@@ -96,7 +96,7 @@ export function buildPackagingCopywritingPrompt(input: PackagingInput): string {
 export function buildPackagingScenePrompt(input: PackagingInput): string {
   return `为品牌「${input.brandName}」的「${input.productName}」生成包装场景展示图。
 包装结构：${input.structure.type}
-材质：${input.materialCraft.materials.join('、')}
+材质：${input.materialCraft?.materials?.join('、') || '未指定'}
 
 场景要求：
 1. 产品在高端零售环境中的场景展示。

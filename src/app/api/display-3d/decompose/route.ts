@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
 
     // Register task
     const taskId = `d3d_dec_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    registerTask(taskId, 'display3d', `3D展陈拆解: ${brandName}`);
+    registerTask(taskId, 'display3d-decompose', `3D展陈拆解: ${brandName}`);
 
     // Start async decomposition
     (async () => {

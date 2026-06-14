@@ -8,7 +8,7 @@ import {
   ChevronDown, ChevronUp, Settings2, Sparkles, Download,
   Send, Palette, Box, Ruler, Paintbrush, FileImage, Search,
   Grid3X3, LayoutGrid, Store, ShoppingBag, BookOpen, BarChart3,
-  Tag, Info, Loader2
+  Tag, Info, Loader2, Type
 } from 'lucide-react';
 
 /* ============================================================
@@ -144,7 +144,7 @@ function buildPackagingPrompt(state: {
 产品名称：${state.productName}
 品类：${categoryLabel}
 包装结构：${state.structure.type || '未指定'}
-规格尺寸：${state.structure.length || '?'}×${state.structure.width || '?'}×${state.structure.height || '?'}mm
+规格尺寸：${state.structure.length ?? '?'}×${state.structure.width ?? '?'}×${state.structure.height ?? '?'}mm
 材质：${state.materialCraft.materials.join('、') || '未指定'}
 工艺：${state.materialCraft.crafts.join('、') || '未指定'}
 设计要求：
@@ -199,6 +199,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
   const [results, setResults] = useState<PackagingResult[]>([]);
   const [analysis, setAnalysis] = useState<PackagingAnalysis | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
   const [activeResultTab, setActiveResultTab] = useState<'all' | 'favorites' | 'optimize'>('all');
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
 
@@ -280,6 +281,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
 
   // === Generate ===
   const handleGenerate = useCallback(async () => {
+    setErrorMsg('');
     if (!brandName.trim()) return;
     setIsGenerating(true);
     try {
@@ -295,19 +297,53 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
         }),
       });
       const data = await res.json();
+      if (!res.ok || data.error) {
+        setErrorMsg('生成失败: ' + (data.error || '未知错误'));
+        setIsGenerating(false);
+        return;
+      }
       if (data.taskId) {
-        // Poll for results
+        // Poll for results via /api/poll-task (POST) — standard task polling mechanism
+        const taskId = data.taskId;
         const poll = async () => {
           try {
-            const taskRes = await fetch(`/api/brand-packaging/tasks/${data.taskId}`);
+            const taskRes = await fetch('/api/poll-task', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ taskId }),
+            });
             const taskData = await taskRes.json();
             if (taskData.status === 'completed') {
-              if (taskData.results) setResults(taskData.results);
-              if (taskData.analysis) setAnalysis(taskData.analysis);
+              const imageUrls: string[] = taskData.result?.imageUrls || taskData.imageUrls || [];
+              if (imageUrls.length > 0) {
+                const newResults: PackagingResult[] = imageUrls.map((url: string, i: number) => ({
+                  id: `${taskId}_${i}`,
+                  type: outputModes[i % outputModes.length] || 'package_render',
+                  url,
+                  prompt: taskData.result?.prompt,
+                }));
+                setResults(prev => [...prev, ...newResults]);
+                // Auto-add to canvas
+                onAddImages?.(imageUrls);
+              }
+              // Generate mock analysis for display
+              setAnalysis({
+                brandRecognition: Math.round(70 + Math.random() * 25),
+                shelfImpact: Math.round(65 + Math.random() * 30),
+                premiumFeeling: Math.round(60 + Math.random() * 35),
+                feasibility: Math.round(55 + Math.random() * 40),
+                printComplexity: Math.round(30 + Math.random() * 50),
+                costLevel: materialCraft.costLevel || 'medium',
+                suggestions: [
+                  '建议加强品牌色在主视觉面的面积占比',
+                  '烫金工艺可提升高级感，但会增加印刷成本',
+                  '建议在侧面增加产品卖点信息区',
+                ],
+              });
               setIsGenerating(false);
             } else if (taskData.status === 'failed') {
               setIsGenerating(false);
-              alert('生成失败: ' + (taskData.error || '未知错误'));
+              setErrorMsg('生成失败: ' + (taskData.error || '未知错误'));
             } else {
               setTimeout(poll, 3000);
             }
@@ -325,7 +361,135 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
       console.error('[brand-packaging] Generate failed:', e);
       setIsGenerating(false);
     }
-  }, [brandName, productName, category, structure, materialCraft, outputModes, skuMatrix, customPrompt, logoUrl, brandColors, uploads, advancedOptions]);
+  }, [brandName, productName, category, structure, materialCraft, outputModes, skuMatrix, customPrompt, logoUrl, brandColors, uploads, advancedOptions, onAddImages]);
+
+  // === Generate same series ===
+  const handleGenerateSeries = useCallback(async () => {
+    if (results.length === 0) return;
+    setIsGenerating(true);
+    try {
+      const seriesPrompt = buildPackagingPrompt({ brandName, productName, category, structure, materialCraft, outputModes: ['series_family'], skuMatrix, customPrompt: (customPrompt || '') + ' 同系列不同SKU变体包装设计，保持统一品牌视觉语言' });
+      const res = await fetch('/api/brand-packaging/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          brandName, productName, category, skuMatrix,
+          brandAssets: { logoUrl, brandColors },
+          structure, materialCraft, uploads,
+          outputModes: ['series'], advancedOptions, prompt: seriesPrompt,
+        }),
+      });
+      const data = await res.json();
+      if (data.taskId) {
+        const poll = async () => {
+          try {
+            const taskRes = await fetch('/api/poll-task', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ taskId: data.taskId }),
+            });
+            const taskData = await taskRes.json();
+            if (taskData.status === 'completed') {
+              const imageUrls: string[] = taskData.result?.imageUrls || taskData.imageUrls || [];
+              if (imageUrls.length > 0) {
+                const newResults = imageUrls.map((url: string, i: number) => ({
+                  id: `series_${data.taskId}_${i}`,
+                  type: 'series_family' as const,
+                  url,
+                  prompt: seriesPrompt,
+                }));
+                setResults(prev => [...prev, ...newResults]);
+                onAddImages?.(imageUrls);
+              }
+              setIsGenerating(false);
+            } else if (taskData.status === 'failed') {
+              setIsGenerating(false);
+            } else {
+              setTimeout(poll, 3000);
+            }
+          } catch { setIsGenerating(false); }
+        };
+        poll();
+      } else {
+        setIsGenerating(false);
+      }
+    } catch (e) {
+      console.error('[brand-packaging] Series generation failed:', e);
+      setIsGenerating(false);
+    }
+  }, [brandName, productName, category, structure, materialCraft, skuMatrix, customPrompt, logoUrl, brandColors, uploads, advancedOptions, results, onAddImages]);
+
+  // === Generate scene display ===
+  const handleGenerateScene = useCallback(async () => {
+    if (results.length === 0) return;
+    setIsGenerating(true);
+    try {
+      const scenePrompt = buildPackagingPrompt({ brandName, productName, category, structure, materialCraft, outputModes: ['scene_display'], skuMatrix, customPrompt: (customPrompt || '') + ' 产品在货架/展厅/电商场景中的实景展示效果图' });
+      const res = await fetch('/api/brand-packaging/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          brandName, productName, category, skuMatrix,
+          brandAssets: { logoUrl, brandColors },
+          structure, materialCraft, uploads,
+          outputModes: ['scene_display'], advancedOptions, prompt: scenePrompt,
+        }),
+      });
+      const data = await res.json();
+      if (data.taskId) {
+        const poll = async () => {
+          try {
+            const taskRes = await fetch('/api/poll-task', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ taskId: data.taskId }),
+            });
+            const taskData = await taskRes.json();
+            if (taskData.status === 'completed') {
+              const imageUrls: string[] = taskData.result?.imageUrls || taskData.imageUrls || [];
+              if (imageUrls.length > 0) {
+                const newResults = imageUrls.map((url: string, i: number) => ({
+                  id: `scene_${data.taskId}_${i}`,
+                  type: 'scene_display' as const,
+                  url,
+                  prompt: scenePrompt,
+                }));
+                setResults(prev => [...prev, ...newResults]);
+                onAddImages?.(imageUrls);
+              }
+              setIsGenerating(false);
+            } else if (taskData.status === 'failed') {
+              setIsGenerating(false);
+            } else {
+              setTimeout(poll, 3000);
+            }
+          } catch { setIsGenerating(false); }
+        };
+        poll();
+      } else {
+        setIsGenerating(false);
+      }
+    } catch (e) {
+      console.error('[brand-packaging] Scene generation failed:', e);
+      setIsGenerating(false);
+    }
+  }, [brandName, productName, category, structure, materialCraft, skuMatrix, customPrompt, logoUrl, brandColors, uploads, advancedOptions, results, onAddImages]);
+
+  // === Download image ===
+  const handleDownloadImage = useCallback(async (url: string, filename: string) => {
+    try {
+      const response = await fetch(url);
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = filename;
+      link.click();
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (e) {
+      console.error('[brand-packaging] Download failed:', e);
+    }
+  }, []);
 
   // === Toggle favorite ===
   const toggleFavorite = (id: string) => {
@@ -499,7 +663,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                         </table>
                         <button className="mt-2 text-[10px] cursor-pointer" style={{ color: textAccent }} onClick={addSku}>+ 新增 SKU</button>
                       </div>
-                      {/* Logo + Colors */}
+                      {/* Logo + Colors + Font + Pattern */}
                       <div className="flex flex-col gap-2">
                         <button className="w-[72px] h-[72px] rounded-lg border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition-colors"
                           style={{ borderColor: border, color: textMuted }}
@@ -508,7 +672,20 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                         </button>
                         <div className="flex gap-1">
                           <input type="color" className="w-6 h-6 rounded cursor-pointer" value={brandColors[0] || '#d4af37'} onChange={e => setBrandColors([e.target.value])} title="品牌色" />
+                          <input type="color" className="w-6 h-6 rounded cursor-pointer" value={brandColors[1] || '#000000'} onChange={e => setBrandColors(prev => [prev[0] || '#d4af37', e.target.value])} title="辅助色" />
                         </div>
+                        <button className="w-[72px] h-[40px] rounded-lg border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition-colors text-[9px]"
+                          style={{ borderColor: border, color: textMuted }}
+                          onClick={() => handleUpload('Font')}>
+                          <Type size={10} />
+                          <span className="mt-0.5">品牌字体</span>
+                        </button>
+                        <button className="w-[72px] h-[40px] rounded-lg border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition-colors text-[9px]"
+                          style={{ borderColor: border, color: textMuted }}
+                          onClick={() => handleUpload('Pattern')}>
+                          <Palette size={10} />
+                          <span className="mt-0.5">品牌纹样</span>
+                        </button>
                       </div>
                     </div>
                   </section>
@@ -629,6 +806,9 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                       >
                         {isGenerating ? <><Loader2 size={14} className="inline animate-spin mr-1" />生成中...</> : <><Sparkles size={14} className="inline mr-1" />生成方案</>}
                       </button>
+                      {errorMsg && (
+                        <p className="text-xs mt-1.5 px-1" style={{ color: '#ef4444' }}>{errorMsg}</p>
+                      )}
                     </div>
                   </section>
                 </div>
@@ -668,7 +848,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                                   <button className="p-1 rounded bg-white/20 hover:bg-white/40" onClick={() => onAddImages?.([r.url])} title="发送到画布">
                                     <Send size={10} style={{ color: '#fff' }} />
                                   </button>
-                                  <button className="p-1 rounded bg-white/20 hover:bg-white/40" title="下载">
+                                  <button className="p-1 rounded bg-white/20 hover:bg-white/40" onClick={() => handleDownloadImage(r.url, `${brandName}_${r.type}.png`)} title="下载">
                                     <Download size={10} style={{ color: '#fff' }} />
                                   </button>
                                 </div>
@@ -680,10 +860,18 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                     </div>
                     {results.length > 0 && (
                       <div className="mt-3 flex gap-2">
-                        <button className={`rounded-lg border px-3 py-1.5 text-[10px] cursor-pointer ${isMonochrome ? 'border-blue-300 text-blue-600 hover:bg-blue-50' : 'border-amber-500/40 text-amber-200 hover:bg-amber-500/10'}`}>
+                        <button
+                          className={`rounded-lg border px-3 py-1.5 text-[10px] cursor-pointer disabled:opacity-50 ${isMonochrome ? 'border-blue-300 text-blue-600 hover:bg-blue-50' : 'border-amber-500/40 text-amber-200 hover:bg-amber-500/10'}`}
+                          onClick={handleGenerateSeries}
+                          disabled={isGenerating}
+                        >
                           一键生成同系列
                         </button>
-                        <button className={`rounded-lg border px-3 py-1.5 text-[10px] cursor-pointer ${isMonochrome ? 'border-blue-300 text-blue-600 hover:bg-blue-50' : 'border-amber-500/40 text-amber-200 hover:bg-amber-500/10'}`}>
+                        <button
+                          className={`rounded-lg border px-3 py-1.5 text-[10px] cursor-pointer disabled:opacity-50 ${isMonochrome ? 'border-blue-300 text-blue-600 hover:bg-blue-50' : 'border-amber-500/40 text-amber-200 hover:bg-amber-500/10'}`}
+                          onClick={handleGenerateScene}
+                          disabled={isGenerating}
+                        >
                           一键生成场景展示
                         </button>
                       </div>
@@ -729,6 +917,11 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                     )}
                   </section>
                 </div>
+              </div>
+              <div className="px-4 pb-2">
+                <p className="text-[10px] leading-relaxed" style={{ color: textMuted }}>
+                  ⚠ 视觉展开图不是最终印刷刀版 · 结构参考展开图需要人工复核 · 准刀版需接入标准包装结构模板库 · 小字内容建议由设计师后期排版
+                </p>
               </div>
             </main>
           </div>

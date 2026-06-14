@@ -7,7 +7,8 @@ import {
   ChevronDown, Sparkles, Download, Send, Search,
   Ruler, Paintbrush, LayoutGrid, Eye, Lightbulb,
   Users, Store, Building2, TreePine, FileText,
-  Grid3X3, BarChart3, DollarSign, Info, Loader2, Palette
+  Grid3X3, BarChart3, DollarSign, Info, Loader2, Palette,
+  Camera, RotateCcw, FileDown
 } from 'lucide-react';
 
 /* ============================================================
@@ -55,9 +56,9 @@ export interface BomItem {
 
 export interface Display3DResult {
   id: string;
-  viewType: DisplayViewOption;
-  imageUrl: string;
-  title: string;
+  type: string;
+  url: string;
+  label?: string;
 }
 
 interface Props {
@@ -180,11 +181,6 @@ function buildDisplay3DPrompt(state: {
 ${state.customPrompt ? `\n附加要求：${state.customPrompt}` : ''}`;
 }
 
-// Missing Camera icon - use a simple substitute
-function Camera(props: React.SVGProps<SVGSVGElement> & { size?: number }) {
-  return <Box size={props.size || 24} {...props} />;
-}
-
 /* ============================================================
    组件
    ============================================================ */
@@ -216,8 +212,17 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
   // === Results state ===
   const [results, setResults] = useState<Display3DResult[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
   const [activePreviewTab, setActivePreviewTab] = useState<'render' | 'views' | 'decompose' | 'dimension' | 'material' | 'floorplan' | 'bom'>('render');
   const [selectedView, setSelectedView] = useState<string>('angle_45');
+  const [decomposition, setDecomposition] = useState<{
+    components: DisplayComponent[];
+    materials: DisplayMaterialSpec[];
+    bom: BomItem[];
+    rawAnalysis?: string;
+  } | null>(null);
+  const [isDecomposing, setIsDecomposing] = useState(false);
 
   // Theme
   const accent = isMonochrome ? '#3b82f6' : '#d4af37';
@@ -267,6 +272,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
 
   // === Generate ===
   const handleGenerate = useCallback(async () => {
+    setErrorMsg('');
     if (!brandName.trim()) return;
     setIsGenerating(true);
     try {
@@ -282,20 +288,49 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
         }),
       });
       const data = await res.json();
+      if (!res.ok || data.error) {
+        console.error('[display-3d] Generate error:', data.error);
+        setIsGenerating(false);
+        return;
+      }
       if (data.taskId) {
+        const taskId = data.taskId;
+        // Poll via /api/poll-task (POST) — standard task polling mechanism
         const poll = async () => {
           try {
-            const taskRes = await fetch(`/api/display-3d/tasks/${data.taskId}`);
+            const taskRes = await fetch('/api/poll-task', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ taskId }),
+            });
             const taskData = await taskRes.json();
             if (taskData.status === 'completed') {
-              if (taskData.results) setResults(taskData.results);
+              const imageUrls: string[] = taskData.result?.imageUrls || taskData.imageUrls || [];
+              if (imageUrls.length > 0) {
+                const newResults = imageUrls.map((url: string, i: number) => ({
+                  id: `${taskId}_${i}`,
+                  type: 'rendering',
+                  url,
+                  label: viewOptions[i % viewOptions.length] || '效果图',
+                }));
+                setResults(prev => [...prev, ...newResults]);
+                onAddImages?.(imageUrls);
+              }
+              // Handle decompose results embedded in task
+              if (taskData.result?.decomposition) {
+                setDecomposition(taskData.result.decomposition);
+              }
               setIsGenerating(false);
             } else if (taskData.status === 'failed') {
+              console.error('[display-3d] Task failed:', taskData.error);
               setIsGenerating(false);
             } else {
               setTimeout(poll, 3000);
             }
-          } catch { setIsGenerating(false); }
+          } catch (e) {
+            console.error('[display-3d] Poll error:', e);
+            setIsGenerating(false);
+          }
         };
         poll();
       } else if (data.results) {
@@ -308,7 +343,135 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
       console.error('[display-3d] Generate failed:', e);
       setIsGenerating(false);
     }
-  }, [brandName, productName, sceneType, environment, dimensions, imageUsageMode, materialStyle, lightingStyle, budget, viewOptions, customPrompt, crowdStyle, assets]);
+  }, [brandName, productName, sceneType, environment, dimensions, imageUsageMode, materialStyle, lightingStyle, budget, viewOptions, customPrompt, crowdStyle, assets, onAddImages]);
+
+  // === Decompose handler ===
+  const handleDecompose = useCallback(async () => {
+    if (!brandName.trim() || results.length === 0) return;
+    setIsDecomposing(true);
+    try {
+      const imageUrl = results[0]?.url || '';
+      const res = await fetch('/api/display-3d/decompose', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ brandName, sceneType, dimensions, imageUrl }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        console.error('[display-3d] Decompose error:', data.error);
+        setIsDecomposing(false);
+        return;
+      }
+      if (data.taskId) {
+        const taskId = data.taskId;
+        const poll = async () => {
+          try {
+            const taskRes = await fetch('/api/poll-task', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ taskId }),
+            });
+            const taskData = await taskRes.json();
+            if (taskData.status === 'completed') {
+              const decomposeResult = taskData.result?.decomposition || taskData.result;
+              if (decomposeResult) {
+                setDecomposition({
+                  components: decomposeResult.components?.map((c: Record<string, unknown>, i: number) => ({
+                    id: String(i + 1), index: c.index as number || i + 1,
+                    name: (c.name as string) || '未命名', sizeSuggestion: (c.sizeSuggestion as string) || '-',
+                    material: (c.material as string) || '-', craft: (c.craft as string) || '-',
+                  })) || MOCK_COMPONENTS,
+                  materials: decomposeResult.materials?.map((m: Record<string, unknown>, i: number) => ({
+                    id: String(i + 1), name: (m.name as string) || '未指定',
+                    description: (m.description as string) || '',
+                  })) || MOCK_MATERIALS,
+                  bom: decomposeResult.bom?.map((b: Record<string, unknown>, i: number) => ({
+                    id: String(i + 1), name: (b.name as string) || '未指定',
+                    count: (b.count as number) || 1,
+                    estimatedPrice: typeof b.estimatedPrice === 'number' ? `¥${b.estimatedPrice.toLocaleString()}` : (b.estimatedPrice as string) || '-',
+                  })) || MOCK_BOM,
+                  rawAnalysis: decomposeResult.rawAnalysis || taskData.result?.rawAnalysis,
+                });
+              }
+              setIsDecomposing(false);
+              setActivePreviewTab('decompose');
+            } else if (taskData.status === 'failed') {
+              console.error('[display-3d] Decompose failed:', taskData.error);
+              setIsDecomposing(false);
+            } else {
+              setTimeout(poll, 3000);
+            }
+          } catch (e) {
+            console.error('[display-3d] Decompose poll error:', e);
+            setIsDecomposing(false);
+          }
+        };
+        poll();
+      } else {
+        setIsDecomposing(false);
+      }
+    } catch (e) {
+      console.error('[display-3d] Decompose failed:', e);
+      setIsDecomposing(false);
+    }
+  }, [brandName, sceneType, dimensions, results, onAddImages]);
+
+  // === Export handlers ===
+  const handleExportPdf = useCallback(async () => {
+    try {
+      const res = await fetch('/api/export/pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ brandName, sceneType, imageUrls: results.map(r => r.url), decomposition }),
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = `${brandName}_展陈方案.pdf`; a.click();
+        URL.revokeObjectURL(url);
+      }
+    } catch (e) { console.error('[display-3d] Export PDF failed:', e); }
+  }, [brandName, sceneType, results, decomposition]);
+
+  const handleExportBom = useCallback(async () => {
+    try {
+      const bomData = decomposition?.bom || MOCK_BOM;
+      const res = await fetch('/api/export/bom', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ brandName, items: bomData }),
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = `${brandName}_BOM清单.csv`; a.click();
+        URL.revokeObjectURL(url);
+      }
+    } catch (e) { console.error('[display-3d] Export BOM failed:', e); }
+  }, [brandName, decomposition]);
+
+  const handleExportAnnotation = useCallback(async () => {
+    try {
+      const imageUrl = results[0]?.url || '';
+      const res = await fetch('/api/export/annotation-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl, brandName, sceneType, dimensions }),
+      });
+      const data = await res.json();
+      if (data.annotations) {
+        setSuccessMsg('标注图已生成，共 ' + data.annotations.length + ' 个标注点');
+        setTimeout(() => setSuccessMsg(''), 4000);
+      }
+    } catch (e) { console.error('[display-3d] Export annotation failed:', e); }
+  }, [results, brandName, sceneType, dimensions]);
+
+  const handleSendToCanvas = useCallback(() => {
+    const urls = results.map(r => r.url).filter(Boolean);
+    if (urls.length > 0) onAddImages?.(urls);
+  }, [results, onAddImages]);
 
   // === Render helpers ===
   const inputCls = `w-full rounded-lg border px-3 py-2 text-xs outline-none transition-colors ${isMonochrome ? 'bg-white border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-blue-400 focus:ring-1 focus:ring-blue-200' : 'bg-black/30 border-white/10 text-amber-50 placeholder:text-white/30 focus:border-amber-400/60 focus:ring-1 focus:ring-amber-400/20'}`;
@@ -412,7 +575,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                       <h3 className="text-xs font-semibold" style={{ color: textPrimary }}>资产上传</h3>
                     </div>
                     <div className="grid grid-cols-3 gap-2">
-                      {['KV主视觉', '平面图', '背板图', '门头图', 'Logo', '产品图', '空间草图', '3D截图', '更多'].map((t, i) => (
+                      {['主视觉KV', '背板图', '门头图', '地贴图', '海报图', '包装图', 'Logo', 'IP形象', '3D截图'].map((t, i) => (
                         <button key={t} className={`h-[60px] rounded-lg border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition-colors ${i < 8 ? '' : (isMonochrome ? 'text-gray-400' : 'text-white/30')}`}
                           style={{ borderColor: border, color: textMuted }}
                           onClick={() => handleUpload(t)}>
@@ -513,6 +676,12 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                   >
                     {isGenerating ? <><Loader2 size={14} className="inline animate-spin mr-1" />生成中...</> : <><Sparkles size={14} className="inline mr-1" />生成展陈方案</>}
                   </button>
+                  {errorMsg && (
+                    <p className="text-xs mt-1.5 px-1" style={{ color: '#ef4444' }}>{errorMsg}</p>
+                  )}
+                  {successMsg && (
+                    <p className="text-xs mt-1.5 px-1" style={{ color: '#22c55e' }}>{successMsg}</p>
+                  )}
                 </div>
 
                 {/* RIGHT: Preview + Decomposition */}
@@ -535,7 +704,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                         <div className="flex-1 rounded-xl border flex items-center justify-center relative overflow-hidden"
                           style={{ background: isMonochrome ? '#f9fafb' : 'rgba(0,0,0,0.4)', borderColor: border }}>
                           {results.length > 0 ? (
-                            <img src={results[0]?.imageUrl} className="w-full h-full object-contain" />
+                            <img src={results[0]?.url} className="w-full h-full object-contain" />
                           ) : (
                             <div className="flex flex-col items-center text-xs" style={{ color: textMuted }}>
                               <Box size={32} className="mb-2 opacity-20" />
@@ -565,6 +734,16 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                     {/* Decomposition: Component list */}
                     {activePreviewTab === 'decompose' && (
                       <div className="flex-1 overflow-auto">
+                        <div className="mb-2 flex items-center gap-2">
+                          <button
+                            className="rounded-lg border px-3 py-1.5 text-[10px] cursor-pointer disabled:opacity-50"
+                            style={{ borderColor: border, color: textAccent }}
+                            onClick={handleDecompose}
+                            disabled={isDecomposing || results.length === 0}
+                          >
+                            {isDecomposing ? <><Loader2 size={10} className="inline animate-spin mr-1" />拆解中...</> : <><Sparkles size={10} className="inline mr-1" />AI 拆解方案</>}
+                          </button>
+                        </div>
                         <table className="w-full text-[10px]">
                           <thead><tr style={{ color: textMuted }}>
                             <th className="py-2 text-left">编号</th>
@@ -574,7 +753,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                             <th className="text-left">工艺</th>
                           </tr></thead>
                           <tbody>
-                            {MOCK_COMPONENTS.map(comp => (
+                            {(decomposition?.components || MOCK_COMPONENTS).map(comp => (
                               <tr key={comp.id} style={{ borderTop: `1px solid ${border}` }}>
                                 <td className="py-2" style={{ color: textAccent }}>{comp.index}</td>
                                 <td style={{ color: textPrimary }}>{comp.name}</td>
@@ -619,7 +798,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                     {/* Material specs */}
                     {activePreviewTab === 'material' && (
                       <div className="flex-1 overflow-auto space-y-2">
-                        {MOCK_MATERIALS.map(m => (
+                        {(decomposition?.materials || MOCK_MATERIALS).map(m => (
                           <div key={m.id} className="flex gap-2 rounded-lg p-2" style={{ background: bgCard }}>
                             <div className="h-10 w-10 rounded-lg shrink-0" style={{ background: isMonochrome ? '#dbeafe' : 'rgba(212,175,55,0.3)' }} />
                             <div>
@@ -634,9 +813,11 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                     {/* BOM */}
                     {activePreviewTab === 'bom' && (
                       <div className="flex-1 overflow-auto">
-                        <div className="mb-2 text-xs font-semibold" style={{ color: textAccent }}>预估成本 ¥128,560</div>
+                        <div className="mb-2 text-xs font-semibold" style={{ color: textAccent }}>
+                          预估成本 {decomposition?.bom ? `¥${decomposition.bom.reduce((sum, b) => sum + (parseInt(String(b.estimatedPrice).replace(/[¥,]/g, '')) || 0), 0).toLocaleString()}` : '¥128,560'}
+                        </div>
                         <div className="space-y-1.5">
-                          {MOCK_BOM.map(item => (
+                          {(decomposition?.bom || MOCK_BOM).map(item => (
                             <div key={item.id} className="flex justify-between items-center rounded-lg px-2.5 py-2 text-xs" style={{ background: bgCard }}>
                               <span style={{ color: textPrimary }}>{item.name}</span>
                               <span style={{ color: textMuted }}>x{item.count}</span>
@@ -727,11 +908,34 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
 
                   {/* Export & action buttons */}
                   <div className="flex items-center gap-2 shrink-0">
-                    {['导出PDF方案', '导出标注图', '导出BOM', '发送到画布'].map(label => (
-                      <button key={label} className={`rounded-lg border px-3 py-1.5 text-[10px] cursor-pointer ${isMonochrome ? 'border-blue-300 text-blue-600 hover:bg-blue-50' : 'border-amber-500/40 text-amber-200 hover:bg-amber-500/10'}`}>
-                        {label}
-                      </button>
-                    ))}
+                    <button
+                      className={`rounded-lg border px-3 py-1.5 text-[10px] cursor-pointer disabled:opacity-50 ${isMonochrome ? 'border-blue-300 text-blue-600 hover:bg-blue-50' : 'border-amber-500/40 text-amber-200 hover:bg-amber-500/10'}`}
+                      onClick={handleExportPdf}
+                      disabled={results.length === 0}
+                    >
+                      导出PDF方案
+                    </button>
+                    <button
+                      className={`rounded-lg border px-3 py-1.5 text-[10px] cursor-pointer disabled:opacity-50 ${isMonochrome ? 'border-blue-300 text-blue-600 hover:bg-blue-50' : 'border-amber-500/40 text-amber-200 hover:bg-amber-500/10'}`}
+                      onClick={handleExportAnnotation}
+                      disabled={results.length === 0}
+                    >
+                      导出标注图
+                    </button>
+                    <button
+                      className={`rounded-lg border px-3 py-1.5 text-[10px] cursor-pointer disabled:opacity-50 ${isMonochrome ? 'border-blue-300 text-blue-600 hover:bg-blue-50' : 'border-amber-500/40 text-amber-200 hover:bg-amber-500/10'}`}
+                      onClick={handleExportBom}
+                      disabled={results.length === 0}
+                    >
+                      导出BOM
+                    </button>
+                    <button
+                      className={`rounded-lg border px-3 py-1.5 text-[10px] cursor-pointer disabled:opacity-50 ${isMonochrome ? 'border-blue-300 text-blue-600 hover:bg-blue-50' : 'border-amber-500/40 text-amber-200 hover:bg-amber-500/10'}`}
+                      onClick={() => { if (results.length > 0) onAddImages?.(results.slice(0, 1).map(r => r.url)); }}
+                      disabled={results.length === 0}
+                    >
+                      发送到画布
+                    </button>
                   </div>
 
                   {/* Disclaimer */}
