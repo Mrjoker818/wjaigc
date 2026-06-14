@@ -1416,9 +1416,10 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
     // Also add canvas images to pending images for visual thumbnail in input area
     if (item.type === 'canvas-image' && item.imageUrl) {
       const imgUrl = item.imageUrl;
+      const mentionId = `mention-${item.id}`;
       setPendingImages(prev => {
-        if (prev.some(p => p.url === imgUrl)) return prev;
-        return [...prev, { id: item.id, url: imgUrl, name: item.label }];
+        if (prev.some(p => p.id === mentionId)) return prev;
+        return [...prev, { id: mentionId, url: imgUrl, name: item.label }];
       });
     }
     setMentionPickerOpen(false);
@@ -4815,21 +4816,21 @@ ${imageDescriptions}
             <div className="mb-1.5 flex flex-wrap gap-1.5">
               {activeMentions.map((m, i) => (
                 m.type === 'canvas-image' ? (
-                  /* Lovart-style image anchor with thumbnail */
+                  /* Image reference with prominent thumbnail */
                   <div
                     key={`${m.type}-${m.id}`}
-                    className={`inline-flex items-center gap-1.5 px-1.5 py-1 rounded-lg text-[10px] font-medium cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] ${isGold ? 'bg-gold/15 text-gold border border-gold/30 hover:bg-gold/20' : 'bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100'}`}
+                    className={`inline-flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] ${isGold ? 'bg-gold/10 text-gold border border-gold/30 hover:bg-gold/20' : 'bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100'}`}
                     onClick={() => onNavigateToImage?.(m.id!)}
                     title="点击定位到画布图片"
                   >
                     {m.imageUrl && (
-                      <div className="w-5 h-5 rounded overflow-hidden shrink-0 border border-white/10">
+                      <div className="w-8 h-8 rounded overflow-hidden shrink-0 border border-white/10">
                         <img src={m.imageUrl} alt="" className="w-full h-full object-cover" />
                       </div>
                     )}
-                    <span className="truncate max-w-[80px]">{m.label}</span>
-                    <button onClick={(e) => { e.stopPropagation(); removeMention(i); }} className="opacity-50 hover:opacity-100">
-                      <X size={10} />
+                    <span className="truncate max-w-[90px]">{m.label}</span>
+                    <button onClick={(e) => { e.stopPropagation(); removeMention(i); setPendingImages(prev => prev.filter(p => p.id !== `mention-${m.id}`)); }} className="opacity-50 hover:opacity-100">
+                      <X size={12} />
                     </button>
                   </div>
                 ) : (
