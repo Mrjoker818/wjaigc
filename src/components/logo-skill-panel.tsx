@@ -5,7 +5,7 @@ import {
   PenTool, X, Loader2, Wand2, Star, Eye, ArrowRight,
   Copy, Check, ChevronDown, ChevronRight, RotateCcw,
   RefreshCw, Sparkles, Download, Save, Palette, ImageIcon,
-  Layout, GripVertical,
+  Layout, GripVertical, Minus,
 } from 'lucide-react';
 
 /* ========== TYPES ========== */
@@ -118,12 +118,13 @@ export default function LogoSkillPanel({
   const panelRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
+  const [isMinimized, setIsMinimized] = useState(false);
   const dragStart = useRef({ mx: 0, my: 0, px: 0, py: 0 });
 
   // Center panel on first render
   useEffect(() => {
     setPos({
-      x: window.innerWidth - PANEL_W - 24,
+      x: Math.max(20, (window.innerWidth - PANEL_W) / 2),
       y: Math.max(72, (window.innerHeight - PANEL_H) / 2),
     });
   }, []);
@@ -493,21 +494,21 @@ export default function LogoSkillPanel({
   return (
     <div
       ref={panelRef}
-      className={`fixed z-[90] flex flex-col rounded-2xl shadow-2xl border overflow-hidden ${bg} ${border}`}
+      className={`fixed z-[90] flex flex-col rounded-2xl shadow-2xl border overflow-hidden ${bg} ${border} ${dragging ? `ring-2 ${isMonochrome ? 'ring-blue-500/30' : 'ring-[#d4af37]/30'} ${isMonochrome ? 'shadow-[0_0_30px_rgba(59,130,246,0.15)]' : 'shadow-[0_0_30px_rgba(212,175,55,0.2)]'}` : ''}`}
       style={{
         left: pos.x,
         top: pos.y,
         width: PANEL_W,
-        maxHeight: `calc(100vh - 96px)`,
+        maxHeight: isMinimized ? undefined : `calc(100vh - 96px)`,
         ...(isMonochrome ? { boxShadow: '0 8px 32px rgba(0,0,0,0.12)' } : { boxShadow: '0 8px 32px rgba(0,0,0,0.6), 0 0 0 1px rgba(212,175,55,0.15)' }),
       }}
       data-popup
     >
       {/* ─── 可拖动标题栏 ─────────────────────────────────────── */}
       <div
-        className={`flex items-center justify-between px-4 py-3 border-b ${border} select-none cursor-move shrink-0 ${
-          isMonochrome ? 'bg-gray-50' : 'bg-[#1a1a1a]'
-        }`}
+        className={`flex items-center justify-between px-4 py-3 border-b select-none cursor-grab active:cursor-grabbing shrink-0 ${
+          isMinimized ? `rounded-2xl border-b-0 ${border}` : border
+        } ${isMonochrome ? 'bg-gray-50' : 'bg-[#1a1a1a]'}`}
         onMouseDown={onDragStart}
       >
         <div className="flex items-center gap-2">
@@ -535,6 +536,9 @@ export default function LogoSkillPanel({
               </div>
             ))}
           </div>
+          <button onClick={() => setIsMinimized(!isMinimized)} className={`p-1.5 rounded-lg ${isMonochrome ? 'hover:bg-gray-200' : 'hover:bg-white/10'} transition-colors`}>
+            <Minus className="h-4 w-4" />
+          </button>
           <button onClick={onClose} className={`p-1.5 rounded-lg ${isMonochrome ? 'hover:bg-gray-200' : 'hover:bg-white/10'} transition-colors`}>
             <X className="h-4 w-4" />
           </button>
@@ -542,6 +546,7 @@ export default function LogoSkillPanel({
       </div>
 
       {/* ─── 内容区 (可滚动) ─────────────────────────────────── */}
+      {!isMinimized && (
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {error && (
           <div className={`p-3 rounded-lg border text-xs ${isMonochrome ? 'bg-red-50 border-red-200 text-red-700' : 'bg-red-500/10 border-red-500/20 text-red-400'}`}>
@@ -554,6 +559,7 @@ export default function LogoSkillPanel({
         {step === 'generate' && renderGeneratingStep()}
         {step === 'result' && renderResultStep()}
       </div>
+      )}
     </div>
   );
 
@@ -684,7 +690,7 @@ export default function LogoSkillPanel({
               className={`w-full px-3 py-2 rounded-lg border text-sm ${inputBg} ${textPrimary} focus:outline-none`}
             >
               {TARGET_PLATFORMS.map(p => (
-                <option key={p.value} value={p.value}>{p.label}</option>
+                <option key={p.value} value={p.value} className={isMonochrome ? '' : 'bg-[#1a1a1a] text-white'}>{p.label}</option>
               ))}
             </select>
           </div>
@@ -695,9 +701,9 @@ export default function LogoSkillPanel({
               onChange={e => setSelectedLlmModel(e.target.value)}
               className={`w-full px-3 py-2 rounded-lg border text-sm ${inputBg} ${textPrimary} focus:outline-none`}
             >
-              {llmModels.length === 0 && <option value="">未配置</option>}
+              {llmModels.length === 0 && <option value="" className={isMonochrome ? '' : 'bg-[#1a1a1a] text-white'}>未配置</option>}
               {llmModels.map(m => (
-                <option key={m.id} value={m.id}>{m.name}</option>
+                <option key={m.id} value={m.id} className={isMonochrome ? '' : 'bg-[#1a1a1a] text-white'}>{m.name}</option>
               ))}
             </select>
           </div>
@@ -933,7 +939,7 @@ export default function LogoSkillPanel({
                 className={`px-2 py-1 rounded-lg border text-[10px] ${inputBg} ${textPrimary} focus:outline-none`}
               >
                 {imageModels.map(m => (
-                  <option key={m.id} value={m.id}>{m.name}</option>
+                  <option key={m.id} value={m.id} className={isMonochrome ? '' : 'bg-[#1a1a1a] text-white'}>{m.name}</option>
                 ))}
               </select>
             )}
