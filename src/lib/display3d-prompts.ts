@@ -15,6 +15,10 @@ interface Display3DInput {
   budget?: number;
   viewOptions?: string[];
   uploads?: Array<{ url: string; type: string }>;
+  renderMode?: string;
+  outputResolution?: string;
+  outputFormat?: string;
+  outputQuality?: string;
 }
 
 export function buildDisplay3DRenderPrompt(input: Display3DInput): string {
@@ -29,6 +33,9 @@ export function buildDisplay3DRenderPrompt(input: Display3DInput): string {
 ${input.materialStyle ? `材质风格：${input.materialStyle}` : ''}
 ${input.lightingStyle ? `灯光氛围：${input.lightingStyle}` : ''}
 ${input.budget ? `预算范围：¥${input.budget.toLocaleString()}` : ''}
+${input.renderMode ? `渲染模式：${input.renderMode}` : ''}
+${input.outputResolution ? `输出分辨率：${input.outputResolution}` : ''}
+${input.outputQuality ? `输出质量：${input.outputQuality}` : ''}
 
 设计要求：
 1. 生成真实商业级展陈效果图，高质量3D渲染质感。

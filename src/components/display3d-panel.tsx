@@ -107,6 +107,16 @@ const MATERIAL_STYLES = ['轻奢质感', '科技未来', '自然环保', '年轻
 const LIGHTING_STYLES = ['明亮聚焦', '柔和高级', '科技冷光', '暖色氛围'];
 const CROWD_STYLES = ['无人', '少量人物', '活动人流', '长曝光人流'];
 
+const ASSET_LIBRARY = ['平面布局', '模型库', '材质库', '贴图库', '场景库', '灯光库', 'Logo', '字体库'];
+const RENDER_MODES: { value: string; label: string; desc: string }[] = [
+  { value: 'realtime', label: '高清实时渲染', desc: '适合快速预览与方案展示' },
+  { value: 'raytracing', label: '光线追踪模式', desc: '适合高质量渲染输出' },
+  { value: 'immersive', label: '沉浸式漫游模式', desc: '适合VR/虚拟现实体验' },
+];
+const OUTPUT_RESOLUTIONS = ['1920×1080', '2560×1440', '3840×2160'];
+const OUTPUT_FORMATS = ['PNG', 'JPG', 'WEBP'];
+const OUTPUT_QUALITIES = ['标准', '高', '极高'];
+
 // Mock data for decomposition
 const MOCK_COMPONENTS: DisplayComponent[] = [
   { id: '1', index: 1, name: '门头', sizeSuggestion: '9000×1200×600', material: '发光字+亚克力', craft: '烤漆+内发光' },
@@ -155,18 +165,25 @@ function buildDisplay3DPrompt(state: {
   lightingStyle?: string;
   budget?: number;
   viewOptions: DisplayViewOption[];
+  renderMode?: string;
+  outputResolution?: string;
+  outputFormat?: string;
+  outputQuality?: string;
   customPrompt?: string;
 }): string {
   const sceneLabel = SCENE_TYPES.find(s => s.value === state.sceneType)?.label || state.sceneType;
   const envLabel = ENVIRONMENTS.find(e => e.value === state.environment)?.label || state.environment;
   const usageLabel = IMAGE_USAGE_MODES.find(m => m.value === state.imageUsageMode)?.label || state.imageUsageMode;
   const viewLabels = state.viewOptions.map(v => VIEW_OPTIONS.find(o => o.value === v)?.label || v).join('、');
+  const renderModeLabel = RENDER_MODES.find(r => r.value === state.renderMode)?.label || state.renderMode || '高清实时渲染';
   return `为品牌「${state.brandName}」设计一个商业级3D展陈空间效果图。
 产品名称：${state.productName || '品牌产品'}
 展陈类型：${sceneLabel}
 环境场景：${envLabel}
 空间尺寸：${state.dimensions.length}×${state.dimensions.width}×${state.dimensions.height}mm
 图像使用模式：${usageLabel}
+渲染模式：${renderModeLabel}
+输出规格：${state.outputResolution || '3840×2160'} ${state.outputFormat || 'PNG'} ${state.outputQuality || '高'}
 材质风格：${state.materialStyle || '未指定'}
 灯光氛围：${state.lightingStyle || '未指定'}
 预算范围：${state.budget ? `¥${state.budget}` : '未指定'}
@@ -208,6 +225,10 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
   const [crowdStyle, setCrowdStyle] = useState('无人');
   const [viewOptions, setViewOptions] = useState<DisplayViewOption[]>(['angle_45', 'front']);
   const [customPrompt, setCustomPrompt] = useState('');
+  const [renderMode, setRenderMode] = useState('realtime');
+  const [outputResolution, setOutputResolution] = useState('3840×2160');
+  const [outputFormat, setOutputFormat] = useState('PNG');
+  const [outputQuality, setOutputQuality] = useState('高');
 
   // === Results state ===
   const [results, setResults] = useState<Display3DResult[]>([]);
@@ -276,7 +297,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
     if (!brandName.trim()) return;
     setIsGenerating(true);
     try {
-      const prompt = buildDisplay3DPrompt({ brandName, productName, sceneType, environment, dimensions, imageUsageMode, materialStyle, lightingStyle, budget: budget || undefined, viewOptions, customPrompt });
+      const prompt = buildDisplay3DPrompt({ brandName, productName, sceneType, environment, dimensions, imageUsageMode, materialStyle, lightingStyle, budget: budget || undefined, viewOptions, renderMode, outputResolution, outputFormat, outputQuality, customPrompt });
       const res = await fetch('/api/display-3d/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -284,7 +305,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
           brandName, productName, assets,
           imageUsageMode, sceneType, environment,
           dimensions, budget, materialStyle, lightingStyle,
-          crowdStyle, viewOptions, prompt,
+          crowdStyle, viewOptions, renderMode, outputResolution, outputFormat, outputQuality, prompt,
         }),
       });
       const data = await res.json();
@@ -343,7 +364,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
       console.error('[display-3d] Generate failed:', e);
       setIsGenerating(false);
     }
-  }, [brandName, productName, sceneType, environment, dimensions, imageUsageMode, materialStyle, lightingStyle, budget, viewOptions, customPrompt, crowdStyle, assets, onAddImages]);
+  }, [brandName, productName, sceneType, environment, dimensions, imageUsageMode, materialStyle, lightingStyle, budget, viewOptions, renderMode, outputResolution, outputFormat, outputQuality, customPrompt, crowdStyle, assets, onAddImages]);
 
   // === Decompose handler ===
   const handleDecompose = useCallback(async () => {
@@ -594,12 +615,39 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                         ))}
                       </div>
                     )}
+                    <div className="mt-3 mb-2 text-[12px] font-semibold" style={{ color: textMuted }}>快捷资产库</div>
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {ASSET_LIBRARY.map(lib => (
+                        <button key={lib} className="rounded-lg border px-1.5 py-1.5 text-[10px] cursor-pointer transition-colors"
+                          style={{ borderColor: border, color: textMuted, background: 'transparent' }}
+                          onClick={() => handleUpload(lib)}>
+                          {lib}
+                        </button>
+                      ))}
+                    </div>
                   </section>
 
-                  {/* Step 2: Image usage mode */}
+                  {/* Step 2: Render mode */}
                   <section className={panelCls}>
                     <div className="mb-3 flex items-center gap-2">
                       <span className={stepBadgeCls}>2</span>
+                      <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>渲染与展示模式</h3>
+                    </div>
+                    <div className="space-y-1.5">
+                      {RENDER_MODES.map(m => (
+                        <button key={m.value} className={`w-full rounded-lg border p-2.5 text-left cursor-pointer transition-all ${renderMode === m.value ? (isMonochrome ? 'border-blue-400 bg-blue-50' : 'border-amber-400/60 bg-amber-400/10') : (isMonochrome ? 'border-gray-200 bg-gray-50' : 'border-white/10 bg-black/30')}`}
+                          onClick={() => setRenderMode(m.value)}>
+                          <div className="text-xs font-medium" style={{ color: renderMode === m.value ? textAccent : textPrimary }}>{m.label}</div>
+                          <div className="text-[12px] mt-0.5" style={{ color: textMuted }}>{m.desc}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+
+                  {/* Step 3: Image usage mode */}
+                  <section className={panelCls}>
+                    <div className="mb-3 flex items-center gap-2">
+                      <span className={stepBadgeCls}>3</span>
                       <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>图像使用模式</h3>
                     </div>
                     <div className="space-y-1.5">
@@ -613,10 +661,10 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                     </div>
                   </section>
 
-                  {/* Step 3: Scene setting */}
+                  {/* Step 4: Scene setting */}
                   <section className={panelCls}>
                     <div className="mb-3 flex items-center gap-2">
-                      <span className={stepBadgeCls}>3</span>
+                      <span className={stepBadgeCls}>4</span>
                       <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>场景设置</h3>
                     </div>
                     <div className="grid grid-cols-4 gap-1.5 mb-3">
@@ -634,10 +682,10 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                     </div>
                   </section>
 
-                  {/* Step 4: Environment & Size */}
+                  {/* Step 5: Environment & Size */}
                   <section className={panelCls}>
                     <div className="mb-3 flex items-center gap-2">
-                      <span className={stepBadgeCls}>4</span>
+                      <span className={stepBadgeCls}>5</span>
                       <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>环境与尺寸设置</h3>
                     </div>
                     <div className="grid grid-cols-4 gap-1.5 mb-3">
@@ -654,16 +702,44 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                     <textarea className={`${inputCls} min-h-[56px]`} placeholder="附加需求，如品牌色、重点展示产品、空间动线..." value={customPrompt} onChange={e => setCustomPrompt(e.target.value)} />
                   </section>
 
-                  {/* Step 5: View selector */}
+                  {/* Step 6: View selector */}
                   <section className={panelCls}>
                     <div className="mb-3 flex items-center gap-2">
-                      <span className={stepBadgeCls}>5</span>
+                      <span className={stepBadgeCls}>6</span>
                       <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>输出视角选择</h3>
                     </div>
                     <div className="grid grid-cols-3 gap-1.5">
                       {VIEW_OPTIONS.map(v => (
                         <button key={v.value} className={tagBtnCls(viewOptions.includes(v.value))} onClick={() => toggleView(v.value)}>{v.label}</button>
                       ))}
+                    </div>
+                  </section>
+
+                  {/* Step 7: Output settings */}
+                  <section className={panelCls}>
+                    <div className="mb-3 flex items-center gap-2">
+                      <span className={stepBadgeCls}>7</span>
+                      <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>输出设置</h3>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 mb-3">
+                      <div>
+                        <label className="block text-[12px] mb-1" style={{ color: textMuted }}>分辨率</label>
+                        <select className={selectCls} value={outputResolution} onChange={e => setOutputResolution(e.target.value)}>
+                          {OUTPUT_RESOLUTIONS.map(r => <option key={r} value={r}>{r}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[12px] mb-1" style={{ color: textMuted }}>格式</label>
+                        <select className={selectCls} value={outputFormat} onChange={e => setOutputFormat(e.target.value)}>
+                          {OUTPUT_FORMATS.map(f => <option key={f} value={f}>{f}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[12px] mb-1" style={{ color: textMuted }}>质量</label>
+                        <select className={selectCls} value={outputQuality} onChange={e => setOutputQuality(e.target.value)}>
+                          {OUTPUT_QUALITIES.map(q => <option key={q} value={q}>{q}</option>)}
+                        </select>
+                      </div>
                     </div>
                   </section>
 

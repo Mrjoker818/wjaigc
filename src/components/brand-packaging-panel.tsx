@@ -100,7 +100,7 @@ const PACKAGING_TYPES = ['插舌盒', '天地盖盒', '抽屉盒', '软管', '�
 
 const MATERIALS = ['白卡纸', '特种纸', '铜版纸', '玻璃', 'PET', '亚克力'];
 
-const CRAFTS = ['哑膜', '亮膜', '局部UV', '烫金', '烫银', '压纹', '击凸', '镭射', '布纹', '磨砂'];
+const CRAFTS = ['烫金', '烫银', 'UV', '局部UV', '压纹', '浮雕', '击凸', '电凹', '镭射', '光油', '丝印', '其他'];
 
 const OUTPUT_MODES: { value: PackagingOutputMode; label: string; icon: React.ReactNode }[] = [
   { value: 'package_render', label: '包装效果图', icon: <Package size={14} /> },
@@ -376,14 +376,14 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
       console.error('[brand-packaging] Generate failed:', e);
       setIsGenerating(false);
     }
-  }, [brandName, productName, category, structure, materialCraft, outputModes, skuMatrix, customPrompt, logoUrl, brandColors, uploads, advancedOptions, onAddImages]);
+  }, [brandName, productName, category, structure, materialCraft, outputModes, skuMatrix, extendScenes, customPrompt, logoUrl, brandColors, uploads, advancedOptions, onAddImages]);
 
   // === Generate same series ===
   const handleGenerateSeries = useCallback(async () => {
     if (results.length === 0) return;
     setIsGenerating(true);
     try {
-      const seriesPrompt = buildPackagingPrompt({ brandName, productName, category, structure, materialCraft, outputModes: ['series_family'], skuMatrix, customPrompt: (customPrompt || '') + ' 同系列不同SKU变体包装设计，保持统一品牌视觉语言' });
+      const seriesPrompt = buildPackagingPrompt({ brandName, productName, category, structure, materialCraft, outputModes: ['series_family'], skuMatrix, extendScenes, customPrompt: (customPrompt || '') + ' 同系列不同SKU变体包装设计，保持统一品牌视觉语言' });
       const res = await fetch('/api/brand-packaging/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -432,14 +432,14 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
       console.error('[brand-packaging] Series generation failed:', e);
       setIsGenerating(false);
     }
-  }, [brandName, productName, category, structure, materialCraft, skuMatrix, customPrompt, logoUrl, brandColors, uploads, advancedOptions, results, onAddImages]);
+  }, [brandName, productName, category, structure, materialCraft, skuMatrix, extendScenes, customPrompt, logoUrl, brandColors, uploads, advancedOptions, results, onAddImages]);
 
   // === Generate scene display ===
   const handleGenerateScene = useCallback(async () => {
     if (results.length === 0) return;
     setIsGenerating(true);
     try {
-      const scenePrompt = buildPackagingPrompt({ brandName, productName, category, structure, materialCraft, outputModes: ['scene_display'], skuMatrix, customPrompt: (customPrompt || '') + ' 产品在货架/展厅/电商场景中的实景展示效果图' });
+      const scenePrompt = buildPackagingPrompt({ brandName, productName, category, structure, materialCraft, outputModes: ['scene_display'], skuMatrix, extendScenes, customPrompt: (customPrompt || '') + ' 产品在货架/展厅/电商场景中的实景展示效果图' });
       const res = await fetch('/api/brand-packaging/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -488,7 +488,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
       console.error('[brand-packaging] Scene generation failed:', e);
       setIsGenerating(false);
     }
-  }, [brandName, productName, category, structure, materialCraft, skuMatrix, customPrompt, logoUrl, brandColors, uploads, advancedOptions, results, onAddImages]);
+  }, [brandName, productName, category, structure, materialCraft, skuMatrix, extendScenes, customPrompt, logoUrl, brandColors, uploads, advancedOptions, results, onAddImages]);
 
   // === Download image ===
   const handleDownloadImage = useCallback(async (url: string, filename: string) => {
@@ -754,8 +754,8 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                       <span className={stepBadgeCls}>4</span>
                       <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>上传参考与素材</h3>
                     </div>
-                    <div className="grid grid-cols-5 gap-2">
-                      {['产品图', '包装参考图', 'Logo', '材质图', '更多素材'].map((t, i) => (
+                    <div className="grid grid-cols-4 gap-2">
+                      {['产品图', '包装参考图', 'Logo', '材质贴图'].map((t, i) => (
                         <button key={t} className="h-[72px] rounded-lg border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition-colors"
                           style={{ borderColor: border, color: textMuted }}
                           onClick={() => handleUpload(t)}>

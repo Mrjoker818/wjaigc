@@ -20,16 +20,21 @@ export async function POST(request: NextRequest) {
       crowdStyle = '',
       budget,
       viewOptions = ['angle_45', 'front'],
+      renderMode,
+      outputResolution,
+      outputFormat,
+      outputQuality,
       assets = [],
       model,
+      prompt: clientPrompt,
     } = body;
 
     if (!brandName) {
       return NextResponse.json({ error: '请提供品牌名称' }, { status: 400 });
     }
 
-    // Build the prompt
-    const prompt = buildDisplay3DRenderPrompt({
+    // Build the prompt (use client-built prompt if provided, otherwise build server-side)
+    const prompt = clientPrompt || buildDisplay3DRenderPrompt({
       brandName,
       productName,
       sceneType,
@@ -41,6 +46,10 @@ export async function POST(request: NextRequest) {
       crowdStyle,
       budget,
       viewOptions,
+      renderMode,
+      outputResolution,
+      outputFormat,
+      outputQuality,
     });
 
     // Find an image model provider

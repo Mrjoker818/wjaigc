@@ -14,23 +14,26 @@ export async function POST(request: NextRequest) {
       category = 'beauty',
       structure = {},
       materialCraft = {},
+      extendScenes = [],
       outputModes = ['package_render'],
       advancedOptions = {},
       uploads = [],
       model,
+      prompt: clientPrompt,
     } = body;
 
     if (!brandName && !productName) {
       return NextResponse.json({ error: '请提供品牌名或产品名称' }, { status: 400 });
     }
 
-    // Build the prompt from input
-    const prompt = buildPackagingRenderPrompt({
+    // Build the prompt (use client-built prompt if provided, otherwise build server-side)
+    const prompt = clientPrompt || buildPackagingRenderPrompt({
       brandName,
       productName,
       category,
       structure,
       materialCraft,
+      extendScenes,
       outputModes,
       advancedOptions,
       uploads,

@@ -27,6 +27,7 @@ interface PackagingInput {
     patterns?: string[];
   };
   skuMatrix?: Array<{ name: string; spec: string; isHero: boolean }>;
+  extendScenes?: string[];
   uploads?: Array<{ url: string; type: string }>;
 }
 
@@ -45,13 +46,17 @@ export function buildPackagingRenderPrompt(input: PackagingInput): string {
     ? `品牌色: ${input.brandAssets.brandColors.join('、')}`
     : '';
 
+  const extendInfo = input.extendScenes?.length
+    ? `延展场景: ${input.extendScenes.join('、')}`
+    : '';
+
   return `为品牌「${input.brandName}」设计一套商业级包装效果图。
 产品名称：${input.productName}
 品类：${input.category}
 包装结构：${input.structure.type}${dimStr ? '，规格：' + dimStr : ''}
 材质：${input.materialCraft?.materials?.join('、') || '未指定'}
 工艺：${input.materialCraft?.crafts?.join('、') || '未指定'}
-${skuInfo ? skuInfo + '\n' : ''}${colorInfo ? colorInfo + '\n' : ''}
+${skuInfo ? skuInfo + '\n' : ''}${colorInfo ? colorInfo + '\n' : ''}${extendInfo ? extendInfo + '\n' : ''}
 设计要求：
 1. 包装需要具有真实商业落地感，专业摄影级效果图。
 2. 保持品牌名「${input.brandName}」清晰可见。
