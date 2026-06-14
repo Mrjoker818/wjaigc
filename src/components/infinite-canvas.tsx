@@ -1031,6 +1031,29 @@ export function InfiniteCanvas({
 
   const [annotationInputText, setAnnotationInputText] = useState('');
   const [hoveredAnnotationId, setHoveredAnnotationId] = useState<string | null>(null);
+  const [annAtPickerOpen, setAnnAtPickerOpen] = useState(false);
+  const [annAtFilter, setAnnAtFilter] = useState('');
+  const [annAtHighlightIdx, setAnnAtHighlightIdx] = useState(0);
+  const annAtPickerItems = useMemo(() => {
+    return images
+      .filter(img => !annAtFilter || (img.prompt || '').toLowerCase().includes(annAtFilter.toLowerCase()) || `图片#${images.indexOf(img) + 1}`.includes(annAtFilter))
+      .map((img, i) => {
+        const num = images.indexOf(img) + 1;
+        return { id: img.id, url: img.url, label: `图片 #${num}`, desc: img.prompt ? img.prompt.slice(0, 20) : '', num };
+      });
+  }, [images, annAtFilter]);
+  const handleAnnAtSelect = useCallback((item: { id: string; url: string; label: string; desc: string; num: number }) => {
+    setAnnotationInputText(prev => {
+      const cursorPos = annotationInputRef.current?.selectionStart ?? prev.length;
+      const textBefore = prev.slice(0, cursorPos);
+      const atIdx = textBefore.lastIndexOf('@');
+      if (atIdx >= 0) return prev.slice(0, atIdx) + `@图片#${item.num} ` + prev.slice(cursorPos);
+      return prev;
+    });
+    setAnnAtPickerOpen(false);
+    setAnnAtFilter('');
+    setAnnAtHighlightIdx(0);
+  }, []);
   const annotationIdCounter = useRef(0);
   const annotationContainerRef = useRef<HTMLDivElement>(null);
   const annotationInputRef = useRef<HTMLTextAreaElement>(null);
@@ -10622,8 +10645,28 @@ export function InfiniteCanvas({
                 <textarea
                   ref={annotationInputRef}
                   value={annotationInputText}
-                  onChange={(e) => setAnnotationInputText(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setAnnotationInputText(val);
+                    const cursorPos = e.target.selectionStart ?? val.length;
+                    const textBefore = val.slice(0, cursorPos);
+                    const atMatch = textBefore.match(/@([^@\s]*)$/);
+                    if (atMatch) {
+                      setAnnAtPickerOpen(true);
+                      setAnnAtFilter(atMatch[1]);
+                      setAnnAtHighlightIdx(0);
+                    } else {
+                      setAnnAtPickerOpen(false);
+                      setAnnAtFilter('');
+                    }
+                  }}
                   onKeyDown={(e) => {
+                    if (annAtPickerOpen && annAtPickerItems.length > 0) {
+                      if (e.key === 'ArrowDown') { e.preventDefault(); setAnnAtHighlightIdx(i => (i + 1) % annAtPickerItems.length); return; }
+                      if (e.key === 'ArrowUp') { e.preventDefault(); setAnnAtHighlightIdx(i => (i - 1 + annAtPickerItems.length) % annAtPickerItems.length); return; }
+                      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAnnAtSelect(annAtPickerItems[annAtHighlightIdx]); return; }
+                      if (e.key === 'Escape') { setAnnAtPickerOpen(false); setAnnAtFilter(''); return; }
+                    }
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
                       submitAnnotationInput();
@@ -10633,9 +10676,31 @@ export function InfiniteCanvas({
                       setAnnotationInputText('');
                     }
                   }}
-                  placeholder="描述你想要的修改..."
+                  placeholder="描述修改... 输入@引用画布图片"
                   className={`w-full h-20 resize-none rounded-lg px-3 py-2 text-sm ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-blue-400' : 'bg-[#2a2a2a] border border-[#444] text-text-bright placeholder:text-gold-muted/40 focus:border-gold/50'} border focus:outline-none`}
                 />
+                {/* @图片下拉菜单 */}
+                {annAtPickerOpen && annAtPickerItems.length > 0 && (
+                  <div className={`absolute left-3 right-3 bottom-14 z-[70] max-h-48 overflow-y-auto rounded-xl border ${isMonochrome ? 'bg-white border-gray-200 shadow-lg' : 'bg-[#1a1a1a] border-gold/30 shadow-[0_0_20px_rgba(212,175,55,0.15)]'}`}>
+                    <div className={`px-2 py-1.5 text-[10px] font-medium ${isMonochrome ? 'text-gray-400 border-b border-gray-100' : 'text-gold-muted/50 border-b border-[#333]'}`}>选择画布图片</div>
+                    {annAtPickerItems.map((item, i) => (
+                      <div
+                        key={item.id}
+                        className={`flex items-center gap-2 px-2 py-1.5 cursor-pointer transition-colors ${i === annAtHighlightIdx ? (isMonochrome ? 'bg-blue-50' : 'bg-gold/10') : (isMonochrome ? 'hover:bg-gray-50' : 'hover:bg-white/5')}`}
+                        onClick={() => handleAnnAtSelect(item)}
+                        onMouseEnter={() => setAnnAtHighlightIdx(i)}
+                      >
+                        <div className="w-8 h-8 rounded overflow-hidden shrink-0 border border-white/10">
+                          <img src={item.url} alt="" className="w-full h-full object-cover" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className={`text-xs font-medium truncate ${isMonochrome ? 'text-gray-800' : 'text-text-bright'}`}>{item.label}</div>
+                          {item.desc && <div className={`text-[10px] truncate ${isMonochrome ? 'text-gray-400' : 'text-gold-muted/50'}`}>{item.desc}</div>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div className="flex items-center justify-between mt-2">
                   <span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-gold-muted/50'}`}>Enter 提交 · Esc 取消</span>
                   <button
