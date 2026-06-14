@@ -5909,7 +5909,7 @@ export function InfiniteCanvas({
             originalHeight: img.originalHeight || Math.round(img.height),
             modifyPrompt: `${modeLabel} (${engineLabel})`,
             // 保存SVG服务器URL用于下载（轻量级，不占localStorage空间）
-            ...(data.url && data.isSvgPreview ? { svgUrl: data.url } : {}),
+            ...(data.url ? { svgUrl: data.url } : {}),
             modelName: modelInfo.apiDisplayName || modelInfo.model,
             apiProvider: modelInfo.providerName || '',
           });
