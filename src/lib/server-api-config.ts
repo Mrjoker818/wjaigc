@@ -22,7 +22,7 @@ export function normalizeApiBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, '');
 }
 
-type ApiKind = 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'imageEdit' | 'universal' | 'general';
+type ApiKind = 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'imageEdit' | 'universal' | 'general' | 'packaging' | 'display3d';
 
 /**
  * Normalize advancedParams from DB storage format to Record<string, string>.
@@ -398,7 +398,7 @@ export async function discoverModelsForCredentials(
     baseUrl,
     apiKey,
     isEnabled: true,
-    type: modelType === 'chat' ? 'chat' : modelType === 'vectorize' ? 'vectorize' : modelType === 'layer' ? 'layer' : modelType === '3d' ? '3d' : modelType === 'video' ? 'video' : modelType === 'imageEdit' ? 'imageEdit' : (modelType === 'universal' || modelType === 'general') ? 'universal' : 'image',
+    type: modelType as ApiProvider['type'],
     modelType,
     createdAt: startedAt,
     updatedAt: startedAt,
@@ -549,7 +549,7 @@ export async function addApiProvider(input: AddProviderInput): Promise<ApiProvid
     baseUrl: normalizeBaseUrl(input.baseUrl),
     apiKey: input.apiKey.trim(),
     isEnabled: true,
-    type: input.modelType === 'chat' ? 'chat' : input.modelType === 'vectorize' ? 'vectorize' : input.modelType === 'layer' ? 'layer' : input.modelType === '3d' ? '3d' : input.modelType === 'video' ? 'video' : input.modelType === 'imageEdit' ? 'imageEdit' : (input.modelType === 'universal' || input.modelType === 'general') ? 'universal' : 'image',
+    type: input.modelType as ApiProvider['type'],
     modelType: input.modelType,
     requestStyle: input.requestStyle === 'auto' ? 'auto' : (input.requestStyle || (input.modelType === 'chat' ? 'chat-completions' : 'images-generations')),
     selectedModels: input.selectedModels || [],

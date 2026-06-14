@@ -27,7 +27,7 @@ import {
   Scissors, Wand2, Expand, Layers, Paintbrush,
   Check, MousePointer2, BoxSelect, Upload, Eye, Sparkles,
   RotateCcw, Minus, Type, GitMerge, Wrench, ChevronRight,
-  Settings, Palette, Users, HelpCircle, Box as BoxIcon, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, MoreHorizontal, Brush, ShoppingBag, Scan, GripVertical, Building2, FileImage, Workflow, LayoutGrid, LayoutDashboard, ChevronsRight, ChevronsLeft, Boxes, MessageCircle, Play
+  Settings, Palette, Users, HelpCircle, Box as BoxIcon, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, MoreHorizontal, Brush, ShoppingBag, Scan, GripVertical, Building2, FileImage, Workflow, LayoutGrid, LayoutDashboard, ChevronsRight, ChevronsLeft, Boxes, MessageCircle, Play, Package, Store
 } from 'lucide-react';
 import type { CanvasAnnotation, AnnotationRegion, AnnotationTool } from '@/lib/canvas-annotation';
 import { createAnnotation, hitTestAnnotationTarget, buildAnnotationPrompt, mergeAnnotationsForImage, ANNOTATION_COLORS, ANNOTATION_COLORS_MONO, computeAnnotationRegion } from '@/lib/canvas-annotation';
@@ -56,6 +56,8 @@ const AiPsdPanel = lazy(() => import('@/components/ai-psd/ai-psd-panel'));
 const ImageCompareDialog = lazy(() => import('@/components/image-compare-dialog').then(m => ({ default: m.ImageCompareDialog })));
 const SceneStudioPanel = lazy(() => import('@/components/scene-studio-panel'));
 const StickerAssistantPanel = lazy(() => import('@/components/sticker-assistant-panel'));
+const BrandPackagingPanel = lazy(() => import('@/components/brand-packaging-panel'));
+const Display3DPanel = lazy(() => import('@/components/display3d-panel'));
 
 /* ====== Multi-Angle Sphere Preview (Canvas 2D) ====== */
 function MultiAngleSpherePreview({
@@ -550,6 +552,8 @@ export function InfiniteCanvas({
   const [showAiPsd, setShowAiPsd] = useState(false);
   const [showStickerAssistant, setShowStickerAssistant] = useState(false);
   const [showSceneStudio, setShowSceneStudio] = useState(false);
+  const [showBrandPackaging, setShowBrandPackaging] = useState(false);
+  const [showDisplay3D, setShowDisplay3D] = useState(false);
 
   // Image compare state
   const [showCompareDialog, setShowCompareDialog] = useState(false);
@@ -11827,6 +11831,32 @@ export function InfiniteCanvas({
           </Suspense>
         )}
 
+        {/* ====== 品牌包装系统 Pro FLOATING PANEL ====== */}
+        {showBrandPackaging && (
+          <Suspense fallback={null}>
+            <BrandPackagingPanel
+              onClose={() => setShowBrandPackaging(false)}
+              onAddImages={(urls: string[], meta?: { modelName?: string; apiProvider?: string }) => {
+                onAddImages?.(urls, undefined, meta);
+              }}
+              isMonochrome={isMonochrome}
+            />
+          </Suspense>
+        )}
+
+        {/* ====== 3D展陈系统 Pro FLOATING PANEL ====== */}
+        {showDisplay3D && (
+          <Suspense fallback={null}>
+            <Display3DPanel
+              onClose={() => setShowDisplay3D(false)}
+              onAddImages={(urls: string[], meta?: { modelName?: string; apiProvider?: string }) => {
+                onAddImages?.(urls, undefined, meta);
+              }}
+              isMonochrome={isMonochrome}
+            />
+          </Suspense>
+        )}
+
         {/* ====== PSD LAYER EDITOR MODAL ====== */}
         {showPsdEditor && psdEditorImageUrl && (
           <div
@@ -13189,6 +13219,26 @@ export function InfiniteCanvas({
         >
           <Boxes className={`h-4 w-4 ${mIcon.hexCube}`} />
           <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">3D构图</span>
+        </button>
+
+        {/* 品牌包装系统 Pro */}
+        <button
+          onClick={() => setShowBrandPackaging(true)}
+          className={`${toolBtnCls}`}
+          title="品牌包装系统 Pro"
+        >
+          <Package className="h-4 w-4" />
+          <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">包装Pro</span>
+        </button>
+
+        {/* 3D展陈系统 Pro */}
+        <button
+          onClick={() => setShowDisplay3D(true)}
+          className={`${toolBtnCls}`}
+          title="3D展陈系统 Pro"
+        >
+          <Store className="h-4 w-4" />
+          <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">展陈Pro</span>
         </button>
 
         {/* AI PSD Generator - AI PSD生成器 */}

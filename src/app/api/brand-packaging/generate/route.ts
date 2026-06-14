@@ -1,0 +1,165 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { findProviderForModel } from '@/lib/server-api-config';
+import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile } from '@/lib/api-compatibility';
+import { buildPackagingRenderPrompt } from '@/lib/packaging-prompts';
+import { registerTask, updateTaskProgress } from '@/lib/task-registry';
+import { fetchWithV1Retry } from '@/lib/api-helpers';
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const {
+      brandName = '',
+      productName = '',
+      category = 'beauty',
+      structure = {},
+      materialCraft = {},
+      outputModes = ['package_render'],
+      advancedOptions = {},
+      uploads = [],
+      model,
+    } = body;
+
+    if (!brandName && !productName) {
+      return NextResponse.json({ error: '请提供品牌名或产品名称' }, { status: 400 });
+    }
+
+    // Build the prompt from input
+    const prompt = buildPackagingRenderPrompt({
+      brandName,
+      productName,
+      category,
+      structure,
+      materialCraft,
+      outputModes,
+      advancedOptions,
+      uploads,
+    } as Parameters<typeof buildPackagingRenderPrompt>[0]);
+
+    // Find an image model provider
+    const provider = await findProviderForModel(model || '', 'image');
+    if (!provider) {
+      return NextResponse.json({ error: '未找到可用的图像模型，请在管理员后台配置' }, { status: 400 });
+    }
+
+    const profile = resolveCompatProfile(provider);
+    const selectedModel = provider.selectedModels?.[0] || model || 'gpt-image-2';
+
+    // Build request body
+    const rawBody: Record<string, unknown> = {
+      model: selectedModel,
+      prompt,
+      n: 1,
+      size: '1024x1024',
+    };
+
+    // Add reference images if uploaded
+    if (Array.isArray(uploads) && uploads.length > 0) {
+      const imageUrls = uploads.filter((u: { url?: string }) => u.url).map((u: { url: string }) => u.url);
+      if (imageUrls.length > 0) {
+        rawBody.image = imageUrls[0];
+        rawBody.image_urls = imageUrls;
+      }
+    }
+
+    const adjustedBody = adjustRequestForProfile(rawBody, profile);
+
+    // Register task
+    const taskId = `pkg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    registerTask(taskId, 'packaging', `品牌包装: ${brandName || productName}`);
+
+    // Start async generation
+    (async () => {
+      try {
+        updateTaskProgress(taskId, { status: 'processing', progress: 10, label: '正在生成包装方案...' });
+
+        // Parse baseUrl and path for fetchWithV1Retry
+        let apiBase = provider.baseUrl.replace(/\/+$/, '');
+        const apiPath = '/images/generations';
+        // Strip path from baseUrl if it already includes /v1
+        if (apiBase.endsWith('/v1')) {
+          apiBase = apiBase.slice(0, -3);
+        }
+
+        const response = await fetchWithV1Retry(apiBase, apiPath, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${provider.apiKey}`,
+          },
+          body: JSON.stringify(adjustedBody),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          updateTaskProgress(taskId, { status: 'failed', error: `API错误: ${response.status} ${errorText}` });
+          return;
+        }
+
+        const apiResponse = await response.json();
+        const parsed = parseResponseForProfile(apiResponse, profile);
+
+        if (parsed.mode === 'direct' && parsed.directImageUrls.length > 0) {
+          updateTaskProgress(taskId, {
+            status: 'completed',
+            progress: 100,
+            result: {
+              imageUrls: parsed.directImageUrls,
+              prompt,
+              type: 'packaging',
+            },
+          });
+        } else if (parsed.mode === 'polling' && parsed.taskIds.length > 0) {
+          // Poll for async results
+          const pollTaskId = parsed.taskIds[0];
+          let pollCount = 0;
+          const maxPolls = 60;
+          const pollInterval = setInterval(async () => {
+            pollCount++;
+            if (pollCount > maxPolls) {
+              clearInterval(pollInterval);
+              updateTaskProgress(taskId, { status: 'failed', error: '生成超时' });
+              return;
+            }
+            try {
+              const pollRes = await fetchWithV1Retry(apiBase, `/tasks/${pollTaskId}`, {
+                headers: { 'Authorization': `Bearer ${provider.apiKey}` },
+              });
+              if (!pollRes.ok) return;
+              const pollData = await pollRes.json();
+              const pollParsed = parseResponseForProfile(pollData, profile);
+              if (pollParsed.mode === 'direct' && pollParsed.directImageUrls.length > 0) {
+                clearInterval(pollInterval);
+                updateTaskProgress(taskId, {
+                  status: 'completed',
+                  progress: 100,
+                  result: {
+                    imageUrls: pollParsed.directImageUrls,
+                    prompt,
+                    type: 'packaging',
+                  },
+                });
+              }
+            } catch {
+              // continue polling
+            }
+          }, 5000);
+        } else {
+          updateTaskProgress(taskId, { status: 'failed', error: '无法解析API响应' });
+        }
+      } catch (err) {
+        updateTaskProgress(taskId, {
+          status: 'failed',
+          error: err instanceof Error ? err.message : '生成失败',
+        });
+      }
+    })();
+
+    return NextResponse.json({ success: true, taskId, status: 'running' });
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : '服务器错误' },
+      { status: 500 }
+    );
+  }
+}

@@ -1,0 +1,740 @@
+'use client';
+
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
+import {
+  Package, X, Minus, Maximize2, Plus, Trash2, Star,
+  Upload, Image, FileText, Layers, DollarSign, CheckCircle2,
+  ChevronDown, ChevronUp, Settings2, Sparkles, Download,
+  Send, Palette, Box, Ruler, Paintbrush, FileImage, Search,
+  Grid3X3, LayoutGrid, Store, ShoppingBag, BookOpen, BarChart3,
+  Tag, Info, Loader2
+} from 'lucide-react';
+
+/* ============================================================
+   类型定义
+   ============================================================ */
+export type PackagingCategory = 'beauty' | 'food' | 'drink' | 'wine' | 'daily' | 'gift' | 'pet' | 'health' | 'electronics';
+export type PackagingOutputMode = 'package_render' | 'visual_flat_layout' | 'structural_flat_layout' | 'scene_display' | 'shelf_display' | 'ecommerce_image' | 'series_family';
+
+export interface PackagingSku {
+  id: string;
+  name: string;
+  spec: string;
+  isHero: boolean;
+}
+
+export interface BrandAssets {
+  logoUrl?: string;
+  brandColors: string[];
+  fontStyle?: string;
+  patterns: string[];
+}
+
+export interface PackagingStructure {
+  type: string;
+  length?: number;
+  width?: number;
+  height?: number;
+  capacity?: string;
+  netContent?: string;
+  insertTray?: string;
+  handleRope?: string;
+  windowType?: string;
+}
+
+export interface PackagingMaterialCraft {
+  materials: string[];
+  crafts: string[];
+  costLevel?: 'low' | 'medium' | 'high';
+}
+
+export interface PackagingAdvancedOptions {
+  enableCopywriting: boolean;
+  enableInfoLayout: boolean;
+  enableBrandConsistency: boolean;
+  enableCostAnalysis: boolean;
+  enableFeasibilityAnalysis: boolean;
+  enableDecompose: boolean;
+}
+
+export interface PackagingResult {
+  id: string;
+  type: PackagingOutputMode;
+  url: string;
+  prompt?: string;
+}
+
+export interface PackagingAnalysis {
+  brandRecognition: number;
+  shelfImpact: number;
+  premiumFeeling: number;
+  feasibility: number;
+  printComplexity: number;
+  costLevel: string;
+  suggestions: string[];
+}
+
+interface Props {
+  isMonochrome?: boolean;
+  onClose: () => void;
+  onAddImages?: (urls: string[], meta?: { modelName?: string; apiProvider?: string }) => void;
+}
+
+/* ============================================================
+   常量
+   ============================================================ */
+const CATEGORIES: { value: PackagingCategory; label: string }[] = [
+  { value: 'beauty', label: '美妆 / 护肤' },
+  { value: 'food', label: '食品' },
+  { value: 'drink', label: '饮品' },
+  { value: 'wine', label: '酒水 / 礼盒' },
+  { value: 'daily', label: '日化' },
+  { value: 'gift', label: '礼盒' },
+  { value: 'pet', label: '宠物' },
+  { value: 'health', label: '保健' },
+  { value: 'electronics', label: '电子' },
+];
+
+const PACKAGING_TYPES = ['插舌盒', '天地盖盒', '抽屉盒', '软管', '自立袋', '瓶身标签', '礼盒套装'];
+
+const MATERIALS = ['白卡纸', '特种纸', '铜版纸', '玻璃', 'PET', '亚克力'];
+
+const CRAFTS = ['哑膜', '亮膜', '局部UV', '烫金', '烫银', '压纹', '击凸', '镭射', '布纹', '磨砂'];
+
+const OUTPUT_MODES: { value: PackagingOutputMode; label: string; icon: React.ReactNode }[] = [
+  { value: 'package_render', label: '包装效果图', icon: <Package size={14} /> },
+  { value: 'visual_flat_layout', label: '视觉展开图', icon: <LayoutGrid size={14} /> },
+  { value: 'structural_flat_layout', label: '结构展开图', icon: <Grid3X3 size={14} /> },
+  { value: 'scene_display', label: '场景展示', icon: <Image size={14} /> },
+  { value: 'shelf_display', label: '货架陈列', icon: <Store size={14} /> },
+  { value: 'ecommerce_image', label: '电商主图', icon: <ShoppingBag size={14} /> },
+  { value: 'series_family', label: '系列包装', icon: <Layers size={14} /> },
+];
+
+const ADVANCED_TOOLS = [
+  { key: 'enableDecompose', label: '包装拆解', icon: <Layers size={14} /> },
+  { key: 'enableCopywriting', label: '文案生成', icon: <FileText size={14} /> },
+  { key: 'enableInfoLayout', label: '信息区布局', icon: <LayoutGrid size={14} /> },
+  { key: 'enableBrandConsistency', label: '品牌一致性', icon: <Palette size={14} /> },
+  { key: 'enableCostAnalysis', label: '成本等级', icon: <DollarSign size={14} /> },
+  { key: 'enableFeasibilityAnalysis', label: '可落地评估', icon: <CheckCircle2 size={14} /> },
+];
+
+const INSERT_TRAY_OPTIONS = ['无内托', '纸托', 'EVA内托', '吸塑内托'];
+const HANDLE_ROPE_OPTIONS = ['无', '棉绳', '丝带', '皮绳'];
+const WINDOW_OPTIONS = ['否', '透明开窗', '异形开窗'];
+
+/* ============================================================
+   Prompt 模板
+   ============================================================ */
+function buildPackagingPrompt(state: {
+  brandName: string;
+  productName: string;
+  category: PackagingCategory;
+  structure: PackagingStructure;
+  materialCraft: PackagingMaterialCraft;
+  outputModes: PackagingOutputMode[];
+  skuMatrix: PackagingSku[];
+  customPrompt?: string;
+}): string {
+  const categoryLabel = CATEGORIES.find(c => c.value === state.category)?.label || state.category;
+  const outputLabels = state.outputModes.map(m => OUTPUT_MODES.find(o => o.value === m)?.label || m).join('、');
+  return `为品牌「${state.brandName}」设计一套商业级包装。
+产品名称：${state.productName}
+品类：${categoryLabel}
+包装结构：${state.structure.type || '未指定'}
+规格尺寸：${state.structure.length || '?'}×${state.structure.width || '?'}×${state.structure.height || '?'}mm
+材质：${state.materialCraft.materials.join('、') || '未指定'}
+工艺：${state.materialCraft.crafts.join('、') || '未指定'}
+设计要求：
+1. 包装需要具有真实商业落地感。
+2. 保持品牌名清晰可见。
+3. 视觉风格高级、干净、专业。
+4. 材质表现真实，包括纸张、哑膜、烫金、压纹、局部UV等细节。
+5. 输出适合品牌提案、电商展示和线下货架展示。
+6. 不要生成乱码文字，不要出现错误品牌名，不要出现无关品牌。
+输出方向：${outputLabels}
+${state.customPrompt ? `\n附加要求：${state.customPrompt}` : ''}`;
+}
+
+/* ============================================================
+   组件
+   ============================================================ */
+export default function BrandPackagingPanel({ isMonochrome = false, onClose, onAddImages }: Props) {
+  // === Window drag state ===
+  const [isMinimized, setIsMinimized] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const [windowPos, setWindowPos] = useState({ x: 40, y: 40 });
+
+  // === Sidebar tab ===
+  const [sidebarTab, setSidebarTab] = useState<'projects' | 'templates' | 'history'>('projects');
+
+  // === Form state ===
+  const [brandName, setBrandName] = useState('');
+  const [productName, setProductName] = useState('');
+  const [category, setCategory] = useState<PackagingCategory>('beauty');
+  const [skuMatrix, setSkuMatrix] = useState<PackagingSku[]>([
+    { id: '1', name: '基础版', spec: '100g', isHero: true },
+  ]);
+  const [brandColors, setBrandColors] = useState<string[]>([]);
+  const [logoUrl, setLogoUrl] = useState<string>('');
+  const [structure, setStructure] = useState<PackagingStructure>({ type: '天地盖盒' });
+  const [materialCraft, setMaterialCraft] = useState<PackagingMaterialCraft>({ materials: [], crafts: [] });
+  const [uploads, setUploads] = useState<{ type: string; url: string; name: string }[]>([]);
+  const [outputModes, setOutputModes] = useState<PackagingOutputMode[]>(['package_render']);
+  const [advancedOptions, setAdvancedOptions] = useState<PackagingAdvancedOptions>({
+    enableCopywriting: false,
+    enableInfoLayout: false,
+    enableBrandConsistency: true,
+    enableCostAnalysis: false,
+    enableFeasibilityAnalysis: false,
+    enableDecompose: false,
+  });
+  const [customPrompt, setCustomPrompt] = useState('');
+  const [exportFormat, setExportFormat] = useState<'PNG' | 'SVG' | 'PDF' | 'AI'>('PNG');
+
+  // === Results state ===
+  const [results, setResults] = useState<PackagingResult[]>([]);
+  const [analysis, setAnalysis] = useState<PackagingAnalysis | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [activeResultTab, setActiveResultTab] = useState<'all' | 'favorites' | 'optimize'>('all');
+  const [favorites, setFavorites] = useState<Set<string>>(new Set());
+
+  // === Search state ===
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Theme
+  const accent = isMonochrome ? '#3b82f6' : '#d4af37';
+  const accentLight = isMonochrome ? '#60a5fa' : '#e8c468';
+  const bg = isMonochrome ? '#ffffff' : '#0d0c0a';
+  const bgSoft = isMonochrome ? '#f9fafb' : '#15120f';
+  const bgPanel = isMonochrome ? 'rgba(249,250,251,0.95)' : 'rgba(24,21,18,0.92)';
+  const bgCard = isMonochrome ? '#f3f4f6' : 'rgba(0,0,0,0.3)';
+  const border = isMonochrome ? '#e5e5e5' : 'rgba(214,156,82,0.25)';
+  const borderStrong = isMonochrome ? '#3b82f6' : 'rgba(255,178,94,0.6)';
+  const textPrimary = isMonochrome ? '#111827' : '#f8efe2';
+  const textMuted = isMonochrome ? '#6b7280' : '#a99b8c';
+  const textAccent = isMonochrome ? '#3b82f6' : '#d4af37';
+
+  // === Drag handlers ===
+  const handleDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+    setDragOffset({ x: e.clientX - windowPos.x, y: e.clientY - windowPos.y });
+  }, [windowPos]);
+
+  useEffect(() => {
+    if (!isDragging) return;
+    const handleMove = (e: MouseEvent) => setWindowPos({ x: e.clientX - dragOffset.x, y: e.clientY - dragOffset.y });
+    const handleUp = () => setIsDragging(false);
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleUp);
+    return () => { window.removeEventListener('mousemove', handleMove); window.removeEventListener('mouseup', handleUp); };
+  }, [isDragging, dragOffset]);
+
+  // === SKU management ===
+  const addSku = () => {
+    setSkuMatrix(prev => [...prev, { id: Date.now().toString(), name: `SKU ${prev.length + 1}`, spec: '', isHero: false }]);
+  };
+  const removeSku = (id: string) => setSkuMatrix(prev => prev.filter(s => s.id !== id));
+  const updateSku = (id: string, field: keyof PackagingSku, value: string | boolean) => {
+    setSkuMatrix(prev => prev.map(s => s.id === id ? { ...s, [field]: value } : s));
+  };
+
+  // === Material / Craft toggle ===
+  const toggleMaterial = (m: string) => {
+    setMaterialCraft(prev => ({
+      ...prev,
+      materials: prev.materials.includes(m) ? prev.materials.filter(x => x !== m) : [...prev.materials, m],
+    }));
+  };
+  const toggleCraft = (c: string) => {
+    setMaterialCraft(prev => ({
+      ...prev,
+      crafts: prev.crafts.includes(c) ? prev.crafts.filter(x => x !== c) : [...prev.crafts, c],
+    }));
+  };
+
+  // === Output mode toggle ===
+  const toggleOutputMode = (mode: PackagingOutputMode) => {
+    setOutputModes(prev => prev.includes(mode) ? prev.filter(m => m !== mode) : [...prev, mode]);
+  };
+
+  // === Upload handler ===
+  const handleUpload = (type: string) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      const url = URL.createObjectURL(file);
+      if (type === 'Logo') setLogoUrl(url);
+      else setUploads(prev => [...prev, { type, url, name: file.name }]);
+    };
+    input.click();
+  };
+
+  // === Generate ===
+  const handleGenerate = useCallback(async () => {
+    if (!brandName.trim()) return;
+    setIsGenerating(true);
+    try {
+      const prompt = buildPackagingPrompt({ brandName, productName, category, structure, materialCraft, outputModes, skuMatrix, customPrompt });
+      const res = await fetch('/api/brand-packaging/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          brandName, productName, category, skuMatrix,
+          brandAssets: { logoUrl, brandColors },
+          structure, materialCraft, uploads,
+          outputModes, advancedOptions, prompt,
+        }),
+      });
+      const data = await res.json();
+      if (data.taskId) {
+        // Poll for results
+        const poll = async () => {
+          try {
+            const taskRes = await fetch(`/api/brand-packaging/tasks/${data.taskId}`);
+            const taskData = await taskRes.json();
+            if (taskData.status === 'completed') {
+              if (taskData.results) setResults(taskData.results);
+              if (taskData.analysis) setAnalysis(taskData.analysis);
+              setIsGenerating(false);
+            } else if (taskData.status === 'failed') {
+              setIsGenerating(false);
+              alert('生成失败: ' + (taskData.error || '未知错误'));
+            } else {
+              setTimeout(poll, 3000);
+            }
+          } catch { setIsGenerating(false); }
+        };
+        poll();
+      } else if (data.results) {
+        setResults(data.results);
+        if (data.analysis) setAnalysis(data.analysis);
+        setIsGenerating(false);
+      } else {
+        setIsGenerating(false);
+      }
+    } catch (e) {
+      console.error('[brand-packaging] Generate failed:', e);
+      setIsGenerating(false);
+    }
+  }, [brandName, productName, category, structure, materialCraft, outputModes, skuMatrix, customPrompt, logoUrl, brandColors, uploads, advancedOptions]);
+
+  // === Toggle favorite ===
+  const toggleFavorite = (id: string) => {
+    setFavorites(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  // === Render helpers ===
+  const inputCls = `w-full rounded-lg border px-3 py-2 text-xs outline-none transition-colors ${isMonochrome ? 'bg-white border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-blue-400 focus:ring-1 focus:ring-blue-200' : 'bg-black/30 border-white/10 text-amber-50 placeholder:text-white/30 focus:border-amber-400/60 focus:ring-1 focus:ring-amber-400/20'}`;
+  const selectCls = inputCls;
+  const tagBtnCls = (active: boolean) => `rounded-lg border px-3 py-1.5 text-xs cursor-pointer transition-all ${active ? (isMonochrome ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-amber-400/60 bg-amber-400/15 text-amber-200') : (isMonochrome ? 'border-gray-200 bg-gray-50 text-gray-500 hover:border-blue-300' : 'border-white/10 bg-black/30 text-white/60 hover:border-amber-400/40')}`;
+  const panelCls = `rounded-xl border p-4 ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#15120f]/90 border-amber-500/25'}`;
+  const stepBadgeCls = `flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold ${isMonochrome ? 'bg-blue-500 text-white' : 'bg-amber-500 text-black'}`;
+
+  const filteredResults = useMemo(() => {
+    if (activeResultTab === 'favorites') return results.filter(r => favorites.has(r.id));
+    if (activeResultTab === 'optimize') return results; // placeholder
+    return results;
+  }, [results, activeResultTab, favorites]);
+
+  // === RENDER ===
+  return createPortal(
+    <div className="fixed z-[200] flex items-start justify-start" style={{ pointerEvents: 'auto', ...(isMinimized ? { left: windowPos.x, top: windowPos.y } : { inset: 0 }) }}>
+      {!isMinimized && <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" onClick={onClose} />}
+
+      <div
+        data-popup
+        className="relative flex flex-col rounded-xl overflow-hidden shadow-2xl border"
+        style={{
+          width: isMinimized ? 340 : 'calc(100vw - 80px)',
+          height: isMinimized ? 'auto' : 'calc(100vh - 80px)',
+          background: bg,
+          borderColor: isMonochrome ? '#e5e5e5' : '#d4af3740',
+          ...(isMinimized ? {} : { left: windowPos.x, top: windowPos.y }),
+          ...(isDragging ? { outline: `2px solid ${accent}`, outlineOffset: '-2px' } : {}),
+        }}
+        onMouseDown={e => e.stopPropagation()}
+        onPointerDown={e => e.stopPropagation()}
+      >
+        {/* === Title bar (draggable) === */}
+        <div
+          data-panel-header
+          className="flex items-center justify-between px-3 shrink-0 cursor-move select-none"
+          style={{ height: 36, background: isMonochrome ? '#f9fafb' : '#161616', borderBottom: isMinimized ? 'none' : (isMonochrome ? '1px solid #e5e5e5' : '1px solid #d4af3730') }}
+          onMouseDown={handleDragStart}
+        >
+          <div className="flex items-center gap-2">
+            <Package size={14} style={{ color: accent }} />
+            <span className="text-sm font-medium" style={{ color: textAccent }}>品牌包装系统 Pro</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <button className={`w-7 h-7 flex items-center justify-center rounded transition-colors ${isMonochrome ? 'hover:bg-gray-200' : 'hover:bg-white/10'}`} onClick={() => setIsMinimized(!isMinimized)} title={isMinimized ? '展开' : '最小化'}>
+              {isMinimized ? <Maximize2 size={14} style={{ color: textMuted }} /> : <Minus size={14} style={{ color: textMuted }} />}
+            </button>
+            <button className={`w-7 h-7 flex items-center justify-center rounded transition-colors ${isMonochrome ? 'hover:bg-red-100' : 'hover:bg-red-500/30'}`} onClick={onClose} title="关闭">
+              <X size={14} style={{ color: textMuted }} />
+            </button>
+          </div>
+        </div>
+
+        {isMinimized ? null : (
+          <div className="flex flex-1 overflow-hidden">
+            {/* === LEFT SIDEBAR === */}
+            <aside className="w-[240px] shrink-0 border-r flex flex-col overflow-hidden"
+              style={{ background: isMonochrome ? '#f9fafb' : 'rgba(0,0,0,0.4)', borderColor: border }}
+            >
+              {/* New project button */}
+              <div className="p-3">
+                <button
+                  className="w-full rounded-xl py-2.5 text-xs font-bold cursor-pointer transition-all"
+                  style={{ background: isMonochrome ? '#3b82f6' : 'linear-gradient(135deg, #ff9d5c, #ff5f88)', color: isMonochrome ? '#fff' : '#000' }}
+                >
+                  + 新建项目
+                </button>
+              </div>
+
+              {/* Tab switcher */}
+              <div className="mx-3 mb-3 grid grid-cols-3 rounded-lg p-0.5 text-xs" style={{ background: isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.05)' }}>
+                {(['projects', 'templates', 'history'] as const).map(tab => (
+                  <button key={tab} className={`rounded-md py-1.5 cursor-pointer transition-colors ${sidebarTab === tab ? (isMonochrome ? 'bg-white text-blue-600 shadow-sm' : 'bg-amber-500/20 text-amber-200') : (isMonochrome ? 'text-gray-500' : 'text-white/50')}`}
+                    onClick={() => setSidebarTab(tab)}>
+                    {{ projects: '项目', templates: '模板', history: '历史' }[tab]}
+                  </button>
+                ))}
+              </div>
+
+              {/* Search */}
+              <div className="mx-3 mb-3 relative">
+                <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: textMuted }} />
+                <input className={`${inputCls} pl-7`} placeholder="搜索项目或模板" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+              </div>
+
+              {/* List placeholder */}
+              <div className="flex-1 overflow-y-auto px-3">
+                <div className="flex flex-col items-center justify-center py-10 text-xs" style={{ color: textMuted }}>
+                  <Package size={24} className="mb-2 opacity-30" />
+                  {sidebarTab === 'projects' && '暂无项目，点击新建开始'}
+                  {sidebarTab === 'templates' && '模板库即将上线'}
+                  {sidebarTab === 'history' && '暂无历史记录'}
+                </div>
+              </div>
+            </aside>
+
+            {/* === MAIN CONTENT === */}
+            <main className="flex flex-1 flex-col overflow-hidden">
+              {/* Header */}
+              <header className="flex items-center justify-between px-4 shrink-0" style={{ height: 44, borderBottom: `1px solid ${border}` }}>
+                <div className="flex items-center gap-3">
+                  <h2 className="text-base font-semibold" style={{ color: textPrimary }}>品牌包装工作台</h2>
+                  <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: isMonochrome ? '#dbeafe' : 'rgba(212,175,55,0.15)', color: textAccent }}>Pro</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button className={`rounded-lg px-3 py-1.5 text-xs cursor-pointer transition-colors ${isMonochrome ? 'text-gray-500 hover:bg-gray-100' : 'text-white/50 hover:bg-white/5'}`}>
+                    <BookOpen size={13} className="inline mr-1" />帮助
+                  </button>
+                </div>
+              </header>
+
+              {/* Workspace: left form + right results */}
+              <div className="grid flex-1 grid-cols-[1.35fr_0.95fr] gap-4 overflow-hidden p-4">
+                {/* LEFT: Form area */}
+                <div className="overflow-y-auto pr-2 space-y-4" data-toolbar>
+                  {/* Step 1: Brand Assets */}
+                  <section className={panelCls}>
+                    <div className="mb-3 flex items-center gap-2">
+                      <span className={stepBadgeCls}>1</span>
+                      <h3 className="text-xs font-semibold" style={{ color: textPrimary }}>品牌资产与核心信息</h3>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 mb-3">
+                      <div>
+                        <label className="block text-[10px] mb-1" style={{ color: textMuted }}>品牌名</label>
+                        <input className={inputCls} placeholder="例如：山茶记" value={brandName} onChange={e => setBrandName(e.target.value)} />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] mb-1" style={{ color: textMuted }}>产品名称</label>
+                        <input className={inputCls} placeholder="例如：山茶花洁面乳" value={productName} onChange={e => setProductName(e.target.value)} />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] mb-1" style={{ color: textMuted }}>品类</label>
+                        <select className={selectCls} value={category} onChange={e => setCategory(e.target.value as PackagingCategory)}>
+                          {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Brand assets row */}
+                    <div className="grid grid-cols-[1fr_auto] gap-3">
+                      {/* SKU Matrix */}
+                      <div className="rounded-lg border p-2.5" style={{ borderColor: border, background: bgCard }}>
+                        <div className="text-[10px] font-semibold mb-2" style={{ color: textMuted }}>系列 SKU 矩阵</div>
+                        <table className="w-full text-[10px]">
+                          <thead><tr style={{ color: textMuted }}>
+                            <th className="py-1 text-left">SKU 名称</th>
+                            <th className="py-1 text-left">规格</th>
+                            <th className="py-1 text-center">主推</th>
+                            <th className="py-1 text-center">操作</th>
+                          </tr></thead>
+                          <tbody>
+                            {skuMatrix.map(sku => (
+                              <tr key={sku.id} style={{ borderTop: `1px solid ${border}` }}>
+                                <td className="py-1"><input className={`${inputCls} py-1 text-[10px]`} value={sku.name} onChange={e => updateSku(sku.id, 'name', e.target.value)} /></td>
+                                <td className="py-1"><input className={`${inputCls} py-1 text-[10px]`} value={sku.spec} onChange={e => updateSku(sku.id, 'spec', e.target.value)} placeholder="100g" /></td>
+                                <td className="py-1 text-center cursor-pointer" onClick={() => updateSku(sku.id, 'isHero', !sku.isHero)}>{sku.isHero ? <Star size={12} fill={accent} style={{ color: accent, margin: '0 auto' }} /> : '-'}</td>
+                                <td className="py-1 text-center"><Trash2 size={11} className="cursor-pointer mx-auto" style={{ color: textMuted }} onClick={() => removeSku(sku.id)} /></td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        <button className="mt-2 text-[10px] cursor-pointer" style={{ color: textAccent }} onClick={addSku}>+ 新增 SKU</button>
+                      </div>
+                      {/* Logo + Colors */}
+                      <div className="flex flex-col gap-2">
+                        <button className="w-[72px] h-[72px] rounded-lg border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition-colors"
+                          style={{ borderColor: border, color: textMuted }}
+                          onClick={() => handleUpload('Logo')}>
+                          {logoUrl ? <img src={logoUrl} className="w-full h-full object-contain rounded" /> : <><Upload size={14} /><span className="text-[9px] mt-0.5">Logo</span></>}
+                        </button>
+                        <div className="flex gap-1">
+                          <input type="color" className="w-6 h-6 rounded cursor-pointer" value={brandColors[0] || '#d4af37'} onChange={e => setBrandColors([e.target.value])} title="品牌色" />
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+
+                  {/* Step 2: Structure */}
+                  <section className={panelCls}>
+                    <div className="mb-3 flex items-center gap-2">
+                      <span className={stepBadgeCls}>2</span>
+                      <h3 className="text-xs font-semibold" style={{ color: textPrimary }}>包装结构与规格</h3>
+                    </div>
+                    <div className="mb-3 flex flex-wrap gap-1.5">
+                      {PACKAGING_TYPES.map(t => (
+                        <button key={t} className={tagBtnCls(structure.type === t)} onClick={() => setStructure(prev => ({ ...prev, type: t }))}>{t}</button>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div><label className="block text-[10px] mb-1" style={{ color: textMuted }}>长 (mm)</label><input className={inputCls} type="number" placeholder="60" value={structure.length || ''} onChange={e => setStructure(p => ({ ...p, length: Number(e.target.value) }))} /></div>
+                      <div><label className="block text-[10px] mb-1" style={{ color: textMuted }}>宽 (mm)</label><input className={inputCls} type="number" placeholder="40" value={structure.width || ''} onChange={e => setStructure(p => ({ ...p, width: Number(e.target.value) }))} /></div>
+                      <div><label className="block text-[10px] mb-1" style={{ color: textMuted }}>高 (mm)</label><input className={inputCls} type="number" placeholder="150" value={structure.height || ''} onChange={e => setStructure(p => ({ ...p, height: Number(e.target.value) }))} /></div>
+                      <div><label className="block text-[10px] mb-1" style={{ color: textMuted }}>容量</label><input className={inputCls} placeholder="100 ml" value={structure.capacity || ''} onChange={e => setStructure(p => ({ ...p, capacity: e.target.value }))} /></div>
+                      <div><label className="block text-[10px] mb-1" style={{ color: textMuted }}>净含量</label><input className={inputCls} placeholder="100 g" value={structure.netContent || ''} onChange={e => setStructure(p => ({ ...p, netContent: e.target.value }))} /></div>
+                      <div><label className="block text-[10px] mb-1" style={{ color: textMuted }}>内托</label><select className={selectCls} value={structure.insertTray || ''} onChange={e => setStructure(p => ({ ...p, insertTray: e.target.value }))}>{INSERT_TRAY_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+                      <div><label className="block text-[10px] mb-1" style={{ color: textMuted }}>手提绳</label><select className={selectCls} value={structure.handleRope || ''} onChange={e => setStructure(p => ({ ...p, handleRope: e.target.value }))}>{HANDLE_ROPE_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+                      <div><label className="block text-[10px] mb-1" style={{ color: textMuted }}>开窗</label><select className={selectCls} value={structure.windowType || ''} onChange={e => setStructure(p => ({ ...p, windowType: e.target.value }))}>{WINDOW_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+                    </div>
+                  </section>
+
+                  {/* Step 3: Material & Craft */}
+                  <section className={panelCls}>
+                    <div className="mb-3 flex items-center gap-2">
+                      <span className={stepBadgeCls}>3</span>
+                      <h3 className="text-xs font-semibold" style={{ color: textPrimary }}>材质与工艺</h3>
+                    </div>
+                    <div className="mb-2 text-[10px] font-semibold" style={{ color: textMuted }}>基础材质</div>
+                    <div className="mb-3 flex flex-wrap gap-1.5">
+                      {MATERIALS.map(m => <button key={m} className={tagBtnCls(materialCraft.materials.includes(m))} onClick={() => toggleMaterial(m)}>{m}</button>)}
+                    </div>
+                    <div className="mb-2 text-[10px] font-semibold" style={{ color: textMuted }}>表面工艺</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {CRAFTS.map(c => <button key={c} className={tagBtnCls(materialCraft.crafts.includes(c))} onClick={() => toggleCraft(c)}>{c}</button>)}
+                    </div>
+                  </section>
+
+                  {/* Step 4: Upload */}
+                  <section className={panelCls}>
+                    <div className="mb-3 flex items-center gap-2">
+                      <span className={stepBadgeCls}>4</span>
+                      <h3 className="text-xs font-semibold" style={{ color: textPrimary }}>上传参考与素材</h3>
+                    </div>
+                    <div className="grid grid-cols-5 gap-2">
+                      {['产品图', '包装参考图', 'Logo', '材质图', '更多素材'].map((t, i) => (
+                        <button key={t} className="h-[72px] rounded-lg border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition-colors"
+                          style={{ borderColor: border, color: textMuted }}
+                          onClick={() => handleUpload(t)}>
+                          <Upload size={14} />
+                          <span className="text-[9px] mt-1">{t}</span>
+                        </button>
+                      ))}
+                    </div>
+                    {uploads.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {uploads.map((u, i) => (
+                          <div key={i} className="relative w-12 h-12 rounded border overflow-hidden" style={{ borderColor: border }}>
+                            <img src={u.url} className="w-full h-full object-cover" />
+                            <button className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-red-500 text-white flex items-center justify-center" onClick={() => setUploads(prev => prev.filter((_, j) => j !== i))}><X size={8} /></button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </section>
+
+                  {/* Step 5: Output modes */}
+                  <section className={panelCls}>
+                    <div className="mb-3 flex items-center gap-2">
+                      <span className={stepBadgeCls}>5</span>
+                      <h3 className="text-xs font-semibold" style={{ color: textPrimary }}>输出模式</h3>
+                    </div>
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {OUTPUT_MODES.map(m => (
+                        <button key={m.value} className={`rounded-lg border p-2 text-[10px] flex flex-col items-center gap-1 cursor-pointer transition-all ${outputModes.includes(m.value) ? (isMonochrome ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-amber-400/60 bg-amber-400/10 text-amber-200') : (isMonochrome ? 'border-gray-200 bg-gray-50 text-gray-500 hover:border-blue-300' : 'border-white/10 bg-black/30 text-white/60 hover:border-amber-400/40')}`}
+                          onClick={() => toggleOutputMode(m.value)}>
+                          {m.icon}<span>{m.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+
+                  {/* Step 6: Advanced tools */}
+                  <section className={panelCls}>
+                    <div className="mb-3 flex items-center gap-2">
+                      <span className={stepBadgeCls}>6</span>
+                      <h3 className="text-xs font-semibold" style={{ color: textPrimary }}>高级工具</h3>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 mb-3">
+                      {ADVANCED_TOOLS.map(tool => (
+                        <button key={tool.key} className={`rounded-lg border px-3 py-1.5 text-[10px] flex items-center gap-1 cursor-pointer transition-all ${(advancedOptions as unknown as Record<string, boolean>)[tool.key] ? (isMonochrome ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-amber-400/60 bg-amber-400/10 text-amber-200') : (isMonochrome ? 'border-gray-200 bg-gray-50 text-gray-500 hover:border-blue-300' : 'border-white/10 bg-black/30 text-white/60 hover:border-amber-400/40')}`}
+                          onClick={() => setAdvancedOptions(prev => ({ ...prev, [tool.key]: !(prev as unknown as Record<string, boolean>)[tool.key] }))}>
+                          {tool.icon}{tool.label}
+                        </button>
+                      ))}
+                    </div>
+                    {/* Custom prompt */}
+                    <textarea className={`${inputCls} min-h-[60px] mb-3`} placeholder="附加设计要求..." value={customPrompt} onChange={e => setCustomPrompt(e.target.value)} />
+                    {/* Export format + Generate button */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px]" style={{ color: textMuted }}>导出格式</span>
+                        {(['PNG', 'SVG', 'PDF', 'AI'] as const).map(f => (
+                          <button key={f} className={`rounded-md border px-2 py-1 text-[10px] cursor-pointer transition-colors ${exportFormat === f ? (isMonochrome ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-amber-400/60 bg-amber-400/10 text-amber-200') : (isMonochrome ? 'border-gray-200 text-gray-500' : 'border-white/10 text-white/50')}`}
+                            onClick={() => setExportFormat(f)}>{f}</button>
+                        ))}
+                      </div>
+                      <button
+                        className="rounded-xl px-8 py-2.5 text-sm font-bold cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                        style={{ background: isMonochrome ? '#3b82f6' : 'linear-gradient(135deg, #ff9d5c, #ff5f88)', color: isMonochrome ? '#fff' : '#000' }}
+                        onClick={handleGenerate}
+                        disabled={isGenerating || !brandName.trim()}
+                      >
+                        {isGenerating ? <><Loader2 size={14} className="inline animate-spin mr-1" />生成中...</> : <><Sparkles size={14} className="inline mr-1" />生成方案</>}
+                      </button>
+                    </div>
+                  </section>
+                </div>
+
+                {/* RIGHT: Results area */}
+                <div className="flex flex-col gap-3 overflow-hidden">
+                  {/* Results grid */}
+                  <section className={`${panelCls} flex-1 flex flex-col overflow-hidden`}>
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-xs font-semibold" style={{ color: textPrimary }}>预览与结果</h3>
+                      <div className="flex gap-1">
+                        {(['all', 'favorites', 'optimize'] as const).map(tab => (
+                          <button key={tab} className={`rounded-lg px-2.5 py-1 text-[10px] cursor-pointer transition-colors ${activeResultTab === tab ? (isMonochrome ? 'bg-blue-50 text-blue-700' : 'bg-amber-500/20 text-amber-200') : (isMonochrome ? 'text-gray-500 hover:bg-gray-100' : 'text-white/50 hover:bg-white/5')}`}
+                            onClick={() => setActiveResultTab(tab)}>
+                            {{ all: `全部 ${results.length}`, favorites: `收藏 ${favorites.size}`, optimize: '待优化' }[tab]}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="flex-1 overflow-y-auto">
+                      {filteredResults.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center h-full text-xs" style={{ color: textMuted }}>
+                          <Package size={32} className="mb-2 opacity-20" />
+                          {isGenerating ? '正在生成包装方案...' : '设置参数后点击"生成方案"'}
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-2 gap-2">
+                          {filteredResults.map(r => (
+                            <div key={r.id} className="rounded-lg border overflow-hidden cursor-pointer group relative" style={{ borderColor: border }}>
+                              <img src={r.url} className="w-full aspect-[4/3] object-cover" />
+                              <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-2">
+                                <span className="text-[10px] text-white">{OUTPUT_MODES.find(m => m.value === r.type)?.label || r.type}</span>
+                                <div className="flex gap-1 mt-1">
+                                  <button className="p-1 rounded bg-white/20 hover:bg-white/40" onClick={() => toggleFavorite(r.id)}>
+                                    <Star size={10} fill={favorites.has(r.id) ? accent : 'none'} style={{ color: favorites.has(r.id) ? accent : '#fff' }} />
+                                  </button>
+                                  <button className="p-1 rounded bg-white/20 hover:bg-white/40" onClick={() => onAddImages?.([r.url])} title="发送到画布">
+                                    <Send size={10} style={{ color: '#fff' }} />
+                                  </button>
+                                  <button className="p-1 rounded bg-white/20 hover:bg-white/40" title="下载">
+                                    <Download size={10} style={{ color: '#fff' }} />
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    {results.length > 0 && (
+                      <div className="mt-3 flex gap-2">
+                        <button className={`rounded-lg border px-3 py-1.5 text-[10px] cursor-pointer ${isMonochrome ? 'border-blue-300 text-blue-600 hover:bg-blue-50' : 'border-amber-500/40 text-amber-200 hover:bg-amber-500/10'}`}>
+                          一键生成同系列
+                        </button>
+                        <button className={`rounded-lg border px-3 py-1.5 text-[10px] cursor-pointer ${isMonochrome ? 'border-blue-300 text-blue-600 hover:bg-blue-50' : 'border-amber-500/40 text-amber-200 hover:bg-amber-500/10'}`}>
+                          一键生成场景展示
+                        </button>
+                      </div>
+                    )}
+                  </section>
+
+                  {/* Analysis panel */}
+                  <section className={panelCls}>
+                    <h3 className="text-xs font-semibold mb-3" style={{ color: textPrimary }}>方案评估与分析</h3>
+                    {analysis ? (
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="flex items-center justify-center rounded-lg border p-4" style={{ borderColor: border, background: bgCard }}>
+                          <div className="text-[10px]" style={{ color: textMuted }}>雷达图组件</div>
+                        </div>
+                        <div className="space-y-1.5">
+                          {([
+                            ['品牌识别度', analysis.brandRecognition],
+                            ['货架吸引力', analysis.shelfImpact],
+                            ['高级感', analysis.premiumFeeling],
+                            ['可落地性', analysis.feasibility],
+                            ['印刷复杂度', analysis.printComplexity],
+                          ] as const).map(([label, value]) => (
+                            <div key={label} className="flex items-center justify-between rounded-lg px-2.5 py-1.5 text-[10px]" style={{ background: bgCard }}>
+                              <span style={{ color: textMuted }}>{label}</span>
+                              <div className="flex items-center gap-2">
+                                <div className="w-16 h-1.5 rounded-full overflow-hidden" style={{ background: isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.1)' }}>
+                                  <div className="h-full rounded-full" style={{ width: `${value}%`, background: accent }} />
+                                </div>
+                                <span className="font-semibold w-6 text-right" style={{ color: textAccent }}>{value}</span>
+                              </div>
+                            </div>
+                          ))}
+                          <div className="flex items-center justify-between rounded-lg px-2.5 py-1.5 text-[10px]" style={{ background: bgCard }}>
+                            <span style={{ color: textMuted }}>成本等级</span>
+                            <span className="font-semibold" style={{ color: textAccent }}>{analysis.costLevel}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-center py-6 text-[10px]" style={{ color: textMuted }}>
+                        生成方案后自动显示评估分析
+                      </div>
+                    )}
+                  </section>
+                </div>
+              </div>
+            </main>
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body,
+  );
+}
