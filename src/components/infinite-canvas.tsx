@@ -320,6 +320,7 @@ export interface CanvasImage {
   };
   threeDModelUrl?: string;
   svgDataUrl?: string; // 保存SVG数据用于下载（画布显示PNG预览时）
+  svgUrl?: string; // SVG服务器文件URL（轻量级，用于下载矢量图，避免存储超大svgDataUrl）
   threeDModelUrls?: Record<string, string>;
   negativePrompt?: string;
   modelName?: string;
@@ -5898,15 +5899,17 @@ export function InfiniteCanvas({
 
         if (svgTraceMode === 'color' || svgTraceMode === 'bw' || svgTraceMode === 'cutting' || svgTraceMode === 'engraving' || svgTraceMode === 'lineart') {
           // SVG结果 - 优先使用PNG预览图用于画布显示，保留SVG数据用于下载
-          const displayUrl = data.pngPreviewUrl || data.dataUrl || data.url;
-          const svgDataUrl = data.svgDataUrl || (data.dataUrl && !data.isSvgPreview ? data.dataUrl : undefined);
+          // API返回: data.dataUrl(PNG服务器URL或SVG服务器URL), data.url(服务器SVG文件路径), data.isSvgPreview(PNG是否生成成功)
+          // 显示策略: data.dataUrl(PNG服务器URL优先，SVG服务器URL兜底)
+          // 下载策略: 从data.url(服务器SVG文件)获取SVG内容，避免存储超大SVG data URL
+          const displayUrl = data.dataUrl || data.url;
           const engineLabel = data.engine === 'vtracer' ? 'VTracer' : data.engine === 'potrace' ? 'Potrace' : data.engine;
           completeProcessingFrame(placeholderId, displayUrl, img.width, img.height, {
             originalWidth: img.originalWidth || Math.round(img.width),
             originalHeight: img.originalHeight || Math.round(img.height),
             modifyPrompt: `${modeLabel} (${engineLabel})`,
-            // 保存SVG数据URL用于下载（如果PNG预览被使用）
-            ...(svgDataUrl && data.isSvgPreview ? { svgDataUrl } : {}),
+            // 保存SVG服务器URL用于下载（轻量级，不占localStorage空间）
+            ...(data.url && data.isSvgPreview ? { svgUrl: data.url } : {}),
             modelName: modelInfo.apiDisplayName || modelInfo.model,
             apiProvider: modelInfo.providerName || '',
           });
@@ -5932,11 +5935,13 @@ export function InfiniteCanvas({
       }
     } catch (e) {
       console.error('SVG trace failed:', e);
+      // 移除处理中的占位框，避免画布上残留空白框
+      removeProcessingFrame(placeholderId);
       alert(`SVG智能描摹失败: ${e instanceof Error ? e.message : '请重试'}`);
     }
     setIsEditProcessing(false);
     setShowSvgTracePanel(false);
-  }, [selectedImageData, svgTraceMode, svgTraceQualityPreset, svgTraceColorPrecision, svgTraceFilterSpeckle, svgTraceCornerThreshold, svgTraceLengthThreshold, svgTraceCurveMode, svgTraceHierarchical, svgTraceBwThreshold, svgTraceBwTurdSize, svgTraceBwInvert, svgTraceBwAlphaMax, svgTraceCompressQuality, svgTraceCompressFormat, svgTraceThumbWidth, svgTraceThumbHeight, svgTraceThumbFit, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame]);
+  }, [selectedImageData, svgTraceMode, svgTraceQualityPreset, svgTraceColorPrecision, svgTraceFilterSpeckle, svgTraceCornerThreshold, svgTraceLengthThreshold, svgTraceCurveMode, svgTraceHierarchical, svgTraceBwThreshold, svgTraceBwTurdSize, svgTraceBwInvert, svgTraceBwAlphaMax, svgTraceCompressQuality, svgTraceCompressFormat, svgTraceThumbWidth, svgTraceThumbHeight, svgTraceThumbFit, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, removeProcessingFrame]);
 
   // Multi-angle - Lovart-style subject/camera mode, result to the right
   const handleOpenMultiAngle = useCallback(() => {
@@ -6747,13 +6752,28 @@ export function InfiniteCanvas({
         return;
       }
       if (format === 'svg' || format === 'eps' || format === 'dxf' || format === 'pdf') {
-        // 优先使用svgDataUrl（画布显示PNG预览时保留的完整SVG数据）
+        // SVG下载策略:
+        // 1. 优先使用svgUrl（服务器SVG文件URL，来自SVG描摹，轻量级）
+        // 2. 其次使用svgDataUrl（SVG data URL，历史数据兼容）
+        // 3. 如果url本身是SVG服务器文件，直接获取
         const svgSource = image.svgDataUrl || image.url;
+        const isSvgServerUrl = !!(image.svgUrl) || (!image.svgDataUrl && image.url && (image.url.includes('/svg-trace/') || image.url.endsWith('.svg')));
+        const svgServerUrl = image.svgUrl || (isSvgServerUrl ? image.url : null);
         // If image URL is already an SVG data URL (from SVG描摹), download directly
-        if (svgSource.startsWith('data:image/svg+xml')) {
+        if (svgSource.startsWith('data:image/svg+xml') || isSvgServerUrl) {
           setDownloadProgress(format === 'svg' ? '正在导出矢量图...' : `正在转换为 ${format.toUpperCase()}...`);
           try {
-            let svgContent = decodeURIComponent(svgSource.replace(/^data:image\/svg\+xml;charset=utf-8,/, ''));
+            let svgContent: string;
+            if (svgSource.startsWith('data:image/svg+xml')) {
+              svgContent = decodeURIComponent(svgSource.replace(/^data:image\/svg\+xml;charset=utf-8,/, ''));
+            } else if (svgServerUrl) {
+              // 从服务器URL获取SVG内容
+              const svgRes = await fetch(svgServerUrl);
+              if (!svgRes.ok) throw new Error('获取SVG文件失败');
+              svgContent = await svgRes.text();
+            } else {
+              throw new Error('无法获取SVG内容');
+            }
             // Apply AI-compatible sanitization: add viewBox, ensure proper namespaces
             svgContent = ensureSvgAiCompatible(svgContent);
 

@@ -8,14 +8,14 @@ import {
   ChevronDown, ChevronUp, Settings2, Sparkles, Download,
   Send, Palette, Box, Ruler, Paintbrush, FileImage, Search,
   Grid3X3, LayoutGrid, Store, ShoppingBag, BookOpen, BarChart3,
-  Tag, Info, Loader2, Type
+  Tag, Info, Loader2, Type, Scissors, PenLine, Video, GitBranch
 } from 'lucide-react';
 
 /* ============================================================
    类型定义
    ============================================================ */
 export type PackagingCategory = 'beauty' | 'food' | 'drink' | 'wine' | 'daily' | 'gift' | 'pet' | 'health' | 'electronics';
-export type PackagingOutputMode = 'package_render' | 'visual_flat_layout' | 'structural_flat_layout' | 'scene_display' | 'shelf_display' | 'ecommerce_image' | 'series_family';
+export type PackagingOutputMode = 'package_render' | 'visual_flat_layout' | 'structural_flat_layout' | 'knife_template' | 'line_drawing' | 'scene_display' | 'shelf_display' | 'ecommerce_image' | 'series_family' | 'roaming_video' | 'model_3d' | 'flow_chart';
 
 export interface PackagingSku {
   id: string;
@@ -106,10 +106,15 @@ const OUTPUT_MODES: { value: PackagingOutputMode; label: string; icon: React.Rea
   { value: 'package_render', label: '包装效果图', icon: <Package size={14} /> },
   { value: 'visual_flat_layout', label: '视觉展开图', icon: <LayoutGrid size={14} /> },
   { value: 'structural_flat_layout', label: '结构展开图', icon: <Grid3X3 size={14} /> },
+  { value: 'knife_template', label: '刀版图', icon: <Scissors size={14} /> },
+  { value: 'line_drawing', label: '线稿图', icon: <PenLine size={14} /> },
   { value: 'scene_display', label: '场景展示', icon: <Image size={14} /> },
   { value: 'shelf_display', label: '货架陈列', icon: <Store size={14} /> },
   { value: 'ecommerce_image', label: '电商主图', icon: <ShoppingBag size={14} /> },
   { value: 'series_family', label: '系列包装', icon: <Layers size={14} /> },
+  { value: 'roaming_video', label: '漫游视频', icon: <Video size={14} /> },
+  { value: 'model_3d', label: '3D模型', icon: <Box size={14} /> },
+  { value: 'flow_chart', label: '包装流程图', icon: <GitBranch size={14} /> },
 ];
 
 const ADVANCED_TOOLS = [
@@ -125,6 +130,8 @@ const INSERT_TRAY_OPTIONS = ['无内托', '纸托', 'EVA内托', '吸塑内托']
 const HANDLE_ROPE_OPTIONS = ['无', '棉绳', '丝带', '皮绳'];
 const WINDOW_OPTIONS = ['否', '透明开窗', '异形开窗'];
 
+const EXTEND_SCENES = ['日常护肤', '礼赠场景', '旅行装', '敏感肌', '节日限定', 'PET消光瓶'];
+
 /* ============================================================
    Prompt 模板
    ============================================================ */
@@ -136,10 +143,12 @@ function buildPackagingPrompt(state: {
   materialCraft: PackagingMaterialCraft;
   outputModes: PackagingOutputMode[];
   skuMatrix: PackagingSku[];
+  extendScenes?: string[];
   customPrompt?: string;
 }): string {
   const categoryLabel = CATEGORIES.find(c => c.value === state.category)?.label || state.category;
   const outputLabels = state.outputModes.map(m => OUTPUT_MODES.find(o => o.value === m)?.label || m).join('、');
+  const extendInfo = state.extendScenes?.length ? `延展场景：${state.extendScenes.join('、')}` : '';
   return `为品牌「${state.brandName}」设计一套商业级包装。
 产品名称：${state.productName}
 品类：${categoryLabel}
@@ -147,6 +156,7 @@ function buildPackagingPrompt(state: {
 规格尺寸：${state.structure.length ?? '?'}×${state.structure.width ?? '?'}×${state.structure.height ?? '?'}mm
 材质：${state.materialCraft.materials.join('、') || '未指定'}
 工艺：${state.materialCraft.crafts.join('、') || '未指定'}
+${extendInfo}
 设计要求：
 1. 包装需要具有真实商业落地感。
 2. 保持品牌名清晰可见。
@@ -182,6 +192,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
   const [logoUrl, setLogoUrl] = useState<string>('');
   const [structure, setStructure] = useState<PackagingStructure>({ type: '天地盖盒' });
   const [materialCraft, setMaterialCraft] = useState<PackagingMaterialCraft>({ materials: [], crafts: [] });
+  const [extendScenes, setExtendScenes] = useState<string[]>([]);
   const [uploads, setUploads] = useState<{ type: string; url: string; name: string }[]>([]);
   const [outputModes, setOutputModes] = useState<PackagingOutputMode[]>(['package_render']);
   const [advancedOptions, setAdvancedOptions] = useState<PackagingAdvancedOptions>({
@@ -206,18 +217,18 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
   // === Search state ===
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Theme — 品牌包装系统: 温暖奢华调 (暖棕底 + 暖金)
-  const accent = isMonochrome ? '#3b82f6' : '#d9a15f';
-  const accentLight = isMonochrome ? '#60a5fa' : '#e8c468';
-  const bg = isMonochrome ? '#ffffff' : '#0d0c0a';
-  const bgSoft = isMonochrome ? '#f9fafb' : '#15120f';
-  const bgPanel = isMonochrome ? 'rgba(249,250,251,0.95)' : 'rgba(28,22,16,0.92)';
-  const bgCard = isMonochrome ? '#f3f4f6' : 'rgba(30,22,14,0.45)';
-  const border = isMonochrome ? '#e5e5e5' : 'rgba(217,161,95,0.22)';
-  const borderStrong = isMonochrome ? '#3b82f6' : 'rgba(217,161,95,0.55)';
-  const textPrimary = isMonochrome ? '#111827' : '#f5ead6';
-  const textMuted = isMonochrome ? '#6b7280' : '#b8a48c';
-  const textAccent = isMonochrome ? '#3b82f6' : '#d9a15f';
+  // Theme — 品牌包装系统: 标准黑金配色 (#d4af37 + #1a1a1a)
+  const accent = isMonochrome ? '#3b82f6' : '#d4af37';
+  const accentLight = isMonochrome ? '#60a5fa' : '#e0b840';
+  const bg = isMonochrome ? '#ffffff' : '#1a1a1a';
+  const bgSoft = isMonochrome ? '#f9fafb' : '#111';
+  const bgPanel = isMonochrome ? 'rgba(249,250,251,0.95)' : 'rgba(26,26,26,0.92)';
+  const bgCard = isMonochrome ? '#f3f4f6' : 'rgba(17,17,17,0.9)';
+  const border = isMonochrome ? '#e5e5e5' : 'rgba(255,255,255,0.1)';
+  const borderStrong = isMonochrome ? '#3b82f6' : 'rgba(212,175,55,0.4)';
+  const textPrimary = isMonochrome ? '#111827' : '#e5e5e5';
+  const textMuted = isMonochrome ? '#6b7280' : '#888';
+  const textAccent = isMonochrome ? '#3b82f6' : '#d4af37';
 
   // === Drag handlers ===
   const handleDragStart = useCallback((e: React.MouseEvent) => {
@@ -259,6 +270,10 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
     }));
   };
 
+  const toggleExtendScene = (s: string) => {
+    setExtendScenes(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s]);
+  };
+
   // === Output mode toggle ===
   const toggleOutputMode = (mode: PackagingOutputMode) => {
     setOutputModes(prev => prev.includes(mode) ? prev.filter(m => m !== mode) : [...prev, mode]);
@@ -285,14 +300,14 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
     if (!brandName.trim()) return;
     setIsGenerating(true);
     try {
-      const prompt = buildPackagingPrompt({ brandName, productName, category, structure, materialCraft, outputModes, skuMatrix, customPrompt });
+      const prompt = buildPackagingPrompt({ brandName, productName, category, structure, materialCraft, outputModes, skuMatrix, extendScenes, customPrompt });
       const res = await fetch('/api/brand-packaging/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           brandName, productName, category, skuMatrix,
           brandAssets: { logoUrl, brandColors },
-          structure, materialCraft, uploads,
+          structure, materialCraft, uploads, extendScenes,
           outputModes, advancedOptions, prompt,
         }),
       });
@@ -504,8 +519,8 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
   const inputCls = `w-full rounded-lg border px-3 py-2 text-xs outline-none transition-colors ${isMonochrome ? 'bg-white border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-blue-400 focus:ring-1 focus:ring-blue-200' : 'bg-black/30 border-white/10 text-amber-50 placeholder:text-white/30 focus:border-amber-400/60 focus:ring-1 focus:ring-amber-400/20'}`;
   const selectCls = inputCls;
   const tagBtnCls = (active: boolean) => `rounded-lg border px-3 py-1.5 text-xs cursor-pointer transition-all ${active ? (isMonochrome ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-amber-400/60 bg-amber-400/15 text-amber-200') : (isMonochrome ? 'border-gray-200 bg-gray-50 text-gray-500 hover:border-blue-300' : 'border-white/10 bg-black/30 text-white/60 hover:border-amber-400/40')}`;
-  const panelCls = `rounded-xl border p-4 ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#15120f]/90 border-amber-500/25'}`;
-  const stepBadgeCls = `flex h-5 w-5 items-center justify-center rounded-full text-[12px] font-bold ${isMonochrome ? 'bg-blue-500 text-white' : 'bg-amber-500 text-black'}`;
+  const panelCls = `rounded-xl border p-4 ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#111]/90 border-white/[0.08]'}`;
+  const stepBadgeCls = `flex h-5 w-5 items-center justify-center rounded-full text-[12px] font-bold ${isMonochrome ? 'bg-blue-500 text-white' : 'bg-[#d4af37] text-black'}`;
 
   const filteredResults = useMemo(() => {
     if (activeResultTab === 'favorites') return results.filter(r => favorites.has(r.id));
@@ -525,7 +540,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
           width: isMinimized ? 340 : 'calc(100vw - 80px)',
           height: isMinimized ? 'auto' : 'calc(100vh - 80px)',
           background: bg,
-          borderColor: isMonochrome ? '#e5e5e5' : '#d4af3740',
+          borderColor: isMonochrome ? '#e5e5e5' : 'rgba(212,175,55,0.3)',
           ...(isMinimized ? {} : { left: windowPos.x, top: windowPos.y }),
           ...(isDragging ? { outline: `2px solid ${accent}`, outlineOffset: '-2px' } : {}),
         }}
@@ -536,7 +551,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
         <div
           data-panel-header
           className="flex items-center justify-between px-3 shrink-0 cursor-move select-none"
-          style={{ height: 36, background: isMonochrome ? '#f9fafb' : '#161616', borderBottom: isMinimized ? 'none' : (isMonochrome ? '1px solid #e5e5e5' : '1px solid #d4af3730') }}
+          style={{ height: 36, background: isMonochrome ? '#f9fafb' : '#111', borderBottom: isMinimized ? 'none' : (isMonochrome ? '1px solid #e5e5e5' : '1px solid rgba(212,175,55,0.3)') }}
           onMouseDown={handleDragStart}
         >
           <div className="flex items-center gap-2">
@@ -563,7 +578,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
               <div className="p-3">
                 <button
                   className="w-full rounded-xl py-2.5 text-xs font-bold cursor-pointer transition-all"
-                  style={{ background: isMonochrome ? '#3b82f6' : 'linear-gradient(135deg, #ff9d5c, #ff5f88)', color: isMonochrome ? '#fff' : '#000' }}
+                  style={{ background: isMonochrome ? '#3b82f6' : '#d4af37', color: isMonochrome ? '#fff' : '#000' }}
                 >
                   + 新建项目
                 </button>
@@ -713,11 +728,15 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                     </div>
                   </section>
 
-                  {/* Step 3: Material & Craft */}
+                  {/* Step 3: Extend & Craft */}
                   <section className={panelCls}>
                     <div className="mb-3 flex items-center gap-2">
                       <span className={stepBadgeCls}>3</span>
-                      <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>材质与工艺</h3>
+                      <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>延展与工艺</h3>
+                    </div>
+                    <div className="mb-2 text-[12px] font-semibold" style={{ color: textMuted }}>延展场景</div>
+                    <div className="mb-3 flex flex-wrap gap-1.5">
+                      {EXTEND_SCENES.map(s => <button key={s} className={tagBtnCls(extendScenes.includes(s))} onClick={() => toggleExtendScene(s)}>{s}</button>)}
                     </div>
                     <div className="mb-2 text-[12px] font-semibold" style={{ color: textMuted }}>基础材质</div>
                     <div className="mb-3 flex flex-wrap gap-1.5">
@@ -800,7 +819,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                       </div>
                       <button
                         className="rounded-xl px-8 py-2.5 text-sm font-bold cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                        style={{ background: isMonochrome ? '#3b82f6' : 'linear-gradient(135deg, #ff9d5c, #ff5f88)', color: isMonochrome ? '#fff' : '#000' }}
+                        style={{ background: isMonochrome ? '#3b82f6' : '#d4af37', color: isMonochrome ? '#fff' : '#000' }}
                         onClick={handleGenerate}
                         disabled={isGenerating || !brandName.trim()}
                       >

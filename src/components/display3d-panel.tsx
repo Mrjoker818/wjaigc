@@ -224,15 +224,15 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
   } | null>(null);
   const [isDecomposing, setIsDecomposing] = useState(false);
 
-  // Theme — 3D展陈系统: 科技建筑调 (深蓝底 + 冷钢蓝)
-  const accent = isMonochrome ? '#3b82f6' : '#7eb8da';
-  const bg = isMonochrome ? '#ffffff' : '#0a0d14';
-  const bgPanel = isMonochrome ? 'rgba(249,250,251,0.95)' : 'rgba(14,18,28,0.92)';
-  const bgCard = isMonochrome ? '#f3f4f6' : 'rgba(14,20,36,0.45)';
-  const border = isMonochrome ? '#e5e5e5' : 'rgba(126,184,218,0.18)';
-  const textPrimary = isMonochrome ? '#111827' : '#dce8f5';
-  const textMuted = isMonochrome ? '#6b7280' : '#8a9bb5';
-  const textAccent = isMonochrome ? '#3b82f6' : '#7eb8da';
+  // Theme — 3D展陈系统: 标准黑金配色 (#d4af37 + #1a1a1a)
+  const accent = isMonochrome ? '#3b82f6' : '#d4af37';
+  const bg = isMonochrome ? '#ffffff' : '#1a1a1a';
+  const bgPanel = isMonochrome ? 'rgba(249,250,251,0.95)' : 'rgba(26,26,26,0.92)';
+  const bgCard = isMonochrome ? '#f3f4f6' : 'rgba(17,17,17,0.9)';
+  const border = isMonochrome ? '#e5e5e5' : 'rgba(255,255,255,0.1)';
+  const textPrimary = isMonochrome ? '#111827' : '#e5e5e5';
+  const textMuted = isMonochrome ? '#6b7280' : '#888';
+  const textAccent = isMonochrome ? '#3b82f6' : '#d4af37';
 
   // === Drag handlers ===
   const handleDragStart = useCallback((e: React.MouseEvent) => {
@@ -477,8 +477,8 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
   const inputCls = `w-full rounded-lg border px-3 py-2 text-xs outline-none transition-colors ${isMonochrome ? 'bg-white border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-blue-400 focus:ring-1 focus:ring-blue-200' : 'bg-black/30 border-white/10 text-amber-50 placeholder:text-white/30 focus:border-amber-400/60 focus:ring-1 focus:ring-amber-400/20'}`;
   const selectCls = inputCls;
   const tagBtnCls = (active: boolean) => `rounded-lg border px-3 py-1.5 text-xs cursor-pointer transition-all ${active ? (isMonochrome ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-amber-400/60 bg-amber-400/15 text-amber-200') : (isMonochrome ? 'border-gray-200 bg-gray-50 text-gray-500 hover:border-blue-300' : 'border-white/10 bg-black/30 text-white/60 hover:border-amber-400/40')}`;
-  const panelCls = `rounded-xl border p-4 ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#15120f]/90 border-amber-500/25'}`;
-  const stepBadgeCls = `flex h-5 w-5 items-center justify-center rounded-full text-[12px] font-bold ${isMonochrome ? 'bg-blue-500 text-white' : 'bg-amber-500 text-black'}`;
+  const panelCls = `rounded-xl border p-4 ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#111]/90 border-white/[0.08]'}`;
+  const stepBadgeCls = `flex h-5 w-5 items-center justify-center rounded-full text-[12px] font-bold ${isMonochrome ? 'bg-blue-500 text-white' : 'bg-[#d4af37] text-black'}`;
 
   return createPortal(
     <div className="fixed z-[200] flex items-start justify-start" style={{ pointerEvents: 'auto', ...(isMinimized ? { left: windowPos.x, top: windowPos.y } : { inset: 0 }) }}>
@@ -491,7 +491,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
           width: isMinimized ? 340 : 'calc(100vw - 80px)',
           height: isMinimized ? 'auto' : 'calc(100vh - 80px)',
           background: bg,
-          borderColor: isMonochrome ? '#e5e5e5' : '#d4af3740',
+          borderColor: isMonochrome ? '#e5e5e5' : 'rgba(212,175,55,0.3)',
           ...(isMinimized ? {} : { left: windowPos.x, top: windowPos.y }),
           ...(isDragging ? { outline: `2px solid ${accent}`, outlineOffset: '-2px' } : {}),
         }}
@@ -502,7 +502,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
         <div
           data-panel-header
           className="flex items-center justify-between px-3 shrink-0 cursor-move select-none"
-          style={{ height: 36, background: isMonochrome ? '#f9fafb' : '#161616', borderBottom: isMinimized ? 'none' : (isMonochrome ? '1px solid #e5e5e5' : '1px solid #d4af3730') }}
+          style={{ height: 36, background: isMonochrome ? '#f9fafb' : '#111', borderBottom: isMinimized ? 'none' : (isMonochrome ? '1px solid #e5e5e5' : '1px solid rgba(212,175,55,0.3)') }}
           onMouseDown={handleDragStart}
         >
           <div className="flex items-center gap-2">
@@ -527,7 +527,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
             >
               <div className="p-3">
                 <button className="w-full rounded-xl py-2.5 text-xs font-bold cursor-pointer transition-all"
-                  style={{ background: isMonochrome ? '#3b82f6' : 'linear-gradient(135deg, #ff9d5c, #ff5f88)', color: isMonochrome ? '#fff' : '#000' }}>
+                  style={{ background: isMonochrome ? '#3b82f6' : '#d4af37', color: isMonochrome ? '#fff' : '#000' }}>
                   + 新建项目
                 </button>
               </div>
@@ -670,7 +670,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                   {/* Generate button */}
                   <button
                     className="w-full rounded-xl py-3 text-sm font-bold cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                    style={{ background: isMonochrome ? '#3b82f6' : 'linear-gradient(135deg, #ff9d5c, #ff5f88)', color: isMonochrome ? '#fff' : '#000' }}
+                    style={{ background: isMonochrome ? '#3b82f6' : '#d4af37', color: isMonochrome ? '#fff' : '#000' }}
                     onClick={handleGenerate}
                     disabled={isGenerating || !brandName.trim()}
                   >

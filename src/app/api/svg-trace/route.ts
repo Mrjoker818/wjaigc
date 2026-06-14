@@ -1715,8 +1715,13 @@ async function tryDesignVectorizeFallback(req: NextRequest, imageUrl: string, mo
     svgContent = normalizeVectorSvg(svgContent, 0, 0);
     const svgDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgContent)}`;
     let pngPreviewUrl: string | undefined;
+    let pngServerUrl: string | undefined;
     try {
       const pngBuffer = await sharp(Buffer.from(svgContent)).resize(2048, 2048, { fit: 'inside', withoutEnlargement: true }).png({ quality: 90 }).toBuffer();
+      const fbTimestamp = Date.now();
+      const fbRandom = Math.random().toString(36).substring(2, 8);
+      const pngSaveResult = await saveResult(pngBuffer, `svg-fallback-${fbTimestamp}-${fbRandom}-preview.png`, 'svg-trace', 'image/png');
+      pngServerUrl = pngSaveResult.url;
       pngPreviewUrl = `data:image/png;base64,${pngBuffer.toString('base64')}`;
     } catch {}
     return NextResponse.json({
@@ -1724,9 +1729,9 @@ async function tryDesignVectorizeFallback(req: NextRequest, imageUrl: string, mo
       mode,
       engine: data.engine || 'design-vectorize-fallback',
       svg: svgContent,
-      dataUrl: pngPreviewUrl || svgDataUrl,
+      dataUrl: pngServerUrl || pngPreviewUrl || svgDataUrl,
       svgDataUrl,
-      isSvgPreview: !!pngPreviewUrl,
+      isSvgPreview: !!(pngServerUrl || pngPreviewUrl),
       fallback: true,
       stats: { svgSize: Buffer.byteLength(svgContent, 'utf-8'), pathCount: (svgContent.match(/<path/g) || []).length },
     });
@@ -1889,17 +1894,23 @@ export async function POST(req: NextRequest) {
         const svgDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgContent)}`;
 
         // 生成 PNG 预览图用于画布显示（SVG data URL 在 <img> 中渲染有限制）
+        // 策略: 优先生成PNG预览并保存到服务器(返回服务器URL), 失败时降级到data URL
         let pngPreviewUrl: string | undefined;
+        let pngServerUrl: string | undefined;
         try {
-          const sharp = require('sharp');
           const pngBuffer = await sharp(Buffer.from(svgContent))
             .resize(Math.min(imgW, 2048), Math.min(imgH, 2048), { fit: 'inside', withoutEnlargement: true })
             .png({ quality: 90 })
             .toBuffer();
+          // 保存PNG预览到服务器，避免前端加载超大data URL
+          const pngFilename = `svg-color-${uid}-preview.png`;
+          const pngSaveResult = await saveResult(pngBuffer, pngFilename, 'svg-trace', 'image/png');
+          pngServerUrl = pngSaveResult.url;
+          // 同时生成data URL作为备用
           const pngBase64 = pngBuffer.toString('base64');
           pngPreviewUrl = `data:image/png;base64,${pngBase64}`;
         } catch (pngErr) {
-          console.warn('[svg-trace] PNG preview generation failed, falling back to SVG dataUrl:', pngErr);
+          console.warn('[svg-trace] PNG preview generation failed, falling back to SVG file URL:', pngErr);
         }
 
         const pathCount = (svgContent.match(/<path/g) || []).length;
@@ -1911,9 +1922,10 @@ export async function POST(req: NextRequest) {
           engine: usedEngine,
           svg: svgContent,
           url,
-          dataUrl: pngPreviewUrl || svgDataUrl,
+          // 优先返回PNG服务器URL(最可靠), 其次PNG data URL, 最后SVG服务器URL
+          dataUrl: pngServerUrl || pngPreviewUrl || url,
           svgDataUrl,
-          isSvgPreview: !!pngPreviewUrl,
+          isSvgPreview: !!(pngServerUrl || pngPreviewUrl),
           stats: {
             svgSize: Buffer.byteLength(svgContent, 'utf-8'),
             pathCount,
@@ -1975,14 +1987,17 @@ export async function POST(req: NextRequest) {
 
         const svgDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgContent)}`;
 
-        // 生成 PNG 预览图
+        // 生成 PNG 预览图并保存到服务器
         let pngPreviewUrl: string | undefined;
+        let pngServerUrl: string | undefined;
         try {
-          const sharp = require('sharp');
           const pngBuffer = await sharp(Buffer.from(svgContent))
             .resize(2048, 2048, { fit: 'inside', withoutEnlargement: true })
             .png({ quality: 90 })
             .toBuffer();
+          const pngFilename = `svg-bw-${uid}-preview.png`;
+          const pngSaveResult = await saveResult(pngBuffer, pngFilename, 'svg-trace', 'image/png');
+          pngServerUrl = pngSaveResult.url;
           const pngBase64 = pngBuffer.toString('base64');
           pngPreviewUrl = `data:image/png;base64,${pngBase64}`;
         } catch (pngErr) {
@@ -1995,9 +2010,9 @@ export async function POST(req: NextRequest) {
           engine: 'potrace',
           svg: svgContent,
           url,
-          dataUrl: pngPreviewUrl || svgDataUrl,
+          dataUrl: pngServerUrl || pngPreviewUrl || url,
           svgDataUrl,
-          isSvgPreview: !!pngPreviewUrl,
+          isSvgPreview: !!(pngServerUrl || pngPreviewUrl),
           stats: {
             svgSize: Buffer.byteLength(svgContent, 'utf-8'),
             pathCount: (svgContent.match(/<path/g) || []).length,
@@ -2053,10 +2068,14 @@ export async function POST(req: NextRequest) {
         const cutSvgDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgContent)}`;
 
         let cutPngPreview: string | undefined;
+        let cutPngServerUrl: string | undefined;
         try {
           const pngBuf = await sharp(Buffer.from(svgContent))
             .resize(2048, 2048, { fit: 'inside', withoutEnlargement: true })
             .png().toBuffer();
+          const cutPngFilename = `svg-cutting-${uid}-preview.png`;
+          const cutPngSaveResult = await saveResult(pngBuf, cutPngFilename, 'svg-trace', 'image/png');
+          cutPngServerUrl = cutPngSaveResult.url;
           cutPngPreview = `data:image/png;base64,${pngBuf.toString('base64')}`;
         } catch {}
 
@@ -2066,9 +2085,9 @@ export async function POST(req: NextRequest) {
           engine: 'potrace',
           svg: svgContent,
           url: cutUrl,
-          dataUrl: cutPngPreview || cutSvgDataUrl,
+          dataUrl: cutPngServerUrl || cutPngPreview || cutUrl,
           svgDataUrl: cutSvgDataUrl,
-          isSvgPreview: !!cutPngPreview,
+          isSvgPreview: !!(cutPngServerUrl || cutPngPreview),
           stats: { svgSize: Buffer.byteLength(svgContent, 'utf-8'), pathCount: cutPathCount },
         });
       }
@@ -2116,10 +2135,14 @@ export async function POST(req: NextRequest) {
         const engSvgDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgContent)}`;
 
         let engPngPreview: string | undefined;
+        let engPngServerUrl: string | undefined;
         try {
           const pngBuf = await sharp(Buffer.from(svgContent))
             .resize(2048, 2048, { fit: 'inside', withoutEnlargement: true })
             .png().toBuffer();
+          const engPngFilename = `svg-engraving-${uid}-preview.png`;
+          const engPngSaveResult = await saveResult(pngBuf, engPngFilename, 'svg-trace', 'image/png');
+          engPngServerUrl = engPngSaveResult.url;
           engPngPreview = `data:image/png;base64,${pngBuf.toString('base64')}`;
         } catch {}
 
@@ -2129,9 +2152,9 @@ export async function POST(req: NextRequest) {
           engine: 'potrace',
           svg: svgContent,
           url: engUrl,
-          dataUrl: engPngPreview || engSvgDataUrl,
+          dataUrl: engPngServerUrl || engPngPreview || engUrl,
           svgDataUrl: engSvgDataUrl,
-          isSvgPreview: !!engPngPreview,
+          isSvgPreview: !!(engPngServerUrl || engPngPreview),
           stats: { svgSize: Buffer.byteLength(svgContent, 'utf-8'), pathCount: engPathCount },
         });
       }
@@ -2179,10 +2202,14 @@ export async function POST(req: NextRequest) {
         const laSvgDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgContent)}`;
 
         let laPngPreview: string | undefined;
+        let laPngServerUrl: string | undefined;
         try {
           const pngBuf = await sharp(Buffer.from(svgContent))
             .resize(2048, 2048, { fit: 'inside', withoutEnlargement: true })
             .png().toBuffer();
+          const laPngFilename = `svg-lineart-${uid}-preview.png`;
+          const laPngSaveResult = await saveResult(pngBuf, laPngFilename, 'svg-trace', 'image/png');
+          laPngServerUrl = laPngSaveResult.url;
           laPngPreview = `data:image/png;base64,${pngBuf.toString('base64')}`;
         } catch {}
 
@@ -2192,9 +2219,9 @@ export async function POST(req: NextRequest) {
           engine: 'potrace',
           svg: svgContent,
           url: laUrl,
-          dataUrl: laPngPreview || laSvgDataUrl,
+          dataUrl: laPngServerUrl || laPngPreview || laUrl,
           svgDataUrl: laSvgDataUrl,
-          isSvgPreview: !!laPngPreview,
+          isSvgPreview: !!(laPngServerUrl || laPngPreview),
           stats: { svgSize: Buffer.byteLength(svgContent, 'utf-8'), pathCount: laPathCount },
         });
       }

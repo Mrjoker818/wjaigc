@@ -86,6 +86,7 @@ export interface CanvasImage {
   processing?: string;
   generatedFromImageId?: string;
   svgDataUrl?: string;
+  svgUrl?: string; // SVG服务器文件URL（轻量级，用于下载矢量图，避免存储超大svgDataUrl）
   // 视频媒体扩展
   mediaType?: 'image' | 'video';
   videoUrl?: string;
