@@ -404,7 +404,7 @@ interface InfiniteCanvasProps {
   onSendToChat?: (image: CanvasImage) => void;
 }
 
-type EditMode = 'none' | 'erase' | 'mask' | 'expand' | 'crop' | 'upscale' | 'svg-trace';
+type EditMode = 'none' | 'erase' | 'mask' | 'expand' | 'crop' | 'upscale';
 type ActiveTool = 'none' | 'upscale' | 'download' | 'multiAngle' | 'to3d';
 type MultiAngleMode = 'image' | 'camera';
 type ThreeDBackend = 'api' | 'local';
@@ -539,6 +539,9 @@ export function InfiniteCanvas({
 
   // Brand e-commerce state
   const [showBrandEcommerce, setShowBrandEcommerce] = useState(false);
+
+  // SVG trace panel state (independent of editMode, like img2img)
+  const [showSvgTracePanel, setShowSvgTracePanel] = useState(false);
 
   // Refine engine state
   const [showRefineEngine, setShowRefineEngine] = useState(false);
@@ -1722,6 +1725,9 @@ export function InfiniteCanvas({
           setAgentSelectingImage(false);
         }
         if (editMode === 'upscale' || editMode === 'erase' || editMode === 'mask') {
+        }
+        if (showSvgTracePanel) {
+          setShowSvgTracePanel(false);
         }
         if (editMode !== 'none') {
           setEditMode('none');
@@ -5802,7 +5808,7 @@ export function InfiniteCanvas({
   const handleOpenSvgTrace = useCallback(() => {
     if (!selectedImageData) return;
     if (selectedImage) setEditImageId(selectedImage.id);
-    setEditMode('svg-trace');
+    setShowSvgTracePanel(true);
   }, [selectedImageData, selectedImage]);
 
   const handleSvgTraceConfirm = useCallback(async () => {
@@ -5929,7 +5935,7 @@ export function InfiniteCanvas({
       alert(`SVG智能描摹失败: ${e instanceof Error ? e.message : '请重试'}`);
     }
     setIsEditProcessing(false);
-    setEditMode('none');
+    setShowSvgTracePanel(false);
   }, [selectedImageData, svgTraceMode, svgTraceQualityPreset, svgTraceColorPrecision, svgTraceFilterSpeckle, svgTraceCornerThreshold, svgTraceLengthThreshold, svgTraceCurveMode, svgTraceHierarchical, svgTraceBwThreshold, svgTraceBwTurdSize, svgTraceBwInvert, svgTraceBwAlphaMax, svgTraceCompressQuality, svgTraceCompressFormat, svgTraceThumbWidth, svgTraceThumbHeight, svgTraceThumbFit, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame]);
 
   // Multi-angle - Lovart-style subject/camera mode, result to the right
@@ -9018,7 +9024,7 @@ export function InfiniteCanvas({
                 </div>
               )}
               {/* Processing overlay (not for SVG trace - has its own progress UI) */}
-              {isEditProcessing && editMode !== 'svg-trace' && (
+              {isEditProcessing && !showSvgTracePanel && (
                 <div className="absolute inset-0 flex items-center justify-center bg-black/60 z-50 pointer-events-auto">
                   <div className="flex flex-col items-center gap-2">
                     <div className="w-8 h-8 border-2 border-gold border-t-transparent rounded-full animate-spin" />
@@ -9116,7 +9122,7 @@ export function InfiniteCanvas({
         })()}
 
         {/* ====== SVG智能描摹 FLOATING PANEL ====== */}
-        {editMode === 'svg-trace' && (() => {
+        {showSvgTracePanel && (() => {
           const editImg = images.find(i => i.id === editImageId);
           if (!editImg) return null;
           const imgOrigW = editImg.originalWidth || Math.round(editImg.width) || 512;

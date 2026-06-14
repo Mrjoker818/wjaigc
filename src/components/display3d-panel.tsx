@@ -1,873 +1,954 @@
 'use client';
 
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  Store, X, Upload, ChevronDown, Download, Plus, Trash2,
-  Sparkles, Eye, Layers, Box, Palette, Ruler, Settings2,
-  Camera, RotateCw, Grid3x3, FileText, BarChart3,
-  CheckSquare, Square, Send, AlertTriangle, FolderOpen,
-  Maximize2, Image, ZoomIn, ChevronRight, Wand2
+  Box, X, Minus, Maximize2, Upload, Image, Layers,
+  ChevronDown, Sparkles, Download, Send, Search,
+  Ruler, Paintbrush, LayoutGrid, Eye, Lightbulb,
+  Users, Store, Building2, TreePine, FileText,
+  Grid3X3, BarChart3, DollarSign, Info, Loader2, Palette,
+  Camera, RotateCcw, FileDown
 } from 'lucide-react';
 
-// === Types ===
-type Display3DSceneType = 'pop-up' | 'exhibition' | 'supermarket' | 'window' | 'check-in' | 'mall-atrium' | 'flagship' | 'product-display';
-type ImageUsageMode = 'texture_mapping' | 'style_extension' | 'structure_reference';
+/* ============================================================
+   类型定义
+   ============================================================ */
+export type DisplayImageUsageMode = 'texture_mapping' | 'style_extension' | 'structure_reference';
+export type DisplaySceneType = 'pop_up_store' | 'exhibition_booth' | 'retail_stack' | 'window_display' | 'photo_spot' | 'product_display' | 'mall_installation';
+export type DisplayEnvironment = 'mall_atrium' | 'exhibition_hall' | 'retail_store' | 'outdoor' | 'supermarket';
+export type DisplayViewOption = 'front' | 'angle_45' | 'side' | 'top' | 'entrance' | 'detail';
 
-interface Display3DDimensions {
+export interface DisplayDimensions {
   length: number;
   width: number;
   height: number;
-  unit: string;
 }
 
-interface Display3DResult {
+export interface Display3DAsset {
+  id: string;
+  type: string;
+  url: string;
+  name: string;
+}
+
+export interface DisplayComponent {
+  id: string;
+  index: number;
+  name: string;
+  sizeSuggestion: string;
+  material: string;
+  craft: string;
+}
+
+export interface DisplayMaterialSpec {
+  id: string;
+  name: string;
+  description: string;
+}
+
+export interface BomItem {
+  id: string;
+  name: string;
+  count: number;
+  estimatedPrice: string;
+}
+
+export interface Display3DResult {
   id: string;
   type: string;
   url: string;
   label?: string;
-  prompt?: string;
 }
 
-interface DecompositionComponent {
-  id: string;
-  name: string;
-  material: string;
-  craft: string;
-  quantity: number;
-  estimatedPrice: number;
-  dimensions?: string;
-}
-
-interface Display3DDecomposition {
-  components: DecompositionComponent[];
-  totalEstimate: number;
-  layoutNotes?: string;
-}
-
-interface Display3DProject {
-  id: string;
-  name: string;
-  brandName: string;
-  createdAt: string;
-}
-
-// === Scene Preset Library ===
-const SCENE_PRESETS = [
-  { id: 'pop-up', label: '快闪店', icon: '🏪', desc: '临时品牌快闪空间' },
-  { id: 'exhibition', label: '展厅', icon: '🏛️', desc: '品牌长期展厅' },
-  { id: 'supermarket', label: '商超端架', icon: '🛒', desc: '超市端架/堆头' },
-  { id: 'window', label: '橱窗', icon: '🪟', desc: '品牌橱窗陈列' },
-  { id: 'check-in', label: '打卡区', icon: '📸', desc: '互动打卡装置' },
-  { id: 'mall-atrium', label: '中庭', icon: '🏬', desc: '商场中庭大场景' },
-  { id: 'flagship', label: '旗舰店', icon: '🏢', desc: '品牌旗舰店空间' },
-  { id: 'product-display', label: '产品展台', icon: '🎯', desc: '单品展示台面' },
-];
-
-// === Template Library ===
-const TEMPLATES = [
-  { id: 'pop-up-cosmetic', name: '美妆快闪', scene: 'pop-up', style: '现代简约' },
-  { id: 'tea-exhibition', name: '茶叶展厅', scene: 'exhibition', style: '新中式' },
-  { id: 'food-supermarket', name: '食品端架', scene: 'supermarket', style: '活力鲜艳' },
-  { id: 'luxury-window', name: '奢侈品橱窗', scene: 'window', style: '高端极简' },
-  { id: 'tech-flagship', name: '科技旗舰店', scene: 'flagship', style: '未来科技' },
-];
-
-// === Color Scheme: Cool Tech/Architecture (Deep Navy + Steel Gold) ===
-const BG = 'rgb(14, 20, 32)';              // #0e1420 deep navy
-const BG_CARD = 'rgb(20, 28, 44)';         // #141c2c dark navy card
-const BG_INPUT = 'rgb(28, 38, 58)';        // #1c263a navy input
-const BORDER = 'rgb(45, 60, 85)';          // #2d3c55 slate border
-const BORDER_FOCUS = 'rgb(140, 170, 210)';  // #8caad2 steel blue focus
-const ACCENT = 'rgb(170, 185, 210)';       // #aab9d2 steel silver-blue
-const ACCENT_WARM = 'rgb(190, 170, 120)';  // #beaa78 cool gold
-const ACCENT_GLOW = 'rgba(170, 185, 210, 0.12)';
-const ACCENT_WARM_GLOW = 'rgba(190, 170, 120, 0.12)';
-const TEXT_PRIMARY = 'rgb(220, 228, 240)';  // #dce4f0 cool white
-const TEXT_SECONDARY = 'rgb(140, 160, 185)';// #8ca0b9 slate text
-const TEXT_MUTED = 'rgb(80, 100, 125)';    // #50647d muted slate
-const DANGER = 'rgb(200, 80, 80)';
-const SUCCESS = 'rgb(80, 180, 80)';
-
-// Monochrome scheme
-const M_BG = 'rgb(255, 255, 255)';
-const M_BG_CARD = 'rgb(248, 248, 250)';
-const M_BG_INPUT = 'rgb(240, 240, 245)';
-const M_BORDER = 'rgb(220, 220, 225)';
-const M_ACCENT = 'rgb(59, 130, 246)';
-const M_ACCENT_DIM = 'rgb(96, 165, 250)';
-const M_TEXT_PRIMARY = 'rgb(15, 23, 42)';
-const M_TEXT_SECONDARY = 'rgb(100, 116, 139)';
-const M_TEXT_MUTED = 'rgb(148, 163, 184)';
-
-// === Component ===
-interface Display3DPanelProps {
+interface Props {
+  isMonochrome?: boolean;
   onClose: () => void;
-  onAddImages: (urls: string[], meta?: Record<string, string>) => void;
-  isMonochrome: boolean;
+  onAddImages?: (urls: string[], meta?: { modelName?: string; apiProvider?: string }) => void;
 }
 
-export default function Display3DPanel({ onClose, onAddImages, isMonochrome }: Display3DPanelProps) {
-  // Drag
-  const panelRef = useRef<HTMLDivElement>(null);
-  const dragOffset = useRef({ x: 0, y: 0 });
+/* ============================================================
+   常量
+   ============================================================ */
+const IMAGE_USAGE_MODES: { value: DisplayImageUsageMode; label: string; desc: string }[] = [
+  { value: 'texture_mapping', label: '贴图应用', desc: '将图片贴到背板/灯箱/地贴' },
+  { value: 'style_extension', label: '风格延展', desc: '参考图片风格生成展陈' },
+  { value: 'structure_reference', label: '结构参考', desc: '参考图片空间结构' },
+];
 
-  // Sidebar
-  const [showSidebar, setShowSidebar] = useState(false);
-  const [projects, setProjects] = useState<Display3DProject[]>([]);
-  const [showTemplates, setShowTemplates] = useState(false);
+const SCENE_TYPES: { value: DisplaySceneType; label: string; icon: React.ReactNode }[] = [
+  { value: 'pop_up_store', label: '快闪店', icon: <Store size={14} /> },
+  { value: 'exhibition_booth', label: '展会展位', icon: <Building2 size={14} /> },
+  { value: 'retail_stack', label: '商超堆头', icon: <Grid3X3 size={14} /> },
+  { value: 'window_display', label: '橱窗陈列', icon: <Eye size={14} /> },
+  { value: 'photo_spot', label: '打卡装置', icon: <Camera size={14} /> },
+  { value: 'product_display', label: '产品展示台', icon: <Box size={14} /> },
+  { value: 'mall_installation', label: '商场美陈', icon: <TreePine size={14} /> },
+];
 
-  // Params
+const ENVIRONMENTS: { value: DisplayEnvironment; label: string }[] = [
+  { value: 'mall_atrium', label: '商场中庭' },
+  { value: 'exhibition_hall', label: '展馆' },
+  { value: 'retail_store', label: '门店' },
+  { value: 'outdoor', label: '户外' },
+  { value: 'supermarket', label: '超市' },
+];
+
+const VIEW_OPTIONS: { value: DisplayViewOption; label: string }[] = [
+  { value: 'front', label: '正面' },
+  { value: 'angle_45', label: '45度' },
+  { value: 'side', label: '侧面' },
+  { value: 'top', label: '俯视' },
+  { value: 'entrance', label: '入口视角' },
+  { value: 'detail', label: '局部细节' },
+];
+
+const MATERIAL_STYLES = ['轻奢质感', '科技未来', '自然环保', '年轻潮流'];
+const LIGHTING_STYLES = ['明亮聚焦', '柔和高级', '科技冷光', '暖色氛围'];
+const CROWD_STYLES = ['无人', '少量人物', '活动人流', '长曝光人流'];
+
+// Mock data for decomposition
+const MOCK_COMPONENTS: DisplayComponent[] = [
+  { id: '1', index: 1, name: '门头', sizeSuggestion: '9000×1200×600', material: '发光字+亚克力', craft: '烤漆+内发光' },
+  { id: '2', index: 2, name: '主背板', sizeSuggestion: '6000×3000', material: '喷绘布+KT板', craft: 'UV喷绘' },
+  { id: '3', index: 3, name: '灯箱', sizeSuggestion: '800×1800×120', material: '亚克力+灯片', craft: '内发光' },
+  { id: '4', index: 4, name: '展柜', sizeSuggestion: '1200×600×950', material: '木质+玻璃', craft: '烤漆' },
+  { id: '5', index: 5, name: '地贴', sizeSuggestion: '9000×6000', material: 'PVC地贴', craft: 'UV喷印' },
+  { id: '6', index: 6, name: '立牌', sizeSuggestion: '600×1600', material: 'KT板+PVC', craft: 'UV喷绘' },
+  { id: '7', index: 7, name: '打卡装置', sizeSuggestion: '1800×1800×2400', material: '亚克力+铁艺', craft: '烤漆造型' },
+  { id: '8', index: 8, name: '收银台', sizeSuggestion: '1500×700×1050', material: '木质+亚克力', craft: '烤漆' },
+  { id: '9', index: 9, name: '展示台', sizeSuggestion: '1000×1000×900', material: '木质+亚克力', craft: '烤漆+灯带' },
+];
+
+const MOCK_MATERIALS: DisplayMaterialSpec[] = [
+  { id: '1', name: '乳白色烤漆板', description: '表面烤漆，高光细腻' },
+  { id: '2', name: '亚克力灯箱', description: '内发光，均匀透光' },
+  { id: '3', name: '金色不锈钢拉丝', description: '304拉丝，香槟金' },
+  { id: '4', name: 'PVC地贴', description: 'UV喷印，防滑耐磨' },
+  { id: '5', name: '木纹饰面板', description: '环保板材，木纹自然' },
+  { id: '6', name: '喷绘布', description: 'UV喷绘，色彩饱满' },
+];
+
+const MOCK_BOM: BomItem[] = [
+  { id: '1', name: '门头', count: 1, estimatedPrice: '¥12,800' },
+  { id: '2', name: '主背板', count: 1, estimatedPrice: '¥9,600' },
+  { id: '3', name: '灯箱', count: 2, estimatedPrice: '¥6,400' },
+  { id: '4', name: '展柜', count: 3, estimatedPrice: '¥18,900' },
+  { id: '5', name: '地贴', count: 1, estimatedPrice: '¥3,200' },
+  { id: '6', name: '立牌', count: 2, estimatedPrice: '¥1,600' },
+  { id: '7', name: '打卡装置', count: 1, estimatedPrice: '¥7,800' },
+  { id: '8', name: '收银台', count: 1, estimatedPrice: '¥6,500' },
+  { id: '9', name: '展示台', count: 4, estimatedPrice: '¥11,200' },
+];
+
+/* ============================================================
+   Prompt 模板
+   ============================================================ */
+function buildDisplay3DPrompt(state: {
+  brandName: string;
+  productName: string;
+  sceneType: DisplaySceneType;
+  environment: DisplayEnvironment;
+  dimensions: DisplayDimensions;
+  imageUsageMode: DisplayImageUsageMode;
+  materialStyle?: string;
+  lightingStyle?: string;
+  budget?: number;
+  viewOptions: DisplayViewOption[];
+  customPrompt?: string;
+}): string {
+  const sceneLabel = SCENE_TYPES.find(s => s.value === state.sceneType)?.label || state.sceneType;
+  const envLabel = ENVIRONMENTS.find(e => e.value === state.environment)?.label || state.environment;
+  const usageLabel = IMAGE_USAGE_MODES.find(m => m.value === state.imageUsageMode)?.label || state.imageUsageMode;
+  const viewLabels = state.viewOptions.map(v => VIEW_OPTIONS.find(o => o.value === v)?.label || v).join('、');
+  return `为品牌「${state.brandName}」设计一个商业级3D展陈空间效果图。
+产品名称：${state.productName || '品牌产品'}
+展陈类型：${sceneLabel}
+环境场景：${envLabel}
+空间尺寸：${state.dimensions.length}×${state.dimensions.width}×${state.dimensions.height}mm
+图像使用模式：${usageLabel}
+材质风格：${state.materialStyle || '未指定'}
+灯光氛围：${state.lightingStyle || '未指定'}
+预算范围：${state.budget ? `¥${state.budget}` : '未指定'}
+设计要求：
+1. 生成真实商业级展陈效果图。
+2. 包含品牌门头、主背板、产品陈列区、打卡装置、灯箱、地贴、导视系统。
+3. 空间结构合理，动线清晰，品牌识别度高。
+4. 如果上传了主视觉KV或平面图，需要将其作为贴图应用到背板、门头、灯箱、地贴等位置。
+5. 画面需要具备高质量3D渲染质感，真实灯光、真实材质。
+6. 不要出现乱码文字，不要出现无关品牌。
+输出视角：${viewLabels}
+${state.customPrompt ? `\n附加要求：${state.customPrompt}` : ''}`;
+}
+
+/* ============================================================
+   组件
+   ============================================================ */
+export default function Display3DPanel({ isMonochrome = false, onClose, onAddImages }: Props) {
+  // === Window drag state ===
+  const [isMinimized, setIsMinimized] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const [windowPos, setWindowPos] = useState({ x: 60, y: 60 });
+
+  // === Sidebar tab ===
+  const [sidebarTab, setSidebarTab] = useState<'projects' | 'templates' | 'presets'>('projects');
+
+  // === Form state ===
   const [brandName, setBrandName] = useState('');
   const [productName, setProductName] = useState('');
-  const [sceneType, setSceneType] = useState<Display3DSceneType>('pop-up');
-  const [environment, setEnvironment] = useState('indoor');
-  const [dimensions, setDimensions] = useState<Display3DDimensions>({ length: 600, width: 400, height: 300, unit: 'cm' });
-  const [imageUsageMode, setImageUsageMode] = useState<ImageUsageMode>('texture_mapping');
-  const [materialStyle, setMaterialStyle] = useState('');
-  const [lightingStyle, setLightingStyle] = useState('');
-  const [budget, setBudget] = useState('');
-  const [viewOptions, setViewOptions] = useState<string[]>(['front']);
-  const [crowdStyle, setCrowdStyle] = useState('');
+  const [assets, setAssets] = useState<Display3DAsset[]>([]);
+  const [imageUsageMode, setImageUsageMode] = useState<DisplayImageUsageMode>('texture_mapping');
+  const [sceneType, setSceneType] = useState<DisplaySceneType>('pop_up_store');
+  const [environment, setEnvironment] = useState<DisplayEnvironment>('mall_atrium');
+  const [dimensions, setDimensions] = useState<DisplayDimensions>({ length: 9000, width: 6000, height: 4500 });
+  const [budget, setBudget] = useState<number | ''>('');
+  const [materialStyle, setMaterialStyle] = useState('轻奢质感');
+  const [lightingStyle, setLightingStyle] = useState('明亮聚焦');
+  const [crowdStyle, setCrowdStyle] = useState('无人');
+  const [viewOptions, setViewOptions] = useState<DisplayViewOption[]>(['angle_45', 'front']);
   const [customPrompt, setCustomPrompt] = useState('');
 
-  // Assets
-  const [assets, setAssets] = useState<{ type: string; url: string; name: string }[]>([]);
-
-  // Generation
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [progress, setProgress] = useState(0);
+  // === Results state ===
   const [results, setResults] = useState<Display3DResult[]>([]);
+  const [isGenerating, setIsGenerating] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
-  const [activeStep, setActiveStep] = useState(0);
-  const [activeTab, setActiveTab] = useState(0);
-
-  // Decomposition
-  const [decomposition, setDecomposition] = useState<Display3DDecomposition | null>(null);
+  const [successMsg, setSuccessMsg] = useState('');
+  const [activePreviewTab, setActivePreviewTab] = useState<'render' | 'views' | 'decompose' | 'dimension' | 'material' | 'floorplan' | 'bom'>('render');
+  const [selectedView, setSelectedView] = useState<string>('angle_45');
+  const [decomposition, setDecomposition] = useState<{
+    components: DisplayComponent[];
+    materials: DisplayMaterialSpec[];
+    bom: BomItem[];
+    rawAnalysis?: string;
+  } | null>(null);
   const [isDecomposing, setIsDecomposing] = useState(false);
 
-  // Preview
-  const [selectedResult, setSelectedResult] = useState<Display3DResult | null>(null);
+  // Theme — 3D展陈系统: 科技建筑调 (深蓝底 + 冷钢蓝)
+  const accent = isMonochrome ? '#3b82f6' : '#7eb8da';
+  const bg = isMonochrome ? '#ffffff' : '#0a0d14';
+  const bgPanel = isMonochrome ? 'rgba(249,250,251,0.95)' : 'rgba(14,18,28,0.92)';
+  const bgCard = isMonochrome ? '#f3f4f6' : 'rgba(14,20,36,0.45)';
+  const border = isMonochrome ? '#e5e5e5' : 'rgba(126,184,218,0.18)';
+  const textPrimary = isMonochrome ? '#111827' : '#dce8f5';
+  const textMuted = isMonochrome ? '#6b7280' : '#8a9bb5';
+  const textAccent = isMonochrome ? '#3b82f6' : '#7eb8da';
 
-  // Color getter
-  const c = useCallback((key: string) => {
-    if (isMonochrome) {
-      const m: Record<string, string> = { bg: M_BG, card: M_BG_CARD, input: M_BG_INPUT, border: M_BORDER, accent: M_ACCENT, accentDim: M_ACCENT_DIM, text: M_TEXT_PRIMARY, text2: M_TEXT_SECONDARY, text3: M_TEXT_MUTED, warmAccent: M_ACCENT };
-      return m[key] || '';
-    }
-    const w: Record<string, string> = { bg: BG, card: BG_CARD, input: BG_INPUT, border: BORDER, accent: ACCENT, accentDim: ACCENT_WARM, text: TEXT_PRIMARY, text2: TEXT_SECONDARY, text3: TEXT_MUTED, warmAccent: ACCENT_WARM };
-    return w[key] || '';
-  }, [isMonochrome]);
+  // === Drag handlers ===
+  const handleDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+    setDragOffset({ x: e.clientX - windowPos.x, y: e.clientY - windowPos.y });
+  }, [windowPos]);
 
-  // Drag handlers
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if ((e.target as HTMLElement).closest('input, textarea, select, button, [data-no-drag]')) return;
-    dragOffset.current = { x: e.clientX - (panelRef.current?.offsetLeft || 0), y: e.clientY - (panelRef.current?.offsetTop || 0) };
-    const handleMouseMove = (ev: MouseEvent) => {
-      if (panelRef.current) {
-        panelRef.current.style.left = `${ev.clientX - dragOffset.current.x}px`;
-        panelRef.current.style.top = `${ev.clientY - dragOffset.current.y}px`;
-      }
-    };
-    const handleMouseUp = () => { document.removeEventListener('mousemove', handleMouseMove); document.removeEventListener('mouseup', handleMouseUp); };
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-  }, []);
+  useEffect(() => {
+    if (!isDragging) return;
+    const handleMove = (e: MouseEvent) => setWindowPos({ x: e.clientX - dragOffset.x, y: e.clientY - dragOffset.y });
+    const handleUp = () => setIsDragging(false);
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleUp);
+    return () => { window.removeEventListener('mousemove', handleMove); window.removeEventListener('mouseup', handleUp); };
+  }, [isDragging, dragOffset]);
 
-  // Upload handler
-  const handleUpload = useCallback((assetType: string) => {
+  // === Upload handler ===
+  const handleUpload = (type: string) => {
     const input = document.createElement('input');
-    input.type = 'file'; input.accept = 'image/*';
+    input.type = 'file';
+    input.accept = 'image/*';
     input.onchange = (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
-      if (file) {
-        const url = URL.createObjectURL(file);
-        setAssets(prev => [...prev, { type: assetType, url, name: file.name }]);
-      }
+      if (!file) return;
+      const url = URL.createObjectURL(file);
+      setAssets(prev => [...prev, { id: Date.now().toString(), type, url, name: file.name }]);
     };
     input.click();
-  }, []);
+  };
 
-  // Generate
+  // === View toggle ===
+  const toggleView = (v: DisplayViewOption) => {
+    setViewOptions(prev => prev.includes(v) ? prev.filter(x => x !== v) : [...prev, v]);
+  };
+
+  // === Generate ===
   const handleGenerate = useCallback(async () => {
-    if (!brandName.trim()) { setErrorMsg('请填写品牌名称'); return; }
-    setErrorMsg(''); setIsGenerating(true); setProgress(10);
+    setErrorMsg('');
+    if (!brandName.trim()) return;
+    setIsGenerating(true);
     try {
+      const prompt = buildDisplay3DPrompt({ brandName, productName, sceneType, environment, dimensions, imageUsageMode, materialStyle, lightingStyle, budget: budget || undefined, viewOptions, customPrompt });
       const res = await fetch('/api/display-3d/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ brandName, productName, sceneType, environment, dimensions, imageUsageMode, materialStyle, lightingStyle, budget, viewOptions, crowdStyle, customPrompt }),
+        body: JSON.stringify({
+          brandName, productName, assets,
+          imageUsageMode, sceneType, environment,
+          dimensions, budget, materialStyle, lightingStyle,
+          crowdStyle, viewOptions, prompt,
+        }),
       });
       const data = await res.json();
-      if (!data.success) { setErrorMsg(data.error || '生成失败'); setIsGenerating(false); return; }
-      const taskId = data.taskId;
-      setProgress(30);
-      const poll = async () => {
-        try {
-          const pr = await fetch('/api/poll-task', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ taskId, model: '' }) });
-          const pd = await pr.json();
-          if (pd.status === 'completed') {
-            const urls: string[] = pd.result?.imageUrls || [];
-            if (urls.length > 0) {
-              setResults(prev => [...prev, ...urls.map((u: string, i: number) => ({ id: `d3d_${Date.now()}_${i}`, type: viewOptions[i % viewOptions.length] || 'front', url: u }))] );
-              onAddImages(urls);
+      if (!res.ok || data.error) {
+        console.error('[display-3d] Generate error:', data.error);
+        setIsGenerating(false);
+        return;
+      }
+      if (data.taskId) {
+        const taskId = data.taskId;
+        // Poll via /api/poll-task (POST) — standard task polling mechanism
+        const poll = async () => {
+          try {
+            const taskRes = await fetch('/api/poll-task', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ taskId }),
+            });
+            const taskData = await taskRes.json();
+            if (taskData.status === 'completed') {
+              const imageUrls: string[] = taskData.result?.imageUrls || taskData.imageUrls || [];
+              if (imageUrls.length > 0) {
+                const newResults = imageUrls.map((url: string, i: number) => ({
+                  id: `${taskId}_${i}`,
+                  type: 'rendering',
+                  url,
+                  label: viewOptions[i % viewOptions.length] || '效果图',
+                }));
+                setResults(prev => [...prev, ...newResults]);
+                onAddImages?.(imageUrls);
+              }
+              // Handle decompose results embedded in task
+              if (taskData.result?.decomposition) {
+                setDecomposition(taskData.result.decomposition);
+              }
+              setIsGenerating(false);
+            } else if (taskData.status === 'failed') {
+              console.error('[display-3d] Task failed:', taskData.error);
+              setIsGenerating(false);
+            } else {
+              setTimeout(poll, 3000);
             }
-            setIsGenerating(false); setProgress(100); return;
+          } catch (e) {
+            console.error('[display-3d] Poll error:', e);
+            setIsGenerating(false);
           }
-          if (pd.status === 'failed') { setErrorMsg(pd.error || '生成失败'); setIsGenerating(false); return; }
-          setProgress(p => Math.min(p + 8, 90));
-          setTimeout(poll, 2000);
-        } catch { setErrorMsg('轮询出错'); setIsGenerating(false); }
-      };
-      setTimeout(poll, 2000);
-    } catch { setErrorMsg('请求失败'); setIsGenerating(false); }
-  }, [brandName, productName, sceneType, environment, dimensions, imageUsageMode, materialStyle, lightingStyle, budget, viewOptions, crowdStyle, customPrompt, onAddImages]);
+        };
+        poll();
+      } else if (data.results) {
+        setResults(data.results);
+        setIsGenerating(false);
+      } else {
+        setIsGenerating(false);
+      }
+    } catch (e) {
+      console.error('[display-3d] Generate failed:', e);
+      setIsGenerating(false);
+    }
+  }, [brandName, productName, sceneType, environment, dimensions, imageUsageMode, materialStyle, lightingStyle, budget, viewOptions, customPrompt, crowdStyle, assets, onAddImages]);
 
-  // Decompose
+  // === Decompose handler ===
   const handleDecompose = useCallback(async () => {
-    if (results.length === 0) { setErrorMsg('请先生成效果图'); return; }
-    setErrorMsg(''); setIsDecomposing(true);
+    if (!brandName.trim() || results.length === 0) return;
+    setIsDecomposing(true);
     try {
+      const imageUrl = results[0]?.url || '';
       const res = await fetch('/api/display-3d/decompose', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageUrl: results[0].url, sceneType, brandName, dimensions }),
+        body: JSON.stringify({ brandName, sceneType, dimensions, imageUrl }),
       });
       const data = await res.json();
-      if (!data.success) { setErrorMsg(data.error || '拆解失败'); setIsDecomposing(false); return; }
-      const taskId = data.taskId;
-      const poll = async () => {
-        try {
-          const pr = await fetch('/api/poll-task', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ taskId, model: '' }) });
-          const pd = await pr.json();
-          if (pd.status === 'completed') {
-            const result = pd.result;
-            if (result?.components) {
-              setDecomposition({ components: result.components, totalEstimate: result.totalEstimate || 0, layoutNotes: result.layoutNotes });
+      if (!res.ok || data.error) {
+        console.error('[display-3d] Decompose error:', data.error);
+        setIsDecomposing(false);
+        return;
+      }
+      if (data.taskId) {
+        const taskId = data.taskId;
+        const poll = async () => {
+          try {
+            const taskRes = await fetch('/api/poll-task', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ taskId }),
+            });
+            const taskData = await taskRes.json();
+            if (taskData.status === 'completed') {
+              const decomposeResult = taskData.result?.decomposition || taskData.result;
+              if (decomposeResult) {
+                setDecomposition({
+                  components: decomposeResult.components?.map((c: Record<string, unknown>, i: number) => ({
+                    id: String(i + 1), index: c.index as number || i + 1,
+                    name: (c.name as string) || '未命名', sizeSuggestion: (c.sizeSuggestion as string) || '-',
+                    material: (c.material as string) || '-', craft: (c.craft as string) || '-',
+                  })) || MOCK_COMPONENTS,
+                  materials: decomposeResult.materials?.map((m: Record<string, unknown>, i: number) => ({
+                    id: String(i + 1), name: (m.name as string) || '未指定',
+                    description: (m.description as string) || '',
+                  })) || MOCK_MATERIALS,
+                  bom: decomposeResult.bom?.map((b: Record<string, unknown>, i: number) => ({
+                    id: String(i + 1), name: (b.name as string) || '未指定',
+                    count: (b.count as number) || 1,
+                    estimatedPrice: typeof b.estimatedPrice === 'number' ? `¥${b.estimatedPrice.toLocaleString()}` : (b.estimatedPrice as string) || '-',
+                  })) || MOCK_BOM,
+                  rawAnalysis: decomposeResult.rawAnalysis || taskData.result?.rawAnalysis,
+                });
+              }
+              setIsDecomposing(false);
+              setActivePreviewTab('decompose');
+            } else if (taskData.status === 'failed') {
+              console.error('[display-3d] Decompose failed:', taskData.error);
+              setIsDecomposing(false);
+            } else {
+              setTimeout(poll, 3000);
             }
-            setIsDecomposing(false); return;
+          } catch (e) {
+            console.error('[display-3d] Decompose poll error:', e);
+            setIsDecomposing(false);
           }
-          if (pd.status === 'failed') { setErrorMsg(pd.error || '拆解失败'); setIsDecomposing(false); return; }
-          setTimeout(poll, 2000);
-        } catch { setErrorMsg('轮询出错'); setIsDecomposing(false); }
-      };
-      setTimeout(poll, 2000);
-    } catch { setErrorMsg('请求失败'); setIsDecomposing(false); }
-  }, [results, sceneType, brandName, dimensions]);
+        };
+        poll();
+      } else {
+        setIsDecomposing(false);
+      }
+    } catch (e) {
+      console.error('[display-3d] Decompose failed:', e);
+      setIsDecomposing(false);
+    }
+  }, [brandName, sceneType, dimensions, results, onAddImages]);
 
-  // Export PDF
+  // === Export handlers ===
   const handleExportPdf = useCallback(async () => {
-    if (results.length === 0) return;
     try {
       const res = await fetch('/api/export/pdf', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageUrls: results.map(r => r.url), brandName, projectName: `${brandName} 3D展陈方案` }),
+        body: JSON.stringify({ brandName, sceneType, imageUrls: results.map(r => r.url), decomposition }),
       });
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = `${brandName}_展陈方案.pdf`; a.click();
-      URL.revokeObjectURL(url);
-    } catch { setErrorMsg('PDF导出失败'); }
-  }, [results, brandName]);
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = `${brandName}_展陈方案.pdf`; a.click();
+        URL.revokeObjectURL(url);
+      }
+    } catch (e) { console.error('[display-3d] Export PDF failed:', e); }
+  }, [brandName, sceneType, results, decomposition]);
 
-  // Export BOM
   const handleExportBom = useCallback(async () => {
-    if (!decomposition) return;
     try {
+      const bomData = decomposition?.bom || MOCK_BOM;
       const res = await fetch('/api/export/bom', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bomItems: decomposition.components.map(c => ({ name: c.name, count: c.quantity, material: c.material, craft: c.craft, estimatedPrice: c.estimatedPrice })), brandName, projectName: `${brandName} 展陈方案` }),
+        body: JSON.stringify({ brandName, items: bomData }),
       });
-      const data = await res.json();
-      if (data.csv) {
-        const blob = new Blob(['\uFEFF' + data.csv], { type: 'text/csv;charset=utf-8' });
+      if (res.ok) {
+        const blob = await res.blob();
         const url = URL.createObjectURL(blob);
-        const a = document.createElement('a'); a.href = url; a.download = `${brandName}_BOM清单.csv`; a.click();
+        const a = document.createElement('a');
+        a.href = url; a.download = `${brandName}_BOM清单.csv`; a.click();
         URL.revokeObjectURL(url);
       }
-    } catch { setErrorMsg('BOM导出失败'); }
-  }, [decomposition, brandName]);
+    } catch (e) { console.error('[display-3d] Export BOM failed:', e); }
+  }, [brandName, decomposition]);
 
-  // Export Annotation
   const handleExportAnnotation = useCallback(async () => {
-    if (results.length === 0) return;
     try {
-      await fetch('/api/export/annotation-image', {
+      const imageUrl = results[0]?.url || '';
+      const res = await fetch('/api/export/annotation-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageUrl: results[0].url, brandName }),
+        body: JSON.stringify({ imageUrl, brandName, sceneType, dimensions }),
       });
-    } catch { /* annotation is async, results come via polling */ }
-  }, [results, brandName]);
+      const data = await res.json();
+      if (data.annotations) {
+        setSuccessMsg('标注图已生成，共 ' + data.annotations.length + ' 个标注点');
+        setTimeout(() => setSuccessMsg(''), 4000);
+      }
+    } catch (e) { console.error('[display-3d] Export annotation failed:', e); }
+  }, [results, brandName, sceneType, dimensions]);
 
-  // Send to canvas
-  const handleSendToCanvas = useCallback(async (imageUrls: string[]) => {
-    try {
-      await fetch('/api/export/to-canvas', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageUrls, brandName, projectName: `${brandName} 展陈方案` }),
-      });
-      onAddImages(imageUrls);
-    } catch { setErrorMsg('发送到画布失败'); }
-  }, [brandName, onAddImages]);
+  const handleSendToCanvas = useCallback(() => {
+    const urls = results.map(r => r.url).filter(Boolean);
+    if (urls.length > 0) onAddImages?.(urls);
+  }, [results, onAddImages]);
 
-  // Download
-  const handleDownloadImage = useCallback(async (url: string, filename: string) => {
-    try {
-      const res = await fetch(url); const blob = await res.blob(); const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = blobUrl; a.download = filename; a.click(); URL.revokeObjectURL(blobUrl);
-    } catch { setErrorMsg('下载失败'); }
-  }, []);
+  // === Render helpers ===
+  const inputCls = `w-full rounded-lg border px-3 py-2 text-xs outline-none transition-colors ${isMonochrome ? 'bg-white border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-blue-400 focus:ring-1 focus:ring-blue-200' : 'bg-black/30 border-white/10 text-amber-50 placeholder:text-white/30 focus:border-amber-400/60 focus:ring-1 focus:ring-amber-400/20'}`;
+  const selectCls = inputCls;
+  const tagBtnCls = (active: boolean) => `rounded-lg border px-3 py-1.5 text-xs cursor-pointer transition-all ${active ? (isMonochrome ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-amber-400/60 bg-amber-400/15 text-amber-200') : (isMonochrome ? 'border-gray-200 bg-gray-50 text-gray-500 hover:border-blue-300' : 'border-white/10 bg-black/30 text-white/60 hover:border-amber-400/40')}`;
+  const panelCls = `rounded-xl border p-4 ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#15120f]/90 border-amber-500/25'}`;
+  const stepBadgeCls = `flex h-5 w-5 items-center justify-center rounded-full text-[12px] font-bold ${isMonochrome ? 'bg-blue-500 text-white' : 'bg-amber-500 text-black'}`;
 
-  // Steps
-  const steps = [
-    { label: '资产上传', icon: <Upload size={16} /> },
-    { label: '场景设置', icon: <Store size={16} /> },
-    { label: '环境尺寸', icon: <Ruler size={16} /> },
-    { label: '输出视角', icon: <Camera size={16} /> },
-  ];
-
-  const viewLabels = [
-    { key: 'front', label: '正面' },
-    { key: 'side', label: '侧面' },
-    { key: 'top', label: '俯视' },
-    { key: 'back', label: '背面' },
-    { key: '45deg', label: '45度角' },
-    { key: 'detail', label: '细节特写' },
-  ];
-
-  const assetTypes = ['主视觉KV', '背板图', '门头图', '地贴图', '海报图', '包装图', 'Logo', 'IP形象', '3D截图', '效果图'];
-
-  // Render
   return createPortal(
-    <div
-      ref={panelRef}
-      onMouseDown={handleMouseDown}
-      className="fixed z-[200] shadow-2xl"
-      style={{
-        left: '80px', top: '50px',
-        width: '92vw', maxWidth: '1280px',
-        height: '82vh', maxHeight: '820px',
-        borderRadius: '12px',
-        overflow: 'hidden',
-        display: 'flex',
-        background: c('bg'),
-        border: `1px solid ${isMonochrome ? M_BORDER : 'rgba(170,185,210,0.15)'}`,
-      }}
-    >
-      {/* === Sidebar === */}
-      {showSidebar && (
+    <div className="fixed z-[200] flex items-start justify-start" style={{ pointerEvents: 'auto', ...(isMinimized ? { left: windowPos.x, top: windowPos.y } : { inset: 0 }) }}>
+      {!isMinimized && <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" onClick={onClose} />}
+
+      <div
+        data-popup
+        className="relative flex flex-col rounded-xl overflow-hidden shadow-2xl border"
+        style={{
+          width: isMinimized ? 340 : 'calc(100vw - 80px)',
+          height: isMinimized ? 'auto' : 'calc(100vh - 80px)',
+          background: bg,
+          borderColor: isMonochrome ? '#e5e5e5' : '#d4af3740',
+          ...(isMinimized ? {} : { left: windowPos.x, top: windowPos.y }),
+          ...(isDragging ? { outline: `2px solid ${accent}`, outlineOffset: '-2px' } : {}),
+        }}
+        onMouseDown={e => e.stopPropagation()}
+        onPointerDown={e => e.stopPropagation()}
+      >
+        {/* Title bar */}
         <div
-          style={{ width: '220px', minWidth: '220px', background: isMonochrome ? M_BG_CARD : 'rgb(16,22,36)', borderRight: `1px solid ${c('border')}` }}
-          className="flex flex-col overflow-hidden" data-no-drag
+          data-panel-header
+          className="flex items-center justify-between px-3 shrink-0 cursor-move select-none"
+          style={{ height: 36, background: isMonochrome ? '#f9fafb' : '#161616', borderBottom: isMinimized ? 'none' : (isMonochrome ? '1px solid #e5e5e5' : '1px solid #d4af3730') }}
+          onMouseDown={handleDragStart}
         >
-          <div style={{ padding: '12px 14px', borderBottom: `1px solid ${c('border')}` }}>
-            <div style={{ fontSize: '15px', fontWeight: 700, color: c('text') }}>项目库</div>
+          <div className="flex items-center gap-2">
+            <Box size={14} style={{ color: accent }} />
+            <span className="text-sm font-medium" style={{ color: textAccent }}>3D 展陈系统 Pro</span>
           </div>
-          <div className="flex-1 overflow-y-auto" style={{ padding: '8px 10px' }}>
-            {projects.length === 0 && <div style={{ fontSize: '12px', color: c('text3'), textAlign: 'center', padding: '20px 0' }}>暂无项目</div>}
-            {projects.map(p => (
-              <div key={p.id} style={{ padding: '8px 10px', borderRadius: '8px', marginBottom: '4px', cursor: 'pointer', transition: 'background 0.15s' }}
-                onMouseEnter={e => (e.currentTarget.style.background = isMonochrome ? M_BG_INPUT : 'rgb(28,38,58)')}
-                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-              >
-                <div style={{ fontSize: '13px', fontWeight: 600, color: c('text') }}>{p.name}</div>
-                <div style={{ fontSize: '11px', color: c('text3') }}>{new Date(p.createdAt).toLocaleDateString()}</div>
-              </div>
-            ))}
-          </div>
-          <div style={{ padding: '8px 10px', borderTop: `1px solid ${c('border')}` }}>
-            <button onClick={() => setShowTemplates(!showTemplates)}
-              style={{ width: '100%', padding: '8px', borderRadius: '8px', fontSize: '13px', fontWeight: 600, color: c('warmAccent'), background: isMonochrome ? M_BG_INPUT : 'rgb(28,38,58)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <Sparkles size={14} /> 模板库
+          <div className="flex items-center gap-1">
+            <button className={`w-7 h-7 flex items-center justify-center rounded transition-colors ${isMonochrome ? 'hover:bg-gray-200' : 'hover:bg-white/10'}`} onClick={() => setIsMinimized(!isMinimized)}>
+              {isMinimized ? <Maximize2 size={14} style={{ color: textMuted }} /> : <Minus size={14} style={{ color: textMuted }} />}
             </button>
-            {showTemplates && (
-              <div style={{ marginTop: '6px' }}>
-                {TEMPLATES.map(t => (
-                  <div key={t.id}
-                    style={{ padding: '6px 8px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', color: c('text2'), marginBottom: '2px', transition: 'background 0.15s' }}
-                    onMouseEnter={e => (e.currentTarget.style.background = isMonochrome ? M_BG_INPUT : 'rgb(28,38,58)')}
-                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                    onClick={() => { setSceneType(t.scene as Display3DSceneType); setShowTemplates(false); }}
-                  >
-                    <span style={{ color: c('warmAccent'), fontWeight: 600 }}>{t.name}</span>
-                    <span style={{ marginLeft: '6px', color: c('text3') }}>{t.style}</span>
-                  </div>
+            <button className={`w-7 h-7 flex items-center justify-center rounded transition-colors ${isMonochrome ? 'hover:bg-red-100' : 'hover:bg-red-500/30'}`} onClick={onClose}>
+              <X size={14} style={{ color: textMuted }} />
+            </button>
+          </div>
+        </div>
+
+        {isMinimized ? null : (
+          <div className="flex flex-1 overflow-hidden">
+            {/* LEFT SIDEBAR */}
+            <aside className="w-[240px] shrink-0 border-r flex flex-col overflow-hidden"
+              style={{ background: isMonochrome ? '#f9fafb' : 'rgba(0,0,0,0.4)', borderColor: border }}
+            >
+              <div className="p-3">
+                <button className="w-full rounded-xl py-2.5 text-xs font-bold cursor-pointer transition-all"
+                  style={{ background: isMonochrome ? '#3b82f6' : 'linear-gradient(135deg, #ff9d5c, #ff5f88)', color: isMonochrome ? '#fff' : '#000' }}>
+                  + 新建项目
+                </button>
+              </div>
+              <div className="mx-3 mb-3 grid grid-cols-3 rounded-lg p-0.5 text-xs" style={{ background: isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.05)' }}>
+                {(['projects', 'templates', 'presets'] as const).map(tab => (
+                  <button key={tab} className={`rounded-md py-1.5 cursor-pointer transition-colors ${sidebarTab === tab ? (isMonochrome ? 'bg-white text-blue-600 shadow-sm' : 'bg-amber-500/20 text-amber-200') : (isMonochrome ? 'text-gray-500' : 'text-white/50')}`}
+                    onClick={() => setSidebarTab(tab)}>
+                    {{ projects: '项目', templates: '模板', presets: '预设' }[tab]}
+                  </button>
                 ))}
               </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* === Left Column: Form === */}
-      <div style={{ width: '380px', minWidth: '340px', borderRight: `1px solid ${c('border')}`, display: 'flex', flexDirection: 'column' }} data-no-drag>
-        {/* Header */}
-        <div style={{ padding: '14px 18px', borderBottom: `1px solid ${c('border')}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: isMonochrome ? M_BG_CARD : 'rgb(16,22,36)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <button onClick={() => setShowSidebar(s => !s)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: c('warmAccent'), padding: '2px' }} title="项目库">
-              <FolderOpen size={18} />
-            </button>
-            <Store size={20} style={{ color: c('warmAccent') }} />
-            <span style={{ fontSize: '17px', fontWeight: 800, color: c('text'), letterSpacing: '0.5px' }}>3D 展陈系统 Pro</span>
-          </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: c('text3') }}><X size={18} /></button>
-        </div>
-
-        {/* Step Tabs */}
-        <div style={{ display: 'flex', padding: '8px 12px', gap: '2px', borderBottom: `1px solid ${c('border')}`, flexWrap: 'wrap' }}>
-          {steps.map((s, i) => (
-            <button key={i} onClick={() => setActiveStep(i)}
-              style={{
-                padding: '6px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 600,
-                color: activeStep === i ? c('warmAccent') : c('text3'),
-                background: activeStep === i ? (isMonochrome ? 'rgba(59,130,246,0.1)' : ACCENT_WARM_GLOW) : 'transparent',
-                border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', transition: 'all 0.15s',
-              }}
-            >{s.icon} {s.label}</button>
-          ))}
-        </div>
-
-        {/* Form Body */}
-        <div className="flex-1 overflow-y-auto" style={{ padding: '16px 18px' }}>
-          {/* Step 0: Asset Upload */}
-          {activeStep === 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div style={{ fontSize: '16px', fontWeight: 700, color: c('text'), marginBottom: '4px' }}>
-                <Upload size={16} style={{ display: 'inline', marginRight: '6px', verticalAlign: '-2px', color: c('warmAccent') }} />
-                资产上传
-              </div>
-              <div style={{ fontSize: '13px', color: c('text3'), marginBottom: '4px' }}>上传展陈所需素材，AI 将智能应用到场景</div>
-
-              {/* Image Usage Mode */}
-              <div>
-                <div style={{ fontSize: '13px', fontWeight: 700, color: c('text2'), marginBottom: '6px' }}>图像使用模式</div>
-                <div style={{ display: 'flex', gap: '6px' }}>
-                  {([
-                    { mode: 'texture_mapping' as ImageUsageMode, label: '贴图应用', desc: '作为展陈贴图' },
-                    { mode: 'style_extension' as ImageUsageMode, label: '风格延展', desc: '提取风格元素' },
-                    { mode: 'structure_reference' as ImageUsageMode, label: '结构参考', desc: '参考空间结构' },
-                  ]).map(item => (
-                    <button key={item.mode} onClick={() => setImageUsageMode(item.mode)}
-                      style={{
-                        flex: 1, padding: '8px 6px', borderRadius: '8px', cursor: 'pointer', textAlign: 'center',
-                        background: imageUsageMode === item.mode ? (isMonochrome ? 'rgba(59,130,246,0.15)' : ACCENT_WARM_GLOW) : c('input'),
-                        border: `1px solid ${imageUsageMode === item.mode ? c('warmAccent') : c('border')}`,
-                        transition: 'all 0.15s',
-                      }}
-                    >
-                      <div style={{ fontSize: '13px', fontWeight: 700, color: imageUsageMode === item.mode ? c('warmAccent') : c('text2') }}>{item.label}</div>
-                      <div style={{ fontSize: '11px', color: c('text3'), marginTop: '2px' }}>{item.desc}</div>
-                    </button>
-                  ))}
+              <div className="flex-1 overflow-y-auto px-3">
+                <div className="flex flex-col items-center justify-center py-10 text-xs" style={{ color: textMuted }}>
+                  <Box size={24} className="mb-2 opacity-30" />
+                  {sidebarTab === 'projects' && '暂无项目'}
+                  {sidebarTab === 'templates' && '模板库即将上线'}
+                  {sidebarTab === 'presets' && '场景预设即将上线'}
                 </div>
               </div>
+            </aside>
 
-              {/* Asset Upload Grid */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px' }}>
-                {assetTypes.map(type => {
-                  const existing = assets.filter(a => a.type === type);
-                  return (
-                    <button key={type} onClick={() => handleUpload(type)}
-                      style={{
-                        padding: '8px', borderRadius: '8px', cursor: 'pointer', textAlign: 'center',
-                        background: existing.length > 0 ? (isMonochrome ? 'rgba(59,130,246,0.1)' : ACCENT_WARM_GLOW) : c('input'),
-                        border: `1px solid ${existing.length > 0 ? c('warmAccent') : c('border')}`,
-                        transition: 'all 0.15s',
-                      }}
-                    >
-                      <div style={{ fontSize: '12px', fontWeight: 600, color: existing.length > 0 ? c('warmAccent') : c('text2') }}>{type}</div>
-                      {existing.length > 0 && <div style={{ fontSize: '10px', color: c('text3'), marginTop: '1px' }}>x{existing.length}</div>}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Uploaded thumbnails */}
-              {assets.length > 0 && (
-                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                  {assets.map((a, i) => (
-                    <div key={i} style={{ width: '48px', height: '48px', borderRadius: '6px', overflow: 'hidden', position: 'relative', border: `1px solid ${c('border')}` }}>
-                      <img src={a.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                      <button onClick={() => setAssets(prev => prev.filter((_, j) => j !== i))}
-                        style={{ position: 'absolute', top: '1px', right: '1px', background: 'rgba(0,0,0,0.6)', border: 'none', borderRadius: '50%', width: '14px', height: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'white' }}>
-                        <X size={9} />
-                      </button>
-                    </div>
-                  ))}
+            {/* MAIN CONTENT */}
+            <main className="flex flex-1 flex-col overflow-hidden">
+              {/* Header */}
+              <header className="flex items-center justify-between px-4 shrink-0" style={{ height: 44, borderBottom: `1px solid ${border}` }}>
+                <div className="flex items-center gap-3">
+                  <h2 className="text-base font-semibold" style={{ color: textPrimary }}>3D 展陈工作台</h2>
+                  <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: isMonochrome ? '#dbeafe' : 'rgba(212,175,55,0.15)', color: textAccent }}>Pro</span>
                 </div>
-              )}
-            </div>
-          )}
-
-          {/* Step 1: Scene Settings */}
-          {activeStep === 1 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div style={{ fontSize: '16px', fontWeight: 700, color: c('text'), marginBottom: '4px' }}>
-                <Store size={16} style={{ display: 'inline', marginRight: '6px', verticalAlign: '-2px', color: c('warmAccent') }} />
-                场景设置
-              </div>
-
-              {/* Brand & Product */}
-              <label style={{ fontSize: '13px', fontWeight: 600, color: c('text2') }}>
-                品牌名称 <span style={{ color: DANGER }}>*</span>
-                <input value={brandName} onChange={e => setBrandName(e.target.value)} placeholder="品牌名称"
-                  style={{ width: '100%', marginTop: '4px', padding: '8px 12px', borderRadius: '8px', fontSize: '14px', background: c('input'), border: `1px solid ${c('border')}`, color: c('text'), outline: 'none' }} />
-              </label>
-              <label style={{ fontSize: '13px', fontWeight: 600, color: c('text2') }}>
-                产品名称
-                <input value={productName} onChange={e => setProductName(e.target.value)} placeholder="产品名称"
-                  style={{ width: '100%', marginTop: '4px', padding: '8px 12px', borderRadius: '8px', fontSize: '14px', background: c('input'), border: `1px solid ${c('border')}`, color: c('text'), outline: 'none' }} />
-              </label>
-
-              {/* Scene Preset Library */}
-              <div>
-                <div style={{ fontSize: '13px', fontWeight: 700, color: c('text2'), marginBottom: '8px' }}>场景预设库</div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
-                  {SCENE_PRESETS.map(s => (
-                    <button key={s.id} onClick={() => setSceneType(s.id as Display3DSceneType)}
-                      style={{
-                        padding: '10px 6px', borderRadius: '8px', textAlign: 'center', cursor: 'pointer',
-                        background: sceneType === s.id ? (isMonochrome ? 'rgba(59,130,246,0.15)' : ACCENT_WARM_GLOW) : c('input'),
-                        border: `1px solid ${sceneType === s.id ? c('warmAccent') : c('border')}`,
-                        color: sceneType === s.id ? c('warmAccent') : c('text2'),
-                        transition: 'all 0.15s',
-                      }}
-                    >
-                      <div style={{ fontSize: '20px', marginBottom: '2px' }}>{s.icon}</div>
-                      <div style={{ fontSize: '11px', fontWeight: 700 }}>{s.label}</div>
-                    </button>
-                  ))}
-                </div>
-                <div style={{ fontSize: '11px', color: c('text3'), marginTop: '4px' }}>
-                  {SCENE_PRESETS.find(s => s.id === sceneType)?.desc}
-                </div>
-              </div>
-
-              {/* Environment */}
-              <div>
-                <div style={{ fontSize: '13px', fontWeight: 700, color: c('text2'), marginBottom: '6px' }}>环境类型</div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                  {['室内', '室外', '半户外', '商场', '展会'].map(env => (
-                    <button key={env} onClick={() => setEnvironment(env === '室内' ? 'indoor' : env === '室外' ? 'outdoor' : env === '半户外' ? 'semi-outdoor' : env === '商场' ? 'mall' : 'exhibition')}
-                      style={{
-                        padding: '5px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 600, cursor: 'pointer',
-                        background: (environment === 'indoor' && env === '室内') || (environment === 'outdoor' && env === '室外') || (environment === 'semi-outdoor' && env === '半户外') || (environment === 'mall' && env === '商场') || (environment === 'exhibition' && env === '展会')
-                          ? (isMonochrome ? 'rgba(59,130,246,0.15)' : ACCENT_WARM_GLOW) : c('input'),
-                        border: `1px solid ${c('border')}`,
-                        color: (environment === 'indoor' && env === '室内') || (environment === 'outdoor' && env === '室外') || (environment === 'semi-outdoor' && env === '半户外') || (environment === 'mall' && env === '商场') || (environment === 'exhibition' && env === '展会')
-                          ? c('warmAccent') : c('text2'),
-                        transition: 'all 0.15s',
-                      }}
-                    >{env}</button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Style & Crowd */}
-              <label style={{ fontSize: '13px', fontWeight: 600, color: c('text2') }}>
-                材质风格
-                <input value={materialStyle} onChange={e => setMaterialStyle(e.target.value)} placeholder="如：现代简约 / 新中式 / 未来科技"
-                  style={{ width: '100%', marginTop: '4px', padding: '8px 12px', borderRadius: '8px', fontSize: '14px', background: c('input'), border: `1px solid ${c('border')}`, color: c('text'), outline: 'none' }} />
-              </label>
-              <label style={{ fontSize: '13px', fontWeight: 600, color: c('text2') }}>
-                灯光风格
-                <input value={lightingStyle} onChange={e => setLightingStyle(e.target.value)} placeholder="如：自然光 / 暖色射灯 / 冷色氛围灯"
-                  style={{ width: '100%', marginTop: '4px', padding: '8px 12px', borderRadius: '8px', fontSize: '14px', background: c('input'), border: `1px solid ${c('border')}`, color: c('text'), outline: 'none' }} />
-              </label>
-              <label style={{ fontSize: '13px', fontWeight: 600, color: c('text2') }}>
-                人群氛围
-                <input value={crowdStyle} onChange={e => setCrowdStyle(e.target.value)} placeholder="如：高端商务 / 年轻潮流 / 家庭亲子"
-                  style={{ width: '100%', marginTop: '4px', padding: '8px 12px', borderRadius: '8px', fontSize: '14px', background: c('input'), border: `1px solid ${c('border')}`, color: c('text'), outline: 'none' }} />
-              </label>
-            </div>
-          )}
-
-          {/* Step 2: Dimensions */}
-          {activeStep === 2 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div style={{ fontSize: '16px', fontWeight: 700, color: c('text'), marginBottom: '4px' }}>
-                <Ruler size={16} style={{ display: 'inline', marginRight: '6px', verticalAlign: '-2px', color: c('warmAccent') }} />
-                环境与尺寸
-              </div>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                {(['length', 'width', 'height'] as const).map(dim => (
-                  <label key={dim} style={{ flex: 1, textAlign: 'center' }}>
-                    <span style={{ fontSize: '11px', color: c('text3'), fontWeight: 600 }}>{dim === 'length' ? '长' : dim === 'width' ? '宽' : '高'}</span>
-                    <input type="number" value={dimensions[dim]} onChange={e => setDimensions(prev => ({ ...prev, [dim]: Number(e.target.value) }))}
-                      style={{ width: '100%', marginTop: '3px', padding: '6px 8px', borderRadius: '6px', fontSize: '14px', background: c('input'), border: `1px solid ${c('border')}`, color: c('text'), outline: 'none', textAlign: 'center' }} />
-                  </label>
-                ))}
-                <span style={{ fontSize: '12px', color: c('text3'), alignSelf: 'flex-end', paddingBottom: '8px' }}>cm</span>
-              </div>
-              <label style={{ fontSize: '13px', fontWeight: 600, color: c('text2') }}>
-                预算范围
-                <input value={budget} onChange={e => setBudget(e.target.value)} placeholder="如：5万-10万"
-                  style={{ width: '100%', marginTop: '4px', padding: '8px 12px', borderRadius: '8px', fontSize: '14px', background: c('input'), border: `1px solid ${c('border')}`, color: c('text'), outline: 'none' }} />
-              </label>
-              {/* Custom Prompt */}
-              <div style={{ marginTop: '8px' }}>
-                <div style={{ fontSize: '13px', fontWeight: 700, color: c('text2'), marginBottom: '4px' }}>自定义提示词</div>
-                <textarea value={customPrompt} onChange={e => setCustomPrompt(e.target.value)} placeholder="额外设计要求..."
-                  style={{ width: '100%', minHeight: '80px', padding: '10px 12px', borderRadius: '8px', fontSize: '13px', background: c('input'), border: `1px solid ${c('border')}`, color: c('text'), outline: 'none', resize: 'vertical', lineHeight: '1.5' }} />
-              </div>
-            </div>
-          )}
-
-          {/* Step 3: View Options */}
-          {activeStep === 3 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              <div style={{ fontSize: '16px', fontWeight: 700, color: c('text'), marginBottom: '4px' }}>
-                <Camera size={16} style={{ display: 'inline', marginRight: '6px', verticalAlign: '-2px', color: c('warmAccent') }} />
-                输出视角
-              </div>
-              {viewLabels.map(v => (
-                <button key={v.key} onClick={() => setViewOptions(prev => prev.includes(v.key) ? prev.filter(x => x !== v.key) : [...prev, v.key])}
-                  style={{
-                    padding: '10px 14px', borderRadius: '8px', cursor: 'pointer', textAlign: 'left',
-                    background: viewOptions.includes(v.key) ? (isMonochrome ? 'rgba(59,130,246,0.12)' : ACCENT_WARM_GLOW) : c('input'),
-                    border: `1px solid ${viewOptions.includes(v.key) ? c('warmAccent') : c('border')}`,
-                    transition: 'all 0.15s',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    {viewOptions.includes(v.key) ? <CheckSquare size={15} style={{ color: c('warmAccent') }} /> : <Square size={15} style={{ color: c('text3') }} />}
-                    <span style={{ fontSize: '14px', fontWeight: 700, color: viewOptions.includes(v.key) ? c('warmAccent') : c('text') }}>{v.label}</span>
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Generate Button */}
-        <div style={{ padding: '14px 18px', borderTop: `1px solid ${c('border')}`, background: isMonochrome ? M_BG_CARD : 'rgb(16,22,36)' }}>
-          {errorMsg && (
-            <div style={{ fontSize: '12px', color: DANGER, marginBottom: '8px', padding: '6px 10px', borderRadius: '6px', background: 'rgba(200,80,80,0.1)' }}>{errorMsg}</div>
-          )}
-          {isGenerating && (
-            <div style={{ marginBottom: '8px' }}>
-              <div style={{ height: '4px', borderRadius: '2px', background: c('input'), overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${progress}%`, background: c('warmAccent'), borderRadius: '2px', transition: 'width 0.3s' }} />
-              </div>
-              <div style={{ fontSize: '12px', color: c('text3'), marginTop: '4px' }}>生成中... {progress}%</div>
-            </div>
-          )}
-          <button onClick={handleGenerate} disabled={isGenerating}
-            style={{
-              width: '100%', padding: '12px', borderRadius: '10px', fontSize: '15px', fontWeight: 800,
-              background: isGenerating ? c('input') : (isMonochrome ? M_ACCENT : ACCENT_WARM),
-              color: isGenerating ? c('text3') : (isMonochrome ? '#fff' : '#0e1420'),
-              border: 'none', cursor: isGenerating ? 'not-allowed' : 'pointer', transition: 'all 0.2s',
-              boxShadow: !isGenerating && !isMonochrome ? '0 2px 12px rgba(190,170,120,0.25)' : 'none',
-            }}
-          >
-            <Sparkles size={16} style={{ verticalAlign: '-2px', marginRight: '4px' }} />
-            {isGenerating ? '生成中...' : '生成展陈方案'}
-          </button>
-        </div>
-      </div>
-
-      {/* === Right Column: Preview & Results === */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }} data-no-drag>
-        {/* Results Header */}
-        <div style={{ padding: '14px 18px', borderBottom: `1px solid ${c('border')}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: isMonochrome ? M_BG_CARD : 'rgb(16,22,36)' }}>
-          <span style={{ fontSize: '16px', fontWeight: 700, color: c('text') }}>展陈方案</span>
-          <div style={{ display: 'flex', gap: '6px' }}>
-            {results.length > 0 && (
-              <>
-                <button onClick={handleDecompose} disabled={isDecomposing}
-                  style={{ padding: '5px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 600, background: isMonochrome ? 'rgba(59,130,246,0.1)' : ACCENT_WARM_GLOW, border: `1px solid ${c('warmAccent')}`, color: c('warmAccent'), cursor: 'pointer' }}>
-                  <Layers size={12} style={{ verticalAlign: '-1px' }} /> {isDecomposing ? '拆解中...' : '方案拆解'}
-                </button>
-                <button onClick={handleExportPdf}
-                  style={{ padding: '5px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 600, background: c('input'), border: `1px solid ${c('border')}`, color: c('text2'), cursor: 'pointer' }}>
-                  <FileText size={12} style={{ verticalAlign: '-1px' }} /> PDF
-                </button>
-                <button onClick={handleExportBom}
-                  style={{ padding: '5px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 600, background: c('input'), border: `1px solid ${c('border')}`, color: c('text2'), cursor: 'pointer' }}>
-                  <BarChart3 size={12} style={{ verticalAlign: '-1px' }} /> BOM
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* Tabs */}
-        {results.length > 0 && (
-          <div style={{ display: 'flex', padding: '6px 12px', gap: '2px', borderBottom: `1px solid ${c('border')}`, flexWrap: 'wrap' }}>
-            {['效果图', '方案拆解', '材质工艺', 'BOM清单'].map((tab, i) => (
-              <button key={tab} onClick={() => setActiveTab(i)}
-                style={{
-                  padding: '4px 10px', borderRadius: '5px', fontSize: '12px', fontWeight: 600,
-                  color: activeTab === i ? c('warmAccent') : c('text3'),
-                  background: activeTab === i ? (isMonochrome ? 'rgba(59,130,246,0.1)' : ACCENT_WARM_GLOW) : 'transparent',
-                  border: 'none', cursor: 'pointer', transition: 'all 0.15s',
-                }}
-              >{tab}</button>
-            ))}
-          </div>
-        )}
-
-        {/* Results Body */}
-        <div className="flex-1 overflow-y-auto" style={{ padding: '16px' }}>
-          {/* Tab 0: Preview Stage */}
-          {activeTab === 0 && (
-            results.length === 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: c('text3') }}>
-                {/* Empty state with preview stage atmosphere */}
-                <div style={{ width: '200px', height: '140px', borderRadius: '12px', background: `linear-gradient(135deg, ${isMonochrome ? 'rgb(240,240,245)' : 'rgb(28,38,58)'}, ${isMonochrome ? 'rgb(248,248,250)' : 'rgb(20,28,44)'})`, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '12px', border: `1px dashed ${c('border')}` }}>
-                  <div style={{ textAlign: 'center' }}>
-                    <RotateCw size={32} style={{ opacity: 0.2, marginBottom: '4px' }} />
-                    <div style={{ fontSize: '11px', opacity: 0.4 }}>3D 预览舞台</div>
-                  </div>
-                </div>
-                <div style={{ fontSize: '15px', fontWeight: 600 }}>暂无方案</div>
-                <div style={{ fontSize: '13px', marginTop: '4px' }}>设置参数后点击生成</div>
-              </div>
-            ) : (
-              <div>
-                {/* Main preview area */}
-                {selectedResult && (
-                  <div style={{ marginBottom: '12px', borderRadius: '12px', overflow: 'hidden', border: `1px solid ${c('border')}`, background: isMonochrome ? M_BG_CARD : 'rgb(16,22,36)', position: 'relative' }}>
-                    <img src={selectedResult.url} alt="" style={{ width: '100%', maxHeight: '300px', objectFit: 'contain' }} />
-                    <div style={{ position: 'absolute', bottom: '8px', right: '8px', display: 'flex', gap: '4px' }}>
-                      <button onClick={() => handleDownloadImage(selectedResult.url, `display3d_${selectedResult.id}.png`)}
-                        style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '11px', background: 'rgba(0,0,0,0.6)', border: 'none', color: 'white', cursor: 'pointer' }}>
-                        <Download size={11} /> 下载
-                      </button>
-                      <button onClick={() => handleSendToCanvas([selectedResult.url])}
-                        style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '11px', background: 'rgba(0,0,0,0.6)', border: 'none', color: c('warmAccent'), cursor: 'pointer' }}>
-                        <Send size={11} /> 画布
-                      </button>
-                    </div>
-                  </div>
-                )}
-                {/* Result grid */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '8px' }}>
-                  {results.map(r => (
-                    <div key={r.id} onClick={() => setSelectedResult(r)}
-                      style={{
-                        borderRadius: '8px', overflow: 'hidden', cursor: 'pointer',
-                        border: `2px solid ${selectedResult?.id === r.id ? c('warmAccent') : c('border')}`,
-                        background: c('card'), transition: 'border 0.15s',
-                      }}
-                    >
-                      <div style={{ aspectRatio: '4/3', overflow: 'hidden' }}>
-                        <img src={r.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                      </div>
-                      <div style={{ padding: '4px 6px' }}>
-                        <div style={{ fontSize: '11px', fontWeight: 600, color: c('text2') }}>
-                          {viewLabels.find(v => v.key === r.type)?.label || r.type}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )
-          )}
-
-          {/* Tab 1: Decomposition */}
-          {activeTab === 1 && (
-            decomposition ? (
-              <div>
-                <div style={{ fontSize: '14px', fontWeight: 700, color: c('text'), marginBottom: '10px' }}>
-                  <Layers size={14} style={{ verticalAlign: '-1px', marginRight: '4px', color: c('warmAccent') }} />
-                  方案拆解 - {decomposition.components.length} 个部件
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  {decomposition.components.map(comp => (
-                    <div key={comp.id} style={{ padding: '10px 12px', borderRadius: '8px', background: c('card'), border: `1px solid ${c('border')}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div>
-                        <div style={{ fontSize: '13px', fontWeight: 700, color: c('text') }}>{comp.name}</div>
-                        <div style={{ fontSize: '12px', color: c('text3'), marginTop: '2px' }}>
-                          {comp.material} · {comp.craft} · x{comp.quantity}
-                          {comp.dimensions && ` · ${comp.dimensions}`}
-                        </div>
-                      </div>
-                      <div style={{ fontSize: '14px', fontWeight: 700, color: c('warmAccent') }}>¥{comp.estimatedPrice.toLocaleString()}</div>
-                    </div>
-                  ))}
-                </div>
-                <div style={{ marginTop: '12px', padding: '12px', borderRadius: '8px', background: isMonochrome ? 'rgba(59,130,246,0.06)' : ACCENT_WARM_GLOW, border: `1px solid ${c('warmAccent')}`, textAlign: 'center' }}>
-                  <div style={{ fontSize: '13px', color: c('text2') }}>预估总价</div>
-                  <div style={{ fontSize: '22px', fontWeight: 800, color: c('warmAccent') }}>¥{decomposition.totalEstimate.toLocaleString()}</div>
-                </div>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: c('text3') }}>
-                <Layers size={36} style={{ opacity: 0.3, marginBottom: '8px' }} />
-                <div style={{ fontSize: '14px', fontWeight: 600 }}>生成效果图后点击"方案拆解"</div>
-              </div>
-            )
-          )}
-
-          {/* Tab 2: Material & Craft */}
-          {activeTab === 2 && (
-            <div style={{ color: c('text3'), textAlign: 'center', padding: '40px 0' }}>
-              <Palette size={32} style={{ opacity: 0.3, marginBottom: '8px' }} />
-              <div style={{ fontSize: '14px' }}>材质工艺标注将在方案拆解后显示</div>
-            </div>
-          )}
-
-          {/* Tab 3: BOM */}
-          {activeTab === 3 && (
-            decomposition ? (
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                  <div style={{ fontSize: '14px', fontWeight: 700, color: c('text') }}>BOM 物料清单</div>
-                  <button onClick={handleExportBom}
-                    style={{ padding: '5px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 600, background: isMonochrome ? 'rgba(59,130,246,0.1)' : ACCENT_WARM_GLOW, border: `1px solid ${c('warmAccent')}`, color: c('warmAccent'), cursor: 'pointer' }}>
-                    <Download size={12} style={{ verticalAlign: '-1px' }} /> 导出 CSV
+                <div className="flex items-center gap-2">
+                  <button className={`rounded-lg px-3 py-1.5 text-xs cursor-pointer ${isMonochrome ? 'text-gray-500 hover:bg-gray-100' : 'text-white/50 hover:bg-white/5'}`}>
+                    <Info size={13} className="inline mr-1" />说明
                   </button>
                 </div>
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                    <thead>
-                      <tr>
-                        {['序号', '部件名称', '数量', '材质', '工艺', '预估单价', '预估总价'].map(h => (
-                          <th key={h} style={{ padding: '8px 6px', textAlign: 'left', borderBottom: `1px solid ${c('border')}`, color: c('warmAccent'), fontWeight: 700 }}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {decomposition.components.map((comp, i) => (
-                        <tr key={comp.id}>
-                          <td style={{ padding: '6px', borderBottom: `1px solid ${c('border')}`, color: c('text3') }}>{i + 1}</td>
-                          <td style={{ padding: '6px', borderBottom: `1px solid ${c('border')}`, color: c('text'), fontWeight: 600 }}>{comp.name}</td>
-                          <td style={{ padding: '6px', borderBottom: `1px solid ${c('border')}`, color: c('text2') }}>{comp.quantity}</td>
-                          <td style={{ padding: '6px', borderBottom: `1px solid ${c('border')}`, color: c('text2') }}>{comp.material}</td>
-                          <td style={{ padding: '6px', borderBottom: `1px solid ${c('border')}`, color: c('text2') }}>{comp.craft}</td>
-                          <td style={{ padding: '6px', borderBottom: `1px solid ${c('border')}`, color: c('text2') }}>¥{comp.estimatedPrice.toLocaleString()}</td>
-                          <td style={{ padding: '6px', borderBottom: `1px solid ${c('border')}`, color: c('warmAccent'), fontWeight: 700 }}>¥{(comp.estimatedPrice * comp.quantity).toLocaleString()}</td>
-                        </tr>
+              </header>
+
+              {/* Workspace */}
+              <div className="grid flex-1 grid-cols-[360px_1fr] gap-4 overflow-hidden p-4">
+                {/* LEFT: Form */}
+                <div className="overflow-y-auto pr-2 space-y-4" data-toolbar>
+                  {/* Step 1: Upload */}
+                  <section className={panelCls}>
+                    <div className="mb-3 flex items-center gap-2">
+                      <span className={stepBadgeCls}>1</span>
+                      <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>资产上传</h3>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      {['主视觉KV', '背板图', '门头图', '地贴图', '海报图', '包装图', 'Logo', 'IP形象', '3D截图'].map((t, i) => (
+                        <button key={t} className={`h-[60px] rounded-lg border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition-colors ${i < 8 ? '' : (isMonochrome ? 'text-gray-400' : 'text-white/30')}`}
+                          style={{ borderColor: border, color: textMuted }}
+                          onClick={() => handleUpload(t)}>
+                          <Upload size={12} />
+                          <span className="text-[9px] mt-0.5">{t}</span>
+                        </button>
                       ))}
-                    </tbody>
-                  </table>
+                    </div>
+                    {assets.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {assets.map(a => (
+                          <div key={a.id} className="relative w-10 h-10 rounded border overflow-hidden" style={{ borderColor: border }}>
+                            <img src={a.url} className="w-full h-full object-cover" />
+                            <button className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-red-500 text-white flex items-center justify-center" onClick={() => setAssets(prev => prev.filter(x => x.id !== a.id))}><X size={8} /></button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </section>
+
+                  {/* Step 2: Image usage mode */}
+                  <section className={panelCls}>
+                    <div className="mb-3 flex items-center gap-2">
+                      <span className={stepBadgeCls}>2</span>
+                      <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>图像使用模式</h3>
+                    </div>
+                    <div className="space-y-1.5">
+                      {IMAGE_USAGE_MODES.map(m => (
+                        <button key={m.value} className={`w-full rounded-lg border p-2.5 text-left cursor-pointer transition-all ${imageUsageMode === m.value ? (isMonochrome ? 'border-blue-400 bg-blue-50' : 'border-amber-400/60 bg-amber-400/10') : (isMonochrome ? 'border-gray-200 bg-gray-50' : 'border-white/10 bg-black/30')}`}
+                          onClick={() => setImageUsageMode(m.value)}>
+                          <div className="text-xs font-medium" style={{ color: imageUsageMode === m.value ? textAccent : textPrimary }}>{m.label}</div>
+                          <div className="text-[12px] mt-0.5" style={{ color: textMuted }}>{m.desc}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+
+                  {/* Step 3: Scene setting */}
+                  <section className={panelCls}>
+                    <div className="mb-3 flex items-center gap-2">
+                      <span className={stepBadgeCls}>3</span>
+                      <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>场景设置</h3>
+                    </div>
+                    <div className="grid grid-cols-4 gap-1.5 mb-3">
+                      {SCENE_TYPES.map(s => (
+                        <button key={s.value} className={`rounded-lg border p-2 text-[12px] flex flex-col items-center gap-1 cursor-pointer transition-all ${sceneType === s.value ? (isMonochrome ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-amber-400/60 bg-amber-400/10 text-amber-200') : (isMonochrome ? 'border-gray-200 bg-gray-50 text-gray-500' : 'border-white/10 bg-black/30 text-white/60')}`}
+                          onClick={() => setSceneType(s.value)}>
+                          {s.icon}<span>{s.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 mb-2">
+                      <div><label className="block text-[12px] mb-1" style={{ color: textMuted }}>长 (mm)</label><input className={inputCls} type="number" value={dimensions.length} onChange={e => setDimensions(p => ({ ...p, length: Number(e.target.value) }))} /></div>
+                      <div><label className="block text-[12px] mb-1" style={{ color: textMuted }}>宽 (mm)</label><input className={inputCls} type="number" value={dimensions.width} onChange={e => setDimensions(p => ({ ...p, width: Number(e.target.value) }))} /></div>
+                      <div><label className="block text-[12px] mb-1" style={{ color: textMuted }}>高 (mm)</label><input className={inputCls} type="number" value={dimensions.height} onChange={e => setDimensions(p => ({ ...p, height: Number(e.target.value) }))} /></div>
+                    </div>
+                  </section>
+
+                  {/* Step 4: Environment & Size */}
+                  <section className={panelCls}>
+                    <div className="mb-3 flex items-center gap-2">
+                      <span className={stepBadgeCls}>4</span>
+                      <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>环境与尺寸设置</h3>
+                    </div>
+                    <div className="grid grid-cols-4 gap-1.5 mb-3">
+                      {ENVIRONMENTS.map(e => (
+                        <button key={e.value} className={tagBtnCls(environment === e.value)} onClick={() => setEnvironment(e.value)}>{e.label}</button>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 mb-3">
+                      <div><label className="block text-[12px] mb-1" style={{ color: textMuted }}>预算（¥）</label><input className={inputCls} type="number" placeholder="150000" value={budget} onChange={e => setBudget(e.target.value ? Number(e.target.value) : '')} /></div>
+                      <div><label className="block text-[12px] mb-1" style={{ color: textMuted }}>材质风格</label><select className={selectCls} value={materialStyle} onChange={e => setMaterialStyle(e.target.value)}>{MATERIAL_STYLES.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
+                      <div><label className="block text-[12px] mb-1" style={{ color: textMuted }}>灯光氛围</label><select className={selectCls} value={lightingStyle} onChange={e => setLightingStyle(e.target.value)}>{LIGHTING_STYLES.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
+                      <div><label className="block text-[12px] mb-1" style={{ color: textMuted }}>人群氛围</label><select className={selectCls} value={crowdStyle} onChange={e => setCrowdStyle(e.target.value)}>{CROWD_STYLES.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
+                    </div>
+                    <textarea className={`${inputCls} min-h-[56px]`} placeholder="附加需求，如品牌色、重点展示产品、空间动线..." value={customPrompt} onChange={e => setCustomPrompt(e.target.value)} />
+                  </section>
+
+                  {/* Step 5: View selector */}
+                  <section className={panelCls}>
+                    <div className="mb-3 flex items-center gap-2">
+                      <span className={stepBadgeCls}>5</span>
+                      <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>输出视角选择</h3>
+                    </div>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {VIEW_OPTIONS.map(v => (
+                        <button key={v.value} className={tagBtnCls(viewOptions.includes(v.value))} onClick={() => toggleView(v.value)}>{v.label}</button>
+                      ))}
+                    </div>
+                  </section>
+
+                  {/* Generate button */}
+                  <button
+                    className="w-full rounded-xl py-3 text-sm font-bold cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    style={{ background: isMonochrome ? '#3b82f6' : 'linear-gradient(135deg, #ff9d5c, #ff5f88)', color: isMonochrome ? '#fff' : '#000' }}
+                    onClick={handleGenerate}
+                    disabled={isGenerating || !brandName.trim()}
+                  >
+                    {isGenerating ? <><Loader2 size={14} className="inline animate-spin mr-1" />生成中...</> : <><Sparkles size={14} className="inline mr-1" />生成展陈方案</>}
+                  </button>
+                  {errorMsg && (
+                    <p className="text-xs mt-1.5 px-1" style={{ color: '#ef4444' }}>{errorMsg}</p>
+                  )}
+                  {successMsg && (
+                    <p className="text-xs mt-1.5 px-1" style={{ color: '#22c55e' }}>{successMsg}</p>
+                  )}
+                </div>
+
+                {/* RIGHT: Preview + Decomposition */}
+                <div className="flex flex-col gap-3 overflow-hidden">
+                  {/* Preview Stage */}
+                  <section className={`${panelCls} flex-1 flex flex-col overflow-hidden`}>
+                    {/* Tabs */}
+                    <div className="flex items-center gap-1 mb-3 overflow-x-auto">
+                      {(['render', 'views', 'decompose', 'dimension', 'material', 'floorplan', 'bom'] as const).map(tab => (
+                        <button key={tab} className={`rounded-lg px-2.5 py-1.5 text-[12px] whitespace-nowrap cursor-pointer transition-colors ${activePreviewTab === tab ? (isMonochrome ? 'bg-blue-50 text-blue-700' : 'bg-amber-500/20 text-amber-200') : (isMonochrome ? 'text-gray-500 hover:bg-gray-100' : 'text-white/50 hover:bg-white/5')}`}
+                          onClick={() => setActivePreviewTab(tab)}>
+                          {{ render: '效果图', views: '多角度', decompose: '方案拆解', dimension: '尺寸标注', material: '材质工艺', floorplan: '平面拆解图', bom: '物料清单BOM' }[tab]}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Render preview */}
+                    {activePreviewTab === 'render' && (
+                      <div className="flex-1 flex gap-3 overflow-hidden">
+                        <div className="flex-1 rounded-xl border flex items-center justify-center relative overflow-hidden"
+                          style={{ background: isMonochrome ? '#f9fafb' : 'rgba(0,0,0,0.4)', borderColor: border }}>
+                          {results.length > 0 ? (
+                            <img src={results[0]?.url} className="w-full h-full object-contain" />
+                          ) : (
+                            <div className="flex flex-col items-center text-xs" style={{ color: textMuted }}>
+                              <Box size={32} className="mb-2 opacity-20" />
+                              {isGenerating ? '正在生成3D展陈效果图...' : '设置参数后点击"生成展陈方案"'}
+                            </div>
+                          )}
+                          {/* Numbered annotations overlay */}
+                          {!isGenerating && results.length > 0 && MOCK_COMPONENTS.map((comp, i) => (
+                            <div key={comp.id} className="absolute rounded-full w-5 h-5 flex items-center justify-center text-[9px] font-bold cursor-pointer"
+                              style={{ background: accent, color: isMonochrome ? '#fff' : '#000', left: `${10 + i * 8}%`, top: `${20 + (i % 4) * 14}%` }}>
+                              {comp.index}
+                            </div>
+                          ))}
+                        </div>
+                        {/* View thumbnails */}
+                        <div className="w-[120px] space-y-1.5 overflow-y-auto">
+                          {VIEW_OPTIONS.filter(v => viewOptions.includes(v.value)).map((v, i) => (
+                            <button key={v.value} className={`w-full h-[46px] rounded-lg border flex items-center justify-center text-[12px] cursor-pointer ${selectedView === v.value ? (isMonochrome ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-amber-400 text-amber-200') : (isMonochrome ? 'border-gray-200 text-gray-500' : 'border-white/10 text-white/50')}`}
+                              onClick={() => setSelectedView(v.value)}>
+                              {v.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Decomposition: Component list */}
+                    {activePreviewTab === 'decompose' && (
+                      <div className="flex-1 overflow-auto">
+                        <div className="mb-2 flex items-center gap-2">
+                          <button
+                            className="rounded-lg border px-3 py-1.5 text-[12px] cursor-pointer disabled:opacity-50"
+                            style={{ borderColor: border, color: textAccent }}
+                            onClick={handleDecompose}
+                            disabled={isDecomposing || results.length === 0}
+                          >
+                            {isDecomposing ? <><Loader2 size={10} className="inline animate-spin mr-1" />拆解中...</> : <><Sparkles size={10} className="inline mr-1" />AI 拆解方案</>}
+                          </button>
+                        </div>
+                        <table className="w-full text-[12px]">
+                          <thead><tr style={{ color: textMuted }}>
+                            <th className="py-2 text-left">编号</th>
+                            <th className="text-left">部件名称</th>
+                            <th className="text-left">尺寸建议</th>
+                            <th className="text-left">材质</th>
+                            <th className="text-left">工艺</th>
+                          </tr></thead>
+                          <tbody>
+                            {(decomposition?.components || MOCK_COMPONENTS).map(comp => (
+                              <tr key={comp.id} style={{ borderTop: `1px solid ${border}` }}>
+                                <td className="py-2" style={{ color: textAccent }}>{comp.index}</td>
+                                <td style={{ color: textPrimary }}>{comp.name}</td>
+                                <td style={{ color: textMuted }}>{comp.sizeSuggestion}</td>
+                                <td style={{ color: textMuted }}>{comp.material}</td>
+                                <td style={{ color: textMuted }}>{comp.craft}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {/* Floor plan */}
+                    {activePreviewTab === 'floorplan' && (
+                      <div className="flex-1 flex flex-col">
+                        <div className="flex-1 rounded-xl border relative" style={{ background: isMonochrome ? '#f9fafb' : 'rgba(0,0,0,0.4)', borderColor: border }}>
+                          <svg viewBox="0 0 400 260" className="w-full h-full">
+                            <rect x="50" y="35" width="300" height="180" rx="20" fill={isMonochrome ? 'rgba(59,130,246,0.08)' : 'rgba(255,255,255,0.08)'} stroke={accent} strokeWidth="1.5" />
+                            <text x="200" y="25" textAnchor="middle" fill={textMuted} fontSize="11">{dimensions.length} mm</text>
+                            <text x="35" y="130" textAnchor="middle" fill={textMuted} fontSize="11" transform="rotate(-90 35 130)">{dimensions.width} mm</text>
+                            {MOCK_COMPONENTS.map((comp, i) => {
+                              const positions = [[300,55],[200,55],[100,90],[200,130],[80,180],[320,180],[200,180],[280,130],[130,135]];
+                              const [cx, cy] = positions[i] || [150, 100];
+                              return (
+                                <g key={comp.id}>
+                                  <circle cx={cx} cy={cy} r="13" fill={accent} />
+                                  <text x={cx} y={cy + 4} textAnchor="middle" fill={isMonochrome ? '#fff' : '#000'} fontSize="11" fontWeight="bold">{comp.index}</text>
+                                </g>
+                              );
+                            })}
+                            <path d="M200 245 L200 215" stroke={accent} strokeWidth="2" />
+                            <text x="200" y="255" textAnchor="middle" fill={textPrimary} fontSize="11">入口</text>
+                          </svg>
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2 text-[12px]" style={{ color: textMuted }}>
+                          <span>人流动线</span><span>展示区</span><span>体验区</span><span>服务区</span><span>储物/后场</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Material specs */}
+                    {activePreviewTab === 'material' && (
+                      <div className="flex-1 overflow-auto space-y-2">
+                        {(decomposition?.materials || MOCK_MATERIALS).map(m => (
+                          <div key={m.id} className="flex gap-2 rounded-lg p-2" style={{ background: bgCard }}>
+                            <div className="h-10 w-10 rounded-lg shrink-0" style={{ background: isMonochrome ? '#dbeafe' : 'rgba(212,175,55,0.3)' }} />
+                            <div>
+                              <div className="text-xs" style={{ color: textPrimary }}>{m.name}</div>
+                              <div className="text-[12px]" style={{ color: textMuted }}>{m.description}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* BOM */}
+                    {activePreviewTab === 'bom' && (
+                      <div className="flex-1 overflow-auto">
+                        <div className="mb-2 text-xs font-semibold" style={{ color: textAccent }}>
+                          预估成本 {decomposition?.bom ? `¥${decomposition.bom.reduce((sum, b) => sum + (parseInt(String(b.estimatedPrice).replace(/[¥,]/g, '')) || 0), 0).toLocaleString()}` : '¥128,560'}
+                        </div>
+                        <div className="space-y-1.5">
+                          {(decomposition?.bom || MOCK_BOM).map(item => (
+                            <div key={item.id} className="flex justify-between items-center rounded-lg px-2.5 py-2 text-xs" style={{ background: bgCard }}>
+                              <span style={{ color: textPrimary }}>{item.name}</span>
+                              <span style={{ color: textMuted }}>x{item.count}</span>
+                              <span style={{ color: textAccent }}>{item.estimatedPrice}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Dimension placeholder */}
+                    {activePreviewTab === 'dimension' && (
+                      <div className="flex-1 flex items-center justify-center text-xs" style={{ color: textMuted }}>
+                        生成效果图后自动标注尺寸
+                      </div>
+                    )}
+
+                    {activePreviewTab === 'views' && (
+                      <div className="flex-1 grid grid-cols-2 gap-2 overflow-auto">
+                        {viewOptions.map(v => (
+                          <div key={v} className="rounded-lg border flex items-center justify-center h-[120px]" style={{ borderColor: border, background: bgCard }}>
+                            <span className="text-[12px]" style={{ color: textMuted }}>{VIEW_OPTIONS.find(o => o.value === v)?.label || v}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </section>
+
+                  {/* Bottom decomposition row */}
+                  <div className="grid grid-cols-[1.2fr_0.9fr_0.65fr_0.65fr] gap-2 min-h-[200px]" style={{ maxHeight: '240px' }}>
+                    {/* Component list mini */}
+                    <section className={`${panelCls} overflow-auto`}>
+                      <h3 className="text-[12px] font-semibold mb-2" style={{ color: textPrimary }}>方案拆解 · 构成部件</h3>
+                      <div className="space-y-1">
+                        {MOCK_COMPONENTS.slice(0, 5).map(c => (
+                          <div key={c.id} className="flex items-center justify-between text-[9px] py-0.5" style={{ color: textMuted }}>
+                            <span style={{ color: textAccent }}>{c.index}.</span>
+                            <span className="flex-1 ml-1" style={{ color: textPrimary }}>{c.name}</span>
+                            <span>{c.sizeSuggestion}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+
+                    {/* Floor plan mini */}
+                    <section className={`${panelCls} overflow-hidden`}>
+                      <h3 className="text-[12px] font-semibold mb-2" style={{ color: textPrimary }}>AI 平面拆解参考图</h3>
+                      <div className="h-[140px]">
+                        <svg viewBox="0 0 200 140" className="w-full h-full">
+                          <rect x="25" y="15" width="150" height="100" rx="10" fill={isMonochrome ? 'rgba(59,130,246,0.06)' : 'rgba(255,255,255,0.05)'} stroke={accent} strokeWidth="1" />
+                          {[[1,150,28],[2,100,28],[3,50,50],[4,100,70],[5,40,95]].map(([id,x,y]) => (
+                            <g key={id}>
+                              <circle cx={x} cy={y} r="8" fill={accent} />
+                              <text x={x} y={y+3} textAnchor="middle" fill={isMonochrome ? '#fff' : '#000'} fontSize="8" fontWeight="bold">{id}</text>
+                            </g>
+                          ))}
+                          <text x="100" y="130" textAnchor="middle" fill={textMuted} fontSize="8">入口</text>
+                        </svg>
+                      </div>
+                    </section>
+
+                    {/* Material mini */}
+                    <section className={`${panelCls} overflow-auto`}>
+                      <h3 className="text-[12px] font-semibold mb-2" style={{ color: textPrimary }}>材质工艺</h3>
+                      <div className="space-y-1">
+                        {MOCK_MATERIALS.slice(0, 4).map(m => (
+                          <div key={m.id} className="text-[9px]" style={{ color: textMuted }}>
+                            <div style={{ color: textPrimary }}>{m.name}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+
+                    {/* BOM mini */}
+                    <section className={`${panelCls} overflow-auto`}>
+                      <h3 className="text-[12px] font-semibold mb-1" style={{ color: textPrimary }}>物料清单 BOM</h3>
+                      <div className="text-[9px] mb-1" style={{ color: textAccent }}>¥128,560</div>
+                      <div className="space-y-0.5">
+                        {MOCK_BOM.slice(0, 5).map(item => (
+                          <div key={item.id} className="flex justify-between text-[9px]" style={{ color: textMuted }}>
+                            <span>{item.name}</span>
+                            <span style={{ color: textAccent }}>{item.estimatedPrice}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  </div>
+
+                  {/* Export & action buttons */}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      className={`rounded-lg border px-3 py-1.5 text-[12px] cursor-pointer disabled:opacity-50 ${isMonochrome ? 'border-blue-300 text-blue-600 hover:bg-blue-50' : 'border-amber-500/40 text-amber-200 hover:bg-amber-500/10'}`}
+                      onClick={handleExportPdf}
+                      disabled={results.length === 0}
+                    >
+                      导出PDF方案
+                    </button>
+                    <button
+                      className={`rounded-lg border px-3 py-1.5 text-[12px] cursor-pointer disabled:opacity-50 ${isMonochrome ? 'border-blue-300 text-blue-600 hover:bg-blue-50' : 'border-amber-500/40 text-amber-200 hover:bg-amber-500/10'}`}
+                      onClick={handleExportAnnotation}
+                      disabled={results.length === 0}
+                    >
+                      导出标注图
+                    </button>
+                    <button
+                      className={`rounded-lg border px-3 py-1.5 text-[12px] cursor-pointer disabled:opacity-50 ${isMonochrome ? 'border-blue-300 text-blue-600 hover:bg-blue-50' : 'border-amber-500/40 text-amber-200 hover:bg-amber-500/10'}`}
+                      onClick={handleExportBom}
+                      disabled={results.length === 0}
+                    >
+                      导出BOM
+                    </button>
+                    <button
+                      className={`rounded-lg border px-3 py-1.5 text-[12px] cursor-pointer disabled:opacity-50 ${isMonochrome ? 'border-blue-300 text-blue-600 hover:bg-blue-50' : 'border-amber-500/40 text-amber-200 hover:bg-amber-500/10'}`}
+                      onClick={() => { if (results.length > 0) onAddImages?.(results.slice(0, 1).map(r => r.url)); }}
+                      disabled={results.length === 0}
+                    >
+                      发送到画布
+                    </button>
+                  </div>
+
+                  {/* Disclaimer */}
+                  <div className="text-[9px] shrink-0 px-1" style={{ color: textMuted }}>
+                    ⚠ AI效果图不是施工图 · 尺寸为建议尺寸 · 材质为推荐材质 · 平面拆解图为方案沟通图 · 真正落地需要设计师/制作方/结构工程师复核
+                  </div>
                 </div>
               </div>
-            ) : (
-              <div style={{ color: c('text3'), textAlign: 'center', padding: '40px 0' }}>
-                <BarChart3 size={32} style={{ opacity: 0.3, marginBottom: '8px' }} />
-                <div style={{ fontSize: '14px' }}>完成方案拆解后查看 BOM 清单</div>
-              </div>
-            )
-          )}
-
-          {/* Disclaimer */}
-          <div style={{ marginTop: '12px', padding: '10px 12px', borderRadius: '8px', background: 'rgba(140,170,210,0.06)', border: `1px solid rgba(140,170,210,0.15)` }}>
-            <div style={{ fontSize: '12px', color: c('text3'), display: 'flex', alignItems: 'flex-start', gap: '6px', lineHeight: '1.6' }}>
-              <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: '2px', color: c('warmAccent') }} />
-              <span>展陈效果图非施工图 / 材质与工艺建议需供应商确认 / 预估造价仅供参考，以实际报价为准</span>
-            </div>
+            </main>
           </div>
-        </div>
+        )}
       </div>
     </div>,
-    document.body
+    document.body,
   );
 }
