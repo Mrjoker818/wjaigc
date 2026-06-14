@@ -10627,8 +10627,8 @@ export function InfiniteCanvas({
           if (!ann) return null;
           const sx = ann.x * zoom + viewOffset.x;
           const sy = ann.y * zoom + viewOffset.y;
-          const panelLeft = sx + 16;
-          const panelTop = sy - 20;
+          const panelLeft = Math.max(16, (window.innerWidth - 280) / 2);
+          const panelTop = Math.max(60, (window.innerHeight - 260) / 2);
           return (
             <div
               className={`absolute z-[60] pointer-events-auto ${isMonochrome ? 'bg-white border border-gray-200' : 'bg-[#1a1a1a] border border-gold/30'} rounded-xl shadow-2xl`}
@@ -11050,6 +11050,22 @@ export function InfiniteCanvas({
                     }`}>
                       {ann.status === 'pending' ? '待执行' : ann.status === 'running' ? '执行中' : ann.status === 'done' ? '已完成' : '失败'}
                     </span>
+                    {ann.status === 'pending' && (
+                      <button
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setEditingAnnotationId(ann.id);
+                        }}
+                        className={`shrink-0 p-1.5 rounded z-10 relative ${isMonochrome ? 'text-gray-400 hover:text-blue-500 hover:bg-blue-50' : 'text-white/40 hover:text-gold hover:bg-gold/10'}`}
+                        title="编辑批注"
+                        style={{ pointerEvents: 'auto' }}
+                      >
+                        <Pencil size={12} />
+                      </button>
+                    )}
                     {ann.status === 'pending' && (
                       <button
                         onPointerDown={(e) => e.stopPropagation()}
