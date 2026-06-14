@@ -194,23 +194,29 @@ export default function LogoSkillPanel({
   const [copiedPrompt, setCopiedPrompt] = useState<string | null>(null);
 
   // ─── 初始化品牌项目数据 ───────────────────────────────────────
+  const brandProjectIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (brandProject) {
-      if (brandProject.brandName) setBrandName(brandProject.brandName);
-      if (brandProject.description) setBrief(brandProject.description);
-      if (brandProject.targetAudience) setAudience(brandProject.targetAudience);
-      if (brandProject.tone) setPreferredStyle(brandProject.tone);
-      const refParts: string[] = [];
-      if (brandProject.brandDna?.mainColors?.length) {
-        refParts.push(`主色: ${brandProject.brandDna.mainColors.join(', ')}`);
+      const projId = brandProject.brandName + '|' + (brandProject.description || '');
+      // 仅在项目ID变化时（切换项目/首次加载）才填充，避免覆盖用户手动修改
+      if (projId !== brandProjectIdRef.current) {
+        brandProjectIdRef.current = projId;
+        if (brandProject.brandName) setBrandName(brandProject.brandName);
+        if (brandProject.description) setBrief(brandProject.description);
+        if (brandProject.targetAudience) setAudience(brandProject.targetAudience);
+        if (brandProject.tone) setPreferredStyle(brandProject.tone);
+        const refParts: string[] = [];
+        if (brandProject.brandDna?.mainColors?.length) {
+          refParts.push(`主色: ${brandProject.brandDna.mainColors.join(', ')}`);
+        }
+        if (brandProject.brandDna?.secondaryColors?.length) {
+          refParts.push(`辅助色: ${brandProject.brandDna.secondaryColors.join(', ')}`);
+        }
+        if (brandProject.brandDna?.fontStyle) {
+          refParts.push(`字体: ${brandProject.brandDna.fontStyle}`);
+        }
+        if (refParts.length > 0) setReferenceStyle(refParts.join('; '));
       }
-      if (brandProject.brandDna?.secondaryColors?.length) {
-        refParts.push(`辅助色: ${brandProject.brandDna.secondaryColors.join(', ')}`);
-      }
-      if (brandProject.brandDna?.fontStyle) {
-        refParts.push(`字体: ${brandProject.brandDna.fontStyle}`);
-      }
-      if (refParts.length > 0) setReferenceStyle(refParts.join('; '));
     }
   }, [brandProject]);
 
