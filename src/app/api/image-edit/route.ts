@@ -825,10 +825,11 @@ async function submitImageTask(
                 model: modelId,
                 prompt: String(adjustedBody.prompt || ''),
                 imageBase64: (adjustedBody.image as string) || undefined,
+                imageUrls: (adjustedBody.image_urls as string[]) || undefined,
                 size: adjustedBody.size as string | undefined,
                 originalError: fallbackErrorText,
                 requestIdPrefix: 'image-edit',
-                force: true,
+                skipChannelCheck: true,
               });
               if (chatImageUrls && chatImageUrls.length > 0) {
                 console.log('[submitImageTask] /chat/completions fallback succeeded, got', chatImageUrls.length, 'images');
@@ -851,10 +852,11 @@ async function submitImageTask(
               model: modelId,
               prompt: String(adjustedBody.prompt || ''),
               imageBase64: (adjustedBody.image as string) || undefined,
+              imageUrls: (adjustedBody.image_urls as string[]) || undefined,
               size: adjustedBody.size as string | undefined,
               originalError: 'images/generations timeout',
               requestIdPrefix: 'image-edit',
-              force: true,
+              skipChannelCheck: true,
             });
             if (chatImageUrls && chatImageUrls.length > 0) {
               console.log('[submitImageTask] /chat/completions fallback succeeded (after generations timeout), got', chatImageUrls.length, 'images');
@@ -899,10 +901,11 @@ async function submitImageTask(
             model: modelId,
             prompt: String(adjustedBody.prompt || ''),
             imageBase64: (adjustedBody.image as string) || undefined,
+            imageUrls: (adjustedBody.image_urls as string[]) || undefined,
             size: adjustedBody.size as string | undefined,
             originalError: `${errorMsg} ${errorText}`,
             requestIdPrefix: 'image-edit',
-            force: true,
+            skipChannelCheck: true,
           });
           if (chatImageUrls && chatImageUrls.length > 0) {
             console.log('[submitImageTask] /chat/completions fallback succeeded from 5xx handler');

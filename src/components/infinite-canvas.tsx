@@ -723,15 +723,22 @@ export function InfiniteCanvas({
   }, [onImagesChange]);
 
   // ★ 自动回填 originalWidth/originalHeight：当图片缺少真实尺寸时，异步加载并补全
+  const sizeFillAttemptedRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     const imagesNeedingSize = images.filter(img => !img.originalWidth || !img.originalHeight);
-    if (imagesNeedingSize.length === 0) return;
+    // 跳过已尝试过但失败的图片，避免无限重试
+    const untried = imagesNeedingSize.filter(img => !sizeFillAttemptedRef.current.has(img.id));
+    if (untried.length === 0) return;
+
+    // 标记这些图片为已尝试
+    for (const img of untried) {
+      sizeFillAttemptedRef.current.add(img.id);
+    }
 
     let cancelled = false;
-    let filledCount = 0;
     const updates = new Map<string, { originalWidth: number; originalHeight: number }>();
 
-    Promise.all(imagesNeedingSize.map(img => {
+    Promise.all(untried.map(img => {
       return new Promise<void>((resolve) => {
         const imageEl = new window.Image();
         imageEl.onload = () => {
@@ -756,7 +763,6 @@ export function InfiniteCanvas({
         return img;
       });
       if (changed) {
-        filledCount = updates.size;
         onImagesChange(updated);
       }
     });
@@ -1754,9 +1760,11 @@ export function InfiniteCanvas({
         const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
         if (tag === 'input' || tag === 'textarea' || (e.target as HTMLElement)?.isContentEditable) return;
         if (selectedIds.size > 0 && editMode === 'none') {
-          onImagesChange(images.filter(img => !selectedIds.has(img.id)));
+          const deletingIds = selectedIds;
+          onImagesChange(images.filter(img => !deletingIds.has(img.id)));
           setSelectedIds(new Set());
           selectImage(null);
+          if (editImageId && deletingIds.has(editImageId)) { setEditImageId(null); }
         }
       }
       // Track Alt key for reverse drawing in erase/mask modes
@@ -3445,7 +3453,9 @@ export function InfiniteCanvas({
       // 将 data: URL 参考图先上传到服务器，避免请求体过大 (base64 图片会触发 413 Request Entity Too Large)
       const rawRefUrls = group.refImages.map(r => r.url);
       const referenceImages: string[] = [];
-      for (const url of rawRefUrls) {
+      const succeededIndices: number[] = []; // 跟踪成功上传的参考图索引
+      for (let idx = 0; idx < rawRefUrls.length; idx++) {
+        const url = rawRefUrls[idx];
         if (url.startsWith('data:')) {
           try {
             const saveRes = await fetch('/api/save-image', {
@@ -3456,6 +3466,7 @@ export function InfiniteCanvas({
             const saveData = await saveRes.json();
             if (saveData.success && saveData.url) {
               referenceImages.push(saveData.url);
+              succeededIndices.push(idx);
             } else {
               console.warn('[handleGroupGenerate] Failed to save data URL, skipping:', saveData.error);
             }
@@ -3464,6 +3475,7 @@ export function InfiniteCanvas({
           }
         } else {
           referenceImages.push(url);
+          succeededIndices.push(idx);
         }
       }
 
@@ -3496,14 +3508,16 @@ export function InfiniteCanvas({
           referenceImages,
           referenceMode: group.type === 'fusion' ? 'fusion' : 'reference',
           ...(calculatedStrength != null && calculatedStrength > 0 ? { strength: calculatedStrength } : {}),
-          ...(groupRefMetaRef.current.referenceDescriptions?.some(d => d.trim()) ? { referenceDescriptions: groupRefMetaRef.current.referenceDescriptions } : {}),
-          ...(groupRefMetaRef.current.referenceCategories ? { referenceCategories: groupRefMetaRef.current.referenceCategories } : {}),
+          ...(groupRefMetaRef.current.referenceDescriptions?.some(d => d.trim()) ? { referenceDescriptions: succeededIndices.map(i => groupRefMetaRef.current.referenceDescriptions?.[i] || '').filter(d => d.trim()) } : {}),
+          ...(groupRefMetaRef.current.referenceCategories ? { referenceCategories: Object.fromEntries(succeededIndices.map((origIdx, newIdx) => [String(newIdx), groupRefMetaRef.current.referenceCategories?.[String(origIdx)] || []]).filter(([,v]) => v.length > 0)) } : {}),
           ...(groupRefMetaRef.current.referenceStrengths?.length ? { referenceStrengths: groupRefMetaRef.current.referenceStrengths } : {}),
         }),
         signal: genController.signal,
       });
       } finally {
         clearTimeout(genTimeout);
+        // 清理参考图元数据，避免污染下一次生成
+        groupRefMetaRef.current = {};
       }
 
       // 安全解析响应：优先尝试 JSON，回退到纯文本
@@ -3589,7 +3603,8 @@ export function InfiniteCanvas({
         }));
       } else if (data.taskIds) {
         // 轮询模式 — 与生成面板一致的动态轮询策略
-        const taskId = data.taskIds[0];
+        // ★ 支持多 taskId 并行轮询（outputCount>1 时 API 可能返回多个 taskIds）
+        const allTaskIds = data.taskIds as string[];
         const estimatedTime = data.estimatedTime || 30;
         // 单任务最大10分钟，兼容需要2分钟以上的慢速API
         const maxPollTime = Math.min(600, Math.max(180, estimatedTime * 4 + 120)) * 1000;
@@ -3597,17 +3612,27 @@ export function InfiniteCanvas({
         let pollCount = 0;
 
         const pollWithBackoff = async () => {
+          // 收集所有已完成任务的结果
+          const completedResults = new Map<string, string[]>();
+          const failedTasks = new Set<string>();
+
           while (Date.now() - startTime < maxPollTime) {
+            // 检查是否所有任务都已完成或失败
+            const pendingTaskIds = allTaskIds.filter(tid => !completedResults.has(tid) && !failedTasks.has(tid));
+            if (pendingTaskIds.length === 0) break;
+
             pollCount++;
             // 动态间隔：快速初始轮询，逐步增长
             const delay = pollCount <= 5 ? 300 : pollCount <= 15 ? 600 : pollCount <= 30 ? 1200 : 2000;
+
             // ★ SSE加速：同时等待定时器和SSE完成事件
+            const primaryTaskId = pendingTaskIds[0];
             await Promise.race([
               new Promise(r => setTimeout(r, delay)),
               new Promise(resolve => {
                 if (!taskEventsClient.isConnected()) { resolve(undefined); return; }
                 const unsub = taskEventsClient.onTaskEvent(event => {
-                  if (event.taskId === taskId && ['completed', 'failed', 'cancelled'].includes(event.type)) {
+                  if (pendingTaskIds.includes(event.taskId) && ['completed', 'failed', 'cancelled'].includes(event.type)) {
                     unsub();
                     resolve(undefined);
                   }
@@ -3616,113 +3641,113 @@ export function InfiniteCanvas({
               })
             ]);
 
-            try {
-              const pollRes = await fetch('/api/poll-task', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ taskId, model, providerId, quickPoll: true }),
-              });
-              if (!pollRes.ok) continue;
-              const pollData = await pollRes.json();
+            // ★ 并行轮询所有未完成的任务
+            const pollPromises = pendingTaskIds.map(async (tid) => {
+              try {
+                const pollRes = await fetch('/api/poll-task', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ taskId: tid, model, providerId, quickPoll: true }),
+                });
+                if (!pollRes.ok) return;
+                return { taskId: tid, data: await pollRes.json() };
+              } catch { return; }
+            });
+            const pollResults = (await Promise.all(pollPromises)).filter(Boolean) as Array<{ taskId: string; data: Record<string, unknown> }>;
 
-              // 更新组内进度
-              if (pollData.progress !== undefined) {
-                setGenGroups(prev => prev.map(g => {
-                  if (g.id !== group.id) return g;
-                  return { ...g, resultPlaceholder: { ...g.resultPlaceholder, progress: Math.max(pollData.progress, 5) } };
-                }));
-              }
+            // 更新进度
+            const maxProgress = pollResults.reduce((max, r) => {
+              const p = typeof r.data.progress === 'number' ? r.data.progress : 0;
+              return Math.max(max, p);
+            }, 0);
+            if (maxProgress > 0) {
+              setGenGroups(prev => prev.map(g => {
+                if (g.id !== group.id) return g;
+                return { ...g, resultPlaceholder: { ...g.resultPlaceholder, progress: Math.max(maxProgress, 5) } };
+              }));
+            }
 
-              if (['completed', 'succeeded', 'success', 'done'].includes(pollData.status)) {
-                // 生成完成
+            // 处理已完成的任务
+            for (const { taskId: tid, data: pollData } of pollResults) {
+              if (['completed', 'succeeded', 'success', 'done'].includes(pollData.status as string)) {
                 const resultUrls: string[] = [];
                 if (pollData.results && Array.isArray(pollData.results) && pollData.results.length > 0) {
-                  resultUrls.push(...pollData.results);
+                  resultUrls.push(...(pollData.results as string[]));
                 } else if (pollData.imageUrl) {
-                  resultUrls.push(pollData.imageUrl);
+                  resultUrls.push(pollData.imageUrl as string);
                 }
                 if (resultUrls.length > 0) {
-                  const savedUrls: string[] = [];
-                  for (const url of resultUrls) {
-                    try {
-                      const saveRes = await fetch('/api/save-image', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ imageUrl: url }),
-                      });
-                      const saveData = await saveRes.json();
-                      savedUrls.push(saveData.url || url);
-                    } catch {
-                      savedUrls.push(url);
-                    }
-                  }
-                  const srcImgs = group.sourceImageIds.map(id => imagesRef.current.find(i => i.id === id)).filter(Boolean) as CanvasImage[];
-                  const srcRightEdge = srcImgs.length > 0 ? Math.max(...srcImgs.map(img => img.x + img.width)) : 0;
-                  const srcCenterY = srcImgs.length > 0 ? srcImgs.reduce((s, img) => s + img.y + img.height / 2, 0) / srcImgs.length : 0;
-                  const resultFrameRight = srcRightEdge + 80 + Math.max(phWidth, 420);
-                  const actualSize = toolbar.size ? toolbar.size.replace(/×/g, 'x').split('x').map(Number) : [phWidth, phHeight];
-                  const actualW = actualSize[0] || phWidth;
-                  const actualH = actualSize[1] || phHeight;
-                  const resultImages = savedUrls.map((url: string, i: number) => ({
-                    id: `grp-result-${Date.now()}-${i}`,
-                    url,
-                    x: resultFrameRight + 20 + i * (phWidth + 20),
-                    y: srcCenterY - phHeight / 2,
-                    width: phWidth, height: phHeight,
-                    originalWidth: actualW,
-                    originalHeight: actualH,
-                    prompt: toolbar.prompt,
-                    aspectRatio: toolbar.aspectRatio,
-                    modelName: pollData.modelName || model,
-                    apiProvider: pollData.providerName,
-                  }));
-                  onImagesChange([...imagesRef.current, ...resultImages]);
-                  setGenGroups(prev => prev.map(g => {
-                    if (g.id !== group.id) return g;
-                    return {
-                      ...g,
-                      status: 'idle' as const,
-                      resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0, resultUrl: undefined, resultImageIds: [], errorMsg: undefined },
-                      resultImageIds: [],
-                    };
-                  }));
+                  completedResults.set(tid, resultUrls);
                 } else {
-                  const errMsg = translateErrorFrontend(pollData.error || '生成完成但未返回图片，请重试');
-                  setGenGroups(prev => prev.map(g => {
-                    if (g.id !== group.id) return g;
-                    return { ...g, status: 'idle' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0, errorMsg: errMsg } };
-                  }));
+                  // 完成但没有图片 → 失败
+                  failedTasks.add(tid);
                 }
-                return; // 完成，退出轮询
+              } else if (pollData.status === 'failed' || (pollData.status === 'error' && !pollData.retryable)) {
+                failedTasks.add(tid);
               }
-
-              // 不可重试错误：立即失败
-              if (pollData.status === 'failed' || (pollData.status === 'error' && !pollData.retryable)) {
-                const errMsg = translateErrorFrontend(pollData.error || '生成失败，请检查模型和API配置');
-                setGenGroups(prev => prev.map(g => {
-                  if (g.id !== group.id) return g;
-                  return { ...g, status: 'idle' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0, errorMsg: errMsg } };
-                }));
-                return;
-              }
-
-              // 可重试错误（error/timeout + retryable）继续轮询
-              if (pollData.status === 'error' || pollData.status === 'timeout') {
-                setGenGroups(prev => prev.map(g => {
-                  if (g.id !== group.id) return g;
-                  return { ...g, resultPlaceholder: { ...g.resultPlaceholder, progress: Math.min(90, 5 + pollCount * 2) } };
-                }));
-                // continue polling
-              }
-            } catch {
-              // 轮询网络错误，继续
+              // 可重试错误/processing → 继续轮询
             }
           }
-          // 超时
-          setGenGroups(prev => prev.map(g => {
-            if (g.id !== group.id) return g;
-            return { ...g, status: 'idle' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0, errorMsg: '生成超时，请重试' } };
-          }));
+
+          // ★ 收集所有结果图片
+          const allResultUrls: string[] = [];
+          for (const urls of completedResults.values()) {
+            allResultUrls.push(...urls);
+          }
+
+          if (allResultUrls.length > 0) {
+            const savedUrls: string[] = [];
+            for (const url of allResultUrls) {
+              try {
+                const saveRes = await fetch('/api/save-image', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ imageUrl: url }),
+                });
+                const saveData = await saveRes.json();
+                savedUrls.push(saveData.url || url);
+              } catch {
+                savedUrls.push(url);
+              }
+            }
+            const srcImgs = group.sourceImageIds.map(id => imagesRef.current.find(i => i.id === id)).filter(Boolean) as CanvasImage[];
+            const srcRightEdge = srcImgs.length > 0 ? Math.max(...srcImgs.map(img => img.x + img.width)) : 0;
+            const srcCenterY = srcImgs.length > 0 ? srcImgs.reduce((s, img) => s + img.y + img.height / 2, 0) / srcImgs.length : 0;
+            const resultFrameRight = srcRightEdge + 80 + Math.max(phWidth, 420);
+            const actualSize = toolbar.size ? toolbar.size.replace(/×/g, 'x').split('x').map(Number) : [phWidth, phHeight];
+            const actualW = actualSize[0] || phWidth;
+            const actualH = actualSize[1] || phHeight;
+            const resultImages = savedUrls.map((url: string, i: number) => ({
+              id: `grp-result-${Date.now()}-${i}`,
+              url,
+              x: resultFrameRight + 20 + i * (phWidth + 20),
+              y: srcCenterY - phHeight / 2,
+              width: phWidth, height: phHeight,
+              originalWidth: actualW,
+              originalHeight: actualH,
+              prompt: toolbar.prompt,
+              aspectRatio: toolbar.aspectRatio,
+              modelName: model,
+              apiProvider: providerId ? providerId.split('::')[0] : undefined,
+            }));
+            onImagesChange([...imagesRef.current, ...resultImages]);
+            setGenGroups(prev => prev.map(g => {
+              if (g.id !== group.id) return g;
+              return {
+                ...g,
+                status: 'idle' as const,
+                resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0, resultUrl: undefined, resultImageIds: [], errorMsg: undefined },
+                resultImageIds: [],
+              };
+            }));
+          } else {
+            // 超时或全部失败
+            const errMsg = failedTasks.size > 0 ? '生成失败，请检查模型和API配置' : '生成超时，请重试';
+            setGenGroups(prev => prev.map(g => {
+              if (g.id !== group.id) return g;
+              return { ...g, status: 'idle' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0, errorMsg: errMsg } };
+            }));
+          }
         };
         pollWithBackoff();
       }
@@ -7138,7 +7163,7 @@ export function InfiniteCanvas({
       { label: '提取封面', action: () => { handleVideoTool('extract-cover', selectedImageData); } },
       { label: '视频压缩', action: () => { handleVideoTool('compress', selectedImageData); } },
     ] : []),
-    { label: '删除', shortcut: 'Delete', action: () => { onImagesChange(images.filter(i => !selectedIds.has(i.id))); setSelectedIds(new Set()); selectImage(null); } },
+    { label: '删除', shortcut: 'Delete', action: () => { const deletingIds = selectedIds; onImagesChange(images.filter(i => !deletingIds.has(i.id))); setSelectedIds(new Set()); selectImage(null); if (editImageId && deletingIds.has(editImageId)) { setEditImageId(null); setEditMode('none'); } } },
     { label: '发送参考图', action: () => { const img = selectedImageData; if (img) onGenerateVariation(img); } },
     { label: '提取关键词', action: () => { const img = selectedImageData; if (img) onExtractKeywords(img); } },
     { label: '语言修图', action: () => { const img = selectedImageData; if (img) onEditImage?.(img); else onEditImage?.(null); } },

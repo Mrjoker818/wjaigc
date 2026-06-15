@@ -175,6 +175,10 @@ export class UserManager {
               if (img.url && img.url.startsWith('/uploads/') && !img.url.startsWith('/api/')) {
                 img.url = `/api/serve-upload${img.url}`;
               }
+              // blob:/data: URL 是临时的，无法跨会话使用，标记为过期
+              if (img.url && (img.url.startsWith('blob:') || img.url.startsWith('data:'))) {
+                img.url = '';
+              }
               // 回填：历史数据 modelName 为空但 model 有值时，用 model 补充
               if ((!img.modelName || img.modelName === '') && img.model) {
                 img.modelName = img.model;

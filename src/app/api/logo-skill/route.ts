@@ -14,7 +14,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, findProviderForFeature, findProviderById } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
-import { resolveCompatProfile, adjustRequestForProfile, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
+import { resolveCompatProfile, adjustRequestForProfile, tryChatCompletionsImageFallback, isChannelUnavailableError, persistResultImage } from '@/lib/api-compatibility';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import { adaptBrandProjectToSanbaoInput, buildSanbaoInputFromUserInput } from '@/modules/brand-factory/logo-generator-core/sanbaoInputAdapter';
 import { buildDirectionSystemPrompt, buildDirectionUserMessage, parseDirectionResponse } from '@/modules/brand-factory/logo-generator-core/sanbaoPromptParser';
@@ -170,6 +170,7 @@ async function handleGenerateImage(body: Record<string, unknown>) {
         'Authorization': `Bearer ${provider.apiKey}`,
       },
       body: JSON.stringify(reqBody),
+      signal: AbortSignal.timeout(120000),
     });
 
     if (!response.ok) {
@@ -187,11 +188,12 @@ async function handleGenerateImage(body: Record<string, unknown>) {
             size,
             originalError: errText,
             requestIdPrefix: 'logo-skill',
-            force: true,
+            skipChannelCheck: true,
           });
           if (chatImageUrls && chatImageUrls.length > 0) {
             console.log('[logo-skill] /chat/completions fallback succeeded, got', chatImageUrls.length, 'images');
-            return NextResponse.json({ success: true, imageUrls: chatImageUrls, imageModel: model });
+            const persistedUrls = await Promise.all(chatImageUrls.map(persistResultImage));
+            return NextResponse.json({ success: true, imageUrls: persistedUrls, imageModel: model });
           }
         } catch (chatErr) {
           console.warn('[logo-skill] /chat/completions fallback error:', chatErr);
@@ -227,6 +229,29 @@ async function handleGenerateImage(body: Record<string, unknown>) {
       imageModel: model,
     });
   } catch (err: unknown) {
+    const isTimeout = err instanceof Error && (err.name === 'AbortError' || /timeout|aborted/i.test(err.message));
+    if (isTimeout) {
+      console.info('[logo-skill] Timed out, trying /chat/completions fallback...');
+      try {
+        const chatImageUrls = await tryChatCompletionsImageFallback({
+          baseUrl,
+          apiKey: provider.apiKey,
+          model,
+          prompt,
+          size,
+          originalError: 'timeout',
+          requestIdPrefix: 'logo-skill-timeout',
+          skipChannelCheck: true,
+        });
+        if (chatImageUrls && chatImageUrls.length > 0) {
+          console.log('[logo-skill] /chat/completions fallback succeeded after timeout, got', chatImageUrls.length, 'images');
+          const persistedUrls = await Promise.all(chatImageUrls.map(persistResultImage));
+          return NextResponse.json({ success: true, imageUrls: persistedUrls, imageModel: model });
+        }
+      } catch (chatErr) {
+        console.warn('[logo-skill] /chat/completions timeout fallback error:', chatErr);
+      }
+    }
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: `图像生成异常: ${message}` }, { status: 500 });
   }

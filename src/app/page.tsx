@@ -625,7 +625,10 @@ function CanvasApp() {
             })),
           };
           const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
-          navigator.sendBeacon('/api/user-data/sync', blob);
+          // sendBeacon 限制约 64KB，超出则跳过（依赖定期同步兜底）
+          if (blob.size <= 65536) {
+            navigator.sendBeacon('/api/user-data/sync', blob);
+          }
         }
       } catch { /* best effort */ }
     };
@@ -1981,8 +1984,10 @@ function CanvasApp() {
       ));
 
       // 渐进式轮询视频任务（与图片生成一致，SSE加速 + 渐进间隔）
+      const videoPollStartTime = Date.now();
+      const VIDEO_MAX_POLL_TIME = 10 * 60 * 1000; // 10分钟绝对超时
       const pollVideoResult = async (attempt = 0): Promise<void> => {
-        if (attempt > 200) { // 最多200次轮询
+        if (attempt > 200 || Date.now() - videoPollStartTime > VIDEO_MAX_POLL_TIME) { // 最多200次轮询或10分钟
           setImages(prev => prev.filter(img => img.id !== phId));
           toast.error('视频生成超时', { description: '已超过最大等待时间', className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
           setActiveGenerationCount(prev => Math.max(0, prev - 1));
@@ -2027,7 +2032,7 @@ function CanvasApp() {
           const pollRes = await fetch('/api/poll-task', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ taskId, model: params.model }),
+            body: JSON.stringify({ taskId, model: params.model, providerId: params.providerId }),
           });
           const pollData = await pollRes.json();
 

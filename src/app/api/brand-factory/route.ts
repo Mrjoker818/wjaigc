@@ -14,7 +14,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, findProviderForFeature, findProviderById } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { optionalApiAuth } from '@/lib/api-auth';
-import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, buildPollUrl, extractImageUrl, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
+import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, buildPollUrl, extractImageUrl, tryChatCompletionsImageFallback, isChannelUnavailableError, persistResultImage } from '@/lib/api-compatibility';
 import type { ApiCompatProfile } from '@/lib/api-compatibility';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import { dbGetUserData, dbSetUserData } from '@/lib/db-storage';
@@ -351,6 +351,7 @@ async function generateImage(
         'Authorization': `Bearer ${provider.apiKey}`,
       },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(120000),
     });
 
     if (!response.ok) {
@@ -368,11 +369,12 @@ async function generateImage(
             size: rawBody.size as string | undefined,
             originalError: errText,
             requestIdPrefix: 'brand-factory',
-            force: true,
+            skipChannelCheck: true,
           });
           if (chatImageUrls && chatImageUrls.length > 0) {
             console.log('[brand-factory] /chat/completions fallback succeeded, got', chatImageUrls.length, 'images');
-            return { success: true, imageUrl: chatImageUrls[0], imageUrls: chatImageUrls };
+            const persistedUrls = await Promise.all(chatImageUrls.map(persistResultImage));
+            return { success: true, imageUrl: persistedUrls[0], imageUrls: persistedUrls };
           }
         } catch (chatErr) {
           console.warn('[brand-factory] /chat/completions fallback error:', chatErr);
@@ -430,6 +432,29 @@ async function generateImage(
     console.warn(`[brand-factory] generateImage: 所有提取方式均未找到图片URL, data=${JSON.stringify(data).substring(0, 500)}`);
     return { success: false, error: '图像生成返回格式异常' };
   } catch (err: unknown) {
+    const isTimeout = err instanceof Error && (err.name === 'AbortError' || /timeout|aborted/i.test(err.message));
+    if (isTimeout) {
+      console.info('[brand-factory] Timed out, trying /chat/completions fallback...');
+      try {
+        const chatImageUrls = await tryChatCompletionsImageFallback({
+          baseUrl,
+          apiKey: provider.apiKey,
+          model,
+          prompt,
+          size: options?.size,
+          originalError: 'timeout',
+          requestIdPrefix: 'brand-factory-timeout',
+          skipChannelCheck: true,
+        });
+        if (chatImageUrls && chatImageUrls.length > 0) {
+          console.log('[brand-factory] /chat/completions fallback succeeded after timeout, got', chatImageUrls.length, 'images');
+          const persistedUrls = await Promise.all(chatImageUrls.map(persistResultImage));
+          return { success: true, imageUrl: persistedUrls[0], imageUrls: persistedUrls };
+        }
+      } catch (chatErr) {
+        console.warn('[brand-factory] /chat/completions timeout fallback error:', chatErr);
+      }
+    }
     const message = err instanceof Error ? err.message : String(err);
     return { success: false, error: `图像生成异常: ${message}` };
   }

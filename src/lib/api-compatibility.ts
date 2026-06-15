@@ -387,8 +387,10 @@ export function buildGeminiChatImageRequest(
   }
 
   // Also handle the single `image` field (for img2img via edits)
+  // B-13 fix: always include `image` even when imageUrls exists, since they serve different purposes
+  // (image = source/edit image, imageUrls = reference images)
   const singleImage = requestBody.image as string | undefined;
-  if (singleImage && !imageUrls?.length) {
+  if (singleImage) {
     userContent.push({
       type: 'image_url',
       image_url: { url: singleImage },
@@ -482,8 +484,13 @@ export function parseGeminiChatImageResponse(
         }
 
         // Some providers return the raw base64 in content
+        // Be more careful: require content to be mostly non-text (no common words/punctuation)
         if (!base64Match && content.length > 1000 && /^[A-Za-z0-9+/=\s]+$/.test(content.substring(0, 100))) {
-          imageUrls.push(`data:image/png;base64,${content.replace(/\s/g, '')}`);
+          // Additional check: base64 strings shouldn't contain common English words
+          const sample = content.substring(0, 200);
+          if (!/\b(the|and|for|this|that|with|from|have|been|will|would|could|should)\b/i.test(sample)) {
+            imageUrls.push(`data:image/png;base64,${content.replace(/\s/g, '')}`);
+          }
         }
       }
 
@@ -551,12 +558,14 @@ export async function tryChatCompletionsImageFallback(params: {
   size?: string;          // e.g., "1024x1024"
   originalError: string;  // the error message that triggered this fallback
   requestIdPrefix?: string;
-  force?: boolean;        // if true, skip channel error check and always attempt fallback
+  skipChannelCheck?: boolean;  // if true, skip channel error check and always attempt fallback (except 401/403)
+  force?: boolean;            // deprecated alias for skipChannelCheck
 }): Promise<string[] | null> {
-  const { baseUrl, apiKey, model, prompt, imageBase64, imageUrls, size, originalError, requestIdPrefix = 'chat-img-fallback', force = false } = params;
+  const { baseUrl, apiKey, model, prompt, imageBase64, imageUrls, size, originalError, requestIdPrefix = 'chat-img-fallback', skipChannelCheck = false, force = false } = params;
+  const shouldSkipChannelCheck = skipChannelCheck || force;
 
   // Skip fallback only for clear auth/validation errors (not timeouts or channel errors)
-  if (!force) {
+  if (!shouldSkipChannelCheck) {
     const isChannelOrTimeoutError = /failover|渠道|channel|no available|unavailable|timeout|timed out|abort|超时/i.test(originalError);
     const isAuthError = /401|403|invalid api key|unauthorized|authentication/i.test(originalError);
     if (!isChannelOrTimeoutError || isAuthError) {
@@ -589,7 +598,7 @@ export async function tryChatCompletionsImageFallback(params: {
         'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify(chatRequest),
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.timeout(120_000),
     });
 
     if (!chatResponse.ok) {
@@ -615,12 +624,62 @@ export async function tryChatCompletionsImageFallback(params: {
 }
 
 /**
+ * Persist a result image URL to the local server filesystem.
+ * Handles data: URLs, HTTP URLs, and already-persisted local paths.
+ * Returns the persisted local URL or the original URL if persistence fails.
+ */
+export async function persistResultImage(imageUrl: string): Promise<string> {
+  try {
+    if (imageUrl.startsWith('/api/serve-upload/') || imageUrl.startsWith('/uploads/')) {
+      return imageUrl;
+    }
+    const internalPort = process.env.DEPLOY_RUN_PORT || '5000';
+    const saveUrl = `http://localhost:${internalPort}/api/save-image`;
+
+    if (imageUrl.startsWith('data:')) {
+      const resp = await fetch(saveUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.url) return data.url;
+      }
+      return imageUrl;
+    }
+    if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+      const imgResp = await fetch(imageUrl, { signal: AbortSignal.timeout(30000) });
+      if (imgResp.ok) {
+        const contentType = imgResp.headers.get('content-type') || 'image/png';
+        const buffer = Buffer.from(await imgResp.arrayBuffer());
+        const base64 = `data:${contentType};base64,${buffer.toString('base64')}`;
+        const resp = await fetch(saveUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageUrl: base64 }),
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.url) return data.url;
+        }
+      }
+      return imageUrl;
+    }
+    return imageUrl;
+  } catch (err) {
+    console.warn('[persistResultImage] Failed to persist result image:', err);
+    return imageUrl;
+  }
+}
+
+/**
  * Check if an API error indicates a channel/routing issue that should trigger
  * fallback to /chat/completions.
  */
 export function isChannelUnavailableError(error: string | unknown): boolean {
   const msg = typeof error === 'string' ? error : error instanceof Error ? error.message : String(error);
-  return /failover|渠道|channel|no available|unavailable|get_channel_failed/i.test(msg);
+  return /failover|渠道|channel|no available|unavailable|get_channel_failed|model_not_found|not configured|bad_response_status|暂不可用|不可用|timeout|timed out|abort|超时/i.test(msg);
 }
 
 /**

@@ -698,7 +698,7 @@ async function submitRefineToApi(
               size: rawBody.size as string | undefined,
               originalError: 'images/generations timeout',
               requestIdPrefix: 'refine-engine',
-              force: true,
+              skipChannelCheck: true,
             });
             if (chatImageUrls && chatImageUrls.length > 0) {
               console.log(`[refine-engine] /chat/completions fallback succeeded (after generations timeout), got ${chatImageUrls.length} images`);
@@ -739,7 +739,7 @@ async function submitRefineToApi(
               size: rawBody.size as string | undefined,
               originalError: fallbackErrText,
               requestIdPrefix: 'refine-engine',
-              force: true,
+              skipChannelCheck: true,
             });
             if (chatImageUrls && chatImageUrls.length > 0) {
               console.log(`[refine-engine] /chat/completions fallback succeeded, got ${chatImageUrls.length} images`);

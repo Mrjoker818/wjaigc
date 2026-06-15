@@ -511,13 +511,15 @@ export function GenerationPanel(
     };
 
     // 监听自定义生成事件
+    const handleGenerateRef = useRef(handleGenerate);
+    handleGenerateRef.current = handleGenerate;
     useEffect(() => {
         const handleTriggerGenerate = () => {
-            handleGenerate();
+            handleGenerateRef.current();
         };
         document.addEventListener('trigger-generate', handleTriggerGenerate);
         return () => document.removeEventListener('trigger-generate', handleTriggerGenerate);
-    }, [prompt, selectedTags, aspectRatio, quality, model, productCategory, outputCount]);
+    }, []);
 
     // 初始化万能API管理器
     useEffect(() => {

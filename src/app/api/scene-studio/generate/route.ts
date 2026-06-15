@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
     const modelName = model || (provider.selectedModels && provider.selectedModels.length > 0 ? provider.selectedModels[0] : 'dall-e-3');
 
     // Check for gemini-image profile — use chat/completions endpoint
-    const { resolveProfileForModel, buildGeminiChatImageRequest, parseGeminiChatImageResponse, adjustRequestForProfile, parseResponseForProfile, tryChatCompletionsImageFallback, isChannelUnavailableError } = await import('@/lib/api-compatibility');
+    const { resolveProfileForModel, buildGeminiChatImageRequest, parseGeminiChatImageResponse, adjustRequestForProfile, parseResponseForProfile, tryChatCompletionsImageFallback, isChannelUnavailableError, persistResultImage } = await import('@/lib/api-compatibility');
     const profile = resolveProfileForModel(modelName, provider);
 
     // Calculate size based on aspect ratio
@@ -177,14 +177,26 @@ export async function POST(request: NextRequest) {
             model: modelName,
             prompt: enhancedPrompt,
             imageBase64: hasImage ? screenshotData : undefined,
+            imageUrls: hasImage ? [screenshotData] : undefined,
             size,
             originalError: 'timeout',
             requestIdPrefix: 'scene-studio',
-            force: true,
+            skipChannelCheck: true,
           });
           if (chatImageUrls && chatImageUrls.length > 0) {
             console.log('[SceneStudio] /chat/completions fallback succeeded (after timeout), got', chatImageUrls.length, 'images');
-            return NextResponse.json({ success: true, result: { data: chatImageUrls.map(url => ({ url })) } });
+            // Persist base64/data: URLs before returning
+            const persistedChatUrls = await Promise.all(chatImageUrls.map(async (url: string) => {
+              if (url.startsWith('data:')) {
+                try {
+                  const saveRes = await fetch(`${baseUrl}/api/save-image`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imageData: url, subdir: 'generate' }) });
+                  const saveData = await saveRes.json();
+                  if (saveData.url) return saveData.url;
+                } catch (e) { /* ignore */ }
+              }
+              return url;
+            }));
+            return NextResponse.json({ success: true, result: { data: persistedChatUrls.map(url => ({ url })) } });
           }
         } catch (chatErr) {
           console.warn('[SceneStudio] /chat/completions fallback error (after timeout):', chatErr);
@@ -207,14 +219,16 @@ export async function POST(request: NextRequest) {
             model: modelName,
             prompt: enhancedPrompt,
             imageBase64: hasImage ? screenshotData : undefined,
+            imageUrls: hasImage ? [screenshotData] : undefined,
             size,
             originalError: errorText,
             requestIdPrefix: 'scene-studio',
-            force: true,
+            skipChannelCheck: true,
           });
           if (chatImageUrls && chatImageUrls.length > 0) {
             console.log('[SceneStudio] /chat/completions fallback succeeded, got', chatImageUrls.length, 'images');
-            return NextResponse.json({ success: true, result: { data: chatImageUrls.map(url => ({ url })) } });
+            const persistedChatUrls = await Promise.all(chatImageUrls.map(async (u: string) => (await persistResultImage(u)) || u));
+            return NextResponse.json({ success: true, result: { data: persistedChatUrls.map(url => ({ url })) } });
           }
         } catch (chatErr) {
           console.warn('[SceneStudio] /chat/completions fallback error:', chatErr);

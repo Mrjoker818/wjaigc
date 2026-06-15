@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { findProviderForModel, findProviderById } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
-import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
+import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, tryChatCompletionsImageFallback, isChannelUnavailableError, persistResultImage } from '@/lib/api-compatibility';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
 import { buildJimengPrompt, buildBlackOnWhitePrompt, buildTransparentLogoPrompt, FONT_STYLE_CATEGORIES, SCENE_MAP, STROKE_MAP, GRAPHIC_MAP, MATERIAL_MAP } from '../plan/route';
 import { getSessionUser } from '@/lib/server-auth';
@@ -197,6 +197,7 @@ export async function POST(request: NextRequest) {
             'Authorization': `Bearer ${apiKey}`,
           },
           body: JSON.stringify(adjustedRequest.body || requestBody),
+          signal: AbortSignal.timeout(120000),
         });
 
         if (!response.ok) {
@@ -214,7 +215,7 @@ export async function POST(request: NextRequest) {
                 size: ratioStr,
                 originalError: errText,
                 requestIdPrefix: 'font-design',
-                force: true,
+                skipChannelCheck: true,
               });
               if (chatImageUrls && chatImageUrls.length > 0) {
                 console.log('[font-design] /chat/completions fallback succeeded, got', chatImageUrls.length, 'images');
@@ -254,6 +255,33 @@ export async function POST(request: NextRequest) {
           updateTaskProgress(taskId, { status: 'failed', error: 'API未返回有效结果' });
         }
       } catch (err: unknown) {
+        const isTimeout = err instanceof Error && (err.name === 'AbortError' || /timeout|aborted/i.test(err.message));
+        if (isTimeout) {
+          console.info('[font-design] Timed out, trying /chat/completions fallback...');
+          try {
+            const chatImageUrls = await tryChatCompletionsImageFallback({
+              baseUrl,
+              apiKey,
+              model: usedModel,
+              prompt: finalPrompt,
+              size: ratioStr,
+              originalError: 'timeout',
+              requestIdPrefix: 'font-design-timeout',
+              skipChannelCheck: true,
+            });
+            if (chatImageUrls && chatImageUrls.length > 0) {
+              console.log('[font-design] /chat/completions fallback succeeded after timeout, got', chatImageUrls.length, 'images');
+              const persistedUrls = await Promise.all(chatImageUrls.map(persistResultImage));
+              updateTaskProgress(taskId, {
+                status: 'completed', progress: 100,
+                result: { directImageUrls: persistedUrls, prompt: finalPrompt, model: usedModel },
+              });
+              return;
+            }
+          } catch (chatErr) {
+            console.warn('[font-design] /chat/completions timeout fallback error:', chatErr);
+          }
+        }
         const msg = err instanceof Error ? err.message : '生成失败';
         if (!isTaskCancelled(taskId)) {
           updateTaskProgress(taskId, { status: 'failed', error: msg });

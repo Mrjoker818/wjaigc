@@ -753,10 +753,10 @@ export async function POST(request: NextRequest) {
           // 合并 errorMsg + errorText 做可重试检测，兼容各种 API 错误格式
           const combinedErrorText = `${errorMsg} ${errorText}`;
 
-          // ★ 500 渠道不可用 → 先尝试 /chat/completions 兜底
+          // ★ 5xx 渠道不可用 → 先尝试 /chat/completions 兜底
           // 某些 API 代理（如 AI link）仅通过 /chat/completions 支持 gpt-image-2 等模型
-          // /images/edits 和 /images/generations 端点均返回 500 "渠道不可用"
-          if (resp.status === 500 && isChannelUnavailableError(combinedErrorText)) {
+          // /images/edits 和 /images/generations 端点均可能返回 500/502/503 "渠道不可用"
+          if (resp.status >= 500 && resp.status !== 501 && isChannelUnavailableError(combinedErrorText)) {
             console.info('[generate] 500 channel error detected, trying /chat/completions fallback...');
             try {
               const chatImageUrls = await tryChatCompletionsImageFallback({
@@ -769,7 +769,7 @@ export async function POST(request: NextRequest) {
                 size: adjustedBody.size as string | undefined,
                 originalError: combinedErrorText,
                 requestIdPrefix: 'generate',
-                force: true,
+                skipChannelCheck: true,
               });
               if (chatImageUrls && chatImageUrls.length > 0) {
                 console.log('[generate] /chat/completions fallback succeeded, got', chatImageUrls.length, 'images');
@@ -964,7 +964,7 @@ export async function POST(request: NextRequest) {
                     size: adjustedBody.size as string | undefined,
                     originalError: 'images/generations timeout',
                     requestIdPrefix: 'generate',
-                    force: true,
+                    skipChannelCheck: true,
                   });
                   if (chatImageUrls && chatImageUrls.length > 0) {
                     console.log('[generate] /chat/completions fallback succeeded (after generations timeout), got', chatImageUrls.length, 'images');
