@@ -277,7 +277,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const allImages = useMemo(() => {
     const imgs: (CanvasImage & { projectName: string })[] = [];
     projects.forEach((p: Project) => {
-      ((p.canvasImages as unknown as CanvasImage[]) || []).forEach((img: CanvasImage) => {
+      (p.canvasImages || []).forEach((img: CanvasImage) => {
         imgs.push({ ...img, projectName: p.name });
       });
     });
@@ -288,7 +288,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     const prompts: PromptEntry[] = [];
     const seen = new Set<string>();
     projects.forEach((p: Project) => {
-      ((p.canvasImages as unknown as CanvasImage[]) || []).forEach((img: CanvasImage) => {
+      (p.canvasImages || []).forEach((img: CanvasImage) => {
         if (img.prompt && !seen.has(img.prompt)) {
           seen.add(img.prompt);
           prompts.push({ text: img.prompt, model: img.model || '', projectName: p.name });
@@ -319,7 +319,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
         id: p.id,
         name: p.name,
         time: fmtTimeAgo(p.updatedAt),
-        imageCount: ((p.canvasImages as unknown as CanvasImage[]) || []).length,
+        imageCount: (p.canvasImages || []).length,
       }));
   }, [projects, nowTs]);
 
@@ -1123,7 +1123,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mt-4">
                   {filteredProjects.map(project => {
-                    const imgs = (project.canvasImages as unknown as CanvasImage[]) || [];
+                    const imgs = project.canvasImages || [];
                     const thumb = imgs.length > 0 ? imgs[imgs.length - 1]?.url : null;
                     const isRenaming = renamingProjectId === project.id;
                     return (

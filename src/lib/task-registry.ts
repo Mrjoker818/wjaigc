@@ -292,9 +292,12 @@ if (typeof setInterval !== 'undefined') {
       if ((isOld && isTerminal) || isZombie) {
         // 释放队列槽位（防止用户并发数永久减少）
         const userId = taskUserMap.get(id);
-        if (userId && ACTIVE_STATUSES.includes(task.status)) {
-          const currentCount = userActiveCount.get(userId) || 0;
-          if (currentCount > 0) userActiveCount.set(userId, currentCount - 1);
+        if (userId) {
+          // 终态任务：如果 taskUserMap 中仍有映射，说明之前未正确释放（历史泄露），也需递减
+          if (ACTIVE_STATUSES.includes(task.status) || isTerminal) {
+            const currentCount = userActiveCount.get(userId) || 0;
+            if (currentCount > 0) userActiveCount.set(userId, currentCount - 1);
+          }
         }
         taskUserMap.delete(id);
         taskRegistry.delete(id);

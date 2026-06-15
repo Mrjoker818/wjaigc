@@ -637,6 +637,7 @@ export function InfiniteCanvas({
   const ORIG_THRESHOLD = 1200; // 原图超过此尺寸才生成缩略图
   const thumbnailGenInProgressRef = useRef<Set<string>>(new Set());
   const [thumbnailVersion, setThumbnailVersion] = useState(0); // 触发重渲染
+  const thumbnailRafRef = useRef<number | null>(null); // RAF 批量更新
 
   useEffect(() => {
     let cancelled = false;
@@ -683,8 +684,13 @@ export function InfiniteCanvas({
 
           const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
           thumbnailCacheRef.current.set(imageUrl, dataUrl);
-          // 触发重渲染让 visibleImages 的 thumbnailUrl 更新
-          setThumbnailVersion(v => v + 1);
+          // 使用 RAF 批量触发重渲染，避免每张缩略图都触发一次 setState
+          if (thumbnailRafRef.current === null) {
+            thumbnailRafRef.current = requestAnimationFrame(() => {
+              thumbnailRafRef.current = null;
+              setThumbnailVersion(v => v + 1);
+            });
+          }
         } catch {
           // 缩略图生成失败不影响原图显示
         } finally {
@@ -718,6 +724,13 @@ export function InfiniteCanvas({
         thumbnailCacheRef.current.delete(key);
       }
     }
+    // 组件卸载时取消未执行的 RAF
+    return () => {
+      if (thumbnailRafRef.current !== null) {
+        cancelAnimationFrame(thumbnailRafRef.current);
+        thumbnailRafRef.current = null;
+      }
+    };
   }, [images]);
 
   // ★ 远程 URL 后台持久化监听：当远程图片持久化为本地 URL 后，更新画布图片
@@ -1015,15 +1028,17 @@ export function InfiniteCanvas({
   const leftToolbarRef = useRef<HTMLDivElement>(null);
 
   // 点击外部关闭左侧工具栏
+  const leftToolbarExpandedRef = useRef(leftToolbarExpanded);
+  leftToolbarExpandedRef.current = leftToolbarExpanded;
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (leftToolbarExpanded && leftToolbarRef.current && !leftToolbarRef.current.contains(e.target as Node)) {
+      if (leftToolbarExpandedRef.current && leftToolbarRef.current && !leftToolbarRef.current.contains(e.target as Node)) {
         setLeftToolbarExpanded(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [leftToolbarExpanded]);
+  }, []);
   const [showToolbarCustomize, setShowToolbarCustomize] = useState(false);
   // 工具栏自定义排序/可见性（从 localStorage 读取）
   const [toolbarItemOrder, setToolbarItemOrder] = useState<string[]>(() => {
@@ -3273,12 +3288,18 @@ export function InfiniteCanvas({
       if (data.optimized || data.optimizedPrompt) {
         let optimizedPrompt = data.optimized || data.optimizedPrompt;
         // 清理思考过程：移除 <think/> 标签内容，保留中英文双语关键词
+        const hasThinkTags = /<think[\s\S]*?<\/think>/gi.test(optimizedPrompt) || /<thinking[\s\S]*?<\/thinking>/gi.test(optimizedPrompt);
         optimizedPrompt = optimizedPrompt
           .replace(/<think[\s\S]*?<\/think>/gi, '')  // 移除 <think...</think >
           .replace(/<thinking[\s\S]*?<\/thinking>/gi, '')  // 移除 <thinking...</thinking >
-          .replace(/【[^】]*】/g, '')  // 移除【】标记
-          .replace(/\*\*[^*]*\*\*/g, '')  // 移除**加粗**标记
           .trim();
+        // 仅在检测到LLM思考标签时才清理【】和**标记（避免误删用户原始输入）
+        if (hasThinkTags) {
+          optimizedPrompt = optimizedPrompt
+            .replace(/【[^】]*】/g, '')  // 移除【】标记
+            .replace(/\*\*[^*]*\*\*/g, '')  // 移除**加粗**标记
+            .trim();
+        }
         setGenGroups(prev => prev.map(g => {
           if (g.id !== groupId) return g;
           return { ...g, toolbar: { ...g.toolbar, prompt: optimizedPrompt } };
@@ -12386,12 +12407,17 @@ export function InfiniteCanvas({
                             if (data.optimized || data.optimizedPrompt) {
                               let optimizedPrompt = data.optimized || data.optimizedPrompt;
                               // 清理思考过程，保留中英文双语关键词
+                              const hasThinkTags2 = /<think[\s\S]*?<\/think>/gi.test(optimizedPrompt) || /<thinking[\s\S]*?<\/thinking>/gi.test(optimizedPrompt);
                               optimizedPrompt = optimizedPrompt
                                 .replace(/<think[\s\S]*?<\/think>/gi, '')
                                 .replace(/<thinking[\s\S]*?<\/thinking>/gi, '')
-                                .replace(/【[^】]*】/g, '')
-                                .replace(/\*\*[^*]*\*\*/g, '')
                                 .trim();
+                              if (hasThinkTags2) {
+                                optimizedPrompt = optimizedPrompt
+                                  .replace(/【[^】]*】/g, '')
+                                  .replace(/\*\*[^*]*\*\*/g, '')
+                                  .trim();
+                              }
                               setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, prompt: optimizedPrompt } } : g));
                             }
                           } catch (err) { console.error('优化失败:', err); }

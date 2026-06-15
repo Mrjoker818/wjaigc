@@ -237,6 +237,16 @@ export async function executeAgentLoop(
           result: `工具不存在`,
           success: false,
         });
+        consecutiveFailures++;
+        if (consecutiveFailures >= 3) {
+          return {
+            success: false,
+            output: context.imageUrl,
+            steps,
+            error: `连续${consecutiveFailures}次调用不存在的工具，终止循环`,
+            finalResponse: `工具 "${toolCall.name}" 不存在，连续失败终止`,
+          };
+        }
         continue;
       }
 

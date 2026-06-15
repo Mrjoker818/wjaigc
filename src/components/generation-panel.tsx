@@ -422,12 +422,12 @@ export function GenerationPanel(
     // 通知父组件当前模型变化（API Key由服务端管理，无需传递）
     // 传递纯 modelId（从复合键 providerId::modelId 中拆解）
     useEffect(() => {
-        const pureModelId = model.includes('::') ? model.split('::').pop()! : model;
+        const pureModelId = model ? (model.includes('::') ? model.split('::').pop()! : model) : '';
         onModelChange?.(pureModelId);
     }, [model, onModelChange]);
 
     // 获取当前模型支持的比例
-    const pureModelId = model.includes('::') ? model.split('::').pop()! : model;
+    const pureModelId = model ? (model.includes('::') ? model.split('::').pop()! : model) : '';
     const getSupportedAspectRatios = useCallback(() => {
         return findModelConfig(MODEL_ASPECT_RATIOS, pureModelId) || SHARED_DEFAULT_ASPECT_RATIOS;
     }, [pureModelId]);

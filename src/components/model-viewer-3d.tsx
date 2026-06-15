@@ -306,8 +306,7 @@ export default function ModelViewer3D({
   const [viewMode, setViewMode] = useState<ViewMode>('orbit');
   const [showSidebar, setShowSidebar] = useState(true);
   const [activeFormat, setActiveFormat] = useState<string>('');
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const orbitRef = useRef<any>(null);
+  const orbitRef = useRef<React.ElementRef<typeof OrbitControls> | null>(null);
 
   /* Determine the best model URL and format from modelUrls */
   const bestModel = useMemo(() => {

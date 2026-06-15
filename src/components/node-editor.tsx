@@ -11,7 +11,7 @@ import {
 } from '@/lib/workflow-engine';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import { MODEL_QUALITIES, MODEL_ASPECT_RATIOS } from '@/lib/canvas-generation-group';
-import { getPromptTemplates, searchTemplates, type PromptTemplate } from '@/lib/prompt-templates';
+import { getPromptTemplates, searchTemplates, addPromptTemplate, type PromptTemplate } from '@/lib/prompt-templates';
 import {
   Image as ImageIcon, Type, SlidersHorizontal, Wand2, Pencil, Maximize, Scissors,
   PenTool, Palette, Sun, GitBranch, GitMerge, Repeat, RefreshCw, Layers,
@@ -796,15 +796,14 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
   // P2: 保存提示词到库 - 同时保存到统一的提示词模板系统
   const savePromptSnippet = useCallback((text: string, tags: string[], category: string) => {
     const snippet: PromptSnippet = { id: `ps-${Date.now()}`, text, tags, category, createdAt: Date.now() };
-    // 保存到统一的提示词模板系统
-    const { addPromptTemplate } = require('@/lib/prompt-templates');
+    // 保存到统一的提示词模板系统（顶层 import，避免客户端 require）
     addPromptTemplate({
-      id: snippet.id,
       name: text.slice(0, 30) + (text.length > 30 ? '...' : ''),
       content: text,
       category,
       tags,
-      createdAt: snippet.createdAt,
+      createdBy: 'user',
+      isGlobal: false,
     });
     // 同时保存到旧的存储（向后兼容）
     setPromptSnippets(prev => {

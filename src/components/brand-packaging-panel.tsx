@@ -800,8 +800,8 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                     </div>
                     <div className="flex flex-wrap gap-1.5 mb-3">
                       {ADVANCED_TOOLS.map(tool => (
-                        <button key={tool.key} className={`rounded-lg border px-3 py-1.5 text-[12px] flex items-center gap-1 cursor-pointer transition-all ${(advancedOptions as unknown as Record<string, boolean>)[tool.key] ? (isMonochrome ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-amber-400/60 bg-amber-400/10 text-amber-200') : (isMonochrome ? 'border-gray-200 bg-gray-50 text-gray-500 hover:border-blue-300' : 'border-white/10 bg-black/30 text-white/60 hover:border-amber-400/40')}`}
-                          onClick={() => setAdvancedOptions(prev => ({ ...prev, [tool.key]: !(prev as unknown as Record<string, boolean>)[tool.key] }))}>
+                        <button key={tool.key} className={`rounded-lg border px-3 py-1.5 text-[12px] flex items-center gap-1 cursor-pointer transition-all ${({ ...advancedOptions } as Record<string, boolean>)[tool.key] ? (isMonochrome ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-amber-400/60 bg-amber-400/10 text-amber-200') : (isMonochrome ? 'border-gray-200 bg-gray-50 text-gray-500 hover:border-blue-300' : 'border-white/10 bg-black/30 text-white/60 hover:border-amber-400/40')}`}
+                          onClick={() => setAdvancedOptions(prev => ({ ...prev, [tool.key]: !(({ ...prev } as Record<string, boolean>)[tool.key]) }))}>
                           {tool.icon}{tool.label}
                         </button>
                       ))}

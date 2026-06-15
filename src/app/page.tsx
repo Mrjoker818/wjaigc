@@ -168,28 +168,28 @@ function CanvasApp() {
       if (targetProject) {
         setCurrentProject(targetProject);
         if (targetProject.canvasImages && targetProject.canvasImages.length > 0) {
-          setImages((targetProject.canvasImages as unknown as Record<string, unknown>[]).map(img => ({
-            id: img.id as string,
-            url: img.url as string,
-            prompt: (img.prompt as string) || '',
-            modifyPrompt: (img.modifyPrompt as string) || '',
-            model: (img.model as string) || '',
-            quality: (img.quality as string) || '',
-            aspectRatio: (img.aspectRatio as string) || '',
-            stylePreset: (img.stylePreset as string) || '',
-            category: (img.category as string) || '',
-            size: (img.size as string) || '',
-            groupId: (img.groupId as string) || '',
-            threeDModelUrl: (img.threeDModelUrl as string) || '',
-            threeDModelUrls: (img.threeDModelUrls as Record<string, string>) || undefined,
-            x: img.x as number,
-            y: img.y as number,
-            width: (img.width as number) || 256,
-            height: (img.height as number) || 256,
-            originalWidth: (img.originalWidth as number) || 512,
-            originalHeight: (img.originalHeight as number) || 512,
-            svgDataUrl: (img.svgDataUrl as string) || undefined,
-          })));
+          setImages(targetProject.canvasImages.map(img => ({
+            id: img.id,
+            url: img.url,
+            prompt: img.prompt || '',
+            modifyPrompt: img.modifyPrompt || '',
+            model: img.model || '',
+            quality: img.quality || '',
+            aspectRatio: img.aspectRatio || '',
+            stylePreset: img.stylePreset || '',
+            category: img.category || '',
+            size: img.size || '',
+            groupId: img.groupId || '',
+            threeDModelUrl: img.threeDModelUrl || '',
+            threeDModelUrls: img.threeDModelUrls || undefined,
+            x: img.x,
+            y: img.y,
+            width: img.width || 256,
+            height: img.height || 256,
+            originalWidth: img.originalWidth || 512,
+            originalHeight: img.originalHeight || 512,
+            svgDataUrl: img.svgDataUrl || undefined,
+          })) as CanvasImage[]);
         } else {
           setImages([]);
         }
@@ -296,31 +296,31 @@ function CanvasApp() {
               if (targetProject) {
                 setCurrentProject(targetProject);
                 if (targetProject.canvasImages && targetProject.canvasImages.length > 0) {
-                  setImages((targetProject.canvasImages as unknown as Record<string, unknown>[]).map(img => ({
-                    id: img.id as string,
-                    url: img.url as string,
-                    prompt: (img.prompt as string) || '',
-                    modifyPrompt: (img.modifyPrompt as string) || '',
-                    model: (img.model as string) || '',
-                    quality: (img.quality as string) || '',
-                    aspectRatio: (img.aspectRatio as string) || '',
-                    stylePreset: (img.stylePreset as string) || '',
-                    category: (img.category as string) || '',
-                    size: (img.size as string) || '',
-                    groupId: (img.groupId as string) || '',
-                    threeDModelUrl: (img.threeDModelUrl as string) || '',
-                    threeDModelUrls: (img.threeDModelUrls as Record<string, string>) || undefined,
-                    x: img.x as number,
-                    y: img.y as number,
-                    width: (img.width as number) || 256,
-                    height: (img.height as number) || 256,
-                    originalWidth: (img.originalWidth as number) || 512,
-                    originalHeight: (img.originalHeight as number) || 512,
-                    createdAt: (img.createdAt as number) || Date.now(),
-                    modelName: (img.modelName as string) || '',
-                    apiProvider: (img.apiProvider as string) || '',
-                    apiBaseUrl: (img.apiBaseUrl as string) || '',
-                  })));
+                  setImages(targetProject.canvasImages.map(img => ({
+                    id: img.id,
+                    url: img.url,
+                    prompt: img.prompt || '',
+                    modifyPrompt: img.modifyPrompt || '',
+                    model: img.model || '',
+                    quality: img.quality || '',
+                    aspectRatio: img.aspectRatio || '',
+                    stylePreset: img.stylePreset || '',
+                    category: img.category || '',
+                    size: img.size || '',
+                    groupId: img.groupId || '',
+                    threeDModelUrl: img.threeDModelUrl || '',
+                    threeDModelUrls: img.threeDModelUrls || undefined,
+                    x: img.x,
+                    y: img.y,
+                    width: img.width || 256,
+                    height: img.height || 256,
+                    originalWidth: img.originalWidth || 512,
+                    originalHeight: img.originalHeight || 512,
+                    createdAt: img.createdAt || Date.now(),
+                    modelName: img.modelName || '',
+                    apiProvider: img.apiProvider || '',
+                    apiBaseUrl: img.apiBaseUrl || '',
+                  })) as CanvasImage[]);
                   // 恢复分组数据
                   const metaGroups = targetProject.metadata?.groups;
                   let restoredGroups: Array<{id: string; name: string; note: string; imageIds: string[]; x: number; y: number; collapsed: boolean}> = [];
@@ -572,13 +572,17 @@ function CanvasApp() {
   }, [images, currentProject, currentUser?.id]);
 
   // 页面关闭/刷新前同步保存（localStorage + sendBeacon到服务器）
+  // 使用 ref 避免每次 images 变化都重建 beforeunload 监听器
+  const currentProjectRef2 = useRef(currentProject);
+  currentProjectRef2.current = currentProject;
   useEffect(() => {
     const handleBeforeUnload = () => {
-      if (!currentProject) return;
+      const proj = currentProjectRef2.current;
+      if (!proj) return;
       try {
         const mgr = UserManagerCore.getInstance();
         // 验证用户一致性：确保只保存当前登录用户的数据
-        if (!currentUser?.id) return;
+        if (!currentUserRef.current?.id) return;
         // 保留所有图片URL，包括 data: URL（避免异步持久化未完成时丢失图片）
         const persistableCanvasImages = latestImagesRef.current
           .map(img => ({
@@ -610,28 +614,28 @@ function CanvasApp() {
           }))
           .filter(img => img.url) as PersistableCanvasImage[];
         // 1. localStorage 即时写入
-        mgr.updateProject(currentProject.id, {
+        mgr.updateProject(proj.id, {
           canvasImages: persistableCanvasImages,
           metadata: {
-            ...(currentProject.metadata || {}),
+            ...(proj.metadata || {}),
             groups: groupsRef.current,
             viewState: viewStateRef.current,
           },
         });
         // 2. sendBeacon 异步发送到服务器，确保云部署不丢数据
-        if (currentUser?.id) {
+        if (currentUserRef.current?.id) {
           const payload = {
             key: 'projects',
             value: mgr.getProjects().map(p => ({
               id: p.id,
               name: p.name,
               description: p.description,
-              canvasImages: p.id === currentProject.id ? persistableCanvasImages : p.canvasImages,
-              metadata: p.id === currentProject.id ? { ...(currentProject.metadata || {}), groups: groupsRef.current } : p.metadata,
+              canvasImages: p.id === proj.id ? persistableCanvasImages : p.canvasImages,
+              metadata: p.id === proj.id ? { ...(proj.metadata || {}), groups: groupsRef.current } : p.metadata,
               settings: p.settings,
               createdAt: p.createdAt,
-              updatedAt: p.id === currentProject.id ? Date.now() : p.updatedAt,
-              userId: currentUser.id,
+              updatedAt: p.id === proj.id ? Date.now() : p.updatedAt,
+              userId: currentUserRef.current?.id,
             })),
           };
           const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
@@ -644,7 +648,7 @@ function CanvasApp() {
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [images, currentProject, currentUser?.id]);
+  }, []); // 使用 ref 获取最新值，避免每次 images 变化都重建监听器
 
   // 定期从服务器同步项目数据（跨设备/跨浏览器数据同步）
   useEffect(() => {

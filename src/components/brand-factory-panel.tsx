@@ -819,12 +819,12 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
       targetId: currentProject.id,
       versionName: `V${versions.length + 1}`,
       note: versionNote,
-      snapshot: currentProject as unknown as Record<string, unknown>,
+      snapshot: { ...currentProject } as Record<string, unknown>,
     });
     setVersions(prev => [...prev, {
       id: genId('ver'), projectId: currentProject.id, targetType: versionType as VersionRecord['targetType'],
       targetId: currentProject.id, versionName: `V${prev.length + 1}`, note: versionNote,
-      snapshot: currentProject as unknown as Record<string, unknown>, createdBy: 'user', createdAt: new Date().toISOString()
+      snapshot: { ...currentProject } as Record<string, unknown>, createdBy: 'user', createdAt: new Date().toISOString()
     }]);
     setVersionNote('');
   };

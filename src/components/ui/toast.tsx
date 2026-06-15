@@ -68,7 +68,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 
   // Expose toast function globally
   useEffect(() => {
-    (window as unknown as { __toast: typeof addToast }).__toast = addToast;
+    (window as unknown as Record<string, unknown>).__toast = addToast;
   }, []);
 
   return (
