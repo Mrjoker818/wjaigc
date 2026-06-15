@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { findProviderForModel, findProviderById } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
-import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile } from '@/lib/api-compatibility';
+import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
 import { buildJimengPrompt, buildBlackOnWhitePrompt, buildTransparentLogoPrompt, FONT_STYLE_CATEGORIES, SCENE_MAP, STROKE_MAP, GRAPHIC_MAP, MATERIAL_MAP } from '../plan/route';
 import { getSessionUser } from '@/lib/server-auth';
@@ -201,6 +201,33 @@ export async function POST(request: NextRequest) {
 
         if (!response.ok) {
           const errText = await response.text().catch(() => '');
+
+          // ★ Try /chat/completions fallback for channel errors
+          if (isChannelUnavailableError(`${errText} ${response.status}`)) {
+            console.info('[font-design] Channel error, trying /chat/completions fallback...');
+            try {
+              const chatImageUrls = await tryChatCompletionsImageFallback({
+                baseUrl,
+                apiKey,
+                model: usedModel,
+                prompt: finalPrompt,
+                size: ratioStr,
+                originalError: errText,
+                requestIdPrefix: 'font-design',
+              });
+              if (chatImageUrls && chatImageUrls.length > 0) {
+                console.log('[font-design] /chat/completions fallback succeeded, got', chatImageUrls.length, 'images');
+                updateTaskProgress(taskId, {
+                  status: 'completed', progress: 100,
+                  result: { directImageUrls: chatImageUrls, prompt: finalPrompt, model: usedModel },
+                });
+                return;
+              }
+            } catch (chatErr) {
+              console.warn('[font-design] /chat/completions fallback error:', chatErr);
+            }
+          }
+
           updateTaskProgress(taskId, { status: 'failed', error: `API错误 ${response.status}: ${errText.slice(0, 200)}` });
           return;
         }

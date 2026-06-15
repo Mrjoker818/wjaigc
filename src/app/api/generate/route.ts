@@ -4,6 +4,7 @@ import { findProviderForModel, normalizeApiBaseUrl, findAllProvidersForType, fin
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { identifyImageSubject } from '@/lib/identify-subject';
+import { tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
 import { optionalApiAuth } from '@/lib/api-auth';
 import { translateApiError } from '@/lib/api-error-translate';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
@@ -752,6 +753,41 @@ export async function POST(request: NextRequest) {
 
           // 合并 errorMsg + errorText 做可重试检测，兼容各种 API 错误格式
           const combinedErrorText = `${errorMsg} ${errorText}`;
+
+          // ★ 500 渠道不可用 → 先尝试 /chat/completions 兜底
+          // 某些 API 代理（如 AI link）仅通过 /chat/completions 支持 gpt-image-2 等模型
+          // /images/edits 和 /images/generations 端点均返回 500 "渠道不可用"
+          if (resp.status === 500 && isChannelUnavailableError(combinedErrorText)) {
+            console.info('[generate] 500 channel error detected, trying /chat/completions fallback...');
+            try {
+              const chatImageUrls = await tryChatCompletionsImageFallback({
+                baseUrl: currentApiBaseUrl,
+                apiKey: currentApiKey,
+                model: currentModelConfig.modelId,
+                prompt: enhancedPrompt,
+                imageBase64: (adjustedBody.image as string) || undefined,
+                size: adjustedBody.size as string | undefined,
+                originalError: combinedErrorText,
+                requestIdPrefix: 'generate',
+              });
+              if (chatImageUrls && chatImageUrls.length > 0) {
+                console.log('[generate] /chat/completions fallback succeeded, got', chatImageUrls.length, 'images');
+                return {
+                  taskIds: [],
+                  directImageUrls: chatImageUrls,
+                  usedModel: currentModelConfig.modelId,
+                  usedProviderId: currentProviderId,
+                };
+              }
+            } catch (chatErr) {
+              console.warn('[generate] /chat/completions fallback error:', chatErr);
+            }
+            // chat fallback also failed → mark as retryable for candidate model fallback
+            const retryErr = new Error(`当前模型暂不可用，请稍后重试或更换模型`);
+            (retryErr as Error & { retryable?: boolean }).retryable = true;
+            throw retryErr;
+          }
+
           // 通用可重试错误检测 - 不针对特定提供商
           if (combinedErrorText.includes('ratio or price') || combinedErrorText.includes('not configured') || combinedErrorText.includes('model_not_found') || combinedErrorText.includes('model not found') || errorCode === 'model_not_found' || combinedErrorText.includes('No available channel') || combinedErrorText.includes('no available channel')) {
             const retryErr = new Error(`当前模型暂不可用，请稍后重试或更换模型`);

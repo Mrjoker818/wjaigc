@@ -3,7 +3,7 @@ import { findProviderForFeature, findProviderById, findProviderForModel } from '
 import type { ApiProvider } from '@/lib/universal-api-types';
 import { fetchWithV1Retry, getInternalApiUrl } from '@/lib/api-helpers';
 import { optionalApiAuth } from '@/lib/api-auth';
-import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile } from '@/lib/api-compatibility';
+import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
 import { executeAgentLoop, getToolsForLLM, type AgentContext, type AgentResult } from '@/lib/agent-engine';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { translateApiError } from '@/lib/api-error-translate';
@@ -559,6 +559,29 @@ async function performImageEdit(
         if (errText.includes('No available channel') || errText.includes('model_not_found') || errText.includes('not configured')) {
           return { success: false, error: `模型在当前渠道暂不可用，请稍后重试或更换模型` };
         }
+
+        // ★ Try /chat/completions fallback for channel errors
+        if (isChannelUnavailableError(`${errText} ${resp.status}`)) {
+          console.info('[agent-edit] Path A: channel error, trying /chat/completions fallback...');
+          try {
+            const chatImageUrls = await tryChatCompletionsImageFallback({
+              baseUrl,
+              apiKey,
+              model: imageModel,
+              prompt: editPrompt,
+              imageBase64: imageUrl,
+              originalError: errText,
+              requestIdPrefix: 'agent-edit-pathA',
+            });
+            if (chatImageUrls && chatImageUrls.length > 0) {
+              console.log('[agent-edit] Path A: /chat/completions fallback succeeded');
+              return { success: true, imageUrl: chatImageUrls[0] };
+            }
+          } catch (chatErr) {
+            console.warn('[agent-edit] Path A: /chat/completions fallback error:', chatErr);
+          }
+        }
+
         return { success: false, error: `OpenAI edit 失败 (${resp.status}): ${errText.slice(0, 200)}` };
       }
 
@@ -644,6 +667,29 @@ async function performImageEdit(
       if (!genResp.ok) {
         const errText = await genResp.text().catch(() => '');
         console.error('[agent-edit] Path B: API error', genResp.status, errText.slice(0, 300));
+
+        // ★ Try /chat/completions fallback for channel errors
+        if (isChannelUnavailableError(`${errText} ${genResp.status}`)) {
+          console.info('[agent-edit] Path B: channel error, trying /chat/completions fallback...');
+          try {
+            const chatImageUrls = await tryChatCompletionsImageFallback({
+              baseUrl,
+              apiKey,
+              model: imageModel,
+              prompt: editPrompt,
+              imageBase64: `data:${imageMimeType};base64,${imageBase64}`,
+              originalError: errText,
+              requestIdPrefix: 'agent-edit-pathB',
+            });
+            if (chatImageUrls && chatImageUrls.length > 0) {
+              console.log('[agent-edit] Path B: /chat/completions fallback succeeded');
+              return { success: true, imageUrl: chatImageUrls[0] };
+            }
+          } catch (chatErr) {
+            console.warn('[agent-edit] Path B: /chat/completions fallback error:', chatErr);
+          }
+        }
+
         const parsed = translateApiError(`编辑请求失败 (${genResp.status}): ${errText.slice(0, 200)}`);
         return { success: false, error: parsed };
       }

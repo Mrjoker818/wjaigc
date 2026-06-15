@@ -14,7 +14,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, findProviderForFeature, findProviderById } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
-import { resolveCompatProfile, adjustRequestForProfile } from '@/lib/api-compatibility';
+import { resolveCompatProfile, adjustRequestForProfile, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import { adaptBrandProjectToSanbaoInput, buildSanbaoInputFromUserInput } from '@/modules/brand-factory/logo-generator-core/sanbaoInputAdapter';
 import { buildDirectionSystemPrompt, buildDirectionUserMessage, parseDirectionResponse } from '@/modules/brand-factory/logo-generator-core/sanbaoPromptParser';
@@ -174,6 +174,29 @@ async function handleGenerateImage(body: Record<string, unknown>) {
 
     if (!response.ok) {
       const errText = await response.text().catch(() => '');
+
+      // ★ Try /chat/completions fallback for channel errors
+      if (isChannelUnavailableError(`${errText} ${response.status}`)) {
+        console.info('[logo-skill] Channel error, trying /chat/completions fallback...');
+        try {
+          const chatImageUrls = await tryChatCompletionsImageFallback({
+            baseUrl,
+            apiKey: provider.apiKey,
+            model,
+            prompt,
+            size,
+            originalError: errText,
+            requestIdPrefix: 'logo-skill',
+          });
+          if (chatImageUrls && chatImageUrls.length > 0) {
+            console.log('[logo-skill] /chat/completions fallback succeeded, got', chatImageUrls.length, 'images');
+            return NextResponse.json({ success: true, imageUrls: chatImageUrls, imageModel: model });
+          }
+        } catch (chatErr) {
+          console.warn('[logo-skill] /chat/completions fallback error:', chatErr);
+        }
+      }
+
       return NextResponse.json({ error: `图像生成失败(${response.status}): ${errText.slice(0, 200)}` }, { status: 500 });
     }
 

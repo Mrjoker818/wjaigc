@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
     const modelName = model || (provider.selectedModels && provider.selectedModels.length > 0 ? provider.selectedModels[0] : 'dall-e-3');
 
     // Check for gemini-image profile — use chat/completions endpoint
-    const { resolveProfileForModel, buildGeminiChatImageRequest, parseGeminiChatImageResponse, adjustRequestForProfile, parseResponseForProfile } = await import('@/lib/api-compatibility');
+    const { resolveProfileForModel, buildGeminiChatImageRequest, parseGeminiChatImageResponse, adjustRequestForProfile, parseResponseForProfile, tryChatCompletionsImageFallback, isChannelUnavailableError } = await import('@/lib/api-compatibility');
     const profile = resolveProfileForModel(modelName, provider);
 
     // Calculate size based on aspect ratio
@@ -167,6 +167,30 @@ export async function POST(request: NextRequest) {
     if (!response.ok) {
       const errorText = await response.text();
       console.error('[SceneStudio] Generate API error:', response.status, errorText);
+
+      // ★ Try /chat/completions fallback for channel errors (API proxies like AI link)
+      if (isChannelUnavailableError(`${errorText} ${response.status}`)) {
+        console.info('[SceneStudio] Channel error detected, trying /chat/completions fallback...');
+        try {
+          const chatImageUrls = await tryChatCompletionsImageFallback({
+            baseUrl,
+            apiKey,
+            model: modelName,
+            prompt: enhancedPrompt,
+            imageBase64: hasImage ? screenshotData : undefined,
+            size,
+            originalError: errorText,
+            requestIdPrefix: 'scene-studio',
+          });
+          if (chatImageUrls && chatImageUrls.length > 0) {
+            console.log('[SceneStudio] /chat/completions fallback succeeded, got', chatImageUrls.length, 'images');
+            return NextResponse.json({ success: true, result: { data: chatImageUrls.map(url => ({ url })) } });
+          }
+        } catch (chatErr) {
+          console.warn('[SceneStudio] /chat/completions fallback error:', chatErr);
+        }
+      }
+
       return NextResponse.json({ error: `API error: ${response.status} - ${errorText.slice(0, 200)}` }, { status: response.status });
     }
 

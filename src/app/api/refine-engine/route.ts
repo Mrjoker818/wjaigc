@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, findProviderById, getPublicModels, getPublicApiProviders } from '@/lib/server-api-config';
 import type { ApiProvider } from '@/lib/universal-api-types';
-import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, isEditsEndpointRejected, stripEditsOnlyFields, resolveProfileForModel, buildGeminiChatImageRequest, parseGeminiChatImageResponse } from '@/lib/api-compatibility';
+import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, isEditsEndpointRejected, stripEditsOnlyFields, resolveProfileForModel, tryChatCompletionsImageFallback, isChannelUnavailableError, buildGeminiChatImageRequest, parseGeminiChatImageResponse } from '@/lib/api-compatibility';
 import { fetchWithV1Retry, getInternalApiUrl } from '@/lib/api-helpers';
 import { translateApiError } from '@/lib/api-error-translate';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
@@ -692,41 +692,38 @@ ${params.prompt}`;
       if (!fallbackResp.ok) {
         const fallbackErrText = await fallbackResp.text().catch(() => '');
 
-        // ★ Third fallback: try /chat/completions (Gemini-style chat image route)
-        // Some API proxies (e.g., AI link) only support gpt-image-2 via /chat/completions
-        if (fallbackResp.status === 500 || fallbackResp.status === 404 || fallbackErrText.includes('failover') || fallbackErrText.includes('渠道') || fallbackErrText.includes('channel')) {
-          console.info('[refine-engine] /images/generations also failed, trying /chat/completions fallback...');
+        // ★ Third fallback: try /chat/completions (for API proxies that only support models via chat)
+        if (isChannelUnavailableError(`${fallbackErrText} ${fallbackResp.status}`)) {
+          console.info('[refine-engine] /images/generations also failed with channel error, trying /chat/completions fallback...');
           try {
-            const chatRequestBody = buildGeminiChatImageRequest(rawBody);
             updateTaskProgress(taskId, { progress: 45, label: '尝试备用通道...' });
-
-            const chatResp = await fetchWithV1Retry(params.provider.baseUrl, '/chat/completions', {
-              method: 'POST',
-              headers,
-              body: JSON.stringify(chatRequestBody),
-            }, true, 120000);
-
-            if (chatResp.ok) {
-              const chatResult = await chatResp.json();
-              const parsed = parseGeminiChatImageResponse(chatResult);
-              if (parsed && parsed.length > 0) {
-                console.log(`[refine-engine] /chat/completions fallback succeeded, got ${parsed.length} images`);
-                updateTaskProgress(taskId, { progress: 90, label: '保存精修结果...' });
-                const persistedUrls = await Promise.all(parsed.map(persistResultImage));
-                setRefineResult(taskId, { directImageUrls: persistedUrls, completedAt: Date.now() });
-                updateTaskProgress(taskId, {
-                  status: 'completed',
-                  progress: 100,
-                  label: '精修完成',
-                  result: { directImageUrls: persistedUrls },
-                });
-                return { directImageUrls: persistedUrls };
-              }
+            const chatImageUrls = await tryChatCompletionsImageFallback({
+              baseUrl: params.provider.baseUrl,
+              apiKey: params.provider.apiKey,
+              model: rawBody.model as string,
+              prompt: String(rawBody.prompt || ''),
+              imageBase64: (rawBody.image as string) || undefined,
+              size: rawBody.size as string | undefined,
+              originalError: fallbackErrText,
+              requestIdPrefix: 'refine-engine',
+            });
+            if (chatImageUrls && chatImageUrls.length > 0) {
+              console.log(`[refine-engine] /chat/completions fallback succeeded, got ${chatImageUrls.length} images`);
+              updateTaskProgress(taskId, { progress: 90, label: '保存精修结果...' });
+              const persistedUrls = await Promise.all(chatImageUrls.map(persistResultImage));
+              setRefineResult(taskId, { directImageUrls: persistedUrls, completedAt: Date.now() });
+              updateTaskProgress(taskId, {
+                status: 'completed',
+                progress: 100,
+                label: '精修完成',
+                result: { directImageUrls: persistedUrls },
+              });
+              return { directImageUrls: persistedUrls };
             }
-            console.warn('[refine-engine] /chat/completions fallback also failed, throwing original error');
           } catch (chatFallbackErr) {
             console.warn('[refine-engine] /chat/completions fallback error:', chatFallbackErr);
           }
+          console.warn('[refine-engine] /chat/completions fallback also failed, throwing original error');
         }
 
         throw new Error(`API错误 (${fallbackResp.status}): ${fallbackErrText.slice(0, 200)}`);

@@ -14,7 +14,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, findProviderForFeature, findProviderById } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { optionalApiAuth } from '@/lib/api-auth';
-import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, buildPollUrl, extractImageUrl } from '@/lib/api-compatibility';
+import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, buildPollUrl, extractImageUrl, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
 import type { ApiCompatProfile } from '@/lib/api-compatibility';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import { dbGetUserData, dbSetUserData } from '@/lib/db-storage';
@@ -355,6 +355,29 @@ async function generateImage(
 
     if (!response.ok) {
       const errText = await response.text().catch(() => '');
+
+      // ★ Try /chat/completions fallback for channel errors
+      if (isChannelUnavailableError(`${errText} ${response.status}`)) {
+        console.info('[brand-factory] Channel error, trying /chat/completions fallback...');
+        try {
+          const chatImageUrls = await tryChatCompletionsImageFallback({
+            baseUrl,
+            apiKey: provider.apiKey,
+            model: rawBody.model as string,
+            prompt: rawBody.prompt as string,
+            size: rawBody.size as string | undefined,
+            originalError: errText,
+            requestIdPrefix: 'brand-factory',
+          });
+          if (chatImageUrls && chatImageUrls.length > 0) {
+            console.log('[brand-factory] /chat/completions fallback succeeded, got', chatImageUrls.length, 'images');
+            return { success: true, imageUrl: chatImageUrls[0], imageUrls: chatImageUrls };
+          }
+        } catch (chatErr) {
+          console.warn('[brand-factory] /chat/completions fallback error:', chatErr);
+        }
+      }
+
       return { success: false, error: `图像生成失败(${response.status}): ${errText.slice(0, 200)}` };
     }
 

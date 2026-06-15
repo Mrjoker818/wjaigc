@@ -5,7 +5,7 @@ import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { optionalApiAuth } from '@/lib/api-auth';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { translateApiError } from '@/lib/api-error-translate';
-import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, convertAspectRatioToSize, buildPollUrl, isEditsEndpointRejected, stripEditsOnlyFields, type ApiCompatProfile, type ImageEndpoint, buildGeminiChatImageRequest, parseGeminiChatImageResponse, resolveProfileForModel, isGeminiImageModel } from '@/lib/api-compatibility';
+import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, convertAspectRatioToSize, buildPollUrl, isEditsEndpointRejected, stripEditsOnlyFields, type ApiCompatProfile, type ImageEndpoint, buildGeminiChatImageRequest, parseGeminiChatImageResponse, resolveProfileForModel, isGeminiImageModel, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
 import { saveImageFile } from '@/lib/server-data-root';
 import sharp from 'sharp';
 import fsSync from 'fs';
@@ -814,6 +814,29 @@ async function submitImageTask(
         } else {
           const fallbackErrorText = await fallbackResponse.text();
           console.error('[submitImageTask] fallback also failed:', fallbackResponse.status, fallbackErrorText);
+
+          // ★ Third fallback: try /chat/completions (for API proxies that only support models via chat)
+          if (isChannelUnavailableError(`${fallbackErrorText} ${fallbackResponse.status}`)) {
+            console.info('[submitImageTask] /images/generations also failed with channel error, trying /chat/completions fallback...');
+            try {
+              const chatImageUrls = await tryChatCompletionsImageFallback({
+                baseUrl: apiBaseUrl,
+                apiKey,
+                model: modelId,
+                prompt: String(adjustedBody.prompt || ''),
+                imageBase64: (adjustedBody.image as string) || undefined,
+                size: adjustedBody.size as string | undefined,
+                originalError: fallbackErrorText,
+                requestIdPrefix: 'image-edit',
+              });
+              if (chatImageUrls && chatImageUrls.length > 0) {
+                console.log('[submitImageTask] /chat/completions fallback succeeded, got', chatImageUrls.length, 'images');
+                return { directUrl: chatImageUrls[0], apiBaseUrl, apiKey, advancedParams: providerInfo?.advancedParams };
+              }
+            } catch (chatErr) {
+              console.warn('[submitImageTask] /chat/completions fallback error:', chatErr);
+            }
+          }
         }
       } catch (fallbackErr) {
         console.error('[submitImageTask] fallback request error:', fallbackErr);
@@ -839,8 +862,30 @@ async function submitImageTask(
     if (errorMsg.includes('_error') || errorMsg.includes('try again later')) {
       throw new ModelCapabilityError(translatedMsg);
     }
-    // 5xx 服务器错误 / Cloudflare 524 超时 / 401 认证错误 → 可重试回退
+    // 5xx 服务器错误 / Cloudflare 524 超时 / 401 认证错误 → 先尝试 chat/completions 兜底
     if (errorMsg.includes('524') || errorMsg.includes('timeout occurred') || errorMsg.includes('bad_response_status_code') || (submitResponse.status >= 500 && submitResponse.status !== 501) || submitResponse.status === 401) {
+      // ★ 尝试 /chat/completions 兜底（某些 API 代理仅通过 chat 端点支持模型）
+      if (isChannelUnavailableError(`${errorMsg} ${errorText}`)) {
+        console.info('[submitImageTask] 5xx channel error, trying /chat/completions fallback...');
+        try {
+          const chatImageUrls = await tryChatCompletionsImageFallback({
+            baseUrl: apiBaseUrl,
+            apiKey,
+            model: modelId,
+            prompt: String(adjustedBody.prompt || ''),
+            imageBase64: (adjustedBody.image as string) || undefined,
+            size: adjustedBody.size as string | undefined,
+            originalError: `${errorMsg} ${errorText}`,
+            requestIdPrefix: 'image-edit',
+          });
+          if (chatImageUrls && chatImageUrls.length > 0) {
+            console.log('[submitImageTask] /chat/completions fallback succeeded from 5xx handler');
+            return { directUrl: chatImageUrls[0], apiBaseUrl, apiKey, advancedParams: providerInfo?.advancedParams };
+          }
+        } catch (chatErr) {
+          console.warn('[submitImageTask] /chat/completions fallback (5xx) error:', chatErr);
+        }
+      }
       console.warn('[submitImageTask] retryable server error, will try fallback:', submitResponse.status, errorMsg);
       throw new ModelCapabilityError(translatedMsg);
     }

@@ -532,6 +532,87 @@ export function parseGeminiChatImageResponse(
 }
 
 /**
+ * Try to generate an image via /chat/completions as a fallback when
+ * /images/generations and /images/edits endpoints are unavailable.
+ *
+ * This is needed because some API proxies (e.g., AI link) only support
+ * gpt-image-2 and similar models through the /chat/completions endpoint,
+ * not the standard OpenAI image endpoints.
+ *
+ * @returns Array of image data URLs, or null if fallback failed
+ */
+export async function tryChatCompletionsImageFallback(params: {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  prompt: string;
+  imageBase64?: string;   // base64 data URL of source image (for img2img)
+  size?: string;          // e.g., "1024x1024"
+  originalError: string;  // the error message that triggered this fallback
+  requestIdPrefix?: string;
+}): Promise<string[] | null> {
+  const { baseUrl, apiKey, model, prompt, imageBase64, size, originalError, requestIdPrefix = 'chat-img-fallback' } = params;
+
+  // Only attempt fallback for channel/routing errors (not auth/validation errors)
+  const isChannelError = /failover|渠道|channel|no available|unavailable/i.test(originalError);
+  if (!isChannelError) {
+    console.log(`[${requestIdPrefix}] Skipping chat/completions fallback: error is not a channel issue`);
+    return null;
+  }
+
+  console.log(`[${requestIdPrefix}] Attempting /chat/completions fallback for model="${model}" after: ${originalError.slice(0, 100)}`);
+
+  try {
+    const chatRequest = buildGeminiChatImageRequest({
+      prompt,
+      imageBase64: imageBase64 || '',
+      model,
+      size,
+    });
+
+    const chatUrl = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
+    const chatResponse = await fetch(chatUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(chatRequest),
+      signal: AbortSignal.timeout(120_000),
+    });
+
+    if (!chatResponse.ok) {
+      const errText = await chatResponse.text().catch(() => '');
+      console.log(`[${requestIdPrefix}] /chat/completions fallback also failed: ${chatResponse.status} ${errText.slice(0, 200)}`);
+      return null;
+    }
+
+    const chatData = await chatResponse.json() as Record<string, unknown>;
+    const imageUrls = parseGeminiChatImageResponse(chatData);
+
+    if (imageUrls.length > 0) {
+      console.log(`[${requestIdPrefix}] /chat/completions fallback succeeded, got ${imageUrls.length} image(s)`);
+      return imageUrls;
+    }
+
+    console.log(`[${requestIdPrefix}] /chat/completions fallback returned no images`);
+    return null;
+  } catch (err) {
+    console.log(`[${requestIdPrefix}] /chat/completions fallback error: ${err}`);
+    return null;
+  }
+}
+
+/**
+ * Check if an API error indicates a channel/routing issue that should trigger
+ * fallback to /chat/completions.
+ */
+export function isChannelUnavailableError(error: string | unknown): boolean {
+  const msg = typeof error === 'string' ? error : error instanceof Error ? error.message : String(error);
+  return /failover|渠道|channel|no available|unavailable|get_channel_failed/i.test(msg);
+}
+
+/**
  * Resolve the compat profile for a given model + provider combination.
  * When the model is a Gemini image model AND the provider doesn't support
  * /images/generations for Gemini (i.e., the provider's resolved profile
