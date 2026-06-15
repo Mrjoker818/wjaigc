@@ -312,6 +312,24 @@ export function isGeminiImageModel(modelId: string): boolean {
 }
 
 /**
+ * Check if a model ID is a known OpenAI image generation model.
+ * These models use /v1/images/generations or /v1/images/edits endpoints,
+ * NOT /chat/completions. They should NOT use the gemini-image profile
+ * even if the provider's compatProfile is set to gemini-image.
+ */
+export function isOpenAIImageModel(modelId: string): boolean {
+  if (!modelId) return false;
+  const lower = modelId.toLowerCase();
+  return (
+    lower.startsWith('gpt-image') ||
+    lower.startsWith('dall-e') ||
+    lower.startsWith('dalle') ||
+    lower.includes('gpt-image') ||
+    lower.includes('dall-e')
+  );
+}
+
+/**
  * Check if a model ID is a nano-banana variant (PearAPI's adapted Gemini models).
  * These models ARE OpenAI-compatible and use /images/generations directly.
  * They should NOT use the gemini-image profile.
@@ -539,18 +557,37 @@ export function resolveProfileForModel(
   // First resolve the normal profile
   const baseProfile = resolveCompatProfile(provider);
 
-  // If the user explicitly set a profile (including gemini-image), respect it
-  if (provider?.compatProfile && COMPAT_PROFILES[provider.compatProfile]) {
-    return COMPAT_PROFILES[provider.compatProfile];
-  }
-  if (provider?.advancedParams?.compatProfile && COMPAT_PROFILES[provider.advancedParams.compatProfile]) {
-    return COMPAT_PROFILES[provider.advancedParams.compatProfile];
+  // IMPORTANT: If the model is a known OpenAI image model (gpt-image-*, dall-e-*),
+  // it MUST use the standard OpenAI image API (/v1/images/generations or /v1/images/edits),
+  // NOT /chat/completions. Override the provider's compatProfile in this case.
+  if (isOpenAIImageModel(modelId)) {
+    return baseProfile;
   }
 
   // If this is a nano-banana model (PearAPI adapted), always use standard OpenAI profile
   // These models ARE OpenAI-compatible on /images/generations
   if (isNanoBananaModel(modelId)) {
     return baseProfile;
+  }
+
+  // If the user explicitly set a profile (including gemini-image), respect it
+  // BUT only if the model is actually a Gemini image model
+  if (provider?.compatProfile && COMPAT_PROFILES[provider.compatProfile]) {
+    const explicitProfile = COMPAT_PROFILES[provider.compatProfile];
+    // If the explicit profile is gemini-image but the model is NOT a Gemini image model,
+    // fall back to the base profile. This prevents gpt-image-2 from being routed
+    // through /chat/completions just because the provider's compatProfile is gemini-image.
+    if (provider.compatProfile === 'gemini-image' && !isGeminiImageModel(modelId)) {
+      return baseProfile;
+    }
+    return explicitProfile;
+  }
+  if (provider?.advancedParams?.compatProfile && COMPAT_PROFILES[provider.advancedParams.compatProfile]) {
+    const explicitProfile = COMPAT_PROFILES[provider.advancedParams.compatProfile];
+    if (provider.advancedParams.compatProfile === 'gemini-image' && !isGeminiImageModel(modelId)) {
+      return baseProfile;
+    }
+    return explicitProfile;
   }
 
   // If this is a Gemini image model AND the provider's base profile uses
