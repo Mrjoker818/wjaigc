@@ -547,12 +547,13 @@ export async function tryChatCompletionsImageFallback(params: {
   model: string;
   prompt: string;
   imageBase64?: string;   // base64 data URL of source image (for img2img)
+  imageUrls?: string[];   // reference image URLs (for img2img with multiple references)
   size?: string;          // e.g., "1024x1024"
   originalError: string;  // the error message that triggered this fallback
   requestIdPrefix?: string;
   force?: boolean;        // if true, skip channel error check and always attempt fallback
 }): Promise<string[] | null> {
-  const { baseUrl, apiKey, model, prompt, imageBase64, size, originalError, requestIdPrefix = 'chat-img-fallback', force = false } = params;
+  const { baseUrl, apiKey, model, prompt, imageBase64, imageUrls, size, originalError, requestIdPrefix = 'chat-img-fallback', force = false } = params;
 
   // Skip fallback only for clear auth/validation errors (not timeouts or channel errors)
   if (!force) {
@@ -567,12 +568,18 @@ export async function tryChatCompletionsImageFallback(params: {
   console.log(`[${requestIdPrefix}] Attempting /chat/completions fallback for model="${model}" after: ${originalError.slice(0, 100)}`);
 
   try {
-    const chatRequest = buildGeminiChatImageRequest({
+    const chatRequestBody: Record<string, unknown> = {
       prompt,
-      imageBase64: imageBase64 || '',
       model,
       size,
-    });
+    };
+    if (imageBase64) {
+      chatRequestBody.image = imageBase64;
+    }
+    if (imageUrls && imageUrls.length > 0) {
+      chatRequestBody.image_urls = imageUrls;
+    }
+    const chatRequest = buildGeminiChatImageRequest(chatRequestBody);
 
     const chatUrl = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
     const chatResponse = await fetch(chatUrl, {
@@ -592,11 +599,11 @@ export async function tryChatCompletionsImageFallback(params: {
     }
 
     const chatData = await chatResponse.json() as Record<string, unknown>;
-    const imageUrls = parseGeminiChatImageResponse(chatData);
+    const resultImageUrls = parseGeminiChatImageResponse(chatData);
 
-    if (imageUrls.length > 0) {
-      console.log(`[${requestIdPrefix}] /chat/completions fallback succeeded, got ${imageUrls.length} image(s)`);
-      return imageUrls;
+    if (resultImageUrls.length > 0) {
+      console.log(`[${requestIdPrefix}] /chat/completions fallback succeeded, got ${resultImageUrls.length} image(s)`);
+      return resultImageUrls;
     }
 
     console.log(`[${requestIdPrefix}] /chat/completions fallback returned no images`);
