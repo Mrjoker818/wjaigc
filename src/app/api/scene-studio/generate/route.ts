@@ -144,25 +144,53 @@ export async function POST(request: NextRequest) {
 
     // Determine endpoint path
     const endpointPath = endpoint || '/images/generations';
-    const response = await fetchWithV1Retry(
-      baseUrl,
-      endpointPath,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-          ...(provider.advancedParams ? Object.fromEntries(
-            Object.entries(provider.advancedParams).filter(([k]) =>
-              !['compatProfile', 'pollPathTemplate', 'editEndpoint', 'defaultEndpoint', 'editEncoding'].includes(k)
-            )
-          ) : {}),
+    let response: Response;
+    try {
+      response = await fetchWithV1Retry(
+        baseUrl,
+        endpointPath,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+            ...(provider.advancedParams ? Object.fromEntries(
+              Object.entries(provider.advancedParams).filter(([k]) =>
+                !['compatProfile', 'pollPathTemplate', 'editEndpoint', 'defaultEndpoint', 'editEncoding'].includes(k)
+              )
+            ) : {}),
+          },
+          body: JSON.stringify(finalBody),
         },
-        body: JSON.stringify(finalBody),
-      },
-      true,
-      300000
-    );
+        true,
+        300000
+      );
+    } catch (fetchErr: unknown) {
+      // Timeout → try /chat/completions fallback
+      const isTimeout = fetchErr instanceof Error && (fetchErr.name === 'AbortError' || /timeout|aborted/i.test(fetchErr.message));
+      if (isTimeout) {
+        console.info('[SceneStudio] Request timed out, trying /chat/completions fallback...');
+        try {
+          const chatImageUrls = await tryChatCompletionsImageFallback({
+            baseUrl,
+            apiKey,
+            model: modelName,
+            prompt: enhancedPrompt,
+            imageBase64: hasImage ? screenshotData : undefined,
+            size,
+            originalError: 'timeout',
+            requestIdPrefix: 'scene-studio',
+          });
+          if (chatImageUrls && chatImageUrls.length > 0) {
+            console.log('[SceneStudio] /chat/completions fallback succeeded (after timeout), got', chatImageUrls.length, 'images');
+            return NextResponse.json({ success: true, result: { data: chatImageUrls.map(url => ({ url })) } });
+          }
+        } catch (chatErr) {
+          console.warn('[SceneStudio] /chat/completions fallback error (after timeout):', chatErr);
+        }
+      }
+      throw fetchErr;
+    }
 
     if (!response.ok) {
       const errorText = await response.text();

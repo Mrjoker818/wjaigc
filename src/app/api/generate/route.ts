@@ -4,13 +4,12 @@ import { findProviderForModel, normalizeApiBaseUrl, findAllProvidersForType, fin
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { identifyImageSubject } from '@/lib/identify-subject';
-import { tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
 import { optionalApiAuth } from '@/lib/api-auth';
 import { translateApiError } from '@/lib/api-error-translate';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { consumeCredits } from '@/lib/credits';
 
-import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, stripEditsOnlyFields, isEditsEndpointRejected, type ApiCompatProfile, resolveProfileForModel, isGeminiImageModel, isNanoBananaModel, buildGeminiChatImageRequest, parseGeminiChatImageResponse } from '@/lib/api-compatibility';
+import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, stripEditsOnlyFields, isEditsEndpointRejected, type ApiCompatProfile, resolveProfileForModel, isGeminiImageModel, isNanoBananaModel, buildGeminiChatImageRequest, parseGeminiChatImageResponse, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
 import { registerTask, updateTaskProgress, isTaskCancelled, getTaskInfo } from '@/lib/task-registry';
 import { persistRemoteImage } from '@/lib/s3-storage';
 
@@ -912,8 +911,10 @@ export async function POST(request: NextRequest) {
             console.info('[generate] /images/edits rejected by API, auto-falling back to /images/generations with image_urls only...');
             clearTimeoutSafely();
 
+            // ★ Use shorter timeout (30s) for /images/generations when /images/edits already failed with channel error
+            const fallbackTimeoutMs = isChannelUnavailableError(errorText) ? 30000 : timeoutMs;
             const fallbackController = new AbortController();
-            const fallbackTimeoutId = setTimeout(() => fallbackController.abort(), timeoutMs);
+            const fallbackTimeoutId = setTimeout(() => fallbackController.abort(), fallbackTimeoutMs);
 
             const fallbackBody = stripEditsOnlyFields(adjustedBody);
 
@@ -931,19 +932,54 @@ export async function POST(request: NextRequest) {
               }
             }
 
-            submitResponse = await fetchWithV1Retry(
-              currentApiBaseUrl,
-              '/images/generations',
-              {
-                method: 'POST',
-                headers: {
-                  'Authorization': `Bearer ${currentApiKey}`,
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(fallbackBody),
-                signal: fallbackController.signal,
+            try {
+              submitResponse = await fetchWithV1Retry(
+                currentApiBaseUrl,
+                '/images/generations',
+                {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Bearer ${currentApiKey}`,
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify(fallbackBody),
+                  signal: fallbackController.signal,
+                }
+              );
+            } catch (fallbackFetchErr: unknown) {
+              // /images/generations timed out → try /chat/completions immediately
+              const isTimeout = fallbackFetchErr instanceof Error && (fallbackFetchErr.name === 'AbortError' || /timeout|aborted/i.test(fallbackFetchErr.message));
+              if (isTimeout) {
+                console.info('[generate] /images/generations timed out, trying /chat/completions fallback...');
+                try {
+                  const chatImageUrls = await tryChatCompletionsImageFallback({
+                    baseUrl: currentApiBaseUrl,
+                    apiKey: currentApiKey,
+                    model: currentModelConfig.modelId,
+                    prompt: String(fallbackBody.prompt || enhancedPrompt),
+                    imageBase64: (adjustedBody.image as string) || undefined,
+                    size: adjustedBody.size as string | undefined,
+                    originalError: 'images/generations timeout',
+                    requestIdPrefix: 'generate',
+                  });
+                  if (chatImageUrls && chatImageUrls.length > 0) {
+                    console.log('[generate] /chat/completions fallback succeeded (after generations timeout), got', chatImageUrls.length, 'images');
+                    return {
+                      taskIds: [],
+                      directImageUrls: chatImageUrls,
+                      usedModel: currentModelConfig.modelId,
+                      usedProviderId: currentProviderId,
+                    };
+                  }
+                } catch (chatErr) {
+                  console.warn('[generate] /chat/completions fallback error (after generations timeout):', chatErr);
+                }
+                const retryErr = new Error(`生成请求超时，请稍后重试或更换模型`);
+                (retryErr as Error & { retryable?: boolean }).retryable = true;
+                throw retryErr;
               }
-            );
+              throw fallbackFetchErr;
+            }
 
             clearTimeout(fallbackTimeoutId);
           } else {

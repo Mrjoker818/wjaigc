@@ -683,11 +683,52 @@ ${params.prompt}`;
         fallbackBody.prompt = `[IMAGE-TO-IMAGE MODE] You MUST use the provided reference image as the mandatory source/base for generation. Do NOT generate from scratch. ${String(fallbackBody.prompt || '')}`;
       }
 
-      const fallbackResp = await fetchWithV1Retry(params.provider.baseUrl, '/images/generations', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(fallbackBody),
-      }, true, 120000);
+      // ★ Use shorter timeout (30s) for /images/generations when /images/edits already failed with channel error
+      // If /images/generations also fails or times out, we'll try /chat/completions
+      let fallbackResp: Response;
+      try {
+        fallbackResp = await fetchWithV1Retry(params.provider.baseUrl, '/images/generations', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(fallbackBody),
+        }, true, 30000); // 30s timeout instead of 120s
+      } catch (fallbackFetchErr: unknown) {
+        // /images/generations timed out → try /chat/completions immediately
+        const isTimeout = fallbackFetchErr instanceof Error && (fallbackFetchErr.name === 'AbortError' || /timeout|aborted/i.test(fallbackFetchErr.message));
+        if (isTimeout) {
+          console.info('[refine-engine] /images/generations timed out, trying /chat/completions fallback...');
+          try {
+            updateTaskProgress(taskId, { progress: 45, label: '尝试备用通道...' });
+            const chatImageUrls = await tryChatCompletionsImageFallback({
+              baseUrl: params.provider.baseUrl,
+              apiKey: params.provider.apiKey,
+              model: rawBody.model as string,
+              prompt: String(rawBody.prompt || ''),
+              imageBase64: (rawBody.image as string) || undefined,
+              size: rawBody.size as string | undefined,
+              originalError: 'images/generations timeout',
+              requestIdPrefix: 'refine-engine',
+            });
+            if (chatImageUrls && chatImageUrls.length > 0) {
+              console.log(`[refine-engine] /chat/completions fallback succeeded (after generations timeout), got ${chatImageUrls.length} images`);
+              updateTaskProgress(taskId, { progress: 90, label: '保存精修结果...' });
+              const persistedUrls = await Promise.all(chatImageUrls.map(persistResultImage));
+              setRefineResult(taskId, { directImageUrls: persistedUrls, completedAt: Date.now() });
+              updateTaskProgress(taskId, {
+                status: 'completed',
+                progress: 100,
+                label: '精修完成',
+                result: { directImageUrls: persistedUrls },
+              });
+              return { directImageUrls: persistedUrls };
+            }
+          } catch (chatFallbackErr) {
+            console.warn('[refine-engine] /chat/completions fallback error (after generations timeout):', chatFallbackErr);
+          }
+          throw new Error(`/images/generations timed out and /chat/completions fallback also failed`);
+        }
+        throw fallbackFetchErr;
+      }
 
       if (!fallbackResp.ok) {
         const fallbackErrText = await fallbackResp.text().catch(() => '');

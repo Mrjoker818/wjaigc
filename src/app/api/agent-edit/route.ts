@@ -610,6 +610,28 @@ async function performImageEdit(
       console.error('[agent-edit] Path A: no images in response', JSON.stringify(data).slice(0, 200));
       return { success: false, error: 'OpenAI 未返回图片' };
     } catch (err) {
+      // Timeout → try /chat/completions fallback
+      const isTimeout = err instanceof Error && (err.name === 'AbortError' || /timeout|aborted/i.test(err.message));
+      if (isTimeout) {
+        console.info('[agent-edit] Path A: timed out, trying /chat/completions fallback...');
+        try {
+          const chatImageUrls = await tryChatCompletionsImageFallback({
+            baseUrl,
+            apiKey,
+            model: imageModel,
+            prompt: editPrompt,
+            imageBase64: imageUrl,
+            originalError: 'timeout',
+            requestIdPrefix: 'agent-edit-pathA',
+          });
+          if (chatImageUrls && chatImageUrls.length > 0) {
+            console.log('[agent-edit] Path A: /chat/completions fallback succeeded (after timeout)');
+            return { success: true, imageUrl: chatImageUrls[0] };
+          }
+        } catch (chatErr) {
+          console.warn('[agent-edit] Path A: /chat/completions fallback error (after timeout):', chatErr);
+        }
+      }
       console.error('[agent-edit] Path A: exception', err);
       return { success: false, error: err instanceof Error ? translateApiError(err.message) : '编辑请求异常' };
     }
@@ -618,10 +640,10 @@ async function performImageEdit(
   // Path B: /images/generations 端点（APImart 等兼容 API）
   if (resolvedEndpoint === '/images/generations') {
     console.log('[agent-edit] Path B: /images/generations, baseUrl:', baseUrl, 'model:', imageModel);
+    let imageBase64 = '';
+    let imageMimeType = 'image/png';
     try {
       // 解析图片为 base64
-      let imageBase64 = '';
-      let imageMimeType = 'image/png';
       if (imageUrl.startsWith('data:')) {
         const commaIdx = imageUrl.indexOf(',');
         const header = imageUrl.substring(0, commaIdx);
@@ -765,6 +787,28 @@ async function performImageEdit(
       console.error('[agent-edit] Path B: no images in response');
       return { success: false, error: '模型未返回编辑后的图片' };
     } catch (err) {
+      // Timeout → try /chat/completions fallback
+      const isTimeout = err instanceof Error && (err.name === 'AbortError' || /timeout|aborted/i.test(err.message));
+      if (isTimeout) {
+        console.info('[agent-edit] Path B: timed out, trying /chat/completions fallback...');
+        try {
+          const chatImageUrls = await tryChatCompletionsImageFallback({
+            baseUrl,
+            apiKey,
+            model: imageModel,
+            prompt: editPrompt,
+            imageBase64: `data:${imageMimeType};base64,${imageBase64}`,
+            originalError: 'timeout',
+            requestIdPrefix: 'agent-edit-pathB',
+          });
+          if (chatImageUrls && chatImageUrls.length > 0) {
+            console.log('[agent-edit] Path B: /chat/completions fallback succeeded (after timeout)');
+            return { success: true, imageUrl: chatImageUrls[0] };
+          }
+        } catch (chatErr) {
+          console.warn('[agent-edit] Path B: /chat/completions fallback error (after timeout):', chatErr);
+        }
+      }
       console.error('[agent-edit] Path B: exception', err);
       return { success: false, error: err instanceof Error ? translateApiError(err.message) : '编辑请求失败' };
     }

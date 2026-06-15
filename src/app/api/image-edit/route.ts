@@ -799,7 +799,7 @@ async function submitImageTask(
               'Content-Type': 'application/json',
             },
             body: JSON.stringify(fallbackBody),
-            signal: AbortSignal.timeout(60000),
+            signal: AbortSignal.timeout(isChannelUnavailableError(errorText) ? 30000 : 60000),
           }
         );
         if (fallbackResponse.ok) {
@@ -839,6 +839,29 @@ async function submitImageTask(
           }
         }
       } catch (fallbackErr) {
+        // /images/generations timed out → try /chat/completions immediately
+        const isTimeout = fallbackErr instanceof Error && (fallbackErr.name === 'AbortError' || /timeout|aborted/i.test(fallbackErr.message));
+        if (isTimeout) {
+          console.info('[submitImageTask] /images/generations timed out, trying /chat/completions fallback...');
+          try {
+            const chatImageUrls = await tryChatCompletionsImageFallback({
+              baseUrl: apiBaseUrl,
+              apiKey,
+              model: modelId,
+              prompt: String(adjustedBody.prompt || ''),
+              imageBase64: (adjustedBody.image as string) || undefined,
+              size: adjustedBody.size as string | undefined,
+              originalError: 'images/generations timeout',
+              requestIdPrefix: 'image-edit',
+            });
+            if (chatImageUrls && chatImageUrls.length > 0) {
+              console.log('[submitImageTask] /chat/completions fallback succeeded (after generations timeout), got', chatImageUrls.length, 'images');
+              return { directUrl: chatImageUrls[0], apiBaseUrl, apiKey, advancedParams: providerInfo?.advancedParams };
+            }
+          } catch (chatErr) {
+            console.warn('[submitImageTask] /chat/completions fallback error (after generations timeout):', chatErr);
+          }
+        }
         console.error('[submitImageTask] fallback request error:', fallbackErr);
       }
     }
