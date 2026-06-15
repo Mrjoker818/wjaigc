@@ -7,6 +7,7 @@ import { translateApiError } from '@/lib/api-error-translate';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
 import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits } from '@/lib/credits';
+import { identifyImageSubject } from '@/lib/identify-subject';
 
 // ─── Persist result image to local server ───
 async function persistResultImage(imageUrl: string): Promise<string> {
@@ -548,9 +549,29 @@ async function submitRefineToApi(
     rawBody.strength = 0.55;
   }
 
+  // Identify image subject via AI vision to anchor identity
+  let identifiedSubject = '';
+  if (params.imageUrl) {
+    updateTaskProgress(taskId, { progress: 25, label: '识别图片主体...' });
+    try {
+      const subjectResult = await identifyImageSubject(params.imageUrl, 12000);
+      if (subjectResult) {
+        identifiedSubject = subjectResult.en;
+        const subjectZh = subjectResult.zh;
+        console.info(`[refine-engine] Identified subject: "${identifiedSubject}" (zh: "${subjectZh}")`);
+      }
+    } catch (err) {
+      console.warn('[refine-engine] Subject identification failed (non-critical):', err);
+    }
+  }
+
   // Enhance prompt for image-to-image
   if (params.imageUrl) {
+    const subjectIdentityLine = identifiedSubject
+      ? `0. SUBJECT IDENTITY: The reference image depicts a "${identifiedSubject}". The output MUST show the EXACT SAME "${identifiedSubject}" — do NOT replace it with any other product or object type, even if visually similar. A medicine bottle is NOT a cosmetic bottle. A food container is NOT a chemical container. Preserve the exact product category.`
+      : `0. SUBJECT IDENTITY: The output MUST show the EXACT SAME product/subject from the reference image. Do NOT replace with a different product or object type.`;
     rawBody.prompt = `[img2img] CRITICAL SUBJECT PRESERVATION RULES:
+${subjectIdentityLine}
 1. You MUST preserve the EXACT same product/subject from the reference image — same shape, same brand identity, same visual identity. DO NOT replace with a different product.
 2. Preserve the subject's UNIQUE DETAILS: exact texture patterns, surface markings, label text, logo positions, embossing/debossing details, brand-specific design elements, engravings, and fine surface details.
 3. Preserve the subject's SIZE PROPORTIONS: the subject must occupy the same relative area of the frame, with identical width-to-height ratio and spatial positioning. The subject must not appear larger, smaller, stretched, or compressed compared to the reference.
