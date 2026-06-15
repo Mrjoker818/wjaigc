@@ -483,8 +483,8 @@ async function submitRefineToApi(
         const publicDir = path.join(workspacePath, 'public');
         let filePath = '';
         if (params.imageUrl.startsWith('/api/serve-upload/')) {
-          const fileName = params.imageUrl.replace('/api/serve-upload/', '');
-          filePath = path.join(publicDir, 'uploads', fileName);
+          const relativePath = params.imageUrl.replace('/api/serve-upload/', '');
+          filePath = path.join(publicDir, relativePath);
         } else {
           filePath = path.join(publicDir, params.imageUrl.replace(/^\//, ''));
         }

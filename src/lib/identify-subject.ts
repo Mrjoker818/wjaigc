@@ -13,9 +13,15 @@ import { findProviderForFeature, getApiProviders } from './server-api-config';
 import { fetchWithV1Retry } from './api-helpers';
 import type { ModelInfo } from './universal-api-types';
 
-const IDENTIFY_PROMPT = `Identify the main product/object in this image in one concise phrase (5-15 words). Focus on: what is it exactly (product type, specific category), NOT what it resembles. For example: "a white medicine bottle with blue label", NOT "a cosmetic container". Be precise about the product category — distinguish between medicine, cosmetics, food, beverages, chemicals, etc. Reply with ONLY the identification phrase, no explanation.`;
+const IDENTIFY_PROMPT = `Identify the main product/object in this image. Focus on: what is it exactly (product type, specific category), NOT what it resembles. For example: "a white medicine bottle with blue label", NOT "a cosmetic container". Be precise about the product category — distinguish between medicine, cosmetics, food, beverages, chemicals, etc.
 
-const IDENTIFY_PROMPT_ZH = `识别这张图片中的主体产品/物品，用简洁的短语描述（5-20字）。重点：它具体是什么（产品类型、具体品类），不是它看起来像什么。例如："白色药瓶带蓝色标签"，而不是"化妆品容器"。精确区分药品、化妆品、食品、饮料、化工品等品类。只回复识别短语，不要解释。`;
+Reply in this exact format:
+EN: [English identification phrase, 5-15 words]
+ZH: [Chinese identification phrase, 5-20 characters]
+
+Example:
+EN: a white medicine bottle with blue label
+ZH: 白色药瓶带蓝色标签`;
 
 interface IdentifyResult {
   /** English subject description */
@@ -86,17 +92,40 @@ async function imageToBase64(imageUrl: string): Promise<string | null> {
       const path = await import('path');
       const workspacePath = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
       const publicDir = path.join(workspacePath, 'public');
-      let filePath = '';
+
+      // Extract relative path (e.g. "uploads/gen-xxx.png")
+      let relativePath = '';
       if (imageUrl.startsWith('/api/serve-upload/')) {
-        const fileName = imageUrl.replace('/api/serve-upload/', '');
-        filePath = path.join(publicDir, 'uploads', fileName);
+        relativePath = imageUrl.replace('/api/serve-upload/', '');
       } else {
-        filePath = path.join(publicDir, imageUrl.replace(/^\//, ''));
+        relativePath = imageUrl.replace(/^\//, '');
       }
-      const buffer = await fs.readFile(filePath);
-      const ext = path.extname(filePath).toLowerCase();
-      const mime = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : ext === '.webp' ? 'image/webp' : 'image/png';
-      return `data:${mime};base64,${buffer.toString('base64')}`;
+
+      // Try multiple directories (same logic as serve-upload route)
+      const possiblePaths = [
+        path.join(publicDir, relativePath),                          // public/uploads/gen-xxx.png
+        path.join(publicDir, 'uploads', relativePath),              // public/uploads/uploads/gen-xxx.png (legacy)
+      ];
+      // Also try server data root if available
+      try {
+        const { getServerDataRoot } = await import('./server-data-root');
+        const dataRoot = getServerDataRoot();
+        possiblePaths.push(
+          path.join(dataRoot, relativePath),                        // dataRoot/uploads/gen-xxx.png
+          path.join(dataRoot, 'uploads', path.basename(relativePath)), // dataRoot/uploads/gen-xxx.png
+        );
+      } catch { /* server-data-root not available */ }
+
+      for (const filePath of possiblePaths) {
+        try {
+          const buffer = await fs.readFile(filePath);
+          const ext = path.extname(filePath).toLowerCase();
+          const mime = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : ext === '.webp' ? 'image/webp' : 'image/png';
+          return `data:${mime};base64,${buffer.toString('base64')}`;
+        } catch { /* try next path */ }
+      }
+      console.warn(`[identify-subject] File not found in any location for: ${imageUrl}`);
+      return null;
     }
 
     // HTTP URL
@@ -211,73 +240,19 @@ export async function identifyImageSubject(
       // Clean up the content - remove quotes, extra whitespace
       content = content.trim().replace(/^["']|["']$/g, '');
 
-      // Also get Chinese description with a second call
-      let zhContent = '';
-      try {
-        const zhRequestBody = {
-          model: provider.model,
-          messages: [
-            {
-              role: 'user',
-              content: [
-                { type: 'text', text: IDENTIFY_PROMPT_ZH },
-                { type: 'image_url', image_url: { url: base64 } },
-              ],
-            },
-          ],
-          max_tokens: 200,
-          temperature: 0.1,
-        };
+      // Parse bilingual response (EN: xxx / ZH: xxx format)
+      let enDesc = content;
+      let zhDesc = content;
 
-        const zhController = new AbortController();
-        const zhTimeoutId = setTimeout(() => zhController.abort(), timeoutMs);
+      const enMatch = content.match(/EN:\s*(.+?)(?:\n|ZH:|$)/i);
+      const zhMatch = content.match(/ZH:\s*(.+?)$/im);
+      if (enMatch) enDesc = enMatch[1].trim();
+      if (zhMatch) zhDesc = zhMatch[1].trim();
 
-        const zhResponse = await fetchWithV1Retry(
-          provider.baseUrl,
-          '/chat/completions',
-          {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${provider.apiKey}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(zhRequestBody),
-            signal: zhController.signal,
-          },
-          true,
-          timeoutMs,
-        );
-
-        clearTimeout(zhTimeoutId);
-
-        if (zhResponse.ok) {
-          const zhText = await zhResponse.text();
-          try {
-            const zhJson = JSON.parse(zhText);
-            zhContent = zhJson.choices?.[0]?.message?.content || '';
-          } catch {
-            // Try SSE parsing
-            const lines = zhText.split('\n');
-            for (const line of lines) {
-              if (line.startsWith('data: ') && line !== 'data: [DONE]') {
-                try {
-                  const chunk = JSON.parse(line.slice(6));
-                  const delta = chunk.choices?.[0]?.delta?.content || '';
-                  zhContent += delta;
-                } catch { /* skip */ }
-              }
-            }
-          }
-          zhContent = zhContent.trim().replace(/^["']|["']$/g, '');
-        }
-      } catch (err) {
-        console.warn('[identify-subject] Chinese identification failed (non-critical):', err);
-      }
-
-      console.info(`[identify-subject] Identified: en="${content}", zh="${zhContent}"`);
+      console.info(`[identify-subject] Identified: en="${enDesc}", zh="${zhDesc}"`);
       return {
-        en: content,
-        zh: zhContent || content,
+        en: enDesc,
+        zh: zhDesc || enDesc,
       };
     } finally {
       clearTimeout(timeoutId);

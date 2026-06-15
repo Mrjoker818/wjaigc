@@ -530,8 +530,8 @@ export async function POST(request: NextRequest) {
               const publicDir = path.join(workspacePath, 'public');
               let filePath = '';
               if (firstRefImage.startsWith('/api/serve-upload/')) {
-                const fileName = firstRefImage.replace('/api/serve-upload/', '');
-                filePath = path.join(publicDir, 'uploads', fileName);
+                const relativePath = firstRefImage.replace('/api/serve-upload/', '');
+                filePath = path.join(publicDir, relativePath);
               } else {
                 filePath = path.join(publicDir, firstRefImage.replace(/^\//, ''));
               }
