@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { findProviderForModel } from '@/lib/server-api-config';
+import { findProviderForModel, findProviderById } from '@/lib/server-api-config';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile } from '@/lib/api-compatibility';
 import { buildPackagingRenderPrompt } from '@/lib/packaging-prompts';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
@@ -19,6 +19,7 @@ export async function POST(request: NextRequest) {
       advancedOptions = {},
       uploads = [],
       model,
+      providerId,
       prompt: clientPrompt,
     } = body;
 
@@ -39,8 +40,10 @@ export async function POST(request: NextRequest) {
       uploads,
     } as Parameters<typeof buildPackagingRenderPrompt>[0]);
 
-    // Find an image model provider
-    const provider = await findProviderForModel(model || '', 'image');
+    // Find an image model provider (prefer providerId for exact match)
+    const provider = providerId
+      ? await findProviderById(providerId)
+      : await findProviderForModel(model || '', 'image');
     if (!provider) {
       return NextResponse.json({ error: '未找到可用的图像模型，请在管理员后台配置' }, { status: 400 });
     }

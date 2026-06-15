@@ -181,6 +181,11 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
   // === Sidebar tab ===
   const [sidebarTab, setSidebarTab] = useState<'projects' | 'templates' | 'history'>('projects');
 
+  // === Model selection ===
+  const [imageModels, setImageModels] = useState<{ id: string; name: string; providerId: string; providerName: string }[]>([]);
+  const [selectedModel, setSelectedModel] = useState('');
+  const [selectedProviderId, setSelectedProviderId] = useState('');
+
   // === Form state ===
   const [brandName, setBrandName] = useState('');
   const [productName, setProductName] = useState('');
@@ -237,6 +242,46 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
     setIsDragging(true);
     setDragOffset({ x: e.clientX - windowPos.x, y: e.clientY - windowPos.y });
   }, [windowPos]);
+
+  // === Load image models ===
+  useEffect(() => {
+    fetch('/api/models?type=image')
+      .then(r => r.json())
+      .then(data => {
+        const providers: { id: string; name: string; isEnabled?: boolean }[] = data.providers || [];
+        const enabledProviderIds = new Set(providers.filter(p => p.isEnabled !== false).map(p => p.id));
+        const providerMap = new Map(providers.map((p: { id: string; name: string }) => [p.id, p]));
+        const modelList: { id: string; name: string; providerId?: string }[] = (data.models || []).filter(
+          (m: { providerId?: string }) => enabledProviderIds.has(m.providerId || '')
+        );
+        if (modelList.length) {
+          const mapped = modelList.map(m => ({
+            id: m.id,
+            name: m.name,
+            providerId: m.providerId || '',
+            providerName: providerMap.get(m.providerId || '')?.name || '',
+          }));
+          setImageModels(mapped);
+          // Read saved model from localStorage (same key as generation-panel)
+          const saved = localStorage.getItem('wujie_selected_image_model');
+          if (saved) {
+            const pureModel = saved.includes('::') ? saved.split('::')[1] : saved;
+            const savedProvId = saved.includes('::') ? saved.split('::')[0] : '';
+            if (mapped.some(m => m.id === pureModel)) {
+              setSelectedModel(pureModel);
+              setSelectedProviderId(savedProvId);
+            } else {
+              setSelectedModel(mapped[0].id);
+              setSelectedProviderId(mapped[0].providerId);
+            }
+          } else {
+            setSelectedModel(mapped[0].id);
+            setSelectedProviderId(mapped[0].providerId);
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!isDragging) return;
@@ -309,6 +354,8 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
           brandAssets: { logoUrl, brandColors },
           structure, materialCraft, uploads, extendScenes,
           outputModes, advancedOptions, prompt,
+          model: selectedModel,
+          providerId: selectedProviderId,
         }),
       });
       const data = await res.json();
@@ -376,7 +423,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
       console.error('[brand-packaging] Generate failed:', e);
       setIsGenerating(false);
     }
-  }, [brandName, productName, category, structure, materialCraft, outputModes, skuMatrix, extendScenes, customPrompt, logoUrl, brandColors, uploads, advancedOptions, onAddImages]);
+  }, [brandName, productName, category, structure, materialCraft, outputModes, skuMatrix, extendScenes, customPrompt, logoUrl, brandColors, uploads, advancedOptions, onAddImages, selectedModel, selectedProviderId]);
 
   // === Generate same series ===
   const handleGenerateSeries = useCallback(async () => {
@@ -392,6 +439,8 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
           brandAssets: { logoUrl, brandColors },
           structure, materialCraft, uploads,
           outputModes: ['series'], advancedOptions, prompt: seriesPrompt,
+          model: selectedModel,
+          providerId: selectedProviderId,
         }),
       });
       const data = await res.json();
@@ -432,7 +481,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
       console.error('[brand-packaging] Series generation failed:', e);
       setIsGenerating(false);
     }
-  }, [brandName, productName, category, structure, materialCraft, skuMatrix, extendScenes, customPrompt, logoUrl, brandColors, uploads, advancedOptions, results, onAddImages]);
+  }, [brandName, productName, category, structure, materialCraft, skuMatrix, extendScenes, customPrompt, logoUrl, brandColors, uploads, advancedOptions, results, onAddImages, selectedModel, selectedProviderId]);
 
   // === Generate scene display ===
   const handleGenerateScene = useCallback(async () => {
@@ -448,6 +497,8 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
           brandAssets: { logoUrl, brandColors },
           structure, materialCraft, uploads,
           outputModes: ['scene_display'], advancedOptions, prompt: scenePrompt,
+          model: selectedModel,
+          providerId: selectedProviderId,
         }),
       });
       const data = await res.json();
@@ -488,7 +539,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
       console.error('[brand-packaging] Scene generation failed:', e);
       setIsGenerating(false);
     }
-  }, [brandName, productName, category, structure, materialCraft, skuMatrix, extendScenes, customPrompt, logoUrl, brandColors, uploads, advancedOptions, results, onAddImages]);
+  }, [brandName, productName, category, structure, materialCraft, skuMatrix, extendScenes, customPrompt, logoUrl, brandColors, uploads, advancedOptions, results, onAddImages, selectedModel, selectedProviderId]);
 
   // === Download image ===
   const handleDownloadImage = useCallback(async (url: string, filename: string) => {
@@ -809,6 +860,35 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                     {/* Custom prompt */}
                     <textarea className={`${inputCls} min-h-[60px] mb-3`} placeholder="附加设计要求..." value={customPrompt} onChange={e => setCustomPrompt(e.target.value)} />
                     {/* Export format + Generate button */}
+                    {/* 模型选择 */}
+                    {imageModels.length > 0 && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-[12px]" style={{ color: textMuted }}>生成模型</span>
+                        <select
+                          className="rounded-lg border px-2 py-1.5 text-[12px] cursor-pointer flex-1"
+                          style={{
+                            background: isMonochrome ? '#f9fafb' : '#111',
+                            color: isMonochrome ? '#374151' : '#e5e5e5',
+                            borderColor: isMonochrome ? '#d1d5db' : 'rgba(255,255,255,0.12)',
+                          }}
+                          value={`${selectedProviderId}::${selectedModel}`}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            const sepIdx = val.indexOf('::');
+                            if (sepIdx > 0) {
+                              setSelectedProviderId(val.substring(0, sepIdx));
+                              setSelectedModel(val.substring(sepIdx + 2));
+                            }
+                          }}
+                        >
+                          {imageModels.map(m => (
+                            <option key={`${m.providerId}::${m.id}`} value={`${m.providerId}::${m.id}`}>
+                              {m.name || m.id}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5">
                         <span className="text-[12px]" style={{ color: textMuted }}>导出格式</span>

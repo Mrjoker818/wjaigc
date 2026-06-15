@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { findProviderForModel } from '@/lib/server-api-config';
+import { findProviderForModel, findProviderById } from '@/lib/server-api-config';
 import { resolveCompatProfile } from '@/lib/api-compatibility';
 import { buildDisplay3DDecomposePrompt } from '@/lib/display3d-prompts';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
@@ -8,7 +8,7 @@ import { fetchWithV1Retry } from '@/lib/api-helpers';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { brandName = '', sceneType = 'pop_up_store', dimensions, imageUrl, model } = body;
+    const { brandName = '', sceneType = 'pop_up_store', dimensions, imageUrl, model, providerId } = body;
 
     if (!imageUrl && !brandName) {
       return NextResponse.json({ error: '请提供效果图或品牌名称' }, { status: 400 });
@@ -21,8 +21,10 @@ export async function POST(request: NextRequest) {
       dimensions: dimensions || { length: 9000, width: 6000, height: 4500, unit: 'mm' as const },
     });
 
-    // Use chat model for decomposition analysis
-    const provider = await findProviderForModel(model || '', 'chat');
+    // Use chat model for decomposition analysis (prefer providerId for exact match)
+    const provider = providerId
+      ? await findProviderById(providerId)
+      : await findProviderForModel(model || '', 'chat');
     if (!provider) {
       return NextResponse.json({ error: '未找到可用的LLM模型，请在管理员后台配置' }, { status: 400 });
     }

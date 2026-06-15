@@ -230,6 +230,38 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
   const [outputFormat, setOutputFormat] = useState('PNG');
   const [outputQuality, setOutputQuality] = useState('高');
 
+  // === Model selection state ===
+  const [availableModels, setAvailableModels] = useState<{ providerId: string; model: string; displayName?: string }[]>([]);
+  const [selectedModel, setSelectedModel] = useState('');
+  const [selectedProviderId, setSelectedProviderId] = useState('');
+
+  // Load available image models
+  useEffect(() => {
+    fetch('/api/models?type=image')
+      .then(r => r.json())
+      .then(data => {
+        const providers: { id: string; name: string; isEnabled?: boolean }[] = data.providers || [];
+        const enabledProviderIds = new Set(providers.filter(p => p.isEnabled !== false).map(p => p.id));
+        const models = (data.models || [])
+          .filter((m: { providerId?: string }) => enabledProviderIds.has(m.providerId || ''))
+          .map((m: { providerId?: string; id?: string; model?: string; name?: string }) => ({
+            providerId: m.providerId || '',
+            model: m.model || m.id || '',
+            displayName: m.name || m.model || m.id || '',
+          }));
+        setAvailableModels(models);
+        // Auto-select from localStorage or first available
+        const saved = typeof window !== 'undefined' ? localStorage.getItem('currentImageModel') : '';
+        if (saved) {
+          const savedProvider = typeof window !== 'undefined' ? localStorage.getItem('currentImageProviderId') : '';
+          const match = models.find((m: { providerId: string; model: string }) => m.model === saved && m.providerId === savedProvider);
+          if (match) { setSelectedModel(match.model); setSelectedProviderId(match.providerId); return; }
+        }
+        if (models.length > 0) { setSelectedModel(models[0].model); setSelectedProviderId(models[0].providerId); }
+      })
+      .catch(() => {});
+  }, []);
+
   // === Results state ===
   const [results, setResults] = useState<Display3DResult[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -306,6 +338,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
           imageUsageMode, sceneType, environment,
           dimensions, budget, materialStyle, lightingStyle,
           crowdStyle, viewOptions, renderMode, outputResolution, outputFormat, outputQuality, prompt,
+          model: selectedModel, providerId: selectedProviderId,
         }),
       });
       const data = await res.json();
@@ -364,7 +397,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
       console.error('[display-3d] Generate failed:', e);
       setIsGenerating(false);
     }
-  }, [brandName, productName, sceneType, environment, dimensions, imageUsageMode, materialStyle, lightingStyle, budget, viewOptions, renderMode, outputResolution, outputFormat, outputQuality, customPrompt, crowdStyle, assets, onAddImages]);
+  }, [brandName, productName, sceneType, environment, dimensions, imageUsageMode, materialStyle, lightingStyle, budget, viewOptions, renderMode, outputResolution, outputFormat, outputQuality, customPrompt, crowdStyle, assets, onAddImages, selectedModel, selectedProviderId]);
 
   // === Decompose handler ===
   const handleDecompose = useCallback(async () => {
@@ -742,6 +775,36 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                       </div>
                     </div>
                   </section>
+
+                  {/* Model selector */}
+                  {availableModels.length > 0 && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-[12px]" style={{ color: textMuted }}>生成模型</span>
+                      <select
+                        className="rounded-lg border px-2 py-1.5 text-[12px] cursor-pointer flex-1"
+                        style={{
+                          background: isMonochrome ? '#f9fafb' : '#111',
+                          color: isMonochrome ? '#374151' : '#e5e5e5',
+                          borderColor: isMonochrome ? '#d1d5db' : 'rgba(255,255,255,0.12)',
+                        }}
+                        value={`${selectedProviderId}::${selectedModel}`}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          const sepIdx = val.indexOf('::');
+                          if (sepIdx > 0) {
+                            setSelectedProviderId(val.substring(0, sepIdx));
+                            setSelectedModel(val.substring(sepIdx + 2));
+                          }
+                        }}
+                      >
+                        {availableModels.map((m: { providerId: string; model: string; displayName?: string }) => (
+                          <option key={`${m.providerId}::${m.model}`} value={`${m.providerId}::${m.model}`}>
+                            {m.displayName || m.model}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
 
                   {/* Generate button */}
                   <button
