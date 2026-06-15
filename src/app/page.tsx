@@ -1086,10 +1086,10 @@ function CanvasApp() {
               }
 
               if (pollData.status === 'completed' && pollData.imageUrl) {
-                const imageUrl = pollData.imageUrl as string;
+                const rawImageUrl = pollData.imageUrl as string;
                 completedImages.push({
                   id: `${Date.now()}-${taskIdx}`,
-                  url: imageUrl,
+                  url: rawImageUrl,
                   prompt: enhancedPrompt || params.prompt,
                   model: params.model,
                   quality: params.quality,
@@ -1097,33 +1097,131 @@ function CanvasApp() {
                   stylePreset: params.stylePreset,
                   category: params.imageCategory || params.productCategory,
                   size: params.size,
-                  sourceUrl: imageUrl,
+                  sourceUrl: rawImageUrl,
                   modelName: pollData.modelName || undefined,
                   apiProvider: pollData.providerName || undefined,
                 });
                 taskCompleted = true;
                 consecutiveErrors = 0;
 
-                // 更新进度
-                // 更新对应占位框的进度
-                const progressVal = Math.ceil((taskIdx + 1) / taskIds.length * outputCount * 0.9);
+                // 立即替换对应占位框为真实图片（而非等全部完成）
                 const phId = placeholderIds[taskIdx];
                 if (phId) {
-                  setImages(prev => prev.map((img): CanvasImage =>
-                    img.id === phId && img.isProcessingPlaceholder ? {
-                      ...img,
-                      processing: { ...img.processing, progress: Math.min(progressVal / outputCount * 100, 95), status: 'generating', label: img.processing?.label || '生成中...' },
-                    } : img
-                  ));
+                  // 持久化 data: URL
+                  const persistAndReplace = async () => {
+                    let finalUrl = rawImageUrl;
+                    if (rawImageUrl.startsWith('data:')) {
+                      try {
+                        const saveResp = await fetch('/api/save-image', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ imageUrl: rawImageUrl, userId: currentUserRef.current?.id, sourceUrl: rawImageUrl }),
+                        });
+                        const saveData = await saveResp.json();
+                        if (saveData.success && saveData.url) finalUrl = saveData.url;
+                      } catch { /* save failed, keep data URL */ }
+                    }
+
+                    // 获取图片真实尺寸
+                    const loadSize = (url: string): Promise<{w: number; h: number}> => new Promise(resolve => {
+                      const img = new window.Image();
+                      img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+                      img.onerror = () => resolve({ w: 0, h: 0 });
+                      img.src = url;
+                    });
+                    const { w: natW, h: natH } = await loadSize(finalUrl);
+
+                    // 替换占位框为真实图片
+                    setImages(prev => prev.map((img): CanvasImage => {
+                      if (img.id !== phId || !img.isProcessingPlaceholder) return img;
+                      const displayW = natW > 0 ? Math.round(natW * Math.min(400 / natW, 400 / (natH || 1))) : img.width;
+                      const displayH = natH > 0 ? Math.round(natH * Math.min(400 / (natW || 1), 400 / natH)) : img.height;
+                      return {
+                        ...img,
+                        url: finalUrl,
+                        width: displayW || img.width,
+                        height: displayH || img.height,
+                        originalWidth: natW || img.originalWidth,
+                        originalHeight: natH || img.originalHeight,
+                        isProcessingPlaceholder: false,
+                        processing: undefined,
+                        prompt: enhancedPrompt || params.prompt,
+                        model: params.model,
+                        quality: params.quality,
+                        aspectRatio: params.aspectRatio,
+                        stylePreset: params.stylePreset,
+                        category: params.imageCategory || params.productCategory,
+                        size: params.size,
+                        sourceUrl: finalUrl,
+                        modelName: pollData.modelName || undefined,
+                        apiProvider: pollData.providerName || undefined,
+                      };
+                    }));
+                  };
+                  persistAndReplace().catch(() => {
+                    // 持久化失败时也替换占位框（用原始URL）
+                    setImages(prev => prev.map((img): CanvasImage =>
+                      img.id === phId && img.isProcessingPlaceholder ? {
+                        ...img,
+                        url: rawImageUrl,
+                        isProcessingPlaceholder: false,
+                        processing: undefined,
+                        prompt: enhancedPrompt || params.prompt,
+                        model: params.model,
+                        quality: params.quality,
+                        aspectRatio: params.aspectRatio,
+                        sourceUrl: rawImageUrl,
+                        modelName: pollData.modelName || undefined,
+                        apiProvider: pollData.providerName || undefined,
+                      } : img
+                    ));
+                  });
+
+                  // 更新剩余占位框的进度标签，显示已完成数量
+                  const completedSoFar = taskIdx + 1;
+                  const remainingCount = taskIds.length - completedSoFar;
+                  if (remainingCount > 0) {
+                    setImages(prev => prev.map((img): CanvasImage => {
+                      if (img.isProcessingPlaceholder && img.processing) {
+                        return {
+                          ...img,
+                          processing: {
+                            ...img.processing,
+                            label: `已完成 ${completedSoFar}/${taskIds.length}，剩余 ${remainingCount} 张`,
+                            progress: Math.round((completedSoFar / taskIds.length) * 100),
+                          },
+                        };
+                      }
+                      return img;
+                    }));
+                  }
                 }
 
               } else if (pollData.status === 'failed') {
                 console.warn(`[poll] taskId=${currentTaskId} FAILED after ${Math.round((Date.now()-taskStartTime)/1000)}s, pollCount=${pollCount}`, pollData.error);
-                // 移除对应的占位框
+                // 移除对应的占位框，并更新剩余占位框标签
                 const failedPhId = placeholderIds[taskIdx];
-                if (failedPhId) {
-                  setImages(prev => prev.filter(img => img.id !== failedPhId));
-                }
+                const completedSoFar = taskIdx + 1;
+                const remainingCount = taskIds.length - completedSoFar;
+                setImages(prev => {
+                  const filtered = prev.filter(img => img.id !== failedPhId);
+                  if (remainingCount > 0) {
+                    return filtered.map((img): CanvasImage => {
+                      if (img.isProcessingPlaceholder && img.processing) {
+                        return {
+                          ...img,
+                          processing: {
+                            ...img.processing,
+                            label: `已完成 ${completedSoFar}/${taskIds.length}，剩余 ${remainingCount} 张`,
+                            progress: Math.round((completedSoFar / taskIds.length) * 100),
+                          },
+                        };
+                      }
+                      return img;
+                    });
+                  }
+                  return filtered;
+                });
                 toast.error('生成失败', {
                   description: pollData.error || '图像生成任务失败',
                   className: 'bg-[#141414] border border-red-900 text-white',
@@ -1233,7 +1331,7 @@ function CanvasApp() {
             };
           });
 
-          // 替换占位框为实际图片
+          // 替换尚未被逐个替换的占位框为实际图片
           setImages(prev => {
             let updated = [...prev];
             for (let i = 0; i < completedCanvasImages.length; i++) {
@@ -1241,12 +1339,16 @@ function CanvasApp() {
               if (phId) {
                 const phIdx = updated.findIndex(img => img.id === phId);
                 if (phIdx >= 0) {
-                  // 保留占位框的位置，替换内容
-                  updated[phIdx] = {
-                    ...completedCanvasImages[i],
-                    x: updated[phIdx].x,
-                    y: updated[phIdx].y,
-                  };
+                  const existing = updated[phIdx];
+                  if (existing.isProcessingPlaceholder) {
+                    // 尚未被逐个替换的占位框，现在替换
+                    updated[phIdx] = {
+                      ...completedCanvasImages[i],
+                      x: existing.x,
+                      y: existing.y,
+                    };
+                  }
+                  // 已被逐个替换的，保留（可能URL已持久化，尺寸更准确）
                 } else {
                   updated.push(completedCanvasImages[i]);
                 }
@@ -1254,9 +1356,8 @@ function CanvasApp() {
                 updated.push(completedCanvasImages[i]);
               }
             }
-            // 移除多余的占位框
-            const usedPlaceholderIds = new Set(placeholderIds.slice(0, completedCanvasImages.length));
-            updated = updated.filter(img => !img.isProcessingPlaceholder || !placeholderIds.includes(img.id) || usedPlaceholderIds.has(img.id));
+            // 移除多余的占位框（如轮询失败或超时残留的）
+            updated = updated.filter(img => !img.isProcessingPlaceholder || !placeholderIds.includes(img.id));
             stabilizeCanvasImages(updated.map(img => ({ id: img.id, url: img.url })));
             return updated;
           });
