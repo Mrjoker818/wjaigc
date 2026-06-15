@@ -108,6 +108,7 @@ export async function POST(request: NextRequest) {
       referenceMode,
       referenceCategories,
       referenceStrengths,
+      referenceDescriptions,
       imageCategory, 
       productCategory, 
       stylePreset, 
@@ -326,7 +327,18 @@ export async function POST(request: NextRequest) {
 
     // 融合模式增强提示词 - 明确指导模型如何融合参考图
     if (referenceMode === 'fusion' && referenceImages && referenceImages.length > 1) {
-      enhancedPrompt = `[FUSION MODE] Combine and merge ${referenceImages.length} reference images into a single cohesive composition. ${enhancedPrompt}. Seamlessly blend all visual elements together, maintaining the key characteristics of each reference while creating a unified, natural result.`;
+      const fusionRefDescArr = Array.isArray(referenceDescriptions) ? referenceDescriptions.filter((d: string) => d && typeof d === 'string' && d.trim()) : [];
+      const fusionDescHint = fusionRefDescArr.length > 0 ? ` The reference images depict: "${fusionRefDescArr.join('; ')}".` : '';
+      enhancedPrompt = `[FUSION MODE] Combine and merge ${referenceImages.length} reference images into a single cohesive composition.${fusionDescHint} ${enhancedPrompt}. Seamlessly blend all visual elements together, maintaining the key characteristics of each reference while creating a unified, natural result.`;
+    }
+
+    // 无分类但有参考图描述时的增强（前端图生图面板路径，不传 referenceCategories）
+    if (referenceImages && referenceImages.length > 0 && !referenceCategories) {
+      const noCatRefDescArr = Array.isArray(referenceDescriptions) ? referenceDescriptions.filter((d: string) => d && typeof d === 'string' && d.trim()) : [];
+      if (noCatRefDescArr.length > 0) {
+        const noCatDescHint = noCatRefDescArr.join('; ');
+        enhancedPrompt = `[REFERENCE MODE] The reference image depicts: "${noCatDescHint}". You MUST preserve the main subject identity — do NOT replace it with a different object. ${enhancedPrompt}`;
+      }
     }
 
     // 参考图分类增强 - 基于前端传递的分类和强度，增强提示词让AI正确理解参考意图
@@ -385,9 +397,13 @@ export async function POST(request: NextRequest) {
 
         // 判断是否包含"主体"保留
         const hasSubjectPreserve = activeCatStrengths['subject'] !== undefined;
+        // 主体描述锚定：如果有参考图原始描述，注入到指令中防止主体被替换
+        const refDescArr = Array.isArray(referenceDescriptions) ? referenceDescriptions.filter((d: string) => d && typeof d === 'string' && d.trim()) : [];
+        const refDescText = refDescArr.length > 0 ? refDescArr.join('; ') : '';
+        const subjectAnchor = refDescText ? ` The reference image depicts: "${refDescText}".` : '';
         const subjectPrefix = hasSubjectPreserve
-          ? 'CRITICAL: The main subject (product/object/person) must remain EXACTLY the same as in the reference image — same item, same identity, same appearance. Do NOT replace or change the subject to a different object. '
-          : '';
+          ? `CRITICAL: The main subject (product/object/person) must remain EXACTLY the same as in the reference image — it is "${refDescText || 'the depicted item'}", same identity, same appearance. Do NOT replace or change the subject to a different object.${subjectAnchor} `
+          : (refDescText ? `The reference image depicts: "${refDescText}". ` : '');
 
         let categoryEnhancement = '';
         if (preserveParts.length > 0) {

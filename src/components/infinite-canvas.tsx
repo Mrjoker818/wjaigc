@@ -3348,6 +3348,17 @@ export function InfiniteCanvas({
         'detail': 'fine details and textures',
       };
 
+      // 收集参考图的原始描述（用于增强主体识别精度）
+      const refDescriptions = group.refImages
+        .map(r => {
+          const canvasImg = images.find(img => img.id === r.imageId);
+          return canvasImg?.prompt?.trim();
+        })
+        .filter((d): d is string => !!d);
+      const refDescText = refDescriptions.length > 0
+        ? refDescriptions.join('; ')
+        : '';
+
       // 收集所有激活的类别及其最大强度（跨多张参考图取最大值）
       const catStrengthMap: Record<string, number> = {};
       for (const r of group.refImages) {
@@ -3385,14 +3396,20 @@ export function InfiniteCanvas({
         const hasSubjectInRef = catStrengthMap['subject'] > 0;
 
         // 构建完整提示词
+        // 主体身份锚定：用原始描述明确告诉AI参考图中的主体是什么
+        const subjectAnchor = refDescText
+          ? ` The reference image depicts: "${refDescText}".`
+          : '';
+        const subjectIdentityRule = hasSubjectInRef
+          ? ` IMPORTANT: The product/object in the result MUST be the SAME product/object as in the reference image — it is "${refDescText || 'the depicted item'}". Do NOT substitute or replace it with a different product or object type.`
+          : '';
+
         if (keyword) {
           fullPrompt = `Create an image of: ${keyword}.`;
           if (preserveAspects.length > 0) {
             fullPrompt += ` While creating this new image, ${preserveAspects.join(', ')}.`;
           }
-          if (hasSubjectInRef) {
-            fullPrompt += ` IMPORTANT: The product/object in the result MUST be the SAME product/object as in the reference image — do NOT substitute or replace it with a different product.`;
-          }
+          fullPrompt += subjectIdentityRule;
           if (freeAspects.length > 0) {
             fullPrompt += ` Feel free to reimagine the ${freeAspects.join(', ')}.`;
           }
@@ -3401,16 +3418,14 @@ export function InfiniteCanvas({
           if (preserveAspects.length > 0) {
             fullPrompt += ` Keep the ${preserveAspects.join(', ')}.`;
           }
-          if (hasSubjectInRef) {
-            fullPrompt += ` IMPORTANT: The product/object in the result MUST be the SAME product/object as in the reference image.`;
-          }
+          fullPrompt += subjectIdentityRule;
           if (freeAspects.length > 0) {
             fullPrompt += ` Creatively transform the ${freeAspects.join(', ')}.`;
           }
         }
 
-        // 显式告诉模型使用参考图
-        fullPrompt = `[ref] Use the provided reference image(s) as the base. ${fullPrompt}`;
+        // 显式告诉模型使用参考图，并附带主体描述
+        fullPrompt = `[ref] Use the provided reference image(s) as the base.${subjectAnchor} ${fullPrompt}`;
         // strength 计算：保留方面多/强 → strength 低（更接近原图）
         const totalPreserveScore = activeKeys.reduce((sum, cat) => sum + catStrengthMap[cat], 0);
         const maxScore = activeKeys.length * 100;
@@ -3425,18 +3440,29 @@ export function InfiniteCanvas({
         }
       } else {
         // 无激活类别，仅作为参考图
+        const descHint = refDescText ? ` (depicts: "${refDescText}")` : '';
         if (keyword) {
-          fullPrompt = `[ref] Using the reference image(s) as visual context, create: ${keyword}`;
+          fullPrompt = `[ref] Using the reference image(s) as visual context${descHint}, create: ${keyword}`;
         }
       }
     } else if (group.type === 'fusion' && group.refImages.length > 0) {
       // 融图组：融合多张参考图
       calculatedStrength = 0.65;
       const keyword = fullPrompt.trim();
+      // 收集融合参考图的原始描述
+      const fusionRefDescs = group.refImages
+        .map(r => {
+          const canvasImg = images.find(img => img.id === r.imageId);
+          return canvasImg?.prompt?.trim();
+        })
+        .filter((d): d is string => !!d);
+      const fusionDescHint = fusionRefDescs.length > 0
+        ? ` The reference images depict: "${fusionRefDescs.join('; ')}".`
+        : '';
       if (keyword) {
-        fullPrompt = `[fusion] Seamlessly blend and fuse elements from the reference images, then create: ${keyword}`;
+        fullPrompt = `[fusion] Seamlessly blend and fuse elements from the reference images, then create: ${keyword}.${fusionDescHint}`;
       } else {
-        fullPrompt = `[fusion] Seamlessly blend and fuse elements from the reference images into a cohesive new image.`;
+        fullPrompt = `[fusion] Seamlessly blend and fuse elements from the reference images into a cohesive new image.${fusionDescHint}`;
       }
     }
 

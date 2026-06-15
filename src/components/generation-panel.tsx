@@ -15,6 +15,7 @@ export interface GenerationParams {
     prompt: string;
     size: string;
     referenceImages: string[];
+    referenceDescriptions?: string[]; // per-image descriptions for better subject recognition
     referenceMode: 'style' | 'content' | 'fusion';
     imageCategory: string;
     productCategory: string;
@@ -63,7 +64,7 @@ interface GenerationPanelProps {
     onUpdateCtrlRefKeyword?: (id: string, keyword: string) => void;
     onFusionGenerate?: (refs: CtrlRefSelection[], fusionPrompt: string) => void;
     onModelChange?: (model: string) => void;
-    externalReferenceImage?: string | null;
+    externalReferenceImage?: { url: string; description?: string } | null;
     onExternalReferenceImageConsumed?: () => void;
     onOpenPromptEquation?: () => void;
     applyFavoriteParams?: { prompt?: string; model?: string; aspectRatio?: string; quality?: string } | null;
@@ -312,9 +313,18 @@ export function GenerationPanel(
     // Sync external reference image from canvas right-click "发送参考图"
     useEffect(() => {
         if (externalReferenceImage && !externalRefImgApplied) {
+            const refUrl = typeof externalReferenceImage === 'string' ? externalReferenceImage : externalReferenceImage.url;
+            const refDesc = typeof externalReferenceImage === 'string' ? '' : (externalReferenceImage.description || '');
             setReferenceImages(prev => {
-                if (prev.includes(externalReferenceImage)) return prev;
-                const next = [...prev, externalReferenceImage];
+                if (prev.includes(refUrl)) return prev;
+                const next = [...prev, refUrl];
+                // Also add description at the same index
+                setReferenceDescriptions(prevDesc => {
+                    const newDesc = [...prevDesc];
+                    while (newDesc.length < next.length - 1) newDesc.push('');
+                    newDesc.push(refDesc);
+                    return newDesc;
+                });
                 return next;
             });
             setExternalRefImgApplied(true);
@@ -325,6 +335,7 @@ export function GenerationPanel(
         }
     }, [externalReferenceImage, externalRefImgApplied, onExternalReferenceImageConsumed]);
     const [referenceImages, setReferenceImages] = useState<string[]>([]);
+    const [referenceDescriptions, setReferenceDescriptions] = useState<string[]>([]);
     const [referenceSelectedCategories, setReferenceSelectedCategories] = useState<Record<number, Set<string>>>({}); // per-image category selection
     const [referenceStrengths, setReferenceStrengths] = useState<number[]>([]);
     const MAX_REF_IMAGES = 10;
@@ -475,6 +486,7 @@ export function GenerationPanel(
             prompt: fullPrompt,
             size: getModelSize(aspectRatio) || "1024x1024",
             referenceImages,
+            referenceDescriptions,
             referenceMode: 'style',
             imageCategory: 'general',
             productCategory,
@@ -635,6 +647,11 @@ export function GenerationPanel(
             const newImages = [...prev];
             newImages[index] = '';
             return newImages;
+        });
+        setReferenceDescriptions(prev => {
+            const newDesc = [...prev];
+            if (index < newDesc.length) newDesc[index] = '';
+            return newDesc;
         });
         setReferenceSelectedCategories(prev => {
             const next = { ...prev };
@@ -905,6 +922,7 @@ export function GenerationPanel(
     const addRefSlot = () => {
         if (referenceImages.length >= MAX_REF_IMAGES) return;
         setReferenceImages(prev => [...prev, '']);
+        setReferenceDescriptions(prev => [...prev, '']);
         setReferenceStrengths(prev => [...prev, 0]);
     };
 

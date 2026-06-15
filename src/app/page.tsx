@@ -2312,7 +2312,7 @@ function CanvasApp() {
 
   // 提示词大师 - 从chat-panel传递到generation-panel
   const [externalPrompt, setExternalPrompt] = useState<string | undefined>(undefined);
-  const [externalReferenceImage, setExternalReferenceImage] = useState<string | null>(null);
+  const [externalReferenceImage, setExternalReferenceImage] = useState<{ url: string; description?: string } | null>(null);
 
   // Oh My Prompt - Vision Prompt handler
   const handleVisionPrompt = useCallback(async (imageUrl: string) => {
@@ -2530,7 +2530,7 @@ function CanvasApp() {
 
   // 适配 InfiniteCanvas 的简单回调函数
   const handleCanvasGenerateVariation = useCallback((image: CanvasImage) => {
-    setExternalReferenceImage(image.url);
+    setExternalReferenceImage({ url: image.url, description: image.prompt || '' });
   }, []);
 
   const handleCanvasExtractKeywords = useCallback((image: CanvasImage) => {
