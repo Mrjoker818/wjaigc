@@ -184,10 +184,13 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
   const pollAttemptRef = useRef(0);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const currentTaskIdRef = useRef<string | null>(null);
+  const isMountedRef = useRef(true);
 
   // ─── Cleanup polling timer on unmount ───
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
+      isMountedRef.current = false;
       if (pollTimerRef.current) {
         clearTimeout(pollTimerRef.current);
         pollTimerRef.current = null;
@@ -380,6 +383,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
         pollAttemptRef.current = 0;
         setProgress(30);
         const pollRefine = async () => {
+          if (!isMountedRef.current) return; // 组件已卸载，停止轮询
           pollAttemptRef.current++;
           // Safety: stop polling after 10 minutes (300+ dynamic attempts)
           if (pollAttemptRef.current > 300) {
@@ -440,7 +444,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
               }
               // Dynamic interval: first 10 polls 800ms, 10-25 1.2s, 25+ 2s
               const delay = pollAttemptRef.current <= 10 ? 800 : pollAttemptRef.current <= 25 ? 1200 : 2000;
-              pollTimerRef.current = setTimeout(pollRefine, delay);
+              if (isMountedRef.current) pollTimerRef.current = setTimeout(pollRefine, delay);
               return; // Don't schedule another poll below
             }
           } catch (pollErr) {
@@ -449,7 +453,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
           }
           // Schedule next poll with dynamic interval
           const delay = pollAttemptRef.current <= 10 ? 800 : pollAttemptRef.current <= 25 ? 1200 : 2000;
-          pollTimerRef.current = setTimeout(pollRefine, delay);
+          if (isMountedRef.current) pollTimerRef.current = setTimeout(pollRefine, delay);
         };
         // Start first poll immediately
         pollRefine();

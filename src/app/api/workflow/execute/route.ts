@@ -194,6 +194,12 @@ async function executeWorkflow(
       break;
     }
 
+    // 检查是否已在循环节点内执行过
+    if (resultMap.has(node.id)) {
+      execState.results[node.id] = resultMap.get(node.id)!;
+      continue;
+    }
+
     // P0: 串行等待 — 检查上游节点是否全部成功
     const upstreamIds = upstreamMap.get(node.id) || [];
     const upstreamFailed = upstreamIds.some(uid => {
@@ -362,12 +368,14 @@ async function executeWorkflow(
                   });
                   if (dsRes.ok) {
                     const dsData = await dsRes.json();
-                    resultMap.set(dsNode.id, {
+                    const dsResult = {
                       nodeId: dsNode.id,
-                      status: 'success',
+                      status: 'success' as const,
                       output: { ...dsData, _type: dsNode.type, _loopIteration: loopIdx },
                       durationMs: Date.now() - nodeStart,
-                    });
+                    } as ExecutionResult;
+                    resultMap.set(dsNode.id, dsResult);
+                    execState.results[dsNode.id] = dsResult;
                   }
                 } catch {
                   // 下游节点执行失败，继续下一轮

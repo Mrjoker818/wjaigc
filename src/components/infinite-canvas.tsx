@@ -510,6 +510,12 @@ export function InfiniteCanvas({
 }: InfiniteCanvasProps) {
   const isMonochrome = themeStyle === 'monochrome';
 
+  // Stable refs for callbacks used in effects (avoid stale closures)
+  const onSelectImageRef = useRef(onSelectImage);
+  onSelectImageRef.current = onSelectImage;
+  const onNavigateToImageCompleteRef = useRef(onNavigateToImageComplete);
+  onNavigateToImageCompleteRef.current = onNavigateToImageComplete;
+
   // Resize preview: stores live dimensions during resize, applied to images only on mouseup
   const [resizePreview, setResizePreview] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
 
@@ -704,6 +710,16 @@ export function InfiniteCanvas({
     });
   }, [visibleImages, thumbnailVersion]);
 
+  // ★ 清理已移除图片的缩略图缓存，避免内存泄漏
+  useEffect(() => {
+    const currentUrls = new Set(images.map(img => img.url));
+    for (const key of thumbnailCacheRef.current.keys()) {
+      if (!currentUrls.has(key)) {
+        thumbnailCacheRef.current.delete(key);
+      }
+    }
+  }, [images]);
+
   // ★ 远程 URL 后台持久化监听：当远程图片持久化为本地 URL 后，更新画布图片
   // Use imagesRef to avoid stale closure over images
   useEffect(() => {
@@ -789,9 +805,9 @@ export function InfiniteCanvas({
       y: canvasH / 2 - imgCenterY,
     });
     // Select the image
-    onSelectImage(targetImg);
+    onSelectImageRef.current(targetImg);
     // Notify parent that navigation is complete
-    onNavigateToImageComplete?.();
+    onNavigateToImageCompleteRef.current?.();
   }, [navigateToImageId]);
 
   // Auto-center view on newly added images (upload / generate / paste)
@@ -831,7 +847,7 @@ export function InfiniteCanvas({
 
         // Select the first new image
         setSelectedIds(new Set([targetImg.id]));
-        onSelectImage(targetImg);
+        onSelectImageRef.current(targetImg);
       }
     }
 

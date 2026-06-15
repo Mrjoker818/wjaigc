@@ -165,6 +165,7 @@ export async function executeAgentLoop(
 ): Promise<AgentResult> {
   const steps: AgentResult['steps'] = [];
   let currentRound = 0;
+  let consecutiveFailures = 0;
   const maxRounds = context.maxRounds || DEFAULT_MAX_ROUNDS;
   const tools = getToolsForLLM();
 
@@ -268,6 +269,7 @@ export async function executeAgentLoop(
             finalResponse: result.description,
           };
         }
+        consecutiveFailures = 0; // 成功后重置连续失败计数
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : '未知错误';
         allResults.push(`工具 "${toolCall.name}" 执行失败: ${errMsg}`);
@@ -278,6 +280,16 @@ export async function executeAgentLoop(
           result: errMsg,
           success: false,
         });
+        consecutiveFailures++;
+        if (consecutiveFailures >= 3) {
+          return {
+            success: false,
+            output: context.imageUrl,
+            steps,
+            error: `工具连续执行失败${consecutiveFailures}次，终止循环`,
+            finalResponse: `工具连续执行失败: ${errMsg}`,
+          };
+        }
       }
     }
 

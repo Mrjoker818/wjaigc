@@ -105,6 +105,12 @@ function CanvasApp() {
   const MAX_UNDO_STEPS = 100;
   const historyStackRef = useRef<CanvasImage[][]>([]);
   const historyIndexRef = useRef<number>(-1);
+  const isMountedRef = useRef(true);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => { isMountedRef.current = false; };
+  }, []);
 
   // Wrap setImages to record history before each change
   const setImages = useCallback((action: React.SetStateAction<CanvasImage[]>) => {
@@ -149,6 +155,8 @@ function CanvasApp() {
   const [activeGenerationCount, setActiveGenerationCount] = useState(0);
   const [previewImage, setPreviewImage] = useState<CanvasImage | null>(null);
   const [themeStyle, setThemeStyle] = useState<ThemeStyle>('gold');
+  const themeStyleRef = useRef(themeStyle);
+  themeStyleRef.current = themeStyle;
   const [panelCollapsed, setPanelCollapsed] = useState(false);
   const [activePanel, setActivePanel] = useState<ActivePanel>('generate');
   // 从工作台加载指定项目
@@ -369,6 +377,8 @@ function CanvasApp() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [ohMyPromptOpen, setOhMyPromptOpen] = useState(false);
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
+  const currentProjectRef = useRef(currentProject);
+  currentProjectRef.current = currentProject;
   const groupsRef = useRef<ImageGroupData[]>([]);
 
   const stabilizeCanvasImages = useCallback((items: Array<{ id: string; url: string }>) => {
@@ -438,8 +448,8 @@ function CanvasApp() {
     autoSaveRef.current = setTimeout(async () => {
       // 二次检查：定时器触发时如果正在切换项目，也跳过
       if (switchingProjectRef.current) return;
-      // 验证用户一致性：定时器闭包捕获的 userId 可能已过时
-      if (!currentUser?.id) return;
+      // 验证用户一致性：使用 ref 获取最新 userId 避免闭包过期
+      if (!currentUserRef.current?.id) return;
       try {
         // 先将 data:/blob: URL 持久化到服务器
         const urlMapping: Record<string, string> = {};
@@ -656,11 +666,11 @@ function CanvasApp() {
       try {
         // ★ 数据隔离保护：验证当前用户身份，防止跨用户数据污染
         const currentUserId = UserManagerCore.getInstance().getUser()?.id;
-        if (!currentUserId || currentUserId !== currentUser?.id) return;
+        if (!currentUserId || currentUserId !== currentUserRef.current?.id) return;
         // 标记服务器同步合并中，防止自动保存用旧闭包数据覆盖
         serverSyncMergeRef.current = true;
         const projects = userMgr.getProjects();
-        const curProjectId = currentProject?.id;
+        const curProjectId = currentProjectRef.current?.id;
         if (curProjectId) {
           const latest = projects.find(p => p.id === curProjectId);
           if (latest) {
@@ -994,7 +1004,7 @@ function CanvasApp() {
           let taskCompleted = false;
           const taskStartTime = Date.now(); // ★ 每个任务独立的开始时间
 
-          while (!taskCompleted) {
+          while (!taskCompleted && isMountedRef.current) {
             const taskElapsed = Date.now() - taskStartTime;
             const globalElapsed = Date.now() - globalStartTime;
             // 检查是否超时：单任务超时 或 全局超时
@@ -1416,9 +1426,9 @@ function CanvasApp() {
     };
     setImages(prev => [...prev, newImage]);
     recordUserData({
-      userId: currentUser?.id,
+      userId: currentUserRef.current?.id,
       area: 'images',
-      type: 'canvas-add',
+      type: 'add-to-canvas',
       filename: `${newImage.id}.json`,
       content: JSON.stringify(newImage, null, 2),
       metadata: { source: 'canvas', imageUrl },
@@ -1428,7 +1438,7 @@ function CanvasApp() {
       description: '参考图已成功添加到画布',
       className: 'bg-[#141414] border-[#2a2a2a] text-white',
     });
-  }, [images, stabilizeCanvasImages, currentUser?.id]);
+  }, [stabilizeCanvasImages]); // 使用 latestImagesRef/currentUserRef 避免 images 闭包
 
   // 自动排列布局：横向顶对齐，间距10px，超出视口宽度换行
   const autoLayoutImages = useCallback((existingImages: CanvasImage[], newImages: CanvasImage[]): CanvasImage[] => {
@@ -1716,7 +1726,7 @@ function CanvasApp() {
           let taskCompleted = false;
           const taskStartTime = Date.now(); // ★ 每个任务独立的开始时间
 
-          while (!taskCompleted) {
+          while (!taskCompleted && isMountedRef.current) {
             const taskElapsed = Date.now() - taskStartTime;
             const globalElapsed = Date.now() - globalStartTime;
             if (taskElapsed > perTaskMaxPollTime || globalElapsed > globalMaxPollTime) {
@@ -2037,6 +2047,7 @@ function CanvasApp() {
           const pollData = await pollRes.json();
 
           if (pollData.status === 'completed') {
+            if (!isMountedRef.current) return; // 组件已卸载，停止轮询
             const videoUrl = pollData.videoUrl || pollData.url;
             const thumbnailUrl = pollData.thumbnailUrl || pollData.url;
             if (videoUrl) {
@@ -2075,11 +2086,11 @@ function CanvasApp() {
               } as CanvasImage : img
             ));
             // 递归继续轮询
-            pollVideoResult(attempt + 1);
+            if (isMountedRef.current) pollVideoResult(attempt + 1);
           }
         } catch {
           // 轮询错误，继续尝试
-          pollVideoResult(attempt + 1);
+          if (isMountedRef.current) pollVideoResult(attempt + 1);
         }
       };
 

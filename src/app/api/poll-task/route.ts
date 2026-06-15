@@ -25,6 +25,8 @@ const FAILED_CACHE = Symbol('failed');
 const failedTaskCache = new Map<string, { error: string; timestamp: number }>();
 
 // 定期清理过期缓存（5分钟以上的缓存清除）
+const MAX_CACHE_SIZE = 1000;
+
 if (typeof setInterval !== 'undefined') {
   setInterval(() => {
     const now = Date.now();
@@ -33,6 +35,17 @@ if (typeof setInterval !== 'undefined') {
     }
     for (const [k, v] of failedTaskCache) {
       if (now - v.timestamp > 5 * 60 * 1000) failedTaskCache.delete(k);
+    }
+    // BE-08: 限制缓存大小，避免无限增长
+    if (completedTaskCache.size > MAX_CACHE_SIZE) {
+      const entries = [...completedTaskCache.entries()].sort((a, b) => a[1].timestamp - b[1].timestamp);
+      const toDelete = entries.slice(0, completedTaskCache.size - MAX_CACHE_SIZE);
+      for (const [k] of toDelete) completedTaskCache.delete(k);
+    }
+    if (failedTaskCache.size > MAX_CACHE_SIZE) {
+      const entries = [...failedTaskCache.entries()].sort((a, b) => a[1].timestamp - b[1].timestamp);
+      const toDelete = entries.slice(0, failedTaskCache.size - MAX_CACHE_SIZE);
+      for (const [k] of toDelete) failedTaskCache.delete(k);
     }
   }, 60_000).unref?.();
 }
@@ -472,7 +485,6 @@ export async function POST(request: NextRequest) {
           // 可能是同步完成的任务（API直接返回视频URL，status可能仍为processing）
           const syncVideoUrl = regResult.videoUrl as string | undefined;
           if (syncVideoUrl) {
-            const releaseQueueSlot = (await import('@/lib/task-registry')).releaseQueueSlot;
             releaseQueueSlot(taskId);
             return NextResponse.json({
               success: true,

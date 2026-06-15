@@ -38,6 +38,9 @@ export async function GET(request: NextRequest) {
         );
       } catch { return; }
 
+      // 心跳变量提前声明，避免回调中引用未赋值变量
+      let heartbeat: ReturnType<typeof setInterval> | undefined;
+
       // 订阅任务事件
       const unsubscribe = subscribeToTaskEvents((event: TaskEvent) => {
         try {
@@ -46,13 +49,13 @@ export async function GET(request: NextRequest) {
           );
         } catch {
           // 客户端已断开
-          clearInterval(heartbeat);
+          if (heartbeat) clearInterval(heartbeat);
           unsubscribe();
         }
       });
 
       // 心跳：每 25 秒发送一次，防止连接被代理/负载均衡器超时断开
-      const heartbeat = setInterval(() => {
+      heartbeat = setInterval(() => {
         try {
           controller.enqueue(
             encoder.encode(`:heartbeat\n\n`)

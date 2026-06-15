@@ -526,7 +526,8 @@ export default function VideoGenerationPanel({
     }
 
     setIsGenerating(true);
-    setTimeout(() => setIsGenerating(false), 3000); // 3秒后恢复按钮（实际由外部控制）
+    // 注意：isGenerating 在 onVideoGenerate 回调返回后恢复为 false
+    // 实际生成进度由父组件通过 activeGenerationCount 追踪
 
     // 提取 providerId（如果 model 是复合键）
     const pureModelId = model.includes('::') ? model.split('::').pop()! : model;

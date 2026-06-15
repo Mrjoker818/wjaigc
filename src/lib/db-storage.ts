@@ -789,8 +789,10 @@ export interface DbBrandMaterial {
 
 /** Allowed columns for brand_projects table (SQL injection prevention) */
 const BRAND_PROJECT_COLUMNS = new Set([
-  'id', 'name', 'description', 'style', 'industry', 'target_audience',
-  'color_palette', 'brand_keywords', 'reference_images', 'is_archived',
+  'id', 'project_name', 'brand_name', 'industry', 'project_type',
+  'keywords', 'target_audience', 'tone', 'description',
+  'logo_url', 'product_url', 'ip_url', 'reference_urls',
+  'brand_dna', 'creative_directions', 'status', 'is_archived',
   'created_at', 'updated_at',
 ]);
 

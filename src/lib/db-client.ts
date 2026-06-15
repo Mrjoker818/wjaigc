@@ -56,8 +56,9 @@ export async function execSql(query: string, params?: unknown[]): Promise<SqlRes
 
       if (isTransient && attempt < maxRetries) {
         console.warn(`[db-client] Transient SQL error (attempt ${attempt + 1}/${maxRetries + 1}), retrying...`, errMsg.substring(0, 100));
-        // Brief delay before retry
-        await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+        // Destroy potentially corrupted pool and rebuild on next query
+        if (pool) { await pool.end().catch(() => {}); pool = null; }
+        await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
         continue;
       }
 

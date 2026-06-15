@@ -733,9 +733,9 @@ export function GenerationPanel(
     };
 
     // 从服务器加载管理员配置的图像模型
-    const loadServerModels = useCallback(async () => {
+    const loadServerModels = useCallback(async (signal?: AbortSignal) => {
         try {
-            const res = await fetch('/api/models?type=image');
+            const res = await fetch('/api/models?type=image', { signal });
             if (res.ok) {
                 const data = await res.json();
                 const serverModels: {id: string, providerId: string, providerName: string, is3DProvider?: boolean, displayLabel?: string, apiDisplayName?: string}[] = [];
@@ -779,15 +779,17 @@ export function GenerationPanel(
     }, []);
 
     useEffect(() => {
-        loadServerModels();
+        const ac = new AbortController();
+        loadServerModels(ac.signal);
         // 页面重新可见时刷新模型列表（用户可能刚从管理面板切回）
         const handleVisibility = () => {
             if (document.visibilityState === 'visible') {
-                loadServerModels();
+                loadServerModels(ac.signal);
             }
         };
         document.addEventListener('visibilitychange', handleVisibility);
         return () => {
+            ac.abort();
             document.removeEventListener('visibilitychange', handleVisibility);
         };
     }, [loadServerModels]);

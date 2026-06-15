@@ -210,39 +210,53 @@ export async function consumeCredits(
   if (cost <= 0) return { success: true, balance: 0, cost: 0 };
 
   try {
-    // Check current balance
-    let credits = await dbGetCredits(userId);
-    if (!credits) {
-      // Auto-init credits for new users
-      credits = await dbInitCredits(userId);
-    }
-
-    if (credits && credits.balance < cost) {
-      return {
-        success: false,
-        balance: credits.balance,
-        cost,
-        message: `积分不足，需要 ${cost} 积分（≈¥${(cost * CREDITS_TO_CNY).toFixed(2)}），当前余额 ${credits.balance} 积分`,
-      };
-    }
-
     const opLabel = getOperationLabel(operation, model);
     const modelInfo = model ? ` [${model}]` : '';
 
-    // Deduct credits
-    const result = await dbAdjustCredits(
-      userId,
-      -cost,
-      'consume',
-      description || `${opLabel}${modelInfo} 扣除 ${cost} 积分`,
-      `${operation}${modelInfo}`
+    // Atomic deduction: UPDATE ... WHERE balance >= cost
+    // This avoids race condition where concurrent requests both pass the balance check
+    const { execSql } = await import('@/lib/db-client');
+    const now = Date.now();
+    const deductResult = await execSql(
+      `UPDATE wujie_credits 
+       SET balance = balance - $1, 
+           total_used = total_used + $2, 
+           updated_at = $3 
+       WHERE user_id = $4 AND balance >= $1 
+       RETURNING balance`,
+      [cost, cost, now, userId]
     );
 
-    if (!result.success) {
-      return { success: false, balance: 0, cost, message: result.message || '积分扣除失败' };
+    if (!deductResult || !deductResult.rows || deductResult.rows.length === 0) {
+      // Either user doesn't exist or balance insufficient
+      // Try auto-init for new users, then check again
+      let credits = await dbGetCredits(userId);
+      if (!credits) {
+        credits = await dbInitCredits(userId);
+      }
+      const currentBalance = credits?.balance ?? 0;
+      return {
+        success: false,
+        balance: currentBalance,
+        cost,
+        message: `积分不足，需要 ${cost} 积分（≈¥${(cost * CREDITS_TO_CNY).toFixed(2)}），当前余额 ${currentBalance} 积分`,
+      };
     }
 
-    return { success: true, balance: result.balance, cost };
+    const newBalance = Number(deductResult.rows[0].balance);
+
+    // Record the transaction in history
+    try {
+      await dbAdjustCredits(
+        userId,
+        0, // already deducted atomically, just record
+        'consume',
+        description || `${opLabel}${modelInfo} 扣除 ${cost} 积分`,
+        `${operation}${modelInfo}`
+      );
+    } catch { /* history recording is non-critical */ }
+
+    return { success: true, balance: newBalance, cost };
   } catch (e) {
     console.error('[credits] consumeCredits error:', e);
     // If credits system fails, allow the operation to proceed

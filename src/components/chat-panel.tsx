@@ -1190,12 +1190,14 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
   // Sync current chat model info to parent for vision-prompt usage
   useEffect(() => {
     if (!onChatModelChange) return;
+    let cancelled = false;
     const isThirdParty = model.includes('::');
     if (isThirdParty) {
       const providerId = model.split('::')[0];
       const actualModel = model.split('::').slice(1).join('::');
       // Look up provider info from UniversalApiManager
       import('@/lib/universal-api-manager').then(({ UniversalApiManager }) => {
+        if (cancelled) return; // 竞态保护：模型已切换
         const mgr = UniversalApiManager.getInstance();
         const provider = mgr.getProviders().find(p => p.id === providerId);
         if (provider) {
@@ -1209,7 +1211,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
         } else {
           onChatModelChange(null);
         }
-      }).catch(() => onChatModelChange(null));
+      }).catch(() => { if (!cancelled) onChatModelChange(null); });
     } else {
       // Server-managed model
       onChatModelChange({
@@ -1219,6 +1221,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
         baseUrl: '',
       });
     }
+    return () => { cancelled = true; };
   }, [model, onChatModelChange]);
   const [systemPrompt, setSystemPrompt] = useState('');
   const [isThinkingMode, setIsThinkingMode] = useState(false);

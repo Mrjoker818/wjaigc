@@ -586,7 +586,11 @@ export async function tryChatCompletionsImageFallback(params: {
       chatRequestBody.image = imageBase64;
     }
     if (imageUrls && imageUrls.length > 0) {
-      chatRequestBody.image_urls = imageUrls;
+      // 去重：避免 image 与 imageUrls 包含相同内容导致重复发送
+      const filteredUrls = imageBase64
+        ? imageUrls.filter(url => url !== imageBase64)
+        : imageUrls;
+      chatRequestBody.image_urls = filteredUrls.length > 0 ? filteredUrls : undefined;
     }
     const chatRequest = buildGeminiChatImageRequest(chatRequestBody);
 

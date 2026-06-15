@@ -93,6 +93,7 @@ export function updateTaskProgress(
   if (!task) return;
 
   const oldStatus = task.status;
+  const oldProgress = task.progress;
   Object.assign(task, { ...update, updatedAt: Date.now() });
 
   // 推断事件类型
@@ -100,7 +101,7 @@ export function updateTaskProgress(
     emitEvent('completed', task);
   } else if (update.status === 'failed') {
     emitEvent('failed', task);
-  } else if (update.progress !== undefined && update.progress !== task.progress) {
+  } else if (update.progress !== undefined && update.progress !== oldProgress) {
     emitEvent('progress', task);
   } else if (oldStatus === 'queued' && task.status !== 'queued') {
     emitEvent('updated', task);
@@ -289,6 +290,13 @@ if (typeof setInterval !== 'undefined') {
       const isTerminal = !ACTIVE_STATUSES.includes(task.status);
       const isZombie = now - task.updatedAt > 2 * 60 * 60 * 1000; // 2小时
       if ((isOld && isTerminal) || isZombie) {
+        // 释放队列槽位（防止用户并发数永久减少）
+        const userId = taskUserMap.get(id);
+        if (userId && ACTIVE_STATUSES.includes(task.status)) {
+          const currentCount = userActiveCount.get(userId) || 0;
+          if (currentCount > 0) userActiveCount.set(userId, currentCount - 1);
+        }
+        taskUserMap.delete(id);
         taskRegistry.delete(id);
         cancelledTasks.delete(id);
         // 从排队队列中也移除
