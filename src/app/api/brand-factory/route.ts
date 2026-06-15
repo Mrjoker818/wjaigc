@@ -368,6 +368,7 @@ async function generateImage(
             size: rawBody.size as string | undefined,
             originalError: errText,
             requestIdPrefix: 'brand-factory',
+            force: true,
           });
           if (chatImageUrls && chatImageUrls.length > 0) {
             console.log('[brand-factory] /chat/completions fallback succeeded, got', chatImageUrls.length, 'images');

@@ -565,23 +565,12 @@ async function submitRefineToApi(
     }
   }
 
-  // Enhance prompt for image-to-image
+  // Enhance prompt for image-to-image - concise instruction to avoid confusing the model
   if (params.imageUrl) {
-    const subjectIdentityLine = identifiedSubject
-      ? `0. SUBJECT IDENTITY: The reference image depicts a "${identifiedSubject}". The output MUST show the EXACT SAME "${identifiedSubject}" — do NOT replace it with any other product or object type, even if visually similar. A medicine bottle is NOT a cosmetic bottle. A food container is NOT a chemical container. Preserve the exact product category.`
-      : `0. SUBJECT IDENTITY: The output MUST show the EXACT SAME product/subject from the reference image. Do NOT replace with a different product or object type.`;
-    rawBody.prompt = `[img2img] CRITICAL SUBJECT PRESERVATION RULES:
-${subjectIdentityLine}
-1. You MUST preserve the EXACT same product/subject from the reference image — same shape, same brand identity, same visual identity. DO NOT replace with a different product.
-2. Preserve the subject's UNIQUE DETAILS: exact texture patterns, surface markings, label text, logo positions, embossing/debossing details, brand-specific design elements, engravings, and fine surface details.
-3. Preserve the subject's SIZE PROPORTIONS: the subject must occupy the same relative area of the frame, with identical width-to-height ratio and spatial positioning. The subject must not appear larger, smaller, stretched, or compressed compared to the reference.
-4. Preserve the subject's DISTINCTIVE FEATURES: specific curves, edges, contours, silhouette, and any characteristic shapes that make this product recognizable and distinct from other similar products.
-5. Preserve the subject's COLOR IDENTITY: brand colors, material colors, and specific color placements must remain faithful to the reference image.
-6. Preserve the subject's COMPOSITIONAL POSITION: maintain the same viewing angle, centering, and spatial relationship between subject and frame edges.
-7. ONLY apply the requested style/rendering/lighting/viewpoint changes — do NOT alter, replace, or reimagine the core subject itself.
-8. If the reference shows a specific product with distinctive design language (e.g., Apple minimalism, luxury ornate details), maintain that exact design language.
-9. If unsure about any detail, default to keeping it exactly as shown in the reference image rather than inventing new elements.
-${params.prompt}`;
+    const subjectHint = identifiedSubject
+      ? `The reference image shows a "${identifiedSubject}". `
+      : '';
+    rawBody.prompt = `[img2img] ${subjectHint}Preserve the exact same subject/product from the reference image — same identity, shape, and proportions. Only apply the requested changes without altering the core subject. ${params.prompt}`;
   }
 
   const hasImageFlag = !!(rawBody.image || rawBody.image_urls);
@@ -708,6 +697,7 @@ ${params.prompt}`;
               size: rawBody.size as string | undefined,
               originalError: 'images/generations timeout',
               requestIdPrefix: 'refine-engine',
+              force: true,
             });
             if (chatImageUrls && chatImageUrls.length > 0) {
               console.log(`[refine-engine] /chat/completions fallback succeeded (after generations timeout), got ${chatImageUrls.length} images`);
@@ -747,6 +737,7 @@ ${params.prompt}`;
               size: rawBody.size as string | undefined,
               originalError: fallbackErrText,
               requestIdPrefix: 'refine-engine',
+              force: true,
             });
             if (chatImageUrls && chatImageUrls.length > 0) {
               console.log(`[refine-engine] /chat/completions fallback succeeded, got ${chatImageUrls.length} images`);

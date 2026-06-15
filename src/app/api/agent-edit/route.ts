@@ -572,6 +572,7 @@ async function performImageEdit(
               imageBase64: imageUrl,
               originalError: errText,
               requestIdPrefix: 'agent-edit-pathA',
+              force: true,
             });
             if (chatImageUrls && chatImageUrls.length > 0) {
               console.log('[agent-edit] Path A: /chat/completions fallback succeeded');
@@ -623,6 +624,7 @@ async function performImageEdit(
             imageBase64: imageUrl,
             originalError: 'timeout',
             requestIdPrefix: 'agent-edit-pathA',
+            force: true,
           });
           if (chatImageUrls && chatImageUrls.length > 0) {
             console.log('[agent-edit] Path A: /chat/completions fallback succeeded (after timeout)');
@@ -702,6 +704,7 @@ async function performImageEdit(
               imageBase64: `data:${imageMimeType};base64,${imageBase64}`,
               originalError: errText,
               requestIdPrefix: 'agent-edit-pathB',
+              force: true,
             });
             if (chatImageUrls && chatImageUrls.length > 0) {
               console.log('[agent-edit] Path B: /chat/completions fallback succeeded');
@@ -800,6 +803,7 @@ async function performImageEdit(
             imageBase64: `data:${imageMimeType};base64,${imageBase64}`,
             originalError: 'timeout',
             requestIdPrefix: 'agent-edit-pathB',
+            force: true,
           });
           if (chatImageUrls && chatImageUrls.length > 0) {
             console.log('[agent-edit] Path B: /chat/completions fallback succeeded (after timeout)');

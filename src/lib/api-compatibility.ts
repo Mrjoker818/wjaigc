@@ -550,14 +550,18 @@ export async function tryChatCompletionsImageFallback(params: {
   size?: string;          // e.g., "1024x1024"
   originalError: string;  // the error message that triggered this fallback
   requestIdPrefix?: string;
+  force?: boolean;        // if true, skip channel error check and always attempt fallback
 }): Promise<string[] | null> {
-  const { baseUrl, apiKey, model, prompt, imageBase64, size, originalError, requestIdPrefix = 'chat-img-fallback' } = params;
+  const { baseUrl, apiKey, model, prompt, imageBase64, size, originalError, requestIdPrefix = 'chat-img-fallback', force = false } = params;
 
-  // Only attempt fallback for channel/routing errors (not auth/validation errors)
-  const isChannelError = /failover|渠道|channel|no available|unavailable/i.test(originalError);
-  if (!isChannelError) {
-    console.log(`[${requestIdPrefix}] Skipping chat/completions fallback: error is not a channel issue`);
-    return null;
+  // Skip fallback only for clear auth/validation errors (not timeouts or channel errors)
+  if (!force) {
+    const isChannelOrTimeoutError = /failover|渠道|channel|no available|unavailable|timeout|timed out|abort|超时/i.test(originalError);
+    const isAuthError = /401|403|invalid api key|unauthorized|authentication/i.test(originalError);
+    if (!isChannelOrTimeoutError || isAuthError) {
+      console.log(`[${requestIdPrefix}] Skipping chat/completions fallback: error is not a channel/timeout issue or is auth error`);
+      return null;
+    }
   }
 
   console.log(`[${requestIdPrefix}] Attempting /chat/completions fallback for model="${model}" after: ${originalError.slice(0, 100)}`);
@@ -578,7 +582,7 @@ export async function tryChatCompletionsImageFallback(params: {
         'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify(chatRequest),
-      signal: AbortSignal.timeout(120_000),
+      signal: AbortSignal.timeout(60_000),
     });
 
     if (!chatResponse.ok) {

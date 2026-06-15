@@ -1312,6 +1312,8 @@ export function InfiniteCanvas({
   // 【调整2&3】生成组状态 — Alt+左键参考图组 / Ctrl+左键融图组
   const [genGroups, setGenGroups] = useState<CanvasGenGroup[]>([]);
   const genGroupsRef = useRef<CanvasGenGroup[]>(genGroups);
+  // 临时存储参考图组的元数据（descriptions/categories/strengths），供 fetch 请求使用
+  const groupRefMetaRef = useRef<{ referenceDescriptions?: string[]; referenceCategories?: Record<string, string[]>; referenceStrengths?: number[] }>({});
   const [optimizingGroupId, setOptimizingGroupId] = useState<string | null>(null);
   const [openModelDropdownGroupId, setOpenModelDropdownGroupId] = useState<string | null>(null);
   const [genGroupTick, setGenGroupTick] = useState(0);
@@ -3338,26 +3340,15 @@ export function InfiniteCanvas({
     let calculatedStrength: number | undefined;
 
     if (group.type === 'reference' && group.refImages.length > 0) {
-      // 参考图组：6类别参考逻辑
-      const categoryEnMap: Record<string, string> = {
-        'style': 'artistic style and visual aesthetics',
-        'composition': 'composition and layout structure',
-        'scene': 'scene and environment setting',
-        'color': 'color palette and tone',
-        'subject': 'main subject and focal point',
-        'detail': 'fine details and textures',
-      };
+      // 参考图组：收集类别/强度/描述，传给后端处理
+      // 前端不再构建复杂提示词，避免与后端逻辑冲突导致重复指令和变形
 
       // 收集参考图的原始描述（用于增强主体识别精度）
       const refDescriptions = group.refImages
         .map(r => {
           const canvasImg = images.find(img => img.id === r.imageId);
-          return canvasImg?.prompt?.trim();
-        })
-        .filter((d): d is string => !!d);
-      const refDescText = refDescriptions.length > 0
-        ? refDescriptions.join('; ')
-        : '';
+          return canvasImg?.prompt?.trim() || '';
+        });
 
       // 收集所有激活的类别及其最大强度（跨多张参考图取最大值）
       const catStrengthMap: Record<string, number> = {};
@@ -3375,75 +3366,48 @@ export function InfiniteCanvas({
       const activeKeys = Object.keys(catStrengthMap);
       const keyword = fullPrompt.trim();
 
-      if (activeKeys.length > 0) {
-        // 收集保留方面（强度>0 表示要保留参考图的该方面）
-        const preserveAspects = activeKeys
-          .map(cat => {
-            const s = catStrengthMap[cat];
-            const desc = categoryEnMap[cat] || cat;
-            if (s >= 80) return `strictly preserve the ${desc} of the reference image(s) — do NOT change the original ${cat === 'subject' ? 'product/object identity' : desc}`;
-            if (s >= 50) return `maintain the ${desc} of the reference image(s) without altering the core ${cat === 'subject' ? 'identity' : desc}`;
-            if (s >= 20) return `subtly reference the ${desc} of the reference image(s)`;
-            return `lightly hint at the ${desc} of the reference image(s)`;
-          });
-
-        // 收集未激活的类别（可以自由改变）
-        const freeAspects = Object.keys(categoryEnMap)
-          .filter(cat => !catStrengthMap[cat] || catStrengthMap[cat] === 0)
-          .map(cat => categoryEnMap[cat]);
-
-        // 检查是否有主体保留
-        const hasSubjectInRef = catStrengthMap['subject'] > 0;
-
-        // 构建完整提示词
-        // 主体身份锚定：用原始描述明确告诉AI参考图中的主体是什么
-        const subjectAnchor = refDescText
-          ? ` The reference image depicts: "${refDescText}".`
-          : '';
-        const subjectIdentityRule = hasSubjectInRef
-          ? ` IMPORTANT: The product/object in the result MUST be the SAME product/object as in the reference image — it is "${refDescText || 'the depicted item'}". Do NOT substitute or replace it with a different product or object type.`
-          : '';
-
-        if (keyword) {
-          fullPrompt = `Create an image of: ${keyword}.`;
-          if (preserveAspects.length > 0) {
-            fullPrompt += ` While creating this new image, ${preserveAspects.join(', ')}.`;
-          }
-          fullPrompt += subjectIdentityRule;
-          if (freeAspects.length > 0) {
-            fullPrompt += ` Feel free to reimagine the ${freeAspects.join(', ')}.`;
-          }
+      // 构建后端需要的 referenceCategories 和 referenceStrengths 格式
+      // referenceCategories: { "0": ["style", "subject"], "1": ["composition"] }
+      const referenceCategories: Record<string, string[]> = {};
+      const referenceStrengthsArr: number[] = [];
+      for (let i = 0; i < group.refImages.length; i++) {
+        const r = group.refImages[i];
+        const cats = group.sourceCategories[r.imageId] || [];
+        const strengths = group.sourceStrengths[r.imageId] || {};
+        if (cats.length > 0) {
+          referenceCategories[String(i)] = cats;
+          // 取该参考图激活类别中的最大强度
+          const maxStr = cats.reduce((max, c) => Math.max(max, strengths[c] || 0), 0);
+          referenceStrengthsArr.push(maxStr);
         } else {
-          fullPrompt = 'Generate a creative variation of the reference image(s).';
-          if (preserveAspects.length > 0) {
-            fullPrompt += ` Keep the ${preserveAspects.join(', ')}.`;
-          }
-          fullPrompt += subjectIdentityRule;
-          if (freeAspects.length > 0) {
-            fullPrompt += ` Creatively transform the ${freeAspects.join(', ')}.`;
-          }
+          referenceStrengthsArr.push(0);
         }
+      }
 
-        // 显式告诉模型使用参考图，并附带主体描述
-        fullPrompt = `[ref] Use the provided reference image(s) as the base.${subjectAnchor} ${fullPrompt}`;
-        // strength 计算：保留方面多/强 → strength 低（更接近原图）
+      // strength 计算：保留方面多/强 → strength 低（更接近原图）
+      if (activeKeys.length > 0) {
         const totalPreserveScore = activeKeys.reduce((sum, cat) => sum + catStrengthMap[cat], 0);
         const maxScore = activeKeys.length * 100;
         const preserveRatio = totalPreserveScore / maxScore;
-        // 0.20 (高度保留) ~ 0.80 (较多自由)
         calculatedStrength = Math.round((0.80 - preserveRatio * 0.60) * 100) / 100;
         // 当保留主体时，额外降低 strength
-        if (hasSubjectInRef) {
+        if (catStrengthMap['subject'] > 0) {
           const subjectStr = catStrengthMap['subject'] || 0;
           const subjectReduction = (subjectStr / 100) * 0.25;
           calculatedStrength = Math.max(0.15, calculatedStrength - subjectReduction);
         }
-      } else {
-        // 无激活类别，仅作为参考图
-        const descHint = refDescText ? ` (depicts: "${refDescText}")` : '';
-        if (keyword) {
-          fullPrompt = `[ref] Using the reference image(s) as visual context${descHint}, create: ${keyword}`;
-        }
+      }
+
+      // 保存这些信息供 fetch 请求使用
+      groupRefMetaRef.current = {
+        referenceDescriptions: refDescriptions,
+        referenceCategories: Object.keys(referenceCategories).length > 0 ? referenceCategories : undefined,
+        referenceStrengths: referenceStrengthsArr.some(s => s > 0) ? referenceStrengthsArr : undefined,
+      };
+
+      // fullPrompt 只保留用户的原始关键词，后端根据 categories/descriptions 构建完整提示词
+      if (!keyword) {
+        fullPrompt = 'Generate a creative variation of the reference image(s).';
       }
     } else if (group.type === 'fusion' && group.refImages.length > 0) {
       // 融图组：融合多张参考图
@@ -3532,6 +3496,9 @@ export function InfiniteCanvas({
           referenceImages,
           referenceMode: group.type === 'fusion' ? 'fusion' : 'reference',
           ...(calculatedStrength != null && calculatedStrength > 0 ? { strength: calculatedStrength } : {}),
+          ...(groupRefMetaRef.current.referenceDescriptions?.some(d => d.trim()) ? { referenceDescriptions: groupRefMetaRef.current.referenceDescriptions } : {}),
+          ...(groupRefMetaRef.current.referenceCategories ? { referenceCategories: groupRefMetaRef.current.referenceCategories } : {}),
+          ...(groupRefMetaRef.current.referenceStrengths?.length ? { referenceStrengths: groupRefMetaRef.current.referenceStrengths } : {}),
         }),
         signal: genController.signal,
       });
@@ -8948,8 +8915,8 @@ export function InfiniteCanvas({
                         }}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter' && !e.shiftKey) {
-                            e.preventDefault();
-                            handleGenGroupGenerate(group.id);
+                            // 不再自动触发生成，用户需要点击"生成"按钮
+                            // Enter 换行由 textarea 默认行为处理
                           }
                         }}
                       />

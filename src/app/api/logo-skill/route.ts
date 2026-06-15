@@ -187,6 +187,7 @@ async function handleGenerateImage(body: Record<string, unknown>) {
             size,
             originalError: errText,
             requestIdPrefix: 'logo-skill',
+            force: true,
           });
           if (chatImageUrls && chatImageUrls.length > 0) {
             console.log('[logo-skill] /chat/completions fallback succeeded, got', chatImageUrls.length, 'images');

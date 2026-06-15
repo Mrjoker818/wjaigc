@@ -214,6 +214,7 @@ export async function POST(request: NextRequest) {
                 size: ratioStr,
                 originalError: errText,
                 requestIdPrefix: 'font-design',
+                force: true,
               });
               if (chatImageUrls && chatImageUrls.length > 0) {
                 console.log('[font-design] /chat/completions fallback succeeded, got', chatImageUrls.length, 'images');

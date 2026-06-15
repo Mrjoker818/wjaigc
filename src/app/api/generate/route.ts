@@ -768,6 +768,7 @@ export async function POST(request: NextRequest) {
                 size: adjustedBody.size as string | undefined,
                 originalError: combinedErrorText,
                 requestIdPrefix: 'generate',
+                force: true,
               });
               if (chatImageUrls && chatImageUrls.length > 0) {
                 console.log('[generate] /chat/completions fallback succeeded, got', chatImageUrls.length, 'images');
@@ -961,6 +962,7 @@ export async function POST(request: NextRequest) {
                     size: adjustedBody.size as string | undefined,
                     originalError: 'images/generations timeout',
                     requestIdPrefix: 'generate',
+                    force: true,
                   });
                   if (chatImageUrls && chatImageUrls.length > 0) {
                     console.log('[generate] /chat/completions fallback succeeded (after generations timeout), got', chatImageUrls.length, 'images');

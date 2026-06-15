@@ -180,6 +180,7 @@ export async function POST(request: NextRequest) {
             size,
             originalError: 'timeout',
             requestIdPrefix: 'scene-studio',
+            force: true,
           });
           if (chatImageUrls && chatImageUrls.length > 0) {
             console.log('[SceneStudio] /chat/completions fallback succeeded (after timeout), got', chatImageUrls.length, 'images');
@@ -209,6 +210,7 @@ export async function POST(request: NextRequest) {
             size,
             originalError: errorText,
             requestIdPrefix: 'scene-studio',
+            force: true,
           });
           if (chatImageUrls && chatImageUrls.length > 0) {
             console.log('[SceneStudio] /chat/completions fallback succeeded, got', chatImageUrls.length, 'images');
