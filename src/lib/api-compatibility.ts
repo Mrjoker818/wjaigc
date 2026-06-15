@@ -559,15 +559,15 @@ export function resolveProfileForModel(
 
   // IMPORTANT: If the model is a known OpenAI image model (gpt-image-*, dall-e-*),
   // it MUST use the standard OpenAI image API (/v1/images/generations or /v1/images/edits),
-  // NOT /chat/completions. Override the provider's compatProfile in this case.
+  // NOT /chat/completions. Force the openai profile regardless of provider's compatProfile.
   if (isOpenAIImageModel(modelId)) {
-    return baseProfile;
+    return COMPAT_PROFILES['openai'];
   }
 
   // If this is a nano-banana model (PearAPI adapted), always use standard OpenAI profile
   // These models ARE OpenAI-compatible on /images/generations
   if (isNanoBananaModel(modelId)) {
-    return baseProfile;
+    return COMPAT_PROFILES['openai'];
   }
 
   // If the user explicitly set a profile (including gemini-image), respect it
@@ -575,17 +575,17 @@ export function resolveProfileForModel(
   if (provider?.compatProfile && COMPAT_PROFILES[provider.compatProfile]) {
     const explicitProfile = COMPAT_PROFILES[provider.compatProfile];
     // If the explicit profile is gemini-image but the model is NOT a Gemini image model,
-    // fall back to the base profile. This prevents gpt-image-2 from being routed
+    // fall back to the openai profile. This prevents gpt-image-2 from being routed
     // through /chat/completions just because the provider's compatProfile is gemini-image.
     if (provider.compatProfile === 'gemini-image' && !isGeminiImageModel(modelId)) {
-      return baseProfile;
+      return COMPAT_PROFILES['openai'];
     }
     return explicitProfile;
   }
   if (provider?.advancedParams?.compatProfile && COMPAT_PROFILES[provider.advancedParams.compatProfile]) {
     const explicitProfile = COMPAT_PROFILES[provider.advancedParams.compatProfile];
     if (provider.advancedParams.compatProfile === 'gemini-image' && !isGeminiImageModel(modelId)) {
-      return baseProfile;
+      return COMPAT_PROFILES['openai'];
     }
     return explicitProfile;
   }
@@ -1330,9 +1330,13 @@ export function stripEditsOnlyFields(body: Record<string, unknown>): Record<stri
  * This is provider-agnostic — we simply check for common rejection patterns.
  */
 export function isEditsEndpointRejected(status: number, errorBody: string): boolean {
-  if (status >= 500) return false; // server errors → not an endpoint rejection
-  // Common patterns when /images/edits is not supported by the provider
+  // Server errors with "channel unavailable" patterns → treat as endpoint rejection for fallback
   const lower = errorBody.toLowerCase();
+  if (status >= 500 && (lower.includes('failover') || lower.includes('渠道') || lower.includes('channel') || lower.includes('no available'))) {
+    return true;
+  }
+  if (status >= 500) return false; // other server errors → not an endpoint rejection
+  // Common patterns when /images/edits is not supported by the provider
   return (
     lower.includes('not supported') ||
     lower.includes('not found') ||
