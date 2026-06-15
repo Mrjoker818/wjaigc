@@ -5217,7 +5217,7 @@ export function InfiniteCanvas({
               y: targetImg.y,
               width: targetImg.width,
               height: targetImg.height,
-              prompt: prompt,
+              prompt: annotation.text || prompt.replace(/^\[画布上下文[：:][^\]]*\]\s*/, ''),
             };
             onImagesChange([...images, newImage]);
             setAnnotations(prev => prev.map(a =>
@@ -7877,8 +7877,8 @@ export function InfiniteCanvas({
                 ) : image.url ? (
                   <img
                     src={zoom > 0.5 || (image.width && image.width * zoom > THUMBNAIL_MAX) ? image.url : (image.thumbnailUrl || image.url)}
-                    alt={image.prompt || 'canvas image'}
-                    className="w-full h-full object-cover pointer-events-none"
+                    alt={image.prompt ? image.prompt.replace(/^\[画布上下文[：:][^\]]*\]\s*/, '').substring(0, 60) : 'canvas image'}
+                    className="w-full h-full object-cover pointer-events-none overflow-hidden"
                     draggable={false}
                     loading="lazy"
                     decoding="async"
