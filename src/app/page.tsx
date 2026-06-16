@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { InfiniteCanvas, CanvasImage, ImageGroup } from '@/components/infinite-canvas';
+import { IncrementalHistoryManager } from '@/lib/canvas-incremental-history';
 import { GenerationPanel, GenerationParams, CtrlRefSelection } from '@/components/generation-panel';
 import VideoGenerationPanel, { VideoGenerateParams } from '@/components/video-generation-panel';
 import { ImagePreview } from '@/components/image-preview';
@@ -97,60 +98,51 @@ function CanvasApp() {
   const [images, setImagesRaw] = useState<CanvasImage[]>([]);
   const [selectedImage, setSelectedImage] = useState<CanvasImage | null>(null);
 
-  // ====== Undo (Ctrl+Z) History ======
-  // All undo state is managed synchronously in refs to avoid React async-state races.
-  // The "current" state is always historyStack[historyIndex].
-  // After a normal edit: push new state, advance index.
-  // After undo: just decrement index and apply.
-  const MAX_UNDO_STEPS = 100;
-  const historyStackRef = useRef<CanvasImage[][]>([]);
-  const historyIndexRef = useRef<number>(-1);
+  // ====== Incremental Diff Undo (Ctrl+Z) / Redo (Ctrl+Shift+Z) History ======
+  // Uses IncrementalHistoryManager for O(changes) memory instead of O(n) full snapshots.
+  // Dragging one image records only {x, y} change, not the entire image array.
+  const incrementalHistoryRef = useRef<IncrementalHistoryManager<CanvasImage>>(new IncrementalHistoryManager<CanvasImage>(100));
   const isMountedRef = useRef(true);
+  const prevImagesRef = useRef<CanvasImage[]>([]);
+
+  // P2-1: 画布连线状态
+  const [canvasConnections, setCanvasConnections] = useState<import('@/lib/canvas-connections').CanvasConnection[]>([]);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => { isMountedRef.current = false; };
   }, []);
 
-  // Wrap setImages to record history before each change
+  // Wrap setImages to record incremental diff before each change
   const setImages = useCallback((action: React.SetStateAction<CanvasImage[]>) => {
     setImagesRaw(prev => {
-      // Snapshot current state before the change
-      const currentSnapshot = prev.map(img => ({ ...img }));
-      const stack = historyStackRef.current;
-      const idx = historyIndexRef.current;
-
-      // If we're not at the end of history, truncate future states
-      if (idx < stack.length - 1) {
-        historyStackRef.current = stack.slice(0, idx + 1);
-      }
-
-      // Push current state
-      historyStackRef.current.push(currentSnapshot);
-      historyIndexRef.current = historyStackRef.current.length - 1;
-
-      // Evict oldest entries when exceeding the limit
-      if (historyStackRef.current.length > MAX_UNDO_STEPS) {
-        const excess = historyStackRef.current.length - MAX_UNDO_STEPS;
-        historyStackRef.current = historyStackRef.current.slice(excess);
-        historyIndexRef.current = historyStackRef.current.length - 1;
-      }
-
-      // Apply the change
+      // Apply the change first
       const next = typeof action === 'function' ? action(prev) : action;
+
+      // Record diff: if prevImagesRef is stale, squash from stale→prev and prev→next into one step
+      const baseState = prevImagesRef.current === prev ? prev : prevImagesRef.current;
+      if (baseState.length > 0 || next.length > 0) {
+        incrementalHistoryRef.current.recordChange(baseState, next);
+      }
+
+      prevImagesRef.current = next;
       return next;
     });
   }, []);
 
   const handleUndo = useCallback(() => {
-    const idx = historyIndexRef.current;
-    if (idx < 0) return; // Nothing to undo
+    if (!incrementalHistoryRef.current.canUndo()) return;
+    // Flush pending diff and apply reverse
+    const result = incrementalHistoryRef.current.undo(prevImagesRef.current);
+    prevImagesRef.current = result;
+    setImagesRaw(result);
+  }, []);
 
-    const previousState = historyStackRef.current[idx];
-    historyIndexRef.current = idx - 1;
-
-    // Directly set state — no re-recording into history
-    setImagesRaw(previousState);
+  const handleRedo = useCallback(() => {
+    if (!incrementalHistoryRef.current.canRedo()) return;
+    const result = incrementalHistoryRef.current.redo(prevImagesRef.current);
+    prevImagesRef.current = result;
+    setImagesRaw(result);
   }, []);
   const [activeGenerationCount, setActiveGenerationCount] = useState(0);
   const [previewImage, setPreviewImage] = useState<CanvasImage | null>(null);
@@ -3071,6 +3063,8 @@ function CanvasApp() {
             setChatInitialImage(image);
             setChatTabOpen(true);
           }}
+          connections={canvasConnections}
+          onConnectionsChange={setCanvasConnections}
         />
       </div>
 

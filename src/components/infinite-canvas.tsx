@@ -1,4 +1,5 @@
 'use client';
+import { getModeHandler, shouldEditModeIntercept, type CanvasContext } from '@/lib/canvas-mode-handlers';
 
 /** 标准画面比例列表（与后端 SUPPORTED_RATIOS 一致） */
 const STANDARD_RATIOS = ['1:1','2:3','3:2','3:4','4:3','4:5','5:4','9:16','16:9','21:9'] as const;
@@ -47,6 +48,8 @@ const VideoEditPanel = dynamic(() => import('@/components/video-edit-panel').the
 
 const PsdLayerEditor = lazy(() => import('@/components/psd-editor/PsdLayerEditor'));
 const AgentEditor = lazy(() => import('@/components/agent-editor').then(m => ({ default: m.AgentEditor })));
+import { computeSnapGuides, findBestSnapOffset, type SnapGuide } from '@/lib/canvas-snap-guides';
+import { type CanvasConnection, type ConnectionDraft, createConnection, computeConnectionEndpoints, buildConnectionPath, buildArrowHead, isPointNearConnection, CONNECTION_COLORS } from '@/lib/canvas-connections';
 const BrandEcommercePanel = lazy(() => import('@/components/brand-ecommerce-panel').then(m => ({ default: m.BrandEcommercePanel })));
 const RefineEnginePanel = lazy(() => import('@/components/refine-engine-panel'));
 const FontDesignPanel = lazy(() => import('@/components/font-design-panel'));
@@ -380,6 +383,10 @@ interface InfiniteCanvasProps {
   altRefMarkerIds?: string[];
   /** Force save canvas data to localStorage + server */
   onForceSave?: () => void;
+  /** 用户绘制的连线 */
+  connections?: CanvasConnection[];
+  /** 连线变更回调 */
+  onConnectionsChange?: (connections: CanvasConnection[]) => void;
   /** Called when user wants to open the language-based image editor (null = open empty) */
   onEditImage?: (image: CanvasImage | null) => void;
   /** Called when view state (offset/zoom) changes for persistence */
@@ -405,7 +412,7 @@ interface InfiniteCanvasProps {
   onSendToChat?: (image: CanvasImage) => void;
 }
 
-type EditMode = 'none' | 'erase' | 'mask' | 'expand' | 'crop' | 'upscale';
+type EditMode = 'none' | 'erase' | 'mask' | 'expand' | 'crop' | 'upscale' | 'connect';
 type ActiveTool = 'none' | 'upscale' | 'download' | 'multiAngle' | 'to3d';
 type MultiAngleMode = 'image' | 'camera';
 type ThreeDBackend = 'api' | 'local';
@@ -507,6 +514,8 @@ export function InfiniteCanvas({
   onSwitchToWorkflowHub,
   onSwitchToDashboard,
   onSendToChat,
+  connections,
+  onConnectionsChange,
 }: InfiniteCanvasProps) {
   const isMonochrome = themeStyle === 'monochrome';
 
@@ -1005,6 +1014,12 @@ export function InfiniteCanvas({
   // 图片工具栏折叠状态
   const [toolbarExpanded, setToolbarExpanded] = useState(false);
   const [leftToolbarExpanded, setLeftToolbarExpanded] = useState(false);
+
+  // P2-1: 轻量连线状态
+  const [connectionDraft, setConnectionDraft] = useState<ConnectionDraft | null>(null);
+  const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
+  const canvasConnections = connections ?? [];
+  const handleConnectionsChange = onConnectionsChange ?? (() => {});
   const toolBtnCls = isMonochrome
     ? 'p-2 rounded-full transition-all relative group text-gray-500 hover:text-gray-700 hover:bg-gray-100'
     : 'p-2 rounded-full transition-all relative group text-gold-muted hover:text-text-bright hover:bg-white/10';
@@ -1094,6 +1109,10 @@ export function InfiniteCanvas({
   const [annotationMode, setAnnotationMode] = useState(false);
   const [annotations, setAnnotations] = useState<CanvasAnnotation[]>([]);
   const [editingAnnotationId, setEditingAnnotationId] = useState<string | null>(null);
+
+  // Snap guides state - alignment assist lines during drag
+  const [activeSnapGuides, setActiveSnapGuides] = useState<SnapGuide[]>([]);
+  const snapEnabledRef = useRef(true);
 
   const [annotationInputText, setAnnotationInputText] = useState('');
   const [hoveredAnnotationId, setHoveredAnnotationId] = useState<string | null>(null);
@@ -1749,6 +1768,20 @@ export function InfiniteCanvas({
         if (!annotationMode) { setAnnotationTool('pin'); setEditMode('none'); } // reset to pin + exit any edit mode when entering
         return;
       }
+      // L key: Toggle connection mode (P2-1)
+      if (e.code === 'KeyL' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
+        if (tag === 'input' || tag === 'textarea' || (e.target as HTMLElement)?.isContentEditable) return;
+        e.preventDefault();
+        if (editMode === 'connect') {
+          setEditMode('none');
+        } else {
+          setEditMode('connect');
+          onSelectImage(null);
+          setAnnotationMode(false);
+        }
+        return;
+      }
       // B key to toggle brush tool in annotation mode
       if (e.code === 'KeyB' && annotationMode && !e.ctrlKey && !e.metaKey && !e.altKey) {
         const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
@@ -1795,6 +1828,7 @@ export function InfiniteCanvas({
           setEditImageId(null);
           setEditStrokes([]);
           setCurrentStroke([]);
+          setConnectionDraft(null);
           isDrawingRef.current = false;
           currentStrokeRef.current = [];
           setActiveTool('none');
@@ -2017,6 +2051,26 @@ export function InfiniteCanvas({
   const handleEditMouseDown = useCallback((e: React.MouseEvent) => {
     if (editMode === 'none') return;
     if (e.button !== 0) return; // Only left click
+
+    // P2-1: 连线模式 - 从图片开始拖拽连线
+    if (editMode === 'connect') {
+      const canvasPos = screenToCanvas(e.clientX, e.clientY);
+      const hitId = hitTestImage(canvasPos.x, canvasPos.y);
+      if (hitId) {
+        const hitImg = images.find(i => i.id === hitId);
+        if (hitImg) {
+          setConnectionDraft({
+            fromId: hitId,
+            fromX: hitImg.x + hitImg.width / 2,
+            fromY: hitImg.y + hitImg.height / 2,
+            toX: canvasPos.x,
+            toY: canvasPos.y,
+          });
+        }
+      }
+      return;
+    }
+
     // Erase/mask modes now use floating window - don't capture strokes on main canvas
     if (editMode === 'erase' || editMode === 'mask') return;
 
@@ -2074,6 +2128,12 @@ export function InfiniteCanvas({
   }, [editMode, editImageId, images, screenToCanvas, cropRect, zoom, viewOffset]);
 
   const handleEditMouseMove = useCallback((e: React.MouseEvent) => {
+    // P2-1: 连线拖拽中
+    if (editMode === 'connect' && connectionDraft) {
+      const canvasPos = screenToCanvas(e.clientX, e.clientY);
+      setConnectionDraft(prev => prev ? { ...prev, toX: canvasPos.x, toY: canvasPos.y } : null);
+      return;
+    }
     // Erase/mask modes now use floating window - don't handle strokes on main canvas
     if (editMode === 'erase' || editMode === 'mask') {
       return;
@@ -2184,6 +2244,19 @@ export function InfiniteCanvas({
   }, [editMode, editImageId, images, screenToCanvas, cropDragStart, cropDragMode, cropDragOrigin, cropRatio, zoom, viewOffset]);
 
   const handleEditMouseUp = useCallback(() => {
+    // P2-1: 连线完成
+    if (editMode === 'connect' && connectionDraft) {
+      const { fromId, toX, toY } = connectionDraft;
+      const hitId = hitTestImage(toX, toY);
+      if (hitId && hitId !== fromId) {
+        // 成功连接到另一张图片
+        const newConn = createConnection(fromId, hitId);
+        handleConnectionsChange([...canvasConnections, newConn]);
+      }
+      setConnectionDraft(null);
+      return;
+    }
+
     if (isDrawingRef.current) {
       // Finalize current stroke
       const stroke = currentStrokeRef.current;
@@ -2201,7 +2274,7 @@ export function InfiniteCanvas({
     setCropDragStart(null);
     setCropDragMode('create');
     setCropDragOrigin(null);
-  }, [cropDragMode]);
+  }, [cropDragMode, editMode, connectionDraft, canvasConnections, handleConnectionsChange]);
 
   // Mouse handlers
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -2464,9 +2537,35 @@ export function InfiniteCanvas({
 
     // Image drag: only allow after long press (imageDragReadyRef)
     if (dragTarget && imageDragReadyRef.current) {
-      const offsetX = canvasPos.x - dragStart.x;
-      const offsetY = canvasPos.y - dragStart.y;
+      const rawOffsetX = canvasPos.x - dragStart.x;
+      const rawOffsetY = canvasPos.y - dragStart.y;
+
+      // Compute snap guides for alignment assist
+      let offsetX = rawOffsetX;
+      let offsetY = rawOffsetY;
+      let guides: SnapGuide[] = [];
+
+      if (snapEnabledRef.current && editMode === 'none') {
+        const draggedImg = images.find(i => i.id === dragTarget);
+        if (draggedImg) {
+          const dragBounds = {
+            id: draggedImg.id,
+            x: draggedImg.x + rawOffsetX,
+            y: draggedImg.y + rawOffsetY,
+            width: draggedImg.width,
+            height: draggedImg.height,
+          };
+          const allBounds = images.map(img => ({
+            id: img.id, x: img.x, y: img.y, width: img.width, height: img.height,
+          }));
+          guides = computeSnapGuides(dragBounds, allBounds, 6);
+          const { dx, dy } = findBestSnapOffset(guides);
+          offsetX = rawOffsetX + dx;
+          offsetY = rawOffsetY + dy;
+        }
+      }
       setDragOffset({ x: offsetX, y: offsetY });
+      setActiveSnapGuides(guides);
 
       // ── Hover detection: check if dragged image is over a GenGroup container ──
       let hoveredGroup: string | null = null;
@@ -2731,6 +2830,7 @@ export function InfiniteCanvas({
       setDragOffset({ x: 0, y: 0 });
       setHoveredGenGroupId(null);
       imageDragReadyRef.current = false;
+      setActiveSnapGuides([]); // Clear snap guides when drag ends
     }
 
     // Group drag finish
@@ -8174,6 +8274,48 @@ export function InfiniteCanvas({
               </div>
             );
           })}
+          {/* P2-1: 用户绘制的连线 */}
+          {canvasConnections.length > 0 && (() => {
+            const gold = isMonochrome ? '#3b82f6' : '#d4af37';
+            return (
+              <svg style={{ position: 'absolute', left: 0, top: 0, width: '1px', height: '1px', overflow: 'visible', pointerEvents: 'none' }}>
+                {canvasConnections.map(conn => {
+                  const fromImg = images.find(i => i.id === conn.fromId);
+                  const toImg = images.find(i => i.id === conn.toId);
+                  if (!fromImg || !toImg) return null;
+                  const { fromX, fromY, toX, toY } = computeConnectionEndpoints(fromImg, toImg);
+                  const path = buildConnectionPath(fromX, fromY, toX, toY);
+                  const arrow = buildArrowHead(toX, toY, fromX, fromY, 6);
+                  const color = conn.color || gold;
+                  const isSelected = conn.id === selectedConnectionId;
+                  return (
+                    <g key={conn.id}>
+                      <path d={path} fill="none" stroke={color} strokeWidth={isSelected ? 2.5 : 1.5} opacity={isSelected ? 0.9 : 0.5} />
+                      <path d={arrow} fill={color} opacity={isSelected ? 0.9 : 0.5} />
+                      {conn.label && (
+                        <text x={(fromX + toX) / 2} y={(fromY + toY) / 2 - 6} textAnchor="middle" fontSize={11} fill={color} opacity={0.7}>{conn.label}</text>
+                      )}
+                    </g>
+                  );
+                })}
+              </svg>
+            );
+          })()}
+
+          {/* P2-1: 连线拖拽草稿 */}
+          {connectionDraft && (() => {
+            const gold = isMonochrome ? '#3b82f6' : '#d4af37';
+            const { fromX, fromY, toX, toY } = connectionDraft;
+            const path = buildConnectionPath(fromX, fromY, toX, toY);
+            const arrow = buildArrowHead(toX, toY, fromX, fromY, 6);
+            return (
+              <svg style={{ position: 'absolute', left: 0, top: 0, width: '1px', height: '1px', overflow: 'visible', pointerEvents: 'none' }}>
+                <path d={path} fill="none" stroke={gold} strokeWidth={2} strokeDasharray="6 3" opacity={0.6} />
+                <path d={arrow} fill={gold} opacity={0.6} />
+              </svg>
+            );
+          })()}
+
           {/* Processing frame connection lines - elegant animated lines from source images to processing frames */}
           {(() => {
             const processingFrames = images.filter(img => img.isProcessingPlaceholder && img.processing?.sourceUrl);
@@ -9082,6 +9224,48 @@ export function InfiniteCanvas({
               height: Math.abs(boxSelectEnd.y - boxSelectStart.y),
             }}
           />
+        )}
+
+        {/* Snap guides overlay - alignment guides when dragging images */}
+        {activeSnapGuides.length > 0 && (
+          <svg
+            className="absolute inset-0 w-full h-full pointer-events-none z-30"
+            style={{ overflow: 'visible' }}
+          >
+            {activeSnapGuides.map((guide, idx) => {
+              if (guide.type === 'vertical') {
+                const screenX = guide.position * zoom + viewOffset.x;
+                return (
+                  <line
+                    key={`snap-v-${idx}`}
+                    x1={screenX}
+                    y1={0}
+                    x2={screenX}
+                    y2="100%"
+                    stroke={isMonochrome ? '#3b82f6' : '#d4af37'}
+                    strokeWidth={1}
+                    strokeDasharray="4 4"
+                    opacity={0.7}
+                  />
+                );
+              } else {
+                const screenY = guide.position * zoom + viewOffset.y;
+                return (
+                  <line
+                    key={`snap-h-${idx}`}
+                    x1={0}
+                    y1={screenY}
+                    x2="100%"
+                    y2={screenY}
+                    stroke={isMonochrome ? '#3b82f6' : '#d4af37'}
+                    strokeWidth={1}
+                    strokeDasharray="4 4"
+                    opacity={0.7}
+                  />
+                );
+              }
+            })}
+          </svg>
         )}
 
         {/* Edit mode overlay */}
@@ -13414,6 +13598,27 @@ export function InfiniteCanvas({
         >
           <MessageCircle className="h-4 w-4" />
           <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">ChatCanvas (C)</span>
+        </button>
+
+        {/* P2-1: 连线工具 */}
+        <button
+          onClick={() => {
+            if (editMode === 'connect') {
+              setEditMode('none');
+            } else {
+              setEditMode('connect');
+              onSelectImage(null);
+            }
+          }}
+          className={`tool-btn p-2 rounded-full transition-all relative group ${editMode === 'connect' ? 'text-gold bg-gold/20 ring-1 ring-gold/40' : 'text-gold-muted hover:text-gold-light hover:bg-gold/10'}`}
+          title="连线工具"
+        >
+          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="5" cy="5" r="2.5" />
+            <circle cx="19" cy="19" r="2.5" />
+            <path d="M7 7 C 10 10, 14 14, 17 17" />
+          </svg>
+          <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">连线 (L)</span>
         </button>
 
         <div className={`w-px h-5 ${separatorCls}`} />

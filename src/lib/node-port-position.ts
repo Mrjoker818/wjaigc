@@ -27,7 +27,7 @@ type NodeCategory = 'input' | 'output' | 'ai' | 'control' | 'group';
 function getNodeCategory(type: NodeType): NodeCategory {
   if (type === 'input-text' || type === 'input-image') return 'input';
   if (type === 'output-image' || type === 'output-export' || type === 'output-image-group' || type === 'output-video') return 'output';
-  if (type === 'condition' || type === 'loop' || type === 'agent' || type === 'storyboard-sequence') return 'control';
+  if (type.startsWith('condition-') || type.startsWith('loop-') || type === 'parallel' || type.startsWith('agent-') || type === 'storyboard-sequence') return 'control';
   if (type === 'group') return 'group';
   return 'ai'; // ai-generate, ai-remove-bg, ai-upscale, etc.
 }

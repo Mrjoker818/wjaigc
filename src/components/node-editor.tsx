@@ -892,6 +892,19 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
     return [...external, ...nodeImages];
   }, [wf.nodes, canvasImages]);
 
+  // P1-4: 上游图片URL缓存 — 避免每个NodeCard内联IIFE重复计算
+  const upstreamImageUrls = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of wf.connections) {
+      if (c.type === 'image' || c.type === 'data') {
+        const upNode = wf.nodes.find(n => n.id === c.fromNodeId);
+        const url = (upNode?.config?.imageUrl as string) || (execResults[c.fromNodeId]?.output?.imageUrl as string);
+        if (url) m.set(c.toNodeId, url);
+      }
+    }
+    return m;
+  }, [wf.connections, wf.nodes, execResults]);
+
   // 框选状态
   const [boxSelect, setBoxSelect] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null);
   const isBoxSelectingRef = useRef(false);
@@ -1234,6 +1247,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
     const node = wf.nodes.find(n => n.id === nodeId);
     if (!node) return;
     const pos = getPortPositionLocal(node, port);
+    if (!pos) return;
     setDraggingConn({ fromNodeId: nodeId, fromPortId: port.id, fromX: pos.x, fromY: pos.y, toX: pos.x, toY: pos.y, portType: port.type });
   }, [wf.nodes]);
 
@@ -1805,15 +1819,14 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
 
   // 纯数据驱动的端口位置计算（不依赖DOM查询）
   const getPortPositionLocal = useCallback((node: WorkflowNode, port: NodePort) => {
-    const dir = port.direction === 'in' ? 'input' as const : 'output' as const;
-    const cacheKey = `${node.id}-${dir}-${port.id}`;
+    const cacheKey = `${node.id}-${port.direction}-${port.id}`;
     const cached = portPositionCacheRef.current.get(cacheKey);
     if (cached) return cached;
 
-    // 从 port.id 解析索引 (port.id 格式通常是 "in-0", "out-0" 等)
-    const portIndex = parseInt(port.id.split('-').pop() || '0', 10);
-    const result = computePortPosition(node, dir, portIndex);
-    portPositionCacheRef.current.set(cacheKey, result);
+    const result = computePortPosition(node, port.id);
+    if (result) {
+      portPositionCacheRef.current.set(cacheKey, result);
+    }
     return result;
   }, []);
 
@@ -2093,6 +2106,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                 if (!fromPort || !toPort) return null;
                 const from = getPortPositionLocal(fromNode, fromPort);
                 const to = getPortPositionLocal(toNode, toPort);
+                if (!from || !to) return null;
                 const color = PORT_COLORS[conn.type] || T.connColor;
                 const isHighlighted = isConnectionHighlighted(conn);
                 const isRunning = execStatus === 'running' && (execResults[conn.fromNodeId]?.status === 'success');
@@ -2240,13 +2254,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
                 onGridSplit={handleGridSplit}
                 onCompare={handleCompare}
                 onTriggerImageUpload={triggerNodeImageUpload}
-                upstreamImageUrl={(() => {
-                  const upConn = wf.connections.find(c => c.toNodeId === node.id && (c.type === 'image' || c.type === 'data'));
-                  if (!upConn) return undefined;
-                  const upNode = wf.nodes.find(n => n.id === upConn.fromNodeId);
-                  const url = (upNode?.config?.imageUrl as string) || (execResults[upConn.fromNodeId]?.output?.imageUrl as string);
-                  return url || undefined;
-                })()}
+                upstreamImageUrl={upstreamImageUrls.get(node.id)}
                 llmModels={chatModels}
                 imageModels={imageModels}
                 canvasImages={canvasImages}
@@ -2734,7 +2742,7 @@ function OutputImageGroupContent({ imageUrls, theme: T, onPreviewImage }: {
   );
 }
 
-function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRunning, theme, canvasImages, llmModels, imageModels, onNodeFieldChange, onLlmOptimize, onCascadeRun, onExtractToSource, onGridSplit, onCompare, onTriggerImageUpload, upstreamImageUrl, onSelect, onHover, onDragStart, onPortMouseDown, onPortMouseUp, onDelete, onDeselect, onPreviewImage, onResizeNode, onUpdateNodeSize, collapsedNodes, onToggleCollapse, onContextMenu }: NodeCardProps) {
+const NodeCard = React.memo(function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRunning, theme, canvasImages, llmModels, imageModels, onNodeFieldChange, onLlmOptimize, onCascadeRun, onExtractToSource, onGridSplit, onCompare, onTriggerImageUpload, upstreamImageUrl, onSelect, onHover, onDragStart, onPortMouseDown, onPortMouseUp, onDelete, onDeselect, onPreviewImage, onResizeNode, onUpdateNodeSize, collapsedNodes, onToggleCollapse, onContextMenu }: NodeCardProps) {
   const T = theme;
   const cat = getNodeCategory(node.type);
   const color = NODE_TYPE_COLORS[cat];
@@ -3395,7 +3403,7 @@ function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRu
       )}
     </div>
   );
-}
+});
 
 // ==================== 属性面板 ====================
 
