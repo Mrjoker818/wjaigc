@@ -12,6 +12,7 @@ export interface User {
     threeD: boolean;
     imageEdit: boolean;
     vectorize: boolean;
+    vlm: boolean;
     layer: boolean;
     video: boolean;
   };

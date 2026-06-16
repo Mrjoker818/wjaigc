@@ -614,6 +614,10 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
     fields.push({ key: 'mode', label: '模式', type: 'select', options: [
       { label: '彩色矢量化', value: 'color' }, { label: '黑白轮廓', value: 'bw' }
     ], defaultValue: 'color' });
+    fields.push({ key: 'engine', label: '引擎', type: 'select', options: [
+      { label: '自动选择', value: 'auto' }, { label: 'Recraft 矢量模型', value: 'recraft' },
+      { label: 'VLM 视觉模型', value: 'vlm' }, { label: 'vtracer 传统描摹', value: 'vtracer' }
+    ], defaultValue: 'auto' });
     fields.push({ key: 'quality', label: '质量', type: 'select', options: [
       { label: '快速 (64色)', value: 'fast' }, { label: '均衡 (256色)', value: 'balanced' },
       { label: '高清 (1024色)', value: 'hd' }, { label: '极致 (4096色)', value: 'ultra' }
@@ -1195,6 +1199,7 @@ export function buildNodeExecutionRequest(
           imageUrl: config.imageUrl || '',
           mode: config.mode || 'color',
           quality: config.quality || 'balanced',
+          engine: config.engine || 'auto',
         }
       };
 

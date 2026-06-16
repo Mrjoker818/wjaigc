@@ -872,7 +872,7 @@ export async function downloadSVG(
     const response = await fetch('/api/svg-trace', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ imageUrl, mode: 'color', quality }),
+      body: JSON.stringify({ imageUrl, mode: 'color', quality, engine: 'auto' }),
     });
     const data = await response.json();
     if (data.success && data.svgDataUrl) {

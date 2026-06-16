@@ -1906,7 +1906,7 @@ export async function POST(request: NextRequest) {
         const result = await upscaylModule.performUpscaleAuto({
           imageUrl,
           scale: scaleVal as 2 | 4,
-          tileSize: 128,
+          // tileSize 由 performOnnxUpscale 内部动态计算
           outputFormat: 'png',
         });
 

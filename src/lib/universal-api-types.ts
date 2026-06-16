@@ -6,11 +6,11 @@ export interface ApiProvider {
   baseUrl: string;
   apiKey: string;
   isEnabled: boolean;
-  type: 'image' | 'chat' | 'imageEdit' | 'universal' | 'general' | '3d' | 'vectorize' | 'layer' | 'video' | 'packaging' | 'display3d';
+  type: 'image' | 'chat' | 'imageEdit' | 'universal' | 'general' | '3d' | 'vectorize' | 'layer' | 'video' | 'packaging' | 'display3d' | 'vlm';
   createdAt: number;
   updatedAt: number;
   // 新增：模型类型区分
-  modelType?: 'image' | 'chat' | '3d' | 'imageEdit' | 'universal' | 'general' | 'vectorize' | 'layer' | 'video' | 'packaging' | 'display3d';
+  modelType?: 'image' | 'chat' | '3d' | 'imageEdit' | 'universal' | 'general' | 'vectorize' | 'layer' | 'video' | 'packaging' | 'display3d' | 'vlm';
   // 新增：显示名称
   displayName?: string;
   // 新增：提供商预设ID

@@ -4,6 +4,7 @@ import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits } from '@/lib/credits';
+import { vectorizePipeline, type VectorizeEngine } from '@/lib/vectorize-pipeline';
 import fsSync from 'fs';
 import path from 'path';
 import sharp from 'sharp';
@@ -765,23 +766,52 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, svg: processed, engine, pathCount });
     };
 
-    // 1. 尝试管理员配置的矢量模型 API
-    const vectorizeProvider = await findProviderForFeature('vectorize');
-    console.log('[vectorize] Provider lookup result:', vectorizeProvider ? { id: vectorizeProvider.id, name: vectorizeProvider.name, baseUrl: vectorizeProvider.baseUrl, modelType: vectorizeProvider.modelType, selectedModels: vectorizeProvider.selectedModels } : null);
+    // 1. 统一矢量化管线 (Recraft Vectorize → VLM → vtracer)
+    console.log('[vectorize] Using unified pipeline...');
+    try {
+      const pipelineResult = await vectorizePipeline({
+        imageUrl,
+        imageBuffer: imageBuffer || undefined,
+        width: origWidth || undefined,
+        height: origHeight || undefined,
+        mode: (mode === 'line-art' ? 'lineart' : mode === 'logo' ? 'color' : 'color') as 'color' | 'lineart',
+        engine: undefined,
+      });
 
+      if (pipelineResult.success && pipelineResult.svg) {
+        const processed = normalizeVectorSvg(sanitizeSvgForAI(pipelineResult.svg), origWidth, origHeight);
+        const pathCount = (processed.match(/<path\b/g) || []).length;
+        if (pathCount <= 900) {
+          return NextResponse.json({
+            success: true,
+            svg: processed,
+            engine: pipelineResult.engine,
+            pathCount,
+            enginesTried: pipelineResult.enginesTried,
+          });
+        }
+        console.warn(`[vectorize] Pipeline SVG path count too high: ${pathCount}, falling through`);
+      } else {
+        console.warn('[vectorize] Pipeline failed:', pipelineResult.error);
+      }
+    } catch (pipelineErr) {
+      console.warn('[vectorize] Pipeline error:', pipelineErr instanceof Error ? pipelineErr.message : String(pipelineErr));
+    }
+
+    // 2. 尝试管理员配置的矢量模型 API (旧策略兼容，仅当管线未命中时)
+    const vectorizeProvider = await findProviderForFeature('vectorize');
     if (vectorizeProvider) {
       const rawBaseUrl = vectorizeProvider.baseUrl.replace(/\/+$/, '');
       const baseUrl = normalizeApiBaseUrl(rawBaseUrl);
       const model = vectorizeProvider.selectedModels?.[0] || vectorizeProvider.selectedModel || '';
-      console.log('[vectorize] Using provider:', { rawBaseUrl, normalizedBaseUrl: baseUrl, model });
 
-      // Strategy 1: Chat completions with vision (most compatible with API proxies like 302.ai)
+      // Strategy 1: Chat completions with vision
       const chatResult = await tryChatCompletionsVectorize(baseUrl, vectorizeProvider.apiKey, imageBase64, publicImageUrl, mode, model);
       if (chatResult) {
         return svgResponse(chatResult.svg, chatResult.engine);
       }
 
-      // Strategy 2: Multipart form-data (Vectorizer.AI / VTracer style API)
+      // Strategy 2: Multipart form-data
       if (imageBuffer) {
         const multipartResult = await tryMultipartVectorize(baseUrl, vectorizeProvider.apiKey, imageBuffer, imageUrl, model);
         if (multipartResult) {
@@ -789,7 +819,7 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Strategy 3: JSON body with image URL and/or base64
+      // Strategy 3: JSON body
       const jsonResult = await tryJsonVectorize(baseUrl, vectorizeProvider.apiKey, imageUrl, imageBase64, layerId, mode, model);
       if (jsonResult) {
         return svgResponse(jsonResult.svg, jsonResult.engine);
@@ -800,14 +830,6 @@ export async function POST(req: NextRequest) {
       if (openaiResult) {
         return svgResponse(openaiResult.svg, openaiResult.engine);
       }
-
-      console.warn('[vectorize] All admin-configured vectorize API attempts failed');
-    }
-
-    // 2. 尝试使用管理员配置的 LLM 模型（带视觉能力）作为 fallback
-    const chatFallbackResult = await tryChatProviderFallback(imageBase64, publicImageUrl, mode);
-    if (chatFallbackResult) {
-      return svgResponse(chatFallbackResult.svg, chatFallbackResult.engine);
     }
 
     // 3. 尝试环境变量配置的矢量化端点

@@ -1178,6 +1178,7 @@ export function InfiniteCanvas({
   // SVG智能描摹 state
   const [svgTraceMode, setSvgTraceMode] = useState<'color' | 'bw' | 'cutting' | 'engraving' | 'lineart' | 'compress' | 'thumbnail'>('color');
   const [svgTraceQualityPreset, setSvgTraceQualityPreset] = useState<'fast' | 'balanced' | 'high' | 'max' | 'print' | 'print-pro'>('balanced');
+  const [svgTraceEngine, setSvgTraceEngine] = useState<'auto' | 'recraft' | 'vtracer' | 'vlm'>('auto');
   const [svgTraceOutputFormat, setSvgTraceOutputFormat] = useState<'svg' | 'eps' | 'dxf' | 'pdf'>('svg');
   const [svgTraceColorPrecision, setSvgTraceColorPrecision] = useState<number | null>(null);  // null = use preset
   const [svgTraceFilterSpeckle, setSvgTraceFilterSpeckle] = useState<number | null>(null);
@@ -6007,6 +6008,7 @@ export function InfiniteCanvas({
         mode: svgTraceMode,
         qualityPreset: svgTraceQualityPreset,
         outputFormat: svgTraceOutputFormat,
+        engine: svgTraceEngine,
       };
 
       // Mode-specific params (only include if user has explicitly set, otherwise use preset)
@@ -6055,7 +6057,10 @@ export function InfiniteCanvas({
           // 显示策略: data.dataUrl(PNG服务器URL优先，SVG服务器URL兜底)
           // 下载策略: 从data.url(服务器SVG文件)获取SVG内容，避免存储超大SVG data URL
           const displayUrl = data.dataUrl || data.url;
-          const engineLabel = data.engine === 'vtracer' ? 'VTracer' : data.engine === 'potrace' ? 'Potrace' : data.engine;
+          const engineLabelMap: Record<string, string> = {
+            vtracer: 'VTracer', potrace: 'Potrace', recraft: 'Recraft', vlm: 'VLM', imagetracer: 'ImageTracer'
+          };
+          const engineLabel = engineLabelMap[data.engine] || data.engine || 'Auto';
           completeProcessingFrame(placeholderId, displayUrl, img.width, img.height, {
             originalWidth: img.originalWidth || Math.round(img.width),
             originalHeight: img.originalHeight || Math.round(img.height),
@@ -6093,7 +6098,7 @@ export function InfiniteCanvas({
     }
     setIsEditProcessing(false);
     setShowSvgTracePanel(false);
-  }, [selectedImageData, svgTraceMode, svgTraceQualityPreset, svgTraceColorPrecision, svgTraceFilterSpeckle, svgTraceCornerThreshold, svgTraceLengthThreshold, svgTraceCurveMode, svgTraceHierarchical, svgTraceBwThreshold, svgTraceBwTurdSize, svgTraceBwInvert, svgTraceBwAlphaMax, svgTraceCompressQuality, svgTraceCompressFormat, svgTraceThumbWidth, svgTraceThumbHeight, svgTraceThumbFit, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, removeProcessingFrame]);
+  }, [selectedImageData, svgTraceMode, svgTraceEngine, svgTraceQualityPreset, svgTraceColorPrecision, svgTraceFilterSpeckle, svgTraceCornerThreshold, svgTraceLengthThreshold, svgTraceCurveMode, svgTraceHierarchical, svgTraceBwThreshold, svgTraceBwTurdSize, svgTraceBwInvert, svgTraceBwAlphaMax, svgTraceCompressQuality, svgTraceCompressFormat, svgTraceThumbWidth, svgTraceThumbHeight, svgTraceThumbFit, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, removeProcessingFrame]);
 
   // Multi-angle - Lovart-style subject/camera mode, result to the right
   const handleOpenMultiAngle = useCallback(() => {
@@ -9416,7 +9421,7 @@ export function InfiniteCanvas({
           const pos = getToolbarPosition();
 
           const svgTraceModes = [
-            { key: 'color' as const, label: '全彩矢量化', icon: <Palette size={14} />, desc: 'VTracer全彩分层', accent: '#d4af37' },
+            { key: 'color' as const, label: '全彩矢量化', icon: <Palette size={14} />, desc: '智能引擎分层', accent: '#d4af37' },
             { key: 'bw' as const, label: '黑白描摹', icon: <Contrast size={14} />, desc: 'Potrace轮廓', accent: '#9ca3af' },
             { key: 'cutting' as const, label: '切割路径', icon: <Scissors size={14} />, desc: '激光切割用', accent: '#ef4444' },
             { key: 'engraving' as const, label: '雕刻路径', icon: <PenTool size={14} />, desc: '激光雕刻用', accent: '#f59e0b' },
@@ -9477,6 +9482,34 @@ export function InfiniteCanvas({
                 {/* Mode-specific options */}
                 {svgTraceMode === 'color' && (
                   <div className="flex flex-col gap-2">
+                    {/* Engine selector */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-xs text-muted-foreground">矢量化引擎</label>
+                        <span className="text-[10px] text-[#777]">自动选择最优引擎</span>
+                      </div>
+                      <div className="grid grid-cols-4 gap-1">
+                        {([
+                          { key: 'auto' as const, label: '自动', color: '#d4af37', desc: '智能选择' },
+                          { key: 'recraft' as const, label: 'Recraft', color: '#4ade80', desc: '专业矢量' },
+                          { key: 'vlm' as const, label: 'VLM', color: '#60a5fa', desc: '视觉模型' },
+                          { key: 'vtracer' as const, label: 'vtracer', color: '#9ca3af', desc: '传统描摹' },
+                        ]).map(eng => (
+                          <button key={eng.key}
+                            onClick={(e) => { e.stopPropagation(); setSvgTraceEngine(eng.key); }}
+                            className="py-1 rounded text-[10px] font-medium border transition-all"
+                            title={eng.desc}
+                            style={{
+                              background: svgTraceEngine === eng.key ? `${eng.color}20` : '#111',
+                              borderColor: svgTraceEngine === eng.key ? eng.color : '#333',
+                              color: svgTraceEngine === eng.key ? eng.color : '#555',
+                            }}
+                          >
+                            {eng.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                     <div>
                       <div className="flex items-center justify-between mb-1">
                         <label className="text-xs text-muted-foreground">质量预设</label>

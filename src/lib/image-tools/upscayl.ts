@@ -435,7 +435,8 @@ function getUpscaleOnnxScriptPath(): string {
 /** ONNX Python 子进程结果 */
 interface OnnxUpscaleResult {
   success: boolean;
-  image?: string;        // base64 PNG
+  image?: string;        // base64 PNG (小图模式)
+  outputFile?: string;   // 输出文件路径 (大图文件模式)
   engine?: string;
   originalSize?: number[];
   outputSize?: number[];
@@ -444,25 +445,72 @@ interface OnnxUpscaleResult {
   error?: string;
 }
 
+/** 动态计算 tileSize：根据图片尺寸和可用内存自适应 */
+function calcOptimalTileSize(width: number, height: number, scale: number): number {
+  // 目标：每个 tile 推理内存 < 200MB (fp16, 4x 模型)
+  // 128x128 tile → 512x512 output ≈ 3MB float16，非常安全
+  // 256x256 tile → 1024x1024 output ≈ 12MB float16，安全
+  // 384x384 tile → 1536x1536 output ≈ 27MB float16，可能 OOM
+  // 512x512 tile → 2048x2048 output ≈ 48MB float16，风险高
+  const pixels = width * height;
+
+  if (pixels > 1024 * 1024) return 128;   // 大图/超大图：小 tile，避免 OOM
+  if (pixels >= 512 * 512) return 192;     // 中大图
+  if (pixels >= 256 * 256) return 256;     // 中图
+  return Math.min(width, 256);             // 小图：用图片尺寸或 256，避免 tile > 图片
+}
+
+/** 动态计算超时：根据图片尺寸和 tile 数量 */
+function calcTimeoutMs(width: number, height: number, tileSize: number): number {
+  const cols = Math.ceil(width / tileSize);
+  const rows = Math.ceil(height / tileSize);
+  const totalTiles = cols * rows;
+  // 每个tile 约 4-6 秒 (128x128)，大 tile 更慢
+  const secondsPerTile = tileSize <= 128 ? 5 : tileSize <= 256 ? 8 : 12;
+  const estimatedSeconds = totalTiles * secondsPerTile;
+  // 取估算的 2 倍 + 30s 启动开销，最少 5 分钟，最多 30 分钟
+  return Math.min(30 * 60 * 1000, Math.max(5 * 60 * 1000, (estimatedSeconds * 2 + 30) * 1000));
+}
+
 /**
  * 调用 Python ONNX 子进程执行放大
+ *
+ * 支持两种模式：
+ * - 小图 (≤512x512): base64 stdin/stdout 传输
+ * - 大图 (>512x512): 文件 I/O，避免 base64 膨胀和内存峰值
  */
 async function callOnnxUpscale(
   imageBase64: string,
   scale: number,
   tileSize: number,
   model: string,
+  inputFile?: string,
+  outputFile?: string,
+  timeoutMs?: number,
 ): Promise<OnnxUpscaleResult> {
   const scriptPath = getUpscaleOnnxScriptPath();
   const onnxModelsDir = getOnnxModelsDir();
 
+  const inputObj: Record<string, unknown> = {
+    scale,
+    tileSize,
+    model,
+  };
+
+  // 文件模式优先（大图场景）
+  if (inputFile && fs.existsSync(inputFile)) {
+    inputObj.inputFile = inputFile;
+    if (outputFile) {
+      inputObj.outputFile = outputFile;
+    }
+  } else {
+    inputObj.image = imageBase64;
+  }
+
+  const effectiveTimeout = timeoutMs || UPSCALE_TIMEOUT_MS;
+
   return new Promise((resolve) => {
-    const input = JSON.stringify({
-      image: imageBase64,
-      scale,
-      tileSize,
-      model,
-    });
+    const input = JSON.stringify(inputObj);
 
     const proc = spawn(PYTHON_BIN, [scriptPath], {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -476,17 +524,17 @@ async function callOnnxUpscale(
     let stderr = '';
     let settled = false;
 
-    // 超时保护 (5 分钟)
+    // 动态超时保护
     const timer = setTimeout(() => {
       if (!settled) {
         settled = true;
         proc.kill('SIGKILL');
         resolve({
           success: false,
-          error: `ONNX 放大超时 (${Math.round(UPSCALE_TIMEOUT_MS / 1000)}s)`,
+          error: `ONNX 放大超时 (${Math.round(effectiveTimeout / 1000)}s)`,
         });
       }
-    }, UPSCALE_TIMEOUT_MS);
+    }, effectiveTimeout);
 
     proc.stdout.on('data', (data: Buffer) => {
       stdout += data.toString();
@@ -546,7 +594,11 @@ async function callOnnxUpscale(
 /**
  * 执行 ONNX CPU 无损放大 (优先路径)
  *
- * 流程：Node.js 准备图片 → base64 → Python 子进程 onnxruntime 推理 → base64 结果 → 保存文件
+ * 两种模式自动选择：
+ * - 小图 (≤512x512): base64 传输，简单高效
+ * - 大图 (>512x512): 文件 I/O，避免内存峰值
+ *
+ * 不对原图做 resizeIfTooLarge 缩放 — ONNX 分块处理天然支持任意尺寸
  */
 export async function performOnnxUpscale(
   params: UpscaleParams,
@@ -554,7 +606,6 @@ export async function performOnnxUpscale(
   const {
     imageUrl: inputImageUrl,
     scale = UPSCALE_DEFAULT_SCALE as 2 | 4,
-    tileSize = 128,
     outputFormat = 'png' as 'png' | 'jpg' | 'jpeg' | 'webp',
     compression = 90,
   } = params;
@@ -575,34 +626,122 @@ export async function performOnnxUpscale(
 
   ensureOutputDirs();
 
+  // 临时目录用于文件模式
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'onnx-upscale-'));
+
   try {
-    // 读取图片为 buffer
+    // 读取图片尺寸信息（不加载全部像素到内存）
     const { readImageToBuffer } = await import('./file');
     const { buffer: inputBuffer, width: origW, height: origH } =
       await readImageToBuffer(inputImageUrl);
 
-    // 大图先缩放
-    const { buffer: processBuffer } = await resizeIfTooLarge(inputBuffer, IMAGE_MAX_EDGE);
+    // 关键：不做 resizeIfTooLarge！ONNX 分块处理天然支持大图
+    // 只对超大图 (>4096px) 做限制，避免内存溢出
+    const MAX_ONNX_EDGE = 4096;
+    let processBuffer = inputBuffer;
+    let procW = origW;
+    let procH = origH;
+    if (origW > MAX_ONNX_EDGE || origH > MAX_ONNX_EDGE) {
+      const { resizeIfTooLarge } = await import('./file');
+      const resized = await resizeIfTooLarge(inputBuffer, MAX_ONNX_EDGE);
+      processBuffer = resized.buffer;
+      procW = resized.width;
+      procH = resized.height;
+      console.log(`[upscayl] Resized超大图: ${origW}x${origH} -> ${procW}x${procH}`);
+    }
 
-    // 转换为 base64
-    const imageBase64 = processBuffer.toString('base64');
+    // 动态计算 tileSize 和超时
+    const tileSize = params.tileSize || calcOptimalTileSize(procW, procH, scale);
+    const timeoutMs = calcTimeoutMs(procW, procH, tileSize);
+
+    // 判断使用 base64 还是文件模式
+    const isLargeImage = procW * procH > 512 * 512;
+    let imageBase64 = '';
+    let inputFile = '';
+    let outputFile = '';
+
+    if (isLargeImage) {
+      // 文件模式：保存到临时文件，Python 直接读写文件
+      const tmpInput = path.join(tmpDir, 'input.png');
+      fs.writeFileSync(tmpInput, processBuffer);
+      inputFile = tmpInput;
+
+      const filename = generateFilename('upscale', 'png');
+      outputFile = path.join(UPSCALE_OUTPUT_DIR, filename);
+
+      console.log(`[upscayl] ONNX CPU upscale (file mode): ${procW}x${procH} -> ${scale}x, tileSize=${tileSize}, timeout=${Math.round(timeoutMs/1000)}s`);
+    } else {
+      // base64 模式：小图直接传 stdin
+      imageBase64 = processBuffer.toString('base64');
+      console.log(`[upscayl] ONNX CPU upscale (base64 mode): ${procW}x${procH} -> ${scale}x, tileSize=${tileSize}`);
+    }
 
     // 调用 Python ONNX 子进程
-    console.log(`[upscayl] ONNX CPU upscale: ${origW}x${origH} -> ${scale}x, tileSize=${tileSize}`);
-    const result = await callOnnxUpscale(imageBase64, scale, tileSize, 'realesrgan-x4plus-fp16');
+    const result = await callOnnxUpscale(
+      imageBase64,
+      scale,
+      tileSize,
+      'realesrgan-x4plus-fp16',
+      inputFile,
+      outputFile,
+      timeoutMs,
+    );
 
-    if (!result.success || !result.image) {
+    if (!result.success) {
       return {
         success: false,
         error: result.error || 'ONNX 放大未返回结果',
       };
     }
 
-    // 解码输出图片
+    // 文件模式：Python 已直接写入输出文件
+    if (result.outputFile && fs.existsSync(result.outputFile)) {
+      let finalBuffer: Buffer = await fs.promises.readFile(result.outputFile);
+      const outW = result.outputSize?.[0] ?? procW * scale;
+      const outH = result.outputSize?.[1] ?? procH * scale;
+
+      // 转换输出格式
+      if (outputFormat === 'jpg' || outputFormat === 'jpeg') {
+        finalBuffer = Buffer.from(await sharp(finalBuffer).jpeg({ quality: compression }).toBuffer());
+      } else if (outputFormat === 'webp') {
+        finalBuffer = Buffer.from(await sharp(finalBuffer).webp({ quality: compression }).toBuffer());
+      }
+
+      // 如果格式不是 PNG，需要重命名
+      const filename = generateFilename('upscale', outputFormat === 'png' ? 'png' : outputFormat as string);
+      const finalOutputPath = path.join(UPSCALE_OUTPUT_DIR, filename);
+
+      if (finalOutputPath !== result.outputFile) {
+        fs.writeFileSync(finalOutputPath, finalBuffer);
+        // 删除 Python 写的 PNG 原始文件
+        try { fs.unlinkSync(result.outputFile); } catch {}
+      }
+
+      const imageUrl = `/outputs/upscale/${filename}`;
+      console.log(`[upscayl] ONNX CPU upscale complete (file): ${procW}x${procH} -> ${outW}x${outH} (${result.elapsed}s)`);
+
+      return {
+        success: true,
+        imageUrl,
+        originalSize: { width: origW, height: origH },
+        outputSize: { width: outW, height: outH },
+        model: result.model || 'realesrgan-x4plus-fp16',
+        scale,
+      };
+    }
+
+    // base64 模式：从返回的 base64 解码
+    if (!result.image) {
+      return {
+        success: false,
+        error: result.error || 'ONNX 放大未返回结果',
+      };
+    }
+
     const outputBuffer = Buffer.from(result.image, 'base64');
     const outputMeta = await sharp(outputBuffer).metadata();
-    const outW = outputMeta.width || (result.outputSize?.[0] ?? origW * scale);
-    const outH = outputMeta.height || (result.outputSize?.[1] ?? origH * scale);
+    const outW = outputMeta.width || (result.outputSize?.[0] ?? procW * scale);
+    const outH = outputMeta.height || (result.outputSize?.[1] ?? procH * scale);
 
     // 转换输出格式
     let finalBuffer: Buffer = outputBuffer;
@@ -619,7 +758,7 @@ export async function performOnnxUpscale(
 
     const imageUrl = `/outputs/upscale/${filename}`;
 
-    console.log(`[upscayl] ONNX CPU upscale complete: ${origW}x${origH} -> ${outW}x${outH} (${result.elapsed}s)`);
+    console.log(`[upscayl] ONNX CPU upscale complete: ${procW}x${procH} -> ${outW}x${outH} (${result.elapsed}s)`);
 
     return {
       success: true,
@@ -635,6 +774,13 @@ export async function performOnnxUpscale(
       success: false,
       error: `ONNX 放大失败: ${msg}`,
     };
+  } finally {
+    // 清理临时目录
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch {
+      // 忽略清理错误
+    }
   }
 }
 

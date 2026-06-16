@@ -22,7 +22,7 @@ export function normalizeApiBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, '');
 }
 
-type ApiKind = 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'imageEdit' | 'universal' | 'general' | 'packaging' | 'display3d';
+type ApiKind = 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'imageEdit' | 'universal' | 'general' | 'packaging' | 'display3d' | 'vlm';
 
 /**
  * Normalize advancedParams from DB storage format to Record<string, string>.
@@ -742,7 +742,7 @@ export async function findProviderById(providerId: string): Promise<ApiProvider 
 }
 
 /** 根据功能类型查找对应的 API 提供商（矢量化/分层/3D/聊天等） */
-export async function findProviderForFeature(feature: 'vectorize' | 'layer' | '3d' | 'imageEdit' | 'chat' | 'video'): Promise<ApiProvider | null> {
+export async function findProviderForFeature(feature: 'vectorize' | 'layer' | '3d' | 'imageEdit' | 'chat' | 'video' | 'vlm'): Promise<ApiProvider | null> {
   const kindMap: Record<string, ApiKind> = {
     vectorize: 'vectorize',
     layer: 'layer',
@@ -750,6 +750,7 @@ export async function findProviderForFeature(feature: 'vectorize' | 'layer' | '3
     imageEdit: 'image',
     chat: 'chat',
     video: 'video',
+    vlm: 'vlm',
   };
   const kind = kindMap[feature];
   if (!kind) return null;

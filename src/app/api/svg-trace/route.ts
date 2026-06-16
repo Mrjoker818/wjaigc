@@ -11,6 +11,8 @@ import { PYTHON_BIN } from '@/lib/image-tools/config';
 import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits } from '@/lib/credits';
 import { optimize as runSvgoOptimize } from 'svgo';
+import { vectorizePipeline, type VectorizeEngine, type VectorizeQuality as PipelineQuality } from '@/lib/vectorize-pipeline';
+import { analyzeWithSharp } from '@/lib/vectorize-analyzer';
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -22,6 +24,8 @@ type QualityPreset = 'fast' | 'balanced' | 'high' | 'max' | 'print' | 'print-pro
 interface TraceRequest {
   imageUrl: string;
   mode: TraceMode;
+  // Engine selection: auto = pipeline auto-selects, recraft/vtracer/vlm = force specific engine
+  engine?: 'auto' | 'recraft' | 'vtracer' | 'vlm';
   // Quality preset (overrides individual params with optimal defaults)
   qualityPreset?: QualityPreset;
   // Color vectorization params (VTracer)
@@ -1689,19 +1693,22 @@ async function saveResult(
 }
 
 
-async function tryDesignVectorizeFallback(req: NextRequest, imageUrl: string, mode: TraceMode): Promise<NextResponse | null> {
+async function tryDesignVectorizeFallback(req: NextRequest, imageUrl: string, mode: TraceMode, forcedEngine?: VectorizeEngine): Promise<NextResponse | null> {
   try {
-    const fallbackMode = mode === 'bw' ? 'line-art' : 'logo';
-    const res = await fetch(getInternalApiUrl('/api/design/vectorize'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', cookie: req.headers.get('cookie') || '' },
-      body: JSON.stringify({ imageUrl, mode: fallbackMode, layerId: `svg-trace-${Date.now()}` }),
-      signal: AbortSignal.timeout(90000),
-    });
-    const data = await res.json().catch(() => null) as { success?: boolean; svg?: string; engine?: string; error?: string } | null;
-    if (!res.ok || !data?.success || !data.svg) return null;
+    // 使用统一矢量化管线替代旧 design/vectorize fallback
+    const inputBuffer = await resolveImageUrl(imageUrl);
+    if (!inputBuffer || inputBuffer.length === 0) return null;
 
-    let svgContent = sanitizeSvgForIllustrator(String(data.svg));
+    const pipelineResult = await vectorizePipeline({
+      imageBuffer: inputBuffer,
+      imageUrl,
+      engine: forcedEngine || undefined,
+      mode: (mode === 'bw' || mode === 'cutting' || mode === 'engraving' || mode === 'lineart') ? 'lineart' : 'color',
+    });
+
+    if (!pipelineResult.success || !pipelineResult.svg) return null;
+
+    let svgContent = sanitizeSvgForIllustrator(String(pipelineResult.svg));
     // AI 生成 SVG 安全过滤
     const safetyResult = sanitizeAIGeneratedSvg(svgContent);
     if (!safetyResult.safe) {
@@ -1727,7 +1734,7 @@ async function tryDesignVectorizeFallback(req: NextRequest, imageUrl: string, mo
     return NextResponse.json({
       success: true,
       mode,
-      engine: data.engine || 'design-vectorize-fallback',
+      engine: pipelineResult.engine || 'pipeline-fallback',
       svg: svgContent,
       dataUrl: pngServerUrl || pngPreviewUrl || svgDataUrl,
       svgDataUrl,
@@ -1736,7 +1743,7 @@ async function tryDesignVectorizeFallback(req: NextRequest, imageUrl: string, mo
       stats: { svgSize: Buffer.byteLength(svgContent, 'utf-8'), pathCount: (svgContent.match(/<path/g) || []).length },
     });
   } catch (e) {
-    console.warn('[svg-trace] design/vectorize fallback failed:', e instanceof Error ? e.message : String(e));
+    console.warn('[svg-trace] vectorize pipeline fallback failed:', e instanceof Error ? e.message : String(e));
     return null;
   }
 }
@@ -1769,21 +1776,21 @@ export async function POST(req: NextRequest) {
     }
 
     // Pre-check tool availability for trace modes
+    // NOTE: color mode now uses unified pipeline (Recraft/VLM → vtracer), so vtracer is not required
     if (mode === 'color') {
       const vtracerCheck = await new Promise<boolean>((resolve) => {
         execFile(PYTHON_BIN, ['-c', 'import vtracer'], { timeout: 5000 }, (error) => {
           resolve(!error);
         });
       });
-      if (!vtracerCheck) {
-        // Fallback: AI矢量化API
-        const fallback = await tryDesignVectorizeFallback(req, imageUrl, mode);
-        if (fallback) return fallback;
+      if (!vtracerCheck && (body.engine === 'vtracer')) {
+        // Only error if user explicitly requested vtracer and it's not installed
         return NextResponse.json({
           success: false,
-          error: 'VTracer 未安装，且AI矢量化兜底不可用。请安装: pip3 install vtracer，或在管理员系统配置可视觉理解的LLM/矢量模型。',
+          error: 'VTracer 未安装。请安装: pip3 install vtracer，或使用 engine=auto 让系统自动选择最优引擎。',
         }, { status: 503 });
       }
+      // If vtracer not available but engine is auto/recraft/vlm, the pipeline will handle it
     } else if (mode === 'bw' || mode === 'cutting' || mode === 'engraving' || mode === 'lineart') {
       const potraceCheck = await new Promise<boolean>((resolve) => {
         execFile('which', ['potrace'], { timeout: 5000 }, (error) => {
@@ -1791,11 +1798,12 @@ export async function POST(req: NextRequest) {
         });
       });
       if (!potraceCheck) {
+        // 尝试统一管线作为黑白模式兜底
         const fallback = await tryDesignVectorizeFallback(req, imageUrl, mode);
         if (fallback) return fallback;
         return NextResponse.json({
           success: false,
-          error: 'Potrace 未安装，且AI矢量化兜底不可用。请安装: apt-get install potrace，或在管理员系统配置可视觉理解的LLM/矢量模型。',
+          error: 'Potrace 未安装，且矢量化管线兜底不可用。请安装: apt-get install potrace，或在管理员系统配置矢量模型。',
         }, { status: 503 });
       }
     }
@@ -1811,8 +1819,95 @@ export async function POST(req: NextRequest) {
     const uid = `${timestamp}-${random}`;
 
     switch (mode) {
-      // ─── 彩色矢量化：Sharp预处理 + VTracer + Illustrator清洗 ───
+      // ─── 彩色矢量化：统一管线(Recraft/VLM) → VTracer → ImageTracer.js ───
       case 'color': {
+        const requestedEngine = body.engine || 'auto';
+
+        // ─── P0: 统一矢量化管线 (Recraft Vectorize → VLM → vtracer spline) ───
+        if (requestedEngine === 'auto' || requestedEngine === 'recraft' || requestedEngine === 'vlm') {
+          try {
+            const inputBufferForPipeline = await resolveImageUrl(imageUrl);
+            if (inputBufferForPipeline && inputBufferForPipeline.length > 0) {
+              // 获取图片尺寸用于管线分析和后续处理
+              let imgWidth = 0, imgHeight = 0;
+              try {
+                const meta = await sharp(inputBufferForPipeline).metadata();
+                imgWidth = meta.width || 0;
+                imgHeight = meta.height || 0;
+              } catch {}
+
+              const pipelineResult = await vectorizePipeline({
+                imageUrl,
+                imageBuffer: inputBufferForPipeline,
+                width: imgWidth,
+                height: imgHeight,
+                engine: requestedEngine !== 'auto' ? requestedEngine as VectorizeEngine : undefined,
+                mode: 'color',
+                quality: (body.qualityPreset as PipelineQuality) || 'balanced',
+              });
+
+              if (pipelineResult.success && pipelineResult.svg) {
+                let svgContent = String(pipelineResult.svg);
+                // AI生成SVG安全过滤
+                const safetyCheck = sanitizeAIGeneratedSvg(svgContent);
+                if (safetyCheck.safe && safetyCheck.sanitized) {
+                  svgContent = safetyCheck.sanitized;
+                }
+                // 丹青AI级别后处理
+                svgContent = await postProcessSvg(svgContent);
+                // 标准化
+                svgContent = normalizeVectorSvg(svgContent, imgWidth, imgHeight);
+
+                const pathCountCheck = (svgContent.match(/<path/g) || []).length;
+                if (pathCountCheck > 0 && pathCountCheck <= 3000) {
+                  const filename = `svg-color-${uid}.svg`;
+                  const { url } = await saveResult(svgContent, filename, 'svg-trace', 'image/svg+xml');
+                  const svgDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgContent)}`;
+
+                  let pngPreviewUrl: string | undefined;
+                  let pngServerUrl: string | undefined;
+                  try {
+                    const imgW = imgWidth || 1024;
+                    const imgH = imgHeight || 1024;
+                    const pngBuffer = await sharp(Buffer.from(svgContent))
+                      .resize(Math.min(imgW, 2048), Math.min(imgH, 2048), { fit: 'inside', withoutEnlargement: true })
+                      .png({ quality: 90 }).toBuffer();
+                    const pngFilename = `svg-color-${uid}-preview.png`;
+                    const pngSaveResult = await saveResult(pngBuffer, pngFilename, 'svg-trace', 'image/png');
+                    pngServerUrl = pngSaveResult.url;
+                    pngPreviewUrl = `data:image/png;base64,${pngBuffer.toString('base64')}`;
+                  } catch {}
+
+                  return NextResponse.json({
+                    success: true,
+                    mode: 'color',
+                    engine: pipelineResult.engine,
+                    svg: svgContent,
+                    url,
+                    dataUrl: pngServerUrl || pngPreviewUrl || url,
+                    svgDataUrl,
+                    isSvgPreview: !!(pngServerUrl || pngPreviewUrl),
+                    stats: {
+                      svgSize: Buffer.byteLength(svgContent, 'utf-8'),
+                      pathCount: pathCountCheck,
+                      groupCount: (svgContent.match(/<g\b/g) || []).length,
+                      preset: body.qualityPreset || 'balanced',
+                      engineUsed: pipelineResult.engine,
+                      imageType: pipelineResult.analysis?.isSimpleGraphic ? 'simple' : pipelineResult.analysis?.isCartoon ? 'cartoon' : 'general',
+                    },
+                  });
+                }
+
+                // Pipeline returned SVG but path count out of range — fall through to vtracer
+                console.log(`[svg-trace] Pipeline SVG path count ${pathCountCheck} out of range, falling back to vtracer`);
+              }
+            }
+          } catch (pipelineErr) {
+            console.warn('[svg-trace] Pipeline failed, falling back to vtracer:', pipelineErr instanceof Error ? pipelineErr.message : String(pipelineErr));
+          }
+        }
+
+        // ─── P1: VTracer 彩色矢量化 (本地引擎) ───
         const vtracerParams = resolveVtracerParams(body);
 
         // Preprocess image for optimal VTracer input

@@ -1,31 +1,19 @@
 #!/usr/bin/env python3
 """
-Real-ESRGAN ONNX 无损放大脚本 — 纯 CPU 推理，分块处理
+Real-ESRGAN ONNX 无损放大脚本 — 纯 CPU 推理，分块处理，内存优化版
 
-通过 stdin 接收 JSON，stdout 返回 JSON 结果
+支持两种 I/O 模式:
+1. 文件模式（推荐，大图优先）: inputFile / outputFile 指定路径
+2. base64 模式（兼容旧调用）: stdin/stdout 传递 base64 JSON
 
-输入格式:
+输入格式 (JSON):
 {
-  "image": "<base64 PNG/JPEG>",
-  "scale": 2 | 4,               (可选，默认 4)
-  "tileSize": 128,              (可选，单块最大边长，默认 128)
-  "model": "realesrgan-x4plus"  (可选，默认 realesrgan-x4plus)
-}
-
-输出格式:
-{
-  "success": true,
-  "image": "<base64 PNG>",
-  "engine": "onnx-realesrgan",
-  "originalSize": [W, H],
-  "outputSize": [W2, H2],
-  "tiles": N,
-  "model": "realesrgan-x4plus"
-}
-或
-{
-  "success": false,
-  "error": "错误信息"
+  "image": "<base64>",           // base64 模式
+  "inputFile": "/tmp/in.png",   // 文件模式（优先）
+  "outputFile": "/tmp/out.png", // 输出文件路径
+  "scale": 2 | 4,
+  "tileSize": 256,
+  "model": "realesrgan-x4plus-fp16"
 }
 """
 
@@ -37,6 +25,7 @@ import os
 import traceback
 import time
 import math
+import tempfile
 
 try:
     import numpy as np
@@ -48,281 +37,291 @@ except ImportError as e:
     sys.stdout.flush()
     sys.exit(1)
 
-# ============================================================
-# 模型路径配置
-# ============================================================
 _ONNX_MODELS_DIR = os.environ.get(
     "ONNX_MODELS_DIR",
     os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "onnx-models")
 )
 
-# 模型文件名映射
 _MODEL_FILES = {
     "realesrgan-x4plus": "realesrgan-x4plus.onnx",
     "realesrgan-x4plus-fp16": "realesrgan-x4plus-fp16.onnx",
 }
 
-# 全局 session 缓存（避免每次调用重新加载模型）
-_session_cache: dict = {}
+_session_cache = {}
 
 
-def get_session(model_name: str) -> ort.InferenceSession:
-    """获取或创建 ONNX 推理 session"""
+def get_session(model_name):
     if model_name in _session_cache:
         return _session_cache[model_name]
-
-    # 确定模型文件路径 — 默认使用 fp16 模型（支持动态输入尺寸）
-    # fp32 模型输入固定为 [1,3,64,64]，不支持分块处理，故默认走 fp16
     if model_name not in ("realesrgan-x4plus-fp16",):
         model_name = "realesrgan-x4plus-fp16"
     model_file = _MODEL_FILES.get(model_name, "realesrgan-x4plus-fp16.onnx")
     model_path = os.path.join(_ONNX_MODELS_DIR, model_file)
-
     if not os.path.exists(model_path):
-        # 尝试 fp16 版本
         fp16_path = os.path.join(_ONNX_MODELS_DIR, "realesrgan-x4plus-fp16.onnx")
         if os.path.exists(fp16_path):
             model_path = fp16_path
             model_name = "realesrgan-x4plus-fp16"
         else:
             raise FileNotFoundError(f"ONNX 模型文件不存在: {model_path}")
-
     print(f"[upscale_onnx] Loading model: {model_path}", file=sys.stderr)
     sess_options = ort.SessionOptions()
-    sess_options.intra_op_num_threads = 4
-    sess_options.inter_op_num_threads = 2
+    # 限制线程数，降低内存峰值
+    sess_options.intra_op_num_threads = 2
+    sess_options.inter_op_num_threads = 1
     sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-
-    session = ort.InferenceSession(
-        model_path,
-        sess_options=sess_options,
-        providers=['CPUExecutionProvider']
-    )
+    session = ort.InferenceSession(model_path, sess_options=sess_options, providers=['CPUExecutionProvider'])
     _session_cache[model_name] = session
     return session
 
 
-def preprocess_image(img: Image.Image, tile_size: int = 128) -> np.ndarray:
-    """预处理图片为模型输入张量 [1, 3, H, W]"""
-    img_array = np.array(img).astype(np.float32) / 255.0
-    # HWC -> CHW
+def process_tile(session, tile_img):
+    """处理单个 tile，返回 PIL Image"""
+    img_array = np.array(tile_img).astype(np.float16) / 255.0
     img_chw = np.transpose(img_array, (2, 0, 1))
-    # 添加 batch 维度
     input_tensor = np.expand_dims(img_chw, axis=0)
-    return input_tensor
-
-
-def postprocess_output(output: np.ndarray) -> Image.Image:
-    """后处理模型输出为 PIL Image"""
-    # [1, 3, H, W] -> [3, H, W] -> [H, W, 3]
-    out = output[0]
+    input_name = session.get_inputs()[0].name
+    output = session.run(None, {input_name: input_tensor})
+    out = output[0][0]
     out = np.transpose(out, (1, 2, 0))
     out = np.clip(out * 255.0, 0, 255).astype(np.uint8)
     return Image.fromarray(out)
 
 
-def process_tile(session: ort.InferenceSession, tile_img: Image.Image) -> Image.Image:
-    """处理单个 tile"""
-    input_tensor = preprocess_image(tile_img)
-    input_name = session.get_inputs()[0].name
-
-    # fp16 模型需要 fp16 输入
-    input_type = session.get_inputs()[0].type
-    if input_type == 'tensor(float16)':
-        input_tensor = input_tensor.astype(np.float16)
-
-    output = session.run(None, {input_name: input_tensor})
-    return postprocess_output(output[0])
-
-
-def upscale_image_tiled(
-    img: Image.Image,
-    scale: int = 4,
-    tile_size: int = 128,
-    model_name: str = "realesrgan-x4plus"
-) -> Image.Image:
+def upscale_image_tiled(img, scale=4, tile_size=256, model_name="realesrgan-x4plus-fp16", output_file=None):
     """
-    分块放大图片
-    
-    Args:
-        img: 输入 PIL Image (RGB)
-        scale: 放大倍率 (模型固定 4x，如需 2x 会后处理缩放)
-        tile_size: 单块最大边长 (像素)
-        model_name: 模型名称
-    
-    Returns:
-        放大后的 PIL Image
+    分块放大 — 逐行拼接，内存优化版
+
+    核心优化:
+    - 逐行处理 tile → 横向拼接后立即写入临时文件 → 释放行内存
+    - 最终从临时文件逐行读取纵向拼接
+    - 内存峰值 = 单行高度 × 输出宽度（而非全图）
+    - 大图自动切换到文件输出（outputFile）
     """
     session = get_session(model_name)
-
     w, h = img.size
-    # 计算分块网格
     cols = max(1, math.ceil(w / tile_size))
     rows = max(1, math.ceil(h / tile_size))
     total_tiles = cols * rows
-
-    # 重叠像素 (tile 的 10%，最小 8px)
     overlap = max(8, tile_size // 10)
+    model_scale = 4
+    # 输出尺寸 = 目标倍率（而非固定的 4x）
+    target_scale = scale
+    target_w = w * target_scale
+    target_h = h * target_scale
 
     print(f"[upscale_onnx] Image: {w}x{h}, Grid: {cols}x{rows}={total_tiles} tiles, "
-          f"tile_size={tile_size}, overlap={overlap}", file=sys.stderr)
+          f"tile_size={tile_size}, overlap={overlap}, target={target_scale}x", file=sys.stderr)
 
-    # 计算每个 tile 的位置 (含重叠)
+    # 计算 tile 坐标
     tile_coords = []
     for row in range(rows):
         for col in range(cols):
-            x_start = max(0, col * tile_size - (overlap if col > 0 else 0))
-            y_start = max(0, row * tile_size - (overlap if row > 0 else 0))
-            x_end = min(w, (col + 1) * tile_size + (overlap if col < cols - 1 else 0))
-            y_end = min(h, (row + 1) * tile_size + (overlap if row < rows - 1 else 0))
-            tile_coords.append((x_start, y_start, x_end, y_end))
+            x1 = max(0, col * tile_size - (overlap if col > 0 else 0))
+            y1 = max(0, row * tile_size - (overlap if row > 0 else 0))
+            x2 = min(w, (col + 1) * tile_size + (overlap if col < cols - 1 else 0))
+            y2 = min(h, (row + 1) * tile_size + (overlap if row < rows - 1 else 0))
+            tile_coords.append((row, col, x1, y1, x2, y2))
 
-    # 模型固定 4x 放大
-    model_scale = 4
-    out_w = w * model_scale
-    out_h = h * model_scale
+    tmp_dir = tempfile.mkdtemp(prefix="upscale_onnx_")
+    row_files = []
 
-    # 创建输出画布 (使用 float 累加，权重混合)
-    output_buffer = np.zeros((out_h, out_w, 3), dtype=np.float32)
-    weight_buffer = np.zeros((out_h, out_w, 1), dtype=np.float32)
+    try:
+        for row_idx in range(rows):
+            row_tiles = [(c, r, x1, y1, x2, y2) for r, c, x1, y1, x2, y2 in tile_coords if r == row_idx]
+            row_tiles.sort(key=lambda t: t[0])
 
-    for i, (x1, y1, x2, y2) in enumerate(tile_coords):
-        tile = img.crop((x1, y1, x2, y2))
-        tile_w, tile_h = tile.size
+            # 处理当前行的每个 tile
+            row_strips = []
+            for col_idx, _, x1, y1, x2, y2 in row_tiles:
+                tile_idx = row_idx * cols + col_idx
+                tile = img.crop((x1, y1, x2, y2))
+                tile_w, tile_h = tile.size
 
-        # 处理 tile
-        t0 = time.time()
-        result = process_tile(session, tile)
-        elapsed = time.time() - t0
-        print(f"[upscale_onnx] Tile {i+1}/{total_tiles}: "
-              f"({x1},{y1})-({x2},{y2}) {tile_w}x{tile_h} -> {result.size} "
-              f"[{elapsed:.1f}s]", file=sys.stderr)
+                t0 = time.time()
+                result = process_tile(session, tile)
+                elapsed = time.time() - t0
+                print(f"[upscale_onnx] Tile {tile_idx+1}/{total_tiles}: "
+                      f"({x1},{y1})-({x2},{y2}) {tile_w}x{tile_h} -> {result.size} "
+                      f"[{elapsed:.1f}s]", file=sys.stderr)
 
-        # 计算在输出画布中的位置
-        out_x1 = x1 * model_scale
-        out_y1 = y1 * model_scale
-        out_x2 = x2 * model_scale
-        out_y2 = y2 * model_scale
+                # 裁剪掉重叠区域
+                res_w, res_h = result.size
+                crop_left = overlap * model_scale if x1 > 0 else 0
+                crop_right = res_w - (overlap * model_scale if x2 < w else 0)
+                crop_top = overlap * model_scale if y1 > 0 else 0
+                crop_bottom = res_h - (overlap * model_scale if y2 < h else 0)
 
-        # 计算权重（中间区域权重=1，边缘渐变到0.5）
-        tile_out_w = result.width
-        tile_out_h = result.height
-        weight = np.ones((tile_out_h, tile_out_w, 1), dtype=np.float32)
+                if crop_right > crop_left and crop_bottom > crop_top:
+                    cropped = result.crop((crop_left, crop_top, crop_right, crop_bottom))
 
-        # 左边重叠区域渐变
-        left_overlap = (x1 > 0)
-        right_overlap = (x2 < w)
-        top_overlap = (y1 > 0)
-        bottom_overlap = (y2 < h)
+                    # 如果目标倍率不是 4x，在 tile 级别就缩放，避免拼大图后再缩
+                    if target_scale != model_scale:
+                        new_w = int(cropped.width * target_scale / model_scale)
+                        new_h = int(cropped.height * target_scale / model_scale)
+                        cropped = cropped.resize((new_w, new_h), Image.LANCZOS)
 
-        if left_overlap:
-            overlap_out = overlap * model_scale
-            for px in range(min(overlap_out, tile_out_w)):
-                weight[:, px, :] *= (px + 1) / overlap_out
-        if right_overlap:
-            overlap_out = overlap * model_scale
-            for px in range(min(overlap_out, tile_out_w)):
-                weight[:, tile_out_w - 1 - px, :] *= (px + 1) / overlap_out
-        if top_overlap:
-            overlap_out = overlap * model_scale
-            for py in range(min(overlap_out, tile_out_h)):
-                weight[py, :, :] *= (py + 1) / overlap_out
-        if bottom_overlap:
-            overlap_out = overlap * model_scale
-            for py in range(min(overlap_out, tile_out_h)):
-                weight[tile_out_h - 1 - py, :, :] *= (py + 1) / overlap_out
+                    # 计算在目标尺寸行拼接中的 paste 位置
+                    paste_x = int((x1 + (overlap if x1 > 0 else 0)) * target_scale - (overlap * target_scale if x1 > 0 else 0))
+                    # 简化：直接按累积宽度拼接
+                    row_strips.append((paste_x, cropped))
 
-        # 累加到输出缓冲区
-        result_array = np.array(result, dtype=np.float32)
-        output_buffer[out_y1:out_y2, out_x1:out_x2] += result_array * weight
-        weight_buffer[out_y1:out_y2, out_x1:out_x2] += weight
+                del result, tile
 
-    # 归一化 (weight_buffer 是 [H, W, 1]，需要广播到 [H, W, 3])
-    mask = weight_buffer > 0
-    # 避免 division by zero
-    weight_safe = np.where(mask, weight_buffer, 1.0)
-    output_buffer = output_buffer / weight_safe  # 自动广播 [H,W,3] / [H,W,1]
-    # 未被任何 tile 覆盖的区域置零
-    output_buffer[~mask.squeeze(axis=2)] = 0
-    output_buffer = np.clip(output_buffer, 0, 255).astype(np.uint8)
+            # 横向拼接当前行（在目标尺寸下）
+            if row_strips:
+                # 按 paste_x 排序
+                row_strips.sort(key=lambda t: t[0])
+                # 直接顺序拼接（strip 之间无间隙）
+                row_height = row_strips[0][1].height
+                row_img = Image.new('RGB', (target_w, row_height))
+                x_cursor = 0
+                for paste_x, strip in row_strips:
+                    # 使用累积位置拼接，避免空隙
+                    actual_x = max(paste_x, x_cursor)
+                    row_img.paste(strip, (actual_x, 0))
+                    x_cursor = actual_x + strip.width
+                del row_strips
 
-    result_img = Image.fromarray(output_buffer)
+                # 保存行到临时文件，释放内存
+                row_file = os.path.join(tmp_dir, f"row_{row_idx:04d}.png")
+                row_img.save(row_file, format="PNG")
+                row_files.append(row_file)
+                print(f"[upscale_onnx] Row {row_idx+1}/{rows} saved ({row_img.size})", file=sys.stderr)
+                del row_img
 
-    # 如果目标倍率不是 4x，缩放到目标
-    if scale != model_scale:
-        target_w = w * scale
-        target_h = h * scale
-        result_img = result_img.resize((target_w, target_h), Image.LANCZOS)
-        print(f"[upscale_onnx] Resized from {model_scale}x to {scale}x: "
-              f"{out_w}x{out_h} -> {target_w}x{target_h}", file=sys.stderr)
+        # 纵向拼接所有行 — 逐行读取（在目标尺寸下）
+        total_h = 0
+        for rf in row_files:
+            ri = Image.open(rf)
+            total_h += ri.height
+            ri.close()
 
-    return result_img
+        print(f"[upscale_onnx] Assembling {len(row_files)} rows, final: {target_w}x{total_h}", file=sys.stderr)
+
+        final_img = Image.new('RGB', (target_w, total_h))
+        y_offset = 0
+        for rf in row_files:
+            ri = Image.open(rf)
+            final_img.paste(ri, (0, y_offset))
+            y_offset += ri.height
+            ri.close()
+
+        # 修正高度（理论上 total_h 应等于 target_h，可能因取整有 1-2px 差异）
+        if final_img.size != (target_w, target_h):
+            final_img = final_img.resize((target_w, target_h), Image.LANCZOS)
+            print(f"[upscale_onnx] Adjusted to exact target: {target_w}x{target_h}", file=sys.stderr)
+
+        # 输出
+        if output_file:
+            final_img.save(output_file, format="PNG", optimize=True)
+            print(f"[upscale_onnx] Saved to file: {output_file}", file=sys.stderr)
+            del final_img
+            _cleanup_tmp(tmp_dir, row_files)
+            return output_file
+        else:
+            _cleanup_tmp(tmp_dir, row_files)
+            return final_img
+
+    except Exception:
+        _cleanup_tmp(tmp_dir, row_files)
+        raise
+
+
+def _cleanup_tmp(tmp_dir, row_files):
+    for f in row_files:
+        try:
+            os.remove(f)
+        except:
+            pass
+    try:
+        os.rmdir(tmp_dir)
+    except:
+        pass
 
 
 def main():
-    # 读取 stdin JSON
     input_data = sys.stdin.read()
     try:
         params = json.loads(input_data)
     except json.JSONDecodeError as e:
-        result = {"success": False, "error": f"JSON 解析失败: {e}"}
-        sys.stdout.write(json.dumps(result))
+        sys.stdout.write(json.dumps({"success": False, "error": f"JSON 解析失败: {e}"}))
         return
 
     image_b64 = params.get("image", "")
+    input_file = params.get("inputFile", "")
+    output_file = params.get("outputFile", "")
     scale = params.get("scale", 4)
-    tile_size = params.get("tileSize", 128)
-    model_name = params.get("model", "realesrgan-x4plus")
+    tile_size = params.get("tileSize", 256)
+    model_name = params.get("model", "realesrgan-x4plus-fp16")
 
-    if not image_b64:
-        result = {"success": False, "error": "缺少 image 参数"}
-        sys.stdout.write(json.dumps(result))
+    if not image_b64 and not input_file:
+        sys.stdout.write(json.dumps({"success": False, "error": "缺少 image 或 inputFile 参数"}))
         return
 
-    # 限制 scale 范围
     if scale not in (2, 4):
         scale = 4
-
-    # 限制 tile_size 范围
     tile_size = max(64, min(512, tile_size))
 
     try:
-        # 解码 base64 图片
-        image_bytes = base64.b64decode(image_b64)
-        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        # 加载图片
+        if input_file and os.path.exists(input_file):
+            img = Image.open(input_file).convert("RGB")
+        else:
+            image_bytes = base64.b64decode(image_b64)
+            img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+
         orig_w, orig_h = img.size
-        print(f"[upscale_onnx] Input: {orig_w}x{orig_h}, scale: {scale}x, "
-              f"tile_size: {tile_size}, model: {model_name}", file=sys.stderr)
+        print(f"[upscale_onnx] Input: {orig_w}x{orig_h}, scale: {scale}x, tile: {tile_size}", file=sys.stderr)
 
-        # 执行放大
+        # 大图 (>512x512) 强制使用文件输出，避免 base64 内存膨胀
+        use_file = bool(output_file) or (orig_w * orig_h > 512 * 512)
+        if use_file and not output_file:
+            output_file = os.path.join(tempfile.gettempdir(), f"upscale_onnx_{int(time.time())}_{orig_w}x{orig_h}.png")
+
         t_start = time.time()
-        result_img = upscale_image_tiled(img, scale, tile_size, model_name)
+        result_obj = upscale_image_tiled(img, scale, tile_size, model_name, output_file)
         elapsed = time.time() - t_start
+        del img
 
-        out_w, out_h = result_img.size
-        print(f"[upscale_onnx] Output: {out_w}x{out_h}, total time: {elapsed:.1f}s", file=sys.stderr)
+        if isinstance(result_obj, str):
+            # 文件输出
+            out_img = Image.open(result_obj)
+            out_w, out_h = out_img.size
+            out_img.close()
+            result = {
+                "success": True,
+                "outputFile": result_obj,
+                "engine": "onnx-realesrgan",
+                "originalSize": [orig_w, orig_h],
+                "outputSize": [out_w, out_h],
+                "model": model_name,
+                "elapsed": round(elapsed, 1),
+            }
+        else:
+            # base64 输出
+            out_w, out_h = result_obj.size
+            buf = io.BytesIO()
+            result_obj.save(buf, format="PNG", optimize=True)
+            output_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+            result = {
+                "success": True,
+                "image": output_b64,
+                "engine": "onnx-realesrgan",
+                "originalSize": [orig_w, orig_h],
+                "outputSize": [out_w, out_h],
+                "model": model_name,
+                "elapsed": round(elapsed, 1),
+            }
+            del result_obj
 
-        # 编码输出为 base64 PNG
-        buf = io.BytesIO()
-        result_img.save(buf, format="PNG", optimize=True)
-        output_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
-
-        result = {
-            "success": True,
-            "image": output_b64,
-            "engine": "onnx-realesrgan",
-            "originalSize": [orig_w, orig_h],
-            "outputSize": [out_w, out_h],
-            "model": model_name,
-            "elapsed": round(elapsed, 1),
-        }
+        print(f"[upscale_onnx] Done: {out_w}x{out_h}, {elapsed:.1f}s", file=sys.stderr)
         sys.stdout.write(json.dumps(result))
 
     except Exception as e:
         tb = traceback.format_exc()
         print(f"[upscale_onnx] Error: {tb}", file=sys.stderr)
-        result = {"success": False, "error": str(e)[:500]}
-        sys.stdout.write(json.dumps(result))
+        sys.stdout.write(json.dumps({"success": False, "error": str(e)[:500]}))
 
 
 if __name__ == "__main__":

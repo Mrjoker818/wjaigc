@@ -16,6 +16,7 @@ const defaultApiPermissions = () => ({
   threeD: true,
   imageEdit: true,
   vectorize: true,
+  vlm: true,
   layer: true,
   video: true,
 });

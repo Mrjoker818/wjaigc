@@ -1846,6 +1846,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                   { key: 'threeD', label: '3D 模型', icon: Box },
                   { key: 'imageEdit', label: '图像编辑', icon: Pencil },
                   { key: 'vectorize', label: '矢量化', icon: Palette },
+                  { key: 'vlm', label: 'VLM视觉', icon: Eye },
                   { key: 'layer', label: '图层分离', icon: Layers },
                 ].map(perm => {
                   const enabled = user?.apiPermissions?.[perm.key as keyof typeof user.apiPermissions] ?? false;
