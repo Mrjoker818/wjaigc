@@ -120,6 +120,18 @@ function CanvasApp() {
       // Apply the change first
       const next = typeof action === 'function' ? action(prev) : action;
 
+      // ★ 检测被删除的图片ID，注册到 UserManagerCore 防止服务器同步恢复
+      // 仅在非服务器同步期间检测，避免误将服务器端删除注册为本地删除
+      if (next.length < prev.length && !serverSyncMergeRef.current) {
+        const nextIdSet = new Set(next.map(img => img.id));
+        const deletedIds = prev.filter(img => !nextIdSet.has(img.id)).map(img => img.id).filter(Boolean);
+        if (deletedIds.length > 0) {
+          try {
+            UserManagerCore.getInstance().recordDeletedImageIds(deletedIds);
+          } catch { /* non-blocking */ }
+        }
+      }
+
       // Record diff: if prevImagesRef is stale, squash from stale→prev and prev→next into one step
       const baseState = prevImagesRef.current === prev ? prev : prevImagesRef.current;
       if (baseState.length > 0 || next.length > 0) {

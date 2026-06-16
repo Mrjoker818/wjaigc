@@ -32,11 +32,46 @@ export class UserManager {
   private currentUserId: string | null = null;
   private _serverSyncReady = false; // 在 loadProjectsFromServer 成功前阻止 syncToServer 上传空数据
   private _onProjectsChanged: (() => void) | null = null;
+  // ★ 跟踪最近删除的图片ID，防止服务器同步时将已删除的图片合并回来
+  // Map: imageId → 删除时间戳(ms)，60秒后自动清理
+  private _recentlyDeletedImageIds: Map<string, number> = new Map();
+  private static readonly DELETED_IMAGE_TTL_MS = 60_000; // 60秒内过滤已删除图片
 
   /** 注册项目数据变更回调（用于跨设备同步时刷新 UI），返回取消订阅函数 */
   onProjectsChanged(callback: (() => void) | null): () => void {
     this._onProjectsChanged = callback;
     return () => { if (this._onProjectsChanged === callback) this._onProjectsChanged = null; };
+  }
+
+  /** 记录已删除的图片ID（防止服务器同步时恢复已删除图片） */
+  recordDeletedImageIds(imageIds: string[]): void {
+    const now = Date.now();
+    for (const id of imageIds) {
+      this._recentlyDeletedImageIds.set(id, now);
+    }
+    // 清理过期的记录
+    this.cleanupDeletedImageIds();
+  }
+
+  /** 检查图片ID是否在最近删除列表中 */
+  isRecentlyDeletedImage(imageId: string): boolean {
+    const deleteTime = this._recentlyDeletedImageIds.get(imageId);
+    if (!deleteTime) return false;
+    if (Date.now() - deleteTime > UserManager.DELETED_IMAGE_TTL_MS) {
+      this._recentlyDeletedImageIds.delete(imageId);
+      return false;
+    }
+    return true;
+  }
+
+  /** 清理过期的已删除图片ID记录 */
+  private cleanupDeletedImageIds(): void {
+    const now = Date.now();
+    for (const [id, time] of this._recentlyDeletedImageIds) {
+      if (now - time > UserManager.DELETED_IMAGE_TTL_MS) {
+        this._recentlyDeletedImageIds.delete(id);
+      }
+    }
   }
 
   private notifyProjectsChanged() {
@@ -314,6 +349,8 @@ export class UserManager {
         console.warn('[Sync] syncToServer: server returned', syncRes.status);
       } else {
         console.log('[Sync] syncToServer: success, projects=', projectsPayload.length);
+        // ★ 同步成功后清除已删除图片ID记录（服务器已有最新数据）
+        this._recentlyDeletedImageIds.clear();
       }
     } catch (error) {
       console.error('[Sync] syncToServer error:', error);
@@ -444,7 +481,9 @@ export class UserManager {
             // ★ 关键修复：对于本地和服务器都存在的图片，进行字段级合并
             // 服务器可能缺少 modelName/apiProvider 等字段（历史遗留），
             // 此时保留本地非空值，避免每次30秒同步都丢失这些字段
-            const mergedImages = sp.canvasImages.map(sImg => {
+            const mergedImages = sp.canvasImages
+              .filter(sImg => !this.isRecentlyDeletedImage(sImg.id)) // ★ 过滤掉最近删除的图片
+              .map(sImg => {
               const lImg = localImgMap.get(sImg.id);
               const enriched = { ...sImg };
               // 回填：历史数据 modelName 为空但 model 有值时，用 model 补充
@@ -481,7 +520,7 @@ export class UserManager {
               return enriched;
             });
             for (const [imgId, img] of localImgMap) {
-              if (!serverImgMap.has(imgId)) {
+              if (!serverImgMap.has(imgId) && !this.isRecentlyDeletedImage(imgId)) {
                 mergedImages.push(img);
               }
             }
