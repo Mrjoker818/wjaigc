@@ -5620,7 +5620,7 @@ ${imageDescriptions}
                             )}
                             <span className="truncate">{item.label}</span>
                             <span className={`ml-auto text-[10px] ${isGold ? 'text-white/30' : 'text-gray-300'}`}>
-                              #{(item.data as Record<string, unknown>)?.num ?? ''}
+                              #{String((item.data as Record<string, unknown>)?.num ?? '')}
                             </span>
                           </button>
                         );
