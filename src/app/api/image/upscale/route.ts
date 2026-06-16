@@ -3,18 +3,16 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
-import { performUpscaleAuto } from '@/lib/image-tools/upscayl';
+import { performOnnxUpscale } from '@/lib/image-tools/upscayl';
 import { IMAGE_MAX_SIZE_MB } from '@/lib/image-tools/config';
-import type { UpscaleParams } from '@/lib/image-tools/upscayl';
 import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits } from '@/lib/credits';
 
 export async function POST(request: NextRequest) {
   try {
-    const body = (await request.json()) as UpscaleParams;
+    const body = await request.json();
 
-    const { imageUrl, model, scale, tileSize, outputFormat, compression } =
-      body;
+    const { imageUrl, scale, outputFormat, compression, upscaleMode } = body;
 
     if (!imageUrl) {
       return NextResponse.json(
@@ -22,6 +20,9 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
+
+    // 放大模式: cpu (ONNX本地) / ai (AI云端), 默认 cpu
+    const mode = upscaleMode === 'ai' ? 'ai' : 'cpu';
 
     // 积分检查与扣除
     const sessionUser = await getSessionUser(request).catch(() => null);
@@ -32,6 +33,35 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // AI 放大模式: 委托给 /api/image-edit (action=upscale, upscaleMode=ai)
+    if (mode === 'ai') {
+      const baseUrl = process.env.DEPLOY_RUN_PORT
+        ? `http://localhost:${process.env.DEPLOY_RUN_PORT}`
+        : 'http://localhost:5000';
+      const aiResp = await fetch(`${baseUrl}/api/image-edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'upscale',
+          imageUrl,
+          scale: scale || 2,
+          upscaleMode: 'ai',
+          outputFormat: outputFormat || 'png',
+          compression: compression || 90,
+        }),
+        signal: AbortSignal.timeout(600000), // 10分钟超时
+      });
+      const aiResult = await aiResp.json() as Record<string, unknown>;
+      if (!aiResp.ok || aiResult.error) {
+        return NextResponse.json(
+          { success: false, error: `AI放大失败: ${aiResult.error || '未知错误'}` },
+          { status: aiResp.status },
+        );
+      }
+      return NextResponse.json(aiResult);
+    }
+
+    // CPU 放大模式: ONNX Real-ESRGAN
     // 校验 scale
     if (scale && scale !== 2 && scale !== 4) {
       return NextResponse.json(
@@ -52,14 +82,11 @@ export async function POST(request: NextRequest) {
     }
 
     // 校验文件大小 (通过 URL 检查受限，后端会在读取时检查)
-    void IMAGE_MAX_SIZE_MB; // 已在 file.ts 中使用
-    void tileSize; // 保留参数，后续可能用于分块处理
+    void IMAGE_MAX_SIZE_MB;
 
-    const result = await performUpscaleAuto({
+    const result = await performOnnxUpscale({
       imageUrl,
-      model,
       scale: scale || 2,
-      tileSize,
       outputFormat: outputFormat || 'png',
       compression: compression || 90,
     });

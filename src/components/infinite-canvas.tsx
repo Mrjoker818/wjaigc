@@ -1171,6 +1171,7 @@ export function InfiniteCanvas({
   const [upscaylChecking, setUpscaylChecking] = useState(true);
   const [upscalePreset, setUpscalePreset] = useState<'2k' | '4k' | '8k'>('2k');
   const [showUpscalePresetMenu, setShowUpscalePresetMenu] = useState(false);
+  const [upscaleMode, setUpscaleMode] = useState<'cpu' | 'ai'>('cpu'); // CPU放大 / AI放大
   // Actual pixel dimensions of the image being upscaled (loaded from DOM)
   const [upscaleActualW, setUpscaleActualW] = useState(0);
   const [upscaleActualH, setUpscaleActualH] = useState(0);
@@ -5668,6 +5669,7 @@ export function InfiniteCanvas({
             scale: upMultiplier,
             originalWidth: origW,
             originalHeight: origH,
+            upscaleMode, // "cpu" 或 "ai"
           }),
           signal: upscaleController.signal,
         });
@@ -5724,7 +5726,7 @@ export function InfiniteCanvas({
         return;
       }
 
-      updateProcessingFrame(placeholderId, { progress: 22, status: data.engine === 'tile-upscale' ? 'AI 正在分块放大（更高质量，耗时稍长）...' : 'AI 正在放大细节...' });
+      updateProcessingFrame(placeholderId, { progress: 22, status: upscaleMode === 'cpu' ? 'CPU 正在无损放大（像素级忠实，耗时稍长）...' : 'AI 正在放大细节...' });
       const usedModel = String(data.usedModel || modelInfo.model);
       const resultUrl = data.imageUrl || await pollForResult((data.taskId as string) || '', usedModel, (progress, status) => {
         updateProcessingFrame(placeholderId, { progress, status });
@@ -5759,7 +5761,7 @@ export function InfiniteCanvas({
     }
     setIsEditProcessing(false);
     setActiveTool('none');
-  }, [selectedImageData, upscalePreset, upscaleActualW, upscaleActualH, getApiKey, getCurrentModel, pollForResult, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, toStableImageUrl, getUpscaleTargetDimensions]);
+  }, [selectedImageData, upscalePreset, upscaleMode, upscaleActualW, upscaleActualH, getApiKey, getCurrentModel, pollForResult, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, toStableImageUrl, getUpscaleTargetDimensions]);
 
   // 1b. Upscale trigger - opens floating control bar
   const handleOpenUpscale = useCallback(() => {
@@ -9383,6 +9385,32 @@ export function InfiniteCanvas({
                       })}
                     </div>
                   )}
+                </div>
+                <div className={panelDividerClass} />
+                {/* Upscale mode selector: CPU放大 / AI放大 */}
+                <div className="flex items-center gap-0.5">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setUpscaleMode('cpu'); }}
+                    className={`px-2 py-1 text-xs rounded-l-md transition-all font-medium ${
+                      upscaleMode === 'cpu'
+                        ? isMonochrome ? 'bg-blue-500 text-white' : 'bg-gold text-black'
+                        : isMonochrome ? 'bg-gray-100 text-gray-500 hover:bg-gray-200' : 'bg-[#252525] text-gold-muted hover:bg-[#333]'
+                    }`}
+                    title="CPU无损放大：像素级忠实，细节增强，不改变画面内容"
+                  >
+                    CPU放大
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setUpscaleMode('ai'); }}
+                    className={`px-2 py-1 text-xs rounded-r-md transition-all font-medium ${
+                      upscaleMode === 'ai'
+                        ? isMonochrome ? 'bg-blue-500 text-white' : 'bg-gold text-black'
+                        : isMonochrome ? 'bg-gray-100 text-gray-500 hover:bg-gray-200' : 'bg-[#252525] text-gold-muted hover:bg-[#333]'
+                    }`}
+                    title="AI放大：AI智能补细节，可能产生新元素，适合创意放大"
+                  >
+                    AI放大
+                  </button>
                 </div>
                 <div className={panelDividerClass} />
                 {/* Target dimensions */}

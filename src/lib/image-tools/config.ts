@@ -48,7 +48,7 @@ export const IOPAINT_TIMEOUT_MS = parseInt(
   10,
 );
 
-/** 是否启用本地 AI (upscayl / IOPaint)
+/** 是否启用本地 AI (IOPaint)
  *  未显式配置 LOCAL_AI_ENABLED 时：
  *  - 生产环境 (COZE_PROJECT_ENV=PROD)：默认关闭，避免低配云主机启动本地模型
  *  - 开发环境：默认开启，方便本地调试

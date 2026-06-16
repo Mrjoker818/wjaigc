@@ -505,6 +505,7 @@ interface EditRequest {
   eraseModel?: string; // IOPaint erase model: lama/zits/anime-lama
   removeBgModel?: string; // IOPaint RemoveBG model: isnet-general-use / u2net / u2netp / silueta
   originalPrompt?: string; // 原图的生成提示词, 用于多角度场景上下文
+  upscaleMode?: 'cpu' | 'ai'; // 放大模式: CPU本地 / AI云端
 }
 
 // Helper: submit a task to the images/generations API and return taskId or directUrl
@@ -1880,15 +1881,12 @@ export async function POST(request: NextRequest) {
       // ============================================================
       // 超清放大 (Upscale)
       //
-      // 策略 A (推荐): ONNX CPU 分块放大 — Real-ESRGAN fp16, 纯 CPU 推理
-      //   Python 子进程 onnxruntime → 分块 → 逐块放大 → 合并
-      //   优势：无需 GPU，像素级忠实，细节增强
+      // 用户可选模式:
+      //   "cpu" → ONNX CPU 分块放大 — Real-ESRGAN fp16, 纯 CPU 推理
+      //           像素级忠实，细节增强，无损放大
       //
-      // 策略 B (备选): upscayl-node NCNN 分块放大 — 需要 Vulkan GPU
-      //   与策略 A 同架构，但依赖 GPU 硬件
-      //
-      // 策略 C (兜底): AI 整图放大 — 用 images/generations + 低 strength
-      //   注意：不做分块！images/generations 不保留 tile 原始内容
+      //   "ai"  → AI 整图放大 — images/generations + 低 strength
+      //           AI 智能补细节，可能产生新元素，适合创意放大
       // ============================================================
 
       const scaleVal = body.scale || 2;
@@ -1896,77 +1894,67 @@ export async function POST(request: NextRequest) {
       const origH = body.originalHeight || 512;
       const targetW = targetWidth || origW * scaleVal;
       const targetH = targetHeight || origH * scaleVal;
+      const upscaleMode = body.upscaleMode || 'cpu'; // "cpu" | "ai"
 
-      // ---- 尝试本地无损放大 (ONNX CPU → Upscayl GPU) ----
-      let localEngine = '';
-      let localResult: { imageUrl: string; usedModel: string; engine: string } | null = null;
+      // ---- CPU 放大模式: ONNX Real-ESRGAN ----
+      if (upscaleMode === 'cpu') {
+        try {
+          const upscaylModule = await import('@/lib/image-tools/upscayl');
+          const result = await upscaylModule.performOnnxUpscale({
+            imageUrl,
+            scale: scaleVal as 2 | 4,
+          });
 
-      try {
-        const upscaylModule = await import('@/lib/image-tools/upscayl');
-        const result = await upscaylModule.performUpscaleAuto({
-          imageUrl,
-          scale: scaleVal as 2 | 4,
-          // tileSize 由 performOnnxUpscale 内部动态计算
-          outputFormat: 'png',
-        });
+          if (result.success && result.imageUrl) {
+            // 读取本地输出文件，保存到持久化存储
+            let outputBuffer: Buffer;
+            if (result.imageUrl.startsWith('/')) {
+              const absPath = path.join(process.cwd(), 'public', result.imageUrl);
+              outputBuffer = await fs.readFile(absPath);
+            } else if (result.imageUrl.startsWith('data:')) {
+              const base64 = result.imageUrl.split(',')[1];
+              outputBuffer = Buffer.from(base64, 'base64');
+            } else {
+              const res = await fetch(result.imageUrl, { signal: AbortSignal.timeout(30000) });
+              outputBuffer = Buffer.from(await res.arrayBuffer());
+            }
 
-        if (result.success && result.imageUrl) {
-          localEngine = result.engine || 'local';
-          localResult = {
-            imageUrl: result.imageUrl,
-            usedModel: result.model || 'realesrgan-x4plus-fp16',
-            engine: localEngine,
-          };
+            // 保存到持久化存储
+            const timestamp = Date.now();
+            const randomSuffix = Math.random().toString(36).substring(2, 8);
+            const filename = `upscale_${timestamp}_${randomSuffix}.png`;
+            const savedPath = await saveBufferToPublic(outputBuffer, filename);
 
-          // 读取本地输出文件，保存到持久化存储
-          let outputBuffer: Buffer;
-          if (result.imageUrl.startsWith('/')) {
-            const absPath = path.join(process.cwd(), 'public', result.imageUrl);
-            outputBuffer = await fs.readFile(absPath);
-          } else if (result.imageUrl.startsWith('data:')) {
-            const base64 = result.imageUrl.split(',')[1];
-            outputBuffer = Buffer.from(base64, 'base64');
-          } else {
-            const res = await fetch(result.imageUrl, { signal: AbortSignal.timeout(30000) });
-            outputBuffer = Buffer.from(await res.arrayBuffer());
+            const resultUrl = savedPath.startsWith('data:') ? savedPath : (() => {
+              const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
+              const domainBase = domain.startsWith('http') ? domain.replace(/\/+$/, '') : `https://${domain.replace(/\/+$/, '')}`;
+              return `${domainBase}${savedPath}`;
+            })();
+
+            console.log(`[image-edit] upscale: CPU ONNX upscale complete. (${(outputBuffer.length / 1024).toFixed(0)}KB)`);
+
+            return NextResponse.json({
+              success: true,
+              imageUrl: resultUrl,
+              action,
+              engine: 'onnx-realesrgan',
+              usedModel: result.model || 'realesrgan-x4plus-fp16',
+              scale: scaleVal,
+              originalSize: { width: origW, height: origH },
+              outputSize: { width: targetW, height: targetH },
+            });
           }
 
-          // 保存到持久化存储
-          const timestamp = Date.now();
-          const randomSuffix = Math.random().toString(36).substring(2, 8);
-          const filename = `upscale_${timestamp}_${randomSuffix}.png`;
-          const savedPath = await saveBufferToPublic(outputBuffer, filename);
-
-          const resultUrl = savedPath.startsWith('data:') ? savedPath : (() => {
-            const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
-            const domainBase = domain.startsWith('http') ? domain.replace(/\/+$/, '') : `https://${domain.replace(/\/+$/, '')}`;
-            return `${domainBase}${savedPath}`;
-          })();
-
-          console.log(`[image-edit] upscale: local ${localEngine} upscale complete. (${(outputBuffer.length / 1024).toFixed(0)}KB)`);
-
-          return NextResponse.json({
-            success: true,
-            imageUrl: resultUrl,
-            action,
-            engine: localEngine,
-            usedModel: localResult.usedModel,
-            scale: scaleVal,
-            originalSize: { width: origW, height: origH },
-            outputSize: { width: targetW, height: targetH },
-          });
+          console.log(`[image-edit] upscale: CPU ONNX upscale failed: ${result.error}`);
+          return NextResponse.json({ success: false, error: `CPU放大失败: ${result.error}` }, { status: 500 });
+        } catch (cpuError) {
+          console.log(`[image-edit] upscale: CPU ONNX error:`, cpuError instanceof Error ? cpuError.message : cpuError);
+          return NextResponse.json({ success: false, error: `CPU放大失败: ${cpuError instanceof Error ? cpuError.message : '未知错误'}` }, { status: 500 });
         }
-
-        console.log(`[image-edit] upscale: local upscale failed: ${result.error}, falling back to AI`);
-      } catch (localError) {
-        console.log(`[image-edit] upscale: local upscale error, falling back to AI:`, localError instanceof Error ? localError.message : localError);
       }
 
-      // ============================================================
-      // 策略 C: AI 整图放大 (本地引擎不可用或失败时的兜底方案)
-      // 注意：不做分块！images/generations 不保留 tile 原始内容
-      // ============================================================
-      // ============================================================
+      // ---- AI 放大模式 ----
+
       console.log(`[image-edit] upscale: using AI whole-image upscale`);
 
       const effectiveSize = (() => {
