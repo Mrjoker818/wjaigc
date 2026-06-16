@@ -1880,13 +1880,15 @@ export async function POST(request: NextRequest) {
       // ============================================================
       // 超清放大 (Upscale)
       //
-      // 策略 A (推荐): upscayl-node 分块放大 — 像素级忠实，Real-ESRGAN 神经网络
-      //   流程：Split → upscayl each tile → Merge
-      //   优势：每个 tile 由专门的放大模型处理，像素级保留 + 细节增强
+      // 策略 A (推荐): ONNX CPU 分块放大 — Real-ESRGAN fp16, 纯 CPU 推理
+      //   Python 子进程 onnxruntime → 分块 → 逐块放大 → 合并
+      //   优势：无需 GPU，像素级忠实，细节增强
       //
-      // 策略 B (兜底): AI 整图放大 — 用 images/generations + 低 strength
-      //   流程：Describe → Generate with reference
-      //   注意：不用分块！images/generations 不保留 tile 原始内容
+      // 策略 B (备选): upscayl-node NCNN 分块放大 — 需要 Vulkan GPU
+      //   与策略 A 同架构，但依赖 GPU 硬件
+      //
+      // 策略 C (兜底): AI 整图放大 — 用 images/generations + 低 strength
+      //   注意：不做分块！images/generations 不保留 tile 原始内容
       // ============================================================
 
       const scaleVal = body.scale || 2;
@@ -1895,147 +1897,75 @@ export async function POST(request: NextRequest) {
       const targetW = targetWidth || origW * scaleVal;
       const targetH = targetHeight || origH * scaleVal;
 
-      // ---- 检测 upscayl 可用性 ----
-      let useUpscayl = false;
-      let upscaylModule: typeof import('@/lib/image-tools/upscayl') | null = null;
+      // ---- 尝试本地无损放大 (ONNX CPU → Upscayl GPU) ----
+      let localEngine = '';
+      let localResult: { imageUrl: string; usedModel: string; engine: string } | null = null;
+
       try {
-        upscaylModule = await import('@/lib/image-tools/upscayl');
-        const upscaylStatus = await upscaylModule.isUpscaylAvailable();
-        const upscaylModels = upscaylStatus.available ? await upscaylModule.listUpscaylModels() : [];
-        useUpscayl = upscaylStatus.available && upscaylModels.length > 0;
-        if (useUpscayl) {
-          console.log(`[image-edit] upscale: upscayl available, will try tile mode first`);
-        }
-      } catch (e) {
-        console.log(`[image-edit] upscale: upscayl not available:`, e);
-      }
-
-      if (useUpscayl && upscaylModule) {
-        // ============================================================
-        // 策略 A: upscayl-node 分块放大（如果失败自动回退到策略 B）
-        // ============================================================
-        try {
-        const maxEdge = Math.max(origW, origH);
-        let cols: number, rows: number;
-        if (maxEdge < 800) { cols = 2; rows = 2; }
-        else if (maxEdge < 1600) { cols = 2; rows = 3; }
-        else { cols = 3; rows = 3; }
-
-        const totalTiles = cols * rows;
-        const overlap = 24;
-
-        console.log(`[image-edit] upscale: upscayl tile mode. Original: ${origW}x${origH}, Scale: ${scaleVal}x, Grid: ${cols}x${rows}=${totalTiles} tiles`);
-
-        // Step 1: 下载原图
-        let imageBuffer: Buffer;
-        try {
-          imageBuffer = await fetchImageBuffer(imageUrl);
-        } catch (e) {
-          console.error('[image-edit] upscale: Failed to fetch source image:', e);
-          return NextResponse.json({ success: false, error: '无法获取原始图片' }, { status: 500 });
-        }
-
-        // Step 2: 分块
-        const { tiles } = await splitImageIntoTiles(imageBuffer, cols, rows, overlap);
-        console.log(`[image-edit] upscale: Split into ${tiles.length} tiles`);
-
-        // Step 3: 用 upscayl 逐块放大
-        // upscayl 模型固定 4x 放大，scale=2 时先 4x 再缩放回 2x
-        const upscaylAvailableModels = await upscaylModule.listUpscaylModels();
-        const upscaylModel = upscaylAvailableModels.includes('realesrgan-x4plus') ? 'realesrgan-x4plus' : upscaylAvailableModels[0];
-        const upscaylScale = 4; // upscayl 强制 4x
-
-        const tileResultBuffers: Buffer[] = [];
-        const tmpDir = path.join('/tmp', `upscayl_tiles_${Date.now()}`);
-        await fs.mkdir(tmpDir, { recursive: true });
-
-        try {
-          for (let i = 0; i < tiles.length; i++) {
-            const tile = tiles[i];
-            // 使用 data URL 传递 tile，避免 readImageToBuffer 的路径拼接问题
-            const tileDataUrl = `data:image/png;base64,${tile.buffer.toString('base64')}`;
-
-            // 调用 upscayl 放大
-            console.log(`[image-edit] upscale: upscayl processing tile ${i + 1}/${tiles.length}`);
-            const result = await upscaylModule.performUpscale({
-              imageUrl: tileDataUrl,
-              model: upscaylModel,
-              scale: upscaylScale as 2 | 4,
-              outputFormat: 'png',
-            });
-
-            if (!result.success || !result.imageUrl) {
-              throw new Error(`Tile ${i} upscayl failed: ${result.error || 'no output'}`);
-            }
-
-            // 读取 upscayl 输出
-            let outputBuffer: Buffer;
-            if (result.imageUrl && result.imageUrl.startsWith('/')) {
-              // upscayl 输出路径如 /outputs/upscale/xxx.png → 实际在 process.cwd()/public/outputs/...
-              const absPath = path.join(process.cwd(), 'public', result.imageUrl);
-              outputBuffer = await fs.readFile(absPath);
-            } else if (result.imageUrl) {
-              const res = await fetch(result.imageUrl, { signal: AbortSignal.timeout(30000) });
-              outputBuffer = Buffer.from(await res.arrayBuffer());
-            } else {
-              throw new Error(`Tile ${i} upscayl returned no output URL`);
-            }
-
-            // 如果 upscaylScale > scaleVal，resize 到目标倍率
-            if (upscaylScale > scaleVal) {
-              const resizeRatio = scaleVal / upscaylScale;
-              const tileMeta = await sharp(outputBuffer).metadata();
-              const newW = Math.round((tileMeta.width || tile.width * upscaylScale) * resizeRatio);
-              const newH = Math.round((tileMeta.height || tile.height * upscaylScale) * resizeRatio);
-              outputBuffer = await sharp(outputBuffer)
-                .resize(newW, newH, { kernel: 'lanczos3' })
-                .png()
-                .toBuffer();
-            }
-
-            tileResultBuffers.push(outputBuffer);
-          }
-        } finally {
-          // 清理临时目录
-          try { await fs.rm(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
-        }
-
-        // Step 4: 合并 tiles
-        console.log(`[image-edit] upscale: Merging ${tiles.length} tiles into ${targetW}x${targetH} image`);
-        const mergedBuffer = await mergeTiles(tileResultBuffers, tiles, scaleVal, targetW, targetH);
-
-        // Step 5: 保存并返回
-        const timestamp = Date.now();
-        const randomSuffix = Math.random().toString(36).substring(2, 8);
-        const filename = `upscale_${timestamp}_${randomSuffix}.png`;
-        const savedPath = await saveBufferToPublic(mergedBuffer, filename);
-
-        // saveBufferToPublic 返回 data URL 或 S3 URL，直接使用
-        const resultUrl = savedPath.startsWith('data:') ? savedPath : (() => {
-          const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
-          const domainBase = domain.startsWith('http') ? domain.replace(/\/+$/, '') : `https://${domain.replace(/\/+$/, '')}`;
-          return `${domainBase}${savedPath}`;
-        })();
-
-        console.log(`[image-edit] upscale: upscayl tile upscale complete. (${(mergedBuffer.length / 1024).toFixed(0)}KB)`);
-
-        return NextResponse.json({
-          success: true,
-          imageUrl: resultUrl,
-          action,
-          engine: 'upscayl-tile',
-          usedModel: upscaylModel,
-          tileInfo: { cols, rows, totalTiles, overlap, scale: scaleVal },
+        const upscaylModule = await import('@/lib/image-tools/upscayl');
+        const result = await upscaylModule.performUpscaleAuto({
+          imageUrl,
+          scale: scaleVal as 2 | 4,
+          tileSize: 128,
+          outputFormat: 'png',
         });
-        } catch (upscaylError) {
-          // upscayl 执行失败（如无 GPU），回退到 AI 整图放大
-          console.log(`[image-edit] upscale: upscayl tile mode failed, falling back to AI:`, upscaylError instanceof Error ? upscaylError.message : upscaylError);
+
+        if (result.success && result.imageUrl) {
+          localEngine = result.engine || 'local';
+          localResult = {
+            imageUrl: result.imageUrl,
+            usedModel: result.model || 'realesrgan-x4plus-fp16',
+            engine: localEngine,
+          };
+
+          // 读取本地输出文件，保存到持久化存储
+          let outputBuffer: Buffer;
+          if (result.imageUrl.startsWith('/')) {
+            const absPath = path.join(process.cwd(), 'public', result.imageUrl);
+            outputBuffer = await fs.readFile(absPath);
+          } else if (result.imageUrl.startsWith('data:')) {
+            const base64 = result.imageUrl.split(',')[1];
+            outputBuffer = Buffer.from(base64, 'base64');
+          } else {
+            const res = await fetch(result.imageUrl, { signal: AbortSignal.timeout(30000) });
+            outputBuffer = Buffer.from(await res.arrayBuffer());
+          }
+
+          // 保存到持久化存储
+          const timestamp = Date.now();
+          const randomSuffix = Math.random().toString(36).substring(2, 8);
+          const filename = `upscale_${timestamp}_${randomSuffix}.png`;
+          const savedPath = await saveBufferToPublic(outputBuffer, filename);
+
+          const resultUrl = savedPath.startsWith('data:') ? savedPath : (() => {
+            const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
+            const domainBase = domain.startsWith('http') ? domain.replace(/\/+$/, '') : `https://${domain.replace(/\/+$/, '')}`;
+            return `${domainBase}${savedPath}`;
+          })();
+
+          console.log(`[image-edit] upscale: local ${localEngine} upscale complete. (${(outputBuffer.length / 1024).toFixed(0)}KB)`);
+
+          return NextResponse.json({
+            success: true,
+            imageUrl: resultUrl,
+            action,
+            engine: localEngine,
+            usedModel: localResult.usedModel,
+            scale: scaleVal,
+            originalSize: { width: origW, height: origH },
+            outputSize: { width: targetW, height: targetH },
+          });
         }
+
+        console.log(`[image-edit] upscale: local upscale failed: ${result.error}, falling back to AI`);
+      } catch (localError) {
+        console.log(`[image-edit] upscale: local upscale error, falling back to AI:`, localError instanceof Error ? localError.message : localError);
       }
 
       // ============================================================
-      // 策略 B: AI 整图放大 (upscayl 不可用或失败时的兜底方案)
+      // 策略 C: AI 整图放大 (本地引擎不可用或失败时的兜底方案)
       // 注意：不做分块！images/generations 不保留 tile 原始内容
+      // ============================================================
       // ============================================================
       console.log(`[image-edit] upscale: using AI whole-image upscale`);
 

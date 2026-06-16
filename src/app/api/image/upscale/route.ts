@@ -3,7 +3,7 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
-import { performUpscale } from '@/lib/image-tools/upscayl';
+import { performUpscaleAuto } from '@/lib/image-tools/upscayl';
 import { IMAGE_MAX_SIZE_MB } from '@/lib/image-tools/config';
 import type { UpscaleParams } from '@/lib/image-tools/upscayl';
 import { getSessionUser } from '@/lib/server-auth';
@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
     void IMAGE_MAX_SIZE_MB; // 已在 file.ts 中使用
     void tileSize; // 保留参数，后续可能用于分块处理
 
-    const result = await performUpscale({
+    const result = await performUpscaleAuto({
       imageUrl,
       model,
       scale: scale || 2,
