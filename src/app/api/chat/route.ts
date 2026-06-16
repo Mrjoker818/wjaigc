@@ -25,7 +25,14 @@ export async function POST(request: NextRequest) {
       providerId,
       userId: requestUserId,
       enableTools = true,  // 是否启用 function calling
+      agentTools = undefined as string[] | undefined,  // 智能体可用的工具列表（过滤）
+      canvasSummary = undefined as string | undefined,  // 画布图片摘要
     } = await request.json();
+    
+    // Filter tools based on agent's allowed tools
+    const availableTools = agentTools && agentTools.length > 0
+      ? CHAT_TOOLS.filter(t => agentTools.includes(t.function.name))
+      : CHAT_TOOLS;
     
     const sessionUser = await getSessionUser(request);
     const userId = sessionUser?.id ?? requestUserId ?? "anonymous";
@@ -106,7 +113,7 @@ export async function POST(request: NextRequest) {
     // 直到 LLM 返回纯文本（无 tool_calls）或达到最大循环次数
 
     if (enableTools && stream) {
-      return handleAgentStream(fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, isThinkingModel);
+      return handleAgentStream(fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, isThinkingModel, availableTools);
     }
 
     // Non-stream or non-tool mode: original behavior
@@ -118,7 +125,7 @@ export async function POST(request: NextRequest) {
     };
 
     if (enableTools) {
-      requestBody.tools = CHAT_TOOLS;
+      requestBody.tools = availableTools;
       requestBody.tool_choice = 'auto';
     }
 
@@ -188,7 +195,7 @@ export async function POST(request: NextRequest) {
       
       // Handle tool_calls in non-stream mode
       if (enableTools && retryData.choices?.[0]?.message?.tool_calls) {
-        return handleNonStreamAgentLoop(retryData, fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId);
+        return handleNonStreamAgentLoop(retryData, fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, availableTools);
       }
       
       await appendUserJsonl(userId, 'chat', { model, providerId, messageCount: messages.length, stream: false });
@@ -261,7 +268,7 @@ export async function POST(request: NextRequest) {
     
     // Handle tool_calls in non-stream mode
     if (enableTools && data.choices?.[0]?.message?.tool_calls) {
-      return handleNonStreamAgentLoop(data, fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId);
+      return handleNonStreamAgentLoop(data, fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, availableTools);
     }
     
     await appendUserJsonl(userId, 'chat', { model, providerId, messageCount: messages.length, stream: false });
@@ -288,6 +295,7 @@ async function handleAgentStream(
   model: string,
   providerId: string | undefined,
   isThinkingModel: boolean,
+  availableTools: typeof CHAT_TOOLS,
 ): Promise<NextResponse> {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -304,7 +312,7 @@ async function handleAgentStream(
             messages: currentMessages,
             stream: true,
             temperature: 0.7,
-            tools: CHAT_TOOLS,
+            tools: availableTools,
             tool_choice: 'auto',
           };
 
@@ -550,6 +558,7 @@ async function handleNonStreamAgentLoop(
   userId: string,
   model: string,
   providerId: string | undefined,
+  availableTools: typeof CHAT_TOOLS,
 ): Promise<NextResponse> {
   const currentMessages = [...fixedMessages];
   const allToolResults: Array<{ toolName: string; result: ToolCallResult }> = [];
@@ -599,7 +608,7 @@ async function handleNonStreamAgentLoop(
       messages: currentMessages,
       stream: false,
       temperature: 0.7,
-      tools: CHAT_TOOLS,
+      tools: availableTools,
       tool_choice: 'auto',
     };
 

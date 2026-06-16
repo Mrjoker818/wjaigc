@@ -61,9 +61,9 @@ export const CHAT_TOOLS = [
             description: '描述想要如何修改图片，例如"将背景改为深蓝色"、"增加光影效果"',
           },
           size: {
-            type: 'number',
-            description: '输出尺寸，1024/1536/2048',
-            enum: [1024, 1536, 2048],
+            type: 'string',
+            description: '输出尺寸: 1024, 1536 或 2048',
+            enum: ['1024', '1536', '2048'],
           },
         },
         required: ['image_url', 'prompt'],
@@ -134,9 +134,9 @@ export const CHAT_TOOLS = [
             description: '要放大的图片URL',
           },
           scale: {
-            type: 'number',
-            description: '放大倍数，2或4',
-            enum: [2, 4],
+            type: 'string',
+            description: '放大倍数: 2 或 4',
+            enum: ['2', '4'],
           },
         },
         required: ['image_url'],
@@ -165,9 +165,9 @@ export const CHAT_TOOLS = [
             enum: ['16:9', '9:16', '1:1', '4:3', '3:4'],
           },
           duration: {
-            type: 'number',
+            type: 'string',
             description: '视频时长（秒）',
-            enum: [5, 6, 8, 10],
+            enum: ['5', '6', '8', '10'],
           },
         },
         required: ['prompt'],
@@ -213,9 +213,9 @@ export const CHAT_TOOLS = [
             enum: ['all', 'left', 'right', 'top', 'bottom'],
           },
           scale: {
-            type: 'number',
+            type: 'string',
             description: '扩展倍数，1.5/2/3',
-            enum: [1.5, 2, 3],
+            enum: ['1.5', '2', '3'],
           },
           prompt: {
             type: 'string',
@@ -376,7 +376,7 @@ async function executeEditImage(
   try {
     const imageUrl = normalizeImageUrl(args.image_url as string, context.origin);
     const prompt = args.prompt as string;
-    const size = args.size as number || 1024;
+    const size = parseInt(args.size as string, 10) || 1024;
 
     // 调用语言修图 API
     const res = await fetch(`${context.origin || 'http://localhost:5000'}/api/edit`, {
@@ -536,7 +536,7 @@ async function executeUpscale(
 ): Promise<ToolCallResult> {
   try {
     const imageUrl = normalizeImageUrl(args.image_url as string, context.origin);
-    const scale = (args.scale as number) || 2;
+    const scale = parseInt(args.scale as string, 10) || 2;
 
     const res = await fetch(`${context.origin || 'http://localhost:5000'}/api/image-edit`, {
       method: 'POST',
@@ -573,7 +573,7 @@ async function executeGenerateVideo(
     const prompt = args.prompt as string;
     const imageUrl = args.image_url ? normalizeImageUrl(args.image_url as string, context.origin) : undefined;
     const aspectRatio = (args.aspect_ratio as string) || '16:9';
-    const duration = (args.duration as number) || 5;
+    const duration = parseInt(args.duration as string, 10) || 5;
 
     const res = await fetch(`${context.origin || 'http://localhost:5000'}/api/video/generate`, {
       method: 'POST',
@@ -674,7 +674,7 @@ async function executeExtendCanvas(
   try {
     const imageUrl = normalizeImageUrl(args.image_url as string, context.origin);
     const direction = (args.direction as string) || 'all';
-    const scale = (args.scale as number) || 2;
+    const scale = parseInt(args.scale as string, 10) || 2;
     const prompt = args.prompt as string | undefined;
 
     const res = await fetch(`${context.origin || 'http://localhost:5000'}/api/image-edit`, {

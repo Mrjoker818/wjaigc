@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Bot, Send, Sparkles, Copy, Check, Trash2, Loader2, Eye, EyeOff, Wand2, User, Upload, X, Image as ImageIcon, Languages, Settings, Plug, Plus, History, FolderOpen, MessageSquare, Bookmark, BookmarkCheck, Lightbulb, Zap, ArrowRight, Palette, Target, Sliders, Download, AlertCircle, LocateFixed, RotateCcw, FileText, Cpu } from 'lucide-react';
+import { Bot, Send, Sparkles, Copy, Check, Trash2, Loader2, Eye, EyeOff, Wand2, User, Upload, X, Image as ImageIcon, Languages, Settings, Plug, Plus, History, FolderOpen, MessageSquare, Bookmark, BookmarkCheck, Lightbulb, Zap, ArrowRight, Palette, Target, Sliders, Download, AlertCircle, LocateFixed, RotateCcw, FileText, Cpu, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -65,8 +65,10 @@ interface ToolExecution {
 interface NextSuggestion {
   id: string;
   label: string;
-  action: 'img2img' | 'retouch' | 'upscale' | 'remove-bg' | 'extend' | 'svg-trace' | 'agent-edit' | 'generate-variant' | 'send-to-prompt' | 'generate-image';
+  action: string;
   prompt?: string;
+  prefilledPrompt?: string;
+  icon?: string;
 }
 
 interface ChatSession {
@@ -77,6 +79,11 @@ interface ChatSession {
   systemPrompt: string;
   createdAt: number;
   updatedAt: number;
+  // P1-6: Session-level persistent context
+  agentId?: string;            // Which agent this session belongs to
+  brandDNA?: string;           // Brand DNA context (from @品牌 references)
+  keyDecisions?: string[];     // Key decisions made in this session (e.g., "风格=极简", "色彩=黑白")
+  canvasImageIds?: string[];   // Canvas images referenced in this session
 }
 
 // Agent recipe: a single-step operation with domain-specific prompt strategy
@@ -86,7 +93,7 @@ interface AgentRecipe {
   operationType: string; // matches tool name: generate_image, edit_image, remove_bg, etc.
   promptTemplate: string; // prompt template with {variables}
   defaultParams: Record<string, unknown>; // default generation params (aspectRatio, quality, etc.)
-  inputHint: string; // what input this recipe needs
+  inputHint?: string; // what input this recipe needs
 }
 
 // Agent capability definition - extends the simple prompt-based agent
@@ -192,6 +199,8 @@ const AGENTS: AgentDefinition[] = [
       { label: '移除背景', action: 'remove_bg' },
     ],
   },
+  {
+    id: 'spatial-exhibit',
     name: '空间展演',
     nameEn: 'Spatial Exhibit',
     icon: '🏛️',
@@ -223,6 +232,18 @@ const AGENTS: AgentDefinition[] = [
 6. AI 渲染提示词：必须同时输出中文和英文两个版本，格式如下：
 【中文提示词】用中文描述展览空间的主体结构、材质纹理、灯光氛围、色彩基调、空间纵深等，100-200字。英文 Prompt 末尾固定附加：Exhibition booth design, professional architectural photography, cinematic lighting, parametric structures, 8k resolution, highly detailed, photorealistic --ar 16:9
 【English Prompt】English prompt for Midjourney/DALL-E 3, must end with: Exhibition booth design, professional architectural photography, cinematic lighting, parametric structures, 8k resolution, highly detailed, photorealistic --ar 16:9`,
+    tools: ['generate_image', 'edit_image', 'generate_video', 'img2video', 'analyze_image'],
+    recipes: [
+      { id: 'booth-overview', name: '展位全景图', operationType: 'generate_image', promptTemplate: 'Exhibition booth design, {theme}, parametric structures, cinematic lighting, {material}, 8k, photorealistic --ar 16:9', defaultParams: { aspectRatio: '16:9', quality: 'hd' } },
+      { id: 'detail-zone', name: '功能区特写', operationType: 'generate_image', promptTemplate: 'Exhibition detail zone, {zoneType}, interactive installation, {lighting} lighting, close-up, product showcase, 8k', defaultParams: { aspectRatio: '3:4', quality: 'hd' } },
+      { id: 'booth-walkthrough', name: '展位漫游视频', operationType: 'generate_video', promptTemplate: 'Cinematic walkthrough of exhibition booth, {theme}, smooth camera movement, professional lighting', defaultParams: { aspectRatio: '16:9', duration: '5' } },
+    ],
+    defaultAspectRatio: '16:9',
+    suggestedNextSteps: [
+      { label: '调整灯光氛围', action: 'edit_image', prefilledPrompt: '保持空间结构不变，将灯光改为暖色调氛围照明' },
+      { label: '生成漫游视频', action: 'generate_video', prefilledPrompt: '展位空间漫游，相机缓慢推进' },
+      { label: '换个角度渲染', action: 'generate_image', prefilledPrompt: '从鸟瞰角度渲染整个展位' },
+    ],
   },
   {
     id: 'creative-scenography',
@@ -254,6 +275,18 @@ const AGENTS: AgentDefinition[] = [
 6. AI 渲染提示词：必须同时输出中文和英文两个版本，格式如下：
 【中文提示词】用中文描述美陈装置的主体造型、材质碰撞、光影效果、色彩氛围、交互细节等，100-200字
 【English Prompt】English prompt for Midjourney/DALL-E 3 with style, lighting, material, interactive elements keywords`,
+    tools: ['generate_image', 'edit_image', 'generate_video', 'img2video', 'upscale', 'analyze_image'],
+    recipes: [
+      { id: 'digital-scene', name: '虚拟场景', operationType: 'generate_image', promptTemplate: 'Immersive digital installation, {theme}, interactive projection mapping, {lighting}, futuristic, 8k, octane render', defaultParams: { aspectRatio: '16:9', quality: 'hd' } },
+      { id: 'window-display', name: '橱窗陈列', operationType: 'generate_image', promptTemplate: 'Luxury window display, {season} theme, {colorScheme}, mannequin styling, dramatic lighting, 8k', defaultParams: { aspectRatio: '3:4', quality: 'hd' } },
+      { id: 'digital-walkthrough', name: '数字空间漫游', operationType: 'generate_video', promptTemplate: 'Smooth walkthrough of digital immersive space, {theme}, flowing light particles, ambient movement', defaultParams: { aspectRatio: '16:9', duration: '5' } },
+    ],
+    defaultAspectRatio: '16:9',
+    suggestedNextSteps: [
+      { label: '调整交互效果', action: 'edit_image', prefilledPrompt: '增加更多互动投影效果，让场景更有科技感' },
+      { label: '生成漫游视频', action: 'generate_video', prefilledPrompt: '虚拟空间沉浸式漫游体验' },
+      { label: '放大到8K', action: 'upscale' },
+    ],
   },
   {
     id: 'creative-posters',
@@ -285,6 +318,18 @@ const AGENTS: AgentDefinition[] = [
 5. 视觉元素清单（产品、道具、场景、光影）
 6. AI 渲染提示词：必须同时输出中文和英文两个版本，格式如下：
 【中文提示词】用中文描述画面的主体、场景、风格、色彩、光影、氛围等，100-200字，含 --ar 比例参数`,
+    tools: ['generate_image', 'edit_image', 'remove_bg', 'upscale', 'analyze_image'],
+    recipes: [
+      { id: 'kv-main-visual', name: 'KV主视觉', operationType: 'generate_image', promptTemplate: 'Brand key visual, {brandStyle}, {season} theme, {colorScheme}, product hero shot, cinematic lighting, 8k, print quality --ar {aspectRatio}', defaultParams: { aspectRatio: '3:4', quality: 'hd' } },
+      { id: 'solar-term-poster', name: '节气海报', operationType: 'generate_image', promptTemplate: '{solarTerm} poster, brand {brandName}, traditional Chinese elements with modern twist, {colorScheme}, elegant composition, 8k --ar 3:4', defaultParams: { aspectRatio: '3:4', quality: 'hd' } },
+      { id: 'social-media-card', name: '社交媒体卡片', operationType: 'generate_image', promptTemplate: 'Social media card, {brandStyle}, {content}, eye-catching layout, {colorScheme}, mobile-friendly, 8k --ar 3:4', defaultParams: { aspectRatio: '3:4', quality: 'standard' } },
+    ],
+    defaultAspectRatio: '3:4',
+    suggestedNextSteps: [
+      { label: '调整色彩方案', action: 'edit_image', prefilledPrompt: '保持构图不变，将色彩改为更沉稳的暗金色调' },
+      { label: '适配社交媒体', action: 'generate_image', prefilledPrompt: '将海报适配为小红书竖版卡片格式' },
+      { label: '移除背景', action: 'remove_bg' },
+    ],
   },
   {
     id: 'content-graphics',
@@ -316,6 +361,19 @@ const AGENTS: AgentDefinition[] = [
 5. 字体与图标系统（层级规范）
 6. AI 渲染提示词：必须同时输出中文和英文两个版本，格式如下：
 【中文提示词】用中文描述画面的主体、场景、风格、色彩、光影、氛围等，100-200字`,
+    tools: ['generate_image', 'edit_image', 'remove_bg', 'upscale', 'analyze_image'],
+    recipes: [
+      { id: 'brand-story-scroll', name: '品牌故事长图', operationType: 'generate_image', promptTemplate: 'Vertical brand story scroll, {brandName}, {era} heritage, hand-drawn illustration style, {colorScheme}, narrative flow top to bottom, 8k --ar 9:16', defaultParams: { aspectRatio: '9:16', quality: 'hd' } },
+      { id: 'infographic', name: '产品科普图解', operationType: 'generate_image', promptTemplate: 'Elegant infographic, {topic}, {brandStyle}, clean data visualization, {colorScheme}, professional layout, 8k --ar 3:4', defaultParams: { aspectRatio: '3:4', quality: 'hd' } },
+      { id: 'solar-term-scroll', name: '节气文化长卷', operationType: 'generate_image', promptTemplate: '{solarTerm} cultural scroll, {brandName}, traditional Chinese painting meets modern design, {colorScheme}, horizontal narrative, 8k --ar 16:9', defaultParams: { aspectRatio: '16:9', quality: 'hd' } },
+      { id: 'social-grid', name: '九宫格方案', operationType: 'generate_image', promptTemplate: 'Social media 9-grid layout, {brandStyle}, {theme}, cohesive color palette, each grid tells a story, 8k --ar 1:1', defaultParams: { aspectRatio: '1:1', quality: 'standard' } },
+    ],
+    defaultAspectRatio: '9:16',
+    suggestedNextSteps: [
+      { label: '调整信息层级', action: 'edit_image', prefilledPrompt: '优化信息层级关系，让核心数据更突出' },
+      { label: '适配小红书', action: 'generate_image', prefilledPrompt: '将内容适配为小红书1242px宽度长图格式' },
+      { label: '移除背景', action: 'remove_bg' },
+    ],
   },
   {
     id: 'brand-character',
@@ -346,6 +404,19 @@ const AGENTS: AgentDefinition[] = [
 5. 延展场景：3个应用场景（如直播、盲盒、节日海报）。
 6. AI 渲染提示词：必须同时输出中文和英文两个版本，格式如下：
 【中文提示词】用中文描述画面的3D角色、材质、光照、渲染参数、风格等，100-200字`,
+    tools: ['generate_image', 'edit_image', 'remove_bg', 'upscale', 'generate_video', 'img2video', 'analyze_image'],
+    recipes: [
+      { id: 'ip-character-design', name: 'IP角色设计', operationType: 'generate_image', promptTemplate: 'Brand mascot character, {characterStyle}, {outfit}, semi-realistic 3D render, subsurface scattering skin, {colorScheme}, studio lighting, octane render, 8k --ar 1:1', defaultParams: { aspectRatio: '1:1', quality: 'hd' } },
+      { id: 'ip-expression-sheet', name: '表情延展', operationType: 'generate_image', promptTemplate: 'Character expression sheet, {characterName}, multiple expressions: happy, angry, surprised, thinking, {style}, consistent design, 8k --ar 16:9', defaultParams: { aspectRatio: '16:9', quality: 'hd' } },
+      { id: 'ip-scene-application', name: '场景应用', operationType: 'generate_image', promptTemplate: '{characterName} in {scene}, {pose}, {background}, brand integration, {colorScheme}, 8k --ar 3:4', defaultParams: { aspectRatio: '3:4', quality: 'hd' } },
+      { id: 'ip-animation', name: 'IP动画', operationType: 'generate_video', promptTemplate: '{characterName} performing {action}, smooth animation, {style}, high quality', defaultParams: { aspectRatio: '1:1', duration: '5' } },
+    ],
+    defaultAspectRatio: '1:1',
+    suggestedNextSteps: [
+      { label: '设计表情包', action: 'generate_image', prefilledPrompt: '为该IP角色设计一组6个表情：开心、生气、惊讶、思考、害羞、得意' },
+      { label: '生成3D场景', action: 'generate_image', prefilledPrompt: '将IP角色放入品牌展厅场景中，保持角色一致性' },
+      { label: '制作动画', action: 'generate_video', prefilledPrompt: 'IP角色向镜头挥手打招呼' },
+    ],
   },
 ];
 
@@ -449,26 +520,35 @@ function parseSuggestions(content: string): { cleanedContent: string; suggestion
     const match = content.match(pattern);
     if (match) {
       const block = match[1];
-      // Parse individual suggestions like: 1. 调整配色 → 图生图 / 2. 修改细节 → 语言修图
+      // Parse individual suggestions like: 1. 调整配色 → 图生图 | 换成扁平风格 / 2. 修改细节 → 语言修图 | 修改背景
       const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
       for (const line of lines) {
         const m = line.match(/^\d+\.\s*(.+?)(?:\s*[→➡>]\s*(.+))?$/);
         if (m) {
           const label = m[1].trim();
           const actionHint = (m[2] || '').trim();
+          // Extract prefilled prompt from parentheses: 图生图(换成扁平风格) → action=img2img, prefilledPrompt="换成扁平风格"
+          let prefilledPrompt: string | undefined;
+          let cleanActionHint = actionHint;
+          const prefilledMatch = actionHint.match(/^(.+?)\(([^\)]+)\)$/);
+          if (prefilledMatch) {
+            cleanActionHint = prefilledMatch[1].trim();
+            prefilledPrompt = prefilledMatch[2].trim();
+          }
           let action: NextSuggestion['action'] = 'generate-variant';
-          let prompt: string | undefined;
-          if (/图生图|风格|参考|变体|variant/i.test(actionHint)) action = 'img2img';
-          else if (/修图|修改|编辑|retouch|edit/i.test(actionHint)) action = 'retouch';
-          else if (/放大|高清|upscale/i.test(actionHint)) action = 'upscale';
-          else if (/背景|去背|removebg|remove.?bg/i.test(actionHint)) action = 'remove-bg';
-          else if (/扩展|延伸|extend|outpaint/i.test(actionHint)) action = 'extend';
-          else if (/矢量|描摹|svg|vectoriz/i.test(actionHint)) action = 'svg-trace';
-          else if (/agent|编排|智能/i.test(actionHint)) action = 'agent-edit';
-          else if (/生成图片|生成|create|generate|画图|画|制作|设计/i.test(actionHint || label)) action = 'generate-image';
-          else if (/提示词|prompt|生图/i.test(actionHint)) action = 'send-to-prompt';
-          prompt = label;
-          suggestions.push({ id: `sug-${Date.now()}-${suggestions.length}`, label, action, prompt });
+          if (/图生图|风格|参考|变体|variant/i.test(cleanActionHint)) action = 'img2img';
+          else if (/修图|修改|编辑|retouch|edit/i.test(cleanActionHint)) action = 'retouch';
+          else if (/放大|高清|upscale/i.test(cleanActionHint)) action = 'upscale';
+          else if (/背景|去背|removebg|remove.?bg/i.test(cleanActionHint)) action = 'remove-bg';
+          else if (/扩展|延伸|extend|outpaint/i.test(cleanActionHint)) action = 'extend';
+          else if (/矢量|描摹|svg|vectoriz/i.test(cleanActionHint)) action = 'svg-trace';
+          else if (/agent|编排|智能/i.test(cleanActionHint)) action = 'agent-edit';
+          else if (/生视频|视频生成|图生视频|video/i.test(cleanActionHint)) action = 'generate-video';
+          else if (/生成图片|生成|create|generate|画图|画|制作|设计/i.test(cleanActionHint || label)) action = 'generate-image';
+          else if (/提示词|prompt|生图/i.test(cleanActionHint)) action = 'send-to-prompt';
+          // Use prefilled prompt as the actual prompt if available, otherwise use label
+          const prompt = prefilledPrompt || label;
+          suggestions.push({ id: `sug-${Date.now()}-${suggestions.length}`, label, action, prompt, prefilledPrompt });
         }
       }
       // Remove suggestion block from content
@@ -1076,6 +1156,8 @@ ${outputSpec || '1. 设计理念（200字内）\n2. 详细方案描述\n3. 材�
       desc: desc.trim() || name.trim(),
       color,
       prompt,
+      tools: ['generate_image', 'edit_image', 'analyze_image'],
+      recipes: [],
     });
     onClose();
   };
@@ -1377,6 +1459,32 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
       if (onChatInitialImageConsumed) onChatInitialImageConsumed();
     }
   }, [chatInitialImage, onChatInitialImageConsumed, onChatTabOpenChange]);
+
+  // P1-5: Auto-enter "针对此图" mode when a canvas image is selected
+  // When user selects an image on the canvas, auto-add it to pendingImages and show a hint
+  const prevSelectedCanvasImageIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selectedCanvasImage) return;
+    // Only trigger on NEW selection (image id changed), not re-renders
+    if (selectedCanvasImage.id === prevSelectedCanvasImageIdRef.current) return;
+    prevSelectedCanvasImageIdRef.current = selectedCanvasImage.id;
+
+    // Auto-add to pendingImages if not already there
+    setPendingImages(prev => {
+      if (prev.find(p => p.id === selectedCanvasImage.id)) return prev;
+      return [...prev, {
+        id: selectedCanvasImage.id,
+        url: selectedCanvasImage.url,
+        name: selectedCanvasImage.prompt?.slice(0, 20) || '画布图片',
+      }];
+    });
+
+    // Show visual hint in input (don't overwrite if user is already typing)
+    setInput(prev => {
+      if (prev.trim() && prev !== '请帮我修改这张图片：') return prev; // Don't overwrite user's text
+      return '针对这张图片，我想...';
+    });
+  }, [selectedCanvasImage]);
 
   // Get mention picker items based on search
   const mentionPickerItems: MentionRef[] = useMemo(() => {
@@ -2843,6 +2951,7 @@ UI设计规范：
       systemPrompt: sessionSystemPrompt,
       createdAt: sessionMessages.length > 0 ? sessionMessages[0].timestamp : Date.now(),
       updatedAt: Date.now(),
+      agentId: sessionSystemPrompt && allAgents.find(a => a.id === sessionSystemPrompt) ? sessionSystemPrompt : undefined,
     };
     setChatSessions(prev => {
       const filtered = prev.filter(s => s.id !== id);
@@ -3135,6 +3244,22 @@ UI设计规范：
         enhancedSystemPrompt = systemPrompt;
       }
 
+      // P0-3: 注入智能体能力信息（工具+配方）
+      if (systemPromptObj) {
+        const agentToolsList = systemPromptObj.tools.join('、');
+        const agentRecipesList = systemPromptObj.recipes.map(r => 
+          `"${r.name}" (${r.operationType}): ${r.promptTemplate}`
+        ).join('\n');
+        enhancedSystemPrompt += `
+
+【智能体能力信息】
+你是"${systemPromptObj.name}"智能体，具备以下专业能力：
+- 可用工具：${agentToolsList}
+- 专业配方（执行特定任务时的提示词策略）：
+${agentRecipesList}
+请根据用户需求，优先使用你的专业配方和工具来完成任务。当需要执行操作时，请调用对应的工具函数。`;
+      }
+
       const requestMessages = [];
       
       // P0-2: 生成后主动引导 - 在系统提示词中注入建议指令
@@ -3143,12 +3268,17 @@ UI设计规范：
 【重要：回复格式规范】
 1. 当你帮助用户生成图片或完成设计任务后，必须在回复末尾附加"建议下一步"区域，格式如下：
 💡 建议下一步：
-1. [具体操作描述] → [操作类型]
-2. [具体操作描述] → [操作类型]
-3. [具体操作描述] → [操作类型]
+1. [具体操作描述] → [操作类型] | [预填充提示词]
+2. [具体操作描述] → [操作类型] | [预填充提示词]
+3. [具体操作描述] → [操作类型] | [预填充提示词]
 
-操作类型必须是以下之一：图生图、语言修图、放大、移除背景、扩展画面、SVG描摹、Agent编排、提示词优化
-每次给出2-3个建议，建议应与当前对话内容紧密相关。
+操作类型必须是以下之一：图生图、语言修图、放大、移除背景、扩展画面、SVG描摹、Agent编排、提示词优化、生成视频、图生视频
+预填充提示词是用户点击建议后自动填入输入框的内容，应包含具体可执行的指令。
+示例：
+- "换成扁平风格" → 图生图 | 请将这张图片转换为扁平化设计风格，保留主体构图
+- "放大到4K" → 放大 | 请将这张图片无损放大到4K分辨率
+- "做成视频" → 生成视频 | 请将这张图片生成为5秒的短视频，添加缓慢推镜效果
+每次给出2-3个建议，建议应与当前对话内容紧密相关，且预填充提示词应具体可执行。
 
 2. 如果你生成的图片有任何值得注意的设计特点，请简要说明。`;
 
@@ -3326,6 +3456,16 @@ ${imageDescriptions}
       const controller = new AbortController();
       abortControllerRef.current = controller;
 
+      // 构建画布摘要：让 LLM 感知当前画布状态
+      const canvasSummary = canvasImages && canvasImages.length > 0
+        ? canvasImages.slice(0, 20).map((img: { id?: string; url?: string; prompt?: string; modelName?: string }, i: number) => ({
+            id: img.id || `img_${i}`,
+            url: (img.url || '').substring(0, 100),
+            prompt: (img.prompt || '').substring(0, 200),
+            modelName: img.modelName || undefined,
+          }))
+        : undefined;
+
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: {
@@ -3337,7 +3477,10 @@ ${imageDescriptions}
           messages: requestMessages,
           stream: true,
           enableTools: true,
+          agentTools: systemPromptObj?.tools,
+          agentId: systemPrompt,
           providerId,
+          canvasSummary,
         }),
       });
 
@@ -4334,8 +4477,31 @@ ${imageDescriptions}
                 <div className={`flex items-center gap-1 px-1.5 py-1 rounded-md ${isGold ? 'bg-[#0d0d0d]' : 'bg-[#f5f5f5]'}`}>
                   <div className="w-0.5 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: selectedAgent.color }} />
                   <div className="flex-1 min-w-0">
-                    <span className={`text-xs font-medium ${isGold ? 'text-gold' : 'text-gray-900'}`}>{selectedAgent.name}</span>
-                    <span className={`text-xs ${isGold ? 'text-gold-muted' : 'text-gray-500'} ml-1`}>{selectedAgent.nameEn}</span>
+                    <div className="flex items-center gap-1">
+                      <span className={`text-xs font-medium ${isGold ? 'text-gold' : 'text-gray-900'}`}>{selectedAgent.name}</span>
+                      <span className={`text-xs ${isGold ? 'text-gold-muted' : 'text-gray-500'}`}>{selectedAgent.nameEn}</span>
+                    </div>
+                    {selectedAgent.tools && selectedAgent.tools.length > 0 && (
+                      <div className="flex items-center gap-0.5 mt-0.5 flex-wrap">
+                        {selectedAgent.tools.map(tool => {
+                          const toolMeta: Record<string, { label: string; icon: string }> = {
+                            generate_image: { label: '生图', icon: '🎨' },
+                            edit_image: { label: '修图', icon: '✏️' },
+                            remove_bg: { label: '去背景', icon: '✂️' },
+                            upscale: { label: '放大', icon: '🔍' },
+                            generate_video: { label: '视频', icon: '🎬' },
+                            img2video: { label: '图生视频', icon: '🎥' },
+                            analyze_image: { label: '分析', icon: '🔎' },
+                          };
+                          const meta = toolMeta[tool] || { label: tool, icon: '⚡' };
+                          return (
+                            <span key={tool} className={`inline-flex items-center gap-0.5 text-[10px] px-1 py-px rounded ${isGold ? 'bg-white/[0.06] text-gold-muted/70' : 'bg-gray-100 text-gray-500'}`}>
+                              {meta.icon} {meta.label}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                   {isCustom && (
                     <div className="flex items-center gap-0.5 shrink-0">
@@ -4373,15 +4539,59 @@ ${imageDescriptions}
         <div className={`flex-1 min-h-0 overflow-y-auto p-3 space-y-3 ${isGold ? 'bg-[#090909]' : 'bg-gray-50/50'}`}>
           {messages.length === 0 && pendingImages.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center">
-              <div className={`w-16 h-16 rounded-2xl ${isGold ? 'bg-gold/10 border border-gold/20' : 'bg-gray-100 border border-gray-200'} flex items-center justify-center mb-3`}>
-                <Bot size={32} className={isGold ? 'text-gold' : 'text-gray-400'} />
-              </div>
-              <h3 className={`text-lg font-medium ${themeClasses.text} mb-2`}>开始对话</h3>
-              <p className={`text-sm ${themeClasses.textMuted} mb-4`}>选择模型并发送消息开始聊天</p>
-              <div className={`text-sm ${themeClasses.textMuted} space-y-1.5`}>
-                <p className="flex items-center gap-1.5 justify-center"><Upload size={14} /> 上传或粘贴图片到对话框</p>
-                <p className="flex items-center gap-1.5 justify-center"><ImageIcon size={14} /> AI自动分析并生成关键词</p>
-              </div>
+              {(() => {
+                const selectedAgent = allAgents.find(a => a.id === systemPrompt);
+                if (selectedAgent && selectedAgent.suggestedNextSteps && selectedAgent.suggestedNextSteps.length > 0) {
+                  return (
+                    <div className="flex flex-col items-center">
+                      <div className={`w-12 h-12 rounded-2xl mb-2 flex items-center justify-center text-2xl`} style={{ backgroundColor: selectedAgent.color + '18', border: `1px solid ${selectedAgent.color}33` }}>
+                        {selectedAgent.icon}
+                      </div>
+                      <h3 className={`text-base font-medium mb-0.5 ${themeClasses.text}`}>{selectedAgent.name}</h3>
+                      <p className={`text-xs mb-3 ${themeClasses.textMuted}`}>{selectedAgent.nameEn}</p>
+                      <div className="flex flex-col gap-1.5 w-full max-w-[240px]">
+                        {selectedAgent.suggestedNextSteps.map((step, idx) => (
+                          <button
+                            key={idx}
+                            onClick={() => {
+                              if (step.prefilledPrompt) {
+                                setInput(step.prefilledPrompt);
+                              }
+                            }}
+                            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-left transition-all ${
+                              isGold
+                                ? 'bg-white/[0.04] border border-white/[0.06] hover:bg-white/[0.08] hover:border-gold/30 text-gold-muted hover:text-gold'
+                                : 'bg-gray-50 border border-gray-100 hover:bg-gray-100 hover:border-gray-300 text-gray-600 hover:text-gray-900'
+                            }`}
+                          >
+                            <span className="text-sm">{'💡'}</span>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-xs font-medium truncate">{step.label}</div>
+                              {step.prefilledPrompt && (
+                                <div className={`text-[10px] truncate ${isGold ? 'text-gold-muted/40' : 'text-gray-400'}`}>{step.prefilledPrompt}</div>
+                              )}
+                            </div>
+                            <ChevronRight size={12} className={`shrink-0 ${isGold ? 'text-gold-muted/30' : 'text-gray-300'}`} />
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                }
+                return (
+                  <>
+                    <div className={`w-16 h-16 rounded-2xl ${isGold ? 'bg-gold/10 border border-gold/20' : 'bg-gray-100 border border-gray-200'} flex items-center justify-center mb-3`}>
+                      <Bot size={32} className={isGold ? 'text-gold' : 'text-gray-400'} />
+                    </div>
+                    <h3 className={`text-lg font-medium ${themeClasses.text} mb-2`}>开始对话</h3>
+                    <p className={`text-sm ${themeClasses.textMuted} mb-4`}>选择模型并发送消息开始聊天</p>
+                    <div className={`text-sm ${themeClasses.textMuted} space-y-1.5`}>
+                      <p className="flex items-center gap-1.5 justify-center"><Upload size={14} /> 上传或粘贴图片到对话框</p>
+                      <p className="flex items-center gap-1.5 justify-center"><ImageIcon size={14} /> AI自动分析并生成关键词</p>
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           ) : (
             messages.map(message => (
@@ -4675,7 +4885,6 @@ ${imageDescriptions}
                             key={sug.id}
                             onClick={() => {
                               if (sug.action === 'generate-image' && onGenerateImage && sug.prompt) {
-                                // 从最近的用户消息中检测生成数量、比例和质量
                                 const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
                                 const userText = lastUserMsg?.content || '';
                                 const count = detectImageCountFromText(userText);
@@ -4683,10 +4892,11 @@ ${imageDescriptions}
                                 const quality = detectQualityFromText(userText) || '1K';
                                 onGenerateImage(sug.prompt, count, ratio, quality);
                               } else if (sug.action === 'send-to-prompt' && sug.prompt) {
-                                // 作为聊天消息发送，而非发到图像生成面板
                                 handleSend(sug.prompt);
+                              } else if (sug.prefilledPrompt) {
+                                // Use prefilled prompt as chat message for context-aware suggestions
+                                handleSend(sug.prefilledPrompt);
                               } else if (sug.prompt) {
-                                // 所有其他建议也作为聊天消息发送（Agent模式）
                                 handleSend(sug.prompt);
                               }
                             }}
@@ -4698,6 +4908,7 @@ ${imageDescriptions}
                           >
                             <ArrowRight size={9} />
                             {sug.label}
+                            {sug.prefilledPrompt && <span className="opacity-50 ml-0.5 text-[8px]">✦</span>}
                           </button>
                         ))}
                       </div>
