@@ -609,6 +609,12 @@ export function InfiniteCanvas({
     return () => { taskEventsClient.disconnect(); };
   }, []);
 
+  // ★ Spatial Index: RBush R-tree for O(log n) hit testing and viewport culling
+  const spatialIndexRef = useRef<import('@/lib/canvas-spatial-index').CanvasSpatialIndex | null>(null);
+  if (!spatialIndexRef.current) {
+    spatialIndexRef.current = new (require('@/lib/canvas-spatial-index').CanvasSpatialIndex)();
+  }
+
   const visibleImages = useMemo(() => {
     if (canvasSize.width === 0 || canvasSize.height === 0) return images;
     // Visible area in canvas coordinates
@@ -616,11 +622,18 @@ export function InfiniteCanvas({
     const vy1 = -viewOffset.y / zoom;
     const vx2 = vx1 + canvasSize.width / zoom;
     const vy2 = vy1 + canvasSize.height / zoom;
-    // Add margin to avoid pop-in (1 screen worth of margin on each side)
+
+    // ★ Use spatial index for viewport culling when image count is large enough to benefit
+    if (images.length > 20 && spatialIndexRef.current) {
+      const visibleIds = new Set(spatialIndexRef.current.viewportQuery(vx1, vy1, vx2, vy2, 0.5));
+      return images.filter(img => img.isProcessingPlaceholder || visibleIds.has(img.id));
+    }
+
+    // Fallback: linear scan for small image sets
     const marginW = (vx2 - vx1) * 0.5;
     const marginH = (vy2 - vy1) * 0.5;
     return images.filter(img => {
-      if (img.isProcessingPlaceholder) return true; // Always render processing frames
+      if (img.isProcessingPlaceholder) return true;
       const ix1 = img.x;
       const iy1 = img.y;
       const ix2 = img.x + img.width;
