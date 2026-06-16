@@ -530,6 +530,7 @@ export function InfiniteCanvas({
 
   // Canvas grid background mode: dots / lines / blank
   const [gridMode, setGridMode] = useState<'dots' | 'lines' | 'blank'>('dots');
+  const [showConnections, setShowConnections] = useState(false);
 
   // Hover toolbar: shown when hovering over an image (separate from visionHoverImage)
   const [hoverToolbarImageId, setHoverToolbarImageId] = useState<string | null>(null);
@@ -1250,6 +1251,9 @@ export function InfiniteCanvas({
   const [showVideoEditPanel, setShowVideoEditPanel] = useState(false);
   const [videoEditTarget, setVideoEditTarget] = useState<CanvasImage | null>(null);
   const [videoEditTab, setVideoEditTab] = useState<'edit' | 'extend'>('edit');
+
+  // Whether any floating panel is open (used to auto-hide connections & image toolbar)
+  const anyPanelOpen = showSvgTracePanel || showAgentEditor || showBrandEcommerce || showFontDesign || showBrandFactory || showSceneStudio || showBrandPackaging || showDisplay3D || showVideoEditPanel || showCanvasGenerator || showRefineEngine || showLogoSkill || showAiPsd || showStickerAssistant;
 
   // Video tools handler
   const handleVideoTool = async (action: 'to-gif' | 'extract-cover' | 'compress', image: CanvasImage) => {
@@ -8241,7 +8245,7 @@ export function InfiniteCanvas({
             );
           })}
           {/* 自动连线：原图→变体/编辑/图生图 关系 */}
-          {canvasConnections.length > 0 && (() => {
+          {showConnections && !anyPanelOpen && canvasConnections.length > 0 && (() => {
             return (
               <svg style={{ position: 'absolute', left: 0, top: 0, width: '1px', height: '1px', overflow: 'visible', pointerEvents: 'none' }}>
                 <defs>
@@ -8423,7 +8427,7 @@ export function InfiniteCanvas({
             );
           })()}
           {/* Auto connection lines - typed relations between images */}
-          {(() => {
+          {showConnections && !anyPanelOpen && (() => {
             // Merge connections from prop (new typed system) with generatedFromImageId (legacy)
             const allConns: Array<{ sourceId: string; targetId: string; relationType: ConnectionRelationType }> = [
               ...canvasConnections.map(c => ({ sourceId: c.fromId, targetId: c.toId, relationType: c.relationType })),
@@ -12789,7 +12793,7 @@ export function InfiniteCanvas({
         })}
 
         {/* ====== IMAGE ACTION TOOLBAR (follows selected image) ====== */}
-        {selectedIds.size === 1 && editMode === 'none' && activeTool === 'none' && !showDownloadPopup && !showSvgTracePanel && !showAgentEditor && !showBrandEcommerce && !showFontDesign && !showBrandFactory && !showSceneStudio && !showBrandPackaging && !showDisplay3D && !showVideoEditPanel && (() => {
+        {selectedIds.size === 1 && editMode === 'none' && activeTool === 'none' && !showDownloadPopup && !anyPanelOpen && (() => {
           const img = selectedImageData;
           if (!img) return null;
           const pos = getToolbarPosition();
@@ -13693,6 +13697,16 @@ export function InfiniteCanvas({
         >
           <LayoutGrid className="h-4 w-4" />
           <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">{gridMode === 'dots' ? '点阵' : gridMode === 'lines' ? '线条' : '空白'}</span>
+        </button>
+
+        {/* Connection lines toggle */}
+        <button
+          onClick={() => setShowConnections(prev => !prev)}
+          className={`tool-btn p-2 rounded-full transition-all relative group ${showConnections ? (isMonochrome ? 'text-blue-500 bg-blue-50 ring-1 ring-blue-500/30' : 'text-gold bg-gold/20 ring-1 ring-gold/40') : (isMonochrome ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100' : 'text-gold-muted hover:text-gold-light hover:bg-gold/10')}`}
+          title={showConnections ? '隐藏连线' : '显示连线'}
+        >
+          <GitMerge className="h-4 w-4" />
+          <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">{showConnections ? '隐藏连线' : '显示连线'}</span>
         </button>
 
         {/* Generating progress */}
