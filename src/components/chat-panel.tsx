@@ -158,9 +158,8 @@ const AGENTS: AgentDefinition[] = [
       { label: '放大到8K', action: 'upscale' },
     ],
     routingKeywords: ['酒', '酒瓶', '酒类', '包装', '瓶型', '瓶身', '标签', '礼盒', '白酒', '红酒', '洋酒', '威士忌', '茅台', '瓶装', '瓶盖', 'liquor', 'wine bottle', 'whiskey', 'packaging'],
+    skillIds: ['preset-product-packaging'],
   },
-  {
-    id: 'brand-visuals',
     name: '品牌视觉',
     nameEn: 'Brand Visuals',
     icon: '🎨',
