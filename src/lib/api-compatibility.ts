@@ -818,10 +818,15 @@ export function extractImageUrl(pollData: Record<string, unknown>): string | nul
   // Path 4: data.data[0].url / .image_url / .b64_json
   const nestedData = pollData?.data as Array<Record<string, unknown>> | undefined;
   if (Array.isArray(nestedData) && nestedData.length) {
-    const url = nestedData[0]?.url || nestedData[0]?.image_url || nestedData[0]?.b64_json;
-    if (typeof url === 'string' && url) {
-      if (url.startsWith('data:') || url.startsWith('http')) return url;
-      return `data:image/png;base64,${url}`;
+    const rawUrl = nestedData[0]?.url || nestedData[0]?.image_url;
+    if (typeof rawUrl === 'string' && rawUrl) {
+      if (rawUrl.startsWith('data:') || rawUrl.startsWith('http')) return rawUrl;
+      return `data:image/png;base64,${rawUrl}`;
+    }
+    // b64_json 需要校验是否为合法 base64，避免 API 错误信息被误判为图片数据
+    const b64 = nestedData[0]?.b64_json;
+    if (typeof b64 === 'string' && b64 && /^[A-Za-z0-9+/=]+$/.test(b64)) {
+      return `data:image/png;base64,${b64}`;
     }
   }
   // Path 5: data.image_url / data.url (single image format)
@@ -1576,7 +1581,7 @@ export function parseResponseForProfile(
     if (images && Array.isArray(images)) {
       for (const img of images) {
         if (img.url && typeof img.url === 'string') directImageUrls.push(img.url);
-        if (img.b64_json && typeof img.b64_json === 'string') directImageUrls.push(`data:image/png;base64,${img.b64_json}`);
+        if (img.b64_json && typeof img.b64_json === 'string' && /^[A-Za-z0-9+/=]+$/.test(img.b64_json)) directImageUrls.push(`data:image/png;base64,${img.b64_json}`);
       }
     }
   }

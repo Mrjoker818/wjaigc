@@ -135,15 +135,6 @@ export async function POST(request: NextRequest) {
     const sessionUser = await getSessionUser(request);
     const userId = sessionUser?.id ?? requestUserId ?? "anonymous";
 
-    // 积分扣除（登录用户才扣积分，按模型差异化扣分）
-    if (sessionUser) {
-      const modelId = model || '';
-      const creditResult = await consumeCredits(sessionUser.id, 'image_generate', undefined, undefined, modelId, { quality });
-      if (!creditResult.success) {
-        return NextResponse.json({ error: creditResult.message || '积分不足' }, { status: 402 });
-      }
-    }
-
     // 解析参考图片 URL（转换为 API 可访问的格式）
     // 优化：并行处理所有参考图，加速提交
     const accessibleReferenceImages: string[] = [];
@@ -282,6 +273,15 @@ export async function POST(request: NextRequest) {
           requiresApiKey: true,
           modelName: modelConfig.name,
         }, { status: 400 });
+      }
+    }
+
+    // 积分扣除（移到凭证验证之后，避免凭证无效时误扣积分）
+    if (sessionUser) {
+      const modelId = model || '';
+      const creditResult = await consumeCredits(sessionUser.id, 'image_generate', undefined, undefined, modelId, { quality });
+      if (!creditResult.success) {
+        return NextResponse.json({ error: creditResult.message || '积分不足' }, { status: 402 });
       }
     }
 

@@ -7,7 +7,7 @@ import { Pool, PoolConfig } from 'pg';
 
 let pool: Pool | null = null;
 
-function getPool(): Pool {
+export function getPool(): Pool {
   if (!pool) {
     const connectionString = process.env.DATABASE_URL || process.env.PGDATABASE_URL;
     if (!connectionString) {
@@ -56,8 +56,9 @@ export async function execSql(query: string, params?: unknown[]): Promise<SqlRes
 
       if (isTransient && attempt < maxRetries) {
         console.warn(`[db-client] Transient SQL error (attempt ${attempt + 1}/${maxRetries + 1}), retrying...`, errMsg.substring(0, 100));
-        // Destroy potentially corrupted pool and rebuild on next query
-        if (pool) { await pool.end().catch(() => {}); pool = null; }
+        // Don't destroy the entire pool — pg handles bad connections internally.
+        // Only reset pool if it's completely unusable (null check on next attempt).
+        // Previously pool.end() here caused cascading failures for concurrent queries.
         await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
         continue;
       }

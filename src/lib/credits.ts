@@ -9,7 +9,7 @@
  * 此文件仅包含服务端函数（依赖 db-storage）
  */
 
-import { dbGetCredits, dbAdjustCredits, dbInitCredits } from './db-storage';
+import { dbGetCredits, dbAdjustCredits, dbInitCredits, dbRecordCreditTransaction } from './db-storage';
 export {
   CREDITS_TO_CNY, CNY_TO_CREDITS,
   IMAGE_MODEL_CREDITS, VIDEO_MODEL_CREDITS, CHAT_MODEL_CREDITS,
@@ -245,12 +245,13 @@ export async function consumeCredits(
 
     const newBalance = Number(deductResult.rows[0].balance);
 
-    // Record the transaction in history
+    // Record the transaction in history (without modifying balance — already deducted atomically)
     try {
-      await dbAdjustCredits(
+      await dbRecordCreditTransaction(
         userId,
-        0, // already deducted atomically, just record
+        -cost,
         'consume',
+        newBalance,
         description || `${opLabel}${modelInfo} 扣除 ${cost} 积分`,
         `${operation}${modelInfo}`
       );

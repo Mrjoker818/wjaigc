@@ -304,12 +304,7 @@ export async function POST(request: NextRequest) {
 
     // 积分检查与扣除
     const sessionUser = await getSessionUser(request);
-    if (sessionUser) {
-      const creditResult = await consumeCredits(sessionUser.id, 'image_retouch', undefined, undefined, model, { quality });
-      if (!creditResult.success) {
-        return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
-      }
-    }
+    // 积分扣除移到凭证验证之后（第345行之后）
 
     // ========== 1. 获取 API 凭证（与 /api/generate 一致） ==========
     let effectiveApiKey = apiKey || '';
@@ -342,6 +337,14 @@ export async function POST(request: NextRequest) {
         error: '需要在管理员系统中配置 API Key',
         requiresApiKey: true,
       }, { status: 400 });
+    }
+
+    // 积分扣除（在凭证验证通过后）
+    if (sessionUser) {
+      const creditResult = await consumeCredits(sessionUser.id, 'image_retouch', undefined, undefined, model, { quality });
+      if (!creditResult.success) {
+        return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
+      }
     }
 
     // ========== 1.5 创建异步任务（提交+轮询模式，避免CDN/FaaS代理超时） ==========

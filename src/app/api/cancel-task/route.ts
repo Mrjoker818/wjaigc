@@ -27,11 +27,21 @@ export async function POST(request: NextRequest) {
     const taskInfo = getTaskInfo(taskId);
 
     // 即使注册中心没有记录，也尝试取消（可能任务在旧store中）
+    // 过滤敏感字段
+    const safeTaskInfo = taskInfo ? (() => {
+      const { result, ...rest } = taskInfo;
+      if (result && typeof result === 'object') {
+        const { apiKey: _ak, apiBaseUrl: _abu, ...safeResult } = result as Record<string, unknown>;
+        return { ...rest, result: safeResult };
+      }
+      return rest;
+    })() : null;
+
     if (isTaskCancelled(taskId)) {
       return NextResponse.json({
         success: true,
         message: '任务已取消',
-        task: taskInfo,
+        task: safeTaskInfo,
       });
     }
 
@@ -43,7 +53,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       message: '任务取消请求已发送',
-      task: taskInfo,
+      task: safeTaskInfo,
     });
   } catch (err) {
     console.error('[cancel-task] Error:', err);

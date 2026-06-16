@@ -6,15 +6,34 @@ import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { optionalApiAuth } from '@/lib/api-auth';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { consumeCredits } from '@/lib/credits';
+import { CHAT_TOOLS, executeToolCall, parseToolCallsFromStream, ToolCallResult } from '@/lib/chat-tools';
 
-export const maxDuration = 60;
+export const maxDuration = 120;
+
+/** Maximum Agent loop iterations to prevent infinite loops */
+const MAX_AGENT_ITERATIONS = 8;
+/** Timeout for each tool execution */
+const TOOL_EXECUTION_TIMEOUT = 120000;
 
 export async function POST(request: NextRequest) {
   try {
     await optionalApiAuth(request);
-    const { model, messages, stream = true, providerId, userId: requestUserId } = await request.json();
+    const {
+      model,
+      messages,
+      stream = true,
+      providerId,
+      userId: requestUserId,
+      enableTools = true,  // 是否启用 function calling
+    } = await request.json();
+    
     const sessionUser = await getSessionUser(request);
     const userId = sessionUser?.id ?? requestUserId ?? "anonymous";
+
+    // 参数验证
+    if (!model || !messages) {
+      return NextResponse.json({ error: '缺少必要参数' }, { status: 400 });
+    }
 
     // 积分扣除（登录用户才扣积分，按模型差异化扣分）
     if (sessionUser) {
@@ -24,11 +43,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (!model || !messages) {
-      return NextResponse.json({ error: '缺少必要参数' }, { status: 400 });
-    }
-
-    // Content safety check on the latest user message
+    // Content safety check
     const lastUserMsg = messages.filter((m: { role: string }) => m.role === 'user').pop();
     if (lastUserMsg) {
       const promptText = typeof lastUserMsg.content === 'string' ? lastUserMsg.content : JSON.stringify(lastUserMsg.content);
@@ -41,13 +56,11 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 检查是否是第三方模型
+    // 查找 API 提供商配置
     let chatApiKey = '';
     let chatBaseUrl = 'https://api.apimart.ai/v1';
 
     if (providerId) {
-      // 第三方模型 - 从 UniversalApiManager 获取配置
-      // 第三方模型 - 从服务端配置获取
       const provider = (await getApiProviders()).find(item => item.id === providerId);
       if (provider) {
         chatApiKey = provider.apiKey;
@@ -56,7 +69,6 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: '未找到对应的模型提供商' }, { status: 400 });
       }
     } else {
-      // 默认查找管理员配置的提供商
       const provider = await findProviderForModel(model, 'chat');
       chatApiKey = provider?.apiKey || '';
       if (provider?.baseUrl) {
@@ -68,15 +80,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '请先在管理员后台配置可用模型' }, { status: 400 });
     }
 
-    // Detect thinking mode: model name ends with -thinking
+    // Detect thinking mode
     const isThinkingModel = model.endsWith('-thinking');
     const baseModel = isThinkingModel ? model.replace(/-thinking$/, '') : model;
-
-    // Use base model name for the API call (most providers don't support -thinking suffix)
-    // but send thinking-related parameters if the provider supports it
     const requestModel = baseModel;
 
-    // Convert relative image URLs to absolute URLs so upstream API can fetch them
+    // Convert relative image URLs to absolute URLs
     const origin = request.headers.get('origin') || process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
     const fixedMessages = messages.map((msg: { role: string; content: unknown }) => {
       if (Array.isArray(msg.content)) {
@@ -91,6 +100,16 @@ export async function POST(request: NextRequest) {
       return msg;
     });
 
+    // ============ Agent Loop with Function Calling ============
+    // 当 enableTools=true 时，执行 Agent 循环：
+    // LLM 思考 → 返回 tool_calls → 执行工具 → 结果回传 LLM → 继续思考
+    // 直到 LLM 返回纯文本（无 tool_calls）或达到最大循环次数
+
+    if (enableTools && stream) {
+      return handleAgentStream(fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, isThinkingModel);
+    }
+
+    // Non-stream or non-tool mode: original behavior
     const requestBody: Record<string, unknown> = {
       model: requestModel,
       messages: fixedMessages,
@@ -98,10 +117,12 @@ export async function POST(request: NextRequest) {
       temperature: 0.7,
     };
 
-    // For thinking mode, add reasoning parameters for compatible providers
+    if (enableTools) {
+      requestBody.tools = CHAT_TOOLS;
+      requestBody.tool_choice = 'auto';
+    }
+
     if (isThinkingModel) {
-      // OpenAI-compatible: reasoning_effort
-      // Some providers support this, others ignore it
       requestBody.reasoning_effort = 'medium';
     }
 
@@ -119,12 +140,16 @@ export async function POST(request: NextRequest) {
       }
     );
 
-    // If API call fails with the base model and thinking params, try the -thinking model name as fallback
+    // Fallback for thinking model
     if (!response.ok && isThinkingModel) {
       const errorText = await response.text().catch(() => '');
       console.warn(`[chat] Base model ${requestModel} with thinking params failed (${response.status}), trying ${model}...`);
       
-      const retryBody = { model, messages: fixedMessages, stream, temperature: 0.7 };
+      const retryBody: Record<string, unknown> = { model, messages: fixedMessages, stream, temperature: 0.7 };
+      if (enableTools) {
+        retryBody.tools = CHAT_TOOLS;
+        retryBody.tool_choice = 'auto';
+      }
       const retryResponse = await fetchWithV1Retry(
         chatBaseUrl,
         '/chat/completions',
@@ -142,43 +167,40 @@ export async function POST(request: NextRequest) {
       if (!retryResponse.ok) {
         const retryError = await retryResponse.text().catch(() => '');
         console.error('Chat API error (both attempts):', errorText, retryError);
-        // Try to extract meaningful error message from 4sapi/distributor responses
         let apiErrMsg = `API 调用失败: ${retryResponse.status}`;
         try {
           const ej = JSON.parse(retryError);
           apiErrMsg = ej.error?.message || ej.message || ej.msg || apiErrMsg;
-        } catch { /* not JSON, use default */ }
+        } catch { /* not JSON */ }
         if (/no\s+available\s+channel/i.test(retryError)) {
           apiErrMsg = '当前模型渠道暂不可用，请稍后重试或更换模型';
         }
         return NextResponse.json({ error: apiErrMsg }, { status: retryResponse.status });
       }
       
-      // Use retry response for streaming/non-streaming
       if (stream && retryResponse.body) {
         await appendUserJsonl(userId, 'chat', { model, providerId, messageCount: messages.length, stream: true });
         return new NextResponse(retryResponse.body, {
-          headers: {
-            'Content-Type': 'text/event-stream',
-            'Cache-Control': 'no-cache',
-            'Connection': 'keep-alive',
-          },
+          headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
         });
       }
       const retryData = await retryResponse.json();
+      
+      // Handle tool_calls in non-stream mode
+      if (enableTools && retryData.choices?.[0]?.message?.tool_calls) {
+        return handleNonStreamAgentLoop(retryData, fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId);
+      }
+      
       await appendUserJsonl(userId, 'chat', { model, providerId, messageCount: messages.length, stream: false });
       return NextResponse.json(retryData);
     }
 
-    // Primary response (non-thinking or thinking with base model succeeded)
-
-    // If response error
+    // Primary response error handling
     if (!response.ok) {
       const error = await response.text().catch(() => '');
       console.error('Chat API error:', error);
 
-      // Fallback: if /chat/completions returns 403 and error mentions /responses,
-      // retry with OpenAI Responses API format
+      // /responses API fallback
       if (response.status === 403 && error.includes('/responses')) {
         console.info('[chat] /chat/completions not allowed, retrying with /responses endpoint...');
         try {
@@ -187,59 +209,31 @@ export async function POST(request: NextRequest) {
             input: fixedMessages,
             stream,
           };
-
-          const responsesRes = await fetchWithV1Retry(
-            chatBaseUrl,
-            '/responses',
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${chatApiKey}`,
-              },
-              body: JSON.stringify(responsesBody),
-              signal: AbortSignal.timeout(120000),
-            }
-          );
-
+          const responsesRes = await fetchWithV1Retry(chatBaseUrl, '/responses', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${chatApiKey}` },
+            body: JSON.stringify(responsesBody),
+            signal: AbortSignal.timeout(120000),
+          });
           if (!responsesRes.ok) {
             const retryErr = await responsesRes.text().catch(() => '');
             console.error('Chat API /responses fallback error:', retryErr);
             return NextResponse.json({ error: `API 调用失败: ${responsesRes.status}` }, { status: responsesRes.status });
           }
-
-          // Stream response from /responses
           if (stream && responsesRes.body) {
             await appendUserJsonl(userId, 'chat', { model, providerId, messageCount: messages.length, stream: true });
             return new NextResponse(responsesRes.body, {
-              headers: {
-                'Content-Type': 'text/event-stream',
-                'Cache-Control': 'no-cache',
-                'Connection': 'keep-alive',
-              },
+              headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
             });
           }
-
-          // Non-stream: convert Responses API output to chat/completions format
           const respData = await responsesRes.json();
           const outputText = Array.isArray(respData.output)
-            ? respData.output
-                .filter((o: { type: string }) => o.type === 'message')
-                .flatMap((o: { content: Array<{ text: string }> }) => o.content?.map((c: { text: string }) => c.text) || [])
-                .join('')
+            ? respData.output.filter((o: { type: string }) => o.type === 'message').flatMap((o: { content: Array<{ text: string }> }) => o.content?.map((c: { text: string }) => c.text) || []).join('')
             : respData.output_text || JSON.stringify(respData.output || '');
-
           await appendUserJsonl(userId, 'chat', { model, providerId, messageCount: messages.length, stream: false });
           return NextResponse.json({
-            id: respData.id || `chatcmpl-${Date.now()}`,
-            object: 'chat.completion',
-            created: Math.floor(Date.now() / 1000),
-            model: requestModel,
-            choices: [{
-              index: 0,
-              message: { role: 'assistant', content: outputText },
-              finish_reason: 'stop',
-            }],
+            id: respData.id || `chatcmpl-${Date.now()}`, object: 'chat.completion', created: Math.floor(Date.now() / 1000), model: requestModel,
+            choices: [{ index: 0, message: { role: 'assistant', content: outputText }, finish_reason: 'stop' }],
             usage: respData.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
           });
         } catch (fallbackErr) {
@@ -248,28 +242,28 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // ★ 渠道不可用 / 模型未找到 — 提供更明确提示
       if (error.includes('No available channel') || error.includes('model_not_found') || error.includes('not configured')) {
         return NextResponse.json({ error: `模型 ${model || requestModel} 在当前渠道暂不可用，请稍后重试或更换模型` }, { status: 503 });
       }
-
       return NextResponse.json({ error: `API 调用失败: ${response.status}` }, { status: response.status });
     }
 
-    // Stream response: forward directly
+    // Stream: forward directly
     if (stream && response.body) {
       await appendUserJsonl(userId, 'chat', { model, providerId, messageCount: messages.length, stream: true });
       return new NextResponse(response.body, {
-        headers: {
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
-          'Connection': 'keep-alive',
-        },
+        headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
       });
     }
 
-    // Non-stream response
+    // Non-stream
     const data = await response.json();
+    
+    // Handle tool_calls in non-stream mode
+    if (enableTools && data.choices?.[0]?.message?.tool_calls) {
+      return handleNonStreamAgentLoop(data, fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId);
+    }
+    
     await appendUserJsonl(userId, 'chat', { model, providerId, messageCount: messages.length, stream: false });
     return NextResponse.json(data);
 
@@ -280,4 +274,380 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+// ============ Agent Stream Handler ============
+
+async function handleAgentStream(
+  fixedMessages: Array<Record<string, unknown>>,
+  requestModel: string,
+  chatApiKey: string,
+  chatBaseUrl: string,
+  origin: string,
+  userId: string,
+  model: string,
+  providerId: string | undefined,
+  isThinkingModel: boolean,
+): Promise<NextResponse> {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      const currentMessages = [...fixedMessages];
+      let iteration = 0;
+
+      try {
+        while (iteration < MAX_AGENT_ITERATIONS) {
+          iteration++;
+          
+          const requestBody: Record<string, unknown> = {
+            model: requestModel,
+            messages: currentMessages,
+            stream: true,
+            temperature: 0.7,
+            tools: CHAT_TOOLS,
+            tool_choice: 'auto',
+          };
+
+          if (isThinkingModel) {
+            requestBody.reasoning_effort = 'medium';
+          }
+
+          const response = await fetchWithV1Retry(chatBaseUrl, '/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${chatApiKey}`,
+            },
+            body: JSON.stringify(requestBody),
+            signal: AbortSignal.timeout(120000),
+          });
+
+          if (!response.ok) {
+            const errorText = await response.text().catch(() => '');
+            let apiErrMsg = `API 调用失败: ${response.status}`;
+            try {
+              const ej = JSON.parse(errorText);
+              apiErrMsg = ej.error?.message || ej.message || ej.msg || apiErrMsg;
+            } catch { /* not JSON */ }
+            // Check if it's a tools-not-supported error — if so, retry without tools
+            if (errorText.includes('tool') || errorText.includes('function') || response.status === 400) {
+              console.warn('[chat-agent] Model may not support function calling, falling back to no-tools mode');
+              // Retry without tools
+              const fallbackBody: Record<string, unknown> = {
+                model: requestModel,
+                messages: currentMessages,
+                stream: true,
+                temperature: 0.7,
+              };
+              const fallbackResponse = await fetchWithV1Retry(chatBaseUrl, '/chat/completions', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${chatApiKey}`,
+                },
+                body: JSON.stringify(fallbackBody),
+                signal: AbortSignal.timeout(120000),
+              });
+              if (fallbackResponse.ok && fallbackResponse.body) {
+                const reader = fallbackResponse.body.getReader();
+                while (true) {
+                  const { done, value } = await reader.read();
+                  if (done) break;
+                  controller.enqueue(value);
+                }
+              }
+              break; // Exit loop — no tools support
+            }
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: apiErrMsg })}\n\n`));
+            break;
+          }
+
+          if (!response.body) {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: 'API 未返回流' })}\n\n`));
+            break;
+          }
+
+          // Parse streaming response, accumulate tool_calls
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          let accumulatedToolCalls: Array<{ id: string; function: { name: string; arguments: string }; type: string }> = [];
+          let assistantContent = '';
+          let finishReason = '';
+          let hasToolCalls = false;
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed || !trimmed.startsWith('data: ')) continue;
+              const data = trimmed.slice(6);
+              if (data === '[DONE]') continue;
+
+              try {
+                const parsed = JSON.parse(data);
+                const choice = parsed.choices?.[0];
+                if (!choice) continue;
+
+                const delta = choice.delta;
+
+                // Accumulate tool_calls from delta
+                if (delta?.tool_calls) {
+                  hasToolCalls = true;
+                  accumulatedToolCalls = parseToolCallsFromStream(accumulatedToolCalls, delta.tool_calls);
+                  
+                  // Send a tool_call_start event to the frontend so it can show progress
+                  for (const tcDelta of delta.tool_calls) {
+                    if (tcDelta.function?.name) {
+                      controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                        type: 'tool_call_start',
+                        tool_name: accumulatedToolCalls[tcDelta.index]?.function?.name || '',
+                        tool_call_id: accumulatedToolCalls[tcDelta.index]?.id || '',
+                        iteration,
+                      })}\n\n`));
+                    }
+                  }
+                }
+
+                // Forward text content to client
+                if (delta?.content) {
+                  assistantContent += delta.content;
+                  // Forward the original SSE event to the frontend
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify(parsed)}\n\n`));
+                }
+
+                if (choice.finish_reason) {
+                  finishReason = choice.finish_reason;
+                }
+              } catch {
+                // Non-JSON line, skip
+              }
+            }
+          }
+
+          // If no tool_calls, we're done — the text content has already been forwarded
+          if (!hasToolCalls || finishReason !== 'tool_calls') {
+            break;
+          }
+
+          // ============ Execute Tool Calls ============
+          // Complete any unfinished tool_calls arguments
+          const completedToolCalls = accumulatedToolCalls.filter(tc => tc.id && tc.function.name);
+          
+          // Add assistant message with tool_calls to conversation
+          currentMessages.push({
+            role: 'assistant',
+            content: assistantContent || null,
+            tool_calls: completedToolCalls,
+          });
+
+          // Execute each tool call and add results
+          for (const toolCall of completedToolCalls) {
+            const toolName = toolCall.function.name;
+            let toolArgs: Record<string, unknown>;
+            try {
+              toolArgs = JSON.parse(toolCall.function.arguments || '{}');
+            } catch {
+              toolArgs = {};
+            }
+
+            // Send tool execution progress event
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+              type: 'tool_execution_start',
+              tool_name: toolName,
+              tool_call_id: toolCall.id,
+              tool_args: toolArgs,
+              iteration,
+            })}\n\n`));
+
+            // Execute the tool
+            let toolResult: ToolCallResult;
+            try {
+              toolResult = await Promise.race([
+                executeToolCall(toolName, toolArgs, {
+                  chatApiKey,
+                  chatBaseUrl,
+                  origin,
+                  userId,
+                }),
+                new Promise<ToolCallResult>((_, reject) =>
+                  setTimeout(() => reject(new Error('Tool execution timeout')), TOOL_EXECUTION_TIMEOUT)
+                ),
+              ]);
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              toolResult = { success: false, error: msg, resultText: `工具执行超时或出错: ${msg}` };
+            }
+
+            // Send tool execution result event
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+              type: 'tool_execution_result',
+              tool_name: toolName,
+              tool_call_id: toolCall.id,
+              success: toolResult.success,
+              imageUrls: toolResult.imageUrls || [],
+              videoUrls: toolResult.videoUrls || [],
+              taskIds: toolResult.taskIds || [],
+              iteration,
+            })}\n\n`));
+
+            // Add tool result to conversation
+            currentMessages.push({
+              role: 'tool',
+              tool_call_id: toolCall.id,
+              content: toolResult.resultText,
+            });
+          }
+
+          // Send tool execution complete event — LLM will continue thinking
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+            type: 'tool_execution_complete',
+            iteration,
+            tools_executed: completedToolCalls.length,
+          })}\n\n`));
+
+          // Continue the loop — LLM will now see the tool results and decide next action
+        }
+
+        // Send final [DONE]
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+        controller.close();
+
+        await appendUserJsonl(userId, 'chat', { model, providerId, messageCount: fixedMessages.length, stream: true, agentIterations: iteration });
+      } catch (err) {
+        console.error('[chat-agent] Stream error:', err);
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: `Agent 执行出错: ${err instanceof Error ? err.message : String(err)}` })}\n\n`));
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+        controller.close();
+      }
+    },
+  });
+
+  return new NextResponse(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    },
+  });
+}
+
+// ============ Non-Stream Agent Loop ============
+
+async function handleNonStreamAgentLoop(
+  initialData: { choices: Array<{ message: { tool_calls?: unknown[]; content?: string } }> },
+  fixedMessages: Array<Record<string, unknown>>,
+  requestModel: string,
+  chatApiKey: string,
+  chatBaseUrl: string,
+  origin: string,
+  userId: string,
+  model: string,
+  providerId: string | undefined,
+): Promise<NextResponse> {
+  const currentMessages = [...fixedMessages];
+  const allToolResults: Array<{ toolName: string; result: ToolCallResult }> = [];
+  let iteration = 0;
+
+  // Add the initial assistant message with tool_calls
+  const initialChoice = initialData.choices[0];
+  if (initialChoice?.message) {
+    currentMessages.push(initialChoice.message as Record<string, unknown>);
+  }
+
+  while (iteration < MAX_AGENT_ITERATIONS) {
+    iteration++;
+    const toolCalls = (currentMessages[currentMessages.length - 1] as Record<string, unknown>)?.tool_calls as Array<{ id: string; function: { name: string; arguments: string } }> | undefined;
+    
+    if (!toolCalls || toolCalls.length === 0) break;
+
+    // Execute each tool call
+    for (const toolCall of toolCalls) {
+      const toolName = toolCall.function.name;
+      let toolArgs: Record<string, unknown>;
+      try {
+        toolArgs = JSON.parse(toolCall.function.arguments || '{}');
+      } catch {
+        toolArgs = {};
+      }
+
+      const toolResult = await executeToolCall(toolName, toolArgs, {
+        chatApiKey,
+        chatBaseUrl,
+        origin,
+        userId,
+      });
+
+      allToolResults.push({ toolName, result: toolResult });
+
+      currentMessages.push({
+        role: 'tool',
+        tool_call_id: toolCall.id,
+        content: toolResult.resultText,
+      });
+    }
+
+    // Call LLM again with tool results
+    const nextRequestBody: Record<string, unknown> = {
+      model: requestModel,
+      messages: currentMessages,
+      stream: false,
+      temperature: 0.7,
+      tools: CHAT_TOOLS,
+      tool_choice: 'auto',
+    };
+
+    const nextResponse = await fetchWithV1Retry(chatBaseUrl, '/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${chatApiKey}`,
+      },
+      body: JSON.stringify(nextRequestBody),
+      signal: AbortSignal.timeout(120000),
+    });
+
+    if (!nextResponse.ok) break;
+
+    const nextData = await nextResponse.json();
+    const nextMessage = nextData.choices?.[0]?.message;
+    if (!nextMessage) break;
+
+    currentMessages.push(nextMessage as Record<string, unknown>);
+
+    // If no more tool_calls, we're done
+    if (!nextMessage.tool_calls || nextMessage.tool_calls.length === 0) {
+      // Collect all image/video URLs from tool results
+      const allImageUrls = allToolResults.flatMap(r => r.result.imageUrls || []);
+      const allVideoUrls = allToolResults.flatMap(r => r.result.videoUrls || []);
+      const allTaskIds = allToolResults.flatMap(r => r.result.taskIds || []);
+
+      await appendUserJsonl(userId, 'chat', { model, providerId, messageCount: fixedMessages.length, stream: false, agentIterations: iteration });
+      
+      // Return the final response with tool results metadata
+      return NextResponse.json({
+        ...nextData,
+        _toolResults: allToolResults.map(r => ({
+          toolName: r.toolName,
+          success: r.result.success,
+          imageUrls: r.result.imageUrls || [],
+          videoUrls: r.result.videoUrls || [],
+          taskIds: r.result.taskIds || [],
+        })),
+        _imageUrls: allImageUrls,
+        _videoUrls: allVideoUrls,
+        _taskIds: allTaskIds,
+      });
+    }
+  }
+
+  // Fallback: return last data
+  await appendUserJsonl(userId, 'chat', { model, providerId, messageCount: fixedMessages.length, stream: false, agentIterations: iteration });
+  return NextResponse.json(initialData);
 }

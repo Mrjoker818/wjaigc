@@ -642,6 +642,16 @@ function CanvasApp() {
           // sendBeacon 限制约 64KB，超出则跳过（依赖定期同步兜底）
           if (blob.size <= 65536) {
             navigator.sendBeacon('/api/user-data/sync', blob);
+          } else {
+            // sendBeacon 超出64KB限制，使用 fetch keepalive 作为 fallback
+            try {
+              fetch('/api/user-data/sync', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+                keepalive: true,
+              }).catch(() => {});
+            } catch { /* best effort */ }
           }
         }
       } catch { /* best effort */ }

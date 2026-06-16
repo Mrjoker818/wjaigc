@@ -95,11 +95,13 @@ export async function POST(request: NextRequest) {
 
       if (task.status === 'completed') {
         setTimeout(() => deleteEditTask(taskId), 5 * 60 * 1000);
+        // ★ 过滤敏感字段
+        const { apiKey: _ak, apiBaseUrl: _abu, advancedParams: _ap, ...safeResult } = (task.result as Record<string, unknown>) || {};
         return NextResponse.json({
           success: true,
           status: 'completed',
           stage: task.stage,
-          result: task.result,
+          result: safeResult,
         }, { status: 200 });
       }
 
@@ -438,16 +440,17 @@ export async function POST(request: NextRequest) {
             taskResult = cached;
           }
         }
-        const taskResultObj = (taskResult as unknown as Record<string, unknown>) || {};
+        // ★ 过滤敏感字段，防止 apiKey/apiBaseUrl 等泄露到前端
+        const { apiKey: _ak, apiBaseUrl: _abu, advancedParams: _ap, ...safeResult } = (taskResult as Record<string, unknown>) || {};
         return NextResponse.json({
           success: true,
           status: 'completed',
           progress: registryTask.progress,
-          result: taskResult,
-          imageUrl: taskResultObj?.imageUrl as string | undefined,
-          maskUrl: taskResultObj?.maskUrl as string | undefined,
-          modelName: (taskResultObj?.usedModel as string) || (taskResultObj?.modelName as string) || '',
-          providerName: (taskResultObj?.providerName as string) || (taskResultObj?.providerId as string) || '',
+          result: safeResult,
+          imageUrl: safeResult?.imageUrl as string | undefined,
+          maskUrl: safeResult?.maskUrl as string | undefined,
+          modelName: (safeResult?.usedModel as string) || (safeResult?.modelName as string) || '',
+          providerName: (safeResult?.providerName as string) || (safeResult?.providerId as string) || '',
         }, { status: 200 });
       }
       if (registryTask.status === 'failed') {
@@ -486,12 +489,13 @@ export async function POST(request: NextRequest) {
           const syncVideoUrl = regResult.videoUrl as string | undefined;
           if (syncVideoUrl) {
             releaseQueueSlot(taskId);
+            const safeRegistryResult = (({ apiKey: _ak, apiBaseUrl: _abu, ...rest }) => rest)(registryTask.result as Record<string, unknown>);
             return NextResponse.json({
               success: true,
               status: 'completed',
               progress: 100,
               label: registryTask.label,
-              result: registryTask.result,
+              result: safeRegistryResult,
             }, { status: 200 });
           }
           // 尚未获得第三方任务ID（可能提交还在进行中）
@@ -640,7 +644,7 @@ export async function POST(request: NextRequest) {
                   const origPath = new URL(videoResult.videoUrl).pathname;
                   const ext = path.extname(origPath).toLowerCase() || '.mp4';
                   const filename = `video_${taskId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`;
-                  const dirPath = path.join(dataRoot, 'public', 'video', taskId);
+                  const dirPath = path.join(dataRoot, 'uploads', 'video', taskId);
                   await fs.mkdir(dirPath, { recursive: true });
                   await fs.writeFile(path.join(dirPath, filename), videoBuffer);
                   persistedVideoUrl = `/api/serve-upload/video/${taskId}/${filename}`;

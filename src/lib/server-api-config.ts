@@ -6,7 +6,7 @@ import type { ApiBalanceInfo, ApiProvider, ModelInfo } from './universal-api-typ
 import { fetchWithV1Retry } from './api-helpers';
 import { getModelDisplayName } from './model-name-map';
 import { getServerSystemDir } from './server-data-root';
-import { dbGetApiProviders, dbUpsertApiProvider, dbDeleteApiProvider } from './db-storage';
+import { dbGetApiProviders, dbUpsertApiProvider, dbDeleteApiProvider, dbDeleteStaleProviders } from './db-storage';
 
 const SYSTEM_DIR = getServerSystemDir();
 const CONFIG_PATH = path.join(SYSTEM_DIR, 'api-providers.json');
@@ -362,7 +362,18 @@ async function migrateProvidersToDb(providers: ApiProvider[]): Promise<void> {
 
 async function writeConfig(config: StoredApiConfig): Promise<void> {
   // Write to database (persistent across deployments)
-  migrateProvidersToDb(config.providers).catch(() => {});
+  // Use await to ensure DB is in sync, then clean up stale providers
+  try {
+    await migrateProvidersToDb(config.providers);
+    // Clean up providers in DB that are no longer in the current config
+    const currentIds = config.providers.map(p => p.id);
+    const dbProviders = await dbGetApiProviders();
+    for (const dbp of dbProviders) {
+      if (!currentIds.includes(dbp.id)) {
+        await dbDeleteApiProvider(dbp.id).catch(() => {});
+      }
+    }
+  } catch {}
 
   // Also write to file system as backup
   await mkdir(SYSTEM_DIR, { recursive: true });
@@ -640,8 +651,8 @@ export async function deleteApiProvider(providerId: string): Promise<boolean> {
   const config = await readConfig();
   const next = config.providers.filter(provider => provider.id !== providerId);
   if (next.length === config.providers.length) return false;
-  // Delete from database explicitly
-  dbDeleteApiProvider(providerId).catch(() => {});
+  // Delete from database and wait for result to ensure consistency
+  await dbDeleteApiProvider(providerId);
   // Reassign sortOrder after deletion
   next.forEach((p, i) => { p.sortOrder = i; });
   await writeConfig({ providers: next, updatedAt: Date.now() });

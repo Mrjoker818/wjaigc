@@ -4,7 +4,7 @@
  * Falls back to file-based storage if database is unavailable
  */
 
-import { execSql } from './db-client';
+import { execSql, getPool } from './db-client';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -167,13 +167,31 @@ export async function dbDeleteApiProvider(id: string): Promise<boolean> {
   }
 }
 
+/** Delete providers from DB that are not in the given activeIdList */
+export async function dbDeleteStaleProviders(activeIdList: string[]): Promise<void> {
+  if (activeIdList.length === 0) return;
+  try {
+    const placeholders = activeIdList.map((_, i) => `$${i + 1}`).join(',');
+    await execSql(
+      `DELETE FROM wujie_api_providers WHERE id NOT IN (${placeholders})`,
+      activeIdList
+    );
+  } catch (e) {
+    console.error('[db-storage] dbDeleteStaleProviders error:', e);
+  }
+}
+
 export async function dbBatchUpdateProviderOrder(orders: Array<{ id: string; sortOrder: number }>): Promise<boolean> {
   try {
+    // 使用事务保证原子性，避免部分更新
+    await execSql('BEGIN');
     for (const { id, sortOrder } of orders) {
       await execSql('UPDATE wujie_api_providers SET sort_order = $1, updated_at = $2 WHERE id = $3', [sortOrder, Date.now(), id]);
     }
+    await execSql('COMMIT');
     return true;
   } catch (e) {
+    try { await execSql('ROLLBACK'); } catch { /* ignore rollback error */ }
     console.error('[db-storage] dbBatchUpdateProviderOrder error:', e);
     return false;
   }
@@ -543,10 +561,22 @@ export async function dbDeleteBrandAsset(id: string): Promise<boolean> {
 
 export async function dbSetDefaultBrandAsset(userId: string, id: string): Promise<boolean> {
   try {
-    // Unset all defaults for this user, then set the new one
-    await execSql('UPDATE wujie_brand_assets SET is_default = FALSE, updated_at = $1 WHERE user_id = $2', [Date.now(), userId]);
-    await execSql('UPDATE wujie_brand_assets SET is_default = TRUE, updated_at = $1 WHERE id = $2 AND user_id = $3', [Date.now(), id, userId]);
-    return true;
+    // Use a transaction to ensure atomicity — if the second UPDATE fails,
+    // the first UPDATE (unsetting all defaults) gets rolled back too
+    const pool = getPool();
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('UPDATE wujie_brand_assets SET is_default = FALSE, updated_at = $1 WHERE user_id = $2', [Date.now(), userId]);
+      await client.query('UPDATE wujie_brand_assets SET is_default = TRUE, updated_at = $1 WHERE id = $2 AND user_id = $3', [Date.now(), id, userId]);
+      await client.query('COMMIT');
+      return true;
+    } catch (txErr) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw txErr;
+    } finally {
+      client.release();
+    }
   } catch (e) {
     console.error('[db-storage] dbSetDefaultBrandAsset error:', e);
     return false;
@@ -831,7 +861,7 @@ export async function dbUpsertBrandProject(project: Partial<DbBrandProject> & { 
       const values: unknown[] = [];
       let idx = 1;
       for (const [k, v] of Object.entries(project)) {
-        if (k === 'id' || !BRAND_PROJECT_COLUMNS.has(k)) continue;
+        if (k === 'id' || k === 'created_at' || k === 'updated_at' || !BRAND_PROJECT_COLUMNS.has(k)) continue;
         fields.push(`${k} = $${idx}`);
         values.push(v);
         idx++;
@@ -843,10 +873,8 @@ export async function dbUpsertBrandProject(project: Partial<DbBrandProject> & { 
     } else {
       const cols = ['id', 'created_at', 'updated_at'];
       const vals: unknown[] = [project.id, now, now];
-      let pi = 1;
       for (const [k, v] of Object.entries(project)) {
-        if (k === 'id' || !BRAND_PROJECT_COLUMNS.has(k)) continue;
-        pi++;
+        if (k === 'id' || k === 'created_at' || k === 'updated_at' || !BRAND_PROJECT_COLUMNS.has(k)) continue;
         cols.push(k);
         vals.push(v);
     }
@@ -1022,6 +1050,31 @@ export async function dbAdjustCredits(
   } catch (e) {
     console.error('[db-storage] dbAdjustCredits error:', e);
     return { success: false, balance: 0, message: 'Database error' };
+  }
+}
+
+/**
+ * Record a credit transaction WITHOUT modifying the balance.
+ * Used after atomic SQL deductions (consumeCredits) to avoid TOCTOU race.
+ */
+export async function dbRecordCreditTransaction(
+  userId: string,
+  amount: number,
+  type: 'recharge' | 'consume' | 'refund' | 'admin_adjust',
+  balanceAfter: number,
+  description?: string,
+  referenceId?: string
+): Promise<void> {
+  try {
+    const now = Date.now();
+    const txId = `tx_${now}_${Math.random().toString(36).slice(2, 8)}`;
+    await execSql(
+      `INSERT INTO wujie_credit_transactions (id, user_id, type, amount, balance_after, description, reference_id, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [txId, userId, type, amount, balanceAfter, description || null, referenceId || null, now]
+    );
+  } catch (e) {
+    console.error('[db-storage] dbRecordCreditTransaction error:', e);
   }
 }
 

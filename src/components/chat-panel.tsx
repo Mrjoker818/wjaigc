@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Bot, Send, Sparkles, Copy, Check, Trash2, Loader2, Eye, EyeOff, Wand2, User, Upload, X, Image as ImageIcon, Languages, Settings, Plug, Plus, History, FolderOpen, MessageSquare, Bookmark, BookmarkCheck, Lightbulb, Zap, ArrowRight, Palette, Target, Sliders, Download, AlertCircle, LocateFixed, RotateCcw, FileText } from 'lucide-react';
+import { Bot, Send, Sparkles, Copy, Check, Trash2, Loader2, Eye, EyeOff, Wand2, User, Upload, X, Image as ImageIcon, Languages, Settings, Plug, Plus, History, FolderOpen, MessageSquare, Bookmark, BookmarkCheck, Lightbulb, Zap, ArrowRight, Palette, Target, Sliders, Download, AlertCircle, LocateFixed, RotateCcw, FileText, Cpu } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -49,6 +49,17 @@ interface Message {
   imageAnchors?: Array<{ imageId: string; imageUrl: string; imageName: string }>; // 画布图片锚点（Lovart风格）
   suggestions?: NextSuggestion[]; // 建议下一步操作
   isClarifying?: boolean; // 是否为追问消息
+  toolExecutions?: ToolExecution[]; // Agent工具执行记录
+}
+
+interface ToolExecution {
+  toolName: string;       // 工具名称 (generate_image, edit_image, remove_bg, etc.)
+  status: 'running' | 'completed' | 'failed'; // 执行状态
+  label: string;          // 显示标签 (如"正在生成图片...")
+  result?: string;        // 结果描述
+  imageUrls?: string[];   // 生成的图片URL
+  videoUrl?: string;      // 生成的视频URL
+  error?: string;         // 错误信息
 }
 
 interface NextSuggestion {
@@ -68,7 +79,33 @@ interface ChatSession {
   updatedAt: number;
 }
 
-const AGENTS = [
+// Agent recipe: a single-step operation with domain-specific prompt strategy
+interface AgentRecipe {
+  id: string;
+  name: string;
+  operationType: string; // matches tool name: generate_image, edit_image, remove_bg, etc.
+  promptTemplate: string; // prompt template with {variables}
+  defaultParams: Record<string, unknown>; // default generation params (aspectRatio, quality, etc.)
+  inputHint: string; // what input this recipe needs
+}
+
+// Agent capability definition - extends the simple prompt-based agent
+interface AgentDefinition {
+  id: string;
+  name: string;
+  nameEn: string;
+  icon: string;
+  desc: string;
+  color: string;
+  prompt: string;
+  // P0-3: New capability fields
+  tools: string[]; // available tool names (subset of chat-tools)
+  recipes: AgentRecipe[]; // domain-specific operation templates
+  defaultAspectRatio?: string; // default aspect ratio for this agent
+  suggestedNextSteps?: { label: string; action: string; prefilledPrompt?: string }[];
+}
+
+const AGENTS: AgentDefinition[] = [
   {
     id: 'liquor-packaging',
     name: '酒类包装',
@@ -99,6 +136,18 @@ const AGENTS = [
 6. AI 渲染提示词：必须同时输出中文和英文两个版本，格式如下：
 【中文提示词】用中文描述画面的主体、场景、风格、色彩、光影、氛围等，100-200字
 【English Prompt】English prompt for Midjourney/DALL-E 3 with style, lighting, composition keywords`,
+    tools: ['generate_image', 'edit_image', 'remove_bg', 'upscale', 'analyze_image'],
+    recipes: [
+      { id: 'bottle-3d-render', name: '瓶型3D渲染', operationType: 'generate_image', promptTemplate: '3D product render of a premium liquor bottle, {style}, {material}, studio lighting, PBR materials, photorealistic, 8k', defaultParams: { aspectRatio: '3:4', quality: 'hd' } },
+      { id: 'label-design', name: '标签设计', operationType: 'generate_image', promptTemplate: 'Premium liquor label design, {brandStyle}, gold foil stamping, elegant typography, white background, flat design', defaultParams: { aspectRatio: '2:3', quality: 'hd' } },
+      { id: 'gift-box-render', name: '礼盒3D渲染', operationType: 'generate_image', promptTemplate: 'Luxury liquor gift box 3D render, {material}, velvet interior, magnetic closure, premium unboxing experience, 8k', defaultParams: { aspectRatio: '4:3', quality: 'hd' } },
+    ],
+    defaultAspectRatio: '3:4',
+    suggestedNextSteps: [
+      { label: '调整瓶型造型', action: 'edit_image', prefilledPrompt: '保持整体风格不变，调整瓶身造型为更流线型的设计' },
+      { label: '更换材质方案', action: 'generate_image', prefilledPrompt: '将瓶身材质更换为磨砂玻璃，保持原有造型' },
+      { label: '放大到8K', action: 'upscale' },
+    ],
   },
   {
     id: 'brand-visuals',
@@ -130,9 +179,19 @@ const AGENTS = [
 6. AI 渲染提示词：必须同时输出中文和英文两个版本，格式如下：
 【中文提示词】用中文描述画面的主体、场景、风格、色彩、光影、氛围等，100-200字
 【English Prompt】English prompt for Midjourney/DALL-E 3 with style, lighting, composition keywords`,
+    tools: ['generate_image', 'edit_image', 'remove_bg', 'upscale', 'analyze_image'],
+    recipes: [
+      { id: 'logo-design', name: 'Logo设计', operationType: 'generate_image', promptTemplate: 'Brand logo design, {brandStyle}, minimalist, vector style, {colorScheme}, flat design on white background', defaultParams: { aspectRatio: '1:1', quality: 'hd' } },
+      { id: 'color-system', name: '色彩体系展示', operationType: 'generate_image', promptTemplate: 'Brand color palette presentation, {primaryColor} {secondaryColor} {accentColor}, professional color swatches, clean layout', defaultParams: { aspectRatio: '16:9', quality: 'standard' } },
+      { id: 'vi-mockup', name: 'VI应用效果图', operationType: 'generate_image', promptTemplate: 'Brand identity mockup, {brandStyle}, business card letterhead envelope, professional presentation, photorealistic', defaultParams: { aspectRatio: '16:9', quality: 'hd' } },
+    ],
+    defaultAspectRatio: '1:1',
+    suggestedNextSteps: [
+      { label: '优化Logo细节', action: 'edit_image', prefilledPrompt: '保持整体构图，优化Logo的线条流畅度和细节' },
+      { label: '生成VI应用场景', action: 'generate_image', prefilledPrompt: '将Logo应用到名片和信封上的效果图' },
+      { label: '移除背景', action: 'remove_bg' },
+    ],
   },
-  {
-    id: 'spatial-exhibit',
     name: '空间展演',
     nameEn: 'Spatial Exhibit',
     icon: '🏛️',
@@ -3129,7 +3188,7 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
       // P1-2: 图片上下文 - 如果有选中画布图片，注入图片上下文
       const hasCanvasImages = pendingImages.length > 0;
       if (hasCanvasImages) {
-        const imageDescriptions = pendingImages.map((img, i) => 
+        const imageDescriptions = pendingImages.map((img, i) =>
           `图片${pendingImages.length > 1 ? (i + 1) : ''}: ${img.name}`
         ).join('\n');
         enhancedSystemPrompt += `
@@ -3139,33 +3198,21 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
 ${imageDescriptions}
 用户的消息是针对这${pendingImages.length > 1 ? '些' : '张'}图片的操作指令，请据此理解用户意图。
 
-【⚠️ 图像生成指令 - 必须遵守⚠️】
-仅在用户明确要求"生成/画出/创建/制作/设计一张图片或某种视觉内容"时，才输出图像生成指令。
-例如：画一只猫、设计海报、制作表情包、生成插画、帮我P图、变体、换风格 → 必须输出[GENERATE:]
-例如：什么是AI、解释xxx原理、写一段文案、推荐配色 → 不要输出[GENERATE:]
+【⚠️ 图像操作指令 - 使用工具调用⚠️】
+当你判断需要生成图片、编辑图片、移除背景、放大图片等操作时，请使用提供的工具(function calling)来执行。
+- 用户要求"生成/画出/创建/设计一张图片" → 调用 generate_image 工具
+- 用户要求"修改/编辑图片" → 调用 edit_image 工具
+- 用户要求"移除背景/抠图" → 调用 remove_bg 工具
+- 用户要求"放大/高清化" → 调用 upscale 工具
+- 用户要求"扩展画面/补全边缘" → 调用 extend_image 工具
+- 用户要求"生成视频" → 调用 generate_video 工具
+- 用户要求"图片变视频" → 调用 img2video 工具
+- 用户要求"分析图片" → 调用 analyze_image 工具
 
-当你判断需要生成图片时，输出格式要求（严格遵守）：
-1. 先用自然语言描述你的设计思路和建议（中文）
-2. 在回复的最后，每张图片单独一行输出 [GENERATE: ...] 标签，格式严格如下：
+对于纯文本问答（解释原理、写文案、推荐配色等），直接文字回复即可，不需要调用工具。
 
-【单张图】
-[GENERATE: 详细的英文图像生成提示词]
-
-【多张图 - 关键规则】
-当用户要求生成多张图（如"生成3张"、"多个方案"、"不同风格"）时：
-- 每个方案必须输出一个独立的 [GENERATE: ...] 标签
-- 每个标签内的提示词只描述一个画面，不要把多个方案合并到一个标签里
-- 每个提示词应有明显差异（不同构图/风格/角度/色调）
-格式示例：
-[GENERATE: a cute orange cat sleeping on a sunny windowsill, oil painting style, warm tones]
-[GENERATE: a playful orange cat chasing a butterfly in a flower garden, watercolor style, bright colors]
-[GENERATE: a majestic orange cat sitting on a rooftop at sunset, digital art, cinematic lighting]
-
-提示词要求：英文、200-500词、详细描述画面内容/风格/构图/色彩/光照/细节。
-示例：用户说"做一套表情包" → 你先给设计建议，最后为每个表情分别输出：
-[GENERATE: a cute cartoon cat sticker with happy expression, kawaii style, white background, bold outlines]
-[GENERATE: a cute cartoon cat sticker with angry expression, kawaii style, white background, bold outlines]
-[GENERATE: a cute cartoon cat sticker with surprised expression, kawaii style, white background, bold outlines]`;
+【多张图生成规则】
+当用户要求生成多张图（如"生成3张"、"多个方案"、"不同风格"）时，每个方案调用一次 generate_image 工具，每次的提示词应有明显差异（不同构图/风格/角度/色调）。`;
       }
 
       // P2-1: Tune Mode — Inject fine-tuning parameters
@@ -3173,35 +3220,25 @@ ${imageDescriptions}
         enhancedSystemPrompt += tuneContextString;
       }
 
-      // 通用图像生成指令 - 当没有图片时，也告诉LLM可以触发生图
+      // 通用图像操作指令 - 当没有图片时，也告诉LLM可以使用工具
       if (!hasCanvasImages) {
         enhancedSystemPrompt += `
 
-【⚠️ 图像生成指令 - 必须遵守⚠️】
-仅在用户明确要求"生成/画出/创建/制作/设计一张图片或某种视觉内容"时，才输出图像生成指令。
-例如：画一只猫、设计海报、制作表情包、生成插画 → 必须输出[GENERATE:]
-例如：什么是AI、解释原理、写文案、推荐配色 → 不要输出[GENERATE:]
+【⚠️ 图像操作指令 - 使用工具调用⚠️】
+当你判断需要生成图片、编辑图片、移除背景、放大图片等操作时，请使用提供的工具(function calling)来执行。
+- 用户要求"生成/画出/创建/设计一张图片" → 调用 generate_image 工具
+- 用户要求"修改/编辑图片" → 调用 edit_image 工具
+- 用户要求"移除背景/抠图" → 调用 remove_bg 工具
+- 用户要求"放大/高清化" → 调用 upscale 工具
+- 用户要求"扩展画面/补全边缘" → 调用 extend_image 工具
+- 用户要求"生成视频" → 调用 generate_video 工具
+- 用户要求"图片变视频" → 调用 img2video 工具
+- 用户要求"分析图片" → 调用 analyze_image 工具
 
-当你判断需要生成图片时，输出格式要求（严格遵守）：
-1. 先用自然语言描述你的设计思路和建议（中文）
-2. 在回复的最后，每张图片单独一行输出 [GENERATE: ...] 标签，格式严格如下：
+对于纯文本问答（解释原理、写文案、推荐配色等），直接文字回复即可，不需要调用工具。
 
-【单张图】
-[GENERATE: 详细的英文图像生成提示词]
-
-【多张图 - 关键规则】
-当用户要求生成多张图（如"生成3张"、"多个方案"、"不同风格"）时：
-- 每个方案必须输出一个独立的 [GENERATE: ...] 标签
-- 每个标签内的提示词只描述一个画面，不要把多个方案合并到一个标签里
-- 每个提示词应有明显差异（不同构图/风格/角度/色调）
-格式示例：
-[GENERATE: a cute orange cat sleeping on a sunny windowsill, oil painting style, warm tones]
-[GENERATE: a playful orange cat chasing a butterfly in a flower garden, watercolor style, bright colors]
-[GENERATE: a majestic orange cat sitting on a rooftop at sunset, digital art, cinematic lighting]
-
-提示词要求：英文、200-500词、详细描述画面内容/风格/构图/色彩/光照/细节。
-示例：用户说"画一只猫" → 你先给出创意建议，最后单独一行输出：
-[GENERATE: a beautiful cat sitting on a windowsill, soft sunlight, oil painting style, warm color palette, detailed fur texture, cozy atmosphere, 4K quality]`;
+【多张图生成规则】
+当用户要求生成多张图（如"生成3张"、"多个方案"、"不同风格"）时，每个方案调用一次 generate_image 工具，每次的提示词应有明显差异（不同构图/风格/角度/色调）。`;
       }
 
       if (enhancedSystemPrompt) {
@@ -3299,7 +3336,7 @@ ${imageDescriptions}
           model: actualModel,
           messages: requestMessages,
           stream: true,
-
+          enableTools: true,
           providerId,
         }),
       });
@@ -3312,6 +3349,10 @@ ${imageDescriptions}
       const decoder = new TextDecoder();
       const assistantMessageId = `assistant-${Date.now()}`;
       let assistantContent = '';
+      const toolExecutions: ToolExecution[] = []; // Agent工具执行记录
+      const toolGeneratedImages: string[] = []; // 工具生成的图片URL
+      let toolGeneratedVideo: string | undefined; // 工具生成的视频URL
+      let currentSSEEvent = ''; // 当前SSE事件类型
 
       setMessages(prev => [...prev, {
         id: assistantMessageId,
@@ -3329,22 +3370,94 @@ ${imageDescriptions}
           const lines = chunk.split('\n');
 
           for (const line of lines) {
+            // 解析SSE event类型行
+            if (line.startsWith('event: ')) {
+              currentSSEEvent = line.slice(7).trim();
+              continue;
+            }
+
             if (line.startsWith('data: ')) {
               const data = line.slice(6);
-              if (data === '[DONE]') break;
+              if (data === '[DONE]') continue;
 
               try {
                 const parsed = JSON.parse(data);
+
+                // ====== 处理Agent工具调用事件 ======
+                if (currentSSEEvent === 'tool_execution_start' && parsed.toolName) {
+                  const toolExec: ToolExecution = {
+                    toolName: parsed.toolName,
+                    status: 'running',
+                    label: parsed.label || `正在执行 ${parsed.toolName}...`,
+                  };
+                  toolExecutions.push(toolExec);
+                  setMessages(prev => prev.map(msg =>
+                    msg.id === assistantMessageId
+                      ? { ...msg, toolExecutions: [...toolExecutions] }
+                      : msg
+                  ));
+                  currentSSEEvent = '';
+                  continue;
+                }
+
+                if (currentSSEEvent === 'tool_execution_result' && parsed.toolName) {
+                  // 更新对应工具的执行结果
+                  const execIdx = toolExecutions.findIndex(e => e.toolName === parsed.toolName && e.status === 'running');
+                  if (execIdx >= 0) {
+                    toolExecutions[execIdx] = {
+                      ...toolExecutions[execIdx],
+                      status: parsed.success ? 'completed' : 'failed',
+                      result: parsed.result,
+                      imageUrls: parsed.imageUrls,
+                      videoUrl: parsed.videoUrl,
+                      error: parsed.error,
+                    };
+                  }
+                  setMessages(prev => prev.map(msg =>
+                    msg.id === assistantMessageId
+                      ? { ...msg, toolExecutions: [...toolExecutions] }
+                      : msg
+                  ));
+                  // 收集工具生成的图片/视频
+                  if (parsed.imageUrls && parsed.imageUrls.length > 0) {
+                    toolGeneratedImages.push(...parsed.imageUrls);
+                  }
+                  if (parsed.videoUrl) {
+                    toolGeneratedVideo = parsed.videoUrl;
+                  }
+                  currentSSEEvent = '';
+                  continue;
+                }
+
+                if (currentSSEEvent === 'tool_execution_complete') {
+                  // 所有工具执行完成，将图片添加到画布
+                  if (toolGeneratedImages.length > 0 && onAddImages) {
+                    const imageModelInfo = getCurrentImageModelInfo(imageModel, imageModelProviderId);
+                    onAddImages(toolGeneratedImages, undefined, { modelName: imageModelInfo.model, apiProvider: imageModelInfo.providerId });
+                  }
+                  // 更新消息中的生成图片
+                  if (toolGeneratedImages.length > 0) {
+                    setMessages(prev => prev.map(msg =>
+                      msg.id === assistantMessageId
+                        ? { ...msg, generatedImages: toolGeneratedImages, isGeneratingImage: false, generateProgress: 100 }
+                        : msg
+                    ));
+                  }
+                  currentSSEEvent = '';
+                  continue;
+                }
+
+                // ====== 处理常规LLM流式内容 ======
                 const delta = parsed.choices?.[0]?.delta?.content || '';
                 if (delta) {
                   assistantContent += delta;
-                  // 流式输出时实时隐藏所有 [GENERATE: ...] 标签（包括未闭合的）
+                  // 流式输出时隐藏 [GENERATE: ...] 标签（兼容旧模式）
                   const streamDisplayContent = assistantContent
-                    .replace(/\[GENERATE:\s*[\s\S]+?\]/g, '') // 移除已闭合的标签
-                    .replace(/\[GENERATE:\s*[\s\S]*$/, '') // 移除未闭合的标签（正在流式输出）
+                    .replace(/\[GENERATE:\s*[\s\S]+?\]/g, '')
+                    .replace(/\[GENERATE:\s*[\s\S]*$/, '')
                     .trimEnd();
-                  setMessages(prev => prev.map(msg => 
-                    msg.id === assistantMessageId 
+                  setMessages(prev => prev.map(msg =>
+                    msg.id === assistantMessageId
                       ? { ...msg, content: streamDisplayContent || assistantContent }
                       : msg
                   ));
@@ -3352,6 +3465,7 @@ ${imageDescriptions}
               } catch {
                 // 忽略解析错误
               }
+              currentSSEEvent = '';
             }
           }
         }
@@ -3376,17 +3490,20 @@ ${imageDescriptions}
         ));
       }
 
-      // ====== LLM驱动的图像生成：解析 [GENERATE: ...] 标签（支持多个独立标签） ======
+      // ====== P0-1: 图像生成处理（Function Calling优先，[GENERATE]标签兜底） ======
       const generateMatches = [...assistantContent.matchAll(/\[GENERATE:\s*([\s\S]+?)\]/g)];
       const hasGenerateTags = generateMatches.length > 0;
-      if (hasGenerateTags) {
-        // ★ 提取所有独立的 prompt
+      const hasToolGeneratedImages = toolGeneratedImages.length > 0 || !!toolGeneratedVideo;
+
+      // 优先使用 Function Calling 工具生成的图片
+      if (hasToolGeneratedImages) {
+        // 工具执行已由流中的 tool_execution_result/tool_execution_complete 事件处理
+        console.log('[ChatImage] Function Calling generated', toolGeneratedImages.length, 'images');
+      } else if (hasGenerateTags) {
+        // ====== 兜底：[GENERATE: ...] 标签解析（不支持 function calling 的模型） ======
         const prompts: string[] = generateMatches.map(m => m[1].trim());
-        // 从显示内容中移除所有 [GENERATE: ...] 标签
         const displayContent = assistantContent.replace(/\[GENERATE:\s*[\s\S]+?\]/g, '').trim();
-        // ★ 先获取模型信息
         const imageModelInfo = getCurrentImageModelInfo(imageModel, imageModelProviderId);
-        // 图片数量 = LLM输出的标签数（优先），否则从用户文本检测
         const imageCount = prompts.length > 0 ? prompts.length : detectImageCountFromText(trimmedInput);
         setMessages(prev => prev.map(msg => 
           msg.id === assistantMessageId 
@@ -3394,7 +3511,6 @@ ${imageDescriptions}
             : msg
         ));
 
-        // 检查是否有可用的图像模型
         if (!imageModelInfo.model) {
           console.warn('[ChatImage] No image model selected');
           setMessages(prev => prev.map(msg => 
@@ -3403,7 +3519,6 @@ ${imageDescriptions}
               : msg
           ));
         } else {
-          // 异步执行图像生成 — 每个 prompt 独立提交
           (async () => {
             try {
               const aspectRatio = detectAspectRatioFromText(prompts.join(' ') + ' ' + trimmedInput) || '1:1';
@@ -3411,17 +3526,13 @@ ${imageDescriptions}
               const referenceImages = capturedPendingImages.map(img => img.url);
               const imageSourceId = capturedPendingImages.length > 0 ? capturedPendingImages[0].id : undefined;
 
-              console.log(`[ChatImage] LLM-triggered generation: ${prompts.length} independent prompt(s)`);
-              prompts.forEach((p, i) => console.log(`[ChatImage] Prompt #${i+1}:`, p.substring(0, 100) + '...'));
+              console.log(`[ChatImage] [GENERATE] fallback: ${prompts.length} prompt(s)`);
 
               const allResultUrls: string[] = [];
-
-              // ★ 逐个提交每个 prompt（串行，避免API限流）
               for (let promptIdx = 0; promptIdx < prompts.length; promptIdx++) {
                 const rawPrompt = prompts[promptIdx];
                 const isMultiPrompt = prompts.length > 1;
 
-                // 更新进度（多prompt时按prompt进度）
                 if (isMultiPrompt) {
                   const baseProgress = Math.round((promptIdx / prompts.length) * 100);
                   setMessages(prev => prev.map(msg => 
@@ -3431,7 +3542,6 @@ ${imageDescriptions}
                   ));
                 }
 
-                // 提交图像生成 — 每个 prompt 只生成1张（outputCount: 1）
                 const generateRes = await fetch('/api/generate', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
@@ -3446,42 +3556,26 @@ ${imageDescriptions}
                   }),
                 });
                 const generateData = await generateRes.json();
-                console.log(`[ChatImage] Prompt #${promptIdx+1} API response:`, JSON.stringify(generateData).substring(0, 200));
-
-                if (!generateData.success) {
-                  console.error(`[ChatImage] Prompt #${promptIdx+1} API failed:`, generateData.error);
-                  // 单个prompt失败不中断其他prompt，记录错误继续
-                  continue;
-                }
+                if (!generateData.success) { continue; }
 
                 const genModel = generateData.model || imageModelInfo.model;
                 const promptResultUrls: string[] = [];
 
-                // ★ 处理直接返回图片的情况 (mode: 'direct', imageUrls)
-                if (generateData.imageUrls && generateData.imageUrls.length > 0) {
-                  promptResultUrls.push(...generateData.imageUrls);
-                } else if (generateData.imageUrl) {
-                  promptResultUrls.push(generateData.imageUrl);
-                }
+                if (generateData.imageUrls?.length > 0) { promptResultUrls.push(...generateData.imageUrls); }
+                else if (generateData.imageUrl) { promptResultUrls.push(generateData.imageUrl); }
 
-                // ★ 轮询模式 (mode: 'polling', taskIds)
                 const taskIds: string[] = generateData.taskIds || [];
                 if (taskIds.length > 0 && promptResultUrls.length === 0) {
                   for (const taskId of taskIds) {
                     for (let i = 0; i < 120; i++) {
                       const interval = i <= 2 ? 800 : i <= 5 ? 1000 : i <= 15 ? 1500 : 2000;
                       await new Promise(r => setTimeout(r, interval));
-
-                      // ★ 更新进度
                       const pollProgress = isMultiPrompt
                         ? Math.round(((promptIdx + (i / 120)) / prompts.length) * 100)
                         : Math.min(90, 10 + Math.round((i / 120) * 80));
                       setMessages(prev => prev.map(msg => 
-                        msg.id === assistantMessageId 
-                          ? { ...msg, generateProgress: pollProgress }
-                          : msg
+                        msg.id === assistantMessageId ? { ...msg, generateProgress: pollProgress } : msg
                       ));
-
                       try {
                         const pollRes = await fetch('/api/poll-task', {
                           method: 'POST',
@@ -3489,57 +3583,32 @@ ${imageDescriptions}
                           body: JSON.stringify({ taskId, model: genModel, providerId: imageModelInfo.providerId }),
                         });
                         const pollData = await pollRes.json();
-
                         if (pollData.status === 'completed') {
-                          const extractedUrl = pollData.imageUrl
-                            || pollData.result?.imageUrl
-                            || (pollData.result?.image?.url)
-                            || (pollData.result?.images?.[0]?.url)
-                            || (pollData.result?.images?.[0]);
-                          if (extractedUrl && typeof extractedUrl === 'string') {
-                            promptResultUrls.push(extractedUrl);
-                          }
+                          const extractedUrl = pollData.imageUrl || pollData.result?.imageUrl || pollData.result?.image?.url || pollData.result?.images?.[0]?.url || pollData.result?.images?.[0];
+                          if (extractedUrl && typeof extractedUrl === 'string') { promptResultUrls.push(extractedUrl); }
                           break;
-                        } else if (pollData.status === 'failed') {
-                          console.error(`[ChatImage] Prompt #${promptIdx+1} generation failed:`, pollData.error);
-                          break; // 单个prompt失败，不中断其他
-                        } else if (pollData.retryable === false) {
-                          console.error(`[ChatImage] Prompt #${promptIdx+1} task not retryable:`, pollData.error);
-                          break;
-                        }
-                      } catch (pollErr) {
-                        console.warn(`[ChatImage] Prompt #${promptIdx+1} poll error, retrying:`, pollErr);
-                      }
+                        } else if (pollData.status === 'failed' || pollData.retryable === false) { break; }
+                      } catch { /* retry */ }
                     }
                   }
                 }
-
-                // 收集此 prompt 的结果
                 allResultUrls.push(...promptResultUrls);
-
-                // 每完成一个prompt，实时更新已生成的图片
                 if (allResultUrls.length > 0) {
                   setMessages(prev => prev.map(msg => 
-                    msg.id === assistantMessageId 
-                      ? { ...msg, generatedImages: [...allResultUrls] }
-                      : msg
+                    msg.id === assistantMessageId ? { ...msg, generatedImages: [...allResultUrls] } : msg
                   ));
                 }
               }
 
               if (allResultUrls.length > 0) {
-                // 更新消息：添加生成图片，移除loading
                 setMessages(prev => prev.map(msg => 
                   msg.id === assistantMessageId 
                     ? { ...msg, generatedImages: allResultUrls, isGeneratingImage: false, generateProgress: 100 }
                     : msg
                 ));
-
-                // 将图片添加到画布
                 if (onAddImages) {
                   onAddImages(allResultUrls, imageSourceId, { modelName: imageModelInfo.model, apiProvider: imageModelInfo.providerId });
                 }
-                console.log('[ChatImage] Successfully generated', allResultUrls.length, 'images from', prompts.length, 'prompt(s)');
               } else {
                 setMessages(prev => prev.map(msg => 
                   msg.id === assistantMessageId 
@@ -3557,15 +3626,12 @@ ${imageDescriptions}
             }
           })();
         }
-      }
-
-      // ====== 兜底：如果LLM未输出 [GENERATE: ...] 但用户意图明确是生图 ======
-      if (!hasGenerateTags && (pendingImages.length > 0 || (activeSkill && ['image', 'design'].includes(activeSkill.category)))) {
+      } else if (!hasToolGeneratedImages && (pendingImages.length > 0 || (activeSkill && ['image', 'design'].includes(activeSkill.category)))) {
+        // ====== 兜底：意图检测（既无工具调用也无 [GENERATE] 标签，但用户意图明确） ======
         const userWantsImage = isImageGenerationIntent(trimmedInput);
         if (userWantsImage) {
-          console.log('[ChatImage] Fallback: LLM did not output [GENERATE] tag but user intent is clear');
+          console.log('[ChatImage] Fallback: intent detection triggered');
           const imageModelInfo = getCurrentImageModelInfo(imageModel, imageModelProviderId);
-          // 检测生成数量
           const imageCount = detectImageCountFromText(trimmedInput);
           setMessages(prev => prev.map(msg => 
             msg.id === assistantMessageId 
@@ -3588,7 +3654,6 @@ ${imageDescriptions}
                 const quality = detectQualityFromText(trimmedInput) || '1K';
                 const outputCount = detectImageCountFromText(trimmedInput);
 
-                // 用 optimize-prompt 优化用户的提示词
                 let optimizedPrompt = trimmedInput;
                 try {
                   const optRes = await fetch('/api/optimize-prompt', {
@@ -3597,28 +3662,19 @@ ${imageDescriptions}
                     body: JSON.stringify({ prompt: trimmedInput, mode: 'enhance', model: actualModel, providerId }),
                   });
                   const optData = await optRes.json();
-                  if (optData.optimizedPrompt) {
-                    optimizedPrompt = optData.optimizedPrompt;
-                  }
+                  if (optData.optimizedPrompt) optimizedPrompt = optData.optimizedPrompt;
                 } catch { /* use original */ }
-
-                console.log('[ChatImage] Fallback generation with prompt:', optimizedPrompt.substring(0, 100));
 
                 const generateRes = await fetch('/api/generate', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
-                    prompt: optimizedPrompt,
-                    model: imageModelInfo.model,
-                    providerId: imageModelInfo.providerId,
-                    aspectRatio,
-                    quality,
-                    outputCount,
+                    prompt: optimizedPrompt, model: imageModelInfo.model, providerId: imageModelInfo.providerId,
+                    aspectRatio, quality, outputCount,
                     ...(referenceImages.length > 0 ? { referenceImages } : {}),
                   }),
                 });
                 const generateData = await generateRes.json();
-
                 if (!generateData.success) {
                   setMessages(prev => prev.map(msg => 
                     msg.id === assistantMessageId 
@@ -3632,28 +3688,18 @@ ${imageDescriptions}
                 const genModel = generateData.model || imageModelInfo.model;
                 const resultUrls: string[] = [];
 
-                // ★ 处理直接返回图片的情况 (mode: 'direct', imageUrls)
-                if (generateData.imageUrls && generateData.imageUrls.length > 0) {
-                  resultUrls.push(...generateData.imageUrls);
-                } else if (generateData.imageUrl) {
-                  resultUrls.push(generateData.imageUrl);
-                }
+                if (generateData.imageUrls?.length > 0) { resultUrls.push(...generateData.imageUrls); }
+                else if (generateData.imageUrl) { resultUrls.push(generateData.imageUrl); }
 
-                // ★ 轮询模式
                 if (taskIds.length > 0 && resultUrls.length === 0) {
                   for (const taskId of taskIds) {
                     for (let i = 0; i < 120; i++) {
                       const interval = i <= 2 ? 800 : i <= 5 ? 1000 : i <= 15 ? 1500 : 2000;
                       await new Promise(r => setTimeout(r, interval));
-
-                      // ★ 更新进度
                       const progress = Math.min(90, 10 + Math.round((i / 120) * 80));
                       setMessages(prev => prev.map(msg => 
-                        msg.id === assistantMessageId 
-                          ? { ...msg, generateProgress: progress }
-                          : msg
+                        msg.id === assistantMessageId ? { ...msg, generateProgress: progress } : msg
                       ));
-
                       try {
                         const pollRes = await fetch('/api/poll-task', {
                           method: 'POST',
@@ -3662,28 +3708,13 @@ ${imageDescriptions}
                         });
                         const pollData = await pollRes.json();
                         if (pollData.status === 'completed') {
-                          const extractedUrl = pollData.imageUrl
-                            || pollData.result?.imageUrl
-                            || (pollData.result?.image?.url)
-                            || (pollData.result?.images?.[0]?.url)
-                            || (pollData.result?.images?.[0]);
-                          if (extractedUrl && typeof extractedUrl === 'string') {
-                            resultUrls.push(extractedUrl);
-                          }
+                          const extractedUrl = pollData.imageUrl || pollData.result?.imageUrl || pollData.result?.image?.url || pollData.result?.images?.[0]?.url || pollData.result?.images?.[0];
+                          if (extractedUrl && typeof extractedUrl === 'string') { resultUrls.push(extractedUrl); }
                           break;
-                        } else if (pollData.status === 'failed') {
-                          const failReason = pollData.error || '生成失败';
+                        } else if (pollData.status === 'failed' || pollData.retryable === false) {
                           setMessages(prev => prev.map(msg => 
                             msg.id === assistantMessageId 
-                              ? { ...msg, isGeneratingImage: false, generateError: failReason }
-                              : msg
-                          ));
-                          return;
-                        } else if (pollData.retryable === false) {
-                          const failReason = pollData.error || '任务不可重试';
-                          setMessages(prev => prev.map(msg => 
-                            msg.id === assistantMessageId 
-                              ? { ...msg, isGeneratingImage: false, generateError: failReason }
+                              ? { ...msg, isGeneratingImage: false, generateError: pollData.error || '生成失败' }
                               : msg
                           ));
                           return;
@@ -4418,6 +4449,47 @@ ${imageDescriptions}
                         : message.content}
                     </div>
                   </div>
+                  {/* Agent工具执行记录 */}
+                  {message.role === 'assistant' && message.toolExecutions && message.toolExecutions.length > 0 && (
+                    <div className={`mt-2 rounded-xl overflow-hidden ${isGold ? 'bg-black/30 border border-gold/15' : 'bg-gray-50 border border-gray-200'}`}>
+                      <div className={`px-3 py-1.5 flex items-center gap-2 ${isGold ? 'bg-gold/5 border-b border-gold/10' : 'bg-gray-100 border-b border-gray-200'}`}>
+                        <div className={`w-4 h-4 rounded flex items-center justify-center ${isGold ? 'bg-gold/20' : 'bg-blue-100'}`}>
+                          <Cpu size={10} className={isGold ? 'text-gold' : 'text-blue-500'} />
+                        </div>
+                        <span className={`text-xs font-medium ${isGold ? 'text-gold/90' : 'text-gray-700'}`}>
+                          Agent 执行
+                        </span>
+                        <span className={`text-[10px] ${isGold ? 'text-gold/60' : 'text-gray-500'}`}>
+                          {message.toolExecutions.filter(e => e.status === 'completed').length}/{message.toolExecutions.length} 完成
+                        </span>
+                      </div>
+                      <div className="p-2 space-y-1.5">
+                        {message.toolExecutions.map((exec, execIdx) => (
+                          <div key={execIdx} className={`flex items-center gap-2 px-2 py-1.5 rounded-lg ${
+                            exec.status === 'running' ? (isGold ? 'bg-gold/5' : 'bg-blue-50') :
+                            exec.status === 'completed' ? (isGold ? 'bg-emerald-900/10' : 'bg-green-50') :
+                            (isGold ? 'bg-red-900/10' : 'bg-red-50')
+                          }`}>
+                            {exec.status === 'running' && <Loader2 size={12} className={`animate-spin ${isGold ? 'text-gold' : 'text-blue-500'}`} />}
+                            {exec.status === 'completed' && <Check size={12} className={isGold ? 'text-emerald-400' : 'text-green-500'} />}
+                            {exec.status === 'failed' && <X size={12} className={isGold ? 'text-red-400' : 'text-red-500'} />}
+                            <span className={`text-xs flex-1 ${
+                              exec.status === 'running' ? (isGold ? 'text-gold/80' : 'text-blue-700') :
+                              exec.status === 'completed' ? (isGold ? 'text-emerald-300/80' : 'text-green-700') :
+                              (isGold ? 'text-red-300/80' : 'text-red-700')
+                            }`}>
+                              {exec.label || exec.toolName}
+                            </span>
+                            {exec.status === 'failed' && exec.error && (
+                              <span className={`text-[10px] ${isGold ? 'text-red-400/60' : 'text-red-400'}`} title={exec.error}>
+                                失败
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   {/* AI生成的图片 - ChatGPT风格：每张图独立卡片，垂直排列 */}
                   {message.generatedImages && message.generatedImages.length > 0 && (
                     <div className="flex flex-col gap-3 mt-3">
