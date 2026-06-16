@@ -4,6 +4,7 @@ import { useState, useCallback, useRef, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { InfiniteCanvas, CanvasImage, ImageGroup } from '@/components/infinite-canvas';
 import { IncrementalHistoryManager } from '@/lib/canvas-incremental-history';
+import { createAutoConnection, type ConnectionRelationType } from '@/lib/canvas-connections';
 import { GenerationPanel, GenerationParams, CtrlRefSelection } from '@/components/generation-panel';
 import VideoGenerationPanel, { VideoGenerateParams } from '@/components/video-generation-panel';
 import { ImagePreview } from '@/components/image-preview';
@@ -1631,7 +1632,7 @@ function CanvasApp() {
 
   // 加载图片真实尺寸
   // 添加多张图片到画布（自动排列布局）
-  const handleAddImages = useCallback(async (imageUrls: string[], sourceImageId?: string, meta?: { modelName?: string; apiProvider?: string }) => {
+  const handleAddImages = useCallback(async (imageUrls: string[], sourceImageId?: string, meta?: { modelName?: string; apiProvider?: string; relationType?: ConnectionRelationType }) => {
     const newImages: CanvasImage[] = [];
     
     // Find source image for positioning if provided
@@ -1713,6 +1714,16 @@ function CanvasApp() {
           const laidOut = autoLayoutImages(prev, newImages);
           stabilizeCanvasImages(laidOut.map(img => ({ id: img.id, url: img.url })));
           return [...prev, ...laidOut];
+        });
+      }
+      // ★ 自动连线：当有源图片时，为新图片自动创建连线
+      if (sourceImageId && newImages.length > 0) {
+        const relationType = meta?.relationType || 'variant';
+        setCanvasConnections(prev => {
+          const newConns = newImages.map(img =>
+            createAutoConnection(sourceImageId, img.id, relationType)
+          );
+          return [...prev, ...newConns];
         });
       }
       recordUserData({

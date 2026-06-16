@@ -49,7 +49,7 @@ const VideoEditPanel = dynamic(() => import('@/components/video-edit-panel').the
 const PsdLayerEditor = lazy(() => import('@/components/psd-editor/PsdLayerEditor'));
 const AgentEditor = lazy(() => import('@/components/agent-editor').then(m => ({ default: m.AgentEditor })));
 import { computeSnapGuides, findBestSnapOffset, type SnapGuide } from '@/lib/canvas-snap-guides';
-import { type CanvasConnection, type ConnectionDraft, createConnection, computeConnectionEndpoints, buildConnectionPath, buildArrowHead, isPointNearConnection, CONNECTION_COLORS } from '@/lib/canvas-connections';
+import { type CanvasConnection, type ConnectionRelationType, createAutoConnection, createEditConnection, createImg2ImgConnection, computeConnectionEndpoints, buildConnectionPath, buildArrowHead, RELATION_TYPE_CONFIG, removeConnectionsForImage, getConnectionsForImage } from '@/lib/canvas-connections';
 const BrandEcommercePanel = lazy(() => import('@/components/brand-ecommerce-panel').then(m => ({ default: m.BrandEcommercePanel })));
 const RefineEnginePanel = lazy(() => import('@/components/refine-engine-panel'));
 const FontDesignPanel = lazy(() => import('@/components/font-design-panel'));
@@ -412,7 +412,7 @@ interface InfiniteCanvasProps {
   onSendToChat?: (image: CanvasImage) => void;
 }
 
-type EditMode = 'none' | 'erase' | 'mask' | 'expand' | 'crop' | 'upscale' | 'connect';
+type EditMode = 'none' | 'erase' | 'mask' | 'expand' | 'crop' | 'upscale';
 type ActiveTool = 'none' | 'upscale' | 'download' | 'multiAngle' | 'to3d';
 type MultiAngleMode = 'image' | 'camera';
 type ThreeDBackend = 'api' | 'local';
@@ -1016,8 +1016,6 @@ export function InfiniteCanvas({
   const [leftToolbarExpanded, setLeftToolbarExpanded] = useState(false);
 
   // P2-1: 轻量连线状态
-  const [connectionDraft, setConnectionDraft] = useState<ConnectionDraft | null>(null);
-  const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
   const canvasConnections = connections ?? [];
   const handleConnectionsChange = onConnectionsChange ?? (() => {});
   const toolBtnCls = isMonochrome
@@ -1768,20 +1766,6 @@ export function InfiniteCanvas({
         if (!annotationMode) { setAnnotationTool('pin'); setEditMode('none'); } // reset to pin + exit any edit mode when entering
         return;
       }
-      // L key: Toggle connection mode (P2-1)
-      if (e.code === 'KeyL' && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
-        if (tag === 'input' || tag === 'textarea' || (e.target as HTMLElement)?.isContentEditable) return;
-        e.preventDefault();
-        if (editMode === 'connect') {
-          setEditMode('none');
-        } else {
-          setEditMode('connect');
-          onSelectImage(null);
-          setAnnotationMode(false);
-        }
-        return;
-      }
       // B key to toggle brush tool in annotation mode
       if (e.code === 'KeyB' && annotationMode && !e.ctrlKey && !e.metaKey && !e.altKey) {
         const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
@@ -1828,7 +1812,6 @@ export function InfiniteCanvas({
           setEditImageId(null);
           setEditStrokes([]);
           setCurrentStroke([]);
-          setConnectionDraft(null);
           isDrawingRef.current = false;
           currentStrokeRef.current = [];
           setActiveTool('none');
@@ -2052,25 +2035,6 @@ export function InfiniteCanvas({
     if (editMode === 'none') return;
     if (e.button !== 0) return; // Only left click
 
-    // P2-1: 连线模式 - 从图片开始拖拽连线
-    if (editMode === 'connect') {
-      const canvasPos = screenToCanvas(e.clientX, e.clientY);
-      const hitId = hitTestImage(canvasPos.x, canvasPos.y);
-      if (hitId) {
-        const hitImg = images.find(i => i.id === hitId);
-        if (hitImg) {
-          setConnectionDraft({
-            fromId: hitId,
-            fromX: hitImg.x + hitImg.width / 2,
-            fromY: hitImg.y + hitImg.height / 2,
-            toX: canvasPos.x,
-            toY: canvasPos.y,
-          });
-        }
-      }
-      return;
-    }
-
     // Erase/mask modes now use floating window - don't capture strokes on main canvas
     if (editMode === 'erase' || editMode === 'mask') return;
 
@@ -2128,12 +2092,6 @@ export function InfiniteCanvas({
   }, [editMode, editImageId, images, screenToCanvas, cropRect, zoom, viewOffset]);
 
   const handleEditMouseMove = useCallback((e: React.MouseEvent) => {
-    // P2-1: 连线拖拽中
-    if (editMode === 'connect' && connectionDraft) {
-      const canvasPos = screenToCanvas(e.clientX, e.clientY);
-      setConnectionDraft(prev => prev ? { ...prev, toX: canvasPos.x, toY: canvasPos.y } : null);
-      return;
-    }
     // Erase/mask modes now use floating window - don't handle strokes on main canvas
     if (editMode === 'erase' || editMode === 'mask') {
       return;
@@ -2244,19 +2202,6 @@ export function InfiniteCanvas({
   }, [editMode, editImageId, images, screenToCanvas, cropDragStart, cropDragMode, cropDragOrigin, cropRatio, zoom, viewOffset]);
 
   const handleEditMouseUp = useCallback(() => {
-    // P2-1: 连线完成
-    if (editMode === 'connect' && connectionDraft) {
-      const { fromId, toX, toY } = connectionDraft;
-      const hitId = hitTestImage(toX, toY);
-      if (hitId && hitId !== fromId) {
-        // 成功连接到另一张图片
-        const newConn = createConnection(fromId, hitId);
-        handleConnectionsChange([...canvasConnections, newConn]);
-      }
-      setConnectionDraft(null);
-      return;
-    }
-
     if (isDrawingRef.current) {
       // Finalize current stroke
       const stroke = currentStrokeRef.current;
@@ -2274,7 +2219,7 @@ export function InfiniteCanvas({
     setCropDragStart(null);
     setCropDragMode('create');
     setCropDragOrigin(null);
-  }, [cropDragMode, editMode, connectionDraft, canvasConnections, handleConnectionsChange]);
+  }, [cropDragMode, editMode]);
 
   // Mouse handlers
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -4009,7 +3954,8 @@ export function InfiniteCanvas({
     newUrl: string,
     newWidth: number,
     newHeight: number,
-    extra?: Partial<CanvasImage>
+    extra?: Partial<CanvasImage>,
+    relationType?: 'variant' | 'edit' | 'img2img' | 'upscale' | 'removebg' | 'trace' | 'reference'
   ): CanvasImage | null => {
     let completedImage: CanvasImage | null = null;
     const nextImages = imagesRef.current.map(image => {
@@ -4033,6 +3979,19 @@ export function InfiniteCanvas({
     if (selectedCompleted) {
       setSelectedIds(new Set([selectedCompleted.id]));
       onSelectImage(selectedCompleted);
+    }
+    // ★ 自动创建连线：从源图指向新完成的图片
+    if (relationType) {
+      const sourceId = (selectedCompleted as Record<string, unknown>).generatedFromImageId as string | undefined || (selectedCompleted as Record<string, unknown>).sourceImageId as string | undefined;
+      if (sourceId) {
+        const sourceImage = imagesRef.current.find(img => img.id === sourceId && !img.isProcessingPlaceholder);
+        if (sourceImage) {
+          const newConn = createAutoConnection(sourceId, id, relationType);
+          if (newConn && onConnectionsChange) {
+            onConnectionsChange([...(connections || []), newConn]);
+          }
+        }
+      }
     }
     // 预加载验证：如果图片 URL 无法加载，自动通过 /api/save-image 兜底
     // 同时获取图片真实像素尺寸更新 originalWidth/originalHeight
@@ -4120,7 +4079,7 @@ export function InfiniteCanvas({
       dataImg.src = newUrl;
     }
     return completedImage;
-  }, [onImagesChange, onSelectImage]);
+  }, [onImagesChange, onSelectImage, connections, onConnectionsChange]);
 
   const removeProcessingFrame = useCallback((id: string) => {
     const nextImages = imagesRef.current.filter(image => image.id !== id);
@@ -5778,7 +5737,7 @@ export function InfiniteCanvas({
           modifyPrompt: `${upMultiplier}x HD ${upscalePreset.toUpperCase()} 放大`,
           modelName: modelInfo.apiDisplayName || modelInfo.model,
           apiProvider: modelInfo.providerName || '',
-        });
+        }, 'upscale');
       } else {
         const pollError = lastPollErrorRef.current || '放大超时，请重试';
         updateProcessingFrame(placeholderId, {
@@ -5962,7 +5921,7 @@ export function InfiniteCanvas({
           modifyPrompt: data.engine === 'local-background-alpha' ? '背景移除（本地透明化）' : String(data.engine || '').includes('ai-background-remove') ? '背景移除（AI高精度）' : '背景移除',
           modelName: modelInfo.apiDisplayName || modelInfo.model,
           apiProvider: modelInfo.providerName || '',
-        });
+        }, 'removebg');
 
         // 同时添加黑白蒙版图到画布（紧邻主体图右侧）
         if (maskResultUrl && completedImage) {
@@ -6105,7 +6064,7 @@ export function InfiniteCanvas({
             ...(data.url ? { svgUrl: data.url } : {}),
             modelName: modelInfo.apiDisplayName || modelInfo.model,
             apiProvider: modelInfo.providerName || '',
-          });
+          }, 'trace');
         } else {
           // Compress / thumbnail result - use data URL for display
           const displayUrl = data.dataUrl || data.url;
@@ -6121,7 +6080,7 @@ export function InfiniteCanvas({
             modifyPrompt: modeLabel,
             modelName: modelInfo.apiDisplayName || modelInfo.model,
             apiProvider: modelInfo.providerName || '',
-          });
+          }, 'trace');
         }
       } else {
         throw new Error(data.error || '处理失败');
@@ -6202,7 +6161,7 @@ export function InfiniteCanvas({
         modifyPrompt: `AI视角变换 / ${multiAngleMode === 'image' ? '环绕观察' : '摄像机位移'} / 水平 ${multiAngleRotation}° / 垂直 ${multiAngleTilt}° / ${['特写', '标准', '广角'][multiAngleZoom]}`,
         modelName: modelInfo.apiDisplayName || modelInfo.model,
         apiProvider: modelInfo.providerName || '',
-      });
+      }, 'variant');
       setActiveTool('none');
     } catch (e) {
       console.error('Multi-angle failed:', e);
@@ -6370,7 +6329,7 @@ export function InfiniteCanvas({
         threeDModelUrls: threeDModelUrls || data.modelUrls,
         modelName: modelInfo.apiDisplayName || modelInfo.model,
         apiProvider: modelInfo.providerName || '',
-      });
+      }, 'variant');
       setThreeDProgress(null);
     } catch (e) {
       console.error('Image to 3D failed:', e);
@@ -6611,7 +6570,7 @@ export function InfiniteCanvas({
           ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
           const newUrl = canvas.toDataURL('image/png');
           updateProcessingFrame(placeholderId, { progress: 92, status: '正在生成裁切结果...' });
-          completeProcessingFrame(placeholderId, newUrl, displayW, displayH, { originalWidth: canvas.width, originalHeight: canvas.height, modelName: modelInfo.apiDisplayName || modelInfo.model, apiProvider: modelInfo.providerName || '' });
+          completeProcessingFrame(placeholderId, newUrl, displayW, displayH, { originalWidth: canvas.width, originalHeight: canvas.height, modelName: modelInfo.apiDisplayName || modelInfo.model, apiProvider: modelInfo.providerName || '' }, 'edit');
         }
       } catch (e) {
         console.error('Crop failed:', e);
@@ -6750,10 +6709,10 @@ export function InfiniteCanvas({
           updateProcessingFrame(placeholderId, { progress: 96, status: '正在合成编辑结果...' });
           try {
             const stableUrl = await toStableImageUrl(resultUrl);
-            completeProcessingFrame(placeholderId, stableUrl, currentEditImg.width, currentEditImg.height, { originalWidth: currentEditImg.originalWidth || Math.round(currentEditImg.width), originalHeight: currentEditImg.originalHeight || Math.round(currentEditImg.height), modelName: modelInfo.apiDisplayName || modelInfo.model, apiProvider: modelInfo.providerName || '' });
+            completeProcessingFrame(placeholderId, stableUrl, currentEditImg.width, currentEditImg.height, { originalWidth: currentEditImg.originalWidth || Math.round(currentEditImg.width), originalHeight: currentEditImg.originalHeight || Math.round(currentEditImg.height), modelName: modelInfo.apiDisplayName || modelInfo.model, apiProvider: modelInfo.providerName || '' }, 'edit');
           } catch (stableErr) {
             console.error('Stable URL conversion failed:', stableErr);
-            completeProcessingFrame(placeholderId, resultUrl, currentEditImg.width, currentEditImg.height, { originalWidth: currentEditImg.originalWidth || Math.round(currentEditImg.width), originalHeight: currentEditImg.originalHeight || Math.round(currentEditImg.height), modelName: modelInfo.apiDisplayName || modelInfo.model, apiProvider: modelInfo.providerName || '' });
+            completeProcessingFrame(placeholderId, resultUrl, currentEditImg.width, currentEditImg.height, { originalWidth: currentEditImg.originalWidth || Math.round(currentEditImg.width), originalHeight: currentEditImg.originalHeight || Math.round(currentEditImg.height), modelName: modelInfo.apiDisplayName || modelInfo.model, apiProvider: modelInfo.providerName || '' }, 'edit');
           }
         } else {
           const pollError = lastPollErrorRef.current || '未获取到结果';
@@ -6865,9 +6824,9 @@ export function InfiniteCanvas({
           updateProcessingFrame(placeholderId, { progress: 96, status: '正在载入扩展结果...' });
           try {
             const stableUrl = await toStableImageUrl(resultUrl);
-            completeProcessingFrame(placeholderId, stableUrl, currentEditImg.width * (finalW / origW), currentEditImg.height * (finalH / origH), { originalWidth: finalW, originalHeight: finalH, modelName: modelInfo.apiDisplayName || modelInfo.model, apiProvider: modelInfo.providerName || '' });
+            completeProcessingFrame(placeholderId, stableUrl, currentEditImg.width * (finalW / origW), currentEditImg.height * (finalH / origH), { originalWidth: finalW, originalHeight: finalH, modelName: modelInfo.apiDisplayName || modelInfo.model, apiProvider: modelInfo.providerName || '' }, 'edit');
           } catch (stableErr) {
-            completeProcessingFrame(placeholderId, resultUrl, currentEditImg.width * (finalW / origW), currentEditImg.height * (finalH / origH), { originalWidth: finalW, originalHeight: finalH, modelName: modelInfo.apiDisplayName || modelInfo.model, apiProvider: modelInfo.providerName || '' });
+            completeProcessingFrame(placeholderId, resultUrl, currentEditImg.width * (finalW / origW), currentEditImg.height * (finalH / origH), { originalWidth: finalW, originalHeight: finalH, modelName: modelInfo.apiDisplayName || modelInfo.model, apiProvider: modelInfo.providerName || '' }, 'edit');
           }
         } else {
           const pollError = lastPollErrorRef.current || '扩展超时，请重试';
@@ -8274,11 +8233,16 @@ export function InfiniteCanvas({
               </div>
             );
           })}
-          {/* P2-1: 用户绘制的连线 */}
+          {/* 自动连线：原图→变体/编辑/图生图 关系 */}
           {canvasConnections.length > 0 && (() => {
-            const gold = isMonochrome ? '#3b82f6' : '#d4af37';
             return (
               <svg style={{ position: 'absolute', left: 0, top: 0, width: '1px', height: '1px', overflow: 'visible', pointerEvents: 'none' }}>
+                <defs>
+                  <filter id="conn-glow" x="-50%" y="-50%" width="200%" height="200%">
+                    <feGaussianBlur stdDeviation="2" result="blur" />
+                    <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+                  </filter>
+                </defs>
                 {canvasConnections.map(conn => {
                   const fromImg = images.find(i => i.id === conn.fromId);
                   const toImg = images.find(i => i.id === conn.toId);
@@ -8286,32 +8250,34 @@ export function InfiniteCanvas({
                   const { fromX, fromY, toX, toY } = computeConnectionEndpoints(fromImg, toImg);
                   const path = buildConnectionPath(fromX, fromY, toX, toY);
                   const arrow = buildArrowHead(toX, toY, fromX, fromY, 6);
-                  const color = conn.color || gold;
-                  const isSelected = conn.id === selectedConnectionId;
+                  const color = conn.color || '#d4af37';
+                  const dashArray = conn.dashArray;
+                  // Type icon from config
+                  const typeConfig = RELATION_TYPE_CONFIG[conn.relationType];
+                  const icon = typeConfig?.icon || '';
+                  const midX = (fromX + toX) / 2;
+                  const midY = (fromY + toY) / 2;
                   return (
                     <g key={conn.id}>
-                      <path d={path} fill="none" stroke={color} strokeWidth={isSelected ? 2.5 : 1.5} opacity={isSelected ? 0.9 : 0.5} />
-                      <path d={arrow} fill={color} opacity={isSelected ? 0.9 : 0.5} />
-                      {conn.label && (
-                        <text x={(fromX + toX) / 2} y={(fromY + toY) / 2 - 6} textAnchor="middle" fontSize={11} fill={color} opacity={0.7}>{conn.label}</text>
-                      )}
+                      {/* Glow background for visibility */}
+                      <path d={path} fill="none" stroke={color} strokeWidth={4} opacity={0.15} />
+                      {/* Main line */}
+                      <path d={path} fill="none" stroke={color} strokeWidth={1.5} opacity={0.6}
+                        strokeDasharray={dashArray} />
+                      {/* Arrow head */}
+                      <path d={arrow} fill={color} opacity={0.6} />
+                      {/* Label background pill */}
+                      <rect
+                        x={midX - (conn.label.length * 4.5 + 12)} y={midY - 10}
+                        width={conn.label.length * 9 + 24} height={20}
+                        rx={10} fill="black" opacity={0.6}
+                      />
+                      {/* Label text */}
+                      <text x={midX} y={midY + 4} textAnchor="middle" fontSize={10} fontWeight={500}
+                        fill={color} opacity={0.9}>{conn.label}</text>
                     </g>
                   );
                 })}
-              </svg>
-            );
-          })()}
-
-          {/* P2-1: 连线拖拽草稿 */}
-          {connectionDraft && (() => {
-            const gold = isMonochrome ? '#3b82f6' : '#d4af37';
-            const { fromX, fromY, toX, toY } = connectionDraft;
-            const path = buildConnectionPath(fromX, fromY, toX, toY);
-            const arrow = buildArrowHead(toX, toY, fromX, fromY, 6);
-            return (
-              <svg style={{ position: 'absolute', left: 0, top: 0, width: '1px', height: '1px', overflow: 'visible', pointerEvents: 'none' }}>
-                <path d={path} fill="none" stroke={gold} strokeWidth={2} strokeDasharray="6 3" opacity={0.6} />
-                <path d={arrow} fill={gold} opacity={0.6} />
               </svg>
             );
           })()}
@@ -8449,22 +8415,30 @@ export function InfiniteCanvas({
               </svg>
             );
           })()}
-          {/* Permanent connection lines - from source images to their generated results */}
+          {/* Auto connection lines - typed relations between images */}
           {(() => {
-            const generatedImages = images.filter(img => img.generatedFromImageId && !img.isProcessingPlaceholder);
-            if (generatedImages.length === 0) return null;
-            const lineColor = isMonochrome ? '#3b82f6' : '#d4af37';
+            // Merge connections from prop (new typed system) with generatedFromImageId (legacy)
+            const allConns: Array<{ sourceId: string; targetId: string; relationType: ConnectionRelationType }> = [
+              ...canvasConnections.map(c => ({ sourceId: c.fromId, targetId: c.toId, relationType: c.relationType })),
+              // Legacy: generatedFromImageId → 'variant' relation
+              ...images
+                .filter(img => img.generatedFromImageId && !img.isProcessingPlaceholder && !canvasConnections.some(c => c.toId === img.id))
+                .map(img => ({ sourceId: img.generatedFromImageId!, targetId: img.id, relationType: 'variant' as ConnectionRelationType })),
+            ];
+            if (allConns.length === 0) return null;
             return (
               <svg style={{ position: 'absolute', left: 0, top: 0, width: '1px', height: '1px', overflow: 'visible', pointerEvents: 'none' }}>
-                {generatedImages.map(genImg => {
-                  const sourceImg = images.find(img => img.id === genImg.generatedFromImageId);
-                  if (!sourceImg) return null;
+                {allConns.map(conn => {
+                  const sourceImg = images.find(img => img.id === conn.sourceId);
+                  const targetImg = images.find(img => img.id === conn.targetId);
+                  if (!sourceImg || !targetImg || sourceImg.isProcessingPlaceholder || targetImg.isProcessingPlaceholder) return null;
+                  const config = RELATION_TYPE_CONFIG[conn.relationType] || RELATION_TYPE_CONFIG.variant;
                   // Source anchor: right edge center
                   const srcX = sourceImg.x + sourceImg.width;
                   const srcY = sourceImg.y + sourceImg.height / 2;
                   // Target anchor: left edge center
-                  const tgtX = genImg.x;
-                  const tgtY = genImg.y + genImg.height / 2;
+                  const tgtX = targetImg.x;
+                  const tgtY = targetImg.y + targetImg.height / 2;
                   const dx = tgtX - srcX;
                   const dy = tgtY - srcY;
                   const dist = Math.sqrt(dx * dx + dy * dy);
@@ -8474,8 +8448,9 @@ export function InfiniteCanvas({
                   const cp2x = tgtX - cpOffset;
                   const cp2y = tgtY;
                   const pathD = `M ${srcX} ${srcY} C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${tgtX} ${tgtY}`;
+                  const lineColor = isMonochrome ? config.colorMono : config.color;
                   return (
-                    <g key={`gen-conn-${genImg.id}`}>
+                    <g key={`auto-conn-${conn.sourceId}-${conn.targetId}-${conn.relationType}`}>
                       {/* Subtle glow */}
                       <path
                         d={pathD}
@@ -8499,6 +8474,20 @@ export function InfiniteCanvas({
                       <circle cx={srcX} cy={srcY} r={2.5 / zoom} fill={lineColor} opacity={0.7} />
                       {/* Target dot */}
                       <circle cx={tgtX} cy={tgtY} r={2.5 / zoom} fill={lineColor} opacity={0.7} />
+                      {/* Relation type label */}
+                      {dist > 100 / zoom && (
+                        <text
+                          x={(srcX + tgtX) / 2}
+                          y={(srcY + tgtY) / 2 - 8 / zoom}
+                          textAnchor="middle"
+                          fontSize={10 / zoom}
+                          fill={lineColor}
+                          opacity={0.7}
+                          style={{ fontFamily: 'system-ui, sans-serif' }}
+                        >
+                          {config.label}
+                        </text>
+                      )}
                     </g>
                   );
                 })}
@@ -13598,27 +13587,6 @@ export function InfiniteCanvas({
         >
           <MessageCircle className="h-4 w-4" />
           <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">ChatCanvas (C)</span>
-        </button>
-
-        {/* P2-1: 连线工具 */}
-        <button
-          onClick={() => {
-            if (editMode === 'connect') {
-              setEditMode('none');
-            } else {
-              setEditMode('connect');
-              onSelectImage(null);
-            }
-          }}
-          className={`tool-btn p-2 rounded-full transition-all relative group ${editMode === 'connect' ? 'text-gold bg-gold/20 ring-1 ring-gold/40' : 'text-gold-muted hover:text-gold-light hover:bg-gold/10'}`}
-          title="连线工具"
-        >
-          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="5" cy="5" r="2.5" />
-            <circle cx="19" cy="19" r="2.5" />
-            <path d="M7 7 C 10 10, 14 14, 17 17" />
-          </svg>
-          <span className="absolute -top-9 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none bg-black/90 text-white">连线 (L)</span>
         </button>
 
         <div className={`w-px h-5 ${separatorCls}`} />
