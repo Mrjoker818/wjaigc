@@ -34,7 +34,7 @@ export function generateFilename(prefix: string, ext: string): string {
 export async function readImageToBuffer(
   imageUrl: string,
 ): Promise<{ buffer: Buffer; width: number; height: number; format: string }> {
-  let buffer: Buffer;
+  let buffer: Buffer = Buffer.alloc(0);
 
   if (imageUrl.startsWith('data:')) {
     // data: URL
@@ -45,18 +45,40 @@ export async function readImageToBuffer(
     const resp = await fetch(imageUrl);
     if (!resp.ok) throw new Error(`无法下载图片: ${resp.status}`);
     buffer = Buffer.from(await resp.arrayBuffer());
-  } else {
-    // 本地路径 (/uploads/xxx.png)
-    let localPath: string;
-    if (imageUrl.startsWith('/')) {
-      localPath = path.join(process.cwd(), 'public', imageUrl);
-    } else {
-      localPath = imageUrl;
+  } else if (imageUrl.startsWith('/api/serve-upload/')) {
+    // serve-upload 路径：从服务器数据目录直接读取，避免 HTTP 回环
+    const relativePath = imageUrl.replace('/api/serve-upload/', '');
+    const { getServerDataRoot } = await import('@/lib/server-data-root');
+    const dataRoot = getServerDataRoot();
+    const possibleDirs = [
+      path.join(dataRoot, 'uploads'),
+      dataRoot,
+    ];
+    let found = false;
+    for (const dir of possibleDirs) {
+      const fullPath = path.join(dir, relativePath);
+      if (fs.existsSync(fullPath)) {
+        buffer = await fs.promises.readFile(fullPath);
+        found = true;
+        break;
+      }
     }
+    if (!found) {
+      throw new Error(`serve-upload 图片文件不存在: ${relativePath} (搜索目录: ${possibleDirs.join(', ')})`);
+    }
+  } else if (imageUrl.startsWith('/')) {
+    // 本地公共路径 (/uploads/xxx.png)
+    const localPath = path.join(process.cwd(), 'public', imageUrl);
     if (!fs.existsSync(localPath)) {
       throw new Error(`图片文件不存在: ${localPath}`);
     }
     buffer = await fs.promises.readFile(localPath);
+  } else {
+    // 绝对路径
+    if (!fs.existsSync(imageUrl)) {
+      throw new Error(`图片文件不存在: ${imageUrl}`);
+    }
+    buffer = await fs.promises.readFile(imageUrl);
   }
 
   // 校验大小

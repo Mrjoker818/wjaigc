@@ -483,8 +483,21 @@ async function submitRefineToApi(
         const publicDir = path.join(workspacePath, 'public');
         let filePath = '';
         if (params.imageUrl.startsWith('/api/serve-upload/')) {
+          // serve-upload 路径：从数据目录读取，而非 public
           const relativePath = params.imageUrl.replace('/api/serve-upload/', '');
-          filePath = path.join(publicDir, relativePath);
+          try {
+            const { getServerDataRoot } = await import('@/lib/server-data-root');
+            const dataRoot = getServerDataRoot();
+            const path1 = path.join(dataRoot, 'uploads', relativePath);
+            const path2 = path.join(dataRoot, relativePath);
+            try { await fs.access(path1); filePath = path1; } catch {
+              try { await fs.access(path2); filePath = path2; } catch {
+                filePath = path.join(publicDir, relativePath);
+              }
+            }
+          } catch {
+            filePath = path.join(publicDir, relativePath);
+          }
         } else {
           filePath = path.join(publicDir, params.imageUrl.replace(/^\//, ''));
         }

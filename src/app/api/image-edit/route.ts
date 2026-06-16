@@ -1908,8 +1908,32 @@ export async function POST(request: NextRequest) {
           if (result.success && result.imageUrl) {
             // 读取本地输出文件，保存到持久化存储
             let outputBuffer: Buffer;
-            if (result.imageUrl.startsWith('/')) {
-              const absPath = path.join(process.cwd(), 'public', result.imageUrl);
+            if (result.imageUrl.startsWith('/api/serve-upload/')) {
+              // serve-upload 路径需要从数据目录读取
+              const { getServerDataRoot } = await import('@/lib/server-data-root');
+              const dataRoot = getServerDataRoot();
+              const relPath = result.imageUrl.replace('/api/serve-upload/', '');
+              const absPath = path.join(dataRoot, 'uploads', relPath);
+              try {
+                outputBuffer = await fs.readFile(absPath);
+              } catch {
+                // fallback: 尝试 dataRoot 直接路径
+                outputBuffer = await fs.readFile(path.join(dataRoot, relPath));
+              }
+            } else if (result.imageUrl.startsWith('/')) {
+              // /outputs/upscale/ 等本地输出路径
+              let absPath = path.join(process.cwd(), 'public', result.imageUrl);
+              // 如果 public 下找不到，尝试数据目录
+              try {
+                await fs.access(absPath);
+              } catch {
+                const { getServerDataRoot } = await import('@/lib/server-data-root');
+                const dataRoot = getServerDataRoot();
+                absPath = path.join(dataRoot, 'uploads', result.imageUrl.replace(/^\//, ''));
+                try { await fs.access(absPath); } catch {
+                  absPath = path.join(dataRoot, result.imageUrl.replace(/^\//, ''));
+                }
+              }
               outputBuffer = await fs.readFile(absPath);
             } else if (result.imageUrl.startsWith('data:')) {
               const base64 = result.imageUrl.split(',')[1];
