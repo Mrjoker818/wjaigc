@@ -12728,7 +12728,7 @@ export function InfiniteCanvas({
         })}
 
         {/* ====== IMAGE ACTION TOOLBAR (follows selected image) ====== */}
-        {selectedIds.size === 1 && editMode === 'none' && activeTool === 'none' && !showDownloadPopup && (() => {
+        {selectedIds.size === 1 && editMode === 'none' && activeTool === 'none' && !showDownloadPopup && !showSvgTracePanel && !showAgentEditor && !showBrandEcommerce && !showFontDesign && !showBrandFactory && !showSceneStudio && !showBrandPackaging && !showDisplay3D && !showVideoEditPanel && (() => {
           const img = selectedImageData;
           if (!img) return null;
           const pos = getToolbarPosition();
