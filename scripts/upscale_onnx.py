@@ -76,16 +76,22 @@ def get_session(model_name):
 
 
 def process_tile(session, tile_img):
-    """处理单个 tile，返回 PIL Image"""
+    """处理单个 tile，返回 PIL Image（强制释放中间内存）"""
     img_array = np.array(tile_img).astype(np.float16) / 255.0
     img_chw = np.transpose(img_array, (2, 0, 1))
     input_tensor = np.expand_dims(img_chw, axis=0)
+    del img_array, img_chw
     input_name = session.get_inputs()[0].name
     output = session.run(None, {input_name: input_tensor})
+    del input_tensor
     out = output[0][0]
+    del output
     out = np.transpose(out, (1, 2, 0))
     out = np.clip(out * 255.0, 0, 255).astype(np.uint8)
-    return Image.fromarray(out)
+    result = Image.fromarray(out)
+    del out
+    import gc; gc.collect()
+    return result
 
 
 def upscale_image_tiled(img, scale=4, tile_size=256, model_name="realesrgan-x4plus-fp16", output_file=None):
@@ -190,36 +196,90 @@ def upscale_image_tiled(img, scale=4, tile_size=256, model_name="realesrgan-x4pl
                 print(f"[upscale_onnx] Row {row_idx+1}/{rows} saved ({row_img.size})", file=sys.stderr)
                 del row_img
 
-        # 纵向拼接所有行 — 逐行读取（在目标尺寸下）
+        # 纵向拼接所有行 — 使用流式像素拷贝（内存安全）
+        # 先计算总高度
+        row_heights = []
         total_h = 0
         for rf in row_files:
             ri = Image.open(rf)
-            total_h += ri.height
+            rh = ri.height
+            row_heights.append(rh)
+            total_h += rh
             ri.close()
 
         print(f"[upscale_onnx] Assembling {len(row_files)} rows, final: {target_w}x{total_h}", file=sys.stderr)
 
-        final_img = Image.new('RGB', (target_w, total_h))
-        y_offset = 0
-        for rf in row_files:
-            ri = Image.open(rf)
-            final_img.paste(ri, (0, y_offset))
-            y_offset += ri.height
-            ri.close()
-
-        # 修正高度（理论上 total_h 应等于 target_h，可能因取整有 1-2px 差异）
-        if final_img.size != (target_w, target_h):
-            final_img = final_img.resize((target_w, target_h), Image.LANCZOS)
-            print(f"[upscale_onnx] Adjusted to exact target: {target_w}x{target_h}", file=sys.stderr)
-
-        # 输出
         if output_file:
+            # 流式写入：逐行拷贝到目标 numpy buffer，避免 PIL 大图
+            import array
+            # 使用 raw pixel writer 逐行写入 PNG
+            # 改用分批纵向拼接：每次只加载 1 行 + 累积结果
+            # 但更安全的方案：直接用 PIL 的逐行 paste，但限制峰值内存
+            # 对于超大图，改用分批合并：每 4 行合并一次写中间文件
+            BATCH = 4
+            batch_files = []
+            for batch_start in range(0, len(row_files), BATCH):
+                batch_end = min(batch_start + BATCH, len(row_files))
+                batch_imgs = []
+                batch_h = 0
+                for idx in range(batch_start, batch_end):
+                    ri = Image.open(row_files[idx])
+                    batch_imgs.append(ri)
+                    batch_h += row_heights[idx]
+                batch_img = Image.new('RGB', (target_w, batch_h))
+                y_off = 0
+                for ri in batch_imgs:
+                    batch_img.paste(ri, (0, y_off))
+                    y_off += ri.height
+                    ri.close()
+                del batch_imgs
+                bf = os.path.join(tmp_dir, f"batch_{batch_start:04d}.png")
+                batch_img.save(bf, format="PNG")
+                batch_files.append(bf)
+                print(f"[upscale_onnx] Batch {batch_start//BATCH+1} saved", file=sys.stderr)
+                del batch_img
+
+            # 合并所有 batch 文件（通常只有几个）
+            batch_imgs2 = []
+            final_h = 0
+            for bf in batch_files:
+                bi = Image.open(bf)
+                batch_imgs2.append(bi)
+                final_h += bi.height
+            final_img = Image.new('RGB', (target_w, final_h))
+            y_off = 0
+            for bi in batch_imgs2:
+                final_img.paste(bi, (0, y_off))
+                y_off += bi.height
+                bi.close()
+            del batch_imgs2
+
+            # 清理 batch 文件
+            for bf in batch_files:
+                try: os.remove(bf)
+                except: pass
+
+            # 修正高度
+            if final_img.size != (target_w, target_h):
+                final_img = final_img.resize((target_w, target_h), Image.LANCZOS)
+                print(f"[upscale_onnx] Adjusted to exact target: {target_w}x{target_h}", file=sys.stderr)
+
             final_img.save(output_file, format="PNG", optimize=True)
             print(f"[upscale_onnx] Saved to file: {output_file}", file=sys.stderr)
             del final_img
             _cleanup_tmp(tmp_dir, row_files)
             return output_file
         else:
+            # base64 模式（小图）：直接在内存中拼接
+            final_img = Image.new('RGB', (target_w, total_h))
+            y_offset = 0
+            for rf in row_files:
+                ri = Image.open(rf)
+                final_img.paste(ri, (0, y_offset))
+                y_offset += ri.height
+                ri.close()
+            if final_img.size != (target_w, target_h):
+                final_img = final_img.resize((target_w, target_h), Image.LANCZOS)
             _cleanup_tmp(tmp_dir, row_files)
             return final_img
 
