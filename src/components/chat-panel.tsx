@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Bot, Send, Sparkles, Copy, Check, Trash2, Loader2, Eye, EyeOff, Wand2, User, Upload, X, Image as ImageIcon, Languages, Settings, Plug, Plus, History, FolderOpen, MessageSquare, Bookmark, BookmarkCheck, Lightbulb, Zap, ArrowRight, Palette, Target, Sliders, Download, AlertCircle, LocateFixed, RotateCcw, FileText, Cpu, ChevronRight } from 'lucide-react';
+import { Bot, Send, Sparkles, Copy, Check, Trash2, Loader2, Eye, EyeOff, Wand2, User, Upload, X, Image as ImageIcon, Languages, Settings, Plug, Plus, History, FolderOpen, MessageSquare, Bookmark, BookmarkCheck, Lightbulb, Zap, ArrowRight, Palette, Target, Sliders, Download, AlertCircle, LocateFixed, RotateCcw, FileText, Cpu, ChevronRight, AtSign } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -111,6 +111,7 @@ interface AgentDefinition {
   defaultAspectRatio?: string; // default aspect ratio for this agent
   suggestedNextSteps?: { label: string; action: string; prefilledPrompt?: string }[];
   routingKeywords?: string[]; // P2-10: keywords for auto-routing
+  skillIds?: string[]; // P2-13: associated Skill IDs for interop
 }
 
 const AGENTS: AgentDefinition[] = [
@@ -1594,7 +1595,8 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
 
     // P2-10: 智能体自动路由 - 检测输入是否匹配某个智能体
     if (value.trim().length >= 2) {
-      const matched = matchAgentByInput(value.trim(), allAgents);
+      const allAgentsForMatch = [...AGENTS, ...customAgents];
+      const matched = matchAgentByInput(value.trim(), allAgentsForMatch);
       // Only suggest if not already using this agent
       if (matched && matched.id !== systemPrompt) {
         setSuggestedAgent(matched);
@@ -3350,7 +3352,12 @@ ${agentRecipesList}
 - "做成视频" → 生成视频 | 请将这张图片生成为5秒的短视频，添加缓慢推镜效果
 每次给出2-3个建议，建议应与当前对话内容紧密相关，且预填充提示词应具体可执行。
 
-2. 如果你生成的图片有任何值得注意的设计特点，请简要说明。`;
+2. 如果你生成的图片有任何值得注意的设计特点，请简要说明。
+
+3. 【智能体适应】当你检测到用户的请求明显超出当前智能体的专业领域时（例如：用户在"酒类包装"智能体中请求设计海报），请在回复开头输出以下标记：
+[AGENT_SUGGEST:智能体ID:智能体名称]
+示例：[AGENT_SUGGEST:creative-posters:创意海报]
+这会触发系统推荐用户切换到更合适的智能体。注意：仅当领域确实不匹配时才输出此标记，轻微偏移不需要。`;
 
       // P2-9: 多级意图澄清 - 根据意图完整度注入不同指令
       if (intentLevel === 'extremely_vague') {
@@ -3677,10 +3684,18 @@ ${imageDescriptions}
                 const delta = parsed.choices?.[0]?.delta?.content || '';
                 if (delta) {
                   assistantContent += delta;
-                  // 流式输出时隐藏 [GENERATE: ...] 标签（兼容旧模式）
+                  // P2-11: 检测智能体适应建议标记
+                  const agentSuggestMatch = assistantContent.match(/\[AGENT_SUGGEST:([^:]+):([^\]]+)\]/);
+                  if (agentSuggestMatch && !suggestedAgent) {
+                    const [, agentId, agentName] = agentSuggestMatch;
+                    const found = allAgents.find(a => a.id === agentId);
+                    if (found) setSuggestedAgent(found);
+                  }
+                  // 流式输出时隐藏 [GENERATE: ...] 标签（兼容旧模式）和 [AGENT_SUGGEST: ...] 标记
                   const streamDisplayContent = assistantContent
                     .replace(/\[GENERATE:\s*[\s\S]+?\]/g, '')
                     .replace(/\[GENERATE:\s*[\s\S]*$/, '')
+                    .replace(/\[AGENT_SUGGEST:[^\]]+\]/g, '')
                     .trimEnd();
                   setMessages(prev => prev.map(msg =>
                     msg.id === assistantMessageId
@@ -3699,16 +3714,18 @@ ${imageDescriptions}
 
       // P0-2: 解析建议下一步
       const { cleanedContent, suggestions } = parseSuggestions(assistantContent);
-      if (suggestions.length > 0) {
+      // P2-11: 从最终内容中移除智能体适应标记
+      const finalCleanedContent = cleanedContent.replace(/\[AGENT_SUGGEST:[^\]]+\]/g, '').trim();
+      if (suggestions.length > 0 || finalCleanedContent !== assistantContent) {
         setMessages(prev => prev.map(msg => 
           msg.id === assistantMessageId 
-            ? { ...msg, content: cleanedContent, suggestions }
+            ? { ...msg, content: finalCleanedContent, suggestions }
             : msg
         ));
       }
 
-      // P0-3: 检测追问回复 - 标记追问消息
-      if (isVague && assistantContent.includes('？') || assistantContent.includes('?') || /请补充|请说明|请选择|请告诉我/.test(assistantContent)) {
+      // P0-3: 检测追问回复 - 标记追问消息（仅极度模糊时）
+      if (intentLevel === 'extremely_vague' && (assistantContent.includes('？') || assistantContent.includes('?') || /请补充|请说明|请选择|请告诉我/.test(assistantContent))) {
         setMessages(prev => prev.map(msg => 
           msg.id === assistantMessageId 
             ? { ...msg, isClarifying: true }
@@ -5118,6 +5135,39 @@ ${imageDescriptions}
 
         {/* Input - 精致设计 */}
         <div className={`px-3 py-4 border-t ${themeClasses.border} shrink-0 ${isGold ? 'bg-[#0d0d0d]/90' : 'bg-white'}`}>
+          {/* P2-12: Quick action chips - visible when input is empty and no images */}
+          {!input.trim() && pendingImages.length === 0 && !isLoading && (
+            <div className="flex items-center gap-1.5 mb-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => { setInput('@'); textareaRef.current?.focus(); }}
+                className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-colors ${isGold ? 'bg-white/[0.06] text-white/50 hover:bg-white/[0.1] hover:text-gold/80' : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'}`}
+              >
+                <AtSign size={10} /> 引用图片
+              </button>
+              <button
+                type="button"
+                onClick={() => { setInput('/'); textareaRef.current?.focus(); }}
+                className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-colors ${isGold ? 'bg-white/[0.06] text-white/50 hover:bg-white/[0.1] hover:text-gold/80' : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'}`}
+              >
+                <FileText size={10} /> 提示词模板
+              </button>
+              {canvasImages && canvasImages.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const lastImg = canvasImages[canvasImages.length - 1];
+                    if (lastImg) {
+                      setPendingImages([{ id: lastImg.id, url: lastImg.url, name: lastImg.prompt || '图片' }]);
+                    }
+                  }}
+                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-colors ${isGold ? 'bg-white/[0.06] text-white/50 hover:bg-white/[0.1] hover:text-gold/80' : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'}`}
+                >
+                  <ImageIcon size={10} /> 针对画布图片
+                </button>
+              )}
+            </div>
+          )}
           {/* Image Context Strip - all images in one unified bar (Lovart-style multi-image) */}
           {pendingImages.length > 0 && (
             <div className={`mb-1.5 flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs overflow-x-auto ${isGold ? 'bg-gold/10 border border-gold/20' : 'bg-blue-50 border border-blue-200'}`}>
@@ -5399,6 +5449,33 @@ ${imageDescriptions}
             </button>
           </div>
 
+          {/* P2-10: 智能体自动路由提示 */}
+          {suggestedAgent && !isLoading && (
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs ${isGold ? 'bg-gold/10 border border-gold/20' : 'bg-blue-50 border border-blue-200'} animate-in fade-in duration-200`}>
+              <span className={isGold ? 'text-gold/80' : 'text-blue-600'}>💡</span>
+              <span className={isGold ? 'text-gold/70' : 'text-blue-600'}>
+                检测到{`"${suggestedAgent.name}"`}相关需求
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setSystemPrompt(suggestedAgent.id);
+                  setSuggestedAgent(null);
+                }}
+                className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${isGold ? 'bg-gold/20 text-gold hover:bg-gold/30' : 'bg-blue-100 text-blue-700 hover:bg-blue-200'}`}
+              >
+                切换到{`${suggestedAgent.icon} ${suggestedAgent.name}`}
+              </button>
+              <button
+                type="button"
+                onClick={() => setSuggestedAgent(null)}
+                className={`ml-auto ${isGold ? 'text-gold/40 hover:text-gold/60' : 'text-gray-400 hover:text-gray-600'}`}
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
           {/* Textarea Row - 输入框独立占满宽度 */}
           <div className={`relative rounded-xl overflow-visible ${isGold ? 'bg-white/[0.03] border border-white/[0.04] focus-within:border-gold/40 focus-within:shadow-gold/10' : 'bg-white border border-gray-200 focus-within:border-gray-400 focus-within:shadow-sm'} transition-all`}>
             <Textarea
@@ -5467,29 +5544,91 @@ ${imageDescriptions}
                 <div className={`px-3 py-1.5 text-[10px] font-medium ${isGold ? 'text-gold-muted/60' : 'text-gray-400'}`}>
                   @ 引用 — 输入筛选，↑↓选择，Enter确认
                 </div>
-                {mentionPickerItems.map((item, idx) => (
-                  <button
-                    key={`${item.type}-${item.id}`}
-                    onClick={() => selectMentionItem(item)}
-                    className={`w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors ${
-                      idx === mentionPickerIndex
-                        ? isGold ? 'bg-gold/10 text-gold' : 'bg-blue-50 text-blue-700'
-                        : isGold ? 'text-white/80 hover:bg-white/5' : 'text-gray-700 hover:bg-gray-50'
-                    }`}
-                  >
-                    {item.type === 'canvas-image' && item.imageUrl ? (
-                      <img src={item.imageUrl} alt="" className="w-5 h-5 rounded object-cover shrink-0 border border-white/10" crossOrigin="anonymous" />
-                    ) : item.type === 'canvas-image' ? (
-                      <ImageIcon size={12} className="shrink-0" />
-                    ) : null}
-                    {item.type === 'brand' && <Palette size={12} className="shrink-0" />}
-                    {item.type === 'prompt' && <Sparkles size={12} className="shrink-0" />}
-                    <span className="truncate">{item.label}</span>
-                    <span className={`ml-auto text-[10px] ${isGold ? 'text-white/30' : 'text-gray-300'}`}>
-                      {item.type === 'canvas-image' ? `#${(item.data as Record<string, unknown>)?.num ?? ''}` : item.type === 'brand' ? '品牌' : '提示词'}
-                    </span>
-                  </button>
-                ))}
+                {(() => {
+                  // P2-12: Group mention items by type with category headers
+                  const imageItems = mentionPickerItems.filter(i => i.type === 'canvas-image');
+                  const brandItems = mentionPickerItems.filter(i => i.type === 'brand');
+                  const promptItems = mentionPickerItems.filter(i => i.type === 'prompt');
+                  return (
+                    <>
+                      {imageItems.length > 0 && (
+                        <div className={`px-3 py-0.5 text-[9px] font-medium uppercase tracking-wider ${isGold ? 'text-gold/40' : 'text-gray-300'}`}>
+                          画布图片 ({imageItems.length})
+                        </div>
+                      )}
+                      {imageItems.map(item => {
+                        const idx = mentionPickerItems.indexOf(item);
+                        return (
+                          <button
+                            key={`${item.type}-${item.id}`}
+                            onClick={() => selectMentionItem(item)}
+                            className={`w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors ${
+                              idx === mentionPickerIndex
+                                ? isGold ? 'bg-gold/10 text-gold' : 'bg-blue-50 text-blue-700'
+                                : isGold ? 'text-white/80 hover:bg-white/5' : 'text-gray-700 hover:bg-gray-50'
+                            }`}
+                          >
+                            {item.imageUrl ? (
+                              <img src={item.imageUrl} alt="" className="w-5 h-5 rounded object-cover shrink-0 border border-white/10" crossOrigin="anonymous" />
+                            ) : (
+                              <ImageIcon size={12} className="shrink-0" />
+                            )}
+                            <span className="truncate">{item.label}</span>
+                            <span className={`ml-auto text-[10px] ${isGold ? 'text-white/30' : 'text-gray-300'}`}>
+                              #{(item.data as Record<string, unknown>)?.num ?? ''}
+                            </span>
+                          </button>
+                        );
+                      })}
+                      {brandItems.length > 0 && (
+                        <div className={`px-3 py-0.5 text-[9px] font-medium uppercase tracking-wider border-t ${isGold ? 'text-gold/40 border-white/5' : 'text-gray-300 border-gray-100'}`}>
+                          品牌规范
+                        </div>
+                      )}
+                      {brandItems.map(item => {
+                        const idx = mentionPickerItems.indexOf(item);
+                        return (
+                          <button
+                            key={`${item.type}-${item.id}`}
+                            onClick={() => selectMentionItem(item)}
+                            className={`w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors ${
+                              idx === mentionPickerIndex
+                                ? isGold ? 'bg-gold/10 text-gold' : 'bg-blue-50 text-blue-700'
+                                : isGold ? 'text-white/80 hover:bg-white/5' : 'text-gray-700 hover:bg-gray-50'
+                            }`}
+                          >
+                            <Palette size={12} className="shrink-0" />
+                            <span className="truncate">{item.label}</span>
+                            <span className={`ml-auto text-[10px] ${isGold ? 'text-white/30' : 'text-gray-300'}`}>品牌</span>
+                          </button>
+                        );
+                      })}
+                      {promptItems.length > 0 && (
+                        <div className={`px-3 py-0.5 text-[9px] font-medium uppercase tracking-wider border-t ${isGold ? 'text-gold/40 border-white/5' : 'text-gray-300 border-gray-100'}`}>
+                          提示词库
+                        </div>
+                      )}
+                      {promptItems.map(item => {
+                        const idx = mentionPickerItems.indexOf(item);
+                        return (
+                          <button
+                            key={`${item.type}-${item.id}`}
+                            onClick={() => selectMentionItem(item)}
+                            className={`w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors ${
+                              idx === mentionPickerIndex
+                                ? isGold ? 'bg-gold/10 text-gold' : 'bg-blue-50 text-blue-700'
+                                : isGold ? 'text-white/80 hover:bg-white/5' : 'text-gray-700 hover:bg-gray-50'
+                            }`}
+                          >
+                            <Sparkles size={12} className="shrink-0" />
+                            <span className="truncate">{item.label}</span>
+                            <span className={`ml-auto text-[10px] ${isGold ? 'text-white/30' : 'text-gray-300'}`}>提示词</span>
+                          </button>
+                        );
+                      })}
+                    </>
+                  );
+                })()}
               </div>
             )}
             {/* / Prompt Template Popup */}
