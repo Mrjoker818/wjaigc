@@ -27,7 +27,11 @@ export async function POST(request: NextRequest) {
       enableTools = true,  // 是否启用 function calling
       agentTools = undefined as string[] | undefined,  // 智能体可用的工具列表（过滤）
       canvasSummary = undefined as string | undefined,  // 画布图片摘要
+      intentLevel = undefined as string | undefined,  // P2-9: 意图完整度 (extremely_vague / moderately_vague / clear)
     } = await request.json();
+    
+    // P2-9: 极度模糊时强制禁用工具，确保LLM只追问不执行
+    const effectiveEnableTools = intentLevel === 'extremely_vague' ? false : enableTools;
     
     // Filter tools based on agent's allowed tools
     const availableTools = agentTools && agentTools.length > 0
@@ -120,7 +124,7 @@ export async function POST(request: NextRequest) {
     // LLM 思考 → 返回 tool_calls → 执行工具 → 结果回传 LLM → 继续思考
     // 直到 LLM 返回纯文本（无 tool_calls）或达到最大循环次数
 
-    if (enableTools && stream) {
+    if (effectiveEnableTools && stream) {
       return handleAgentStream(fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, isThinkingModel, availableTools);
     }
 
@@ -132,7 +136,7 @@ export async function POST(request: NextRequest) {
       temperature: 0.7,
     };
 
-    if (enableTools) {
+    if (effectiveEnableTools) {
       requestBody.tools = availableTools;
       requestBody.tool_choice = 'auto';
     }
@@ -161,8 +165,8 @@ export async function POST(request: NextRequest) {
       console.warn(`[chat] Base model ${requestModel} with thinking params failed (${response.status}), trying ${model}...`);
       
       const retryBody: Record<string, unknown> = { model, messages: fixedMessages, stream, temperature: 0.7 };
-      if (enableTools) {
-        retryBody.tools = CHAT_TOOLS;
+      if (effectiveEnableTools) {
+        retryBody.tools = availableTools;
         retryBody.tool_choice = 'auto';
       }
       const retryResponse = await fetchWithV1Retry(
@@ -202,7 +206,7 @@ export async function POST(request: NextRequest) {
       const retryData = await retryResponse.json();
       
       // Handle tool_calls in non-stream mode
-      if (enableTools && retryData.choices?.[0]?.message?.tool_calls) {
+      if (effectiveEnableTools && retryData.choices?.[0]?.message?.tool_calls) {
         return handleNonStreamAgentLoop(retryData, fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, availableTools);
       }
       
@@ -275,7 +279,7 @@ export async function POST(request: NextRequest) {
     const data = await response.json();
     
     // Handle tool_calls in non-stream mode
-    if (enableTools && data.choices?.[0]?.message?.tool_calls) {
+    if (effectiveEnableTools && data.choices?.[0]?.message?.tool_calls) {
       return handleNonStreamAgentLoop(data, fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, availableTools);
     }
     

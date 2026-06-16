@@ -560,17 +560,44 @@ function parseSuggestions(content: string): { cleanedContent: string; suggestion
 }
 
 // Helper: detect if user input is too vague
-function isVagueInput(text: string): boolean {
+/** P2-9: 多级意图澄清 - 评估用户输入的完整度 */
+type IntentLevel = 'extremely_vague' | 'moderately_vague' | 'clear';
+
+function classifyIntentLevel(text: string, hasImages: boolean): IntentLevel {
   const trimmed = text.trim();
-  // Too short (< 8 chars) and no image attached
-  if (trimmed.length < 8) return true;
-  // Very generic single-word or two-word requests
-  const vaguePatterns = /^(画一个|做一个|设计|生成|搞个|来个|帮我|创作|随便|帮我画)\s*$/;
-  if (vaguePatterns.test(trimmed)) return true;
-  // Just a noun without any detail
+
+  // 有图片附件时，意图通常更明确
+  if (hasImages) {
+    // 有图但无任何文字 → 中等模糊
+    if (trimmed.length === 0) return 'moderately_vague';
+    // 有图+简短指令 → 清晰（如"改成蓝色"、"生成视频"）
+    if (trimmed.length < 4) return 'moderately_vague';
+    return 'clear';
+  }
+
+  // 无图片场景
+
+  // 极度模糊：<8字符 或 纯触发词
+  if (trimmed.length < 8) return 'extremely_vague';
+  const triggerOnlyPatterns = /^(画一个|做一个|设计|生成|搞个|来个|帮我|创作|随便|帮我画)\s*$/;
+  if (triggerOnlyPatterns.test(trimmed)) return 'extremely_vague';
+  // 纯名词无细节
   const nounOnlyPattern = /^(一个|一只|一副|一张)?[\u4e00-\u9fa5]{1,4}$/;
-  if (nounOnlyPattern.test(trimmed)) return true;
-  return false;
+  if (nounOnlyPattern.test(trimmed)) return 'extremely_vague';
+
+  // 中等模糊：有方向但缺关键信息
+  const moderatePatterns = [
+    // 有主题无风格："设计一个logo"、"画一个猫"（<20字且无修饰词）
+    /^(画|做|设计|生成|创建|制作|帮我)(一个|一只|一副|一张)?\S{1,10}$/,
+    // 有风格无主题："设计一个极简风的"、"生成赛博朋克风格的"
+    /^(设计|生成|创建|制作)\S*(风格|风|感觉|氛围)\S*$/,
+  ];
+  if (trimmed.length < 20 && moderatePatterns.some(p => p.test(trimmed))) {
+    return 'moderately_vague';
+  }
+
+  // 清晰：有足够的细节
+  return 'clear';
 }
 
 // Helper: create markdown components for react-markdown
@@ -3193,8 +3220,8 @@ UI设计规范：
 
     const trimmedInput = textToSend.trim();
 
-    // P0-3: 模糊意图主动追问 - 如果输入太模糊，添加追问标记
-    const isVague = isVagueInput(trimmedInput) && pendingImages.length === 0;
+    // P2-9: 多级意图澄清 - 评估用户输入完整度
+    const intentLevel = classifyIntentLevel(trimmedInput, pendingImages.length > 0);
 
     // 收集图片锚点（来自pendingImages、@图片引用）
     const imageAnchors: { imageId: string; imageUrl: string; imageName: string }[] = [];
@@ -3282,21 +3309,33 @@ ${agentRecipesList}
 
 2. 如果你生成的图片有任何值得注意的设计特点，请简要说明。`;
 
-      // P0-3: 模糊意图追问 - 如果输入太模糊，注入追问指令
-      if (isVague) {
+      // P2-9: 多级意图澄清 - 根据意图完整度注入不同指令
+      if (intentLevel === 'extremely_vague') {
         enhancedSystemPrompt += `
 
-【重要：当前用户输入过于模糊】
-用户输入简短且缺少关键细节。请先追问澄清，而非直接执行。你需要问清楚：
-- 具体主题/对象是什么？
-- 期望的风格/氛围是什么？
-- 用途/场景是什么？
-- 有无特殊要求？
-追问时给出2-3个具体选项帮助用户选择，降低回答门槛。格式示例：
-"我理解您想[用户意图]，为了给出最好的结果，请补充一些细节：
-1. 关于主题：[选项A] / [选项B] / [选项C]
-2. 关于风格：[选项A] / [选项B] / [选项C]"`;
+【重要：当前用户输入极度模糊】
+用户输入过短或仅有触发词，完全无法确定执行方向。请严格遵循以下规则：
+- **禁止调用任何工具**（不要生成图片/视频等）
+- 必须先追问澄清，帮助用户明确需求
+- 追问时给出2-3个具体选项帮助用户选择，降低回答门槛
+- 追问格式示例：
+  "我理解您想创作些什么！为了给出最好的结果，请补充一些细节：
+  1. 关于主题：[选项A] / [选项B] / [选项C]
+  2. 关于风格：[选项A] / [选项B] / [选项C]
+  3. 关于用途：[选项A] / [选项B] / [选项C]"
+- 禁止回复"好的，我来帮你生成"，必须在追问后等用户回答`;
+      } else if (intentLevel === 'moderately_vague') {
+        enhancedSystemPrompt += `
+
+【重要：当前用户输入中等模糊】
+用户有大致方向但缺少关键细节。请按以下规则处理：
+- 基于已有信息**自动补全**合理默认值（风格、主题、色彩等），尽量直接执行
+- 在执行的同时，简要说明你的补全假设："我为您选择了XX风格/XX配色，如果您希望调整可以告诉我"
+- 如果某个关键参数完全无法推断（如品牌色、具体尺寸要求），则简短追问该单项
+- 优先执行而非追问，减少用户等待
+- 示例：用户说"设计一个logo"→ 自动选择现代简约风格+品牌色系+矢量风格，生成后说明"默认使用了简约风格，如需调整风格/配色请告知"`;
       }
+      // intentLevel === 'clear' → 不注入任何额外指令，直接执行
 
       // P1-3: 品牌资产注入 - 如果有@品牌引用，注入BrandDNA到systemPrompt
       const brandMention = activeMentions.find(m => m.type === 'brand');
@@ -3481,6 +3520,7 @@ ${imageDescriptions}
           agentId: systemPrompt,
           providerId,
           canvasSummary,
+          intentLevel,  // P2-9: 多级意图澄清
         }),
       });
 
