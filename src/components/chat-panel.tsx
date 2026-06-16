@@ -160,6 +160,8 @@ const AGENTS: AgentDefinition[] = [
     routingKeywords: ['酒', '酒瓶', '酒类', '包装', '瓶型', '瓶身', '标签', '礼盒', '白酒', '红酒', '洋酒', '威士忌', '茅台', '瓶装', '瓶盖', 'liquor', 'wine bottle', 'whiskey', 'packaging'],
     skillIds: ['preset-product-packaging'],
   },
+  {
+    id: 'brand-visuals',
     name: '品牌视觉',
     nameEn: 'Brand Visuals',
     icon: '🎨',
@@ -201,7 +203,10 @@ const AGENTS: AgentDefinition[] = [
       { label: '移除背景', action: 'remove_bg' },
     ],
     routingKeywords: ['品牌', 'VI', '视觉识别', 'Logo', '标识', '色彩体系', '字体系统', '品牌规范', '品牌设计', '品牌形象', 'brand', 'logo', 'identity', 'visual system'],
+    skillIds: ['preset-logo-brand', 'preset-mockup-showcase', 'preset-business-card'],
   },
+  {
+    id: 'spatial-exhibit',
     name: '空间展演',
     nameEn: 'Spatial Exhibit',
     icon: '🏛️',
@@ -246,6 +251,7 @@ const AGENTS: AgentDefinition[] = [
       { label: '换个角度渲染', action: 'generate_image', prefilledPrompt: '从鸟瞰角度渲染整个展位' },
     ],
     routingKeywords: ['展位', '展览', '展厅', '展会', '空间', '会展', '博物馆', '发布会', '空间叙事', '展陈', 'exhibition', 'booth', 'spatial', 'gallery'],
+    skillIds: ['preset-interior-design', 'preset-concept-art', 'preset-mockup-showcase'],
   },
   {
     id: 'creative-scenography',
@@ -290,7 +296,10 @@ const AGENTS: AgentDefinition[] = [
       { label: '放大到8K', action: 'upscale' },
     ],
     routingKeywords: ['美陈', '装置', '橱窗', '陈列', '快闪', '打卡', '互动', '沉浸', '体验空间', '场景', '造景', '造境', 'scenography', 'installation', 'display', 'immersive', 'popup'],
+    skillIds: ['preset-interior-design', 'preset-concept-art', 'preset-mockup-showcase'],
   },
+  {
+    id: 'creative-poster',
     name: '创意海报',
     nameEn: 'Creative Posters',
     icon: '🖼️',
@@ -332,6 +341,7 @@ const AGENTS: AgentDefinition[] = [
       { label: '移除背景', action: 'remove_bg' },
     ],
     routingKeywords: ['海报', 'KV', '主视觉', '节气', '促销', '物料', '广告', '宣传图', '社交图', 'banner', 'poster', 'kv', 'ad', 'marketing', 'campaign'],
+    skillIds: ['preset-poster-design', 'preset-social-media', 'preset-marketing-brochure', 'preset-magazine-cover'],
   },
   {
     id: 'content-graphics',
@@ -377,6 +387,7 @@ const AGENTS: AgentDefinition[] = [
       { label: '移除背景', action: 'remove_bg' },
     ],
     routingKeywords: ['长图', '图解', '信息图', '科普', '九宫格', '信息流', '内容', '图说', 'infographic', 'long image', 'scroll', 'content'],
+    skillIds: ['preset-social-media', 'preset-marketing-brochure', 'preset-storyboard'],
   },
   {
     id: 'brand-character',
@@ -421,6 +432,7 @@ const AGENTS: AgentDefinition[] = [
       { label: '制作动画', action: 'generate_video', prefilledPrompt: 'IP角色向镜头挥手打招呼' },
     ],
     routingKeywords: ['吉祥物', 'IP', '角色', '虚拟人', '代言人', '卡通', '人物设计', '形象', 'mascot', 'character', 'avatar', 'ip', 'virtual idol'],
+    skillIds: ['preset-ip-character', 'preset-sticker-emoji', 'preset-comic-manga'],
   },
 ];
 
@@ -2818,6 +2830,20 @@ UI设计规范：
     if (skillSystemPrompt) {
       setSystemPrompt(skillSystemPrompt);
     }
+    // P2-13: 如果 Skill 关联了智能体，自动切换到该智能体
+    if (skill.agentId) {
+      const matchedAgent = allAgents.find(a => a.id === skill.agentId);
+      if (matchedAgent) {
+        setSystemPrompt(matchedAgent.prompt);
+      }
+    }
+    // P2-13: 如果没有 agentId，检查是否有智能体的 skillIds 包含此 Skill
+    if (!skill.agentId) {
+      const matchedAgent = allAgents.find(a => a.skillIds?.includes(skill.id));
+      if (matchedAgent) {
+        setSystemPrompt(matchedAgent.prompt);
+      }
+    }
     // 构建首条消息 - 替换参数槽位
     let firstMessage = '';
     if (skill.steps.length > 0) {
@@ -2856,7 +2882,7 @@ UI设计规范：
     if (firstMessage.trim()) {
       setInput(firstMessage);
     }
-  }, [skillParamValues, model, systemPrompt, chatSkills, saveSkills]);
+  }, [skillParamValues, model, systemPrompt, chatSkills, saveSkills, allAgents]);
 
   // 删除 Skill
   const handleDeleteSkill = useCallback((skillId: string) => {
@@ -4606,6 +4632,26 @@ ${imageDescriptions}
                             <span key={tool} className={`inline-flex items-center gap-0.5 text-[10px] px-1 py-px rounded ${isGold ? 'bg-white/[0.06] text-gold-muted/70' : 'bg-gray-100 text-gray-500'}`}>
                               {meta.icon} {meta.label}
                             </span>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {/* P2-13: Associated Skills */}
+                    {selectedAgent.skillIds && selectedAgent.skillIds.length > 0 && (
+                      <div className="flex items-center gap-0.5 mt-0.5 flex-wrap">
+                        <Bookmark size={8} className={isGold ? 'text-gold-muted/50' : 'text-gray-400'} />
+                        {selectedAgent.skillIds.map(sid => {
+                          const skill = chatSkills.find(s => s.id === sid);
+                          if (!skill) return null;
+                          return (
+                            <button
+                              key={sid}
+                              onClick={(e) => { e.stopPropagation(); handleUseSkill(skill); }}
+                              className={`inline-flex items-center gap-0.5 text-[10px] px-1 py-px rounded transition-colors ${isGold ? 'bg-gold/10 text-gold-muted hover:bg-gold/20' : 'bg-amber-50 text-amber-600 hover:bg-amber-100'}`}
+                              title={`使用 Skill: ${skill.name}`}
+                            >
+                              {skill.name}
+                            </button>
                           );
                         })}
                       </div>
