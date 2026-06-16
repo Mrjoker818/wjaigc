@@ -1382,6 +1382,7 @@ ${outputSpec || '1. 设计理念（200字内）\n2. 详细方案描述\n3. 材�
 export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages = [], selectedCanvasImage, onChatModelChange, onSuggestionAction, onGenerateImage, brandDna, onInjectBrandDna, chatInitialImage, onChatInitialImageConsumed, chatTabOpen, onChatTabOpenChange, onNavigateToImage }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
+  const [suggestedAgent, setSuggestedAgent] = useState<AgentDefinition | null>(null); // P2-10: auto-routing suggestion
   const [model, setModel] = useState('gemini-3.1-pro-preview');
 
   // Sync current chat model info to parent for vision-prompt usage
@@ -1590,6 +1591,19 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
     const value = e.target.value;
     const cursorPos = e.target.selectionStart;
     setInput(value);
+
+    // P2-10: 智能体自动路由 - 检测输入是否匹配某个智能体
+    if (value.trim().length >= 2) {
+      const matched = matchAgentByInput(value.trim(), allAgents);
+      // Only suggest if not already using this agent
+      if (matched && matched.id !== systemPrompt) {
+        setSuggestedAgent(matched);
+      } else {
+        setSuggestedAgent(null);
+      }
+    } else {
+      setSuggestedAgent(null);
+    }
 
     // Detect @ trigger
     const textBeforeCursor = value.slice(0, cursorPos);
