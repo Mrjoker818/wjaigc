@@ -110,6 +110,7 @@ interface AgentDefinition {
   recipes: AgentRecipe[]; // domain-specific operation templates
   defaultAspectRatio?: string; // default aspect ratio for this agent
   suggestedNextSteps?: { label: string; action: string; prefilledPrompt?: string }[];
+  routingKeywords?: string[]; // P2-10: keywords for auto-routing
 }
 
 const AGENTS: AgentDefinition[] = [
@@ -155,6 +156,7 @@ const AGENTS: AgentDefinition[] = [
       { label: '更换材质方案', action: 'generate_image', prefilledPrompt: '将瓶身材质更换为磨砂玻璃，保持原有造型' },
       { label: '放大到8K', action: 'upscale' },
     ],
+    routingKeywords: ['酒', '酒瓶', '酒类', '包装', '瓶型', '瓶身', '标签', '礼盒', '白酒', '红酒', '洋酒', '威士忌', '茅台', '瓶装', '瓶盖', 'liquor', 'wine bottle', 'whiskey', 'packaging'],
   },
   {
     id: 'brand-visuals',
@@ -198,9 +200,8 @@ const AGENTS: AgentDefinition[] = [
       { label: '生成VI应用场景', action: 'generate_image', prefilledPrompt: '将Logo应用到名片和信封上的效果图' },
       { label: '移除背景', action: 'remove_bg' },
     ],
+    routingKeywords: ['品牌', 'VI', '视觉识别', 'Logo', '标识', '色彩体系', '字体系统', '品牌规范', '品牌设计', '品牌形象', 'brand', 'logo', 'identity', 'visual system'],
   },
-  {
-    id: 'spatial-exhibit',
     name: '空间展演',
     nameEn: 'Spatial Exhibit',
     icon: '🏛️',
@@ -244,6 +245,7 @@ const AGENTS: AgentDefinition[] = [
       { label: '生成漫游视频', action: 'generate_video', prefilledPrompt: '展位空间漫游，相机缓慢推进' },
       { label: '换个角度渲染', action: 'generate_image', prefilledPrompt: '从鸟瞰角度渲染整个展位' },
     ],
+    routingKeywords: ['展位', '展览', '展厅', '展会', '空间', '会展', '博物馆', '发布会', '空间叙事', '展陈', 'exhibition', 'booth', 'spatial', 'gallery'],
   },
   {
     id: 'creative-scenography',
@@ -287,9 +289,8 @@ const AGENTS: AgentDefinition[] = [
       { label: '生成漫游视频', action: 'generate_video', prefilledPrompt: '虚拟空间沉浸式漫游体验' },
       { label: '放大到8K', action: 'upscale' },
     ],
+    routingKeywords: ['美陈', '装置', '橱窗', '陈列', '快闪', '打卡', '互动', '沉浸', '体验空间', '场景', '造景', '造境', 'scenography', 'installation', 'display', 'immersive', 'popup'],
   },
-  {
-    id: 'creative-posters',
     name: '创意海报',
     nameEn: 'Creative Posters',
     icon: '🖼️',
@@ -330,6 +331,7 @@ const AGENTS: AgentDefinition[] = [
       { label: '适配社交媒体', action: 'generate_image', prefilledPrompt: '将海报适配为小红书竖版卡片格式' },
       { label: '移除背景', action: 'remove_bg' },
     ],
+    routingKeywords: ['海报', 'KV', '主视觉', '节气', '促销', '物料', '广告', '宣传图', '社交图', 'banner', 'poster', 'kv', 'ad', 'marketing', 'campaign'],
   },
   {
     id: 'content-graphics',
@@ -374,6 +376,7 @@ const AGENTS: AgentDefinition[] = [
       { label: '适配小红书', action: 'generate_image', prefilledPrompt: '将内容适配为小红书1242px宽度长图格式' },
       { label: '移除背景', action: 'remove_bg' },
     ],
+    routingKeywords: ['长图', '图解', '信息图', '科普', '九宫格', '信息流', '内容', '图说', 'infographic', 'long image', 'scroll', 'content'],
   },
   {
     id: 'brand-character',
@@ -417,6 +420,7 @@ const AGENTS: AgentDefinition[] = [
       { label: '生成3D场景', action: 'generate_image', prefilledPrompt: '将IP角色放入品牌展厅场景中，保持角色一致性' },
       { label: '制作动画', action: 'generate_video', prefilledPrompt: 'IP角色向镜头挥手打招呼' },
     ],
+    routingKeywords: ['吉祥物', 'IP', '角色', '虚拟人', '代言人', '卡通', '人物设计', '形象', 'mascot', 'character', 'avatar', 'ip', 'virtual idol'],
   },
 ];
 
@@ -598,6 +602,31 @@ function classifyIntentLevel(text: string, hasImages: boolean): IntentLevel {
 
   // 清晰：有足够的细节
   return 'clear';
+}
+
+/** P2-10: 智能体自动路由 - 基于关键词匹配推荐最佳智能体 */
+function matchAgentByInput(text: string, agents: AgentDefinition[]): AgentDefinition | null {
+  const lowerText = text.toLowerCase();
+  let bestMatch: AgentDefinition | null = null;
+  let bestScore = 0;
+
+  for (const agent of agents) {
+    if (!agent.routingKeywords || agent.routingKeywords.length === 0) continue;
+    let score = 0;
+    for (const kw of agent.routingKeywords) {
+      if (lowerText.includes(kw.toLowerCase())) {
+        // Longer keywords get higher score (more specific)
+        score += kw.length;
+      }
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestMatch = agent;
+    }
+  }
+
+  // Only recommend if score exceeds threshold (at least one keyword matched with length > 1)
+  return bestScore >= 2 ? bestMatch : null;
 }
 
 // Helper: create markdown components for react-markdown
