@@ -3609,6 +3609,7 @@ ${imageDescriptions}
       let assistantContent = '';
       const toolExecutions: ToolExecution[] = []; // Agent工具执行记录
       const toolGeneratedImages: string[] = []; // 工具生成的图片URL
+      const toolPendingTaskIds: Array<{ taskId: string; model: string; providerId: string; type: 'image' | 'video' }> = []; // 工具返回的异步任务，需轮询
       let toolGeneratedVideo: string | undefined; // 工具生成的视频URL
       let currentSSEEvent = ''; // 当前SSE事件类型
 
@@ -3683,12 +3684,16 @@ ${imageDescriptions}
                   if (parsed.videoUrl) {
                     toolGeneratedVideo = parsed.videoUrl;
                   }
+                  // 收集异步任务ID，稍后轮询
+                  if (parsed.taskIds && parsed.taskIds.length > 0 && (!parsed.imageUrls || parsed.imageUrls.length === 0)) {
+                    toolPendingTaskIds.push(...parsed.taskIds);
+                  }
                   currentSSEEvent = '';
                   continue;
                 }
 
                 if (currentSSEEvent === 'tool_execution_complete') {
-                  // 所有工具执行完成，将图片添加到画布
+                  // 所有工具执行完成，将直接返回的图片添加到画布
                   if (toolGeneratedImages.length > 0 && onAddImages) {
                     const imageModelInfo = getCurrentImageModelInfo(imageModel, imageModelProviderId);
                     onAddImages(toolGeneratedImages, undefined, { modelName: imageModelInfo.model, apiProvider: imageModelInfo.providerId });
@@ -3700,6 +3705,75 @@ ${imageDescriptions}
                         ? { ...msg, generatedImages: toolGeneratedImages, isGeneratingImage: false, generateProgress: 100 }
                         : msg
                     ));
+                  }
+                  // 异步任务轮询：当工具返回taskIds但没有imageUrls时，后台轮询等待结果
+                  if (toolPendingTaskIds.length > 0 && toolGeneratedImages.length === 0) {
+                    const imageModelInfo = getCurrentImageModelInfo(imageModel, imageModelProviderId);
+                    setMessages(prev => prev.map(msg =>
+                      msg.id === assistantMessageId
+                        ? { ...msg, isGeneratingImage: true, generateModelName: imageModelInfo.model || '图像生成', generateProviderId: imageModelInfo.providerId, generateProgress: 10 }
+                        : msg
+                    ));
+                    // 后台轮询异步任务
+                    (async () => {
+                      try {
+                        const resultUrls: string[] = [];
+                        for (const taskInfo of toolPendingTaskIds) {
+                          const tid = taskInfo.taskId;
+                          const tModel = taskInfo.model || imageModelInfo.model;
+                          const tProviderId = taskInfo.providerId || imageModelInfo.providerId;
+                          for (let i = 0; i < 90; i++) {
+                            const interval = i <= 3 ? 1000 : i <= 10 ? 1500 : 2000;
+                            await new Promise(r => setTimeout(r, interval));
+                            const progress = Math.min(90, 10 + Math.round((i / 90) * 80));
+                            setMessages(prev => prev.map(msg =>
+                              msg.id === assistantMessageId ? { ...msg, generateProgress: progress } : msg
+                            ));
+                            try {
+                              const pollRes = await fetch('/api/poll-task', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ taskId: tid, model: tModel, providerId: tProviderId }),
+                              });
+                              const pollData = await pollRes.json();
+                              if (pollData.status === 'completed') {
+                                if (taskInfo.type === 'video') {
+                                  const vUrl = pollData.videoUrl || pollData.result?.videoUrl;
+                                  if (vUrl && typeof vUrl === 'string') resultUrls.push(vUrl);
+                                } else {
+                                  const extractedUrl = pollData.imageUrl || pollData.result?.imageUrl || pollData.result?.image?.url || pollData.result?.images?.[0]?.url || pollData.result?.images?.[0];
+                                  if (extractedUrl && typeof extractedUrl === 'string') resultUrls.push(extractedUrl);
+                                }
+                                break;
+                              } else if (pollData.status === 'failed' || pollData.retryable === false) { break; }
+                            } catch { /* retry */ }
+                          }
+                        }
+                        if (resultUrls.length > 0) {
+                          setMessages(prev => prev.map(msg =>
+                            msg.id === assistantMessageId
+                              ? { ...msg, generatedImages: resultUrls, isGeneratingImage: false, generateProgress: 100 }
+                              : msg
+                          ));
+                          if (onAddImages) {
+                            onAddImages(resultUrls, undefined, { modelName: imageModelInfo.model, apiProvider: imageModelInfo.providerId });
+                          }
+                        } else {
+                          setMessages(prev => prev.map(msg =>
+                            msg.id === assistantMessageId
+                              ? { ...msg, isGeneratingImage: false, generateError: '图像生成未返回结果，请检查图像模型配置' }
+                              : msg
+                          ));
+                        }
+                      } catch (pollErr) {
+                        console.error('[ChatImage] Task polling error:', pollErr);
+                        setMessages(prev => prev.map(msg =>
+                          msg.id === assistantMessageId
+                            ? { ...msg, isGeneratingImage: false, generateError: '图像生成轮询出错' }
+                            : msg
+                        ));
+                      }
+                    })();
                   }
                   currentSSEEvent = '';
                   continue;
@@ -3761,12 +3835,113 @@ ${imageDescriptions}
       // ====== P0-1: 图像生成处理（Function Calling优先，[GENERATE]标签兜底） ======
       const generateMatches = [...assistantContent.matchAll(/\[GENERATE:\s*([\s\S]+?)\]/g)];
       const hasGenerateTags = generateMatches.length > 0;
-      const hasToolGeneratedImages = toolGeneratedImages.length > 0 || !!toolGeneratedVideo;
+      const hasToolGeneratedImages = toolGeneratedImages.length > 0 || !!toolGeneratedVideo || toolPendingTaskIds.length > 0;
 
       // 优先使用 Function Calling 工具生成的图片
       if (hasToolGeneratedImages) {
         // 工具执行已由流中的 tool_execution_result/tool_execution_complete 事件处理
-        console.log('[ChatImage] Function Calling generated', toolGeneratedImages.length, 'images');
+        console.log('[ChatImage] Function Calling generated', toolGeneratedImages.length, 'images, pending tasks:', toolPendingTaskIds.length);
+
+        // 当工具返回 taskIds（异步任务）但没有直接的 imageUrls 时，需要轮询获取结果
+        if (toolPendingTaskIds.length > 0) {
+          const imageModelInfo = getCurrentImageModelInfo(imageModel, imageModelProviderId);
+          setMessages(prev => prev.map(msg =>
+            msg.id === assistantMessageId
+              ? { ...msg, isGeneratingImage: true, generateModelName: imageModelInfo.model || '图像生成', generateProviderId: imageModelInfo.providerId, generateProgress: 5, generateImageCount: toolPendingTaskIds.length }
+              : msg
+          ));
+
+          (async () => {
+            try {
+              const allPolledUrls: string[] = [];
+              const allPolledVideoUrls: string[] = [];
+
+              for (let tIdx = 0; tIdx < toolPendingTaskIds.length; tIdx++) {
+                const { taskId, model, providerId, type: taskType } = toolPendingTaskIds[tIdx];
+                const genModel = model || imageModelInfo.model;
+                const genProviderId = providerId || imageModelInfo.providerId;
+
+                for (let i = 0; i < 120; i++) {
+                  const interval = i <= 2 ? 800 : i <= 5 ? 1000 : i <= 15 ? 1500 : 2000;
+                  await new Promise(r => setTimeout(r, interval));
+                  const pollProgress = Math.min(90, 5 + Math.round(((tIdx + i / 120) / toolPendingTaskIds.length) * 85));
+                  setMessages(prev => prev.map(msg =>
+                    msg.id === assistantMessageId ? { ...msg, generateProgress: pollProgress } : msg
+                  ));
+
+                  try {
+                    const pollRes = await fetch('/api/poll-task', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ taskId, model: genModel, providerId: genProviderId }),
+                    });
+                    const pollData = await pollRes.json();
+
+                    if (pollData.status === 'completed') {
+                      if (taskType === 'video' || pollData.videoUrl) {
+                        const vUrl = pollData.videoUrl || pollData.result?.videoUrl;
+                        if (vUrl) allPolledVideoUrls.push(vUrl);
+                      } else {
+                        const extractedUrl = pollData.imageUrl || pollData.result?.imageUrl || pollData.result?.image?.url || pollData.result?.images?.[0]?.url || pollData.result?.images?.[0];
+                        if (extractedUrl && typeof extractedUrl === 'string') allPolledUrls.push(extractedUrl);
+                      }
+                      break;
+                    } else if (pollData.status === 'failed' || pollData.retryable === false) {
+                      console.warn('[ChatImage] Task', taskId, 'failed:', pollData.error);
+                      break;
+                    }
+                  } catch (pollErr) {
+                    console.warn('[ChatImage] Poll error for task', taskId, pollErr);
+                  }
+                }
+              }
+
+              // 将轮询到的图片/视频添加到画布
+              if (allPolledUrls.length > 0) {
+                const savedUrls: string[] = [];
+                for (const url of allPolledUrls) {
+                  try {
+                    const saveRes = await fetch('/api/save-image', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ imageUrl: url }),
+                    });
+                    const saveData = await saveRes.json();
+                    savedUrls.push(saveData.savedUrl || saveData.url || url);
+                  } catch { savedUrls.push(url); }
+                }
+                if (onAddImages && savedUrls.length > 0) {
+                  onAddImages(savedUrls);
+                }
+                setMessages(prev => prev.map(msg =>
+                  msg.id === assistantMessageId
+                    ? { ...msg, generatedImages: [...(msg.generatedImages || []), ...savedUrls], isGeneratingImage: false, generateProgress: 100 }
+                    : msg
+                ));
+              } else if (allPolledVideoUrls.length > 0) {
+                if (onAddImages) onAddImages(allPolledVideoUrls);
+                setMessages(prev => prev.map(msg =>
+                  msg.id === assistantMessageId
+                    ? { ...msg, generatedImages: [...(msg.generatedImages || []), ...allPolledVideoUrls], isGeneratingImage: false, generateProgress: 100 }
+                    : msg
+                ));
+              } else {
+                setMessages(prev => prev.map(msg =>
+                  msg.id === assistantMessageId
+                    ? { ...msg, isGeneratingImage: false, generateError: '图像生成完成但未获取到结果' }
+                    : msg
+                ));
+              }
+            } catch (err) {
+              console.error('[ChatImage] Task polling error:', err);
+              setMessages(prev => prev.map(msg =>
+                msg.id === assistantMessageId
+                  ? { ...msg, isGeneratingImage: false, generateError: '图像生成轮询失败' }
+                  : msg
+              ));
+            }
+          })();
+        }
       } else if (hasGenerateTags) {
         // ====== 兜底：[GENERATE: ...] 标签解析（不支持 function calling 的模型） ======
         const prompts: string[] = generateMatches.map(m => m[1].trim());
@@ -5296,29 +5471,11 @@ ${imageDescriptions}
             </div>
           )}
 
-          {/* P1-1: Active Mentions Tags */}
-          {activeMentions.length > 0 && (
+          {/* P1-1: Active Mentions Tags - 非图片类型显示在输入框上方，图片类型移到输入框内 */}
+          {activeMentions.filter(m => m.type !== 'canvas-image').length > 0 && (
             <div className="mb-1.5 flex flex-wrap gap-1.5">
               {activeMentions.map((m, i) => (
-                m.type === 'canvas-image' ? (
-                  /* Image reference with prominent thumbnail */
-                  <div
-                    key={`${m.type}-${m.id}`}
-                    className={`inline-flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] ${isGold ? 'bg-gold/10 text-gold border border-gold/30 hover:bg-gold/20' : 'bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100'}`}
-                    onClick={() => onNavigateToImage?.(m.id!)}
-                    title="点击定位到画布图片"
-                  >
-                    {m.imageUrl && (
-                      <div className="w-8 h-8 rounded overflow-hidden shrink-0 border border-white/10">
-                        <img src={m.imageUrl} alt="" className="w-full h-full object-cover" />
-                      </div>
-                    )}
-                    <span className="truncate max-w-[90px]">{m.label}</span>
-                    <button onClick={(e) => { e.stopPropagation(); removeMention(i); setPendingImages(prev => prev.filter(p => p.id !== `mention-${m.id}`)); }} className="opacity-50 hover:opacity-100">
-                      <X size={12} />
-                    </button>
-                  </div>
-                ) : (
+                m.type !== 'canvas-image' ? (
                   <span key={`${m.type}-${m.id}`} className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${
                     m.type === 'brand' ? (isGold ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30' : 'bg-amber-50 text-amber-700 border border-amber-200') :
                     m.type === 'prompt' ? (isGold ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : 'bg-emerald-50 text-emerald-700 border border-emerald-200') :
@@ -5331,7 +5488,7 @@ ${imageDescriptions}
                       <X size={10} />
                     </button>
                   </span>
-                )
+                ) : null
               ))}
             </div>
           )}
@@ -5523,6 +5680,40 @@ ${imageDescriptions}
 
           {/* Textarea Row - 输入框独立占满宽度 */}
           <div className={`relative rounded-xl overflow-visible ${isGold ? 'bg-white/[0.03] border border-white/[0.04] focus-within:border-gold/40 focus-within:shadow-gold/10' : 'bg-white border border-gray-200 focus-within:border-gray-400 focus-within:shadow-sm'} transition-all`}>
+            {/* @图片 引用缩略图 - 显示在输入框内部 */}
+            {activeMentions.filter(m => m.type === 'canvas-image').length > 0 && (
+              <div className="flex flex-wrap gap-2 px-3 pt-2.5">
+                {activeMentions.map((m, i) => (
+                  m.type === 'canvas-image' ? (
+                    <div
+                      key={`img-mention-${m.id}`}
+                      className={`relative group inline-flex flex-col items-center rounded-lg overflow-hidden cursor-pointer transition-all hover:scale-[1.03] active:scale-[0.97] ${isGold ? 'bg-white/[0.06] border border-gold/25 hover:border-gold/50' : 'bg-gray-50 border border-gray-200 hover:border-blue-300'}`}
+                      onClick={() => onNavigateToImage?.(m.id!)}
+                      title={m.label}
+                    >
+                      {m.imageUrl ? (
+                        <div className="w-12 h-12 overflow-hidden">
+                          <img src={m.imageUrl} alt="" className="w-full h-full object-cover" />
+                        </div>
+                      ) : (
+                        <div className={`w-12 h-12 flex items-center justify-center ${isGold ? 'text-gold/40' : 'text-gray-400'}`}>
+                          <ImageIcon size={16} />
+                        </div>
+                      )}
+                      <div className={`px-1.5 py-0.5 text-[9px] font-medium truncate max-w-[48px] ${isGold ? 'text-gold/70' : 'text-gray-500'}`}>
+                        #{i + 1}
+                      </div>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); removeMention(i); setPendingImages(prev => prev.filter(p => p.id !== `mention-${m.id}`)); }}
+                        className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity ${isGold ? 'bg-gold/80 text-black' : 'bg-gray-800 text-white'}`}
+                      >
+                        <X size={10} />
+                      </button>
+                    </div>
+                  ) : null
+                ))}
+              </div>
+            )}
             <Textarea
               ref={textareaRef}
               value={input}

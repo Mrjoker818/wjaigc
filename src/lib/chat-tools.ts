@@ -238,8 +238,8 @@ export interface ToolCallResult {
   imageUrls?: string[];
   /** 工具执行产生的视频URL列表 */
   videoUrls?: string[];
-  /** 任务ID列表（异步任务） */
-  taskIds?: string[];
+  /** 异步任务ID列表（包含model/providerId供前端轮询） */
+  taskIds?: Array<{ taskId: string; model: string; providerId: string; type: 'image' | 'video' }>;
   /** 结果描述，用于回传给 LLM */
   resultText: string;
 }
@@ -295,66 +295,54 @@ async function executeGenerateImage(
     const count = (args.count as number) || 1;
     const negativePrompt = args.negative_prompt as string | undefined;
 
-    // 查找图像生成提供商
-    const { findProviderForModel: findImgProvider } = await import('@/lib/server-api-config');
-    const imgProvider = await findImgProvider('', 'image');
-    if (!imgProvider) {
-      return { success: false, error: '未配置图像生成模型', resultText: '错误：管理员尚未配置图像生成模型，无法生成图片。请提醒管理员在后台添加图像模型。' };
-    }
-
-    const imgApiKey = imgProvider.apiKey;
-    const imgBaseUrl = imgProvider.baseUrl?.replace(/\/+$/, '') || context.chatBaseUrl;
-
-    // 构建生成请求
-    const requestBody: Record<string, unknown> = {
-      model: imgProvider.selectedModels?.[0] || 'dall-e-3',
-      prompt: negativePrompt ? `${prompt} [negative: ${negativePrompt}]` : prompt,
-      n: count,
-      size: mapAspectRatioToSize(aspectRatio, quality),
-      quality: quality === '4K' ? 'hd' : 'standard',
-    };
-
-    const { fetchWithV1Retry } = await import('@/lib/api-helpers');
-    const response = await fetchWithV1Retry(imgBaseUrl, '/images/generations', {
+    // 使用统一的 /api/generate 接口，确保兼容性、异步轮询、URL持久化
+    const generateRes = await fetch(`${context.origin || 'http://localhost:5000'}/api/generate`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${imgApiKey}`,
-      },
-      body: JSON.stringify(requestBody),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt: negativePrompt ? `${prompt} [negative: ${negativePrompt}]` : prompt,
+        aspectRatio,
+        quality,
+        outputCount: count,
+      }),
       signal: AbortSignal.timeout(120000),
     });
 
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => '');
-      return { success: false, error: `图像生成API失败: ${response.status}`, resultText: `图像生成失败（HTTP ${response.status}）。${errorText.substring(0, 200)}` };
+    if (!generateRes.ok) {
+      const errorText = await generateRes.text().catch(() => '');
+      return { success: false, error: `图像生成API失败: ${generateRes.status}`, resultText: `图像生成失败（HTTP ${generateRes.status}）。${errorText.substring(0, 200)}` };
     }
 
-    const data = await response.json();
-    const imageUrls: string[] = [];
+    const data = await generateRes.json();
+    if (!data.success) {
+      return { success: false, error: data.error || '生成失败', resultText: `图像生成失败: ${data.error || '未知错误'}` };
+    }
 
-    // 解析响应 - 兼容多种格式
-    if (data.data && Array.isArray(data.data)) {
-      for (const item of data.data) {
-        const url = item.url || item.b64_json;
-        if (url) imageUrls.push(url);
-      }
-    } else if (data.imageUrls && Array.isArray(data.imageUrls)) {
+    const imageUrls: string[] = [];
+    if (data.imageUrls && Array.isArray(data.imageUrls)) {
       imageUrls.push(...data.imageUrls);
     } else if (data.imageUrl) {
       imageUrls.push(data.imageUrl);
     }
 
+    // 如果是异步任务（taskIds），不再在工具内阻塞轮询，直接返回 taskIds 给前端轮询
+    // 这样 LLM 不需要等待图片生成完成，可以立即继续回复用户
+    const taskIds: string[] = data.taskIds || (data.taskId ? [data.taskId] : []);
+    if (taskIds.length > 0 && imageUrls.length === 0) {
+      return {
+        success: true,
+        imageUrls: [],
+        taskIds: taskIds.map(tid => ({
+          taskId: tid,
+          model: data.model || '',
+          providerId: data.providerId || '',
+          type: 'image' as const,
+        })),
+        resultText: `已提交 ${taskIds.length} 个图像生成任务，正在生成中...图片完成后将自动添加到画布。`,
+      };
+    }
+
     if (imageUrls.length === 0) {
-      // 可能是异步任务
-      const taskIds = data.taskIds || (data.taskId ? [data.taskId] : []);
-      if (taskIds.length > 0) {
-        return {
-          success: true,
-          taskIds,
-          resultText: `图像生成任务已提交（任务ID: ${taskIds.join(', ')}），正在生成中。用户可以在画布上看到生成进度。`,
-        };
-      }
       return { success: false, error: '未返回图片', resultText: '图像生成API返回了空结果。' };
     }
 
@@ -403,7 +391,7 @@ async function executeEditImage(
       if (taskId) {
         return {
           success: true,
-          taskIds: [taskId],
+          taskIds: [{ taskId, model: data.model || '', providerId: data.providerId || '', type: 'image' as const }],
           resultText: `语言修图任务已提交（任务ID: ${taskId}），正在处理中。`,
         };
       }
@@ -484,7 +472,7 @@ async function executeImg2Img(
     if (taskIds.length > 0) {
       return {
         success: true,
-        taskIds,
+        taskIds: taskIds.map(tid => ({ taskId: tid, model: data.model || '', providerId: data.providerId || '', type: 'image' as const })),
         resultText: `图生图任务已提交（任务ID: ${taskIds.join(', ')}），正在生成中。`,
       };
     }
@@ -521,7 +509,11 @@ async function executeRemoveBg(
       return { success: true, imageUrls: resultUrls, resultText: `成功移除了图片背景。透明背景图和蒙版图已添加到画布上。` };
     }
     if (taskIds.length > 0) {
-      return { success: true, taskIds, resultText: `移除背景任务已提交，正在处理中。` };
+      return {
+        success: true,
+        taskIds: taskIds.map(tid => ({ taskId: tid, model: data.model || '', providerId: data.providerId || '', type: 'image' as const })),
+        resultText: `移除背景任务已提交，正在处理中。`,
+      };
     }
     return { success: false, error: '未返回结果', resultText: '移除背景API未返回有效结果。' };
   } catch (err) {
@@ -556,7 +548,11 @@ async function executeUpscale(
       return { success: true, imageUrls: resultUrls, resultText: `成功将图片放大了${scale}倍。放大后的图片已添加到画布上。` };
     }
     if (taskIds.length > 0) {
-      return { success: true, taskIds, resultText: `图片放大任务已提交，正在处理中。` };
+      return {
+        success: true,
+        taskIds: taskIds.map(tid => ({ taskId: tid, model: data.model || '', providerId: data.providerId || '', type: 'image' as const })),
+        resultText: `图片放大任务已提交，正在处理中。`,
+      };
     }
     return { success: false, error: '未返回结果', resultText: '图片放大API未返回有效结果。' };
   } catch (err) {
@@ -594,7 +590,16 @@ async function executeGenerateVideo(
     const taskIds: string[] = data.taskIds || (data.taskId ? [data.taskId] : []);
 
     if (taskIds.length > 0) {
-      return { success: true, taskIds, resultText: `视频生成任务已提交（任务ID: ${taskIds.join(', ')}），视频生成通常需要1-3分钟。` };
+      return {
+        success: true,
+        taskIds: taskIds.map(tid => ({
+          taskId: tid,
+          model: data.model || '',
+          providerId: data.providerId || '',
+          type: 'video' as const,
+        })),
+        resultText: `视频生成任务已提交（任务ID: ${taskIds.join(', ')}），视频生成通常需要1-3分钟。`,
+      };
     }
 
     const videoUrls: string[] = data.videoUrls || (data.videoUrl ? [data.videoUrl] : []);
@@ -695,7 +700,11 @@ async function executeExtendCanvas(
       return { success: true, imageUrls: resultUrls, resultText: `成功扩展了画面。扩展后的图片已添加到画布上。` };
     }
     if (taskIds.length > 0) {
-      return { success: true, taskIds, resultText: `扩展画面任务已提交，正在处理中。` };
+      return {
+        success: true,
+        taskIds: taskIds.map(tid => ({ taskId: tid, model: data.model || '', providerId: data.providerId || '', type: 'image' as const })),
+        resultText: `扩展画面任务已提交，正在处理中。`,
+      };
     }
     return { success: false, error: '未返回结果', resultText: '扩展画面API未返回有效结果。' };
   } catch (err) {
