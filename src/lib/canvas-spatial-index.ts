@@ -52,9 +52,7 @@ export class CanvasSpatialIndex {
   rebuild(images: CanvasImageLike[]): void {
     const items: SpatialItem[] = [];
     for (const img of images) {
-      if (img.isProcessingPlaceholder !== undefined && (img as any).isProcessingPlaceholder) {
-        // processing frame 也加入索引，保证命中测试一致
-      }
+      // processing frame 也加入索引，保证命中测试一致
       items.push({
         minX: img.x,
         minY: img.y,
@@ -95,6 +93,11 @@ export class CanvasSpatialIndex {
   /** 范围查询：返回与给定包围盒相交的所有图片 ID */
   search(bbox: BBox): string[] {
     return this.tree.search(bbox).map(item => item.id);
+  }
+
+  /** 范围查询（4个数字参数）：返回与给定矩形区域相交的所有图片 ID */
+  searchInBounds(minX: number, minY: number, maxX: number, maxY: number): string[] {
+    return this.tree.search({ minX, minY, maxX, maxY }).map(item => item.id);
   }
 
   /** 视口裁剪查询：返回视口内可见的图片 ID */

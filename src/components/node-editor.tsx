@@ -10,6 +10,7 @@ import {
   canConnectPorts, autoLayoutWorkflow, parseComfyUIWorkflow, isImageGeneratingNode, getOutputNodeSize,
 } from '@/lib/workflow-engine';
 import { getModelDisplayName } from '@/lib/model-name-map';
+import { computePortPosition } from '@/lib/node-port-position';
 import { MODEL_QUALITIES, MODEL_ASPECT_RATIOS } from '@/lib/canvas-generation-group';
 import { getPromptTemplates, searchTemplates, addPromptTemplate, type PromptTemplate } from '@/lib/prompt-templates';
 import {
@@ -1804,15 +1805,17 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
 
   // 纯数据驱动的端口位置计算（不依赖DOM查询）
   const getPortPositionLocal = useCallback((node: WorkflowNode, port: NodePort) => {
-    const dir = port.direction === 'in' ? 'in' : 'out';
+    const dir = port.direction === 'in' ? 'input' as const : 'output' as const;
     const cacheKey = `${node.id}-${dir}-${port.id}`;
     const cached = portPositionCacheRef.current.get(cacheKey);
     if (cached) return cached;
 
-    const result = computePortPosition(node, port, collapsedNodes);
+    // 从 port.id 解析索引 (port.id 格式通常是 "in-0", "out-0" 等)
+    const portIndex = parseInt(port.id.split('-').pop() || '0', 10);
+    const result = computePortPosition(node, dir, portIndex);
     portPositionCacheRef.current.set(cacheKey, result);
     return result;
-  }, [collapsedNodes]);
+  }, []);
 
   // ─── 高亮连线 (选中节点时高亮上下游) ───
 

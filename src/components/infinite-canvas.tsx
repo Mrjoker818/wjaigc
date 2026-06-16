@@ -1986,7 +1986,7 @@ export function InfiniteCanvas({
 
     // ★ Spatial index path: O(log n) candidate filtering + z-order sort
     if (images.length > 20 && spatialIndexRef.current) {
-      const candidates = spatialIndexRef.current.pointQuery(canvasX, canvasY);
+      const candidates = spatialIndexRef.current.hitTestAll(canvasX, canvasY);
       // Sort by z-order (index in images array, last = top) and return topmost non-excluded
       let topIndex = -1;
       let topId: string | null = null;
@@ -2632,13 +2632,13 @@ export function InfiniteCanvas({
           // Use spatial index for O(log n + k) box selection instead of O(n) linear scan
           const canvasLeft = screenToCanvas(left + (rect?.left || 0), top + (rect?.top || 0));
           const canvasRight = screenToCanvas(right + (rect?.left || 0), bottom + (rect?.top || 0));
-          const hits = spatialIndexRef.current.search({
-            minX: canvasLeft.x, minY: canvasLeft.y,
-            maxX: canvasRight.x, maxY: canvasRight.y,
-          });
-          for (const item of hits) {
-            if (!genGroupResultIds.has(item.id)) {
-              selected.add(item.id);
+          const hitIds = spatialIndexRef.current?.searchInBounds(
+            canvasLeft.x, canvasLeft.y,
+            canvasRight.x, canvasRight.y,
+          ) ?? [];
+          for (const id of hitIds) {
+            if (!genGroupResultIds.has(id)) {
+              selected.add(id);
             }
           }
           if (selected.size > 0) {
