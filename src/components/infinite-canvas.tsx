@@ -3981,8 +3981,8 @@ export function InfiniteCanvas({
       onSelectImage(selectedCompleted);
     }
     // ★ 自动创建连线：从源图指向新完成的图片
-    if (relationType) {
-      const sourceId = (selectedCompleted as Record<string, unknown>).generatedFromImageId as string | undefined || (selectedCompleted as Record<string, unknown>).sourceImageId as string | undefined;
+    if (relationType && selectedCompleted) {
+      const sourceId = selectedCompleted.generatedFromImageId;
       if (sourceId) {
         const sourceImage = imagesRef.current.find(img => img.id === sourceId && !img.isProcessingPlaceholder);
         if (sourceImage) {

@@ -11,7 +11,7 @@
 - **AI 集成**: 通用 API 兼容层（支持 OpenAI / Gemini / 任意兼容格式 API）
 - **图像生成**: DALL-E 3、Midjourney、Stable Diffusion 等多种模型
 - **视频生成**: 可灵 V3、Seedance 2.0/2.3、Vidu Q1/Q2、Runway Gen-3/4、Sora、Veo 等多种模型
-- **特色功能**: 无限画布、图生图、图生视频、视频延长、PSD/SVG 导出、3D 模型预览、语言修图、SVG智能描摹、Agent编排、工作流节点模式、Ctrl+Z 撤回
+- **特色功能**: 无限画布、图生图、图生视频、视频延长、PSD/SVG 导出、3D 模型预览、语言修图、SVG智能描摹、Agent编排、工作流节点模式、Ctrl+Z 撤回、自动连线
 
 ### 项目结构
 ```
@@ -668,6 +668,13 @@ UPSCALE_TIMEOUT_MS=300000
 - 使用 `historyStackRef` + `historyIndexRef` 纯 ref 同步管理
 - `handleUndo` 直接调用 `setImagesRaw`，不使用 `isUndoingRef`
 - 撤回操作无 toast 提示，避免异步状态竞争
+
+### 自动连线不显示
+- 检查 `connections` prop 是否从 page.tsx 正确传递给 InfiniteCanvas
+- 检查 `onConnectionsChange` 回调是否正确更新状态
+- 连线仅在有 `generatedFromImageId` 或 `relationType` 时自动创建
+- `completeProcessingFrame` 需要传递 `relationType` 参数才会创建连线
+- `RELATION_TYPE_CONFIG` 定义了6种关系类型: variant/reference/edit/img2img/upscale/trace
 
 ### TypeScript 类型错误
 - 检查 `infinite-canvas.tsx` 中的 `onAddImages` 参数类型，应为 `(imageUrls: string[]) => void`
