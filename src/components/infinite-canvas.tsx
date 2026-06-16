@@ -641,6 +641,14 @@ export function InfiniteCanvas({
       return ix2 >= vx1 - marginW && ix1 <= vx2 + marginW && iy2 >= vy1 - marginH && iy1 <= vy2 + marginH;
     });
   }, [images, viewOffset, zoom, canvasSize]);
+
+  // ★ Keep spatial index in sync with images
+  useEffect(() => {
+    if (spatialIndexRef.current) {
+      spatialIndexRef.current.rebuild(images);
+    }
+  }, [images]);
+
   // Track total vs visible for debugging
   const virtualizationStats = useMemo(() => ({ total: images.length, visible: visibleImages.length }), [images.length, visibleImages.length]);
 
@@ -1966,7 +1974,7 @@ export function InfiniteCanvas({
     };
   }, [viewOffset, zoom]);
 
-  // Hit test
+  // Hit test — ★ Uses spatial index for O(log n) when available
   const hitTestImage = useCallback((canvasX: number, canvasY: number): string | null => {
     // Collect IDs of gen group result images (they are hidden on canvas, skip them in hit test)
     const genGroupResultIds = new Set<string>();
@@ -1975,9 +1983,27 @@ export function InfiniteCanvas({
         for (const rid of g.resultImageIds) genGroupResultIds.add(rid);
       }
     }
+
+    // ★ Spatial index path: O(log n) candidate filtering + z-order sort
+    if (images.length > 20 && spatialIndexRef.current) {
+      const candidates = spatialIndexRef.current.pointQuery(canvasX, canvasY);
+      // Sort by z-order (index in images array, last = top) and return topmost non-excluded
+      let topIndex = -1;
+      let topId: string | null = null;
+      for (const id of candidates) {
+        if (genGroupResultIds.has(id)) continue;
+        const idx = images.findIndex(img => img.id === id);
+        if (idx > topIndex) {
+          topIndex = idx;
+          topId = id;
+        }
+      }
+      return topId;
+    }
+
+    // Fallback: linear scan for small image sets
     for (let i = images.length - 1; i >= 0; i--) {
       const img = images[i];
-      // Skip gen group result images (they are rendered inside the result frame, not on canvas)
       if (genGroupResultIds.has(img.id)) continue;
       if (canvasX >= img.x && canvasX <= img.x + img.width &&
           canvasY >= img.y && canvasY <= img.y + img.height) {
@@ -2603,19 +2629,18 @@ export function InfiniteCanvas({
           // Collect gen group result image IDs to exclude from selection (they're hidden on canvas)
           const genGroupResultIds = new Set<string>();
           genGroups.forEach(g => { if (g.resultImageIds) g.resultImageIds.forEach(id => genGroupResultIds.add(id)); });
-          images.forEach(img => {
-            // Skip hidden gen group result images
-            if (genGroupResultIds.has(img.id)) return;
-            const imgScreenLeft = img.x * zoom + viewOffset.x;
-            const imgScreenTop = img.y * zoom + viewOffset.y;
-            const imgScreenRight = (img.x + img.width) * zoom + viewOffset.x;
-            const imgScreenBottom = (img.y + img.height) * zoom + viewOffset.y;
-
-            if (imgScreenRight > left && imgScreenLeft < right &&
-                imgScreenBottom > top && imgScreenTop < bottom) {
-              selected.add(img.id);
-            }
+          // Use spatial index for O(log n + k) box selection instead of O(n) linear scan
+          const canvasLeft = screenToCanvas(left + (rect?.left || 0), top + (rect?.top || 0));
+          const canvasRight = screenToCanvas(right + (rect?.left || 0), bottom + (rect?.top || 0));
+          const hits = spatialIndexRef.current.search({
+            minX: canvasLeft.x, minY: canvasLeft.y,
+            maxX: canvasRight.x, maxY: canvasRight.y,
           });
+          for (const item of hits) {
+            if (!genGroupResultIds.has(item.id)) {
+              selected.add(item.id);
+            }
+          }
           if (selected.size > 0) {
             setSelectedIds(selected);
           }

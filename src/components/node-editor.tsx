@@ -1784,23 +1784,54 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
     return `M ${fromX} ${fromY} C ${fromX + dx} ${fromY}, ${toX - dx} ${toY}, ${toX} ${toY}`;
   }, []);
 
+  // 端口位置缓存: 避免每次渲染连线时查询DOM
+  const portPositionCacheRef = useRef<Map<string, { x: number; y: number }>>(new Map());
+
+  // 节点渲染完成后更新端口位置缓存
+  const updatePortPositionsFromDOM = useCallback((nodeId: string) => {
+    const nodeEl = canvasContainerRef.current?.querySelector(`[data-node-id="${nodeId}"]`);
+    if (!nodeEl) return;
+    const zoom = viewport.zoom || 1;
+    const nodeRect = nodeEl.getBoundingClientRect();
+    // 查找所有端口元素
+    const portEls = nodeEl.querySelectorAll('[data-port-id]');
+    for (const portEl of portEls) {
+      const portId = (portEl as HTMLElement).dataset.portId;
+      if (!portId) continue;
+      const portRect = portEl.getBoundingClientRect();
+      const x = nodeRect.left + (portRect.left + portRect.width / 2 - nodeRect.left) / zoom;
+      const y = nodeRect.top + (portRect.top + portRect.height / 2 - nodeRect.top) / zoom;
+      // 存储为相对于节点的本地坐标
+      const node = wf.nodes.find(n => n.id === nodeId);
+      if (node) {
+        portPositionCacheRef.current.set(portId, { x: x - nodeRect.left / zoom + node.x, y: y - nodeRect.top / zoom + node.y });
+      }
+    }
+  }, [viewport.zoom, wf.nodes]);
+
   const getPortPositionLocal = useCallback((node: WorkflowNode, port: NodePort) => {
-    // 优先从DOM元素读取端口实际位置（与原型port-row布局对齐）
+    const dir = port.direction === 'in' ? 'in' : 'out';
+    const cacheKey = `${node.id}-${dir}-${port.id}`;
+    // 优先从缓存读取
+    const cached = portPositionCacheRef.current.get(cacheKey);
+    if (cached) return cached;
+
+    // 缓存未命中时尝试从DOM读取并缓存
     const nodeEl = canvasContainerRef.current?.querySelector(`[data-node-id="${node.id}"]`);
     const zoom = viewport.zoom || 1;
     if (nodeEl) {
-      const dir = port.direction === 'in' ? 'in' : 'out';
-      const portEl = nodeEl.querySelector(`[data-port-id="${node.id}-${dir}-${port.id}"]`);
+      const portEl = nodeEl.querySelector(`[data-port-id="${cacheKey}"]`);
       if (portEl) {
         const nodeRect = nodeEl.getBoundingClientRect();
         const portRect = portEl.getBoundingClientRect();
-        // 使用端口实际中心位置，而非假设左进右出
         const x = node.x + (portRect.left + portRect.width / 2 - nodeRect.left) / zoom;
         const y = node.y + (portRect.top + portRect.height / 2 - nodeRect.top) / zoom;
+        portPositionCacheRef.current.set(cacheKey, { x, y });
         return { x, y };
       }
     }
-    // Fallback: 从节点宽度推断（input-card输入端口在右, port-row输入端口在左, 输出端口在右）
+
+    // Fallback: 纯数据计算（无DOM依赖，用于首次渲染DOM尚未挂载时）
     const portIndex = node.ports.filter(p => p.direction === port.direction).findIndex(p => p.id === port.id);
     const total = node.ports.filter(p => p.direction === port.direction).length;
     const headerH = 42;
@@ -1808,12 +1839,16 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
     const effectiveHeight = collapsedNodes.has(node.id) ? 45 : node.height;
     const bodyHeight = effectiveHeight - headerH;
     if (port.direction === 'in') {
-      // input-card模式的输入端口在右边缘, 其他在左边缘
       const x = isInputCardPort ? node.x + node.width : node.x;
-      return { x, y: node.y + headerH + (portIndex + 1) * (bodyHeight / (total + 1)) };
+      const y = node.y + headerH + (portIndex + 1) * (bodyHeight / (total + 1));
+      portPositionCacheRef.current.set(cacheKey, { x, y });
+      return { x, y };
     }
-    return { x: node.x + node.width, y: node.y + headerH + (portIndex + 1) * (bodyHeight / (total + 1)) };
-  }, [collapsedNodes, viewport.zoom]);
+    const fx = node.x + node.width;
+    const fy = node.y + headerH + (portIndex + 1) * (bodyHeight / (total + 1));
+    portPositionCacheRef.current.set(cacheKey, { x: fx, y: fy });
+    return { x: fx, y: fy };
+  }, [collapsedNodes, viewport.zoom, wf.nodes]);
 
   // ─── 高亮连线 (选中节点时高亮上下游) ───
 
