@@ -4264,13 +4264,22 @@ ${imageDescriptions}
                           : isGold ? 'hover:bg-white/[0.06] border border-transparent' : 'hover:bg-white border border-transparent'
                       }`}
                     >
-                      <MessageSquare size={12} className={session.id === currentSessionId ? (isGold ? 'text-gold' : 'text-blue-500') : themeClasses.textMuted} />
+                      {session.agentId ? (
+                        <span
+                          className="w-2 h-2 rounded-full shrink-0"
+                          style={{ backgroundColor: allAgents.find(a => a.id === session.agentId)?.color || '#888' }}
+                        />
+                      ) : (
+                        <MessageSquare size={12} className={session.id === currentSessionId ? (isGold ? 'text-gold' : 'text-blue-500') : themeClasses.textMuted} />
+                      )}
                       <div className="flex-1 min-w-0">
                         <div className={`text-xs font-medium truncate ${session.id === currentSessionId ? themeClasses.text : themeClasses.textMuted}`}>
-                          {session.title}
+                          {session.agentId ? (
+                            <span>{allAgents.find(a => a.id === session.agentId)?.name || session.title}</span>
+                          ) : session.title}
                         </div>
                         <div className={`text-xs ${themeClasses.textMuted}`}>
-                          {new Date(session.updatedAt).toLocaleDateString()} {new Date(session.updatedAt).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}
+                          {session.agentId ? `${session.title}` : `${new Date(session.updatedAt).toLocaleDateString()} ${new Date(session.updatedAt).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`}
                         </div>
                       </div>
                       <button
@@ -4534,6 +4543,18 @@ ${imageDescriptions}
           </div>
           )}
         </div>
+
+        {/* Agent identity badge when messages exist */}
+        {messages.length > 0 && allAgents.find(a => a.id === systemPrompt) && (
+          <div className={`shrink-0 px-3 py-1.5 flex items-center gap-1.5 border-b ${isGold ? 'bg-[#111]/80 border-white/5' : 'bg-gray-50/80 border-gray-100'}`}>
+            <div className="w-4 h-4 rounded flex items-center justify-center text-[10px]" style={{ backgroundColor: (allAgents.find(a => a.id === systemPrompt)!.color) + '20', border: `1px solid ${(allAgents.find(a => a.id === systemPrompt)!.color)}40` }}>
+              {allAgents.find(a => a.id === systemPrompt)!.icon}
+            </div>
+            <span className={`text-[10px] font-medium ${themeClasses.textMuted}`}>{allAgents.find(a => a.id === systemPrompt)!.name}</span>
+            <span className={`text-[9px] ${isGold ? 'text-white/25' : 'text-gray-300'}`}>·</span>
+            <span className={`text-[9px] ${themeClasses.textMuted} opacity-60`}>{allAgents.find(a => a.id === systemPrompt)!.nameEn}</span>
+          </div>
+        )}
 
         {/* Messages - 精致设计 */}
         <div className={`flex-1 min-h-0 overflow-y-auto p-3 space-y-3 ${isGold ? 'bg-[#090909]' : 'bg-gray-50/50'}`}>

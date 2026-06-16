@@ -107,6 +107,14 @@ export async function POST(request: NextRequest) {
       return msg;
     });
 
+    // Inject canvas summary as context
+    if (canvasSummary) {
+      fixedMessages.unshift({
+        role: 'system',
+        content: `[画布状态]\n${canvasSummary}`
+      });
+    }
+
     // ============ Agent Loop with Function Calling ============
     // 当 enableTools=true 时，执行 Agent 循环：
     // LLM 思考 → 返回 tool_calls → 执行工具 → 结果回传 LLM → 继续思考
