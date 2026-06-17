@@ -1467,6 +1467,12 @@ export function InfiniteCanvas({
     return { model: 'gemini-3-pro-image-preview' };
   }, []);
 
+  // Helper: check if a native event originates from a dialog/modal/overlay (should be ignored by canvas)
+  const isEventFromOverlay = useCallback((e: Event): boolean => {
+    const target = e.target as HTMLElement;
+    return !!target?.closest?.('[data-compare-dialog], [data-modal], [data-popup], [data-floating-panel]');
+  }, []);
+
   // Sync selectedImage prop
   useEffect(() => {
     if (selectedImage) {
@@ -1477,10 +1483,12 @@ export function InfiniteCanvas({
   // Track Ctrl/Meta key for reference selection visual hint
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (isEventFromOverlay(e)) return;
       if (e.ctrlKey || e.metaKey) setCtrlKeyHeld(true);
       if (e.altKey) setAltKeyHeld(true);
     };
     const handleKeyUp = (e: KeyboardEvent) => {
+      if (isEventFromOverlay(e)) return;
       if (!e.ctrlKey && !e.metaKey) setCtrlKeyHeld(false);
       if (!e.altKey) setAltKeyHeld(false);
     };
@@ -1513,6 +1521,7 @@ export function InfiniteCanvas({
   useEffect(() => {
     if (!isMultiAngleDragging) return;
     const handleMove = (event: MouseEvent) => {
+      if (isEventFromOverlay(event)) return;
       const drag = multiAngleDragRef.current;
       if (!drag?.active) return;
       const dx = event.clientX - drag.startX;
@@ -1537,6 +1546,7 @@ export function InfiniteCanvas({
   useEffect(() => {
     if (!hexCube3dDragging) return;
     const handleMove = (event: MouseEvent) => {
+      if (isEventFromOverlay(event)) return;
       const drag = hexCube3dDragRef.current;
       if (!drag) return;
       const dx = event.clientX - drag.startX;
@@ -1545,7 +1555,8 @@ export function InfiniteCanvas({
       const newTiltX = Math.round(Math.max(-60, Math.min(60, drag.startTiltX + dy * 0.4)));
       setHexCubeGroups(prev => prev.map(g => g.id === drag.groupId ? { ...g, toolbar: { ...g.toolbar, rotationY: newRotY, tiltX: newTiltX } } : g));
     };
-    const handleUp = () => {
+    const handleUp = (e: MouseEvent) => {
+      if (isEventFromOverlay(e)) return;
       hexCube3dDragRef.current = null;
       setHexCube3dDragging(false);
     };
@@ -1639,7 +1650,8 @@ export function InfiniteCanvas({
 
   // Window-level mouseUp listener to ensure drawing always stops even if mouse released outside canvas
   useEffect(() => {
-    const handleWindowMouseUp = () => {
+    const handleWindowMouseUp = (e: MouseEvent) => {
+      if (isEventFromOverlay(e)) return;
       if (isDrawingRef.current) {
         const stroke = currentStrokeRef.current;
         if (stroke.length > 1) {
@@ -1658,6 +1670,8 @@ export function InfiniteCanvas({
   // Keyboard events
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Skip if event originates from dialog/modal/overlay
+      if (isEventFromOverlay(e)) return;
       // Ctrl+Z / Cmd+Z: Undo
       if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ' && !e.shiftKey) {
         const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
@@ -1954,7 +1968,8 @@ export function InfiniteCanvas({
 
   // Click outside to close menus
   useEffect(() => {
-    const handleClick = () => {
+    const handleClick = (e: MouseEvent) => {
+      if (isEventFromOverlay(e)) return;
       setShowContextMenu(false);
       setShowCanvasMenu(false);
       setShowExpandRatios(false);
@@ -2221,7 +2236,7 @@ export function InfiniteCanvas({
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     // Skip if event originates from a floating panel/popup/modal/toolbar
     const target = e.target as HTMLElement;
-    if (target?.closest?.('[data-floating-panel], [data-popup], [data-modal], [data-toolbar]')) {
+    if (target?.closest?.('[data-floating-panel], [data-popup], [data-modal], [data-toolbar], [data-compare-dialog]')) {
       return;
     }
 
@@ -2898,7 +2913,7 @@ export function InfiniteCanvas({
     // Prevent scroll from affecting canvas when cursor is over a modal/overlay/popup
     const target = e.target as HTMLElement;
     const isInsideFloatingUI = target.closest(
-      '.fixed, [data-modal], [data-popup], [data-toolbar], [data-floating-panel]'
+      '.fixed, [data-modal], [data-popup], [data-toolbar], [data-floating-panel], [data-compare-dialog]'
     );
     if (isInsideFloatingUI) return;
     const isInsideCanvas = canvasRef.current?.contains(target);
@@ -6418,6 +6433,7 @@ export function InfiniteCanvas({
     const startPadding = { ...expandPaddingRef.current };
 
     const handleMouseMove = (ev: MouseEvent) => {
+      if (isEventFromOverlay(ev)) return;
       const dx = ev.clientX - startX;
       const dy = ev.clientY - startY;
       // 屏幕像素 → 原始像素
@@ -9865,6 +9881,7 @@ export function InfiniteCanvas({
                             const startY = e.clientY;
                             const startPan = { ...editCanvasPan };
                             const onMove = (ev: MouseEvent) => {
+                              if (isEventFromOverlay(ev)) return;
                               setEditCanvasPan({
                                 x: startPan.x + ev.clientX - startX,
                                 y: startPan.y + ev.clientY - startY,
@@ -13252,7 +13269,8 @@ export function InfiniteCanvas({
           title="抓手工具"
           onClick={() => {
             setIsSpacePressed(true);
-            const handleUp = () => {
+            const handleUp = (e: MouseEvent) => {
+              if (isEventFromOverlay(e)) return;
               setIsSpacePressed(false);
               window.removeEventListener('mouseup', handleUp);
             };

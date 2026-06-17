@@ -30,6 +30,7 @@ export function ImageCompareDialog({
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
   const panStartRef = useRef({ x: 0, y: 0, ox: 0, oy: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   // Slider drag handler
   const handleSliderMouseDown = useCallback((e: React.MouseEvent) => {
@@ -52,7 +53,7 @@ export function ImageCompareDialog({
     };
   }, [zoomPercent, panOffset]);
 
-  // Global mouse move
+  // Global mouse move — runs when slider dragging or panning
   const handleMouseMove = useCallback((e: MouseEvent) => {
     if (isDraggingSlider && containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect();
@@ -70,7 +71,7 @@ export function ImageCompareDialog({
     }
   }, [isDraggingSlider, isPanning]);
 
-  // Global mouse up
+  // Global mouse up — stop dragging/panning
   const handleMouseUp = useCallback(() => {
     setIsDraggingSlider(false);
     setIsPanning(false);
@@ -98,30 +99,11 @@ export function ImageCompareDialog({
     }
   }, [zoomPercent]);
 
-  // Block all pointer events from reaching the canvas behind
-  useEffect(() => {
-    const blockEvent = (e: Event) => {
-      const target = e.target as HTMLElement;
-      if (target.closest('[data-compare-dialog]')) {
-        e.stopPropagation();
-      }
-    };
-
-    const events = ['mousedown', 'mousemove', 'mouseup', 'wheel', 'touchstart', 'touchmove', 'touchend'];
-    events.forEach(evt => {
-      document.addEventListener(evt, blockEvent, true);
-    });
-
-    return () => {
-      events.forEach(evt => {
-        document.removeEventListener(evt, blockEvent, true);
-      });
-    };
-  }, []);
-
   // Keyboard: ESC to close, 1/2 switch mode, +/- zoom
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
+      // Only handle if focus is inside the dialog
+      if (dialogRef.current && !dialogRef.current.contains(e.target as Node)) return;
       if (e.key === 'Escape') { e.stopPropagation(); onClose(); return; }
       if (e.key === '1') { e.stopPropagation(); setMode('slider'); }
       if (e.key === '2') { e.stopPropagation(); setMode('sideBySide'); }
@@ -158,19 +140,12 @@ export function ImageCompareDialog({
       data-compare-dialog
       className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 backdrop-blur-sm"
       onClick={onClose}
-      onMouseDown={(e) => e.stopPropagation()}
-      onMouseMove={(e) => e.stopPropagation()}
-      onMouseUp={(e) => e.stopPropagation()}
-      onWheel={(e) => e.stopPropagation()}
     >
       <div
+        ref={dialogRef}
         className={`relative rounded-2xl border shadow-2xl overflow-hidden flex flex-col ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-[#333]'}`}
         style={{ width: '90vw', maxWidth: 1200, height: '85vh', maxHeight: 900 }}
         onClick={(e) => e.stopPropagation()}
-        onMouseDown={(e) => e.stopPropagation()}
-        onMouseMove={(e) => e.stopPropagation()}
-        onMouseUp={(e) => e.stopPropagation()}
-        onWheel={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className={`flex-shrink-0 flex items-center justify-between px-5 py-3 border-b ${borderCls}`}>
@@ -223,6 +198,7 @@ export function ImageCompareDialog({
               className="relative w-full h-full select-none overflow-hidden"
               style={{ cursor: sliderCursor }}
               onMouseDown={(e) => {
+                e.stopPropagation();
                 // Don't start panning if clicking the slider handle
                 if ((e.target as HTMLElement).closest('[data-slider-handle]')) return;
                 if (zoomPercent > 100) {
