@@ -1909,19 +1909,33 @@ export function InfiniteCanvas({
           }
           // Offset each pasted image slightly so they don't stack
           const offsetIdx = newImages.length * 30;
-          // Calculate display size (max 500px on longest edge)
-          const maxEdge = 500;
-          const displayW = 400;
-          const displayH = 300;
+          // Load actual pixel dimensions first to ensure correct originalWidth/originalHeight
+          const imgDim = await new Promise<{ natW: number; natH: number; dispW: number; dispH: number }>((resolve) => {
+            const tempImg = new Image();
+            tempImg.onload = () => {
+              const natW = tempImg.naturalWidth;
+              const natH = tempImg.naturalHeight;
+              const maxEdge = 500;
+              const scale = Math.min(maxEdge / natW, maxEdge / natH, 1);
+              const dispW = Math.round(natW * scale);
+              const dispH = Math.round(natH * scale);
+              resolve({ natW, natH, dispW, dispH });
+            };
+            tempImg.onerror = () => {
+              // Fallback to default dimensions
+              resolve({ natW: 400, natH: 300, dispW: 400, dispH: 300 });
+            };
+            tempImg.src = url;
+          });
           newImages.push({
             id: `paste-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
             url,
             x: cx + offsetIdx,
             y: cy + offsetIdx,
-            width: displayW,
-            height: displayH,
-            originalWidth: displayW,
-            originalHeight: displayH,
+            width: imgDim.dispW,
+            height: imgDim.dispH,
+            originalWidth: imgDim.natW,
+            originalHeight: imgDim.natH,
           });
         } catch {
           // Skip failed uploads
@@ -1931,24 +1945,6 @@ export function InfiniteCanvas({
       if (newImages.length > 0) {
         onImagesChange([...images, ...newImages]);
         setSelectedIds(new Set(newImages.map(img => img.id)));
-        // Load natural dimensions for pasted images and update
-        newImages.forEach(img => {
-          const tempImg = new Image();
-          tempImg.onload = () => {
-            const natW = tempImg.naturalWidth;
-            const natH = tempImg.naturalHeight;
-            const maxEdge = 500;
-            const scale = Math.min(maxEdge / natW, maxEdge / natH, 1);
-            const dispW = Math.round(natW * scale);
-            const dispH = Math.round(natH * scale);
-            // Use imagesRef.current to avoid stale closure over images
-            const updated = imagesRef.current.map(i =>
-              i.id === img.id ? { ...i, width: dispW, height: dispH, originalWidth: natW, originalHeight: natH } : i
-            );
-            onImagesChange(updated);
-          };
-          tempImg.src = img.url;
-        });
       }
     };
 
@@ -3971,16 +3967,47 @@ export function InfiniteCanvas({
         url: newUrl,
         width: newWidth,
         height: newHeight,
-        originalWidth: Math.round(newWidth),
-        originalHeight: Math.round(newHeight),
+        // 优先使用 extra 中的原始尺寸；若无则保留原图的原始尺寸（避免用显示宽度覆盖）
+        originalWidth: extra?.originalWidth ?? image.originalWidth ?? Math.round(newWidth),
+        originalHeight: extra?.originalHeight ?? image.originalHeight ?? Math.round(newHeight),
         isProcessingPlaceholder: false,
         processing: undefined,
-        ...extra,
       };
+      // extra 展开放在后面，确保 extra.originalWidth/Height 能覆盖上面的默认值
+      if (extra) {
+        completedImage = { ...completedImage, ...extra };
+      }
       return completedImage;
     });
     imagesRef.current = nextImages;
     onImagesChange(nextImages);
+
+    // ★ 异步验证修正：如果 originalWidth 仍等于显示宽度，从图片真实像素尺寸修正
+    const imgToVerify = completedImage as CanvasImage | null;
+    if (imgToVerify) {
+      // 如果 originalWidth 缺失或等于显示宽度（说明可能是错误的 fallback），异步加载真实尺寸
+      if (!imgToVerify.originalWidth || !imgToVerify.originalHeight ||
+          (imgToVerify.originalWidth === Math.round(imgToVerify.width) && imgToVerify.originalHeight === Math.round(imgToVerify.height))) {
+        const verifyImg = new Image();
+        const verifyUrl = imgToVerify.url;
+        verifyImg.onload = () => {
+          const natW = verifyImg.naturalWidth;
+          const natH = verifyImg.naturalHeight;
+          if (natW > 0 && natH > 0) {
+            // 只有真实尺寸与当前记录不同时才更新
+            const currentImg = imagesRef.current.find(i => i.id === id);
+            if (currentImg && (currentImg.originalWidth !== natW || currentImg.originalHeight !== natH)) {
+              const updated = imagesRef.current.map(i =>
+                i.id === id ? { ...i, originalWidth: natW, originalHeight: natH } : i
+              );
+              imagesRef.current = updated;
+              onImagesChange(updated);
+            }
+          }
+        };
+        verifyImg.src = verifyUrl;
+      }
+    }
     const selectedCompleted = nextImages.find(image => image.id === id && !image.isProcessingPlaceholder) || null;
     if (selectedCompleted) {
       setSelectedIds(new Set([selectedCompleted.id]));
