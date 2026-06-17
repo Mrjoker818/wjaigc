@@ -5347,6 +5347,9 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                         data: { url: lastImg.url },
                       }]);
                     }
+                    if (lastImg && !pendingImages.find(p => p.id === lastImg.id)) {
+                      setPendingImages(prev => [...prev, { id: lastImg.id, url: lastImg.url, name: lastImg.prompt?.slice(0, 20) || '画布图片' }]);
+                    }
                     textareaRef.current?.focus();
                   }}
                   className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-colors ${isGold ? 'bg-white/[0.06] text-white/50 hover:bg-white/[0.1] hover:text-gold/80' : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'}`}
@@ -5733,7 +5736,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               ref={textareaRef}
               value={input}
               onChange={handleInputChange}
-              placeholder={(() => { const imgCount = activeMentions.filter(m => m.type === 'canvas-image').length + pendingImages.length; return imgCount > 0 ? `描述你想对这${imgCount}张图片做什么，如"将图片#1的人物和图片#2合并"...` : "输入消息，@ 引用图片/品牌，/ 使用模板..."; })()}
+              placeholder={(() => { const imgIds = new Set<string>(); activeMentions.forEach(m => { if (m.type === 'canvas-image' && m.id) imgIds.add(m.id); }); pendingImages.forEach(p => imgIds.add(p.id)); const imgCount = imgIds.size; return imgCount > 0 ? `描述你想对这${imgCount}张图片做什么，如"将图片#1的人物和图片#2合并"...` : "输入消息，@ 引用图片/品牌，/ 使用模板..."; })()}
               className={`w-full resize-none min-h-[60px] max-h-[200px] border-0 bg-transparent px-4 py-3 text-[14px] leading-relaxed focus:outline-none focus:ring-0 ${themeClasses.text} placeholder:${isGold ? 'text-gold-muted/40' : 'text-gray-400'}`}
               onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
                 // Handle template popup navigation (priority over mention picker)
