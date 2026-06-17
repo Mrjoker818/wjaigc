@@ -5761,7 +5761,7 @@ export function InfiniteCanvas({
         return;
       }
 
-      updateProcessingFrame(placeholderId, { progress: 22, status: upscaleMode === 'cpu' ? 'CPU 正在无损放大（像素级忠实，耗时稍长）...' : 'AI 正在放大细节...' });
+      updateProcessingFrame(placeholderId, { progress: 22, status: upscaleMode === 'cpu' ? 'CPU 正在放大（Lanczos3 高质量缩放）...' : 'AI 正在放大细节...' });
       const usedModel = String(data.usedModel || modelInfo.model);
       const resultUrl = data.imageUrl || await pollForResult((data.taskId as string) || '', usedModel, (progress, status) => {
         updateProcessingFrame(placeholderId, { progress, status });

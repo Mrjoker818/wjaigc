@@ -3,7 +3,6 @@
 // ============================================================
 
 import { NextResponse } from 'next/server';
-import { isOnnxUpscaleAvailable } from '@/lib/image-tools/upscayl';
 import { checkIOPaintHealth, REMOVEBG_MODELS, ERASE_MODELS } from '@/lib/image-tools/iopaint-client';
 import { LOCAL_AI_ENABLED, IOPAINT_MODELS_DIR } from '@/lib/image-tools/config';
 import fs from 'fs';
@@ -58,9 +57,8 @@ function checkPythonScripts(): { erase: boolean; removebg: boolean } {
 }
 
 export async function GET() {
-  const [iopaint, onnxUpscale] = await Promise.all([
+  const [iopaint] = await Promise.all([
     checkIOPaintHealth(),
-    isOnnxUpscaleAvailable(),
   ]);
 
   const eraseModels = checkEraseModels();
@@ -99,9 +97,10 @@ export async function GET() {
       erase: scripts.erase,
       removebg: scripts.removebg,
     },
-    onnxUpscale: {
-      available: onnxUpscale.available,
-      error: onnxUpscale.error,
+    // CPU 放大使用 sharp Lanczos3，始终可用
+    cpuUpscale: {
+      available: true,
+      engine: 'sharp-lanczos3',
     },
   });
 }

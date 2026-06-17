@@ -1115,29 +1115,25 @@ export async function POST(request: NextRequest) {
             const aiW = aiMeta.width || upscaleTargetW;
             const aiH = aiMeta.height || upscaleTargetH;
 
-            if (aiW < upscaleTargetW || aiH < upscaleTargetH) {
-              console.log(`[poll-task] AI Upscale: AI output ${aiW}x${aiH} < target ${upscaleTargetW}x${upscaleTargetH}, resizing...`);
-              const resizedBuf = await sharp(aiResultBuf)
-                .resize(upscaleTargetW, upscaleTargetH, { fit: 'fill', kernel: sharp.kernel.lanczos3 })
-                .png({ quality: 95 })
-                .toBuffer();
+            // 放大必须精确到目标尺寸，无论 AI 输出大于还是小于目标都需要 resize
+            console.log(`[poll-task] AI Upscale: AI output ${aiW}x${aiH}, resizing to target ${upscaleTargetW}x${upscaleTargetH}...`);
+            const resizedBuf = await sharp(aiResultBuf)
+              .resize(upscaleTargetW, upscaleTargetH, { fit: 'fill', kernel: sharp.kernel.lanczos3 })
+              .png({ quality: 95 })
+              .toBuffer();
 
-              const { saveImageFile } = await import('../../../lib/server-data-root');
-              const ts = Date.now();
-              const filename = `upscale-ai-${ts}.png`;
-              const resizedUrl = saveImageFile(resizedBuf, filename, 'upscale');
-              if (resizedUrl) {
-                pollResult.imageUrl = resizedUrl;
-              } else {
-                pollResult.imageUrl = `data:image/png;base64,${resizedBuf.toString('base64')}`;
-              }
-
-              (pollResult as Record<string, unknown>).outputSize = { width: upscaleTargetW, height: upscaleTargetH };
-              console.log(`[poll-task] AI Upscale: resized to ${upscaleTargetW}x${upscaleTargetH}`);
+            const { saveImageFile } = await import('../../../lib/server-data-root');
+            const ts = Date.now();
+            const filename = `upscale-ai-${ts}.png`;
+            const resizedUrl = saveImageFile(resizedBuf, filename, 'upscale');
+            if (resizedUrl) {
+              pollResult.imageUrl = resizedUrl;
             } else {
-              console.log(`[poll-task] AI Upscale: AI output ${aiW}x${aiH} >= target ${upscaleTargetW}x${upscaleTargetH}, no resize needed`);
-              (pollResult as Record<string, unknown>).outputSize = { width: aiW, height: aiH };
+              pollResult.imageUrl = `data:image/png;base64,${resizedBuf.toString('base64')}`;
             }
+
+            (pollResult as Record<string, unknown>).outputSize = { width: upscaleTargetW, height: upscaleTargetH };
+            console.log(`[poll-task] AI Upscale: resized to ${upscaleTargetW}x${upscaleTargetH}`);
           } catch (upscaleResizeErr) {
             console.warn('[poll-task] AI Upscale resize failed, using raw AI result:', upscaleResizeErr instanceof Error ? upscaleResizeErr.message : upscaleResizeErr);
           }
