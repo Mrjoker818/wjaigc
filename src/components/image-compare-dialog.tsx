@@ -24,7 +24,7 @@ export function ImageCompareDialog({
 }: ImageCompareDialogProps) {
   const [mode, setMode] = useState<CompareMode>('slider');
   const [sliderPos, setSliderPos] = useState(50); // 0-100 percentage
-  const [zoomPercent, setZoomPercent] = useState(100); // 10-300 percentage
+  const [zoomPercent, setZoomPercent] = useState(100); // 10-500 percentage
   const [isDraggingSlider, setIsDraggingSlider] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
@@ -107,7 +107,7 @@ export function ImageCompareDialog({
       if (e.key === 'Escape') { e.stopPropagation(); onClose(); return; }
       if (e.key === '1') { e.stopPropagation(); setMode('slider'); }
       if (e.key === '2') { e.stopPropagation(); setMode('sideBySide'); }
-      if (e.key === '+' || e.key === '=') { e.stopPropagation(); setZoomPercent(prev => Math.min(300, prev + 10)); }
+      if (e.key === '+' || e.key === '=') { e.stopPropagation(); setZoomPercent(prev => Math.min(500, prev + 10)); }
       if (e.key === '-' || e.key === '_') { e.stopPropagation(); setZoomPercent(prev => Math.max(10, prev - 10)); }
       if (e.key === '0') { e.stopPropagation(); setZoomPercent(100); }
     };
@@ -117,10 +117,10 @@ export function ImageCompareDialog({
 
   // Zoom handler
   const handleZoomChange = useCallback((value: number) => {
-    setZoomPercent(Math.max(10, Math.min(300, value)));
+    setZoomPercent(Math.max(10, Math.min(500, value)));
   }, []);
 
-  const zoomPresets = [25, 50, 75, 100, 150, 200];
+  const zoomPresets = [25, 50, 75, 100, 150, 200, 300, 500];
 
   // Theme helpers
   const textPrimary = isMonochrome ? 'text-gray-900' : 'text-white';
@@ -366,7 +366,7 @@ export function ImageCompareDialog({
           <input
             type="range"
             min={10}
-            max={300}
+            max={500}
             value={zoomPercent}
             onChange={(e) => handleZoomChange(Number(e.target.value))}
             className={`w-24 h-1 rounded-full appearance-none cursor-pointer ${
