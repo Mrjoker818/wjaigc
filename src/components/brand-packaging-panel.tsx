@@ -10,6 +10,7 @@ import {
   Grid3X3, LayoutGrid, Store, ShoppingBag, BookOpen, BarChart3,
   Tag, Info, Loader2, Type, Scissors, PenLine, Video, GitBranch
 } from 'lucide-react';
+import { getModelDisplayName } from '@/lib/model-name-map';
 
 /* ============================================================
    类型定义
@@ -185,6 +186,9 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
   const [imageModels, setImageModels] = useState<{ id: string; name: string; providerId: string; providerName: string }[]>([]);
   const [selectedModel, setSelectedModel] = useState('');
   const [selectedProviderId, setSelectedProviderId] = useState('');
+  const [chatModels, setChatModels] = useState<{ id: string; name: string; providerId: string; providerName: string }[]>([]);
+  const [selectedChatModel, setSelectedChatModel] = useState('');
+  const [selectedChatProviderId, setSelectedChatProviderId] = useState('');
 
   // === Form state ===
   const [brandName, setBrandName] = useState('');
@@ -283,6 +287,45 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
       .catch(() => {});
   }, []);
 
+  // === Load chat models ===
+  useEffect(() => {
+    fetch('/api/models?type=chat')
+      .then(r => r.json())
+      .then(data => {
+        const providers: { id: string; name: string; isEnabled?: boolean }[] = data.providers || [];
+        const enabledProviderIds = new Set(providers.filter(p => p.isEnabled !== false).map(p => p.id));
+        const providerMap = new Map(providers.map((p: { id: string; name: string }) => [p.id, p]));
+        const modelList: { id: string; name: string; providerId?: string }[] = (data.models || []).filter(
+          (m: { providerId?: string }) => enabledProviderIds.has(m.providerId || '')
+        );
+        if (modelList.length) {
+          const mapped = modelList.map(m => ({
+            id: m.id,
+            name: m.name,
+            providerId: m.providerId || '',
+            providerName: providerMap.get(m.providerId || '')?.name || '',
+          }));
+          setChatModels(mapped);
+          const saved = localStorage.getItem('wujie_selected_chat_model');
+          if (saved) {
+            const pureModel = saved.includes('::') ? saved.split('::')[1] : saved;
+            const savedProvId = saved.includes('::') ? saved.split('::')[0] : '';
+            if (mapped.some(m => m.id === pureModel)) {
+              setSelectedChatModel(pureModel);
+              setSelectedChatProviderId(savedProvId);
+            } else {
+              setSelectedChatModel(mapped[0].id);
+              setSelectedChatProviderId(mapped[0].providerId);
+            }
+          } else {
+            setSelectedChatModel(mapped[0].id);
+            setSelectedChatProviderId(mapped[0].providerId);
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     if (!isDragging) return;
     const handleMove = (e: MouseEvent) => setWindowPos({ x: e.clientX - dragOffset.x, y: e.clientY - dragOffset.y });
@@ -356,6 +399,8 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
           outputModes, advancedOptions, prompt,
           model: selectedModel,
           providerId: selectedProviderId,
+          chatModel: selectedChatModel,
+          chatProviderId: selectedChatProviderId,
         }),
       });
       const data = await res.json();
@@ -423,7 +468,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
       console.error('[brand-packaging] Generate failed:', e);
       setIsGenerating(false);
     }
-  }, [brandName, productName, category, structure, materialCraft, outputModes, skuMatrix, extendScenes, customPrompt, logoUrl, brandColors, uploads, advancedOptions, onAddImages, selectedModel, selectedProviderId]);
+  }, [brandName, productName, category, structure, materialCraft, outputModes, skuMatrix, extendScenes, customPrompt, logoUrl, brandColors, uploads, advancedOptions, onAddImages, selectedModel, selectedProviderId, selectedChatModel, selectedChatProviderId]);
 
   // === Generate same series ===
   const handleGenerateSeries = useCallback(async () => {
@@ -441,6 +486,8 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
           outputModes: ['series'], advancedOptions, prompt: seriesPrompt,
           model: selectedModel,
           providerId: selectedProviderId,
+          chatModel: selectedChatModel,
+          chatProviderId: selectedChatProviderId,
         }),
       });
       const data = await res.json();
@@ -481,7 +528,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
       console.error('[brand-packaging] Series generation failed:', e);
       setIsGenerating(false);
     }
-  }, [brandName, productName, category, structure, materialCraft, skuMatrix, extendScenes, customPrompt, logoUrl, brandColors, uploads, advancedOptions, results, onAddImages, selectedModel, selectedProviderId]);
+  }, [brandName, productName, category, structure, materialCraft, skuMatrix, extendScenes, customPrompt, logoUrl, brandColors, uploads, advancedOptions, results, onAddImages, selectedModel, selectedProviderId, selectedChatModel, selectedChatProviderId]);
 
   // === Generate scene display ===
   const handleGenerateScene = useCallback(async () => {
@@ -499,6 +546,8 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
           outputModes: ['scene_display'], advancedOptions, prompt: scenePrompt,
           model: selectedModel,
           providerId: selectedProviderId,
+          chatModel: selectedChatModel,
+          chatProviderId: selectedChatProviderId,
         }),
       });
       const data = await res.json();
@@ -539,7 +588,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
       console.error('[brand-packaging] Scene generation failed:', e);
       setIsGenerating(false);
     }
-  }, [brandName, productName, category, structure, materialCraft, skuMatrix, extendScenes, customPrompt, logoUrl, brandColors, uploads, advancedOptions, results, onAddImages, selectedModel, selectedProviderId]);
+  }, [brandName, productName, category, structure, materialCraft, skuMatrix, extendScenes, customPrompt, logoUrl, brandColors, uploads, advancedOptions, results, onAddImages, selectedModel, selectedProviderId, selectedChatModel, selectedChatProviderId]);
 
   // === Download image ===
   const handleDownloadImage = useCallback(async (url: string, filename: string) => {
@@ -862,31 +911,95 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                     {/* Export format + Generate button */}
                     {/* 模型选择 */}
                     {imageModels.length > 0 && (
-                      <div className="flex items-center gap-2">
-                        <span className="text-[12px]" style={{ color: textMuted }}>生成模型</span>
-                        <select
-                          className="rounded-lg border px-2 py-1.5 text-[12px] cursor-pointer flex-1"
-                          style={{
-                            background: isMonochrome ? '#f9fafb' : '#111',
-                            color: isMonochrome ? '#374151' : '#e5e5e5',
-                            borderColor: isMonochrome ? '#d1d5db' : 'rgba(255,255,255,0.12)',
-                          }}
-                          value={`${selectedProviderId}::${selectedModel}`}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            const sepIdx = val.indexOf('::');
-                            if (sepIdx > 0) {
-                              setSelectedProviderId(val.substring(0, sepIdx));
-                              setSelectedModel(val.substring(sepIdx + 2));
-                            }
-                          }}
-                        >
-                          {imageModels.map(m => (
-                            <option key={`${m.providerId}::${m.id}`} value={`${m.providerId}::${m.id}`}>
-                              {m.name || m.id}
-                            </option>
-                          ))}
-                        </select>
+                      <div className="space-y-1.5">
+                        <div>
+                          <span className="text-[11px] font-medium" style={{ color: textMuted }}>图像模型</span>
+                          <select
+                            className="w-full rounded-lg border px-2 py-1.5 text-[12px] cursor-pointer mt-0.5"
+                            style={{
+                              background: isMonochrome ? '#f9fafb' : '#111',
+                              color: isMonochrome ? '#374151' : '#e5e5e5',
+                              borderColor: isMonochrome ? '#d1d5db' : 'rgba(255,255,255,0.12)',
+                            }}
+                            value={`${selectedProviderId}::${selectedModel}`}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              const sepIdx = val.indexOf('::');
+                              if (sepIdx > 0) {
+                                setSelectedProviderId(val.substring(0, sepIdx));
+                                setSelectedModel(val.substring(sepIdx + 2));
+                              }
+                            }}
+                          >
+                            {(() => {
+                              const grouped: Record<string, typeof imageModels> = {};
+                              imageModels.forEach(m => {
+                                const key = m.providerName || '未知';
+                                if (!grouped[key]) grouped[key] = [];
+                                grouped[key].push(m);
+                              });
+                              return Object.entries(grouped).map(([provName, models]) => (
+                                <optgroup key={provName} label={provName}>
+                                  {models.map(m => (
+                                    <option key={`${m.providerId}::${m.id}`} value={`${m.providerId}::${m.id}`}>
+                                      {getModelDisplayName(m.id) || m.name || m.id}
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              ));
+                            })()}
+                          </select>
+                          {(() => {
+                            const cur = imageModels.find(m => m.providerId === selectedProviderId && m.id === selectedModel);
+                            if (cur) return <p className="text-[11px] mt-0.5" style={{ color: isMonochrome ? '#9ca3af' : 'rgba(212,175,55,0.5)' }}>{getModelDisplayName(cur.id) || cur.name} · 来自 {cur.providerName}</p>;
+                            return null;
+                          })()}
+                        </div>
+                        {chatModels.length > 0 && (
+                          <div>
+                            <span className="text-[11px] font-medium" style={{ color: textMuted }}>LLM模型</span>
+                            <select
+                              className="w-full rounded-lg border px-2 py-1.5 text-[12px] cursor-pointer mt-0.5"
+                              style={{
+                                background: isMonochrome ? '#f9fafb' : '#111',
+                                color: isMonochrome ? '#374151' : '#e5e5e5',
+                                borderColor: isMonochrome ? '#d1d5db' : 'rgba(255,255,255,0.12)',
+                              }}
+                              value={`${selectedChatProviderId}::${selectedChatModel}`}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                const sepIdx = val.indexOf('::');
+                                if (sepIdx > 0) {
+                                  setSelectedChatProviderId(val.substring(0, sepIdx));
+                                  setSelectedChatModel(val.substring(sepIdx + 2));
+                                }
+                              }}
+                            >
+                              {(() => {
+                                const grouped: Record<string, typeof chatModels> = {};
+                                chatModels.forEach(m => {
+                                  const key = m.providerName || '未知';
+                                  if (!grouped[key]) grouped[key] = [];
+                                  grouped[key].push(m);
+                                });
+                                return Object.entries(grouped).map(([provName, models]) => (
+                                  <optgroup key={provName} label={provName}>
+                                    {models.map(m => (
+                                      <option key={`${m.providerId}::${m.id}`} value={`${m.providerId}::${m.id}`}>
+                                        {getModelDisplayName(m.id) || m.name || m.id}
+                                      </option>
+                                    ))}
+                                  </optgroup>
+                                ));
+                              })()}
+                            </select>
+                            {(() => {
+                              const cur = chatModels.find(m => m.providerId === selectedChatProviderId && m.id === selectedChatModel);
+                              if (cur) return <p className="text-[11px] mt-0.5" style={{ color: isMonochrome ? '#9ca3af' : 'rgba(212,175,55,0.5)' }}>{getModelDisplayName(cur.id) || cur.name} · 来自 {cur.providerName}</p>;
+                              return null;
+                            })()}
+                          </div>
+                        )}
                       </div>
                     )}
                     <div className="flex items-center justify-between">

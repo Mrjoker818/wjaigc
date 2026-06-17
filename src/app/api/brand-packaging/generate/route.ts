@@ -20,6 +20,8 @@ export async function POST(request: NextRequest) {
       uploads = [],
       model,
       providerId,
+      chatModel,
+      chatProviderId,
       prompt: clientPrompt,
     } = body;
 

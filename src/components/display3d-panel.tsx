@@ -2,6 +2,7 @@
 
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
+import { getModelDisplayName } from '@/lib/model-name-map';
 import {
   Box, X, Minus, Maximize2, Upload, Image, Layers,
   ChevronDown, Sparkles, Download, Send, Search,
@@ -231,9 +232,12 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
   const [outputQuality, setOutputQuality] = useState('高');
 
   // === Model selection state ===
-  const [availableModels, setAvailableModels] = useState<{ providerId: string; model: string; displayName?: string }[]>([]);
+  const [availableModels, setAvailableModels] = useState<{ providerId: string; model: string; displayName?: string; providerName?: string }[]>([]);
   const [selectedModel, setSelectedModel] = useState('');
   const [selectedProviderId, setSelectedProviderId] = useState('');
+  const [chatModels, setChatModels] = useState<{ id: string; name: string; providerId: string; providerName: string }[]>([]);
+  const [selectedChatModel, setSelectedChatModel] = useState('');
+  const [selectedChatProviderId, setSelectedChatProviderId] = useState('');
 
   // Load available image models
   useEffect(() => {
@@ -242,12 +246,14 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
       .then(data => {
         const providers: { id: string; name: string; isEnabled?: boolean }[] = data.providers || [];
         const enabledProviderIds = new Set(providers.filter(p => p.isEnabled !== false).map(p => p.id));
+        const providerMap = new Map(providers.map((p: { id: string; name: string }) => [p.id, p]));
         const models = (data.models || [])
           .filter((m: { providerId?: string }) => enabledProviderIds.has(m.providerId || ''))
           .map((m: { providerId?: string; id?: string; model?: string; name?: string }) => ({
             providerId: m.providerId || '',
             model: m.model || m.id || '',
             displayName: m.name || m.model || m.id || '',
+            providerName: providerMap.get(m.providerId || '')?.name || '',
           }));
         setAvailableModels(models);
         // Auto-select from localStorage or first available
@@ -258,6 +264,45 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
           if (match) { setSelectedModel(match.model); setSelectedProviderId(match.providerId); return; }
         }
         if (models.length > 0) { setSelectedModel(models[0].model); setSelectedProviderId(models[0].providerId); }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Load available chat models
+  useEffect(() => {
+    fetch('/api/models?type=chat')
+      .then(r => r.json())
+      .then(data => {
+        const providers: { id: string; name: string; isEnabled?: boolean }[] = data.providers || [];
+        const enabledProviderIds = new Set(providers.filter(p => p.isEnabled !== false).map(p => p.id));
+        const providerMap = new Map(providers.map((p: { id: string; name: string }) => [p.id, p]));
+        const modelList: { id: string; name: string; providerId?: string }[] = (data.models || []).filter(
+          (m: { providerId?: string }) => enabledProviderIds.has(m.providerId || '')
+        );
+        if (modelList.length) {
+          const mapped = modelList.map(m => ({
+            id: m.id,
+            name: m.name,
+            providerId: m.providerId || '',
+            providerName: providerMap.get(m.providerId || '')?.name || '',
+          }));
+          setChatModels(mapped);
+          const saved = localStorage.getItem('wujie_selected_chat_model');
+          if (saved) {
+            const pureModel = saved.includes('::') ? saved.split('::')[1] : saved;
+            const savedProvId = saved.includes('::') ? saved.split('::')[0] : '';
+            if (mapped.some(m => m.id === pureModel)) {
+              setSelectedChatModel(pureModel);
+              setSelectedChatProviderId(savedProvId);
+            } else {
+              setSelectedChatModel(mapped[0].id);
+              setSelectedChatProviderId(mapped[0].providerId);
+            }
+          } else {
+            setSelectedChatModel(mapped[0].id);
+            setSelectedChatProviderId(mapped[0].providerId);
+          }
+        }
       })
       .catch(() => {});
   }, []);
@@ -408,7 +453,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
       const res = await fetch('/api/display-3d/decompose', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ brandName, sceneType, dimensions, imageUrl }),
+        body: JSON.stringify({ brandName, sceneType, dimensions, imageUrl, model: selectedChatModel || undefined, providerId: selectedChatProviderId || undefined }),
       });
       const data = await res.json();
       if (!res.ok || data.error) {
@@ -468,7 +513,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
       console.error('[display-3d] Decompose failed:', e);
       setIsDecomposing(false);
     }
-  }, [brandName, sceneType, dimensions, results, onAddImages]);
+  }, [brandName, sceneType, dimensions, results, onAddImages, selectedChatModel, selectedChatProviderId]);
 
   // === Export handlers ===
   const handleExportPdf = useCallback(async () => {
@@ -776,12 +821,12 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                     </div>
                   </section>
 
-                  {/* Model selector */}
+                  {/* Image Model selector */}
                   {availableModels.length > 0 && (
-                    <div className="flex items-center gap-2">
-                      <span className="text-[12px]" style={{ color: textMuted }}>生成模型</span>
+                    <div>
+                      <label className="block text-[12px] mb-1" style={{ color: textMuted }}>图像模型</label>
                       <select
-                        className="rounded-lg border px-2 py-1.5 text-[12px] cursor-pointer flex-1"
+                        className="rounded-lg border px-2 py-1.5 text-[12px] cursor-pointer w-full"
                         style={{
                           background: isMonochrome ? '#f9fafb' : '#111',
                           color: isMonochrome ? '#374151' : '#e5e5e5',
@@ -797,12 +842,64 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                           }
                         }}
                       >
-                        {availableModels.map((m: { providerId: string; model: string; displayName?: string }) => (
-                          <option key={`${m.providerId}::${m.model}`} value={`${m.providerId}::${m.model}`}>
-                            {m.displayName || m.model}
-                          </option>
+                        {Array.from(new Set(availableModels.map(m => m.providerName || '未知'))).map(pName => (
+                          <optgroup key={pName} label={pName}>
+                            {availableModels
+                              .filter(m => (m.providerName || '未知') === pName)
+                              .map((m: { providerId: string; model: string; displayName?: string; providerName?: string }) => (
+                                <option key={`${m.providerId}::${m.model}`} value={`${m.providerId}::${m.model}`}>
+                                  {getModelDisplayName(m.model)}
+                                </option>
+                              ))}
+                          </optgroup>
                         ))}
                       </select>
+                      {selectedModel && (
+                        <div className="text-[10px] mt-0.5" style={{ color: textMuted }}>
+                          {getModelDisplayName(selectedModel)} · 来自 {availableModels.find(m => m.providerId === selectedProviderId && m.model === selectedModel)?.providerName || '未知'}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* LLM Model selector */}
+                  {chatModels.length > 0 && (
+                    <div>
+                      <label className="block text-[12px] mb-1" style={{ color: textMuted }}>LLM模型</label>
+                      <select
+                        className="rounded-lg border px-2 py-1.5 text-[12px] cursor-pointer w-full"
+                        style={{
+                          background: isMonochrome ? '#f9fafb' : '#111',
+                          color: isMonochrome ? '#374151' : '#e5e5e5',
+                          borderColor: isMonochrome ? '#d1d5db' : 'rgba(255,255,255,0.12)',
+                        }}
+                        value={`${selectedChatProviderId}::${selectedChatModel}`}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          const sepIdx = val.indexOf('::');
+                          if (sepIdx >= 0) {
+                            setSelectedChatProviderId(val.substring(0, sepIdx));
+                            setSelectedChatModel(val.substring(sepIdx + 2));
+                          }
+                        }}
+                      >
+                        {Array.from(new Set(chatModels.map(m => m.providerName || '未知'))).map(pName => (
+                          <optgroup key={pName} label={pName}>
+                            {chatModels
+                              .filter(m => (m.providerName || '未知') === pName)
+                              .map(m => (
+                                <option key={`${m.providerId}::${m.id}`} value={`${m.providerId}::${m.id}`}>
+                                  {m.name || m.id}
+                                </option>
+                              ))}
+                          </optgroup>
+                        ))}
+                      </select>
+                      {selectedChatModel && (
+                        <div className="text-[10px] mt-0.5" style={{ color: textMuted }}>
+                          {chatModels.find(m => m.providerId === selectedChatProviderId && m.id === selectedChatModel)?.name || selectedChatModel} · 来自 {chatModels.find(m => m.providerId === selectedChatProviderId && m.id === selectedChatModel)?.providerName || '未知'}
+                        </div>
+                      )}
                     </div>
                   )}
 

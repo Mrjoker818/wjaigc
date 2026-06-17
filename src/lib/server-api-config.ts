@@ -22,7 +22,7 @@ export function normalizeApiBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, '');
 }
 
-type ApiKind = 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'imageEdit' | 'universal' | 'general' | 'packaging' | 'display3d' | 'vlm';
+type ApiKind = 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'imageEdit' | 'universal' | 'general' | 'vlm';
 
 /**
  * Normalize advancedParams from DB storage format to Record<string, string>.

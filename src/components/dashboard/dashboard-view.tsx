@@ -22,7 +22,7 @@ import { getModelDisplayName } from '@/lib/model-name-map';
 type TabType = 'projects' | 'templates' | 'assets' | 'stats' | 'credits' | 'settings' | 'users' | 'apis' | 'data' | 'ecom-templates' | 'payment-config';
 type ProjectFilter = 'all' | 'recent' | 'starred';
 type AssetSubTab = 'images' | 'prompts' | 'brands';
-type ApiKind = 'general' | 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'imageEdit' | 'universal' | 'packaging' | 'display3d';
+type ApiKind = 'general' | 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'imageEdit' | 'universal';
 type UserPermissionKey = 'image' | 'chat' | 'threeD' | 'imageEdit' | 'vectorize' | 'layer' | 'video';
 type AdminProvider = ApiProvider & { apiKeyPreview?: string };
 
@@ -36,8 +36,6 @@ const apiKindLabels: Record<ApiKind, string> = {
   video: '视频模型',
   imageEdit: '图像编辑模型',
   universal: '通用模型',
-  packaging: '品牌包装模型',
-  display3d: '3D展陈模型',
 };
 
 const apiKindDescriptions: Record<ApiKind, string> = {
@@ -50,8 +48,6 @@ const apiKindDescriptions: Record<ApiKind, string> = {
   video: '添加API后系统自动识别视频模型（可灵/Seedance/海螺/Vidu/Runway/Pika/Sora等），对接到文生视频和图生视频功能',
   imageEdit: '支持图像编辑模型，对接到擦除/蒙版/放大/扩展等功能',
   universal: '通用模型，支持多种能力',
-  packaging: '支持品牌包装图像生成，对接到品牌包装系统Pro',
-  display3d: '支持3D展陈图像生成，对接到3D展陈系统Pro',
 };
 
 const userPermissionLabels: Record<UserPermissionKey, string> = {
