@@ -1178,10 +1178,10 @@ export function InfiniteCanvas({
   const [upscaleActualH, setUpscaleActualH] = useState(0);
 
   // SVG智能描摹 state
-  const [svgTraceMode, setSvgTraceMode] = useState<'color' | 'bw' | 'cutting' | 'engraving' | 'lineart' | 'compress' | 'thumbnail'>('color');
+  const [svgTraceMode, setSvgTraceMode] = useState<'color' | 'bw'>('color');
   const [svgTraceQualityPreset, setSvgTraceQualityPreset] = useState<'fast' | 'balanced' | 'high' | 'max' | 'print' | 'print-pro'>('balanced');
   const [svgTraceEngine, setSvgTraceEngine] = useState<'auto' | 'vectorize-api' | 'vlm' | 'vtracer'>('auto');
-  const [svgTraceOutputFormat, setSvgTraceOutputFormat] = useState<'svg' | 'eps' | 'dxf' | 'pdf'>('svg');
+  const svgTraceOutputFormat = 'svg' as const;
   const [svgTraceColorPrecision, setSvgTraceColorPrecision] = useState<number | null>(null);  // null = use preset
   const [svgTraceFilterSpeckle, setSvgTraceFilterSpeckle] = useState<number | null>(null);
   const [svgTraceCornerThreshold, setSvgTraceCornerThreshold] = useState<number | null>(null);
@@ -1191,12 +1191,6 @@ export function InfiniteCanvas({
   const [svgTraceBwThreshold, setSvgTraceBwThreshold] = useState(50);
   const [svgTraceBwTurdSize, setSvgTraceBwTurdSize] = useState(2);
   const [svgTraceBwInvert, setSvgTraceBwInvert] = useState(false);
-  const [svgTraceBwAlphaMax, setSvgTraceBwAlphaMax] = useState(1);
-  const [svgTraceCompressQuality, setSvgTraceCompressQuality] = useState(80);
-  const [svgTraceCompressFormat, setSvgTraceCompressFormat] = useState<'webp' | 'jpeg' | 'png'>('webp');
-  const [svgTraceThumbWidth, setSvgTraceThumbWidth] = useState(200);
-  const [svgTraceThumbHeight, setSvgTraceThumbHeight] = useState(200);
-  const [svgTraceThumbFit, setSvgTraceThumbFit] = useState<'cover' | 'contain' | 'inside' | 'fill'>('cover');
 
   // Check Upscayl NCNN availability on mount
   useEffect(() => {
@@ -2263,7 +2257,7 @@ export function InfiniteCanvas({
         // Brush mode: create annotation + start drawing on canvas overlay
         const targetImg = images.find(i => i.id === targetImageId);
         if (targetImg) {
-          const newAnn = createAnnotation(canvasPos.x, canvasPos.y, '', targetImageId, undefined, undefined);
+          const newAnn = createAnnotation(canvasPos.x, canvasPos.y, '', targetImageId, undefined);
           setAnnotations(prev => [...prev, newAnn]);
           setEditingAnnotationId(newAnn.id);
           setBrushDrawingAnnId(newAnn.id);
@@ -6016,11 +6010,6 @@ export function InfiniteCanvas({
     const modeLabels: Record<string, string> = {
       color: '全彩矢量化',
       bw: '黑白描摹',
-      cutting: '切割路径',
-      engraving: '雕刻路径',
-      lineart: '线稿提取',
-      compress: '图片压缩',
-      thumbnail: '缩略图生成',
     };
     const modeLabel = modeLabels[svgTraceMode] || 'SVG描摹';
 
@@ -6066,14 +6055,7 @@ export function InfiniteCanvas({
         requestBody.threshold = svgTraceBwThreshold;
         requestBody.turdSize = svgTraceBwTurdSize;
         requestBody.invert = svgTraceBwInvert;
-        requestBody.alphaMax = svgTraceBwAlphaMax;
-      } else if (svgTraceMode === 'compress') {
-        requestBody.quality = svgTraceCompressQuality;
-        requestBody.compressFormat = svgTraceCompressFormat;
-      } else if (svgTraceMode === 'thumbnail') {
-        requestBody.thumbnailWidth = svgTraceThumbWidth;
-        requestBody.thumbnailHeight = svgTraceThumbHeight;
-        requestBody.thumbnailFit = svgTraceThumbFit;
+        // alphaMax not used in simplified panel
       }
 
       const response = await fetch('/api/svg-trace', {
@@ -6094,7 +6076,7 @@ export function InfiniteCanvas({
       if (data.success) {
         updateProcessingFrame(placeholderId, { progress: 88, status: '正在渲染预览...' });
 
-        if (svgTraceMode === 'color' || svgTraceMode === 'bw' || svgTraceMode === 'cutting' || svgTraceMode === 'engraving' || svgTraceMode === 'lineart') {
+        if (svgTraceMode === 'color' || svgTraceMode === 'bw') {
           // SVG结果 - 优先使用PNG预览图用于画布显示，保留SVG数据用于下载
           // API返回: data.dataUrl(PNG服务器URL或SVG服务器URL), data.url(服务器SVG文件路径), data.isSvgPreview(PNG是否生成成功)
           // 显示策略: data.dataUrl(PNG服务器URL优先，SVG服务器URL兜底)
@@ -6141,7 +6123,7 @@ export function InfiniteCanvas({
     }
     setIsEditProcessing(false);
     setShowSvgTracePanel(false);
-  }, [selectedImageData, svgTraceMode, svgTraceEngine, svgTraceQualityPreset, svgTraceColorPrecision, svgTraceFilterSpeckle, svgTraceCornerThreshold, svgTraceLengthThreshold, svgTraceCurveMode, svgTraceHierarchical, svgTraceBwThreshold, svgTraceBwTurdSize, svgTraceBwInvert, svgTraceBwAlphaMax, svgTraceCompressQuality, svgTraceCompressFormat, svgTraceThumbWidth, svgTraceThumbHeight, svgTraceThumbFit, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, removeProcessingFrame]);
+  }, [selectedImageData, svgTraceMode, svgTraceEngine, svgTraceQualityPreset, svgTraceColorPrecision, svgTraceFilterSpeckle, svgTraceCornerThreshold, svgTraceLengthThreshold, svgTraceCurveMode, svgTraceHierarchical, svgTraceBwThreshold, svgTraceBwTurdSize, svgTraceBwInvert, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, removeProcessingFrame]);
 
   // Multi-angle - Lovart-style subject/camera mode, result to the right
   const handleOpenMultiAngle = useCallback(() => {
@@ -9485,452 +9467,220 @@ export function InfiniteCanvas({
         {showSvgTracePanel && (() => {
           const editImg = images.find(i => i.id === editImageId);
           if (!editImg) return null;
-          const imgOrigW = editImg.originalWidth || Math.round(editImg.width) || 512;
-          const imgOrigH = editImg.originalHeight || Math.round(editImg.height) || 512;
+          const imgOrigW = editImg.originalWidth || Math.round(editImg.width);
+          const imgOrigH = editImg.originalHeight || Math.round(editImg.height);
           const pos = getToolbarPosition();
-
-          const svgTraceModes = [
-            { key: 'color' as const, label: '全彩矢量化', icon: <Palette size={14} />, desc: '智能引擎分层', accent: '#d4af37' },
-            { key: 'bw' as const, label: '黑白描摹', icon: <Contrast size={14} />, desc: 'Potrace轮廓', accent: '#9ca3af' },
-            { key: 'cutting' as const, label: '切割路径', icon: <Scissors size={14} />, desc: '激光切割用', accent: '#ef4444' },
-            { key: 'engraving' as const, label: '雕刻路径', icon: <PenTool size={14} />, desc: '激光雕刻用', accent: '#f59e0b' },
-            { key: 'lineart' as const, label: '线稿提取', icon: <Type size={14} />, desc: '纯净线条', accent: '#06b6d4' },
-            { key: 'compress' as const, label: '图片压缩', icon: <Minimize2 size={14} />, desc: 'Sharp', accent: '#60a5fa' },
-            { key: 'thumbnail' as const, label: '缩略图', icon: <Frame size={14} />, desc: 'Sharp', accent: '#34d399' },
-          ];
-          const activeAccent = svgTraceModes.find(m => m.key === svgTraceMode)?.accent || '#d4af37';
-
           return (
             <div
-              className="absolute z-50 pointer-events-auto"
-              data-toolbar="svg-trace"
-              style={{ left: pos.x, top: pos.y, transform: 'translate(-50%, -100%)' }}
-              onMouseDown={(e) => e.stopPropagation()}
-              onWheel={(e) => e.stopPropagation()}
+              style={{
+                position: 'fixed',
+                left: pos.x,
+                top: pos.y,
+                width: 320,
+                background: '#141414',
+                border: '1px solid #333',
+                borderRadius: 12,
+                boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+                zIndex: 60,
+                padding: 16,
+                color: '#ccc',
+                fontSize: 13,
+              }}
+              onClick={e => e.stopPropagation()}
             >
-              <div
-                className="flex flex-col items-stretch gap-2.5 p-3 min-w-[280px] max-w-[320px] rounded-xl border shadow-2xl"
-                style={{ background: '#141414', borderColor: `${activeAccent}40`, borderWidth: '1px' }}
-                onMouseDown={(e) => e.stopPropagation()}
-              >
-                {/* Header */}
-                <div className="flex items-center gap-2">
-                  <PenTool size={14} style={{ color: activeAccent }} />
-                  <span className="text-xs font-semibold" style={{ color: activeAccent }}>SVG智能描摹</span>
-                  <span className="text-xs ml-auto text-gray-500">Esc 退出</span>
-                </div>
+              {/* Header */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <span style={{ color: '#fff', fontWeight: 600, fontSize: 15, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Settings2 size={16} style={{ color: '#d4af37' }} />
+                  SVG智能描摹
+                </span>
+                <span style={{ color: '#888', fontSize: 12 }}>Esc 退出</span>
+              </div>
 
-                {/* Mode selector */}
-                <div className="grid grid-cols-2 gap-1.5">
-                  {svgTraceModes.map(m => (
-                    <button
-                      key={m.key}
-                      onClick={(e) => { e.stopPropagation(); setSvgTraceMode(m.key); }}
-                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border transition-all text-left"
-                      style={{
-                        background: svgTraceMode === m.key ? `${m.accent}15` : '#111',
-                        borderColor: svgTraceMode === m.key ? m.accent : '#333',
-                        color: svgTraceMode === m.key ? m.accent : '#777',
-                      }}
-                    >
-                      <span style={{ color: svgTraceMode === m.key ? m.accent : '#555' }}>{m.icon}</span>
-                      <div className="flex flex-col min-w-0">
-                        <span className="text-[11px] font-medium leading-tight truncate">{m.label}</span>
-                        <span className="text-[9px] leading-tight text-gray-600 truncate">{m.desc}</span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-
-                {/* Source image info */}
-                <div className="flex items-center gap-2 px-2 py-1.5 rounded-md text-xs" style={{ background: '#111', color: '#555' }}>
-                  <ImageIcon size={12} />
-                  <span>原图 {imgOrigW}×{imgOrigH}</span>
-                </div>
-
-                {/* Mode-specific options */}
-                {svgTraceMode === 'color' && (
-                  <div className="flex flex-col gap-2">
-                    {/* Engine selector */}
-                    <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <label className="text-xs text-muted-foreground">矢量化引擎</label>
-                        <span className="text-[10px] text-[#777]">自动选择最优引擎</span>
-                      </div>
-                      <div className="grid grid-cols-4 gap-1">
-                        {([
-                          { key: 'auto' as const, label: '自动', color: '#d4af37', desc: '智能选择最优引擎' },
-                          { key: 'vectorize-api' as const, label: 'Vectorizer', color: '#4ade80', desc: 'Vectorizer.AI 精确矢量' },
-                          { key: 'vlm' as const, label: 'VLM', color: '#60a5fa', desc: '视觉语言模型' },
-                          { key: 'vtracer' as const, label: 'vtracer', color: '#9ca3af', desc: '传统描摹算法' },
-                        ]).map(eng => (
-                          <button key={eng.key}
-                            onClick={(e) => { e.stopPropagation(); setSvgTraceEngine(eng.key); }}
-                            className="py-1 rounded text-[10px] font-medium border transition-all"
-                            title={eng.desc}
-                            style={{
-                              background: svgTraceEngine === eng.key ? `${eng.color}20` : '#111',
-                              borderColor: svgTraceEngine === eng.key ? eng.color : '#333',
-                              color: svgTraceEngine === eng.key ? eng.color : '#555',
-                            }}
-                          >
-                            {eng.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <label className="text-xs text-muted-foreground">质量预设</label>
-                        <span className="text-[10px] text-[#777]">调整后自动覆盖参数</span>
-                      </div>
-                      <div className="grid grid-cols-4 gap-1">
-                        {([
-                          { key: 'fast' as const, label: '快速', color: '#4ade80' },
-                          { key: 'balanced' as const, label: '均衡', color: '#d4af37' },
-                          { key: 'high' as const, label: '精细', color: '#f97316' },
-                          { key: 'max' as const, label: '极致', color: '#ef4444' },
-                          { key: 'print' as const, label: '印刷', color: '#8b5cf6' },
-                          { key: 'print-pro' as const, label: '丹青级', color: '#ec4899' },
-                        ]).map(p => (
-                          <button key={p.key}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSvgTraceQualityPreset(p.key);
-                              setSvgTraceColorPrecision(null);
-                              setSvgTraceFilterSpeckle(null);
-                              setSvgTraceCornerThreshold(null);
-                              setSvgTraceLengthThreshold(null);
-                              setSvgTraceCurveMode(null);
-                              setSvgTraceHierarchical(null);
-                            }}
-                            className="py-1 rounded text-[10px] font-medium border transition-all"
-                            style={{
-                              background: svgTraceQualityPreset === p.key ? `${p.color}20` : '#111',
-                              borderColor: svgTraceQualityPreset === p.key ? p.color : '#333',
-                              color: svgTraceQualityPreset === p.key ? p.color : '#555',
-                            }}
-                          >
-                            {p.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Curve mode toggle */}
-                    <div className="flex items-center gap-2">
-                      <label className="text-xs text-muted-foreground">曲线模式</label>
-                      <div className="flex items-center gap-1 ml-auto">
-                        {(['polygon', 'spline'] as const).map(cm => (
-                          <button key={cm}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSvgTraceCurveMode(svgTraceCurveMode === cm ? null : cm);
-                            }}
-                            className="px-2 py-0.5 rounded text-[10px] border transition-all"
-                            style={{
-                              background: (svgTraceCurveMode ?? 'spline') === cm ? '#d4af3720' : '#111',
-                              borderColor: (svgTraceCurveMode ?? 'spline') === cm ? '#d4af37' : '#333',
-                              color: (svgTraceCurveMode ?? 'spline') === cm ? '#d4af37' : '#555',
-                            }}
-                          >
-                            {cm === 'polygon' ? '折线' : '曲线'}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Hierarchical toggle */}
-                    <div className="flex items-center gap-2">
-                      <label className="text-xs text-muted-foreground">分层策略</label>
-                      <div className="flex items-center gap-1 ml-auto">
-                        {(['stacked', 'cutout'] as const).map(h => (
-                          <button key={h}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSvgTraceHierarchical(svgTraceHierarchical === h ? null : h);
-                            }}
-                            className="px-2 py-0.5 rounded text-[10px] border transition-all"
-                            style={{
-                              background: (svgTraceHierarchical ?? 'stacked') === h ? '#d4af3720' : '#111',
-                              borderColor: (svgTraceHierarchical ?? 'stacked') === h ? '#d4af37' : '#333',
-                              color: (svgTraceHierarchical ?? 'stacked') === h ? '#d4af37' : '#555',
-                            }}
-                          >
-                            {h === 'stacked' ? '叠加' : '剪切'}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Fine-tuning sliders (override preset values) */}
-                    <div className="border-t border-white/[0.12] pt-2 mt-1">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-[10px] text-gold-muted/70">精细调节（覆盖预设值）</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <label className="text-xs text-gold-muted">颜色数</label>
-                        <span className={`text-xs tabular-nums font-mono ${isMonochrome ? 'text-blue-500' : 'text-gold'}`}>{svgTraceColorPrecision ?? (svgTraceQualityPreset === 'fast' ? 64 : svgTraceQualityPreset === 'balanced' ? 128 : svgTraceQualityPreset === 'high' ? 256 : svgTraceQualityPreset === 'max' ? 256 : svgTraceQualityPreset === 'print' ? 256 : 256)}色</span>
-                      </div>
-                      <input type="range" min={2} max={256} step={1} value={svgTraceColorPrecision ?? (svgTraceQualityPreset === 'fast' ? 64 : svgTraceQualityPreset === 'balanced' ? 128 : svgTraceQualityPreset === 'high' ? 256 : 256)}
-                        onChange={e => setSvgTraceColorPrecision(Number(e.target.value))}
-                        onClick={e => e.stopPropagation()}
-                        className="w-full h-1 accent-blue-500 cursor-pointer" />
-                      <div className="flex items-center justify-between">
-                        <label className="text-xs text-gold-muted">去斑</label>
-                        <span className={`text-xs tabular-nums font-mono ${isMonochrome ? 'text-blue-500' : 'text-gold'}`}>{svgTraceFilterSpeckle ?? (svgTraceQualityPreset === 'fast' ? 4 : svgTraceQualityPreset === 'balanced' ? 4 : svgTraceQualityPreset === 'high' ? 6 : svgTraceQualityPreset === 'max' ? 10 : svgTraceQualityPreset === 'print' ? 2 : 12)}px</span>
-                      </div>
-                      <input type="range" min={0} max={20} step={1} value={svgTraceFilterSpeckle ?? (svgTraceQualityPreset === 'fast' ? 4 : svgTraceQualityPreset === 'balanced' ? 4 : svgTraceQualityPreset === 'high' ? 6 : svgTraceQualityPreset === 'max' ? 10 : svgTraceQualityPreset === 'print' ? 2 : 12)}
-                        onChange={e => setSvgTraceFilterSpeckle(Number(e.target.value))}
-                        onClick={e => e.stopPropagation()}
-                        className="w-full h-1 accent-blue-500 cursor-pointer" />
-                      <div className="flex items-center justify-between">
-                        <label className="text-xs text-gold-muted">角点阈值</label>
-                        <span className={`text-xs tabular-nums font-mono ${isMonochrome ? 'text-blue-500' : 'text-gold'}`}>{svgTraceCornerThreshold ?? (svgTraceQualityPreset === 'fast' ? 60 : svgTraceQualityPreset === 'balanced' ? 60 : svgTraceQualityPreset === 'high' ? 90 : svgTraceQualityPreset === 'max' ? 180 : svgTraceQualityPreset === 'print' ? 60 : 180)}</span>
-                      </div>
-                      <input type="range" min={0} max={180} step={5} value={svgTraceCornerThreshold ?? (svgTraceQualityPreset === 'fast' ? 60 : svgTraceQualityPreset === 'balanced' ? 60 : svgTraceQualityPreset === 'high' ? 90 : svgTraceQualityPreset === 'max' ? 180 : svgTraceQualityPreset === 'print' ? 60 : 180)}
-                        onChange={e => setSvgTraceCornerThreshold(Number(e.target.value))}
-                        onClick={e => e.stopPropagation()}
-                        className="w-full h-1 accent-blue-500 cursor-pointer" />
-                      <div className="flex items-center justify-between">
-                        <label className="text-xs text-gold-muted">长度阈值</label>
-                        <span className={`text-xs tabular-nums font-mono ${isMonochrome ? 'text-blue-500' : 'text-gold'}`}>{svgTraceLengthThreshold ?? (svgTraceQualityPreset === 'fast' ? 4 : svgTraceQualityPreset === 'balanced' ? 4 : svgTraceQualityPreset === 'high' ? 4 : svgTraceQualityPreset === 'max' ? 4 : svgTraceQualityPreset === 'print' ? 3 : 3)}</span>
-                      </div>
-                      <input type="range" min={1} max={20} step={1} value={svgTraceLengthThreshold ?? (svgTraceQualityPreset === 'fast' ? 4 : svgTraceQualityPreset === 'balanced' ? 4 : svgTraceQualityPreset === 'high' ? 4 : svgTraceQualityPreset === 'max' ? 4 : svgTraceQualityPreset === 'print' ? 3 : 3)}
-                        onChange={e => setSvgTraceLengthThreshold(Number(e.target.value))}
-                        onClick={e => e.stopPropagation()}
-                        className="w-full h-1 accent-blue-500 cursor-pointer" />
-                    </div>
-                  </div>
-                )}
-
-                {svgTraceMode === 'bw' && (
-                  <div className="flex flex-col gap-2">
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs text-muted-foreground">二值化阈值</label>
-                      <span className="text-xs tabular-nums font-mono text-[#9ca3af]">{svgTraceBwThreshold}%</span>
-                    </div>
-                    <input type="range" min={10} max={90} step={5} value={svgTraceBwThreshold}
-                      onChange={e => setSvgTraceBwThreshold(Number(e.target.value))}
-                      onClick={e => e.stopPropagation()}
-                      className="w-full h-1 accent-[#9ca3af] cursor-pointer" />
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs text-muted-foreground">去斑大小</label>
-                      <span className="text-xs tabular-nums font-mono text-[#9ca3af]">{svgTraceBwTurdSize}px</span>
-                    </div>
-                    <input type="range" min={1} max={50} step={1} value={svgTraceBwTurdSize}
-                      onChange={e => setSvgTraceBwTurdSize(Number(e.target.value))}
-                      onClick={e => e.stopPropagation()}
-                      className="w-full h-1 accent-[#9ca3af] cursor-pointer" />
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setSvgTraceBwInvert(!svgTraceBwInvert); }}
-                        className="px-2.5 py-1 rounded text-xs border transition-all"
-                        style={{
-                          background: svgTraceBwInvert ? '#333' : '#111',
-                          borderColor: svgTraceBwInvert ? '#555' : '#333',
-                          color: svgTraceBwInvert ? '#ccc' : '#555',
-                        }}
-                      >
-                        反色输出
-                      </button>
-                      <span className="text-[10px] text-gray-600">
-                        {svgTraceBwInvert ? '白底黑线→黑底白线' : '黑线白底'}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs text-muted-foreground">透明度阈值</label>
-                      <span className="text-xs tabular-nums font-mono text-[#9ca3af]">{svgTraceBwAlphaMax}%</span>
-                    </div>
-                    <input type="range" min={0} max={100} step={5} value={svgTraceBwAlphaMax}
-                      onChange={e => setSvgTraceBwAlphaMax(Number(e.target.value))}
-                      onClick={e => e.stopPropagation()}
-                      className="w-full h-1 accent-[#9ca3af] cursor-pointer" />
-                  </div>
-                )}
-
-                {/* Cutting/Engraving/Lineart threshold controls */}
-                {(svgTraceMode === 'cutting' || svgTraceMode === 'engraving' || svgTraceMode === 'lineart') && (
-                  <div className="flex flex-col gap-2">
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs text-muted-foreground">
-                        {svgTraceMode === 'cutting' ? '轮廓阈值' : svgTraceMode === 'engraving' ? '细节阈值' : '线条阈值'}
-                      </label>
-                      <span className="text-xs tabular-nums font-mono text-[#9ca3af]">{svgTraceBwThreshold}%</span>
-                    </div>
-                    <input type="range" min={10} max={90} step={5} value={svgTraceBwThreshold}
-                      onChange={e => setSvgTraceBwThreshold(Number(e.target.value))}
-                      onClick={e => e.stopPropagation()}
-                      className="w-full h-1 accent-[#9ca3af] cursor-pointer" />
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs text-muted-foreground">去斑大小</label>
-                      <span className="text-xs tabular-nums font-mono text-[#9ca3af]">{svgTraceBwTurdSize}px</span>
-                    </div>
-                    <input type="range" min={1} max={50} step={1} value={svgTraceBwTurdSize}
-                      onChange={e => setSvgTraceBwTurdSize(Number(e.target.value))}
-                      onClick={e => e.stopPropagation()}
-                      className="w-full h-1 accent-[#9ca3af] cursor-pointer" />
-                  </div>
-                )}
-
-                {svgTraceMode === 'compress' && (
-                  <div className="flex flex-col gap-2">
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs text-muted-foreground">压缩质量</label>
-                      <span className="text-xs tabular-nums font-mono text-[#60a5fa]">{svgTraceCompressQuality}%</span>
-                    </div>
-                    <input type="range" min={10} max={100} step={5} value={svgTraceCompressQuality}
-                      onChange={e => setSvgTraceCompressQuality(Number(e.target.value))}
-                      onClick={e => e.stopPropagation()}
-                      className="w-full h-1 accent-[#60a5fa] cursor-pointer" />
-                    <div className="flex items-center gap-1.5">
-                      {(['webp', 'jpeg', 'png'] as const).map(fmt => (
-                        <button key={fmt}
-                          onClick={(e) => { e.stopPropagation(); setSvgTraceCompressFormat(fmt); }}
-                          className="px-2.5 py-1 rounded text-xs border transition-all uppercase"
-                          style={{
-                            background: svgTraceCompressFormat === fmt ? '#60a5fa15' : '#111',
-                            borderColor: svgTraceCompressFormat === fmt ? '#60a5fa' : '#333',
-                            color: svgTraceCompressFormat === fmt ? '#60a5fa' : '#555',
-                          }}
-                        >
-                          {fmt}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {svgTraceMode === 'thumbnail' && (
-                  <div className="flex flex-col gap-2">
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-xs text-muted-foreground">宽度</label>
-                        <input type="number" min={16} max={4096} value={svgTraceThumbWidth}
-                          onChange={e => setSvgTraceThumbWidth(Math.max(16, Number(e.target.value)))}
-                          onClick={e => e.stopPropagation()}
-                          className="w-full mt-1 px-2 py-1 rounded text-xs tabular-nums border bg-[#2a2a2a] border-[#444] text-text-bright" />
-                      </div>
-                      <div>
-                        <label className="text-xs text-muted-foreground">高度</label>
-                        <input type="number" min={16} max={4096} value={svgTraceThumbHeight}
-                          onChange={e => setSvgTraceThumbHeight(Math.max(16, Number(e.target.value)))}
-                          onClick={e => e.stopPropagation()}
-                          className="w-full mt-1 px-2 py-1 rounded text-xs tabular-nums border bg-[#2a2a2a] border-[#444] text-text-bright" />
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      {(['cover', 'contain', 'fill', 'inside'] as const).map(fit => (
-                        <button key={fit}
-                          onClick={(e) => { e.stopPropagation(); setSvgTraceThumbFit(fit); }}
-                          className="px-2 py-1 rounded text-xs border transition-all"
-                          style={{
-                            background: svgTraceThumbFit === fit ? '#34d39915' : '#111',
-                            borderColor: svgTraceThumbFit === fit ? '#34d399' : '#333',
-                            color: svgTraceThumbFit === fit ? '#34d399' : '#555',
-                          }}
-                        >
-                          {fit === 'cover' ? '覆盖' : fit === 'contain' ? '包含' : fit === 'fill' ? '填充' : '适应'}
-                        </button>
-                      ))}
-                    </div>
-                    {/* Quick size presets */}
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      {[
-                        { label: '128', w: 128, h: 128 },
-                        { label: '256', w: 256, h: 256 },
-                        { label: '512', w: 512, h: 512 },
-                        { label: '1024', w: 1024, h: 1024 },
-                        { label: '同比例', w: 0, h: 0 },
-                      ].map(p => (
-                        <button key={p.label}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (p.w === 0) {
-                              const scale = Math.min(256 / imgOrigW, 256 / imgOrigH, 1);
-                              setSvgTraceThumbWidth(Math.round(imgOrigW * scale));
-                              setSvgTraceThumbHeight(Math.round(imgOrigH * scale));
-                            } else {
-                              setSvgTraceThumbWidth(p.w);
-                              setSvgTraceThumbHeight(p.h);
-                            }
-                          }}
-                          className="px-2 py-0.5 rounded text-[10px] border transition-all"
-                          style={{ borderColor: '#333', background: '#111', color: '#666' }}
-                        >
-                          {p.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Output format selector (for SVG-producing modes) */}
-                {(svgTraceMode === 'color' || svgTraceMode === 'bw' || svgTraceMode === 'cutting' || svgTraceMode === 'engraving' || svgTraceMode === 'lineart') && (
-                  <div className="flex items-center gap-2">
-                    <label className="text-xs text-muted-foreground">输出格式</label>
-                    <div className="flex items-center gap-1 ml-auto">
-                      {(['svg', 'eps', 'dxf', 'pdf'] as const).map(fmt => (
-                        <button key={fmt}
-                          onClick={(e) => { e.stopPropagation(); setSvgTraceOutputFormat(fmt); }}
-                          className="px-2 py-0.5 rounded text-[10px] font-medium border transition-all uppercase"
-                          style={{
-                            background: svgTraceOutputFormat === fmt ? `${activeAccent}20` : '#111',
-                            borderColor: svgTraceOutputFormat === fmt ? activeAccent : '#333',
-                            color: svgTraceOutputFormat === fmt ? activeAccent : '#555',
-                          }}
-                        >
-                          {fmt}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Mode-specific hints for cutting/engraving/lineart */}
-                {svgTraceMode === 'cutting' && (
-                  <div className="text-[10px] text-amber-500/70 bg-amber-500/5 rounded px-2 py-1">
-                    切割模式：生成封闭轮廓路径，适合激光切割/剪纸/CNC加工
-                  </div>
-                )}
-                {svgTraceMode === 'engraving' && (
-                  <div className="text-[10px] text-yellow-500/70 bg-yellow-500/5 rounded px-2 py-1">
-                    雕刻模式：保留细节线条，适合激光雕刻/印章制作
-                  </div>
-                )}
-                {svgTraceMode === 'lineart' && (
-                  <div className="text-[10px] text-cyan-500/70 bg-cyan-500/5 rounded px-2 py-1">
-                    线稿模式：提取纯净线条，适合漫画线稿/设计草图矢量化
-                  </div>
-                )}
-
-                {/* Action buttons */}
-                <div className="flex items-center gap-2">
+              {/* Mode selection */}
+              <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                {([
+                  { key: 'color', label: '全彩矢量化', desc: 'AI识别分色', icon: <Palette size={14} style={{ color: '#d4af37' }} /> },
+                  { key: 'bw', label: '黑白描摹', desc: '轮廓追踪', icon: <PenTool size={14} style={{ color: '#d4af37' }} /> },
+                ] as const).map(m => (
                   <button
-                    onClick={(e) => { e.stopPropagation(); handleSvgTraceConfirm(); }}
-                    disabled={isEditProcessing}
-                    className="flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all active:scale-[0.98]"
+                    key={m.key}
+                    onClick={() => setSvgTraceMode(m.key)}
                     style={{
-                      background: isEditProcessing ? '#333' : activeAccent,
-                      color: isEditProcessing ? '#555' : '#000',
-                      cursor: isEditProcessing ? 'not-allowed' : 'pointer',
+                      flex: 1,
+                      padding: '8px 6px',
+                      borderRadius: 8,
+                      border: svgTraceMode === m.key ? '1.5px solid #d4af37' : '1px solid #444',
+                      background: svgTraceMode === m.key ? 'rgba(212,175,55,0.12)' : '#1e1e1e',
+                      color: svgTraceMode === m.key ? '#d4af37' : '#aaa',
+                      cursor: 'pointer',
+                      textAlign: 'center',
+                      fontSize: 12,
                     }}
                   >
-                    {isEditProcessing ? '处理中...' : svgTraceModes.find(m => m.key === svgTraceMode)?.label || '开始'}
+                    <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 4 }}>{m.icon}</div>
+                    <div style={{ fontWeight: 600, fontSize: 13 }}>{m.label}</div>
+                    <div style={{ fontSize: 10, opacity: 0.6, marginTop: 2 }}>{m.desc}</div>
                   </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); exitEditMode(); }}
-                    className="px-3 py-1.5 rounded-lg text-xs border transition-all"
-                    style={{ background: 'rgba(34,34,34,0.80)', color: '#999', borderColor: '#444' }}
-                  >
-                    取消
-                  </button>
+                ))}
+              </div>
+
+              {/* Original image info */}
+              <div style={{ fontSize: 11, color: '#888', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <Check size={12} style={{ color: '#4ade80' }} />
+                原图 {imgOrigW}×{imgOrigH}
+              </div>
+
+              {/* Color mode settings */}
+              {svgTraceMode === 'color' && (
+                <>
+                  {/* Engine */}
+                  <div style={{ marginBottom: 10 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                      <span style={{ color: '#999', fontSize: 12 }}>矢量化引擎</span>
+                      <span style={{ color: '#666', fontSize: 10 }}>自动选择最优</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      {([
+                        { key: 'auto', label: '自动' },
+                        { key: 'vectorize-api', label: 'Vectorizer' },
+                        { key: 'vlm', label: 'VLM' },
+                        { key: 'vtracer', label: 'VTracer' },
+                      ] as const).map(e => (
+                        <button
+                          key={e.key}
+                          onClick={() => setSvgTraceEngine(e.key as typeof svgTraceEngine)}
+                          style={{
+                            flex: 1,
+                            padding: '5px 4px',
+                            borderRadius: 6,
+                            border: svgTraceEngine === e.key ? '1.5px solid #d4af37' : '1px solid #444',
+                            background: svgTraceEngine === e.key ? 'rgba(212,175,55,0.12)' : '#1e1e1e',
+                            color: svgTraceEngine === e.key ? '#d4af37' : '#aaa',
+                            cursor: 'pointer',
+                            fontSize: 11,
+                            fontWeight: svgTraceEngine === e.key ? 600 : 400,
+                          }}
+                        >
+                          {e.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Quality preset */}
+                  <div style={{ marginBottom: 10 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                      <span style={{ color: '#999', fontSize: 12 }}>质量预设</span>
+                      <span style={{ color: '#666', fontSize: 10 }}>调整后覆盖参数</span>
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {[
+                        { key: 'fast' as const, label: '快速' },
+                        { key: 'balanced' as const, label: '均衡' },
+                        { key: 'high' as const, label: '高清' },
+                        { key: 'max' as const, label: '极致' },
+                      ].map(q => (
+                        <button
+                          key={q.key}
+                          onClick={() => setSvgTraceQualityPreset(q.key)}
+                          style={{
+                            padding: '4px 10px',
+                            borderRadius: 6,
+                            border: svgTraceQualityPreset === q.key ? '1.5px solid #d4af37' : '1px solid #444',
+                            background: svgTraceQualityPreset === q.key ? 'rgba(212,175,55,0.12)' : '#1e1e1e',
+                            color: svgTraceQualityPreset === q.key ? '#d4af37' : '#aaa',
+                            cursor: 'pointer',
+                            fontSize: 11,
+                            fontWeight: svgTraceQualityPreset === q.key ? 600 : 400,
+                          }}
+                        >
+                          {q.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Fine-tuning sliders */}
+                  <div style={{ marginBottom: 10 }}>
+                    <div style={{ color: '#999', fontSize: 12, marginBottom: 6, display: 'flex', justifyContent: 'space-between' }}>
+                      <span>精细调节</span>
+                      <span style={{ color: '#666', fontSize: 10 }}>覆盖预设值</span>
+                    </div>
+                    {/* Color count */}
+                    <div style={{ marginBottom: 6 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#888', marginBottom: 2 }}>
+                        <span>颜色数</span>
+                        <span>{svgTraceColorPrecision}色</span>
+                      </div>
+                      <input type="range" min={2} max={256} value={svgTraceColorPrecision ?? 5} onChange={e => setSvgTraceColorPrecision(Number(e.target.value))}
+                        style={{ width: '100%', accentColor: '#d4af37' }} />
+                    </div>
+                    {/* Corner threshold */}
+                    <div style={{ marginBottom: 6 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#888', marginBottom: 2 }}>
+                        <span>角点阈值</span>
+                        <span>{svgTraceCornerThreshold ?? '自动'}</span>
+                      </div>
+                      <input type="range" min={0} max={100} value={svgTraceCornerThreshold ?? 60} onChange={e => setSvgTraceCornerThreshold(Number(e.target.value))}
+                        style={{ width: '100%', accentColor: '#d4af37' }} />
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* BW mode settings */}
+              {svgTraceMode === 'bw' && (
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ color: '#999', fontSize: 12, marginBottom: 6 }}>黑白参数</div>
+                  <div style={{ marginBottom: 6 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#888', marginBottom: 2 }}>
+                      <span>阈值</span>
+                      <span>{svgTraceBwThreshold}</span>
+                    </div>
+                    <input type="range" min={0} max={255} value={svgTraceBwThreshold} onChange={e => setSvgTraceBwThreshold(Number(e.target.value))}
+                      style={{ width: '100%', accentColor: '#d4af37' }} />
+                  </div>
                 </div>
+              )}
+
+              {/* Action buttons */}
+              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                <button
+                  onClick={handleSvgTraceConfirm}
+                  style={{
+                    flex: 2,
+                    padding: '10px 0',
+                    borderRadius: 8,
+                    border: 'none',
+                    background: '#d4af37',
+                    color: '#000',
+                    fontWeight: 600,
+                    fontSize: 14,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {svgTraceMode === 'color' ? '全彩矢量化' : '黑白描摹'}
+                </button>
+                <button
+                  onClick={() => { setShowSvgTracePanel(false); setEditMode('none'); }}
+                  style={{
+                    flex: 1,
+                    padding: '10px 0',
+                    borderRadius: 8,
+                    border: '1px solid #444',
+                    background: '#1e1e1e',
+                    color: '#aaa',
+                    cursor: 'pointer',
+                    fontSize: 13,
+                  }}
+                >
+                  取消
+                </button>
               </div>
             </div>
           );
         })()}
-
         {/* ====== ERASE/MASK FLOATING WINDOW ====== */}
         {(editMode === 'erase' || editMode === 'mask') && (() => {
           const editImg = images.find(i => i.id === editImageId);

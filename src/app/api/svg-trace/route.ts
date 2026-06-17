@@ -1327,6 +1327,18 @@ function sanitizeAIGeneratedSvg(svg: string): { safe: boolean; reason?: string; 
     return { safe: false, reason: '包含外部图片引用，仅支持纯矢量路径' };
   }
 
+  // Detect and strip <text> elements — they cause garbled rendering due to font dependency
+  const textElementCount = (content.match(/<text[\s>]/gi) || []).length;
+  if (textElementCount > 0) {
+    console.warn(`[svg-trace] SVG 包含 ${textElementCount} 个 <text> 元素，将尝试移除`);
+    // Remove <text> elements but keep a warning in the SVG as a comment
+    const strippedContent = content.replace(/<text[^>]*>[\s\S]*?<\/text>/gi, '').replace(/<text[^>]*\/>/gi, '');
+    if (strippedContent !== content) {
+      content = strippedContent;
+      console.warn('[svg-trace] 已移除 <text> 元素，文字内容可能丢失');
+    }
+  }
+
   // Reject event handlers (onclick, onload, onerror, etc.)
   if (/\bon\w+\s*=/i.test(content)) {
     return { safe: false, reason: '包含事件处理器脚本' };

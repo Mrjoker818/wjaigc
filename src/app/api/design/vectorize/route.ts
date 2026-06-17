@@ -157,10 +157,18 @@ function extractSvgFromText(text: string): string | null {
  * Rejects dangerous or invalid SVG content.
  * Returns { safe, reason? } — if safe=false, the SVG should be rejected.
  */
-function sanitizeGeneratedSvg(svg: string): { safe: boolean; reason?: string } {
+function sanitizeGeneratedSvg(svg: string): { safe: boolean; reason?: string; sanitized?: string } {
+  let content = svg;
   // Must contain <svg> tag
-  if (!/<svg[\s>]/i.test(svg)) {
+  if (!/<svg[\s>]/i.test(content)) {
     return { safe: false, reason: 'Missing <svg> tag' };
+  }
+
+  // Detect and strip <text> elements — they cause garbled rendering due to font dependency
+  const textElementCount = (content.match(/<text[\s>]/gi) || []).length;
+  if (textElementCount > 0) {
+    console.warn(`[vectorize] SVG 包含 ${textElementCount} 个 <text> 元素，将尝试移除`);
+    content = content.replace(/<text[^>]*>[\s\S]*?<\/text>/gi, '').replace(/<text[^>]*\/>/gi, '');
   }
 
   // Security checks — reject dangerous content
@@ -192,18 +200,18 @@ function sanitizeGeneratedSvg(svg: string): { safe: boolean; reason?: string } {
   }
 
   // Check graphic element count
-  const graphicElements = svg.match(/<(?:path|circle|ellipse|rect|line|polyline|polygon|g|defs|linearGradient|radialGradient|stop|use|clipPath|mask)\b/gi) || [];
+  const graphicElements = content.match(/<(?:path|circle|ellipse|rect|line|polyline|polygon|g|defs|linearGradient|radialGradient|stop|use|clipPath|mask)\b/gi) || [];
   if (graphicElements.length === 0) {
     return { safe: false, reason: 'No graphic elements found' };
   }
 
   // Path count quality control
-  const pathCount = (svg.match(/<path\b/gi) || []).length;
+  const pathCount = (content.match(/<path\b/gi) || []).length;
   if (pathCount > 900) {
     return { safe: false, reason: `Too many paths (${pathCount}), this asset is better kept as PNG` };
   }
 
-  return { safe: true };
+  return { safe: true, sanitized: content };
 }
 
 /**
@@ -511,6 +519,7 @@ OUTPUT RULES:
 - Preserve gradient directions if visible
 
 FORBIDDEN:
+- NO <text> elements — always convert text to <path> outlines
 - NO <image> tags (no raster embedding)
 - NO <foreignObject>
 - NO <script> or event handlers (onclick, onload, etc.)
@@ -584,7 +593,8 @@ Do NOT redesign or stylize. Reproduce faithfully.`,
             console.warn('[vectorize] AI SVG failed safety check:', safetyCheck.reason);
             return null;
           }
-          return { svg, engine: `chat-vision-vectorize (${model || 'gpt-4o'})` };
+          // Use sanitized version (text elements stripped)
+          return { svg: safetyCheck.sanitized || svg, engine: `chat-vision-vectorize (${model || 'gpt-4o'})` };
         }
         console.warn('[vectorize] Chat completions returned content without SVG:', content.substring(0, 200));
       }

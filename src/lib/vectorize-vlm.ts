@@ -34,14 +34,15 @@ const VLM_SYSTEM_PROMPT = `You are a professional SVG engineer. Your task is to 
 
 STRICT RULES:
 1. Analyze the image carefully: identify all shapes, colors, gradients, text, and spatial relationships
-2. Reconstruct the image as SVG using <path>, <rect>, <circle>, <ellipse>, <polygon>, <line>, <text> elements
+2. Reconstruct the image as SVG using ONLY <path>, <rect>, <circle>, <ellipse>, <polygon>, <line>, <polyline> elements
 3. Use precise coordinates and colors from the original image
 4. Keep the total number of paths ≤ 300 — merge similar adjacent paths
 5. Set correct width/height/viewBox matching the original image dimensions
-6. For text, use <text> elements with matching font properties
+6. For text/letters in the image, you MUST trace them as <path> outlines (bezier curves), NEVER use <text> elements — <text> elements break rendering due to font dependency issues
 7. For gradients, use <linearGradient>/<radialGradient> in <defs>
 
 ABSOLUTELY FORBIDDEN:
+- NO <text> elements — always convert text to <path> outlines
 - NO <script> tags or JavaScript event handlers
 - NO <foreignObject> elements
 - NO <image> tags with embedded base64 or external URLs
