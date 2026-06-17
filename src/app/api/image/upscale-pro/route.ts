@@ -110,45 +110,151 @@ async function upscaleViaPearAPI(
   }
 }
 
-/** 策略2: 本地 upscayl-node */
-async function upscaleViaLocal(
+/** 策略2: 本地 Python ONNX Real-ESRGAN（纯CPU，无需GPU） */
+async function upscaleViaOnnx(
   imageUrl: string,
   scale: number,
+  face: boolean,
 ): Promise<{ url: string; model: string; strategy: string } | null> {
-  console.log(`[upscale-pro] Strategy 2: Local upscayl-node (scale=${scale}x)`);
+  console.log(`[upscale-pro] Strategy 2: Local ONNX Real-ESRGAN (scale=${scale}x, face=${face})`);
 
   try {
-    const baseUrl = process.env.DEPLOY_RUN_PORT
-      ? `http://localhost:${process.env.DEPLOY_RUN_PORT}`
-      : 'http://localhost:5000';
+    const { execFile } = await import('child_process');
+    const path = await import('path');
+    const fs = await import('fs');
 
-    const localRes = await fetch(`${baseUrl}/api/image/upscale`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        imageUrl,
-        model: 'realesrgan-x4plus',
-        scale,
-        outputFormat: 'png',
-      }),
+    // 检查脚本和模型文件是否存在
+    const scriptPath = path.join(process.cwd(), 'scripts', 'upscale_onnx.py');
+    const modelDir = path.join(process.cwd(), 'onnx-models');
+
+    if (!fs.existsSync(scriptPath)) {
+      console.warn('[upscale-pro] ONNX upscale script not found:', scriptPath);
+      return null;
+    }
+
+    // 列出可用模型
+    const availableModels = fs.readdirSync(modelDir)
+      .filter(f => f.endsWith('.onnx'))
+      .map(f => f.replace('.onnx', ''));
+    if (availableModels.length === 0) {
+      console.warn('[upscale-pro] No ONNX models found in', modelDir);
+      return null;
+    }
+
+    // 选择模型：根据scale选择合适的模型
+    let modelName = 'realesrgan-x4plus-fp16'; // 默认使用x4plus fp16模型（体积小速度快）
+    if (!availableModels.includes(modelName)) {
+      const alternatives = ['realesrgan-x4plus', 'RealESRGAN_x4plus', 'realesrgan-x2plus'];
+      modelName = alternatives.find(m => availableModels.includes(m)) || availableModels[0];
+    }
+
+    // 先将图片下载/保存到临时文件
+    let inputPath: string;
+    if (imageUrl.startsWith('data:')) {
+      const matches = imageUrl.match(/^data:image\/(\w+);base64,(.+)$/);
+      if (!matches) {
+        console.warn('[upscale-pro] Invalid data URL format');
+        return null;
+      }
+      const ext = matches[1] === 'jpeg' ? 'jpg' : matches[1];
+      const buffer = Buffer.from(matches[2], 'base64');
+      inputPath = path.join('/tmp', `upscale-input-${Date.now()}.${ext}`);
+      fs.writeFileSync(inputPath, buffer);
+    } else if (imageUrl.startsWith('/') || imageUrl.startsWith('/api/')) {
+      const baseUrl = process.env.DEPLOY_RUN_PORT
+        ? `http://localhost:${process.env.DEPLOY_RUN_PORT}`
+        : 'http://localhost:5000';
+      inputPath = path.join('/tmp', `upscale-input-${Date.now()}.png`);
+      const resp = await fetch(`${baseUrl}${imageUrl}`);
+      if (!resp.ok) {
+        console.warn(`[upscale-pro] Failed to download local image: ${resp.status}`);
+        return null;
+      }
+      const buf = Buffer.from(await resp.arrayBuffer());
+      fs.writeFileSync(inputPath, buf);
+    } else {
+      inputPath = path.join('/tmp', `upscale-input-${Date.now()}.png`);
+      const resp = await fetch(imageUrl);
+      if (!resp.ok) {
+        console.warn(`[upscale-pro] Failed to download remote image: ${resp.status}`);
+        return null;
+      }
+      const buf = Buffer.from(await resp.arrayBuffer());
+      fs.writeFileSync(inputPath, buf);
+    }
+
+    // 计算tile大小：根据图片尺寸动态调整，避免OOM
+    const sharp = await import('sharp');
+    const metadata = await sharp.default(inputPath).metadata();
+    const maxDim = Math.max(metadata.width || 512, metadata.height || 512);
+    let tileSize = 256;
+    if (maxDim > 1024) tileSize = 64;
+    else if (maxDim > 512) tileSize = 128;
+
+    console.log(`[upscale-pro] ONNX upscale: input=${maxDim}px, model=${modelName}, tile=${tileSize}, scale=${scale}x`);
+
+    // 调用Python ONNX脚本
+    const params = JSON.stringify({
+      inputFile: inputPath,
+      scale,
+      tileSize,
+      model: modelName,
     });
 
-    if (!localRes.ok) {
-      console.warn(`[upscale-pro] Local upscale returned ${localRes.status}`);
+    const result = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+      const proc = execFile(
+        'python3',
+        [scriptPath],
+        { timeout: 300000, maxBuffer: 50 * 1024 * 1024 },
+        (error, stdout, stderr) => {
+          if (error) {
+            reject(error);
+          } else {
+            resolve({ stdout, stderr });
+          }
+        },
+      );
+      proc.stdin?.write(params);
+      proc.stdin?.end();
+    });
+
+    // 清理输入临时文件
+    try { fs.unlinkSync(inputPath); } catch {}
+
+    // 解析输出
+    const output = JSON.parse(result.stdout.trim());
+    if (!output.success) {
+      console.warn(`[upscale-pro] ONNX upscale failed: ${output.error || result.stderr.slice(0, 200)}`);
       return null;
     }
 
-    const localData = await localRes.json() as Record<string, unknown>;
-    if (!localData.success || !localData.url) {
-      console.warn(`[upscale-pro] Local upscale failed: ${localData.error || 'no url'}`);
+    let resultUrl: string = output.outputFile || output.outputBase64;
+    if (!resultUrl) {
+      console.warn('[upscale-pro] ONNX upscale: no output in response');
       return null;
     }
 
-    console.log(`[upscale-pro] Local upscayl success: ${(localData.url as string).slice(0, 80)}`);
-    return { url: localData.url as string, model: 'upscayl-Real-ESRGAN', strategy: 'local-upscayl' };
+    // 如果输出是文件路径，转为API URL
+    if (fs.existsSync(resultUrl)) {
+      const fileName = path.basename(resultUrl);
+      const publicDir = path.join(process.cwd(), 'public', 'outputs', 'upscale');
+      if (!fs.existsSync(publicDir)) {
+        fs.mkdirSync(publicDir, { recursive: true });
+      }
+      const destPath = path.join(publicDir, fileName);
+      fs.copyFileSync(resultUrl, destPath);
+      try { fs.unlinkSync(resultUrl); } catch {}
+      resultUrl = `/api/serve-upload/outputs/upscale/${fileName}`;
+    } else if (resultUrl.startsWith('data:')) {
+      const persistedUrl = await persistResult(resultUrl);
+      resultUrl = persistedUrl;
+    }
+
+    console.log(`[upscale-pro] ONNX Real-ESRGAN success: ${resultUrl.slice(0, 80)}`);
+    return { url: resultUrl, model: `ONNX-${modelName}`, strategy: 'local-Real-ESRGAN' };
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
-    console.warn(`[upscale-pro] Local upscayl error: ${errMsg}`);
+    console.warn(`[upscale-pro] ONNX Real-ESRGAN error: ${errMsg}`);
     return null;
   }
 }
@@ -272,16 +378,16 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // 策略2: 本地 upscayl-node
-    const localResult = await upscaleViaLocal(imageUrl, scale);
+    // 策略2: 本地 ONNX Real-ESRGAN
+    const localResult = await upscaleViaOnnx(imageUrl, scale, face);
     if (localResult?.url) {
       return NextResponse.json({
         success: true,
         url: localResult.url,
         model: localResult.model,
         strategy: localResult.strategy,
-        fallback: true,
-        fallbackReason: '云端API不可用，已使用本地Real-ESRGAN',
+        fallback: !cloudResult ? false : true,
+        fallbackReason: cloudResult ? '云端API不可用，已使用本地Real-ESRGAN' : undefined,
       });
     }
 

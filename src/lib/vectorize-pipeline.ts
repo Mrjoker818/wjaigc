@@ -386,8 +386,24 @@ export async function vectorizePipeline(
       // 确保 VLM 收到 base64 data URL（外部 API 无法访问本地路径）
       let vlmImageDataUrl = imageDataUrl;
       if (!vlmImageDataUrl && imageBuffer) {
-        const mime = detectImageMimeFromBuffer(imageBuffer);
-        vlmImageDataUrl = `data:${mime};base64,${imageBuffer.toString('base64')}`;
+        // 预缩小图片：VLM 不需要原始分辨率，缩小到 768px 以内可大幅减少传输量和超时风险
+        let finalBuffer = imageBuffer;
+        try {
+          const sharp = (await import('sharp')).default;
+          const metadata = await sharp(imageBuffer).metadata();
+          const maxDim = 768;
+          if ((metadata.width || 0) > maxDim || (metadata.height || 0) > maxDim) {
+            finalBuffer = await sharp(imageBuffer)
+              .resize(maxDim, maxDim, { fit: 'inside', withoutEnlargement: true })
+              .jpeg({ quality: 85 })
+              .toBuffer();
+            console.log(`[vectorize-pipeline] VLM: resized image from ${metadata.width}x${metadata.height} to ≤${maxDim}px`);
+          }
+        } catch (resizeErr) {
+          console.warn('[vectorize-pipeline] VLM: pre-resize failed, using original:', resizeErr);
+        }
+        const mime = finalBuffer === imageBuffer ? detectImageMimeFromBuffer(imageBuffer) : 'image/jpeg';
+        vlmImageDataUrl = `data:${mime};base64,${finalBuffer.toString('base64')}`;
       }
       const result = await vlmVectorize({
         imageUrl,

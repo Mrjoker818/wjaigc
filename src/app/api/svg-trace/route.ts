@@ -625,6 +625,12 @@ function fixSvgXml(svg: string): string {
   // Fix paths with trailing slash before closing bracket but after attrs: <path fill="red" />  (this is valid)
   // But <path fill="red" / d="M"/> is not — already handled above
 
+  // Remove incomplete attribute names (e.g., stroke- with no value: stroke-="..." or stroke- )
+  // These cause XML parse errors: "Specification mandates value for attribute stroke-"
+  // Key: a valid attr like stroke-width has \w after the hyphen; an invalid one has > or space or =
+  fixed = fixed.replace(/\s+[a-zA-Z][\w]*-=(?:"[^"]*"|'[^']*')?/g, '');  // e.g., stroke-="..." or stroke-=
+  fixed = fixed.replace(/\s+[a-zA-Z][\w]*-(?=[\s>])/g, ' ');  // e.g., stroke-> or stroke- fill=
+
   // Remove completely empty path elements (no d attribute)
   fixed = fixed.replace(/<path\s*(?:\/>)?>/g, '');
 
@@ -1993,6 +1999,7 @@ export async function POST(req: NextRequest) {
         const requestedEngine = body.engine || 'auto';
 
         // ─── P0: 统一矢量化管线 (Recraft Vectorize → VLM → vtracer spline) ───
+        let pipelineFallbackWarning: string | undefined;
         if (requestedEngine === 'auto' || requestedEngine === 'vectorize-api' || requestedEngine === 'vlm') {
           try {
             const inputBufferForPipeline = await resolveImageUrl(imageUrl);
@@ -2098,10 +2105,13 @@ export async function POST(req: NextRequest) {
 
                 // Pipeline returned SVG but path count out of range — fall through to vtracer
                 console.log(`[svg-trace] Pipeline SVG path count ${pathCountCheck} out of range, falling back to vtracer`);
+                pipelineFallbackWarning = `AI矢量模型生成路径数异常(${pathCountCheck})，已降级到本地描摹引擎`;
               }
             }
           } catch (pipelineErr) {
-            console.warn('[svg-trace] Pipeline failed, falling back to vtracer:', pipelineErr instanceof Error ? pipelineErr.message : String(pipelineErr));
+            const errMsg = pipelineErr instanceof Error ? pipelineErr.message : String(pipelineErr);
+            console.warn('[svg-trace] Pipeline failed, falling back to vtracer:', errMsg);
+            pipelineFallbackWarning = `AI矢量模型不可用(${errMsg})，已降级到本地描摹引擎，质量可能较低`;
           }
         }
 
@@ -2250,6 +2260,7 @@ export async function POST(req: NextRequest) {
           success: true,
           mode: 'color',
           engine: usedEngine,
+          engineFallbackWarning: pipelineFallbackWarning,
           svg: svgContent,
           url,
           // 优先返回PNG服务器URL(最可靠), 其次PNG data URL, 最后SVG服务器URL

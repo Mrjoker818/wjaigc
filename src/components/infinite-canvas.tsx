@@ -1,4 +1,5 @@
 'use client';
+import { toast } from 'sonner';
 import { getModeHandler, shouldEditModeIntercept, type CanvasContext } from '@/lib/canvas-mode-handlers';
 
 /** 标准画面比例列表（与后端 SUPPORTED_RATIOS 一致） */
@@ -6242,12 +6243,16 @@ export function InfiniteCanvas({
           completeProcessingFrame(placeholderId, displayUrl, img.width, img.height, {
             originalWidth: img.originalWidth || Math.round(img.width),
             originalHeight: img.originalHeight || Math.round(img.height),
-            modifyPrompt: `${modeLabel} (${engineLabel})`,
+            modifyPrompt: `${modeLabel} (${engineLabel})${data.engineFallbackWarning ? ' ⚠️' : ''}`,
             // 保存SVG服务器URL用于下载（轻量级，不占localStorage空间）
             ...(data.url ? { svgUrl: data.url } : {}),
             modelName: modelInfo.apiDisplayName || modelInfo.model,
             apiProvider: modelInfo.providerName || '',
           }, 'trace');
+          // 显示引擎降级警告
+          if (data.engineFallbackWarning) {
+            toast.warning(data.engineFallbackWarning, { duration: 8000 });
+          }
         } else {
           // Compress / thumbnail result - use data URL for display
           const displayUrl = data.dataUrl || data.url;
