@@ -15,6 +15,142 @@ import { recraftVectorize, findRecraftProvider, type RecraftVectorizeResult } fr
 import { vlmVectorize, findVlmProvider, type VlmVectorizeResult } from './vectorize-vlm';
 import { analyzeFromMetadata, analyzeWithSharp, type ImageAnalysis } from './vectorize-analyzer';
 
+/**
+ * 查找管理员配置的 vectorize 类型提供商（如 302AI Vectorizer.AI 代理）
+ * 优先级高于 VLM，因为专业矢量模型质量更高
+ */
+export async function findVectorizeApiProvider(): Promise<{
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+} | null> {
+  try {
+    const { getApiProviders } = await import('./server-api-config');
+    const providers = await getApiProviders();
+    const vectorizeProvider = providers.find(
+      (p) =>
+        p.type === 'vectorize' && p.isEnabled !== false,
+    );
+    if (!vectorizeProvider) return null;
+
+    const baseUrl = (vectorizeProvider.baseUrl || '').replace(/\/+$/, '');
+    const apiKey = vectorizeProvider.apiKey || '';
+    const model = Array.isArray(vectorizeProvider.selectedModels)
+      ? String(vectorizeProvider.selectedModels[0] || '')
+      : String(vectorizeProvider.selectedModel || '');
+
+    if (!baseUrl || !apiKey) return null;
+    return { baseUrl, apiKey, model };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 调用 Vectorizer.AI 风格的 API（如 302AI 代理）
+ * POST /vectorizer/api/v1/vectorize — multipart form-data
+ */
+async function vectorizeApiCall(
+  provider: { baseUrl: string; apiKey: string; model: string },
+  imageBuffer: Buffer,
+  imageUrl: string,
+): Promise<{ success: boolean; svg?: string; error?: string; pathCount?: number; svgSize?: number }> {
+  const { baseUrl, apiKey, model } = provider;
+  const mime = detectImageMimeFromBuffer(imageBuffer);
+
+  // Build multipart form-data
+  const boundary = '----FormBoundary' + Math.random().toString(36).substring(2);
+  const parts: Buffer[] = [];
+
+  const imageHeader = Buffer.from(
+    `--${boundary}\r\nContent-Disposition: form-data; name="image"; filename="image.${mime.split('/')[1]}"\r\nContent-Type: ${mime}\r\n\r\n`
+  );
+  parts.push(imageHeader);
+  parts.push(imageBuffer);
+  parts.push(Buffer.from('\r\n'));
+
+  if (model) {
+    parts.push(Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\n${model}\r\n`
+    ));
+  }
+
+  parts.push(Buffer.from(
+    `--${boundary}\r\nContent-Disposition: form-data; name="output.type"\r\n\r\nsvg\r\n`
+  ));
+  parts.push(Buffer.from(`--${boundary}--\r\n`));
+
+  const body = Buffer.concat(parts);
+
+  // Try different path patterns for Vectorizer.AI compatible endpoints
+  const baseUrlWithoutV1 = baseUrl.replace(/\/v1\/?$/, '');
+  const pathsToTry = [
+    `${baseUrlWithoutV1}/vectorizer/api/v1/vectorize`,  // 302AI proxy style
+    `${baseUrl}/api/v1/vectorize`,                        // Vectorizer.AI native
+    `${baseUrl}/vectorize`,                                // Standard
+    `${baseUrl}/v1/vectorize`,                             // With /v1 prefix
+  ];
+
+  for (const url of pathsToTry) {
+    try {
+      console.log(`[vectorize-api] Trying: ${url}`);
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        },
+        body,
+        signal: AbortSignal.timeout(120000),
+      });
+
+      if (response.ok) {
+        const contentType = response.headers.get('content-type') || '';
+        let svgContent: string;
+
+        if (contentType.includes('image/svg') || contentType.includes('text/xml') || contentType.includes('text/plain')) {
+          svgContent = await response.text();
+        } else {
+          const data = await response.json() as Record<string, unknown>;
+          if (data.svg) {
+            svgContent = String(data.svg);
+          } else if (data.data) {
+            const dataList = data.data as Array<Record<string, string>>;
+            if (dataList[0]?.b64_json) {
+              svgContent = Buffer.from(String(dataList[0].b64_json), 'base64').toString('utf-8');
+            } else if (dataList[0]?.url) {
+              const svgResp = await fetch(String(dataList[0].url), { signal: AbortSignal.timeout(15000) });
+              svgContent = await svgResp.text();
+            } else {
+              continue;
+            }
+          } else {
+            continue;
+          }
+        }
+
+        if (svgContent.includes('<svg')) {
+          const pathCount = (svgContent.match(/<path\b/gi) || []).length;
+          return {
+            success: true,
+            svg: svgContent,
+            pathCount,
+            svgSize: Buffer.byteLength(svgContent, 'utf-8'),
+          };
+        }
+        console.warn('[vectorize-api] Response did not contain <svg>');
+      } else {
+        const errText = await response.text().catch(() => '');
+        console.warn(`[vectorize-api] Non-OK: ${url} ${response.status}`, errText.substring(0, 200));
+      }
+    } catch (e) {
+      console.warn(`[vectorize-api] Failed: ${url}`, e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  return { success: false, error: 'All Vectorizer.AI endpoint paths failed' };
+}
+
 /** 从 buffer 头部检测图片 MIME 类型 */
 function detectImageMimeFromBuffer(buffer: Buffer): string {
   if (buffer[0] === 0x89 && buffer[1] === 0x50) return 'image/png';
@@ -25,7 +161,7 @@ function detectImageMimeFromBuffer(buffer: Buffer): string {
 }
 
 /** 矢量化引擎类型 */
-export type VectorizeEngine = 'recraft' | 'vtracer' | 'vtracer-bw' | 'vlm';
+export type VectorizeEngine = 'recraft' | 'vectorize-api' | 'vtracer' | 'vtracer-bw' | 'vlm';
 
 /** 矢量化模式 */
 export type VectorizeMode = 'color' | 'bw' | 'cutting' | 'engraving' | 'lineart' | 'auto';
@@ -83,13 +219,15 @@ export interface VectorizePipelineResult {
  * 检查各引擎的可用性
  */
 export async function checkEngineAvailability(): Promise<Record<VectorizeEngine, boolean>> {
-  const [recraftProvider, vlmProvider] = await Promise.all([
+  const [recraftProvider, vlmProvider, vectorizeApiProvider] = await Promise.all([
     findRecraftProvider().catch(() => null),
     findVlmProvider().catch(() => null),
+    findVectorizeApiProvider().catch(() => null),
   ]);
 
   return {
     recraft: !!recraftProvider,
+    'vectorize-api': !!vectorizeApiProvider,
     vtracer: true, // vtracer 始终可用（内置）
     'vtracer-bw': true, // potrace 始终可用（内置）
     vlm: !!vlmProvider,
@@ -109,7 +247,7 @@ function buildEngineChain(
     return [forcedEngine];
   }
 
-  const avail = availability || { recraft: true, vtracer: true, 'vtracer-bw': true, vlm: true };
+  const avail = availability || { recraft: true, 'vectorize-api': true, vtracer: true, 'vtracer-bw': true, vlm: true };
 
   // 黑白模式：优先 potrace
   if (mode === 'bw' || mode === 'cutting' || mode === 'engraving' || mode === 'lineart') {
@@ -121,6 +259,7 @@ function buildEngineChain(
   // 彩色模式 / 自动模式
   const chain: VectorizeEngine[] = [];
   if (avail.recraft) chain.push('recraft');
+  if (avail['vectorize-api']) chain.push('vectorize-api');
   if (avail.vlm) chain.push('vlm');
   chain.push('vtracer');
   
@@ -273,6 +412,33 @@ export async function vectorizePipeline(
 
       errors.push(`VLM: ${result.error}`);
       onProgress?.(engine, `VLM 失败: ${result.error}`);
+      continue;
+    }
+
+    if (engine === 'vectorize-api') {
+      onProgress?.(engine, '正在调用 Vectorizer.AI 风格 API...');
+      const vectorizeApiProvider = await findVectorizeApiProvider();
+      if (!vectorizeApiProvider || !imageBuffer) {
+        errors.push('vectorize-api: 无可用提供商或无图片数据');
+        continue;
+      }
+
+      const result = await vectorizeApiCall(vectorizeApiProvider, imageBuffer, imageUrl);
+      if (result.success && result.svg) {
+        onProgress?.(engine, 'Vectorizer.API 矢量化成功');
+        return {
+          success: true,
+          svg: result.svg,
+          engine: 'vectorize-api',
+          enginesTried,
+          analysis,
+          pathCount: result.pathCount,
+          svgSize: result.svgSize,
+        };
+      }
+
+      errors.push(`vectorize-api: ${result.error}`);
+      onProgress?.(engine, `Vectorizer.API 失败: ${result.error}`);
       continue;
     }
   }

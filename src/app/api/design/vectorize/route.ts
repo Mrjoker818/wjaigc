@@ -280,9 +280,22 @@ async function tryMultipartVectorize(
   const body = Buffer.concat(parts);
 
   // Try /vectorize with multipart form-data
+  // Path patterns:
+  //   Standard: baseUrl + /vectorize or /v1/vectorize
+  //   Vectorizer.AI style: baseUrl + /api/v1/vectorize
+  //   302AI proxy: baseUrl + /vectorizer/api/v1/vectorize (when baseUrl ends with /v1, strip it first)
+  const pathsToTry: string[] = [];
   for (const basePath of ['', '/v1']) {
+    pathsToTry.push(`${baseUrl}${basePath}/vectorize`);
+  }
+  // Vectorizer.AI native endpoint: /api/v1/vectorize
+  pathsToTry.push(`${baseUrl}/api/v1/vectorize`);
+  // 302AI proxy: strips /v1 from baseUrl, then adds /vectorizer/api/v1/vectorize
+  const baseUrlWithoutV1 = baseUrl.replace(/\/v1\/?$/, '');
+  pathsToTry.push(`${baseUrlWithoutV1}/vectorizer/api/v1/vectorize`);
+
+  for (const url of pathsToTry) {
     try {
-      const url = `${baseUrl}${basePath}/vectorize`;
       console.log('[vectorize] Trying multipart POST:', url);
       const response = await fetch(url, {
         method: 'POST',
@@ -323,7 +336,7 @@ async function tryMultipartVectorize(
         }
 
         if (svgContent.includes('<svg')) {
-          return { svg: svgContent, engine: `vectorize-api${basePath}` };
+          return { svg: svgContent, engine: 'vectorize-api' };
         }
         console.warn('[vectorize] Multipart response did not contain <svg>');
       } else {
@@ -331,7 +344,7 @@ async function tryMultipartVectorize(
         console.warn('[vectorize] Multipart endpoint returned non-OK:', url, response.status, errText.substring(0, 200));
       }
     } catch (e) {
-      console.warn('[vectorize] Multipart endpoint failed:', `${baseUrl}${basePath}/vectorize`, e instanceof Error ? e.message : String(e));
+      console.warn('[vectorize] Multipart endpoint failed:', url, e instanceof Error ? e.message : String(e));
     }
   }
 
