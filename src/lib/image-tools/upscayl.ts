@@ -445,17 +445,181 @@ export async function performOnnxUpscale(
 }
 
 // ============================================================
-// 统一入口：CPU 放大 (ONNX Real-ESRGAN)
+// NCNN CPU 放大 (upscayl-node, Real-ESRGAN NCNN 驱动)
+// ============================================================
+
+/** NCNN 模型目录 */
+function getNcnnModelsDir(): string {
+  return process.env.UPSCAYL_MODELS_DIR ||
+    path.join(process.env.COZE_WORKSPACE_PATH || '/workspace/projects', 'upscayl-models');
+}
+
+/** 检查 NCNN 放大是否可用 */
+export async function isNcnnUpscaleAvailable(): Promise<{
+  available: boolean;
+  model?: string;
+  error?: string;
+}> {
+  const modelsDir = getNcnnModelsDir();
+  if (!fs.existsSync(modelsDir)) {
+    return { available: false, error: 'NCNN 模型目录不存在' };
+  }
+
+  // 检查 NCNN 模型文件（.bin + .param 配对）
+  const modelPairs = [
+    { bin: 'realesrgan-x4plus.bin', param: 'realesrgan-x4plus.param', name: 'realesrgan-x4plus' },
+    { bin: 'realesrgan-x4plus-anime.bin', param: 'realesrgan-x4plus-anime.param', name: 'realesrgan-x4plus-anime' },
+  ];
+
+  for (const pair of modelPairs) {
+    const binPath = path.join(modelsDir, pair.bin);
+    const paramPath = path.join(modelsDir, pair.param);
+    if (fs.existsSync(binPath) && fs.existsSync(paramPath)) {
+      return { available: true, model: pair.name };
+    }
+  }
+
+  return { available: false, error: '未找到 NCNN 模型文件 (.bin/.param)' };
+}
+
+/**
+ * 使用 upscayl-node (NCNN) 执行 CPU 放大
+ * NCNN 是高性能推理框架，使用 Vulkan/GPU 加速或纯 CPU 推理
+ */
+async function performNcnnUpscale(
+  params: UpscaleParams,
+): Promise<UpscaleResult> {
+  const {
+    imageUrl: inputImageUrl,
+    scale = UPSCALE_DEFAULT_SCALE,
+    outputFormat = 'png' as 'png' | 'jpg' | 'jpeg' | 'webp',
+    compression = 90,
+  } = params;
+
+  const scaleNum = Math.max(2, Math.min(4, Math.round(scale)));
+  const ncnnAvailable = await isNcnnUpscaleAvailable();
+  if (!ncnnAvailable.available || !ncnnAvailable.model) {
+    return { success: false, error: ncnnAvailable.error || 'NCNN 放大不可用' };
+  }
+
+  ensureOutputDirs();
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ncnn-upscale-'));
+
+  try {
+    // 读取图片到临时文件
+    const { readImageToBuffer } = await import('./file');
+    const { buffer: inputBuffer, width: origW, height: origH } = await readImageToBuffer(inputImageUrl);
+
+    // 限制输入尺寸：NCNN 大图可能 OOM，超过 4096 缩小
+    const MAX_NCNN_EDGE = 4096;
+    let processBuffer = inputBuffer;
+    let procW = origW;
+    let procH = origH;
+    if (origW > MAX_NCNN_EDGE || origH > MAX_NCNN_EDGE) {
+      const { resizeIfTooLarge } = await import('./file');
+      const resized = await resizeIfTooLarge(inputBuffer, MAX_NCNN_EDGE);
+      processBuffer = resized.buffer;
+      procW = resized.width;
+      procH = resized.height;
+    }
+
+    // 写入临时输入文件（upscayl-node 需要文件路径）
+    const tmpInput = path.join(tmpDir, 'input.png');
+    fs.writeFileSync(tmpInput, processBuffer);
+
+    // 生成输出路径
+    const tmpOutput = path.join(tmpDir, `output.${outputFormat === 'jpg' ? 'jpg' : 'png'}`);
+
+    // 使用 upscayl-node NCNN 放大
+    const { upscaler } = await import('upscayl-node');
+    const modelsDir = getNcnnModelsDir();
+
+    // 注册模型
+    upscaler.addModel({
+      name: ncnnAvailable.model,
+      path: path.join(modelsDir, ncnnAvailable.model),
+      scale: 4,
+    });
+
+    console.log(`[upscayl] NCNN CPU upscale: ${procW}x${procH} -> ${scaleNum}x, model=${ncnnAvailable.model}`);
+
+    await upscaler.upscaleImage(tmpInput, tmpOutput, {
+      model: ncnnAvailable.model,
+      scale: scaleNum,
+      compression: outputFormat === 'jpg' ? compression : 0,
+    });
+
+    // 读取输出
+    if (!fs.existsSync(tmpOutput)) {
+      return { success: false, error: 'NCNN 放大未生成输出文件' };
+    }
+
+    let outputBuffer = await fs.promises.readFile(tmpOutput);
+    const outputMeta = await sharp(outputBuffer).metadata();
+    const outW = outputMeta.width || procW * scaleNum;
+    const outH = outputMeta.height || procH * scaleNum;
+
+    // 转换输出格式
+    if (outputFormat === 'jpg' || outputFormat === 'jpeg') {
+      outputBuffer = await sharp(outputBuffer).jpeg({ quality: compression }).toBuffer();
+    } else if (outputFormat === 'webp') {
+      outputBuffer = await sharp(outputBuffer).webp({ quality: compression }).toBuffer();
+    }
+
+    // 保存到输出目录
+    const filename = generateFilename('upscale', outputFormat);
+    const finalOutputPath = path.join(UPSCALE_OUTPUT_DIR, filename);
+    fs.writeFileSync(finalOutputPath, outputBuffer);
+
+    const imageUrl = `/outputs/upscale/${filename}`;
+    console.log(`[upscayl] NCNN upscale complete: ${procW}x${procH} -> ${outW}x${outH}`);
+
+    return {
+      success: true,
+      imageUrl,
+      originalSize: { width: origW, height: origH },
+      outputSize: { width: outW, height: outH },
+      model: ncnnAvailable.model,
+      scale: scaleNum,
+    };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error(`[upscayl] NCNN upscale error: ${msg}`);
+    return {
+      success: false,
+      error: `NCNN 放大失败: ${msg}`,
+    };
+  } finally {
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+  }
+}
+
+// ============================================================
+// 统一入口：CPU 放大 (NCNN → ONNX 降级)
 // ============================================================
 
 /**
- * 执行 CPU 无损放大 — 使用 ONNX Real-ESRGAN
+ * 执行 CPU 无损放大 — 优先 NCNN (Real-ESRGAN), 备选 ONNX (Python)
  *
- * 仅提供 CPU 放大路径，AI 云端放大由 image-edit route 独立处理
+ * 降级链: NCNN (upscayl-node) → ONNX (Python 子进程) → sharp Lanczos3 兜底
+ * AI 云端放大由 image-edit route 独立处理
  */
 export async function performUpscaleAuto(
   params: UpscaleParams,
 ): Promise<UpscaleResult & { engine?: string }> {
+  // 优先尝试 NCNN (upscayl-node)
+  const ncnnAvailable = await isNcnnUpscaleAvailable();
+  if (ncnnAvailable.available) {
+    console.log('[upscale] Using NCNN CPU upscale...');
+    const result = await performNcnnUpscale(params);
+    if (result.success) {
+      return { ...result, engine: 'ncnn-cpu' };
+    }
+    console.log(`[upscale] NCNN CPU failed: ${result.error}`);
+  }
+
+  // 备选 ONNX (Python 子进程)
   const onnxAvailable = await isOnnxUpscaleAvailable();
   if (onnxAvailable.available) {
     console.log('[upscale] Using ONNX CPU upscale...');
@@ -466,8 +630,46 @@ export async function performUpscaleAuto(
     console.log(`[upscale] ONNX CPU failed: ${result.error}`);
   }
 
-  return {
-    success: false,
-    error: 'CPU 放大引擎不可用 (ONNX Real-ESRGAN)',
-  };
+  // 最终兜底: sharp Lanczos3 插值放大（仅保留像素，不增加细节）
+  console.log('[upscale] Falling back to sharp Lanczos3 resize...');
+  try {
+    const { readImageToBuffer } = await import('./file');
+    const { buffer: inputBuffer, width: origW, height: origH } = await readImageToBuffer(params.imageUrl);
+    const scaleNum = Math.max(2, Math.min(4, Math.round(params.scale || UPSCALE_DEFAULT_SCALE)));
+    const outW = origW * scaleNum;
+    const outH = origH * scaleNum;
+
+    ensureOutputDirs();
+
+    let pipeline = sharp(inputBuffer).resize(outW, outH, { kernel: 'lanczos3' });
+    const outputFormat = params.outputFormat || 'png';
+    if (outputFormat === 'jpg' || outputFormat === 'jpeg') {
+      pipeline = pipeline.jpeg({ quality: params.compression || 90 });
+    } else if (outputFormat === 'webp') {
+      pipeline = pipeline.webp({ quality: params.compression || 90 });
+    } else {
+      pipeline = pipeline.png();
+    }
+
+    const outputBuffer = await pipeline.toBuffer();
+    const filename = generateFilename('upscale', outputFormat);
+    const outputPath = path.join(UPSCALE_OUTPUT_DIR, filename);
+    fs.writeFileSync(outputPath, outputBuffer);
+
+    return {
+      success: true,
+      imageUrl: `/outputs/upscale/${filename}`,
+      originalSize: { width: origW, height: origH },
+      outputSize: { width: outW, height: outH },
+      model: 'lanczos3',
+      scale: scaleNum,
+      engine: 'sharp-lanczos3',
+    };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return {
+      success: false,
+      error: `CPU 放大失败: ${msg}`,
+    };
+  }
 }
