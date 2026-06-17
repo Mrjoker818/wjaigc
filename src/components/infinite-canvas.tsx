@@ -1367,6 +1367,7 @@ export function InfiniteCanvas({
   const [editStrokes, setEditStrokes] = useState<{ x: number; y: number; reverse: boolean }[][]>([]);
   const [currentStroke, setCurrentStroke] = useState<{ x: number; y: number; reverse: boolean }[]>([]);
   const [isEditProcessing, setIsEditProcessing] = useState(false);
+  const [isSvgTraceProcessing, setIsSvgTraceProcessing] = useState(false);
   // Floating window brush tool mode: 'brush' or 'eraser'
   const [editBrushMode, setEditBrushMode] = useState<'brush' | 'eraser'>('brush');
   // Erase model selection (LaMa / ZITS / Anime-Lama)
@@ -6170,7 +6171,9 @@ export function InfiniteCanvas({
       img.height,
       '正在处理...'
     );
-    setIsEditProcessing(true);
+    // 点击开始后立即关闭面板，让画布显示处理进度
+    setShowSvgTracePanel(false);
+    setIsSvgTraceProcessing(true);
     try {
       // Prepare image URL: convert data/blob URLs to server URLs first
       let imageUrl = img.url;
@@ -6291,7 +6294,7 @@ export function InfiniteCanvas({
                   apiProvider: modelInfo.providerName || '',
                 }, 'trace');
               }
-              setIsEditProcessing(false);
+              setIsSvgTraceProcessing(false);
               setShowSvgTracePanel(false);
               return;
             }
@@ -6305,7 +6308,7 @@ export function InfiniteCanvas({
       removeProcessingFrame(placeholderId);
       alert(`SVG智能描摹失败: ${e instanceof Error ? e.message : '请重试'}`);
     }
-    setIsEditProcessing(false);
+    setIsSvgTraceProcessing(false);
     setShowSvgTracePanel(false);
   }, [getActiveImageData, svgTraceMode, svgTraceEngine, svgTraceQualityPreset, svgTraceColorPrecision, svgTraceFilterSpeckle, svgTraceCornerThreshold, svgTraceLengthThreshold, svgTraceCurveMode, svgTraceHierarchical, svgTraceBwThreshold, svgTraceBwTurdSize, svgTraceBwInvert, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, removeProcessingFrame]);
 
@@ -9524,8 +9527,8 @@ export function InfiniteCanvas({
                   ))}
                 </div>
               )}
-              {/* Processing overlay (not for SVG trace - has its own progress UI) */}
-              {isEditProcessing && !showSvgTracePanel && (
+              {/* Processing overlay (not for SVG trace - has its own canvas progress frame) */}
+              {isEditProcessing && !showSvgTracePanel && !isSvgTraceProcessing && (
                 <div className="absolute inset-0 flex items-center justify-center bg-black/60 z-50 pointer-events-auto">
                   <div className="flex flex-col items-center gap-2">
                     <div className="w-8 h-8 border-2 border-gold border-t-transparent rounded-full animate-spin" />
