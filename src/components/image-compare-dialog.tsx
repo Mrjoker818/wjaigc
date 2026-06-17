@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { X, Columns2, SplitSquareHorizontal, ChevronLeft, ChevronRight, ZoomIn, ZoomOut } from 'lucide-react';
+import { X, Columns2, SplitSquareHorizontal, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Move } from 'lucide-react';
 
 interface ImageCompareDialogProps {
   /** 左侧图片（对比前/A图） */
@@ -25,27 +25,55 @@ export function ImageCompareDialog({
   const [mode, setMode] = useState<CompareMode>('slider');
   const [sliderPos, setSliderPos] = useState(50); // 0-100 percentage
   const [zoomPercent, setZoomPercent] = useState(100); // 10-300 percentage
-  const [isDragging, setIsDragging] = useState(false);
+  const [isDraggingSlider, setIsDraggingSlider] = useState(false);
+  const [isPanning, setIsPanning] = useState(false);
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const panStartRef = useRef({ x: 0, y: 0, ox: 0, oy: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Slider drag handler
   const handleSliderMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setIsDragging(true);
+    setIsDraggingSlider(true);
   }, []);
 
+  // Pan drag handler (for zoomed images)
+  const handlePanMouseDown = useCallback((e: React.MouseEvent) => {
+    if (zoomPercent <= 100) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setIsPanning(true);
+    panStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      ox: panOffset.x,
+      oy: panOffset.y,
+    };
+  }, [zoomPercent, panOffset]);
+
+  // Global mouse move
   const handleMouseMove = useCallback((e: MouseEvent) => {
-    if (isDragging && containerRef.current) {
+    if (isDraggingSlider && containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const pct = Math.max(0, Math.min(100, (x / rect.width) * 100));
       setSliderPos(pct);
     }
-  }, [isDragging]);
+    if (isPanning) {
+      const dx = e.clientX - panStartRef.current.x;
+      const dy = e.clientY - panStartRef.current.y;
+      setPanOffset({
+        x: panStartRef.current.ox + dx,
+        y: panStartRef.current.oy + dy,
+      });
+    }
+  }, [isDraggingSlider, isPanning]);
 
+  // Global mouse up
   const handleMouseUp = useCallback(() => {
-    setIsDragging(false);
+    setIsDraggingSlider(false);
+    setIsPanning(false);
   }, []);
 
   useEffect(() => {
@@ -57,31 +85,59 @@ export function ImageCompareDialog({
     };
   }, [handleMouseMove, handleMouseUp]);
 
-  // Reset slider on mode change
+  // Reset slider and pan on mode change
   useEffect(() => {
     setSliderPos(50);
+    setPanOffset({ x: 0, y: 0 });
   }, [mode]);
+
+  // Reset pan on zoom reset
+  useEffect(() => {
+    if (zoomPercent === 100) {
+      setPanOffset({ x: 0, y: 0 });
+    }
+  }, [zoomPercent]);
+
+  // Block all pointer events from reaching the canvas behind
+  useEffect(() => {
+    const blockEvent = (e: Event) => {
+      const target = e.target as HTMLElement;
+      if (target.closest('[data-compare-dialog]')) {
+        e.stopPropagation();
+      }
+    };
+
+    const events = ['mousedown', 'mousemove', 'mouseup', 'wheel', 'touchstart', 'touchmove', 'touchend'];
+    events.forEach(evt => {
+      document.addEventListener(evt, blockEvent, true);
+    });
+
+    return () => {
+      events.forEach(evt => {
+        document.removeEventListener(evt, blockEvent, true);
+      });
+    };
+  }, []);
 
   // Keyboard: ESC to close, 1/2 switch mode, +/- zoom
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-      if (e.key === '1') setMode('slider');
-      if (e.key === '2') setMode('sideBySide');
-      if (e.key === '+' || e.key === '=') setZoomPercent(prev => Math.min(300, prev + 10));
-      if (e.key === '-' || e.key === '_') setZoomPercent(prev => Math.max(10, prev - 10));
-      if (e.key === '0') setZoomPercent(100);
+      if (e.key === 'Escape') { e.stopPropagation(); onClose(); return; }
+      if (e.key === '1') { e.stopPropagation(); setMode('slider'); }
+      if (e.key === '2') { e.stopPropagation(); setMode('sideBySide'); }
+      if (e.key === '+' || e.key === '=') { e.stopPropagation(); setZoomPercent(prev => Math.min(300, prev + 10)); }
+      if (e.key === '-' || e.key === '_') { e.stopPropagation(); setZoomPercent(prev => Math.max(10, prev - 10)); }
+      if (e.key === '0') { e.stopPropagation(); setZoomPercent(100); }
     };
-    window.addEventListener('keydown', handleKey);
-    return () => window.removeEventListener('keydown', handleKey);
+    window.addEventListener('keydown', handleKey, true);
+    return () => window.removeEventListener('keydown', handleKey, true);
   }, [onClose]);
 
-  // Zoom handler with preset values
+  // Zoom handler
   const handleZoomChange = useCallback((value: number) => {
     setZoomPercent(Math.max(10, Math.min(300, value)));
   }, []);
 
-  // Zoom preset buttons
   const zoomPresets = [25, 50, 75, 100, 150, 200];
 
   // Theme helpers
@@ -91,12 +147,30 @@ export function ImageCompareDialog({
   const btnActiveBg = isMonochrome ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-[#d4af37]/15 text-[#d4af37] border-[#d4af37]/40';
   const borderCls = isMonochrome ? 'border-gray-200' : 'border-[#333]';
 
+  // Cursor for slider area
+  const sliderCursor = isPanning ? 'grabbing' : isDraggingSlider ? 'col-resize' : zoomPercent > 100 ? 'grab' : 'default';
+
+  // Common image transform (scale + pan, with pan in pixel space)
+  const imageTransform = `scale(${zoomPercent / 100}) translate(${panOffset.x}px, ${panOffset.y}px)`;
+
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={onClose}>
+    <div
+      data-compare-dialog
+      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 backdrop-blur-sm"
+      onClick={onClose}
+      onMouseDown={(e) => e.stopPropagation()}
+      onMouseMove={(e) => e.stopPropagation()}
+      onMouseUp={(e) => e.stopPropagation()}
+      onWheel={(e) => e.stopPropagation()}
+    >
       <div
         className={`relative rounded-2xl border shadow-2xl overflow-hidden flex flex-col ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-[#333]'}`}
         style={{ width: '90vw', maxWidth: 1200, height: '85vh', maxHeight: 900 }}
         onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+        onMouseMove={(e) => e.stopPropagation()}
+        onMouseUp={(e) => e.stopPropagation()}
+        onWheel={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className={`flex-shrink-0 flex items-center justify-between px-5 py-3 border-b ${borderCls}`}>
@@ -136,35 +210,52 @@ export function ImageCompareDialog({
           </div>
         </div>
 
-        {/* Body — takes remaining space between header and footer */}
+        {/* Body */}
         <div className="relative flex-1 overflow-hidden min-h-0">
           {mode === 'slider' ? (
-            /* Slider comparison mode */
+            /* Slider comparison mode
+             * Uses clip-path on the left image's container div.
+             * Both images are full-size with the same transform so they stay aligned.
+             * The left container clips from the right edge to the slider position.
+             */
             <div
               ref={containerRef}
               className="relative w-full h-full select-none overflow-hidden"
-              style={{ cursor: isDragging ? 'col-resize' : 'default' }}
+              style={{ cursor: sliderCursor }}
+              onMouseDown={(e) => {
+                // Don't start panning if clicking the slider handle
+                if ((e.target as HTMLElement).closest('[data-slider-handle]')) return;
+                if (zoomPercent > 100) {
+                  handlePanMouseDown(e);
+                }
+              }}
             >
-              {/* Right image (full) */}
-              <img
-                src={rightImage.url}
-                alt="B"
-                className="absolute inset-0 w-full h-full object-contain"
-                style={{ transform: `scale(${zoomPercent / 100})` }}
-                draggable={false}
-              />
+              {/* Right image (full, rendered first = behind) */}
+              <div className="absolute inset-0">
+                <img
+                  src={rightImage.url}
+                  alt="B"
+                  className="absolute inset-0 w-full h-full object-contain"
+                  style={{ transform: imageTransform }}
+                  draggable={false}
+                />
+              </div>
 
-              {/* Left image (clipped by slider via clip-path) */}
-              <img
-                src={leftImage.url}
-                alt="A"
-                className="absolute inset-0 w-full h-full object-contain"
+              {/* Left image (clipped via container div) */}
+              <div
+                className="absolute inset-0 overflow-hidden"
                 style={{
                   clipPath: `inset(0 ${100 - sliderPos}% 0 0)`,
-                  transform: `scale(${zoomPercent / 100})`,
                 }}
-                draggable={false}
-              />
+              >
+                <img
+                  src={leftImage.url}
+                  alt="A"
+                  className="absolute inset-0 w-full h-full object-contain"
+                  style={{ transform: imageTransform }}
+                  draggable={false}
+                />
+              </div>
 
               {/* Slider line */}
               <div
@@ -178,6 +269,7 @@ export function ImageCompareDialog({
 
               {/* Slider handle */}
               <div
+                data-slider-handle
                 className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-20 cursor-col-resize"
                 style={{ left: `${sliderPos}%` }}
                 onMouseDown={handleSliderMouseDown}
@@ -203,12 +295,26 @@ export function ImageCompareDialog({
               }`}>
                 B - {rightImage.modelName || '图片2'}
               </div>
+
+              {/* Pan hint when zoomed */}
+              {zoomPercent > 100 && !isPanning && !isDraggingSlider && (
+                <div className={`absolute bottom-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-lg text-xs font-medium z-10 pointer-events-none ${
+                  isMonochrome ? 'bg-white/90 text-gray-500 shadow' : 'bg-black/70 text-[#999]'
+                }`}>
+                  <Move size={12} className="inline mr-1.5 -mt-0.5" />
+                  拖拽平移查看细节
+                </div>
+              )}
             </div>
           ) : (
             /* Side-by-side comparison mode */
             <div className="flex w-full h-full select-none">
               {/* Left panel */}
-              <div className="w-1/2 h-full flex flex-col items-center justify-center p-4 border-r overflow-hidden" style={{ borderColor: isMonochrome ? '#e5e7eb' : '#333' }}>
+              <div
+                className="w-1/2 h-full flex flex-col items-center justify-center p-4 border-r overflow-hidden"
+                style={{ borderColor: isMonochrome ? '#e5e7eb' : '#333', cursor: zoomPercent > 100 ? (isPanning ? 'grabbing' : 'grab') : 'default' }}
+                onMouseDown={handlePanMouseDown}
+              >
                 <div className={`mb-2 text-xs font-medium ${textSecondary}`}>
                   A - {leftImage.modelName || '图片1'}
                 </div>
@@ -217,14 +323,22 @@ export function ImageCompareDialog({
                     src={leftImage.url}
                     alt="A"
                     className="object-contain"
-                    style={{ maxWidth: '100%', maxHeight: '100%', transform: `scale(${zoomPercent / 100})` }}
+                    style={{
+                      maxWidth: '100%',
+                      maxHeight: '100%',
+                      transform: imageTransform,
+                    }}
                     draggable={false}
                   />
                 </div>
               </div>
 
               {/* Right panel */}
-              <div className="w-1/2 h-full flex flex-col items-center justify-center p-4 overflow-hidden">
+              <div
+                className="w-1/2 h-full flex flex-col items-center justify-center p-4 overflow-hidden"
+                style={{ cursor: zoomPercent > 100 ? (isPanning ? 'grabbing' : 'grab') : 'default' }}
+                onMouseDown={handlePanMouseDown}
+              >
                 <div className={`mb-2 text-xs font-medium ${textSecondary}`}>
                   B - {rightImage.modelName || '图片2'}
                 </div>
@@ -233,7 +347,11 @@ export function ImageCompareDialog({
                     src={rightImage.url}
                     alt="B"
                     className="object-contain"
-                    style={{ maxWidth: '100%', maxHeight: '100%', transform: `scale(${zoomPercent / 100})` }}
+                    style={{
+                      maxWidth: '100%',
+                      maxHeight: '100%',
+                      transform: imageTransform,
+                    }}
                     draggable={false}
                   />
                 </div>
@@ -295,7 +413,7 @@ export function ImageCompareDialog({
           {/* Reset zoom */}
           {zoomPercent !== 100 && (
             <button
-              onClick={() => setZoomPercent(100)}
+              onClick={() => { setZoomPercent(100); setPanOffset({ x: 0, y: 0 }); }}
               className={`px-2 py-1 rounded text-xs transition-colors ${
                 isMonochrome ? 'text-blue-500 hover:bg-blue-50' : 'text-[#d4af37] hover:bg-[#d4af37]/10'
               }`}
@@ -317,7 +435,7 @@ export function ImageCompareDialog({
             <div className={`text-xs ${textSecondary} truncate`}>{rightImage.prompt || '无描述'}</div>
           </div>
 
-          {/* Keyboard hints — inline with footer */}
+          {/* Keyboard hints */}
           <div className={`flex items-center gap-2 text-xs ${textSecondary} opacity-50 flex-shrink-0`}>
             <span>ESC 关闭</span>
             <span>1 滑动</span>
