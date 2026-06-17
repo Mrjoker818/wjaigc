@@ -121,8 +121,8 @@ function buildEngineChain(
   // 彩色模式 / 自动模式
   const chain: VectorizeEngine[] = [];
   if (avail.recraft) chain.push('recraft');
-  chain.push('vtracer');
   if (avail.vlm) chain.push('vlm');
+  chain.push('vtracer');
   
   // 至少保证一个引擎
   if (chain.length === 0) {
