@@ -2,7 +2,7 @@
 // Image Tools — Upscale Engine
 //
 // 放大策略:
-//   1. CPU 放大 (ONNX Real-ESRGAN fp16, Python 子进程) — 无需 GPU，纯 CPU 推理
+//   1. CPU 放大 — 优先 NCNN Real-ESRGAN (upscayl-node), 备选 ONNX (Python 子进程)
 //   2. AI 云端放大 (由 image-edit route 处理) — AI 模型生成，需 API Key
 // ============================================================
 
