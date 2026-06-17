@@ -1899,113 +1899,68 @@ export async function POST(request: NextRequest) {
       const targetH = targetHeight || origH * scaleVal;
       const upscaleMode = body.upscaleMode || 'cpu'; // "cpu" | "ai"
 
-      // ---- CPU 放大模式: ONNX Real-ESRGAN 超分辨率，降级到 sharp Lanczos3 ----
+      // ---- CPU 放大模式: NCNN → ONNX → sharp 降级链 ----
       if (upscaleMode === 'cpu') {
         try {
-          // 优先使用 ONNX Real-ESRGAN (真正的AI超分辨率，能补充细节)
-          const { isOnnxUpscaleAvailable, performOnnxUpscale } = await import('@/lib/image-tools/upscayl');
-          const onnxAvail = await isOnnxUpscaleAvailable();
+          const { performUpscaleAuto } = await import('@/lib/image-tools/upscayl');
+          const result = await performUpscaleAuto({
+            imageUrl,
+            scale: scaleVal,
+            outputFormat: body.outputFormat || 'png',
+            compression: body.compression || 90,
+          });
 
-          if (onnxAvail.available) {
-            console.log(`[image-edit] upscale: using ONNX Real-ESRGAN for true super-resolution ${origW}x${origH} -> ${targetW}x${targetH}`);
-            const onnxResult = await performOnnxUpscale({
-              imageUrl,
-              scale: scaleVal,
-              outputFormat: body.outputFormat || 'png',
-              compression: body.compression || 90,
-            });
+          if (result.success && result.imageUrl) {
+            // CPU 超分辨率输出可能需要精确调整到目标尺寸
+            const cpuOutputW = result.outputSize?.width || targetW;
+            const cpuOutputH = result.outputSize?.height || targetH;
 
-            if (onnxResult.success && onnxResult.imageUrl) {
-              // ONNX Real-ESRGAN 输出固定倍率(2x/4x)，可能不精确匹配目标尺寸
-              // 用 sharp 精确调整到目标尺寸 (仅微调，不会损失太多细节)
-              const onnxOutputW = onnxResult.outputSize?.width || targetW;
-              const onnxOutputH = onnxResult.outputSize?.height || targetH;
+            if (cpuOutputW !== targetW || cpuOutputH !== targetH) {
+              const { fetchImageBuffer } = await import('@/lib/fetch-image-buffer');
+              const cpuBuf = await fetchImageBuffer(result.imageUrl);
+              const resizedBuf = await sharp(cpuBuf)
+                .resize(targetW, targetH, { kernel: 'lanczos3' })
+                .png({ quality: 95 })
+                .toBuffer();
 
-              if (onnxOutputW !== targetW || onnxOutputH !== targetH) {
-                const { fetchImageBuffer } = await import('@/lib/fetch-image-buffer');
-                const onnxBuf = await fetchImageBuffer(onnxResult.imageUrl);
-                const resizedBuf = await sharp(onnxBuf)
-                  .resize(targetW, targetH, { kernel: 'lanczos3' })
-                  .png({ quality: 95 })
-                  .toBuffer();
+              const timestamp = Date.now();
+              const randomSuffix = Math.random().toString(36).substring(2, 8);
+              const filename = `upscale_${timestamp}_${randomSuffix}.png`;
+              const savedPath = await saveBufferToPublic(resizedBuf, filename);
+              const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
+              const domainBase = domain.startsWith('http') ? domain.replace(/\/+$/, '') : `https://${domain.replace(/\/+$/, '')}`;
+              const finalUrl = savedPath.startsWith('data:') ? savedPath : `${domainBase}${savedPath}`;
 
-                const timestamp = Date.now();
-                const randomSuffix = Math.random().toString(36).substring(2, 8);
-                const filename = `upscale_${timestamp}_${randomSuffix}.png`;
-                const savedPath = await saveBufferToPublic(resizedBuf, filename);
-                const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
-                const domainBase = domain.startsWith('http') ? domain.replace(/\/+$/, '') : `https://${domain.replace(/\/+$/, '')}`;
-                const finalUrl = savedPath.startsWith('data:') ? savedPath : `${domainBase}${savedPath}`;
-
-                return NextResponse.json({
-                  success: true,
-                  imageUrl: finalUrl,
-                  action,
-                  engine: 'onnx-realesrgan',
-                  usedModel: onnxResult.model || 'realesrgan-x4plus-fp16',
-                  scale: scaleVal,
-                  originalSize: { width: origW, height: origH },
-                  outputSize: { width: targetW, height: targetH },
-                  outputWidth: targetW,
-                  outputHeight: targetH,
-                });
-              }
-
-              // ONNX 输出尺寸已匹配目标
               return NextResponse.json({
                 success: true,
-                imageUrl: onnxResult.imageUrl,
+                imageUrl: finalUrl,
                 action,
-                engine: 'onnx-realesrgan',
-                usedModel: onnxResult.model || 'realesrgan-x4plus-fp16',
+                engine: result.engine || 'cpu-auto',
+                usedModel: result.model || 'realesrgan',
                 scale: scaleVal,
-                originalSize: onnxResult.originalSize || { width: origW, height: origH },
-                outputSize: onnxResult.outputSize || { width: targetW, height: targetH },
-                outputWidth: onnxResult.outputSize?.width || targetW,
-                outputHeight: onnxResult.outputSize?.height || targetH,
+                originalSize: result.originalSize || { width: origW, height: origH },
+                outputSize: { width: targetW, height: targetH },
+                outputWidth: targetW,
+                outputHeight: targetH,
               });
             }
 
-            // ONNX 失败，降级到 sharp
-            console.log(`[image-edit] upscale: ONNX Real-ESRGAN failed (${onnxResult.error}), falling back to sharp Lanczos3`);
-          } else {
-            console.log(`[image-edit] upscale: ONNX not available (${onnxAvail.error}), falling back to sharp Lanczos3`);
+            return NextResponse.json({
+              success: true,
+              imageUrl: result.imageUrl,
+              action,
+              engine: result.engine || 'cpu-auto',
+              usedModel: result.model || 'realesrgan',
+              scale: scaleVal,
+              originalSize: result.originalSize || { width: origW, height: origH },
+              outputSize: result.outputSize || { width: targetW, height: targetH },
+              outputWidth: result.outputSize?.width || targetW,
+              outputHeight: result.outputSize?.height || targetH,
+            });
           }
 
-          // 降级方案: sharp Lanczos3 插值放大 (不补充细节，仅放大像素)
-          const { fetchImageBuffer } = await import('@/lib/fetch-image-buffer');
-          const inputBuf = await fetchImageBuffer(imageUrl);
-          
-          const resizedBuf = await sharp(inputBuf)
-            .resize(targetW, targetH, { kernel: 'lanczos3' })
-            .png({ quality: 95 })
-            .toBuffer();
-
-          const timestamp = Date.now();
-          const randomSuffix = Math.random().toString(36).substring(2, 8);
-          const filename = `upscale_${timestamp}_${randomSuffix}.png`;
-          const savedPath = await saveBufferToPublic(resizedBuf, filename);
-
-          const resultUrl = savedPath.startsWith('data:') ? savedPath : (() => {
-            const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
-            const domainBase = domain.startsWith('http') ? domain.replace(/\/+$/, '') : `https://${domain.replace(/\/+$/, '')}`;
-            return `${domainBase}${savedPath}`;
-          })();
-
-          console.log(`[image-edit] upscale: sharp Lanczos3 fallback ${origW}x${origH} -> ${targetW}x${targetH} (${(resizedBuf.length / 1024).toFixed(0)}KB)`);
-
-          return NextResponse.json({
-            success: true,
-            imageUrl: resultUrl,
-            action,
-            engine: 'sharp-lanczos3',
-            usedModel: 'lanczos3',
-            scale: scaleVal,
-            originalSize: { width: origW, height: origH },
-            outputSize: { width: targetW, height: targetH },
-            outputWidth: targetW,
-            outputHeight: targetH,
-          });
+          // performUpscaleAuto 全部失败
+          return NextResponse.json({ success: false, error: `CPU放大失败: ${result.error || '未知错误'}` }, { status: 500 });
         } catch (cpuError) {
           console.log(`[image-edit] upscale: CPU error:`, cpuError instanceof Error ? cpuError.message : cpuError);
           return NextResponse.json({ success: false, error: `CPU放大失败: ${cpuError instanceof Error ? cpuError.message : '未知错误'}` }, { status: 500 });
@@ -2090,14 +2045,12 @@ export async function POST(request: NextRequest) {
             return { url: finalUrl, actualW: targetW, actualH: targetH };
           }
 
-          // 情况2: AI 输出 < 目标尺寸 → AI 已增强细节，使用 ONNX Real-ESRGAN 二次放大
+          // 情况2: AI 输出 < 目标尺寸 → AI 已增强细节，使用 CPU 超分辨率二次放大
           // 这样避免了 sharp 插值放大导致的模糊
-          console.log(`[image-edit] AI upscale output ${aiW}x${aiH} < target ${targetW}x${targetH}, using ONNX Real-ESRGAN for secondary upscale...`);
+          console.log(`[image-edit] AI upscale output ${aiW}x${aiH} < target ${targetW}x${targetH}, using CPU super-resolution for secondary upscale...`);
           try {
-            const { isOnnxUpscaleAvailable, performOnnxUpscale } = await import('@/lib/image-tools/upscayl');
-            const onnxAvail = await isOnnxUpscaleAvailable();
+            const { performUpscaleAuto } = await import('@/lib/image-tools/upscayl');
 
-            if (onnxAvail.available) {
               // 先保存 AI 增强后的图片到临时文件
               const ts1 = Date.now();
               const rs1 = Math.random().toString(36).substring(2, 8);
@@ -2109,38 +2062,37 @@ export async function POST(request: NextRequest) {
 
               // 计算需要的放大倍率
               const neededScale = Math.max(targetW / aiW, targetH / aiH);
-              const onnxScale = neededScale <= 2 ? 2 : 4; // ONNX 只支持 2x 和 4x
+              const autoScale = neededScale <= 2 ? 2 : 4;
 
-              const onnxResult = await performOnnxUpscale({
+              const autoResult = await performUpscaleAuto({
                 imageUrl: aiTempUrl,
-                scale: onnxScale,
+                scale: autoScale,
                 outputFormat: 'png',
                 compression: 95,
               });
 
-              if (onnxResult.success && onnxResult.imageUrl) {
-                // ONNX 输出可能大于目标，精确 resize 到目标
-                const onnxBuf = await fetchImageBuffer(onnxResult.imageUrl);
-                const finalBuffer = await sharp(onnxBuf)
+              if (autoResult.success && autoResult.imageUrl) {
+                // 输出可能大于目标，精确 resize 到目标
+                const autoBuf = await fetchImageBuffer(autoResult.imageUrl);
+                const finalBuffer = await sharp(autoBuf)
                   .resize(targetW, targetH, { kernel: 'lanczos3' })
                   .png({ quality: 95 })
                   .toBuffer();
 
                 const ts2 = Date.now();
                 const rs2 = Math.random().toString(36).substring(2, 8);
-                const finalFilename = `upscale_ai_onnx_${ts2}_${rs2}.png`;
+                const finalFilename = `upscale_ai_cpu_${ts2}_${rs2}.png`;
                 const finalSavedPath = await saveBufferToPublic(finalBuffer, finalFilename);
                 const domain3 = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
                 const domainBase3 = domain3.startsWith('http') ? domain3.replace(/\/+$/, '') : `https://${domain3.replace(/\/+$/, '')}`;
                 const finalUrl = finalSavedPath.startsWith('data:') ? finalSavedPath : `${domainBase3}${finalSavedPath}`;
 
-                console.log(`[image-edit] AI+ONNX upscale complete: AI ${aiW}x${aiH} -> ONNX -> ${targetW}x${targetH}`);
+                console.log(`[image-edit] AI+CPU upscale complete: AI ${aiW}x${aiH} -> ${autoResult.engine || 'cpu'} -> ${targetW}x${targetH}`);
                 return { url: finalUrl, actualW: targetW, actualH: targetH };
               }
-              console.log(`[image-edit] ONNX secondary upscale failed, falling back to sharp resize`);
-            }
-          } catch (onnxErr) {
-            console.log(`[image-edit] ONNX secondary upscale error:`, onnxErr instanceof Error ? onnxErr.message : onnxErr);
+              console.log(`[image-edit] CPU secondary upscale failed, falling back to sharp resize`);
+          } catch (cpuErr) {
+            console.log(`[image-edit] CPU secondary upscale error:`, cpuErr instanceof Error ? cpuErr.message : cpuErr);
           }
 
           // ONNX 不可用时的降级: sharp 插值放大 (细节不如 ONNX，但保证功能可用)

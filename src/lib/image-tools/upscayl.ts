@@ -535,19 +535,19 @@ async function performNcnnUpscale(
     const { upscaler } = await import('upscayl-node');
     const modelsDir = getNcnnModelsDir();
 
-    // 注册模型
-    upscaler.addModel({
-      name: ncnnAvailable.model,
-      path: path.join(modelsDir, ncnnAvailable.model),
-      scale: 4,
-    });
+    const modelPath = path.join(modelsDir, ncnnAvailable.model);
+
+    // 注册模型 (addModel 接受 string 类型的模型路径)
+    upscaler.addModel(modelPath);
+
+    console.log(`[upscayl] NCNN CPU upscale: ${procW}x${procH} -> ${scaleNum}x, model=${ncnnAvailable.model}`);
 
     console.log(`[upscayl] NCNN CPU upscale: ${procW}x${procH} -> ${scaleNum}x, model=${ncnnAvailable.model}`);
 
     await upscaler.upscaleImage(tmpInput, tmpOutput, {
-      model: ncnnAvailable.model,
+      model: modelPath,
       scale: scaleNum,
-      compression: outputFormat === 'jpg' ? compression : 0,
+      compression: 0,
     });
 
     // 读取输出
@@ -555,16 +555,16 @@ async function performNcnnUpscale(
       return { success: false, error: 'NCNN 放大未生成输出文件' };
     }
 
-    let outputBuffer = await fs.promises.readFile(tmpOutput);
+    let outputBuffer: Buffer = await fs.promises.readFile(tmpOutput);
     const outputMeta = await sharp(outputBuffer).metadata();
     const outW = outputMeta.width || procW * scaleNum;
     const outH = outputMeta.height || procH * scaleNum;
 
     // 转换输出格式
     if (outputFormat === 'jpg' || outputFormat === 'jpeg') {
-      outputBuffer = await sharp(outputBuffer).jpeg({ quality: compression }).toBuffer();
+      outputBuffer = await sharp(outputBuffer).jpeg({ quality: compression }).toBuffer() as Buffer;
     } else if (outputFormat === 'webp') {
-      outputBuffer = await sharp(outputBuffer).webp({ quality: compression }).toBuffer();
+      outputBuffer = await sharp(outputBuffer).webp({ quality: compression }).toBuffer() as Buffer;
     }
 
     // 保存到输出目录
@@ -642,7 +642,7 @@ export async function performUpscaleAuto(
     ensureOutputDirs();
 
     let pipeline = sharp(inputBuffer).resize(outW, outH, { kernel: 'lanczos3' });
-    const outputFormat = params.outputFormat || 'png';
+    const outputFormat: string = params.outputFormat || 'png';
     if (outputFormat === 'jpg' || outputFormat === 'jpeg') {
       pipeline = pipeline.jpeg({ quality: params.compression || 90 });
     } else if (outputFormat === 'webp') {
