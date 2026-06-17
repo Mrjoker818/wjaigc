@@ -3926,6 +3926,8 @@ export function InfiniteCanvas({
       // ★ 继承源图的模型信息，确保处理帧完成后不会丢失
       modelName: sourceImage.modelName,
       apiProvider: sourceImage.apiProvider,
+      // ★ 记录来源图片ID，完成后自动创建连线
+      generatedFromImageId: sourceImage.id,
     };
     const nextImages = [...imagesRef.current, placeholder];
     imagesRef.current = nextImages;
