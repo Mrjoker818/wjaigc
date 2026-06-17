@@ -2009,7 +2009,7 @@ export async function POST(request: NextRequest) {
 
       // ---- AI 放大模式 ----
 
-      console.log(`[image-edit] upscale: using AI whole-image upscale`);
+      console.log(`[image-edit] upscale: using AI whole-image upscale, target: ${targetW}x${targetH}`);
 
       const effectiveSize = (() => {
         const ar = aspectRatio || (origW >= origH ? `${origW}:${origH}` : `${origW}:${origH}`);
@@ -2043,21 +2043,66 @@ export async function POST(request: NextRequest) {
         negative_prompt: negativePrompt,
       }), 'AI放大');
 
+      // ★ AI 模型按自身预设尺寸输出，不受 size 参数精确控制
+      // 因此 AI 生成后需要用 sharp resize 到目标尺寸 targetW x targetH
+      const resizeAiResultToTarget = async (aiImageUrl: string): Promise<{ url: string; actualW: number; actualH: number }> => {
+        try {
+          // 下载 AI 生成的图片
+          const aiBuffer = await fetchImageBuffer(aiImageUrl);
+          const aiMeta = await sharp(aiBuffer).metadata();
+          const aiW = aiMeta.width || targetW;
+          const aiH = aiMeta.height || targetH;
+
+          // 如果 AI 输出尺寸已经是目标尺寸（或更大），直接返回
+          if (aiW >= targetW && aiH >= targetH) {
+            console.log(`[image-edit] AI upscale output ${aiW}x${aiH} meets target ${targetW}x${targetH}, no resize needed`);
+            return { url: aiImageUrl, actualW: aiW, actualH: aiH };
+          }
+
+          // 用 sharp resize 到目标尺寸 — 保留 AI 增强的细节，同时确保像素尺寸正确
+          console.log(`[image-edit] AI upscale output ${aiW}x${aiH} < target ${targetW}x${targetH}, resizing...`);
+          const resizedBuffer = await sharp(aiBuffer)
+            .resize(targetW, targetH, { fit: 'fill', kernel: sharp.kernel.lanczos3 })
+            .png({ quality: 95 })
+            .toBuffer();
+
+          // 保存 resize 后的图片
+          const timestamp = Date.now();
+          const randomSuffix = Math.random().toString(36).substring(2, 8);
+          const filename = `upscale_ai_${timestamp}_${randomSuffix}.png`;
+          const savedPath = await saveBufferToPublic(resizedBuffer, filename);
+
+          const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
+          const domainBase = domain.startsWith('http') ? domain.replace(/\/+$/, '') : `https://${domain.replace(/\/+$/, '')}`;
+          const finalUrl = savedPath.startsWith('data:') ? savedPath : `${domainBase}${savedPath}`;
+
+          console.log(`[image-edit] AI upscale resized to ${targetW}x${targetH} (${(resizedBuffer.length / 1024).toFixed(0)}KB)`);
+          return { url: finalUrl, actualW: targetW, actualH: targetH };
+        } catch (resizeErr) {
+          console.error(`[image-edit] AI upscale resize failed:`, resizeErr instanceof Error ? resizeErr.message : resizeErr);
+          // resize 失败时仍返回原始 URL，尺寸用 AI 实际输出
+          return { url: aiImageUrl, actualW: targetW, actualH: targetH };
+        }
+      };
+
       if (result.directUrl) {
+        const resized = await resizeAiResultToTarget(result.directUrl);
         return NextResponse.json({
           success: true,
-          imageUrl: result.directUrl,
+          imageUrl: resized.url,
           action,
           engine: 'ai-upscale-hq',
           usedModel: result.usedModel,
           originalSize: { width: origW, height: origH },
-          outputSize: { width: targetW, height: targetH },
-          outputWidth: targetW,
-          outputHeight: targetH,
+          outputSize: { width: resized.actualW, height: resized.actualH },
+          outputWidth: resized.actualW,
+          outputHeight: resized.actualH,
         });
       }
 
       // ★ 注册异步放大任务到 task-registry，确保 poll-task 能正确查询第三方 API
+      // 异步任务完成后，前端 pollForResult 拿到 URL 时需要 resize
+      // 通过在 task result 中标记 _needsResize + targetW/targetH，让 poll-task 完成后触发 resize
       if (result.taskId) {
         const regTaskId = registerTask(result.taskId, 'upscale', 'AI放大');
         updateTaskProgress(regTaskId.taskId, {
@@ -2071,6 +2116,9 @@ export async function POST(request: NextRequest) {
             usedModel: result.usedModel,
             originalSize: { width: origW, height: origH },
             outputSize: { width: targetW, height: targetH },
+            _needsResize: true,
+            _targetW: targetW,
+            _targetH: targetH,
           },
         });
       }

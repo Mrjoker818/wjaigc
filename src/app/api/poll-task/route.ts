@@ -1103,6 +1103,46 @@ export async function POST(request: NextRequest) {
           }
         }
 
+        // ★ AI 放大后处理：AI 模型按自身预设尺寸输出，需 resize 到目标尺寸
+        const upscaleResizeInfo = registryResult._needsResize as boolean | undefined;
+        const upscaleTargetW = registryResult._targetW as number | undefined;
+        const upscaleTargetH = registryResult._targetH as number | undefined;
+        if (upscaleResizeInfo && upscaleTargetW && upscaleTargetH && pollResult.imageUrl) {
+          try {
+            const sharp = (await import('sharp')).default;
+            const aiResultBuf = await fetchImageBuffer(pollResult.imageUrl as string);
+            const aiMeta = await sharp(aiResultBuf).metadata();
+            const aiW = aiMeta.width || upscaleTargetW;
+            const aiH = aiMeta.height || upscaleTargetH;
+
+            if (aiW < upscaleTargetW || aiH < upscaleTargetH) {
+              console.log(`[poll-task] AI Upscale: AI output ${aiW}x${aiH} < target ${upscaleTargetW}x${upscaleTargetH}, resizing...`);
+              const resizedBuf = await sharp(aiResultBuf)
+                .resize(upscaleTargetW, upscaleTargetH, { fit: 'fill', kernel: sharp.kernel.lanczos3 })
+                .png({ quality: 95 })
+                .toBuffer();
+
+              const { saveImageFile } = await import('../../../lib/server-data-root');
+              const ts = Date.now();
+              const filename = `upscale-ai-${ts}.png`;
+              const resizedUrl = saveImageFile(resizedBuf, filename, 'upscale');
+              if (resizedUrl) {
+                pollResult.imageUrl = resizedUrl;
+              } else {
+                pollResult.imageUrl = `data:image/png;base64,${resizedBuf.toString('base64')}`;
+              }
+
+              (pollResult as Record<string, unknown>).outputSize = { width: upscaleTargetW, height: upscaleTargetH };
+              console.log(`[poll-task] AI Upscale: resized to ${upscaleTargetW}x${upscaleTargetH}`);
+            } else {
+              console.log(`[poll-task] AI Upscale: AI output ${aiW}x${aiH} >= target ${upscaleTargetW}x${upscaleTargetH}, no resize needed`);
+              (pollResult as Record<string, unknown>).outputSize = { width: aiW, height: aiH };
+            }
+          } catch (upscaleResizeErr) {
+            console.warn('[poll-task] AI Upscale resize failed, using raw AI result:', upscaleResizeErr instanceof Error ? upscaleResizeErr.message : upscaleResizeErr);
+          }
+        }
+
         // ★ AI RemoveBG 后处理：用蒙版应用到原图，精确去背景
         // 当 image-edit 的 remove_background 动作返回 AI 异步 taskId 时，
         // 从 AI 结果生成蒙版 → 优化边缘 → 用蒙版应用到原图

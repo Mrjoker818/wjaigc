@@ -1530,13 +1530,17 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
   }, [chatInitialImage, onChatInitialImageConsumed, onChatTabOpenChange]);
 
   // P1-5: Auto-enter "针对此图" mode when a canvas image is selected
-  // When user selects an image on the canvas, auto-add it to pendingImages and show a hint
+  // When user selects an image on the canvas, auto-add it to pendingImages ONLY when chat tab is open
+  // This prevents images being added to chat input when user is just interacting with the canvas
   const prevSelectedCanvasImageIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (!selectedCanvasImage) return;
     // Only trigger on NEW selection (image id changed), not re-renders
     if (selectedCanvasImage.id === prevSelectedCanvasImageIdRef.current) return;
     prevSelectedCanvasImageIdRef.current = selectedCanvasImage.id;
+
+    // Only auto-add to chat when chat tab is open/active
+    if (!chatTabOpen) return;
 
     // Auto-add to pendingImages if not already there
     setPendingImages(prev => {
@@ -1553,7 +1557,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
       if (prev.trim() && prev !== '请帮我修改这张图片：') return prev; // Don't overwrite user's text
       return '针对这张图片，我想...';
     });
-  }, [selectedCanvasImage]);
+  }, [selectedCanvasImage, chatTabOpen]);
 
   // Get mention picker items based on search
   const mentionPickerItems: MentionRef[] = useMemo(() => {
@@ -5303,67 +5307,8 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
             </div>
           )}
 
-          {/* 图片引用预览 - 显示在聊天消息区域，编号对应输入框中的图片#1/#2 */}
-          {activeMentions.filter(m => m.type === 'canvas-image').length > 0 || pendingImages.length > 0 ? (
-            <div className="flex gap-2.5 justify-end">
-              <div className="max-w-[92%] order-2">
-                <div className={`rounded-xl overflow-hidden relative ${isGold ? 'border border-white/[0.04]' : 'border border-gray-200'}`}>
-                  <div className="flex gap-1 p-1.5 overflow-x-auto" style={{ maxWidth: '100%' }}>
-                    {(() => {
-                      const allRefImgs: Array<{id: string; url: string; name: string}> = [];
-                      activeMentions.forEach(m => {
-                        if (m.type === 'canvas-image' && m.imageUrl && !allRefImgs.find(r => r.id === m.id)) {
-                          allRefImgs.push({ id: m.id!, url: m.imageUrl, name: m.label });
-                        }
-                      });
-                      pendingImages.forEach(img => {
-                        if (!allRefImgs.find(r => r.id === img.id)) {
-                          allRefImgs.push({ id: img.id, url: img.url, name: img.name });
-                        }
-                      });
-                      return allRefImgs.map((img, idx) => (
-                        <div key={img.id} className="relative shrink-0 group">
-                          <img src={img.url} alt={img.name} className="max-h-40 max-w-[200px] object-contain rounded-lg" />
-                          <div className={`absolute top-1 left-1 px-1.5 py-0.5 rounded text-[9px] font-bold ${isGold ? 'bg-gold/80 text-black' : 'bg-blue-500 text-white'}`}>
-                            #{idx + 1}
-                          </div>
-                          <button
-                            onClick={() => {
-                              setPendingImages(prev => prev.filter(p => p.id !== img.id));
-                              setActiveMentions(prev => prev.filter(m => !(m.type === 'canvas-image' && m.id === img.id)));
-                            }}
-                            className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center hover:bg-black/80 transition-colors opacity-0 group-hover:opacity-100"
-                          >
-                            <X size={12} />
-                          </button>
-                          <div className={`absolute bottom-0 left-0 right-0 px-1.5 py-0.5 bg-gradient-to-t from-black/70 to-transparent rounded-b-lg`}>
-                            <span className="text-[9px] text-white/80 truncate block">图片#{idx + 1} {img.name.length > 8 ? img.name.slice(0, 8) + '..' : img.name}</span>
-                          </div>
-                        </div>
-                      ));
-                    })()}
-                  </div>
-                  <div className="flex items-center gap-2 p-2 border-t border-white/5">
-                    <span className={`text-[10px] ${isGold ? 'text-gold/60' : 'text-gray-400'}`}>
-                      {(() => {
-                        const cnt = activeMentions.filter(m => m.type === 'canvas-image').length + pendingImages.filter(p => !activeMentions.find(m => m.type === 'canvas-image' && m.id === p.id)).length;
-                        return `${cnt}张图片引用`;
-                      })()}
-                    </span>
-                    <div className="flex-1" />
-                    <Button
-                      onClick={() => { setPendingImages([]); setActiveMentions(prev => prev.filter(m => m.type !== 'canvas-image')); }}
-                      className={`h-7 px-2.5 text-[10px] font-medium rounded-md ${
-                        isGold ? 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                      }`}
-                    >
-                      清空
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : null}
+          {/* 图片引用预览 - Lovart风格：小方形缩略图在输入框上方 */}
+          {/* (缩略图已移至输入区域上方渲染) */}
 
           <div ref={messagesEndRef} />
         </div>
@@ -5452,6 +5397,70 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               </button>
             </div>
           )}
+
+          {/* Lovart风格图片缩略图条 - 在输入框上方显示已引用的图片 */}
+          {(() => {
+            const allRefImgs: Array<{id: string; url: string; name: string; source: string}> = [];
+            activeMentions.forEach(m => {
+              if (m.type === 'canvas-image' && m.imageUrl && !allRefImgs.find(r => r.id === m.id)) {
+                allRefImgs.push({ id: m.id!, url: m.imageUrl, name: m.label, source: 'mention' });
+              }
+            });
+            pendingImages.forEach(img => {
+              if (!allRefImgs.find(r => r.id === img.id)) {
+                allRefImgs.push({ id: img.id, url: img.url, name: img.name, source: 'pending' });
+              }
+            });
+            if (allRefImgs.length === 0) return null;
+            return (
+              <div className={`mb-2 rounded-lg overflow-hidden ${isGold ? 'bg-white/[0.03] border border-white/[0.06]' : 'bg-gray-50 border border-gray-200'}`}>
+                {/* 缩略图行 */}
+                <div className="flex gap-1.5 p-2 overflow-x-auto" style={{ maxWidth: '100%' }}>
+                  {allRefImgs.map((img, idx) => (
+                    <div key={img.id} className="relative shrink-0 group">
+                      <div className="w-12 h-12 rounded-md overflow-hidden bg-black/20">
+                        <img src={img.url} alt="" className="w-full h-full object-cover" />
+                      </div>
+                      {/* 右上角关闭按钮 */}
+                      <button
+                        onClick={() => {
+                          setPendingImages(prev => prev.filter(p => p.id !== img.id));
+                          setActiveMentions(prev => prev.filter(m => !(m.type === 'canvas-image' && m.id === img.id)));
+                        }}
+                        className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-black/70 text-white flex items-center justify-center hover:bg-black/90 transition-colors opacity-0 group-hover:opacity-100 shadow-sm"
+                      >
+                        <X size={9} />
+                      </button>
+                      {/* 左上角序号标签 */}
+                      <div className={`absolute top-0.5 left-0.5 px-1 py-px rounded text-[8px] font-bold leading-tight ${isGold ? 'bg-gold/80 text-black' : 'bg-blue-500 text-white'}`}>
+                        {idx + 1}
+                      </div>
+                      {/* 底部名称 */}
+                      <div className="mt-0.5 text-center">
+                        <span className={`text-[8px] truncate block max-w-[48px] ${isGold ? 'text-white/50' : 'text-gray-400'}`}>
+                          {img.name.length > 6 ? img.name.slice(0, 6) + '..' : img.name}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {/* 底部栏：图片数量 + 清空按钮 */}
+                <div className={`flex items-center justify-between px-2 py-1 ${isGold ? 'border-t border-white/[0.04]' : 'border-t border-gray-200'}`}>
+                  <span className={`text-[9px] ${isGold ? 'text-gold/50' : 'text-gray-400'}`}>
+                    {allRefImgs.length}张图片引用
+                  </span>
+                  <button
+                    onClick={() => { setPendingImages([]); setActiveMentions(prev => prev.filter(m => m.type !== 'canvas-image')); }}
+                    className={`text-[9px] font-medium px-1.5 py-0.5 rounded transition-colors ${
+                      isGold ? 'text-white/40 hover:text-white/70 hover:bg-white/[0.06]' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+                    }`}
+                  >
+                    清空
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* P1-1: Active Mentions Tags - 非图片类型显示在输入框上方，图片类型移到输入框内 */}
           {activeMentions.filter(m => m.type !== 'canvas-image').length > 0 && (
@@ -5719,54 +5728,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
 
           {/* Textarea Row - 输入框独立占满宽度 */}
           <div className={`relative rounded-xl overflow-visible ${isGold ? 'bg-white/[0.03] border border-white/[0.04] focus-within:border-gold/40 focus-within:shadow-gold/10' : 'bg-white border border-gray-200 focus-within:border-gray-400 focus-within:shadow-sm'} transition-all`}>
-            {/* 图片引用缩略图 - 统一显示在输入框内部（@图片 + 粘贴/上传的图片） */}
-            {(() => {
-              // 合并 @图片引用 和 pendingImages 为统一的图片列表，去重
-              const allRefImages: Array<{id: string; url: string; name: string; source: 'mention' | 'pending'; mentionIdx?: number}> = [];
-              activeMentions.forEach((m, i) => {
-                if (m.type === 'canvas-image' && m.imageUrl) {
-                  if (!allRefImages.find(r => r.id === m.id)) {
-                    allRefImages.push({ id: m.id!, url: m.imageUrl, name: m.label, source: 'mention', mentionIdx: i });
-                  }
-                }
-              });
-              pendingImages.forEach(img => {
-                if (!allRefImages.find(r => r.id === img.id)) {
-                  allRefImages.push({ id: img.id, url: img.url, name: img.name, source: 'pending' });
-                }
-              });
-              return allRefImages.length > 0 ? (
-                <div className="flex flex-wrap gap-2 px-3 pt-2.5">
-                  {allRefImages.map((img, idx) => (
-                    <div
-                      key={`ref-img-${img.id}`}
-                      className={`relative group inline-flex flex-col items-center rounded-lg overflow-hidden cursor-pointer transition-all hover:scale-[1.03] active:scale-[0.97] ${isGold ? 'bg-white/[0.06] border border-gold/25 hover:border-gold/50' : 'bg-gray-50 border border-gray-200 hover:border-blue-300'}`}
-                      onClick={() => onNavigateToImage?.(img.id)}
-                      title={`${img.name} - 点击定位到画布`}
-                    >
-                      <div className="w-12 h-12 overflow-hidden">
-                        <img src={img.url} alt="" className="w-full h-full object-cover" />
-                      </div>
-                      <div className={`px-1.5 py-0.5 text-[9px] font-medium truncate max-w-[48px] ${isGold ? 'text-gold/70' : 'text-gray-500'}`}>
-                        图片#{idx + 1}
-                      </div>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (img.source === 'mention' && img.mentionIdx !== undefined) {
-                            removeMention(img.mentionIdx);
-                          }
-                          setPendingImages(prev => prev.filter(p => p.id !== img.id));
-                        }}
-                        className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity ${isGold ? 'bg-gold/80 text-black' : 'bg-gray-800 text-white'}`}
-                      >
-                        <X size={10} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              ) : null;
-            })()}
+            {/* 图片缩略图已在输入框上方Lovart风格条中显示，此处不再重复 */}
             <Textarea
               ref={textareaRef}
               value={input}
