@@ -360,8 +360,12 @@ export async function performOnnxUpscale(
       const outW = result.outputSize?.[0] ?? procW * scale;
       const outH = result.outputSize?.[1] ?? procH * scale;
 
-      // 轻微锐化后处理：减轻 Real-ESRGAN 的涂抹感，恢复微观纹理细节
+      // 降噪 + 锐化后处理：去除杂点 + 恢复微观纹理细节
       finalBuffer = Buffer.from(await sharp(finalBuffer)
+        .convolve({
+          width: 3, height: 3,
+          kernel: [1/16, 2/16, 1/16, 2/16, 4/16, 2/16, 1/16, 2/16, 1/16]
+        })
         .sharpen({ sigma: 0.5, m1: 0.5, m2: 0.3 })
         .toBuffer());
 
@@ -565,17 +569,24 @@ async function performNcnnUpscale(
     const outW = outputMeta.width || procW * scaleNum;
     const outH = outputMeta.height || procH * scaleNum;
 
-    // 对 NCNN Real-ESRGAN 结果进行强锐化后处理
-    // Real-ESRGAN 容易产生过度平滑/涂抹感，需要强锐化恢复微细节纹理
-    // 使用两步策略：1) 强锐化恢复边缘和纹理 2) 高通叠加增强微细节
-    let sharpenPipeline = sharp(outputBuffer).sharpen({
-      sigma: 1.2,    // 较大范围锐化，恢复中等尺度细节
-      m1: 1.5,       // 平坦区域强锐化，对抗ESRGAN平滑
-      m2: 0.8,       // 边缘区域适度锐化，避免过锐振铃
-      x1: 2,         // 亮边阈值
-      y2: 4,         // 暗边阈值
-      y3: 8,         // 平坦区域阈值（更大=更多区域被锐化）
-    });
+    // 对 NCNN Real-ESRGAN 结果进行降噪 + 锐化后处理
+    // Real-ESRGAN 容易产生过度平滑/涂抹感和少量杂点
+    // 使用三步策略：1) 高斯轻微降噪去除杂点 2) 强锐化恢复边缘和纹理 3) 高通叠加增强微细节
+    let sharpenPipeline = sharp(outputBuffer)
+      // Step 1: 轻微高斯降噪 — 去除 Real-ESRGAN 可能产生的杂点和色斑
+      .convolve({
+        width: 3, height: 3,
+        kernel: [1/16, 2/16, 1/16, 2/16, 4/16, 2/16, 1/16, 2/16, 1/16] // 高斯 3x3
+      })
+      // Step 2: 强锐化恢复边缘和纹理
+      .sharpen({
+        sigma: 1.2,    // 较大范围锐化，恢复中等尺度细节
+        m1: 1.5,       // 平坦区域强锐化，对抗ESRGAN平滑
+        m2: 0.8,       // 边缘区域适度锐化，避免过锐振铃
+        x1: 2,         // 亮边阈值
+        y2: 4,         // 暗边阈值
+        y3: 8,         // 平坦区域阈值（更大=更多区域被锐化）
+      });
 
     // 第一步锐化后的中间结果
     let midBuffer: Buffer;
