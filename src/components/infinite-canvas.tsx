@@ -5868,11 +5868,35 @@ export function InfiniteCanvas({
       let actualOutH = targetH;
       let usedModelName = modelInfo.apiDisplayName || modelInfo.model;
 
+      let proStrategy = '';
       if (upscaleMode === 'lossless') {
-        // 无损放大：直接返回结果URL，无需轮询
-        resultUrl = (data.url as string) || null;
-        const proModel = (data.model as string) || 'Real-ESRGAN';
-        usedModelName = proModel === 'SeedVR2-Upscaler' ? 'SeedVR2 无损放大' : 'Real-ESRGAN 无损放大';
+        // 无损放大：可能直接返回URL，也可能降级到异步轮询
+        proStrategy = (data.strategy as string) || '';
+        const isFallback = data.fallback === true;
+        const fallbackReason = (data.fallbackReason as string) || '';
+
+        if (data.requiresPolling && data.taskId) {
+          // 降级到AI异步轮询
+          const aiTaskId = data.taskId as string;
+          usedModelName = 'AI重绘放大(降级)';
+          resultUrl = await pollForResult(aiTaskId, usedModelName, (progress, status) => {
+            updateProcessingFrame(placeholderId, { progress, status });
+          });
+        } else {
+          resultUrl = (data.url as string) || null;
+          const proModel = (data.model as string) || 'Real-ESRGAN';
+          if (proStrategy === 'local-upscayl') {
+            usedModelName = '本地Real-ESRGAN' + (isFallback ? '(降级)' : '');
+          } else if (proStrategy === 'ai-redraw') {
+            usedModelName = 'AI重绘放大' + (isFallback ? '(降级)' : '');
+          } else {
+            usedModelName = proModel === 'SeedVR2-Upscaler' ? 'SeedVR2 无损放大' : 'Real-ESRGAN 无损放大';
+          }
+        }
+
+        if (isFallback && fallbackReason) {
+          console.warn(`[upscale] 降级提示: ${fallbackReason}`);
+        }
       } else {
         usedModelName = String(data.usedModel || modelInfo.model);
         resultUrl = (data.imageUrl as string | null) || await pollForResult((data.taskId as string) || '', usedModelName, (progress, status) => {
@@ -5899,7 +5923,7 @@ export function InfiniteCanvas({
           originalHeight: actualOutH,
           modifyPrompt: `${upMultiplier}x ${upscaleMode === 'lossless' ? '无损' : 'HD'} ${upscalePreset.toUpperCase()} 放大`,
           modelName: usedModelName,
-          apiProvider: upscaleMode === 'lossless' ? 'PearAPI' : (modelInfo.providerName || ''),
+          apiProvider: upscaleMode === 'lossless' ? (proStrategy === 'local-upscayl' ? '本地' : proStrategy === 'ai-redraw' ? 'AI重绘' : 'PearAPI') : (modelInfo.providerName || ''),
         }, 'upscale');
       } else {
         const pollError = lastPollErrorRef.current || '放大超时，请重试';
