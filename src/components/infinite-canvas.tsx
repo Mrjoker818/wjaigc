@@ -1177,7 +1177,7 @@ export function InfiniteCanvas({
   const [upscaylChecking, setUpscaylChecking] = useState(true);
   const [upscalePreset, setUpscalePreset] = useState<'2k' | '4k' | '8k'>('2k');
   const [showUpscalePresetMenu, setShowUpscalePresetMenu] = useState(false);
-  const [upscaleMode, setUpscaleMode] = useState<'cpu' | 'ai'>('cpu'); // CPU放大 / AI放大
+  const [upscaleMode, setUpscaleMode] = useState<'cpu' | 'ai' | 'lossless'>('lossless'); // CPU放大 / AI放大 / 无损放大
   // Actual pixel dimensions of the image being upscaled (loaded from DOM)
   const [upscaleActualW, setUpscaleActualW] = useState(0);
   const [upscaleActualH, setUpscaleActualH] = useState(0);
@@ -5768,32 +5768,47 @@ export function InfiniteCanvas({
     try {
       const apiKey = getApiKey();
       const modelInfo = getCurrentModel();
-      updateProcessingFrame(placeholderId, { progress: 8, status: '正在提交到 AI 模型...' });
+      updateProcessingFrame(placeholderId, { progress: 8, status: upscaleMode === 'lossless' ? '正在提交到云端无损放大...' : '正在提交到 AI 模型...' });
       // ★ 放大操作可能耗时较长（如108s），设置5分钟超时与后端直接模式600s对齐
       const upscaleController = new AbortController();
       const upscaleTimeout = setTimeout(() => upscaleController.abort(), 600000); // 10分钟超时，匹配后端maxDuration
       let res: Response;
       try {
-        res = await fetch('/api/image-edit', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'upscale',
-            imageUrl: img.url,
-            prompt: img.prompt || img.modifyPrompt || '', // 传图片描述给后端，让AI知道原图内容
-            targetWidth: targetW,
-            targetHeight: targetH,
-            aspectRatio: findClosestStandardRatio(origW, origH),
-            model: modelInfo.model,
-            apiKey,
-            providerId: modelInfo.providerId || getCurrentProviderId(),
-            scale: upMultiplier,
-            originalWidth: origW,
-            originalHeight: origH,
-            upscaleMode, // "cpu" 或 "ai"
-          }),
-          signal: upscaleController.signal,
-        });
+        if (upscaleMode === 'lossless') {
+          // ★ 无损放大：调用 PearAPI /api/photo-enhancer (Real-ESRGAN / SeedVR2)
+          res = await fetch('/api/image/upscale-pro', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              imageUrl: img.url,
+              model: upMultiplier > 2 ? 'SeedVR2-Upscaler' : 'Real-ESRGAN',
+              face: false,
+              scale: upMultiplier === 4 ? 4 : 2,
+            }),
+            signal: upscaleController.signal,
+          });
+        } else {
+          res = await fetch('/api/image-edit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'upscale',
+              imageUrl: img.url,
+              prompt: img.prompt || img.modifyPrompt || '', // 传图片描述给后端，让AI知道原图内容
+              targetWidth: targetW,
+              targetHeight: targetH,
+              aspectRatio: findClosestStandardRatio(origW, origH),
+              model: modelInfo.model,
+              apiKey,
+              providerId: modelInfo.providerId || getCurrentProviderId(),
+              scale: upMultiplier,
+              originalWidth: origW,
+              originalHeight: origH,
+              upscaleMode, // "cpu" 或 "ai"
+            }),
+            signal: upscaleController.signal,
+          });
+        }
       } catch (fetchErr: unknown) {
         clearTimeout(upscaleTimeout);
         const err = fetchErr as Error;
@@ -5847,24 +5862,44 @@ export function InfiniteCanvas({
         return;
       }
 
-      updateProcessingFrame(placeholderId, { progress: 22, status: upscaleMode === 'cpu' ? 'CPU 正在超清放大（Real-ESRGAN AI超分辨率）...' : 'AI 正在放大细节...' });
-      const usedModel = String(data.usedModel || modelInfo.model);
-      const resultUrl = data.imageUrl || await pollForResult((data.taskId as string) || '', usedModel, (progress, status) => {
-        updateProcessingFrame(placeholderId, { progress, status });
-      });
+      updateProcessingFrame(placeholderId, { progress: 22, status: upscaleMode === 'lossless' ? '云端无损放大中（Real-ESRGAN/SeedVR2 超分辨率）...' : upscaleMode === 'cpu' ? 'CPU 正在超清放大（Real-ESRGAN AI超分辨率）...' : 'AI 正在放大细节...' });
+      let resultUrl: string | null;
+      let actualOutW = targetW;
+      let actualOutH = targetH;
+      let usedModelName = modelInfo.apiDisplayName || modelInfo.model;
+
+      if (upscaleMode === 'lossless') {
+        // 无损放大：直接返回结果URL，无需轮询
+        resultUrl = (data.url as string) || null;
+        const proModel = (data.model as string) || 'Real-ESRGAN';
+        usedModelName = proModel === 'SeedVR2-Upscaler' ? 'SeedVR2 无损放大' : 'Real-ESRGAN 无损放大';
+      } else {
+        usedModelName = String(data.usedModel || modelInfo.model);
+        resultUrl = (data.imageUrl as string | null) || await pollForResult((data.taskId as string) || '', usedModelName, (progress, status) => {
+          updateProcessingFrame(placeholderId, { progress, status });
+        });
+        const outSize = data.outputSize as { width: number; height: number } | undefined;
+        actualOutW = outSize?.width || (data.outputWidth as number) || targetW;
+        actualOutH = outSize?.height || (data.outputHeight as number) || targetH;
+      }
       if (resultUrl) {
         updateProcessingFrame(placeholderId, { progress: 96, status: '正在载入结果...' });
         const stableUrl = await toStableImageUrl(resultUrl as string);
-        // 使用后端返回的实际输出尺寸，优先从 outputSize 字段读取，兼容 outputWidth/outputHeight
-        const outSize = data.outputSize as { width: number; height: number } | undefined;
-        const actualOutW = outSize?.width || (data.outputWidth as number) || targetW;
-        const actualOutH = outSize?.height || (data.outputHeight as number) || targetH;
+        // 无损放大结果异步检测实际尺寸
+        if (upscaleMode === 'lossless') {
+          const imgEl = new Image();
+          imgEl.onload = () => {
+            actualOutW = imgEl.naturalWidth;
+            actualOutH = imgEl.naturalHeight;
+          };
+          imgEl.src = stableUrl;
+        }
         completeProcessingFrame(placeholderId, stableUrl, displayW, displayH, {
           originalWidth: actualOutW,
           originalHeight: actualOutH,
-          modifyPrompt: `${upMultiplier}x HD ${upscalePreset.toUpperCase()} 放大`,
-          modelName: modelInfo.apiDisplayName || modelInfo.model,
-          apiProvider: modelInfo.providerName || '',
+          modifyPrompt: `${upMultiplier}x ${upscaleMode === 'lossless' ? '无损' : 'HD'} ${upscalePreset.toUpperCase()} 放大`,
+          modelName: usedModelName,
+          apiProvider: upscaleMode === 'lossless' ? 'PearAPI' : (modelInfo.providerName || ''),
         }, 'upscale');
       } else {
         const pollError = lastPollErrorRef.current || '放大超时，请重试';
@@ -9536,18 +9571,29 @@ export function InfiniteCanvas({
                   )}
                 </div>
                 <div className={panelDividerClass} />
-                {/* Upscale mode selector: CPU放大 / AI放大 */}
+                {/* Upscale mode selector: 无损放大 / CPU放大 / AI放大 */}
                 <div className="flex items-center gap-0.5">
                   <button
-                    onClick={(e) => { e.stopPropagation(); setUpscaleMode('cpu'); }}
+                    onClick={(e) => { e.stopPropagation(); setUpscaleMode('lossless'); }}
                     className={`px-2 py-1 text-xs rounded-l-md transition-all font-medium ${
+                      upscaleMode === 'lossless'
+                        ? isMonochrome ? 'bg-blue-500 text-white' : 'bg-gold text-black'
+                        : isMonochrome ? 'bg-gray-100 text-gray-500 hover:bg-gray-200' : 'bg-[#252525] text-gold-muted hover:bg-[#333]'
+                    }`}
+                    title="无损放大：云端 Real-ESRGAN / SeedVR2 超分辨率，真实无损，忠实还原每一个像素"
+                  >
+                    无损放大
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setUpscaleMode('cpu'); }}
+                    className={`px-2 py-1 text-xs transition-all font-medium ${
                       upscaleMode === 'cpu'
                         ? isMonochrome ? 'bg-blue-500 text-white' : 'bg-gold text-black'
                         : isMonochrome ? 'bg-gray-100 text-gray-500 hover:bg-gray-200' : 'bg-[#252525] text-gold-muted hover:bg-[#333]'
                     }`}
                     title="CPU超清放大：Real-ESRGAN AI超分辨率，补充细节纹理，忠实还原"
                   >
-                    CPU放大
+                    CPU
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); setUpscaleMode('ai'); }}
@@ -9558,7 +9604,7 @@ export function InfiniteCanvas({
                     }`}
                     title="AI放大：AI智能补细节+增强清晰度，适合创意放大"
                   >
-                    AI放大
+                    AI
                   </button>
                 </div>
                 <div className={panelDividerClass} />
