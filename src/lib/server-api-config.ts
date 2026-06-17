@@ -104,21 +104,23 @@ function normalizeBaseUrl(baseUrl: string): string {
   return trimmed;
 }
 
-function modelTypeForProvider(provider: ApiProvider): 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' {
+function modelTypeForProvider(provider: ApiProvider): 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' {
   if (provider.modelType === 'chat') return 'chat';
   if (provider.modelType === '3d') return '3d';
   if (provider.modelType === 'vectorize') return 'vectorize';
   if (provider.modelType === 'layer') return 'layer';
   if (provider.modelType === 'video') return 'video';
-  // General/universal/vlm: default to 'chat' since most models are chat
+  // VLM type stays as 'vlm' for SVG vectorization pipeline
+  if (provider.modelType === 'vlm') return 'vlm';
+  // General/universal: default to 'chat' since most models are chat
   // Individual model types from inferModelType override this in getPublicModels
-  if (provider.modelType === 'universal' || provider.modelType === 'general' || provider.modelType === 'vlm') return 'chat';
+  if (provider.modelType === 'universal' || provider.modelType === 'general') return 'chat';
   // Legacy imageEdit type maps to 'image'
   if ((provider.modelType as string) === 'imageEdit') return 'image';
   return 'image';
 }
 
-function inferModelType(modelId: string, fallback: 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video'): 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' {
+function inferModelType(modelId: string, fallback: 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm'): 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' {
   const id = modelId.toLowerCase();
   // 视频模型关键词匹配 — 必须在图像之前检查，避免视频模型被误判为图像
   if (
@@ -147,7 +149,18 @@ function inferModelType(modelId: string, fallback: 'image' | 'chat' | '3d' | 've
     return 'video';
   }
   // 矢量化模型关键词匹配
-  if (id.includes('vectorize') || id.includes('vector') || id.includes('vtracer') || id.includes('starvector') || id.includes('svg-convert') || id.includes('svgconvert')) return 'vectorize';
+  if (id.includes('vectorize') || id.includes('vector') || id.includes('vtracer') || id.includes('starvector') || id.includes('svg-convert') || id.includes('svgconvert') || id.includes('recraft')) return 'vectorize';
+  // VLM视觉语言模型关键词匹配
+  if (
+    id.includes('qwen-vl') || id.includes('qwen2.5-vl') || id.includes('qwen2-vl') ||
+    id.includes('qwen3-vl') || id.includes('qwen2.7-vl') || id.includes('qvq') ||
+    id.includes('glm-4v') || id.includes('glm-5v') || id.includes('glm-4.1v') || id.includes('glm-4v-plus') ||
+    id.includes('gemini-vision') || id.includes('internvl') || id.includes('intern-vl') ||
+    id.includes('moondream') || id.includes('llava') || id.includes('cogvlm') ||
+    id.includes('idefics') || id.includes('kosmos') || id.includes('florence') ||
+    id.includes('qwen2.5-vl') || id.includes('qwen3.6-vl') ||
+    (id.includes('qwen') && id.includes('vl'))
+  ) return 'vlm';
   // 分层模型关键词匹配
   if (id.includes('qwen-image-layered') || id.includes('layer') || id.includes('segment') || id.includes('sam') || id.includes('detection') || id.includes('yolo')) return 'layer';
   // 3D模型关键词匹配
