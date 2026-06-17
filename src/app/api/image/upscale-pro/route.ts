@@ -186,17 +186,39 @@ async function upscaleViaOnnx(
     // 计算tile大小：根据图片尺寸动态调整，避免OOM
     const sharp = await import('sharp');
     const metadata = await sharp.default(inputPath).metadata();
-    const maxDim = Math.max(metadata.width || 512, metadata.height || 512);
-    let tileSize = 256;
-    if (maxDim > 1024) tileSize = 64;
-    else if (maxDim > 512) tileSize = 128;
+    let maxDim = Math.max(metadata.width || 512, metadata.height || 512);
+    let effectiveScale = scale;
+    
+    // 性能优化：大图先缩小再放大，避免CPU处理超时
+    // Real-ESRGAN x4模型最大输入建议≤512px，x2建议≤768px
+    const maxInputSize = scale >= 4 ? 384 : scale >= 2 ? 512 : 768;
+    if (maxDim > maxInputSize) {
+      const ratio = maxInputSize / maxDim;
+      const newW = Math.round((metadata.width || 512) * ratio);
+      const newH = Math.round((metadata.height || 512) * ratio);
+      const resizedBuf = await sharp.default(inputPath)
+        .resize(newW, newH, { kernel: 'lanczos3' })
+        .png()
+        .toBuffer();
+      const resizedPath = inputPath.replace(/(\.\w+)$/, '-resized$1');
+      fs.writeFileSync(resizedPath, resizedBuf);
+      inputPath = resizedPath;
+      maxDim = Math.max(newW, newH);
+      // 调整实际放大倍率以尽量达到目标尺寸
+      const targetSize = (metadata.width || 512) * scale;
+      effectiveScale = Math.min(4, Math.max(2, Math.round(targetSize / newW)));
+    }
 
-    console.log(`[upscale-pro] ONNX upscale: input=${maxDim}px, model=${modelName}, tile=${tileSize}, scale=${scale}x`);
+    let tileSize = 256;
+    if (maxDim > 512) tileSize = 128;
+    else if (maxDim > 256) tileSize = 192;
+
+    console.log(`[upscale-pro] ONNX upscale: input=${maxDim}px, model=${modelName}, tile=${tileSize}, scale=${effectiveScale}x`);
 
     // 调用Python ONNX脚本
     const params = JSON.stringify({
       inputFile: inputPath,
-      scale,
+      scale: effectiveScale,
       tileSize,
       model: modelName,
     });
@@ -232,6 +254,18 @@ async function upscaleViaOnnx(
     if (!resultUrl) {
       console.warn('[upscale-pro] ONNX upscale: no output in response');
       return null;
+    }
+
+    // 如果输入图被缩小过，需要将ONNX输出resize到目标尺寸
+    if (effectiveScale !== scale && fs.existsSync(resultUrl)) {
+      const targetW = (metadata.width || 512) * scale;
+      const targetH = (metadata.height || 512) * scale;
+      const resizedBuf = await sharp.default(resultUrl)
+        .resize(targetW, targetH, { kernel: 'lanczos3' })
+        .png()
+        .toBuffer();
+      fs.writeFileSync(resultUrl, resizedBuf);
+      console.log(`[upscale-pro] ONNX output resized to ${targetW}x${targetH}`);
     }
 
     // 如果输出是文件路径，转为API URL

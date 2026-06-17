@@ -1178,7 +1178,7 @@ export function InfiniteCanvas({
   const [upscaylChecking, setUpscaylChecking] = useState(true);
   const [upscalePreset, setUpscalePreset] = useState<'2k' | '4k' | '8k'>('2k');
   const [showUpscalePresetMenu, setShowUpscalePresetMenu] = useState(false);
-  const [upscaleMode, setUpscaleMode] = useState<'cpu' | 'ai' | 'lossless'>('lossless'); // CPU放大 / AI放大 / 无损放大
+  const [upscaleMode, setUpscaleMode] = useState<'lossless' | 'ai'>('lossless'); // 无损放大 / AI放大
   // Actual pixel dimensions of the image being upscaled (loaded from DOM)
   const [upscaleActualW, setUpscaleActualW] = useState(0);
   const [upscaleActualH, setUpscaleActualH] = useState(0);
@@ -5805,7 +5805,7 @@ export function InfiniteCanvas({
               scale: upMultiplier,
               originalWidth: origW,
               originalHeight: origH,
-              upscaleMode, // "cpu" 或 "ai"
+              upscaleMode, // "lossless" 或 "ai"
             }),
             signal: upscaleController.signal,
           });
@@ -5863,7 +5863,7 @@ export function InfiniteCanvas({
         return;
       }
 
-      updateProcessingFrame(placeholderId, { progress: 22, status: upscaleMode === 'lossless' ? '云端无损放大中（Real-ESRGAN/SeedVR2 超分辨率）...' : upscaleMode === 'cpu' ? 'CPU 正在超清放大（Real-ESRGAN AI超分辨率）...' : 'AI 正在放大细节...' });
+      updateProcessingFrame(placeholderId, { progress: 22, status: upscaleMode === 'lossless' ? '无损放大中（Real-ESRGAN 超分辨率算法）...' : 'AI 正在放大细节...' });
       let resultUrl: string | null;
       let actualOutW = targetW;
       let actualOutH = targetH;
@@ -9509,7 +9509,7 @@ export function InfiniteCanvas({
                   )}
                 </div>
                 <div className={panelDividerClass} />
-                {/* Upscale mode selector: 无损放大 / CPU放大 / AI放大 */}
+                {/* Upscale mode selector: 无损放大 / AI放大 */}
                 <div className="flex items-center gap-0.5">
                   <button
                     onClick={(e) => { e.stopPropagation(); setUpscaleMode('lossless'); }}
@@ -9518,20 +9518,9 @@ export function InfiniteCanvas({
                         ? isMonochrome ? 'bg-blue-500 text-white' : 'bg-gold text-black'
                         : isMonochrome ? 'bg-gray-100 text-gray-500 hover:bg-gray-200' : 'bg-[#252525] text-gold-muted hover:bg-[#333]'
                     }`}
-                    title="无损放大：云端 Real-ESRGAN / SeedVR2 超分辨率，真实无损，忠实还原每一个像素"
+                    title="无损放大：Real-ESRGAN 超分辨率算法，真实无损，忠实还原每一个像素"
                   >
                     无损放大
-                  </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setUpscaleMode('cpu'); }}
-                    className={`px-2 py-1 text-xs transition-all font-medium ${
-                      upscaleMode === 'cpu'
-                        ? isMonochrome ? 'bg-blue-500 text-white' : 'bg-gold text-black'
-                        : isMonochrome ? 'bg-gray-100 text-gray-500 hover:bg-gray-200' : 'bg-[#252525] text-gold-muted hover:bg-[#333]'
-                    }`}
-                    title="CPU超清放大：Real-ESRGAN AI超分辨率，补充细节纹理，忠实还原"
-                  >
-                    CPU
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); setUpscaleMode('ai'); }}
@@ -9540,9 +9529,9 @@ export function InfiniteCanvas({
                         ? isMonochrome ? 'bg-blue-500 text-white' : 'bg-gold text-black'
                         : isMonochrome ? 'bg-gray-100 text-gray-500 hover:bg-gray-200' : 'bg-[#252525] text-gold-muted hover:bg-[#333]'
                     }`}
-                    title="AI放大：AI智能补细节+增强清晰度，适合创意放大"
+                    title="AI放大：AI模型智能补细节+增强清晰度，内容可能有变化"
                   >
-                    AI
+                    AI放大
                   </button>
                 </div>
                 <div className={panelDividerClass} />
