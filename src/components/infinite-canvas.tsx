@@ -5666,11 +5666,15 @@ export function InfiniteCanvas({
     const origH = upscaleActualH || img.originalHeight || img.height;
     const { w: targetW, h: targetH, multiplier: upMultiplier } = getUpscaleTargetDimensions(origW, origH, upscalePreset);
 
+    // 放大结果应保持与原图相同的画布显示尺寸，仅 originalWidth/Height 变大
+    const displayW = img.width;
+    const displayH = img.height;
+
     const placeholderId = createProcessingFrameRightOf(
       img,
       '放大中',
-      targetW / 2,
-      targetH / 2,
+      displayW,
+      displayH,
       '正在提交放大任务...'
     );
     setIsEditProcessing(true);
@@ -5765,9 +5769,13 @@ export function InfiniteCanvas({
       if (resultUrl) {
         updateProcessingFrame(placeholderId, { progress: 96, status: '正在载入结果...' });
         const stableUrl = await toStableImageUrl(resultUrl as string);
-        completeProcessingFrame(placeholderId, stableUrl, targetW / 2, targetH / 2, {
-          originalWidth: targetW,
-          originalHeight: targetH,
+        // 使用后端返回的实际输出尺寸，优先从 outputSize 字段读取，兼容 outputWidth/outputHeight
+        const outSize = data.outputSize as { width: number; height: number } | undefined;
+        const actualOutW = outSize?.width || (data.outputWidth as number) || targetW;
+        const actualOutH = outSize?.height || (data.outputHeight as number) || targetH;
+        completeProcessingFrame(placeholderId, stableUrl, displayW, displayH, {
+          originalWidth: actualOutW,
+          originalHeight: actualOutH,
           modifyPrompt: `${upMultiplier}x HD ${upscalePreset.toUpperCase()} 放大`,
           modelName: modelInfo.apiDisplayName || modelInfo.model,
           apiProvider: modelInfo.providerName || '',

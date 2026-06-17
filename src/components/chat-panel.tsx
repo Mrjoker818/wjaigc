@@ -2888,6 +2888,7 @@ UI设计规范：
   }, [chatSkills, saveSkills]);
   const [showHistoryPanel, setShowHistoryPanel] = useState(false);
   const [showFilePanel, setShowFilePanel] = useState(false);
+  const [showImagePicker, setShowImagePicker] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -3571,6 +3572,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
 
       // Clear mentions after sending
       setActiveMentions([]);
+      setShowImagePicker(false);
 
       // ====== 图像生成：改为LLM驱动模式 ======
       // 不再预检测意图，而是在LLM回复中解析 [GENERATE: ...] 标签
@@ -5301,73 +5303,67 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
             </div>
           )}
 
-          {/* Pending images preview - multi-image strip */}
-          {pendingImages.length > 0 && (
+          {/* 图片引用预览 - 显示在聊天消息区域，编号对应输入框中的图片#1/#2 */}
+          {activeMentions.filter(m => m.type === 'canvas-image').length > 0 || pendingImages.length > 0 ? (
             <div className="flex gap-2.5 justify-end">
               <div className="max-w-[92%] order-2">
                 <div className={`rounded-xl overflow-hidden relative ${isGold ? 'border border-white/[0.04]' : 'border border-gray-200'}`}>
-                  {/* Image strip - horizontal scrollable */}
                   <div className="flex gap-1 p-1.5 overflow-x-auto" style={{ maxWidth: '100%' }}>
-                    {pendingImages.map((img, idx) => (
-                      <div key={img.id} className="relative shrink-0 group">
-                        <img src={img.url} alt={img.name} className="max-h-40 max-w-[200px] object-contain rounded-lg" />
-                        <button
-                          onClick={() => setPendingImages(prev => prev.filter((_, i) => i !== idx))}
-                          className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center hover:bg-black/80 transition-colors opacity-0 group-hover:opacity-100"
-                        >
-                          <X size={12} />
-                        </button>
-                        <div className={`absolute bottom-0 left-0 right-0 px-1.5 py-0.5 bg-gradient-to-t from-black/70 to-transparent rounded-b-lg`}>
-                          <span className="text-[9px] text-white/80 truncate block">{img.name.length > 12 ? img.name.slice(0, 12) + '...' : img.name}</span>
+                    {(() => {
+                      const allRefImgs: Array<{id: string; url: string; name: string}> = [];
+                      activeMentions.forEach(m => {
+                        if (m.type === 'canvas-image' && m.imageUrl && !allRefImgs.find(r => r.id === m.id)) {
+                          allRefImgs.push({ id: m.id!, url: m.imageUrl, name: m.label });
+                        }
+                      });
+                      pendingImages.forEach(img => {
+                        if (!allRefImgs.find(r => r.id === img.id)) {
+                          allRefImgs.push({ id: img.id, url: img.url, name: img.name });
+                        }
+                      });
+                      return allRefImgs.map((img, idx) => (
+                        <div key={img.id} className="relative shrink-0 group">
+                          <img src={img.url} alt={img.name} className="max-h-40 max-w-[200px] object-contain rounded-lg" />
+                          <div className={`absolute top-1 left-1 px-1.5 py-0.5 rounded text-[9px] font-bold ${isGold ? 'bg-gold/80 text-black' : 'bg-blue-500 text-white'}`}>
+                            #{idx + 1}
+                          </div>
+                          <button
+                            onClick={() => {
+                              setPendingImages(prev => prev.filter(p => p.id !== img.id));
+                              setActiveMentions(prev => prev.filter(m => !(m.type === 'canvas-image' && m.id === img.id)));
+                            }}
+                            className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center hover:bg-black/80 transition-colors opacity-0 group-hover:opacity-100"
+                          >
+                            <X size={12} />
+                          </button>
+                          <div className={`absolute bottom-0 left-0 right-0 px-1.5 py-0.5 bg-gradient-to-t from-black/70 to-transparent rounded-b-lg`}>
+                            <span className="text-[9px] text-white/80 truncate block">图片#{idx + 1} {img.name.length > 8 ? img.name.slice(0, 8) + '..' : img.name}</span>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      ));
+                    })()}
                   </div>
-                  {/* Action bar */}
                   <div className="flex items-center gap-2 p-2 border-t border-white/5">
-                    <span className={`text-[10px] ${isGold ? 'text-gold/60' : 'text-gray-400'}`}>{pendingImages.length}张图片</span>
+                    <span className={`text-[10px] ${isGold ? 'text-gold/60' : 'text-gray-400'}`}>
+                      {(() => {
+                        const cnt = activeMentions.filter(m => m.type === 'canvas-image').length + pendingImages.filter(p => !activeMentions.find(m => m.type === 'canvas-image' && m.id === p.id)).length;
+                        return `${cnt}张图片引用`;
+                      })()}
+                    </span>
                     <div className="flex-1" />
                     <Button
-                      onClick={() => setPendingImages([])}
+                      onClick={() => { setPendingImages([]); setActiveMentions(prev => prev.filter(m => m.type !== 'canvas-image')); }}
                       className={`h-7 px-2.5 text-[10px] font-medium rounded-md ${
-                        isGold
-                          ? 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white'
-                          : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                        isGold ? 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
                       }`}
                     >
                       清空
                     </Button>
-                    <Button
-                      onClick={handleAnalyzeImage}
-                      disabled={isAnalyzingImage}
-                      className={`h-7 px-3 text-[10px] font-medium rounded-md ${
-                        isGold
-                          ? 'bg-gradient-to-r from-gold to-gold-dark text-black hover:opacity-90'
-                          : 'bg-blue-500 text-white hover:bg-blue-600'
-                      }`}
-                    >
-                      {isAnalyzingImage ? (
-                        <>
-                          <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                          分析中...
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles className="h-3 w-3 mr-1" />
-                          生成关键词
-                        </>
-                      )}
-                    </Button>
                   </div>
                 </div>
               </div>
-              <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
-                isGold ? 'bg-gradient-to-br from-gold to-gold-dark text-black' : 'bg-blue-500 text-white'
-              }`}>
-                <User size={14} />
-              </div>
             </div>
-          )}
+          ) : null}
 
           <div ref={messagesEndRef} />
         </div>
@@ -5489,18 +5485,75 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               onChange={handleImageUpload}
               className="hidden"
             />
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className={`shrink-0 h-7 px-2.5 rounded-md flex items-center gap-1.5 text-[11px] transition-colors ${
-                isGold
-                  ? 'bg-white/[0.04] text-gold-muted/70 hover:text-gold hover:bg-white/[0.08]'
-                  : 'bg-gray-50 text-gray-400 hover:text-gray-600 hover:bg-gray-100'
-              }`}
-              title="上传图片"
-            >
-              <ImageIcon size={12} />
-              <span>图片</span>
-            </button>
+            <div className="relative">
+              <button
+                onClick={() => {
+                  if (canvasImages && canvasImages.length > 0) {
+                    setShowImagePicker(prev => !prev);
+                  } else {
+                    fileInputRef.current?.click();
+                  }
+                }}
+                className={`shrink-0 h-7 px-2.5 rounded-md flex items-center gap-1.5 text-[11px] transition-colors ${
+                  showImagePicker
+                    ? isGold ? 'bg-gold/15 text-gold' : 'bg-blue-100 text-blue-600'
+                    : isGold
+                      ? 'bg-white/[0.04] text-gold-muted/70 hover:text-gold hover:bg-white/[0.08]'
+                      : 'bg-gray-50 text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+                }`}
+                title="添加图片引用"
+              >
+                <ImageIcon size={12} />
+                <span>图片</span>
+              </button>
+              {/* @图片选择弹出框 - 从画布选择图片引用 */}
+              {showImagePicker && canvasImages && canvasImages.length > 0 && (
+                <div className={`absolute bottom-full left-0 mb-1 w-56 max-h-60 rounded-lg border shadow-lg z-50 overflow-hidden ${isGold ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-gray-200'}`}>
+                  <div className={`px-3 py-1.5 text-[10px] font-medium flex items-center justify-between ${isGold ? 'text-gold-muted/60' : 'text-gray-400'}`}>
+                    <span>@图片引用 (可多选)</span>
+                    <button onClick={() => fileInputRef.current?.click()} className={`text-[10px] ${isGold ? 'text-gold/50 hover:text-gold' : 'text-blue-400 hover:text-blue-600'}`}>本地上传</button>
+                  </div>
+                  <div className="overflow-y-auto max-h-48">
+                    {canvasImages.slice().reverse().map((img, idx) => {
+                      const isAdded = activeMentions.some(m => m.type === 'canvas-image' && m.id === img.id);
+                      return (
+                        <button
+                          key={img.id}
+                          onClick={() => {
+                            if (isAdded) {
+                              // 取消引用
+                              setActiveMentions(prev => prev.filter(m => !(m.type === 'canvas-image' && m.id === img.id)));
+                              setPendingImages(prev => prev.filter(p => p.id !== img.id));
+                            } else {
+                              // 添加引用
+                              setActiveMentions(prev => [...prev, {
+                                type: 'canvas-image',
+                                id: img.id,
+                                label: img.prompt?.slice(0, 15) || '画布图片',
+                                imageUrl: img.url,
+                                data: { url: img.url },
+                              }]);
+                              setPendingImages(prev => {
+                                if (prev.some(p => p.id === img.id)) return prev;
+                                return [...prev, { id: img.id, url: img.url, name: img.prompt?.slice(0, 20) || '画布图片' }];
+                              });
+                            }
+                            textareaRef.current?.focus();
+                          }}
+                          className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors ${isGold ? 'text-white/80 hover:bg-white/5' : 'text-gray-700 hover:bg-gray-50'} ${isAdded ? (isGold ? 'bg-gold/10' : 'bg-blue-50') : ''}`}
+                        >
+                          <div className="w-7 h-7 rounded overflow-hidden shrink-0 border border-white/10">
+                            <img src={img.url} alt="" className="w-full h-full object-cover" />
+                          </div>
+                          <span className="truncate flex-1 text-left">{img.prompt?.slice(0, 20) || '图片'}</span>
+                          {isAdded && <span className={`text-[10px] ${isGold ? 'text-gold' : 'text-blue-500'}`}>已引用</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
             <button
               onClick={() => setShowTunePanel(prev => !prev)}
               className={`shrink-0 h-7 px-2.5 rounded-md flex items-center gap-1.5 text-[11px] transition-colors ${

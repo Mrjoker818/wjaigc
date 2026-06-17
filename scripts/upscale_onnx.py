@@ -303,7 +303,7 @@ def main():
     image_b64 = params.get("image", "")
     input_file = params.get("inputFile", "")
     output_file = params.get("outputFile", "")
-    scale = params.get("scale", 4)
+    scale = int(params.get("scale", 4))
     tile_size = params.get("tileSize", 256)
     model_name = params.get("model", "realesrgan-x4plus-fp16")
 
@@ -311,8 +311,9 @@ def main():
         sys.stdout.write(json.dumps({"success": False, "error": "缺少 image 或 inputFile 参数"}))
         return
 
-    if scale not in (2, 4):
-        scale = 4
+    if scale < 2:
+        scale = 2
+    scale = min(scale, 16)  # 安全上限
     tile_size = max(64, min(512, tile_size))
 
     try:

@@ -30,7 +30,7 @@ const UPSCALE_TIMEOUT_MS = 5 * 60 * 1000;
 export interface UpscaleParams {
   imageUrl: string;
   model?: string;
-  scale?: 2 | 4;
+  scale?: number; // 支持 2~16 倍放大
   tileSize?: number;
   outputFormat?: 'png' | 'jpg' | 'webp';
   compression?: number;
@@ -264,14 +264,15 @@ export async function performOnnxUpscale(
 ): Promise<UpscaleResult> {
   const {
     imageUrl: inputImageUrl,
-    scale = UPSCALE_DEFAULT_SCALE as 2 | 4,
+    scale = UPSCALE_DEFAULT_SCALE,
     outputFormat = 'png' as 'png' | 'jpg' | 'jpeg' | 'webp',
     compression = 90,
   } = params;
 
-  // 校验 scale
-  if (scale !== 2 && scale !== 4) {
-    return { success: false, error: `不支持的放大倍率: ${scale}，仅支持 2 和 4` };
+  // 校验 scale (支持 2~16 倍放大)
+  const scaleNum = Math.max(2, Math.min(16, Math.round(scale)));
+  if (scaleNum < 2) {
+    return { success: false, error: `不支持的放大倍率: ${scale}，最小 2 倍` };
   }
 
   // 检查 ONNX 可用性

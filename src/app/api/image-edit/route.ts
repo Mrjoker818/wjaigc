@@ -1900,10 +1900,34 @@ export async function POST(request: NextRequest) {
       if (upscaleMode === 'cpu') {
         try {
           const upscaylModule = await import('@/lib/image-tools/upscayl');
-          const result = await upscaylModule.performOnnxUpscale({
-            imageUrl,
-            scale: scaleVal as 2 | 4,
-          });
+          // ONNX 模型是 4x 模型，支持 scale=2(4x后缩小) 或 scale=4(直接4x)
+          // 对于超过 4x 的请求(如 8x)，需要多轮放大
+          let result: { success: boolean; imageUrl?: string; error?: string; model?: string; originalSize?: { width: number; height: number }; outputSize?: { width: number; height: number } };
+
+          if (scaleVal <= 4) {
+            // 单轮放大: 2x 或 4x
+            result = await upscaylModule.performOnnxUpscale({
+              imageUrl,
+              scale: scaleVal,
+            });
+          } else {
+            // 多轮放大: 先 4x，再继续放大
+            result = await upscaylModule.performOnnxUpscale({
+              imageUrl,
+              scale: 4,
+            });
+            if (result.success && result.imageUrl && scaleVal > 4) {
+              // 第二轮: 从4x结果继续放大到目标倍率
+              const secondScale = Math.min(scaleVal / 4, 4);
+              const secondResult = await upscaylModule.performOnnxUpscale({
+                imageUrl: result.imageUrl,
+                scale: secondScale,
+              });
+              if (secondResult.success) {
+                result = secondResult;
+              }
+            }
+          }
 
           if (result.success && result.imageUrl) {
             // 读取本地输出文件，保存到持久化存储
@@ -1957,6 +1981,10 @@ export async function POST(request: NextRequest) {
 
             console.log(`[image-edit] upscale: CPU ONNX upscale complete. (${(outputBuffer.length / 1024).toFixed(0)}KB)`);
 
+            // 使用后端实际输出尺寸，而非前端估算
+            const actualOutW = result.outputSize?.width || targetW;
+            const actualOutH = result.outputSize?.height || targetH;
+
             return NextResponse.json({
               success: true,
               imageUrl: resultUrl,
@@ -1965,7 +1993,9 @@ export async function POST(request: NextRequest) {
               usedModel: result.model || 'realesrgan-x4plus-fp16',
               scale: scaleVal,
               originalSize: { width: origW, height: origH },
-              outputSize: { width: targetW, height: targetH },
+              outputSize: { width: actualOutW, height: actualOutH },
+              outputWidth: actualOutW,
+              outputHeight: actualOutH,
             });
           }
 
@@ -2020,6 +2050,10 @@ export async function POST(request: NextRequest) {
           action,
           engine: 'ai-upscale-hq',
           usedModel: result.usedModel,
+          originalSize: { width: origW, height: origH },
+          outputSize: { width: targetW, height: targetH },
+          outputWidth: targetW,
+          outputHeight: targetH,
         });
       }
 
@@ -2035,6 +2069,8 @@ export async function POST(request: NextRequest) {
             apiKey: result.apiKey,
             advancedParams: result.advancedParams,
             usedModel: result.usedModel,
+            originalSize: { width: origW, height: origH },
+            outputSize: { width: targetW, height: targetH },
           },
         });
       }
@@ -2046,6 +2082,8 @@ export async function POST(request: NextRequest) {
         engine: 'ai-upscale',
         prompt: upscalePrompt,
         usedModel: result.usedModel,
+        originalSize: { width: origW, height: origH },
+        outputSize: { width: targetW, height: targetH },
       });
     }
 
