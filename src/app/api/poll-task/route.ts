@@ -1120,24 +1120,35 @@ export async function POST(request: NextRequest) {
 
             // 直接使用 AI 输出尺寸，不做 resize
             // AI 模型知道它能增强的最佳分辨率，强行 resize 到更大尺寸只会通过插值补像素 = 模糊
-            // 只添加锐化后处理来增强清晰度
+            // 两步锐化后处理增强清晰度（不做模糊降噪）
             let finalBuf = aiResultBuf;
             if (aiW < upscaleTargetW * 0.9 || aiH < upscaleTargetH * 0.9) {
-              // AI 输出显著小于目标(差距>10%)，添加锐化增强清晰度
-              finalBuf = await sharp(aiResultBuf)
-                .sharpen({ sigma: 0.6, m1: 0.8, m2: 0.3, x1: 1.5, y2: 5, y3: 15 })
+              // AI 输出显著小于目标(差距>10%)，两步锐化增强
+              // Step 1: 中频纹理恢复
+              const step1 = await sharp(aiResultBuf)
+                .sharpen({ sigma: 1.2, m1: 0.8, m2: 0.4, x1: 2, y2: 4, y3: 10 })
                 .png({ quality: 95 })
                 .toBuffer();
-              console.log(`[poll-task] AI Upscale: applied sharpening to ${aiW}x${aiH} result`);
+              // Step 2: 微观边缘增强
+              finalBuf = await sharp(step1)
+                .sharpen({ sigma: 0.3, m1: 0.4, m2: 0.15, x1: 1, y2: 2, y3: 6 })
+                .png({ quality: 95 })
+                .toBuffer();
+              console.log(`[poll-task] AI Upscale: applied 2-step sharpening to ${aiW}x${aiH} result`);
             }
 
-            // 仅在 AI 输出大于目标时才做缩小（精确裁剪到目标尺寸）
+            // 仅在 AI 输出大于目标时才做缩小（精确裁剪到目标尺寸）+ 锐化
             if (aiW > upscaleTargetW && aiH > upscaleTargetH) {
-              finalBuf = await sharp(aiResultBuf)
+              const downscaled = await sharp(aiResultBuf)
                 .resize(upscaleTargetW, upscaleTargetH, { fit: 'fill', kernel: sharp.kernel.lanczos3 })
                 .png({ quality: 95 })
                 .toBuffer();
-              console.log(`[poll-task] AI Upscale: downscaled from ${aiW}x${aiH} to ${upscaleTargetW}x${upscaleTargetH}`);
+              // 缩小后添加锐化补偿
+              finalBuf = await sharp(downscaled)
+                .sharpen({ sigma: 0.8, m1: 0.6, m2: 0.3, x1: 2, y2: 4, y3: 8 })
+                .png({ quality: 95 })
+                .toBuffer();
+              console.log(`[poll-task] AI Upscale: downscaled from ${aiW}x${aiH} to ${upscaleTargetW}x${upscaleTargetH} + sharpened`);
             }
 
             // 持久化最终结果

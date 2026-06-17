@@ -360,13 +360,14 @@ export async function performOnnxUpscale(
       const outW = result.outputSize?.[0] ?? procW * scale;
       const outH = result.outputSize?.[1] ?? procH * scale;
 
-      // 降噪 + 锐化后处理：去除杂点 + 恢复微观纹理细节
+      // ONNX Real-ESRGAN 后处理：两步锐化恢复纹理（不做模糊降噪）
+      // Step 1: 中频纹理恢复
       finalBuffer = Buffer.from(await sharp(finalBuffer)
-        .convolve({
-          width: 3, height: 3,
-          kernel: [1/16, 2/16, 1/16, 2/16, 4/16, 2/16, 1/16, 2/16, 1/16]
-        })
-        .sharpen({ sigma: 0.5, m1: 0.5, m2: 0.3 })
+        .sharpen({ sigma: 1.5, m1: 1.0, m2: 0.5, x1: 2, y2: 4, y3: 10 })
+        .toBuffer());
+      // Step 2: 微观边缘增强
+      finalBuffer = Buffer.from(await sharp(finalBuffer)
+        .sharpen({ sigma: 0.3, m1: 0.6, m2: 0.2, x1: 1, y2: 2, y3: 6 })
         .toBuffer());
 
       // 转换输出格式
@@ -569,23 +570,23 @@ async function performNcnnUpscale(
     const outW = outputMeta.width || procW * scaleNum;
     const outH = outputMeta.height || procH * scaleNum;
 
-    // 对 NCNN Real-ESRGAN 结果进行降噪 + 锐化后处理
-    // Real-ESRGAN 容易产生过度平滑/涂抹感和少量杂点
-    // 使用三步策略：1) 高斯轻微降噪去除杂点 2) 强锐化恢复边缘和纹理 3) 高通叠加增强微细节
+    // NCNN Real-ESRGAN 后处理策略：
+    // Real-ESRGAN 输出的特征：无噪声、边缘干净、但有"过度平滑/涂抹感"（尤其肤色、纹理区域）
+    // 不做高斯模糊降噪（模糊会丢失本就不多的微细节）
+    // 只做精细锐化来恢复 ESRGAN 平滑掉的纹理质感
+    //
+    // 两步锐化：
+    //   1) 大 sigma 锐化：恢复中等尺度纹理（布料纹理、皮肤质感、发丝走向）
+    //   2) 小 sigma 锐化：增强微观边缘（睫毛、发丝末端、细小高光）
     let sharpenPipeline = sharp(outputBuffer)
-      // Step 1: 轻微高斯降噪 — 去除 Real-ESRGAN 可能产生的杂点和色斑
-      .convolve({
-        width: 3, height: 3,
-        kernel: [1/16, 2/16, 1/16, 2/16, 4/16, 2/16, 1/16, 2/16, 1/16] // 高斯 3x3
-      })
-      // Step 2: 强锐化恢复边缘和纹理
+      // Step 1: 中频纹理恢复 — 大 sigma 捕获 ESRGAN 平滑掉的纹理
       .sharpen({
-        sigma: 1.2,    // 较大范围锐化，恢复中等尺度细节
-        m1: 1.5,       // 平坦区域强锐化，对抗ESRGAN平滑
-        m2: 0.8,       // 边缘区域适度锐化，避免过锐振铃
+        sigma: 1.5,    // 大范围：恢复布料纹理、皮肤质感等中频细节
+        m1: 1.0,       // 平坦区域适度锐化（肤色等）
+        m2: 0.5,       // 边缘区域轻微锐化（避免边缘过锐振铃）
         x1: 2,         // 亮边阈值
         y2: 4,         // 暗边阈值
-        y3: 8,         // 平坦区域阈值（更大=更多区域被锐化）
+        y3: 10,        // 平坦区域阈值
       });
 
     // 第一步锐化后的中间结果
@@ -598,38 +599,19 @@ async function performNcnnUpscale(
       midBuffer = await sharpenPipeline.png({ quality: Math.max(compression, 95) }).toBuffer() as Buffer;
     }
 
-    // 第二步：高通叠加 (High-pass overlay) 增强微细节
-    // 原理：提取高频细节 → 以低透明度叠加回原图 → 增强纹理而不改变整体色调
-    const originalForOverlay = sharp(midBuffer);
-    const blurredForHP = sharp(midBuffer).blur(1.5); // 模糊版用于提取高频
-    const [origBuf, blurBuf] = await Promise.all([
-      originalForOverlay.raw().toBuffer(),
-      blurredForHP.raw().toBuffer(),
-    ]);
-    const overlayMeta = await sharp(midBuffer).metadata();
-    const channels = overlayMeta.channels || 3;
+    // Step 2: 微观边缘增强 — 小 sigma 锐化微观细节
+    const finalBuffer = await sharp(midBuffer)
+      .sharpen({
+        sigma: 0.3,    // 小范围：仅增强最细微的边缘
+        m1: 0.6,       // 平坦区域轻微增强
+        m2: 0.2,       // 边缘区域极轻微（已在第一步处理过）
+        x1: 1,         // 亮边阈值
+        y2: 2,         // 暗边阈值
+        y3: 6,         // 平坦区域阈值
+      })
+      .toBuffer() as Buffer;
 
-    // 高通 = 原图 - 模糊 → 叠加到原图 (30% 强度)
-    const hpBuffer = Buffer.alloc(origBuf.length);
-    const hpStrength = 0.3;
-    for (let i = 0; i < origBuf.length; i++) {
-      const highPass = origBuf[i] - blurBuf[i]; // 高频细节
-      const blended = origBuf[i] + highPass * hpStrength;
-      hpBuffer[i] = Math.max(0, Math.min(255, Math.round(blended)));
-    }
-
-    // 重组锐化+高通叠加结果
-    let finalSharp = sharp(hpBuffer, {
-      raw: { width: outW, height: outH, channels: channels as 1 | 2 | 3 | 4 }
-    });
-
-    if (outputFormat === 'jpg' || outputFormat === 'jpeg') {
-      outputBuffer = await finalSharp.jpeg({ quality: compression }).toBuffer() as Buffer;
-    } else if (outputFormat === 'webp') {
-      outputBuffer = await finalSharp.webp({ quality: compression }).toBuffer() as Buffer;
-    } else {
-      outputBuffer = await finalSharp.png({ quality: compression }).toBuffer() as Buffer;
-    }
+    outputBuffer = finalBuffer;
 
     // 保存到输出目录
     const filename = generateFilename('upscale', outputFormat);
@@ -705,7 +687,10 @@ export async function performUpscaleAuto(
 
     ensureOutputDirs();
 
-    let pipeline = sharp(inputBuffer).resize(outW, outH, { kernel: 'lanczos3' });
+    let pipeline = sharp(inputBuffer)
+      .resize(outW, outH, { kernel: 'lanczos3' })
+      // Lanczos3 插值天然偏软，添加锐化补偿
+      .sharpen({ sigma: 0.8, m1: 0.8, m2: 0.4, x1: 2, y2: 4, y3: 8 });
     const outputFormat: string = params.outputFormat || 'png';
     if (outputFormat === 'jpg' || outputFormat === 'jpeg') {
       pipeline = pipeline.jpeg({ quality: params.compression || 90 });

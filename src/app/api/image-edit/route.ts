@@ -1989,18 +1989,19 @@ export async function POST(request: NextRequest) {
       const imageBase64ForVision = await resolveImageToBase64(imageUrl);
       const descSnippet = prompt || '';
 
-      // Step 2: 构建整图放大 prompt — 极致忠实还原 + 细节增强 + 去噪
+      // Step 2: 构建整图放大 prompt — 忠实还原优先 + 适度细节增强
       const upscalePrompt = [
-        `Exact pixel-faithful upscale with enhanced micro-detail. CRITICAL RULES: 1) Preserve EXACT identity, expression, facial geometry, eye shape, lip shape — zero alteration. 2) ADD realistic micro-details ONLY: individual hair strands, skin pores, fabric thread texture, eyelash details, iris patterns. 3) SHARPEN edges and fine details without over-sharpening. 4) REMOVE noise, compression artifacts, JPEG blocks, grain, speckles, and color splotches. 5) Background must remain pixel-identical — no new objects, no color shifts, no layout changes, no position drift. 6) This is a RESIZE operation, NOT a creative generation — do NOT add creative interpretation, do NOT change lighting, do NOT change colors, do NOT move any element. 7) Think of this as re-scanning the same scene with a higher-resolution sensor: same content, more detail, less noise. 8k uhd, ultra-sharp, photorealistic, forensic-level detail, noise-free, artifact-free.`,
+        `High-fidelity upscale. CRITICAL: 1) This is a RESIZE operation, NOT creative generation. 2) Preserve EXACT content: identity, expression, facial geometry, eye/lip shape, composition, colors, lighting — ZERO alteration. 3) SHARPEN existing edges and details — do NOT invent new texture. 4) REMOVE all noise, compression artifacts, JPEG blocks, grain, speckles, color splotches. 5) Background must be pixel-identical — no new objects, no color shifts, no position drift. 6) Do NOT add skin pores, hair strands, or fabric threads that don't exist in the original. 7) Output should look like the same image captured at higher resolution, not a re-interpretation. Clean, sharp, faithful, noise-free, artifact-free.`,
         descSnippet ? `Original content: ${descSnippet.substring(0, 300)}.` : '',
       ].filter(Boolean).join(' ');
 
-      const negativePrompt = '(worst quality, low quality, normal quality:2), blurry, pixelated, jpeg artifacts, painting, oil painting, illustration, cartoon, anime, over-smoothed, plastic skin, waxy, airbrushed, soft focus, smoothed, gaussian blur, changed content, new elements, different colors, altered composition, deformed, watermark, text, makeup change, flat, cartoonish, drawn, sketch, CG, 3d render, unnatural, noise, grain, speckle, color splotch, compression block, ringing, oversharp, halo, chromatic aberration, moire, shifted, misaligned, moved, position change, content drift';
+      const negativePrompt = '(worst quality, low quality, normal quality:2), blurry, pixelated, jpeg artifacts, painting, oil painting, illustration, cartoon, anime, over-smoothed, plastic skin, waxy, airbrushed, soft focus, smoothed, gaussian blur, changed content, new elements, different colors, altered composition, deformed, watermark, text, makeup change, flat, cartoonish, drawn, sketch, CG, 3d render, unnatural, noise, grain, speckle, color splotch, compression block, ringing, halo, chromatic aberration, moire, added texture, fake skin pores, fake hair strands, invented details, painted over, retouched, HDR, oversaturated, shifted, misaligned, moved, position change, content drift, creative interpretation, style change';
 
       // Step 3: 提交整图 AI 放大（仅使用用户指定的模型，不自动尝试其他模型）
-      // strength 0.40: 适度创作自由度，平衡忠实还原与细节增强
+      // strength 0.25: 低创作自由度，优先忠实还原
+      // 0.40+ 会导致明显杂点和色斑（AI "创造" 不存在的纹理）
+      // 0.15 以下细节增强不足
       // 配合 input_fidelity: 'high' 和严格负面提示词，确保零偏移
-      // 0.45+ 会导致明显内容偏移(人脸变形/物体位移)，0.2以下细节增强不足
       const specifiedModel = modelStr || '';
       const specifiedProviderId = providerId || '';
       console.log(`[image-edit] AI upscale: using specified model=${specifiedModel}, providerId=${specifiedProviderId}`);
@@ -2046,7 +2047,7 @@ export async function POST(request: NextRequest) {
         n: 1,
         image: imageBase64ForVision,
         image_urls: [imageBase64ForVision],
-        strength: 0.40,
+        strength: 0.25,
         input_fidelity: 'high',
         negative_prompt: negativePrompt,
       }), 'AI放大', '/images/generations');
@@ -2071,26 +2072,27 @@ export async function POST(request: NextRequest) {
             // AI 放大输出通常不带 alpha 通道；如有 alpha，convolve+sharpen 在 RGBA 上也能正确处理
             const resizedBuffer = await sharp(aiBuffer)
               .resize(targetW, targetH, { kernel: sharp.kernel.lanczos3 })
-              // 降噪：去除 AI 放大可能引入的杂点和色斑
-              .convolve({
-                width: 3, height: 3,
-                kernel: [1/16, 2/16, 1/16, 2/16, 4/16, 2/16, 1/16, 2/16, 1/16] // 高斯 3x3 轻微降噪
-              })
-              // 锐化：恢复降噪损失的边缘细节 + 增强 AI 添加的微细节
-              .sharpen({ sigma: 0.5, m1: 0.6, m2: 0.3, x1: 1.2, y2: 6, y3: 12 })
+              // AI 放大后处理：不做模糊降噪（会丢失微细节），两步锐化恢复纹理
+              // Step 1: 中频纹理恢复
+              .sharpen({ sigma: 1.2, m1: 0.8, m2: 0.4, x1: 2, y2: 4, y3: 10 })
+              .png({ quality: 95 })
+              .toBuffer();
+            // Step 2: 微观边缘增强
+            const finalResizedBuffer = await sharp(resizedBuffer)
+              .sharpen({ sigma: 0.3, m1: 0.4, m2: 0.15, x1: 1, y2: 2, y3: 6 })
               .png({ quality: 95 })
               .toBuffer();
 
             const timestamp = Date.now();
             const randomSuffix = Math.random().toString(36).substring(2, 8);
             const filename = `upscale_ai_${timestamp}_${randomSuffix}.png`;
-            const savedPath = await saveBufferToPublic(resizedBuffer, filename);
+            const savedPath = await saveBufferToPublic(finalResizedBuffer, filename);
 
             const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
             const domainBase = domain.startsWith('http') ? domain.replace(/\/+$/, '') : `https://${domain.replace(/\/+$/, '')}`;
             const finalUrl = savedPath.startsWith('data:') ? savedPath : `${domainBase}${savedPath}`;
 
-            console.log(`[image-edit] AI upscale downsampled to ${targetW}x${targetH} (${(resizedBuffer.length / 1024).toFixed(0)}KB)`);
+            console.log(`[image-edit] AI upscale downsampled to ${targetW}x${targetH} (${(finalResizedBuffer.length / 1024).toFixed(0)}KB)`);
             return { url: finalUrl, actualW: targetW, actualH: targetH };
           }
 
@@ -2099,13 +2101,15 @@ export async function POST(request: NextRequest) {
           // 不再二次放大到4x，因为：1.二次放大会引入涂抹感 2.用户期望的是AI增强后的实际输出尺寸
           console.log(`[image-edit] AI upscale output ${aiW}x${aiH} < target ${targetW}x${targetH}. Accepting AI enhanced result as-is (AI determined optimal resolution).`);
 
-          // 对 AI 输出应用锐化增强，减少 AI 模型固有的轻微模糊
-          const sharpenedBuffer = await sharp(aiBuffer)
-            .convolve({
-              width: 3, height: 3,
-              kernel: [1/16, 2/16, 1/16, 2/16, 4/16, 2/16, 1/16, 2/16, 1/16]
-            })
-            .sharpen({ sigma: 0.6, m1: 0.8, m2: 0.3, x1: 1.2, y2: 6, y3: 12 })
+          // 对 AI 输出应用两步锐化增强，不做模糊降噪
+          // Step 1: 中频纹理恢复
+          const step1Buffer = await sharp(aiBuffer)
+            .sharpen({ sigma: 1.2, m1: 0.8, m2: 0.4, x1: 2, y2: 4, y3: 10 })
+            .png({ quality: 95 })
+            .toBuffer();
+          // Step 2: 微观边缘增强
+          const sharpenedBuffer = await sharp(step1Buffer)
+            .sharpen({ sigma: 0.3, m1: 0.4, m2: 0.15, x1: 1, y2: 2, y3: 6 })
             .png({ quality: 95 })
             .toBuffer();
 
