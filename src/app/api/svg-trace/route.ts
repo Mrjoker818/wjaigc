@@ -1839,6 +1839,7 @@ export async function POST(req: NextRequest) {
               const pipelineResult = await vectorizePipeline({
                 imageUrl,
                 imageBuffer: inputBufferForPipeline,
+                imageDataUrl: `data:image/png;base64,${inputBufferForPipeline.toString('base64')}`,
                 width: imgWidth,
                 height: imgHeight,
                 engine: requestedEngine !== 'auto' ? requestedEngine as VectorizeEngine : undefined,

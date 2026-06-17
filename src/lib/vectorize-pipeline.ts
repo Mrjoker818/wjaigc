@@ -15,6 +15,15 @@ import { recraftVectorize, findRecraftProvider, type RecraftVectorizeResult } fr
 import { vlmVectorize, findVlmProvider, type VlmVectorizeResult } from './vectorize-vlm';
 import { analyzeFromMetadata, analyzeWithSharp, type ImageAnalysis } from './vectorize-analyzer';
 
+/** 从 buffer 头部检测图片 MIME 类型 */
+function detectImageMimeFromBuffer(buffer: Buffer): string {
+  if (buffer[0] === 0x89 && buffer[1] === 0x50) return 'image/png';
+  if (buffer[0] === 0xFF && buffer[1] === 0xD8) return 'image/jpeg';
+  if (buffer[0] === 0x47 && buffer[1] === 0x49) return 'image/gif';
+  if (buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[4] === 0x57 && buffer[5] === 0x45) return 'image/webp';
+  return 'image/png';
+}
+
 /** 矢量化引擎类型 */
 export type VectorizeEngine = 'recraft' | 'vtracer' | 'vtracer-bw' | 'vlm';
 
@@ -235,9 +244,15 @@ export async function vectorizePipeline(
 
     if (engine === 'vlm') {
       onProgress?.(engine, '正在调用 VLM 视觉模型...');
+      // 确保 VLM 收到 base64 data URL（外部 API 无法访问本地路径）
+      let vlmImageDataUrl = imageDataUrl;
+      if (!vlmImageDataUrl && imageBuffer) {
+        const mime = detectImageMimeFromBuffer(imageBuffer);
+        vlmImageDataUrl = `data:${mime};base64,${imageBuffer.toString('base64')}`;
+      }
       const result = await vlmVectorize({
         imageUrl,
-        imageDataUrl,
+        imageDataUrl: vlmImageDataUrl,
         customPrompt,
         maxRetries: 1,
       });

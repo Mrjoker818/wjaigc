@@ -565,21 +565,59 @@ async function performNcnnUpscale(
     const outW = outputMeta.width || procW * scaleNum;
     const outH = outputMeta.height || procH * scaleNum;
 
-    // 对 NCNN Real-ESRGAN 结果进行适度锐化后处理
-    // Real-ESRGAN 容易产生过度平滑/涂抹感，适度锐化可以恢复微细节纹理
-    const sharpenPipeline = sharp(outputBuffer).sharpen({
-      sigma: 0.5,    // 轻微锐化，避免过锐
-      m1: 0.5,       // 平坦区域锐化强度
-      m2: 0.3,       // 边缘区域锐化强度
+    // 对 NCNN Real-ESRGAN 结果进行强锐化后处理
+    // Real-ESRGAN 容易产生过度平滑/涂抹感，需要强锐化恢复微细节纹理
+    // 使用两步策略：1) 强锐化恢复边缘和纹理 2) 高通叠加增强微细节
+    let sharpenPipeline = sharp(outputBuffer).sharpen({
+      sigma: 1.2,    // 较大范围锐化，恢复中等尺度细节
+      m1: 1.5,       // 平坦区域强锐化，对抗ESRGAN平滑
+      m2: 0.8,       // 边缘区域适度锐化，避免过锐振铃
+      x1: 2,         // 亮边阈值
+      y2: 4,         // 暗边阈值
+      y3: 8,         // 平坦区域阈值（更大=更多区域被锐化）
     });
 
-    // 转换输出格式（含锐化）
+    // 第一步锐化后的中间结果
+    let midBuffer: Buffer;
     if (outputFormat === 'jpg' || outputFormat === 'jpeg') {
-      outputBuffer = await sharpenPipeline.jpeg({ quality: compression }).toBuffer() as Buffer;
+      midBuffer = await sharpenPipeline.jpeg({ quality: Math.max(compression, 95) }).toBuffer() as Buffer;
     } else if (outputFormat === 'webp') {
-      outputBuffer = await sharpenPipeline.webp({ quality: compression }).toBuffer() as Buffer;
+      midBuffer = await sharpenPipeline.webp({ quality: Math.max(compression, 95) }).toBuffer() as Buffer;
     } else {
-      outputBuffer = await sharpenPipeline.png({ quality: compression }).toBuffer() as Buffer;
+      midBuffer = await sharpenPipeline.png({ quality: Math.max(compression, 95) }).toBuffer() as Buffer;
+    }
+
+    // 第二步：高通叠加 (High-pass overlay) 增强微细节
+    // 原理：提取高频细节 → 以低透明度叠加回原图 → 增强纹理而不改变整体色调
+    const originalForOverlay = sharp(midBuffer);
+    const blurredForHP = sharp(midBuffer).blur(1.5); // 模糊版用于提取高频
+    const [origBuf, blurBuf] = await Promise.all([
+      originalForOverlay.raw().toBuffer(),
+      blurredForHP.raw().toBuffer(),
+    ]);
+    const overlayMeta = await sharp(midBuffer).metadata();
+    const channels = overlayMeta.channels || 3;
+
+    // 高通 = 原图 - 模糊 → 叠加到原图 (30% 强度)
+    const hpBuffer = Buffer.alloc(origBuf.length);
+    const hpStrength = 0.3;
+    for (let i = 0; i < origBuf.length; i++) {
+      const highPass = origBuf[i] - blurBuf[i]; // 高频细节
+      const blended = origBuf[i] + highPass * hpStrength;
+      hpBuffer[i] = Math.max(0, Math.min(255, Math.round(blended)));
+    }
+
+    // 重组锐化+高通叠加结果
+    let finalSharp = sharp(hpBuffer, {
+      raw: { width: outW, height: outH, channels: channels as 1 | 2 | 3 | 4 }
+    });
+
+    if (outputFormat === 'jpg' || outputFormat === 'jpeg') {
+      outputBuffer = await finalSharp.jpeg({ quality: compression }).toBuffer() as Buffer;
+    } else if (outputFormat === 'webp') {
+      outputBuffer = await finalSharp.webp({ quality: compression }).toBuffer() as Buffer;
+    } else {
+      outputBuffer = await finalSharp.png({ quality: compression }).toBuffer() as Buffer;
     }
 
     // 保存到输出目录

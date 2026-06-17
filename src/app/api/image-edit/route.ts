@@ -1991,15 +1991,16 @@ export async function POST(request: NextRequest) {
 
       // Step 2: 构建整图放大 prompt — 专业摄影级约束，最大化细节还原
       const upscalePrompt = [
-        `Upscale this image to ultra-high resolution with maximum photorealistic detail preservation. CRITICAL RULES: 1) Preserve the EXACT identity, expression, and facial geometry of any subjects — no alteration to face shape, features, or expression. 2) Only allow subtle feature cleanup without changing identity. 3) Keep the background completely identical — no replacement, no alteration, no new objects, no layout shifts. 4) The environment must look exactly the same with enhanced clarity. ENHANCE: add realistic fine textures (skin pores, fabric weave, hair strands), sharpen edges, recover lost micro-details, improve clarity and sharpness. The result must look like the same image captured with a Sony A1 at 85mm f/1.4, f/1.6, ISO 100, 1/200s — razor-sharp with natural bokeh and professional-grade resolution. Do not add, remove, or change any objects. 8k uhd, extremely detailed, ultra-sharp, photorealistic, studio quality.`,
+        `Ultra-sharp high-resolution upscale. ABSOLUTELY NO smoothing, NO painting effect, NO oil painting, NO airbrushing, NO waxy skin, NO plastic texture. This must look like a razor-sharp photograph — NOT an illustration or painting. CRITICAL: 1) Preserve EXACT identity, expression, facial geometry — zero alteration to face/eyes/lips. 2) ADD realistic micro-details: individual hair strands, skin pores, fabric thread texture, eyelash details, iris patterns. 3) SHARPEN all edges and fine details to maximum clarity. 4) Background must remain identical — no new objects, no color shifts, no layout changes. 5) Enhance clarity and definition like re-capturing with Sony A1 + 85mm f/1.4 lens at f/5.6, ISO 100 — deep depth of field, everything razor-sharp. The result MUST be photorealistic with visible fine texture detail. No soft focus, no blur, no smoothing. 8k uhd, extremely detailed, ultra-sharp, photorealistic, forensic-level detail, studio quality.`,
         descSnippet ? `Original content: ${descSnippet.substring(0, 300)}.` : '',
       ].filter(Boolean).join(' ');
 
-      const negativePrompt = '(worst quality, low quality, normal quality:2), blurry, pixelated, jpeg artifacts, painting, oil painting, illustration, cartoon, anime, over-smoothed, plastic skin, waxy, changed content, new elements, different colors, altered composition, deformed, watermark, text, makeup change';
+      const negativePrompt = '(worst quality, low quality, normal quality:2), blurry, pixelated, jpeg artifacts, painting, oil painting, illustration, cartoon, anime, over-smoothed, plastic skin, waxy, airbrushed, soft focus, smoothed, denoised, gaussian blur, changed content, new elements, different colors, altered composition, deformed, watermark, text, makeup change, flat, cartoonish, drawn, sketch,CG, 3d render, unnatural';
 
       // Step 3: 提交整图 AI 放大
-      // strength 0.18-0.22: 最佳平衡点 — AI 足够增强纹理细节，同时不过度改变画面
-      // >0.3 容易产生涂抹感/油画感，<0.1 几乎不增加细节
+      // strength 0.4-0.5: 让AI有足够空间增强细节纹理
+      // 配合严格的负面提示词和内容约束，防止涂抹/油画/内容偏移
+      // 0.2以下几乎不增加细节(依然模糊)，0.3-0.5是最佳增强区间
       const result = await autoTrySubmitImageTask(candidateModels, (m) => ({
         model: m,
         prompt: upscalePrompt,
@@ -2007,7 +2008,7 @@ export async function POST(request: NextRequest) {
         n: 1,
         image: imageBase64ForVision,
         image_urls: [imageBase64ForVision],
-        strength: 0.20,
+        strength: 0.45,
         input_fidelity: 'high',
         negative_prompt: negativePrompt,
       }), 'AI放大');
@@ -2024,11 +2025,12 @@ export async function POST(request: NextRequest) {
           const aiW = aiMeta.width || targetW;
           const aiH = aiMeta.height || targetH;
 
-          // 情况1: AI 输出 >= 目标尺寸 → 下采样 (保留细节，缩小不会模糊)
+          // 情况1: AI 输出 >= 目标尺寸 → 下采样 + 锐化增强细节
           if (aiW >= targetW && aiH >= targetH) {
-            console.log(`[image-edit] AI upscale output ${aiW}x${aiH} >= target ${targetW}x${targetH}, downsampling...`);
+            console.log(`[image-edit] AI upscale output ${aiW}x${aiH} >= target ${targetW}x${targetH}, downsampling + sharpening...`);
             const resizedBuffer = await sharp(aiBuffer)
               .resize(targetW, targetH, { fit: 'fill', kernel: sharp.kernel.lanczos3 })
+              .sharpen({ sigma: 0.6, m1: 0.8, m2: 0.4, x1: 1.5, y2: 8, y3: 15 })
               .png({ quality: 95 })
               .toBuffer();
 

@@ -350,8 +350,13 @@ async function tryJsonVectorize(
   mode: string,
   model: string,
 ): Promise<{ svg: string; engine: string } | null> {
+  // 优先使用 base64 数据，确保外部 API 可以访问图片
+  const effectiveImageUrl = imageBase64
+    ? `data:image/png;base64,${imageBase64}`
+    : buildPublicImageUrl(imageUrl);
+
   const vectorizeRequestBody: Record<string, unknown> = {
-    imageUrl: buildPublicImageUrl(imageUrl),
+    imageUrl: effectiveImageUrl,
     imageBase64: imageBase64 || undefined,
     layerId,
     mode,
@@ -769,9 +774,15 @@ export async function POST(req: NextRequest) {
     // 1. 统一矢量化管线 (Recraft Vectorize → VLM → vtracer)
     console.log('[vectorize] Using unified pipeline...');
     try {
+      // 为 VLM 准备 base64 data URL（外部 API 无法访问本地路径）
+      const pipelineImageDataUrl = imageBase64
+        ? `data:${detectImageMime(imageUrl, imageBuffer || Buffer.alloc(0))};base64,${imageBase64}`
+        : undefined;
+
       const pipelineResult = await vectorizePipeline({
         imageUrl,
         imageBuffer: imageBuffer || undefined,
+        imageDataUrl: pipelineImageDataUrl,
         width: origWidth || undefined,
         height: origHeight || undefined,
         mode: (mode === 'line-art' ? 'lineart' : mode === 'logo' ? 'color' : 'color') as 'color' | 'lineart',

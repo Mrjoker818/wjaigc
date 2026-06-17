@@ -248,15 +248,22 @@ export async function vlmVectorize(
   }
 
   const { baseUrl, apiKey, model } = provider;
+  console.log(`[vectorize-vlm] Using provider: baseUrl=${baseUrl}, model=${model}`);
   const maxRetries = options.maxRetries ?? 1;
+
+  // 确保 VLM 收到可访问的图片数据：base64 data URL 优先于原始 URL
+  const effectiveImageUrl = options.imageDataUrl || options.imageUrl;
+  if (!options.imageDataUrl && !options.imageUrl.startsWith('http') && !options.imageUrl.startsWith('data:')) {
+    console.warn(`[vectorize-vlm] imageUrl is not publicly accessible: ${options.imageUrl.substring(0, 80)}... — VLM may fail to read the image`);
+  }
 
   let lastError = '';
   
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       const messages = buildVlmMessages(
-        options.imageUrl,
-        options.imageDataUrl,
+        effectiveImageUrl,
+        undefined, // 已合并到 effectiveImageUrl
         options.customPrompt,
         attempt > 0,
       );
@@ -279,6 +286,7 @@ export async function vlmVectorize(
       if (!response.ok) {
         const errorText = await response.text().catch(() => '');
         lastError = `VLM API 返回 HTTP ${response.status}: ${errorText.slice(0, 200)}`;
+        console.warn(`[vectorize-vlm] API error (attempt ${attempt + 1}/${maxRetries + 1}): ${lastError}`);
         continue;
       }
 
@@ -287,6 +295,7 @@ export async function vlmVectorize(
       
       if (!content) {
         lastError = 'VLM 返回空内容';
+        console.warn(`[vectorize-vlm] Empty response (attempt ${attempt + 1}/${maxRetries + 1}), response keys: ${Object.keys(data).join(',')}`);
         continue;
       }
 
@@ -294,6 +303,7 @@ export async function vlmVectorize(
       const rawSvg = extractSvgFromResponse(content);
       if (!rawSvg) {
         lastError = `VLM 未生成有效 SVG，原始回复: ${content.slice(0, 300)}`;
+        console.warn(`[vectorize-vlm] No valid SVG extracted (attempt ${attempt + 1}/${maxRetries + 1})`);
         continue;
       }
 
@@ -323,6 +333,7 @@ export async function vlmVectorize(
       };
     } catch (err) {
       lastError = `VLM 请求失败: ${err instanceof Error ? err.message : String(err)}`;
+      console.warn(`[vectorize-vlm] Request failed (attempt ${attempt + 1}/${maxRetries + 1}): ${lastError}`);
     }
   }
 
