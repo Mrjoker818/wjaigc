@@ -3722,6 +3722,31 @@ export function InfiniteCanvas({
           apiProvider: data.providerName,
         }));
         onImagesChange([...imagesRef.current, ...newImages]);
+        // ★ 异步修正：API 可能忽略 size 参数返回不同尺寸的图片，需检测实际像素尺寸并修正
+        newImages.forEach((newImg) => {
+          const vImg = new Image();
+          vImg.onload = () => {
+            const nW = vImg.naturalWidth;
+            const nH = vImg.naturalHeight;
+            if (nW > 0 && nH > 0 && (nW !== actualW || nH !== actualH)) {
+              // API 返回了与请求不同的尺寸，修正显示尺寸和原始尺寸
+              const displayH = phHeight;
+              const correctedDisplayW = Math.round(displayH * nW / nH);
+              const updated = imagesRef.current.map(i =>
+                i.id === newImg.id ? {
+                  ...i,
+                  originalWidth: nW,
+                  originalHeight: nH,
+                  width: correctedDisplayW,
+                  height: displayH,
+                } : i
+              );
+              imagesRef.current = updated;
+              onImagesChange(updated);
+            }
+          };
+          vImg.src = newImg.url;
+        });
         // Reset group: keep toolbar visible, clear result for next generation
         setGenGroups(prev => prev.map(g => {
           if (g.id !== group.id) return g;
@@ -3868,6 +3893,30 @@ export function InfiniteCanvas({
               apiProvider: providerId ? providerId.split('::')[0] : undefined,
             }));
             onImagesChange([...imagesRef.current, ...resultImages]);
+            // ★ 异步修正：API 可能忽略 size 参数返回不同尺寸的图片
+            resultImages.forEach((newImg) => {
+              const vImg = new Image();
+              vImg.onload = () => {
+                const nW = vImg.naturalWidth;
+                const nH = vImg.naturalHeight;
+                if (nW > 0 && nH > 0 && (nW !== actualW || nH !== actualH)) {
+                  const displayH = phHeight;
+                  const correctedDisplayW = Math.round(displayH * nW / nH);
+                  const updated = imagesRef.current.map(i =>
+                    i.id === newImg.id ? {
+                      ...i,
+                      originalWidth: nW,
+                      originalHeight: nH,
+                      width: correctedDisplayW,
+                      height: displayH,
+                    } : i
+                  );
+                  imagesRef.current = updated;
+                  onImagesChange(updated);
+                }
+              };
+              vImg.src = newImg.url;
+            });
             setGenGroups(prev => prev.map(g => {
               if (g.id !== group.id) return g;
               return {
@@ -3999,31 +4048,38 @@ export function InfiniteCanvas({
     imagesRef.current = nextImages;
     onImagesChange(nextImages);
 
-    // ★ 异步验证修正：如果 originalWidth 仍等于显示宽度，从图片真实像素尺寸修正
+    // ★ 异步验证修正：始终从图片真实像素尺寸修正 originalWidth/Height 和 width/height
+    // 因为 API 可能忽略 size 参数返回不同尺寸的图片（特别是 /images/edits 端点）
     const imgToVerify = completedImage as CanvasImage | null;
-    if (imgToVerify) {
-      // 如果 originalWidth 缺失或等于显示宽度（说明可能是错误的 fallback），异步加载真实尺寸
-      if (!imgToVerify.originalWidth || !imgToVerify.originalHeight ||
-          (imgToVerify.originalWidth === Math.round(imgToVerify.width) && imgToVerify.originalHeight === Math.round(imgToVerify.height))) {
-        const verifyImg = new Image();
-        const verifyUrl = imgToVerify.url;
-        verifyImg.onload = () => {
-          const natW = verifyImg.naturalWidth;
-          const natH = verifyImg.naturalHeight;
-          if (natW > 0 && natH > 0) {
-            // 只有真实尺寸与当前记录不同时才更新
-            const currentImg = imagesRef.current.find(i => i.id === id);
-            if (currentImg && (currentImg.originalWidth !== natW || currentImg.originalHeight !== natH)) {
-              const updated = imagesRef.current.map(i =>
-                i.id === id ? { ...i, originalWidth: natW, originalHeight: natH } : i
-              );
-              imagesRef.current = updated;
-              onImagesChange(updated);
-            }
+    if (imgToVerify && imgToVerify.url) {
+      const verifyImg = new Image();
+      const verifyUrl = imgToVerify.url;
+      verifyImg.onload = () => {
+        const natW = verifyImg.naturalWidth;
+        const natH = verifyImg.naturalHeight;
+        if (natW > 0 && natH > 0) {
+          const currentImg = imagesRef.current.find(i => i.id === id);
+          if (currentImg && (currentImg.originalWidth !== natW || currentImg.originalHeight !== natH)) {
+            // ★ 同时更新显示尺寸(width/height)以匹配实际图片比例
+            // 避免显示尺寸与实际图片比例不一致导致 object-cover 裁剪
+            const currentDisplayH = currentImg.height;
+            const correctedDisplayW = Math.round(currentDisplayH * natW / natH);
+            const updated = imagesRef.current.map(i =>
+              i.id === id ? {
+                ...i,
+                originalWidth: natW,
+                originalHeight: natH,
+                // 按实际图片比例修正显示宽度，保持高度不变
+                width: correctedDisplayW,
+                height: currentDisplayH,
+              } : i
+            );
+            imagesRef.current = updated;
+            onImagesChange(updated);
           }
-        };
-        verifyImg.src = verifyUrl;
-      }
+        }
+      };
+      verifyImg.src = verifyUrl;
     }
     const selectedCompleted = nextImages.find(image => image.id === id && !image.isProcessingPlaceholder) || null;
     if (selectedCompleted) {

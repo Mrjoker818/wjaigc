@@ -507,6 +507,12 @@ export async function POST(request: NextRequest) {
 
       // 添加参考图片
       const hasRefImages = accessibleReferenceImages.length > 0 && currentModelConfig.supportsImageToImage;
+      // ★ 参考图组(reference/fusion) vs 图片编辑(erase/mask/outpaint) 的关键区别：
+      // - 参考图组：用户希望按设定的尺寸生成新图，参考图仅作为风格/构图参考 → 不设置 image 字段，
+      //   使用 /images/generations 端点，确保 API 遵守 size 参数
+      // - 图片编辑：用户要求在原图基础上修改（擦除/蒙版/扩展）→ 必须设置 image 字段，
+      //   使用 /images/edits 端点，强制 AI 处理源图
+      const isReferenceOnly = referenceMode === 'reference' || referenceMode === 'fusion';
       if (hasRefImages) {
         // 始终提供 image_urls（大多数 API 代理支持此字段传递参考图 URL）
         requestBody.image_urls = accessibleReferenceImages;
@@ -514,69 +520,66 @@ export async function POST(request: NextRequest) {
         if (typeof strength === 'number' && strength > 0 && strength <= 1) {
           requestBody.strength = strength;
         }
-        // 为 /images/edits 端点同时提供 image 字段（base64 格式）
-        // /images/edits 将 image 视为必须编辑的源图（AI 无法忽略），而 image_urls 是可选参考
-        const firstRefImage = accessibleReferenceImages[0];
-        if (firstRefImage) {
-          if (firstRefImage.startsWith('data:')) {
-            // 已经是 base64 data URL，直接使用（但压缩过大的图）
-            requestBody.image = firstRefImage;
-          } else if (firstRefImage.startsWith('/api/serve-upload/') || firstRefImage.startsWith('/uploads/')) {
-            // 内部路径：直接从本地文件系统读取，避免 HTTP 下载开销
-            try {
-              const fs = await import('fs/promises');
-              const path = await import('path');
-              const workspacePath = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
-              const publicDir = path.join(workspacePath, 'public');
-              let filePath = '';
-              if (firstRefImage.startsWith('/api/serve-upload/')) {
-                const relativePath = firstRefImage.replace('/api/serve-upload/', '');
-                filePath = path.join(publicDir, relativePath);
-              } else {
-                filePath = path.join(publicDir, firstRefImage.replace(/^\//, ''));
+        // ★ 只有非参考图模式（即图片编辑模式）才设置 image 字段
+        // 参考图组模式下，不设置 image 字段，让 API 使用 /images/generations 端点并遵守 size 参数
+        // 否则 /images/edits 会忽略 size，以原图尺寸生成结果
+        if (!isReferenceOnly) {
+          const firstRefImage = accessibleReferenceImages[0];
+          if (firstRefImage) {
+            if (firstRefImage.startsWith('data:')) {
+              requestBody.image = firstRefImage;
+            } else if (firstRefImage.startsWith('/api/serve-upload/') || firstRefImage.startsWith('/uploads/')) {
+              try {
+                const fs = await import('fs/promises');
+                const path = await import('path');
+                const workspacePath = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
+                const publicDir = path.join(workspacePath, 'public');
+                let filePath = '';
+                if (firstRefImage.startsWith('/api/serve-upload/')) {
+                  const relativePath = firstRefImage.replace('/api/serve-upload/', '');
+                  filePath = path.join(publicDir, relativePath);
+                } else {
+                  filePath = path.join(publicDir, firstRefImage.replace(/^\//, ''));
+                }
+                const resolved = path.resolve(filePath);
+                if (resolved.startsWith(publicDir)) {
+                  const imgBuf = await fs.readFile(resolved);
+                  const ext = path.extname(resolved).toLowerCase();
+                  const mimeMap: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' };
+                  const mime = mimeMap[ext] || 'image/png';
+                  requestBody.image = `data:${mime};base64,${imgBuf.toString('base64')}`;
+                }
+              } catch (localErr) {
+                console.warn('Failed to read local reference image:', localErr);
               }
-              // 安全检查
-              const resolved = path.resolve(filePath);
-              if (resolved.startsWith(publicDir)) {
-                const imgBuf = await fs.readFile(resolved);
-                const ext = path.extname(resolved).toLowerCase();
-                const mimeMap: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' };
-                const mime = mimeMap[ext] || 'image/png';
-                requestBody.image = `data:${mime};base64,${imgBuf.toString('base64')}`;
+            } else if (firstRefImage.startsWith('http')) {
+              try {
+                const imgResp = await fetch(firstRefImage, { signal: AbortSignal.timeout(15000) });
+                if (imgResp.ok) {
+                  const imgBuf = Buffer.from(await imgResp.arrayBuffer());
+                  const contentType = imgResp.headers.get('content-type') || 'image/png';
+                  requestBody.image = `data:${contentType};base64,${imgBuf.toString('base64')}`;
+                }
+              } catch (imgErr) {
+                console.warn('Failed to download reference image for edits endpoint:', imgErr);
               }
-            } catch (localErr) {
-              console.warn('Failed to read local reference image:', localErr);
-            }
-          } else if (firstRefImage.startsWith('http')) {
-            // 外部 URL，需要下载为 base64
-            try {
-              const imgResp = await fetch(firstRefImage, { signal: AbortSignal.timeout(15000) });
-              if (imgResp.ok) {
-                const imgBuf = Buffer.from(await imgResp.arrayBuffer());
-                const contentType = imgResp.headers.get('content-type') || 'image/png';
-                requestBody.image = `data:${contentType};base64,${imgBuf.toString('base64')}`;
-              }
-            } catch (imgErr) {
-              console.warn('Failed to download reference image for edits endpoint:', imgErr);
             }
           }
-        }
-        // 压缩参考图：大于1MB的base64图片用sharp压缩到最大1536px + JPEG q90
-        // 这显著减少传输体积（PNG→JPEG通常减少60-80%），加快API请求速度
-        const requestImageStr = requestBody.image as string | undefined;
-        if (requestImageStr && requestImageStr.startsWith('data:') && requestImageStr.length > 1_000_000) {
-          try {
-            const sharp = (await import('sharp')).default;
-            const base64Data = requestImageStr.split(',')[1];
-            const imgBuf = Buffer.from(base64Data, 'base64');
-            const compressed = await sharp(imgBuf)
-              .resize(1536, 1536, { fit: 'inside', withoutEnlargement: true })
-              .jpeg({ quality: 90 })
-              .toBuffer();
-            requestBody.image = `data:image/jpeg;base64,${compressed.toString('base64')}`;
-          } catch (compressErr) {
-            // 压缩失败不影响流程，使用原图
-            console.warn('Reference image compression failed:', compressErr);
+          // 压缩参考图：大于1MB的base64图片用sharp压缩到最大1536px + JPEG q90
+          const requestImageStr = requestBody.image as string | undefined;
+          if (requestImageStr && requestImageStr.startsWith('data:') && requestImageStr.length > 1_000_000) {
+            try {
+              const sharp = (await import('sharp')).default;
+              const base64Data = requestImageStr.split(',')[1];
+              const imgBuf = Buffer.from(base64Data, 'base64');
+              const compressed = await sharp(imgBuf)
+                .resize(1536, 1536, { fit: 'inside', withoutEnlargement: true })
+                .jpeg({ quality: 90 })
+                .toBuffer();
+              requestBody.image = `data:image/jpeg;base64,${compressed.toString('base64')}`;
+            } catch (compressErr) {
+              console.warn('Reference image compression failed:', compressErr);
+            }
           }
         }
       }
@@ -679,12 +682,11 @@ export async function POST(request: NextRequest) {
       }
 
       // 使用兼容性层自动调整请求（size格式、端点选择等）
-      // hasImage 应基于是否有参考图（image_urls 或 image），而非仅看 image 字段
-      // 因为 image_urls 也是参考图的传递方式（APImart 等代理通过此字段识别图生图）
-      // 当有参考图时：使用 editEndpoint，确保 API 知道这是图生图请求
-      // 当有 image 字段时：editEndpoint + image(base64)，AI 必须处理源图
-      // 当仅有 image_urls 时：editEndpoint + image_urls，AI 作为参考处理
-      const hasImageFlag = !!(requestBody.image || requestBody.image_urls || accessibleReferenceImages.length > 0);
+      // ★ 关键修复：参考图组模式(reference/fusion)不应使用 editEndpoint(/images/edits)
+      // 因为 /images/edits 会被 image 字段强制以原图尺寸生成，忽略 size 参数
+      // 参考图组模式：hasImage=false → 使用 defaultEndpoint(/images/generations)，遵守 size
+      // 图片编辑模式(erase/mask/outpaint)：hasImage=true → 使用 editEndpoint(/images/edits)
+      const hasImageFlag = !!(requestBody.image || (requestBody.image_urls && !isReferenceOnly) || (accessibleReferenceImages.length > 0 && !isReferenceOnly));
       const { body: adjustedBody, endpoint } = adjustRequestForProfile(requestBody, profile, {
         hasImage: hasImageFlag,
       });
