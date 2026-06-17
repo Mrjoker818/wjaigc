@@ -1103,7 +1103,8 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // ★ AI 放大后处理：AI 模型按自身预设尺寸输出，需 resize 到目标尺寸
+        // ★ AI 放大后处理：AI 模型按自身预设尺寸输出，直接使用 AI 输出
+        // AI 输出已是 AI 能增强的最佳尺寸，无需再 resize（resize 会导致模糊/涂抹）
         const upscaleResizeInfo = registryResult._needsResize as boolean | undefined;
         const upscaleTargetW = registryResult._targetW as number | undefined;
         const upscaleTargetH = registryResult._targetH as number | undefined;
@@ -1115,27 +1116,48 @@ export async function POST(request: NextRequest) {
             const aiW = aiMeta.width || upscaleTargetW;
             const aiH = aiMeta.height || upscaleTargetH;
 
-            // 放大必须精确到目标尺寸，无论 AI 输出大于还是小于目标都需要 resize
-            console.log(`[poll-task] AI Upscale: AI output ${aiW}x${aiH}, resizing to target ${upscaleTargetW}x${upscaleTargetH}...`);
-            const resizedBuf = await sharp(aiResultBuf)
-              .resize(upscaleTargetW, upscaleTargetH, { fit: 'fill', kernel: sharp.kernel.lanczos3 })
-              .png({ quality: 95 })
-              .toBuffer();
+            console.log(`[poll-task] AI Upscale: AI output ${aiW}x${aiH}, target was ${upscaleTargetW}x${upscaleTargetH}`);
 
-            const { saveImageFile } = await import('../../../lib/server-data-root');
-            const ts = Date.now();
-            const filename = `upscale-ai-${ts}.png`;
-            const resizedUrl = saveImageFile(resizedBuf, filename, 'upscale');
-            if (resizedUrl) {
-              pollResult.imageUrl = resizedUrl;
-            } else {
-              pollResult.imageUrl = `data:image/png;base64,${resizedBuf.toString('base64')}`;
+            // 直接使用 AI 输出尺寸，不做 resize
+            // AI 模型知道它能增强的最佳分辨率，强行 resize 到更大尺寸只会通过插值补像素 = 模糊
+            // 只添加锐化后处理来增强清晰度
+            let finalBuf = aiResultBuf;
+            if (aiW < upscaleTargetW * 0.9 || aiH < upscaleTargetH * 0.9) {
+              // AI 输出显著小于目标(差距>10%)，添加锐化增强清晰度
+              finalBuf = await sharp(aiResultBuf)
+                .sharpen({ sigma: 0.6, m1: 0.8, m2: 0.3, x1: 1.5, y2: 5, y3: 15 })
+                .png({ quality: 95 })
+                .toBuffer();
+              console.log(`[poll-task] AI Upscale: applied sharpening to ${aiW}x${aiH} result`);
             }
 
-            (pollResult as Record<string, unknown>).outputSize = { width: upscaleTargetW, height: upscaleTargetH };
-            console.log(`[poll-task] AI Upscale: resized to ${upscaleTargetW}x${upscaleTargetH}`);
+            // 仅在 AI 输出大于目标时才做缩小（精确裁剪到目标尺寸）
+            if (aiW > upscaleTargetW && aiH > upscaleTargetH) {
+              finalBuf = await sharp(aiResultBuf)
+                .resize(upscaleTargetW, upscaleTargetH, { fit: 'fill', kernel: sharp.kernel.lanczos3 })
+                .png({ quality: 95 })
+                .toBuffer();
+              console.log(`[poll-task] AI Upscale: downscaled from ${aiW}x${aiH} to ${upscaleTargetW}x${upscaleTargetH}`);
+            }
+
+            // 持久化最终结果
+            if (!Buffer.isBuffer(finalBuf) || finalBuf !== aiResultBuf) {
+              const { saveImageFile } = await import('../../../lib/server-data-root');
+              const ts = Date.now();
+              const filename = `upscale-ai-${ts}.png`;
+              const savedUrl = saveImageFile(Buffer.isBuffer(finalBuf) ? finalBuf : aiResultBuf, filename, 'upscale');
+              if (savedUrl) {
+                pollResult.imageUrl = savedUrl;
+              }
+            }
+
+            // 返回 AI 实际输出尺寸
+            const finalW = (aiW > upscaleTargetW && aiH > upscaleTargetH) ? upscaleTargetW : aiW;
+            const finalH = (aiW > upscaleTargetW && aiH > upscaleTargetH) ? upscaleTargetH : aiH;
+            (pollResult as Record<string, unknown>).outputSize = { width: finalW, height: finalH };
+            console.log(`[poll-task] AI Upscale: final output ${finalW}x${finalH}`);
           } catch (upscaleResizeErr) {
-            console.warn('[poll-task] AI Upscale resize failed, using raw AI result:', upscaleResizeErr instanceof Error ? upscaleResizeErr.message : upscaleResizeErr);
+            console.warn('[poll-task] AI Upscale post-process failed, using raw AI result:', upscaleResizeErr instanceof Error ? upscaleResizeErr.message : upscaleResizeErr);
           }
         }
 

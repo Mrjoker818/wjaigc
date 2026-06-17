@@ -1188,6 +1188,12 @@ export function InfiniteCanvas({
   const [svgTraceLengthThreshold, setSvgTraceLengthThreshold] = useState<number | null>(null);
   const [svgTraceCurveMode, setSvgTraceCurveMode] = useState<'polygon' | 'spline' | null>(null);
   const [svgTraceHierarchical, setSvgTraceHierarchical] = useState<'stacked' | 'cutout' | null>(null);
+
+  // Fixed position ref for SVG trace panel — prevents random movement on click
+  const svgTraceFixedPosRef = useRef<{top: number; left: number} | null>(null);
+  useEffect(() => {
+    if (!showSvgTracePanel) svgTraceFixedPosRef.current = null;
+  }, [showSvgTracePanel]);
   const [svgTraceBwThreshold, setSvgTraceBwThreshold] = useState(50);
   const [svgTraceBwTurdSize, setSvgTraceBwTurdSize] = useState(2);
   const [svgTraceBwInvert, setSvgTraceBwInvert] = useState(false);
@@ -9485,13 +9491,18 @@ export function InfiniteCanvas({
           if (!editImg) return null;
           const imgOrigW = editImg.originalWidth || Math.round(editImg.width);
           const imgOrigH = editImg.originalHeight || Math.round(editImg.height);
-          const pos = getToolbarPosition();
+          // 面板位置只在首次打开时计算，后续渲染使用固定位置，避免点击时跳动
+          if (!svgTraceFixedPosRef.current) {
+            const initPos = getToolbarPosition();
+            svgTraceFixedPosRef.current = { top: initPos.y, left: initPos.x };
+          }
+          const pos = svgTraceFixedPosRef.current;
           return (
             <div
               style={{
                 position: 'fixed',
-                left: pos.x,
-                top: pos.y,
+                left: pos.left,
+                top: pos.top,
                 width: 320,
                 background: '#141414',
                 border: '1px solid #333',

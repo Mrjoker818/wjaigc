@@ -1997,33 +1997,73 @@ export async function POST(request: NextRequest) {
 
       const negativePrompt = '(worst quality, low quality, normal quality:2), blurry, pixelated, jpeg artifacts, painting, oil painting, illustration, cartoon, anime, over-smoothed, plastic skin, waxy, airbrushed, soft focus, smoothed, gaussian blur, changed content, new elements, different colors, altered composition, deformed, watermark, text, makeup change, flat, cartoonish, drawn, sketch, CG, 3d render, unnatural, noise, grain, speckle, color splotch, compression block, ringing, oversharp, halo, chromatic aberration, moire, shifted, misaligned, moved, position change, content drift';
 
-      // Step 3: 提交整图 AI 放大
-      // strength 0.30: 极低创作自由度，最大化忠实还原原图内容
+      // Step 3: 提交整图 AI 放大（仅使用用户指定的模型，不自动尝试其他模型）
+      // strength 0.40: 适度创作自由度，平衡忠实还原与细节增强
       // 配合 input_fidelity: 'high' 和严格负面提示词，确保零偏移
       // 0.45+ 会导致明显内容偏移(人脸变形/物体位移)，0.2以下细节增强不足
-      const result = await autoTrySubmitImageTask(candidateModels, (m) => ({
+      const specifiedModel = modelStr || '';
+      const specifiedProviderId = providerId || '';
+      console.log(`[image-edit] AI upscale: using specified model=${specifiedModel}, providerId=${specifiedProviderId}`);
+
+      // 构建仅包含用户指定模型的候选列表，确保不会自动回退到其他模型
+      let aiUpscaleCandidates: typeof candidateModels = [];
+      if (specifiedProviderId) {
+        const specifiedProvider = await findProviderById(specifiedProviderId);
+        if (specifiedProvider) {
+          const provModels = (specifiedProvider.selectedModels || specifiedProvider.discoveredModels || []) as string[];
+          if (specifiedModel && provModels.includes(specifiedModel)) {
+            aiUpscaleCandidates.push({
+              model: specifiedModel,
+              apiKey: specifiedProvider.apiKey,
+              apiBaseUrl: specifiedProvider.baseUrl,
+              source: `用户指定: ${specifiedProvider.name}`,
+              advancedParams: specifiedProvider.advancedParams as Record<string, string> | undefined,
+            });
+          } else if (!specifiedModel) {
+            // 没指定模型，用该提供商的第一个模型
+            const firstModel = provModels[0] || '';
+            if (firstModel) {
+              aiUpscaleCandidates.push({
+                model: firstModel,
+                apiKey: specifiedProvider.apiKey,
+                apiBaseUrl: specifiedProvider.baseUrl,
+                source: `用户指定提供商: ${specifiedProvider.name}`,
+                advancedParams: specifiedProvider.advancedParams as Record<string, string> | undefined,
+              });
+            }
+          }
+        }
+      }
+      // 如果指定模型候选为空，使用全局候选列表（兼容旧调用方式）
+      if (aiUpscaleCandidates.length === 0) {
+        aiUpscaleCandidates = candidateModels;
+      }
+
+      const result = await autoTrySubmitImageTask(aiUpscaleCandidates, (m: string) => ({
         model: m,
         prompt: upscalePrompt,
         size: effectiveSize,
         n: 1,
         image: imageBase64ForVision,
         image_urls: [imageBase64ForVision],
-        strength: 0.30,
+        strength: 0.40,
         input_fidelity: 'high',
         negative_prompt: negativePrompt,
-      }), 'AI放大');
+      }), 'AI放大', '/images/generations');
 
       // ★ AI 模型按自身预设尺寸输出，不受 size 参数精确控制
       // 优化策略:
       //   AI 输出 >= 目标: sharp 缩小到目标 (下采样保留细节)
       //   AI 输出 < 目标: 先保存 AI 输出 (已增强细节)，再用 ONNX Real-ESRGAN 放大到目标
       const resizeAiResultToTarget = async (aiImageUrl: string): Promise<{ url: string; actualW: number; actualH: number }> => {
+        let aiW = targetW;
+        let aiH = targetH;
         try {
           // 下载 AI 生成的图片
           const aiBuffer = await fetchImageBuffer(aiImageUrl);
           const aiMeta = await sharp(aiBuffer).metadata();
-          const aiW = aiMeta.width || targetW;
-          const aiH = aiMeta.height || targetH;
+          aiW = aiMeta.width || targetW;
+          aiH = aiMeta.height || targetH;
 
           // 情况1: AI 输出 >= 目标尺寸 → 下采样 + 降噪 + 锐化
           if (aiW >= targetW && aiH >= targetH) {
@@ -2054,88 +2094,36 @@ export async function POST(request: NextRequest) {
             return { url: finalUrl, actualW: targetW, actualH: targetH };
           }
 
-          // 情况2: AI 输出 < 目标尺寸 → AI 已增强细节，使用 CPU 超分辨率二次放大
-          // 这样避免了 sharp 插值放大导致的模糊
-          console.log(`[image-edit] AI upscale output ${aiW}x${aiH} < target ${targetW}x${targetH}, using CPU super-resolution for secondary upscale...`);
-          try {
-            const { performUpscaleAuto } = await import('@/lib/image-tools/upscayl');
+          // 情况2: AI 输出 < 目标尺寸 → 直接接受 AI 增强结果
+          // AI 模型输出的尺寸是它认为最佳的增强分辨率（如原图896x1200 → AI输出1728x2304 ≈2x）
+          // 不再二次放大到4x，因为：1.二次放大会引入涂抹感 2.用户期望的是AI增强后的实际输出尺寸
+          console.log(`[image-edit] AI upscale output ${aiW}x${aiH} < target ${targetW}x${targetH}. Accepting AI enhanced result as-is (AI determined optimal resolution).`);
 
-              // 先保存 AI 增强后的图片到临时文件
-              const ts1 = Date.now();
-              const rs1 = Math.random().toString(36).substring(2, 8);
-              const aiFilename = `upscale_ai_tmp_${ts1}_${rs1}.png`;
-              const aiSavedPath = await saveBufferToPublic(aiBuffer, aiFilename);
-              const domain2 = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
-              const domainBase2 = domain2.startsWith('http') ? domain2.replace(/\/+$/, '') : `https://${domain2.replace(/\/+$/, '')}`;
-              const aiTempUrl = aiSavedPath.startsWith('data:') ? aiSavedPath : `${domainBase2}${aiSavedPath}`;
-
-              // 计算需要的放大倍率
-              const neededScale = Math.max(targetW / aiW, targetH / aiH);
-              const autoScale = neededScale <= 2 ? 2 : 4;
-
-              const autoResult = await performUpscaleAuto({
-                imageUrl: aiTempUrl,
-                scale: autoScale,
-                outputFormat: 'png',
-                compression: 95,
-              });
-
-              if (autoResult.success && autoResult.imageUrl) {
-                // 输出可能大于目标，精确 resize 到目标 + 降噪 + 锐化
-                const autoBuf = await fetchImageBuffer(autoResult.imageUrl);
-                const finalBuffer = await sharp(autoBuf)
-                  .resize(targetW, targetH, { kernel: 'lanczos3' })
-                  .convolve({
-                    width: 3, height: 3,
-                    kernel: [1/16, 2/16, 1/16, 2/16, 4/16, 2/16, 1/16, 2/16, 1/16]
-                  })
-                  .sharpen({ sigma: 0.5, m1: 0.6, m2: 0.3, x1: 1.2, y2: 6, y3: 12 })
-                  .png({ quality: 95 })
-                  .toBuffer();
-
-                const ts2 = Date.now();
-                const rs2 = Math.random().toString(36).substring(2, 8);
-                const finalFilename = `upscale_ai_cpu_${ts2}_${rs2}.png`;
-                const finalSavedPath = await saveBufferToPublic(finalBuffer, finalFilename);
-                const domain3 = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
-                const domainBase3 = domain3.startsWith('http') ? domain3.replace(/\/+$/, '') : `https://${domain3.replace(/\/+$/, '')}`;
-                const finalUrl = finalSavedPath.startsWith('data:') ? finalSavedPath : `${domainBase3}${finalSavedPath}`;
-
-                console.log(`[image-edit] AI+CPU upscale complete: AI ${aiW}x${aiH} -> ${autoResult.engine || 'cpu'} -> ${targetW}x${targetH}`);
-                return { url: finalUrl, actualW: targetW, actualH: targetH };
-              }
-              console.log(`[image-edit] CPU secondary upscale failed, falling back to sharp resize`);
-          } catch (cpuErr) {
-            console.log(`[image-edit] CPU secondary upscale error:`, cpuErr instanceof Error ? cpuErr.message : cpuErr);
-          }
-
-          // ONNX 不可用时的降级: sharp 插值放大 + 降噪 + 锐化
-          console.log(`[image-edit] AI upscale: sharp Lanczos3 resize from ${aiW}x${aiH} to target ${targetW}x${targetH} (fallback)`);
-          const resizedBuffer = await sharp(aiBuffer)
-            .resize(targetW, targetH, { kernel: sharp.kernel.lanczos3 })
+          // 对 AI 输出应用锐化增强，减少 AI 模型固有的轻微模糊
+          const sharpenedBuffer = await sharp(aiBuffer)
             .convolve({
               width: 3, height: 3,
               kernel: [1/16, 2/16, 1/16, 2/16, 4/16, 2/16, 1/16, 2/16, 1/16]
             })
-            .sharpen({ sigma: 0.5, m1: 0.6, m2: 0.3, x1: 1.2, y2: 6, y3: 12 })
+            .sharpen({ sigma: 0.6, m1: 0.8, m2: 0.3, x1: 1.2, y2: 6, y3: 12 })
             .png({ quality: 95 })
             .toBuffer();
 
           const timestamp = Date.now();
           const randomSuffix = Math.random().toString(36).substring(2, 8);
           const filename = `upscale_ai_${timestamp}_${randomSuffix}.png`;
-          const savedPath = await saveBufferToPublic(resizedBuffer, filename);
+          const savedPath = await saveBufferToPublic(sharpenedBuffer, filename);
 
           const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
           const domainBase = domain.startsWith('http') ? domain.replace(/\/+$/, '') : `https://${domain.replace(/\/+$/, '')}`;
           const finalUrl = savedPath.startsWith('data:') ? savedPath : `${domainBase}${savedPath}`;
 
-          console.log(`[image-edit] AI upscale sharp-resized to ${targetW}x${targetH} (${(resizedBuffer.length / 1024).toFixed(0)}KB)`);
-          return { url: finalUrl, actualW: targetW, actualH: targetH };
+          console.log(`[image-edit] AI upscale result: ${aiW}x${aiH} (AI enhanced, sharpened, ${sharpenedBuffer ? (sharpenedBuffer.length / 1024).toFixed(0) + 'KB' : 'N/A'})`);
+          return { url: finalUrl, actualW: aiW, actualH: aiH };
         } catch (resizeErr) {
           console.error(`[image-edit] AI upscale resize failed:`, resizeErr instanceof Error ? resizeErr.message : resizeErr);
-          // resize 失败时仍返回原始 URL，尺寸用 AI 实际输出
-          return { url: aiImageUrl, actualW: targetW, actualH: targetH };
+          // resize 失败时仍返回原始 URL，尺寸用 AI 实际输出尺寸
+          return { url: aiImageUrl, actualW: aiW, actualH: aiH };
         }
       };
 
@@ -2170,9 +2158,7 @@ export async function POST(request: NextRequest) {
             usedModel: result.usedModel,
             originalSize: { width: origW, height: origH },
             outputSize: { width: targetW, height: targetH },
-            _needsResize: true,
-            _targetW: targetW,
-            _targetH: targetH,
+            _needsResize: true, // poll-task 完成后会自动应用锐化，不再二次放大
           },
         });
       }
