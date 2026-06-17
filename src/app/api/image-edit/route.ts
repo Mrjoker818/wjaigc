@@ -1989,17 +1989,17 @@ export async function POST(request: NextRequest) {
       const imageBase64ForVision = await resolveImageToBase64(imageUrl);
       const descSnippet = prompt || '';
 
-      // Step 2: 构建整图放大 prompt — 强调细节增强而非内容变更
+      // Step 2: 构建整图放大 prompt — 专业摄影级约束，最大化细节还原
       const upscalePrompt = [
-        `Upscale this image to ultra-high resolution. Keep the EXACT same content, composition, colors, and style. ENHANCE: add realistic fine textures, sharpen edges, recover lost details, improve clarity. The result must look like the same image but with significantly more detail and sharpness. Do not add, remove, or change any objects. 8k uhd, extremely detailed, ultra-sharp, photorealistic enhancement.`,
+        `Upscale this image to ultra-high resolution with maximum photorealistic detail preservation. CRITICAL RULES: 1) Preserve the EXACT identity, expression, and facial geometry of any subjects — no alteration to face shape, features, or expression. 2) Only allow subtle feature cleanup without changing identity. 3) Keep the background completely identical — no replacement, no alteration, no new objects, no layout shifts. 4) The environment must look exactly the same with enhanced clarity. ENHANCE: add realistic fine textures (skin pores, fabric weave, hair strands), sharpen edges, recover lost micro-details, improve clarity and sharpness. The result must look like the same image captured with a Sony A1 at 85mm f/1.4, f/1.6, ISO 100, 1/200s — razor-sharp with natural bokeh and professional-grade resolution. Do not add, remove, or change any objects. 8k uhd, extremely detailed, ultra-sharp, photorealistic, studio quality.`,
         descSnippet ? `Original content: ${descSnippet.substring(0, 300)}.` : '',
       ].filter(Boolean).join(' ');
 
-      const negativePrompt = '(worst quality, low quality, normal quality:2), blurry, pixelated, jpeg artifacts, changed content, new elements, different colors, altered composition, deformed, watermark, text';
+      const negativePrompt = '(worst quality, low quality, normal quality:2), blurry, pixelated, jpeg artifacts, painting, oil painting, illustration, cartoon, anime, over-smoothed, plastic skin, waxy, changed content, new elements, different colors, altered composition, deformed, watermark, text, makeup change';
 
       // Step 3: 提交整图 AI 放大
-      // strength 0.3-0.4: AI 足够自由来增强细节，同时保持原图内容不偏离
-      // 0.05 太低 = 几乎不改变 = 不增加细节
+      // strength 0.18-0.22: 最佳平衡点 — AI 足够增强纹理细节，同时不过度改变画面
+      // >0.3 容易产生涂抹感/油画感，<0.1 几乎不增加细节
       const result = await autoTrySubmitImageTask(candidateModels, (m) => ({
         model: m,
         prompt: upscalePrompt,
@@ -2007,7 +2007,7 @@ export async function POST(request: NextRequest) {
         n: 1,
         image: imageBase64ForVision,
         image_urls: [imageBase64ForVision],
-        strength: 0.35,
+        strength: 0.20,
         input_fidelity: 'high',
         negative_prompt: negativePrompt,
       }), 'AI放大');

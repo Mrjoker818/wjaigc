@@ -360,6 +360,11 @@ export async function performOnnxUpscale(
       const outW = result.outputSize?.[0] ?? procW * scale;
       const outH = result.outputSize?.[1] ?? procH * scale;
 
+      // 轻微锐化后处理：减轻 Real-ESRGAN 的涂抹感，恢复微观纹理细节
+      finalBuffer = Buffer.from(await sharp(finalBuffer)
+        .sharpen({ sigma: 0.5, m1: 0.5, m2: 0.3 })
+        .toBuffer());
+
       // 转换输出格式
       if (outputFormat === 'jpg' || outputFormat === 'jpeg') {
         finalBuffer = Buffer.from(await sharp(finalBuffer).jpeg({ quality: compression }).toBuffer());
@@ -560,11 +565,21 @@ async function performNcnnUpscale(
     const outW = outputMeta.width || procW * scaleNum;
     const outH = outputMeta.height || procH * scaleNum;
 
-    // 转换输出格式
+    // 对 NCNN Real-ESRGAN 结果进行适度锐化后处理
+    // Real-ESRGAN 容易产生过度平滑/涂抹感，适度锐化可以恢复微细节纹理
+    const sharpenPipeline = sharp(outputBuffer).sharpen({
+      sigma: 0.5,    // 轻微锐化，避免过锐
+      m1: 0.5,       // 平坦区域锐化强度
+      m2: 0.3,       // 边缘区域锐化强度
+    });
+
+    // 转换输出格式（含锐化）
     if (outputFormat === 'jpg' || outputFormat === 'jpeg') {
-      outputBuffer = await sharp(outputBuffer).jpeg({ quality: compression }).toBuffer() as Buffer;
+      outputBuffer = await sharpenPipeline.jpeg({ quality: compression }).toBuffer() as Buffer;
     } else if (outputFormat === 'webp') {
-      outputBuffer = await sharp(outputBuffer).webp({ quality: compression }).toBuffer() as Buffer;
+      outputBuffer = await sharpenPipeline.webp({ quality: compression }).toBuffer() as Buffer;
+    } else {
+      outputBuffer = await sharpenPipeline.png({ quality: compression }).toBuffer() as Buffer;
     }
 
     // 保存到输出目录
