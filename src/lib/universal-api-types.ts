@@ -38,7 +38,7 @@ export interface ModelInfo {
   id: string;
   name: string;
   providerId: string;
-  type: 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video';
+  type: 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm';
   description?: string;
   supportedAspectRatios?: string[];
   supportedQualities?: string[];

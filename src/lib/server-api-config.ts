@@ -264,7 +264,7 @@ function normalizeSelectedModels(val: unknown): string[] {
 
 /** Normalize discovered_models from DB: handle JSON string or array */
 function normalizeDiscoveredModels(val: unknown, providerId: string, modelType: string): ModelInfo[] {
-  const validTypes = ['image', 'chat', '3d', 'vectorize', 'layer', 'video'] as const;
+  const validTypes = ['image', 'chat', '3d', 'vectorize', 'layer', 'video', 'vlm'] as const;
   type ModelType = typeof validTypes[number];
   const resolveType = (t: unknown): ModelType => {
     if (typeof t === 'string' && validTypes.includes(t as ModelType)) return t as ModelType;
