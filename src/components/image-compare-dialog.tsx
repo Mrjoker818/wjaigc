@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { X, Columns2, SplitSquareHorizontal, ChevronLeft, ChevronRight } from 'lucide-react';
+import { X, Columns2, SplitSquareHorizontal, ChevronLeft, ChevronRight, ZoomIn, ZoomOut } from 'lucide-react';
 
 interface ImageCompareDialogProps {
   /** 左侧图片（对比前/A图） */
@@ -24,6 +24,7 @@ export function ImageCompareDialog({
 }: ImageCompareDialogProps) {
   const [mode, setMode] = useState<CompareMode>('slider');
   const [sliderPos, setSliderPos] = useState(50); // 0-100 percentage
+  const [zoomPercent, setZoomPercent] = useState(100); // 10-300 percentage
   const [isDragging, setIsDragging] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -61,16 +62,27 @@ export function ImageCompareDialog({
     setSliderPos(50);
   }, [mode]);
 
-  // Keyboard: ESC to close
+  // Keyboard: ESC to close, 1/2 switch mode, +/- zoom
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
       if (e.key === '1') setMode('slider');
       if (e.key === '2') setMode('sideBySide');
+      if (e.key === '+' || e.key === '=') setZoomPercent(prev => Math.min(300, prev + 10));
+      if (e.key === '-' || e.key === '_') setZoomPercent(prev => Math.max(10, prev - 10));
+      if (e.key === '0') setZoomPercent(100);
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
   }, [onClose]);
+
+  // Zoom handler with preset values
+  const handleZoomChange = useCallback((value: number) => {
+    setZoomPercent(Math.max(10, Math.min(300, value)));
+  }, []);
+
+  // Zoom preset buttons
+  const zoomPresets = [25, 50, 75, 100, 150, 200];
 
   // Theme helpers
   const textPrimary = isMonochrome ? 'text-gray-900' : 'text-white';
@@ -82,12 +94,12 @@ export function ImageCompareDialog({
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={onClose}>
       <div
-        className={`relative rounded-2xl border shadow-2xl overflow-hidden ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-[#333]'}`}
-        style={{ width: '90vw', maxWidth: 1200, height: '80vh', maxHeight: 800 }}
+        className={`relative rounded-2xl border shadow-2xl overflow-hidden flex flex-col ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-[#333]'}`}
+        style={{ width: '90vw', maxWidth: 1200, height: '85vh', maxHeight: 900 }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className={`flex items-center justify-between px-5 py-3 border-b ${borderCls}`}>
+        <div className={`flex-shrink-0 flex items-center justify-between px-5 py-3 border-b ${borderCls}`}>
           <div className="flex items-center gap-3">
             <span className={`text-sm font-semibold ${textPrimary}`}>图片对比</span>
 
@@ -124,8 +136,8 @@ export function ImageCompareDialog({
           </div>
         </div>
 
-        {/* Body */}
-        <div className="relative overflow-hidden" style={{ height: 'calc(100% - 52px - 44px)' }}>
+        {/* Body — takes remaining space between header and footer */}
+        <div className="relative flex-1 overflow-hidden min-h-0">
           {mode === 'slider' ? (
             /* Slider comparison mode */
             <div
@@ -138,6 +150,7 @@ export function ImageCompareDialog({
                 src={rightImage.url}
                 alt="B"
                 className="absolute inset-0 w-full h-full object-contain"
+                style={{ transform: `scale(${zoomPercent / 100})` }}
                 draggable={false}
               />
 
@@ -146,7 +159,10 @@ export function ImageCompareDialog({
                 src={leftImage.url}
                 alt="A"
                 className="absolute inset-0 w-full h-full object-contain"
-                style={{ clipPath: `inset(0 ${100 - sliderPos}% 0 0)` }}
+                style={{
+                  clipPath: `inset(0 ${100 - sliderPos}% 0 0)`,
+                  transform: `scale(${zoomPercent / 100})`,
+                }}
                 draggable={false}
               />
 
@@ -200,7 +216,8 @@ export function ImageCompareDialog({
                   <img
                     src={leftImage.url}
                     alt="A"
-                    className="max-w-full max-h-full object-contain"
+                    className="object-contain"
+                    style={{ maxWidth: '100%', maxHeight: '100%', transform: `scale(${zoomPercent / 100})` }}
                     draggable={false}
                   />
                 </div>
@@ -215,7 +232,8 @@ export function ImageCompareDialog({
                   <img
                     src={rightImage.url}
                     alt="B"
-                    className="max-w-full max-h-full object-contain"
+                    className="object-contain"
+                    style={{ maxWidth: '100%', maxHeight: '100%', transform: `scale(${zoomPercent / 100})` }}
                     draggable={false}
                   />
                 </div>
@@ -224,8 +242,71 @@ export function ImageCompareDialog({
           )}
         </div>
 
+        {/* Zoom controls bar */}
+        <div className={`flex-shrink-0 flex items-center justify-center gap-3 px-5 py-2 border-t ${borderCls}`}>
+          <button
+            onClick={() => handleZoomChange(zoomPercent - 10)}
+            className={`p-1 rounded transition-colors ${textSecondary} hover:${isMonochrome ? 'text-gray-700 bg-gray-100' : 'text-white bg-[#2a2a2a]'}`}
+          >
+            <ZoomOut size={14} />
+          </button>
+
+          {/* Zoom preset buttons */}
+          <div className={`flex items-center gap-1 p-0.5 rounded-lg ${isMonochrome ? 'bg-gray-100' : 'bg-[#252525]'}`}>
+            {zoomPresets.map(pct => (
+              <button
+                key={pct}
+                onClick={() => handleZoomChange(pct)}
+                className={`px-2 py-1 rounded text-xs font-medium transition-all ${
+                  zoomPercent === pct
+                    ? btnActiveBg
+                    : `${textSecondary} hover:${isMonochrome ? 'text-gray-700' : 'text-white'}`
+                }`}
+              >
+                {pct}%
+              </button>
+            ))}
+          </div>
+
+          {/* Zoom slider */}
+          <input
+            type="range"
+            min={10}
+            max={300}
+            value={zoomPercent}
+            onChange={(e) => handleZoomChange(Number(e.target.value))}
+            className={`w-24 h-1 rounded-full appearance-none cursor-pointer ${
+              isMonochrome ? 'accent-blue-500' : 'accent-[#d4af37]'
+            }`}
+          />
+
+          {/* Current zoom display */}
+          <span className={`text-xs font-medium min-w-[3rem] text-center ${accentColor}`}>
+            {zoomPercent}%
+          </span>
+
+          <button
+            onClick={() => handleZoomChange(zoomPercent + 10)}
+            className={`p-1 rounded transition-colors ${textSecondary} hover:${isMonochrome ? 'text-gray-700 bg-gray-100' : 'text-white bg-[#2a2a2a]'}`}
+          >
+            <ZoomIn size={14} />
+          </button>
+
+          {/* Reset zoom */}
+          {zoomPercent !== 100 && (
+            <button
+              onClick={() => setZoomPercent(100)}
+              className={`px-2 py-1 rounded text-xs transition-colors ${
+                isMonochrome ? 'text-blue-500 hover:bg-blue-50' : 'text-[#d4af37] hover:bg-[#d4af37]/10'
+              }`}
+            >
+              重置
+            </button>
+          )}
+        </div>
+
         {/* Footer: Prompt info */}
-        <div className={`flex items-center gap-4 px-5 py-2.5 border-t ${borderCls}`}>
+        <div className={`flex-shrink-0 flex items-center gap-4 px-5 py-2.5 border-t ${borderCls}`}>
           <div className="flex-1 min-w-0">
             <div className={`text-xs ${accentColor} font-medium mb-0.5`}>A</div>
             <div className={`text-xs ${textSecondary} truncate`}>{leftImage.prompt || '无描述'}</div>
@@ -235,13 +316,13 @@ export function ImageCompareDialog({
             <div className={`text-xs ${accentColor} font-medium mb-0.5`}>B</div>
             <div className={`text-xs ${textSecondary} truncate`}>{rightImage.prompt || '无描述'}</div>
           </div>
-        </div>
 
-        {/* Keyboard hints */}
-        <div className={`absolute bottom-2 right-3 flex items-center gap-2 text-xs ${textSecondary} opacity-50`}>
-          <span>ESC 关闭</span>
-          <span>1 滑动</span>
-          <span>2 并排</span>
+          {/* Keyboard hints — inline with footer */}
+          <div className={`flex items-center gap-2 text-xs ${textSecondary} opacity-50 flex-shrink-0`}>
+            <span>ESC 关闭</span>
+            <span>1 滑动</span>
+            <span>2 并排</span>
+          </div>
         </div>
       </div>
     </div>
