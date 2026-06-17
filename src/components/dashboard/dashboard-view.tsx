@@ -22,8 +22,8 @@ import { getModelDisplayName } from '@/lib/model-name-map';
 type TabType = 'projects' | 'templates' | 'assets' | 'stats' | 'credits' | 'settings' | 'users' | 'apis' | 'data' | 'ecom-templates' | 'payment-config';
 type ProjectFilter = 'all' | 'recent' | 'starred';
 type AssetSubTab = 'images' | 'prompts' | 'brands';
-type ApiKind = 'general' | 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'imageEdit' | 'universal';
-type UserPermissionKey = 'image' | 'chat' | 'threeD' | 'imageEdit' | 'vectorize' | 'layer' | 'video';
+type ApiKind = 'general' | 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'universal';
+type UserPermissionKey = 'image' | 'chat' | 'threeD' | 'vectorize' | 'layer' | 'video';
 type AdminProvider = ApiProvider & { apiKeyPreview?: string };
 
 const apiKindLabels: Record<ApiKind, string> = {
@@ -34,7 +34,6 @@ const apiKindLabels: Record<ApiKind, string> = {
   vectorize: '矢量模型',
   layer: '图片分层模型',
   video: '视频模型',
-  imageEdit: '图像编辑模型',
   universal: '通用模型',
 };
 
@@ -46,7 +45,6 @@ const apiKindDescriptions: Record<ApiKind, string> = {
   vectorize: '添加API后系统自动识别 vectorize 模型，对接到矢量化工具和导出SVG',
   layer: '添加API后系统自动识别 qwen-image-layered 模型，对接到编辑元素和下载PSD',
   video: '添加API后系统自动识别视频模型（可灵/Seedance/海螺/Vidu/Runway/Pika/Sora等），对接到文生视频和图生视频功能',
-  imageEdit: '支持图像编辑模型，对接到擦除/蒙版/放大/扩展等功能',
   universal: '通用模型，支持多种能力',
 };
 
@@ -54,7 +52,6 @@ const userPermissionLabels: Record<UserPermissionKey, string> = {
   image: '图像',
   chat: 'LLM',
   threeD: '3D',
-  imageEdit: '编辑',
   vectorize: '矢量',
   layer: '分层',
   video: '视频',
@@ -533,7 +530,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const handleToggleUserPermission = async (u: User, key: UserPermissionKey) => {
     const current: Record<UserPermissionKey, boolean> = {
       image: u.apiPermissions?.image ?? true, chat: u.apiPermissions?.chat ?? true,
-      threeD: u.apiPermissions?.threeD ?? true, imageEdit: u.apiPermissions?.imageEdit ?? true,
+      threeD: u.apiPermissions?.threeD ?? true,
       vectorize: u.apiPermissions?.vectorize ?? true, layer: u.apiPermissions?.layer ?? true,
       video: u.apiPermissions?.video ?? true,
     };
@@ -1002,7 +999,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 <div className="flex flex-wrap gap-1">
                   {[
                     { key: 'image', label: '图像', icon: '🎨' }, { key: 'chat', label: '对话', icon: '💬' },
-                    { key: 'threeD', label: '3D', icon: '🧊' }, { key: 'imageEdit', label: '编辑', icon: '✏️' },
+                    { key: 'threeD', label: '3D', icon: '🧊' },
                     { key: 'vectorize', label: '矢量', icon: '📐' }, { key: 'layer', label: '分层', icon: '🗂️' },
                     { key: 'video', label: '视频', icon: '🎬' },
                   ].map(perm => {
@@ -1840,7 +1837,6 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                   { key: 'chat', label: 'AI 聊天', icon: Sparkles },
                   { key: 'video', label: '视频生成', icon: Film },
                   { key: 'threeD', label: '3D 模型', icon: Box },
-                  { key: 'imageEdit', label: '图像编辑', icon: Pencil },
                   { key: 'vectorize', label: '矢量化', icon: Palette },
                   { key: 'vlm', label: 'VLM视觉', icon: Eye },
                   { key: 'layer', label: '图层分离', icon: Layers },

@@ -2476,7 +2476,7 @@ export async function POST(request: NextRequest) {
               try {
                 // 查找provider用于轮询
                 const eraseProvider = await findProviderForModel(eraseResult.usedModel || '', 'image')
-                  || await findProviderForModel(eraseResult.usedModel || '', 'imageEdit');
+                  || await findProviderForModel(eraseResult.usedModel || '', 'image');
                 const eraseApiKey = eraseProvider?.apiKey;
                 const eraseApiBaseUrl = normalizeApiBaseUrl(eraseProvider?.baseUrl || '');
                 const eraseProfile = eraseProvider ? resolveCompatProfile(eraseProvider) : null;

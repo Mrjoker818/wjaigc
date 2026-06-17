@@ -909,9 +909,9 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                     {/* Custom prompt */}
                     <textarea className={`${inputCls} min-h-[60px] mb-3`} placeholder="附加设计要求..." value={customPrompt} onChange={e => setCustomPrompt(e.target.value)} />
                     {/* Export format + Generate button */}
-                    {/* 模型选择 */}
+                    {/* 模型选择 - 图像模型与LLM模型左右横向排列 */}
                     {imageModels.length > 0 && (
-                      <div className="space-y-1.5">
+                      <div className="grid grid-cols-2 gap-3">
                         <div>
                           <span className="text-[11px] font-medium" style={{ color: textMuted }}>图像模型</span>
                           <select

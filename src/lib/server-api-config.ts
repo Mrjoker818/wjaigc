@@ -22,7 +22,7 @@ export function normalizeApiBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, '');
 }
 
-type ApiKind = 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'imageEdit' | 'universal' | 'general' | 'vlm';
+export type ApiKind = 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'universal' | 'general' | 'vlm' | 'imageEdit';
 
 /**
  * Normalize advancedParams from DB storage format to Record<string, string>.
@@ -110,9 +110,11 @@ function modelTypeForProvider(provider: ApiProvider): 'image' | 'chat' | '3d' | 
   if (provider.modelType === 'vectorize') return 'vectorize';
   if (provider.modelType === 'layer') return 'layer';
   if (provider.modelType === 'video') return 'video';
-  // General/universal: default to 'chat' since most models are chat
+  // General/universal/vlm: default to 'chat' since most models are chat
   // Individual model types from inferModelType override this in getPublicModels
-  if (provider.modelType === 'imageEdit' || provider.modelType === 'universal' || provider.modelType === 'general') return 'chat';
+  if (provider.modelType === 'universal' || provider.modelType === 'general' || provider.modelType === 'vlm') return 'chat';
+  // Legacy imageEdit type maps to 'image'
+  if ((provider.modelType as string) === 'imageEdit') return 'image';
   return 'image';
 }
 
@@ -456,7 +458,6 @@ export async function discoverModelsForCredentials(
         modelType === 'general' ||
         modelType === 'vectorize' ||
         modelType === 'layer' ||
-        modelType === 'imageEdit' ||
         // For image/chat/3d: also show other types so admin can pick cross-type models
         m.type === modelType
       ));
@@ -778,8 +779,8 @@ export async function findAllProvidersForType(modelType: ApiKind): Promise<Array
   models: string[];
 }>> {
   const providers = await getApiProviders();
-  // For imageEdit, include image-type providers
-  const effectiveType = modelType === 'imageEdit' ? 'image' : modelType;
+  // For legacy imageEdit, include image-type providers
+  const effectiveType = modelType;
   const enabled = providers.filter(p => p.isEnabled && (p.modelType === effectiveType || p.modelType === 'universal' || p.modelType === 'general'));
   // Sort: default providers first
   enabled.sort((a, b) => (b.isDefault ? 1 : 0) - (a.isDefault ? 1 : 0));
@@ -812,7 +813,7 @@ export async function getPublicModels(modelType?: ApiKind): Promise<ModelInfo[]>
   const isGeneralQuery = !modelType || modelType === 'universal' || modelType === 'general';
 
   return providers
-    .filter(provider => provider.isEnabled && (isGeneralQuery || provider.modelType === modelType || provider.modelType === 'universal' || provider.modelType === 'general'))
+    .filter(provider => provider.isEnabled && (isGeneralQuery || provider.modelType === modelType || provider.modelType === 'universal' || provider.modelType === 'general' || (modelType === 'image' && provider.modelType === 'imageEdit')))
     .flatMap(provider => {
       const selected = new Set(provider.selectedModels || []);
       const discovered = provider.discoveredModels || [];

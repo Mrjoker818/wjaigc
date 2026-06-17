@@ -814,7 +814,7 @@ export async function POST(request: NextRequest) {
     } else {
       // 降级：从管理员配置查找提供商
       const provider = providerId ? await findProviderById(providerId)
-        : await findProviderForModel(model || regUsedModel || '', 'imageEdit')
+        : await findProviderForModel(model || regUsedModel || '', 'image')
         || await findProviderForModel(model || regUsedModel || '', 'image')
         || await findProviderForModel(model || regUsedModel || '', 'universal');
       apiKey = provider?.apiKey;
