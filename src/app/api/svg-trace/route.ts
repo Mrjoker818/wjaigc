@@ -49,6 +49,8 @@ interface TraceRequest {
   // Compress params
   quality?: number;              // 1-100, default 80
   compressFormat?: 'jpeg' | 'webp' | 'png'; // default webp
+  // Force SVG output even if path count exceeds threshold
+  forceSvg?: boolean;
   // Thumbnail params
   thumbnailWidth?: number;       // default 200
   thumbnailHeight?: number;      // default 200
@@ -1386,6 +1388,128 @@ function sanitizeAIGeneratedSvg(svg: string): { safe: boolean; reason?: string; 
 }
 
 /**
+ * Aggressively simplify SVG paths when path count exceeds thresholds.
+ * Strategy:
+ * 1. Merge paths with identical fill+stroke+opacity (biggest win)
+ * 2. Remove tiny/invisible paths (area < threshold)
+ * 3. Run aggressive SVGO pass with lower precision
+ * Returns simplified SVG string.
+ */
+async function aggressivelySimplifyPaths(svg: string): Promise<string> {
+  let result = svg;
+
+  // Step 1: Merge paths with identical visual properties
+  // Group <path> elements by their fill+stroke+opacity+stroke-width combination
+  const pathRegex = /<path\s+([^>]*)\/?\s*>/g;
+  const pathGroups = new Map<string, { attrs: string; d: string[] }>();
+
+  let match: RegExpExecArray | null;
+  while ((match = pathRegex.exec(result)) !== null) {
+    const attrs = match[1];
+    const dMatch = attrs.match(/d="([^"]*)"/);
+    if (!dMatch) continue;
+
+    const fill = (attrs.match(/fill="([^"]*)"/)?.[1] || 'none');
+    const stroke = (attrs.match(/stroke="([^"]*)"/)?.[1] || 'none');
+    const opacity = (attrs.match(/opacity="([^"]*)"/)?.[1] || '1');
+    const strokeWidth = (attrs.match(/stroke-width="([^"]*)"/)?.[1] || '1');
+    const fillOpacity = (attrs.match(/fill-opacity="([^"]*)"/)?.[1] || '1');
+    const strokeOpacity = (attrs.match(/stroke-opacity="([^"]*)"/)?.[1] || '1');
+
+    const key = `${fill}|${stroke}|${opacity}|${strokeWidth}|${fillOpacity}|${strokeOpacity}`;
+    const group = pathGroups.get(key);
+    if (group) {
+      group.d.push(dMatch[1]);
+    } else {
+      pathGroups.set(key, {
+        attrs: attrs.replace(/d="[^"]*"/, '').trim(),
+        d: [dMatch[1]],
+      });
+    }
+  }
+
+  if (pathGroups.size > 0) {
+    // Rebuild SVG with merged paths
+    const mergedPaths: string[] = [];
+    for (const [, group] of pathGroups) {
+      if (group.d.length > 1) {
+        // Merge multiple paths with same visual properties into one
+        const mergedD = group.d.join(' ');
+        mergedPaths.push(`<path ${group.attrs} d="${mergedD}"/>`);
+      } else {
+        mergedPaths.push(`<path ${group.attrs} d="${group.d[0]}"/>`);
+      }
+    }
+
+    // Only apply if we actually reduced path count
+    const originalCount = (result.match(/<path/g) || []).length;
+    if (mergedPaths.length < originalCount) {
+      // Remove all existing <path> elements
+      result = result.replace(/<path\s+[^>]*\/?\s*>/g, '');
+      // Insert merged paths before closing </svg> or </g>
+      const insertPos = result.lastIndexOf('</svg>');
+      if (insertPos > -1) {
+        result = result.substring(0, insertPos) + mergedPaths.join('\n') + '\n' + result.substring(insertPos);
+      }
+      console.log(`[svg-trace] Merged ${originalCount} paths → ${mergedPaths.length} (saved ${originalCount - mergedPaths.length})`);
+    }
+  }
+
+  // Step 2: Remove tiny paths (likely noise/artifacts)
+  // A path with very short d attribute is probably a speck
+  result = result.replace(/<path\s+([^>]*?)d="([MZLHVCSQTAzmzlhvcsqta\s.,+\-\d]+)"\s*\/?>/g, (_full, attrs: string, d: string) => {
+    // Rough estimate: count coordinate numbers as proxy for path complexity
+    const coordCount = (d.match(/[\d.]+/g) || []).length;
+    if (coordCount < 4) {
+      return ''; // Remove paths with fewer than 2 points
+    }
+    return _full;
+  });
+
+  // Step 3: Aggressive SVGO pass with lower precision
+  try {
+    const svgoResult = await runSvgoOptimize(result, {
+      plugins: [
+        'removeDoctype', 'removeXMLProcInst', 'removeComments', 'removeMetadata',
+        'removeEditorsNSData', 'cleanupAttrs', 'mergeStyles', 'inlineStyles',
+        'minifyStyles', 'cleanupIds', 'removeUselessDefs',
+        {
+          name: 'convertPathData',
+          params: {
+            floatPrecision: 1,         // Lower precision (was 2)
+            transformPrecision: 2,     // Lower transform precision
+            makeArcs: { threshold: 5, tolerance: 1 }, // More aggressive arc fitting
+            removeUseless: true,
+            collapseRepeated: true,
+            lineShorthands: true,
+            curveSmoothShorthands: true,
+            convertToQ: true,          // Convert cubic to quadratic (shorter)
+            negativeExtraSpace: true,
+            smartArcRounding: true,
+          }
+        },
+        { name: 'mergePaths', params: { force: true, noSpaceAfterFlags: true } }, // Force merge
+        'convertTransform', 'removeEmptyContainers', 'removeHiddenElems',
+        'removeEmptyAttrs', 'removeNonInheritableGroupAttrs',
+        'removeDesc', 'removeTitle',
+        'convertShapeToPath', 'convertEllipseToCircle',
+      ],
+      multipass: true,
+    });
+    if (svgoResult.data) {
+      const beforePaths = (result.match(/<path/g) || []).length;
+      const afterPaths = (svgoResult.data.match(/<path/g) || []).length;
+      console.log(`[svg-trace] Aggressive SVGO: ${beforePaths} → ${afterPaths} paths, ${result.length} → ${svgoResult.data.length} bytes`);
+      result = svgoResult.data;
+    }
+  } catch (err) {
+    console.warn('[svg-trace] Aggressive SVGO failed:', (err as Error).message);
+  }
+
+  return result;
+}
+
+/**
  * Normalize SVG dimensions: ensure width, height, viewBox are consistent
  * with the original image dimensions.
  */
@@ -1977,18 +2101,31 @@ export async function POST(req: NextRequest) {
         // 标准化 SVG（统一 viewBox / width / height）
         svgContent = normalizeVectorSvg(svgContent, imgW, imgH);
 
-        // 路径数质量控制：过多路径建议保留 PNG
-        const pathCountCheck = (svgContent.match(/<path/g) || []).length;
+        // 路径数质量控制：过多路径时尝试激进简化
+        let pathCountCheck = (svgContent.match(/<path/g) || []).length;
         if (pathCountCheck === 0) {
           return NextResponse.json({
             success: false,
             error: '没有检测到可转换的 SVG 路径，该素材不适合矢量化',
           });
         }
-        if (pathCountCheck > 3000) {
+
+        // Soft limit: try aggressive simplification first
+        const COLOR_SOFT_LIMIT = 5000;
+        const COLOR_HARD_LIMIT = 10000;
+        if (pathCountCheck > COLOR_SOFT_LIMIT && !body.forceSvg) {
+          console.log(`[svg-trace] Path count ${pathCountCheck} > soft limit ${COLOR_SOFT_LIMIT}, applying aggressive simplification...`);
+          svgContent = await aggressivelySimplifyPaths(svgContent);
+          svgContent = normalizeVectorSvg(svgContent, imgW, imgH);
+          pathCountCheck = (svgContent.match(/<path/g) || []).length;
+          console.log(`[svg-trace] After simplification: ${pathCountCheck} paths`);
+        }
+
+        // Hard limit: refuse unless forceSvg
+        if (pathCountCheck > COLOR_HARD_LIMIT && !body.forceSvg) {
           return NextResponse.json({
             success: false,
-            error: `路径数量过多(${pathCountCheck}条)，该素材更适合保留为 PNG 格式`,
+            error: `路径数量过多(${pathCountCheck}条)，已尝试自动简化但仍超过${COLOR_HARD_LIMIT}条上限。该素材更适合保留为 PNG 格式，或在面板中勾选"强制输出SVG"`,
             stats: { pathCount: pathCountCheck },
           });
         }
@@ -2072,17 +2209,28 @@ export async function POST(req: NextRequest) {
         svgContent = normalizeVectorSvg(svgContent, bwImgW, bwImgH);
 
         // 路径数质量控制
-        const bwPathCount = (svgContent.match(/<path/g) || []).length;
+        let bwPathCount = (svgContent.match(/<path/g) || []).length;
         if (bwPathCount === 0) {
           return NextResponse.json({
             success: false,
             error: '没有检测到可转换的 SVG 路径，该素材不适合黑白描摹',
           });
         }
-        if (bwPathCount > 2000) {
+
+        // Soft limit: try aggressive simplification first
+        const BW_SOFT_LIMIT = 4000;
+        const BW_HARD_LIMIT = 8000;
+        if (bwPathCount > BW_SOFT_LIMIT && !body.forceSvg) {
+          console.log(`[svg-trace] BW path count ${bwPathCount} > soft limit ${BW_SOFT_LIMIT}, applying aggressive simplification...`);
+          svgContent = await aggressivelySimplifyPaths(svgContent);
+          svgContent = normalizeVectorSvg(svgContent, bwImgW, bwImgH);
+          bwPathCount = (svgContent.match(/<path/g) || []).length;
+        }
+
+        if (bwPathCount > BW_HARD_LIMIT && !body.forceSvg) {
           return NextResponse.json({
             success: false,
-            error: `路径数量过多(${bwPathCount}条)，该素材更适合保留为 PNG 格式`,
+            error: `路径数量过多(${bwPathCount}条)，已尝试自动简化但仍超过${BW_HARD_LIMIT}条上限。该素材更适合保留为 PNG 格式，或在面板中勾选"强制输出SVG"`,
             stats: { pathCount: bwPathCount },
           });
         }

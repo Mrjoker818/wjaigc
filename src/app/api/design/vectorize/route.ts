@@ -783,11 +783,11 @@ export async function POST(req: NextRequest) {
       const processed = normalizeVectorSvg(sanitizeSvgForAI(svg), origWidth, origHeight);
       // Quality control: check path count
       const pathCount = (processed.match(/<path\b/g) || []).length;
-      if (pathCount > 900) {
+      if (pathCount > 5000) {
         console.warn(`[vectorize] SVG path count too high: ${pathCount}, this asset may be better as PNG`);
         return NextResponse.json({
           success: false,
-          error: `路径数量过多(${pathCount})，该素材更适合保留为 PNG 格式`,
+          error: `路径数量过多(${pathCount})，已尝试自动简化但仍超过上限。该素材更适合保留为 PNG 格式`,
           pathCount,
         });
       }

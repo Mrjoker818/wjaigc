@@ -6143,7 +6143,41 @@ export function InfiniteCanvas({
           }, 'trace');
         }
       } else {
-        throw new Error(data.error || '处理失败');
+        // 如果是路径数量过多错误，自动重试并强制输出
+        const errorMsg = data.error || '处理失败';
+        if (errorMsg.includes('路径数量过多') || errorMsg.includes('path count')) {
+          console.log('[svg-trace] 路径过多，自动重试(forceSvg)...');
+          updateProcessingFrame(placeholderId, { progress: 30, status: '正在简化路径...' });
+          const forceBody: Record<string, unknown> = { ...requestBody, forceSvg: true };
+          const forceRes = await fetch('/api/svg-trace', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(forceBody),
+          });
+          if (forceRes.ok) {
+            const forceData = await forceRes.json();
+            if (forceData.success) {
+              // 重试成功，继续处理
+              updateProcessingFrame(placeholderId, { progress: 88, status: '正在渲染预览...' });
+              if (svgTraceMode === 'color' || svgTraceMode === 'bw') {
+                const displayUrl = forceData.dataUrl || forceData.url;
+                completeProcessingFrame(placeholderId, displayUrl, img.width * 2, img.height * 2, {
+                  prompt: `SVG描摹(${svgTraceMode === 'color' ? '全彩' : '黑白'}${forceData.engine ? '·' + forceData.engine : ''}${forceData.pathCount ? '·' + forceData.pathCount + '路径' : ''})`,
+                  svgDataUrl: forceData.svgDataUrl || forceData.svg,
+                  originalWidth: forceData.width || Math.round(img.width * 2),
+                  originalHeight: forceData.height || Math.round(img.height * 2),
+                  modifyPrompt: 'trace',
+                  modelName: modelInfo.apiDisplayName || modelInfo.model,
+                  apiProvider: modelInfo.providerName || '',
+                }, 'trace');
+              }
+              setIsEditProcessing(false);
+              setShowSvgTracePanel(false);
+              return;
+            }
+          }
+        }
+        throw new Error(errorMsg);
       }
     } catch (e) {
       console.error('SVG trace failed:', e);

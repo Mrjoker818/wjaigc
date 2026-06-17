@@ -311,10 +311,10 @@ export async function vlmVectorize(
       // 安全过滤
       const svg = sanitizeVlmSvg(rawSvg);
 
-      // 质量检查：路径数不超过 900
+      // 质量检查：路径数不超过 3000
       const pathCount = (svg.match(/<path/g) || []).length;
-      if (pathCount > 900) {
-        lastError = `VLM 生成的 SVG 路径数 ${pathCount} 超过 900，可能不适合矢量使用`;
+      if (pathCount > 3000) {
+        lastError = `VLM 生成的 SVG 路径数 ${pathCount} 超过 3000，可能不适合矢量使用`;
         // 仍然返回，但标记路径数过多
       }
 
