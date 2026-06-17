@@ -4145,6 +4145,14 @@ export function InfiniteCanvas({
 
   const selectedImageData = getSelectedImageData();
 
+  // 获取当前编辑的图片数据：优先用 editImageId（面板打开后选择可能丢失），fallback 到 selectedImageData
+  const getActiveImageData = useCallback((): CanvasImage | null => {
+    if (editImageId) {
+      return images.find(i => i.id === editImageId) || null;
+    }
+    return selectedImageData;
+  }, [editImageId, images, selectedImageData]);
+
   const loadImageAsDataUrl = useCallback(async (url: string): Promise<{ dataUrl: string; width: number; height: number }> => {
     const image = new Image();
     image.crossOrigin = 'anonymous';
@@ -5675,7 +5683,7 @@ export function InfiniteCanvas({
   }, []);
 
   const handleUpscaleConfirm = useCallback(async () => {
-    const img = selectedImageData;
+    const img = getActiveImageData();
     if (!img) return;
 
     // Use actual pixel dimensions loaded from the image element
@@ -5821,7 +5829,7 @@ export function InfiniteCanvas({
 
   // 1b. Upscale trigger - opens floating control bar
   const handleOpenUpscale = useCallback(() => {
-    const img = selectedImageData;
+    const img = getActiveImageData();
     if (!img) return;
     setEditImageId(img.id);
     setEditMode('upscale');
@@ -5855,7 +5863,7 @@ export function InfiniteCanvas({
 
   // 2. REMOVE BACKGROUND - auto, result to the right
   const handleRemoveBackground = useCallback(async () => {
-    const img = selectedImageData;
+    const img = getActiveImageData();
     if (!img) return;
     const apiKey = getApiKey();
 
@@ -6018,13 +6026,14 @@ export function InfiniteCanvas({
 
   // 3. SVG智能描摹 - Sharp + VTracer (彩色) / ImageMagick + Potrace (黑白) / Sharp (压缩/缩略图)
   const handleOpenSvgTrace = useCallback(() => {
-    if (!selectedImageData) return;
-    if (selectedImage) setEditImageId(selectedImage.id);
+    const img = getActiveImageData();
+    if (!img) return;
+    setEditImageId(img.id);
     setShowSvgTracePanel(true);
-  }, [selectedImageData, selectedImage]);
+  }, [getActiveImageData]);
 
   const handleSvgTraceConfirm = useCallback(async () => {
-    const img = selectedImageData;
+    const img = getActiveImageData();
     if (!img) return;
     const modelInfo = getCurrentModel();
 
@@ -6144,7 +6153,7 @@ export function InfiniteCanvas({
     }
     setIsEditProcessing(false);
     setShowSvgTracePanel(false);
-  }, [selectedImageData, svgTraceMode, svgTraceEngine, svgTraceQualityPreset, svgTraceColorPrecision, svgTraceFilterSpeckle, svgTraceCornerThreshold, svgTraceLengthThreshold, svgTraceCurveMode, svgTraceHierarchical, svgTraceBwThreshold, svgTraceBwTurdSize, svgTraceBwInvert, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, removeProcessingFrame]);
+  }, [getActiveImageData, svgTraceMode, svgTraceEngine, svgTraceQualityPreset, svgTraceColorPrecision, svgTraceFilterSpeckle, svgTraceCornerThreshold, svgTraceLengthThreshold, svgTraceCurveMode, svgTraceHierarchical, svgTraceBwThreshold, svgTraceBwTurdSize, svgTraceBwInvert, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, removeProcessingFrame]);
 
   // Multi-angle - Lovart-style subject/camera mode, result to the right
   const handleOpenMultiAngle = useCallback(() => {
@@ -6157,7 +6166,7 @@ export function InfiniteCanvas({
   }, [selectedImageData]);
 
   const handleMultiAngleConfirm = useCallback(async () => {
-    const img = selectedImageData;
+    const img = getActiveImageData();
     if (!img) return;
     const apiKey = getApiKey();
     const placeholderId = createProcessingFrameRightOf(
@@ -6224,7 +6233,7 @@ export function InfiniteCanvas({
 
   // Edit elements - open semantic layer editor directly
   const handleEditElements = useCallback(async () => {
-    const img = selectedImageData;
+    const img = getActiveImageData();
     if (!img) return;
     // Directly open the PSD layer editor with AI semantic analysis
     setPsdEditorImageUrl(img.url);
@@ -6244,7 +6253,7 @@ export function InfiniteCanvas({
   }, [selectedImageData, getThreeDProviders, threeDProviderId]);
 
   const handle3DConfirm = useCallback(async () => {
-    const img = selectedImageData;
+    const img = getActiveImageData();
     if (!img) return;
     const modelInfo = getCurrentModel();
     const providers = getThreeDProviders();
@@ -6391,7 +6400,7 @@ export function InfiniteCanvas({
 
   // 4. ERASE - floating window mode
   const handleOpenErase = useCallback(() => {
-    const img = selectedImageData;
+    const img = getActiveImageData();
     if (!img) return;
     setEditImageId(img.id);
     setEditMode('erase');
@@ -6405,7 +6414,7 @@ export function InfiniteCanvas({
 
   // 5. MASK - floating window mode
   const handleOpenMask = useCallback(() => {
-    const img = selectedImageData;
+    const img = getActiveImageData();
     if (!img) return;
     setEditImageId(img.id);
     setEditMode('mask');
@@ -6419,7 +6428,7 @@ export function InfiniteCanvas({
 
   // 6. EXPAND - 即梦风格方向性扩展
   const handleOpenExpand = useCallback(() => {
-    const img = selectedImageData;
+    const img = getActiveImageData();
     if (!img) return;
     setEditMode('expand');
     setEditImageId(img.id);
@@ -6526,7 +6535,7 @@ export function InfiniteCanvas({
 
   // 7. CROP - floating toolbar with custom ratios, drag crop points
   const handleOpenCrop = useCallback(() => {
-    const img = selectedImageData;
+    const img = getActiveImageData();
     if (!img) return;
     setEditMode('crop');
     setEditImageId(img.id);
