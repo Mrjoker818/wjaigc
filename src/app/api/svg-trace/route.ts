@@ -608,6 +608,33 @@ function mergeSvgColors(svg: string, mergeThreshold: number = 12): string {
   return result;
 }
 
+/**
+ * Validate and fix common SVG XML errors that prevent rendering.
+ * Handles: orphaned slashes in tags, unclosed tags, malformed attributes.
+ */
+function fixSvgXml(svg: string): string {
+  let fixed = svg;
+
+  // Fix orphaned slashes inside opening tags: <path fill="red" / d="..."/> → <path fill="red" d="..."/>
+  // This happens when attributes are stripped from self-closing tags
+  fixed = fixed.replace(/<(\w+)\s+([^>]*?)\s+\/\s+([^>]*?)>/g, '<$1 $2 $3>');
+
+  // Fix double slashes: <path //> → <path/>
+  fixed = fixed.replace(/<(\w+)\s+([^>]*?)\/\/>/g, '<$1 $2/>');
+
+  // Fix paths with trailing slash before closing bracket but after attrs: <path fill="red" />  (this is valid)
+  // But <path fill="red" / d="M"/> is not — already handled above
+
+  // Remove completely empty path elements (no d attribute)
+  fixed = fixed.replace(/<path\s*(?:\/>)?>/g, '');
+
+  // Fix unclosed path tags: <path d="..." > should be <path d="..."/>
+  // Only for path elements that have attributes but no self-closing
+  fixed = fixed.replace(/<path\s+([^>]*[^/])>(?!\s*<\/path)/g, '<path $1/>');
+
+  return fixed;
+}
+
 /** 将 hex 颜色转为 RGB */
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   let h = hex.replace('#', '');
@@ -1400,7 +1427,8 @@ async function aggressivelySimplifyPaths(svg: string): Promise<string> {
 
   // Step 1: Merge paths with identical visual properties
   // Group <path> elements by their fill+stroke+opacity+stroke-width combination
-  const pathRegex = /<path\s+([^>]*)\/?\s*>/g;
+  // Match <path .../> or <path ...> — capture attributes only (not trailing /)
+  const pathRegex = /<path\s+((?:(?!\/?>).)*?)(?:\s*\/?)>/g;
   const pathGroups = new Map<string, { attrs: string; d: string[] }>();
 
   let match: RegExpExecArray | null;
@@ -1422,7 +1450,9 @@ async function aggressivelySimplifyPaths(svg: string): Promise<string> {
       group.d.push(dMatch[1]);
     } else {
       pathGroups.set(key, {
-        attrs: attrs.replace(/d="[^"]*"/, '').trim(),
+        // Remove d attribute and any trailing slash from self-closing tags
+        // to prevent "Forward-slash in opening tag not followed by >" XML errors
+        attrs: attrs.replace(/d="[^"]*"/, '').replace(/\/\s*$/, '').replace(/\s+/g, ' ').trim(),
         d: [dMatch[1]],
       });
     }
@@ -1444,8 +1474,8 @@ async function aggressivelySimplifyPaths(svg: string): Promise<string> {
     // Only apply if we actually reduced path count
     const originalCount = (result.match(/<path/g) || []).length;
     if (mergedPaths.length < originalCount) {
-      // Remove all existing <path> elements
-      result = result.replace(/<path\s+[^>]*\/?\s*>/g, '');
+      // Remove all existing <path> elements (both self-closing and non-self-closing)
+      result = result.replace(/<path\s+[^>]*?(?:\s*\/?)>/g, '');
       // Insert merged paths before closing </svg> or </g>
       const insertPos = result.lastIndexOf('</svg>');
       if (insertPos > -1) {
@@ -1856,6 +1886,7 @@ async function tryDesignVectorizeFallback(req: NextRequest, imageUrl: string, mo
     svgContent = await postProcessSvg(svgContent);
     // SVG 标准化
     svgContent = normalizeVectorSvg(svgContent, 0, 0);
+    svgContent = fixSvgXml(svgContent);
     const svgDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgContent)}`;
     let pngPreviewUrl: string | undefined;
     let pngServerUrl: string | undefined;
@@ -1866,7 +1897,9 @@ async function tryDesignVectorizeFallback(req: NextRequest, imageUrl: string, mo
       const pngSaveResult = await saveResult(pngBuffer, `svg-fallback-${fbTimestamp}-${fbRandom}-preview.png`, 'svg-trace', 'image/png');
       pngServerUrl = pngSaveResult.url;
       pngPreviewUrl = `data:image/png;base64,${pngBuffer.toString('base64')}`;
-    } catch {}
+    } catch (pngErr) {
+      console.warn('[svg-trace] Fallback PNG preview failed:', (pngErr as Error).message);
+    }
     return NextResponse.json({
       success: true,
       mode,
@@ -1970,7 +2003,7 @@ export async function POST(req: NextRequest) {
                 const meta = await sharp(inputBufferForPipeline).metadata();
                 imgWidth = meta.width || 0;
                 imgHeight = meta.height || 0;
-              } catch {}
+              } catch { /* metadata not critical */ }
 
               const pipelineResult = await vectorizePipeline({
                 imageUrl,
@@ -1997,6 +2030,9 @@ export async function POST(req: NextRequest) {
 
                 const pathCountCheck = (svgContent.match(/<path/g) || []).length;
                 if (pathCountCheck > 0 && pathCountCheck <= 3000) {
+                  // Fix any SVG XML errors from path merging before saving
+                  svgContent = fixSvgXml(svgContent);
+
                   const filename = `svg-color-${uid}.svg`;
                   const { url } = await saveResult(svgContent, filename, 'svg-trace', 'image/svg+xml');
                   const svgDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgContent)}`;
@@ -2013,7 +2049,32 @@ export async function POST(req: NextRequest) {
                     const pngSaveResult = await saveResult(pngBuffer, pngFilename, 'svg-trace', 'image/png');
                     pngServerUrl = pngSaveResult.url;
                     pngPreviewUrl = `data:image/png;base64,${pngBuffer.toString('base64')}`;
-                  } catch {}
+                  } catch (pngErr) {
+                    console.warn('[svg-trace] Pipeline PNG preview failed (attempt 1):', (pngErr as Error).message);
+                    // Retry with cairosvg
+                    try {
+                      const { execFile } = await import('child_process');
+                      const tmpSvgPath = `/tmp/svg-pipe-${uid}.svg`;
+                      const tmpPngPath = `/tmp/svg-pipe-${uid}-preview.png`;
+                      const fs = await import('fs/promises');
+                      await fs.writeFile(tmpSvgPath, svgContent);
+                      await new Promise<void>((resolve, reject) => {
+                        execFile('cairosvg', [tmpSvgPath, '-o', tmpPngPath], { timeout: 30000 }, (err) => {
+                          if (err) reject(err); else resolve();
+                        });
+                      });
+                      const pngBuffer = await fs.readFile(tmpPngPath);
+                      const pngFilename = `svg-color-${uid}-preview.png`;
+                      const pngSaveResult = await saveResult(pngBuffer, pngFilename, 'svg-trace', 'image/png');
+                      pngServerUrl = pngSaveResult.url;
+                      pngPreviewUrl = `data:image/png;base64,${pngBuffer.toString('base64')}`;
+                      fs.unlink(tmpSvgPath).catch(() => {});
+                      fs.unlink(tmpPngPath).catch(() => {});
+                      console.log('[svg-trace] Pipeline PNG preview generated via cairosvg fallback');
+                    } catch (retryErr) {
+                      console.warn('[svg-trace] Pipeline PNG preview failed (cairosvg fallback):', (retryErr as Error).message);
+                    }
+                  }
 
                   return NextResponse.json({
                     success: true,
@@ -2139,7 +2200,7 @@ export async function POST(req: NextRequest) {
         const svgDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgContent)}`;
 
         // 生成 PNG 预览图用于画布显示（SVG data URL 在 <img> 中渲染有限制）
-        // 策略: 优先生成PNG预览并保存到服务器(返回服务器URL), 失败时降级到data URL
+        // 策略: 优先生成PNG预览并保存到服务器(返回服务器URL), 失败时尝试修复SVG重试, 最终降级到data URL
         let pngPreviewUrl: string | undefined;
         let pngServerUrl: string | undefined;
         try {
@@ -2155,7 +2216,31 @@ export async function POST(req: NextRequest) {
           const pngBase64 = pngBuffer.toString('base64');
           pngPreviewUrl = `data:image/png;base64,${pngBase64}`;
         } catch (pngErr) {
-          console.warn('[svg-trace] PNG preview generation failed, falling back to SVG file URL:', pngErr);
+          console.warn('[svg-trace] PNG preview generation failed (attempt 1):', (pngErr as Error).message);
+          // Retry: try with cairosvg as fallback for SVG→PNG conversion
+          try {
+            const { execFile } = await import('child_process');
+            const tmpSvgPath = `/tmp/svg-trace-${uid}.svg`;
+            const tmpPngPath = `/tmp/svg-trace-${uid}-preview.png`;
+            const fs = await import('fs/promises');
+            await fs.writeFile(tmpSvgPath, svgContent);
+            await new Promise<void>((resolve, reject) => {
+              execFile('cairosvg', [tmpSvgPath, '-o', tmpPngPath, '--output-width', String(Math.min(imgW, 2048)), '--output-height', String(Math.min(imgH, 2048))], { timeout: 30000 }, (err) => {
+                if (err) reject(err); else resolve();
+              });
+            });
+            const pngBuffer = await fs.readFile(tmpPngPath);
+            const pngFilename = `svg-color-${uid}-preview.png`;
+            const pngSaveResult = await saveResult(pngBuffer, pngFilename, 'svg-trace', 'image/png');
+            pngServerUrl = pngSaveResult.url;
+            pngPreviewUrl = `data:image/png;base64,${pngBuffer.toString('base64')}`;
+            // Cleanup temp files
+            fs.unlink(tmpSvgPath).catch(() => {});
+            fs.unlink(tmpPngPath).catch(() => {});
+            console.log('[svg-trace] PNG preview generated via cairosvg fallback');
+          } catch (retryErr) {
+            console.warn('[svg-trace] PNG preview generation failed (cairosvg fallback):', (retryErr as Error).message);
+          }
         }
 
         const pathCount = (svgContent.match(/<path/g) || []).length;
@@ -2238,6 +2323,9 @@ export async function POST(req: NextRequest) {
           console.warn(`[svg-trace] BW路径数量较多: ${bwPathCount}条`);
         }
 
+        // Fix any SVG XML errors from path merging before saving
+        svgContent = fixSvgXml(svgContent);
+
         const filename = `svg-bw-${uid}.svg`;
         const { url } = await saveResult(svgContent, filename, 'svg-trace', 'image/svg+xml');
 
@@ -2257,7 +2345,30 @@ export async function POST(req: NextRequest) {
           const pngBase64 = pngBuffer.toString('base64');
           pngPreviewUrl = `data:image/png;base64,${pngBase64}`;
         } catch (pngErr) {
-          console.warn('[svg-trace] BW PNG preview generation failed:', pngErr);
+          console.warn('[svg-trace] BW PNG preview generation failed (attempt 1):', (pngErr as Error).message);
+          // Retry with cairosvg
+          try {
+            const { execFile } = await import('child_process');
+            const tmpSvgPath = `/tmp/svg-bw-${uid}.svg`;
+            const tmpPngPath = `/tmp/svg-bw-${uid}-preview.png`;
+            const fs = await import('fs/promises');
+            await fs.writeFile(tmpSvgPath, svgContent);
+            await new Promise<void>((resolve, reject) => {
+              execFile('cairosvg', [tmpSvgPath, '-o', tmpPngPath, '--output-width', String(Math.min(bwImgW || 2048, 2048)), '--output-height', String(Math.min(bwImgH || 2048, 2048))], { timeout: 30000 }, (err) => {
+                if (err) reject(err); else resolve();
+              });
+            });
+            const pngBuffer = await fs.readFile(tmpPngPath);
+            const pngFilename = `svg-bw-${uid}-preview.png`;
+            const pngSaveResult = await saveResult(pngBuffer, pngFilename, 'svg-trace', 'image/png');
+            pngServerUrl = pngSaveResult.url;
+            pngPreviewUrl = `data:image/png;base64,${pngBuffer.toString('base64')}`;
+            fs.unlink(tmpSvgPath).catch(() => {});
+            fs.unlink(tmpPngPath).catch(() => {});
+            console.log('[svg-trace] BW PNG preview generated via cairosvg fallback');
+          } catch (retryErr) {
+            console.warn('[svg-trace] BW PNG preview generation failed (cairosvg fallback):', (retryErr as Error).message);
+          }
         }
 
         return NextResponse.json({
@@ -2313,6 +2424,7 @@ export async function POST(req: NextRequest) {
         svgContent = simplifySvgPaths(svgContent);
 
         svgContent = normalizeVectorSvg(svgContent, cutImgW, cutImgH);
+        svgContent = fixSvgXml(svgContent);
 
         const cutPathCount = (svgContent.match(/<path/g) || []).length;
         if (cutPathCount === 0) {
@@ -2333,7 +2445,7 @@ export async function POST(req: NextRequest) {
           const cutPngSaveResult = await saveResult(pngBuf, cutPngFilename, 'svg-trace', 'image/png');
           cutPngServerUrl = cutPngSaveResult.url;
           cutPngPreview = `data:image/png;base64,${pngBuf.toString('base64')}`;
-        } catch {}
+        } catch (e) { console.warn('[svg-trace] Cutting PNG preview failed:', (e as Error).message); }
 
         return NextResponse.json({
           success: true,
@@ -2381,6 +2493,7 @@ export async function POST(req: NextRequest) {
         svgContent = simplifySvgPaths(svgContent);
 
         svgContent = normalizeVectorSvg(svgContent, engImgW, engImgH);
+        svgContent = fixSvgXml(svgContent);
         const engPathCount = (svgContent.match(/<path/g) || []).length;
         if (engPathCount === 0) {
           return NextResponse.json({ success: false, error: '没有检测到可雕刻的轮廓路径' });
@@ -2400,7 +2513,7 @@ export async function POST(req: NextRequest) {
           const engPngSaveResult = await saveResult(pngBuf, engPngFilename, 'svg-trace', 'image/png');
           engPngServerUrl = engPngSaveResult.url;
           engPngPreview = `data:image/png;base64,${pngBuf.toString('base64')}`;
-        } catch {}
+        } catch (e) { console.warn('[svg-trace] Engraving PNG preview failed:', (e as Error).message); }
 
         return NextResponse.json({
           success: true,
@@ -2447,6 +2560,7 @@ export async function POST(req: NextRequest) {
         svgContent = simplifySvgPaths(svgContent);
 
         svgContent = normalizeVectorSvg(svgContent, laImgW, laImgH);
+        svgContent = fixSvgXml(svgContent);
 
         const laPathCount = (svgContent.match(/<path/g) || []).length;
         if (laPathCount === 0) {
@@ -2467,7 +2581,7 @@ export async function POST(req: NextRequest) {
           const laPngSaveResult = await saveResult(pngBuf, laPngFilename, 'svg-trace', 'image/png');
           laPngServerUrl = laPngSaveResult.url;
           laPngPreview = `data:image/png;base64,${pngBuf.toString('base64')}`;
-        } catch {}
+        } catch (e) { console.warn('[svg-trace] Lineart PNG preview failed:', (e as Error).message); }
 
         return NextResponse.json({
           success: true,
