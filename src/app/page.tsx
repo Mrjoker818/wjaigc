@@ -537,6 +537,14 @@ function CanvasApp() {
             modelName: img.modelName || '',
             apiProvider: img.apiProvider || '',
             apiBaseUrl: img.apiBaseUrl || '',
+            sourceUrl: img.sourceUrl || '',
+            generatedFromImageId: img.generatedFromImageId || '',
+            svgDataUrl: img.svgDataUrl || '',
+            svgUrl: img.svgUrl || '',
+            mediaType: img.mediaType || '',
+            videoUrl: img.videoUrl || '',
+            videoDuration: img.videoDuration || undefined,
+            videoThumbnailUrl: img.videoThumbnailUrl || '',
           }))
           .filter(img => img.url) as PersistableCanvasImage[];
         const updatedMeta = {
@@ -616,6 +624,14 @@ function CanvasApp() {
             modelName: img.modelName || '',
             apiProvider: img.apiProvider || '',
             apiBaseUrl: img.apiBaseUrl || '',
+            sourceUrl: img.sourceUrl || '',
+            generatedFromImageId: img.generatedFromImageId || '',
+            svgDataUrl: img.svgDataUrl || '',
+            svgUrl: img.svgUrl || '',
+            mediaType: img.mediaType || '',
+            videoUrl: img.videoUrl || '',
+            videoDuration: img.videoDuration || undefined,
+            videoThumbnailUrl: img.videoThumbnailUrl || '',
           }))
           .filter(img => img.url) as PersistableCanvasImage[];
         // 1. localStorage 即时写入
@@ -750,6 +766,33 @@ function CanvasApp() {
                 }
                 if ((!enriched.apiBaseUrl || enriched.apiBaseUrl === '') && localImg?.apiBaseUrl) {
                   enriched.apiBaseUrl = localImg.apiBaseUrl;
+                }
+                // ★ 视频字段回填：服务器同步时保留本地的视频元数据
+                if (!enriched.mediaType && localImg?.mediaType) {
+                  enriched.mediaType = localImg.mediaType;
+                }
+                if ((!enriched.videoUrl || enriched.videoUrl === '') && localImg?.videoUrl) {
+                  enriched.videoUrl = localImg.videoUrl;
+                }
+                if (!enriched.videoDuration && localImg?.videoDuration) {
+                  enriched.videoDuration = localImg.videoDuration;
+                }
+                if ((!enriched.videoThumbnailUrl || enriched.videoThumbnailUrl === '') && localImg?.videoThumbnailUrl) {
+                  enriched.videoThumbnailUrl = localImg.videoThumbnailUrl;
+                }
+                // ★ SVG字段回填：保留本地的SVG数据
+                if ((!enriched.svgDataUrl || enriched.svgDataUrl === '') && localImg?.svgDataUrl) {
+                  enriched.svgDataUrl = localImg.svgDataUrl;
+                }
+                if ((!enriched.svgUrl || enriched.svgUrl === '') && localImg?.svgUrl) {
+                  enriched.svgUrl = localImg.svgUrl;
+                }
+                // ★ 源图URL和连线关系回填
+                if ((!enriched.sourceUrl || enriched.sourceUrl === '') && localImg?.sourceUrl) {
+                  enriched.sourceUrl = localImg.sourceUrl;
+                }
+                if ((!enriched.generatedFromImageId || enriched.generatedFromImageId === '') && localImg?.generatedFromImageId) {
+                  enriched.generatedFromImageId = localImg.generatedFromImageId;
                 }
                 return enriched;
               });
@@ -2178,14 +2221,20 @@ function CanvasApp() {
 
           if (pollData.status === 'completed') {
             if (!isMountedRef.current) return; // 组件已卸载，停止轮询
-            const videoUrl = pollData.videoUrl || pollData.url;
-            const thumbnailUrl = pollData.thumbnailUrl || pollData.url;
-            if (videoUrl) {
+            const rawVideoUrl = pollData.videoUrl || pollData.url;
+            const rawThumbnailUrl = pollData.thumbnailUrl || pollData.url;
+            if (rawVideoUrl) {
+              // ★ 持久化远程URL到本地，防止过期后图片/视频消失
+              const [stableThumbnail, stableVideo] = await Promise.all([
+                toStableImageUrl(rawThumbnailUrl),
+                toStableImageUrl(rawVideoUrl),
+              ]);
+              if (!isMountedRef.current) return; // 持久化期间组件可能卸载
               setImages(prev => prev.map(img =>
                 img.id === phId ? {
                   ...img,
-                  url: thumbnailUrl || '',
-                  videoUrl: videoUrl,
+                  url: stableThumbnail || '',
+                  videoUrl: stableVideo,
                   videoDuration: params.duration,
                   mediaType: 'video' as const,
                   originalWidth: pollData.width || 1920,
@@ -2927,6 +2976,14 @@ function CanvasApp() {
                   threeDModelUrls: img.threeDModelUrls || undefined,
                   modelName: img.modelName || '', apiProvider: img.apiProvider || '',
                   apiBaseUrl: img.apiBaseUrl || '',
+                  sourceUrl: img.sourceUrl || '',
+                  generatedFromImageId: img.generatedFromImageId || '',
+                  svgDataUrl: img.svgDataUrl || '',
+                  svgUrl: img.svgUrl || '',
+                  mediaType: img.mediaType || '',
+                  videoUrl: img.videoUrl || '',
+                  videoDuration: img.videoDuration || undefined,
+                  videoThumbnailUrl: img.videoThumbnailUrl || '',
                 }))
                 .filter(img => img.url) as PersistableCanvasImage[];
               mgr.updateProject(currentProject.id, {

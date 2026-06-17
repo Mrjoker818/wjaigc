@@ -771,9 +771,14 @@ export function InfiniteCanvas({
       const currentImages = imagesRef.current;
       let changed = false;
       const updated = currentImages.map(img => {
+        // 更新匹配的 url（缩略图）或 videoUrl（视频播放地址）
         if (img.url === originalUrl) {
           changed = true;
           return { ...img, url: localUrl };
+        }
+        if (img.videoUrl === originalUrl) {
+          changed = true;
+          return { ...img, videoUrl: localUrl };
         }
         return img;
       });
