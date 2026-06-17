@@ -1180,7 +1180,7 @@ export function InfiniteCanvas({
   // SVG智能描摹 state
   const [svgTraceMode, setSvgTraceMode] = useState<'color' | 'bw' | 'cutting' | 'engraving' | 'lineart' | 'compress' | 'thumbnail'>('color');
   const [svgTraceQualityPreset, setSvgTraceQualityPreset] = useState<'fast' | 'balanced' | 'high' | 'max' | 'print' | 'print-pro'>('balanced');
-  const [svgTraceEngine, setSvgTraceEngine] = useState<'auto' | 'recraft' | 'vtracer' | 'vlm'>('auto');
+  const [svgTraceEngine, setSvgTraceEngine] = useState<'auto' | 'vectorize-api' | 'vlm' | 'vtracer'>('auto');
   const [svgTraceOutputFormat, setSvgTraceOutputFormat] = useState<'svg' | 'eps' | 'dxf' | 'pdf'>('svg');
   const [svgTraceColorPrecision, setSvgTraceColorPrecision] = useState<number | null>(null);  // null = use preset
   const [svgTraceFilterSpeckle, setSvgTraceFilterSpeckle] = useState<number | null>(null);
@@ -6101,7 +6101,7 @@ export function InfiniteCanvas({
           // 下载策略: 从data.url(服务器SVG文件)获取SVG内容，避免存储超大SVG data URL
           const displayUrl = data.dataUrl || data.url;
           const engineLabelMap: Record<string, string> = {
-            vtracer: 'VTracer', potrace: 'Potrace', recraft: 'Recraft', vlm: 'VLM', imagetracer: 'ImageTracer'
+            vtracer: 'VTracer', potrace: 'Potrace', 'vectorize-api': 'Vectorizer', vlm: 'VLM', imagetracer: 'ImageTracer'
           };
           const engineLabel = engineLabelMap[data.engine] || data.engine || 'Auto';
           completeProcessingFrame(placeholderId, displayUrl, img.width, img.height, {
@@ -9510,7 +9510,7 @@ export function InfiniteCanvas({
             >
               <div
                 className="flex flex-col items-stretch gap-2.5 p-3 min-w-[280px] max-w-[320px] rounded-xl border shadow-2xl"
-                style={{ background: 'rgba(20,20,20,0.85)', borderColor: `${activeAccent}40`, borderWidth: '1px' }}
+                style={{ background: '#141414', borderColor: `${activeAccent}40`, borderWidth: '1px' }}
                 onMouseDown={(e) => e.stopPropagation()}
               >
                 {/* Header */}
@@ -9559,10 +9559,10 @@ export function InfiniteCanvas({
                       </div>
                       <div className="grid grid-cols-4 gap-1">
                         {([
-                          { key: 'auto' as const, label: '自动', color: '#d4af37', desc: '智能选择' },
-                          { key: 'recraft' as const, label: 'Recraft', color: '#4ade80', desc: '专业矢量' },
-                          { key: 'vlm' as const, label: 'VLM', color: '#60a5fa', desc: '视觉模型' },
-                          { key: 'vtracer' as const, label: 'vtracer', color: '#9ca3af', desc: '传统描摹' },
+                          { key: 'auto' as const, label: '自动', color: '#d4af37', desc: '智能选择最优引擎' },
+                          { key: 'vectorize-api' as const, label: 'Vectorizer', color: '#4ade80', desc: 'Vectorizer.AI 精确矢量' },
+                          { key: 'vlm' as const, label: 'VLM', color: '#60a5fa', desc: '视觉语言模型' },
+                          { key: 'vtracer' as const, label: 'vtracer', color: '#9ca3af', desc: '传统描摹算法' },
                         ]).map(eng => (
                           <button key={eng.key}
                             onClick={(e) => { e.stopPropagation(); setSvgTraceEngine(eng.key); }}

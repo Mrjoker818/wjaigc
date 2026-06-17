@@ -24,8 +24,8 @@ type QualityPreset = 'fast' | 'balanced' | 'high' | 'max' | 'print' | 'print-pro
 interface TraceRequest {
   imageUrl: string;
   mode: TraceMode;
-  // Engine selection: auto = pipeline auto-selects, recraft/vtracer/vlm = force specific engine
-  engine?: 'auto' | 'recraft' | 'vtracer' | 'vlm';
+  // Engine selection: auto = pipeline auto-selects, vectorize-api/vtracer/vlm = force specific engine
+  engine?: 'auto' | 'vectorize-api' | 'vtracer' | 'vlm';
   // Quality preset (overrides individual params with optimal defaults)
   qualityPreset?: QualityPreset;
   // Color vectorization params (VTracer)
@@ -1790,7 +1790,7 @@ export async function POST(req: NextRequest) {
           error: 'VTracer 未安装。请安装: pip3 install vtracer，或使用 engine=auto 让系统自动选择最优引擎。',
         }, { status: 503 });
       }
-      // If vtracer not available but engine is auto/recraft/vlm, the pipeline will handle it
+      // If vtracer not available but engine is auto/vectorize-api/vlm, the pipeline will handle it
     } else if (mode === 'bw' || mode === 'cutting' || mode === 'engraving' || mode === 'lineart') {
       const potraceCheck = await new Promise<boolean>((resolve) => {
         execFile('which', ['potrace'], { timeout: 5000 }, (error) => {
@@ -1824,7 +1824,7 @@ export async function POST(req: NextRequest) {
         const requestedEngine = body.engine || 'auto';
 
         // ─── P0: 统一矢量化管线 (Recraft Vectorize → VLM → vtracer spline) ───
-        if (requestedEngine === 'auto' || requestedEngine === 'recraft' || requestedEngine === 'vlm') {
+        if (requestedEngine === 'auto' || requestedEngine === 'vectorize-api' || requestedEngine === 'vlm') {
           try {
             const inputBufferForPipeline = await resolveImageUrl(imageUrl);
             if (inputBufferForPipeline && inputBufferForPipeline.length > 0) {
