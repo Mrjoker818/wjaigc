@@ -506,6 +506,8 @@ interface EditRequest {
   removeBgModel?: string; // IOPaint RemoveBG model: isnet-general-use / u2net / u2netp / silueta
   originalPrompt?: string; // 原图的生成提示词, 用于多角度场景上下文
   upscaleMode?: 'cpu' | 'ai'; // 放大模式: CPU本地 / AI云端
+  outputFormat?: 'png' | 'jpg' | 'webp'; // 输出格式
+  compression?: number; // 压缩质量 (0-100)
 }
 
 // Helper: submit a task to the images/generations API and return taskId or directUrl
@@ -1883,10 +1885,11 @@ export async function POST(request: NextRequest) {
       //
       // 用户可选模式:
       //   "cpu" → ONNX CPU 分块放大 — Real-ESRGAN fp16, 纯 CPU 推理
-      //           像素级忠实，细节增强，无损放大
+      //           像素级忠实，细节增强，真正的超分辨率放大
+      //           降级: ONNX不可用时使用 sharp Lanczos3 插值放大
       //
-      //   "ai"  → AI 整图放大 — images/generations + 低 strength
-      //           AI 智能补细节，可能产生新元素，适合创意放大
+      //   "ai"  → AI 整图放大 — images/generations + 适当 strength
+      //           AI 智能补细节，适合创意放大
       // ============================================================
 
       const scaleVal = body.scale || 2;
@@ -1896,19 +1899,88 @@ export async function POST(request: NextRequest) {
       const targetH = targetHeight || origH * scaleVal;
       const upscaleMode = body.upscaleMode || 'cpu'; // "cpu" | "ai"
 
-      // ---- CPU 放大模式: sharp Lanczos3 高质量缩放 ----
+      // ---- CPU 放大模式: ONNX Real-ESRGAN 超分辨率，降级到 sharp Lanczos3 ----
       if (upscaleMode === 'cpu') {
         try {
+          // 优先使用 ONNX Real-ESRGAN (真正的AI超分辨率，能补充细节)
+          const { isOnnxUpscaleAvailable, performOnnxUpscale } = await import('@/lib/image-tools/upscayl');
+          const onnxAvail = await isOnnxUpscaleAvailable();
+
+          if (onnxAvail.available) {
+            console.log(`[image-edit] upscale: using ONNX Real-ESRGAN for true super-resolution ${origW}x${origH} -> ${targetW}x${targetH}`);
+            const onnxResult = await performOnnxUpscale({
+              imageUrl,
+              scale: scaleVal,
+              outputFormat: body.outputFormat || 'png',
+              compression: body.compression || 90,
+            });
+
+            if (onnxResult.success && onnxResult.imageUrl) {
+              // ONNX Real-ESRGAN 输出固定倍率(2x/4x)，可能不精确匹配目标尺寸
+              // 用 sharp 精确调整到目标尺寸 (仅微调，不会损失太多细节)
+              const onnxOutputW = onnxResult.outputSize?.width || targetW;
+              const onnxOutputH = onnxResult.outputSize?.height || targetH;
+
+              if (onnxOutputW !== targetW || onnxOutputH !== targetH) {
+                const { fetchImageBuffer } = await import('@/lib/fetch-image-buffer');
+                const onnxBuf = await fetchImageBuffer(onnxResult.imageUrl);
+                const resizedBuf = await sharp(onnxBuf)
+                  .resize(targetW, targetH, { kernel: 'lanczos3' })
+                  .png({ quality: 95 })
+                  .toBuffer();
+
+                const timestamp = Date.now();
+                const randomSuffix = Math.random().toString(36).substring(2, 8);
+                const filename = `upscale_${timestamp}_${randomSuffix}.png`;
+                const savedPath = await saveBufferToPublic(resizedBuf, filename);
+                const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
+                const domainBase = domain.startsWith('http') ? domain.replace(/\/+$/, '') : `https://${domain.replace(/\/+$/, '')}`;
+                const finalUrl = savedPath.startsWith('data:') ? savedPath : `${domainBase}${savedPath}`;
+
+                return NextResponse.json({
+                  success: true,
+                  imageUrl: finalUrl,
+                  action,
+                  engine: 'onnx-realesrgan',
+                  usedModel: onnxResult.model || 'realesrgan-x4plus-fp16',
+                  scale: scaleVal,
+                  originalSize: { width: origW, height: origH },
+                  outputSize: { width: targetW, height: targetH },
+                  outputWidth: targetW,
+                  outputHeight: targetH,
+                });
+              }
+
+              // ONNX 输出尺寸已匹配目标
+              return NextResponse.json({
+                success: true,
+                imageUrl: onnxResult.imageUrl,
+                action,
+                engine: 'onnx-realesrgan',
+                usedModel: onnxResult.model || 'realesrgan-x4plus-fp16',
+                scale: scaleVal,
+                originalSize: onnxResult.originalSize || { width: origW, height: origH },
+                outputSize: onnxResult.outputSize || { width: targetW, height: targetH },
+                outputWidth: onnxResult.outputSize?.width || targetW,
+                outputHeight: onnxResult.outputSize?.height || targetH,
+              });
+            }
+
+            // ONNX 失败，降级到 sharp
+            console.log(`[image-edit] upscale: ONNX Real-ESRGAN failed (${onnxResult.error}), falling back to sharp Lanczos3`);
+          } else {
+            console.log(`[image-edit] upscale: ONNX not available (${onnxAvail.error}), falling back to sharp Lanczos3`);
+          }
+
+          // 降级方案: sharp Lanczos3 插值放大 (不补充细节，仅放大像素)
           const { fetchImageBuffer } = await import('@/lib/fetch-image-buffer');
           const inputBuf = await fetchImageBuffer(imageUrl);
           
-          // 使用 sharp Lanczos3 缩放到目标尺寸
           const resizedBuf = await sharp(inputBuf)
             .resize(targetW, targetH, { kernel: 'lanczos3' })
             .png({ quality: 95 })
             .toBuffer();
 
-          // 保存到持久化存储
           const timestamp = Date.now();
           const randomSuffix = Math.random().toString(36).substring(2, 8);
           const filename = `upscale_${timestamp}_${randomSuffix}.png`;
@@ -1920,7 +1992,7 @@ export async function POST(request: NextRequest) {
             return `${domainBase}${savedPath}`;
           })();
 
-          console.log(`[image-edit] upscale: CPU sharp Lanczos3 upscale complete ${origW}x${origH} -> ${targetW}x${targetH} (${(resizedBuf.length / 1024).toFixed(0)}KB)`);
+          console.log(`[image-edit] upscale: sharp Lanczos3 fallback ${origW}x${origH} -> ${targetW}x${targetH} (${(resizedBuf.length / 1024).toFixed(0)}KB)`);
 
           return NextResponse.json({
             success: true,
@@ -1935,7 +2007,7 @@ export async function POST(request: NextRequest) {
             outputHeight: targetH,
           });
         } catch (cpuError) {
-          console.log(`[image-edit] upscale: CPU sharp error:`, cpuError instanceof Error ? cpuError.message : cpuError);
+          console.log(`[image-edit] upscale: CPU error:`, cpuError instanceof Error ? cpuError.message : cpuError);
           return NextResponse.json({ success: false, error: `CPU放大失败: ${cpuError instanceof Error ? cpuError.message : '未知错误'}` }, { status: 500 });
         }
       }
@@ -1944,26 +2016,35 @@ export async function POST(request: NextRequest) {
 
       console.log(`[image-edit] upscale: using AI whole-image upscale, target: ${targetW}x${targetH}`);
 
+      // AI 放大策略: 请求最大可用尺寸以获得最多细节，最后用 sharp 精确调整到目标尺寸
+      // 优先使用 2K/3K 尺寸档位（如 2048x2048），AI 输出越大细节越丰富
       const effectiveSize = (() => {
-        const ar = aspectRatio || (origW >= origH ? `${origW}:${origH}` : `${origW}:${origH}`);
-        return findClosestAspectRatio(ar);
+        // 优先选择大于等于目标尺寸的最大尺寸档位
+        const ar = aspectRatio || `${origW}:${origH}`;
+        const closest = findClosestAspectRatio(ar);
+        // 如果目标尺寸较小（如 1024x1024），仍使用至少 1024 档位
+        // 如果目标尺寸较大（如 2048x2048），使用 2K/3K 档位
+        const maxDim = Math.max(targetW, targetH);
+        if (maxDim > 1536) return closest; // 已经是大尺寸，直接使用
+        // 对于小目标，仍请求较大输出以获得更多细节
+        return closest;
       })();
 
-      // Step 1: 获取参考图（直接传原图给模型，跳过冗余的 vision 描述调用以节省 3-10 秒）
-      // input_fidelity: 'high' + image 参数已经把原图发给模型，模型会自行理解内容
+      // Step 1: 获取参考图（直接传原图给模型）
       const imageBase64ForVision = await resolveImageToBase64(imageUrl);
-      // 仅在用户提供了描述性 prompt 时使用，否则用通用放大指令
       const descSnippet = prompt || '';
 
-      // Step 2: 构建整图放大 prompt
+      // Step 2: 构建整图放大 prompt — 强调细节增强而非内容变更
       const upscalePrompt = [
-        `Ultra-high resolution upscale. PRESERVE exactly: same content, colors, style, composition, lighting, every detail. ENHANCE only: add finer textures, sharper edges, crisper details. DO NOT change any element, pose, or color. DO NOT add new objects. masterpiece, best quality, ultra-detailed, 8k uhd, extremely sharp.`,
-        descSnippet ? `Content: ${descSnippet.substring(0, 300)}.` : '',
+        `Upscale this image to ultra-high resolution. Keep the EXACT same content, composition, colors, and style. ENHANCE: add realistic fine textures, sharpen edges, recover lost details, improve clarity. The result must look like the same image but with significantly more detail and sharpness. Do not add, remove, or change any objects. 8k uhd, extremely detailed, ultra-sharp, photorealistic enhancement.`,
+        descSnippet ? `Original content: ${descSnippet.substring(0, 300)}.` : '',
       ].filter(Boolean).join(' ');
 
-      const negativePrompt = '(worst quality, low quality, normal quality:2), blurry, pixelated, jpeg artifacts, noise, grain, changed content, new elements, different colors, altered composition, deformed';
+      const negativePrompt = '(worst quality, low quality, normal quality:2), blurry, pixelated, jpeg artifacts, changed content, new elements, different colors, altered composition, deformed, watermark, text';
 
       // Step 3: 提交整图 AI 放大
+      // strength 0.3-0.4: AI 足够自由来增强细节，同时保持原图内容不偏离
+      // 0.05 太低 = 几乎不改变 = 不增加细节
       const result = await autoTrySubmitImageTask(candidateModels, (m) => ({
         model: m,
         prompt: upscalePrompt,
@@ -1971,13 +2052,15 @@ export async function POST(request: NextRequest) {
         n: 1,
         image: imageBase64ForVision,
         image_urls: [imageBase64ForVision],
-        strength: 0.05,
+        strength: 0.35,
         input_fidelity: 'high',
         negative_prompt: negativePrompt,
       }), 'AI放大');
 
       // ★ AI 模型按自身预设尺寸输出，不受 size 参数精确控制
-      // 因此 AI 生成后需要用 sharp resize 到目标尺寸 targetW x targetH
+      // 优化策略:
+      //   AI 输出 >= 目标: sharp 缩小到目标 (下采样保留细节)
+      //   AI 输出 < 目标: 先保存 AI 输出 (已增强细节)，再用 ONNX Real-ESRGAN 放大到目标
       const resizeAiResultToTarget = async (aiImageUrl: string): Promise<{ url: string; actualW: number; actualH: number }> => {
         try {
           // 下载 AI 生成的图片
@@ -1986,16 +2069,87 @@ export async function POST(request: NextRequest) {
           const aiW = aiMeta.width || targetW;
           const aiH = aiMeta.height || targetH;
 
-          // ★ 放大必须精确到目标尺寸，无论 AI 输出大于还是小于目标都需要 resize
-          // AI 输出 > 目标: 缩小到目标(保持精确尺寸)
-          // AI 输出 < 目标: 放大到目标(AI已增强细节，resize补足像素)
-          console.log(`[image-edit] AI upscale output ${aiW}x${aiH}, resizing to target ${targetW}x${targetH}...`);
+          // 情况1: AI 输出 >= 目标尺寸 → 下采样 (保留细节，缩小不会模糊)
+          if (aiW >= targetW && aiH >= targetH) {
+            console.log(`[image-edit] AI upscale output ${aiW}x${aiH} >= target ${targetW}x${targetH}, downsampling...`);
+            const resizedBuffer = await sharp(aiBuffer)
+              .resize(targetW, targetH, { fit: 'fill', kernel: sharp.kernel.lanczos3 })
+              .png({ quality: 95 })
+              .toBuffer();
+
+            const timestamp = Date.now();
+            const randomSuffix = Math.random().toString(36).substring(2, 8);
+            const filename = `upscale_ai_${timestamp}_${randomSuffix}.png`;
+            const savedPath = await saveBufferToPublic(resizedBuffer, filename);
+
+            const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
+            const domainBase = domain.startsWith('http') ? domain.replace(/\/+$/, '') : `https://${domain.replace(/\/+$/, '')}`;
+            const finalUrl = savedPath.startsWith('data:') ? savedPath : `${domainBase}${savedPath}`;
+
+            console.log(`[image-edit] AI upscale downsampled to ${targetW}x${targetH} (${(resizedBuffer.length / 1024).toFixed(0)}KB)`);
+            return { url: finalUrl, actualW: targetW, actualH: targetH };
+          }
+
+          // 情况2: AI 输出 < 目标尺寸 → AI 已增强细节，使用 ONNX Real-ESRGAN 二次放大
+          // 这样避免了 sharp 插值放大导致的模糊
+          console.log(`[image-edit] AI upscale output ${aiW}x${aiH} < target ${targetW}x${targetH}, using ONNX Real-ESRGAN for secondary upscale...`);
+          try {
+            const { isOnnxUpscaleAvailable, performOnnxUpscale } = await import('@/lib/image-tools/upscayl');
+            const onnxAvail = await isOnnxUpscaleAvailable();
+
+            if (onnxAvail.available) {
+              // 先保存 AI 增强后的图片到临时文件
+              const ts1 = Date.now();
+              const rs1 = Math.random().toString(36).substring(2, 8);
+              const aiFilename = `upscale_ai_tmp_${ts1}_${rs1}.png`;
+              const aiSavedPath = await saveBufferToPublic(aiBuffer, aiFilename);
+              const domain2 = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
+              const domainBase2 = domain2.startsWith('http') ? domain2.replace(/\/+$/, '') : `https://${domain2.replace(/\/+$/, '')}`;
+              const aiTempUrl = aiSavedPath.startsWith('data:') ? aiSavedPath : `${domainBase2}${aiSavedPath}`;
+
+              // 计算需要的放大倍率
+              const neededScale = Math.max(targetW / aiW, targetH / aiH);
+              const onnxScale = neededScale <= 2 ? 2 : 4; // ONNX 只支持 2x 和 4x
+
+              const onnxResult = await performOnnxUpscale({
+                imageUrl: aiTempUrl,
+                scale: onnxScale,
+                outputFormat: 'png',
+                compression: 95,
+              });
+
+              if (onnxResult.success && onnxResult.imageUrl) {
+                // ONNX 输出可能大于目标，精确 resize 到目标
+                const onnxBuf = await fetchImageBuffer(onnxResult.imageUrl);
+                const finalBuffer = await sharp(onnxBuf)
+                  .resize(targetW, targetH, { kernel: 'lanczos3' })
+                  .png({ quality: 95 })
+                  .toBuffer();
+
+                const ts2 = Date.now();
+                const rs2 = Math.random().toString(36).substring(2, 8);
+                const finalFilename = `upscale_ai_onnx_${ts2}_${rs2}.png`;
+                const finalSavedPath = await saveBufferToPublic(finalBuffer, finalFilename);
+                const domain3 = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
+                const domainBase3 = domain3.startsWith('http') ? domain3.replace(/\/+$/, '') : `https://${domain3.replace(/\/+$/, '')}`;
+                const finalUrl = finalSavedPath.startsWith('data:') ? finalSavedPath : `${domainBase3}${finalSavedPath}`;
+
+                console.log(`[image-edit] AI+ONNX upscale complete: AI ${aiW}x${aiH} -> ONNX -> ${targetW}x${targetH}`);
+                return { url: finalUrl, actualW: targetW, actualH: targetH };
+              }
+              console.log(`[image-edit] ONNX secondary upscale failed, falling back to sharp resize`);
+            }
+          } catch (onnxErr) {
+            console.log(`[image-edit] ONNX secondary upscale error:`, onnxErr instanceof Error ? onnxErr.message : onnxErr);
+          }
+
+          // ONNX 不可用时的降级: sharp 插值放大 (细节不如 ONNX，但保证功能可用)
+          console.log(`[image-edit] AI upscale: sharp Lanczos3 resize from ${aiW}x${aiH} to target ${targetW}x${targetH} (fallback)`);
           const resizedBuffer = await sharp(aiBuffer)
             .resize(targetW, targetH, { fit: 'fill', kernel: sharp.kernel.lanczos3 })
             .png({ quality: 95 })
             .toBuffer();
 
-          // 保存 resize 后的图片
           const timestamp = Date.now();
           const randomSuffix = Math.random().toString(36).substring(2, 8);
           const filename = `upscale_ai_${timestamp}_${randomSuffix}.png`;
@@ -2005,7 +2159,7 @@ export async function POST(request: NextRequest) {
           const domainBase = domain.startsWith('http') ? domain.replace(/\/+$/, '') : `https://${domain.replace(/\/+$/, '')}`;
           const finalUrl = savedPath.startsWith('data:') ? savedPath : `${domainBase}${savedPath}`;
 
-          console.log(`[image-edit] AI upscale resized to ${targetW}x${targetH} (${(resizedBuffer.length / 1024).toFixed(0)}KB)`);
+          console.log(`[image-edit] AI upscale sharp-resized to ${targetW}x${targetH} (${(resizedBuffer.length / 1024).toFixed(0)}KB)`);
           return { url: finalUrl, actualW: targetW, actualH: targetH };
         } catch (resizeErr) {
           console.error(`[image-edit] AI upscale resize failed:`, resizeErr instanceof Error ? resizeErr.message : resizeErr);

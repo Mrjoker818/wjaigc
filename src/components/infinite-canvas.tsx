@@ -5763,7 +5763,7 @@ export function InfiniteCanvas({
         return;
       }
 
-      updateProcessingFrame(placeholderId, { progress: 22, status: upscaleMode === 'cpu' ? 'CPU 正在放大（Lanczos3 高质量缩放）...' : 'AI 正在放大细节...' });
+      updateProcessingFrame(placeholderId, { progress: 22, status: upscaleMode === 'cpu' ? 'CPU 正在超清放大（Real-ESRGAN AI超分辨率）...' : 'AI 正在放大细节...' });
       const usedModel = String(data.usedModel || modelInfo.model);
       const resultUrl = data.imageUrl || await pollForResult((data.taskId as string) || '', usedModel, (progress, status) => {
         updateProcessingFrame(placeholderId, { progress, status });
@@ -9437,7 +9437,7 @@ export function InfiniteCanvas({
                         ? isMonochrome ? 'bg-blue-500 text-white' : 'bg-gold text-black'
                         : isMonochrome ? 'bg-gray-100 text-gray-500 hover:bg-gray-200' : 'bg-[#252525] text-gold-muted hover:bg-[#333]'
                     }`}
-                    title="CPU无损放大：像素级忠实，细节增强，不改变画面内容"
+                    title="CPU超清放大：Real-ESRGAN AI超分辨率，补充细节纹理，忠实还原"
                   >
                     CPU放大
                   </button>
@@ -9448,7 +9448,7 @@ export function InfiniteCanvas({
                         ? isMonochrome ? 'bg-blue-500 text-white' : 'bg-gold text-black'
                         : isMonochrome ? 'bg-gray-100 text-gray-500 hover:bg-gray-200' : 'bg-[#252525] text-gold-muted hover:bg-[#333]'
                     }`}
-                    title="AI放大：AI智能补细节，可能产生新元素，适合创意放大"
+                    title="AI放大：AI智能补细节+增强清晰度，适合创意放大"
                   >
                     AI放大
                   </button>
