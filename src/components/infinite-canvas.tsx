@@ -5863,7 +5863,7 @@ export function InfiniteCanvas({
         return;
       }
 
-      updateProcessingFrame(placeholderId, { progress: 22, status: upscaleMode === 'lossless' ? '无损放大中（Real-ESRGAN 超分辨率算法）...' : 'AI 正在放大细节...' });
+      updateProcessingFrame(placeholderId, { progress: 22, status: upscaleMode === 'lossless' ? '无损放大中（Real-ESRGAN 超分辨率 + AI画质精修）...' : 'AI 正在放大细节...' });
       let resultUrl: string | null;
       let actualOutW = targetW;
       let actualOutH = targetH;
@@ -5886,12 +5886,18 @@ export function InfiniteCanvas({
         } else {
           resultUrl = (data.url as string) || null;
           const proModel = (data.model as string) || 'Real-ESRGAN';
-          if (proStrategy === 'local-upscayl') {
+          const isEnhanced = data.enhanced === true;
+          if (proStrategy === 'onnx+ai-enhance') {
+            usedModelName = 'Real-ESRGAN+AI精修' + (isFallback ? '(降级)' : '');
+          } else if (proStrategy === 'cloud+ai-enhance') {
+            usedModelName = '云端无损+AI精修';
+          } else if (proStrategy === 'local-upscayl') {
             usedModelName = '本地Real-ESRGAN' + (isFallback ? '(降级)' : '');
           } else if (proStrategy === 'ai-redraw') {
             usedModelName = 'AI重绘放大' + (isFallback ? '(降级)' : '');
           } else {
             usedModelName = proModel === 'SeedVR2-Upscaler' ? 'SeedVR2 无损放大' : 'Real-ESRGAN 无损放大';
+            if (isEnhanced) usedModelName += '+AI精修';
           }
         }
 
@@ -12018,6 +12024,7 @@ export function InfiniteCanvas({
                 onAddImages?.(urls, undefined, meta);
               }}
               isMonochrome={isMonochrome}
+              sourceImageUrl={getActiveImageData()?.url}
             />
           </Suspense>
         )}

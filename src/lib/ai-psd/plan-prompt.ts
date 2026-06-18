@@ -193,7 +193,8 @@ CRITICAL RULES:
   const assetGuidance = [
     hasProductImages ? 'PRODUCT IMAGES are provided by the user — create product layers with "editable": false and prompt like "placeholder for user product image, centered composition"' : '',
     hasLogoImages ? 'LOGO IMAGES are provided by the user — create logo layers with "editable": false and prompt like "placeholder for user logo, positioned in corner"' : '',
-    hasReferenceImages ? 'REFERENCE IMAGES are provided for style/composition reference — analyze their visual style and apply to the layer design' : '',
+    hasReferenceImages && generationMode !== 'reference_to_psd' ? 'REFERENCE IMAGES are provided for style/composition reference — analyze their visual style and apply to the layer design' : '',
+    generationMode === 'reference_to_psd' ? 'CRITICAL: SOURCE IMAGE MODE — A source image is provided that MUST be faithfully reproduced as a layered PSD. Your layer plan MUST:\n1. Carefully analyze the source image and identify ALL distinct visual elements (background, foreground subjects, text, decorative elements, effects)\n2. Plan layers that reconstruct the source image as closely as possible\n3. Each layer prompt MUST describe the exact visual content from the corresponding region of the source image\n4. Maintain the SAME composition, colors, and visual style as the source image\n5. The preview should look IDENTICAL to the source image — this is not a creative reinterpretation\n6. Text visible in the source image should be recreated in text layers with matching content' : '',
   ].filter(Boolean).join('\n');
 
   const colorSpec = colorTone === 'custom'

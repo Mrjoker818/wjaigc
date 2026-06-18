@@ -249,10 +249,16 @@ export async function runAiPsdTask(taskId: string): Promise<void> {
 
     const previewPrompt = generatePreviewPrompt(t);
     const previewSize = `${dims.width}x${dims.height}`;
+    // reference_to_psd 模式：使用源图作为参考，图生图以复现原图设计
+    const previewRefImage = t.generationMode === 'reference_to_psd' && t.referenceImageUrls?.[0]
+      ? t.referenceImageUrls[0]
+      : undefined;
+    const previewStrength = previewRefImage ? 0.55 : undefined;
     const previewResult = await generateImage(previewPrompt, t.imageModel, {
       size: previewSize,
       quality: t.outputQuality === 'hd' ? 'hd' : 'standard',
       n: 1,
+      ...(previewRefImage ? { referenceImageUrl: previewRefImage, strength: previewStrength } : {}),
     });
 
     if (previewResult.success) {
@@ -327,10 +333,16 @@ export async function runAiPsdTask(taskId: string): Promise<void> {
         } else {
           // ── AI 生成图层 ──
           const layerPrompt = generateLayerPrompt(layer, t);
+          // reference_to_psd 模式：图层也用源图参考，保持与原图风格一致
+          const layerRefImage = t.generationMode === 'reference_to_psd' && t.referenceImageUrls?.[0]
+            ? t.referenceImageUrls[0]
+            : undefined;
+          const layerStrength = layerRefImage ? 0.45 : undefined;
           const imgResult = await generateImage(layerPrompt, t.imageModel, {
             size: `${dims.width}x${dims.height}`,
             quality: t.outputQuality === 'hd' ? 'hd' : 'standard',
             n: 1,
+            ...(layerRefImage ? { referenceImageUrl: layerRefImage, strength: layerStrength } : {}),
           });
 
           if (imgResult.success) {

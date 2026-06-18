@@ -98,18 +98,28 @@ function generateAtmospherePrompt(layer: LayerPlanLayer, task: AiPsdTask): strin
 /** 为单个图层生成优化Prompt */
 export function generateLayerPrompt(layer: LayerPlanLayer, task: AiPsdTask): string {
   const generator = LAYER_PROMPT_TEMPLATES[layer.type];
-  if (generator) return generator(layer, task);
-  // 通用回退
-  const parts: string[] = [layer.prompt || 'design element'];
-  if (layer.transparent) parts.push('TRANSPARENT BACKGROUND');
-  parts.push('no text, no product');
-  return parts.join(', ');
+  let prompt = generator ? generator(layer, task) : (() => {
+    const parts: string[] = [layer.prompt || 'design element'];
+    if (layer.transparent) parts.push('TRANSPARENT BACKGROUND');
+    parts.push('no text, no product');
+    return parts.join(', ');
+  })();
+  // reference_to_psd模式：图层生成必须匹配原图风格
+  if (task.generationMode === 'reference_to_psd') {
+    prompt += ', MUST match the original reference image style, colors, and composition precisely';
+  }
+  return prompt;
 }
 
 /** 生成整图预览Prompt */
 export function generatePreviewPrompt(task: AiPsdTask): string {
   const parts: string[] = [];
-  parts.push(`A complete ${task.sceneType || 'commercial'} design composition`);
+  if (task.generationMode === 'reference_to_psd') {
+    parts.push('FAITHFULLY REPRODUCE the original reference image as a complete layered design');
+    parts.push('MUST preserve the exact same visual content, composition, colors, text, and style as the original');
+  } else {
+    parts.push(`A complete ${task.sceneType || 'commercial'} design composition`);
+  }
   if (task.prompt) parts.push(task.prompt);
   if (task.style) parts.push(`in ${task.style} style`);
   if (task.colorTone) parts.push(`with ${task.colorTone} color palette`);

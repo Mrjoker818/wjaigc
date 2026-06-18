@@ -93,6 +93,7 @@ interface AiPsdPanelProps {
   onClose: () => void;
   onAddImages: (urls: string[], meta?: { modelName?: string; apiProvider?: string }) => void;
   isMonochrome?: boolean;
+  sourceImageUrl?: string;
 }
 
 // ─── Constants (aligned with dev doc) ─────────────────────────
@@ -263,7 +264,7 @@ const thLight = {
 
 // ─── Component ────────────────────────────────────────────────
 
-export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false }: AiPsdPanelProps) {
+export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false, sourceImageUrl }: AiPsdPanelProps) {
   const th = isMonochrome ? thLight : thDark;
   // === Panel drag state ===
   const [panelPos, setPanelPos] = useState(() => {
@@ -302,6 +303,19 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false 
   const [productImage, setProductImage] = useState<{ url: string; name: string } | null>(null);
   const [logoImage, setLogoImage] = useState<{ url: string; name: string } | null>(null);
   const [referenceStrength, setReferenceStrength] = useState(70);
+
+  // Auto-fill source image from canvas when provided
+  useEffect(() => {
+    if (sourceImageUrl) {
+      setGenerateMode('reference');
+      setReferenceImages(prev => {
+        // Avoid duplicates
+        if (prev.some(r => r.url === sourceImageUrl)) return prev;
+        return [...prev, { url: sourceImageUrl, name: '画布图片' }];
+      });
+      setReferenceStrength(85);
+    }
+  }, [sourceImageUrl]);
 
   // === Brand material mode ===
   const [brandName, setBrandName] = useState('');
