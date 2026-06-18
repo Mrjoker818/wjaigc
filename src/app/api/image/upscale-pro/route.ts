@@ -12,6 +12,7 @@ import { getSessionUser } from '@/lib/server-auth';
 // 允许最长5分钟（ONNX放大+AI精修可能较慢）
 export const maxDuration = 300;
 import { consumeCredits } from '@/lib/credits';
+import { enhanceViaAI } from '@/lib/quality-enhance';
 
 /** 支持的无损放大模型 */
 type UpscaleProModel = 'Real-ESRGAN' | 'SeedVR2-Upscaler';
@@ -372,136 +373,7 @@ async function upscaleViaAI(
   }
 }
 
-/** 画质优化提示词：放大后AI精修，仅做画质修复不做内容改动 */
-const QUALITY_ENHANCE_PROMPT = `修复这张放大后的图片，使画面变得锐利高清、写实质感。严格遵循以下要求：
-
-【核心修复目标】将模糊低清图片修复为锐利、高清、写实质感画面，完整保留原图人物/景物/动物的五官、神态、动作、构图、拍摄角度、服饰、背景、光影氛围等全部原始内容。
-
-【画质优化要求】
-1. 提升分辨率，补齐画面细节，强化纹理质感；
-2. 消除压缩噪点、像素模糊、画面发灰发白、过软发虚等瑕疵；
-3. 还原自然真实色彩，明暗对比柔和自然，避免过度锐化、磨皮、失真；
-4. 真实还原皮肤肌理、毛发、眼睛、布料、背景景物细节，不改动原图轮廓与内容。
-
-【画面限制规范】禁止过度修图、平滑磨皮、美颜滤镜；禁止生成不存在的画面元素；杜绝人工虚假锐化、画面失真怪异问题，确保修复效果自然真实。
-
-【画面干净度要求】clean illustration, smooth shading, soft lighting, controlled details, minimal texture, high clarity, refined edges, smooth gradients -- no noise, grain, artifacts, high frequency detail, dirty texture, oversharpen, blotchy, chaotic details`;
-
-/** 最大公约数（用于计算画面比例） */
-function gcd(a: number, b: number): number {
-  a = Math.abs(a);
-  b = Math.abs(b);
-  while (b) { [a, b] = [b, a % b]; }
-  return a;
-}
-
-/** 策略2.5: AI画质优化（ONNX/云端放大后精修） */
-async function enhanceViaAI(
-  imageUrl: string,
-): Promise<{ url: string; model: string } | null> {
-  console.log(`[upscale-pro] Post-enhance: AI quality refinement`);
-  const enhanceStart = Date.now();
-
-  try {
-    const baseUrl = process.env.DEPLOY_RUN_PORT
-      ? `http://localhost:${process.env.DEPLOY_RUN_PORT}`
-      : 'http://localhost:5000';
-
-    // 读取放大后图片的尺寸，计算正确的画面比例
-    let aspectRatio = '1:1';
-    try {
-      const sharp = await import('sharp');
-      const imgResp = await fetch(imageUrl.startsWith('/') ? `${baseUrl}${imageUrl}` : imageUrl, {
-        signal: AbortSignal.timeout(10000),
-      });
-      if (imgResp.ok) {
-        const imgBuf = Buffer.from(await imgResp.arrayBuffer());
-        const metadata = await sharp.default(imgBuf).metadata();
-        if (metadata.width && metadata.height) {
-          const g = gcd(metadata.width, metadata.height);
-          aspectRatio = `${metadata.width / g}:${metadata.height / g}`;
-          console.log(`[upscale-pro] AI enhance: image ${metadata.width}x${metadata.height}, ratio=${aspectRatio}`);
-        }
-      }
-    } catch {
-      // 尺寸检测失败，使用默认1:1
-    }
-
-    // 使用 /api/generate 以参考图模式调用，确保只做画质修复不做内容改动
-    // referenceMode: 'reference' → 路由到 /images/generations 端点，只参考不编辑
-    // referenceCategories + referenceStrengths → 指导AI保留所有维度
-    const enhanceRes = await fetch(`${baseUrl}/api/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        prompt: QUALITY_ENHANCE_PROMPT,
-        referenceImages: [imageUrl],
-        referenceMode: 'reference',
-        referenceCategories: { '0': ['style', 'composition', 'scene', 'color', 'subject', 'detail'] },
-        referenceStrengths: [90], // 高强度：尽可能保留原图内容，仅修复画质
-        n: 1,
-        quality: 'high',
-        aspectRatio,
-      }),
-      signal: AbortSignal.timeout(180_000), // 3分钟超时
-    });
-
-    if (!enhanceRes.ok) {
-      console.warn(`[upscale-pro] AI enhance returned ${enhanceRes.status}`);
-      return null;
-    }
-
-    const enhanceData = await enhanceRes.json() as Record<string, unknown>;
-
-    // 异步任务（generate返回taskIds）
-    const taskIds = enhanceData.taskIds as string[] | undefined;
-    if (taskIds && taskIds.length > 0) {
-      const taskId = taskIds[0];
-      console.log(`[upscale-pro] AI enhance submitted as async: ${taskId}, polling...`);
-      const maxPollTime = 150_000; // 最多等2.5分钟
-      const pollStart = Date.now();
-      while (Date.now() - pollStart < maxPollTime) {
-        await new Promise(r => setTimeout(r, 3000)); // 每3秒查一次
-        const pollRes = await fetch(`${baseUrl}/api/poll-task`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ taskId }),
-        });
-        if (pollRes.ok) {
-          const pollData = await pollRes.json() as Record<string, unknown>;
-          if (pollData.status === 'completed' && pollData.imageUrl) {
-            const persistedUrl = await persistResult(pollData.imageUrl as string);
-            const elapsed = ((Date.now() - enhanceStart) / 1000).toFixed(1);
-            console.log(`[upscale-pro] AI enhance success (${elapsed}s): ${persistedUrl.slice(0, 80)}`);
-            return { url: persistedUrl, model: 'AI-enhance' };
-          }
-          if (pollData.status === 'failed' || pollData.status === 'cancelled') {
-            console.warn(`[upscale-pro] AI enhance task ${pollData.status}`);
-            return null;
-          }
-        }
-      }
-      console.warn(`[upscale-pro] AI enhance polling timeout`);
-      return null;
-    }
-
-    // 同步返回结果
-    const resultUrl = (enhanceData.url as string) || (enhanceData.imageUrl as string) || '';
-    if (resultUrl && (resultUrl.startsWith('http') || resultUrl.startsWith('/') || resultUrl.startsWith('data:'))) {
-      const persistedUrl = await persistResult(resultUrl);
-      const elapsed = ((Date.now() - enhanceStart) / 1000).toFixed(1);
-      console.log(`[upscale-pro] AI enhance success (${elapsed}s): ${persistedUrl.slice(0, 80)}`);
-      return { url: persistedUrl, model: 'AI-enhance' };
-    }
-
-    console.warn(`[upscale-pro] AI enhance unexpected response:`, JSON.stringify(enhanceData).slice(0, 200));
-    return null;
-  } catch (err) {
-    const errMsg = err instanceof Error ? err.message : String(err);
-    console.warn(`[upscale-pro] AI enhance error: ${errMsg}`);
-    return null;
-  }
-}
+/** AI画质精修已提取到共享模块 src/lib/quality-enhance.ts */
 
 /** 持久化远程URL到本地/S3 */
 async function persistResult(remoteUrl: string): Promise<string> {
@@ -560,11 +432,11 @@ export async function POST(request: NextRequest) {
     if (cloudResult?.url) {
       // 云端放大后也做AI画质优化
       const enhanceResult = await enhanceViaAI(cloudResult.url);
-      if (enhanceResult?.url) {
+      if (enhanceResult.enhanced) {
         return NextResponse.json({
           success: true,
           url: enhanceResult.url,
-          model: `${cloudResult.model}+${enhanceResult.model}`,
+          model: `${cloudResult.model}+AI-enhance`,
           strategy: 'cloud+ai-enhance',
           enhanced: true,
         });
@@ -584,11 +456,11 @@ export async function POST(request: NextRequest) {
     if (localResult?.url) {
       // 策略2.5: ONNX放大成功后，自动追加AI画质优化
       const enhanceResult = await enhanceViaAI(localResult.url);
-      if (enhanceResult?.url) {
+      if (enhanceResult.enhanced) {
         return NextResponse.json({
           success: true,
           url: enhanceResult.url,
-          model: `${localResult.model}+${enhanceResult.model}`,
+          model: `${localResult.model}+AI-enhance`,
           strategy: 'onnx+ai-enhance',
           fallback: !cloudResult ? false : true,
           fallbackReason: cloudResult ? '云端API不可用，已使用本地Real-ESRGAN+AI精修' : undefined,
@@ -614,11 +486,11 @@ export async function POST(request: NextRequest) {
       if (aiResult?.url) {
         // AI放大后画质也较差，同样追加AI精修
         const enhancedResult = await enhanceViaAI(aiResult.url);
-        if (enhancedResult?.url) {
+        if (enhancedResult.enhanced) {
           return NextResponse.json({
             success: true,
             url: enhancedResult.url,
-            model: `${aiResult.model}+${enhancedResult.model}`,
+            model: `${aiResult.model}+AI-enhance`,
             strategy: 'ai-redraw+ai-enhance',
             enhanced: true,
             fallback: true,

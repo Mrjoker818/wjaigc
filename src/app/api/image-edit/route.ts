@@ -19,6 +19,7 @@ import { LOCAL_AI_ENABLED } from '@/lib/image-tools/config';
 import { postProcessAIRemoveBG, postProcessLocalRemoveBG } from '@/lib/remove-bg-postprocess';
 import { fetchImageBuffer } from '@/lib/fetch-image-buffer';
 import { consumeCredits } from '@/lib/credits';
+import { enhanceViaAI } from '@/lib/quality-enhance';
 
 const SUPPORTED_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
 
@@ -2138,12 +2139,28 @@ export async function POST(request: NextRequest) {
 
       if (result.directUrl) {
         const resized = await resizeAiResultToTarget(result.directUrl);
+        
+        // AI 画质精修：放大后自动优化画面质量
+        let finalUrl = resized.url;
+        let enhanced = false;
+        try {
+          const enhanceResult = await enhanceViaAI(resized.url);
+          if (enhanceResult.enhanced) {
+            finalUrl = enhanceResult.url;
+            enhanced = true;
+            console.log(`[image-edit] AI upscale quality enhanced: ${resized.url} → ${finalUrl}`);
+          }
+        } catch (enhanceErr) {
+          console.warn(`[image-edit] AI upscale enhancement failed, using unenhanced result:`, enhanceErr instanceof Error ? enhanceErr.message : enhanceErr);
+        }
+        
         return NextResponse.json({
           success: true,
-          imageUrl: resized.url,
+          imageUrl: finalUrl,
           action,
-          engine: 'ai-upscale-hq',
+          engine: enhanced ? 'ai-upscale-hq-enhanced' : 'ai-upscale-hq',
           usedModel: result.usedModel,
+          enhanced,
           originalSize: { width: origW, height: origH },
           outputSize: { width: resized.actualW, height: resized.actualH },
           outputWidth: resized.actualW,

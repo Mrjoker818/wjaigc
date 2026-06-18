@@ -14,6 +14,7 @@ import { translateApiError } from '@/lib/api-error-translate';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getRefineResult } from '@/app/api/refine-engine/route';
 import { getBrandResult } from '@/app/api/brand-ecommerce/route';
+import { enhanceViaAI } from '@/lib/quality-enhance';
 
 export const dynamic = 'force-dynamic';
 
@@ -1172,6 +1173,20 @@ export async function POST(request: NextRequest) {
             const finalH = didDownscale ? upscaleTargetH : (didUpscale ? upscaleTargetH : aiH);
             (pollResult as Record<string, unknown>).outputSize = { width: finalW, height: finalH };
             console.log(`[poll-task] AI Upscale: final output ${finalW}x${finalH}`);
+
+            // AI 画质精修：放大后自动优化画面质量
+            if (pollResult.imageUrl) {
+              try {
+                const enhanceResult = await enhanceViaAI(pollResult.imageUrl as string);
+                if (enhanceResult.enhanced) {
+                  pollResult.imageUrl = enhanceResult.url;
+                  (pollResult as Record<string, unknown>).enhanced = true;
+                  console.log(`[poll-task] AI Upscale quality enhanced: ${enhanceResult.url}`);
+                }
+              } catch (enhanceErr) {
+                console.warn('[poll-task] AI Upscale enhancement failed, using unenhanced result:', enhanceErr instanceof Error ? enhanceErr.message : enhanceErr);
+              }
+            }
           } catch (upscaleResizeErr) {
             console.warn('[poll-task] AI Upscale post-process failed, using raw AI result:', upscaleResizeErr instanceof Error ? upscaleResizeErr.message : upscaleResizeErr);
           }
