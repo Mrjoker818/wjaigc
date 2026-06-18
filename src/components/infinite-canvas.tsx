@@ -525,6 +525,11 @@ export function InfiniteCanvas({
   onSelectImageRef.current = onSelectImage;
   const onNavigateToImageCompleteRef = useRef(onNavigateToImageComplete);
   onNavigateToImageCompleteRef.current = onNavigateToImageComplete;
+  // Ref for connections to avoid stale closure in completeProcessingFrame
+  const connectionsRef = useRef(connections);
+  connectionsRef.current = connections;
+  const onConnectionsChangeRef = useRef(onConnectionsChange);
+  onConnectionsChangeRef.current = onConnectionsChange;
 
   // Resize preview: stores live dimensions during resize, applied to images only on mouseup
   const [resizePreview, setResizePreview] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
@@ -914,6 +919,11 @@ export function InfiniteCanvas({
   const [dragTarget, setDragTarget] = useState<string | null>(null);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  // Refs for RAF-throttled drag updates to avoid excessive re-renders
+  const dragOffsetRef = useRef({ x: 0, y: 0 });
+  const dragRafRef = useRef<number | null>(null);
+  const snapGuidesRef = useRef<SnapGuide[]>([]);
+  const hoveredGenGroupIdRef = useRef<string | null>(null);
 
   // Group drag state
   const [groupDragTarget, setGroupDragTarget] = useState<string | null>(null);
@@ -2532,9 +2542,6 @@ export function InfiniteCanvas({
           offsetY = rawOffsetY + dy;
         }
       }
-      setDragOffset({ x: offsetX, y: offsetY });
-      setActiveSnapGuides(guides);
-
       // ── Hover detection: check if dragged image is over a GenGroup container ──
       let hoveredGroup: string | null = null;
       if (imageDragReadyRef.current && dragTarget) {
@@ -2563,7 +2570,18 @@ export function InfiniteCanvas({
           }
         }
       }
-      setHoveredGenGroupId(hoveredGroup);
+      // RAF-throttled state updates for drag performance
+      dragOffsetRef.current = { x: offsetX, y: offsetY };
+      snapGuidesRef.current = guides;
+      hoveredGenGroupIdRef.current = hoveredGroup;
+      if (dragRafRef.current === null) {
+        dragRafRef.current = requestAnimationFrame(() => {
+          dragRafRef.current = null;
+          setDragOffset(dragOffsetRef.current);
+          setActiveSnapGuides(snapGuidesRef.current);
+          setHoveredGenGroupId(hoveredGenGroupIdRef.current);
+        });
+      }
     }
 
     // Group drag: only allow after long press (groupDragReadyRef)
@@ -2795,6 +2813,12 @@ export function InfiniteCanvas({
         }
       }
       setDragTarget(null);
+      // Cancel any pending RAF and reset drag refs
+      if (dragRafRef.current !== null) {
+        cancelAnimationFrame(dragRafRef.current);
+        dragRafRef.current = null;
+      }
+      dragOffsetRef.current = { x: 0, y: 0 };
       setDragOffset({ x: 0, y: 0 });
       setHoveredGenGroupId(null);
       imageDragReadyRef.current = false;
@@ -2907,6 +2931,11 @@ export function InfiniteCanvas({
     brushCursorPosRef.current = null;
     if (dragTarget) {
       setDragTarget(null);
+      if (dragRafRef.current !== null) {
+        cancelAnimationFrame(dragRafRef.current);
+        dragRafRef.current = null;
+      }
+      dragOffsetRef.current = { x: 0, y: 0 };
       setDragOffset({ x: 0, y: 0 });
       imageDragReadyRef.current = false;
     }
@@ -4099,8 +4128,10 @@ export function InfiniteCanvas({
         const sourceImage = imagesRef.current.find(img => img.id === sourceId && !img.isProcessingPlaceholder);
         if (sourceImage) {
           const newConn = createAutoConnection(sourceId, id, relationType);
-          if (newConn && onConnectionsChange) {
-            onConnectionsChange([...(connections || []), newConn]);
+          if (newConn && onConnectionsChangeRef.current) {
+            // Use ref to avoid stale closure — merge with latest connections
+            const latestConns = connectionsRef.current || [];
+            onConnectionsChangeRef.current([...latestConns, newConn]);
           }
         }
       }
