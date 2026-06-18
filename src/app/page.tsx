@@ -105,6 +105,9 @@ function CanvasApp() {
   const incrementalHistoryRef = useRef<IncrementalHistoryManager<CanvasImage>>(new IncrementalHistoryManager<CanvasImage>(100));
   const isMountedRef = useRef(true);
   const prevImagesRef = useRef<CanvasImage[]>([]);
+  // ★ 跳过历史记录标记：项目加载/服务器同步等非用户操作不记录 undo diff
+  // 防止 Ctrl+Z 撤销到项目加载前的空画布状态
+  const skipHistoryRef = useRef(false);
 
   // P2-1: 画布连线状态
   const [canvasConnections, setCanvasConnections] = useState<import('@/lib/canvas-connections').CanvasConnection[]>([]);
@@ -133,9 +136,12 @@ function CanvasApp() {
       }
 
       // Record diff: if prevImagesRef is stale, squash from stale→prev and prev→next into one step
-      const baseState = prevImagesRef.current === prev ? prev : prevImagesRef.current;
-      if (baseState.length > 0 || next.length > 0) {
-        incrementalHistoryRef.current.recordChange(baseState, next);
+      // ★ 跳过非用户操作（项目加载/服务器同步）的 diff 记录，防止 Ctrl+Z 撤销到空画布
+      if (!skipHistoryRef.current) {
+        const baseState = prevImagesRef.current === prev ? prev : prevImagesRef.current;
+        if (baseState.length > 0 || next.length > 0) {
+          incrementalHistoryRef.current.recordChange(baseState, next);
+        }
       }
 
       prevImagesRef.current = next;
@@ -167,6 +173,11 @@ function CanvasApp() {
   // 从工作台加载指定项目
   const loadProjectById = useCallback(async (projectId: string) => {
     try {
+      // ★ 加载项目前：清空 undo 历史 + 跳过 diff 记录，防止 Ctrl+Z 撤销到空画布
+      skipHistoryRef.current = true;
+      incrementalHistoryRef.current.clear();
+      prevImagesRef.current = [];
+
       const userMgr = UserManagerCore.getInstance();
       const projects = userMgr.getProjects();
       const targetProject = projects.find((p: Project) => p.id === projectId);
@@ -202,7 +213,11 @@ function CanvasApp() {
           groupsRef.current = targetProject.metadata.groups as ImageGroupData[];
         }
       }
+
+      // ★ 加载完成后恢复 diff 记录（延迟，确保 setImages 的回调已执行完毕）
+      setTimeout(() => { skipHistoryRef.current = false; }, 0);
     } catch (e) {
+      skipHistoryRef.current = false;
       console.error('加载项目失败:', e);
     }
   }, []);
@@ -294,6 +309,11 @@ function CanvasApp() {
           const projectId = searchParams.get('projectId');
           
           if (projectId) {
+            // ★ 初始化加载项目：跳过 diff 记录，防止 Ctrl+Z 撤销到空画布
+            skipHistoryRef.current = true;
+            incrementalHistoryRef.current.clear();
+            prevImagesRef.current = [];
+
             // 从工作台跳转过来，加载指定项目
             try {
               const projects = userMgr.getProjects();
@@ -355,6 +375,8 @@ function CanvasApp() {
                 }
               }
             } catch { /* non-blocking */ }
+            // ★ 初始化项目加载完成，恢复 diff 记录
+            setTimeout(() => { skipHistoryRef.current = false; }, 0);
           } else {
             // 无 projectId → 显示工作台视图（在画布页面内部）
             setAuthChecked(true);
@@ -704,6 +726,8 @@ function CanvasApp() {
         if (!currentUserId || currentUserId !== currentUserRef.current?.id) return;
         // 标记服务器同步合并中，防止自动保存用旧闭包数据覆盖
         serverSyncMergeRef.current = true;
+        // ★ 跳过历史记录，防止服务器同步合并被记入 undo 历史
+        skipHistoryRef.current = true;
         const projects = userMgr.getProjects();
         const curProjectId = currentProjectRef.current?.id;
         if (curProjectId) {
@@ -806,8 +830,9 @@ function CanvasApp() {
         // 项目列表可能变化（如其他设备新建了项目）
         setCurrentUser({ ...currentUser }); // 触发 UI 刷新
         // 延迟清除同步合并标记，确保 setImages 引起的自动保存跳过本轮
-        setTimeout(() => { serverSyncMergeRef.current = false; }, 2000);
-      } catch { /* best effort */ serverSyncMergeRef.current = false; }
+        // ★ 同时恢复历史记录（延迟更久，确保 setImages 回调链完成）
+        setTimeout(() => { serverSyncMergeRef.current = false; skipHistoryRef.current = false; }, 2000);
+      } catch { /* best effort */ serverSyncMergeRef.current = false; skipHistoryRef.current = false; }
     });
     return () => { if (typeof unsubscribe === 'function') unsubscribe(); };
   }, [currentUser, currentProject?.id]);
@@ -2996,6 +3021,9 @@ function CanvasApp() {
           userMgr.logout();
           setCurrentUser(null);
           setCurrentProject(null);
+          // ★ 清空 undo 历史，防止退出登录后残留历史
+          incrementalHistoryRef.current.clear();
+          prevImagesRef.current = [];
           setImages([]);
           latestImagesRef.current = []; // 立即清除 ref，防止残留图片数据
           setInitialGroups([]);
@@ -3393,6 +3421,10 @@ function CanvasApp() {
           onLogin={async (user) => {
             // 关键：先清除旧用户的所有状态，防止数据跨用户泄露
             setCurrentProject(null);
+            // ★ 清空 undo 历史，防止旧用户的历史影响新用户
+            incrementalHistoryRef.current.clear();
+            prevImagesRef.current = [];
+            skipHistoryRef.current = true;
             setImages([]);
             latestImagesRef.current = []; // 立即清除 ref，防止 onProjectsChanged 用旧图片覆盖新用户数据
             setCurrentUser(user);
@@ -3409,6 +3441,8 @@ function CanvasApp() {
             });
             // 登录成功后进入工作台
             setAppMode('dashboard');
+            // ★ 延迟恢复历史记录（登录清空图片不需要记录到 undo）
+            setTimeout(() => { skipHistoryRef.current = false; }, 100);
           }}
         />
       )}
