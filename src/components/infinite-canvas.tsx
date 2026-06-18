@@ -6191,13 +6191,22 @@ export function InfiniteCanvas({
           
           updateProcessingFrame(placeholderId, { progress: 20, status: `正在${modeLabel} (WASM)...` });
           
+          // WASM 引擎使用位深度(1-8)，而非颜色数量；使用质量预设映射
+          const WASM_PRESETS: Record<string, { colorPrecision: number; filterSpeckle: number; maxColors?: number }> = {
+            fast: { colorPrecision: 4, filterSpeckle: 4, maxColors: 16 },
+            balanced: { colorPrecision: 5, filterSpeckle: 4, maxColors: 32 },
+            high: { colorPrecision: 6, filterSpeckle: 4, maxColors: 64 },
+            max: { colorPrecision: 7, filterSpeckle: 4, maxColors: 128 },
+          };
+          const wasmPreset = WASM_PRESETS[svgTraceQualityPreset] || WASM_PRESETS.balanced;
           const result = await vtracerWasmClient.convertImage(img.url, {
             colorMode: svgTraceMode === 'bw' ? 'bw' : 'color',
-            colorPrecision: svgTraceColorPrecision ?? undefined,
-            filterSpeckle: svgTraceFilterSpeckle ?? undefined,
+            colorPrecision: wasmPreset.colorPrecision,
+            filterSpeckle: wasmPreset.filterSpeckle,
             cornerThreshold: svgTraceCornerThreshold ?? undefined,
             lengthThreshold: svgTraceLengthThreshold ?? undefined,
             hierarchical: svgTraceHierarchical ?? undefined,
+            maxColors: wasmPreset.maxColors,
           });
 
           if (!result.success || !result.svg) {
