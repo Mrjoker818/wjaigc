@@ -32,7 +32,7 @@ interface TraceRequest {
   colorPrecision?: number;       // 2-12, default depends on preset
   filterSpeckle?: number;        // 0-20, default depends on preset
   cornerThreshold?: number;      // 0-10, default 1
-  lengthThreshold?: number;      // 1-20, default depends on preset
+  lengthThreshold?: number;      // 3.5-10.0 (WASM constraint), default depends on preset
   spliceThreshold?: number;      // 0-90, default 45
   pathPrecision?: number;        // 1-8, default depends on preset
   hierarchical?: VtracerHierarchical;  // 'stacked' or 'cutout', default depends on preset
@@ -132,7 +132,7 @@ const QUALITY_PRESETS: Record<QualityPreset, VtracerParams> = {
     colorPrecision: 256,      // 256色: 最高色彩精度
     filterSpeckle: 2,         // 印刷级保留细节
     cornerThreshold: 60,      // 默认精度，保留角落
-    lengthThreshold: 3.0,     // 更精细路径
+    lengthThreshold: 3.5,     // 更精细路径 (WASM min=3.5)
     spliceThreshold: 45,
     pathPrecision: 5,         // 高坐标精度
     hierarchical: 'stacked',
@@ -148,7 +148,7 @@ const QUALITY_PRESETS: Record<QualityPreset, VtracerParams> = {
     colorPrecision: 256,      // 256色: 最高色彩精度
     filterSpeckle: 6,         // 适度去噪，保留小细节
     cornerThreshold: 100,     // 中等角点平滑，保留卡通尖角
-    lengthThreshold: 3.0,     // 更精细路径
+    lengthThreshold: 3.5,     // 更精细路径 (WASM min=3.5)
     spliceThreshold: 45,      // 官方默认
     pathPrecision: 5,         // 高坐标精度
     hierarchical: 'stacked',  // 官方默认: stacked无层间间隙
@@ -167,7 +167,7 @@ function resolveVtracerParams(body: TraceRequest): VtracerParams {
     colorPrecision: body.colorPrecision ?? base.colorPrecision,
     filterSpeckle: body.filterSpeckle ?? base.filterSpeckle,
     cornerThreshold: body.cornerThreshold ?? base.cornerThreshold,
-    lengthThreshold: body.lengthThreshold ?? base.lengthThreshold,
+    lengthThreshold: Math.max(3.5, Math.min(10.0, body.lengthThreshold ?? base.lengthThreshold)),
     spliceThreshold: body.spliceThreshold ?? base.spliceThreshold,
     pathPrecision: body.pathPrecision ?? base.pathPrecision,
     hierarchical: body.hierarchical ?? base.hierarchical,

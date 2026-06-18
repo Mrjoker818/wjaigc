@@ -240,13 +240,13 @@ export async function vectorizeWithWasm(
         : vtracer.Hierarchical.Stacked
     );
     
-    // 设置参数
-    config.setColorPrecision(effectiveColorPrecision);
-    config.setFilterSpeckle(options.filterSpeckle);
-    config.setCornerThreshold(options.cornerThreshold);
-    config.setLengthThreshold(options.lengthThreshold);
-    config.setSpliceThreshold(options.spliceThreshold);
-    config.setPathPrecision(options.pathPrecision);
+    // 设置参数（带边界钳制，防止越界报错）
+    config.setColorPrecision(Math.max(1, Math.min(8, effectiveColorPrecision)));
+    config.setFilterSpeckle(Math.max(0, Math.round(options.filterSpeckle)));
+    config.setCornerThreshold(Math.max(0, Math.min(180, options.cornerThreshold)));
+    config.setLengthThreshold(Math.max(3.5, Math.min(10.0, options.lengthThreshold)));
+    config.setSpliceThreshold(Math.max(0, Math.min(180, options.spliceThreshold)));
+    config.setPathPrecision(Math.max(0, Math.min(8, options.pathPrecision)));
 
     // 执行转换
     const rgbaPixels = new Uint8Array(imageData.data.buffer);

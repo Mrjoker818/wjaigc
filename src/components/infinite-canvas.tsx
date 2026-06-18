@@ -6235,9 +6235,9 @@ export function InfiniteCanvas({
             colorMode: svgTraceMode === 'bw' ? 'bw' : 'color',
             colorPrecision: wasmPreset.colorPrecision,
             filterSpeckle: wasmPreset.filterSpeckle,
-            cornerThreshold: svgTraceCornerThreshold ?? undefined,
-            lengthThreshold: svgTraceLengthThreshold ?? undefined,
-            hierarchical: svgTraceHierarchical ?? undefined,
+            ...(svgTraceCornerThreshold !== null ? { cornerThreshold: svgTraceCornerThreshold } : {}),
+            ...(svgTraceLengthThreshold !== null ? { lengthThreshold: svgTraceLengthThreshold } : {}),
+            ...(svgTraceHierarchical !== null ? { hierarchical: svgTraceHierarchical } : {}),
             maxColors: wasmPreset.maxColors,
           });
 
@@ -6329,7 +6329,7 @@ export function InfiniteCanvas({
       }
 
       const svgTraceController = new AbortController();
-      const svgTraceTimeout = setTimeout(() => svgTraceController.abort(), 120_000); // 2分钟超时
+      const svgTraceTimeout = setTimeout(() => svgTraceController.abort(new Error('SVG描摹超时，请重试或选择其他引擎')), 300_000); // 5分钟超时（自动模式需多引擎降级）
       const response = await fetch('/api/svg-trace', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -6432,7 +6432,9 @@ export function InfiniteCanvas({
       console.error('SVG trace failed:', e);
       // 移除处理中的占位框，避免画布上残留空白框
       removeProcessingFrame(placeholderId);
-      alert(`SVG智能描摹失败: ${e instanceof Error ? e.message : '请重试'}`);
+      const isAbort = e instanceof DOMException && e.name === 'AbortError';
+      const abortReason = isAbort && e.message ? e.message : '';
+      alert(`SVG智能描摹失败: ${abortReason || (e instanceof Error ? e.message : '请重试')}`);
     }
     setIsSvgTraceProcessing(false);
     setShowSvgTracePanel(false);
