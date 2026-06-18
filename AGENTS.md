@@ -55,6 +55,7 @@ src/
 │       ├── image/
 │       │   ├── health/route.ts     # 本地图像工具健康检测 API
 │       │   ├── upscale/route.ts    # 无损放大 API (upscayl-node)
+│       │   ├── upscale-pro/route.ts # 无损放大Pro API (PearAPI+ONNX+AI精修, 多策略降级)
 │       │   └── inpaint/route.ts    # 涂抹消除/蒙版修图 API (IOPaint+LaMa)
 │       ├── admin/
 │       │   └── api-balance/route.ts   # API 余额与用量分析 API
@@ -283,6 +284,7 @@ scripts/
 - **擦除功能**: IOPaint 多模型优先（LaMa 通用/ZITS 结构保持/Anime-Lama 动漫），AI 模型兜底（全图发送+蒙版合成避免变形），BFS 边界扩散最终兜底
 - **蒙版修图**: AI 模型优先生成 + 后端精确蒙版合成（仅替换蒙版区域）
 - **无损放大**: upscayl-node (NCNN) + AI 整图放大兜底
+- **无损放大Pro**: PearAPI Real-ESRGAN 云端 → 本地 ONNX Real-ESRGAN (CPU) → AI 重绘兜底，放大后自动 AI 画质精修（补细节/消噪点/还原质感，保持原图内容不变）
 - **移除背景**: IOPaint RemoveBG 优先（支持 3 个模型：BiRefNet通用 + U2Net轻量快速 + Silueta轻量人像），默认 birefnet-general-lite，AI 模型兜底，本地透明化最终兜底
   - 同时生成透明背景图和黑白蒙版图（白色=主体，黑色=背景），两图并排添加到画布
   - Python 端完成所有蒙版处理（膨胀+模糊+应用），Node.js 端仅保存文件
@@ -293,6 +295,7 @@ scripts/
 - **API 接口**:
   - POST `/api/image-edit` - 图片编辑（action: erase/mask/upscale/extend/removebg）
   - GET `/api/image/health` - 本地图像工具健康检测
+  - POST `/api/image/upscale-pro` - 无损放大Pro（PearAPI+ONNX+AI精修，多策略降级）
 
 ### 12. 本地图像编辑 (image-editor/ + image-tools/)
 

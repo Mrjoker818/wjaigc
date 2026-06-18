@@ -1,12 +1,16 @@
 // ============================================================
-// POST /api/image/upscale-pro — 无损放大（多策略降级）
+// POST /api/image/upscale-pro — 无损放大（多策略降级 + AI画质精修）
 // 1. 云端专用API（PearAPI photo-enhancer: Real-ESRGAN/SeedVR2）
-// 2. 本地 upscayl-node（Real-ESRGAN ONNX）
+// 2. 本地 ONNX Real-ESRGAN（CPU分块处理）
+// 2.5 AI画质精修（放大后自动追加，修复模糊/噪点/失真）
 // 3. AI重绘兜底（图像生成模型放大）
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/server-auth';
+
+// 允许最长5分钟（ONNX放大+AI精修可能较慢）
+export const maxDuration = 300;
 import { consumeCredits } from '@/lib/credits';
 
 /** 支持的无损放大模型 */
@@ -243,29 +247,48 @@ async function upscaleViaOnnx(
     // 清理输入临时文件
     try { fs.unlinkSync(inputPath); } catch {}
 
-    // 解析输出
+    // 解析输出 — Python脚本返回 outputFile（文件路径）或 image（base64编码的图片数据）
     const output = JSON.parse(result.stdout.trim());
     if (!output.success) {
       console.warn(`[upscale-pro] ONNX upscale failed: ${output.error || result.stderr.slice(0, 200)}`);
       return null;
     }
 
-    let resultUrl: string = output.outputFile || output.outputBase64;
+    // 优先使用文件路径（大图模式），否则使用base64（小图模式）
+    let resultUrl: string = output.outputFile || '';
+    if (!resultUrl && output.image) {
+      // Python脚本返回的image字段是纯base64，需转为data URL
+      resultUrl = `data:image/png;base64,${output.image}`;
+    }
     if (!resultUrl) {
       console.warn('[upscale-pro] ONNX upscale: no output in response');
       return null;
     }
 
     // 如果输入图被缩小过，需要将ONNX输出resize到目标尺寸
-    if (effectiveScale !== scale && fs.existsSync(resultUrl)) {
+    if (effectiveScale !== scale) {
       const targetW = (metadata.width || 512) * scale;
       const targetH = (metadata.height || 512) * scale;
-      const resizedBuf = await sharp.default(resultUrl)
-        .resize(targetW, targetH, { kernel: 'lanczos3' })
-        .png()
-        .toBuffer();
-      fs.writeFileSync(resultUrl, resizedBuf);
-      console.log(`[upscale-pro] ONNX output resized to ${targetW}x${targetH}`);
+      if (fs.existsSync(resultUrl)) {
+        const resizedBuf = await sharp.default(resultUrl)
+          .resize(targetW, targetH, { kernel: 'lanczos3' })
+          .png()
+          .toBuffer();
+        fs.writeFileSync(resultUrl, resizedBuf);
+        console.log(`[upscale-pro] ONNX output resized to ${targetW}x${targetH}`);
+      } else if (resultUrl.startsWith('data:')) {
+        // base64 data URL — decode, resize, re-encode
+        const base64Match = resultUrl.match(/^data:image\/(png|jpeg|webp);base64,(.+)$/);
+        if (base64Match) {
+          const imgBuf = Buffer.from(base64Match[2], 'base64');
+          const resizedBuf = await sharp.default(imgBuf)
+            .resize(targetW, targetH, { kernel: 'lanczos3' })
+            .png()
+            .toBuffer();
+          resultUrl = `data:image/png;base64,${resizedBuf.toString('base64')}`;
+          console.log(`[upscale-pro] ONNX base64 output resized to ${targetW}x${targetH}`);
+        }
+      }
     }
 
     // 如果输出是文件路径，转为API URL
@@ -362,6 +385,14 @@ const QUALITY_ENHANCE_PROMPT = `修复这张放大后的图片，使画面变得
 
 【画面限制规范】禁止过度修图、平滑磨皮、美颜滤镜；禁止生成不存在的画面元素；杜绝人工虚假锐化、画面失真怪异问题，确保修复效果自然真实。`;
 
+/** 最大公约数（用于计算画面比例） */
+function gcd(a: number, b: number): number {
+  a = Math.abs(a);
+  b = Math.abs(b);
+  while (b) { [a, b] = [b, a % b]; }
+  return a;
+}
+
 /** 策略2.5: AI画质优化（ONNX/云端放大后精修） */
 async function enhanceViaAI(
   imageUrl: string,
@@ -373,6 +404,26 @@ async function enhanceViaAI(
     const baseUrl = process.env.DEPLOY_RUN_PORT
       ? `http://localhost:${process.env.DEPLOY_RUN_PORT}`
       : 'http://localhost:5000';
+
+    // 读取放大后图片的尺寸，计算正确的画面比例
+    let aspectRatio = '1:1';
+    try {
+      const sharp = await import('sharp');
+      const imgResp = await fetch(imageUrl.startsWith('/') ? `${baseUrl}${imageUrl}` : imageUrl, {
+        signal: AbortSignal.timeout(10000),
+      });
+      if (imgResp.ok) {
+        const imgBuf = Buffer.from(await imgResp.arrayBuffer());
+        const metadata = await sharp.default(imgBuf).metadata();
+        if (metadata.width && metadata.height) {
+          const g = gcd(metadata.width, metadata.height);
+          aspectRatio = `${metadata.width / g}:${metadata.height / g}`;
+          console.log(`[upscale-pro] AI enhance: image ${metadata.width}x${metadata.height}, ratio=${aspectRatio}`);
+        }
+      }
+    } catch {
+      // 尺寸检测失败，使用默认1:1
+    }
 
     // 使用 /api/generate 以参考图模式调用，确保只做画质修复不做内容改动
     // referenceMode: 'reference' → 路由到 /images/generations 端点，只参考不编辑
@@ -388,6 +439,7 @@ async function enhanceViaAI(
         referenceStrengths: [90], // 高强度：尽可能保留原图内容，仅修复画质
         n: 1,
         quality: 'high',
+        aspectRatio,
       }),
       signal: AbortSignal.timeout(180_000), // 3分钟超时
     });
@@ -411,7 +463,7 @@ async function enhanceViaAI(
         const pollRes = await fetch(`${baseUrl}/api/poll-task`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ taskId, model: 'image-edit' }),
+          body: JSON.stringify({ taskId }),
         });
         if (pollRes.ok) {
           const pollData = await pollRes.json() as Record<string, unknown>;
