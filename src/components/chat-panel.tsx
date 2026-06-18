@@ -1436,6 +1436,9 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
   const [systemPrompt, setSystemPrompt] = useState('');
   const [isThinkingMode, setIsThinkingMode] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const thinkingStartTimeRef = useRef<number>(0);
+  const [thinkingElapsed, setThinkingElapsed] = useState(0);
+  const thinkingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [showChatSettings, setShowChatSettings] = useState(true);
@@ -1479,6 +1482,28 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
   const [skillCategoryFilter, setSkillCategoryFilter] = useState('');
   const [activeSkill, setActiveSkill] = useState<ChatSkill | null>(null);
   const [skillParamValues, setSkillParamValues] = useState<Record<string, string>>({});
+
+  // ===== 思考计时器 =====
+  useEffect(() => {
+    if (isLoading) {
+      thinkingStartTimeRef.current = Date.now();
+      setThinkingElapsed(0);
+      thinkingTimerRef.current = setInterval(() => {
+        setThinkingElapsed(Math.floor((Date.now() - thinkingStartTimeRef.current) / 1000));
+      }, 1000);
+    } else {
+      if (thinkingTimerRef.current) {
+        clearInterval(thinkingTimerRef.current);
+        thinkingTimerRef.current = null;
+      }
+    }
+    return () => {
+      if (thinkingTimerRef.current) {
+        clearInterval(thinkingTimerRef.current);
+        thinkingTimerRef.current = null;
+      }
+    };
+  }, [isLoading]);
 
   // ===== @ Reference System =====
   interface MentionRef {
@@ -5301,7 +5326,20 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 isGold ? 'bg-white/5 border border-white/[0.04]' : 'bg-white border border-gray-200'
               }`}>
                 <Loader2 className={`h-5 w-5 animate-spin ${isGold ? 'text-gold' : 'text-blue-500'}`} />
-                <span className={`text-sm ${themeClasses.textMuted}`}>思考中...</span>
+                <span className={`text-sm ${themeClasses.textMuted}`}>思考中</span>
+                <span className="inline-flex gap-0.5">
+                  <span className={`w-1 h-1 rounded-full animate-bounce ${isGold ? 'bg-gold/60' : 'bg-blue-400'}`} style={{ animationDelay: '0ms' }} />
+                  <span className={`w-1 h-1 rounded-full animate-bounce ${isGold ? 'bg-gold/60' : 'bg-blue-400'}`} style={{ animationDelay: '150ms' }} />
+                  <span className={`w-1 h-1 rounded-full animate-bounce ${isGold ? 'bg-gold/60' : 'bg-blue-400'}`} style={{ animationDelay: '300ms' }} />
+                </span>
+                {thinkingElapsed > 0 && (
+                  <span className={`text-xs ${isGold ? 'text-white/30' : 'text-gray-400'}`}>
+                    {thinkingElapsed < 60
+                      ? `${thinkingElapsed}s`
+                      : `${Math.floor(thinkingElapsed / 60)}m${thinkingElapsed % 60}s`
+                    }
+                  </span>
+                )}
               </div>
             </div>
           )}
