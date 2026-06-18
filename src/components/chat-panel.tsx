@@ -1599,7 +1599,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
     } catch { /* ignore */ }
     return items.filter(item =>
       !mentionPickerSearch || item.label.toLowerCase().includes(mentionPickerSearch.toLowerCase())
-    ).slice(0, 8);
+    ).slice(0, 50);
   }, [canvasImages, brandDna, mentionPickerSearch]);
 
   // Handle @ trigger in textarea
