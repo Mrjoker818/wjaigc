@@ -282,6 +282,7 @@ export function GenerationPanel(
     const [templateSearchQuery, setTemplateSearchQuery] = useState('');
     const [filteredTemplates, setFilteredTemplates] = useState<PromptTemplate[]>([]);
     const [selectedTemplateIndex, setSelectedTemplateIndex] = useState(0);
+    const [hoveredTemplateId, setHoveredTemplateId] = useState<string | null>(null);
     const promptTextareaRef = useRef<HTMLTextAreaElement>(null);
 
     // Sync external prompt from chat-panel prompt optimizer
@@ -1188,7 +1189,7 @@ export function GenerationPanel(
                     </div>
                     {/* Template Popup - outside overflow-hidden container */}
                     {showTemplatePopup && filteredTemplates.length > 0 && (
-                            <div className={`absolute left-0 right-0 top-full mt-1 z-50 rounded-xl shadow-2xl overflow-hidden ${
+                            <div className={`absolute left-0 right-0 top-full mt-1 z-50 rounded-xl shadow-2xl ${
                                 mc ? 'bg-white border border-gray-200' : 'bg-[#1a1a1a] border border-white/[0.12]'
                             }`}>
                                 <div className={`px-3 py-2 border-b ${mc ? 'border-gray-100' : 'border-white/[0.06]'}`}>
@@ -1196,7 +1197,7 @@ export function GenerationPanel(
                                         提示词模板 {templateSearchQuery && `· 搜索: "${templateSearchQuery}"`}
                                     </span>
                                 </div>
-                                <div className="max-h-60 overflow-y-auto">
+                                <div className="max-h-60 overflow-y-auto overscroll-contain">
                                     {filteredTemplates.map((template, index) => (
                                         <button
                                             key={template.id}
@@ -1210,7 +1211,9 @@ export function GenerationPanel(
                                                 setShowTemplatePopup(false);
                                                 promptTextareaRef.current?.focus();
                                             }}
-                                            className={`w-full text-left px-3 py-2.5 transition-colors group/tpl relative ${
+                                            onMouseEnter={() => template.thumbnail && setHoveredTemplateId(template.id)}
+                                            onMouseLeave={() => setHoveredTemplateId(null)}
+                                            className={`w-full text-left px-3 py-2.5 transition-colors relative ${
                                                 index === selectedTemplateIndex
                                                     ? mc ? 'bg-gray-100' : 'bg-white/[0.06]'
                                                     : mc ? 'hover:bg-gray-50' : 'hover:bg-white/[0.03]'
@@ -1234,17 +1237,22 @@ export function GenerationPanel(
                                             <p className={`text-xs mt-1 line-clamp-1 pl-9 ${mc ? 'text-gray-500' : 'text-gold-muted/50'}`}>
                                                 {template.content}
                                             </p>
-                                            {template.thumbnail && (
-                                                <div className="absolute left-full ml-2 top-0 z-[60] hidden group-hover/tpl:block">
-                                                    <div className={`rounded-lg shadow-2xl overflow-hidden border ${mc ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-white/[0.12]'}`}>
-                                                        <img src={template.thumbnail} alt={template.name} className="w-40 h-40 object-cover" />
-                                                        <div className={`px-2 py-1 text-[10px] truncate ${mc ? 'text-gray-600' : 'text-gold-muted'}`}>{template.name}</div>
-                                                    </div>
-                                                </div>
-                                            )}
                                         </button>
                                     ))}
                                 </div>
+                                {/* Floating thumbnail - outside scroll container to avoid overflow clipping */}
+                                {hoveredTemplateId && (() => {
+                                    const tpl = filteredTemplates.find(t => t.id === hoveredTemplateId);
+                                    if (!tpl?.thumbnail) return null;
+                                    return (
+                                        <div className="absolute right-full mr-2 top-6 z-[60] pointer-events-none">
+                                            <div className={`rounded-lg shadow-2xl overflow-hidden border ${mc ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-white/[0.12]'}`}>
+                                                <img src={tpl.thumbnail} alt={tpl.name} className="w-40 h-40 object-cover" />
+                                                <div className={`px-2 py-1 text-[10px] truncate ${mc ? 'text-gray-600' : 'text-gold-muted'}`}>{tpl.name}</div>
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
                                 <div className={`px-3 py-2 border-t ${mc ? 'border-gray-100' : 'border-white/[0.06]'}`}>
                                     <span className={`text-[10px] ${mc ? 'text-gray-400' : 'text-gold-muted/40'}`}>
                                         ↑↓ 选择 · Enter 确认 · Esc 关闭
