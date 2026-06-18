@@ -5798,6 +5798,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 <div className={`px-3 py-1.5 text-[10px] font-medium ${isGold ? 'text-gold-muted/60' : 'text-gray-400'}`}>
                   @ 引用 — 输入筛选，↑↓选择，Enter确认
                 </div>
+                <div className="max-h-60 overflow-y-auto">
                 {(() => {
                   // P2-12: Group mention items by type with category headers
                   const imageItems = mentionPickerItems.filter(i => i.type === 'canvas-image');
@@ -5883,6 +5884,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                     </>
                   );
                 })()}
+                </div>
               </div>
             )}
             {/* / Prompt Template Popup */}
