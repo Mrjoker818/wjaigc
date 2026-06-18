@@ -292,7 +292,8 @@ async function executeGenerateImage(
     const prompt = args.prompt as string;
     const aspectRatio = (args.aspect_ratio as string) || '1:1';
     const quality = (args.quality as string) || '1K';
-    const count = (args.count as number) || 1;
+    // 强制 count=1：系统提示词要求每次只生成1张，多张时应多次调用工具
+    const count = 1;
     const negativePrompt = args.negative_prompt as string | undefined;
 
     // 使用统一的 /api/generate 接口，确保兼容性、异步轮询、URL持久化

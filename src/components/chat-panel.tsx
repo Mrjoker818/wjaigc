@@ -3155,9 +3155,15 @@ UI设计规范：
     setThirdPartyChatModels(chatModels);
   }, [showThirdPartyDialog]);
 
-  // 自动滚动到底部
+  // 自动滚动到底部 — 仅在用户已在底部附近时才跟随滚动，避免思考时强制回滚
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const container = chatContainerRef.current;
+    if (!container) return;
+    // 判断用户是否在底部附近（100px 内视为"在底部"）
+    const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+    if (isNearBottom) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [messages]);
 
   // 自动调整textarea高度
@@ -5321,7 +5327,8 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               </div>
             ))
           )}
-          {isLoading && (
+          {/* 思考中加载指示器 — 当有工具执行步骤时隐藏，避免与工具步骤重叠 */}
+          {isLoading && !(messages.length > 0 && messages[messages.length - 1].role === 'assistant' && messages[messages.length - 1].toolExecutions && messages[messages.length - 1].toolExecutions!.length > 0) && (
             <div className="flex gap-2.5 justify-start">
               <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
                 isGold ? 'bg-gold/15 text-gold' : 'bg-gray-100 text-gray-600'
