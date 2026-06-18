@@ -5928,11 +5928,11 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
             )}
             {/* / Prompt Template Popup */}
             {templatePopupOpen && templatePopupItems.length > 0 && (
-              <div className={`absolute bottom-full left-0 right-0 mb-1 rounded-lg border shadow-lg z-50 overflow-hidden ${isGold ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-gray-200'}`}>
+              <div className={`absolute bottom-full left-0 right-0 mb-1 rounded-lg border shadow-lg z-50 ${isGold ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-gray-200'}`}>
                 <div className={`px-3 py-1.5 text-[10px] font-medium ${isGold ? 'text-gold-muted/60' : 'text-gray-400'}`}>
                   提示词模板 {templatePopupSearch && `· 搜索: "${templatePopupSearch}"`}
                 </div>
-                <div className="max-h-48 overflow-y-auto">
+                <div className="max-h-48 overflow-hidden overflow-y-auto rounded-b-lg">
                   {templatePopupItems.map((template, idx) => (
                     <button
                       key={template.id}
