@@ -7654,7 +7654,7 @@ export function InfiniteCanvas({
         />
 
         {/* Collapsible toolbar - top left (click to toggle) */}
-        <div ref={leftToolbarRef}>
+        <div ref={leftToolbarRef} data-toolbar="left-toolbar" onMouseDown={(e) => e.stopPropagation()}>
         {leftToolbarExpanded ? (
           /* Expanded: full toolbar */
           <div className={`absolute top-4 left-4 z-50 flex flex-col gap-1 min-w-[160px] p-2 rounded-xl ${isMonochrome ? 'bg-white border border-gray-200 shadow-lg' : 'bg-[#1a1a1a] border border-white/[0.12] shadow-2xl'} transition-all duration-200`}>
