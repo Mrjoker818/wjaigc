@@ -2855,7 +2855,6 @@ UI设计规范：
 
   // 使用 Skill 创建新对话
   const handleUseSkill = useCallback((skill: ChatSkill) => {
-    const paramValues = { ...skillParamValues };
     // 设置智能体 systemPrompt（优先 agentId，其次 skill.systemPrompt）
     const skillSystemPrompt = skill.agentId || skill.systemPrompt;
     if (skillSystemPrompt) {
@@ -2875,45 +2874,37 @@ UI设计规范：
         setSystemPrompt(matchedAgent.prompt);
       }
     }
-    // 构建首条消息 - 替换参数槽位
+    // 构建首条消息 - Lovart 风格：直接预填充到输入框，用【】标记参数位置
     let firstMessage = '';
     if (skill.steps.length > 0) {
       const firstUserStep = skill.steps.find(s => s.role === 'user');
       if (firstUserStep) {
         firstMessage = firstUserStep.content;
-        // 替换参数槽位
+        // 替换参数槽位为【参数名】标记，用户直接在输入框中编辑
         for (const slot of skill.paramSlots) {
-          const val = paramValues[slot.name] || slot.defaultValue || '';
-          if (val) {
-            firstMessage = firstMessage.replace(slot.defaultValue || slot.name, val);
-          }
+          const placeholder = `【${slot.label}】`;
+          firstMessage = firstMessage.replace(slot.defaultValue || slot.name, placeholder);
         }
       }
+    } else if (skill.description) {
+      // 没有步骤时，用描述作为提示词
+      firstMessage = skill.description;
     }
-    // 创建新对话
-    const newId = `chat-${Date.now()}`;
-    const newSession: ChatSession = {
-      id: newId,
-      title: `Skill: ${skill.name}`,
-      messages: [],
-      model: model,
-      systemPrompt: skillSystemPrompt || systemPrompt,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-    setChatSessions(prev => [newSession, ...prev]);
-    setCurrentSessionId(newId);
-    setMessages([]);
+    // 切换到聊天 tab 并预填充输入框
     setActiveSkill(null);
     setSkillParamValues({});
     setActiveTab('chat');
     // 更新使用计数
     saveSkills(chatSkills.map(s => s.id === skill.id ? { ...s, usageCount: s.usageCount + 1, updatedAt: Date.now() } : s));
-    // 如果有首条消息，自动发送
+    // 预填充到输入框（不自动发送，用户可编辑后自行发送）
     if (firstMessage.trim()) {
       setInput(firstMessage);
+      // 聚焦输入框
+      setTimeout(() => {
+        textareaRef.current?.focus();
+      }, 100);
     }
-  }, [skillParamValues, model, systemPrompt, chatSkills, saveSkills, allAgents]);
+  }, [model, systemPrompt, chatSkills, saveSkills, allAgents]);
 
   // 删除 Skill
   const handleDeleteSkill = useCallback((skillId: string) => {
@@ -3653,7 +3644,19 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       });
 
       if (!response.ok) {
-        throw new Error(`请求失败: ${response.status}`);
+        // 读取后端返回的实际错误消息
+        let errMsg = `请求失败: ${response.status}`;
+        try {
+          const errData = await response.json();
+          if (errData.error) {
+            errMsg = typeof errData.error === 'string' ? errData.error : JSON.stringify(errData.error);
+          } else if (errData.message) {
+            errMsg = errData.message;
+          }
+        } catch {
+          // 无法解析 JSON，使用默认消息
+        }
+        throw new Error(errMsg);
       }
 
       const reader = response.body?.getReader();
@@ -6349,18 +6352,10 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                     return (
                       <div
                         key={skill.id}
-                        className={`rounded-lg p-2.5 transition-all cursor-pointer ${
-                          isActive
-                            ? isGold ? 'bg-gold/12 border border-gold/30' : 'bg-blue-50 border border-blue-200'
-                            : isGold ? 'bg-white/[0.03] border border-white/[0.04] hover:border-white/[0.10]' : 'bg-white border border-gray-100 hover:border-gray-200'
+                        className={`rounded-lg p-2.5 transition-all cursor-pointer hover:scale-[1.01] active:scale-[0.99] ${
+                          isGold ? 'bg-white/[0.03] border border-white/[0.04] hover:border-gold/30' : 'bg-white border border-gray-100 hover:border-blue-200'
                         }`}
-                        onClick={() => {
-                          if (isActive) { setActiveSkill(null); setSkillParamValues({}); }
-                          else {
-                            setActiveSkill(skill);
-                            setSkillParamValues(skill.paramSlots.reduce((acc: Record<string, string>, slot: ChatSkill['paramSlots'][0]) => { acc[slot.name] = slot.defaultValue || ''; return acc; }, {} as Record<string, string>));
-                          }
-                        }}
+                        onClick={() => handleUseSkill(skill)}
                       >
                         <div className="flex items-start gap-2">
                           <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 text-sm ${
@@ -6379,55 +6374,10 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                               }`}>
                                 {categoryLabel[skill.category] || '自定义'}
                               </span>
-                            {skill.paramSlots.length > 0 && (
-                              <span className={`text-[9px] ${themeClasses.textMuted}`}>
-                                {skill.paramSlots.length} 个参数
-                              </span>
-                            )}
                           </div>
                         </div>
-                        <Zap size={12} className={`shrink-0 mt-1 ${isActive ? (isGold ? 'text-gold' : 'text-blue-500') : (isGold ? 'text-gold-muted/30' : 'text-gray-300')}`} />
+                        <Zap size={12} className={`shrink-0 mt-1 ${isGold ? 'text-gold-muted/30' : 'text-gray-300'}`} />
                       </div>
-                      {/* 参数填写面板 */}
-                      {isActive && skill.paramSlots.length > 0 && (
-                        <div className={`mt-2 pt-2 border-t ${isGold ? 'border-white/[0.06]' : 'border-gray-100'}`} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
-                          <div className="space-y-1.5">
-                            {skill.paramSlots.map(slot => (
-                              <div key={slot.name}>
-                                <label className={`text-[10px] font-medium ${themeClasses.textMuted}`}>{slot.label}</label>
-                                <input
-                                  value={skillParamValues[slot.name] || ''}
-                                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSkillParamValues(prev => ({...prev, [slot.name]: e.target.value}))}
-                                  placeholder={slot.placeholder}
-                                  className={`w-full px-2 py-1 rounded text-[11px] mt-0.5 ${isGold ? 'bg-[#0d0d0d] border border-white/[0.06] text-text-bright placeholder:text-gold-muted/30' : 'bg-white border border-gray-200 text-gray-900 placeholder:text-gray-400'} focus:outline-none`}
-                                />
-                              </div>
-                            ))}
-                          </div>
-                          <Button
-                            onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleUseSkill(skill); }}
-                            className={`w-full h-7 mt-2 text-xs font-medium rounded-md ${
-                              isGold ? 'bg-gradient-to-r from-gold to-gold-dark text-black hover:opacity-90' : 'bg-blue-500 text-white hover:bg-blue-600'
-                            }`}
-                          >
-                            <ArrowRight size={12} className="mr-1" />
-                            使用 Skill 开始对话
-                          </Button>
-                        </div>
-                      )}
-                      {isActive && skill.paramSlots.length === 0 && (
-                        <div className={`mt-2 pt-2 border-t ${isGold ? 'border-white/[0.06]' : 'border-gray-100'}`}>
-                          <Button
-                            onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleUseSkill(skill); }}
-                            className={`w-full h-7 text-xs font-medium rounded-md ${
-                              isGold ? 'bg-gradient-to-r from-gold to-gold-dark text-black hover:opacity-90' : 'bg-blue-500 text-white hover:bg-blue-600'
-                            }`}
-                          >
-                            <ArrowRight size={12} className="mr-1" />
-                            使用 Skill 开始对话
-                          </Button>
-                        </div>
-                      )}
                     </div>
                   );
                 })}
@@ -6486,20 +6436,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
                         <button
-                          onClick={() => {
-                            if (activeSkill?.id === skill.id) {
-                              setActiveSkill(null);
-                              setSkillParamValues({});
-                            } else {
-                              setActiveSkill(skill);
-                              setSkillParamValues(
-                                skill.paramSlots.reduce((acc, slot) => {
-                                  acc[slot.name] = slot.defaultValue || '';
-                                  return acc;
-                                }, {} as Record<string, string>)
-                              );
-                            }
-                          }}
+                          onClick={() => handleUseSkill(skill)}
                           className={`p-1 rounded transition-colors ${
                             isGold ? 'text-gold/70 hover:text-gold hover:bg-gold/10' : 'text-blue-400 hover:text-blue-600 hover:bg-blue-50'
                           }`}
@@ -6518,46 +6455,6 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                         </button>
                       </div>
                     </div>
-                    {/* 参数填写面板 */}
-                    {activeSkill?.id === skill.id && skill.paramSlots.length > 0 && (
-                      <div className={`mt-2 pt-2 border-t ${isGold ? 'border-white/[0.06]' : 'border-gray-100'}`} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
-                        <div className="space-y-1.5">
-                          {skill.paramSlots.map(slot => (
-                            <div key={slot.name}>
-                              <label className={`text-[10px] font-medium ${themeClasses.textMuted}`}>{slot.label}</label>
-                              <input
-                                value={skillParamValues[slot.name] || ''}
-                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSkillParamValues(prev => ({...prev, [slot.name]: e.target.value}))}
-                                placeholder={slot.placeholder}
-                                className={`w-full px-2 py-1 rounded text-[11px] mt-0.5 ${isGold ? 'bg-[#0d0d0d] border border-white/[0.06] text-text-bright placeholder:text-gold-muted/30' : 'bg-white border border-gray-200 text-gray-900 placeholder:text-gray-400'} focus:outline-none`}
-                              />
-                            </div>
-                          ))}
-                        </div>
-                        <Button
-                          onClick={() => handleUseSkill(skill)}
-                          className={`w-full h-7 mt-2 text-xs font-medium rounded-md ${
-                            isGold ? 'bg-gradient-to-r from-gold to-gold-dark text-black hover:opacity-90' : 'bg-blue-500 text-white hover:bg-blue-600'
-                          }`}
-                        >
-                          <ArrowRight size={12} className="mr-1" />
-                          使用 Skill 开始对话
-                        </Button>
-                      </div>
-                    )}
-                    {activeSkill?.id === skill.id && skill.paramSlots.length === 0 && (
-                      <div className={`mt-2 pt-2 border-t ${isGold ? 'border-white/[0.06]' : 'border-gray-100'}`} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
-                        <Button
-                          onClick={() => handleUseSkill(skill)}
-                          className={`w-full h-7 text-xs font-medium rounded-md ${
-                            isGold ? 'bg-gradient-to-r from-gold to-gold-dark text-black hover:opacity-90' : 'bg-blue-500 text-white hover:bg-blue-600'
-                          }`}
-                        >
-                          <ArrowRight size={12} className="mr-1" />
-                          使用 Skill 开始对话
-                        </Button>
-                      </div>
-                    )}
                   </div>
                 ))}
               </div>

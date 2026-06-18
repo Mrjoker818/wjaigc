@@ -123,7 +123,8 @@ class TaskEventsClient {
 
   private scheduleReconnect(): void {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) return;
-    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
+    // 指数退避：2s → 4s → 8s → 16s → 30s（最大）
+    const delay = Math.min(2000 * Math.pow(2, this.reconnectAttempts), 30000);
     this.reconnectAttempts++;
     this.reconnectTimer = setTimeout(() => {
       this.connect();
