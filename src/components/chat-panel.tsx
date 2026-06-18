@@ -1524,6 +1524,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
   const [templatePopupSearch, setTemplatePopupSearch] = useState('');
   const [templatePopupIndex, setTemplatePopupIndex] = useState(0);
   const [templatePopupItems, setTemplatePopupItems] = useState<PromptTemplate[]>([]);
+  const [hoveredTemplateId, setHoveredTemplateId] = useState<string | null>(null);
 
   // ===== Tab Mode (selected image → chat targeting) =====
   // All images are stored in pendingImages array - canvas images, pasted images, @mentioned images
@@ -5932,12 +5933,14 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 <div className={`px-3 py-1.5 text-[10px] font-medium ${isGold ? 'text-gold-muted/60' : 'text-gray-400'}`}>
                   提示词模板 {templatePopupSearch && `· 搜索: "${templatePopupSearch}"`}
                 </div>
-                <div className="max-h-48 overflow-hidden overflow-y-auto rounded-b-lg">
+                <div className="max-h-48 overflow-y-auto rounded-b-lg">
                   {templatePopupItems.map((template, idx) => (
                     <button
                       key={template.id}
                       onClick={() => selectPromptTemplate(template)}
-                      className={`w-full flex items-start gap-2 px-3 py-2 text-xs transition-colors text-left group/tpl relative ${
+                      onMouseEnter={() => template.thumbnail && setHoveredTemplateId(template.id)}
+                      onMouseLeave={() => setHoveredTemplateId(null)}
+                      className={`w-full flex items-start gap-2 px-3 py-2 text-xs transition-colors text-left ${
                         idx === templatePopupIndex
                           ? isGold ? 'bg-gold/10 text-gold' : 'bg-blue-50 text-blue-700'
                           : isGold ? 'text-white/80 hover:bg-white/5' : 'text-gray-700 hover:bg-gray-50'
@@ -5959,17 +5962,22 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                           {template.content}
                         </p>
                       </div>
-                      {template.thumbnail && (
-                        <div className="absolute right-full mr-2 top-0 z-[60] hidden group-hover/tpl:block">
-                          <div className={`rounded-lg shadow-2xl overflow-hidden border ${isGold ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-gray-200'}`}>
-                            <img src={template.thumbnail} alt={template.name} className="w-36 h-36 object-cover" />
-                            <div className={`px-2 py-1 text-[10px] truncate ${isGold ? 'text-gold-muted' : 'text-gray-600'}`}>{template.name}</div>
-                          </div>
-                        </div>
-                      )}
                     </button>
                   ))}
                 </div>
+                {/* Floating thumbnail - outside scroll container to avoid overflow clipping */}
+                {hoveredTemplateId && (() => {
+                  const tpl = templatePopupItems.find(t => t.id === hoveredTemplateId);
+                  if (!tpl?.thumbnail) return null;
+                  return (
+                    <div className="absolute right-full mr-2 top-6 z-[60] pointer-events-none">
+                      <div className={`rounded-lg shadow-2xl overflow-hidden border ${isGold ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-gray-200'}`}>
+                        <img src={tpl.thumbnail} alt={tpl.name} className="w-36 h-36 object-cover" />
+                        <div className={`px-2 py-1 text-[10px] truncate ${isGold ? 'text-gold-muted' : 'text-gray-600'}`}>{tpl.name}</div>
+                      </div>
+                    </div>
+                  );
+                })()}
                 <div className={`px-3 py-1.5 border-t text-[10px] ${isGold ? 'border-white/5 text-white/30' : 'border-gray-100 text-gray-400'}`}>
                   ↑↓ 选择 · Enter 确认 · Esc 关闭
                 </div>
