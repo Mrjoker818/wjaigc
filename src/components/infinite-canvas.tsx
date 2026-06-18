@@ -5816,6 +5816,7 @@ export function InfiniteCanvas({
               model: upMultiplier > 2 ? 'SeedVR2-Upscaler' : 'Real-ESRGAN',
               face: false,
               scale: upMultiplier === 4 ? 4 : 2,
+              enhanceModel: modelInfo.model, // 精修使用用户当前选择的图像模型
             }),
             signal: upscaleController.signal,
           });

@@ -1177,7 +1177,8 @@ export async function POST(request: NextRequest) {
             // AI 画质精修：放大后自动优化画面质量
             if (pollResult.imageUrl) {
               try {
-                const enhanceResult = await enhanceViaAI(pollResult.imageUrl as string);
+                const enhanceModel = (registryResult._model as string) || undefined;
+                const enhanceResult = await enhanceViaAI(pollResult.imageUrl as string, enhanceModel);
                 if (enhanceResult.enhanced) {
                   pollResult.imageUrl = enhanceResult.url;
                   (pollResult as Record<string, unknown>).enhanced = true;

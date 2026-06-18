@@ -5,17 +5,12 @@
  * GET /api/credits/pay-redirect?token=xxx
  * → token 有效：显示真实收款码页面（含倒计时）
  * → token 过期：显示二维码已过期提示
+ * 
+ * v2: 使用 HMAC 签名令牌验证，不依赖内存存储
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-
-type TokenData = { realQrUrl: string; method: string; expiresAt: number };
-
-const g = globalThis as Record<string, unknown>;
-
-function getTokenStore(): Map<string, TokenData> {
-  return (g.__paymentTokenStore || new Map<string, TokenData>()) as Map<string, TokenData>;
-}
+import { verifyToken } from '../payment-qr/route';
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -28,8 +23,8 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  const store = getTokenStore();
-  const tokenData = store.get(token);
+  // 使用 HMAC 签名验证（无状态，服务器重启不丢失）
+  const tokenData = verifyToken(decodeURIComponent(token));
 
   if (!tokenData) {
     return new NextResponse(getExpiredHtml('二维码已失效，请重新获取'), {
@@ -39,7 +34,6 @@ export async function GET(request: NextRequest) {
   }
 
   if (tokenData.expiresAt < Date.now()) {
-    store.delete(token);
     return new NextResponse(getExpiredHtml('二维码已过期（超过60秒），请重新获取'), {
       status: 410,
       headers: { 'Content-Type': 'text/html; charset=utf-8' },

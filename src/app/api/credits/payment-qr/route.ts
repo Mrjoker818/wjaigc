@@ -7,32 +7,58 @@
  * 
  * 扫码后访问 /api/credits/pay-redirect?token=xxx
  * → 验证 token 有效后跳转到真实收款码页面
+ * 
+ * v2: 使用 HMAC 签名令牌替代内存 Map，服务器重启不丢失令牌
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import QRCode from 'qrcode';
+import crypto from 'crypto';
 import { dbGetSystemSetting } from '@/lib/db-storage';
 
-type TokenData = { realQrUrl: string; method: string; expiresAt: number };
+const TOKEN_TTL_MS = 60_000; // 60 秒有效期
 
-// 使用 globalThis 共享 tokenStore（跨路由共享内存）
-const g = globalThis as Record<string, unknown>;
-if (!g.__paymentTokenStore) {
-  g.__paymentTokenStore = new Map<string, TokenData>();
-  // 定时清理过期 token
-  if (typeof setInterval !== 'undefined') {
-    setInterval(() => {
-      const store = g.__paymentTokenStore as Map<string, TokenData>;
-      const now = Date.now();
-      for (const [token, data] of store) {
-        if (data.expiresAt < now) store.delete(token);
-      }
-    }, 10_000);
+/** HMAC 密钥：优先环境变量，否则用固定种子（生产环境必须设置环境变量） */
+function getHmacSecret(): string {
+  return process.env.PAYMENT_TOKEN_SECRET || 'wujie-payment-hmac-secret-v2-default';
+}
+
+/** 生成 HMAC 签名令牌 */
+function signToken(data: { realQrUrl: string; method: string; expiresAt: number }): string {
+  const payload = Buffer.from(JSON.stringify(data)).toString('base64url');
+  const signature = crypto
+    .createHmac('sha256', getHmacSecret())
+    .update(payload)
+    .digest('base64url');
+  return `${payload}.${signature}`;
+}
+
+/** 验证并解析 HMAC 签名令牌 */
+export function verifyToken(token: string): { realQrUrl: string; method: string; expiresAt: number } | null {
+  try {
+    const dotIndex = token.lastIndexOf('.');
+    if (dotIndex === -1) return null;
+
+    const payload = token.slice(0, dotIndex);
+    const signature = token.slice(dotIndex + 1);
+
+    const expectedSig = crypto
+      .createHmac('sha256', getHmacSecret())
+      .update(payload)
+      .digest('base64url');
+
+    // 常量时间比较防止时序攻击
+    if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSig))) {
+      return null;
+    }
+
+    const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf-8'));
+    if (!data.realQrUrl || !data.method || !data.expiresAt) return null;
+    return data;
+  } catch {
+    return null;
   }
 }
-const tokenStore = g.__paymentTokenStore as Map<string, TokenData>;
-
-const TOKEN_TTL_MS = 60_000; // 60 秒有效期
 
 /** 读取收款码配置 */
 async function getPaymentConfig() {
@@ -43,25 +69,14 @@ async function getPaymentConfig() {
   } catch { return null; }
 }
 
-/** 生成随机 token */
-function generateToken(): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let token = '';
-  for (let i = 0; i < 32; i++) {
-    token += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return token;
-}
-
 /** 获取完整的跳转 URL（扫码后访问） */
 function getRedirectUrl(token: string): string {
   let domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
-  // 去除可能存在的协议前缀
   domain = domain.replace(/^https?:\/\//, '');
   if (domain) {
-    return `https://${domain}/api/credits/pay-redirect?token=${token}`;
+    return `https://${domain}/api/credits/pay-redirect?token=${encodeURIComponent(token)}`;
   }
-  return `/api/credits/pay-redirect?token=${token}`;
+  return `/api/credits/pay-redirect?token=${encodeURIComponent(token)}`;
 }
 
 export async function GET(request: NextRequest) {
@@ -72,7 +87,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ success: false, error: '无效的支付方式' }, { status: 400 });
   }
 
-  // 读取配置
   const config = await getPaymentConfig();
   if (!config) {
     return NextResponse.json({ success: false, error: '未配置收款码' }, { status: 404 });
@@ -86,18 +100,14 @@ export async function GET(request: NextRequest) {
   }
 
   const realQrUrl: string = config[qrKey];
-
-  // 生成临时 token
-  const token = generateToken();
   const expiresAt = Date.now() + TOKEN_TTL_MS;
 
-  tokenStore.set(token, { realQrUrl, method, expiresAt });
+  // 使用 HMAC 签名令牌（无需内存存储，服务器重启不丢失）
+  const token = signToken({ realQrUrl, method, expiresAt });
 
-  // 构建扫码后跳转 URL
   const redirectUrl = getRedirectUrl(token);
 
   try {
-    // 生成二维码 PNG
     const qrPng = await QRCode.toBuffer(redirectUrl, {
       type: 'png',
       width: 280,

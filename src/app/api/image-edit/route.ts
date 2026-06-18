@@ -2144,7 +2144,7 @@ export async function POST(request: NextRequest) {
         let finalUrl = resized.url;
         let enhanced = false;
         try {
-          const enhanceResult = await enhanceViaAI(resized.url);
+          const enhanceResult = await enhanceViaAI(resized.url, modelStr);
           if (enhanceResult.enhanced) {
             finalUrl = enhanceResult.url;
             enhanced = true;
@@ -2185,6 +2185,7 @@ export async function POST(request: NextRequest) {
             originalSize: { width: origW, height: origH },
             outputSize: { width: targetW, height: targetH },
             _needsResize: true, // poll-task 完成后会自动应用锐化，不再二次放大
+            _model: modelStr, // 用户选择的模型，供 poll-task 精修时使用
           },
         });
       }

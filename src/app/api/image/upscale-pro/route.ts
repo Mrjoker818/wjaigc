@@ -23,6 +23,7 @@ interface UpscaleProRequest {
   face?: boolean;       // 是否含人脸，增强人脸细节
   scale?: 2 | 4;       // 放大倍率
   fallbackToAi?: boolean; // 云端和本地都失败时是否用AI重绘兜底（默认true）
+  enhanceModel?: string;  // 精修使用的图像模型（用户当前在图像生成面板选择的模型）
 }
 
 /** 从管理员配置查找 PearAPI 提供商的 API Key */
@@ -407,6 +408,7 @@ export async function POST(request: NextRequest) {
       face = false,
       scale = 2,
       fallbackToAi = true,
+      enhanceModel,
     } = body;
 
     if (!imageUrl) {
@@ -431,7 +433,7 @@ export async function POST(request: NextRequest) {
     const cloudResult = await upscaleViaPearAPI(imageUrl, model, face, scale);
     if (cloudResult?.url) {
       // 云端放大后也做AI画质优化
-      const enhanceResult = await enhanceViaAI(cloudResult.url);
+      const enhanceResult = await enhanceViaAI(cloudResult.url, enhanceModel);
       if (enhanceResult.enhanced) {
         return NextResponse.json({
           success: true,
@@ -455,7 +457,7 @@ export async function POST(request: NextRequest) {
     const localResult = await upscaleViaOnnx(imageUrl, scale, face);
     if (localResult?.url) {
       // 策略2.5: ONNX放大成功后，自动追加AI画质优化
-      const enhanceResult = await enhanceViaAI(localResult.url);
+      const enhanceResult = await enhanceViaAI(localResult.url, enhanceModel);
       if (enhanceResult.enhanced) {
         return NextResponse.json({
           success: true,
@@ -485,7 +487,7 @@ export async function POST(request: NextRequest) {
       const aiResult = await upscaleViaAI(imageUrl, scale);
       if (aiResult?.url) {
         // AI放大后画质也较差，同样追加AI精修
-        const enhancedResult = await enhanceViaAI(aiResult.url);
+        const enhancedResult = await enhanceViaAI(aiResult.url, enhanceModel);
         if (enhancedResult.enhanced) {
           return NextResponse.json({
             success: true,
