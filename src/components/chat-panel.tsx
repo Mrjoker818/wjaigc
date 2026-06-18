@@ -2854,58 +2854,6 @@ UI设计规范：
   }, [skillSaveName, skillSaveCategory, skillSaveDescription, messages, systemPrompt, allAgents, chatSkills, saveSkills, currentSessionId]);
 
   // 使用 Skill 创建新对话
-  const handleUseSkill = useCallback((skill: ChatSkill) => {
-    // 设置智能体 systemPrompt（优先 agentId，其次 skill.systemPrompt）
-    const skillSystemPrompt = skill.agentId || skill.systemPrompt;
-    if (skillSystemPrompt) {
-      setSystemPrompt(skillSystemPrompt);
-    }
-    // P2-13: 如果 Skill 关联了智能体，自动切换到该智能体
-    if (skill.agentId) {
-      const matchedAgent = allAgents.find(a => a.id === skill.agentId);
-      if (matchedAgent) {
-        setSystemPrompt(matchedAgent.prompt);
-      }
-    }
-    // P2-13: 如果没有 agentId，检查是否有智能体的 skillIds 包含此 Skill
-    if (!skill.agentId) {
-      const matchedAgent = allAgents.find(a => a.skillIds?.includes(skill.id));
-      if (matchedAgent) {
-        setSystemPrompt(matchedAgent.prompt);
-      }
-    }
-    // 构建首条消息 - Lovart 风格：直接预填充到输入框，用【】标记参数位置
-    let firstMessage = '';
-    if (skill.steps.length > 0) {
-      const firstUserStep = skill.steps.find(s => s.role === 'user');
-      if (firstUserStep) {
-        firstMessage = firstUserStep.content;
-        // 替换参数槽位为【参数名】标记，用户直接在输入框中编辑
-        for (const slot of skill.paramSlots) {
-          const placeholder = `【${slot.label}】`;
-          firstMessage = firstMessage.replace(slot.defaultValue || slot.name, placeholder);
-        }
-      }
-    } else if (skill.description) {
-      // 没有步骤时，用描述作为提示词
-      firstMessage = skill.description;
-    }
-    // 切换到聊天 tab 并预填充输入框
-    setActiveSkill(null);
-    setSkillParamValues({});
-    setActiveTab('chat');
-    // 更新使用计数
-    saveSkills(chatSkills.map(s => s.id === skill.id ? { ...s, usageCount: s.usageCount + 1, updatedAt: Date.now() } : s));
-    // 预填充到输入框（不自动发送，用户可编辑后自行发送）
-    if (firstMessage.trim()) {
-      setInput(firstMessage);
-      // 聚焦输入框
-      setTimeout(() => {
-        textareaRef.current?.focus();
-      }, 100);
-    }
-  }, [model, systemPrompt, chatSkills, saveSkills, allAgents]);
-
   // 删除 Skill
   const handleDeleteSkill = useCallback((skillId: string) => {
     saveSkills(chatSkills.filter(s => s.id !== skillId));
@@ -3305,7 +3253,7 @@ UI设计规范：
     }
   };
 
-  const handleSend = useCallback(async (overrideText?: string) => {
+  const handleSend = useCallback(async (overrideText?: string, options?: { systemPromptOverride?: string }) => {
     const textToSend = overrideText ?? input;
     if (textToSend.trim() || isLoading) {
       // continue
@@ -3362,12 +3310,14 @@ UI设计规范：
       const actualModel = isThirdParty ? selectedModel.split('::').slice(1).join('::') : selectedModel;
 
       // 构建增强版系统提示词
+      // 优先使用 options.systemPromptOverride（Skill 触发时直接传入）
+      const effectiveSystemPrompt = options?.systemPromptOverride || systemPrompt;
       // systemPrompt 可能是 agentId（短ID）或直接是 Skill 的 systemPrompt 文本（长文本）
-      const systemPromptObj = allAgents.find(p => p.id === systemPrompt);
+      const systemPromptObj = allAgents.find(p => p.id === effectiveSystemPrompt);
       let enhancedSystemPrompt = systemPromptObj?.prompt || '';
       // 如果 systemPrompt 不是 agentId（未在 allAgents 中找到），则它本身就是 prompt 文本
-      if (!systemPromptObj && systemPrompt) {
-        enhancedSystemPrompt = systemPrompt;
+      if (!systemPromptObj && effectiveSystemPrompt) {
+        enhancedSystemPrompt = effectiveSystemPrompt;
       }
 
       // P0-3: 注入智能体能力信息（工具+配方）
@@ -4269,6 +4219,46 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
     }
   }, [input, isLoading, messages, model, systemPrompt, isThinkingMode, saveSession, pendingImages, allAgents, activeMentions, brandDna, tuneContextString, activeSkill, onAddImages]);
 
+  // Lovart 风格 Skill 调用：点击 Skill 直接创建对话并自动发送，AI 按 Skill 方法论引导用户
+  const handleUseSkill = useCallback((skill: ChatSkill) => {
+    // 1. 设置 activeSkill 标记
+    setActiveSkill(skill);
+
+    // 2. 构建最终 systemPrompt（优先 agentId，其次 skill.systemPrompt）
+    let skillSystemPrompt = skill.systemPrompt || '';
+    // 如果 Skill 关联了智能体，使用该智能体的 prompt
+    if (skill.agentId) {
+      const matchedAgent = allAgents.find(a => a.id === skill.agentId);
+      if (matchedAgent) {
+        skillSystemPrompt = matchedAgent.prompt;
+      }
+    }
+    // 如果没有 agentId，检查是否有智能体的 skillIds 包含此 Skill
+    if (!skill.agentId) {
+      const matchedAgent = allAgents.find(a => a.skillIds?.includes(skill.id));
+      if (matchedAgent) {
+        skillSystemPrompt = matchedAgent.prompt;
+      }
+    }
+    // 同步更新 systemPrompt 状态
+    setSystemPrompt(skillSystemPrompt);
+
+    // 3. 切换到聊天 tab
+    setActiveTab('chat');
+
+    // 4. 更新使用计数
+    saveSkills(chatSkills.map(s => s.id === skill.id ? { ...s, usageCount: s.usageCount + 1, updatedAt: Date.now() } : s));
+
+    // 5. 清空当前对话，创建新会话
+    setMessages([]);
+    setCurrentSessionId(`session-${Date.now()}`);
+
+    // 6. 直接发送触发消息，通过 options.systemPromptOverride 绕过闭包陈旧值问题
+    const triggerText = `使用「${skill.name}」技能`;
+    setInput('');
+    handleSend(triggerText, { systemPromptOverride: skillSystemPrompt });
+  }, [chatSkills, saveSkills, allAgents, handleSend]);
+
   // 提示词大师功能 - Agent智能体化
   const handleOptimizePrompt = useCallback(async () => {
     if (!optimizerInput.trim() || isOptimizing) return;
@@ -4937,6 +4927,27 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
             <span className={`text-[10px] font-medium ${themeClasses.textMuted}`}>{allAgents.find(a => a.id === systemPrompt)!.name}</span>
             <span className={`text-[9px] ${isGold ? 'text-white/25' : 'text-gray-300'}`}>·</span>
             <span className={`text-[9px] ${themeClasses.textMuted} opacity-60`}>{allAgents.find(a => a.id === systemPrompt)!.nameEn}</span>
+          </div>
+        )}
+
+        {/* Active Skill badge - Lovart 风格：显示当前激活的技能 */}
+        {activeSkill && messages.length > 0 && !allAgents.find(a => a.id === systemPrompt) && (
+          <div className={`shrink-0 px-3 py-1.5 flex items-center gap-1.5 border-b ${isGold ? 'bg-[#111]/80 border-white/5' : 'bg-gray-50/80 border-gray-100'}`}>
+            <Zap size={10} className={isGold ? 'text-[#d4af37]' : 'text-blue-500'} />
+            <span className={`text-[10px] font-medium ${themeClasses.textMuted}`}>技能: {activeSkill.name}</span>
+            {activeSkill.category && (
+              <>
+                <span className={`text-[9px] ${isGold ? 'text-white/25' : 'text-gray-300'}`}>·</span>
+                <span className={`text-[9px] ${themeClasses.textMuted} opacity-60`}>{activeSkill.category}</span>
+              </>
+            )}
+            <button
+              onClick={() => { setActiveSkill(null); setSystemPrompt(''); }}
+              className={`ml-auto p-0.5 rounded transition-colors ${isGold ? 'hover:bg-[#333] text-gold-muted' : 'hover:bg-gray-200 text-gray-400'}`}
+              title="退出技能模式"
+            >
+              <X size={10} />
+            </button>
           </div>
         )}
 
