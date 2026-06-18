@@ -3658,12 +3658,13 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               try {
                 const parsed = JSON.parse(data);
 
-                // ====== 处理Agent工具调用事件 ======
-                if (currentSSEEvent === 'tool_execution_start' && parsed.toolName) {
+                // ====== 处理Agent工具调用事件（后端将 type 放在 JSON data 内，非 event: 行） ======
+                const toolName = parsed.toolName || parsed.tool_name;
+                if (parsed.type === 'tool_execution_start' && toolName) {
                   const toolExec: ToolExecution = {
-                    toolName: parsed.toolName,
+                    toolName,
                     status: 'running',
-                    label: parsed.label || `正在执行 ${parsed.toolName}...`,
+                    label: parsed.label || `正在执行 ${toolName}...`,
                   };
                   toolExecutions.push(toolExec);
                   setMessages(prev => prev.map(msg =>
@@ -3671,13 +3672,12 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                       ? { ...msg, toolExecutions: [...toolExecutions] }
                       : msg
                   ));
-                  currentSSEEvent = '';
                   continue;
                 }
 
-                if (currentSSEEvent === 'tool_execution_result' && parsed.toolName) {
+                if (parsed.type === 'tool_execution_result' && toolName) {
                   // 更新对应工具的执行结果
-                  const execIdx = toolExecutions.findIndex(e => e.toolName === parsed.toolName && e.status === 'running');
+                  const execIdx = toolExecutions.findIndex(e => e.toolName === toolName && e.status === 'running');
                   if (execIdx >= 0) {
                     toolExecutions[execIdx] = {
                       ...toolExecutions[execIdx],
@@ -3700,15 +3700,14 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                   if (parsed.videoUrl) {
                     toolGeneratedVideo = parsed.videoUrl;
                   }
-                  // 收集异步任务ID，稍后轮询
+                  // 收集异步任务ID（后端直接发送 {taskId, model, providerId, type} 对象数组）
                   if (parsed.taskIds && parsed.taskIds.length > 0 && (!parsed.imageUrls || parsed.imageUrls.length === 0)) {
                     toolPendingTaskIds.push(...parsed.taskIds);
                   }
-                  currentSSEEvent = '';
                   continue;
                 }
 
-                if (currentSSEEvent === 'tool_execution_complete') {
+                if (parsed.type === 'tool_execution_complete') {
                   // 所有工具执行完成，将直接返回的图片添加到画布
                   if (toolGeneratedImages.length > 0 && onAddImages) {
                     const imageModelInfo = getCurrentImageModelInfo(imageModel, imageModelProviderId);

@@ -962,6 +962,7 @@ export function InfiniteCanvas({
   // Middle button pan state
   const [isMiddlePanning, setIsMiddlePanning] = useState(false);
   const middlePanStartRef = useRef({ x: 0, y: 0 });
+  const middlePanMovedRef = useRef(false); // 中键拖动是否移动过（防止拖动后误触发 auxclick 缩放重置）
 
   // Long press for drag
   const [isLongPressing, setIsLongPressing] = useState(false);
@@ -2342,6 +2343,7 @@ export function InfiniteCanvas({
       e.preventDefault();
       setIsMiddlePanning(true);
       middlePanStartRef.current = { x: e.clientX - viewOffset.x, y: e.clientY - viewOffset.y };
+      middlePanMovedRef.current = false; // 重置移动标记
       return;
     }
 
@@ -2458,6 +2460,7 @@ export function InfiniteCanvas({
 
     // Middle button panning
     if (isMiddlePanning) {
+      middlePanMovedRef.current = true; // 标记已移动，防止 auxclick 误触发缩放重置
       setViewOffset({
         x: e.clientX - middlePanStartRef.current.x,
         y: e.clientY - middlePanStartRef.current.y,
@@ -2992,6 +2995,8 @@ export function InfiniteCanvas({
   // Double-click middle button: reset view to 100% centered on mouse
   const handleAuxClick = useCallback((e: React.MouseEvent) => {
     if (e.button === 1) {
+      // 中键拖动过则跳过缩放重置（防止拖动后误触发）
+      if (middlePanMovedRef.current) return;
       // Middle button double-click: center on mouse at 100%
       if (!canvasRef.current) return;
       const rect = canvasRef.current.getBoundingClientRect();
