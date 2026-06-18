@@ -383,7 +383,9 @@ const QUALITY_ENHANCE_PROMPT = `修复这张放大后的图片，使画面变得
 3. 还原自然真实色彩，明暗对比柔和自然，避免过度锐化、磨皮、失真；
 4. 真实还原皮肤肌理、毛发、眼睛、布料、背景景物细节，不改动原图轮廓与内容。
 
-【画面限制规范】禁止过度修图、平滑磨皮、美颜滤镜；禁止生成不存在的画面元素；杜绝人工虚假锐化、画面失真怪异问题，确保修复效果自然真实。`;
+【画面限制规范】禁止过度修图、平滑磨皮、美颜滤镜；禁止生成不存在的画面元素；杜绝人工虚假锐化、画面失真怪异问题，确保修复效果自然真实。
+
+【画面干净度要求】clean illustration, smooth shading, soft lighting, controlled details, minimal texture, high clarity, refined edges, smooth gradients -- no noise, grain, artifacts, high frequency detail, dirty texture, oversharpen, blotchy, chaotic details`;
 
 /** 最大公约数（用于计算画面比例） */
 function gcd(a: number, b: number): number {
