@@ -239,6 +239,9 @@ importers:
       vaul:
         specifier: ^1.1.2
         version: 1.1.2(@types/react-dom@19.2.3(@types/react@19.2.10))(@types/react@19.2.10)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      wasm_vtracer:
+        specifier: ^0.2.0
+        version: 0.2.0
       zod:
         specifier: ^4.3.5
         version: 4.3.6
@@ -6753,6 +6756,9 @@ packages:
 
   victory-vendor@36.9.2:
     resolution: {integrity: sha512-PnpQQMuxlwYdocC8fIJqVXvkeViHYzotI+NJrCuav0ZYFoq912ZHBk3mCeuj+5/VpodOjPe1z0Fk2ihgzlXqjQ==}
+
+  wasm_vtracer@0.2.0:
+    resolution: {integrity: sha512-QXhfGsgI79J3CYZJARIdwHsDWcDTYMHrRFbQlJtmoa/xJF9ObkfTq5P8wh6TAAN3JojCwOLZ/G93YCN50hih1Q==}
 
   watchpack@2.5.1:
     resolution: {integrity: sha512-Zn5uXdcFNIA1+1Ei5McRd+iRzfhENPCe7LeABkJtNulSxjma+l7ltNx55BWZkRlwRnpOgHqxnjyaDgJnNXnqzg==}
@@ -14191,6 +14197,8 @@ snapshots:
       d3-shape: 3.2.0
       d3-time: 3.1.0
       d3-timer: 3.0.1
+
+  wasm_vtracer@0.2.0: {}
 
   watchpack@2.5.1:
     dependencies:

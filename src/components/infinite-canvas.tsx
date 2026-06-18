@@ -1186,7 +1186,7 @@ export function InfiniteCanvas({
   // SVG智能描摹 state
   const [svgTraceMode, setSvgTraceMode] = useState<'color' | 'bw'>('color');
   const [svgTraceQualityPreset, setSvgTraceQualityPreset] = useState<'fast' | 'balanced' | 'high' | 'max' | 'print' | 'print-pro'>('balanced');
-  const [svgTraceEngine, setSvgTraceEngine] = useState<'auto' | 'vectorize-api' | 'vlm' | 'vtracer'>('auto');
+  const [svgTraceEngine, setSvgTraceEngine] = useState<'auto' | 'vectorize-api' | 'vlm' | 'vtracer' | 'wasm-vtracer'>('auto');
   const svgTraceOutputFormat = 'svg' as const;
   const [svgTraceColorPrecision, setSvgTraceColorPrecision] = useState<number | null>(null);  // null = use preset
   const [svgTraceFilterSpeckle, setSvgTraceFilterSpeckle] = useState<number | null>(null);
@@ -6183,6 +6183,74 @@ export function InfiniteCanvas({
     setShowSvgTracePanel(false);
     setIsSvgTraceProcessing(true);
     try {
+      // === WASM 引擎：前端直接转换，无需服务器 ===
+      if (svgTraceEngine === 'wasm-vtracer') {
+        try {
+          updateProcessingFrame(placeholderId, { progress: 10, status: '正在加载 WASM 引擎...' });
+          const { vtracerWasmClient } = await import('@/lib/vtracer-wasm-client');
+          
+          updateProcessingFrame(placeholderId, { progress: 20, status: `正在${modeLabel} (WASM)...` });
+          
+          const result = await vtracerWasmClient.convertImage(img.url, {
+            colorMode: svgTraceMode === 'bw' ? 'bw' : 'color',
+            colorPrecision: svgTraceColorPrecision ?? undefined,
+            filterSpeckle: svgTraceFilterSpeckle ?? undefined,
+            cornerThreshold: svgTraceCornerThreshold ?? undefined,
+            lengthThreshold: svgTraceLengthThreshold ?? undefined,
+            hierarchical: svgTraceHierarchical ?? undefined,
+          });
+
+          if (!result.success || !result.svg) {
+            throw new Error(result.error || 'WASM 转换失败');
+          }
+
+          updateProcessingFrame(placeholderId, { progress: 80, status: '正在保存结果...' });
+
+          // 保存 SVG 到服务器用于下载
+          let svgUrl = '';
+          let displayUrl = '';
+          try {
+            const saveSvgRes = await fetch('/api/save-image', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ imageUrl: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(result.svg)}`, format: 'svg' }),
+            });
+            if (saveSvgRes.ok) {
+              const saveData = await saveSvgRes.json();
+              svgUrl = saveData.url || '';
+              displayUrl = svgUrl;
+            }
+          } catch {}
+
+          // 生成 PNG 预览用于画布显示
+          if (!displayUrl) {
+            displayUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(result.svg)}`;
+          }
+
+          const engineLabel = `WASM·VTracer`;
+          completeProcessingFrame(placeholderId, displayUrl, img.width, img.height, {
+            originalWidth: img.originalWidth || Math.round(img.width),
+            originalHeight: img.originalHeight || Math.round(img.height),
+            modifyPrompt: `${modeLabel} (${engineLabel})${result.pathCount ? '·' + result.pathCount + '路径' : ''}`,
+            ...(svgUrl ? { svgUrl } : {}),
+            svgDataUrl: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(result.svg)}`,
+            modelName: modelInfo.apiDisplayName || modelInfo.model,
+            apiProvider: modelInfo.providerName || '',
+          }, 'trace');
+
+          setIsSvgTraceProcessing(false);
+          setShowSvgTracePanel(false);
+          return;
+        } catch (wasmErr) {
+          console.error('[svg-trace] WASM failed:', wasmErr);
+          removeProcessingFrame(placeholderId);
+          alert(`WASM 矢量化失败: ${wasmErr instanceof Error ? wasmErr.message : '请重试'}`);
+          setIsSvgTraceProcessing(false);
+          return;
+        }
+      }
+
+      // === 服务器端引擎：调用 /api/svg-trace ===
       // Prepare image URL: convert data/blob URLs to server URLs first
       let imageUrl = img.url;
       if (imageUrl.startsWith('data:') || imageUrl.startsWith('blob:')) {
@@ -6244,7 +6312,7 @@ export function InfiniteCanvas({
           // 下载策略: 从data.url(服务器SVG文件)获取SVG内容，避免存储超大SVG data URL
           const displayUrl = data.dataUrl || data.url;
           const engineLabelMap: Record<string, string> = {
-            vtracer: 'VTracer', potrace: 'Potrace', 'vectorize-api': 'Vectorizer', vlm: 'VLM', imagetracer: 'ImageTracer'
+            vtracer: 'VTracer', potrace: 'Potrace', 'vectorize-api': 'Vectorizer', vlm: 'VLM', imagetracer: 'ImageTracer', 'wasm-vtracer': 'WASM·VTracer'
           };
           const engineLabel = engineLabelMap[data.engine] || data.engine || 'Auto';
           completeProcessingFrame(placeholderId, displayUrl, img.width, img.height, {
@@ -9655,6 +9723,7 @@ export function InfiniteCanvas({
                     <div style={{ display: 'flex', gap: 6 }}>
                       {([
                         { key: 'auto', label: '自动' },
+                        { key: 'wasm-vtracer', label: 'WASM' },
                         { key: 'vectorize-api', label: 'Vectorizer' },
                         { key: 'vlm', label: 'VLM' },
                         { key: 'vtracer', label: 'VTracer' },

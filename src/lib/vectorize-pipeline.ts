@@ -3,8 +3,10 @@
  * 
  * 管线策略（按优先级）：
  * 1. Recraft Vectorize API — 专业矢量模型，语义分组可编辑SVG，质量最高
- * 2. vtracer — 传统描摹引擎（spline 彩色 / potrace 黑白），稳定可靠
+ * 2. Vectorize.AI API — 专业矢量化服务（302AI 代理），贝塞尔曲线精确还原
  * 3. VLM 视觉模型 — AI "看图重绘" SVG，适合简单图形/图标
+ * 4. WASM VTracer — 浏览器端 WebAssembly 本地转换，零服务器压力
+ * 5. Python vtracer — 传统后端描摹引擎（spline 彩色 / potrace 黑白）
  * 
  * 每个引擎有独立的适配器文件：
  * - vectorize-recraft.ts — Recraft API 适配
@@ -161,7 +163,7 @@ function detectImageMimeFromBuffer(buffer: Buffer): string {
 }
 
 /** 矢量化引擎类型 */
-export type VectorizeEngine = 'recraft' | 'vectorize-api' | 'vtracer' | 'vtracer-bw' | 'vlm';
+export type VectorizeEngine = 'recraft' | 'vectorize-api' | 'vlm' | 'wasm-vtracer' | 'vtracer' | 'vtracer-bw';
 
 /** 矢量化模式 */
 export type VectorizeMode = 'color' | 'bw' | 'cutting' | 'engraving' | 'lineart' | 'auto';
@@ -228,7 +230,8 @@ export async function checkEngineAvailability(): Promise<Record<VectorizeEngine,
   return {
     recraft: !!recraftProvider,
     'vectorize-api': !!vectorizeApiProvider,
-    vtracer: true, // vtracer 始终可用（内置）
+    'wasm-vtracer': true, // WASM vtracer 始终可用（内置，无需 Python）
+    vtracer: true, // Python vtracer 始终可用（内置）
     'vtracer-bw': true, // potrace 始终可用（内置）
     vlm: !!vlmProvider,
   };
@@ -247,7 +250,7 @@ function buildEngineChain(
     return [forcedEngine];
   }
 
-  const avail = availability || { recraft: true, 'vectorize-api': true, vtracer: true, 'vtracer-bw': true, vlm: true };
+  const avail = availability || { recraft: true, 'vectorize-api': true, 'wasm-vtracer': true, vtracer: true, 'vtracer-bw': true, vlm: true };
 
   // 黑白模式：优先 potrace
   if (mode === 'bw' || mode === 'cutting' || mode === 'engraving' || mode === 'lineart') {
@@ -261,11 +264,12 @@ function buildEngineChain(
   if (avail.recraft) chain.push('recraft');
   if (avail['vectorize-api']) chain.push('vectorize-api');
   if (avail.vlm) chain.push('vlm');
+  chain.push('wasm-vtracer');
   chain.push('vtracer');
   
   // 至少保证一个引擎
   if (chain.length === 0) {
-    chain.push('vtracer');
+    chain.push('wasm-vtracer');
   }
 
   return chain;
@@ -277,7 +281,7 @@ function buildEngineChain(
  * 这里作为一个标识告诉上层使用 vtracer 引擎
  */
 export function isVtracerEngine(engine: VectorizeEngine): boolean {
-  return engine === 'vtracer' || engine === 'vtracer-bw';
+  return engine === 'vtracer' || engine === 'vtracer-bw' || engine === 'wasm-vtracer';
 }
 
 /**

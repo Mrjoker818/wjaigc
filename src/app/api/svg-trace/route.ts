@@ -25,7 +25,7 @@ interface TraceRequest {
   imageUrl: string;
   mode: TraceMode;
   // Engine selection: auto = pipeline auto-selects, vectorize-api/vtracer/vlm = force specific engine
-  engine?: 'auto' | 'vectorize-api' | 'vtracer' | 'vlm';
+  engine?: 'auto' | 'vectorize-api' | 'vtracer' | 'vlm' | 'wasm-vtracer';
   // Quality preset (overrides individual params with optimal defaults)
   qualityPreset?: QualityPreset;
   // Color vectorization params (VTracer)
@@ -404,6 +404,82 @@ async function runVTracer(
     try { await unlink(inputPath); } catch { /* ignore */ }
     try { await unlink(outputPath); } catch { /* ignore */ }
   }
+}
+
+// ─── WASM VTracer (Node.js native, no Python dependency) ─────
+
+let wasmVtracerModule: any = null;
+
+async function getWasmVtracer(): Promise<any> {
+  if (wasmVtracerModule) return wasmVtracerModule;
+  try {
+    const vtracer = await import('wasm_vtracer');
+    const fs = await import('fs');
+    const pathModule = await import('path');
+    const wasmPath = pathModule.join(
+      process.cwd(), 'node_modules/wasm_vtracer/wasm_vtracer_bg.wasm'
+    );
+    const wasmBuffer = fs.readFileSync(wasmPath);
+    await vtracer.init();
+    wasmVtracerModule = vtracer;
+    console.log('[svg-trace] WASM vtracer initialized successfully');
+    return vtracer;
+  } catch (err) {
+    console.error('[svg-trace] WASM vtracer init failed:', (err as Error).message);
+    throw new Error('WASM vtracer not available: ' + (err as Error).message);
+  }
+}
+
+async function runWasmVTracer(
+  inputBuffer: Buffer,
+  params: VtracerParams,
+  mode: 'color' | 'bw' = 'color',
+): Promise<string> {
+  const vtracer = await getWasmVtracer();
+
+  // Decode image to raw RGBA pixels using sharp
+  const image = sharp(inputBuffer);
+  const metadata = await image.metadata();
+  const { data, info } = await image
+    .raw()
+    .ensureAlpha()
+    .toBuffer({ resolveWithObject: true });
+
+  const pixels = new Uint8Array(data);
+  const width = info.width;
+  const height = info.height;
+
+  // Create config
+  const config = new vtracer.TracerConfig();
+  config.setColorMode(
+    mode === 'bw'
+      ? vtracer.ColorMode.Binary
+      : vtracer.ColorMode.Color
+  );
+  config.setHierarchical(
+    params.hierarchical === 'cutout'
+      ? vtracer.Hierarchical.Cutout
+      : vtracer.Hierarchical.Stacked
+  );
+  config.setFilterSpeckle(Math.round(params.filterSpeckle));
+  // ★ WASM vtracer 的 colorPrecision 是位深度(1-8)，不是颜色数量
+  // Python vtracer 预设中 colorPrecision 是颜色数量(2-4096)，需要转换
+  // 位深度 → 颜色数 = 2^depth，所以颜色数 → 位深度 = ceil(log2(colorCount))
+  const wasmColorPrecision = Math.min(8, Math.max(1, Math.ceil(Math.log2(Math.max(2, params.colorPrecision)))));
+  config.setColorPrecision(wasmColorPrecision);
+  config.setCornerThreshold(params.cornerThreshold);
+  config.setPathPrecision(Math.round(params.pathPrecision));
+  config.setLayerDifference(Math.round(params.layerDifference));
+  config.setMaxIterations(Math.round(params.maxIterations));
+
+  console.log(`[svg-trace] WASM vtracer: ${width}x${height}, colorPrecision=${params.colorPrecision}, filterSpeckle=${params.filterSpeckle}`);
+
+  const svg = vtracer.convertImageToSvg(pixels, width, height, config);
+  if (!svg || svg.length < 50) {
+    throw new Error('WASM vtracer produced empty or invalid output');
+  }
+
+  return svg;
 }
 
 // ─── Potrace (B&W Trace) via ImageMagick + Potrace ─────
@@ -1951,7 +2027,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Pre-check tool availability for trace modes
-    // NOTE: color mode now uses unified pipeline (Recraft/VLM → vtracer), so vtracer is not required
+    // NOTE: color mode now uses unified pipeline (Recraft/VLM → WASM-vtracer/Python-vtracer), so Python vtracer is not required
     if (mode === 'color') {
       const vtracerCheck = await new Promise<boolean>((resolve) => {
         execFile(PYTHON_BIN, ['-c', 'import vtracer'], { timeout: 5000 }, (error) => {
@@ -1959,13 +2035,10 @@ export async function POST(req: NextRequest) {
         });
       });
       if (!vtracerCheck && (body.engine === 'vtracer')) {
-        // Only error if user explicitly requested vtracer and it's not installed
-        return NextResponse.json({
-          success: false,
-          error: 'VTracer 未安装。请安装: pip3 install vtracer，或使用 engine=auto 让系统自动选择最优引擎。',
-        }, { status: 503 });
+        // Python vtracer not installed, but WASM vtracer is always available as fallback
+        console.log('[svg-trace] Python vtracer not available, falling back to WASM vtracer');
       }
-      // If vtracer not available but engine is auto/vectorize-api/vlm, the pipeline will handle it
+      // If vtracer not available but engine is auto/vectorize-api/vlm/wasm-vtracer, the pipeline will handle it
     } else if (mode === 'bw' || mode === 'cutting' || mode === 'engraving' || mode === 'lineart') {
       const potraceCheck = await new Promise<boolean>((resolve) => {
         execFile('which', ['potrace'], { timeout: 5000 }, (error) => {
@@ -2124,10 +2197,42 @@ export async function POST(req: NextRequest) {
           vtracerParams,
         );
 
-        let svgContent = await runVTracer(preprocessed, vtracerParams);
-        let usedEngine = 'vtracer';
+        let svgContent = '';
+        let usedEngine = 'wasm-vtracer';
 
-        // VTracer失败时使用 ImageTracer.js 作为高质量JS兜底
+        // 优先尝试 WASM vtracer（纯 Node.js，无 Python 依赖，性能更好）
+        if (requestedEngine === 'wasm-vtracer' || requestedEngine === 'vtracer' || requestedEngine === 'auto') {
+          try {
+            svgContent = await runWasmVTracer(preprocessed, vtracerParams);
+            if (svgContent && svgContent.trim().length > 50) {
+              usedEngine = 'wasm-vtracer';
+              console.log('[svg-trace] WASM vtracer 成功，路径数:', (svgContent.match(/<path/g) || []).length);
+            } else {
+              svgContent = '';
+            }
+          } catch (wasmErr) {
+            const wasmErrMsg = wasmErr instanceof Error ? wasmErr.message : String(wasmErr);
+            console.warn('[svg-trace] WASM vtracer 失败:', wasmErrMsg);
+            svgContent = '';
+          }
+        }
+
+        // WASM 失败时，尝试 Python vtracer
+        if (!svgContent) {
+          try {
+            svgContent = await runVTracer(preprocessed, vtracerParams);
+            if (svgContent && svgContent.trim().length > 50) {
+              usedEngine = 'vtracer';
+            } else {
+              svgContent = '';
+            }
+          } catch (pyErr) {
+            console.warn('[svg-trace] Python vtracer 失败:', pyErr instanceof Error ? pyErr.message : String(pyErr));
+            svgContent = '';
+          }
+        }
+
+        // VTracer全部失败时使用 ImageTracer.js 作为高质量JS兜底
         if (!svgContent || svgContent.trim().length < 50) {
           console.warn('[svg-trace] VTracer输出为空，尝试ImageTracer.js兜底');
           try {
