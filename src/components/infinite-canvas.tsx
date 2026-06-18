@@ -5863,7 +5863,7 @@ export function InfiniteCanvas({
         return;
       }
 
-      updateProcessingFrame(placeholderId, { progress: 22, status: upscaleMode === 'lossless' ? '无损放大中（Real-ESRGAN 超分辨率 + AI画质精修）...' : 'AI 正在放大细节...' });
+      updateProcessingFrame(placeholderId, { progress: 22, status: upscaleMode === 'lossless' ? '无损放大中（Real-ESRGAN 超分辨率 + AI画质精修）...' : 'AI 放大 + 画质精修中...' });
       let resultUrl: string | null;
       let actualOutW = targetW;
       let actualOutH = targetH;
@@ -5893,6 +5893,8 @@ export function InfiniteCanvas({
             usedModelName = '云端无损+AI精修';
           } else if (proStrategy === 'local-upscayl') {
             usedModelName = '本地Real-ESRGAN' + (isFallback ? '(降级)' : '');
+          } else if (proStrategy === 'ai-redraw+ai-enhance') {
+            usedModelName = 'AI放大+精修' + (isFallback ? '(降级)' : '');
           } else if (proStrategy === 'ai-redraw') {
             usedModelName = 'AI重绘放大' + (isFallback ? '(降级)' : '');
           } else {

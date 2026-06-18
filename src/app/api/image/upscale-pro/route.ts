@@ -610,6 +610,20 @@ export async function POST(request: NextRequest) {
     if (fallbackToAi) {
       const aiResult = await upscaleViaAI(imageUrl, scale);
       if (aiResult?.url) {
+        // AI放大后画质也较差，同样追加AI精修
+        const enhancedResult = await enhanceViaAI(aiResult.url);
+        if (enhancedResult?.url) {
+          return NextResponse.json({
+            success: true,
+            url: enhancedResult.url,
+            model: `${aiResult.model}+${enhancedResult.model}`,
+            strategy: 'ai-redraw+ai-enhance',
+            enhanced: true,
+            fallback: true,
+            fallbackReason: '已使用AI重绘放大并精修画质',
+          });
+        }
+        // 精修失败，返回AI重绘结果
         return NextResponse.json({
           success: true,
           url: aiResult.url,
