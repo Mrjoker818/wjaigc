@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import {
   WorkflowNode, WorkflowConnection, Workflow as WorkflowData, NodeType, NodeCategory,
   NODE_TYPE_COLORS, NODE_TYPE_LABELS, NODE_TYPE_ICONS, NODE_CATEGORY_LABELS,
@@ -2793,6 +2794,7 @@ const NodeCard = React.memo(function NodeCard({ node, isSelected, isHighlighted,
   const [templateSearch, setTemplateSearch] = useState('');
   const [templatePopupIndex, setTemplatePopupIndex] = useState(0);
   const [hoveredTemplateId, setHoveredTemplateId] = useState<string | null>(null);
+  const [thumbnailRect, setThumbnailRect] = useState<DOMRect | null>(null);
   const filteredTemplates = templateSearch ? searchTemplates(templateSearch) : getPromptTemplates();
 
   // P0: 解析文本中的 [img:id] 引用，渲染为缩略图
@@ -3004,7 +3006,12 @@ const NodeCard = React.memo(function NodeCard({ node, isSelected, isHighlighted,
                         onNodeFieldChange?.(node.id, 'textContent', before + tpl.content);
                         setShowTemplatePopup(false);
                       }}
-                      onMouseEnter={() => tpl.thumbnail && setHoveredTemplateId(tpl.id)}
+                      onMouseEnter={(e) => {
+                        if (tpl.thumbnail) {
+                          setHoveredTemplateId(tpl.id);
+                          setThumbnailRect(e.currentTarget.getBoundingClientRect());
+                        }
+                      }}
                       onMouseLeave={() => setHoveredTemplateId(null)}
                       className={`w-full text-left px-3 py-2 text-sm border-b border-white/5 last:border-0 transition-colors relative ${i === templatePopupIndex ? 'bg-[#d4af37]/20 text-white' : 'text-gray-300 hover:bg-white/5'}`}
                     >
@@ -3020,17 +3027,24 @@ const NodeCard = React.memo(function NodeCard({ node, isSelected, isHighlighted,
                     </button>
                   ))}
                   </div>
-                  {/* Floating thumbnail - outside scroll container */}
+                  {/* Floating thumbnail - portal to body to avoid overflow clipping */}
                   {hoveredTemplateId && (() => {
                     const tpl = filteredTemplates.find(t => t.id === hoveredTemplateId);
-                    if (!tpl?.thumbnail) return null;
-                    return (
-                      <div className="absolute right-full mr-2 top-1 z-[60] pointer-events-none">
+                    if (!tpl?.thumbnail || !thumbnailRect) return null;
+                    return createPortal(
+                      <div
+                        className="fixed z-[9999] pointer-events-none"
+                        style={{
+                          left: thumbnailRect.left - 160,
+                          top: Math.max(8, thumbnailRect.top - 40),
+                        }}
+                      >
                         <div className="rounded-lg shadow-2xl overflow-hidden border border-white/10 bg-[#1a1a1a]">
                           <img src={tpl.thumbnail} alt={tpl.name} className="w-36 h-36 object-cover" />
                           <div className="px-2 py-1 text-[10px] truncate text-gold-muted">{tpl.name}</div>
                         </div>
-                      </div>
+                      </div>,
+                      document.body
                     );
                   })()}
                 </div>

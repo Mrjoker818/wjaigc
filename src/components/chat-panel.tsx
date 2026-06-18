@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { Bot, Send, Sparkles, Copy, Check, Trash2, Loader2, Eye, EyeOff, Wand2, User, Upload, X, Image as ImageIcon, Languages, Settings, Plug, Plus, History, FolderOpen, MessageSquare, Bookmark, BookmarkCheck, Lightbulb, Zap, ArrowRight, Palette, Target, Sliders, Download, AlertCircle, LocateFixed, RotateCcw, FileText, Cpu, ChevronRight, AtSign } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -1525,6 +1526,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
   const [templatePopupIndex, setTemplatePopupIndex] = useState(0);
   const [templatePopupItems, setTemplatePopupItems] = useState<PromptTemplate[]>([]);
   const [hoveredTemplateId, setHoveredTemplateId] = useState<string | null>(null);
+  const [thumbnailRect, setThumbnailRect] = useState<DOMRect | null>(null);
 
   // ===== Tab Mode (selected image → chat targeting) =====
   // All images are stored in pendingImages array - canvas images, pasted images, @mentioned images
@@ -1557,7 +1559,7 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
 
   // P1-5: Auto-enter "针对此图" mode when a canvas image is selected
   // When user selects an image on the canvas, auto-add it to pendingImages ONLY when chat tab is open
-  // This prevents images being added to chat input when user is just interacting with the canvas
+  // AND the chat input is focused (user is actively chatting, not just clicking around canvas)
   const prevSelectedCanvasImageIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (!selectedCanvasImage) return;
@@ -1565,8 +1567,9 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
     if (selectedCanvasImage.id === prevSelectedCanvasImageIdRef.current) return;
     prevSelectedCanvasImageIdRef.current = selectedCanvasImage.id;
 
-    // Only auto-add to chat when chat tab is open/active
+    // Only auto-add to chat when chat tab is open/active AND chat input is focused
     if (!chatTabOpen) return;
+    if (document.activeElement !== textareaRef.current) return;
 
     // Auto-add to pendingImages if not already there
     setPendingImages(prev => {
@@ -5938,7 +5941,12 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                     <button
                       key={template.id}
                       onClick={() => selectPromptTemplate(template)}
-                      onMouseEnter={() => template.thumbnail && setHoveredTemplateId(template.id)}
+                      onMouseEnter={(e) => {
+                        if (template.thumbnail) {
+                          setHoveredTemplateId(template.id);
+                          setThumbnailRect(e.currentTarget.getBoundingClientRect());
+                        }
+                      }}
                       onMouseLeave={() => setHoveredTemplateId(null)}
                       className={`w-full flex items-start gap-2 px-3 py-2 text-xs transition-colors text-left ${
                         idx === templatePopupIndex
@@ -5965,17 +5973,24 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                     </button>
                   ))}
                 </div>
-                {/* Floating thumbnail - outside scroll container to avoid overflow clipping */}
+                {/* Floating thumbnail - portal to body to avoid overflow clipping */}
                 {hoveredTemplateId && (() => {
                   const tpl = templatePopupItems.find(t => t.id === hoveredTemplateId);
-                  if (!tpl?.thumbnail) return null;
-                  return (
-                    <div className="absolute right-full mr-2 top-6 z-[60] pointer-events-none">
+                  if (!tpl?.thumbnail || !thumbnailRect) return null;
+                  return createPortal(
+                    <div
+                      className="fixed z-[9999] pointer-events-none"
+                      style={{
+                        left: thumbnailRect.left - 160,
+                        top: Math.max(8, thumbnailRect.top - 40),
+                      }}
+                    >
                       <div className={`rounded-lg shadow-2xl overflow-hidden border ${isGold ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-gray-200'}`}>
                         <img src={tpl.thumbnail} alt={tpl.name} className="w-36 h-36 object-cover" />
                         <div className={`px-2 py-1 text-[10px] truncate ${isGold ? 'text-gold-muted' : 'text-gray-600'}`}>{tpl.name}</div>
                       </div>
-                    </div>
+                    </div>,
+                    document.body
                   );
                 })()}
                 <div className={`px-3 py-1.5 border-t text-[10px] ${isGold ? 'border-white/5 text-white/30' : 'border-gray-100 text-gray-400'}`}>

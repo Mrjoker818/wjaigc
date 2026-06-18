@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { Upload, X, Plus, Cpu, GitMerge, GripHorizontal, Zap, FileText } from 'lucide-react';
 import { toast } from 'sonner';
 import { UniversalApiManager } from '@/lib/universal-api-manager';
@@ -283,7 +284,9 @@ export function GenerationPanel(
     const [filteredTemplates, setFilteredTemplates] = useState<PromptTemplate[]>([]);
     const [selectedTemplateIndex, setSelectedTemplateIndex] = useState(0);
     const [hoveredTemplateId, setHoveredTemplateId] = useState<string | null>(null);
+    const [thumbnailRect, setThumbnailRect] = useState<DOMRect | null>(null);
     const promptTextareaRef = useRef<HTMLTextAreaElement>(null);
+    const templatePopupRef = useRef<HTMLDivElement>(null);
 
     // Sync external prompt from chat-panel prompt optimizer
     useEffect(() => {
@@ -1211,7 +1214,12 @@ export function GenerationPanel(
                                                 setShowTemplatePopup(false);
                                                 promptTextareaRef.current?.focus();
                                             }}
-                                            onMouseEnter={() => template.thumbnail && setHoveredTemplateId(template.id)}
+                                            onMouseEnter={(e) => {
+                                                if (template.thumbnail) {
+                                                    setHoveredTemplateId(template.id);
+                                                    setThumbnailRect(e.currentTarget.getBoundingClientRect());
+                                                }
+                                            }}
                                             onMouseLeave={() => setHoveredTemplateId(null)}
                                             className={`w-full text-left px-3 py-2.5 transition-colors relative ${
                                                 index === selectedTemplateIndex
@@ -1240,17 +1248,24 @@ export function GenerationPanel(
                                         </button>
                                     ))}
                                 </div>
-                                {/* Floating thumbnail - outside scroll container to avoid overflow clipping */}
+                                {/* Floating thumbnail - portal to body to avoid overflow clipping */}
                                 {hoveredTemplateId && (() => {
                                     const tpl = filteredTemplates.find(t => t.id === hoveredTemplateId);
-                                    if (!tpl?.thumbnail) return null;
-                                    return (
-                                        <div className="absolute right-full mr-2 top-6 z-[60] pointer-events-none">
+                                    if (!tpl?.thumbnail || !thumbnailRect) return null;
+                                    return createPortal(
+                                        <div
+                                            className="fixed z-[9999] pointer-events-none"
+                                            style={{
+                                                left: thumbnailRect.left - 176,
+                                                top: Math.max(8, thumbnailRect.top - 40),
+                                            }}
+                                        >
                                             <div className={`rounded-lg shadow-2xl overflow-hidden border ${mc ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-white/[0.12]'}`}>
                                                 <img src={tpl.thumbnail} alt={tpl.name} className="w-40 h-40 object-cover" />
                                                 <div className={`px-2 py-1 text-[10px] truncate ${mc ? 'text-gray-600' : 'text-gold-muted'}`}>{tpl.name}</div>
                                             </div>
-                                        </div>
+                                        </div>,
+                                        document.body
                                     );
                                 })()}
                                 <div className={`px-3 py-2 border-t ${mc ? 'border-gray-100' : 'border-white/[0.06]'}`}>
