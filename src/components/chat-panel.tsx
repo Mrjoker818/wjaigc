@@ -6390,7 +6390,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                       </div>
                       {/* 参数填写面板 */}
                       {isActive && skill.paramSlots.length > 0 && (
-                        <div className={`mt-2 pt-2 border-t ${isGold ? 'border-white/[0.06]' : 'border-gray-100'}`}>
+                        <div className={`mt-2 pt-2 border-t ${isGold ? 'border-white/[0.06]' : 'border-gray-100'}`} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
                           <div className="space-y-1.5">
                             {skill.paramSlots.map(slot => (
                               <div key={slot.name}>
@@ -6520,7 +6520,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                     </div>
                     {/* 参数填写面板 */}
                     {activeSkill?.id === skill.id && skill.paramSlots.length > 0 && (
-                      <div className={`mt-2 pt-2 border-t ${isGold ? 'border-white/[0.06]' : 'border-gray-100'}`}>
+                      <div className={`mt-2 pt-2 border-t ${isGold ? 'border-white/[0.06]' : 'border-gray-100'}`} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
                         <div className="space-y-1.5">
                           {skill.paramSlots.map(slot => (
                             <div key={slot.name}>
@@ -6546,7 +6546,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                       </div>
                     )}
                     {activeSkill?.id === skill.id && skill.paramSlots.length === 0 && (
-                      <div className={`mt-2 pt-2 border-t ${isGold ? 'border-white/[0.06]' : 'border-gray-100'}`}>
+                      <div className={`mt-2 pt-2 border-t ${isGold ? 'border-white/[0.06]' : 'border-gray-100'}`} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
                         <Button
                           onClick={() => handleUseSkill(skill)}
                           className={`w-full h-7 text-xs font-medium rounded-md ${
