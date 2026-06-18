@@ -33,7 +33,7 @@ export const CHAT_TOOLS = [
           },
           count: {
             type: 'number',
-            description: '生成图片数量，1-4张',
+            description: '生成图片数量，1-4张，默认1张。仅当用户明确要求多张时才设置>1',
           },
           negative_prompt: {
             type: 'string',
