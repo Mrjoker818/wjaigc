@@ -1986,9 +1986,8 @@ async function tryDesignVectorizeFallback(req: NextRequest, imageUrl: string, mo
       success: true,
       mode,
       engine: pipelineResult.engine || 'pipeline-fallback',
-      svg: svgContent,
       dataUrl: pngServerUrl || pngPreviewUrl || svgDataUrl,
-      svgDataUrl,
+      ...(svgDataUrl.length < 200000 ? { svgDataUrl } : {}),
       isSvgPreview: !!(pngServerUrl || pngPreviewUrl),
       fallback: true,
       stats: { svgSize: Buffer.byteLength(svgContent, 'utf-8'), pathCount: (svgContent.match(/<path/g) || []).length },
@@ -2071,9 +2070,10 @@ export async function POST(req: NextRequest) {
       case 'color': {
         const requestedEngine = body.engine || 'auto';
 
-        // ─── P0: 统一矢量化管线 (Recraft Vectorize → VLM → vtracer spline) ───
+        // ─── P0: 统一矢量化管线 (Recraft Vectorize → VLM → WASM VTracer → vtracer spline) ───
         let pipelineFallbackWarning: string | undefined;
         if (requestedEngine === 'auto' || requestedEngine === 'vectorize-api' || requestedEngine === 'vlm') {
+          console.log(`[svg-trace] Pipeline starting, requestedEngine=${requestedEngine}, qualityPreset=${body.qualityPreset || 'balanced'}`);
           try {
             const inputBufferForPipeline = await resolveImageUrl(imageUrl);
             if (inputBufferForPipeline && inputBufferForPipeline.length > 0) {
@@ -2095,6 +2095,8 @@ export async function POST(req: NextRequest) {
                 mode: 'color',
                 quality: (body.qualityPreset as PipelineQuality) || 'balanced',
               });
+
+              console.log(`[svg-trace] Pipeline result: success=${pipelineResult.success}, engine=${pipelineResult.engine}, enginesTried=[${pipelineResult.enginesTried?.join(',') || ''}], hasSvg=${!!pipelineResult.svg}, error=${pipelineResult.error || 'none'}`);
 
               if (pipelineResult.success && pipelineResult.svg) {
                 let svgContent = String(pipelineResult.svg);
@@ -2160,10 +2162,10 @@ export async function POST(req: NextRequest) {
                     success: true,
                     mode: 'color',
                     engine: pipelineResult.engine,
-                    svg: svgContent,
                     url,
                     dataUrl: pngServerUrl || pngPreviewUrl || url,
-                    svgDataUrl,
+                    // 仅小型SVG附带svgDataUrl(前端用于离线下载), 大型SVG通过url下载
+                    ...(svgDataUrl.length < 200000 ? { svgDataUrl } : {}),
                     isSvgPreview: !!(pngServerUrl || pngPreviewUrl),
                     stats: {
                       svgSize: Buffer.byteLength(svgContent, 'utf-8'),
@@ -2177,8 +2179,10 @@ export async function POST(req: NextRequest) {
                 }
 
                 // Pipeline returned SVG but path count out of range — fall through to vtracer
-                console.log(`[svg-trace] Pipeline SVG path count ${pathCountCheck} out of range, falling back to vtracer`);
-                pipelineFallbackWarning = `AI矢量模型生成路径数异常(${pathCountCheck})，已降级到本地描摹引擎`;
+                console.log(`[svg-trace] Pipeline SVG path count ${pathCountCheck} out of range (1-3000), falling back to local engine`);
+                pipelineFallbackWarning = pathCountCheck === 0
+                  ? 'AI矢量模型生成结果为空，已降级到本地描摹引擎'
+                  : `AI矢量模型生成路径数过多(${pathCountCheck})，已降级到本地描摹引擎`;
               }
             }
           } catch (pipelineErr) {
@@ -2189,6 +2193,7 @@ export async function POST(req: NextRequest) {
         }
 
         // ─── P1: VTracer 彩色矢量化 (本地引擎) ───
+        console.log(`[svg-trace] Entering P1 local engine, pipelineFallbackWarning=${pipelineFallbackWarning || 'none'}`);
         const vtracerParams = resolveVtracerParams(body);
 
         // Preprocess image for optimal VTracer input
@@ -2366,11 +2371,10 @@ export async function POST(req: NextRequest) {
           mode: 'color',
           engine: usedEngine,
           engineFallbackWarning: pipelineFallbackWarning,
-          svg: svgContent,
           url,
           // 优先返回PNG服务器URL(最可靠), 其次PNG data URL, 最后SVG服务器URL
           dataUrl: pngServerUrl || pngPreviewUrl || url,
-          svgDataUrl,
+          ...(svgDataUrl.length < 200000 ? { svgDataUrl } : {}),
           isSvgPreview: !!(pngServerUrl || pngPreviewUrl),
           stats: {
             svgSize: Buffer.byteLength(svgContent, 'utf-8'),
@@ -2491,10 +2495,9 @@ export async function POST(req: NextRequest) {
           success: true,
           mode: 'bw',
           engine: 'potrace',
-          svg: svgContent,
           url,
           dataUrl: pngServerUrl || pngPreviewUrl || url,
-          svgDataUrl,
+          ...(svgDataUrl.length < 200000 ? { svgDataUrl } : {}),
           isSvgPreview: !!(pngServerUrl || pngPreviewUrl),
           stats: {
             svgSize: Buffer.byteLength(svgContent, 'utf-8'),
@@ -2567,10 +2570,9 @@ export async function POST(req: NextRequest) {
           success: true,
           mode: 'cutting',
           engine: 'potrace',
-          svg: svgContent,
           url: cutUrl,
           dataUrl: cutPngServerUrl || cutPngPreview || cutUrl,
-          svgDataUrl: cutSvgDataUrl,
+          ...(cutSvgDataUrl && cutSvgDataUrl.length < 200000 ? { svgDataUrl: cutSvgDataUrl } : {}),
           isSvgPreview: !!(cutPngServerUrl || cutPngPreview),
           stats: { svgSize: Buffer.byteLength(svgContent, 'utf-8'), pathCount: cutPathCount },
         });
@@ -2635,10 +2637,9 @@ export async function POST(req: NextRequest) {
           success: true,
           mode: 'engraving',
           engine: 'potrace',
-          svg: svgContent,
           url: engUrl,
           dataUrl: engPngServerUrl || engPngPreview || engUrl,
-          svgDataUrl: engSvgDataUrl,
+          ...(engSvgDataUrl && engSvgDataUrl.length < 200000 ? { svgDataUrl: engSvgDataUrl } : {}),
           isSvgPreview: !!(engPngServerUrl || engPngPreview),
           stats: { svgSize: Buffer.byteLength(svgContent, 'utf-8'), pathCount: engPathCount },
         });
@@ -2703,10 +2704,9 @@ export async function POST(req: NextRequest) {
           success: true,
           mode: 'lineart',
           engine: 'potrace',
-          svg: svgContent,
           url: laUrl,
           dataUrl: laPngServerUrl || laPngPreview || laUrl,
-          svgDataUrl: laSvgDataUrl,
+          ...(laSvgDataUrl && laSvgDataUrl.length < 200000 ? { svgDataUrl: laSvgDataUrl } : {}),
           isSvgPreview: !!(laPngServerUrl || laPngPreview),
           stats: { svgSize: Buffer.byteLength(svgContent, 'utf-8'), pathCount: laPathCount },
         });

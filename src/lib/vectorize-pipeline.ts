@@ -18,6 +18,50 @@ import { vlmVectorize, findVlmProvider, type VlmVectorizeResult } from './vector
 import { analyzeFromMetadata, analyzeWithSharp, type ImageAnalysis } from './vectorize-analyzer';
 
 /**
+ * 服务端 WASM vtracer 调用（复用 svg-trace 路由的 runWasmVTracer 逻辑）
+ * 直接使用 wasm_vtracer npm 包在 Node.js 中执行矢量化
+ */
+async function runWasmVTracerInPipeline(
+  imageBuffer: Buffer,
+  colorPrecision: number = 5,
+  filterSpeckle: number = 4,
+): Promise<{ success: boolean; svg?: string; error?: string; pathCount?: number }> {
+  try {
+    const wasmVtracer = await import('wasm_vtracer');
+    // Initialize WASM
+    await wasmVtracer.init();
+
+    // Decode image to raw RGBA pixels using sharp
+    const sharp = (await import('sharp')).default;
+    const image = sharp(imageBuffer);
+    const { data, info } = await image
+      .raw()
+      .ensureAlpha()
+      .toBuffer({ resolveWithObject: true });
+
+    const pixels = new Uint8Array(data);
+    const width = info.width;
+    const height = info.height;
+
+    // Create config
+    const config = new wasmVtracer.TracerConfig();
+    config.setColorMode(wasmVtracer.ColorMode.Color);
+    config.setColorPrecision(Math.min(8, Math.max(1, colorPrecision)));
+    config.setFilterSpeckle(filterSpeckle);
+    config.setPathPrecision(2);
+
+    const svg = wasmVtracer.convertImageToSvg(pixels, width, height, config);
+    if (!svg || svg.trim().length < 50) {
+      return { success: false, error: 'WASM vtracer 输出为空' };
+    }
+    const pathCount = (svg.match(/<path/g) || []).length;
+    return { success: true, svg, pathCount };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
  * 查找管理员配置的 vectorize 类型提供商（如 302AI Vectorizer.AI 代理）
  * 优先级高于 VLM，因为专业矢量模型质量更高
  */
@@ -459,6 +503,38 @@ export async function vectorizePipeline(
 
       errors.push(`vectorize-api: ${result.error}`);
       onProgress?.(engine, `Vectorizer.API 失败: ${result.error}`);
+      continue;
+    }
+
+    if (engine === 'wasm-vtracer') {
+      onProgress?.(engine, '正在使用 WASM VTracer 引擎矢量化...');
+      console.log('[vectorize-pipeline] Trying wasm-vtracer engine...');
+      if (!imageBuffer) {
+        errors.push('wasm-vtracer: 无图片数据');
+        console.log('[vectorize-pipeline] wasm-vtracer skipped: no image buffer');
+        continue;
+      }
+      const wasmColorPrecision = quality === 'fast' ? 4
+        : quality === 'balanced' ? 5
+        : quality === 'high' ? 6
+        : 7;
+      const wasmResult = await runWasmVTracerInPipeline(imageBuffer, wasmColorPrecision);
+      if (wasmResult.success && wasmResult.svg) {
+        onProgress?.(engine, 'WASM VTracer 矢量化成功');
+        console.log(`[vectorize-pipeline] wasm-vtracer succeeded, pathCount=${wasmResult.pathCount}`);
+        return {
+          success: true,
+          svg: wasmResult.svg,
+          engine: 'wasm-vtracer',
+          enginesTried,
+          analysis,
+          pathCount: wasmResult.pathCount,
+          svgSize: wasmResult.svg.length,
+        };
+      }
+      errors.push(`wasm-vtracer: ${wasmResult.error}`);
+      console.warn(`[vectorize-pipeline] wasm-vtracer failed: ${wasmResult.error}`);
+      onProgress?.(engine, `WASM VTracer 失败: ${wasmResult.error}`);
       continue;
     }
   }

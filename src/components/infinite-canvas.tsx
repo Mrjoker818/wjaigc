@@ -6296,11 +6296,14 @@ export function InfiniteCanvas({
         // alphaMax not used in simplified panel
       }
 
+      const svgTraceController = new AbortController();
+      const svgTraceTimeout = setTimeout(() => svgTraceController.abort(), 120_000); // 2分钟超时
       const response = await fetch('/api/svg-trace', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestBody),
-      });
+        signal: svgTraceController.signal,
+      }).finally(() => clearTimeout(svgTraceTimeout));
 
       if (!response.ok) {
         const errText = await response.text().catch(() => '');
@@ -6318,7 +6321,7 @@ export function InfiniteCanvas({
           // SVG结果 - 优先使用PNG预览图用于画布显示，保留SVG数据用于下载
           // API返回: data.dataUrl(PNG服务器URL或SVG服务器URL), data.url(服务器SVG文件路径), data.isSvgPreview(PNG是否生成成功)
           // 显示策略: data.dataUrl(PNG服务器URL优先，SVG服务器URL兜底)
-          // 下载策略: 从data.url(服务器SVG文件)获取SVG内容，避免存储超大SVG data URL
+          // 下载策略: 优先svgDataUrl(离线可用), 其次从svgUrl服务器获取
           const displayUrl = data.dataUrl || data.url;
           const engineLabelMap: Record<string, string> = {
             vtracer: 'VTracer', potrace: 'Potrace', 'vectorize-api': 'Vectorizer', vlm: 'VLM', imagetracer: 'ImageTracer', 'wasm-vtracer': 'WASM·VTracer'
@@ -6330,6 +6333,8 @@ export function InfiniteCanvas({
             modifyPrompt: `${modeLabel} (${engineLabel})${data.engineFallbackWarning ? ' ⚠️' : ''}`,
             // 保存SVG服务器URL用于下载（轻量级，不占localStorage空间）
             ...(data.url ? { svgUrl: data.url } : {}),
+            // 保存小型SVG data URL用于离线下载（大型SVG通过svgUrl下载）
+            ...(data.svgDataUrl ? { svgDataUrl: data.svgDataUrl } : {}),
             modelName: modelInfo.apiDisplayName || modelInfo.model,
             apiProvider: modelInfo.providerName || '',
           }, 'trace');
