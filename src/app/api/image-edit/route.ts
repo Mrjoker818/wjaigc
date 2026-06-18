@@ -1702,16 +1702,27 @@ export async function POST(request: NextRequest) {
           } catch {}
         }
         // 文件系统未找到则走 localhost fetch（兼容所有环境）
+        // 注意：serve-upload 可能从 S3 恢复文件，需要较长时间（最多 30s），因此超时设为 45s
         const port = process.env.DEPLOY_RUN_PORT || 5000;
         const fetchUrl = relPath.startsWith('/') ? `http://localhost:${port}${relPath}` : `http://localhost:${port}/${relPath}`;
-        try {
-          const res = await fetch(fetchUrl, { signal: AbortSignal.timeout(15000) });
-          if (res.ok) {
-            const buf = Buffer.from(await res.arrayBuffer());
-            const ct = res.headers.get('content-type') || 'image/png';
-            return `data:${ct};base64,${buf.toString('base64')}`;
+        // 重试最多 2 次，应对 S3 恢复延迟
+        for (let retry = 0; retry < 2; retry++) {
+          try {
+            const res = await fetch(fetchUrl, { signal: AbortSignal.timeout(45000) });
+            if (res.ok) {
+              const buf = Buffer.from(await res.arrayBuffer());
+              const ct = res.headers.get('content-type') || 'image/png';
+              return `data:${ct};base64,${buf.toString('base64')}`;
+            }
+            if (res.status === 404) {
+              // 404 不重试，文件确实不存在
+              break;
+            }
+          } catch {
+            // 超时或其他网络错误，等待后重试
+            if (retry < 1) await new Promise(r => setTimeout(r, 2000));
           }
-        } catch {}
+        }
         throw new Error(`Local image not found: ${url} (tried fs: ${fsSearchPaths.join(', ')}, fetch: ${fetchUrl})`);
       }
 

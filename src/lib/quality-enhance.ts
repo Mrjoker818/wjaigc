@@ -48,6 +48,7 @@ async function persistResult(remoteUrl: string): Promise<string> {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ imageUrl: remoteUrl, prefix: 'quality-enhance' }),
+      signal: AbortSignal.timeout(30000),
     });
     if (persistResp.ok) {
       const persistData = await persistResp.json() as Record<string, unknown>;
@@ -92,7 +93,7 @@ export async function enhanceViaAI(
     let aspectRatio = '1:1';
     try {
       const sharp = (await import('sharp')).default;
-      const imgResp = await fetch(absoluteUrl);
+      const imgResp = await fetch(absoluteUrl, { signal: AbortSignal.timeout(30000) });
       if (imgResp.ok) {
         const imgBuf = Buffer.from(await imgResp.arrayBuffer());
         const meta = await sharp(imgBuf).metadata();
