@@ -2096,10 +2096,9 @@ export async function POST(request: NextRequest) {
             return { url: finalUrl, actualW: targetW, actualH: targetH };
           }
 
-          // 情况2: AI 输出 < 目标尺寸 → 直接接受 AI 增强结果
-          // AI 模型输出的尺寸是它认为最佳的增强分辨率（如原图896x1200 → AI输出1728x2304 ≈2x）
-          // 不再二次放大到4x，因为：1.二次放大会引入涂抹感 2.用户期望的是AI增强后的实际输出尺寸
-          console.log(`[image-edit] AI upscale output ${aiW}x${aiH} < target ${targetW}x${targetH}. Accepting AI enhanced result as-is (AI determined optimal resolution).`);
+          // 情况2: AI 输出 < 目标尺寸 → 用 Lanczos3 放大到目标尺寸
+          // AI 已增强画质，再用高质量插值放大到用户设定的倍数
+          console.log(`[image-edit] AI upscale output ${aiW}x${aiH} < target ${targetW}x${targetH}. Upscaling AI result to target with Lanczos3...`);
 
           // 对 AI 输出应用两步锐化增强，不做模糊降噪
           // Step 1: 中频纹理恢复
@@ -2113,17 +2112,23 @@ export async function POST(request: NextRequest) {
             .png({ quality: 95 })
             .toBuffer();
 
+          // Step 3: Lanczos3 放大到用户设定的目标尺寸
+          const resizedBuffer = await sharp(sharpenedBuffer)
+            .resize(targetW, targetH, { kernel: sharp.kernel.lanczos3 })
+            .png({ quality: 95 })
+            .toBuffer();
+
           const timestamp = Date.now();
           const randomSuffix = Math.random().toString(36).substring(2, 8);
           const filename = `upscale_ai_${timestamp}_${randomSuffix}.png`;
-          const savedPath = await saveBufferToPublic(sharpenedBuffer, filename);
+          const savedPath = await saveBufferToPublic(resizedBuffer, filename);
 
           const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
           const domainBase = domain.startsWith('http') ? domain.replace(/\/+$/, '') : `https://${domain.replace(/\/+$/, '')}`;
           const finalUrl = savedPath.startsWith('data:') ? savedPath : `${domainBase}${savedPath}`;
 
-          console.log(`[image-edit] AI upscale result: ${aiW}x${aiH} (AI enhanced, sharpened, ${sharpenedBuffer ? (sharpenedBuffer.length / 1024).toFixed(0) + 'KB' : 'N/A'})`);
-          return { url: finalUrl, actualW: aiW, actualH: aiH };
+          console.log(`[image-edit] AI upscale result: ${aiW}x${aiH} → ${targetW}x${targetH} (AI enhanced + Lanczos3 upscale, ${resizedBuffer ? (resizedBuffer.length / 1024).toFixed(0) + 'KB' : 'N/A'})`);
+          return { url: finalUrl, actualW: targetW, actualH: targetH };
         } catch (resizeErr) {
           console.error(`[image-edit] AI upscale resize failed:`, resizeErr instanceof Error ? resizeErr.message : resizeErr);
           // resize 失败时仍返回原始 URL，尺寸用 AI 实际输出尺寸

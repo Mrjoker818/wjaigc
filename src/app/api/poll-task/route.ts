@@ -1118,23 +1118,26 @@ export async function POST(request: NextRequest) {
 
             console.log(`[poll-task] AI Upscale: AI output ${aiW}x${aiH}, target was ${upscaleTargetW}x${upscaleTargetH}`);
 
-            // 直接使用 AI 输出尺寸，不做 resize
-            // AI 模型知道它能增强的最佳分辨率，强行 resize 到更大尺寸只会通过插值补像素 = 模糊
-            // 两步锐化后处理增强清晰度（不做模糊降噪）
+            // AI 输出小于目标时，先用两步锐化增强，再用 Lanczos3 放大到目标尺寸
             let finalBuf = aiResultBuf;
             if (aiW < upscaleTargetW * 0.9 || aiH < upscaleTargetH * 0.9) {
-              // AI 输出显著小于目标(差距>10%)，两步锐化增强
+              // AI 输出显著小于目标(差距>10%)，两步锐化 + Lanczos3 放大到目标
               // Step 1: 中频纹理恢复
               const step1 = await sharp(aiResultBuf)
                 .sharpen({ sigma: 1.2, m1: 0.8, m2: 0.4, x1: 2, y2: 4, y3: 10 })
                 .png({ quality: 95 })
                 .toBuffer();
               // Step 2: 微观边缘增强
-              finalBuf = await sharp(step1)
+              const step2 = await sharp(step1)
                 .sharpen({ sigma: 0.3, m1: 0.4, m2: 0.15, x1: 1, y2: 2, y3: 6 })
                 .png({ quality: 95 })
                 .toBuffer();
-              console.log(`[poll-task] AI Upscale: applied 2-step sharpening to ${aiW}x${aiH} result`);
+              // Step 3: Lanczos3 放大到用户设定的目标尺寸
+              finalBuf = await sharp(step2)
+                .resize(upscaleTargetW, upscaleTargetH, { kernel: sharp.kernel.lanczos3 })
+                .png({ quality: 95 })
+                .toBuffer();
+              console.log(`[poll-task] AI Upscale: sharpened + Lanczos3 upscaled from ${aiW}x${aiH} to ${upscaleTargetW}x${upscaleTargetH}`);
             }
 
             // 仅在 AI 输出大于目标时才做缩小（精确裁剪到目标尺寸）+ 锐化
@@ -1162,9 +1165,11 @@ export async function POST(request: NextRequest) {
               }
             }
 
-            // 返回 AI 实际输出尺寸
-            const finalW = (aiW > upscaleTargetW && aiH > upscaleTargetH) ? upscaleTargetW : aiW;
-            const finalH = (aiW > upscaleTargetW && aiH > upscaleTargetH) ? upscaleTargetH : aiH;
+            // 返回最终输出尺寸：如果做了放大则用目标尺寸，否则用AI输出尺寸
+            const didUpscale = (aiW < upscaleTargetW * 0.9 || aiH < upscaleTargetH * 0.9);
+            const didDownscale = (aiW > upscaleTargetW && aiH > upscaleTargetH);
+            const finalW = didDownscale ? upscaleTargetW : (didUpscale ? upscaleTargetW : aiW);
+            const finalH = didDownscale ? upscaleTargetH : (didUpscale ? upscaleTargetH : aiH);
             (pollResult as Record<string, unknown>).outputSize = { width: finalW, height: finalH };
             console.log(`[poll-task] AI Upscale: final output ${finalW}x${finalH}`);
           } catch (upscaleResizeErr) {
