@@ -3446,15 +3446,15 @@ IP角色设计规范：
       }
     });
 
-    // ★ 如果有激活的 Skill 且是首轮对话，在用户消息前附加技能上下文
+    // ★ 如果有激活的 Skill 且是首轮对话，在用户消息前附加技能上下文（Lovart 风格）
     let finalInput = trimmedInput;
     if (activeSkill && messages.length === 0) {
       const paramParts = activeSkill.paramSlots
         ?.filter(p => skillParamValues[p.name])
         .map(p => `${p.label}: ${skillParamValues[p.name]}`)
         .filter(Boolean);
-      const paramStr = paramParts && paramParts.length > 0 ? `\n参数：${paramParts.join('、')}` : '';
-      finalInput = `[使用技能「${activeSkill.name}」]${activeSkill.description ? ` ${activeSkill.description}` : ''}${paramStr}\n\n${trimmedInput}`;
+      const paramStr = paramParts && paramParts.length > 0 ? `\n用户填写的参数：${paramParts.join('、')}` : '';
+      finalInput = `[用户使用了技能「${activeSkill.name}」]${activeSkill.description ? `\n技能说明：${activeSkill.description}` : ''}${paramStr}\n\n用户需求：${trimmedInput}\n\n请按照技能设定的专业流程引导：先分析需求，再输出方案等用户确认，最后执行生成。不要直接开始生成，先像专业设计总监一样分析和规划。`;
     }
 
     const userMessage: Message = {
@@ -5108,11 +5108,12 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
           </div>
         )}
 
-        {/* Active Skill badge - Lovart 风格：显示当前激活的技能 */}
-        {activeSkill && messages.length > 0 && !allAgents.find(a => a.id === systemPrompt) && (
+        {/* Active Skill badge - Lovart 风格：显示当前激活的技能（无论是否有消息） */}
+        {activeSkill && !allAgents.find(a => a.id === systemPrompt) && (
           <div className={`shrink-0 px-3 py-1.5 flex items-center gap-1.5 border-b ${isGold ? 'bg-[#111]/80 border-white/5' : 'bg-gray-50/80 border-gray-100'}`}>
             <Zap size={10} className={isGold ? 'text-[#d4af37]' : 'text-blue-500'} />
-            <span className={`text-[10px] font-medium ${themeClasses.textMuted}`}>技能: {activeSkill.name}</span>
+            <span className={`text-[10px] font-medium ${isGold ? 'text-[#d4af37]' : 'text-blue-500'}`}>技能</span>
+            <span className={`text-[10px] ${themeClasses.textMuted}`}>: {activeSkill.name}</span>
             {activeSkill.category && (
               <>
                 <span className={`text-[9px] ${isGold ? 'text-white/25' : 'text-gray-300'}`}>·</span>
@@ -5173,20 +5174,41 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                   );
                 }
                 return (
-                  // ★ Skill 激活状态：显示技能信息，等待用户输入需求
+                  // ★ Skill 激活状态：Lovart 风格 — 像设计总监一样引导对话
                   activeSkill ? (
-                    <div className="flex flex-col items-center">
-                      <div className={`w-14 h-14 rounded-2xl mb-3 flex items-center justify-center text-2xl ${
+                    <div className="flex flex-col items-center w-full max-w-[260px]">
+                      <div className={`w-14 h-14 rounded-2xl mb-2.5 flex items-center justify-center text-2xl ${
                         isGold ? 'bg-gradient-to-br from-gold/20 to-gold-dark/10 border border-gold/20' : 'bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-100'
                       }`}>
                         {{image: '🖼', design: '🎨', brand: '🏢', storyboard: '🎬', editing: '✏️', custom: '⚡'}[activeSkill.category as 'image'|'design'|'brand'|'storyboard'|'editing'|'custom'] || '⚡'}
                       </div>
-                      <h3 className={`text-base font-medium mb-1 ${themeClasses.text}`}>{activeSkill.name}</h3>
+                      <h3 className={`text-sm font-semibold mb-0.5 ${themeClasses.text}`}>{activeSkill.name}</h3>
                       {activeSkill.description && (
-                        <p className={`text-xs mb-3 max-w-[220px] ${themeClasses.textMuted}`}>{activeSkill.description}</p>
+                        <p className={`text-[11px] mb-3 text-center leading-relaxed ${themeClasses.textMuted}`}>{activeSkill.description}</p>
                       )}
+
+                      {/* Lovart 3步交互流程 */}
+                      <div className={`w-full rounded-xl p-3 mb-3 ${isGold ? 'bg-white/[0.03] border border-white/[0.05]' : 'bg-gray-50 border border-gray-100'}`}>
+                        <div className={`text-[10px] font-medium mb-2 ${isGold ? 'text-gold/70' : 'text-blue-500'}`}>交互流程</div>
+                        <div className="space-y-1.5">
+                          <div className="flex items-start gap-2">
+                            <span className={`shrink-0 w-4 h-4 rounded-full text-[9px] flex items-center justify-center font-bold ${isGold ? 'bg-gold/15 text-gold' : 'bg-blue-100 text-blue-600'}`}>1</span>
+                            <span className={`text-[11px] leading-snug ${themeClasses.textMuted}`}>你描述需求</span>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <span className={`shrink-0 w-4 h-4 rounded-full text-[9px] flex items-center justify-center font-bold ${isGold ? 'bg-gold/15 text-gold' : 'bg-blue-100 text-blue-600'}`}>2</span>
+                            <span className={`text-[11px] leading-snug ${themeClasses.textMuted}`}>AI 分析规划，输出方案</span>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <span className={`shrink-0 w-4 h-4 rounded-full text-[9px] flex items-center justify-center font-bold ${isGold ? 'bg-gold/15 text-gold' : 'bg-blue-100 text-blue-600'}`}>3</span>
+                            <span className={`text-[11px] leading-snug ${themeClasses.textMuted}`}>确认后生成交付</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 参数输入 */}
                       {activeSkill.paramSlots && activeSkill.paramSlots.length > 0 && (
-                        <div className="w-full max-w-[240px] space-y-2 mb-3">
+                        <div className="w-full space-y-2 mb-3">
                           {activeSkill.paramSlots.map((slot) => (
                             <div key={slot.name} className="text-left">
                               <label className={`text-[10px] font-medium ${themeClasses.textMuted} mb-0.5 block`}>{slot.label}</label>
@@ -5205,9 +5227,6 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                           ))}
                         </div>
                       )}
-                      <div className={`text-xs ${themeClasses.textMuted} opacity-60`}>
-                        在下方输入你的需求开始
-                      </div>
                     </div>
                   ) : (
                   <>
