@@ -1027,44 +1027,44 @@ export default function LogoSkillPanel({
 
   function renderDirectionStep() {
     return (
-      <div className="p-5 space-y-5">
-        {/* 上半段：方向概要 + 符号 + 视觉系统 — 2列布局更宽敞 */}
-        <div className="grid grid-cols-[1fr_1fr] gap-5">
-          {/* 左列：Logo 方向 + 配色 */}
+      <div className="p-4 space-y-3 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 200px)' }}>
+        {/* 三栏横向布局：Logo方向 | 符号概念 | 视觉系统 */}
+        <div className="grid grid-cols-3 gap-3">
+          {/* Logo 方向 */}
           {direction && (
-            <div className={`rounded-xl border ${border} ${glassBg} p-5 space-y-4`}>
-              <div className="flex items-center gap-2">
-                <CompassIcon className={`h-5 w-5 ${accent}`} />
-                <h3 className={`font-bold text-[14px] ${textPrimary}`}>Logo 方向 / Direction</h3>
+            <div className={`rounded-xl border ${border} ${glassBg} p-4 space-y-3`}>
+              <div className="flex items-center gap-1.5">
+                <CompassIcon className={`h-4 w-4 ${accent}`} />
+                <h3 className={`font-bold text-[13px] ${textPrimary}`}>Logo 方向</h3>
                 {direction.visualMood && (
-                  <span className={`ml-auto px-2.5 py-0.5 rounded-full text-[10px] font-semibold ${
+                  <span className={`ml-auto px-2 py-0.5 rounded-full text-[9px] font-semibold ${
                     isMonochrome ? 'bg-blue-50 text-blue-700' : 'bg-[#d4af37]/15 text-[#d4af37]'
                   }`}>
                     {direction.visualMood}
                   </span>
                 )}
               </div>
-              <div className="space-y-4">
+              <div className="space-y-3">
                 <div>
-                  <span className={`text-[10px] font-semibold uppercase tracking-wider ${textSecondary} mb-1.5 block`}>定位 Positioning</span>
+                  <span className={`text-[9px] font-semibold uppercase tracking-wider ${textSecondary} mb-1 block`}>定位 Positioning</span>
                   {bilingual(direction.positioning || '待确定', direction.positioningEn)}
                 </div>
                 <div>
-                  <span className={`text-[10px] font-semibold uppercase tracking-wider ${textSecondary} mb-1.5 block`}>构图 Composition</span>
+                  <span className={`text-[9px] font-semibold uppercase tracking-wider ${textSecondary} mb-1 block`}>构图 Composition</span>
                   {bilingual(direction.composition, direction.compositionEn)}
                 </div>
                 <div>
-                  <span className={`text-[10px] font-semibold uppercase tracking-wider ${textSecondary} mb-1.5 block`}>字体 Typography</span>
+                  <span className={`text-[9px] font-semibold uppercase tracking-wider ${textSecondary} mb-1 block`}>字体 Typography</span>
                   {bilingual(direction.typography, direction.typographyEn)}
                 </div>
                 {direction.colorPalette.length > 0 && (
                   <div>
-                    <span className={`text-[10px] font-semibold uppercase tracking-wider ${textSecondary} mb-2 block`}>配色 Palette</span>
-                    <div className="flex items-center gap-3 flex-wrap">
+                    <span className={`text-[9px] font-semibold uppercase tracking-wider ${textSecondary} mb-1.5 block`}>配色 Palette</span>
+                    <div className="flex items-center gap-2 flex-wrap">
                       {direction.colorPalette.map((c, i) => (
-                        <div key={i} className="flex items-center gap-1.5">
-                          <div className="w-6 h-6 rounded-md border border-white/20 shadow-sm" style={{ backgroundColor: c.startsWith('#') ? c : undefined }} />
-                          <span className={`text-[11px] font-mono ${textSecondary}`}>{c}</span>
+                        <div key={i} className="flex items-center gap-1">
+                          <div className="w-5 h-5 rounded border border-white/20" style={{ backgroundColor: c.startsWith('#') ? c : undefined }} />
+                          <span className={`text-[10px] font-mono ${textSecondary}`}>{c}</span>
                         </div>
                       ))}
                     </div>
@@ -1074,80 +1074,77 @@ export default function LogoSkillPanel({
             </div>
           )}
 
-          {/* 右列：符号概念 + 视觉系统 垂直堆叠 */}
-          <div className="space-y-5">
-            {/* 符号概念 */}
-            {symbol && (
-              <div className={`rounded-xl border ${border} ${glassBg} p-5 space-y-4`}>
-                <div className="flex items-center gap-2">
-                  <Star className={`h-5 w-5 ${accent}`} />
-                  <h3 className={`font-bold text-[14px] ${textPrimary}`}>符号概念 / Symbol</h3>
-                </div>
-                <div className="space-y-3.5">
-                  <div>
-                    <span className={`text-[10px] font-semibold uppercase tracking-wider ${textSecondary} mb-1.5 block`}>核心隐喻 Core Metaphor</span>
-                    {bilingual(symbol.coreMetaphor || '待确定', symbol.coreMetaphorEn)}
-                  </div>
-                  <div>
-                    <span className={`text-[10px] font-semibold uppercase tracking-wider ${textSecondary} mb-1.5 block`}>图标形式 Icon Form</span>
-                    {bilingual(symbol.iconForm, symbol.iconFormEn)}
-                  </div>
-                  {symbol.negativeSpaceIdea && (
-                    <div>
-                      <span className={`text-[10px] font-semibold uppercase tracking-wider ${textSecondary} mb-1.5 block`}>负空间 Negative Space</span>
-                      {bilingual(symbol.negativeSpaceIdea, symbol.negativeSpaceIdeaEn)}
-                    </div>
-                  )}
-                  {symbol.alternativeRoutes.length > 0 && (
-                    <div>
-                      <span className={`text-[10px] font-semibold uppercase tracking-wider ${textSecondary} mb-1.5 block`}>替代路线 Alternatives</span>
-                      <ul className="space-y-1.5">
-                        {symbol.alternativeRoutes.map((r, i) => {
-                          const enRoute = symbol.alternativeRoutesEn?.[i];
-                          return (
-                            <li key={i} className="flex items-start gap-2">
-                              <ArrowRight className={`h-3.5 w-3.5 mt-1 ${accent} shrink-0`} />
-                              {bilingual(r, enRoute)}
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    </div>
-                  )}
-                </div>
+          {/* 符号概念 */}
+          {symbol && (
+            <div className={`rounded-xl border ${border} ${glassBg} p-4 space-y-3`}>
+              <div className="flex items-center gap-1.5">
+                <Star className={`h-4 w-4 ${accent}`} />
+                <h3 className={`font-bold text-[13px] ${textPrimary}`}>符号概念</h3>
               </div>
-            )}
+              <div className="space-y-3">
+                <div>
+                  <span className={`text-[9px] font-semibold uppercase tracking-wider ${textSecondary} mb-1 block`}>核心隐喻 Core Metaphor</span>
+                  {bilingual(symbol.coreMetaphor || '待确定', symbol.coreMetaphorEn)}
+                </div>
+                <div>
+                  <span className={`text-[9px] font-semibold uppercase tracking-wider ${textSecondary} mb-1 block`}>图标形式 Icon Form</span>
+                  {bilingual(symbol.iconForm, symbol.iconFormEn)}
+                </div>
+                {symbol.negativeSpaceIdea && (
+                  <div>
+                    <span className={`text-[9px] font-semibold uppercase tracking-wider ${textSecondary} mb-1 block`}>负空间 Negative Space</span>
+                    {bilingual(symbol.negativeSpaceIdea, symbol.negativeSpaceIdeaEn)}
+                  </div>
+                )}
+                {symbol.alternativeRoutes.length > 0 && (
+                  <div>
+                    <span className={`text-[9px] font-semibold uppercase tracking-wider ${textSecondary} mb-1 block`}>替代路线 Alternatives</span>
+                    <ul className="space-y-1">
+                      {symbol.alternativeRoutes.map((r, i) => {
+                        const enRoute = symbol.alternativeRoutesEn?.[i];
+                        return (
+                          <li key={i} className="flex items-start gap-1.5">
+                            <ArrowRight className={`h-3 w-3 mt-1 ${accent} shrink-0`} />
+                            {bilingual(r, enRoute)}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
-            {/* 视觉系统 */}
-            {visualNotes && (
-              <div className={`rounded-xl border ${border} ${glassBg} p-5 space-y-4`}>
-                <div className="flex items-center gap-2">
-                  <Eye className={`h-5 w-5 ${accent}`} />
-                  <h3 className={`font-bold text-[14px] ${textPrimary}`}>视觉系统 / Visual</h3>
-                </div>
-                <div className="space-y-3.5">
-                  <div>
-                    <span className={`text-[10px] font-semibold uppercase tracking-wider ${textSecondary} mb-1.5 block`}>单色行为 Monochrome</span>
-                    {bilingual(visualNotes.oneColorBehavior, visualNotes.oneColorBehaviorEn)}
-                  </div>
-                  <div>
-                    <span className={`text-[10px] font-semibold uppercase tracking-wider ${textSecondary} mb-1.5 block`}>小尺寸行为 Small Size</span>
-                    {bilingual(visualNotes.smallSizeBehavior, visualNotes.smallSizeBehaviorEn)}
-                  </div>
-                  {visualNotes.recommendedLockups.length > 0 && (
-                    <div>
-                      <span className={`text-[10px] font-semibold uppercase tracking-wider ${textSecondary} mb-2 block`}>推荐组合 Lockups</span>
-                      <div className="flex flex-wrap gap-2">
-                        {visualNotes.recommendedLockups.map((l, i) => (
-                          <span key={i} className={`px-2.5 py-1 rounded text-[11px] ${cardBg} ${textSecondary}`}>{l}</span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
+          {/* 视觉系统 */}
+          {visualNotes && (
+            <div className={`rounded-xl border ${border} ${glassBg} p-4 space-y-3`}>
+              <div className="flex items-center gap-1.5">
+                <Eye className={`h-4 w-4 ${accent}`} />
+                <h3 className={`font-bold text-[13px] ${textPrimary}`}>视觉系统</h3>
               </div>
-            )}
-          </div>
+              <div className="space-y-3">
+                <div>
+                  <span className={`text-[9px] font-semibold uppercase tracking-wider ${textSecondary} mb-1 block`}>单色行为 Monochrome</span>
+                  {bilingual(visualNotes.oneColorBehavior, visualNotes.oneColorBehaviorEn)}
+                </div>
+                <div>
+                  <span className={`text-[9px] font-semibold uppercase tracking-wider ${textSecondary} mb-1 block`}>小尺寸行为 Small Size</span>
+                  {bilingual(visualNotes.smallSizeBehavior, visualNotes.smallSizeBehaviorEn)}
+                </div>
+                {visualNotes.recommendedLockups.length > 0 && (
+                  <div>
+                    <span className={`text-[9px] font-semibold uppercase tracking-wider ${textSecondary} mb-1.5 block`}>推荐组合 Lockups</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {visualNotes.recommendedLockups.map((l, i) => (
+                        <span key={i} className={`px-2 py-0.5 rounded text-[10px] ${cardBg} ${textSecondary}`}>{l}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* 下半段A：修订方向 — 独立卡片 */}
