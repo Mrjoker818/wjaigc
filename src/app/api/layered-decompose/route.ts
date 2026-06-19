@@ -138,9 +138,16 @@ async function decomposeViaAI(
   // Resolve local image URL to base64 for external API access
   let resolvedImageUrl = imageUrl;
   if (imageUrl.startsWith('/uploads/') || imageUrl.startsWith('/api/serve-upload/')) {
-    const dataRoot = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
+    const { getServerDataRoot } = await import('@/lib/server-data-root');
+    const serverDataRoot = getServerDataRoot();
+    const publicDir = path.join(process.cwd(), 'public');
     const filename = imageUrl.split('/').pop() || '';
-    const localPath = path.join(dataRoot, 'public', 'uploads', filename);
+
+    // Try public/uploads first, then dataRoot/uploads
+    let localPath = path.join(publicDir, 'uploads', filename);
+    if (!fs.existsSync(localPath)) {
+      localPath = path.join(serverDataRoot, 'uploads', filename);
+    }
     if (fs.existsSync(localPath)) {
       const buffer = await fs.promises.readFile(localPath);
       const base64 = buffer.toString('base64');

@@ -583,7 +583,7 @@ export async function POST(request: NextRequest) {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${llmProvider.apiKey}`,
         };
-        const llmModel = (llmProvider.selectedModels as string[])?.[0] || llmProvider.selectedModel || '';
+        const llmModel = llmModelId || (llmProvider.selectedModels as string[])?.[0] || llmProvider.selectedModel || '';
 
         const collaborationMessages: Array<Record<string, unknown>> = [];
         const contentParts: Array<Record<string, unknown>> = [];

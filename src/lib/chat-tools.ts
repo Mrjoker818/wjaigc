@@ -297,7 +297,7 @@ async function executeGenerateImage(
     const negativePrompt = args.negative_prompt as string | undefined;
 
     // 使用统一的 /api/generate 接口，确保兼容性、异步轮询、URL持久化
-    const generateRes = await fetch(`${context.origin || 'http://localhost:5000'}/api/generate`, {
+    const generateRes = await fetch(`${context.origin || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`}/api/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
