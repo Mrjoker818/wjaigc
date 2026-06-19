@@ -134,24 +134,22 @@ async function imageUrlToBase64(imageUrl: string): Promise<string> {
       return `data:${contentType};base64,${buffer.toString('base64')}`;
     }
 
-    // 2. Try persistent data directory (PROD)
-    if (process.env.COZE_PROJECT_ENV === 'PROD') {
-      try {
-        const { getServerDataRoot } = await import('@/lib/server-data-root');
-        const dataRoot = await getServerDataRoot();
-        const persistentPath = path.join(dataRoot, imageUrl.replace(/^\//, ''));
-        if (fsSync.existsSync(persistentPath)) {
-          const buffer = await fsPromises.readFile(persistentPath);
-          const ext = path.extname(persistentPath).toLowerCase();
-          const mimeMap: Record<string, string> = {
-            '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-            '.webp': 'image/webp', '.gif': 'image/gif',
-          };
-          const contentType = mimeMap[ext] || 'image/png';
-          return `data:${contentType};base64,${buffer.toString('base64')}`;
-        }
-      } catch {}
-    }
+    // 2. Try persistent data directory (DEV + PROD)
+    try {
+      const { getServerDataRoot } = await import('@/lib/server-data-root');
+      const dataRoot = await getServerDataRoot();
+      const persistentPath = path.join(dataRoot, imageUrl.replace(/^\//, ''));
+      if (fsSync.existsSync(persistentPath)) {
+        const buffer = await fsPromises.readFile(persistentPath);
+        const ext = path.extname(persistentPath).toLowerCase();
+        const mimeMap: Record<string, string> = {
+          '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+          '.webp': 'image/webp', '.gif': 'image/gif',
+        };
+        const contentType = mimeMap[ext] || 'image/png';
+        return `data:${contentType};base64,${buffer.toString('base64')}`;
+      }
+    } catch {}
 
     // 3. Try S3 object storage fallback
     try {

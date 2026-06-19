@@ -536,13 +536,42 @@ export async function POST(request: NextRequest) {
                 const publicDir = path.join(workspacePath, 'public');
                 let filePath = '';
                 if (firstRefImage.startsWith('/api/serve-upload/')) {
+                  // serve-upload 路径：从数据目录读取，而非 public
                   const relativePath = firstRefImage.replace('/api/serve-upload/', '');
-                  filePath = path.join(publicDir, relativePath);
+                  try {
+                    const { getServerDataRoot } = await import('@/lib/server-data-root');
+                    const dataRoot = getServerDataRoot();
+                    const path1 = path.join(dataRoot, 'uploads', relativePath);
+                    const path2 = path.join(dataRoot, relativePath);
+                    try { await fs.access(path1); filePath = path1; } catch {
+                      try { await fs.access(path2); filePath = path2; } catch {
+                        filePath = path.join(publicDir, relativePath);
+                      }
+                    }
+                  } catch {
+                    filePath = path.join(publicDir, relativePath);
+                  }
                 } else {
-                  filePath = path.join(publicDir, firstRefImage.replace(/^\//, ''));
+                  // 直接路径如 /uploads/xxx.jpg：先尝试 publicDir，再尝试 dataRoot
+                  const relativePath = firstRefImage.replace(/^\//, '');
+                  filePath = path.join(publicDir, relativePath);
+                  try { await fs.access(filePath); } catch {
+                    try {
+                      const { getServerDataRoot } = await import('@/lib/server-data-root');
+                      const dataRoot = getServerDataRoot();
+                      const altPath = path.join(dataRoot, relativePath);
+                      await fs.access(altPath);
+                      filePath = altPath;
+                    } catch {
+                      // 保持 publicDir 路径，后续安全校验会处理
+                    }
+                  }
                 }
                 const resolved = path.resolve(filePath);
-                if (resolved.startsWith(publicDir)) {
+                // 安全校验：允许 publicDir 和 dataRoot 两个合法目录
+                const { getServerDataRoot } = await import('@/lib/server-data-root');
+                const dataRoot = getServerDataRoot();
+                if (resolved.startsWith(publicDir) || resolved.startsWith(dataRoot)) {
                   const imgBuf = await fs.readFile(resolved);
                   const ext = path.extname(resolved).toLowerCase();
                   const mimeMap: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' };

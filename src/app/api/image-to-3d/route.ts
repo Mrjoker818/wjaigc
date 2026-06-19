@@ -67,11 +67,18 @@ async function imageUrlToBase64(imageUrl: string): Promise<string | null> {
         return buffer.toString('base64');
       }
 
+      // Try persistent data directory (DEV + PROD)
+      const dataRoot = getServerDataRoot();
+      const persistentPath = path.join(dataRoot, imageUrl.replace(/^\//, ''));
+      if (fsSync.existsSync(persistentPath)) {
+        const buffer = await fsSync.promises.readFile(persistentPath);
+        return buffer.toString('base64');
+      }
+
       // /api/serve-upload/filename → search upload directories
       const serveUploadMatch = imageUrl.match(/^\/api\/serve-upload\/(.+)$/);
       if (serveUploadMatch) {
         const filename = serveUploadMatch[1];
-        const dataRoot = getServerDataRoot();
         const uploadDirs = [
           path.join(dataRoot, 'uploads'),
           path.join(workspacePath, 'public', 'uploads'),

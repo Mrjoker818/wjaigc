@@ -50,6 +50,13 @@ async function resolveImageToBuffer(imageUrl: string): Promise<Buffer | null> {
         return await fsSync.promises.readFile(localPath);
       }
 
+      // Try dataRoot path (images stored via save-image API)
+      const dataRoot = getServerDataRoot();
+      const dataRootPath = path.join(dataRoot, imageUrl);
+      if (fsSync.existsSync(dataRootPath)) {
+        return await fsSync.promises.readFile(dataRootPath);
+      }
+
       // /api/serve-upload/filename → search upload directories
       const serveUploadMatch = imageUrl.match(/^\/api\/serve-upload\/(.+)$/);
       if (serveUploadMatch) {

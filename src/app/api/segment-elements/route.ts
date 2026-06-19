@@ -48,6 +48,13 @@ async function resolveImageToBase64(imageUrl: string): Promise<string | null> {
         return (await fsSync.promises.readFile(localPath)).toString('base64');
       }
 
+      // Try dataRoot path (images stored via save-image API)
+      const dataRoot = getServerDataRoot();
+      const dataRootPath = path.join(dataRoot, imageUrl);
+      if (fsSync.existsSync(dataRootPath)) {
+        return (await fsSync.promises.readFile(dataRootPath)).toString('base64');
+      }
+
       // /api/serve-upload/filename → search upload directories
       const serveUploadMatch = imageUrl.match(/^\/api\/serve-upload\/(.+)$/);
       if (serveUploadMatch) {

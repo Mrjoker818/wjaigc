@@ -499,10 +499,26 @@ async function submitRefineToApi(
             filePath = path.join(publicDir, relativePath);
           }
         } else {
-          filePath = path.join(publicDir, params.imageUrl.replace(/^\//, ''));
+          // 直接路径如 /uploads/xxx.jpg：先尝试 publicDir，再尝试 dataRoot
+          const relativePath = params.imageUrl.replace(/^\//, '');
+          filePath = path.join(publicDir, relativePath);
+          try { await fs.access(filePath); } catch {
+            try {
+              const { getServerDataRoot } = await import('@/lib/server-data-root');
+              const dataRoot = getServerDataRoot();
+              const altPath = path.join(dataRoot, relativePath);
+              await fs.access(altPath);
+              filePath = altPath;
+            } catch {
+              // 保持 publicDir 路径，后续安全校验会处理
+            }
+          }
         }
         const resolved = path.resolve(filePath);
-        if (resolved.startsWith(publicDir)) {
+        // 安全校验：允许 publicDir 和 dataRoot 两个合法目录
+        const { getServerDataRoot } = await import('@/lib/server-data-root');
+        const dataRoot = getServerDataRoot();
+        if (resolved.startsWith(publicDir) || resolved.startsWith(dataRoot)) {
           const imgBuf = await fs.readFile(resolved);
           const ext = path.extname(resolved).toLowerCase();
           const mimeMap: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' };
