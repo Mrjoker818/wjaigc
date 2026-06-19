@@ -402,7 +402,7 @@ interface InfiniteCanvasProps {
   onTogglePromptTemplate?: () => void;
   /** Callback to open Logo Generator Skill panel (legacy, now uses internal state) */
   /** Brand project info for Logo Generator panel */
-  brandProject?: { brandName?: string; description?: string; targetAudience?: string; tone?: string; brandDna?: { mainColors?: string[]; secondaryColors?: string[]; fontStyle?: string } | null } | null;
+  brandProject?: { id?: string; brandName?: string; description?: string; targetAudience?: string; tone?: string; brandDna?: { mainColors?: string[]; secondaryColors?: string[]; fontStyle?: string } | null } | null;
   /** Switch to node editor mode */
   onSwitchToNodeMode?: () => void;
   /** Switch to workflow hub */
@@ -575,6 +575,7 @@ export function InfiniteCanvas({
   const [showFontDesign, setShowFontDesign] = useState(false);
   const [showBrandFactory, setShowBrandFactory] = useState(false);
   const [showLogoSkill, setShowLogoSkill] = useState(false);
+  const [logoSkillBrandProject, setLogoSkillBrandProject] = useState<{ id: string; brandName: string } | null>(null);
   const [showAiPsd, setShowAiPsd] = useState(false);
   const [showStickerAssistant, setShowStickerAssistant] = useState(false);
   const [showSceneStudio, setShowSceneStudio] = useState(false);
@@ -12110,9 +12111,12 @@ export function InfiniteCanvas({
                 onAddImages?.(urls, undefined, meta);
               }}
               isMonochrome={isMonochrome}
-              onOpenLogoSkill={() => {
+              onOpenLogoSkill={(project?: { id: string; brandName: string }) => {
                 setShowBrandFactory(false);
                 setShowLogoSkill(true);
+                if (project) {
+                  setLogoSkillBrandProject(project);
+                }
               }}
             />
           </Suspense>
@@ -12127,7 +12131,7 @@ export function InfiniteCanvas({
               onAddImages={(urls: string[], meta?: { modelName?: string; apiProvider?: string }) => {
                 onAddImages?.(urls, undefined, meta);
               }}
-              brandProject={brandProject}
+              brandProject={logoSkillBrandProject}
               onOpenBrandDna={() => {
                 setShowLogoSkill(false);
                 setShowBrandFactory(true);

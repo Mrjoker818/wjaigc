@@ -3119,6 +3119,7 @@ function CanvasApp() {
           onToggleFavorites={() => setShowFavorites(true)}
           onTogglePromptTemplate={() => setShowPromptTemplate(true)}
           brandProject={currentProject ? {
+            id: currentProject.id,
             brandName: currentProject.name || '',
             description: currentProject.description || '',
             targetAudience: '',

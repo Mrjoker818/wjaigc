@@ -422,8 +422,8 @@ interface BrandFactoryPanelProps {
   onClose: () => void;
   onAddImages?: (urls: string[], meta?: { modelName?: string; apiProvider?: string }) => void;
   isMonochrome?: boolean;
-  /** 打开 Logo Generator Skill Pro 面板 */
-  onOpenLogoSkill?: () => void;
+  /** 打开 Logo Generator Skill Pro 面板，传入当前品牌项目 */
+  onOpenLogoSkill?: (project: { id: string; brandName: string; mission?: string; vision?: string; tone?: string; colorPalette?: string[]; primaryColor?: string }) => void;
 }
 
 export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome = false, onOpenLogoSkill }: BrandFactoryPanelProps) {
@@ -679,7 +679,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
       setNewProject({ brandName: '', industry: '', projectType: '', tone: '', keywords: '', targetAudience: '', description: '', logoSource: 'generate' });
       // 如果选择了 AI 生成 Logo，创建项目后自动打开 Logo Generator
       if (logoSrc === 'generate') {
-        onOpenLogoSkill?.();
+        onOpenLogoSkill?.(data.project);
       }
     }
   };
@@ -1034,7 +1034,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
                 </div>
               </div>
               <button className={`${th.btn} w-full flex items-center justify-center gap-2`}
-                onClick={() => onOpenLogoSkill?.()}>
+                onClick={() => onOpenLogoSkill?.(currentProject)}>
                 <PenTool className="w-4 h-4" /> 重新生成 Logo
               </button>
             </div>
@@ -1042,7 +1042,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
             <div className="space-y-3">
               <div className={`${th.textMuted} text-xs text-center py-3`}>当前项目尚无 Logo，使用 AI 专业生成</div>
               <button className={`${th.btn} w-full flex items-center justify-center gap-2`}
-                onClick={() => onOpenLogoSkill?.()}>
+                onClick={() => onOpenLogoSkill?.(currentProject)}>
                 <PenTool className="w-4 h-4" /> 生成专业 Logo
               </button>
             </div>
