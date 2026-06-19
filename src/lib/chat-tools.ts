@@ -310,6 +310,8 @@ async function executeGenerateImage(
     const model = (args.model as string) || context.imageModel || '';
     const providerId = (args.provider_id as string) || context.imageProviderId || '';
 
+    console.log(`[chat-tools] generate_image: model=${model}, providerId=${providerId}, prompt="${prompt?.substring(0, 80)}...", aspectRatio=${aspectRatio}, quality=${quality}`);
+
     // 使用统一的 /api/generate 接口，确保兼容性、异步轮询、URL持久化
     const generateRes = await fetch(`${context.origin || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`}/api/generate`, {
       method: 'POST',
@@ -380,10 +382,14 @@ async function executeEditImage(
 ): Promise<ToolCallResult> {
   try {
     const imageUrl = normalizeImageUrl(args.image_url as string, context.origin);
+
+    console.log(`[chat-tool:remove_bg] model=${context.imageModel || 'default'}, providerId=${context.imageProviderId || 'default'}`);
     const prompt = args.prompt as string;
     const size = parseInt(args.size as string, 10) || 1024;
     const model = (args.model as string) || context.imageModel || '';
     const providerId = (args.provider_id as string) || context.imageProviderId || '';
+
+    console.log(`[chat-tool:edit_image] model=${model}, providerId=${providerId}, prompt="${(prompt as string).slice(0, 80)}"`);
 
     // 调用语言修图 API
     const res = await fetch(`${context.origin || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`}/api/edit`, {
@@ -442,6 +448,8 @@ async function executeImg2Img(
     const negativePrompt = args.negative_prompt as string | undefined;
     const model = (args.model as string) || context.imageModel || '';
     const providerId = (args.provider_id as string) || context.imageProviderId || '';
+
+    console.log(`[chat-tool:img2img] model=${model}, providerId=${providerId}, prompt="${prompt.slice(0, 80)}", strength=${strength}`);
 
     // 构建图生图 prompt 前缀
     const refPrefixes: string[] = [];
@@ -507,6 +515,7 @@ async function executeRemoveBg(
   try {
     const imageUrl = normalizeImageUrl(args.image_url as string, context.origin);
 
+    console.log(`[chat-tool:edit_image] model=${context.imageModel || 'default'}, providerId=${context.imageProviderId || 'default'}`);
     const res = await fetch(`${context.origin || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`}/api/image-edit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -550,6 +559,8 @@ async function executeUpscale(
   try {
     const imageUrl = normalizeImageUrl(args.image_url as string, context.origin);
     const scale = parseInt(args.scale as string, 10) || 2;
+
+    console.log(`[chat-tool:upscale] model=${context.imageModel || 'default'}, providerId=${context.imageProviderId || 'default'}, scale=${scale}`);
 
     const res = await fetch(`${context.origin || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`}/api/image-edit`, {
       method: 'POST',
@@ -597,6 +608,8 @@ async function executeGenerateVideo(
     const imageUrl = args.image_url ? normalizeImageUrl(args.image_url as string, context.origin) : undefined;
     const aspectRatio = (args.aspect_ratio as string) || '16:9';
     const duration = parseInt(args.duration as string, 10) || 5;
+
+    console.log(`[chat-tool:generate_video] model=${context.imageModel || 'default'}, providerId=${context.imageProviderId || 'default'}, aspectRatio=${aspectRatio}, duration=${duration}s`);
 
     const res = await fetch(`${context.origin || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`}/api/video/generate`, {
       method: 'POST',
@@ -708,6 +721,8 @@ async function executeExtendCanvas(
     const direction = (args.direction as string) || 'all';
     const scale = parseInt(args.scale as string, 10) || 2;
     const prompt = args.prompt as string | undefined;
+
+    console.log(`[chat-tool:extend_canvas] model=${context.imageModel || 'default'}, providerId=${context.imageProviderId || 'default'}, direction=${direction}, scale=${scale}`);
 
     const res = await fetch(`${context.origin || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`}/api/image-edit`, {
       method: 'POST',

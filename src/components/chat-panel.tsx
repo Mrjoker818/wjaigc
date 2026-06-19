@@ -3789,6 +3789,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       let assistantContent = '';
       const toolExecutions: ToolExecution[] = []; // Agent工具执行记录
       const toolGeneratedImages: string[] = []; // 工具生成的图片URL
+      const addedImageUrls = new Set<string>(); // 已添加到画布的图片URL去重
       const toolPendingTaskIds: Array<{ taskId: string; model: string; providerId: string; type: 'image' | 'video' }> = []; // 工具返回的异步任务，需轮询
       let toolGeneratedVideo: string | undefined; // 工具生成的视频URL
       let currentSSEEvent = ''; // 当前SSE事件类型
@@ -3872,16 +3873,21 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 }
 
                 if (parsed.type === 'tool_execution_complete') {
-                  // 所有工具执行完成，将直接返回的图片添加到画布
+                  // 所有工具执行完成，将直接返回的图片添加到画布（去重，避免多次 iteration 重复添加）
                   if (toolGeneratedImages.length > 0 && onAddImages) {
-                    const imageModelInfo = getCurrentImageModelInfo(imageModel, imageModelProviderId);
-                    onAddImages(toolGeneratedImages, undefined, { modelName: imageModelInfo.model, apiProvider: imageModelInfo.providerId });
+                    const newImages = toolGeneratedImages.filter((url: string) => !addedImageUrls.has(url));
+                    if (newImages.length > 0) {
+                      newImages.forEach((url: string) => addedImageUrls.add(url));
+                      const imageModelInfo = getCurrentImageModelInfo(imageModel, imageModelProviderId);
+                      onAddImages(newImages, undefined, { modelName: imageModelInfo.model, apiProvider: imageModelInfo.providerId });
+                    }
                   }
-                  // 更新消息中的生成图片
-                  if (toolGeneratedImages.length > 0) {
+                  // 更新消息中的生成图片（使用去重后的列表）
+                  if (addedImageUrls.size > 0) {
+                    const uniqueImages = Array.from(addedImageUrls);
                     setMessages(prev => prev.map(msg =>
                       msg.id === assistantMessageId
-                        ? { ...msg, generatedImages: toolGeneratedImages, isGeneratingImage: false, generateProgress: 100 }
+                        ? { ...msg, generatedImages: uniqueImages, isGeneratingImage: false, generateProgress: 100 }
                         : msg
                     ));
                   }
@@ -3929,13 +3935,16 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                           }
                         }
                         if (resultUrls.length > 0) {
+                          // 去重：只添加还没添加过的图片
+                          const newUrls = resultUrls.filter((url: string) => !addedImageUrls.has(url));
+                          newUrls.forEach((url: string) => addedImageUrls.add(url));
                           setMessages(prev => prev.map(msg =>
                             msg.id === assistantMessageId
-                              ? { ...msg, generatedImages: resultUrls, isGeneratingImage: false, generateProgress: 100 }
+                              ? { ...msg, generatedImages: Array.from(addedImageUrls), isGeneratingImage: false, generateProgress: 100 }
                               : msg
                           ));
-                          if (onAddImages) {
-                            onAddImages(resultUrls, undefined, { modelName: imageModelInfo.model, apiProvider: imageModelInfo.providerId });
+                          if (onAddImages && newUrls.length > 0) {
+                            onAddImages(newUrls, undefined, { modelName: imageModelInfo.model, apiProvider: imageModelInfo.providerId });
                           }
                         } else {
                           setMessages(prev => prev.map(msg =>
