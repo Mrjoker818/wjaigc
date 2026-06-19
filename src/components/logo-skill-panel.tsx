@@ -557,24 +557,51 @@ export default function LogoSkillPanel({
   function handleSaveToBrandAssets() {
     if (!selectedImageUrl) return;
     setIsSavingToBrand(true);
-    onSaveToBrandAssets?.(selectedImageUrl, direction || undefined);
-    fetch('/api/logo-skill', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'save-asset',
-        brandName,
-        logoType,
-        logoUrl: selectedImageUrl,
-        direction: direction || undefined,
-        symbol: symbol || undefined,
-        visualNotes: visualNotes || undefined,
-        platformPrompts: platformPrompts.length > 0 ? platformPrompts : undefined,
-        projectId: brandProject?.id,
-      }),
-    }).then(res => res.json()).then(data => {
-      if (data.success) setSavedToBrand(true);
-    }).catch(() => {}).finally(() => setIsSavingToBrand(false));
+
+    // 如果有品牌项目，直接更新项目的 logoUrl
+    const savePromises: Promise<void>[] = [];
+
+    if (brandProject?.id) {
+      savePromises.push(
+        fetch('/api/brand-factory', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'update-project',
+            id: brandProject.id,
+            logoUrl: selectedImageUrl,
+          }),
+        }).then(res => res.json()).then(data => {
+          if (!data.success) console.error('品牌工厂更新失败:', data.error);
+        }).catch(err => console.error('品牌工厂保存出错:', err))
+      );
+    }
+
+    // 同时保存到 logo-skill 的资产记录
+    savePromises.push(
+      fetch('/api/logo-skill', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'save-asset',
+          brandName,
+          logoType,
+          logoUrl: selectedImageUrl,
+          direction: direction || undefined,
+          symbol: symbol || undefined,
+          visualNotes: visualNotes || undefined,
+          platformPrompts: platformPrompts.length > 0 ? platformPrompts : undefined,
+          projectId: brandProject?.id,
+        }),
+      }).then(res => res.json()).then(data => {
+        if (!data.success) console.error('Logo资产保存失败:', data.error);
+      }).catch(err => console.error('Logo资产保存出错:', err))
+    );
+
+    Promise.all(savePromises).then(() => {
+      setSavedToBrand(true);
+    }).catch(() => {
+    }).finally(() => setIsSavingToBrand(false));
   }
 
   // ─── 重新开始 ────────────────────────────────────────────────

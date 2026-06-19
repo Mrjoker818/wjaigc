@@ -870,6 +870,7 @@ export async function POST(request: NextRequest) {
       case 'update-project': {
         const id = body.id as string;
         if (!id) return NextResponse.json({ error: '缺少项目ID' }, { status: 400 });
+        await loadProjects(); // 确保从数据库加载最新数据
         const proj = projectsStore.get(id);
         if (!proj) return NextResponse.json({ error: '项目不存在' }, { status: 404 });
         // camelCase → snake_case 字段映射（前端发送camelCase，存储用snake_case）
