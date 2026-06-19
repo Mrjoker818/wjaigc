@@ -15,25 +15,38 @@ import type { SanbaoInput } from './sanbaoInputAdapter';
 
 export interface LogoDirection {
   positioning: string;
+  positioningEn: string;
   visualMood: string;
+  visualMoodEn: string;
   colorPalette: string[];
   typography: string;
+  typographyEn: string;
   composition: string;
+  compositionEn: string;
   fitReason: string;
+  fitReasonEn: string;
 }
 
 export interface SymbolConcept {
   coreMetaphor: string;
+  coreMetaphorEn: string;
   iconForm: string;
+  iconFormEn: string;
   negativeSpaceIdea: string;
+  negativeSpaceIdeaEn: string;
   alternativeRoutes: string[];
+  alternativeRoutesEn: string[];
 }
 
 export interface VisualSystemNotes {
   recommendedLockups: string[];
+  recommendedLockupsEn: string[];
   oneColorBehavior: string;
+  oneColorBehaviorEn: string;
   smallSizeBehavior: string;
+  smallSizeBehaviorEn: string;
   usageNotes: string;
+  usageNotesEn: string;
 }
 
 export interface BrandSystemBoardLayout {
@@ -80,21 +93,23 @@ CRITICAL RULES:
 - If reference_style is provided, use it as layout/spacing/mood guidance only. Never copy the reference mark, exact wordmark, or protected silhouette.
 ${input.revision_notes ? '- Preserve the useful parts of the prior direction and revise ONLY the requested aspects.' : ''}
 
-OUTPUT FORMAT — respond with EXACTLY these sections in this order, using these exact markdown headers:
+OUTPUT FORMAT — respond with EXACTLY these sections in this order, using these exact markdown headers.
+IMPORTANT: Provide EVERY field in BILINGUAL format — Chinese first, then English in parentheses.
 
 # Logo Direction
-Include: positioning, visual mood, color palette (list exactly 3-5 specific colors with hex codes), typography, composition, and why this direction fits the logo type.
+Include: positioning (中英双语), visual mood (中英双语), color palette (list exactly 3-5 specific colors with hex codes + Chinese color name), typography (中英双语), composition (中英双语), and why this direction fits the logo type (中英双语).
+Format example: "定位：高端奢华 (Premium luxury)" 
 
 # Symbol Concept
-Include: core metaphor, icon form, negative-space idea, and 2-3 alternative symbolic routes.
+Include: core metaphor (中英双语), icon form (中英双语), negative-space idea (中英双语), and 2-3 alternative symbolic routes (中英双语).
 
 # Visual System Notes
-Include: recommended lockups, one-color behavior, small-size behavior, and usage notes for the relevant surfaces.
+Include: recommended lockups (中英双语), one-color behavior (中英双语), small-size behavior (中英双语), and usage notes for the relevant surfaces (中英双语).
 
 # Brand System Board Layout
 Describe the final brand-system-board image layout: square board grid on ivory background, module labels, main logo area, favicon, seal version, wordmark lockup, black/ivory applications, mockup, embossed application, symbol meaning, footer values, spacing, background, and one-color behavior. Include specific module numbering.
 
-RESPOND IN ${input.output_language === 'en' ? 'English' : 'Chinese (Simplified)'}.`;
+RESPOND IN CHINESE (Simplified) with English translation in parentheses for each key field.`;
 }
 
 /**
@@ -146,13 +161,24 @@ function parseLogoDirection(text: string): LogoDirection {
   const section = extractSection(text, 'Logo Direction');
   const colorPalette = extractColorPalette(section);
 
+  const positioning = extractLine(section, /positioning|定位/i) || extractFirstMeaningfulLine(section);
+  const visualMood = extractLine(section, /visual mood|视觉氛围|视觉调性/i) || '高端奢华';
+  const typography = extractLine(section, /typography|字体/i) || '精致衬线体或几何无衬线体';
+  const composition = extractLine(section, /composition|构图/i) || '居中平衡，图标在文字上方';
+  const fitReason = extractLine(section, /why this direction|为什么|适配原因/i) || '';
+
   return {
-    positioning: extractLine(section, /positioning|定位/i) || extractFirstMeaningfulLine(section),
-    visualMood: extractLine(section, /visual mood|视觉氛围|视觉调性/i) || 'Premium, timeless',
+    positioning,
+    positioningEn: extractEnglish(positioning),
+    visualMood,
+    visualMoodEn: extractEnglish(visualMood),
     colorPalette: colorPalette.length > 0 ? colorPalette : ['#1A1A1A', '#D4AF37', '#FAFAF5'],
-    typography: extractLine(section, /typography|字体/i) || 'Refined serif or geometric sans',
-    composition: extractLine(section, /composition|构图/i) || 'Centered, balanced, icon above wordmark',
-    fitReason: extractLine(section, /why this direction|为什么|适配原因/i) || '',
+    typography,
+    typographyEn: extractEnglish(typography),
+    composition,
+    compositionEn: extractEnglish(composition),
+    fitReason,
+    fitReasonEn: extractEnglish(fitReason),
   };
 }
 
@@ -165,12 +191,21 @@ function parseSymbolConcept(text: string): SymbolConcept {
     const routes = altMatch[1].split(/\n/).filter(l => l.trim().match(/^[-•*\d]/));
     routes.forEach(r => altRoutes.push(r.replace(/^[-•*\d.)\s]+/, '').trim()));
   }
+  const finalRoutes = altRoutes.length > 0 ? altRoutes : ['极简几何符号', '字母与图形融合'];
+
+  const coreMetaphor = extractLine(section, /core metaphor|核心隐喻|核心概念/i) || extractFirstMeaningfulLine(section);
+  const iconForm = extractLine(section, /icon form|图标形式|图标形态/i) || '几何符号';
+  const negativeSpaceIdea = extractLine(section, /negative.space|负空间/i) || '';
 
   return {
-    coreMetaphor: extractLine(section, /core metaphor|核心隐喻|核心概念/i) || extractFirstMeaningfulLine(section),
-    iconForm: extractLine(section, /icon form|图标形式|图标形态/i) || 'Geometric symbol',
-    negativeSpaceIdea: extractLine(section, /negative.space|负空间/i) || '',
-    alternativeRoutes: altRoutes.length > 0 ? altRoutes : ['Minimalist geometric mark', 'Lettermark with symbol fusion'],
+    coreMetaphor,
+    coreMetaphorEn: extractEnglish(coreMetaphor),
+    iconForm,
+    iconFormEn: extractEnglish(iconForm),
+    negativeSpaceIdea,
+    negativeSpaceIdeaEn: extractEnglish(negativeSpaceIdea),
+    alternativeRoutes: finalRoutes,
+    alternativeRoutesEn: finalRoutes.map(r => extractEnglish(r)),
   };
 }
 
@@ -183,12 +218,21 @@ function parseVisualSystemNotes(text: string): VisualSystemNotes {
     const items = lockupMatch[1].split(/\n/).filter(l => l.trim().match(/^[-•*\d]/));
     items.forEach(i => lockups.push(i.replace(/^[-•*\d.)\s]+/, '').trim()));
   }
+  const finalLockups = lockups.length > 0 ? lockups : ['横排：符号在文字左侧', '竖排：符号在文字上方', '仅符号'];
+
+  const oneColorBehavior = extractLine(section, /one.color|单色/i) || '纯黑白均可使用';
+  const smallSizeBehavior = extractLine(section, /small.size|小尺寸/i) || '16px 下符号仍可辨识';
+  const usageNotes = extractLine(section, /usage|使用说明/i) || '';
 
   return {
-    recommendedLockups: lockups.length > 0 ? lockups : ['Horizontal: symbol left of wordmark', 'Stacked: symbol above wordmark', 'Symbol-only'],
-    oneColorBehavior: extractLine(section, /one.color|单色/i) || 'Works in pure black on white and reverse',
-    smallSizeBehavior: extractLine(section, /small.size|小尺寸/i) || 'Symbol remains recognizable at 16px',
-    usageNotes: extractLine(section, /usage|使用说明/i) || '',
+    recommendedLockups: finalLockups,
+    recommendedLockupsEn: finalLockups.map(l => extractEnglish(l)),
+    oneColorBehavior,
+    oneColorBehaviorEn: extractEnglish(oneColorBehavior),
+    smallSizeBehavior,
+    smallSizeBehaviorEn: extractEnglish(smallSizeBehavior),
+    usageNotes,
+    usageNotesEn: extractEnglish(usageNotes),
   };
 }
 
@@ -285,4 +329,27 @@ function getLogoTypeLabel(logoType?: string): string {
     'other': 'logo',
   };
   return labels[logoType || ''] || 'brand logo';
+}
+
+/**
+ * 从中英双语文本中提取英文部分
+ * 支持格式："中文内容 (English content)" 或 "中文内容（English content）"
+ * 如果没有英文部分则返回原文
+ */
+function extractEnglish(text: string): string {
+  if (!text) return '';
+  // Match content inside (parentheses) or （full-width parentheses）
+  const match = text.match(/[（(]([^(）)]+)[）)]/);
+  if (match) {
+    const inner = match[1].trim();
+    // Check if the content looks like English (contains Latin letters)
+    if (/[a-zA-Z]{2,}/.test(inner)) {
+      return inner;
+    }
+  }
+  // If no parentheses, check if text itself is mostly English
+  if (/^[a-zA-Z0-9\s,.\-':;!?/()]+$/.test(text)) {
+    return text;
+  }
+  return text;
 }
