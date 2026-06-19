@@ -730,11 +730,11 @@ export default function LogoSkillPanel({
     </div>
   );
 
-  // ─── Step 1: 输入 — 全宽单栏流式布局 ─────────
+  // ─── Step 1: 输入 ─────────
   function renderInputStep() {
     return (
       <div className="p-6 space-y-5">
-        {/* 第一行：品牌名称 + 英文名 */}
+        {/* 品牌名称 + 英文名 */}
         <div className="grid grid-cols-[1fr_220px] gap-4">
           <div>
             <label className={`block text-sm font-semibold mb-2 ${textPrimary}`}>
@@ -758,7 +758,7 @@ export default function LogoSkillPanel({
           </div>
         </div>
 
-        {/* 第二行：品牌简报 */}
+        {/* 品牌简报 */}
         <div>
           <label className={`block text-sm font-semibold mb-2 ${textPrimary}`}>
             品牌简报 <span className="text-red-500">*</span>
@@ -772,184 +772,182 @@ export default function LogoSkillPanel({
           />
         </div>
 
-        {/* 第三行：Logo 类型 */}
-        <div>
-          <label className={`block text-sm font-semibold mb-2.5 ${textPrimary}`}>Logo 类型</label>
-          <div className="flex flex-wrap gap-2.5">
-            {LOGO_TYPES.map(t => (
-              <button
-                key={t.value}
-                onClick={() => setLogoType(t.value)}
-                className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 cursor-pointer ${
-                  logoType === t.value
-                    ? `${accentBg} text-white shadow-sm`
-                    : isMonochrome
-                      ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                      : 'bg-white/10 text-gray-300 hover:bg-white/20'
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* 第四行：受众 + 风格 + 参考风格 */}
+        {/* 受众 / 偏好风格 / 参考风格 — 紧接品牌简报 */}
         <div className="grid grid-cols-3 gap-4">
           <div>
-            <label className={`block text-sm font-semibold mb-2 ${textPrimary}`}>目标受众</label>
+            <label className={`block text-xs font-semibold mb-1.5 ${textSecondary}`}>目标受众</label>
             <input
               value={audience}
               onChange={e => setAudience(e.target.value)}
               placeholder="如：25-35岁都市白领"
-              className={`w-full px-4 py-2.5 rounded-xl border text-sm ${inputBg} ${textPrimary} placeholder:text-gray-500 focus:outline-none focus:ring-2 ${isMonochrome ? 'focus:ring-blue-500/30' : 'focus:ring-[#d4af37]/30'} transition-shadow`}
+              className={`w-full px-3.5 py-2 rounded-lg border text-sm ${inputBg} ${textPrimary} placeholder:text-gray-500 focus:outline-none focus:ring-2 ${isMonochrome ? 'focus:ring-blue-500/30' : 'focus:ring-[#d4af37]/30'} transition-shadow`}
             />
           </div>
           <div>
-            <label className={`block text-sm font-semibold mb-2 ${textPrimary}`}>偏好风格</label>
+            <label className={`block text-xs font-semibold mb-1.5 ${textSecondary}`}>偏好风格</label>
             <input
               value={preferredStyle}
               onChange={e => setPreferredStyle(e.target.value)}
               placeholder="如：极简现代"
-              className={`w-full px-4 py-2.5 rounded-xl border text-sm ${inputBg} ${textPrimary} placeholder:text-gray-500 focus:outline-none focus:ring-2 ${isMonochrome ? 'focus:ring-blue-500/30' : 'focus:ring-[#d4af37]/30'} transition-shadow`}
+              className={`w-full px-3.5 py-2 rounded-lg border text-sm ${inputBg} ${textPrimary} placeholder:text-gray-500 focus:outline-none focus:ring-2 ${isMonochrome ? 'focus:ring-blue-500/30' : 'focus:ring-[#d4af37]/30'} transition-shadow`}
             />
           </div>
           <div>
-            <label className={`block text-sm font-semibold mb-2 ${textPrimary}`}>参考风格</label>
+            <label className={`block text-xs font-semibold mb-1.5 ${textSecondary}`}>参考风格</label>
             <input
               value={referenceStyle}
               onChange={e => setReferenceStyle(e.target.value)}
               placeholder="色彩、布局、间距..."
-              className={`w-full px-4 py-2.5 rounded-xl border text-sm ${inputBg} ${textPrimary} placeholder:text-gray-500 focus:outline-none focus:ring-2 ${isMonochrome ? 'focus:ring-blue-500/30' : 'focus:ring-[#d4af37]/30'} transition-shadow`}
+              className={`w-full px-3.5 py-2 rounded-lg border text-sm ${inputBg} ${textPrimary} placeholder:text-gray-500 focus:outline-none focus:ring-2 ${isMonochrome ? 'focus:ring-blue-500/30' : 'focus:ring-[#d4af37]/30'} transition-shadow`}
             />
           </div>
         </div>
 
-        {/* 第五行：输出 + 设置 + 模型 + 生成 — 横向排列 */}
-        <div className={`rounded-xl border ${border} ${glassBg} p-5`}>
-          <div className="flex items-start gap-6">
-            {/* 输出布局 */}
-            <div className="shrink-0">
-              <label className={`block text-sm font-semibold mb-2.5 ${textPrimary}`}>输出布局</label>
-              <div className="flex gap-2">
-                {OUTPUT_LAYOUTS.map(l => {
-                  const Icon = l.icon;
-                  return (
-                    <button
-                      key={l.value}
-                      onClick={() => setOutputLayout(l.value)}
-                      className={`w-[72px] py-2 rounded-lg text-center transition-all duration-200 cursor-pointer ${
-                        outputLayout === l.value
-                          ? isMonochrome
-                            ? 'border-2 border-blue-500 bg-blue-50'
-                            : 'border-2 border-[#d4af37] bg-[#d4af37]/10'
-                          : `${cardBg} hover:opacity-80 border border-transparent`
-                      }`}
-                    >
-                      <Icon className={`h-4 w-4 mx-auto mb-1 ${outputLayout === l.value ? accent : textSecondary}`} />
-                      <div className={`text-[11px] font-medium ${outputLayout === l.value ? accent : textSecondary}`}>
-                        {l.label}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* 分隔线 */}
-            <div className={`w-px self-stretch ${isMonochrome ? 'bg-gray-200' : 'bg-white/10'}`} />
-
-            {/* 模型区域 */}
-            <div className="flex-1 min-w-0 space-y-3">
-              {/* LLM + 图像模型 横排 */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={`block text-sm font-semibold mb-2 ${textPrimary}`}>LLM 模型</label>
-                  {llmModels.length === 0 ? (
-                    <div className={`px-4 py-2.5 rounded-lg border text-sm ${inputBg} ${textSecondary}`}>
-                      未配置 LLM 模型
-                    </div>
-                  ) : (
-                    renderModelDropdown(
-                      llmModels, selectedLlmModel, setSelectedLlmModel,
-                      showLlmDropdown,
-                      () => { setShowLlmDropdown(v => !v); setShowImageDropdown(false); },
-                      <Cpu className="h-4 w-4 shrink-0 opacity-60" />,
-                      '选择 LLM 模型',
-                    )
-                  )}
-                </div>
-                <div>
-                  <label className={`block text-sm font-semibold mb-2 ${textPrimary}`}>图像模型</label>
-                  {imageModels.length === 0 ? (
-                    <div className={`px-4 py-2.5 rounded-lg border text-sm ${inputBg} ${textSecondary}`}>
-                      未配置图像模型
-                    </div>
-                  ) : (
-                    renderModelDropdown(
-                      imageModels, selectedImageModel, setSelectedImageModel,
-                      showImageDropdown,
-                      () => { setShowImageDropdown(v => !v); setShowLlmDropdown(false); },
-                      <ImageIcon className="h-4 w-4 shrink-0 opacity-60" />,
-                      '选择图像模型',
-                    )
-                  )}
-                </div>
-              </div>
-
-              {/* 高级设置折叠行 */}
-              <div>
+        {/* Logo 类型(左:双排) + 输出布局(右) */}
+        <div className="flex gap-6">
+          {/* Logo 类型 — 双排网格 */}
+          <div className="flex-1">
+            <label className={`block text-sm font-semibold mb-2.5 ${textPrimary}`}>Logo 类型</label>
+            <div className="grid grid-cols-4 gap-2">
+              {LOGO_TYPES.map(t => (
                 <button
-                  onClick={() => setShowSettings(!showSettings)}
-                  className={`flex items-center gap-2 text-sm font-medium ${accent} hover:opacity-80 transition-opacity cursor-pointer`}
+                  key={t.value}
+                  onClick={() => setLogoType(t.value)}
+                  className={`px-3 py-2 rounded-lg text-[13px] font-medium transition-all duration-200 cursor-pointer ${
+                    logoType === t.value
+                      ? `${accentBg} text-white shadow-sm`
+                      : isMonochrome
+                        ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                        : 'bg-white/8 text-gray-300 hover:bg-white/15'
+                  }`}
                 >
-                  <Settings2 className="h-4 w-4" />
-                  {showSettings ? '收起高级设置' : '展开高级设置'}
-                  {showSettings ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                  {t.label}
                 </button>
-                {showSettings && (
-                  <div className="mt-2.5">
-                    <label className={`block text-[11px] font-medium mb-1.5 ${textSecondary}`}>目标平台</label>
-                    <select
-                      value={targetPlatform}
-                      onChange={e => setTargetPlatform(e.target.value)}
-                      className={`w-64 px-4 py-2 rounded-lg border text-sm ${inputBg} ${textPrimary} focus:outline-none cursor-pointer`}
-                    >
-                      {TARGET_PLATFORMS.map(p => (
-                        <option key={p.value} value={p.value} className={isMonochrome ? '' : 'bg-[#1a1a1a] text-white'}>
-                          {p.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* 分隔线 */}
-            <div className={`w-px self-stretch ${isMonochrome ? 'bg-gray-200' : 'bg-white/10'}`} />
-
-            {/* 生成按钮 */}
-            <div className="shrink-0 flex flex-col justify-end">
-              <button
-                onClick={handleGenerateDirection}
-                disabled={isGeneratingDirection || !brandName.trim() || !brief.trim()}
-                className={`px-8 py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all duration-200 cursor-pointer whitespace-nowrap ${
-                  isGeneratingDirection || !brandName.trim() || !brief.trim()
-                    ? isMonochrome
-                      ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                      : 'bg-white/10 text-gray-500 cursor-not-allowed'
-                    : `${accentBg} ${accentBgHover} text-white shadow-lg hover:shadow-xl active:scale-[0.98]`
-                }`}
-              >
-                {isGeneratingDirection ? (
-                  <><Loader2 className="h-4 w-4 animate-spin" />生成中...</>
-                ) : (
-                  <><Wand2 className="h-4 w-4" />生成 Logo 方向</>
-                )}
-              </button>
+              ))}
             </div>
           </div>
+
+          {/* 输出布局 */}
+          <div className="shrink-0">
+            <label className={`block text-sm font-semibold mb-2.5 ${textPrimary}`}>输出布局</label>
+            <div className="flex flex-col gap-2">
+              {OUTPUT_LAYOUTS.map(l => {
+                const Icon = l.icon;
+                return (
+                  <button
+                    key={l.value}
+                    onClick={() => setOutputLayout(l.value)}
+                    className={`w-[100px] py-2 rounded-lg text-center flex items-center justify-center gap-2 transition-all duration-200 cursor-pointer ${
+                      outputLayout === l.value
+                        ? isMonochrome
+                          ? 'border-2 border-blue-500 bg-blue-50'
+                          : 'border-2 border-[#d4af37] bg-[#d4af37]/10'
+                        : `${cardBg} hover:opacity-80 border border-transparent`
+                    }`}
+                  >
+                    <Icon className={`h-4 w-4 ${outputLayout === l.value ? accent : textSecondary}`} />
+                    <span className={`text-[12px] font-medium ${outputLayout === l.value ? accent : textSecondary}`}>
+                      {l.label}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* 模型选择 + 高级设置 + 生成按钮 */}
+        <div className={`rounded-xl border ${border} ${glassBg} p-5`}>
+          <div className="flex items-end gap-5">
+            {/* LLM 模型 */}
+            <div className="flex-1 min-w-0">
+              <label className={`block text-sm font-semibold mb-2 ${textPrimary}`}>LLM 模型</label>
+              {llmModels.length === 0 ? (
+                <div className={`px-4 py-2.5 rounded-lg border text-sm ${inputBg} ${textSecondary}`}>
+                  未配置 LLM 模型
+                </div>
+              ) : (
+                renderModelDropdown(
+                  llmModels, selectedLlmModel, setSelectedLlmModel,
+                  showLlmDropdown,
+                  () => { setShowLlmDropdown(v => !v); setShowImageDropdown(false); },
+                  <Cpu className="h-4 w-4 shrink-0 opacity-60" />,
+                  '选择 LLM 模型',
+                )
+              )}
+            </div>
+
+            {/* 图像模型 */}
+            <div className="flex-1 min-w-0">
+              <label className={`block text-sm font-semibold mb-2 ${textPrimary}`}>图像模型</label>
+              {imageModels.length === 0 ? (
+                <div className={`px-4 py-2.5 rounded-lg border text-sm ${inputBg} ${textSecondary}`}>
+                  未配置图像模型
+                </div>
+              ) : (
+                renderModelDropdown(
+                  imageModels, selectedImageModel, setSelectedImageModel,
+                  showImageDropdown,
+                  () => { setShowImageDropdown(v => !v); setShowLlmDropdown(false); },
+                  <ImageIcon className="h-4 w-4 shrink-0 opacity-60" />,
+                  '选择图像模型',
+                )
+              )}
+            </div>
+
+            {/* 高级设置 */}
+            <div className="shrink-0">
+              <button
+                onClick={() => setShowSettings(!showSettings)}
+                className={`px-4 py-2.5 rounded-lg border text-sm font-medium flex items-center gap-2 transition-all duration-200 cursor-pointer ${
+                  isMonochrome
+                    ? 'border-gray-300 text-gray-600 hover:bg-gray-100'
+                    : 'border-white/15 text-gray-300 hover:bg-white/8'
+                }`}
+              >
+                <Settings2 className="h-4 w-4" />
+                高级
+                {showSettings ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+              </button>
+            </div>
+
+            {/* 生成按钮 */}
+            <button
+              onClick={handleGenerateDirection}
+              disabled={isGeneratingDirection || !brandName.trim() || !brief.trim()}
+              className={`px-7 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 transition-all duration-200 cursor-pointer whitespace-nowrap shrink-0 ${
+                isGeneratingDirection || !brandName.trim() || !brief.trim()
+                  ? isMonochrome
+                    ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                    : 'bg-white/10 text-gray-500 cursor-not-allowed'
+                  : `${accentBg} ${accentBgHover} text-white shadow-lg hover:shadow-xl active:scale-[0.98]`
+              }`}
+            >
+              {isGeneratingDirection ? (
+                <><Loader2 className="h-4 w-4 animate-spin" />生成中...</>
+              ) : (
+                <><Wand2 className="h-4 w-4" />生成 Logo 方向</>
+              )}
+            </button>
+          </div>
+
+          {/* 高级设置展开区 */}
+          {showSettings && (
+            <div className={`mt-4 pt-4 border-t ${isMonochrome ? 'border-gray-200' : 'border-white/10'}`}>
+              <label className={`block text-[11px] font-medium mb-1.5 ${textSecondary}`}>目标平台</label>
+              <select
+                value={targetPlatform}
+                onChange={e => setTargetPlatform(e.target.value)}
+                className={`w-64 px-4 py-2 rounded-lg border text-sm ${inputBg} ${textPrimary} focus:outline-none cursor-pointer`}
+              >
+                {TARGET_PLATFORMS.map(p => (
+                  <option key={p.value} value={p.value} className={isMonochrome ? '' : 'bg-[#1a1a1a] text-white'}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
       </div>
     );
