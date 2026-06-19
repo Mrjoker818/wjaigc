@@ -152,22 +152,23 @@ async function handleGenerateImage(body: Record<string, unknown>) {
   const baseUrl = provider.baseUrl.replace(/\/+$/, '');
   const profile = resolveCompatProfile(provider);
 
-  try {
-    const rawBody: Record<string, unknown> = {
-      model,
-      prompt,
-      n,
-      size,
-    };
-    if (quality) rawBody.quality = quality;
+  // ★ 多提供商轮询：渠道耗尽时自动切换其他图像提供商
+  const triedProviderIds = new Set<string>();
+  if (provider.id) triedProviderIds.add(provider.id);
 
+  const attemptGenerate = async (prov: ApiProvider, mdl: string): Promise<NextResponse> => {
+    const baseUrl = prov.baseUrl.replace(/\/+$/, '');
+    const profile = resolveCompatProfile(prov);
+
+    const rawBody: Record<string, unknown> = { model: mdl, prompt, n, size };
+    if (quality) rawBody.quality = quality;
     const { body: reqBody, endpoint } = adjustRequestForProfile(rawBody, profile, {});
 
     const response = await fetchWithV1Retry(baseUrl, endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${provider.apiKey}`,
+        'Authorization': `Bearer ${prov.apiKey}`,
       },
       body: JSON.stringify(reqBody),
       signal: AbortSignal.timeout(120000),
@@ -176,84 +177,97 @@ async function handleGenerateImage(body: Record<string, unknown>) {
     if (!response.ok) {
       const errText = await response.text().catch(() => '');
 
-      // ★ Try /chat/completions fallback for channel errors
       if (isChannelUnavailableError(`${errText} ${response.status}`)) {
-        console.info('[logo-skill] Channel error, trying /chat/completions fallback...');
+        console.info(`[logo-skill] Channel error with provider ${prov.name || prov.id}, trying /chat/completions fallback...`);
         try {
           const chatImageUrls = await tryChatCompletionsImageFallback({
-            baseUrl,
-            apiKey: provider.apiKey,
-            model,
-            prompt,
-            size,
-            originalError: errText,
-            requestIdPrefix: 'logo-skill',
-            skipChannelCheck: true,
+            baseUrl, apiKey: prov.apiKey, model: mdl, prompt, size,
+            originalError: errText, requestIdPrefix: 'logo-skill', skipChannelCheck: true,
           });
           if (chatImageUrls && chatImageUrls.length > 0) {
-            console.log('[logo-skill] /chat/completions fallback succeeded, got', chatImageUrls.length, 'images');
             const persistedUrls = await Promise.all(chatImageUrls.map(persistResultImage));
-            return NextResponse.json({ success: true, imageUrls: persistedUrls, imageModel: model });
+            return NextResponse.json({ success: true, imageUrls: persistedUrls, imageModel: mdl });
           }
         } catch (chatErr) {
           console.warn('[logo-skill] /chat/completions fallback error:', chatErr);
         }
+
+        // ★ 此提供商渠道不可用，抛出特定错误让外层尝试下一个提供商
+        throw Object.assign(new Error(`CHANNEL_EXHAUSTED:${prov.id}`), { status: response.status, errText });
       }
 
       return NextResponse.json({ error: `图像生成失败(${response.status}): ${errText.slice(0, 200)}` }, { status: 500 });
     }
 
     const data = await response.json();
-
-    // 提取图片 URL
     const imageUrls = extractImageUrls(data);
     if (imageUrls.length === 0) {
-      // 可能是异步任务
       const taskId = extractTaskId(data);
       if (taskId) {
         return NextResponse.json({
-          success: true,
-          taskId,
-          status: 'processing',
-          imageModel: model,
-          apiBaseUrl: baseUrl,
-          apiKey: provider.apiKey,
+          success: true, taskId, status: 'processing', imageModel: mdl,
+          apiBaseUrl: baseUrl, apiKey: prov.apiKey,
         });
       }
       return NextResponse.json({ error: '图像生成返回格式异常，未找到图片URL' }, { status: 500 });
     }
 
-    return NextResponse.json({
-      success: true,
-      imageUrls,
-      imageModel: model,
-    });
-  } catch (err: unknown) {
-    const isTimeout = err instanceof Error && (err.name === 'AbortError' || /timeout|aborted/i.test(err.message));
-    if (isTimeout) {
-      console.info('[logo-skill] Timed out, trying /chat/completions fallback...');
-      try {
-        const chatImageUrls = await tryChatCompletionsImageFallback({
-          baseUrl,
-          apiKey: provider.apiKey,
-          model,
-          prompt,
-          size,
-          originalError: 'timeout',
-          requestIdPrefix: 'logo-skill-timeout',
-          skipChannelCheck: true,
-        });
-        if (chatImageUrls && chatImageUrls.length > 0) {
-          console.log('[logo-skill] /chat/completions fallback succeeded after timeout, got', chatImageUrls.length, 'images');
-          const persistedUrls = await Promise.all(chatImageUrls.map(persistResultImage));
-          return NextResponse.json({ success: true, imageUrls: persistedUrls, imageModel: model });
+    return NextResponse.json({ success: true, imageUrls, imageModel: mdl });
+  };
+
+  try {
+    // 第一次尝试：使用选定的提供商
+    return await attemptGenerate(provider, model);
+  } catch (firstErr: unknown) {
+    // 如果不是渠道耗尽错误，直接返回
+    const errMsg = firstErr instanceof Error ? firstErr.message : String(firstErr);
+    if (!errMsg.startsWith('CHANNEL_EXHAUSTED')) {
+      const isTimeout = firstErr instanceof Error && (firstErr.name === 'AbortError' || /timeout|aborted/i.test(firstErr.message));
+      if (isTimeout) {
+        try {
+          const chatImageUrls = await tryChatCompletionsImageFallback({
+            baseUrl: provider.baseUrl.replace(/\/+$/, ''), apiKey: provider.apiKey, model, prompt, size,
+            originalError: 'timeout', requestIdPrefix: 'logo-skill-timeout', skipChannelCheck: true,
+          });
+          if (chatImageUrls && chatImageUrls.length > 0) {
+            const persistedUrls = await Promise.all(chatImageUrls.map(persistResultImage));
+            return NextResponse.json({ success: true, imageUrls: persistedUrls, imageModel: model });
+          }
+        } catch (chatErr) {
+          console.warn('[logo-skill] /chat/completions timeout fallback error:', chatErr);
         }
-      } catch (chatErr) {
-        console.warn('[logo-skill] /chat/completions timeout fallback error:', chatErr);
+      }
+      const message = firstErr instanceof Error ? firstErr.message : String(firstErr);
+      return NextResponse.json({ error: `图像生成异常: ${message}` }, { status: 500 });
+    }
+
+    // 渠道耗尽 → 尝试其他提供商
+    console.info('[logo-skill] Primary provider channel exhausted, trying alternative providers...');
+    const { findAllProvidersForType } = await import('@/lib/server-api-config');
+    const allProviderEntries = await findAllProvidersForType('image');
+    const alternatives = allProviderEntries
+      .filter((entry) => !triedProviderIds.has(entry.provider.id) && entry.models.length > 0)
+      .map((entry) => ({ provider: entry.provider, model: entry.models[0] }));
+
+    for (const { provider: altProvider, model: altModel } of alternatives) {
+      console.info(`[logo-skill] Trying alternative provider: ${altProvider.name} (${altModel})`);
+      try {
+        const result = await attemptGenerate(altProvider, altModel);
+        return result;
+      } catch (altErr: unknown) {
+        const altErrMsg = altErr instanceof Error ? altErr.message : String(altErr);
+        if (altErrMsg.startsWith('CHANNEL_EXHAUSTED')) {
+          triedProviderIds.add(altProvider.id || '');
+          continue;
+        }
+        console.warn(`[logo-skill] Alternative provider ${altProvider.name} failed:`, altErrMsg);
+        continue;
       }
     }
-    const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: `图像生成异常: ${message}` }, { status: 500 });
+
+    return NextResponse.json({
+      error: '所有图像提供商渠道均不可用，请稍后重试或在管理员后台添加新的API提供商',
+    }, { status: 503 });
   }
 }
 

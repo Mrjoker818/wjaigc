@@ -1027,44 +1027,44 @@ export default function LogoSkillPanel({
 
   function renderDirectionStep() {
     return (
-      <div className="p-5 space-y-4">
+      <div className="p-5 space-y-5">
         {/* 上半段：方向概要 + 符号 + 视觉系统 — 2列布局更宽敞 */}
-        <div className="grid grid-cols-[1fr_1fr] gap-4">
+        <div className="grid grid-cols-[1fr_1fr] gap-5">
           {/* 左列：Logo 方向 + 配色 */}
           {direction && (
-            <div className={`rounded-xl border ${border} ${glassBg} p-4 space-y-3.5`}>
+            <div className={`rounded-xl border ${border} ${glassBg} p-5 space-y-4`}>
               <div className="flex items-center gap-2">
-                <CompassIcon className={`h-4.5 w-4.5 ${accent}`} />
-                <h3 className={`font-bold text-[13px] ${textPrimary}`}>Logo 方向 / Direction</h3>
+                <CompassIcon className={`h-5 w-5 ${accent}`} />
+                <h3 className={`font-bold text-[14px] ${textPrimary}`}>Logo 方向 / Direction</h3>
                 {direction.visualMood && (
-                  <span className={`ml-auto px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                  <span className={`ml-auto px-2.5 py-0.5 rounded-full text-[10px] font-semibold ${
                     isMonochrome ? 'bg-blue-50 text-blue-700' : 'bg-[#d4af37]/15 text-[#d4af37]'
                   }`}>
                     {direction.visualMood}
                   </span>
                 )}
               </div>
-              <div className="space-y-3">
+              <div className="space-y-4">
                 <div>
-                  <span className={`text-[10px] font-semibold uppercase tracking-wider ${textSecondary} mb-1 block`}>定位 Positioning</span>
+                  <span className={`text-[10px] font-semibold uppercase tracking-wider ${textSecondary} mb-1.5 block`}>定位 Positioning</span>
                   {bilingual(direction.positioning || '待确定', direction.positioningEn)}
                 </div>
                 <div>
-                  <span className={`text-[10px] font-semibold uppercase tracking-wider ${textSecondary} mb-1 block`}>构图 Composition</span>
+                  <span className={`text-[10px] font-semibold uppercase tracking-wider ${textSecondary} mb-1.5 block`}>构图 Composition</span>
                   {bilingual(direction.composition, direction.compositionEn)}
                 </div>
                 <div>
-                  <span className={`text-[10px] font-semibold uppercase tracking-wider ${textSecondary} mb-1 block`}>字体 Typography</span>
+                  <span className={`text-[10px] font-semibold uppercase tracking-wider ${textSecondary} mb-1.5 block`}>字体 Typography</span>
                   {bilingual(direction.typography, direction.typographyEn)}
                 </div>
                 {direction.colorPalette.length > 0 && (
                   <div>
-                    <span className={`text-[10px] font-semibold uppercase tracking-wider ${textSecondary} mb-1.5 block`}>配色 Palette</span>
-                    <div className="flex items-center gap-2.5 flex-wrap">
+                    <span className={`text-[10px] font-semibold uppercase tracking-wider ${textSecondary} mb-2 block`}>配色 Palette</span>
+                    <div className="flex items-center gap-3 flex-wrap">
                       {direction.colorPalette.map((c, i) => (
                         <div key={i} className="flex items-center gap-1.5">
-                          <div className="w-5 h-5 rounded-md border border-white/20 shadow-sm" style={{ backgroundColor: c.startsWith('#') ? c : undefined }} />
-                          <span className={`text-[10px] font-mono ${textSecondary}`}>{c}</span>
+                          <div className="w-6 h-6 rounded-md border border-white/20 shadow-sm" style={{ backgroundColor: c.startsWith('#') ? c : undefined }} />
+                          <span className={`text-[11px] font-mono ${textSecondary}`}>{c}</span>
                         </div>
                       ))}
                     </div>
@@ -1075,38 +1075,38 @@ export default function LogoSkillPanel({
           )}
 
           {/* 右列：符号概念 + 视觉系统 垂直堆叠 */}
-          <div className="space-y-4">
+          <div className="space-y-5">
             {/* 符号概念 */}
             {symbol && (
-              <div className={`rounded-xl border ${border} ${glassBg} p-4 space-y-3`}>
+              <div className={`rounded-xl border ${border} ${glassBg} p-5 space-y-4`}>
                 <div className="flex items-center gap-2">
-                  <Star className={`h-4 w-4 ${accent}`} />
-                  <h3 className={`font-bold text-[13px] ${textPrimary}`}>符号概念 / Symbol</h3>
+                  <Star className={`h-5 w-5 ${accent}`} />
+                  <h3 className={`font-bold text-[14px] ${textPrimary}`}>符号概念 / Symbol</h3>
                 </div>
-                <div className="space-y-2.5">
+                <div className="space-y-3.5">
                   <div>
-                    <span className={`text-[10px] font-semibold uppercase tracking-wider ${textSecondary} mb-1 block`}>核心隐喻 Core Metaphor</span>
+                    <span className={`text-[10px] font-semibold uppercase tracking-wider ${textSecondary} mb-1.5 block`}>核心隐喻 Core Metaphor</span>
                     {bilingual(symbol.coreMetaphor || '待确定', symbol.coreMetaphorEn)}
                   </div>
                   <div>
-                    <span className={`text-[10px] font-semibold uppercase tracking-wider ${textSecondary} mb-1 block`}>图标形式 Icon Form</span>
+                    <span className={`text-[10px] font-semibold uppercase tracking-wider ${textSecondary} mb-1.5 block`}>图标形式 Icon Form</span>
                     {bilingual(symbol.iconForm, symbol.iconFormEn)}
                   </div>
                   {symbol.negativeSpaceIdea && (
                     <div>
-                      <span className={`text-[10px] font-semibold uppercase tracking-wider ${textSecondary} mb-1 block`}>负空间 Negative Space</span>
+                      <span className={`text-[10px] font-semibold uppercase tracking-wider ${textSecondary} mb-1.5 block`}>负空间 Negative Space</span>
                       {bilingual(symbol.negativeSpaceIdea, symbol.negativeSpaceIdeaEn)}
                     </div>
                   )}
                   {symbol.alternativeRoutes.length > 0 && (
                     <div>
-                      <span className={`text-[10px] font-semibold uppercase tracking-wider ${textSecondary} mb-1 block`}>替代路线 Alternatives</span>
-                      <ul className="space-y-1">
+                      <span className={`text-[10px] font-semibold uppercase tracking-wider ${textSecondary} mb-1.5 block`}>替代路线 Alternatives</span>
+                      <ul className="space-y-1.5">
                         {symbol.alternativeRoutes.map((r, i) => {
                           const enRoute = symbol.alternativeRoutesEn?.[i];
                           return (
-                            <li key={i} className="flex items-start gap-1.5">
-                              <ArrowRight className={`h-3 w-3 mt-1.5 ${accent} shrink-0`} />
+                            <li key={i} className="flex items-start gap-2">
+                              <ArrowRight className={`h-3.5 w-3.5 mt-1 ${accent} shrink-0`} />
                               {bilingual(r, enRoute)}
                             </li>
                           );
@@ -1120,26 +1120,26 @@ export default function LogoSkillPanel({
 
             {/* 视觉系统 */}
             {visualNotes && (
-              <div className={`rounded-xl border ${border} ${glassBg} p-4 space-y-3`}>
+              <div className={`rounded-xl border ${border} ${glassBg} p-5 space-y-4`}>
                 <div className="flex items-center gap-2">
-                  <Eye className={`h-4 w-4 ${accent}`} />
-                  <h3 className={`font-bold text-[13px] ${textPrimary}`}>视觉系统 / Visual</h3>
+                  <Eye className={`h-5 w-5 ${accent}`} />
+                  <h3 className={`font-bold text-[14px] ${textPrimary}`}>视觉系统 / Visual</h3>
                 </div>
-                <div className="space-y-2.5">
+                <div className="space-y-3.5">
                   <div>
-                    <span className={`text-[10px] font-semibold uppercase tracking-wider ${textSecondary} mb-1 block`}>单色行为 Monochrome</span>
+                    <span className={`text-[10px] font-semibold uppercase tracking-wider ${textSecondary} mb-1.5 block`}>单色行为 Monochrome</span>
                     {bilingual(visualNotes.oneColorBehavior, visualNotes.oneColorBehaviorEn)}
                   </div>
                   <div>
-                    <span className={`text-[10px] font-semibold uppercase tracking-wider ${textSecondary} mb-1 block`}>小尺寸行为 Small Size</span>
+                    <span className={`text-[10px] font-semibold uppercase tracking-wider ${textSecondary} mb-1.5 block`}>小尺寸行为 Small Size</span>
                     {bilingual(visualNotes.smallSizeBehavior, visualNotes.smallSizeBehaviorEn)}
                   </div>
                   {visualNotes.recommendedLockups.length > 0 && (
                     <div>
-                      <span className={`text-[10px] font-semibold uppercase tracking-wider ${textSecondary} mb-1.5 block`}>推荐组合 Lockups</span>
-                      <div className="flex flex-wrap gap-1.5">
+                      <span className={`text-[10px] font-semibold uppercase tracking-wider ${textSecondary} mb-2 block`}>推荐组合 Lockups</span>
+                      <div className="flex flex-wrap gap-2">
                         {visualNotes.recommendedLockups.map((l, i) => (
-                          <span key={i} className={`px-2 py-0.5 rounded text-[10px] ${cardBg} ${textSecondary}`}>{l}</span>
+                          <span key={i} className={`px-2.5 py-1 rounded text-[11px] ${cardBg} ${textSecondary}`}>{l}</span>
                         ))}
                       </div>
                     </div>
@@ -1150,34 +1150,33 @@ export default function LogoSkillPanel({
           </div>
         </div>
 
-        {/* 下半段：操作栏 — 全宽，单行紧凑 */}
-        <div className={`rounded-xl border ${border} ${glassBg} px-4 py-3`}>
+        {/* 下半段A：修订方向 — 独立卡片 */}
+        <div className={`rounded-xl border ${border} ${glassBg} px-5 py-3.5`}>
           <div className="flex items-center gap-3">
-            {/* 修订方向 */}
-            <div className="flex-1 min-w-0 flex items-center gap-2">
-              <RefreshCw className={`h-3.5 w-3.5 shrink-0 ${accent}`} />
-              <input
-                value={revisionNotes}
-                onChange={e => setRevisionNotes(e.target.value)}
-                placeholder="修订方向 (可选)..."
-                className={`flex-1 min-w-0 px-3 py-2 rounded-lg border text-[13px] ${inputBg} ${textPrimary} placeholder:text-gray-500 focus:outline-none focus:ring-2 ${isMonochrome ? 'focus:ring-blue-500/30' : 'focus:ring-[#d4af37]/30'} transition-shadow`}
-                onKeyDown={e => { if (e.key === 'Enter' && revisionNotes.trim()) handleRefineDirection(); }}
-              />
-              <button
-                onClick={handleRefineDirection}
-                disabled={!revisionNotes.trim() || isGeneratingDirection}
-                className={`px-3 py-2 rounded-lg text-[13px] font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex items-center gap-1 cursor-pointer ${
-                  isMonochrome ? 'bg-gray-100 hover:bg-gray-200 text-gray-700' : 'bg-white/10 hover:bg-white/20 text-white'
-                }`}
-              >
-                {isGeneratingDirection ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
-                修订
-              </button>
-            </div>
+            <RefreshCw className={`h-4 w-4 shrink-0 ${accent}`} />
+            <input
+              value={revisionNotes}
+              onChange={e => setRevisionNotes(e.target.value)}
+              placeholder="输入修订意见，调整方向后重新生成..."
+              className={`flex-1 min-w-0 px-3 py-2.5 rounded-lg border text-[13px] ${inputBg} ${textPrimary} placeholder:text-gray-500 focus:outline-none focus:ring-2 ${isMonochrome ? 'focus:ring-blue-500/30' : 'focus:ring-[#d4af37]/30'} transition-shadow`}
+              onKeyDown={e => { if (e.key === 'Enter' && revisionNotes.trim()) handleRefineDirection(); }}
+            />
+            <button
+              onClick={handleRefineDirection}
+              disabled={!revisionNotes.trim() || isGeneratingDirection}
+              className={`px-4 py-2.5 rounded-lg text-[13px] font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex items-center gap-1.5 cursor-pointer ${
+                isMonochrome ? 'bg-gray-100 hover:bg-gray-200 text-gray-700' : 'bg-white/10 hover:bg-white/20 text-white'
+              }`}
+            >
+              {isGeneratingDirection ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+              修订方向
+            </button>
+          </div>
+        </div>
 
-            {/* 分隔线 */}
-            <div className={`w-px h-8 shrink-0 ${isMonochrome ? 'bg-gray-200' : 'bg-white/10'}`} />
-
+        {/* 下半段B：操作栏 — 模型+生成 */}
+        <div className={`rounded-xl border ${border} ${glassBg} px-5 py-3.5`}>
+          <div className="flex items-center gap-4">
             {/* 图像模型 */}
             <div className="shrink-0">
               {imageModels.length === 0 ? (
@@ -1202,7 +1201,7 @@ export default function LogoSkillPanel({
               <button
                 onClick={handleGenerateImage}
                 disabled={isGeneratingImage || imageModels.length === 0}
-                className={`px-5 py-2.5 rounded-lg font-bold text-[13px] flex items-center gap-1.5 ${accentBg} ${accentBgHover} text-white transition-all duration-200 disabled:opacity-50 active:scale-[0.98] cursor-pointer`}
+                className={`px-6 py-2.5 rounded-lg font-bold text-[14px] flex items-center gap-2 ${accentBg} ${accentBgHover} text-white transition-all duration-200 disabled:opacity-50 active:scale-[0.98] cursor-pointer`}
               >
                 {isGeneratingImage ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />}
                 生成 Logo
@@ -1216,62 +1215,67 @@ export default function LogoSkillPanel({
                 重来
               </button>
             </div>
+
+            {/* 平台 Prompt 按钮 — 右侧 */}
+            {platformPrompts.length > 0 && (
+              <>
+                <div className={`w-px h-8 shrink-0 ${isMonochrome ? 'bg-gray-200' : 'bg-white/10'}`} />
+                <button
+                  onClick={() => setExpandedPrompt(expandedPrompt === '__list__' ? null : '__list__')}
+                  className={`text-[11px] ${textSecondary} hover:underline flex items-center gap-1 cursor-pointer shrink-0`}
+                >
+                  <MessageSquare className="h-3.5 w-3.5" />
+                  {expandedPrompt === '__list__' ? '隐藏' : '查看'}平台 Prompt ({platformPrompts.length})
+                  {expandedPrompt === '__list__' ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                </button>
+              </>
+            )}
           </div>
 
-          {/* 平台 Prompt — 可折叠，默认收起 */}
-          {platformPrompts.length > 0 && (
-            <div className="mt-3">
-              <button
-                onClick={() => setExpandedPrompt(expandedPrompt === '__list__' ? null : '__list__')}
-                className={`text-[11px] ${textSecondary} hover:underline flex items-center gap-1 cursor-pointer`}
-              >
-                <MessageSquare className="h-3 w-3" />
-                {expandedPrompt === '__list__' ? '隐藏' : '展开'}平台 Prompt ({platformPrompts.length})
-                {expandedPrompt === '__list__' ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-              </button>
-              {expandedPrompt === '__list__' && (
-                <div className="mt-2 grid grid-cols-2 gap-2">
-                  {platformPrompts.map((pp, i) => (
-                    <div key={i} className={`rounded-lg border ${border} overflow-hidden`}>
-                      <div className={`px-3 py-2 flex items-center justify-between ${cardBg}`}>
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className={`text-[11px] font-bold ${accent}`}>{pp.platform}</span>
-                          {pp.notes && <span className={`text-[10px] ${textSecondary} truncate`}>{pp.notes}</span>}
-                        </div>
-                        <button
-                          onClick={() => handleCopyPrompt(pp.prompt, pp.platform)}
-                          className={`p-1 rounded cursor-pointer ${isMonochrome ? 'hover:bg-gray-200' : 'hover:bg-white/10'} transition-colors shrink-0`}
-                          title="复制"
-                        >
-                          {copiedPrompt === pp.platform ? <Check className="h-3.5 w-3.5 text-green-400" /> : <Copy className={`h-3.5 w-3.5 ${textSecondary}`} />}
-                        </button>
-                      </div>
-                      <div className={`px-3 py-2 ${isMonochrome ? 'bg-white' : 'bg-black/20'}`}>
-                        <pre className={`text-[10px] ${textSecondary} whitespace-pre-wrap break-all leading-relaxed`}>{pp.prompt}</pre>
-                      </div>
+          {/* 平台 Prompt 展开区域 */}
+          {expandedPrompt === '__list__' && platformPrompts.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-white/5 grid grid-cols-2 gap-2">
+              {platformPrompts.map((pp, i) => (
+                <div key={i} className={`rounded-lg border ${border} overflow-hidden`}>
+                  <div className={`px-3 py-2 flex items-center justify-between ${cardBg}`}>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className={`text-[11px] font-bold ${accent}`}>{pp.platform}</span>
+                      {pp.notes && <span className={`text-[10px] ${textSecondary} truncate`}>{pp.notes}</span>}
                     </div>
-                  ))}
+                    <button
+                      onClick={() => handleCopyPrompt(pp.prompt, pp.platform)}
+                      className={`p-1 rounded cursor-pointer ${isMonochrome ? 'hover:bg-gray-200' : 'hover:bg-white/10'} transition-colors shrink-0`}
+                      title="复制"
+                    >
+                      {copiedPrompt === pp.platform ? <Check className="h-3.5 w-3.5 text-green-400" /> : <Copy className={`h-3.5 w-3.5 ${textSecondary}`} />}
+                    </button>
+                  </div>
+                  <div className={`px-3 py-2 ${isMonochrome ? 'bg-white' : 'bg-black/20'}`}>
+                    <pre className={`text-[10px] ${textSecondary} whitespace-pre-wrap break-all leading-relaxed`}>{pp.prompt}</pre>
+                  </div>
                 </div>
-              )}
+              ))}
             </div>
           )}
+        </div>
 
-          {/* 原始响应 */}
-          <div className="mt-2">
+        {/* 原始响应 — 独立区块 */}
+        {rawResponse && (
+          <div>
             <button
               onClick={() => setShowRawResponse(!showRawResponse)}
-              className={`text-[10px] ${textSecondary} hover:underline flex items-center gap-1 cursor-pointer`}
+              className={`text-[11px] ${textSecondary} hover:underline flex items-center gap-1 cursor-pointer`}
             >
               {showRawResponse ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
               {showRawResponse ? '隐藏' : '查看'}原始 LLM 响应
             </button>
             {showRawResponse && (
-              <pre className={`mt-1.5 p-2.5 rounded-lg text-[10px] ${textSecondary} whitespace-pre-wrap break-all overflow-auto max-h-28 ${cardBg}`}>
+              <pre className={`mt-2 p-3 rounded-lg text-[10px] ${textSecondary} whitespace-pre-wrap break-all overflow-auto max-h-32 ${cardBg}`}>
                 {rawResponse}
               </pre>
             )}
           </div>
-        </div>
+        )}
       </div>
     );
   }
