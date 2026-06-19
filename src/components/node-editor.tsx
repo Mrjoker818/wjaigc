@@ -45,7 +45,7 @@ function getNodeIcon(type: NodeType, size = 14, className = '') {
 
 // ==================== 模型列表 Hook ====================
 
-interface ModelOption { id: string; name: string; type: string; provider: string; apiDisplayName?: string; }
+interface ModelOption { id: string; name: string; type: string; provider: string; providerId?: string; apiDisplayName?: string; }
 
 
 function useModelList() {
@@ -58,7 +58,7 @@ function useModelList() {
       const res = await fetch('/api/workflow/models?type=all');
       if (res.ok) {
         const data = await res.json();
-        setModels(data.models || []);
+        setModels((data.models || []) as ModelOption[]);
       }
     } catch (e) { console.error('[NodeEditor] 模型列表加载失败:', e); }
     finally { setLoading(false); }
@@ -3433,7 +3433,7 @@ const NodeCard = React.memo(function NodeCard({ node, isSelected, isHighlighted,
 
 interface PropertyPanelProps {
   node: WorkflowNode | null;
-  models: { id: string; name: string; type: string; provider: string; apiDisplayName?: string }[];
+  models: ModelOption[];
   modelsLoading: boolean;
   onUpdate: (nodeId: string, updates: Partial<WorkflowNode>) => void;
   onDelete: (nodeId: string) => void;
@@ -3673,23 +3673,42 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
 
       case 'model-select': {
         const modelFilterType = field.modelFilter || 'image'; // 默认只显示图像模型
+        // 支持复合键 providerId::modelId 和纯 modelId
+        const currentModelId = String(externalValue || '');
+        const currentCompositeValue = (() => {
+          if (!currentModelId) return '';
+          // 如果config中有providerId，用复合键匹配
+          const cfgProviderId = node.config?.providerId as string | undefined;
+          if (cfgProviderId) return `${cfgProviderId}::${currentModelId}`;
+          // 否则只用modelId匹配
+          const match = models.find(m => m.id === currentModelId && m.type === modelFilterType);
+          return match && match.providerId ? `${match.providerId}::${match.id}` : currentModelId;
+        })();
         return (
           <select
-            value={String(externalValue || '')}
+            value={currentCompositeValue}
             onChange={e => {
-              const newModelId = e.target.value;
-              const configUpdate: Record<string, string> = { [field.key]: newModelId };
+              const selectedValue = e.target.value;
+              // 解析复合键: providerId::modelId
+              const sepIdx = selectedValue.indexOf('::');
+              const selectedModelId = sepIdx >= 0 ? selectedValue.slice(sepIdx + 2) : selectedValue;
+              const selectedProviderId = sepIdx >= 0 ? selectedValue.slice(0, sepIdx) : '';
+              const configUpdate: Record<string, string> = { [field.key]: selectedModelId };
+              // 保存providerId到节点config
+              if (selectedProviderId) {
+                configUpdate.providerId = selectedProviderId;
+              }
               // 模型变更时，动态更新 quality 和 aspectRatio 为新模型的默认值
-              if (newModelId) {
-                const supportedQualities = MODEL_QUALITIES[newModelId as keyof typeof MODEL_QUALITIES] || [];
+              if (selectedModelId) {
+                const supportedQualities = MODEL_QUALITIES[selectedModelId as keyof typeof MODEL_QUALITIES] || [];
                 // 尝试找到匹配的模型配置
-                const modelKey = Object.keys(MODEL_QUALITIES).find(k => newModelId.includes(k));
+                const modelKey = Object.keys(MODEL_QUALITIES).find(k => selectedModelId.includes(k));
                 const qualities = modelKey ? MODEL_QUALITIES[modelKey as keyof typeof MODEL_QUALITIES] : supportedQualities;
                 if (qualities.length > 0) {
                   configUpdate.quality = qualities[0];
                 }
-                const supportedRatios = MODEL_ASPECT_RATIOS[newModelId as keyof typeof MODEL_ASPECT_RATIOS] || [];
-                const ratioKey = Object.keys(MODEL_ASPECT_RATIOS).find(k => newModelId.includes(k));
+                const supportedRatios = MODEL_ASPECT_RATIOS[selectedModelId as keyof typeof MODEL_ASPECT_RATIOS] || [];
+                const ratioKey = Object.keys(MODEL_ASPECT_RATIOS).find(k => selectedModelId.includes(k));
                 const ratios = ratioKey ? MODEL_ASPECT_RATIOS[ratioKey as keyof typeof MODEL_ASPECT_RATIOS] : supportedRatios;
                 if (ratios.length > 0) {
                   configUpdate.aspectRatio = ratios[0];
@@ -3701,9 +3720,12 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
             className="w-full bg-muted border border-border rounded px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary/50 disabled:opacity-50"
           >
             <option value="">{modelsLoading ? '加载中...' : '选择模型'}</option>
-            {models.filter(m => m.type === modelFilterType).map(m => (
-              <option key={`${m.id}-${m.provider}`} value={m.id}>{m.apiDisplayName || m.name || getModelDisplayName(m.id)} ({m.provider})</option>
-            ))}
+            {models.filter(m => m.type === modelFilterType).map(m => {
+              const compositeValue = m.providerId ? `${m.providerId}::${m.id}` : m.id;
+              return (
+                <option key={compositeValue} value={compositeValue}>{m.apiDisplayName || m.name || getModelDisplayName(m.id)} ({m.provider})</option>
+              );
+            })}
           </select>
         );
       }

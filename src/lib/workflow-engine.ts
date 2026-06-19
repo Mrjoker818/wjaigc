@@ -1111,6 +1111,13 @@ export function buildNodeExecutionRequest(
 ): { endpoint: string; method: string; body: Record<string, unknown> } | null {
   const config = { ...node.config, ...inputs };
 
+  // 解析复合键 providerId::modelId，确保 model 和 providerId 正确分离
+  if (config.model && typeof config.model === 'string' && config.model.includes('::')) {
+    const sepIdx = config.model.indexOf('::');
+    config.providerId = config.model.slice(0, sepIdx);
+    config.model = config.model.slice(sepIdx + 2);
+  }
+
   switch (node.type) {
     case 'input-image':
       // 图片输入节点：直接输出图片URL，不需要调用API
@@ -1136,6 +1143,8 @@ export function buildNodeExecutionRequest(
         outputCount: config.n || 1,
         seed: config.seed || -1,
       };
+      // 传递 providerId 以确保后端精确匹配用户选择的提供商
+      if (config.providerId) body.providerId = config.providerId;
       // 图生图：当有图片输入时，添加参考图参数（与画布模式img2img一致）
       const refImageUrl = inputs.imageUrl as string | undefined;
       if (refImageUrl) {
@@ -1212,6 +1221,7 @@ export function buildNodeExecutionRequest(
           negativePrompt: config.negativePrompt || '',
           imageUrl: config.imageUrl || '',
           model: config.model || '',
+          providerId: config.providerId || '',
           strength: config.strength || 50,
         }
       };
@@ -1243,47 +1253,54 @@ export function buildNodeExecutionRequest(
       const retouchQuality = (config.quality as string) || '1K';
       const retouchAspectRatio = (config.aspectRatio as string) || '1:1';
       const retouchSize = calculateActualPixels(retouchAspectRatio, retouchQuality, retouchModel);
+      const retouchBody: Record<string, unknown> = {
+        image: config.imageUrl || '',
+        prompt: config.prompt || config.textContent || config.text || '',
+        model: retouchModel,
+        size: retouchSize || '1024x1024',
+      };
+      if (config.providerId) retouchBody.providerId = config.providerId;
       return {
         endpoint: '/api/edit',
         method: 'POST',
-        body: {
-          image: config.imageUrl || '',
-          prompt: config.prompt || config.textContent || config.text || '',
-          model: retouchModel,
-          size: retouchSize || '1024x1024',
-        }
+        body: retouchBody,
       };
     }
 
     // ─── 画布模式专用节点 ───
-    case 'ai-font-design':
+    case 'ai-font-design': {
+      const fontBody: Record<string, unknown> = {
+        textContent: config.textContent || '',
+        styleCategory: config.styleCategory || 'calligraphy',
+        scene: config.scene || 'logo',
+        mode: config.mode || 'full',
+        model: config.model || '',
+        prompt: config.prompt || config.textContent || config.text || '',
+      };
+      if (config.providerId) fontBody.providerId = config.providerId;
       return {
         endpoint: '/api/font-design/generate-image',
         method: 'POST',
-        body: {
-          textContent: config.textContent || '',
-          styleCategory: config.styleCategory || 'calligraphy',
-          scene: config.scene || 'logo',
-          mode: config.mode || 'full',
-          model: config.model || '',
-          prompt: config.prompt || config.textContent || config.text || '',
-        }
+        body: fontBody,
       };
+    }
 
     case 'ai-refine-engine': {
       const refineModel = (config.model as string) || '';
       const refineQuality = (config.quality as string) || '1K';
       const refineAspectRatio = (config.aspectRatio as string) || '1:1';
       const refineSize = calculateActualPixels(refineAspectRatio, refineQuality, refineModel);
+      const refineBody: Record<string, unknown> = {
+        image: config.imageUrl || '',
+        prompt: config.prompt || `Professional product photography, ${config.lighting || 'studio'} lighting, ${config.viewAngle || 'front'} view, ${config.background || 'white'} background, ${config.category || 'electronics'} product, commercial quality, 8k`,
+        model: refineModel,
+        size: refineSize || '1024x1024',
+      };
+      if (config.providerId) refineBody.providerId = config.providerId;
       return {
         endpoint: '/api/edit',
         method: 'POST',
-        body: {
-          image: config.imageUrl || '',
-          prompt: config.prompt || `Professional product photography, ${config.lighting || 'studio'} lighting, ${config.viewAngle || 'front'} view, ${config.background || 'white'} background, ${config.category || 'electronics'} product, commercial quality, 8k`,
-          model: refineModel,
-          size: refineSize || '1024x1024',
-        }
+        body: refineBody,
       };
     }
 
@@ -1292,144 +1309,165 @@ export function buildNodeExecutionRequest(
       const brandQuality = (config.quality as string) || '1K';
       const brandAspectRatio = (config.aspectRatio as string) || '1:1';
       const brandSize = calculateActualPixels(brandAspectRatio, brandQuality, brandModel);
+      const brandBody: Record<string, unknown> = {
+        prompt: config.prompt || `E-commerce product photo for ${config.brandName || 'brand'}, ${config.templateType || 'product-scene'} style, ${config.brandStyle || 'minimal'} aesthetic, ${config.productCategory || 'clothing'} category, professional lighting, commercial quality`,
+        negativePrompt: config.negativePrompt || 'low quality, blurry, watermark, text, signature',
+        model: brandModel,
+        quality: brandQuality,
+        size: brandSize || '1024x1024',
+      };
+      if (config.providerId) brandBody.providerId = config.providerId;
       return {
         endpoint: '/api/generate',
         method: 'POST',
-        body: {
-          prompt: config.prompt || `E-commerce product photo for ${config.brandName || 'brand'}, ${config.templateType || 'product-scene'} style, ${config.brandStyle || 'minimal'} aesthetic, ${config.productCategory || 'clothing'} category, professional lighting, commercial quality`,
-          negativePrompt: config.negativePrompt || 'low quality, blurry, watermark, text, signature',
-          model: brandModel,
-          quality: brandQuality,
-          size: brandSize || '1024x1024',
-        }
+        body: brandBody,
       };
     }
 
-    case 'ai-segment':
+    case 'ai-segment': {
+      const segBody: Record<string, unknown> = {
+        imageUrl: config.imageUrl || '',
+        model: config.model || '',
+        exportFormat: config.exportFormat || 'psd-pro',
+      };
+      if (config.providerId) segBody.providerId = config.providerId;
       return {
         endpoint: '/api/segment-elements',
         method: 'POST',
-        body: {
-          imageUrl: config.imageUrl || '',
-          model: config.model || '',
-          exportFormat: config.exportFormat || 'psd-pro',
-        }
+        body: segBody,
       };
+    }
 
     case 'ai-multi-angle': {
       const maModel = (config.model as string) || '';
       const maQuality = (config.quality as string) || '1K';
       const maAspectRatio = (config.aspectRatio as string) || '1:1';
       const maSize = calculateActualPixels(maAspectRatio, maQuality, maModel);
+      const maBody: Record<string, unknown> = {
+        prompt: config.prompt || `Multi-angle view, ${config.angles || 'quad'} layout, same subject from different angles, consistent style`,
+        negativePrompt: config.negativePrompt || '',
+        model: maModel,
+        imageUrl: config.imageUrl || '',
+        quality: maQuality,
+        size: maSize || '1024x1024',
+      };
+      if (config.providerId) maBody.providerId = config.providerId;
       return {
         endpoint: '/api/generate',
         method: 'POST',
-        body: {
-          prompt: config.prompt || `Multi-angle view, ${config.angles || 'quad'} layout, same subject from different angles, consistent style`,
-          negativePrompt: config.negativePrompt || '',
-          model: maModel,
-          imageUrl: config.imageUrl || '',
-          quality: maQuality,
-          size: maSize || '1024x1024',
-        }
+        body: maBody,
       };
     }
 
-    case 'ai-video-generate':
+    case 'ai-video-generate': {
+      const vGenBody: Record<string, unknown> = {
+        prompt: config.prompt || config.textContent || config.text || '',
+        model: config.model || '',
+        mode: config.mode || 'text2video',
+        aspectRatio: config.aspectRatio || '16:9',
+        duration: Number(config.duration) || 5,
+        quality: config.quality || 'std',
+        resolution: config.resolution || '1080p',
+        generateAudio: config.generateAudio === true || config.generateAudio === 'true',
+        negativePrompt: config.negativePrompt || '',
+        seed: config.seed ? Number(config.seed) : undefined,
+        cameraControl: config.cameraControl ? { type: config.cameraControl, intensity: Number(config.motionStrength) || 50 } : undefined,
+      };
+      if (config.providerId) vGenBody.providerId = config.providerId;
       return {
         endpoint: '/api/video/generate',
         method: 'POST',
-        body: {
-          prompt: config.prompt || config.textContent || config.text || '',
-          model: config.model || '',
-          mode: config.mode || 'text2video',
-          aspectRatio: config.aspectRatio || '16:9',
-          duration: Number(config.duration) || 5,
-          quality: config.quality || 'std',
-          resolution: config.resolution || '1080p',
-          generateAudio: config.generateAudio === true || config.generateAudio === 'true',
-          negativePrompt: config.negativePrompt || '',
-          seed: config.seed ? Number(config.seed) : undefined,
-          cameraControl: config.cameraControl ? { type: config.cameraControl, intensity: Number(config.motionStrength) || 50 } : undefined,
-        }
+        body: vGenBody,
       };
+    }
 
-    case 'ai-video-i2v':
+    case 'ai-video-i2v': {
+      const vi2vBody: Record<string, unknown> = {
+        prompt: config.prompt || config.textContent || config.text || '',
+        model: config.model || '',
+        mode: config.mode || config.videoMode || 'image2video-first',
+        imageUrl: config.imageUrl || inputs.imageUrl || '',
+        lastFrameImageUrl: config.lastFrameImageUrl || '',
+        aspectRatio: config.aspectRatio || '16:9',
+        duration: Number(config.duration) || 5,
+        quality: config.quality || 'std',
+        resolution: config.resolution || '1080p',
+        generateAudio: config.generateAudio === true || config.generateAudio === 'true',
+        negativePrompt: config.negativePrompt || '',
+        seed: config.seed ? Number(config.seed) : undefined,
+        cameraControl: config.cameraControl ? { type: config.cameraControl, intensity: Number(config.motionStrength) || 50 } : undefined,
+      };
+      if (config.providerId) vi2vBody.providerId = config.providerId;
       return {
         endpoint: '/api/video/generate',
         method: 'POST',
-        body: {
-          prompt: config.prompt || config.textContent || config.text || '',
-          model: config.model || '',
-          mode: config.mode || config.videoMode || 'image2video-first',
-          imageUrl: config.imageUrl || inputs.imageUrl || '',
-          lastFrameImageUrl: config.lastFrameImageUrl || '',
-          aspectRatio: config.aspectRatio || '16:9',
-          duration: Number(config.duration) || 5,
-          quality: config.quality || 'std',
-          resolution: config.resolution || '1080p',
-          generateAudio: config.generateAudio === true || config.generateAudio === 'true',
-          negativePrompt: config.negativePrompt || '',
-          seed: config.seed ? Number(config.seed) : undefined,
-          cameraControl: config.cameraControl ? { type: config.cameraControl, intensity: Number(config.motionStrength) || 50 } : undefined,
-        }
+        body: vi2vBody,
       };
+    }
 
     case 'output-video':
       // 视频输出节点：直接传递结果，不需要API调用
       return null;
 
-    case 'ai-3d-model':
+    case 'ai-3d-model': {
+      const t3dBody: Record<string, unknown> = {
+        imageUrl: config.imageUrl || '',
+        model: config.model || '',
+        quality: config.quality || 'standard',
+      };
+      if (config.providerId) t3dBody.providerId = config.providerId;
       return {
         endpoint: '/api/poll-3d-task',
         method: 'POST',
-        body: {
-          imageUrl: config.imageUrl || '',
-          model: config.model || '',
-          quality: config.quality || 'standard',
-        }
+        body: t3dBody,
       };
+    }
 
     case 'storyboard-sequence': {
       const sbModel = (config.model as string) || '';
       const sbQuality = (config.quality as string) || '1K';
       const sbAspectRatio = (config.aspectRatio as string) || '1:1';
       const sbSize = calculateActualPixels(sbAspectRatio, sbQuality, sbModel);
+      const sbBody: Record<string, unknown> = {
+        prompt: config.scenes || config.prompt || '',
+        negativePrompt: config.negativePrompt || '',
+        model: sbModel,
+        quality: sbQuality,
+        size: sbSize || '1024x1024',
+        // 分镜串行元数据
+        _storyboard: {
+          scenes: (config.scenes as string || '').split('\n').filter((s: string) => s.trim()),
+          character: config.character || '',
+          style: config.style || '',
+          continueMode: config.continueMode || 'independent',
+          strength: config.strength || 50,
+        },
+        imageUrl: config.imageUrl || '',
+        strength: config.continueMode === 'img2img' ? (config.strength || 50) : undefined,
+      };
+      if (config.providerId) sbBody.providerId = config.providerId;
       return {
         endpoint: '/api/generate',
         method: 'POST',
-        body: {
-          prompt: config.scenes || config.prompt || '',
-          negativePrompt: config.negativePrompt || '',
-          model: sbModel,
-          quality: sbQuality,
-          size: sbSize || '1024x1024',
-          // 分镜串行元数据
-          _storyboard: {
-            scenes: (config.scenes as string || '').split('\n').filter((s: string) => s.trim()),
-            character: config.character || '',
-            style: config.style || '',
-            continueMode: config.continueMode || 'independent',
-            strength: config.strength || 50,
-          },
-          imageUrl: config.imageUrl || '',
-          strength: config.continueMode === 'img2img' ? (config.strength || 50) : undefined,
-        }
+        body: sbBody,
       };
     }
 
-    case 'agent-auto':
+    case 'agent-auto': {
+      const agentBody: Record<string, unknown> = {
+        imageUrl: config.imageUrl || '',
+        instruction: config.prompt || config.systemPrompt || '',
+        model: config.model || '',
+        maxRounds: config.maxRounds || 5,
+        tools: (config.tools as string || '').split(',').map((t: string) => t.trim()),
+      };
+      if (config.providerId) agentBody.providerId = config.providerId;
       return {
         endpoint: '/api/agent-edit',
         method: 'POST',
-        body: {
-          imageUrl: config.imageUrl || '',
-          instruction: config.prompt || config.systemPrompt || '',
-          model: config.model || '',
-          maxRounds: config.maxRounds || 5,
-          tools: (config.tools as string || '').split(',').map((t: string) => t.trim()),
-        }
+        body: agentBody,
       };
+    }
 
     case 'output-save':
       return {
@@ -1658,9 +1696,46 @@ export function parseAIBuildResponse(response: string): { name: string; descript
     const parsed = JSON.parse(jsonMatch[0]);
     if (!parsed.nodes || !Array.isArray(parsed.nodes)) return null;
 
-    // 验证节点类型
+    // 验证节点类型（含别名映射）
     const validTypes = new Set<string>(Object.keys(NODE_TYPE_LABELS));
-    const validNodes = parsed.nodes.filter((n: { type: string }) => validTypes.has(n.type));
+    const ALIAS_MAP: Record<string, NodeType> = {
+      'generate': 'ai-generate', 'image-generate': 'ai-generate', 'text-to-image': 'ai-generate',
+      'stable-diffusion': 'ai-generate', 'stable-diffusion-xl': 'ai-generate', 'dalle': 'ai-generate',
+      'midjourney': 'ai-generate', 'image-gen': 'ai-generate',
+      'edit': 'ai-edit', 'image-edit': 'ai-edit', 'inpaint': 'ai-edit', 'outpaint': 'ai-edit',
+      'upscale': 'ai-upscale', 'super-resolution': 'ai-upscale', 'enhance': 'ai-upscale',
+      'remove-bg': 'ai-removebg', 'remove-background': 'ai-removebg', 'background-removal': 'ai-removebg',
+      'vectorize': 'ai-vectorize', 'svg-export': 'ai-vectorize', 'trace': 'ai-vectorize',
+      'style-transfer': 'ai-style-transfer', 'style': 'ai-style-transfer',
+      'color-adjust': 'ai-color-adjust', 'color-correction': 'ai-color-adjust',
+      'analyze': 'ai-analyze', 'image-analysis': 'ai-analyze',
+      'retouch': 'ai-retouch', 'image-retouch': 'ai-retouch',
+      'font-design': 'ai-font-design', 'typography': 'ai-font-design',
+      'refine': 'ai-refine-engine', 'refine-engine': 'ai-refine-engine',
+      'brand': 'ai-brand-ecommerce', 'ecommerce': 'ai-brand-ecommerce',
+      'segment': 'ai-segment', 'layer-decompose': 'ai-segment', 'decompose': 'ai-segment',
+      'multi-angle': 'ai-multi-angle', 'multi-view': 'ai-multi-angle',
+      '3d-model': 'ai-3d-model', '3d': 'ai-3d-model',
+      'text-input': 'input-text', 'prompt-input': 'input-text',
+      'image-input': 'input-image', 'image-reference': 'input-image',
+      'image-output': 'output-image', 'output': 'output-image',
+      'video-generate': 'ai-video-generate', 'text-to-video': 'ai-video-generate',
+      'video-i2v': 'ai-video-i2v', 'image-to-video': 'ai-video-i2v',
+      'if': 'condition-if', 'switch': 'condition-switch',
+      'loop': 'loop-for', 'for': 'loop-for', 'each': 'loop-each',
+      'agent': 'agent-auto',
+      'storyboard': 'storyboard-sequence',
+    };
+
+    const validNodes = parsed.nodes
+      .map((n: { type: string; id?: string; label?: string; config?: Record<string, unknown> }) => {
+        if (validTypes.has(n.type)) return n;
+        // 尝试别名映射
+        const mapped = ALIAS_MAP[n.type.toLowerCase()] || ALIAS_MAP[n.type];
+        if (mapped) return { ...n, type: mapped };
+        return null;
+      })
+      .filter(Boolean);
     if (validNodes.length === 0) return null;
 
     return {

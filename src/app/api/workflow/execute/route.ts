@@ -21,7 +21,7 @@ import {
   type ExecutionResult,
   type NodeType,
 } from '@/lib/workflow-engine';
-import { findProviderForModel, findProviderForFeature } from '@/lib/server-api-config';
+import { findProviderForModel, findProviderForFeature, findProviderById } from '@/lib/server-api-config';
 
 // 内存中的执行状态
 const executionCache = new Map<string, {
@@ -244,6 +244,25 @@ async function executeWorkflow(
         }
       }
 
+      // P0: 自动注入缺失的 providerId — 当 AI 建图或历史节点缺少 providerId 时，根据 model 名自动查找
+      if (node.config.model && !node.config.providerId) {
+        const modelStr = String(node.config.model);
+        // 解析复合键
+        const sepIdx = modelStr.indexOf('::');
+        const pureModelId = sepIdx >= 0 ? modelStr.slice(sepIdx + 2) : modelStr;
+        const existingProviderId = sepIdx >= 0 ? modelStr.slice(0, sepIdx) : '';
+        if (!existingProviderId) {
+          const provider = await findProviderForModel(pureModelId);
+          if (provider) {
+            node.config.providerId = provider.id;
+            console.log(`[workflow-execute] 自动注入 providerId=${provider.id} for model=${pureModelId}`);
+          }
+        } else {
+          node.config.providerId = existingProviderId;
+          node.config.model = pureModelId;
+        }
+      }
+
       // 构建执行请求
       if (node.type === 'ai-generate') {
         console.log('[workflow-execute] ai-generate inputs:', JSON.stringify(inputs));
@@ -332,21 +351,32 @@ async function executeWorkflow(
               if (dsReq) {
                 try {
                   const dsModelName = String(dsInputs.model || dsNode.config.model || '');
+                  const dsConfigProviderId = dsNode.config.providerId as string | undefined;
                   let dsApiKey = '';
                   let dsBaseUrl = '';
-                  if (dsModelName) {
+                  // 1. 优先使用节点config中的providerId
+                  if (dsConfigProviderId) {
+                    const provider = await findProviderById(dsConfigProviderId);
+                    if (provider) {
+                      dsApiKey = provider.apiKey;
+                      dsBaseUrl = provider.baseUrl;
+                    }
+                  }
+                  // 2. 按模型名称查找
+                  if (!dsApiKey && dsModelName) {
                     const provider = await findProviderForModel(dsModelName);
                     if (provider) {
                       dsApiKey = provider.apiKey;
                       dsBaseUrl = provider.baseUrl;
                     }
                   }
+                  // 3. 按功能类型查找
                   if (!dsApiKey || !dsBaseUrl) {
                     const feature = getFeatureForNodeType(dsNode.type as NodeType);
                     const anyProvider = await findProviderForFeature(feature);
                     if (anyProvider) {
-                      dsApiKey = anyProvider.apiKey;
-                      dsBaseUrl = anyProvider.baseUrl;
+                      dsApiKey = dsApiKey || anyProvider.apiKey;
+                      dsBaseUrl = dsBaseUrl || anyProvider.baseUrl;
                     }
                   }
                   // 内部API走本地fetch，外部API走完整URL
@@ -389,12 +419,23 @@ async function executeWorkflow(
         continue;
       }
 
-      // 查找API密钥 (P0: 按节点类型智能匹配功能)
+      // 查找API密钥 (P0: 优先使用providerId，按节点类型智能匹配功能)
       const modelName = String(inputs.model || node.config.model || '');
+      const configProviderId = node.config.providerId as string | undefined;
       let apiKey = '';
       let baseUrl = '';
 
-      if (modelName) {
+      // 1. 优先使用节点config中的providerId
+      if (configProviderId) {
+        const provider = await findProviderById(configProviderId);
+        if (provider) {
+          apiKey = provider.apiKey;
+          baseUrl = provider.baseUrl;
+        }
+      }
+
+      // 2. 按模型名称查找
+      if (!apiKey && modelName) {
         const provider = await findProviderForModel(modelName);
         if (provider) {
           apiKey = provider.apiKey;
@@ -402,7 +443,7 @@ async function executeWorkflow(
         }
       }
 
-      // 如果没找到对应模型的提供商，按功能类型查找
+      // 3. 如果没找到对应模型的提供商，按功能类型查找
       if (!apiKey) {
         const feature = getFeatureForNodeType(node.type as NodeType);
         const provider = await findProviderForFeature(feature);
@@ -554,12 +595,14 @@ async function executeAsyncTask(
 ): Promise<ExecutionResult> {
   const start = Date.now();
 
-  // 提交任务
+  // 提交任务（/api/generate 在 direct 模式下可能同步等待数分钟，需要足够长的超时）
+  const isGenerateEndpoint = submitUrl.includes('/api/generate') || submitUrl.includes('/api/edit') || submitUrl.includes('/api/image-edit');
+  const submitTimeoutMs = isGenerateEndpoint ? 600000 : 30000; // 图像生成/编辑类接口10分钟，其他30秒
   const submitRes = await fetch(submitUrl, {
     ...fetchOptions,
     method: 'POST',
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(30000),
+    signal: AbortSignal.timeout(submitTimeoutMs),
   });
 
   const submitData = await submitRes.json();
@@ -604,7 +647,7 @@ async function executeAsyncTask(
         const pollRes = await fetch(`http://localhost:${port}/api/poll-task`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ taskId: tid, model: body.model }),
+          body: JSON.stringify({ taskId: tid, model: body.model, providerId: body.providerId }),
           signal: AbortSignal.timeout(10000),
         });
         const pollData = await pollRes.json();
