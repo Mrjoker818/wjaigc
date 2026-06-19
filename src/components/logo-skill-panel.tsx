@@ -230,25 +230,51 @@ export default function LogoSkillPanel({
       ]);
       if (imgRes.ok) {
         const data = await imgRes.json();
-        const models = (data.models || []).map((m: Record<string, unknown>) => ({
-          id: m.modelId as string || m.id as string,
-          name: (m.modelName as string) || (m.modelId as string) || (m.id as string),
-          providerId: m.providerId as string || '',
-          providerName: m.providerName as string || '',
-        }));
+        // 构建 providerId → providerName 映射
+        const providerMap = new Map<string, string>();
+        if (data.providers && Array.isArray(data.providers)) {
+          for (const p of data.providers) {
+            providerMap.set(p.id, p.name || p.displayName || '');
+          }
+        }
+        const models = (data.models || []).map((m: Record<string, unknown>) => {
+          const pid = (m.providerId as string) || '';
+          const modelId = (m.id as string) || (m.modelId as string) || '';
+          return {
+            id: modelId,
+            name: (m.apiDisplayName as string) || (m.name as string) || (m.modelName as string) || modelId,
+            providerId: pid,
+            providerName: providerMap.get(pid) || pid || '',
+          };
+        });
         setImageModels(models);
-        if (models.length > 0) setSelectedImageModel(models[0].id);
+        if (models.length > 0) {
+          // 使用复合键 providerId::modelId 区分不同提供商的同名模型
+          setSelectedImageModel(`${models[0].providerId}::${models[0].id}`);
+        }
       }
       if (chatRes.ok) {
         const data = await chatRes.json();
-        const models = (data.models || []).map((m: Record<string, unknown>) => ({
-          id: m.modelId as string || m.id as string,
-          name: (m.modelName as string) || (m.modelId as string) || (m.id as string),
-          providerId: m.providerId as string || '',
-          providerName: m.providerName as string || '',
-        }));
+        const providerMap = new Map<string, string>();
+        if (data.providers && Array.isArray(data.providers)) {
+          for (const p of data.providers) {
+            providerMap.set(p.id, p.name || p.displayName || '');
+          }
+        }
+        const models = (data.models || []).map((m: Record<string, unknown>) => {
+          const pid = (m.providerId as string) || '';
+          const modelId = (m.id as string) || (m.modelId as string) || '';
+          return {
+            id: modelId,
+            name: (m.apiDisplayName as string) || (m.name as string) || (m.modelName as string) || modelId,
+            providerId: pid,
+            providerName: providerMap.get(pid) || pid || '',
+          };
+        });
         setLlmModels(models);
-        if (models.length > 0) setSelectedLlmModel(models[0].id);
+        if (models.length > 0) {
+          setSelectedLlmModel(`${models[0].providerId}::${models[0].id}`);
+        }
       }
     } catch { /* ignore */ }
   }
@@ -262,6 +288,7 @@ export default function LogoSkillPanel({
     setIsGeneratingDirection(true);
     setError('');
     try {
+      const { modelId: llmModel, providerId: llmProviderId } = parseCompositeKey(selectedLlmModel);
       const res = await fetch('/api/logo-skill', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -276,7 +303,8 @@ export default function LogoSkillPanel({
           outputLayout,
           targetPlatform,
           englishName: englishName.trim() || undefined,
-          llmModel: selectedLlmModel || undefined,
+          llmModel: llmModel || undefined,
+          llmProviderId: llmProviderId || undefined,
         }),
       });
       const data = await res.json();
@@ -301,6 +329,7 @@ export default function LogoSkillPanel({
     setIsGeneratingDirection(true);
     setError('');
     try {
+      const { modelId: llmModel, providerId: llmProviderId } = parseCompositeKey(selectedLlmModel);
       const res = await fetch('/api/logo-skill', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -316,7 +345,8 @@ export default function LogoSkillPanel({
           targetPlatform,
           englishName: englishName.trim() || undefined,
           revisionNotes: revisionNotes.trim(),
-          llmModel: selectedLlmModel || undefined,
+          llmModel: llmModel || undefined,
+          llmProviderId: llmProviderId || undefined,
         }),
       });
       const data = await res.json();
@@ -346,13 +376,15 @@ export default function LogoSkillPanel({
     setTaskId(null);
     setStep('generate');
     try {
+      const { modelId: imgModel, providerId: imgProviderId } = parseCompositeKey(selectedImageModel);
       const res = await fetch('/api/logo-skill', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'generate-image',
           prompt: bestPrompt,
-          imageModel: selectedImageModel || undefined,
+          imageModel: imgModel || undefined,
+          imageProviderId: imgProviderId || undefined,
           size: '1024x1024',
           n: 1,
         }),
@@ -436,10 +468,9 @@ export default function LogoSkillPanel({
     if (selectedImageUrl && onAddImages) {
       const meta: { modelName?: string; apiProvider?: string } = {};
       if (selectedImageModel) {
-        const pureModelId = selectedImageModel.includes('::') ? selectedImageModel.split('::').pop()! : selectedImageModel;
-        meta.modelName = pureModelId;
-        const provider = imageModels.find(m => m.id === selectedImageModel);
-        if (provider?.providerId) meta.apiProvider = provider.providerId;
+        const { modelId, providerId } = parseCompositeKey(selectedImageModel);
+        meta.modelName = modelId;
+        if (providerId) meta.apiProvider = providerId;
       }
       onAddImages([selectedImageUrl], meta);
     }
@@ -516,9 +547,19 @@ export default function LogoSkillPanel({
     return grouped;
   }
 
+  // ─── 从复合键解析 modelId 和 providerId ────────────────────────
+  function parseCompositeKey(key: string): { modelId: string; providerId: string } {
+    if (key.includes('::')) {
+      const [pid, ...rest] = key.split('::');
+      return { providerId: pid, modelId: rest.join('::') };
+    }
+    return { modelId: key, providerId: '' };
+  }
+
   // ─── 获取当前选中模型的提供商信息 ────────────────────────────
-  function getSelectedModelInfo(models: ImageModel[], selectedId: string): ImageModel | undefined {
-    return models.find(m => m.id === selectedId);
+  function getSelectedModelInfo(models: ImageModel[], compositeKey: string): ImageModel | undefined {
+    const { modelId, providerId } = parseCompositeKey(compositeKey);
+    return models.find(m => m.id === modelId && m.providerId === providerId);
   }
 
   return (
@@ -772,11 +813,14 @@ export default function LogoSkillPanel({
                 >
                   {Object.entries(groupModelsByProvider(llmModels)).map(([providerName, models]) => (
                     <optgroup key={providerName} label={providerName}>
-                      {models.map(m => (
-                        <option key={m.id} value={m.id} className={isMonochrome ? '' : 'bg-[#1a1a1a] text-white'}>
-                          {m.name}
-                        </option>
-                      ))}
+                      {models.map(m => {
+                        const compositeKey = `${m.providerId}::${m.id}`;
+                        return (
+                          <option key={compositeKey} value={compositeKey} className={isMonochrome ? '' : 'bg-[#1a1a1a] text-white'}>
+                            {m.name}
+                          </option>
+                        );
+                      })}
                     </optgroup>
                   ))}
                 </select>
@@ -1052,11 +1096,14 @@ export default function LogoSkillPanel({
                 >
                   {Object.entries(groupModelsByProvider(imageModels)).map(([providerName, models]) => (
                     <optgroup key={providerName} label={providerName}>
-                      {models.map(m => (
-                        <option key={m.id} value={m.id} className={isMonochrome ? '' : 'bg-[#1a1a1a] text-white'}>
-                          {m.name}
-                        </option>
-                      ))}
+                      {models.map(m => {
+                        const compositeKey = `${m.providerId}::${m.id}`;
+                        return (
+                          <option key={compositeKey} value={compositeKey} className={isMonochrome ? '' : 'bg-[#1a1a1a] text-white'}>
+                            {m.name}
+                          </option>
+                        );
+                      })}
                     </optgroup>
                   ))}
                 </select>
