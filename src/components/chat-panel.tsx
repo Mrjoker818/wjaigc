@@ -3446,10 +3446,21 @@ IP角色设计规范：
       }
     });
 
+    // ★ 如果有激活的 Skill 且是首轮对话，在用户消息前附加技能上下文
+    let finalInput = trimmedInput;
+    if (activeSkill && messages.length === 0) {
+      const paramParts = activeSkill.paramSlots
+        ?.filter(p => skillParamValues[p.name])
+        .map(p => `${p.label}: ${skillParamValues[p.name]}`)
+        .filter(Boolean);
+      const paramStr = paramParts && paramParts.length > 0 ? `\n参数：${paramParts.join('、')}` : '';
+      finalInput = `[使用技能「${activeSkill.name}」]${activeSkill.description ? ` ${activeSkill.description}` : ''}${paramStr}\n\n${trimmedInput}`;
+    }
+
     const userMessage: Message = {
       id: `user-${Date.now()}`,
       role: 'user',
-      content: trimmedInput,
+      content: finalInput,
       timestamp: Date.now(),
       imageAnchors: imageAnchors.length > 0 ? imageAnchors : undefined,
     };
@@ -4379,7 +4390,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       setIsLoading(false);
       abortControllerRef.current = null;
     }
-  }, [input, isLoading, messages, model, systemPrompt, isThinkingMode, saveSession, pendingImages, allAgents, activeMentions, brandDna, tuneContextString, activeSkill, onAddImages]);
+  }, [input, isLoading, messages, model, systemPrompt, isThinkingMode, saveSession, pendingImages, allAgents, activeMentions, brandDna, tuneContextString, activeSkill, skillParamValues, onAddImages]);
 
   // Lovart 风格 Skill 调用：点击 Skill 直接创建对话并自动发送，AI 按 Skill 方法论引导用户
   const handleUseSkill = useCallback((skill: ChatSkill) => {
@@ -4415,12 +4426,16 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
     setMessages([]);
     setCurrentSessionId(`session-${Date.now()}`);
 
-    // 6. 直接发送触发消息，包含技能描述让AI立即理解上下文
-    const desc = skill.description ? `：${skill.description}` : '';
-    const triggerText = `使用「${skill.name}」技能${desc}。请分析我的需求并引导我完成设计。`;
+    // 6. 不自动发送，而是设置输入框占位提示，等待用户描述需求
     setInput('');
-    handleSend(triggerText, { systemPromptOverride: skillSystemPrompt });
-  }, [chatSkills, saveSkills, allAgents, handleSend]);
+
+    // 7. 初始化参数默认值
+    const defaultParams: Record<string, string> = {};
+    skill.paramSlots?.forEach(p => {
+      if (p.defaultValue) defaultParams[p.name] = p.defaultValue;
+    });
+    setSkillParamValues(defaultParams);
+  }, [chatSkills, saveSkills, allAgents]);
 
   // 提示词大师功能 - Agent智能体化
   const handleOptimizePrompt = useCallback(async () => {
@@ -5158,6 +5173,43 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                   );
                 }
                 return (
+                  // ★ Skill 激活状态：显示技能信息，等待用户输入需求
+                  activeSkill ? (
+                    <div className="flex flex-col items-center">
+                      <div className={`w-14 h-14 rounded-2xl mb-3 flex items-center justify-center text-2xl ${
+                        isGold ? 'bg-gradient-to-br from-gold/20 to-gold-dark/10 border border-gold/20' : 'bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-100'
+                      }`}>
+                        {{image: '🖼', design: '🎨', brand: '🏢', storyboard: '🎬', editing: '✏️', custom: '⚡'}[activeSkill.category as 'image'|'design'|'brand'|'storyboard'|'editing'|'custom'] || '⚡'}
+                      </div>
+                      <h3 className={`text-base font-medium mb-1 ${themeClasses.text}`}>{activeSkill.name}</h3>
+                      {activeSkill.description && (
+                        <p className={`text-xs mb-3 max-w-[220px] ${themeClasses.textMuted}`}>{activeSkill.description}</p>
+                      )}
+                      {activeSkill.paramSlots && activeSkill.paramSlots.length > 0 && (
+                        <div className="w-full max-w-[240px] space-y-2 mb-3">
+                          {activeSkill.paramSlots.map((slot) => (
+                            <div key={slot.name} className="text-left">
+                              <label className={`text-[10px] font-medium ${themeClasses.textMuted} mb-0.5 block`}>{slot.label}</label>
+                              <input
+                                type="text"
+                                value={skillParamValues[slot.name] || ''}
+                                placeholder={slot.placeholder || ''}
+                                onChange={(e) => setSkillParamValues(prev => ({ ...prev, [slot.name]: e.target.value }))}
+                                className={`w-full text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${
+                                  isGold
+                                    ? 'bg-white/[0.04] border-white/[0.08] text-white placeholder:text-white/20 focus:border-gold/40 focus:outline-none'
+                                    : 'bg-white border-gray-200 text-gray-800 placeholder:text-gray-400 focus:border-blue-300 focus:outline-none'
+                                }`}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <div className={`text-xs ${themeClasses.textMuted} opacity-60`}>
+                        在下方输入你的需求开始
+                      </div>
+                    </div>
+                  ) : (
                   <>
                     <div className={`w-16 h-16 rounded-2xl ${isGold ? 'bg-gold/10 border border-gold/20' : 'bg-gray-100 border border-gray-200'} flex items-center justify-center mb-3`}>
                       <Bot size={32} className={isGold ? 'text-gold' : 'text-gray-400'} />
@@ -5169,6 +5221,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                       <p className="flex items-center gap-1.5 justify-center"><ImageIcon size={14} /> AI自动分析并生成关键词</p>
                     </div>
                   </>
+                  )
                 );
               })()}
             </div>
@@ -5917,7 +5970,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               ref={textareaRef}
               value={input}
               onChange={handleInputChange}
-              placeholder={(() => { const imgIds = new Set<string>(); activeMentions.forEach(m => { if (m.type === 'canvas-image' && m.id) imgIds.add(m.id); }); pendingImages.forEach(p => imgIds.add(p.id)); const imgCount = imgIds.size; return imgCount > 0 ? `描述你想对这${imgCount}张图片做什么，如"将图片#1的人物和图片#2合并"...` : "输入消息，@ 引用图片/品牌，/ 使用模板..."; })()}
+              placeholder={(() => { if (activeSkill) { const skillName = activeSkill.name; return `描述你的需求，如"帮我生成一个科技公司的${skillName}"...`; } const imgIds = new Set<string>(); activeMentions.forEach(m => { if (m.type === 'canvas-image' && m.id) imgIds.add(m.id); }); pendingImages.forEach(p => imgIds.add(p.id)); const imgCount = imgIds.size; return imgCount > 0 ? `描述你想对这${imgCount}张图片做什么，如"将图片#1的人物和图片#2合并"...` : "输入消息，@ 引用图片/品牌，/ 使用模板..."; })()}
               className={`w-full resize-none min-h-[60px] max-h-[200px] border-0 bg-transparent px-4 py-3 text-[14px] leading-relaxed focus:outline-none focus:ring-0 ${themeClasses.text} placeholder:${isGold ? 'text-gold-muted/40' : 'text-gray-400'}`}
               onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
                 // Handle template popup navigation (priority over mention picker)
