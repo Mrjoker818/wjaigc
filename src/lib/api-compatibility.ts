@@ -1365,9 +1365,11 @@ export function adjustRequestForProfile(
     hasImage?: boolean;
     /** Whether this is an edits endpoint request (vs generations) */
     isEditEndpoint?: boolean;
+    /** Force using /images/generations endpoint even when hasImage is true (for providers that don't support /images/edits) */
+    forceGenerationsEndpoint?: boolean;
   } = {},
 ): { body: Record<string, unknown>; endpoint: ImageEndpoint } {
-  const { hasImage = false, isEditEndpoint = false } = options;
+  const { hasImage = false, isEditEndpoint = false, forceGenerationsEndpoint = false } = options;
   // ★ 防御空 body 导致后续解构崩溃
   const body = requestBody ? { ...requestBody } : {};
 
@@ -1395,8 +1397,12 @@ export function adjustRequestForProfile(
   //   - PROFILE_AUTO / PROFILE_OPENAI: editEndpoint = /images/edits  → image field preserved, AI must process it
   //   - PROFILE_APIMART:             editEndpoint = /images/generations → image/mask/strength preserved for img2img
   // If /images/edits is rejected by the provider at runtime, callers auto-fallback to /images/generations.
+  // forceGenerationsEndpoint: when true, skip /images/edits and go directly to /images/generations
+  // (useful when the provider's /images/edits is unavailable or times out)
   let endpoint: ImageEndpoint;
-  if (hasImage || isEditEndpoint) {
+  if (forceGenerationsEndpoint) {
+    endpoint = '/images/generations';
+  } else if (hasImage || isEditEndpoint) {
     endpoint = profile.editEndpoint;
   } else {
     endpoint = profile.defaultEndpoint;

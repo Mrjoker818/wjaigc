@@ -836,7 +836,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
               'Content-Length': String(formBuffer.length),
             },
             body: formBuffer as unknown as BodyInit,
-            signal: AbortSignal.timeout(120000), // ★ 120秒超时（图像编辑耗时长）
+            signal: AbortSignal.timeout(15000), // ★ 15秒超时（images/edits端点多数代理不支持，快速跳过走images/generations）
           },
         );
 
@@ -872,7 +872,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
                     'Content-Length': String(extraFormBuffer.length),
                   },
                   body: extraFormBuffer as unknown as BodyInit,
-                  signal: AbortSignal.timeout(120000),
+                  signal: AbortSignal.timeout(15000),
                 })
                 .then(async r => {
                   if (!r.ok) return null;
@@ -921,10 +921,14 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
 
     // 路径B: images/generations 端点
     // - 有mask时：直接走此路径（mask作为视觉参考图+prompt语义描述，通用不针对供应商）
-    // - 无mask时：images/edit 失败后 fallback 到此路径
+    // - 无mask+images/edit成功时：不会到达这里（已 return）
+    // - 无mask+images/edit失败时：必须走此路径 fallback
     const compatProfile = resolveCompatProfile(imageProvider);
-    // ★ 有mask时强制走images/generations路径，或editEndpoint=/images/generations时走此路径
-    const useGenerationsPath = skipImagesEdit || compatProfile.editEndpoint === '/images/generations';
+    // ★ 关键修复：images/edits 失败后也必须走 images/generations
+    // 如果代码执行到这里且 !skipImagesEdit，说明 images/edits 已经失败（成功已 return）
+    // 之前只判断 skipImagesEdit || editEndpoint==='/images/generations'，
+    // 导致 images/edits 失败后直接跳到 chat/completions（路径C），绕过了 images/generations
+    const useGenerationsPath = true; // ★ 始终尝试 images/generations
     if (useGenerationsPath) {
       try {
         console.info(`[edit] taskId=${taskId} 使用images/generations路径, 原因: ${skipImagesEdit ? '有mask走视觉参考' : 'editEndpoint=/images/generations'}, model=${model}`);
@@ -942,22 +946,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
           } catch { /* 压缩失败就用原图 */ }
         }
 
-        // 构建 images/generations 请求体
-        const genRequestBody: Record<string, unknown> = {
-          model,
-          prompt: editInstruction,
-          size: size || '1024x1024',
-          quality: quality || 'standard',
-          n: Math.min(count, 4),
-        };
-
-        // 使用 adjustRequestForProfile 自动调整请求体（size格式转换等）
-        const { body: adjustedBody, endpoint: resolvedEndpoint } = adjustRequestForProfile(genRequestBody, compatProfile, {
-          hasImage: true,
-          isEditEndpoint: true,
-        });
-
-        // 添加参考图：原图 + 蒙版参考图（如有）+ 用户参考图都作为 image_urls
+        // 先构建 image_urls 数组（需要在 adjustRequestForProfile 之前，这样兼容层才能转换为 images[] 格式）
         const imageUrls: string[] = [imageUrlForApi];
         // ★ 蒙版参考图：红色高亮标注编辑区域，让AI理解蒙版位置
         if (maskImageUrl) {
@@ -986,7 +975,23 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
         if (maskBuffer) {
           imageUrls.push(`data:image/png;base64,${maskBuffer.toString('base64')}`);
         }
-        adjustedBody.image_urls = imageUrls;
+
+        // 构建 images/generations 请求体（image_urls 在此放入，兼容层才能正确转换）
+        const genRequestBody: Record<string, unknown> = {
+          model,
+          prompt: editInstruction,
+          size: size || '1024x1024',
+          quality: quality || 'standard',
+          n: Math.min(count, 4),
+          image_urls: imageUrls,
+        };
+
+        // 使用 adjustRequestForProfile 自动调整请求体（images[] 格式转换、size 格式转换等）
+        const { body: adjustedBody, endpoint: resolvedEndpoint } = adjustRequestForProfile(genRequestBody, compatProfile, {
+          hasImage: true,  // 有参考图，让兼容层正确转换为 images[] 格式
+          isEditEndpoint: false,
+          forceGenerationsEndpoint: true,  // 强制使用 /images/generations 端点
+        });
 
         // 增强 prompt：确保 AI 将参考图作为编辑基础
         if (imageUrls.length > 0) {
@@ -996,6 +1001,8 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
           }
           adjustedBody.prompt = `${promptPrefix}${String(adjustedBody.prompt || '')}`;
         }
+
+        console.info(`[edit] taskId=${taskId} images/generations 请求: endpoint=${resolvedEndpoint}, body keys=${Object.keys(adjustedBody).join(',')}, has_images=${!!adjustedBody.images}, has_image_urls=${!!adjustedBody.image_urls}, has_image=${!!adjustedBody.image}, prompt_len=${String(adjustedBody.prompt||'').length}`);
 
         const genResponse = await fetchWithV1Retry(
           effectiveBaseUrl,
@@ -1007,7 +1014,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
               'Content-Type': 'application/json',
             },
             body: JSON.stringify(adjustedBody),
-            signal: AbortSignal.timeout(120000), // ★ 120秒超时（图像编辑耗时长）
+            signal: AbortSignal.timeout(600000), // ★ 10分钟超时（与generate一致，带参考图的编辑耗时长）
           },
         );
 
@@ -1256,25 +1263,20 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
       // ★ 清理常见 API 错误信息，提供更友好的中文提示
       const translatedMsg = translateApiError(errorMsg);
 
-      // ★ 渠道不可用 / 模型未找到 — 提供更明确提示
-      if (errorMsg.includes('No available channel') || errorMsg.includes('not configured') || errorMsg.includes('model_not_found') || errorMsg.includes('model not found')) {
-        failTask(taskId, `模型 ${model} 在当前渠道暂不可用，请稍后重试或更换模型`);
+      // ★ 渠道不可用 / 模型未找到 — 直接失败，提示用户检查配置
+      if (errorMsg.includes('No available channel') || errorMsg.includes('not configured') || errorMsg.includes('model_not_found') || errorMsg.includes('model not found') || errorMsg.includes('failover groups exhausted') || errorMsg.includes('可用渠道失败') || errorMsg.includes('No healthy upstream') || errorMsg.includes('channel not found')) {
+        failTask(taskId, `当前 API 提供商渠道不可用: ${translatedMsg}。请尝试更换提供商或稍后重试`);
         return;
-      }
-
-      if (chatResponse.status === 401 || chatResponse.status === 403) {
+      } else if (chatResponse.status === 401 || chatResponse.status === 403) {
         failTask(taskId, `API Key 无效或权限不足: ${translatedMsg}`);
         return;
-      }
-      if (chatResponse.status === 429) {
+      } else if (chatResponse.status === 429) {
         failTask(taskId, '请求频率超限，请稍后再试');
         return;
-      }
-      if (chatResponse.status === 404) {
+      } else if (chatResponse.status === 404) {
         failTask(taskId, `模型 ${model} 在当前 API 端点不可用，请检查模型名称或更换 API 提供商`);
         return;
-      }
-      if (chatResponse.status === 400) {
+      } else if (chatResponse.status === 400) {
         // 400 可能是模型不支持图片输入，尝试降级到 /images/generations
         if (isImageEditModel(model)) {
           try {
@@ -1319,8 +1321,14 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
         return;
       }
 
-      failTask(taskId, translatedMsg);
-      return;
+      // ★ 5xx 服务端错误 — 直接失败
+      if (chatResponse.status >= 500) {
+        failTask(taskId, `API 服务端错误 (${chatResponse.status}): ${translatedMsg}。请尝试更换提供商或稍后重试`);
+        return;
+      } else {
+        failTask(taskId, translatedMsg);
+        return;
+      }
     }
 
     // 解析响应（兼容流式和非流式）
@@ -1354,18 +1362,18 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
     }
 
     if (!resultImageUrl) {
-      const chatChoices = (chatData as Record<string, unknown>).choices as Array<Record<string, unknown>> | undefined;
-      const textContent = chatChoices?.[0]?.message
-        ? ((chatChoices[0].message as Record<string, unknown>).content as string)
-        : undefined;
-      if (typeof textContent === 'string' && textContent.length > 0 && !textContent.includes('data:image')) {
-        failTask(taskId, '模型未返回编辑后的图片，仅返回了文本描述。请尝试更换模型或 API 提供商');
+        const chatChoices = (chatData as Record<string, unknown>).choices as Array<Record<string, unknown>> | undefined;
+        const textContent = chatChoices?.[0]?.message
+          ? ((chatChoices[0].message as Record<string, unknown>).content as string)
+          : undefined;
+        if (typeof textContent === 'string' && textContent.length > 0 && !textContent.includes('data:image')) {
+          failTask(taskId, '模型未返回编辑后的图片，仅返回了文本描述。请尝试更换模型或 API 提供商');
+          return;
+        }
+
+        failTask(taskId, '图片编辑失败，未返回有效结果。请检查 API 配置或稍后重试');
         return;
       }
-
-      failTask(taskId, '图片编辑失败，未返回有效结果');
-      return;
-    }
 
     // ★ count > 1 时，多次图像生成（并行调用，节省LLM开销）
     const images: Array<{ url: string; revisedPrompt: string }> = [{ url: resultImageUrl, revisedPrompt: effectivePrompt }];
