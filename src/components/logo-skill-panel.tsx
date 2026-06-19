@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import ReactDOM from 'react-dom';
 import {
   PenTool, X, Loader2, Wand2, Star, Eye, ArrowRight,
   Copy, Check, ChevronDown, ChevronRight, RotateCcw,
@@ -80,12 +81,59 @@ interface LogoSkillPanelProps {
 const PANEL_W = 780;
 
 const LOGO_TYPES = [
-  { value: 'brand', label: '品牌 Logo' },
-  { value: 'app-icon', label: 'App 图标' },
-  { value: 'emblem', label: '徽章/纹章' },
+  { value: 'brand', label: '品牌标' },
   { value: 'wordmark', label: '文字标' },
-  { value: 'pictogram', label: '图形符号' },
+  { value: 'lettermark', label: '字母标' },
+  { value: 'pictogram', label: '图形标' },
+  { value: 'abstract', label: '抽象标' },
+  { value: 'mascot', label: '吉祥物' },
+  { value: 'emblem', label: '徽章纹章' },
+  { value: 'combination', label: '组合标' },
+  { value: 'app-icon', label: 'App 图标' },
+  { value: 'dynamic', label: '动态标' },
 ];
+
+/* ========== Portal 下拉菜单组件（避免 overflow 裁剪）========== */
+function ModelDropdownPortal({
+  buttonRef,
+  isMonochrome,
+  children,
+}: {
+  buttonRef?: React.RefObject<HTMLButtonElement | null>;
+  isMonochrome: boolean;
+  children: React.ReactNode;
+}) {
+  const [style, setStyle] = useState<React.CSSProperties>({});
+
+  useEffect(() => {
+    if (buttonRef?.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const dropH = 240;
+      const top = spaceBelow < dropH
+        ? rect.top - dropH - 4
+        : rect.bottom + 4;
+      setStyle({
+        position: 'fixed',
+        top,
+        left: rect.left,
+        width: rect.width,
+        zIndex: 9999,
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [buttonRef]);
+
+  return ReactDOM.createPortal(
+    <div
+      style={style}
+      className={`max-h-60 overflow-y-auto rounded-xl border shadow-2xl ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-white/10'}`}
+    >
+      {children}
+    </div>,
+    document.body,
+  );
+}
 
 const OUTPUT_LAYOUTS = [
   { value: 'brand-system-board', label: '品牌板', icon: Layout },
@@ -188,6 +236,8 @@ export default function LogoSkillPanel({
   const [selectedLlmModel, setSelectedLlmModel] = useState('');
   const [showLlmDropdown, setShowLlmDropdown] = useState(false);
   const [showImageDropdown, setShowImageDropdown] = useState(false);
+  const llmBtnRef = useRef<HTMLButtonElement>(null);
+  const imgBtnRef = useRef<HTMLButtonElement>(null);
 
   // 展开状态
   const [expandedPrompt, setExpandedPrompt] = useState<string | null>(null);
@@ -580,11 +630,14 @@ export default function LogoSkillPanel({
     onToggle: () => void,
     icon: React.ReactNode,
     placeholder: string,
+    buttonRef?: React.RefObject<HTMLButtonElement | null>,
   ) {
     const selectedInfo = getSelectedModelInfo(models, selected);
+
     return (
       <div className="relative">
         <button
+          ref={buttonRef}
           type="button"
           onClick={onToggle}
           className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border text-sm transition-colors ${inputBg} ${textPrimary} hover:brightness-110 focus:outline-none cursor-pointer`}
@@ -601,7 +654,10 @@ export default function LogoSkillPanel({
           <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${show ? 'rotate-180' : ''} ${isMonochrome ? 'text-gray-400' : 'text-gray-500'}`} />
         </button>
         {show && (
-          <div className={`absolute z-50 left-0 right-0 mt-1 max-h-60 overflow-y-auto rounded-xl border shadow-2xl ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-white/10'}`}>
+          <ModelDropdownPortal
+            buttonRef={buttonRef}
+            isMonochrome={isMonochrome}
+          >
             {Object.entries(groupModelsByProvider(models)).map(([providerName, pModels]) => (
               <div key={providerName}>
                 <div className={`px-4 py-2 text-[11px] font-bold uppercase tracking-wider sticky top-0 ${isMonochrome ? 'text-gray-400 bg-gray-50 border-b border-gray-100' : 'text-white/40 bg-[#1a1a1a] border-b border-white/5'}`}>
@@ -632,7 +688,7 @@ export default function LogoSkillPanel({
                 })}
               </div>
             ))}
-          </div>
+          </ModelDropdownPortal>
         )}
       </div>
     );
@@ -808,12 +864,12 @@ export default function LogoSkillPanel({
           {/* Logo 类型 — 3 列网格 */}
           <div>
             <label className={`block text-sm font-semibold mb-2.5 ${textPrimary}`}>Logo 类型</label>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-5 gap-1.5">
               {LOGO_TYPES.map(t => (
                 <button
                   key={t.value}
                   onClick={() => setLogoType(t.value)}
-                  className={`px-3 py-2.5 rounded-lg text-xs font-medium transition-all duration-200 cursor-pointer text-center ${
+                  className={`px-2 py-2 rounded-lg text-[11px] font-medium transition-all duration-200 cursor-pointer text-center ${
                     logoType === t.value
                       ? `${accentBg} text-white shadow-sm`
                       : isMonochrome
@@ -871,6 +927,7 @@ export default function LogoSkillPanel({
                   () => { setShowLlmDropdown(v => !v); setShowImageDropdown(false); },
                   <Cpu className="h-4 w-4 shrink-0 opacity-60" />,
                   '选择 LLM',
+                  llmBtnRef,
                 )
               )}
             </div>
@@ -886,6 +943,7 @@ export default function LogoSkillPanel({
                   () => { setShowImageDropdown(v => !v); setShowLlmDropdown(false); },
                   <ImageIcon className="h-4 w-4 shrink-0 opacity-60" />,
                   '选择图像模型',
+                  imgBtnRef,
                 )
               )}
             </div>
@@ -1153,6 +1211,7 @@ export default function LogoSkillPanel({
                     () => { setShowImageDropdown(v => !v); setShowLlmDropdown(false); },
                     <ImageIcon className="h-4 w-4 shrink-0 opacity-60" />,
                     '选择图像模型',
+                    imgBtnRef,
                   )
                 )}
               </div>
