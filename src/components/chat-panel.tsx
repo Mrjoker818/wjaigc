@@ -5542,52 +5542,6 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
 
         {/* Input - 精致设计 */}
         <div className={`px-3 py-4 border-t ${themeClasses.border} shrink-0 ${isGold ? 'bg-[#0d0d0d]/90' : 'bg-white'}`}>
-          {/* P2-12: Quick action chips - visible when input is empty and no images */}
-          {!input.trim() && pendingImages.length === 0 && !isLoading && (
-            <div className="flex items-center gap-1.5 mb-2 flex-wrap">
-              <button
-                type="button"
-                onClick={() => { setInput('@'); textareaRef.current?.focus(); }}
-                className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-colors ${isGold ? 'bg-white/[0.06] text-white/50 hover:bg-white/[0.1] hover:text-gold/80' : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'}`}
-              >
-                <AtSign size={10} /> 引用图片
-              </button>
-              <button
-                type="button"
-                onClick={() => { setInput('/'); textareaRef.current?.focus(); }}
-                className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-colors ${isGold ? 'bg-white/[0.06] text-white/50 hover:bg-white/[0.1] hover:text-gold/80' : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'}`}
-              >
-                <FileText size={10} /> 提示词模板
-              </button>
-              {canvasImages && canvasImages.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    // 添加最后一张画布图片为@图片引用
-                    const lastImg = canvasImages[canvasImages.length - 1];
-                    if (lastImg && !activeMentions.find(m => m.type === 'canvas-image' && m.id === lastImg.id)) {
-                      setActiveMentions(prev => [...prev, {
-                        type: 'canvas-image',
-                        id: lastImg.id,
-                        label: lastImg.prompt?.slice(0, 15) || '画布图片',
-                        imageUrl: lastImg.url,
-                        data: { url: lastImg.url },
-                      }]);
-                    }
-                    if (lastImg && !pendingImages.find(p => p.id === lastImg.id)) {
-                      setPendingImages(prev => [...prev, { id: lastImg.id, url: lastImg.url, name: lastImg.prompt?.slice(0, 20) || '画布图片' }]);
-                    }
-                    textareaRef.current?.focus();
-                  }}
-                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-colors ${isGold ? 'bg-white/[0.06] text-white/50 hover:bg-white/[0.1] hover:text-gold/80' : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'}`}
-                >
-                  <ImageIcon size={10} /> @图片
-                </button>
-              )}
-            </div>
-          )}
-
-
           {/* P2-1: Tune Mode Panel */}
           {showTunePanel && (
             <div className={`mb-1.5 p-2 rounded-lg text-xs space-y-2 ${isGold ? 'bg-white/[0.03] border border-white/[0.06]' : 'bg-gray-50 border border-gray-200'}`}>

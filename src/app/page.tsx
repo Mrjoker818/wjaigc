@@ -459,11 +459,33 @@ function CanvasApp() {
   const switchingProjectRef = useRef(false);
   // 服务器同步合并中标记：防止自动保存用旧闭包数据覆盖刚从服务器合并的新数据
   const serverSyncMergeRef = useRef(false);
+  // ★ 近期删除的图片 ID 集合：防止服务器同步把刚删除的图片恢复回来
+  const recentlyDeletedIdsRef = useRef<Set<string>>(new Set());
   // Keep a ref to latest images to avoid stale closure in setTimeout
   const latestImagesRef = useRef(images);
   latestImagesRef.current = images;
   const currentUserRef = useRef(currentUser);
   currentUserRef.current = currentUser;
+
+  // ★ 追踪图片删除：当 images 减少时，记录被删除的 ID，5 秒后自动清除
+  const prevImageIdsRef2 = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const currentIds = new Set(images.map(img => img.id));
+    const prevIds = prevImageIdsRef2.current;
+    // 找出被删除的 ID（上一轮有、这一轮没有的）
+    const deleted = new Set<string>();
+    prevIds.forEach(id => {
+      if (!currentIds.has(id)) deleted.add(id);
+    });
+    if (deleted.size > 0) {
+      deleted.forEach(id => recentlyDeletedIdsRef.current.add(id));
+      // 5 秒后清除（足够让自动保存完成并同步到服务器）
+      setTimeout(() => {
+        deleted.forEach(id => recentlyDeletedIdsRef.current.delete(id));
+      }, 5000);
+    }
+    prevImageIdsRef2.current = currentIds;
+  }, [images]);
   useEffect(() => {
     if (!currentProject) return;
     // 项目切换进行中时，跳过自动保存，避免旧闭包数据覆盖
@@ -748,15 +770,19 @@ function CanvasApp() {
               const validImages = latest.canvasImages.filter(
                 (img) => img.url || img.isProcessingPlaceholder
               );
-              // ★ 数据隔离：仅从当前项目已有的服务器图片 ID 集合中查找本地补充数据
+              // ★ 过滤近期删除的图片：防止服务器同步把刚删除的图片恢复回来
+              const afterDeletedFilter = validImages.filter(
+                (img) => !recentlyDeletedIdsRef.current.has(img.id)
+              );
+              // ★ 数据隔离：仅从过滤后的服务器图片 ID 集合中查找本地补充数据
               // 防止 latestImagesRef 中残留的前用户图片通过字段回填泄露到当前用户
-              const serverImgIdSet = new Set(latest.canvasImages.map(img => img.id));
+              const serverImgIdSet = new Set(afterDeletedFilter.map(img => img.id));
               const localImgMap = new Map<string, CanvasImage>();
               for (const li of latestImagesRef.current) {
                 // 仅纳入服务器也有的图片 ID，排除不属于当前项目的图片
                 if (li.id && serverImgIdSet.has(li.id)) localImgMap.set(li.id, li);
               }
-              const enrichedImages = validImages.map((img) => {
+              const enrichedImages = afterDeletedFilter.map((img) => {
                 const localImg = localImgMap.get(img.id);
                 const enriched = { ...img };
                 // 回填：历史数据 modelName 为空但 model 有值时，用 model 补充
