@@ -258,6 +258,8 @@ export async function executeToolCall(
     chatBaseUrl: string;
     origin: string;
     userId: string;
+    imageModel?: string;
+    imageProviderId?: string;
   }
 ): Promise<ToolCallResult> {
   switch (toolName) {
@@ -282,11 +284,19 @@ export async function executeToolCall(
   }
 }
 
-// ============ Tool Implementations ============
+// ============ Tool Context Type ============
+interface ToolContext {
+  chatApiKey: string;
+  chatBaseUrl: string;
+  origin: string;
+  userId: string;
+  imageModel?: string;
+  imageProviderId?: string;
+}
 
 async function executeGenerateImage(
   args: Record<string, unknown>,
-  context: { chatApiKey: string; chatBaseUrl: string; origin: string; userId: string }
+  context: ToolContext
 ): Promise<ToolCallResult> {
   try {
     const prompt = args.prompt as string;
@@ -296,12 +306,18 @@ async function executeGenerateImage(
     const count = 1;
     const negativePrompt = args.negative_prompt as string | undefined;
 
+    // 从 args 或 context 获取 model 和 providerId
+    const model = (args.model as string) || context.imageModel || '';
+    const providerId = (args.provider_id as string) || context.imageProviderId || '';
+
     // 使用统一的 /api/generate 接口，确保兼容性、异步轮询、URL持久化
     const generateRes = await fetch(`${context.origin || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`}/api/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         prompt: negativePrompt ? `${prompt} [negative: ${negativePrompt}]` : prompt,
+        model,
+        providerId,
         aspectRatio,
         quality,
         outputCount: count,
@@ -360,21 +376,25 @@ async function executeGenerateImage(
 
 async function executeEditImage(
   args: Record<string, unknown>,
-  context: { chatApiKey: string; chatBaseUrl: string; origin: string; userId: string }
+  context: ToolContext
 ): Promise<ToolCallResult> {
   try {
     const imageUrl = normalizeImageUrl(args.image_url as string, context.origin);
     const prompt = args.prompt as string;
     const size = parseInt(args.size as string, 10) || 1024;
+    const model = (args.model as string) || context.imageModel || '';
+    const providerId = (args.provider_id as string) || context.imageProviderId || '';
 
     // 调用语言修图 API
-    const res = await fetch(`${context.origin || 'http://localhost:5000'}/api/edit`, {
+    const res = await fetch(`${context.origin || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`}/api/edit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         image: imageUrl,
         prompt,
         size: `${size}x${size}`,
+        model,
+        providerId,
       }),
     });
 
@@ -412,7 +432,7 @@ async function executeEditImage(
 
 async function executeImg2Img(
   args: Record<string, unknown>,
-  context: { chatApiKey: string; chatBaseUrl: string; origin: string; userId: string }
+  context: ToolContext
 ): Promise<ToolCallResult> {
   try {
     const imageUrl = normalizeImageUrl(args.image_url as string, context.origin);
@@ -420,6 +440,8 @@ async function executeImg2Img(
     const strength = (args.strength as number) || 0.7;
     const referenceTypes = args.reference_types as string[] || ['style', 'composition'];
     const negativePrompt = args.negative_prompt as string | undefined;
+    const model = (args.model as string) || context.imageModel || '';
+    const providerId = (args.provider_id as string) || context.imageProviderId || '';
 
     // 构建图生图 prompt 前缀
     const refPrefixes: string[] = [];
@@ -432,21 +454,14 @@ async function executeImg2Img(
       ? `${refPrefixes.join(', ')}. ${prompt}${negativePrompt ? ` [negative: ${negativePrompt}]` : ''}`
       : `${prompt}${negativePrompt ? ` [negative: ${negativePrompt}]` : ''}`;
 
-    // 查找图像生成提供商
-    const { findProviderForModel: findImgProvider } = await import('@/lib/server-api-config');
-    const imgProvider = await findImgProvider('', 'image');
-    if (!imgProvider) {
-      return { success: false, error: '未配置图像生成模型', resultText: '错误：管理员尚未配置图像生成模型。' };
-    }
-
     // 调用 generate API 并传入参考图
-    const res = await fetch(`${context.origin || 'http://localhost:5000'}/api/generate`, {
+    const res = await fetch(`${context.origin || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`}/api/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         prompt: fullPrompt,
-        model: imgProvider.selectedModels?.[0],
-        providerId: imgProvider.id,
+        model,
+        providerId,
         referenceImages: [imageUrl],
         strength,
         aspectRatio: '1:1',
@@ -487,15 +502,20 @@ async function executeImg2Img(
 
 async function executeRemoveBg(
   args: Record<string, unknown>,
-  context: { chatApiKey: string; chatBaseUrl: string; origin: string; userId: string }
+  context: ToolContext
 ): Promise<ToolCallResult> {
   try {
     const imageUrl = normalizeImageUrl(args.image_url as string, context.origin);
 
-    const res = await fetch(`${context.origin || 'http://localhost:5000'}/api/image-edit`, {
+    const res = await fetch(`${context.origin || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`}/api/image-edit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'removebg', imageUrl }),
+      body: JSON.stringify({
+        action: 'removebg',
+        imageUrl,
+        model: context.imageModel || '',
+        providerId: context.imageProviderId || '',
+      }),
     });
 
     if (!res.ok) {
@@ -525,16 +545,22 @@ async function executeRemoveBg(
 
 async function executeUpscale(
   args: Record<string, unknown>,
-  context: { chatApiKey: string; chatBaseUrl: string; origin: string; userId: string }
+  context: ToolContext
 ): Promise<ToolCallResult> {
   try {
     const imageUrl = normalizeImageUrl(args.image_url as string, context.origin);
     const scale = parseInt(args.scale as string, 10) || 2;
 
-    const res = await fetch(`${context.origin || 'http://localhost:5000'}/api/image-edit`, {
+    const res = await fetch(`${context.origin || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`}/api/image-edit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'upscale', imageUrl, scale }),
+      body: JSON.stringify({
+        action: 'upscale',
+        imageUrl,
+        scale,
+        model: context.imageModel || '',
+        providerId: context.imageProviderId || '',
+      }),
     });
 
     if (!res.ok) {
@@ -564,7 +590,7 @@ async function executeUpscale(
 
 async function executeGenerateVideo(
   args: Record<string, unknown>,
-  context: { chatApiKey: string; chatBaseUrl: string; origin: string; userId: string }
+  context: ToolContext
 ): Promise<ToolCallResult> {
   try {
     const prompt = args.prompt as string;
@@ -572,7 +598,7 @@ async function executeGenerateVideo(
     const aspectRatio = (args.aspect_ratio as string) || '16:9';
     const duration = parseInt(args.duration as string, 10) || 5;
 
-    const res = await fetch(`${context.origin || 'http://localhost:5000'}/api/video/generate`, {
+    const res = await fetch(`${context.origin || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`}/api/video/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -617,7 +643,7 @@ async function executeGenerateVideo(
 
 async function executeAnalyzeImage(
   args: Record<string, unknown>,
-  context: { chatApiKey: string; chatBaseUrl: string; origin: string; userId: string }
+  context: ToolContext
 ): Promise<ToolCallResult> {
   try {
     const imageUrl = normalizeImageUrl(args.image_url as string, context.origin);
@@ -675,7 +701,7 @@ async function executeAnalyzeImage(
 
 async function executeExtendCanvas(
   args: Record<string, unknown>,
-  context: { chatApiKey: string; chatBaseUrl: string; origin: string; userId: string }
+  context: ToolContext
 ): Promise<ToolCallResult> {
   try {
     const imageUrl = normalizeImageUrl(args.image_url as string, context.origin);
@@ -683,10 +709,18 @@ async function executeExtendCanvas(
     const scale = parseInt(args.scale as string, 10) || 2;
     const prompt = args.prompt as string | undefined;
 
-    const res = await fetch(`${context.origin || 'http://localhost:5000'}/api/image-edit`, {
+    const res = await fetch(`${context.origin || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`}/api/image-edit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'extend', imageUrl, direction, scale, prompt }),
+      body: JSON.stringify({
+        action: 'extend',
+        imageUrl,
+        direction,
+        scale,
+        prompt,
+        model: context.imageModel || '',
+        providerId: context.imageProviderId || '',
+      }),
     });
 
     if (!res.ok) {

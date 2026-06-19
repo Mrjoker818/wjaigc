@@ -1336,6 +1336,7 @@ export async function POST(request: NextRequest) {
       model: usedModelId,
       modelName: usedModelName,
       providerName: usedProviderName,
+      providerId: usedProviderId,
       apiBaseUrl: usedApiBaseUrl,
       estimatedTime: modelConfig.estimatedTime,
       prompt: enhancedPrompt,

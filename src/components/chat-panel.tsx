@@ -3762,6 +3762,8 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
           providerId,
           canvasSummary,
           intentLevel,  // P2-9: 多级意图澄清
+          imageModel,  // 前端当前选择的图像模型
+          imageProviderId: imageModelProviderId,  // 前端当前选择的图像提供商ID
         }),
       });
 
