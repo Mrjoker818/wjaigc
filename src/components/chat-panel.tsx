@@ -3893,75 +3893,13 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                   }
                   // 异步任务轮询：当工具返回taskIds但没有imageUrls时，后台轮询等待结果
                   if (toolPendingTaskIds.length > 0 && toolGeneratedImages.length === 0) {
+                    // 只设置生成中状态，轮询统一由流结束后的路径B处理，避免重复添加图片
                     const imageModelInfo = getCurrentImageModelInfo(imageModel, imageModelProviderId);
                     setMessages(prev => prev.map(msg =>
                       msg.id === assistantMessageId
-                        ? { ...msg, isGeneratingImage: true, generateModelName: imageModelInfo.model || '图像生成', generateProviderId: imageModelInfo.providerId, generateProgress: 10 }
+                        ? { ...msg, isGeneratingImage: true, generateModelName: imageModelInfo.model || '图像生成', generateProviderId: imageModelInfo.providerId, generateProgress: 10, generateImageCount: toolPendingTaskIds.length }
                         : msg
                     ));
-                    // 后台轮询异步任务
-                    (async () => {
-                      try {
-                        const resultUrls: string[] = [];
-                        for (const taskInfo of toolPendingTaskIds) {
-                          const tid = taskInfo.taskId;
-                          const tModel = taskInfo.model || imageModelInfo.model;
-                          const tProviderId = taskInfo.providerId || imageModelInfo.providerId;
-                          for (let i = 0; i < 90; i++) {
-                            const interval = i <= 3 ? 1000 : i <= 10 ? 1500 : 2000;
-                            await new Promise(r => setTimeout(r, interval));
-                            const progress = Math.min(90, 10 + Math.round((i / 90) * 80));
-                            setMessages(prev => prev.map(msg =>
-                              msg.id === assistantMessageId ? { ...msg, generateProgress: progress } : msg
-                            ));
-                            try {
-                              const pollRes = await fetch('/api/poll-task', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ taskId: tid, model: tModel, providerId: tProviderId }),
-                              });
-                              const pollData = await pollRes.json();
-                              if (pollData.status === 'completed') {
-                                if (taskInfo.type === 'video') {
-                                  const vUrl = pollData.videoUrl || pollData.result?.videoUrl;
-                                  if (vUrl && typeof vUrl === 'string') resultUrls.push(vUrl);
-                                } else {
-                                  const extractedUrl = pollData.imageUrl || pollData.result?.imageUrl || pollData.result?.image?.url || pollData.result?.images?.[0]?.url || pollData.result?.images?.[0];
-                                  if (extractedUrl && typeof extractedUrl === 'string') resultUrls.push(extractedUrl);
-                                }
-                                break;
-                              } else if (pollData.status === 'failed' || pollData.retryable === false) { break; }
-                            } catch { /* retry */ }
-                          }
-                        }
-                        if (resultUrls.length > 0) {
-                          // 去重：只添加还没添加过的图片
-                          const newUrls = resultUrls.filter((url: string) => !addedImageUrls.has(url));
-                          newUrls.forEach((url: string) => addedImageUrls.add(url));
-                          setMessages(prev => prev.map(msg =>
-                            msg.id === assistantMessageId
-                              ? { ...msg, generatedImages: Array.from(addedImageUrls), isGeneratingImage: false, generateProgress: 100 }
-                              : msg
-                          ));
-                          if (onAddImages && newUrls.length > 0) {
-                            onAddImages(newUrls, undefined, { modelName: imageModelInfo.model, apiProvider: imageModelInfo.providerId });
-                          }
-                        } else {
-                          setMessages(prev => prev.map(msg =>
-                            msg.id === assistantMessageId
-                              ? { ...msg, isGeneratingImage: false, generateError: '图像生成未返回结果，请检查图像模型配置' }
-                              : msg
-                          ));
-                        }
-                      } catch (pollErr) {
-                        console.error('[ChatImage] Task polling error:', pollErr);
-                        setMessages(prev => prev.map(msg =>
-                          msg.id === assistantMessageId
-                            ? { ...msg, isGeneratingImage: false, generateError: '图像生成轮询出错' }
-                            : msg
-                        ));
-                      }
-                    })();
                   }
                   currentSSEEvent = '';
                   continue;
@@ -4098,19 +4036,24 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                     savedUrls.push(saveData.savedUrl || saveData.url || url);
                   } catch { savedUrls.push(url); }
                 }
-                if (onAddImages && savedUrls.length > 0) {
-                  onAddImages(savedUrls);
+                // 去重：只添加尚未添加到画布的图片
+                const newUrls = savedUrls.filter(u => !addedImageUrls.has(u));
+                newUrls.forEach(u => addedImageUrls.add(u));
+                if (onAddImages && newUrls.length > 0) {
+                  onAddImages(newUrls);
                 }
                 setMessages(prev => prev.map(msg =>
                   msg.id === assistantMessageId
-                    ? { ...msg, generatedImages: [...(msg.generatedImages || []), ...savedUrls], isGeneratingImage: false, generateProgress: 100 }
+                    ? { ...msg, generatedImages: [...new Set([...(msg.generatedImages || []), ...newUrls])], isGeneratingImage: false, generateProgress: 100 }
                     : msg
                 ));
               } else if (allPolledVideoUrls.length > 0) {
-                if (onAddImages) onAddImages(allPolledVideoUrls);
+                const newVideoUrls = allPolledVideoUrls.filter(u => !addedImageUrls.has(u));
+                newVideoUrls.forEach(u => addedImageUrls.add(u));
+                if (onAddImages && newVideoUrls.length > 0) onAddImages(newVideoUrls);
                 setMessages(prev => prev.map(msg =>
                   msg.id === assistantMessageId
-                    ? { ...msg, generatedImages: [...(msg.generatedImages || []), ...allPolledVideoUrls], isGeneratingImage: false, generateProgress: 100 }
+                    ? { ...msg, generatedImages: [...new Set([...(msg.generatedImages || []), ...newVideoUrls])], isGeneratingImage: false, generateProgress: 100 }
                     : msg
                 ));
               } else {
@@ -4225,20 +4168,22 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 }
                 allResultUrls.push(...promptResultUrls);
                 if (allResultUrls.length > 0) {
+                  const uniqueResultUrls = [...new Set(allResultUrls)];
                   setMessages(prev => prev.map(msg => 
-                    msg.id === assistantMessageId ? { ...msg, generatedImages: [...allResultUrls] } : msg
+                    msg.id === assistantMessageId ? { ...msg, generatedImages: uniqueResultUrls } : msg
                   ));
                 }
               }
 
               if (allResultUrls.length > 0) {
+                const uniqueResultUrls = [...new Set(allResultUrls)];
                 setMessages(prev => prev.map(msg => 
                   msg.id === assistantMessageId 
-                    ? { ...msg, generatedImages: allResultUrls, isGeneratingImage: false, generateProgress: 100 }
+                    ? { ...msg, generatedImages: uniqueResultUrls, isGeneratingImage: false, generateProgress: 100 }
                     : msg
                 ));
                 if (onAddImages) {
-                  onAddImages(allResultUrls, imageSourceId, { modelName: imageModelInfo.model, apiProvider: imageModelInfo.providerId });
+                  onAddImages(uniqueResultUrls, imageSourceId, { modelName: imageModelInfo.model, apiProvider: imageModelInfo.providerId });
                 }
               } else {
                 setMessages(prev => prev.map(msg => 
@@ -4356,13 +4301,14 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 }
 
                 if (resultUrls.length > 0) {
+                  const uniqueResultUrls = [...new Set(resultUrls)];
                   setMessages(prev => prev.map(msg => 
                     msg.id === assistantMessageId 
-                      ? { ...msg, generatedImages: resultUrls, isGeneratingImage: false, generateProgress: 100 }
+                      ? { ...msg, generatedImages: uniqueResultUrls, isGeneratingImage: false, generateProgress: 100 }
                       : msg
                   ));
                   if (onAddImages) {
-                    onAddImages(resultUrls, imageSourceId, { modelName: imageModelInfo.model, apiProvider: imageModelInfo.providerId });
+                    onAddImages(uniqueResultUrls, imageSourceId, { modelName: imageModelInfo.model, apiProvider: imageModelInfo.providerId });
                   }
                 } else {
                   setMessages(prev => prev.map(msg => 
@@ -5355,7 +5301,9 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                   {/* AI生成的图片 - ChatGPT风格：每张图独立卡片，垂直排列 */}
                   {message.generatedImages && message.generatedImages.length > 0 && (
                     <div className="flex flex-col gap-3 mt-3">
-                      {message.generatedImages.map((imgUrl, imgIdx) => (
+                      {(() => {
+                        const uniqueImages = [...new Set(message.generatedImages)];
+                        return uniqueImages.map((imgUrl, imgIdx) => (
                         <div key={imgIdx} className={`rounded-xl overflow-hidden ${isGold ? 'bg-black/30 border border-gold/15' : 'bg-gray-50 border border-gray-200'}`}>
                           {/* 模型名称标签 */}
                           <div className={`px-3 py-1.5 flex items-center gap-2 ${isGold ? 'bg-gold/5 border-b border-gold/10' : 'bg-gray-100 border-b border-gray-200'}`}>
@@ -5365,9 +5313,9 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                             <span className={`text-xs font-medium ${isGold ? 'text-gold/90' : 'text-gray-700'}`}>
                               {message.generateModelName || 'AI 生成'}
                             </span>
-                            {message.generatedImages!.length > 1 && (
+                            {uniqueImages.length > 1 && (
                               <span className={`text-[10px] ${isGold ? 'text-gold/60' : 'text-gray-500'}`}>
-                                {imgIdx + 1} / {message.generatedImages!.length}
+                                {imgIdx + 1} / {uniqueImages.length}
                               </span>
                             )}
                           </div>
@@ -5406,7 +5354,8 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                             </div>
                           </div>
                         </div>
-                      ))}
+                      ));
+                      })()}
                       <div className={`text-[10px] text-center ${isGold ? 'text-gold/50' : 'text-gray-400'}`}>
                         点击图片可添加到画布
                       </div>
