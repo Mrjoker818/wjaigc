@@ -187,11 +187,25 @@ export default function LogoSkillPanel({
   const [selectedImageModel, setSelectedImageModel] = useState('');
   const [llmModels, setLlmModels] = useState<ImageModel[]>([]);
   const [selectedLlmModel, setSelectedLlmModel] = useState('');
+  const [showLlmDropdown, setShowLlmDropdown] = useState(false);
+  const [showImageDropdown, setShowImageDropdown] = useState(false);
 
   // 展开状态
   const [expandedPrompt, setExpandedPrompt] = useState<string | null>(null);
   const [showRawResponse, setShowRawResponse] = useState(false);
   const [copiedPrompt, setCopiedPrompt] = useState<string | null>(null);
+
+  // 点击面板外关闭下拉菜单
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+        setShowLlmDropdown(false);
+        setShowImageDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
 
   // ─── 初始化品牌项目数据 ───────────────────────────────────────
   const brandProjectIdRef = useRef<string | null>(null);
@@ -799,44 +813,79 @@ export default function LogoSkillPanel({
                 ))}
               </select>
             </div>
-            <div>
+            <div className="relative">
               <label className={`block text-xs font-medium mb-1.5 ${textPrimary}`}>LLM 模型</label>
               {llmModels.length === 0 ? (
                 <div className={`px-3 py-2 rounded-lg border text-xs ${inputBg} ${textSecondary}`}>
                   未配置 LLM 模型
                 </div>
               ) : (
-                <select
-                  value={selectedLlmModel}
-                  onChange={e => setSelectedLlmModel(e.target.value)}
-                  className={`w-full px-3 py-2 rounded-lg border text-sm ${inputBg} ${textPrimary} focus:outline-none`}
-                >
-                  {Object.entries(groupModelsByProvider(llmModels)).map(([providerName, models]) => (
-                    <optgroup key={providerName} label={providerName}>
-                      {models.map(m => {
-                        const compositeKey = `${m.providerId}::${m.id}`;
-                        return (
-                          <option key={compositeKey} value={compositeKey} className={isMonochrome ? '' : 'bg-[#1a1a1a] text-white'}>
-                            {m.name}
-                          </option>
-                        );
-                      })}
-                    </optgroup>
-                  ))}
-                </select>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => { setShowLlmDropdown(v => !v); setShowImageDropdown(false); }}
+                    className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg border text-sm transition-colors ${inputBg} ${textPrimary} hover:brightness-110 focus:outline-none`}
+                  >
+                    <span className="truncate text-left flex items-center gap-1.5 min-w-0">
+                      <Cpu className="h-3.5 w-3.5 shrink-0 opacity-60" />
+                      <span className="truncate">
+                        {(() => {
+                          const info = getSelectedModelInfo(llmModels, selectedLlmModel);
+                          return info?.name || '选择模型';
+                        })()}
+                      </span>
+                    </span>
+                    <ChevronDown className={`h-3.5 w-3.5 shrink-0 transition-transform ${showLlmDropdown ? 'rotate-180' : ''}`} />
+                  </button>
+                  {(() => {
+                    const info = getSelectedModelInfo(llmModels, selectedLlmModel);
+                    if (info?.providerName) {
+                      return (
+                        <p className={`text-[10px] mt-0.5 ${textSecondary}`}>
+                          <Cpu className="h-2.5 w-2.5 inline mr-0.5" />
+                          {info.providerName}
+                        </p>
+                      );
+                    }
+                    return null;
+                  })()}
+                  {showLlmDropdown && (
+                    <div className={`absolute z-50 left-0 right-0 mt-1 max-h-60 overflow-y-auto rounded-lg border shadow-xl ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-white/10'}`}>
+                      {Object.entries(groupModelsByProvider(llmModels)).map(([providerName, models]) => (
+                        <div key={providerName}>
+                          <div className={`px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider ${isMonochrome ? 'text-gray-400 bg-gray-50' : 'text-white/40 bg-white/[0.03]'}`}>
+                            {providerName}
+                          </div>
+                          {models.map(m => {
+                            const compositeKey = `${m.providerId}::${m.id}`;
+                            const isSelected = selectedLlmModel === compositeKey;
+                            return (
+                              <button
+                                key={compositeKey}
+                                type="button"
+                                onClick={() => { setSelectedLlmModel(compositeKey); setShowLlmDropdown(false); }}
+                                className={`w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors ${
+                                  isSelected
+                                    ? isMonochrome
+                                      ? 'bg-blue-50 text-blue-600'
+                                      : 'bg-gold/10 text-gold'
+                                    : isMonochrome
+                                      ? 'text-gray-700 hover:bg-gray-50'
+                                      : 'text-white/80 hover:bg-white/5'
+                                }`}
+                              >
+                                <Cpu className="h-3 w-3 shrink-0 opacity-40" />
+                                <span className="truncate flex-1 text-left">{m.name}</span>
+                                {isSelected && <Check className="h-3 w-3 shrink-0" />}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
               )}
-              {(() => {
-                const info = getSelectedModelInfo(llmModels, selectedLlmModel);
-                if (info?.providerName) {
-                  return (
-                    <p className={`text-[10px] mt-0.5 ${textSecondary}`}>
-                      <Cpu className="h-2.5 w-2.5 inline mr-0.5" />
-                      {info.providerName}
-                    </p>
-                  );
-                }
-                return null;
-              })()}
             </div>
           </div>
 
@@ -1088,25 +1137,23 @@ export default function LogoSkillPanel({
 
             {/* 图像模型选择器 */}
             {imageModels.length > 0 && (
-              <div className="mb-2">
-                <select
-                  value={selectedImageModel}
-                  onChange={e => setSelectedImageModel(e.target.value)}
-                  className={`w-full px-3 py-2 rounded-lg border text-xs ${inputBg} ${textPrimary} focus:outline-none`}
+              <div className="mb-2 relative">
+                <button
+                  type="button"
+                  onClick={() => { setShowImageDropdown(v => !v); setShowLlmDropdown(false); }}
+                  className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg border text-xs transition-colors ${inputBg} ${textPrimary} hover:brightness-110 focus:outline-none`}
                 >
-                  {Object.entries(groupModelsByProvider(imageModels)).map(([providerName, models]) => (
-                    <optgroup key={providerName} label={providerName}>
-                      {models.map(m => {
-                        const compositeKey = `${m.providerId}::${m.id}`;
-                        return (
-                          <option key={compositeKey} value={compositeKey} className={isMonochrome ? '' : 'bg-[#1a1a1a] text-white'}>
-                            {m.name}
-                          </option>
-                        );
-                      })}
-                    </optgroup>
-                  ))}
-                </select>
+                  <span className="truncate text-left flex items-center gap-1.5 min-w-0">
+                    <ImageIcon className="h-3.5 w-3.5 shrink-0 opacity-60" />
+                    <span className="truncate">
+                      {(() => {
+                        const info = getSelectedModelInfo(imageModels, selectedImageModel);
+                        return info?.name || '选择图像模型';
+                      })()}
+                    </span>
+                  </span>
+                  <ChevronDown className={`h-3.5 w-3.5 shrink-0 transition-transform ${showImageDropdown ? 'rotate-180' : ''}`} />
+                </button>
                 {(() => {
                   const info = getSelectedModelInfo(imageModels, selectedImageModel);
                   if (info?.providerName) {
@@ -1119,6 +1166,41 @@ export default function LogoSkillPanel({
                   }
                   return null;
                 })()}
+                {showImageDropdown && (
+                  <div className={`absolute z-50 left-0 right-0 mt-1 max-h-60 overflow-y-auto rounded-lg border shadow-xl ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-white/10'}`}>
+                    {Object.entries(groupModelsByProvider(imageModels)).map(([providerName, models]) => (
+                      <div key={providerName}>
+                        <div className={`px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider ${isMonochrome ? 'text-gray-400 bg-gray-50' : 'text-white/40 bg-white/[0.03]'}`}>
+                          {providerName}
+                        </div>
+                        {models.map(m => {
+                          const compositeKey = `${m.providerId}::${m.id}`;
+                          const isSelected = selectedImageModel === compositeKey;
+                          return (
+                            <button
+                              key={compositeKey}
+                              type="button"
+                              onClick={() => { setSelectedImageModel(compositeKey); setShowImageDropdown(false); }}
+                              className={`w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors ${
+                                isSelected
+                                  ? isMonochrome
+                                    ? 'bg-blue-50 text-blue-600'
+                                    : 'bg-gold/10 text-gold'
+                                  : isMonochrome
+                                    ? 'text-gray-700 hover:bg-gray-50'
+                                    : 'text-white/80 hover:bg-white/5'
+                              }`}
+                            >
+                              <ImageIcon className="h-3 w-3 shrink-0 opacity-40" />
+                              <span className="truncate flex-1 text-left">{m.name}</span>
+                              {isSelected && <Check className="h-3 w-3 shrink-0" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
