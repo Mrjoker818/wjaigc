@@ -321,6 +321,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
     rawAnalysis?: string;
   } | null>(null);
   const [isDecomposing, setIsDecomposing] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
 
   // Theme — 3D展陈系统: 标准黑金配色 (#d4af37 + #1a1a1a)
   const accent = isMonochrome ? '#3b82f6' : '#d4af37';
@@ -400,7 +401,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
             const taskRes = await fetch('/api/poll-task', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ taskId }),
+              body: JSON.stringify({ taskId, model: selectedModel, providerId: selectedProviderId }),
             });
             const taskData = await taskRes.json();
             if (taskData.status === 'completed') {
@@ -657,7 +658,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                   <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: isMonochrome ? '#dbeafe' : 'rgba(212,175,55,0.15)', color: textAccent }}>Pro</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button className={`rounded-lg px-3 py-1.5 text-xs cursor-pointer ${isMonochrome ? 'text-gray-500 hover:bg-gray-100' : 'text-white/50 hover:bg-white/5'}`}>
+                  <button onClick={() => setShowHelp(true)} className={`rounded-lg px-3 py-1.5 text-xs cursor-pointer ${isMonochrome ? 'text-gray-500 hover:bg-gray-100' : 'text-white/50 hover:bg-white/5'}`}>
                     <Info size={13} className="inline mr-1" />说明
                   </button>
                 </div>
@@ -667,6 +668,25 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
               <div className="grid flex-1 grid-cols-[360px_1fr] gap-4 overflow-hidden p-4">
                 {/* LEFT: Form */}
                 <div className="overflow-y-auto pr-2 space-y-4" data-toolbar>
+                  {/* Basic Info: Brand & Product */}
+                  <section className={panelCls}>
+                    <div className="mb-3 flex items-center gap-2">
+                      <span className={stepBadgeCls}>*</span>
+                      <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>品牌与产品</h3>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: isMonochrome ? '#fef2f2' : 'rgba(239,68,68,0.15)', color: isMonochrome ? '#dc2626' : '#f87171' }}>必填</span>
+                    </div>
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-[12px] mb-1 font-medium" style={{ color: textMuted }}>品牌名称 <span style={{ color: isMonochrome ? '#dc2626' : '#f87171' }}>*</span></label>
+                        <input className={inputCls} placeholder="如：NIKE、星巴克、华为" value={brandName} onChange={e => setBrandName(e.target.value)} />
+                      </div>
+                      <div>
+                        <label className="block text-[12px] mb-1" style={{ color: textMuted }}>产品名称</label>
+                        <input className={inputCls} placeholder="如：Air Max 2025、抹茶拿铁" value={productName} onChange={e => setProductName(e.target.value)} />
+                      </div>
+                    </div>
+                  </section>
+
                   {/* Step 1: Upload */}
                   <section className={panelCls}>
                     <div className="mb-3 flex items-center gap-2">
@@ -1181,6 +1201,70 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                 </div>
               </div>
             </main>
+
+            {/* ====== 使用说明弹窗 ====== */}
+            {showHelp && (
+              <div className="fixed inset-0 z-[9999] flex items-center justify-center" onClick={() => setShowHelp(false)} style={{ background: 'rgba(0,0,0,0.6)' }}>
+                <div className="w-[520px] max-h-[80vh] overflow-y-auto rounded-2xl p-6 shadow-2xl" onClick={e => e.stopPropagation()} style={{ background: isMonochrome ? '#fff' : '#1a1a1a', border: `1px solid ${isMonochrome ? '#e5e5e5' : 'rgba(255,255,255,0.1)'}` }}>
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-lg font-bold" style={{ color: textPrimary }}>3D 展陈系统 Pro — 使用说明</h2>
+                    <button onClick={() => setShowHelp(false)} className="rounded-lg p-1.5 cursor-pointer" style={{ color: textMuted }}><X size={18} /></button>
+                  </div>
+                  <div className="space-y-4 text-[13px] leading-relaxed" style={{ color: textPrimary }}>
+                    <section>
+                      <h3 className="text-sm font-semibold mb-1.5" style={{ color: textAccent }}>功能概述</h3>
+                      <p style={{ color: textMuted }}>基于 AI 图像模型的商业级 3D 展陈空间效果图生成工具。输入品牌信息和展陈参数，一键生成逼真效果图，并支持方案拆解、尺寸标注、材质工艺、BOM 清单等多维度输出。</p>
+                    </section>
+                    <section>
+                      <h3 className="text-sm font-semibold mb-1.5" style={{ color: textAccent }}>操作流程</h3>
+                      <ol className="space-y-1.5 list-decimal pl-4" style={{ color: textMuted }}>
+                        <li><b style={{ color: textPrimary }}>品牌与产品</b>：填写品牌名称（必填）和产品名称，品牌名会融入生成效果图的门头与导视系统</li>
+                        <li><b style={{ color: textPrimary }}>资产上传</b>：上传品牌素材（主视觉KV、Logo、IP形象等），AI 会参考素材风格生成展陈图</li>
+                        <li><b style={{ color: textPrimary }}>渲染与展示模式</b>：选择效果图风格（实时渲染/照片级/线框等）</li>
+                        <li><b style={{ color: textPrimary }}>图像使用模式</b>：定义上传图片的使用方式（贴图应用/风格延展/结构参考）</li>
+                        <li><b style={{ color: textPrimary }}>场景设置</b>：选择展陈类型（快闪店/展位/堆头等）和空间尺寸</li>
+                        <li><b style={{ color: textPrimary }}>环境与尺寸</b>：设定场地环境、预算、材质风格、灯光氛围、人群氛围</li>
+                        <li><b style={{ color: textPrimary }}>输出视角</b>：选择需要的效果图视角（正面/45度/侧面等）</li>
+                        <li><b style={{ color: textPrimary }}>输出设置</b>：设定分辨率、格式和质量</li>
+                        <li><b style={{ color: textPrimary }}>生成展陈方案</b>：点击底部金色按钮开始生成</li>
+                      </ol>
+                    </section>
+                    <section>
+                      <h3 className="text-sm font-semibold mb-1.5" style={{ color: textAccent }}>右侧预览区</h3>
+                      <ul className="space-y-1 list-disc pl-4" style={{ color: textMuted }}>
+                        <li><b style={{ color: textPrimary }}>效果图</b>：查看生成的主效果图，点击可添加到画布</li>
+                        <li><b style={{ color: textPrimary }}>多角度</b>：不同视角的效果图展示</li>
+                        <li><b style={{ color: textPrimary }}>方案拆解</b>：AI 分析展陈空间的结构组件、尺寸、材质</li>
+                        <li><b style={{ color: textPrimary }}>尺寸标注</b>：标注展陈各部件的尺寸信息</li>
+                        <li><b style={{ color: textPrimary }}>材质工艺</b>：推荐各部件的材质与制作工艺</li>
+                        <li><b style={{ color: textPrimary }}>平面拆解图</b>：俯视平面布局方案图</li>
+                        <li><b style={{ color: textPrimary }}>物料清单BOM</b>：展陈所需的物料清单及预算估算</li>
+                      </ul>
+                    </section>
+                    <section>
+                      <h3 className="text-sm font-semibold mb-1.5" style={{ color: textAccent }}>导出功能</h3>
+                      <ul className="space-y-1 list-disc pl-4" style={{ color: textMuted }}>
+                        <li><b style={{ color: textPrimary }}>导出PDF</b>：将效果图+拆解方案导出为PDF文档</li>
+                        <li><b style={{ color: textPrimary }}>导出BOM</b>：将物料清单导出为CSV表格</li>
+                        <li><b style={{ color: textPrimary }}>发送到画布</b>：将效果图发送到无限画布进行后续编辑</li>
+                      </ul>
+                    </section>
+                    <section>
+                      <h3 className="text-sm font-semibold mb-1.5" style={{ color: textAccent }}>注意事项</h3>
+                      <ul className="space-y-1 list-disc pl-4" style={{ color: textMuted }}>
+                        <li>AI 效果图不是施工图，尺寸为建议尺寸，真正落地需设计师/制作方/结构工程师复核</li>
+                        <li>品牌名称为必填项，会体现在生成图的门头和品牌标识上</li>
+                        <li>上传资产越丰富（KV、Logo、IP形象），生成效果越贴合品牌</li>
+                        <li>需要管理员后台配置可用的图像模型才能生成效果图</li>
+                      </ul>
+                    </section>
+                  </div>
+                  <div className="mt-5 flex justify-end">
+                    <button className="rounded-lg px-4 py-2 text-sm font-medium cursor-pointer" style={{ background: isMonochrome ? '#3b82f6' : '#d4af37', color: isMonochrome ? '#fff' : '#000' }} onClick={() => setShowHelp(false)}>知道了</button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

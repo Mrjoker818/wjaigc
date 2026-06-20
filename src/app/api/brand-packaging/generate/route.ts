@@ -42,16 +42,24 @@ export async function POST(request: NextRequest) {
       uploads,
     } as Parameters<typeof buildPackagingRenderPrompt>[0]);
 
-    // Find an image model provider (prefer providerId for exact match)
-    const provider = providerId
+    // Find an image model provider (try multiple strategies for robustness)
+    let provider = providerId
       ? await findProviderById(providerId)
-      : await findProviderForModel(model || '', 'image');
+      : null;
+    if (!provider && model) {
+      provider = await findProviderForModel(model, 'image');
+    }
     if (!provider) {
-      return NextResponse.json({ error: '未找到可用的图像模型，请在管理员后台配置' }, { status: 400 });
+      // Fallback: find any available image provider
+      provider = await findProviderForModel('', 'image');
+    }
+    if (!provider) {
+      return NextResponse.json({ error: '未找到可用的图像模型，请在管理员后台配置图像模型提供商' }, { status: 400 });
     }
 
     const profile = resolveCompatProfile(provider);
-    const selectedModel = provider.selectedModels?.[0] || model || 'gpt-image-2';
+    // Use user-selected model first, then provider's configured models, then sensible defaults
+    const selectedModel = model || provider.selectedModels?.find(m => m) || 'gpt-image-2';
 
     // Build request body
     const rawBody: Record<string, unknown> = {
@@ -76,84 +84,121 @@ export async function POST(request: NextRequest) {
     const taskId = `pkg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     registerTask(taskId, 'packaging', `品牌包装: ${brandName || productName}`);
 
-    // Start async generation
+    // Start async generation with provider fallback
     (async () => {
       try {
         updateTaskProgress(taskId, { status: 'processing', progress: 10, label: '正在生成包装方案...' });
 
-        // Parse baseUrl and path for fetchWithV1Retry
-        let apiBase = provider.baseUrl.replace(/\/+$/, '');
-        const apiPath = '/images/generations';
-        // Strip path from baseUrl if it already includes /v1
-        if (apiBase.endsWith('/v1')) {
-          apiBase = apiBase.slice(0, -3);
+        // Try current provider first, then fallback to others
+        const providers = [provider!];
+        if (!providerId) {
+          // Auto-find additional providers as fallbacks
+          const allImageProviders = await findProviderForModel('', 'image');
+          if (allImageProviders && allImageProviders.id !== provider!.id) {
+            providers.push(allImageProviders);
+          }
         }
 
-        const response = await fetchWithV1Retry(apiBase, apiPath, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${provider.apiKey}`,
-          },
-          body: JSON.stringify(adjustedBody),
-        });
+        let lastError = '';
+        let success = false;
 
-        if (!response.ok) {
-          const errorText = await response.text();
-          updateTaskProgress(taskId, { status: 'failed', error: `API错误: ${response.status} ${errorText}` });
-          return;
-        }
+        for (const currentProvider of providers) {
+          try {
+            const currentProfile = resolveCompatProfile(currentProvider);
+            const currentModel = model || currentProvider.selectedModels?.find(m => m) || 'gpt-image-2';
+            const currentBody = { ...adjustedBody, model: currentModel };
+            const reAdjustedBody = adjustRequestForProfile(currentBody, currentProfile);
 
-        const apiResponse = await response.json();
-        const parsed = parseResponseForProfile(apiResponse, profile);
-
-        if (parsed.mode === 'direct' && parsed.directImageUrls.length > 0) {
-          updateTaskProgress(taskId, {
-            status: 'completed',
-            progress: 100,
-            result: {
-              imageUrls: parsed.directImageUrls,
-              prompt,
-              type: 'packaging',
-            },
-          });
-        } else if (parsed.mode === 'polling' && parsed.taskIds.length > 0) {
-          // Poll for async results
-          const pollTaskId = parsed.taskIds[0];
-          let pollCount = 0;
-          const maxPolls = 60;
-          const pollInterval = setInterval(async () => {
-            pollCount++;
-            if (pollCount > maxPolls) {
-              clearInterval(pollInterval);
-              updateTaskProgress(taskId, { status: 'failed', error: '生成超时' });
-              return;
+            let apiBase = currentProvider.baseUrl.replace(/\/+$/, '');
+            const apiPath = '/images/generations';
+            if (apiBase.endsWith('/v1')) {
+              apiBase = apiBase.slice(0, -3);
             }
-            try {
-              const pollRes = await fetchWithV1Retry(apiBase, `/tasks/${pollTaskId}`, {
-                headers: { 'Authorization': `Bearer ${provider.apiKey}` },
+
+            updateTaskProgress(taskId, { progress: 20, label: `正在使用 ${currentModel} 生成...` });
+
+            const response = await fetchWithV1Retry(apiBase, apiPath, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${currentProvider.apiKey}`,
+              },
+              body: JSON.stringify(reAdjustedBody),
+            });
+
+            if (!response.ok) {
+              const errorText = await response.text();
+              lastError = `API错误(${response.status}): ${errorText}`;
+              console.warn(`[brand-packaging] Provider ${currentProvider.name} failed: ${lastError}`);
+              continue; // Try next provider
+            }
+
+            const apiResponse = await response.json();
+            const parsed = parseResponseForProfile(apiResponse, currentProfile);
+
+            if (parsed.mode === 'direct' && parsed.directImageUrls.length > 0) {
+              updateTaskProgress(taskId, {
+                status: 'completed',
+                progress: 100,
+                result: {
+                  imageUrls: parsed.directImageUrls,
+                  prompt,
+                  type: 'packaging',
+                },
               });
-              if (!pollRes.ok) return;
-              const pollData = await pollRes.json();
-              const pollParsed = parseResponseForProfile(pollData, profile);
-              if (pollParsed.mode === 'direct' && pollParsed.directImageUrls.length > 0) {
-                clearInterval(pollInterval);
-                updateTaskProgress(taskId, {
-                  status: 'completed',
-                  progress: 100,
-                  result: {
-                    imageUrls: pollParsed.directImageUrls,
-                    prompt,
-                    type: 'packaging',
-                  },
-                });
-              }
-            } catch {
-              // continue polling
+              success = true;
+              break;
+            } else if (parsed.mode === 'polling' && parsed.taskIds.length > 0) {
+              // Poll for async results
+              const pollTaskId = parsed.taskIds[0];
+              let pollCount = 0;
+              const maxPolls = 60;
+              await new Promise<void>((resolve, reject) => {
+                const pollInterval = setInterval(async () => {
+                  pollCount++;
+                  if (pollCount > maxPolls) {
+                    clearInterval(pollInterval);
+                    reject(new Error('生成超时'));
+                    return;
+                  }
+                  try {
+                    const pollRes = await fetchWithV1Retry(apiBase, `/tasks/${pollTaskId}`, {
+                      headers: { 'Authorization': `Bearer ${currentProvider.apiKey}` },
+                    });
+                    if (!pollRes.ok) return;
+                    const pollData = await pollRes.json();
+                    const pollParsed = parseResponseForProfile(pollData, currentProfile);
+                    if (pollParsed.mode === 'direct' && pollParsed.directImageUrls.length > 0) {
+                      clearInterval(pollInterval);
+                      updateTaskProgress(taskId, {
+                        status: 'completed',
+                        progress: 100,
+                        result: {
+                          imageUrls: pollParsed.directImageUrls,
+                          prompt,
+                          type: 'packaging',
+                        },
+                      });
+                      success = true;
+                      resolve();
+                    }
+                  } catch {
+                    // continue polling
+                  }
+                }, 5000);
+              });
+              if (success) break;
+            } else {
+              lastError = '无法解析API响应';
             }
-          }, 5000);
-        } else {
-          updateTaskProgress(taskId, { status: 'failed', error: '无法解析API响应' });
+          } catch (providerErr) {
+            lastError = providerErr instanceof Error ? providerErr.message : '提供商调用失败';
+            console.warn(`[brand-packaging] Provider error:`, lastError);
+          }
+        }
+
+        if (!success) {
+          updateTaskProgress(taskId, { status: 'failed', error: lastError || '所有模型提供商均不可用，请在管理员后台检查配置' });
         }
       } catch (err) {
         updateTaskProgress(taskId, {

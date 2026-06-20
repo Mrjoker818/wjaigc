@@ -15,7 +15,7 @@ import { getModelDisplayName } from '@/lib/model-name-map';
 /* ============================================================
    类型定义
    ============================================================ */
-export type PackagingCategory = 'beauty' | 'food' | 'drink' | 'wine' | 'daily' | 'gift' | 'pet' | 'health' | 'electronics';
+export type PackagingCategory = 'beauty' | 'food' | 'drink' | 'wine' | 'daily' | 'gift' | 'pet' | 'health' | 'electronics' | 'home' | 'maternal' | 'stationery' | 'apparel' | 'toy' | 'tea' | 'coffee' | 'snack' | 'condiment' | 'jewelry' | 'automotive';
 export type PackagingOutputMode = 'package_render' | 'visual_flat_layout' | 'structural_flat_layout' | 'knife_template' | 'line_drawing' | 'scene_display' | 'shelf_display' | 'ecommerce_image' | 'series_family' | 'roaming_video' | 'model_3d' | 'flow_chart';
 
 export interface PackagingSku {
@@ -85,23 +85,51 @@ interface Props {
 /* ============================================================
    常量
    ============================================================ */
-const CATEGORIES: { value: PackagingCategory; label: string }[] = [
-  { value: 'beauty', label: '美妆 / 护肤' },
-  { value: 'food', label: '食品' },
-  { value: 'drink', label: '饮品' },
-  { value: 'wine', label: '酒水 / 礼盒' },
-  { value: 'daily', label: '日化' },
-  { value: 'gift', label: '礼盒' },
-  { value: 'pet', label: '宠物' },
-  { value: 'health', label: '保健' },
-  { value: 'electronics', label: '电子' },
+const CATEGORIES: { value: PackagingCategory; label: string; subLabels?: string[] }[] = [
+  { value: 'beauty', label: '美妆 / 护肤', subLabels: ['精华液', '面霜', '面膜', '口红', '粉底', '香水', '眼影', '卸妆'] },
+  { value: 'food', label: '食品', subLabels: ['休闲食品', '烘焙糕点', '速食', '干货', '有机食品', '冷冻食品'] },
+  { value: 'snack', label: '零食 / 糖果', subLabels: ['坚果', '巧克力', '薯片', '果冻', '饼干', '蜜饯', '肉干'] },
+  { value: 'drink', label: '饮品', subLabels: ['果汁', '气泡水', '乳饮料', '功能饮料', '奶茶', '植物蛋白饮'] },
+  { value: 'tea', label: '茶叶', subLabels: ['绿茶', '红茶', '普洱', '花茶', '白茶', '乌龙茶', '茶礼盒'] },
+  { value: 'coffee', label: '咖啡', subLabels: ['挂耳咖啡', '咖啡豆', '速溶咖啡', '胶囊咖啡', '手冲套装'] },
+  { value: 'wine', label: '酒水', subLabels: ['白酒', '红酒', '洋酒', '啤酒', '果酒', '威士忌', '香槟'] },
+  { value: 'condiment', label: '调味品', subLabels: ['酱油', '食用油', '酱料', '香料', '调味汁', '食盐'] },
+  { value: 'daily', label: '日化', subLabels: ['洗发水', '沐浴露', '洗衣液', '牙膏', '洗手液', '柔顺剂'] },
+  { value: 'gift', label: '礼盒', subLabels: ['中秋礼盒', '年货礼盒', '婚庆礼盒', '商务礼盒', '节日限定'] },
+  { value: 'pet', label: '宠物', subLabels: ['猫粮', '狗粮', '宠物零食', '宠物用品', '猫砂', '宠物保健'] },
+  { value: 'health', label: '保健', subLabels: ['维生素', '益生菌', '蛋白粉', '鱼油', '胶原蛋白', '中药饮片'] },
+  { value: 'electronics', label: '电子 / 数码', subLabels: ['手机配件', '耳机', '智能穿戴', '充电器', '数据线', '存储设备'] },
+  { value: 'home', label: '家居', subLabels: ['香薰蜡烛', '收纳盒', '家纺', '清洁用品', '餐具', '装饰摆件'] },
+  { value: 'maternal', label: '母婴', subLabels: ['奶粉', '纸尿裤', '婴儿洗护', '辅食', '孕产用品', '童装'] },
+  { value: 'stationery', label: '文具', subLabels: ['笔记本', '笔具', '手账', '文创周边', '书包', '文件夹'] },
+  { value: 'apparel', label: '服装', subLabels: ['T恤', '牛仔裤', '羽绒服', '内衣', '袜子', '配饰'] },
+  { value: 'toy', label: '玩具', subLabels: ['积木', '毛绒玩具', '益智玩具', '模型', '盲盒', '手办'] },
+  { value: 'jewelry', label: '珠宝首饰', subLabels: ['戒指', '项链', '手链', '耳饰', '胸针', '手表'] },
+  { value: 'automotive', label: '汽车用品', subLabels: ['车载香水', '行车记录仪', '脚垫', '座套', '清洁护理'] },
 ];
 
-const PACKAGING_TYPES = ['插舌盒', '天地盖盒', '抽屉盒', '软管', '自立袋', '瓶身标签', '礼盒套装'];
+const PACKAGING_TYPES = [
+  // 纸盒类
+  '插舌盒', '天地盖盒', '抽屉盒', '翻盖盒', '书型盒', '对开门盒', '异形盒',
+  // 软包装类
+  '自立袋', '三边封袋', '八边封袋', '吸嘴袋', '铝箔袋',
+  // 管/瓶类
+  '软管', '瓶身标签', '喷雾瓶', '滴管瓶', '广口瓶', '窄口瓶',
+  // 罐/桶类
+  '铁罐', '纸罐', '塑料罐',
+  // 套装类
+  '礼盒套装', '手提袋', '内托+外盒',
+];
 
-const MATERIALS = ['白卡纸', '特种纸', '铜版纸', '玻璃', 'PET', '亚克力'];
+const MATERIALS = [
+  '白卡纸', '铜版纸', '牛皮纸', '特种纸', '瓦楞纸', '灰板纸', '珠光纸', '黑卡纸',
+  'PET', 'PP', 'PE', '磨砂亚克力',
+  '马口铁', '铝合金',
+  '玻璃', '陶瓷',
+  '甘蔗渣', '竹纤维', '可降解PLA',
+];
 
-const CRAFTS = ['烫金', '烫银', 'UV', '局部UV', '压纹', '浮雕', '击凸', '电凹', '镭射', '光油', '丝印', '其他'];
+const CRAFTS = ['烫金', '烫银', 'UV', '局部UV', '压纹', '浮雕', '击凸', '模切', '镭射', '光油', '哑油', '丝印', '覆膜', '起凸', '压暗', '热转印', '击烫', '水晶标', '其他'];
 
 const OUTPUT_MODES: { value: PackagingOutputMode; label: string; icon: React.ReactNode }[] = [
   { value: 'package_render', label: '包装效果图', icon: <Package size={14} /> },
@@ -131,7 +159,7 @@ const INSERT_TRAY_OPTIONS = ['无内托', '纸托', 'EVA内托', '吸塑内托']
 const HANDLE_ROPE_OPTIONS = ['无', '棉绳', '丝带', '皮绳'];
 const WINDOW_OPTIONS = ['否', '透明开窗', '异形开窗'];
 
-const EXTEND_SCENES = ['日常护肤', '礼赠场景', '旅行装', '敏感肌', '节日限定', 'PET消光瓶'];
+const EXTEND_SCENES = ['电商主图', '礼盒套装', '节日限定', '旅行便携', '会员专享', '联名款', '限定款', '环保概念', '高奢礼赠', '日常家用', '商务定制', '活动促销'];
 
 /* ============================================================
    Prompt 模板

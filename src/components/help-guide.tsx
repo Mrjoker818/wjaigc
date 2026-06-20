@@ -6,7 +6,7 @@ import {
   BookOpen, X, Info, Pen, Wand2, ImagePlus, GitMerge, ImageIcon,
   ZoomIn, Eraser, Maximize, Download, Shapes, Settings, Database,
   FileBox, ChevronRight, Check, PenTool, Pencil, Box, Type,
-  LayoutGrid, Bot, Palette, FolderOpen, FileImage, Building2, ShoppingBag
+  LayoutGrid, Bot, Palette, FolderOpen, FileImage, Building2, ShoppingBag, Store
 } from 'lucide-react';
 import { APP_VERSION_LABEL } from '@/config/app-meta';
 
@@ -15,7 +15,7 @@ import { APP_VERSION_LABEL } from '@/config/app-meta';
 type SectionId = 'canvas' | 'generate' | 'img2img' | 'video' | 'tools'
   | 'svg-trace' | 'lang-edit' | 'agent-edit' | 'refine-engine' | 'sticker'
   | 'font-design' | 'logo-pro' | 'brand-factory' | 'brand-ecommerce'
-  | 'node-editor' | 'scene-studio' | 'ai-psd' | 'chat' | 'project' | 'admin'
+  | 'node-editor' | 'scene-studio' | 'display3d' | 'ai-psd' | 'chat' | 'project' | 'admin'
   | 'shortcuts' | 'tips' | 'changelog';
 
 interface SectionDef {
@@ -42,6 +42,7 @@ const SECTIONS: SectionDef[] = [
   { id: 'brand-ecommerce', label: '品牌电商', icon: <ShoppingBag size={14} />, group: '使用说明' },
   { id: 'node-editor', label: '工作流节点模式', icon: <GitMerge size={14} />, group: '使用说明' },
   { id: 'scene-studio', label: '3D 构图', icon: <Box size={14} />, group: '使用说明' },
+  { id: 'display3d', label: '3D 展陈系统', icon: <Store size={14} />, group: '使用说明' },
   { id: 'ai-psd', label: 'AI PSD 生成器', icon: <FileImage size={14} />, group: '使用说明' },
   { id: 'chat', label: 'AI 聊天', icon: <MessageSquare size={14} />, group: '使用说明' },
   { id: 'project', label: '项目管理', icon: <FolderOpen size={14} />, group: '使用说明' },
@@ -344,6 +345,47 @@ function SceneStudioSection() {
   );
 }
 
+function Display3DSection() {
+  return (
+    <div>
+      <h3 className="text-sm font-bold text-[var(--color-on-surface)] mb-2">3D 展陈系统 Pro</h3>
+      <p className="text-xs text-[var(--color-on-surface-variant)] mb-3">
+        基于 AI 图像模型的商业级 3D 展陈空间效果图生成工具，支持方案拆解、尺寸标注、材质工艺、BOM 清单等多维度输出。
+      </p>
+      <SubTitle>操作流程</SubTitle>
+      <FeatureItem>品牌与产品：填写品牌名称（必填）和产品名称，品牌名会融入效果图的门头与导视</FeatureItem>
+      <FeatureItem>资产上传：上传品牌素材（主视觉KV、Logo、IP形象等），AI 参考素材风格生成展陈图</FeatureItem>
+      <FeatureItem>渲染与展示模式：选择效果图风格（实时渲染/照片级/线框/概念等）</FeatureItem>
+      <FeatureItem>图像使用模式：定义上传图片的使用方式（贴图应用/风格延展/结构参考）</FeatureItem>
+      <FeatureItem>场景设置：选择展陈类型（快闪店/展位/堆头/橱窗/打卡装置等）和空间尺寸</FeatureItem>
+      <FeatureItem>环境与尺寸：设定场地环境、预算、材质风格、灯光氛围、人群氛围</FeatureItem>
+      <FeatureItem>输出视角：选择效果图视角（正面/45度/侧面/俯视/入口/细节）</FeatureItem>
+      <FeatureItem>输出设置：设定分辨率、格式和质量</FeatureItem>
+      <FeatureItem>点击底部"生成展陈方案"按钮开始生成</FeatureItem>
+      <SubTitle>右侧预览区</SubTitle>
+      <FeatureItem>效果图：查看生成的主效果图，点击可添加到画布</FeatureItem>
+      <FeatureItem>多角度：不同视角的效果图展示</FeatureItem>
+      <FeatureItem>方案拆解：AI 分析展陈空间的结构组件、尺寸、材质</FeatureItem>
+      <FeatureItem>尺寸标注：标注展陈各部件的尺寸信息</FeatureItem>
+      <FeatureItem>材质工艺：推荐各部件的材质与制作工艺</FeatureItem>
+      <FeatureItem>平面拆解图：俯视平面布局方案图</FeatureItem>
+      <FeatureItem>物料清单BOM：展陈所需的物料清单及预算估算</FeatureItem>
+      <SubTitle>导出功能</SubTitle>
+      <FeatureItem>导出PDF：将效果图+拆解方案导出为PDF文档</FeatureItem>
+      <FeatureItem>导出BOM：将物料清单导出为CSV表格</FeatureItem>
+      <FeatureItem>发送到画布：将效果图发送到无限画布进行后续编辑</FeatureItem>
+      <SubTitle>注意事项</SubTitle>
+      <FeatureItem>AI 效果图不是施工图，尺寸为建议尺寸，落地需设计师/制作方/结构工程师复核</FeatureItem>
+      <FeatureItem>品牌名称为必填项，会体现在效果图的门头和品牌标识上</FeatureItem>
+      <FeatureItem>上传资产越丰富（KV、Logo、IP形象），生成效果越贴合品牌</FeatureItem>
+      <FeatureItem>需要管理员后台配置可用的图像模型才能生成效果图</FeatureItem>
+      <SubTitle>入口</SubTitle>
+      <FeatureItem>底部工具栏"展陈"按钮</FeatureItem>
+      <FeatureItem>右键菜单"3D展陈"</FeatureItem>
+    </div>
+  );
+}
+
 function ChatSection() {
   return (
     <div>
@@ -620,6 +662,7 @@ const SECTION_CONTENT: Record<SectionId, React.ReactNode> = {
   'brand-ecommerce': <BrandEcommerceSection />,
   'node-editor': <NodeEditorSection />,
   'scene-studio': <SceneStudioSection />,
+  'display3d': <Display3DSection />,
   'ai-psd': <AiPsdSection />,
   'project': <ProjectSection />,
   'admin': <AdminSection />,
