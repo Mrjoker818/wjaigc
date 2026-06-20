@@ -520,7 +520,7 @@ async function handleGenerate(body: {
               'Content-Type': 'application/json',
               'Authorization': `Bearer ${imgApiKey}`,
             },
-            body: JSON.stringify(adjustedRequest),
+            body: JSON.stringify(adjustedRequest.body || adjustedRequest),
           }
         );
 

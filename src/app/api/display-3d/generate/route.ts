@@ -81,7 +81,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const adjustedBody = adjustRequestForProfile(rawBody, profile);
+    const { body: adjustedBody } = adjustRequestForProfile(rawBody, profile);
 
     // Register task
     const taskId = `d3d_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;

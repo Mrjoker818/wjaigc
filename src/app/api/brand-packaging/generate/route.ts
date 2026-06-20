@@ -78,7 +78,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const adjustedBody = adjustRequestForProfile(rawBody, profile);
+    const { body: adjustedBody } = adjustRequestForProfile(rawBody, profile);
 
     // Register task
     const taskId = `pkg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -114,7 +114,7 @@ export async function POST(request: NextRequest) {
             let providerSuccess = false;
             for (const tryModel of modelsToTry) {
               const currentBody = { ...adjustedBody, model: tryModel };
-              const reAdjustedBody = adjustRequestForProfile(currentBody, currentProfile);
+              const { body: reAdjustedBody } = adjustRequestForProfile(currentBody, currentProfile);
 
               let apiBase = currentProvider.baseUrl.replace(/\/+$/, '');
               const apiPath = '/images/generations';

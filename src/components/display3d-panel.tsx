@@ -19,6 +19,7 @@ export type DisplayImageUsageMode = 'texture_mapping' | 'style_extension' | 'str
 export type DisplaySceneType = 'pop_up_store' | 'exhibition_booth' | 'retail_stack' | 'window_display' | 'photo_spot' | 'product_display' | 'mall_installation';
 export type DisplayEnvironment = 'mall_atrium' | 'exhibition_hall' | 'retail_store' | 'outdoor' | 'supermarket';
 export type DisplayViewOption = 'front' | 'angle_45' | 'side' | 'top' | 'entrance' | 'detail' | 'back' | 'bird_eye';
+export type DisplayRenderStyle = 'photorealistic' | '3d_render' | 'concept_sketch';
 
 export interface DisplayDimensions {
   length: number;
@@ -77,6 +78,12 @@ const IMAGE_USAGE_MODES: { value: DisplayImageUsageMode; label: string; desc: st
   { value: 'structure_reference', label: '结构参考', desc: '参考图片空间结构' },
 ];
 
+const RENDER_STYLES: { value: DisplayRenderStyle; label: string; desc: string; icon: React.ReactNode }[] = [
+  { value: 'photorealistic', label: '写实照片级', desc: '追求真实感，适合方案汇报', icon: <Camera size={14} /> },
+  { value: '3d_render', label: '3D渲染级', desc: '高质量渲染质感，真实灯光材质', icon: <Monitor size={14} /> },
+  { value: 'concept_sketch', label: '概念草图级', desc: '快速概念表达，适合方案初探', icon: <Paintbrush size={14} /> },
+];
+
 const SCENE_TYPES: { value: DisplaySceneType; label: string; icon: React.ReactNode }[] = [
   { value: 'pop_up_store', label: '快闪店', icon: <Store size={14} /> },
   { value: 'exhibition_booth', label: '展会展位', icon: <Building2 size={14} /> },
@@ -104,12 +111,6 @@ const VIEW_OPTIONS: { value: DisplayViewOption; label: string }[] = [
   { value: 'detail', label: '局部细节' },
   { value: 'back', label: '背面视角' },
   { value: 'bird_eye', label: '鸟瞰视角' },
-];
-
-const RENDER_MODES: { value: string; label: string }[] = [
-  { value: 'realtime', label: '高清实时渲染' },
-  { value: 'raytracing', label: '光线追踪渲染' },
-  { value: 'stylized', label: '艺术风格渲染' },
 ];
 
 const MATERIAL_STYLES = ['轻奢质感', '科技未来', '自然环保', '年轻潮流', '极简现代', '复古经典'];
@@ -188,20 +189,20 @@ function buildDisplay3DPrompt(state: {
   customPrompt?: string;
   brandColor?: string;
   focusProduct?: string;
-  renderMode?: string;
+  renderStyle?: string;
 }): string {
   const sceneLabel = SCENE_TYPES.find(s => s.value === state.sceneType)?.label || state.sceneType;
   const envLabel = ENVIRONMENTS.find(e => e.value === state.environment)?.label || state.environment;
   const usageLabel = IMAGE_USAGE_MODES.find(m => m.value === state.imageUsageMode)?.label || state.imageUsageMode;
   const viewLabels = state.viewOptions.map(v => VIEW_OPTIONS.find(o => o.value === v)?.label || v).join('、');
-  const renderModeLabel = RENDER_MODES.find((r: { value: string }) => r.value === state.renderMode)?.label || state.renderMode || '高清实时渲染';
+  const renderStyleLabel = RENDER_STYLES.find((r: { value: string }) => r.value === state.renderStyle)?.label || state.renderStyle || '3D渲染级';
   return `为品牌「${state.brandName}」设计一个商业级3D展陈空间效果图。
 产品名称：${state.productName || '品牌产品'}
 展陈类型：${sceneLabel}
 环境场景：${envLabel}
 空间尺寸：${state.dimensions.length}×${state.dimensions.width}×${state.dimensions.height}mm
 图像使用模式：${usageLabel}
-渲染模式：${renderModeLabel}
+渲染风格：${renderStyleLabel}
 输出规格：${state.outputResolution || '3840×2160'} ${state.outputFormat || 'PNG'} ${state.outputQuality || '高'}
 材质风格：${state.materialStyle || '未指定'}
 灯光氛围：${state.lightingStyle || '未指定'}
@@ -238,6 +239,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
   const [productName, setProductName] = useState('');
   const [assets, setAssets] = useState<Display3DAsset[]>([]);
   const [imageUsageMode, setImageUsageMode] = useState<DisplayImageUsageMode>('texture_mapping');
+  const [renderStyle, setRenderStyle] = useState<DisplayRenderStyle>('3d_render');
   const [sceneType, setSceneType] = useState<DisplaySceneType>('pop_up_store');
   const [environment, setEnvironment] = useState<DisplayEnvironment>('mall_atrium');
   const [dimensions, setDimensions] = useState<DisplayDimensions>({ length: 9000, width: 6000, height: 4500 });
@@ -249,7 +251,6 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
   const [customPrompt, setCustomPrompt] = useState('');
   const [brandColor, setBrandColor] = useState('');
   const [focusProduct, setFocusProduct] = useState('');
-  const [renderMode, setRenderMode] = useState('realtime'); // kept for backward compat
   const [outputResolution, setOutputResolution] = useState('3840×2160');
   const [outputFormat, setOutputFormat] = useState('PNG');
   const [outputQuality, setOutputQuality] = useState('高');
@@ -406,7 +407,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
           brandName, productName, assets,
           imageUsageMode, sceneType, environment,
           dimensions, budget, materialStyle, lightingStyle,
-          crowdStyle, viewOptions, renderMode, outputResolution, outputFormat, outputQuality, prompt,
+          crowdStyle, viewOptions, renderStyle, outputResolution, outputFormat, outputQuality, prompt,
           model: selectedModel, providerId: selectedProviderId,
         }),
       });
@@ -466,7 +467,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
       console.error('[display-3d] Generate failed:', e);
       setIsGenerating(false);
     }
-  }, [brandName, productName, sceneType, environment, dimensions, imageUsageMode, materialStyle, lightingStyle, budget, viewOptions, renderMode, outputResolution, outputFormat, outputQuality, customPrompt, crowdStyle, assets, onAddImages, selectedModel, selectedProviderId, brandColor, focusProduct]);
+  }, [brandName, productName, sceneType, environment, dimensions, imageUsageMode, materialStyle, lightingStyle, budget, viewOptions, renderStyle, outputResolution, outputFormat, outputQuality, customPrompt, crowdStyle, assets, onAddImages, selectedModel, selectedProviderId, brandColor, focusProduct]);
 
   // === Decompose handler ===
   const handleDecompose = useCallback(async () => {
@@ -769,10 +770,30 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                     </div>
                   </section>
 
-                  {/* Step 3: Scene setting */}
+                  {/* Step 3: Render style */}
                   <section className={panelCls}>
                     <div className="mb-3 flex items-center gap-2">
                       <span className={stepBadgeCls}>3</span>
+                      <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>渲染风格</h3>
+                    </div>
+                    <div className="space-y-1.5">
+                      {RENDER_STYLES.map(s => (
+                        <button key={s.value} className={`w-full rounded-lg border p-2.5 text-left cursor-pointer transition-all ${renderStyle === s.value ? (isMonochrome ? 'border-blue-400 bg-blue-50' : 'border-amber-400/60 bg-amber-400/10') : (isMonochrome ? 'border-gray-200 bg-gray-50' : 'border-white/10 bg-black/30')}`}
+                          onClick={() => setRenderStyle(s.value)}>
+                          <div className="flex items-center gap-2">
+                            <span style={{ color: renderStyle === s.value ? accent : textMuted }}>{s.icon}</span>
+                            <div className="text-xs font-medium" style={{ color: renderStyle === s.value ? textAccent : textPrimary }}>{s.label}</div>
+                          </div>
+                          <div className="text-[12px] mt-0.5 ml-6" style={{ color: textMuted }}>{s.desc}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+
+                  {/* Step 4: Scene setting */}
+                  <section className={panelCls}>
+                    <div className="mb-3 flex items-center gap-2">
+                      <span className={stepBadgeCls}>4</span>
                       <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>场景设置</h3>
                     </div>
                     <div className="grid grid-cols-4 gap-1.5 mb-3">
@@ -790,10 +811,10 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                     </div>
                   </section>
 
-                  {/* Step 4: Environment & Size */}
+                  {/* Step 5: Environment & Size */}
                   <section className={panelCls}>
                     <div className="mb-3 flex items-center gap-2">
-                      <span className={stepBadgeCls}>4</span>
+                      <span className={stepBadgeCls}>5</span>
                       <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>环境与尺寸设置</h3>
                     </div>
                     <div className="grid grid-cols-4 gap-1.5 mb-3">
@@ -815,7 +836,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                   {/* Step 5: View selector */}
                   <section className={panelCls}>
                     <div className="mb-3 flex items-center gap-2">
-                      <span className={stepBadgeCls}>5</span>
+                      <span className={stepBadgeCls}>6</span>
                       <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>输出视角选择</h3>
                     </div>
                     <div className="grid grid-cols-3 gap-1.5">
@@ -1284,11 +1305,12 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                       <p style={{ color: textMuted }}>基于 AI 图像模型的商业级 3D 展陈空间效果图生成工具。输入品牌信息和展陈参数，一键生成逼真效果图，并支持方案拆解、尺寸标注、材质工艺、BOM 清单等多维度输出。</p>
                     </section>
                     <section>
-                      <h3 className="text-sm font-semibold mb-1.5" style={{ color: textAccent }}>操作流程（5 步）</h3>
+                      <h3 className="text-sm font-semibold mb-1.5" style={{ color: textAccent }}>操作流程（6 步）</h3>
                       <ol className="space-y-1.5 list-decimal pl-4" style={{ color: textMuted }}>
                         <li><b style={{ color: textPrimary }}>品牌与产品</b>：填写品牌名称（必填）和产品名称，品牌名会融入效果图的门头与导视系统</li>
                         <li><b style={{ color: textPrimary }}>资产上传</b>：上传品牌素材（10种分类：主视觉KV/背板图/门头图/地贴图/海报图/包装图/Logo/IP形象/3D截图/效果图），AI 会参考素材风格生成展陈图</li>
                         <li><b style={{ color: textPrimary }}>图像使用模式</b>：定义上传图片的使用方式（贴图应用：直接贴到背板/灯箱/地贴；风格延展：参考图片风格生成展陈；结构参考：参考图片空间结构）</li>
+                        <li><b style={{ color: textPrimary }}>渲染风格</b>：选择输出风格 — 写实照片级（真实场景，适合方案汇报）、3D渲染级（高质量渲染质感，默认推荐）、概念草图级（快速概念表达）</li>
                         <li><b style={{ color: textPrimary }}>场景设置</b>：选择展陈类型（快闪店/展会展位/商超堆头/橱窗陈列/打卡装置/产品展示台/商场美陈）和空间尺寸（长×宽×高 mm）</li>
                         <li><b style={{ color: textPrimary }}>环境与尺寸</b>：设定场地环境（商场中庭/展馆/门店/户外/超市）、预算、材质风格、灯光氛围、人群氛围、品牌主色、重点展示产品</li>
                       </ol>
