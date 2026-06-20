@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { findProviderForModel, findProviderById } from '@/lib/server-api-config';
+import { findProviderForModel, findProviderById, findAllProvidersForType } from '@/lib/server-api-config';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile } from '@/lib/api-compatibility';
 import { buildPackagingRenderPrompt } from '@/lib/packaging-prompts';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
@@ -91,13 +91,15 @@ export async function POST(request: NextRequest) {
 
         // Try current provider first, then fallback to others
         const providers = [provider!];
-        if (!providerId) {
-          // Auto-find additional providers as fallbacks
-          const allImageProviders = await findProviderForModel('', 'image');
-          if (allImageProviders && allImageProviders.id !== provider!.id) {
-            providers.push(allImageProviders);
+        // Auto-find additional providers as fallbacks
+        try {
+          const allImageProviders = await findAllProvidersForType('image');
+          for (const p of allImageProviders) {
+            if (p.provider.id !== provider!.id && p.models && p.models.length > 0) {
+              providers.push(p.provider);
+            }
           }
-        }
+        } catch (_e) { /* ignore fallback lookup errors */ }
 
         let lastError = '';
         let success = false;
@@ -105,92 +107,102 @@ export async function POST(request: NextRequest) {
         for (const currentProvider of providers) {
           try {
             const currentProfile = resolveCompatProfile(currentProvider);
-            const currentModel = model || currentProvider.selectedModels?.find(m => m) || 'gpt-image-2';
-            const currentBody = { ...adjustedBody, model: currentModel };
-            const reAdjustedBody = adjustRequestForProfile(currentBody, currentProfile);
+            // Model selection: user-specified > provider selected models (try all) > default
+            const providerModels = currentProvider.selectedModels?.filter(m => m) || [];
+            const modelsToTry = model ? [model] : (providerModels.length > 0 ? providerModels : ['gpt-image-2']);
 
-            let apiBase = currentProvider.baseUrl.replace(/\/+$/, '');
-            const apiPath = '/images/generations';
-            if (apiBase.endsWith('/v1')) {
-              apiBase = apiBase.slice(0, -3);
-            }
+            let providerSuccess = false;
+            for (const tryModel of modelsToTry) {
+              const currentBody = { ...adjustedBody, model: tryModel };
+              const reAdjustedBody = adjustRequestForProfile(currentBody, currentProfile);
 
-            updateTaskProgress(taskId, { progress: 20, label: `正在使用 ${currentModel} 生成...` });
+              let apiBase = currentProvider.baseUrl.replace(/\/+$/, '');
+              const apiPath = '/images/generations';
+              if (apiBase.endsWith('/v1')) {
+                apiBase = apiBase.slice(0, -3);
+              }
 
-            const response = await fetchWithV1Retry(apiBase, apiPath, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${currentProvider.apiKey}`,
-              },
-              body: JSON.stringify(reAdjustedBody),
-            });
+              updateTaskProgress(taskId, { progress: 20, label: `正在使用 ${tryModel} 生成...` });
 
-            if (!response.ok) {
-              const errorText = await response.text();
-              lastError = `API错误(${response.status}): ${errorText}`;
-              console.warn(`[brand-packaging] Provider ${currentProvider.name} failed: ${lastError}`);
-              continue; // Try next provider
-            }
-
-            const apiResponse = await response.json();
-            const parsed = parseResponseForProfile(apiResponse, currentProfile);
-
-            if (parsed.mode === 'direct' && parsed.directImageUrls.length > 0) {
-              updateTaskProgress(taskId, {
-                status: 'completed',
-                progress: 100,
-                result: {
-                  imageUrls: parsed.directImageUrls,
-                  prompt,
-                  type: 'packaging',
+              const response = await fetchWithV1Retry(apiBase, apiPath, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${currentProvider.apiKey}`,
                 },
+                body: JSON.stringify(reAdjustedBody),
               });
-              success = true;
-              break;
-            } else if (parsed.mode === 'polling' && parsed.taskIds.length > 0) {
-              // Poll for async results
-              const pollTaskId = parsed.taskIds[0];
-              let pollCount = 0;
-              const maxPolls = 60;
-              await new Promise<void>((resolve, reject) => {
-                const pollInterval = setInterval(async () => {
-                  pollCount++;
-                  if (pollCount > maxPolls) {
-                    clearInterval(pollInterval);
-                    reject(new Error('生成超时'));
-                    return;
-                  }
-                  try {
-                    const pollRes = await fetchWithV1Retry(apiBase, `/tasks/${pollTaskId}`, {
-                      headers: { 'Authorization': `Bearer ${currentProvider.apiKey}` },
-                    });
-                    if (!pollRes.ok) return;
-                    const pollData = await pollRes.json();
-                    const pollParsed = parseResponseForProfile(pollData, currentProfile);
-                    if (pollParsed.mode === 'direct' && pollParsed.directImageUrls.length > 0) {
+
+              if (!response.ok) {
+                const errorText = await response.text();
+                lastError = `API错误(${response.status}): ${errorText}`;
+                console.warn(`[brand-packaging] Provider ${currentProvider.name} model ${tryModel} failed: ${lastError}`);
+                continue; // Try next model
+              }
+
+              const apiResponse = await response.json();
+              const parsed = parseResponseForProfile(apiResponse, currentProfile);
+
+              if (parsed.mode === 'direct' && parsed.directImageUrls.length > 0) {
+                updateTaskProgress(taskId, {
+                  status: 'completed',
+                  progress: 100,
+                  result: {
+                    imageUrls: parsed.directImageUrls,
+                    prompt,
+                    type: 'packaging',
+                  },
+                });
+                success = true;
+                providerSuccess = true;
+                break;
+              } else if (parsed.mode === 'polling' && parsed.taskIds.length > 0) {
+                // Poll for async results
+                const pollTaskId = parsed.taskIds[0];
+                let pollCount = 0;
+                const maxPolls = 60;
+                await new Promise<void>((resolve, reject) => {
+                  const pollInterval = setInterval(async () => {
+                    pollCount++;
+                    if (pollCount > maxPolls) {
                       clearInterval(pollInterval);
-                      updateTaskProgress(taskId, {
-                        status: 'completed',
-                        progress: 100,
-                        result: {
-                          imageUrls: pollParsed.directImageUrls,
-                          prompt,
-                          type: 'packaging',
-                        },
-                      });
-                      success = true;
-                      resolve();
+                      reject(new Error('生成超时'));
+                      return;
                     }
-                  } catch {
-                    // continue polling
-                  }
-                }, 5000);
-              });
-              if (success) break;
-            } else {
-              lastError = '无法解析API响应';
-            }
+                    try {
+                      const pollRes = await fetchWithV1Retry(apiBase, `/tasks/${pollTaskId}`, {
+                        headers: { 'Authorization': `Bearer ${currentProvider.apiKey}` },
+                      });
+                      if (!pollRes.ok) return;
+                      const pollData = await pollRes.json();
+                      const pollParsed = parseResponseForProfile(pollData, currentProfile);
+                      if (pollParsed.mode === 'direct' && pollParsed.directImageUrls.length > 0) {
+                        clearInterval(pollInterval);
+                        updateTaskProgress(taskId, {
+                          status: 'completed',
+                          progress: 100,
+                          result: {
+                            imageUrls: pollParsed.directImageUrls,
+                            prompt,
+                            type: 'packaging',
+                          },
+                        });
+                        success = true;
+                        providerSuccess = true;
+                        resolve();
+                      }
+                    } catch {
+                      // continue polling
+                    }
+                  }, 5000);
+                });
+                if (success) { providerSuccess = true; break; }
+              } else {
+                lastError = '无法解析API响应';
+              }
+            } // end modelsToTry loop
+
+            if (providerSuccess) break;
           } catch (providerErr) {
             lastError = providerErr instanceof Error ? providerErr.message : '提供商调用失败';
             console.warn(`[brand-packaging] Provider error:`, lastError);

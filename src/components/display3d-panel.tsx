@@ -4,12 +4,12 @@ import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import {
-  Box, X, Minus, Maximize2, Upload, Image, Layers,
+  Box, X, Minus, Maximize2, Upload, Image as ImageIcon, Layers,
   ChevronDown, Sparkles, Download, Send, Search,
   Ruler, Paintbrush, LayoutGrid, Eye, Lightbulb,
   Users, Store, Building2, TreePine, FileText,
   Grid3X3, BarChart3, DollarSign, Info, Loader2, Palette,
-  Camera, RotateCcw, FileDown
+  Camera, RotateCcw, FileDown, DoorOpen, FileImage, Package, Monitor
 } from 'lucide-react';
 
 /* ============================================================
@@ -18,7 +18,7 @@ import {
 export type DisplayImageUsageMode = 'texture_mapping' | 'style_extension' | 'structure_reference';
 export type DisplaySceneType = 'pop_up_store' | 'exhibition_booth' | 'retail_stack' | 'window_display' | 'photo_spot' | 'product_display' | 'mall_installation';
 export type DisplayEnvironment = 'mall_atrium' | 'exhibition_hall' | 'retail_store' | 'outdoor' | 'supermarket';
-export type DisplayViewOption = 'front' | 'angle_45' | 'side' | 'top' | 'entrance' | 'detail';
+export type DisplayViewOption = 'front' | 'angle_45' | 'side' | 'top' | 'entrance' | 'detail' | 'back' | 'bird_eye';
 
 export interface DisplayDimensions {
   length: number;
@@ -96,24 +96,40 @@ const ENVIRONMENTS: { value: DisplayEnvironment; label: string }[] = [
 ];
 
 const VIEW_OPTIONS: { value: DisplayViewOption; label: string }[] = [
-  { value: 'front', label: '正面' },
-  { value: 'angle_45', label: '45度' },
-  { value: 'side', label: '侧面' },
-  { value: 'top', label: '俯视' },
+  { value: 'front', label: '正面全景' },
+  { value: 'angle_45', label: '45度斜角' },
+  { value: 'side', label: '侧面全景' },
+  { value: 'top', label: '俯瞰全貌' },
   { value: 'entrance', label: '入口视角' },
   { value: 'detail', label: '局部细节' },
+  { value: 'back', label: '背面视角' },
+  { value: 'bird_eye', label: '鸟瞰视角' },
 ];
 
-const MATERIAL_STYLES = ['轻奢质感', '科技未来', '自然环保', '年轻潮流'];
-const LIGHTING_STYLES = ['明亮聚焦', '柔和高级', '科技冷光', '暖色氛围'];
-const CROWD_STYLES = ['无人', '少量人物', '活动人流', '长曝光人流'];
+const RENDER_MODES: { value: string; label: string }[] = [
+  { value: 'realtime', label: '高清实时渲染' },
+  { value: 'raytracing', label: '光线追踪渲染' },
+  { value: 'stylized', label: '艺术风格渲染' },
+];
+
+const MATERIAL_STYLES = ['轻奢质感', '科技未来', '自然环保', '年轻潮流', '极简现代', '复古经典'];
+const LIGHTING_STYLES = ['明亮聚焦', '柔和高级', '科技冷光', '暖色氛围', '自然采光', '舞台灯光'];
+const CROWD_STYLES = ['无人', '少量人物', '活动人流', '长曝光人流', '专业模特'];
+
+const ASSET_TYPES: { key: string; label: string; icon: React.ReactNode }[] = [
+  { key: 'kv', label: '主视觉KV', icon: <ImageIcon size={12} /> },
+  { key: 'backboard', label: '背板图', icon: <Layers size={12} /> },
+  { key: 'doorway', label: '门头图', icon: <DoorOpen size={12} /> },
+  { key: 'floor', label: '地贴图', icon: <Grid3X3 size={12} /> },
+  { key: 'poster', label: '海报图', icon: <FileImage size={12} /> },
+  { key: 'package', label: '包装图', icon: <Package size={12} /> },
+  { key: 'logo', label: 'Logo', icon: <Sparkles size={12} /> },
+  { key: 'ip', label: 'IP形象', icon: <Users size={12} /> },
+  { key: '3d_screenshot', label: '3D截图', icon: <Box size={12} /> },
+  { key: 'rendering', label: '效果图', icon: <Monitor size={12} /> },
+];
 
 const ASSET_LIBRARY = ['平面布局', '模型库', '材质库', '贴图库', '场景库', '灯光库', 'Logo', '字体库'];
-const RENDER_MODES: { value: string; label: string; desc: string }[] = [
-  { value: 'realtime', label: '高清实时渲染', desc: '适合快速预览与方案展示' },
-  { value: 'raytracing', label: '光线追踪模式', desc: '适合高质量渲染输出' },
-  { value: 'immersive', label: '沉浸式漫游模式', desc: '适合VR/虚拟现实体验' },
-];
 const OUTPUT_RESOLUTIONS = ['1920×1080', '2560×1440', '3840×2160'];
 const OUTPUT_FORMATS = ['PNG', 'JPG', 'WEBP'];
 const OUTPUT_QUALITIES = ['标准', '高', '极高'];
@@ -166,17 +182,19 @@ function buildDisplay3DPrompt(state: {
   lightingStyle?: string;
   budget?: number;
   viewOptions: DisplayViewOption[];
-  renderMode?: string;
   outputResolution?: string;
   outputFormat?: string;
   outputQuality?: string;
   customPrompt?: string;
+  brandColor?: string;
+  focusProduct?: string;
+  renderMode?: string;
 }): string {
   const sceneLabel = SCENE_TYPES.find(s => s.value === state.sceneType)?.label || state.sceneType;
   const envLabel = ENVIRONMENTS.find(e => e.value === state.environment)?.label || state.environment;
   const usageLabel = IMAGE_USAGE_MODES.find(m => m.value === state.imageUsageMode)?.label || state.imageUsageMode;
   const viewLabels = state.viewOptions.map(v => VIEW_OPTIONS.find(o => o.value === v)?.label || v).join('、');
-  const renderModeLabel = RENDER_MODES.find(r => r.value === state.renderMode)?.label || state.renderMode || '高清实时渲染';
+  const renderModeLabel = RENDER_MODES.find((r: { value: string }) => r.value === state.renderMode)?.label || state.renderMode || '高清实时渲染';
   return `为品牌「${state.brandName}」设计一个商业级3D展陈空间效果图。
 产品名称：${state.productName || '品牌产品'}
 展陈类型：${sceneLabel}
@@ -187,6 +205,8 @@ function buildDisplay3DPrompt(state: {
 输出规格：${state.outputResolution || '3840×2160'} ${state.outputFormat || 'PNG'} ${state.outputQuality || '高'}
 材质风格：${state.materialStyle || '未指定'}
 灯光氛围：${state.lightingStyle || '未指定'}
+品牌主色：${state.brandColor || '按品牌标准'}
+重点展示产品：${state.focusProduct || '全线产品'}
 预算范围：${state.budget ? `¥${state.budget}` : '未指定'}
 设计要求：
 1. 生成真实商业级展陈效果图。
@@ -195,6 +215,7 @@ function buildDisplay3DPrompt(state: {
 4. 如果上传了主视觉KV或平面图，需要将其作为贴图应用到背板、门头、灯箱、地贴等位置。
 5. 画面需要具备高质量3D渲染质感，真实灯光、真实材质。
 6. 不要出现乱码文字，不要出现无关品牌。
+7. 品牌色调贯穿整体空间设计，重点产品需要突出展示。
 输出视角：${viewLabels}
 ${state.customPrompt ? `\n附加要求：${state.customPrompt}` : ''}`;
 }
@@ -226,7 +247,9 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
   const [crowdStyle, setCrowdStyle] = useState('无人');
   const [viewOptions, setViewOptions] = useState<DisplayViewOption[]>(['angle_45', 'front']);
   const [customPrompt, setCustomPrompt] = useState('');
-  const [renderMode, setRenderMode] = useState('realtime');
+  const [brandColor, setBrandColor] = useState('');
+  const [focusProduct, setFocusProduct] = useState('');
+  const [renderMode, setRenderMode] = useState('realtime'); // kept for backward compat
   const [outputResolution, setOutputResolution] = useState('3840×2160');
   const [outputFormat, setOutputFormat] = useState('PNG');
   const [outputQuality, setOutputQuality] = useState('高');
@@ -375,7 +398,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
     if (!brandName.trim()) return;
     setIsGenerating(true);
     try {
-      const prompt = buildDisplay3DPrompt({ brandName, productName, sceneType, environment, dimensions, imageUsageMode, materialStyle, lightingStyle, budget: budget || undefined, viewOptions, renderMode, outputResolution, outputFormat, outputQuality, customPrompt });
+      const prompt = buildDisplay3DPrompt({ brandName, productName, sceneType, environment, dimensions, imageUsageMode, materialStyle, lightingStyle, budget: budget || undefined, viewOptions, outputResolution, outputFormat, outputQuality, customPrompt, brandColor, focusProduct });
       const res = await fetch('/api/display-3d/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -443,7 +466,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
       console.error('[display-3d] Generate failed:', e);
       setIsGenerating(false);
     }
-  }, [brandName, productName, sceneType, environment, dimensions, imageUsageMode, materialStyle, lightingStyle, budget, viewOptions, renderMode, outputResolution, outputFormat, outputQuality, customPrompt, crowdStyle, assets, onAddImages, selectedModel, selectedProviderId]);
+  }, [brandName, productName, sceneType, environment, dimensions, imageUsageMode, materialStyle, lightingStyle, budget, viewOptions, renderMode, outputResolution, outputFormat, outputQuality, customPrompt, crowdStyle, assets, onAddImages, selectedModel, selectedProviderId, brandColor, focusProduct]);
 
   // === Decompose handler ===
   const handleDecompose = useCallback(async () => {
@@ -692,23 +715,27 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                     <div className="mb-3 flex items-center gap-2">
                       <span className={stepBadgeCls}>1</span>
                       <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>资产上传</h3>
+                      <span className="text-[11px] ml-auto" style={{ color: textMuted }}>点击上传对应素材</span>
                     </div>
-                    <div className="grid grid-cols-3 gap-2">
-                      {['主视觉KV', '背板图', '门头图', '地贴图', '海报图', '包装图', 'Logo', 'IP形象', '3D截图'].map((t, i) => (
-                        <button key={t} className={`h-[60px] rounded-lg border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition-colors ${i < 8 ? '' : (isMonochrome ? 'text-gray-400' : 'text-white/30')}`}
-                          style={{ borderColor: border, color: textMuted }}
-                          onClick={() => handleUpload(t)}>
-                          <Upload size={12} />
-                          <span className="text-[9px] mt-0.5">{t}</span>
+                    <div className="grid grid-cols-5 gap-1.5">
+                      {ASSET_TYPES.map(at => (
+                        <button key={at.key} className={`h-[52px] rounded-lg border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition-colors ${assets.some(a => a.type === at.key) ? (isMonochrome ? 'border-blue-400 bg-blue-50' : 'border-amber-400/60 bg-amber-400/10') : ''}`}
+                          style={{ borderColor: assets.some(a => a.type === at.key) ? undefined : border, color: assets.some(a => a.type === at.key) ? textAccent : textMuted }}
+                          onClick={() => handleUpload(at.label)}>
+                          {at.icon}
+                          <span className="text-[9px] mt-0.5">{at.label}</span>
                         </button>
                       ))}
                     </div>
                     {assets.length > 0 && (
                       <div className="mt-2 flex flex-wrap gap-1.5">
                         {assets.map(a => (
-                          <div key={a.id} className="relative w-10 h-10 rounded border overflow-hidden" style={{ borderColor: border }}>
-                            <img src={a.url} className="w-full h-full object-cover" />
-                            <button className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-red-500 text-white flex items-center justify-center" onClick={() => setAssets(prev => prev.filter(x => x.id !== a.id))}><X size={8} /></button>
+                          <div key={a.id} className="relative group rounded border overflow-hidden" style={{ borderColor: border }}>
+                            <div className="w-12 h-12">
+                              <img src={a.url} className="w-full h-full object-cover" />
+                            </div>
+                            <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-[8px] text-white text-center py-0.5 truncate px-0.5">{a.type}</div>
+                            <button className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => setAssets(prev => prev.filter(x => x.id !== a.id))}><X size={8} /></button>
                           </div>
                         ))}
                       </div>
@@ -725,27 +752,10 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                     </div>
                   </section>
 
-                  {/* Step 2: Render mode */}
+                  {/* Step 2: Image usage mode */}
                   <section className={panelCls}>
                     <div className="mb-3 flex items-center gap-2">
                       <span className={stepBadgeCls}>2</span>
-                      <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>渲染与展示模式</h3>
-                    </div>
-                    <div className="space-y-1.5">
-                      {RENDER_MODES.map(m => (
-                        <button key={m.value} className={`w-full rounded-lg border p-2.5 text-left cursor-pointer transition-all ${renderMode === m.value ? (isMonochrome ? 'border-blue-400 bg-blue-50' : 'border-amber-400/60 bg-amber-400/10') : (isMonochrome ? 'border-gray-200 bg-gray-50' : 'border-white/10 bg-black/30')}`}
-                          onClick={() => setRenderMode(m.value)}>
-                          <div className="text-xs font-medium" style={{ color: renderMode === m.value ? textAccent : textPrimary }}>{m.label}</div>
-                          <div className="text-[12px] mt-0.5" style={{ color: textMuted }}>{m.desc}</div>
-                        </button>
-                      ))}
-                    </div>
-                  </section>
-
-                  {/* Step 3: Image usage mode */}
-                  <section className={panelCls}>
-                    <div className="mb-3 flex items-center gap-2">
-                      <span className={stepBadgeCls}>3</span>
                       <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>图像使用模式</h3>
                     </div>
                     <div className="space-y-1.5">
@@ -759,10 +769,10 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                     </div>
                   </section>
 
-                  {/* Step 4: Scene setting */}
+                  {/* Step 3: Scene setting */}
                   <section className={panelCls}>
                     <div className="mb-3 flex items-center gap-2">
-                      <span className={stepBadgeCls}>4</span>
+                      <span className={stepBadgeCls}>3</span>
                       <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>场景设置</h3>
                     </div>
                     <div className="grid grid-cols-4 gap-1.5 mb-3">
@@ -780,10 +790,10 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                     </div>
                   </section>
 
-                  {/* Step 5: Environment & Size */}
+                  {/* Step 4: Environment & Size */}
                   <section className={panelCls}>
                     <div className="mb-3 flex items-center gap-2">
-                      <span className={stepBadgeCls}>5</span>
+                      <span className={stepBadgeCls}>4</span>
                       <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>环境与尺寸设置</h3>
                     </div>
                     <div className="grid grid-cols-4 gap-1.5 mb-3">
@@ -796,14 +806,16 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                       <div><label className="block text-[12px] mb-1" style={{ color: textMuted }}>材质风格</label><select className={selectCls} value={materialStyle} onChange={e => setMaterialStyle(e.target.value)}>{MATERIAL_STYLES.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
                       <div><label className="block text-[12px] mb-1" style={{ color: textMuted }}>灯光氛围</label><select className={selectCls} value={lightingStyle} onChange={e => setLightingStyle(e.target.value)}>{LIGHTING_STYLES.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
                       <div><label className="block text-[12px] mb-1" style={{ color: textMuted }}>人群氛围</label><select className={selectCls} value={crowdStyle} onChange={e => setCrowdStyle(e.target.value)}>{CROWD_STYLES.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
+                      <div><label className="block text-[12px] mb-1" style={{ color: textMuted }}>品牌主色</label><input className={inputCls} placeholder="如：#FF6600、星空蓝" value={brandColor} onChange={e => setBrandColor(e.target.value)} /></div>
+                      <div><label className="block text-[12px] mb-1" style={{ color: textMuted }}>重点展示产品</label><input className={inputCls} placeholder="如：旗舰新品、限量联名款" value={focusProduct} onChange={e => setFocusProduct(e.target.value)} /></div>
                     </div>
-                    <textarea className={`${inputCls} min-h-[56px]`} placeholder="附加需求，如品牌色、重点展示产品、空间动线..." value={customPrompt} onChange={e => setCustomPrompt(e.target.value)} />
+                    <textarea className={`${inputCls} min-h-[56px]`} placeholder="附加需求，如空间动线、竞品差异化、互动装置..." value={customPrompt} onChange={e => setCustomPrompt(e.target.value)} />
                   </section>
 
-                  {/* Step 6: View selector */}
+                  {/* Step 5: View selector */}
                   <section className={panelCls}>
                     <div className="mb-3 flex items-center gap-2">
-                      <span className={stepBadgeCls}>6</span>
+                      <span className={stepBadgeCls}>5</span>
                       <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>输出视角选择</h3>
                     </div>
                     <div className="grid grid-cols-3 gap-1.5">
@@ -813,33 +825,27 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                     </div>
                   </section>
 
-                  {/* Step 7: Output settings */}
-                  <section className={panelCls}>
-                    <div className="mb-3 flex items-center gap-2">
-                      <span className={stepBadgeCls}>7</span>
-                      <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>输出设置</h3>
+                  {/* Output settings (inline) */}
+                  <div className="grid grid-cols-3 gap-2 mb-3">
+                    <div>
+                      <label className="block text-[12px] mb-1" style={{ color: textMuted }}>分辨率</label>
+                      <select className={selectCls} value={outputResolution} onChange={e => setOutputResolution(e.target.value)}>
+                        {OUTPUT_RESOLUTIONS.map(r => <option key={r} value={r}>{r}</option>)}
+                      </select>
                     </div>
-                    <div className="grid grid-cols-3 gap-2 mb-3">
-                      <div>
-                        <label className="block text-[12px] mb-1" style={{ color: textMuted }}>分辨率</label>
-                        <select className={selectCls} value={outputResolution} onChange={e => setOutputResolution(e.target.value)}>
-                          {OUTPUT_RESOLUTIONS.map(r => <option key={r} value={r}>{r}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-[12px] mb-1" style={{ color: textMuted }}>格式</label>
-                        <select className={selectCls} value={outputFormat} onChange={e => setOutputFormat(e.target.value)}>
-                          {OUTPUT_FORMATS.map(f => <option key={f} value={f}>{f}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-[12px] mb-1" style={{ color: textMuted }}>质量</label>
-                        <select className={selectCls} value={outputQuality} onChange={e => setOutputQuality(e.target.value)}>
-                          {OUTPUT_QUALITIES.map(q => <option key={q} value={q}>{q}</option>)}
-                        </select>
-                      </div>
+                    <div>
+                      <label className="block text-[12px] mb-1" style={{ color: textMuted }}>格式</label>
+                      <select className={selectCls} value={outputFormat} onChange={e => setOutputFormat(e.target.value)}>
+                        {OUTPUT_FORMATS.map(f => <option key={f} value={f}>{f}</option>)}
+                      </select>
                     </div>
-                  </section>
+                    <div>
+                      <label className="block text-[12px] mb-1" style={{ color: textMuted }}>质量</label>
+                      <select className={selectCls} value={outputQuality} onChange={e => setOutputQuality(e.target.value)}>
+                        {OUTPUT_QUALITIES.map(q => <option key={q} value={q}>{q}</option>)}
+                      </select>
+                    </div>
+                  </div>
 
                   {/* Image Model selector */}
                   {availableModels.length > 0 && (
@@ -1084,20 +1090,82 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                       </div>
                     )}
 
-                    {/* Dimension placeholder */}
+                    {/* Dimension annotations */}
                     {activePreviewTab === 'dimension' && (
-                      <div className="flex-1 flex items-center justify-center text-xs" style={{ color: textMuted }}>
-                        生成效果图后自动标注尺寸
+                      <div className="flex-1 overflow-auto">
+                        {results.length > 0 ? (
+                          <div className="space-y-2">
+                            <div className="relative rounded-xl border overflow-hidden" style={{ background: isMonochrome ? '#f9fafb' : 'rgba(0,0,0,0.4)', borderColor: border }}>
+                              <img src={results[0]?.url} className="w-full h-auto max-h-[280px] object-contain" />
+                              {/* Dimension overlay lines */}
+                              <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
+                                <line x1="10" y1="50" x2="90" y2="50" stroke={accent} strokeWidth="0.5" strokeDasharray="2,1" />
+                                <line x1="50" y1="10" x2="50" y2="90" stroke={accent} strokeWidth="0.5" strokeDasharray="2,1" />
+                                <text x="50" y="48" textAnchor="middle" fill={accent} fontSize="4" fontWeight="bold">{dimensions.length}mm</text>
+                                <text x="48" y="55" textAnchor="middle" fill={accent} fontSize="4" fontWeight="bold">{dimensions.width}mm</text>
+                                <text x="52" y="15" textAnchor="middle" fill={accent} fontSize="4" fontWeight="bold">{dimensions.height}mm</text>
+                              </svg>
+                            </div>
+                            <div className="space-y-1">
+                              {(decomposition?.components || MOCK_COMPONENTS).map(comp => (
+                                <div key={comp.id} className="flex items-center justify-between text-[12px] px-2 py-1.5 rounded-lg" style={{ background: bgCard }}>
+                                  <span className="flex items-center gap-1.5">
+                                    <span className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold" style={{ background: accent, color: isMonochrome ? '#fff' : '#000' }}>{comp.index}</span>
+                                    <span style={{ color: textPrimary }}>{comp.name}</span>
+                                  </span>
+                                  <span style={{ color: textMuted }}>{comp.sizeSuggestion}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex-1 flex flex-col items-center justify-center text-xs py-8" style={{ color: textMuted }}>
+                            <Ruler size={28} className="mb-2 opacity-20" />
+                            生成效果图后自动标注各部件尺寸
+                          </div>
+                        )}
                       </div>
                     )}
 
                     {activePreviewTab === 'views' && (
-                      <div className="flex-1 grid grid-cols-2 gap-2 overflow-auto">
-                        {viewOptions.map(v => (
-                          <div key={v} className="rounded-lg border flex items-center justify-center h-[120px]" style={{ borderColor: border, background: bgCard }}>
-                            <span className="text-[12px]" style={{ color: textMuted }}>{VIEW_OPTIONS.find(o => o.value === v)?.label || v}</span>
+                      <div className="flex-1 flex flex-col gap-2 overflow-auto">
+                        {viewOptions.length > 0 ? (
+                          <>
+                            <div className="flex items-center justify-between">
+                              <span className="text-[12px]" style={{ color: textMuted }}>已选 {viewOptions.length} 个视角</span>
+                              <button
+                                className="rounded-lg border px-2.5 py-1 text-[11px] cursor-pointer disabled:opacity-50"
+                                style={{ borderColor: border, color: textAccent }}
+                                onClick={handleGenerate}
+                                disabled={isGenerating || results.length === 0}
+                              >
+                                {isGenerating ? <><Loader2 size={10} className="inline animate-spin mr-1" />生成中...</> : <><Sparkles size={10} className="inline mr-1" />批量生成多角度</>}
+                              </button>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2 flex-1">
+                              {viewOptions.map(v => {
+                                const viewResult = results.find((r, i) => i > 0 && r.label === VIEW_OPTIONS.find(o => o.value === v)?.label);
+                                return (
+                                  <div key={v} className="rounded-lg border flex flex-col items-center justify-center h-[120px] relative overflow-hidden" style={{ borderColor: border, background: bgCard }}>
+                                    {viewResult?.url ? (
+                                      <img src={viewResult.url} className="w-full h-full object-cover" />
+                                    ) : (
+                                      <span className="text-[12px]" style={{ color: textMuted }}>{VIEW_OPTIONS.find(o => o.value === v)?.label || v}</span>
+                                    )}
+                                    <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-[9px] text-white text-center py-0.5">
+                                      {VIEW_OPTIONS.find(o => o.value === v)?.label || v}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </>
+                        ) : (
+                          <div className="flex-1 flex flex-col items-center justify-center text-xs py-8" style={{ color: textMuted }}>
+                            <Camera size={28} className="mb-2 opacity-20" />
+                            请在"输出视角选择"中勾选视角
                           </div>
-                        ))}
+                        )}
                       </div>
                     )}
                   </section>
@@ -1216,18 +1284,15 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                       <p style={{ color: textMuted }}>基于 AI 图像模型的商业级 3D 展陈空间效果图生成工具。输入品牌信息和展陈参数，一键生成逼真效果图，并支持方案拆解、尺寸标注、材质工艺、BOM 清单等多维度输出。</p>
                     </section>
                     <section>
-                      <h3 className="text-sm font-semibold mb-1.5" style={{ color: textAccent }}>操作流程</h3>
+                      <h3 className="text-sm font-semibold mb-1.5" style={{ color: textAccent }}>操作流程（5 步）</h3>
                       <ol className="space-y-1.5 list-decimal pl-4" style={{ color: textMuted }}>
-                        <li><b style={{ color: textPrimary }}>品牌与产品</b>：填写品牌名称（必填）和产品名称，品牌名会融入生成效果图的门头与导视系统</li>
-                        <li><b style={{ color: textPrimary }}>资产上传</b>：上传品牌素材（主视觉KV、Logo、IP形象等），AI 会参考素材风格生成展陈图</li>
-                        <li><b style={{ color: textPrimary }}>渲染与展示模式</b>：选择效果图风格（实时渲染/照片级/线框等）</li>
-                        <li><b style={{ color: textPrimary }}>图像使用模式</b>：定义上传图片的使用方式（贴图应用/风格延展/结构参考）</li>
-                        <li><b style={{ color: textPrimary }}>场景设置</b>：选择展陈类型（快闪店/展位/堆头等）和空间尺寸</li>
-                        <li><b style={{ color: textPrimary }}>环境与尺寸</b>：设定场地环境、预算、材质风格、灯光氛围、人群氛围</li>
-                        <li><b style={{ color: textPrimary }}>输出视角</b>：选择需要的效果图视角（正面/45度/侧面等）</li>
-                        <li><b style={{ color: textPrimary }}>输出设置</b>：设定分辨率、格式和质量</li>
-                        <li><b style={{ color: textPrimary }}>生成展陈方案</b>：点击底部金色按钮开始生成</li>
+                        <li><b style={{ color: textPrimary }}>品牌与产品</b>：填写品牌名称（必填）和产品名称，品牌名会融入效果图的门头与导视系统</li>
+                        <li><b style={{ color: textPrimary }}>资产上传</b>：上传品牌素材（10种分类：主视觉KV/背板图/门头图/地贴图/海报图/包装图/Logo/IP形象/3D截图/效果图），AI 会参考素材风格生成展陈图</li>
+                        <li><b style={{ color: textPrimary }}>图像使用模式</b>：定义上传图片的使用方式（贴图应用：直接贴到背板/灯箱/地贴；风格延展：参考图片风格生成展陈；结构参考：参考图片空间结构）</li>
+                        <li><b style={{ color: textPrimary }}>场景设置</b>：选择展陈类型（快闪店/展会展位/商超堆头/橱窗陈列/打卡装置/产品展示台/商场美陈）和空间尺寸（长×宽×高 mm）</li>
+                        <li><b style={{ color: textPrimary }}>环境与尺寸</b>：设定场地环境（商场中庭/展馆/门店/户外/超市）、预算、材质风格、灯光氛围、人群氛围、品牌主色、重点展示产品</li>
                       </ol>
+                      <p className="mt-2" style={{ color: textMuted }}>然后在"输出视角选择"中勾选需要的视角，设置分辨率/格式/质量，点击"生成展陈方案"即可。</p>
                     </section>
                     <section>
                       <h3 className="text-sm font-semibold mb-1.5" style={{ color: textAccent }}>右侧预览区</h3>

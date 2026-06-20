@@ -155,9 +155,9 @@ const ADVANCED_TOOLS = [
   { key: 'enableFeasibilityAnalysis', label: '可落地评估', icon: <CheckCircle2 size={14} /> },
 ];
 
-const INSERT_TRAY_OPTIONS = ['无内托', '纸托', 'EVA内托', '吸塑内托'];
-const HANDLE_ROPE_OPTIONS = ['无', '棉绳', '丝带', '皮绳'];
-const WINDOW_OPTIONS = ['否', '透明开窗', '异形开窗'];
+const INSERT_TRAY_OPTIONS = ['无内托', '纸托', 'EVA内托', '吸塑内托', '海绵内托', '绸布内衬', '瓦楞隔板', '珍珠棉'];
+const HANDLE_ROPE_OPTIONS = ['无', '棉绳', '丝带', '皮绳', '织带', '金属链', '竹提手', '纸绳'];
+const WINDOW_OPTIONS = ['否', '透明开窗', '异形开窗', '镂空透窗', '半透明磨砂窗'];
 
 const EXTEND_SCENES = ['电商主图', '礼盒套装', '节日限定', '旅行便携', '会员专享', '联名款', '限定款', '环保概念', '高奢礼赠', '日常家用', '商务定制', '活动促销'];
 
