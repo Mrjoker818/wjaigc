@@ -459,7 +459,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                 }));
                 setResults(prev => [...prev, ...newResults]);
                 // Auto-add to canvas
-                onAddImages?.(imageUrls);
+                onAddImages?.(imageUrls, { modelName: selectedModel, apiProvider: selectedProviderId });
               }
               // Generate mock analysis for display
               setAnalysis({
@@ -538,7 +538,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                   prompt: seriesPrompt,
                 }));
                 setResults(prev => [...prev, ...newResults]);
-                onAddImages?.(imageUrls);
+                onAddImages?.(imageUrls, { modelName: selectedModel, apiProvider: selectedProviderId });
               }
               setIsGenerating(false);
             } else if (taskData.status === 'failed') {
@@ -598,7 +598,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                   prompt: scenePrompt,
                 }));
                 setResults(prev => [...prev, ...newResults]);
-                onAddImages?.(imageUrls);
+                onAddImages?.(imageUrls, { modelName: selectedModel, apiProvider: selectedProviderId });
               }
               setIsGenerating(false);
             } else if (taskData.status === 'failed') {
@@ -1085,7 +1085,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                                   <button className="p-1 rounded bg-white/20 hover:bg-white/40" onClick={() => toggleFavorite(r.id)}>
                                     <Star size={10} fill={favorites.has(r.id) ? accent : 'none'} style={{ color: favorites.has(r.id) ? accent : '#fff' }} />
                                   </button>
-                                  <button className="p-1 rounded bg-white/20 hover:bg-white/40" onClick={() => onAddImages?.([r.url])} title="发送到画布">
+                                  <button className="p-1 rounded bg-white/20 hover:bg-white/40" onClick={() => onAddImages?.([r.url], { modelName: selectedModel, apiProvider: selectedProviderId })} title="发送到画布">
                                     <Send size={10} style={{ color: '#fff' }} />
                                   </button>
                                   <button className="p-1 rounded bg-white/20 hover:bg-white/40" onClick={() => handleDownloadImage(r.url, `${brandName}_${r.type}.png`)} title="下载">

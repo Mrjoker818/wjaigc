@@ -2197,6 +2197,13 @@ function CanvasApp() {
         generateAudio: params.generateAudio,
         providerId: params.providerId,
         resolution: params.resolution,
+        cameraControl: params.cameraControl,
+        motionBrush: params.motionBrush,
+        characterReferences: params.characterReferences,
+        motionStrength: params.motionStrength,
+        seed: params.seed,
+        negativePrompt: params.negativePrompt,
+        multiShotScenes: params.multiShotScenes,
       };
 
       const res = await fetch(apiEndpoint, {

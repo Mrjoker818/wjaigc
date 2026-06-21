@@ -836,7 +836,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
               'Content-Length': String(formBuffer.length),
             },
             body: formBuffer as unknown as BodyInit,
-            signal: AbortSignal.timeout(15000), // ★ 15秒超时（images/edits端点多数代理不支持，快速跳过走images/generations）
+            signal: AbortSignal.timeout(30000), // ★ 30秒超时（images/edits端点多数代理不支持，快速跳过走images/generations）
           },
         );
 
@@ -872,7 +872,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
                     'Content-Length': String(extraFormBuffer.length),
                   },
                   body: extraFormBuffer as unknown as BodyInit,
-                  signal: AbortSignal.timeout(15000),
+                  signal: AbortSignal.timeout(30000),
                 })
                 .then(async r => {
                   if (!r.ok) return null;

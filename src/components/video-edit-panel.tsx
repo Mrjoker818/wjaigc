@@ -32,6 +32,10 @@ interface VideoEditPanelProps {
     model?: string;
     providerId?: string;
   }) => void;
+  /** 当前选中的视频模型 */
+  selectedVideoModel?: string;
+  /** 当前选中的视频提供商ID */
+  selectedVideoProviderId?: string;
 }
 
 export function VideoEditPanel({
@@ -43,6 +47,8 @@ export function VideoEditPanel({
   onClose,
   onEdit,
   onExtend,
+  selectedVideoModel,
+  selectedVideoProviderId,
 }: VideoEditPanelProps) {
   const [editPrompt, setEditPrompt] = useState('');
   const [extendPrompt, setExtendPrompt] = useState('');
@@ -92,6 +98,8 @@ export function VideoEditPanel({
     onEdit({
       videoUrl,
       prompt: editPrompt.trim(),
+      model: selectedVideoModel,
+      providerId: selectedVideoProviderId,
     });
   };
 
@@ -101,6 +109,8 @@ export function VideoEditPanel({
       videoUrl,
       prompt: extendPrompt.trim() || undefined,
       duration: extendDuration,
+      model: selectedVideoModel,
+      providerId: selectedVideoProviderId,
     });
   };
 

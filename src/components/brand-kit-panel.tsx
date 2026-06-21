@@ -672,9 +672,14 @@ function BatchGenerateDialog({ kit, isGold, onClose, onAddImages, currentImageMo
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          action: 'batch-generate',
-          kitId: kit.id,
-          sceneTypes: selectedScenes,
+          action: 'generate',
+          scenarioIds: selectedScenes,
+          brandDNA: kit.brandDna ? (typeof kit.brandDna === 'string' ? JSON.parse(kit.brandDna) : kit.brandDna) : {
+            primaryColor: kit.colors?.primary || '#000000',
+            secondaryColors: [kit.colors?.secondary, kit.colors?.accent].filter(Boolean),
+            styleKeywords: kit.styleKeywords || [],
+            fontFamily: kit.fontStyle || '',
+          },
           count,
           imageModel: currentImageModel,
           imageProviderId: currentImageProviderId,

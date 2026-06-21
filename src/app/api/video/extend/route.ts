@@ -187,6 +187,53 @@ export async function POST(request: NextRequest) {
         const data = await response.json();
         const submitResult = parseVideoSubmitResponse(profile, data);
 
+        // 同步完成场景：第三方API直接返回了视频URL
+        if (submitResult.status === 'succeeded' && submitResult.videoUrl) {
+          let finalVideoUrl = submitResult.videoUrl;
+          let finalImageUrl = (submitResult as unknown as Record<string, unknown>).imageUrl as string || (submitResult as unknown as Record<string, unknown>).coverUrl as string || '';
+          
+          // 持久化视频URL
+          try {
+            const persistRes = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/save-image`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ imageUrl: finalVideoUrl, format: 'mp4' }),
+              signal: AbortSignal.timeout(30000),
+            });
+            if (persistRes.ok) {
+              const persistData = await persistRes.json();
+              if (persistData.url) finalVideoUrl = persistData.url;
+            }
+          } catch { /* fallback to original */ }
+
+          // 持久化封面图
+          if (finalImageUrl) {
+            try {
+              const persistRes = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/save-image`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ imageUrl: finalImageUrl }),
+                signal: AbortSignal.timeout(30000),
+              });
+              if (persistRes.ok) {
+                const persistData = await persistRes.json();
+                if (persistData.url) finalImageUrl = persistData.url;
+              }
+            } catch { /* fallback to original */ }
+          }
+
+          updateTaskProgress(taskId, {
+            status: 'completed',
+            progress: 100,
+            result: {
+              videoUrl: finalVideoUrl,
+              imageUrl: finalImageUrl,
+              videoDuration: (submitResult as unknown as Record<string, unknown>).videoDuration as number || extendDuration,
+            },
+          });
+          return;
+        }
+
         if (!submitResult.taskId) {
           updateTaskProgress(taskId, {
             status: 'failed',

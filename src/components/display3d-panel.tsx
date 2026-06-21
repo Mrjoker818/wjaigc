@@ -438,7 +438,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                   label: viewOptions[i % viewOptions.length] || '效果图',
                 }));
                 setResults(prev => [...prev, ...newResults]);
-                onAddImages?.(imageUrls);
+                onAddImages?.(imageUrls, { modelName: selectedModel, apiProvider: selectedProviderId });
               }
               // Handle decompose results embedded in task
               if (taskData.result?.decomposition) {
@@ -624,8 +624,8 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
 
   const handleSendToCanvas = useCallback(() => {
     const urls = results.map(r => r.url).filter(Boolean);
-    if (urls.length > 0) onAddImages?.(urls);
-  }, [results, onAddImages]);
+    if (urls.length > 0) onAddImages?.(urls, { modelName: selectedModel, apiProvider: selectedProviderId });
+  }, [results, onAddImages, selectedModel, selectedProviderId]);
 
   // === Render helpers ===
   const inputCls = `w-full rounded-lg border px-3 py-2 text-xs outline-none transition-colors ${isMonochrome ? 'bg-white border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-blue-400 focus:ring-1 focus:ring-blue-200' : 'bg-black/30 border-white/10 text-amber-50 placeholder:text-white/30 focus:border-amber-400/60 focus:ring-1 focus:ring-amber-400/20'}`;
@@ -1306,7 +1306,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                     </button>
                     <button
                       className={`rounded-lg border px-3 py-1.5 text-[12px] cursor-pointer disabled:opacity-50 ${isMonochrome ? 'border-blue-300 text-blue-600 hover:bg-blue-50' : 'border-amber-500/40 text-amber-200 hover:bg-amber-500/10'}`}
-                      onClick={() => { if (results.length > 0) onAddImages?.(results.slice(0, 1).map(r => r.url)); }}
+                      onClick={() => { if (results.length > 0) onAddImages?.(results.slice(0, 1).map(r => r.url), { modelName: selectedModel, apiProvider: selectedProviderId }); }}
                       disabled={results.length === 0}
                     >
                       发送到画布

@@ -1096,7 +1096,19 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
         }
         return;
       }
-      const maskDataUrl = currentModelSupportsMask ? exportMask() : null;
+      const maskDataUrl = currentModelSupportsMask ? exportMask() : (() => {
+        // 检查用户是否在画布上涂抹了内容
+        const canvas = canvasRef.current;
+        if (canvas) {
+          const ctx = canvas.getContext('2d');
+          const imageData = ctx?.getImageData(0, 0, canvas.width, canvas.height);
+          const hasStrokes = imageData?.data.some((v: number, i: number) => i % 4 === 3 && v > 10);
+          if (hasStrokes) {
+            console.warn('[ImageEditor] 当前模型不支持蒙版涂抹，您绘制的区域将被忽略');
+          }
+        }
+        return null;
+      })();
       const progressInterval = setInterval(() => {
         setLoadingProgress(prev => Math.min(prev + 10, 90));
       }, 500);

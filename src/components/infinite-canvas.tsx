@@ -5804,7 +5804,6 @@ export function InfiniteCanvas({
     setIsEditProcessing(true);
     exitEditMode();
     try {
-      const apiKey = getApiKey();
       const modelInfo = getCurrentModel();
       updateProcessingFrame(placeholderId, { progress: 8, status: upscaleMode === 'lossless' ? '正在提交到云端无损放大...' : '正在提交到 AI 模型...' });
       // ★ 放大操作可能耗时较长（如108s），设置5分钟超时与后端直接模式600s对齐
@@ -5838,7 +5837,6 @@ export function InfiniteCanvas({
               targetHeight: targetH,
               aspectRatio: findClosestStandardRatio(origW, origH),
               model: modelInfo.model,
-              apiKey,
               providerId: modelInfo.providerId || getCurrentProviderId(),
               scale: upMultiplier,
               originalWidth: origW,
@@ -6032,8 +6030,6 @@ export function InfiniteCanvas({
   const handleRemoveBackground = useCallback(async () => {
     const img = getActiveImageData();
     if (!img) return;
-    const apiKey = getApiKey();
-
     const placeholderId = createProcessingFrameRightOf(
       img,
       '去背景中',
@@ -6053,7 +6049,6 @@ export function InfiniteCanvas({
           imageUrl: img.url,
           aspectRatio: findClosestStandardRatio(img.originalWidth || img.width, img.originalHeight || img.height),
           model: modelInfo.model,
-          apiKey,
           providerId: modelInfo.providerId || getCurrentProviderId(),
           removeBgModel: removeBgModelId,
         }),
@@ -6459,7 +6454,6 @@ export function InfiniteCanvas({
   const handleMultiAngleConfirm = useCallback(async () => {
     const img = getActiveImageData();
     if (!img) return;
-    const apiKey = getApiKey();
     const placeholderId = createProcessingFrameRightOf(
       img,
       '多角度生成中',
@@ -6486,7 +6480,6 @@ export function InfiniteCanvas({
           originalWidth: img.originalWidth || Math.round(img.width),
           originalHeight: img.originalHeight || Math.round(img.height),
           model: modelInfo.model,
-          apiKey,
           providerId: modelInfo.providerId || getCurrentProviderId(),
         }),
       });
@@ -6883,8 +6876,6 @@ export function InfiniteCanvas({
     if (!editImg) { exitEditMode(); return; }
     const modelInfo = getCurrentModel();
 
-    const apiKey = getApiKey();
-
     if (editMode === 'crop') {
       if (!cropRect) {
         exitEditMode();
@@ -6965,7 +6956,7 @@ export function InfiniteCanvas({
         // 使用管理员系统的图像模型进行 AI 修复
         const prompt = currentEditMode === 'mask'
           ? (currentMaskKeyword || currentEditPrompt || '')
-          : ''; // 擦除模式：空提示词
+          : 'Remove the masked area and seamlessly fill with surrounding context'; // 擦除模式：自动填充默认prompt
 
         let resultUrl: string | null = null;
 
@@ -6980,7 +6971,6 @@ export function InfiniteCanvas({
           editMode: currentEditMode as 'erase' | 'mask',
           aspectRatio: currentEditImg.aspectRatio && (STANDARD_RATIOS as readonly string[]).includes(currentEditImg.aspectRatio) ? currentEditImg.aspectRatio as StandardRatio : findClosestStandardRatio(currentEditImg.originalWidth || currentEditImg.width || 1, currentEditImg.originalHeight || currentEditImg.height || 1),
           model: modelInfo.model,
-          apiKey,
           providerId: modelInfo.providerId || getCurrentProviderId(),
           ...(currentEditMode === 'erase' ? { eraseModel: eraseModelId } : {}),
         };
@@ -7133,7 +7123,6 @@ export function InfiniteCanvas({
             aspectRatio: `${targetW}:${targetH}`,
             prompt: editPrompt || 'Naturally extend the image beyond its original borders. Fill the new areas with content that seamlessly continues the existing scene, maintaining consistent style, lighting, perspective and color palette.',
             model: modelInfo.model,
-            apiKey,
             providerId: modelInfo.providerId || getCurrentProviderId(),
           }),
         });
@@ -12001,6 +11990,8 @@ export function InfiniteCanvas({
             thumbnailUrl={videoEditTarget.videoThumbnailUrl}
             originalPrompt={videoEditTarget.prompt}
             themeStyle={isMonochrome ? 'monochrome' : 'gold'}
+            selectedVideoModel={videoEditTarget.modelName || ''}
+            selectedVideoProviderId={videoEditTarget.apiProvider || ''}
             onClose={() => { setShowVideoEditPanel(false); setVideoEditTarget(null); setVideoEditTab('edit'); }}
             onEdit={async (params) => {
               // 视频编辑：通过视频生成API重新生成
@@ -12017,7 +12008,7 @@ export function InfiniteCanvas({
                   }),
                 });
                 const data = await res.json();
-                if (data.taskIds && data.taskIds.length > 0) {
+                if (data.taskId) {
                   // 创建processing frame
                   const sourceId = videoEditTarget?.id;
                   const frameId = `processing-video-edit-${Date.now()}`;
@@ -12033,16 +12024,19 @@ export function InfiniteCanvas({
                     prompt: params.prompt,
                   };
                   onImagesChange([...images, frame]);
+                  // 使用视频模型的model/providerId，而非图片模型的
+                  const videoModel = params.model || '';
+                  const videoProviderId = params.providerId || '';
                   // 轮询任务结果（最多5分钟）
                   let videoEditPollCount = 0;
                   const pollInterval = setInterval(async () => {
                     videoEditPollCount++;
-                    if (videoEditPollCount >= 100) { clearInterval(pollInterval); onImagesChange(images.filter((img: CanvasImage) => img.id !== frameId)); return; }
+                    if (videoEditPollCount >= 100) { clearInterval(pollInterval); toast.error('视频编辑超时'); onImagesChange(images.filter((img: CanvasImage) => img.id !== frameId)); return; }
                     try {
                       const pollRes = await fetch('/api/poll-task', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ taskId: data.taskIds[0], model: getCurrentModel(), providerId: getCurrentProviderId() }),
+                        body: JSON.stringify({ taskId: data.taskId, model: videoModel, providerId: videoProviderId }),
                       });
                       const pollData = await pollRes.json();
                       if (pollData.status === 'completed' && pollData.imageUrl) {
@@ -12051,7 +12045,7 @@ export function InfiniteCanvas({
                           img.id === frameId
                             ? {
                                 ...img,
-                                url: pollData.imageUrl,
+                                url: pollData.videoThumbnailUrl || pollData.imageUrl,
                                 videoUrl: pollData.videoUrl || pollData.imageUrl,
                                 mediaType: 'video' as const,
                                 isProcessing: false,
@@ -12063,13 +12057,17 @@ export function InfiniteCanvas({
                         ));
                       } else if (pollData.status === 'failed' || pollData.status === 'cancelled') {
                         clearInterval(pollInterval);
+                        toast.error(pollData.error || '视频编辑失败');
                         onImagesChange(images.filter((img: CanvasImage) => img.id !== frameId));
                       }
                     } catch { /* ignore poll errors */ }
                   }, 3000);
+                } else if (data.error) {
+                  toast.error(data.error);
                 }
               } catch (err) {
                 console.error('[video-edit] API error:', err);
+                toast.error('视频编辑请求失败');
               }
               setShowVideoEditPanel(false);
             }}
@@ -12088,7 +12086,7 @@ export function InfiniteCanvas({
                   }),
                 });
                 const data = await res.json();
-                if (data.taskIds && data.taskIds.length > 0) {
+                if (data.taskId) {
                   const sourceId = videoEditTarget?.id;
                   const frameId = `processing-video-extend-${Date.now()}`;
                   const frame = {
@@ -12103,15 +12101,17 @@ export function InfiniteCanvas({
                     prompt: params.prompt,
                   };
                   onImagesChange([...images, frame]);
+                  const videoModel = params.model || '';
+                  const videoProviderId = params.providerId || '';
                   let videoExtendPollCount = 0;
                   const pollInterval = setInterval(async () => {
                     videoExtendPollCount++;
-                    if (videoExtendPollCount >= 100) { clearInterval(pollInterval); onImagesChange(images.filter((img: CanvasImage) => img.id !== frameId)); return; }
+                    if (videoExtendPollCount >= 100) { clearInterval(pollInterval); toast.error('视频延长超时'); onImagesChange(images.filter((img: CanvasImage) => img.id !== frameId)); return; }
                     try {
                       const pollRes = await fetch('/api/poll-task', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ taskId: data.taskIds[0], model: getCurrentModel(), providerId: getCurrentProviderId() }),
+                        body: JSON.stringify({ taskId: data.taskId, model: videoModel, providerId: videoProviderId }),
                       });
                       const pollData = await pollRes.json();
                       if (pollData.status === 'completed' && pollData.imageUrl) {
@@ -12120,7 +12120,7 @@ export function InfiniteCanvas({
                           img.id === frameId
                             ? {
                                 ...img,
-                                url: pollData.imageUrl,
+                                url: pollData.videoThumbnailUrl || pollData.imageUrl,
                                 videoUrl: pollData.videoUrl || pollData.imageUrl,
                                 mediaType: 'video' as const,
                                 isProcessing: false,
@@ -12132,13 +12132,17 @@ export function InfiniteCanvas({
                         ));
                       } else if (pollData.status === 'failed' || pollData.status === 'cancelled') {
                         clearInterval(pollInterval);
+                        toast.error(pollData.error || '视频延长失败');
                         onImagesChange(images.filter((img: CanvasImage) => img.id !== frameId));
                       }
                     } catch { /* ignore poll errors */ }
                   }, 3000);
+                } else if (data.error) {
+                  toast.error(data.error);
                 }
               } catch (err) {
                 console.error('[video-extend] API error:', err);
+                toast.error('视频延长请求失败');
               }
               setShowVideoEditPanel(false);
             }}

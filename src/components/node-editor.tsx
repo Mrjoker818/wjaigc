@@ -1625,6 +1625,11 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
       }
       // ★ 动态间隔：前5次1秒，5-15次1.5秒，之后2秒
       const delay = pollCount <= 5 ? 1000 : pollCount <= 15 ? 1500 : 2000;
+      // ★ 轮询上限：180次（约5分钟），防止无限轮询
+      if (pollCount >= 180) {
+        setExecStatus('failed');
+        return;
+      }
       timerId = setTimeout(poll, delay);
     };
     poll();
