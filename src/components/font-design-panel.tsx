@@ -268,7 +268,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
           const res = await fetch('/api/poll-task', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ taskId: tid, model: selectedModelRef.current }),
+            body: JSON.stringify({ taskId: tid, model: selectedModelRef.current, providerId: imageModels.find(m => m.id === selectedModelRef.current)?.providerId }),
           });
           const data = await res.json();
           if (data.status === 'completed') {

@@ -5,6 +5,8 @@
 interface Display3DInput {
   brandName: string;
   productName?: string;
+  brandColor?: string;
+  focusProduct?: string;
   sceneType?: string;
   environment?: string;
   dimensions?: { length: number; width: number; height: number; unit: string };
@@ -15,7 +17,8 @@ interface Display3DInput {
   budget?: number;
   viewOptions?: string[];
   uploads?: Array<{ url: string; type: string }>;
-  renderMode?: string;
+  renderStyle?: string;
+  renderMode?: string; // 向后兼容
   outputResolution?: string;
   outputFormat?: string;
   outputQuality?: string;
@@ -26,6 +29,8 @@ export function buildDisplay3DRenderPrompt(input: Display3DInput): string {
 
   return `为品牌「${input.brandName}」设计一个商业级3D展陈空间效果图。
 产品名称：${input.productName || '品牌产品'}
+品牌主色：${input.brandColor || '未指定'}
+重点展示产品：${input.focusProduct || '全部产品'}
 展陈类型：${input.sceneType || '未指定'}
 环境场景：${input.environment || '未指定'}
 空间尺寸：${dimStr}
@@ -33,7 +38,7 @@ export function buildDisplay3DRenderPrompt(input: Display3DInput): string {
 ${input.materialStyle ? `材质风格：${input.materialStyle}` : ''}
 ${input.lightingStyle ? `灯光氛围：${input.lightingStyle}` : ''}
 ${input.budget ? `预算范围：¥${input.budget.toLocaleString()}` : ''}
-${input.renderMode ? `渲染模式：${input.renderMode}` : ''}
+${(input.renderStyle || input.renderMode) ? `渲染风格：${input.renderStyle || input.renderMode}` : ''}
 ${input.outputResolution ? `输出分辨率：${input.outputResolution}` : ''}
 ${input.outputQuality ? `输出质量：${input.outputQuality}` : ''}
 
@@ -54,6 +59,8 @@ export function buildDisplay3DDecomposePrompt(input: Display3DInput): string {
 
   return `请对当前3D展陈效果图进行方案拆解分析。
 品牌：${input.brandName}
+品牌主色：${input.brandColor || '未指定'}
+重点展示产品：${input.focusProduct || '全部产品'}
 场景类型：${input.sceneType || '未指定'}
 空间尺寸：${dimStr}
 

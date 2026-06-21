@@ -445,7 +445,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
             const taskRes = await fetch('/api/poll-task', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ taskId }),
+              body: JSON.stringify({ taskId, model: selectedModel, providerId: selectedProviderId }),
             });
             const taskData = await taskRes.json();
             if (taskData.status === 'completed') {
@@ -525,7 +525,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
             const taskRes = await fetch('/api/poll-task', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ taskId: data.taskId }),
+              body: JSON.stringify({ taskId: data.taskId, model: selectedModel, providerId: selectedProviderId }),
             });
             const taskData = await taskRes.json();
             if (taskData.status === 'completed') {
@@ -585,7 +585,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
             const taskRes = await fetch('/api/poll-task', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ taskId: data.taskId }),
+              body: JSON.stringify({ taskId: data.taskId, model: selectedModel, providerId: selectedProviderId }),
             });
             const taskData = await taskRes.json();
             if (taskData.status === 'completed') {

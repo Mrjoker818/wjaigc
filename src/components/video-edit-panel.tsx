@@ -22,12 +22,15 @@ interface VideoEditPanelProps {
     prompt: string;
     duration?: number;
     model?: string;
+    providerId?: string;
   }) => void;
   /** 延长提交回调 */
   onExtend?: (params: {
     videoUrl: string;
     prompt?: string;
     duration?: number;
+    model?: string;
+    providerId?: string;
   }) => void;
 }
 

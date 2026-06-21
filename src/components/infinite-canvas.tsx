@@ -5488,7 +5488,7 @@ export function InfiniteCanvas({
           const pollResp = await fetch('/api/poll-task', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ taskId, model: effectiveModel }),
+            body: JSON.stringify({ taskId, model: effectiveModel, providerId: currentProviderId || undefined }),
           });
           const pollData = await pollResp.json();
 
@@ -5687,7 +5687,7 @@ export function InfiniteCanvas({
           const pollRes = await fetch('/api/poll-task', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ taskId: data.taskId, model: modelInfo.model }),
+            body: JSON.stringify({ taskId: data.taskId, model: modelInfo.model, providerId: modelInfo.providerId || undefined }),
           });
           const pollData = await pollRes.json();
           const newImageUrl = pollData.result?.url || pollData.result?.imageUrl || pollData.imageUrl || (pollData.result?.image as Record<string,unknown>)?.url;
@@ -12002,14 +12002,144 @@ export function InfiniteCanvas({
             originalPrompt={videoEditTarget.prompt}
             themeStyle={isMonochrome ? 'monochrome' : 'gold'}
             onClose={() => { setShowVideoEditPanel(false); setVideoEditTarget(null); setVideoEditTab('edit'); }}
-            onEdit={(params) => {
-              // TODO: 视频编辑 API 调用
-              console.log('[video-edit] edit params:', params);
+            onEdit={async (params) => {
+              // 视频编辑：通过视频生成API重新生成
+              try {
+                const res = await fetch('/api/video/generate', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    prompt: params.prompt,
+                    model: params.model || undefined,
+                    providerId: params.providerId || undefined,
+                    imageUrl: params.videoUrl,
+                    mode: 'image2video',
+                  }),
+                });
+                const data = await res.json();
+                if (data.taskIds && data.taskIds.length > 0) {
+                  // 创建processing frame
+                  const sourceId = videoEditTarget?.id;
+                  const frameId = `processing-video-edit-${Date.now()}`;
+                  const frame = {
+                    id: frameId,
+                    url: '',
+                    x: videoEditTarget ? videoEditTarget.x + (videoEditTarget.width || 300) + 30 : 100,
+                    y: videoEditTarget?.y || 100,
+                    width: videoEditTarget?.width || 300,
+                    height: videoEditTarget?.height || 200,
+                    isProcessing: true,
+                    processingLabel: '视频编辑中...',
+                    prompt: params.prompt,
+                  };
+                  onImagesChange([...images, frame]);
+                  // 轮询任务结果（最多5分钟）
+                  let videoEditPollCount = 0;
+                  const pollInterval = setInterval(async () => {
+                    videoEditPollCount++;
+                    if (videoEditPollCount >= 100) { clearInterval(pollInterval); onImagesChange(images.filter((img: CanvasImage) => img.id !== frameId)); return; }
+                    try {
+                      const pollRes = await fetch('/api/poll-task', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ taskId: data.taskIds[0], model: getCurrentModel(), providerId: getCurrentProviderId() }),
+                      });
+                      const pollData = await pollRes.json();
+                      if (pollData.status === 'completed' && pollData.imageUrl) {
+                        clearInterval(pollInterval);
+                        onImagesChange(images.map((img: CanvasImage) =>
+                          img.id === frameId
+                            ? {
+                                ...img,
+                                url: pollData.imageUrl,
+                                videoUrl: pollData.videoUrl || pollData.imageUrl,
+                                mediaType: 'video' as const,
+                                isProcessing: false,
+                                processingLabel: undefined,
+                                generatedFromImageId: sourceId,
+                                relationType: 'edit' as const,
+                              }
+                            : img
+                        ));
+                      } else if (pollData.status === 'failed' || pollData.status === 'cancelled') {
+                        clearInterval(pollInterval);
+                        onImagesChange(images.filter((img: CanvasImage) => img.id !== frameId));
+                      }
+                    } catch { /* ignore poll errors */ }
+                  }, 3000);
+                }
+              } catch (err) {
+                console.error('[video-edit] API error:', err);
+              }
               setShowVideoEditPanel(false);
             }}
-            onExtend={(params) => {
-              // TODO: 视频延长 API 调用
-              console.log('[video-edit] extend params:', params);
+            onExtend={async (params) => {
+              // 视频延长：调用视频延长API
+              try {
+                const res = await fetch('/api/video/extend', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    videoUrl: params.videoUrl,
+                    prompt: params.prompt || undefined,
+                    extendDuration: params.duration || 5,
+                    model: params.model || undefined,
+                    providerId: params.providerId || undefined,
+                  }),
+                });
+                const data = await res.json();
+                if (data.taskIds && data.taskIds.length > 0) {
+                  const sourceId = videoEditTarget?.id;
+                  const frameId = `processing-video-extend-${Date.now()}`;
+                  const frame = {
+                    id: frameId,
+                    url: '',
+                    x: videoEditTarget ? videoEditTarget.x + (videoEditTarget.width || 300) + 30 : 100,
+                    y: videoEditTarget?.y || 100,
+                    width: videoEditTarget?.width || 300,
+                    height: videoEditTarget?.height || 200,
+                    isProcessing: true,
+                    processingLabel: '视频延长中...',
+                    prompt: params.prompt,
+                  };
+                  onImagesChange([...images, frame]);
+                  let videoExtendPollCount = 0;
+                  const pollInterval = setInterval(async () => {
+                    videoExtendPollCount++;
+                    if (videoExtendPollCount >= 100) { clearInterval(pollInterval); onImagesChange(images.filter((img: CanvasImage) => img.id !== frameId)); return; }
+                    try {
+                      const pollRes = await fetch('/api/poll-task', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ taskId: data.taskIds[0], model: getCurrentModel(), providerId: getCurrentProviderId() }),
+                      });
+                      const pollData = await pollRes.json();
+                      if (pollData.status === 'completed' && pollData.imageUrl) {
+                        clearInterval(pollInterval);
+                        onImagesChange(images.map((img: CanvasImage) =>
+                          img.id === frameId
+                            ? {
+                                ...img,
+                                url: pollData.imageUrl,
+                                videoUrl: pollData.videoUrl || pollData.imageUrl,
+                                mediaType: 'video' as const,
+                                isProcessing: false,
+                                processingLabel: undefined,
+                                generatedFromImageId: sourceId,
+                                relationType: 'edit' as const,
+                              }
+                            : img
+                        ));
+                      } else if (pollData.status === 'failed' || pollData.status === 'cancelled') {
+                        clearInterval(pollInterval);
+                        onImagesChange(images.filter((img: CanvasImage) => img.id !== frameId));
+                      }
+                    } catch { /* ignore poll errors */ }
+                  }, 3000);
+                }
+              } catch (err) {
+                console.error('[video-extend] API error:', err);
+              }
               setShowVideoEditPanel(false);
             }}
           />

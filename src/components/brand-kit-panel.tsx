@@ -718,7 +718,7 @@ function BatchGenerateDialog({ kit, isGold, onClose, onAddImages, currentImageMo
           const resp = await fetch('/api/poll-task', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ taskId: tid }),
+            body: JSON.stringify({ taskId: tid, model: currentImageModel, providerId: currentImageProviderId }),
           });
           if (resp.ok) {
             const data = await resp.json();

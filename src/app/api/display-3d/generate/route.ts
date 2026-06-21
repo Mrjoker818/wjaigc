@@ -17,10 +17,12 @@ export async function POST(request: NextRequest) {
       imageUsageMode = 'texture_mapping',
       materialStyle = '',
       lightingStyle = '',
+      brandColor = '',
+      focusProduct = '',
       crowdStyle = '',
       budget,
       viewOptions = ['angle_45', 'front'],
-      renderMode,
+      renderStyle = '',
       outputResolution,
       outputFormat,
       outputQuality,
@@ -29,6 +31,7 @@ export async function POST(request: NextRequest) {
       providerId,
       prompt: clientPrompt,
     } = body;
+    const renderMode = renderStyle || (body as Record<string, unknown>).renderMode as string || '';
 
     if (!brandName) {
       return NextResponse.json({ error: '请提供品牌名称' }, { status: 400 });
@@ -38,6 +41,8 @@ export async function POST(request: NextRequest) {
     const prompt = clientPrompt || buildDisplay3DRenderPrompt({
       brandName,
       productName,
+      brandColor,
+      focusProduct,
       sceneType,
       environment,
       dimensions,
@@ -47,7 +52,7 @@ export async function POST(request: NextRequest) {
       crowdStyle,
       budget,
       viewOptions,
-      renderMode,
+      renderStyle: renderMode, // renderMode is derived from renderStyle field
       outputResolution,
       outputFormat,
       outputQuality,

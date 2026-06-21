@@ -1207,7 +1207,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
             const pollResp = await fetch('/api/poll-task', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ taskId }),
+              body: JSON.stringify({ taskId, model: currentImageModel?.id || selectedModelKey.split('::').pop() || '', providerId: currentImageModel?.providerId || selectedModelKey.split('::')[1] || '' }),
             });
             const pollData = await pollResp.json();
             return { taskId, pollData };

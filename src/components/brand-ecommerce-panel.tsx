@@ -428,7 +428,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
             const pollResp = await fetch('/api/poll-task', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ taskId: respTaskId }),
+              body: JSON.stringify({ taskId: respTaskId, model: selectedModel, providerId: selectedImageProviderId }),
             });
             const pollData = await pollResp.json();
 
@@ -554,7 +554,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
           const poll = async () => {
             pollCount++;
             try {
-              const pr = await fetch('/api/poll-task', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ taskId: pollId }) });
+              const pr = await fetch('/api/poll-task', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ taskId: pollId, model: selectedModel, providerId: selectedImageProviderId }) });
               const pd = await pr.json();
               if (pd.status === 'completed' && pd.result?.results) {
                 setResults(prev => [...prev.filter(r => r.templateId !== templateId), ...pd.result.results]);

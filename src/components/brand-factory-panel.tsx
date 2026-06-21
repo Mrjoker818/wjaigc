@@ -757,7 +757,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
             const pollRes = await fetch(`/api/poll-task`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ taskId: data.taskId, model: selectedImageModel }),
+              body: JSON.stringify({ taskId: data.taskId, model: selectedImageModel, providerId: selectedImageProviderId }),
             });
             const pollData = await pollRes.json();
             if (pollData.status === 'success' || pollData.status === 'completed') {

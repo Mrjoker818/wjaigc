@@ -508,7 +508,7 @@ export default function LogoSkillPanel({
         const res = await fetch('/api/poll-task', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ taskId: tid, model, apiBaseUrl, apiKey }),
+          body: JSON.stringify({ taskId: tid, model, providerId: selectedImageModel?.split('::')[0] || undefined, apiBaseUrl, apiKey }),
         });
         const data = await res.json();
         if (data.status === 'completed' && data.imageUrls?.length > 0) {

@@ -493,7 +493,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
             const taskRes = await fetch('/api/poll-task', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ taskId }),
+              body: JSON.stringify({ taskId, model: selectedModel, providerId: selectedProviderId }),
             });
             const taskData = await taskRes.json();
             if (taskData.status === 'completed') {
@@ -538,7 +538,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
       console.error('[display-3d] Decompose failed:', e);
       setIsDecomposing(false);
     }
-  }, [brandName, sceneType, dimensions, results, onAddImages, selectedChatModel, selectedChatProviderId]);
+  }, [brandName, sceneType, dimensions, results, onAddImages, selectedChatModel, selectedChatProviderId, selectedModel, selectedProviderId]);
 
   // === Export handlers ===
   const handleExportPdf = useCallback(async () => {
@@ -549,11 +549,25 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
         body: JSON.stringify({ brandName, sceneType, imageUrls: results.map(r => r.url), decomposition }),
       });
       if (res.ok) {
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = `${brandName}_展陈方案.pdf`; a.click();
-        URL.revokeObjectURL(url);
+        const data = await res.json();
+        if (data.htmlContent) {
+          // 创建HTML blob并在新窗口打开，用户可通过浏览器"打印为PDF"
+          const blob = new Blob([data.htmlContent], { type: 'text/html;charset=utf-8' });
+          const url = URL.createObjectURL(blob);
+          const printWindow = window.open(url, '_blank');
+          if (printWindow) {
+            printWindow.onload = () => {
+              printWindow.print();
+            };
+          } else {
+            // 弹窗被拦截，降级为下载HTML文件
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${brandName}_展陈方案.html`;
+            a.click();
+          }
+          setTimeout(() => URL.revokeObjectURL(url), 60000);
+        }
       }
     } catch (e) { console.error('[display-3d] Export PDF failed:', e); }
   }, [brandName, sceneType, results, decomposition]);
@@ -567,11 +581,27 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
         body: JSON.stringify({ brandName, items: bomData }),
       });
       if (res.ok) {
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = `${brandName}_BOM清单.csv`; a.click();
-        URL.revokeObjectURL(url);
+        const data = await res.json();
+        if (data.csv) {
+          // 创建CSV blob并下载
+          const bom = new Blob(['\ufeff' + data.csv], { type: 'text/csv;charset=utf-8' });
+          const url = URL.createObjectURL(bom);
+          const a = document.createElement('a');
+          a.href = url; a.download = `${brandName}_BOM清单.csv`; a.click();
+          URL.revokeObjectURL(url);
+        } else if (data.items) {
+          // 降级：前端直接生成CSV
+          const headers = ['名称', '类型', '规格', '数量', '单价(元)', '总价(元)'];
+          const rows = data.items.map((item: { name: string; type: string; spec: string; quantity: number; unitPrice: number }) =>
+            [item.name, item.type, item.spec, item.quantity, item.unitPrice, item.quantity * item.unitPrice].join(',')
+          );
+          const csv = [headers.join(','), ...rows].join('\n');
+          const bom = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+          const url = URL.createObjectURL(bom);
+          const a = document.createElement('a');
+          a.href = url; a.download = `${brandName}_BOM清单.csv`; a.click();
+          URL.revokeObjectURL(url);
+        }
       }
     } catch (e) { console.error('[display-3d] Export BOM failed:', e); }
   }, [brandName, decomposition]);
