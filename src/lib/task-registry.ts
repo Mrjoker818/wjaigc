@@ -219,7 +219,7 @@ interface QueueConfig {
 }
 
 /** 每用户最大并发任务数（可通过环境变量 TASK_MAX_CONCURRENT 覆盖） */
-export const MAX_CONCURRENT_PER_USER = parseInt(process.env.TASK_MAX_CONCURRENT || '5', 10);
+export const MAX_CONCURRENT_PER_USER = parseInt(process.env.TASK_MAX_CONCURRENT || '15', 10);
 /** 全局最大存储任务数 */
 export const MAX_TASKS = 500;
 /** 任务过期时间（毫秒） */
