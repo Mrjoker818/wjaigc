@@ -817,7 +817,7 @@ export function InfiniteCanvas({
           if (!cancelled && imageEl.naturalWidth && imageEl.naturalHeight) {
             updates.set(img.id, { originalWidth: imageEl.naturalWidth, originalHeight: imageEl.naturalHeight });
           }
-          resolve();
+          // poll-task returns image URL in multiple formats:resolve();
         };
         imageEl.onerror = () => resolve();
         imageEl.src = img.url;
@@ -5467,6 +5467,14 @@ export function InfiniteCanvas({
         body: JSON.stringify(requestBody),
       });
 
+      if (!submitResp.ok) {
+        const errText = await submitResp.text().catch(() => '');
+        console.error('Submit refine error:', submitResp.status, errText);
+        setAnnotations(prev => prev.map(a =>
+          a.id === annotation.id ? { ...a, status: 'failed' as const, aiReply: '提交修改请求失败' } : a
+        ));
+        return;
+      }
       const submitData = await submitResp.json();
       if (!submitData.success || !submitData.taskId) {
         const errMsg = submitData.error || '提交修改失败';
@@ -5490,9 +5498,22 @@ export function InfiniteCanvas({
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ taskId, model: effectiveModel, providerId: currentProviderId || undefined }),
           });
+          if (!pollResp.ok) {
+            console.error('Poll refine error:', pollResp.status);
+            continue;
+          }
           const pollData = await pollResp.json();
-
-          // poll-task returns image URL in multiple formats:
+          if (!pollData.success && pollData.status !== 'completed') {
+            // 任务不存在或已过期
+            if (pollData.status === 'failed' || pollData.status === 'not_found') {
+              setAnnotations(prev => prev.map(a =>
+                a.id === annotation.id ? { ...a, status: 'failed' as const, aiReply: pollData.error || '任务已过期或不存在' } : a
+              ));
+              completed = true;
+              break;
+            }
+            continue;
+          }
           // 1. result.url / result.imageUrl (local editTask or remote poll)
           // 2. imageUrl (top-level, completedTaskCache)
           // 3. result.image.url (images/generations format)
@@ -5514,10 +5535,10 @@ export function InfiniteCanvas({
             setAnnotations(prev => prev.map(a =>
               a.id === annotation.id ? { ...a, status: 'done' as const, resultImageUrl: resultUrl, aiReply: '修改完成', chatExpanded: true } : a
             ));
-          } else if (pollData.status === 'failed') {
+          } else if (pollData.status === 'failed' || pollData.status === 'not_found' || !pollData.success) {
             completed = true;
             setAnnotations(prev => prev.map(a =>
-              a.id === annotation.id ? { ...a, status: 'failed' as const, aiReply: pollData.error || '修改失败', chatExpanded: true } : a
+              a.id === annotation.id ? { ...a, status: 'failed' as const, aiReply: pollData.error || pollData.label || '修改失败', chatExpanded: true } : a
             ));
           }
         } catch {
@@ -5678,17 +5699,26 @@ export function InfiniteCanvas({
         }),
       });
 
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        console.error('Edit API error:', res.status, errText);
+        return;
+      }
       const data = await res.json();
       if (data.taskId) {
         // Poll for result
         let completed = false;
-        while (!completed) {
+        let pollAttempts = 0;
+        const maxPollAttempts = 150; // ~5 minutes
+        while (!completed && pollAttempts < maxPollAttempts) {
+          pollAttempts++;
           await new Promise(r => setTimeout(r, 2000));
           const pollRes = await fetch('/api/poll-task', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ taskId: data.taskId, model: modelInfo.model, providerId: modelInfo.providerId || undefined }),
           });
+          if (!pollRes.ok) { completed = true; break; }
           const pollData = await pollRes.json();
           const newImageUrl = pollData.result?.url || pollData.result?.imageUrl || pollData.imageUrl || (pollData.result?.image as Record<string,unknown>)?.url;
           if (pollData.status === 'completed' && newImageUrl) {

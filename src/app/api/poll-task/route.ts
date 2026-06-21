@@ -773,13 +773,16 @@ export async function POST(request: NextRequest) {
           result: brandCached,
         }, { status: 200 });
       }
-      // 既不在 registry 也不在缓存，返回 processing 状态让前端继续轮询
+      // 既不在 registry 也不在缓存，任务不存在或已过期
+      // ★ 返回 status:'failed' 而非 'not_found'，确保所有前端轮询代码（检查 status==='failed'）都能正确停止
+      console.log(`[poll-task] 任务不存在或已过期: ${taskId}`);
       return NextResponse.json({
-        success: true,
-        status: 'processing',
-        progress: 10,
-        label: '处理中...',
-      }, { status: 200 });
+        success: false,
+        status: 'failed',
+        error: '任务不存在或已过期，请重新提交',
+        progress: 0,
+        label: '任务已过期',
+      });
     }
 
     if (!taskId) {

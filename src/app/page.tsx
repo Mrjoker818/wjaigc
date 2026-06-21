@@ -951,6 +951,18 @@ function CanvasApp() {
 
       const data = await response.json();
 
+      // === HTTP 错误处理 ===
+      if (!response.ok) {
+        console.error('[生成] API HTTP错误:', response.status, data);
+        setImages(prev => prev.filter(img => !img.isProcessingPlaceholder || !placeholderIds.includes(img.id)));
+        toast.error('生成失败', {
+          description: data.error || `服务器错误 (${response.status})，请稍后重试`,
+          className: 'bg-[#141414] border border-red-900 text-white',
+          duration: 5000,
+        });
+        return;
+      }
+
       // === 提交失败处理 ===
       if (!data.success) {
         console.error('[生成] API提交失败:', data.error, data);

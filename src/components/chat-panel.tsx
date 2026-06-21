@@ -3793,6 +3793,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       const toolPendingTaskIds: Array<{ taskId: string; model: string; providerId: string; type: 'image' | 'video' }> = []; // 工具返回的异步任务，需轮询
       let toolGeneratedVideo: string | undefined; // 工具生成的视频URL
       let currentSSEEvent = ''; // 当前SSE事件类型
+      let sseBuffer = ''; // SSE buffer拼接，防止跨chunk JSON破裂
 
       setMessages(prev => [...prev, {
         id: assistantMessageId,
@@ -3807,7 +3808,14 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
           if (done) break;
 
           const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n');
+          sseBuffer += chunk;
+          const lines = sseBuffer.split('\n');
+          // 如果最后一行不以\n结尾，说明可能跨chunk断裂，保留到下次拼接
+          if (!chunk.endsWith('\n')) {
+            sseBuffer = lines.pop() || '';
+          } else {
+            sseBuffer = '';
+          }
 
           for (const line of lines) {
             // 解析SSE event类型行
