@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
 
     // ─── 持久化 + 注册 ──────────────────────────────────
     await dbCreateTask(task);
-    registerTask(taskId, 'ai-psd', 'AI PSD生成');
+    registerTask(taskId, 'ai-psd', 'AI PSD生成', authResult.userId);
 
     // ─── 惰性清理过期任务（>7天） ─────────────────────
     cleanupExpiredTasks().catch((err: Error) => {

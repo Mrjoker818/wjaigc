@@ -124,7 +124,7 @@ export async function POST(request: NextRequest) {
     switch (action) {
       case 'analyze': return handleAnalyze(body);
       case 'analyze-image': return handleAnalyzeImage(body);
-      case 'generate': return handleGenerate(body);
+      case 'generate': return handleGenerate(body, auth.userId);
       case 'create': return handleCreateKit(body);
       case 'update': return handleUpdateKit(body);
       case 'delete': return handleDeleteKit(body);
@@ -369,7 +369,7 @@ async function handleGenerate(body: {
   llmProviderId?: string;
   aspectRatio?: string;
   count?: number;
-}) {
+}, userId?: string) {
   const { brandDNA, scenarioIds, customPrompt, imageModel, imageProviderId, llmModel, llmProviderId, aspectRatio, count } = body;
 
   if (!brandDNA) {
@@ -472,7 +472,7 @@ async function handleGenerate(body: {
   const totalScenarios = scenarios.length;
   const generateCount = count || 1; // images per scenario
 
-  registerTask(taskId, 'brand-generate', `品牌延展设计 (${totalScenarios} 个场景)`);
+  registerTask(taskId, 'brand-generate', `品牌延展设计 (${totalScenarios} 个场景)`, userId);
 
   // Start async generation — 使用 after() 确保响应返回后 IIFE 仍可运行
   after(async () => {

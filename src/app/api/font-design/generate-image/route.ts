@@ -174,7 +174,7 @@ export async function POST(request: NextRequest) {
     const compatProfile = resolveCompatProfile(provider);
 
     const taskId = `font-design-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    registerTask(taskId, 'font-design', `字体设计: ${textStr || '生成图片'}`);
+    registerTask(taskId, 'font-design', `字体设计: ${textStr || '生成图片'}`, sessionUser?.id);
     updateTaskProgress(taskId, { status: 'processing', progress: 0, label: '正在生成字体设计图片...' });
 
     // 使用 after() 确保响应返回后 IIFE 仍可运行

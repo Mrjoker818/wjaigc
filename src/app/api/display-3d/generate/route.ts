@@ -4,6 +4,7 @@ import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile 
 import { buildDisplay3DRenderPrompt } from '@/lib/display3d-prompts';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { getSessionUser } from '@/lib/server-auth';
 
 export async function POST(request: NextRequest) {
   try {
@@ -89,8 +90,9 @@ export async function POST(request: NextRequest) {
     const { body: adjustedBody } = adjustRequestForProfile(rawBody, profile);
 
     // Register task
+    const sessionUser = await getSessionUser(request).catch(() => null);
     const taskId = `d3d_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    registerTask(taskId, 'display3d', `3D展陈: ${brandName}`);
+    registerTask(taskId, 'display3d', `3D展陈: ${brandName}`, sessionUser?.id);
 
     // Start async generation
     (async () => {

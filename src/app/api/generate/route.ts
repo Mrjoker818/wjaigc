@@ -1279,7 +1279,7 @@ export async function POST(request: NextRequest) {
       for (let i = 0; i < persistedUrls.length; i++) {
         const directTid = `direct-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}`;
         taskIds.push(directTid);
-        registerTask(directTid, 'generate', '生成图片');
+        registerTask(directTid, 'generate', '生成图片', userId);
         // 直接标记为已完成，结果存储在 task-registry 中
         updateTaskProgress(directTid, {
           status: 'completed',
@@ -1312,7 +1312,7 @@ export async function POST(request: NextRequest) {
       // 跳过已经注册的直接模式任务（上面已注册并标记完成）
       const existingTask = getTaskInfo(tid);
       if (existingTask) continue;
-      registerTask(tid, 'generate', '生成图片');
+      registerTask(tid, 'generate', '生成图片', userId);
       // ★ 关键修复：存储提供商信息到 task-registry，确保 poll-task 能直接使用正确的提供商
       // 而不需要通过 findProviderForModel 重新查找（可能找不到或找到错误的提供商）
       updateTaskProgress(tid, {

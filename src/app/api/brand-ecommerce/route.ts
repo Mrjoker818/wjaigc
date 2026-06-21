@@ -697,7 +697,7 @@ export async function POST(request: NextRequest) {
 
       // Register a task for tracking
       const taskId = `ecom-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      registerTask(taskId, 'brand-ecommerce', `品牌电商生成 (${selectedTemplates.length}模板×${variantsPerTemplate}变体)`);
+      registerTask(taskId, 'brand-ecommerce', `品牌电商生成 (${selectedTemplates.length}模板×${variantsPerTemplate}变体)`, sessionUser?.id);
 
       // ★ Async mode: return taskId immediately, process in background
       // 使用 after() 确保响应返回后 IIFE 仍可运行

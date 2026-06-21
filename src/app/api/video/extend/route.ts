@@ -132,7 +132,7 @@ export async function POST(request: NextRequest) {
     // 5. 注册任务
     const taskId = `video_extend_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     const modelName = modelInfo?.name || model;
-    registerTask(taskId, 'video', `视频延长 · ${modelName}`);
+    registerTask(taskId, 'video', `视频延长 · ${modelName}`, sessionUser?.id);
 
     // 6. 异步提交到第三方 API
     (async () => {

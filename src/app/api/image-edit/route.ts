@@ -1876,7 +1876,7 @@ export async function POST(request: NextRequest) {
       // ★ 注册异步多角度任务（存储提供商信息，供 poll-task 轮询远端API）
       if (result?.taskId) {
         const maCandidate = candidateModels.find(c => c.model === result.usedModel) || candidateModels[0];
-        registerTask(result.taskId, 'multi-angle', '多角度旋转');
+        registerTask(result.taskId, 'multi-angle', '多角度旋转', sessionUser?.id);
         updateTaskProgress(result.taskId, {
           status: 'processing',
           progress: 10,
@@ -2183,7 +2183,7 @@ export async function POST(request: NextRequest) {
       // 异步任务完成后，前端 pollForResult 拿到 URL 时需要 resize
       // 通过在 task result 中标记 _needsResize + targetW/targetH，让 poll-task 完成后触发 resize
       if (result.taskId) {
-        const regTaskId = registerTask(result.taskId, 'upscale', 'AI放大');
+        const regTaskId = registerTask(result.taskId, 'upscale', 'AI放大', sessionUser?.id);
         updateTaskProgress(regTaskId.taskId, {
           status: 'processing',
           progress: 12,
@@ -2317,7 +2317,7 @@ export async function POST(request: NextRequest) {
           // 异步模式：返回 taskId 给前端轮询，poll-task 会做后处理
           console.log(`[remove_background] AI returned taskId=${result.taskId}, returning to frontend for polling`);
           const rbUsedCandidate = candidateModels.find(c => c.model === result.usedModel) || candidateModels[0];
-          registerTask(result.taskId, 'generate', 'AI 移除背景');
+          registerTask(result.taskId, 'generate', 'AI 移除背景', sessionUser?.id);
           updateTaskProgress(result.taskId, {
             status: 'processing',
             progress: 10,
@@ -2606,7 +2606,7 @@ export async function POST(request: NextRequest) {
 
               // ★ 注册异步擦除任务（存储提供商信息，供 poll-task 轮询远端API）
               const eraseUsedCandidate = candidateModels.find(c => c.model === eraseResult.usedModel) || candidateModels[0];
-              registerTask(eraseResult.taskId, 'erase', '擦除');
+              registerTask(eraseResult.taskId, 'erase', '擦除', sessionUser?.id);
               updateTaskProgress(eraseResult.taskId, {
                 status: 'processing',
                 progress: 10,
@@ -2733,7 +2733,7 @@ export async function POST(request: NextRequest) {
 
                 // ★ 注册异步擦除任务（存储提供商信息，供 poll-task 轮询远端API）
                 const eraseCandidate = candidateModels.find(c => c.model === eraseResult.usedModel) || candidateModels[0];
-                registerTask(eraseResult.taskId, 'erase', 'AI擦除');
+                registerTask(eraseResult.taskId, 'erase', 'AI擦除', sessionUser?.id);
                 updateTaskProgress(eraseResult.taskId, {
                   status: 'processing',
                   progress: 30,
@@ -2920,7 +2920,7 @@ export async function POST(request: NextRequest) {
       // ★ 注册异步蒙版修图任务（存储提供商信息 + 合成所需数据，供 poll-task 轮询后做蒙版合成）
       if (result.taskId) {
         const usedCandidate = candidateModels.find(c => c.model === result.usedModel) || candidateModels[0];
-        registerTask(result.taskId, 'mask', '蒙版修图');
+        registerTask(result.taskId, 'mask', '蒙版修图', sessionUser?.id);
         updateTaskProgress(result.taskId, {
           status: 'processing',
           progress: 10,
@@ -3165,7 +3165,7 @@ export async function POST(request: NextRequest) {
 
       // 异步结果 - 返回 taskId，前端轮询后直接使用 AI 结果
       if (result.taskId) {
-        registerTask(result.taskId, 'outpaint', '扩展画面');
+        registerTask(result.taskId, 'outpaint', '扩展画面', sessionUser?.id);
         updateTaskProgress(result.taskId, {
           status: 'processing',
           progress: 10,

@@ -351,7 +351,7 @@ export async function POST(request: NextRequest) {
     const taskId = `edit_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     setEditTask(taskId, { id: taskId, status: 'processing', progress: 0, stage: '初始化', createdAt: Date.now() });
     // ★ 注册到统一任务中心（SSE推送 + 取消支持）
-    registerTask(taskId, 'edit', '语言修图');
+    registerTask(taskId, 'edit', '语言修图', sessionUser?.id);
     console.info(`[edit] ★ taskId=${taskId} 创建成功, model=${model}, providerId=${providerId || 'auto'}`);
 
     // 后台异步执行编辑流程（5分钟全局超时兜底）

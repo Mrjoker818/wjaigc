@@ -202,7 +202,7 @@ export async function POST(request: NextRequest) {
     const taskId = `video_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     const modeLabel = imageUrl ? '图生视频' : '文生视频';
     const modelName = modelInfo?.name || model;
-    registerTask(taskId, 'video', `${modeLabel} · ${modelName}`);
+    registerTask(taskId, 'video', `${modeLabel} · ${modelName}`, sessionUser?.id);
 
     // 6. 异步提交到第三方 API
     // 使用 IIFE 异步执行，不阻塞响应

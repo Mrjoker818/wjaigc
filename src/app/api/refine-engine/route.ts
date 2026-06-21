@@ -938,7 +938,7 @@ export async function POST(request: NextRequest) {
       });
 
       const taskId = `refine-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      registerTask(taskId, 'refine-engine', `精修: ${productName || MODE_LABELS[refineMode] || '产品'}`);
+      registerTask(taskId, 'refine-engine', `精修: ${productName || MODE_LABELS[refineMode] || '产品'}`, sessionUser?.id);
 
       try {
         const apiResult = await submitRefineToApi(taskId, {

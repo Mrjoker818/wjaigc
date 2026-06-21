@@ -4,6 +4,7 @@ import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile 
 import { buildPackagingRenderPrompt } from '@/lib/packaging-prompts';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { getSessionUser } from '@/lib/server-auth';
 
 export async function POST(request: NextRequest) {
   try {
@@ -81,8 +82,9 @@ export async function POST(request: NextRequest) {
     const { body: adjustedBody } = adjustRequestForProfile(rawBody, profile);
 
     // Register task
+    const sessionUser = await getSessionUser(request).catch(() => null);
     const taskId = `pkg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    registerTask(taskId, 'packaging', `品牌包装: ${brandName || productName}`);
+    registerTask(taskId, 'packaging', `品牌包装: ${brandName || productName}`, sessionUser?.id);
 
     // Start async generation with provider fallback
     (async () => {

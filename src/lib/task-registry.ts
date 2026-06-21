@@ -67,8 +67,16 @@ const taskEventBus = getGlobalTaskStore().eventBus;
 
 // ─── 任务操作 ─────────────────────────────────────────────────────────
 
-/** 注册新任务（现有路由创建任务时调用） */
-export function registerTask(taskId: string, type: TaskType, label?: string): TaskInfo {
+/** 注册新任务（现有路由创建任务时调用）
+ *  ★ 当传入 userId 时，自动接入并发排队机制：
+ *  - 当前用户活跃任务 < MAX_CONCURRENT_PER_USER → 立即执行（返回 queuePosition=0）
+ *  - 当前用户活跃任务 ≥ MAX_CONCURRENT_PER_USER → 任务排队等待（状态=queued）
+ *  - 需要等待的路由可调用 await waitForQueueSlot(taskId) 阻塞直到获得槽位
+ *  ★ 未传入 userId 时，使用 'anonymous' 分组（所有匿名用户共享并发限制）
+ */
+export function registerTask(taskId: string, type: TaskType, label?: string, userId?: string): TaskInfo {
+  const effectiveUserId = userId || 'anonymous';
+
   const task: TaskInfo = {
     taskId,
     type,
@@ -80,8 +88,50 @@ export function registerTask(taskId: string, type: TaskType, label?: string): Ta
   };
   taskRegistry.set(taskId, task);
   evictOldestTerminalTasks();
-  emitEvent('created', task);
+
+  // ★ 自动接入排队机制
+  const queuePos = enqueueTask(taskId, effectiveUserId);
+  // enqueueTask 内部已通过 updateTaskProgress 更新了 status 和 queuePosition
+  // 这里需要回读最新状态
+  const updated = taskRegistry.get(taskId);
+  if (updated) Object.assign(task, updated);
+
   return task;
+}
+
+/**
+ * ★ 等待排队槽位 — 在并发已满时阻塞，直到获得执行槽位
+ * API 路由可在 registerTask 后调用此函数，实现"提交后等待执行"的排队模式
+ * 如果任务未被排队或已获得槽位，立即返回
+ * @param taskId 任务ID
+ * @param timeoutMs 最大等待时间（默认 5 分钟）
+ * @returns true=获得槽位可执行, false=超时/取消
+ */
+export function waitForQueueSlot(taskId: string, timeoutMs: number = 5 * 60 * 1000): Promise<boolean> {
+  const task = taskRegistry.get(taskId);
+  if (!task || task.status !== 'queued') return Promise.resolve(true);
+
+  return new Promise<boolean>((resolve) => {
+    // 超时兜底
+    const timer = setTimeout(() => {
+      subscription();
+      resolve(false); // 超时
+    }, timeoutMs);
+
+    // 监听任务状态变化
+    const subscription = subscribeToTaskEvents((event) => {
+      if (event.taskId !== taskId) return;
+      if (event.task.status === 'pending' || event.task.status === 'processing') {
+        clearTimeout(timer);
+        subscription();
+        resolve(true); // 获得槽位
+      } else if (event.task.status === 'cancelled' || event.task.status === 'failed') {
+        clearTimeout(timer);
+        subscription();
+        resolve(false); // 被取消或失败
+      }
+    });
+  });
 }
 
 /** 更新任务进度/状态 */
@@ -168,7 +218,14 @@ interface QueueConfig {
   perUser: boolean;       // 是否按用户限流
 }
 
-const defaultQueueConfig: QueueConfig = { maxConcurrent: 3, perUser: true };
+/** 每用户最大并发任务数（可通过环境变量 TASK_MAX_CONCURRENT 覆盖） */
+export const MAX_CONCURRENT_PER_USER = parseInt(process.env.TASK_MAX_CONCURRENT || '5', 10);
+/** 全局最大存储任务数 */
+export const MAX_TASKS = 500;
+/** 任务过期时间（毫秒） */
+export const TASK_TTL_MS = 30 * 60 * 1000;
+
+const defaultQueueConfig: QueueConfig = { maxConcurrent: MAX_CONCURRENT_PER_USER, perUser: true };
 
 // 每个用户的排队队列
 const userQueues = new Map<string, string[]>();  // userId → [taskId, ...]
@@ -255,8 +312,6 @@ export function getActiveTaskCount(userId: string): number {
 
 // ─── 清理 ──────────────────────────────────────────────────────────────
 
-const MAX_TASKS = 500;
-
 /** 淘汰最老的终态任务，确保 registry 不超过上限 */
 function evictOldestTerminalTasks(): void {
   if (taskRegistry.size <= MAX_TASKS) return;
@@ -282,11 +337,10 @@ function evictOldestTerminalTasks(): void {
 if (typeof setInterval !== 'undefined') {
   const cleanupTimer = setInterval(() => {
     const now = Date.now();
-    const THIRTY_MIN = 30 * 60 * 1000;
     const ACTIVE_STATUSES: TaskStatus[] = ['pending', 'processing', 'queued'];
     for (const [id, task] of taskRegistry) {
       // 仅清理超时的终态任务，或超时极久(>2h)的活跃任务（防僵尸）
-      const isOld = now - task.updatedAt > THIRTY_MIN;
+      const isOld = now - task.updatedAt > TASK_TTL_MS;
       const isTerminal = !ACTIVE_STATUSES.includes(task.status);
       const isZombie = now - task.updatedAt > 2 * 60 * 60 * 1000; // 2小时
       if ((isOld && isTerminal) || isZombie) {
