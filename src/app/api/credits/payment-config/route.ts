@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dbGetSystemSetting, dbSetSystemSetting } from '@/lib/db-storage';
 import { getSessionUser } from '@/lib/server-auth';
+import { uploadImageToS3, isS3Available } from '@/lib/s3-storage';
+import { getServerDataRoot } from '@/lib/server-data-root';
+import path from 'path';
+import fs from 'fs';
 
 /** 个人收款码支付配置 */
 interface QrPaymentConfig {
@@ -78,6 +82,38 @@ export async function POST(request: NextRequest) {
     // 自动启用：有收款码URL就自动启用，清空URL就自动禁用
     if (body.wechatQrUrl !== undefined) currentCfg.wechatEnabled = !!body.wechatQrUrl;
     if (body.alipayQrUrl !== undefined) currentCfg.alipayEnabled = !!body.alipayQrUrl;
+
+    // 主动将收款码图片备份到 S3（防止重新部署后本地文件丢失）
+    const urlsToBackup = [currentCfg.wechatQrUrl, currentCfg.alipayQrUrl].filter(u => u && u.startsWith('/api/serve-upload/'));
+    if (urlsToBackup.length > 0 && isS3Available()) {
+      const dataRoot = getServerDataRoot();
+      for (const url of urlsToBackup) {
+        const relativePath = url.replace(/^\/api\/serve-upload\//, '');
+        const possibleDirs = [
+          path.join(dataRoot, 'uploads'),
+          dataRoot,
+          path.join(process.cwd(), 'public', 'uploads'),
+        ];
+        for (const dir of possibleDirs) {
+          const fullPath = path.join(dir, relativePath);
+          if (fs.existsSync(fullPath)) {
+            try {
+              const buffer = await fs.promises.readFile(fullPath);
+              const ext = path.extname(fullPath).toLowerCase();
+              const mimeType = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
+                : ext === '.webp' ? 'image/webp'
+                : ext === '.svg' ? 'image/svg+xml'
+                : 'image/png';
+              const s3Key = await uploadImageToS3(buffer, path.basename(relativePath), mimeType);
+              if (s3Key) console.log(`[payment-config] S3 backup: ${relativePath} → ${s3Key}`);
+            } catch (err) {
+              console.warn(`[payment-config] S3 backup failed for ${relativePath}:`, err instanceof Error ? err.message : err);
+            }
+            break; // 找到文件就不继续搜索其他目录
+          }
+        }
+      }
+    }
 
     await dbSetSystemSetting(CONFIG_KEY, JSON.stringify(currentCfg));
 

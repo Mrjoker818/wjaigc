@@ -7,10 +7,104 @@
  * → token 过期：显示二维码已过期提示
  * 
  * v2: 使用 HMAC 签名令牌验证，不依赖内存存储
+ * v3: 服务端预获取收款码图片，嵌入 base64 到 HTML，消除客户端对 serve-upload 的依赖
+ *     解决重新部署后本地文件丢失导致图片加载失败的问题
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '../payment-qr/route';
+import { getServerDataRoot } from '@/lib/server-data-root';
+import { downloadImageFromS3, resolveS3Key, deriveS3Key } from '@/lib/s3-storage';
+import path from 'path';
+import fs from 'fs';
+
+/** 从服务端获取收款码图片并转为 base64 data URL */
+async function fetchQrImageAsBase64(imagePath: string): Promise<string | null> {
+  // imagePath 可能是 /api/serve-upload/uploads/xxx.png 格式
+  // 提取实际文件路径部分
+  const relativePath = imagePath.replace(/^\/api\/serve-upload\//, '');
+  
+  // 1. 尝试从本地文件系统读取
+  const dataRoot = getServerDataRoot();
+  const possibleDirs = [
+    path.join(dataRoot, 'uploads'),
+    dataRoot,
+  ];
+  
+  for (const dir of possibleDirs) {
+    const fullPath = path.join(dir, relativePath);
+    if (fs.existsSync(fullPath)) {
+      try {
+        const buffer = await fs.promises.readFile(fullPath);
+        const ext = path.extname(fullPath).toLowerCase();
+        const mimeType = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
+          : ext === '.webp' ? 'image/webp'
+          : ext === '.svg' ? 'image/svg+xml'
+          : 'image/png';
+        return `data:${mimeType};base64,${buffer.toString('base64')}`;
+      } catch { /* continue */ }
+    }
+  }
+  
+  // 1.5 回退: 检查 Next.js public/uploads 目录
+  const publicPath = path.join(process.cwd(), 'public', 'uploads', path.basename(relativePath));
+  if (fs.existsSync(publicPath)) {
+    try {
+      const buffer = await fs.promises.readFile(publicPath);
+      const ext = path.extname(publicPath).toLowerCase();
+      const mimeType = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
+        : ext === '.webp' ? 'image/webp'
+        : ext === '.svg' ? 'image/svg+xml'
+        : 'image/png';
+      return `data:${mimeType};base64,${buffer.toString('base64')}`;
+    } catch { /* continue */ }
+  }
+  
+  // 2. 尝试从 S3 下载
+  try {
+    const s3Buffer = await downloadImageFromS3(relativePath);
+    if (s3Buffer) {
+      const ext = path.extname(relativePath).toLowerCase();
+      const mimeType = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
+        : ext === '.webp' ? 'image/webp'
+        : ext === '.svg' ? 'image/svg+xml'
+        : 'image/png';
+      return `data:${mimeType};base64,${Buffer.from(s3Buffer).toString('base64')}`;
+    }
+  } catch { /* continue */ }
+  
+  // 3. 尝试 S3 presigned URL 获取
+  try {
+    const s3Key = deriveS3Key(relativePath);
+    const resolvedKey = await resolveS3Key(s3Key);
+    if (resolvedKey) {
+      const { getS3PresignedUrl } = await import('@/lib/s3-storage');
+      const presignedUrl = await getS3PresignedUrl(resolvedKey);
+      if (presignedUrl) {
+        const res = await fetch(presignedUrl, { signal: AbortSignal.timeout(10000) });
+        if (res.ok) {
+          const buffer = Buffer.from(await res.arrayBuffer());
+          const contentType = res.headers.get('content-type') || 'image/png';
+          return `data:${contentType};base64,${buffer.toString('base64')}`;
+        }
+      }
+    }
+  } catch { /* continue */ }
+  
+  // 4. 如果是完整 URL（http/https），尝试直接下载
+  if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
+    try {
+      const res = await fetch(imagePath, { signal: AbortSignal.timeout(10000) });
+      if (res.ok) {
+        const buffer = Buffer.from(await res.arrayBuffer());
+        const contentType = res.headers.get('content-type') || 'image/png';
+        return `data:${contentType};base64,${buffer.toString('base64')}`;
+      }
+    } catch { /* continue */ }
+  }
+  
+  return null;
+}
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -43,9 +137,38 @@ export async function GET(request: NextRequest) {
   const { realQrUrl, method, expiresAt } = tokenData;
   const methodName = method === 'wechat' ? '微信' : '支付宝';
   const methodColor = method === 'wechat' ? '#07C160' : '#1677FF';
-  let domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
-  domain = domain.replace(/^https?:\/\//, '');
-  const fullQrUrl = realQrUrl.startsWith('http') ? realQrUrl : `https://${domain}${realQrUrl}`;
+
+  // 服务端预获取收款码图片，嵌入 base64 到 HTML
+  // 这确保即使本地文件丢失、S3 暂时不可用，只要服务端能获取到图片数据，页面就能正常显示
+  let imgSrc: string;
+  let useServerFallback = false;
+  
+  const base64Data = await fetchQrImageAsBase64(realQrUrl);
+  if (base64Data) {
+    imgSrc = base64Data;
+  } else {
+    // 所有服务端获取方式都失败，回退到客户端 URL 加载
+    let domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
+    domain = domain.replace(/^https?:\/\//, '');
+    imgSrc = realQrUrl.startsWith('http') ? realQrUrl : `https://${domain}${realQrUrl}`;
+    useServerFallback = true;
+    console.warn(`[pay-redirect] 服务端无法获取收款码图片，回退到客户端URL: ${imgSrc}`);
+  }
+
+  const fallbackScript = useServerFallback ? `
+    <script>
+      // 客户端 URL 加载失败时的重试逻辑
+      var img = document.querySelector('.qr-container img');
+      if (img) {
+        img.onerror = function() {
+          this.style.display = 'none';
+          var placeholder = document.createElement('div');
+          placeholder.style.cssText = 'width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#999;font-size:13px;';
+          placeholder.textContent = '收款码加载失败，请刷新页面重试';
+          this.parentNode.appendChild(placeholder);
+        };
+      }
+    </script>` : '';
 
   const html = `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -115,7 +238,7 @@ export async function GET(request: NextRequest) {
     </div>
     <h1>请使用${methodName}扫码支付</h1>
     <div class="qr-container">
-      <img src="${fullQrUrl}" alt="${methodName}收款码" />
+      <img src="${imgSrc}" alt="${methodName}收款码" />
     </div>
     <p class="tip">请长按识别或扫描上方收款码完成支付</p>
     <p class="countdown" id="countdown"></p>
@@ -136,6 +259,7 @@ export async function GET(request: NextRequest) {
     }
     update();
   </script>
+  ${fallbackScript}
 </body>
 </html>`;
 
