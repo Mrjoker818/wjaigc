@@ -76,20 +76,48 @@ function defaultApiPermissions() {
 
 let _authSecretCache: { value: string; warned: boolean } | null = null;
 
-function authSecret(): string {
+async function authSecret(): Promise<string> {
   if (_authSecretCache) return _authSecretCache.value;
 
-  const secret = process.env.WUJIE_AUTH_SECRET || process.env.NEXTAUTH_SECRET;
-  if (secret) {
-    _authSecretCache = { value: secret, warned: false };
-    return secret;
+  // Priority: env var → DB stored secret → hardcoded fallback
+  const envSecret = process.env.WUJIE_AUTH_SECRET || process.env.NEXTAUTH_SECRET;
+  if (envSecret) {
+    _authSecretCache = { value: envSecret, warned: false };
+    // Persist to DB so future deployments can recover even without env var
+    try {
+      const { dbGetSystemSetting, dbSetSystemSetting } = await import('./db-storage');
+      const dbSecret = await dbGetSystemSetting('auth_secret') as string | null;
+      if (!dbSecret) {
+        await dbSetSystemSetting('auth_secret', envSecret);
+      }
+    } catch { /* non-critical */ }
+    return envSecret;
   }
-  // Use a stable fallback secret so passwords persist across process restarts
-  // In production, always set WUJIE_AUTH_SECRET env var for security
+
+  // Try to recover from DB (persists across redeployments)
+  try {
+    const { dbGetSystemSetting, dbSetSystemSetting } = await import('./db-storage');
+    const dbSecret = await dbGetSystemSetting('auth_secret') as string | null;
+    if (dbSecret) {
+      _authSecretCache = { value: dbSecret, warned: false };
+      return dbSecret;
+    }
+    // No env var and no DB secret → first deployment with fallback, persist it
+    const fallback = 'wujie-ai-stable-auth-secret-fallback-2024';
+    await dbSetSystemSetting('auth_secret', fallback);
+    _authSecretCache = { value: fallback, warned: false };
+    if (process.env.COZE_PROJECT_ENV === 'PROD' && !_authSecretCache.warned) {
+      _authSecretCache.warned = true;
+      console.warn('[SECURITY] WUJIE_AUTH_SECRET/NEXTAUTH_SECRET not set! Using default secret. Set env var for production. (This warning is logged once per process)');
+    }
+    return fallback;
+  } catch {
+    // DB not available, use fallback
+  }
+
   const fallback = 'wujie-ai-stable-auth-secret-fallback-2024';
   _authSecretCache = { value: fallback, warned: false };
 
-  // Only log the warning ONCE per process lifetime to avoid flooding logs
   if (process.env.COZE_PROJECT_ENV === 'PROD' && !_authSecretCache.warned) {
     _authSecretCache.warned = true;
     console.warn('[SECURITY] WUJIE_AUTH_SECRET/NEXTAUTH_SECRET not set! Using default secret. Set env var for production. (This warning is logged once per process)');
@@ -97,12 +125,47 @@ function authSecret(): string {
   return fallback;
 }
 
-function hashPassword(password: string): string {
-  return crypto.createHash('sha256').update(`${authSecret()}:${password}`).digest('hex');
+/**
+ * Legacy auth secrets used in previous deployments.
+ * When a user's password hash doesn't match the current secret,
+ * we try these legacy secrets. If matched, the hash is auto-migrated
+ * to the current secret so subsequent logins use the fast path.
+ */
+const LEGACY_AUTH_SECRETS = [
+  'wujie-local-session-secret', // Original fallback (pre-v3.0)
+];
+
+function hashPasswordWithSecret(password: string, secret: string): string {
+  return crypto.createHash('sha256').update(`${secret}:${password}`).digest('hex');
 }
 
-function hmac(value: string): string {
-  return crypto.createHmac('sha256', authSecret()).update(value).digest('base64url');
+async function hashPassword(password: string): Promise<string> {
+  return hashPasswordWithSecret(password, await authSecret());
+}
+
+/**
+ * Verify a password against a stored hash, trying the current secret first
+ * and then falling back to legacy secrets.
+ * Returns { matched, needsMigration } - if needsMigration is true,
+ * the password hash should be re-hashed with the current secret.
+ * Must be called after authSecret() has been called at least once (cache populated).
+ */
+function verifyPassword(password: string, storedHash: string, currentSecret: string): { matched: boolean; needsMigration: boolean } {
+  // Fast path: current secret
+  if (hashPasswordWithSecret(password, currentSecret) === storedHash) {
+    return { matched: true, needsMigration: false };
+  }
+  // Legacy secrets: try each one
+  for (const legacySecret of LEGACY_AUTH_SECRETS) {
+    if (hashPasswordWithSecret(password, legacySecret) === storedHash) {
+      return { matched: true, needsMigration: true };
+    }
+  }
+  return { matched: false, needsMigration: false };
+}
+
+async function hmac(value: string): Promise<string> {
+  return crypto.createHmac('sha256', await authSecret()).update(value).digest('base64url');
 }
 
 function storageFolder(userId: string): string {
@@ -269,7 +332,7 @@ async function readStore(): Promise<StoredUsersFile> {
     file.users.unshift({
       id: 'admin_mr_joker',
       name: DEFAULT_ADMIN_NAME,
-      passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD),
+      passwordHash: await hashPassword(DEFAULT_ADMIN_PASSWORD),
       role: 'admin',
       status: 'active',
       apiPermissions: defaultApiPermissions(),
@@ -314,7 +377,7 @@ export async function authenticateUser(input: {
     const user: StoredUser = {
       id,
       name,
-      passwordHash: hashPassword(password),
+      passwordHash: await hashPassword(password),
       role,
       status: input.profile?.status || 'active',
       apiPermissions: input.profile?.apiPermissions || defaultApiPermissions(),
@@ -330,9 +393,13 @@ export async function authenticateUser(input: {
 
   const user = file.users[index];
   if (user.status === 'disabled') return null;
-  const passwordMatches = user.passwordHash === hashPassword(password);
+  const currentSecret = await authSecret();
+  const { matched: passwordMatches, needsMigration } = verifyPassword(password, user.passwordHash, currentSecret);
   const adminBootstrapMatches = isDefaultAdmin && password === DEFAULT_ADMIN_PASSWORD;
   if (!passwordMatches && !adminBootstrapMatches) return null;
+
+  // If password matched via a legacy secret, re-hash with current secret (auto-migration)
+  const newPasswordHash = needsMigration ? await hashPassword(password) : (passwordMatches ? user.passwordHash : await hashPassword(password));
 
   const next: StoredUser = {
     ...user,
@@ -342,11 +409,14 @@ export async function authenticateUser(input: {
     apiPermissions: input.profile?.apiPermissions || user.apiPermissions || defaultApiPermissions(),
     storageFolder: storageFolder(user.id),
     email: input.profile?.email ?? user.email,
-    passwordHash: passwordMatches ? user.passwordHash : hashPassword(password),
+    passwordHash: newPasswordHash,
     updatedAt: now,
   };
   file.users[index] = next;
   await writeStore(file);
+  if (needsMigration) {
+    console.log(`[auth] Auto-migrated password hash for user "${name}" from legacy secret to current secret`);
+  }
   return publicUser(next);
 }
 
@@ -381,7 +451,7 @@ export async function createManagedUser(input: {
   const user: StoredUser = {
     id,
     name,
-    passwordHash: hashPassword(password),
+    passwordHash: await hashPassword(password),
     role: 'user',
     status: 'active',
     apiPermissions: input.apiPermissions || defaultApiPermissions(),
@@ -420,7 +490,7 @@ export async function updateManagedUser(userId: string, updates: ManagedUserUpda
     ...(updates.email !== undefined ? { email: updates.email.trim() || undefined } : {}),
     ...(updates.status ? { status: updates.status } : {}),
     ...(updates.apiPermissions ? { apiPermissions: updates.apiPermissions } : {}),
-    ...(updates.password ? { passwordHash: hashPassword(updates.password) } : {}),
+    ...(updates.password ? { passwordHash: await hashPassword(updates.password) } : {}),
     storageFolder: storageFolder(current.id),
     updatedAt: Date.now(),
   };
@@ -458,7 +528,7 @@ export async function deleteManagedUser(userId: string): Promise<boolean> {
   return true;
 }
 
-export function createSessionToken(user: User): string {
+export async function createSessionToken(user: User): Promise<string> {
   const payload: SessionPayload = {
     sub: user.id,
     role: user.role === 'admin' ? 'admin' : 'user',
@@ -466,7 +536,7 @@ export function createSessionToken(user: User): string {
     exp: Date.now() + WUJIE_SESSION_TTL_SECONDS * 1000,
   };
   const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
-  return `${encoded}.${hmac(encoded)}`;
+  return `${encoded}.${await hmac(encoded)}`;
 }
 
 export async function getSessionUser(request: NextRequest): Promise<User | null> {
@@ -474,7 +544,7 @@ export async function getSessionUser(request: NextRequest): Promise<User | null>
   if (!token) return null;
 
   const [encoded, signature] = token.split('.');
-  if (!encoded || !signature || hmac(encoded) !== signature) return null;
+  if (!encoded || !signature || await hmac(encoded) !== signature) return null;
 
   let payload: SessionPayload;
   try {

@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
     await ensureUserDataDirs(user.id);
 
     const response = NextResponse.json({ success: true, user });
-    response.cookies.set(WUJIE_SESSION_COOKIE, createSessionToken(user), {
+    response.cookies.set(WUJIE_SESSION_COOKIE, await createSessionToken(user), {
       httpOnly: true,
       sameSite: 'lax',
       secure: process.env.NODE_ENV === 'production',
