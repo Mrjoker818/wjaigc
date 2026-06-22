@@ -502,11 +502,10 @@ export async function detectAndRecoverOrphanedUsers(): Promise<OrphanedUser[]> {
       const userName = userId.replace(/^user_\d+_/, '') || userId;
 
       // Create a placeholder user record with known temporary password
-      // Use the ACTUAL authSecret (not fallback) so the password hash works at login
+      // Use the same authSecret logic as server-auth.ts (inlined to avoid circular dependency)
       try {
         const crypto = await import('crypto');
-        const { authSecret } = await import('./server-auth.js');
-        const secret = authSecret();
+        const secret = process.env.WUJIE_AUTH_SECRET || process.env.NEXTAUTH_SECRET || 'wujie-ai-stable-auth-secret-fallback-2024';
         const tempPassword = 'wujie_reset_2024';
         const tempPasswordHash = crypto.createHash('sha256')
           .update(`${secret}:${tempPassword}`)

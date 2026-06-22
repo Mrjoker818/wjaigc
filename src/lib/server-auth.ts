@@ -76,7 +76,7 @@ function defaultApiPermissions() {
 
 let _authSecretCache: { value: string; warned: boolean } | null = null;
 
-export function authSecret(): string {
+function authSecret(): string {
   if (_authSecretCache) return _authSecretCache.value;
 
   const secret = process.env.WUJIE_AUTH_SECRET || process.env.NEXTAUTH_SECRET;

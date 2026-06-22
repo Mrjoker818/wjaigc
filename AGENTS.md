@@ -705,7 +705,19 @@ UPSCALE_TIMEOUT_MS=300000
 
 ## 更新日志
 
-### v3.3.0 (当前版本)
+### v3.3.1 (当前版本)
+
+**P0: 生产环境用户数据丢失修复**
+- 发现生产数据库3个用户账号记录丢失（有项目数据但无用户记录），已直接通过 SQL 恢复
+- 新增 `detectAndRecoverOrphanedUsers()` 函数：启动时自动检测孤立用户并恢复账号记录
+- 修复 `db-storage.ts` 循环依赖：`detectAndRecoverOrphanedUsers` 内联 authSecret 逻辑（避免 import server-auth.js 导致模块找不到）
+- 修复 `authSecret()` 安全警告刷屏：添加缓存机制 `_authSecretCache`，仅首次输出警告（之前每个请求都输出，生产日志被严重刷屏）
+- 修复 `authSecret()` 可见性：从 `export` 改为模块内部 `function`（避免外部误用导致循环依赖）
+- 修复 `readStore` 数据库回退逻辑：当 DB 读取失败回退文件系统时，不再将文件数据写回 DB（避免 stale 数据覆盖生产数据）
+- 孤立用户恢复：临时密码 `wujie_reset_2024`，管理员应在恢复后重置用户密码
+- 恢复的生产用户：zhnude / iw3qca / btcwsm（管理员可在面板中修改为原始用户名）
+
+### v3.3.0
 
 **P0: 任务并发控制与稳定性**
 - task-registry.ts 新增任务并发控制：每用户最大 15 个并发任务（MAX_CONCURRENT_PER_USER=15），全局 500 任务上限
