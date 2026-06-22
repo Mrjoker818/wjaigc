@@ -210,10 +210,14 @@ export async function GET(request: NextRequest) {
       margin-bottom: 16px;
     }
     h1 { font-size: 18px; color: #1a1a1a; margin-bottom: 20px; }
+    .qr-wrapper {
+      position: relative;
+      width: 220px;
+      margin: 0 auto 16px;
+    }
     .qr-container {
       width: 220px;
       height: 220px;
-      margin: 0 auto 16px;
       border: 2px solid ${methodColor}20;
       border-radius: 12px;
       overflow: hidden;
@@ -227,8 +231,20 @@ export async function GET(request: NextRequest) {
       height: 100%;
       object-fit: contain;
     }
-    .tip { font-size: 13px; color: #666; margin-top: 12px; line-height: 1.6; }
-    .countdown { font-size: 12px; color: #ff6b6b; margin-top: 8px; }
+    .countdown {
+      position: absolute;
+      bottom: -12px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 11px;
+      color: #ff6b6b;
+      background: white;
+      padding: 2px 10px;
+      border-radius: 10px;
+      white-space: nowrap;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+    }
+    .tip { font-size: 13px; color: #666; margin-top: 20px; line-height: 1.6; }
   </style>
 </head>
 <body>
@@ -237,11 +253,13 @@ export async function GET(request: NextRequest) {
       ${method === 'wechat' ? '&#x1F4AC;' : '&#x1F535;'} ${methodName}支付
     </div>
     <h1>请使用${methodName}扫码支付</h1>
-    <div class="qr-container">
-      <img src="${imgSrc}" alt="${methodName}收款码" />
+    <div class="qr-wrapper">
+      <div class="qr-container">
+        <img src="${imgSrc}" alt="${methodName}收款码" />
+      </div>
+      <div class="countdown" id="countdown"></div>
     </div>
     <p class="tip">请长按识别或扫描上方收款码完成支付</p>
-    <p class="countdown" id="countdown"></p>
   </div>
   <script>
     var expiresAt = ${expiresAt};
