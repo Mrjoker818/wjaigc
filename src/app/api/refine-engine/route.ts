@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, findProviderById, getPublicModels, getPublicApiProviders } from '@/lib/server-api-config';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import { calculateActualPixelsFromRatio } from '@/app/api/generate/route';
+import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, resolveProfileForModel, buildGeminiChatImageRequest, tryChatCompletionsImageFallback, parseGeminiChatImageResponse, isEditsEndpointRejected, stripEditsOnlyFields, isChannelUnavailableError } from '@/lib/api-compatibility';
 import { fetchWithV1Retry, getInternalApiUrl } from '@/lib/api-helpers';
 import { translateApiError } from '@/lib/api-error-translate';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';

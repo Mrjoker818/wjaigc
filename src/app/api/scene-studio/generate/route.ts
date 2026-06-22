@@ -60,7 +60,8 @@ export async function POST(request: NextRequest) {
 
     // Calculate size based on aspect ratio and quality (user setting from panel)
     const quality = body.quality || '1K';
-    const size = calculateActualPixelsFromRatio(aspectRatio, quality, modelName);
+    const calculatedSize = calculateActualPixelsFromRatio(aspectRatio, quality, modelName);
+    const size = calculatedSize || undefined;
 
     const n = imageCount || 1;
     const hasImage = !!(screenshotData && mode !== 'text_to_image');

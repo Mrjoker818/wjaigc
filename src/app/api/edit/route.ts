@@ -811,7 +811,13 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
         if (size.includes(':')) {
           // 比例格式（如 "1:1", "16:9"）→ 根据质量转换为像素
           const pixelSize = calculateActualPixelsFromRatio(size, quality, model);
-          outputSize = `${pixelSize.width}x${pixelSize.height}`;
+          if (pixelSize) {
+            outputSize = pixelSize; // 已经是 "WxH" 格式
+          } else {
+            // Fallback: 1K 默认映射
+            const fallbackMap: Record<string, string> = { '1:1': '1024x1024', '16:9': '1792x1024', '9:16': '1024x1792', '4:3': '1536x1024', '3:4': '1024x1536' };
+            outputSize = fallbackMap[size] || '1024x1024';
+          }
         } else if (size === '1024' || size === '1536' || size === '2048') {
           outputSize = `${size}x${size}`;
         } else if (!size.includes('x')) {
@@ -985,7 +991,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
           // 根据质量参数动态计算默认尺寸
           ...((() => {
             const ps = calculateActualPixelsFromRatio('1:1', quality || '1K', model);
-            return { size: size || `${ps.width}x${ps.height}`, quality: quality || '1K' };
+            return { size: size || ps || '1024x1024', quality: quality || '1K' };
           })()),
           n: Math.min(count, 4),
           image_urls: imageUrls,
@@ -1211,8 +1217,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
     const outputSize = (() => {
       if (size && /^\d+x\d+$/.test(size)) return size; // 已经是像素格式
       const ratio = size || '1:1';
-      const ps = calculateActualPixelsFromRatio(ratio, quality || '1K', model);
-      return `${ps.width}x${ps.height}`;
+      return calculateActualPixelsFromRatio(ratio, quality || '1K', model) || '1024x1024';
     })();
 
     // 构建 chat/completions 请求体
@@ -1497,8 +1502,7 @@ async function tryImagesGenerations(
   const outputSize = (() => {
     if (size && /^\d+x\d+$/.test(size)) return size; // 已经是像素格式
     const ratio = size || '1:1';
-    const ps = calculateActualPixelsFromRatio(ratio, quality || '1K', model);
-    return `${ps.width}x${ps.height}`;
+    return calculateActualPixelsFromRatio(ratio, quality || '1K', model) || '1024x1024';
   })();
 
   const genResponse = await fetchWithV1Retry(
