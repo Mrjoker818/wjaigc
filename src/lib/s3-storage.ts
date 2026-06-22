@@ -14,6 +14,7 @@
  */
 
 import { S3Storage } from 'coze-coding-dev-sdk';
+import { saveImageDataMapping } from './image-source-map';
 
 let _storage: S3Storage | null = null;
 
@@ -22,16 +23,12 @@ function getStorage(): S3Storage | null {
   
   const endpointUrl = process.env.COZE_BUCKET_ENDPOINT_URL;
   const bucketName = process.env.COZE_BUCKET_NAME;
+  // SDK supports empty accessKey/secretKey — it will auto-resolve credentials via workload identity
   const accessKey = process.env.COZE_BUCKET_ACCESS_KEY || process.env.AWS_ACCESS_KEY_ID || '';
   const secretKey = process.env.COZE_BUCKET_SECRET_KEY || process.env.AWS_SECRET_ACCESS_KEY || '';
   
   if (!endpointUrl || !bucketName) {
     console.warn('[s3-storage] S3 not configured: missing COZE_BUCKET_ENDPOINT_URL or COZE_BUCKET_NAME');
-    return null;
-  }
-  
-  if (!accessKey || !secretKey) {
-    console.warn('[s3-storage] S3 credentials not configured: missing access key / secret key');
     return null;
   }
   
@@ -43,7 +40,7 @@ function getStorage(): S3Storage | null {
       bucketName,
       region: process.env.COZE_BUCKET_REGION || 'cn-beijing',
     });
-    console.log(`[s3-storage] S3 initialized. Bucket: ${bucketName}`);
+    console.log(`[s3-storage] S3 initialized. Bucket: ${bucketName}, accessKey: ${accessKey ? 'provided' : 'auto-resolve'}`);
     return _storage;
   } catch (e) {
     console.error('[s3-storage] Failed to initialize S3:', e);
@@ -417,6 +414,13 @@ export async function persistRemoteImage(
     });
     
     console.log(`[s3-storage] Persisted image: ${filename} (${(imageBuffer.length / 1024).toFixed(0)}KB, S3: ${s3Key ? 'yes' : 'no'})`);
+    
+    // Record sourceUrl mapping for future recovery (e.g., redeployment without S3)
+    if (imageUrl && subfolder) {
+      saveImageDataMapping(`${subfolder}/${filename}`, imageUrl).catch((e: unknown) => {
+        console.warn('[s3-storage] Failed to save source mapping for', filename, e);
+      });
+    }
     
     // Return stable local URL (already in correct /api/serve-upload/{subDir}/{filename} format)
     return localUrl;
