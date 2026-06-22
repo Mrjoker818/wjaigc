@@ -75,7 +75,8 @@ export async function POST(request: NextRequest) {
       model: selectedModel,
       prompt,
       n: 1,
-      size: '1024x1024',
+      size: '2048x2048',
+      quality: '2K',
     };
 
     // Add reference images

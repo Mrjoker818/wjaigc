@@ -185,6 +185,8 @@ export async function POST(request: NextRequest) {
           prompt: finalPrompt,
           n: numCount,
           size: ratioStr,
+          aspectRatio: ratioStr,
+          quality: '2K',
         };
 
         const adjustedRequest = adjustRequestForProfile(requestBody, compatProfile);

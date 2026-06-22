@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { findProviderForModel } from '@/lib/server-api-config';
-import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile } from '@/lib/api-compatibility';
+import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, getModelSpecificPixelSize } from '@/lib/api-compatibility';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
 import { dbListBrandKits, dbUpsertBrandKit, dbDeleteBrandKit } from '@/lib/db-storage';
@@ -370,7 +370,7 @@ async function handleGenerate(body: {
   aspectRatio?: string;
   count?: number;
 }, userId?: string) {
-  const { brandDNA, scenarioIds, customPrompt, imageModel, imageProviderId, llmModel, llmProviderId, aspectRatio, count } = body;
+  const { brandDNA, scenarioIds, customPrompt, imageModel, imageProviderId, llmModel, llmProviderId, aspectRatio, quality, count } = body;
 
   if (!brandDNA) {
     return NextResponse.json({ error: '请先提取品牌 DNA' }, { status: 400 });
@@ -497,7 +497,7 @@ async function handleGenerate(body: {
         // Build full prompt with brand DNA context
         const fullPrompt = `${prompt}. Brand style: ${brandDNA.styleKeywords?.join(', ') || ''}. Color palette: ${brandDNA.primaryColor}, ${(brandDNA.secondaryColors || []).join(', ')}. ${brandDNA.layoutStyle ? `Layout: ${brandDNA.layoutStyle}.` : ''} ${brandDNA.toneKeywords?.length ? `Tone: ${brandDNA.toneKeywords.join(', ')}.` : ''}`;
 
-        const size = parseAspectRatio(aspectRatio || scenario.aspectRatio || '1:1');
+        const size = parseAspectRatio(aspectRatio || scenario.aspectRatio || '1:1', imgModelId, quality);
 
         const adjustedRequest = adjustRequestForProfile(
           {
@@ -724,15 +724,17 @@ Generate a JSON array of design scenario objects. Each object must have:
 Return ONLY the JSON array, no markdown or explanation.`;
 }
 
-function parseAspectRatio(ratio: string): string {
-  const map: Record<string, string> = {
-    '1:1': '1024x1024',
-    '16:9': '1792x1024',
-    '9:16': '1024x1792',
-    '4:3': '1365x1024',
-    '3:4': '1024x1365',
-    '3:2': '1536x1024',
-    '2:3': '1024x1536',
-  };
-  return map[ratio] || '1024x1024';
+function parseAspectRatio(ratio: string, model?: string, quality?: string): string {
+  // Try model-specific pixel sizes first (respects user's quality/resolution setting)
+  const pixelSize = getModelSpecificPixelSize(model || '', ratio, quality);
+  if (pixelSize) return pixelSize;
+  // Fallback: calculate from ratio with 4K baseline
+  const [w, h] = ratio.split(':').map(Number);
+  if (w && h) {
+    const base = (quality === '4K') ? 4096 : (quality === '2K') ? 2048 : 1024;
+    const longSide = base;
+    const shortSide = Math.round(base * Math.min(w, h) / Math.max(w, h));
+    return w >= h ? `${longSide}x${shortSide}` : `${shortSide}x${longSide}`;
+  }
+  return '1024x1024';
 }

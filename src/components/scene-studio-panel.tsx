@@ -1660,6 +1660,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
           body: JSON.stringify({
             prompt: fullPrompt,
             aspectRatio,
+            quality: '2K',
             n: imageCount,
             referenceImageUrl,
             strength: strengthInfo?.value || 60,

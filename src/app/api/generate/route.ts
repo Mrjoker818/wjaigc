@@ -9,9 +9,46 @@ import { translateApiError } from '@/lib/api-error-translate';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { consumeCredits } from '@/lib/credits';
 
-import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, stripEditsOnlyFields, isEditsEndpointRejected, type ApiCompatProfile, resolveProfileForModel, isGeminiImageModel, isNanoBananaModel, buildGeminiChatImageRequest, parseGeminiChatImageResponse, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
+import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, stripEditsOnlyFields, isEditsEndpointRejected, type ApiCompatProfile, resolveProfileForModel, isGeminiImageModel, isNanoBananaModel, buildGeminiChatImageRequest, parseGeminiChatImageResponse, tryChatCompletionsImageFallback, isChannelUnavailableError, getModelSpecificPixelSize } from '@/lib/api-compatibility';
 import { registerTask, updateTaskProgress, isTaskCancelled, getTaskInfo } from '@/lib/task-registry';
 import { persistRemoteImage } from '@/lib/s3-storage';
+
+/**
+ * ★ 根据 aspectRatio + quality 计算精确像素尺寸
+ * 优先使用前端传递的 size 参数（像素格式），否则从比例+质量推算
+ */
+export function calculateActualPixelsFromRatio(aspectRatio: string, quality?: string, modelId?: string): string | null {
+  // 直接使用 api-compatibility 中的模型像素表推算
+  if (!aspectRatio || !quality) return null;
+  try {
+    const pixelSize = getModelSpecificPixelSize(modelId || '', aspectRatio, quality);
+    if (pixelSize) {
+      const [w, h] = pixelSize.split('x').map(Number);
+      if (w > 0 && h > 0) return pixelSize;
+    }
+  } catch {
+    // fallback: 从比例推算基础尺寸
+  }
+
+  // Fallback: 从 aspectRatio 比例 + quality 推算
+  const ratioMatch = aspectRatio.match(/^(\d+):(\d+)$/);
+  if (!ratioMatch) return null;
+  const [, rw, rh] = ratioMatch.map(Number);
+  const ratio = rw / rh;
+
+  // 根据质量确定长边像素
+  const qualityPixels: Record<string, number> = { '1K': 1024, '2K': 2048, '3K': 3072, '4K': 4096 };
+  const longEdge = qualityPixels[quality];
+  if (!longEdge) return null;
+
+  if (ratio >= 1) {
+    // 横向或正方形
+    return `${longEdge}x${Math.round(longEdge / ratio)}`;
+  } else {
+    // 纵向
+    return `${Math.round(longEdge * ratio)}x${longEdge}`;
+  }
+}
 
 // 直接模式（OpenAI兼容API返回图片需60-120秒）
 // 异步模式（返回task_id只需几秒）两者共存，取较大值
@@ -54,15 +91,15 @@ function inferModelConfig(modelId: string, profile: ApiCompatProfile, providerNa
   const id = (modelId || '').toLowerCase();
 
   // 根据模型名称关键词推断参数类型
-  let paramType: ModelConfig['paramType'] = 'none';
+  // 大多数现代图像模型都支持分辨率参数，默认使用 resolution
+  // 仅对明确使用 quality 参数的模型设置 quality，对极少数不支持任何参数的模型设置 none
+  let paramType: ModelConfig['paramType'] = 'resolution';
   if (id.includes('gpt-image') || id.includes('dall-e')) {
+    // OpenAI 系列：使用 quality 参数 (standard/hd/auto/low/medium/high)
     paramType = 'quality';
-  } else if (id.includes('gemini') || id.includes('seedream') || id.includes('doubao') || id.includes('flux')) {
-    paramType = 'resolution';
-  } else if (id.includes('nano-banana') || id.includes('nanobanana')) {
-    // PearAPI nano-banana 系列：基于 Gemini 的图像模型，使用分辨率参数
-    paramType = 'resolution';
   }
+  // 以下模型虽然也支持分辨率，但关键词匹配已覆盖，无需额外处理：
+  // gemini / seedream / doubao / flux / nano-banana — 均使用 resolution（默认值）
 
   // 根据模型名称推断是否支持图生图
   // 大多数现代图像模型都支持图生图，只有极少数纯文生图模型不支持
@@ -102,9 +139,11 @@ function inferModelConfig(modelId: string, profile: ApiCompatProfile, providerNa
 export async function POST(request: NextRequest) {
   await optionalApiAuth(request);
   try {
+    const body = await request.json();
     const {
       prompt,
       aspectRatio = '1:1',
+      size: requestedPixelSize, // 前端传递的像素格式尺寸（如 "4096x2304"），用于验证
       referenceImages,
       referenceMode,
       referenceCategories,
@@ -119,7 +158,7 @@ export async function POST(request: NextRequest) {
       userId: requestUserId,
       strength,
       providerId,
-    } = await request.json();
+    } = body;
     // 防御性处理：确保 model 是字符串（前端可能误传对象）
     const model = typeof rawModel === 'string' ? rawModel : (rawModel as Record<string, unknown>)?.model as string || String(rawModel || '');
 
@@ -486,14 +525,20 @@ export async function POST(request: NextRequest) {
         ? requestedSize 
         : currentModelConfig.supportedSizes[0] || '1:1';
 
+      // ★ 始终附带前端计算的精确像素尺寸，确保第三方 API 收到完整分辨率信息
+      const pixelSize = requestedPixelSize || calculateActualPixelsFromRatio(effectiveSize, quality);
+
       const requestBody: Record<string, unknown> = {
         model: currentModelConfig.modelId,
         prompt: enhancedPrompt,
         size: effectiveSize,
         n: requestN,
+        ...(pixelSize ? { width: parseInt(pixelSize.split('x')[0]), height: parseInt(pixelSize.split('x')[1]), size_px: pixelSize } : {}),
       };
 
       // 根据模型参数类型添加质量/分辨率参数
+      // ★ 关键修复：paramType 为 'none' 时也需要传递 quality/resolution，
+      //   否则用户选择的 4K 分辨率会被完全忽略，API 使用默认 1K
       if (currentModelConfig.paramType === 'resolution' && quality) {
         requestBody.resolution = quality;
       } else if (currentModelConfig.paramType === 'quality' && quality) {
@@ -503,6 +548,22 @@ export async function POST(request: NextRequest) {
           'low': 'low', 'medium': 'medium',
         };
         requestBody.quality = qualityMap[quality] || quality;
+      } else if (currentModelConfig.paramType === 'none' && quality) {
+        // ★ 未知模型类型：同时传递 resolution 和 quality，让 API 选择支持的参数
+        // 很多第三方 API 至少支持其中一个
+        requestBody.resolution = quality;
+        requestBody.quality = quality;
+      }
+
+      // ★ 确保像素格式 size 始终存在（覆盖比例格式 size，确保 API 生成正确分辨率）
+      if (pixelSize) {
+        // 对于 pixel 格式的 profile，直接用像素值覆盖 size
+        // 对于 aspect-ratio 格式的 profile，保留比例格式 size，但 pixel size 已在 width/height/size_px 中
+        if (profile.sizeFormat === 'pixel') {
+          requestBody.size = pixelSize;
+        }
+        // aspect-ratio 格式的 profile: size 保持比例格式（如 "16:9"），
+        // 但 width/height/size_px 已附带，API 可自行选择使用
       }
 
       // 添加参考图片
@@ -728,6 +789,14 @@ export async function POST(request: NextRequest) {
         apiBaseUrl: currentApiBaseUrl,
         prompt: enhancedPrompt.substring(0, 50) + '...',
         size: adjustedBody.size,
+        resolution: adjustedBody.resolution || undefined,
+        quality: adjustedBody.quality || undefined,
+        width: adjustedBody.width || undefined,
+        height: adjustedBody.height || undefined,
+        size_px: adjustedBody.size_px || undefined,
+        aspectRatio,
+        requestedPixelSize: requestedPixelSize || undefined,
+        paramType: currentModelConfig.paramType,
         endpoint,
         profile: profile.id,
         hasRefImages,

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, findProviderById, getPublicModels, getPublicApiProviders } from '@/lib/server-api-config';
 import type { ApiProvider } from '@/lib/universal-api-types';
-import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, isEditsEndpointRejected, stripEditsOnlyFields, resolveProfileForModel, tryChatCompletionsImageFallback, isChannelUnavailableError, buildGeminiChatImageRequest, parseGeminiChatImageResponse } from '@/lib/api-compatibility';
+import { calculateActualPixelsFromRatio } from '@/app/api/generate/route';
 import { fetchWithV1Retry, getInternalApiUrl } from '@/lib/api-helpers';
 import { translateApiError } from '@/lib/api-error-translate';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
@@ -423,8 +423,11 @@ async function getImageProvider(model?: string, providerId?: string): Promise<Ap
   return p;
 }
 
-// ─── Helper: Aspect ratio to size ───
-function getAspectSize(ratio: string): string {
+// ─── Helper: Aspect ratio to size (respects quality/resolution) ───
+function getAspectSize(ratio: string, model?: string, quality?: string): string {
+  const pixelSize = calculateActualPixelsFromRatio(ratio, quality, model);
+  if (pixelSize) return pixelSize;
+  // fallback: use 1K as minimum
   const sizes: Record<string, string> = {
     '1:1': '1024x1024',
     '4:3': '1024x768',
@@ -463,7 +466,7 @@ async function submitRefineToApi(
     model: params.model,
     prompt: params.prompt,
     n: 1,
-    size: getAspectSize(params.aspectRatio),
+    size: getAspectSize(params.aspectRatio, params.model, params.quality),
   };
 
   if (params.quality && params.quality !== 'standard' && params.quality !== 'auto') {

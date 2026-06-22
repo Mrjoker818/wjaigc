@@ -338,7 +338,7 @@ async function generateImage(
       model,
       prompt,
       n: options?.n ?? 1,
-      size: options?.size ?? '1024x1024',
+      size: options?.size ?? '2048x2048',
     };
     if (options?.quality) rawBody.quality = options.quality;
 
@@ -1047,7 +1047,8 @@ export async function POST(request: NextRequest) {
         const prompt = buildKVImagePrompt(brandDna, body);
 
         const result = await generateImageWithPoll(prompt, imageModel, {
-          size: body.ratio === '9:16' ? '1024x1536' : body.ratio === '1:1' ? '1024x1024' : '1536x1024',
+          size: body.ratio === '9:16' ? '2048x3072' : body.ratio === '1:1' ? '2048x2048' : '3072x2048',
+          quality: '2K',
         }, imageProviderId);
 
         if (!result.success) {
@@ -1086,7 +1087,7 @@ export async function POST(request: NextRequest) {
         const results: { item: string; imageUrl?: string; error?: string }[] = [];
         for (const item of items) {
           const prompt = buildBatchMaterialPrompt(brandDna, materialType, item);
-          const result = await generateImageWithPoll(prompt, imageModel, { size: '1024x1024' }, imageProviderId);
+          const result = await generateImageWithPoll(prompt, imageModel, { size: '2048x2048', quality: '2K' }, imageProviderId);
           results.push({
             item,
             imageUrl: result.imageUrl,

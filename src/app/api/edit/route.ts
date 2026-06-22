@@ -8,6 +8,7 @@ import { consumeCredits } from '@/lib/credits';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import { getEditTask, deleteEditTask, setEditTask, updateTaskStage, failEditTask } from '@/lib/edit-task-store';
+import { calculateActualPixelsFromRatio } from '@/app/api/generate/route';
 import type { EditTask } from '@/lib/edit-task-store';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
 import { translateApiError } from '@/lib/api-error-translate';
@@ -805,16 +806,17 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
         form.append('image', imageBuffer, { filename: 'image.png', contentType: mimeType });
         form.append('prompt', editInstruction);
 
-        // 比例到像素尺寸映射
-        const sizeMap: Record<string, string> = {
-          '1:1': '1024x1024', '16:9': '1792x1024', '9:16': '1024x1792',
-          '4:3': '1024x768', '3:4': '768x1024', '2:3': '768x1024', '3:2': '1024x768',
-          '1:2': '512x1024', '2:1': '1024x512',
-          '1024': '1024x1024', '1536': '1536x1536', '2048': '2048x2048',
-        };
+        // 根据用户选择的分辨率动态计算像素尺寸
         let outputSize = size;
-        if (sizeMap[size]) outputSize = sizeMap[size];
-        else if (!size.includes('x')) outputSize = `${size}x${size}`;
+        if (size.includes(':')) {
+          // 比例格式（如 "1:1", "16:9"）→ 根据质量转换为像素
+          const pixelSize = calculateActualPixelsFromRatio(size, quality, model);
+          outputSize = `${pixelSize.width}x${pixelSize.height}`;
+        } else if (size === '1024' || size === '1536' || size === '2048') {
+          outputSize = `${size}x${size}`;
+        } else if (!size.includes('x')) {
+          outputSize = `${size}x${size}`;
+        }
 
         form.append('size', outputSize);
         form.append('quality', quality);
@@ -980,8 +982,11 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
         const genRequestBody: Record<string, unknown> = {
           model,
           prompt: editInstruction,
-          size: size || '1024x1024',
-          quality: quality || 'standard',
+          // 根据质量参数动态计算默认尺寸
+          ...((() => {
+            const ps = calculateActualPixelsFromRatio('1:1', quality || '1K', model);
+            return { size: size || `${ps.width}x${ps.height}`, quality: quality || '1K' };
+          })()),
           n: Math.min(count, 4),
           image_urls: imageUrls,
         };
@@ -1202,16 +1207,13 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
     // 编辑指令
     contentParts.push({ type: 'text', text: editInstruction });
 
-    // 比例到像素尺寸映射（与 /images/edits 和 /images/generations 路径一致）
-    const sizeMap: Record<string, string> = {
-      '1:1': '1024x1024', '16:9': '1792x1024', '9:16': '1024x1792',
-      '4:3': '1024x768', '3:4': '768x1024', '2:3': '768x1024', '3:2': '1024x768',
-      '1:2': '512x1024', '2:1': '1024x512',
-      '1024': '1024x1024', '1536': '1536x1536', '2048': '2048x2048',
-    };
-    let outputSize = size;
-    if (sizeMap[size]) outputSize = sizeMap[size];
-    else if (size && !size.includes('x')) outputSize = `${size}x${size}`;
+    // 根据质量参数动态计算像素尺寸
+    const outputSize = (() => {
+      if (size && /^\d+x\d+$/.test(size)) return size; // 已经是像素格式
+      const ratio = size || '1:1';
+      const ps = calculateActualPixelsFromRatio(ratio, quality || '1K', model);
+      return `${ps.width}x${ps.height}`;
+    })();
 
     // 构建 chat/completions 请求体
     const chatRequestBody: Record<string, unknown> = {
@@ -1491,15 +1493,13 @@ async function tryImagesGenerations(
   quality: string,
   count: number,
 ): Promise<string | null> {
-  const sizeMap: Record<string, string> = {
-    '1:1': '1024x1024', '16:9': '1792x1024', '9:16': '1024x1792',
-    '4:3': '1024x768', '3:4': '768x1024', '2:3': '768x1024', '3:2': '1024x768',
-    '1:2': '512x1024', '2:1': '1024x512',
-    '1024': '1024x1024', '1536': '1536x1536', '2048': '2048x2048',
-  };
-  let outputSize = size;
-  if (sizeMap[size]) outputSize = sizeMap[size];
-  else if (!size.includes('x')) outputSize = `${size}x${size}`;
+  // 根据质量参数动态计算像素尺寸
+  const outputSize = (() => {
+    if (size && /^\d+x\d+$/.test(size)) return size; // 已经是像素格式
+    const ratio = size || '1:1';
+    const ps = calculateActualPixelsFromRatio(ratio, quality || '1K', model);
+    return `${ps.width}x${ps.height}`;
+  })();
 
   const genResponse = await fetchWithV1Retry(
     baseUrl,

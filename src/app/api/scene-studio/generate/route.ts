@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { calculateActualPixelsFromRatio } from '@/app/api/generate/route';
 
 // POST: generate image from 3D scene
 export async function POST(request: NextRequest) {
@@ -57,13 +58,9 @@ export async function POST(request: NextRequest) {
     const { resolveProfileForModel, buildGeminiChatImageRequest, parseGeminiChatImageResponse, adjustRequestForProfile, parseResponseForProfile, tryChatCompletionsImageFallback, isChannelUnavailableError, persistResultImage } = await import('@/lib/api-compatibility');
     const profile = resolveProfileForModel(modelName, provider);
 
-    // Calculate size based on aspect ratio
-    let size = '1344x768'; // default 16:9 landscape
-    if (aspectRatio === '1:1') size = '1024x1024';
-    else if (aspectRatio === '9:16') size = '768x1344';
-    else if (aspectRatio === '4:3') size = '1152x896';
-    else if (aspectRatio === '3:4') size = '896x1152';
-    else if (aspectRatio === '16:9') size = '1344x768';
+    // Calculate size based on aspect ratio and quality (user setting from panel)
+    const quality = body.quality || '1K';
+    const size = calculateActualPixelsFromRatio(aspectRatio, quality, modelName);
 
     const n = imageCount || 1;
     const hasImage = !!(screenshotData && mode !== 'text_to_image');

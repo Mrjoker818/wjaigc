@@ -1230,7 +1230,7 @@ const MODEL_SPECIFIC_PIXEL_SIZES: Record<string, Record<string, Record<string, s
  * Look up model-specific pixel size for a given ratio+quality combination.
  * Returns undefined if no model-specific mapping exists.
  */
-function getModelSpecificPixelSize(ratio: string, quality: string, modelId: string): string | undefined {
+export function getModelSpecificPixelSize(ratio: string, quality: string, modelId: string): string | undefined {
   const lowerModel = modelId.toLowerCase();
   // Find the best matching model key (longest match = most specific)
   let matchedKey: string | undefined;
@@ -1389,6 +1389,23 @@ export function adjustRequestForProfile(
     if (/^\d+x\d+$/.test(sizeStr)) {
       const modelId = typeof body.model === 'string' ? body.model : undefined;
       body.size = convertPixelSizeToAspectRatio(sizeStr, modelId);
+    }
+    // ★ 对于 aspect-ratio 格式的 profile，当 resolution 参数存在时，
+    // 也计算并附带像素尺寸，确保即使 API 不理解 resolution 参数，
+    // 也能通过 width/height 获取正确的分辨率信息
+    const resolution = typeof body.resolution === 'string' ? body.resolution : undefined;
+    if (resolution && typeof body.size === 'string' && body.size.includes(':')) {
+      const modelId = typeof body.model === 'string' ? body.model : undefined;
+      const pixelSize = convertAspectRatioToSize(body.size, resolution, modelId);
+      if (pixelSize && /^\d+x\d+$/.test(pixelSize)) {
+        const [w, h] = pixelSize.split('x').map(Number);
+        if (w > 0 && h > 0) {
+          body.width = w;
+          body.height = h;
+          // 同时保留像素格式的 size 作为兜底，一些 API 代理可同时接受两种格式
+          body.size_px = pixelSize;
+        }
+      }
     }
   }
 
