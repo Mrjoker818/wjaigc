@@ -5,6 +5,7 @@ import { buildPackagingRenderPrompt } from '@/lib/packaging-prompts';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getSessionUser } from '@/lib/server-auth';
+import { calculateActualPixelsFromRatio } from '@/app/api/generate/route';
 
 export async function POST(request: NextRequest) {
   try {
@@ -24,6 +25,8 @@ export async function POST(request: NextRequest) {
       chatModel,
       chatProviderId,
       prompt: clientPrompt,
+      quality = '2K',
+      aspectRatio = '1:1',
     } = body;
 
     if (!brandName && !productName) {
@@ -63,12 +66,14 @@ export async function POST(request: NextRequest) {
     const selectedModel = model || provider.selectedModels?.find(m => m) || 'gpt-image-2';
 
     // Build request body
+    const effectiveSize = calculateActualPixelsFromRatio(aspectRatio, quality) || '2048x2048';
     const rawBody: Record<string, unknown> = {
       model: selectedModel,
       prompt,
       n: 1,
-      size: '2048x2048',
-      quality: '2K',
+      size: effectiveSize,
+      quality,
+      aspectRatio,
     };
 
     // Add reference images if uploaded

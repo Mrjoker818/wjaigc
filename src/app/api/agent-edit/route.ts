@@ -4,6 +4,7 @@ import type { ApiProvider } from '@/lib/universal-api-types';
 import { fetchWithV1Retry, getInternalApiUrl } from '@/lib/api-helpers';
 import { optionalApiAuth } from '@/lib/api-auth';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
+import { calculateActualPixelsFromRatio } from '@/app/api/generate/route';
 import { executeAgentLoop, getToolsForLLM, type AgentContext, type AgentResult } from '@/lib/agent-engine';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { translateApiError } from '@/lib/api-error-translate';
@@ -55,7 +56,7 @@ export async function POST(request: NextRequest) {
     await optionalApiAuth(request);
 
     const body = await request.json();
-    const { image, prompt, maskDataUrl, model, providerId, maxRounds, imagePrompt, imageModel, imageProviderId } = body;
+    const { image, prompt, maskDataUrl, model, providerId, maxRounds, imagePrompt, imageModel, imageProviderId, quality, aspectRatio } = body;
 
     if (!image || !prompt) {
       return NextResponse.json({ success: false, error: '缺少图片或描述' }, { status: 400 });
@@ -262,6 +263,8 @@ export async function POST(request: NextRequest) {
                 i === 0 ? maskDataUrl : undefined, // 仅第一步使用用户蒙版
                 imageModel,
                 imageProviderId,
+                quality,
+                aspectRatio,
               );
               console.log(`[agent-edit] Edit step ${i + 1} result: success=${editResult.success} hasUrl=${!!editResult.imageUrl} url=${editResult.imageUrl?.substring(0, 80)} error=${editResult.error || ''}`);
               if (editResult.success && editResult.imageUrl) {
@@ -476,7 +479,9 @@ async function performImageEdit(
   editPrompt: string,
   maskDataUrl: string | undefined,
   imageModelFromFrontend?: string,
-  imageProviderIdFromFrontend?: string
+  imageProviderIdFromFrontend?: string,
+  qualityFromFrontend?: string,
+  aspectRatioFromFrontend?: string
 ): Promise<{ success: boolean; imageUrl?: string; error?: string }> {
   // 优先使用前端传递的图像模型和提供商，遵循用户在图像生成面板的选择
   console.log('[agent-edit] performImageEdit called, model:', imageModelFromFrontend, 'providerId:', imageProviderIdFromFrontend);
@@ -524,7 +529,10 @@ async function performImageEdit(
       formData.append('model', imageModel);
       formData.append('prompt', editPrompt);
       formData.append('n', '1');
-      formData.append('size', '1024x1024');
+      const effectiveQuality = qualityFromFrontend || '1K';
+      const effectiveAspectRatio = aspectRatioFromFrontend || '1:1';
+      const dynamicSize = calculateActualPixelsFromRatio(effectiveAspectRatio, effectiveQuality, imageModel) || '1024x1024';
+      formData.append('size', dynamicSize);
 
       // 添加图片
       if (imageUrl.startsWith('data:')) {
@@ -665,13 +673,16 @@ async function performImageEdit(
       }
 
       // 构建 images/generations 请求体
+      const effectiveQuality = qualityFromFrontend || '1K';
+      const effectiveAspectRatio = aspectRatioFromFrontend || '1:1';
+      const dynamicSize = calculateActualPixelsFromRatio(effectiveAspectRatio, effectiveQuality, imageModel) || '2048x2048';
       const { body: genBody, endpoint: _resolvedEp } = adjustRequestForProfile(
         {
           model: imageModel,
           prompt: editPrompt,
           n: 1,
-          size: '2048x2048',
-          quality: '2K',
+          size: dynamicSize,
+          quality: effectiveQuality,
           image_urls: [`data:${imageMimeType};base64,${imageBase64}`],
         },
         profile,

@@ -409,6 +409,8 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
           dimensions, budget, materialStyle, lightingStyle,
           crowdStyle, viewOptions, renderStyle, outputResolution, outputFormat, outputQuality, prompt,
           model: selectedModel, providerId: selectedProviderId,
+          quality: (() => { try { const s = localStorage.getItem('wujie_selected_model'); return s ? JSON.parse(s).quality : undefined; } catch { return undefined; } })(),
+          aspectRatio: (() => { try { const s = localStorage.getItem('wujie_selected_model'); return s ? JSON.parse(s).aspectRatio : undefined; } catch { return undefined; } })(),
         }),
       });
       const data = await res.json();

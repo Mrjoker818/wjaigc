@@ -5,6 +5,7 @@
 
 import { findProviderForModel } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { calculateActualPixelsFromRatio } from '@/app/api/generate/route';
 
 /** 画质精修提示词 — 在放大后修复模糊、噪点、脏画面等问题 */
 export const QUALITY_ENHANCE_PROMPT = `## 核心修复目标
@@ -131,7 +132,7 @@ export async function enhanceViaAI(
       model: enhanceModel,
       prompt: enhancePrompt,
       n: 1,
-      size: '1024x1024', // 默认尺寸，后续会根据实际比例调整
+      size: calculateActualPixelsFromRatio(aspectRatio, '2K') || '1024x1024',
       response_format: 'url',
       // 以放大结果为参考图，低强度保持内容不变
       image_urls: [absoluteUrl],
@@ -139,20 +140,6 @@ export async function enhanceViaAI(
       referenceStrength: 30,
       referenceCategories: ['style', 'composition'],
     };
-
-    // 尝试匹配宽高比对应的尺寸
-    const aspectSizes: Record<string, string> = {
-      '1:1': '1024x1024',
-      '4:3': '1024x768',
-      '3:4': '768x1024',
-      '16:9': '1280x720',
-      '9:16': '720x1280',
-      '3:2': '1152x768',
-      '2:3': '768x1152',
-    };
-    if (aspectSizes[aspectRatio]) {
-      requestBody.size = aspectSizes[aspectRatio];
-    }
 
     // 提交精修任务
     const submitResp = await fetchWithV1Retry(apiBase, '/images/generations', {

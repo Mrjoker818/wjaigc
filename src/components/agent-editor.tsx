@@ -27,7 +27,7 @@ interface AgentStep {
 }
 
 // 从图像生成面板读取当前选择的模型信息
-function getCurrentImageModelInfo(): { imageModel?: string; imageProviderId?: string } {
+function getCurrentImageModelInfo(): { imageModel?: string; imageProviderId?: string; quality?: string; aspectRatio?: string } {
   try {
     const stored = localStorage.getItem('wujie_selected_model');
     if (stored) {
@@ -35,9 +35,9 @@ function getCurrentImageModelInfo(): { imageModel?: string; imageProviderId?: st
       const compositeKey = parsed.model || '';
       if (compositeKey.includes('::')) {
         const [pid, mid] = compositeKey.split('::');
-        return { imageModel: mid, imageProviderId: pid };
+        return { imageModel: mid, imageProviderId: pid, quality: parsed.quality, aspectRatio: parsed.aspectRatio };
       }
-      return { imageModel: compositeKey, imageProviderId: parsed.providerId || parsed.compositeProviderId || undefined };
+      return { imageModel: compositeKey, imageProviderId: parsed.providerId || parsed.compositeProviderId || undefined, quality: parsed.quality, aspectRatio: parsed.aspectRatio };
     }
   } catch { /* ignore */ }
   return {};
@@ -257,8 +257,6 @@ export function AgentEditor({
           imagePrompt: imagePrompt || '',
           maskDataUrl: '',
           maxRounds,
-          size: '1024',
-          quality: 'medium',
           ...getCurrentImageModelInfo(),
         }),
       });

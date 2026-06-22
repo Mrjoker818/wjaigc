@@ -1003,11 +1003,10 @@ ${themeDesc}
 
     const requestBody: Record<string, unknown> = {
       prompt,
-      size: '1024x1024',
       aspectRatio: '1:1',
       n: 1,
       outputCount: 1,
-      quality: 'standard',
+      quality: (() => { try { const s = localStorage.getItem('wujie_selected_model'); return s ? JSON.parse(s).quality : 'standard'; } catch { return 'standard'; } })(),
     };
 
     if (selectedModelId) {

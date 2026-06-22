@@ -15,6 +15,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, findProviderForFeature, findProviderById } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { resolveCompatProfile, adjustRequestForProfile, tryChatCompletionsImageFallback, isChannelUnavailableError, persistResultImage } from '@/lib/api-compatibility';
+import { calculateActualPixelsFromRatio } from '@/app/api/generate/route';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import { adaptBrandProjectToSanbaoInput, buildSanbaoInputFromUserInput } from '@/modules/brand-factory/logo-generator-core/sanbaoInputAdapter';
 import { buildDirectionSystemPrompt, buildDirectionUserMessage, parseDirectionResponse } from '@/modules/brand-factory/logo-generator-core/sanbaoPromptParser';
@@ -139,8 +140,10 @@ async function handleGenerateImage(body: Record<string, unknown>) {
 
   const imageModel = body.imageModel as string | undefined;
   const imageProviderId = body.imageProviderId as string | undefined;
-  const size = (body.size as string) || '1024x1024';
   const quality = body.quality as string | undefined;
+  const aspectRatio = (body.aspectRatio as string) || '1:1';
+  const effectiveQuality = quality || '1K';
+  const size = (body.size as string) || calculateActualPixelsFromRatio(aspectRatio, effectiveQuality) || '1024x1024';
   const n = (body.n as number) || 1;
 
   const provider = await getImageProvider(imageModel, imageProviderId);

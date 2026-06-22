@@ -684,6 +684,7 @@ function BatchGenerateDialog({ kit, isGold, onClose, onAddImages, currentImageMo
           imageModel: currentImageModel,
           imageProviderId: currentImageProviderId,
           aspectRatio,
+          quality: (() => { try { const s = localStorage.getItem('wujie_selected_model'); return s ? JSON.parse(s).quality : undefined; } catch { return undefined; } })(),
         }),
       });
       if (resp.ok) {

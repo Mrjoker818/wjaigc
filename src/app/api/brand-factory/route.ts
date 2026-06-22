@@ -18,6 +18,7 @@ import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile,
 import type { ApiCompatProfile } from '@/lib/api-compatibility';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import { dbGetUserData, dbSetUserData } from '@/lib/db-storage';
+import { calculateActualPixelsFromRatio } from '@/app/api/generate/route';
 
 // ─── 内存项目存储 ────────────────────────────────────────────────────
 const BRAND_PROJECTS_KEY = 'brand_factory_projects';
@@ -832,6 +833,8 @@ export async function POST(request: NextRequest) {
     const llmModel = body.llmModel as string | undefined;
     const imageProviderId = body.imageProviderId as string | undefined;
     const llmProviderId = body.llmProviderId as string | undefined;
+    const quality = (body.quality as string) || '2K';
+    const aspectRatio = (body.aspectRatio as string) || '1:1';
 
     switch (action) {
       // ─── 项目管理 ─────────────────────────────────────
@@ -1047,8 +1050,8 @@ export async function POST(request: NextRequest) {
         const prompt = buildKVImagePrompt(brandDna, body);
 
         const result = await generateImageWithPoll(prompt, imageModel, {
-          size: body.ratio === '9:16' ? '2048x3072' : body.ratio === '1:1' ? '2048x2048' : '3072x2048',
-          quality: '2K',
+          size: calculateActualPixelsFromRatio(body.ratio as string || aspectRatio, quality) || calculateActualPixelsFromRatio('3:4', '2K') || '2048x3072',
+          quality,
         }, imageProviderId);
 
         if (!result.success) {
@@ -1087,7 +1090,7 @@ export async function POST(request: NextRequest) {
         const results: { item: string; imageUrl?: string; error?: string }[] = [];
         for (const item of items) {
           const prompt = buildBatchMaterialPrompt(brandDna, materialType, item);
-          const result = await generateImageWithPoll(prompt, imageModel, { size: '2048x2048', quality: '2K' }, imageProviderId);
+          const result = await generateImageWithPoll(prompt, imageModel, { size: calculateActualPixelsFromRatio(aspectRatio, quality) || '2048x2048', quality }, imageProviderId);
           results.push({
             item,
             imageUrl: result.imageUrl,
@@ -1212,7 +1215,7 @@ export async function POST(request: NextRequest) {
         if (!text) return NextResponse.json({ error: '请输入标题文字' }, { status: 400 });
 
         const prompt = buildChineseTitlePrompt(text, scene, style, brandDna);
-        const result = await generateImageWithPoll(prompt, imageModel, { size: '1536x1024' }, imageProviderId);
+        const result = await generateImageWithPoll(prompt, imageModel, { size: calculateActualPixelsFromRatio('3:2', quality) || '1536x1024', quality }, imageProviderId);
 
         if (!result.success) {
           return NextResponse.json({ error: result.error || '标题图生成失败' }, { status: 500 });

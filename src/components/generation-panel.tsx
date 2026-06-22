@@ -413,6 +413,8 @@ export function GenerationPanel(
                                         compositeKey: saved,
                                         apiDisplayName: dm?.apiDisplayName || dm?.displayLabel || '',
                                         providerName: dm?.providerName || '',
+                                        quality: quality,
+                                        aspectRatio: aspectRatio,
                                     }));
                                 } catch {}
                             }
@@ -708,6 +710,8 @@ export function GenerationPanel(
                         compositeKey: compositeKey,
                         apiDisplayName: dm?.apiDisplayName || dm?.displayLabel || '',
                         providerName: dm?.providerName || '',
+                        quality: quality,
+                        aspectRatio: aspectRatio,
                     }));
                 } catch {}
             }
@@ -990,6 +994,8 @@ export function GenerationPanel(
                                 compositeKey: compositeKey,
                                 apiDisplayName: dm?.apiDisplayName || dm?.displayLabel || '',
                                 providerName: dm?.providerName || '',
+                                quality: quality,
+                                aspectRatio: aspectRatio,
                               }));
                             } catch {}
                             // Extract pure modelId for ratio/quality lookup

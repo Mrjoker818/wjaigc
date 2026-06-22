@@ -429,6 +429,8 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
           providerId: selectedProviderId,
           chatModel: selectedChatModel,
           chatProviderId: selectedChatProviderId,
+          quality: (() => { try { const s = localStorage.getItem('wujie_selected_model'); return s ? JSON.parse(s).quality : undefined; } catch { return undefined; } })(),
+          aspectRatio: (() => { try { const s = localStorage.getItem('wujie_selected_model'); return s ? JSON.parse(s).aspectRatio : undefined; } catch { return undefined; } })(),
         }),
       });
       const data = await res.json();
@@ -516,6 +518,8 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
           providerId: selectedProviderId,
           chatModel: selectedChatModel,
           chatProviderId: selectedChatProviderId,
+          quality: (() => { try { const s = localStorage.getItem('wujie_selected_model'); return s ? JSON.parse(s).quality : undefined; } catch { return undefined; } })(),
+          aspectRatio: (() => { try { const s = localStorage.getItem('wujie_selected_model'); return s ? JSON.parse(s).aspectRatio : undefined; } catch { return undefined; } })(),
         }),
       });
       const data = await res.json();
@@ -576,6 +580,8 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
           providerId: selectedProviderId,
           chatModel: selectedChatModel,
           chatProviderId: selectedChatProviderId,
+          quality: (() => { try { const s = localStorage.getItem('wujie_selected_model'); return s ? JSON.parse(s).quality : undefined; } catch { return undefined; } })(),
+          aspectRatio: (() => { try { const s = localStorage.getItem('wujie_selected_model'); return s ? JSON.parse(s).aspectRatio : undefined; } catch { return undefined; } })(),
         }),
       });
       const data = await res.json();

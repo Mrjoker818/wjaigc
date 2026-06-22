@@ -5,6 +5,7 @@ import { buildDisplay3DRenderPrompt } from '@/lib/display3d-prompts';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getSessionUser } from '@/lib/server-auth';
+import { calculateActualPixelsFromRatio } from '@/app/api/generate/route';
 
 export async function POST(request: NextRequest) {
   try {
@@ -31,6 +32,8 @@ export async function POST(request: NextRequest) {
       model,
       providerId,
       prompt: clientPrompt,
+      quality,
+      aspectRatio,
     } = body;
     const renderMode = renderStyle || (body as Record<string, unknown>).renderMode as string || '';
 
@@ -71,12 +74,15 @@ export async function POST(request: NextRequest) {
     const selectedModel = provider.selectedModels?.[0] || model || 'gpt-image-2';
 
     // Build request body
+    const effectiveQuality = quality || '1K';
+    const effectiveAspectRatio = aspectRatio || '1:1';
+    const dynamicSize = calculateActualPixelsFromRatio(effectiveAspectRatio, effectiveQuality, selectedModel) || '1024x1024';
     const rawBody: Record<string, unknown> = {
       model: selectedModel,
       prompt,
       n: 1,
-      size: '2048x2048',
-      quality: '2K',
+      size: dynamicSize,
+      quality: effectiveQuality,
     };
 
     // Add reference images

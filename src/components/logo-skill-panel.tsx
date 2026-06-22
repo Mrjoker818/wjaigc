@@ -452,6 +452,9 @@ export default function LogoSkillPanel({
     setStep('generate');
     try {
       const { modelId: imgModel, providerId: imgProviderId } = parseCompositeKey(selectedImageModel);
+      const imgModelInfo = (() => { try { const s = localStorage.getItem('wujie_selected_model'); return s ? JSON.parse(s) : {}; } catch { return {}; } })();
+      const imgQuality = imgModelInfo.quality || '1K';
+      const imgAspectRatio = imgModelInfo.aspectRatio || '1:1';
       const res = await fetch('/api/logo-skill', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -460,7 +463,8 @@ export default function LogoSkillPanel({
           prompt: bestPrompt,
           imageModel: imgModel || undefined,
           imageProviderId: imgProviderId || undefined,
-          size: '1024x1024',
+          quality: imgQuality,
+          aspectRatio: imgAspectRatio,
           n: 1,
         }),
       });

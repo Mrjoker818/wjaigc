@@ -1,3 +1,5 @@
+import { calculateActualPixels } from './canvas-generation-group';
+
 /**
  * Chat Tool Definitions for AI Agent Function Calling
  * 
@@ -772,18 +774,8 @@ function normalizeImageUrl(url: string, origin: string): string {
   return url;
 }
 
-function mapAspectRatioToSize(aspectRatio: string, quality: string): string {
-  const sizeMap: Record<string, Record<string, string>> = {
-    '1:1': { '1K': '1024x1024', '2K': '1024x1024', '4K': '1024x1024' },
-    '16:9': { '1K': '1024x576', '2K': '1792x1024', '4K': '1792x1024' },
-    '9:16': { '1K': '576x1024', '2K': '1024x1792', '4K': '1024x1792' },
-    '4:3': { '1K': '1024x768', '2K': '1024x768', '4K': '1024x768' },
-    '3:4': { '1K': '768x1024', '2K': '768x1024', '4K': '768x1024' },
-    '3:2': { '1K': '1024x683', '2K': '1024x683', '4K': '1024x683' },
-    '2:3': { '1K': '683x1024', '2K': '683x1024', '4K': '683x1024' },
-    '21:9': { '1K': '1024x439', '2K': '1792x768', '4K': '1792x768' },
-  };
-  return sizeMap[aspectRatio]?.[quality] || '1024x1024';
+function mapAspectRatioToSize(aspectRatio: string, quality: string, modelId?: string): string {
+  return calculateActualPixels(aspectRatio, quality, modelId) || '1024x1024';
 }
 
 /**

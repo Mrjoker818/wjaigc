@@ -645,8 +645,10 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
       const res = await fetch('/api/brand-factory', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, ...body, imageModel: selectedImageModel, imageProviderId: selectedImageProviderId, llmModel: selectedLlmModel, llmProviderId: selectedLlmProviderId }),
-      });
+        body: JSON.stringify({ action, ...body, imageModel: selectedImageModel, imageProviderId: selectedImageProviderId, llmModel: selectedLlmModel, llmProviderId: selectedLlmProviderId,
+          quality: (() => { try { const s = localStorage.getItem('wujie_selected_model'); return s ? JSON.parse(s).quality : undefined; } catch { return undefined; } })(),
+          aspectRatio: (() => { try { const s = localStorage.getItem('wujie_selected_model'); return s ? JSON.parse(s).aspectRatio : undefined; } catch { return undefined; } })(),
+        }),      });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || '操作失败');
       return data;

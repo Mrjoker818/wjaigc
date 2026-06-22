@@ -1660,7 +1660,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
           body: JSON.stringify({
             prompt: fullPrompt,
             aspectRatio,
-            quality: '2K',
+            quality: (() => { try { const s = localStorage.getItem('wujie_selected_model'); return s ? JSON.parse(s).quality : '2K'; } catch { return '2K'; } })(),
             n: imageCount,
             referenceImageUrl,
             strength: strengthInfo?.value || 60,
