@@ -9,10 +9,16 @@ export async function register() {
     // 首次请求时会在对应 API 路由中自动完成初始化
     const dbInit = async () => {
       try {
-        const { migrateFileDataToDb, dbEnsureSortOrderColumn } = await import('@/lib/db-storage');
+        const { migrateFileDataToDb, dbEnsureSortOrderColumn, detectAndRecoverOrphanedUsers } = await import('@/lib/db-storage');
         await migrateFileDataToDb();
         await dbEnsureSortOrderColumn();
         console.log('[instrumentation] DB migration check completed');
+
+        // 检测并恢复孤立用户（有项目数据但无账号记录的用户）
+        const orphaned = await detectAndRecoverOrphanedUsers();
+        if (orphaned.length > 0) {
+          console.warn(`[instrumentation] Recovered ${orphaned.filter(o => o.recovered).length}/${orphaned.length} orphaned user(s). Admin should reset their passwords.`);
+        }
 
         // 确保 sourceUrl 映射表存在
         const { ensureImageSourceMapTable } = await import('@/lib/image-source-map');

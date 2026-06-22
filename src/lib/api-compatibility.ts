@@ -683,7 +683,8 @@ export async function persistResultImage(imageUrl: string): Promise<string> {
  */
 export function isChannelUnavailableError(error: string | unknown): boolean {
   const msg = typeof error === 'string' ? error : error instanceof Error ? error.message : String(error);
-  return /failover|渠道|channel|no available|unavailable|get_channel_failed|model_not_found|not configured|bad_response_status|暂不可用|不可用|timeout|timed out|abort|超时/i.test(msg);
+  // 精确匹配渠道/路由级错误，不匹配通用的超时/中断（这些可能是临时网络问题，不需要触发全量 failover）
+  return /failover|渠道不可用|no available channel|channel not found|get_channel_failed|model_not_found|not configured|bad_response_status|暂不可用/i.test(msg);
 }
 
 /**

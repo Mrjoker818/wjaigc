@@ -35,10 +35,12 @@ export const WUJIE_SESSION_COOKIE = 'wujie_session';
 export const WUJIE_SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
 
 const DEFAULT_ADMIN_NAME = process.env.WUJIE_ADMIN_USERNAME || 'Mr.joker';
+let _defaultAdminPasswordWarned = false;
 const DEFAULT_ADMIN_PASSWORD = process.env.WUJIE_ADMIN_PASSWORD || (() => {
   // Security warning: using hardcoded default password. Set WUJIE_ADMIN_PASSWORD env var for production!
-  if (process.env.COZE_PROJECT_ENV === 'PROD') {
-    console.warn('[SECURITY] WUJIE_ADMIN_PASSWORD not set! Using default password in production is insecure.');
+  if (process.env.COZE_PROJECT_ENV === 'PROD' && !_defaultAdminPasswordWarned) {
+    _defaultAdminPasswordWarned = true;
+    console.warn('[SECURITY] WUJIE_ADMIN_PASSWORD not set! Using default password in production. (This warning is logged once)');
   }
   return 'dongdong851212';
 })();
@@ -72,15 +74,27 @@ function defaultApiPermissions() {
   };
 }
 
-function authSecret(): string {
+let _authSecretCache: { value: string; warned: boolean } | null = null;
+
+export function authSecret(): string {
+  if (_authSecretCache) return _authSecretCache.value;
+
   const secret = process.env.WUJIE_AUTH_SECRET || process.env.NEXTAUTH_SECRET;
-  if (secret) return secret;
+  if (secret) {
+    _authSecretCache = { value: secret, warned: false };
+    return secret;
+  }
   // Use a stable fallback secret so passwords persist across process restarts
   // In production, always set WUJIE_AUTH_SECRET env var for security
-  if (process.env.COZE_PROJECT_ENV === 'PROD') {
-    console.warn('[SECURITY] WUJIE_AUTH_SECRET/NEXTAUTH_SECRET not set! Using default secret. Set env var for production.');
+  const fallback = 'wujie-ai-stable-auth-secret-fallback-2024';
+  _authSecretCache = { value: fallback, warned: false };
+
+  // Only log the warning ONCE per process lifetime to avoid flooding logs
+  if (process.env.COZE_PROJECT_ENV === 'PROD' && !_authSecretCache.warned) {
+    _authSecretCache.warned = true;
+    console.warn('[SECURITY] WUJIE_AUTH_SECRET/NEXTAUTH_SECRET not set! Using default secret. Set env var for production. (This warning is logged once per process)');
   }
-  return 'wujie-ai-stable-auth-secret-fallback-2024';
+  return fallback;
 }
 
 function hashPassword(password: string): string {
@@ -135,9 +149,30 @@ async function writeStore(file: StoredUsersFile): Promise<void> {
   // Write to file (backward compatible)
   await mkdir(SYSTEM_DIR, { recursive: true });
   await writeFile(USERS_PATH, JSON.stringify(data, null, 2), 'utf8');
+  // Safety: ensure we don't lose DB users that aren't in the current write list
+  try {
+    const dbUsers = await dbReadUsers();
+    const writeUserIds = new Set(data.users.map(u => u.id));
+    const missingFromWrite = (dbUsers || []).filter(u => !writeUserIds.has(u.id) && u.name !== DEFAULT_ADMIN_NAME);
+    if (missingFromWrite.length > 0) {
+      console.warn(`[auth] ⚠️ writeStore: ${missingFromWrite.length} DB user(s) not in write list, preserving:`,
+        missingFromWrite.map(u => `${u.id}(${u.name})`).join(', '));
+      for (const u of missingFromWrite) {
+        data.users.push(normalizeStoredUser({
+          id: u.id, name: u.name, passwordHash: u.password_hash,
+          role: (u.role || 'user') as 'admin' | 'user',
+          status: (u.status || 'active') as 'active' | 'disabled',
+          apiPermissions: normalizeApiPermissions(u.api_permissions),
+          storageFolder: u.storage_folder || storageFolder(u.id),
+          email: u.email || undefined,
+          createdAt: u.created_at, updatedAt: u.updated_at,
+        }));
+      }
+    }
+  } catch {
+    // DB check failed, proceed with write (UPSERT is safe)
+  }
   // Write to database (persistent) - uses UPSERT to prevent data loss
-  // Only users in the current list will be upserted; DB users not in
-  // this list are preserved (never auto-deleted).
   await dbWriteUsers(data.users.map(u => ({
     id: u.id,
     name: u.name,
@@ -154,6 +189,7 @@ async function writeStore(file: StoredUsersFile): Promise<void> {
 
 async function readStore(): Promise<StoredUsersFile> {
   let file: StoredUsersFile;
+  let usedFallback = false;
 
   // Try database first (persistent across deployments)
   try {
@@ -177,8 +213,10 @@ async function readStore(): Promise<StoredUsersFile> {
     } else {
       throw new Error('No users in DB');
     }
-  } catch {
+  } catch (dbError) {
     // Fallback to file system
+    usedFallback = true;
+    console.warn('[auth] DB read failed, falling back to file system:', dbError instanceof Error ? dbError.message : dbError);
     try {
       const raw = await readFile(USERS_PATH, 'utf8');
       const parsed = JSON.parse(raw) as StoredUsersFile;
@@ -188,6 +226,34 @@ async function readStore(): Promise<StoredUsersFile> {
       };
     } catch {
       file = { users: [], updatedAt: Date.now() };
+    }
+
+    // Critical safety: merge DB users into file users to prevent data loss
+    // When we fall back to file system, the file may have fewer users than the DB
+    // We should NOT lose DB users just because we couldn't read from DB this time
+    try {
+      const dbUsers = await dbReadUsers();
+      if (dbUsers && dbUsers.length > 0) {
+        const fileUserIds = new Set(file.users.map(u => u.id));
+        for (const dbUser of dbUsers) {
+          if (!fileUserIds.has(dbUser.id)) {
+            file.users.push(normalizeStoredUser({
+              id: dbUser.id,
+              name: dbUser.name,
+              passwordHash: dbUser.password_hash,
+              role: (dbUser.role || 'user') as 'admin' | 'user',
+              status: (dbUser.status || 'active') as 'active' | 'disabled',
+              apiPermissions: normalizeApiPermissions(dbUser.api_permissions),
+              storageFolder: dbUser.storage_folder || storageFolder(dbUser.id),
+              email: dbUser.email || undefined,
+              createdAt: dbUser.created_at,
+              updatedAt: dbUser.updated_at,
+            }));
+          }
+        }
+      }
+    } catch {
+      // DB retry also failed, proceed with file system data only
     }
   }
 

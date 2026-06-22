@@ -3,7 +3,7 @@ import 'server-only';
 import { mkdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
 import type { ApiBalanceInfo, ApiProvider, ModelInfo } from './universal-api-types';
-import { fetchWithV1Retry } from './api-helpers';
+import { fetchWithV1Retry, shouldSkipV1Retry } from './api-helpers';
 import { getModelDisplayName } from './model-name-map';
 import { getServerSystemDir } from './server-data-root';
 import { dbGetApiProviders, dbUpsertApiProvider, dbDeleteApiProvider, dbDeleteStaleProviders } from './db-storage';
@@ -431,8 +431,9 @@ export async function discoverModelsForCredentials(
   };
 
   try {
+    const normalizedBase = normalizeBaseUrl(baseUrl);
     const response = await fetchWithV1Retry(
-      normalizeBaseUrl(baseUrl),
+      normalizedBase,
       '/models',
       {
         headers: {
@@ -440,19 +441,35 @@ export async function discoverModelsForCredentials(
           'Content-Type': 'application/json',
         },
         signal: AbortSignal.timeout(DISCOVERY_TIMEOUT_MS),
+        skipV1Retry: shouldSkipV1Retry(normalizedBase),
       }
     );
 
     const latencyMs = Date.now() - startedAt;
     if (!response.ok) {
-      // Some API gateways return HTML error pages even for /v1/ paths
-      // Try to parse JSON error, otherwise return a readable error
+      // Some providers don't expose /models endpoint but their generation endpoints work fine
+      // Return partial success: API is reachable but model list is unavailable
+      const isReachable = response.status < 500; // 4xx = API reached, just denied/not found
       try {
         const errorData = await response.json();
         const errorMsg = errorData?.error?.message || errorData?.message || `${response.status} ${response.statusText}`;
-        return { success: false, models: [], message: errorMsg, latencyMs };
+        return { 
+          success: isReachable, // 4xx means API is reachable even if /models failed
+          models: [], 
+          message: isReachable 
+            ? `API 可达但模型列表不可用（${errorMsg}），生成功能可能正常` 
+            : errorMsg, 
+          latencyMs 
+        };
       } catch {
-        return { success: false, models: [], message: `HTTP ${response.status}: API 返回了非 JSON 响应，请检查 Base URL 是否正确`, latencyMs };
+        return { 
+          success: isReachable, 
+          models: [], 
+          message: isReachable 
+            ? `API 可达但模型列表不可用（HTTP ${response.status}），生成功能可能正常`
+            : `HTTP ${response.status}: API 返回了非 JSON 响应，请检查 Base URL 是否正确`, 
+          latencyMs 
+        };
       }
     }
 
@@ -460,7 +477,8 @@ export async function discoverModelsForCredentials(
     try {
       data = await response.json();
     } catch {
-      return { success: false, models: [], message: 'API 返回了非 JSON 响应，请检查 Base URL 是否正确（可能需要添加 /v1 路径）', latencyMs };
+      // JSON parse failed — likely HTML response from a non-API URL
+      return { success: false, models: [], message: 'API 返回了非 JSON 响应，请检查 Base URL 是否正确（可能需要添加或去掉 /v1 路径）', latencyMs };
     }
     const rawModels = Array.isArray(data.data) ? data.data : Array.isArray(data.models) ? data.models : [];
     const models = rawModels

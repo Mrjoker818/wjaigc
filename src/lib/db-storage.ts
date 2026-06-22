@@ -460,6 +460,82 @@ export async function migrateFileDataToDb(): Promise<void> {
   console.log('[db-storage] Migration complete');
 }
 
+// ─── Orphaned User Recovery (孤立用户恢复) ────────────────────────────────────
+// Detects users that have data in wujie_user_data but no record in wujie_users
+// This can happen if: (1) user records were accidentally deleted, (2) DB table was reset
+
+export interface OrphanedUser {
+  userId: string;
+  dataKeys: string[];
+  recovered: boolean;
+}
+
+export async function detectAndRecoverOrphanedUsers(): Promise<OrphanedUser[]> {
+  try {
+    // Find all distinct user_ids in wujie_user_data that don't exist in wujie_users
+    const orphans = await execSql(
+      `SELECT DISTINCT ud.user_id, 
+              array_agg(ud.data_key) as data_keys,
+              MAX(ud.updated_at) as last_active
+       FROM wujie_user_data ud
+       LEFT JOIN wujie_users u ON ud.user_id = u.id
+       WHERE u.id IS NULL
+       GROUP BY ud.user_id
+       ORDER BY last_active DESC`,
+      []
+    );
+
+    if (!orphans.rows || orphans.rows.length === 0) {
+      return [];
+    }
+
+    console.warn(`[db-storage] Found ${orphans.rows.length} orphaned user(s) with data but no account record`);
+
+    const results: OrphanedUser[] = [];
+
+    for (const row of orphans.rows) {
+      const userId = String(row.user_id ?? '');
+      const dataKeys = Array.isArray(row.data_keys) ? row.data_keys.map(String) : [];
+      let recovered = false;
+
+      // Try to extract username from user_id (format: user_{timestamp}_{random})
+      const userName = userId.replace(/^user_\d+_/, '') || userId;
+
+      // Create a placeholder user record with known temporary password
+      // Use the ACTUAL authSecret (not fallback) so the password hash works at login
+      try {
+        const crypto = await import('crypto');
+        const { authSecret } = await import('./server-auth.js');
+        const secret = authSecret();
+        const tempPassword = 'wujie_reset_2024';
+        const tempPasswordHash = crypto.createHash('sha256')
+          .update(`${secret}:${tempPassword}`)
+          .digest('hex');
+
+        const now = Date.now();
+        await execSql(
+          `INSERT INTO wujie_users (id, name, password_hash, role, status, api_permissions, storage_folder, created_at, updated_at)
+           VALUES ($1, $2, $3, 'user', 'active', '[]', $4, $5, $5)
+           ON CONFLICT (id) DO NOTHING`,
+          [userId, userName, tempPasswordHash, `user_${userName}`, now]
+        );
+        recovered = true;
+        console.warn(`[db-storage] Recovered orphaned user: ${userId} (name: ${userName})`);
+        console.warn(`[db-storage] Temporary password: ${tempPassword} — User should change password after login`);
+      } catch (err) {
+        console.error(`[db-storage] Failed to recover orphaned user ${userId}:`, err);
+      }
+
+      results.push({ userId, dataKeys, recovered });
+    }
+
+    return results;
+  } catch (err) {
+    console.error('[db-storage] Error detecting orphaned users:', err);
+    return [];
+  }
+}
+
 // ─── Brand Assets (品牌资产持久化) ────────────────────────────────────────────
 
 export interface DbBrandAsset {

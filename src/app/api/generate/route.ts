@@ -657,14 +657,15 @@ export async function POST(request: NextRequest) {
             } catch { /* ignore */ }
             // 合并 errorMsg + errorText 做可重试检测，兼容各种 API 错误格式
             const combinedErrorText = `${errorMsg} ${errorText}`;
-            // ★ 可重试错误检测 — 渠道不可用/模型未找到/超时/上游认证等错误标记为可重试，触发候选模型回退
+            // ★ 可重试错误检测 — 渠道不可用/模型未找到/上游认证等错误标记为可重试，触发候选模型回退
+            // 注意：纯 401 认证失败不应重试（Key 无效换模型也没用），仅 401+bad_response_status_code（上游中转异常）可重试
             const translatedMsg = translateApiError(errorMsg);
             const isRetryableError =
               combinedErrorText.includes('No available channel') || combinedErrorText.includes('no available channel') ||
               combinedErrorText.includes('not configured') || combinedErrorText.includes('model_not_found') || combinedErrorText.includes('model not found') ||
               combinedErrorText.includes('bad_response_status_code') ||
               (chatResponse.status >= 500 && chatResponse.status !== 501) ||
-              chatResponse.status === 401;
+              (chatResponse.status === 401 && combinedErrorText.includes('bad_response_status_code'));
             if (isRetryableError) {
               console.warn('[generate] Gemini image route retryable error, will try fallback models:', errorMsg);
               const retryErr = new Error(`当前模型暂不可用，请稍后重试或更换模型`);
@@ -774,10 +775,18 @@ export async function POST(request: NextRequest) {
             }
           } catch { /* ignore */ }
 
-          // 5xx 服务器错误（如 Cloudflare 524 超时）→ 可重试
+          // 5xx 服务器错误处理
           if (resp.status >= 502 && resp.status <= 599) {
-            const retryErr = new Error(`API 服务器错误 (${resp.status})，请稍后重试或更换模型`);
-            (retryErr as Error & { retryable?: boolean }).retryable = true;
+            // 仅真正的渠道不可用错误标记为 retryable（会触发候选模型切换）
+            // 临时性的 502/503/504（网关超时、CDN 错误等）不应切换渠道，应让用户重试
+            const combinedForCheck = `${errorMsg} ${errorText}`;
+            const isChannelError = isChannelUnavailableError(combinedForCheck);
+            const retryErr = new Error(
+              isChannelError
+                ? `当前模型渠道不可用，已尝试其他模型`
+                : `API 服务器错误 (${resp.status})，请稍后重试`
+            );
+            (retryErr as Error & { retryable?: boolean }).retryable = isChannelError;
             throw retryErr;
           }
 

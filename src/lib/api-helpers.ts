@@ -52,23 +52,61 @@ function isJsonLikeResponse(response: Response): boolean {
 }
 
 /**
+ * Check if a base URL explicitly includes /v1 (or any version path).
+ * Used to decide whether /v1 retry should be attempted.
+ */
+export function baseUrlHasVersionPath(baseUrl: string): boolean {
+  return /\/v\d+\/?$/.test(baseUrl.replace(/\/+$/, ''));
+}
+
+/**
+ * Check if a base URL looks like a unified/non-standard API that should NOT
+ * be retried with /v1. These providers have their own routing and /v1 would
+ * cause 404 or HTML responses.
+ * 
+ * Known patterns:
+ * - URLs ending with /api, /api/v2, /proxy etc. (non-/v1 version paths)
+ * - URLs containing known unified API patterns
+ */
+function isUnifiedApiUrl(baseUrl: string): boolean {
+  const cleanBase = baseUrl.replace(/\/+$/, '');
+  // If URL has a version path that is NOT /v1 (e.g. /api, /api/v2, /proxy)
+  const nonV1VersionMatch = cleanBase.match(/\/(api|proxy|gateway|rest)(\/v?\d+)?\/?$/);
+  if (nonV1VersionMatch) return true;
+  return false;
+}
+
+/**
+ * Public helper: determine whether /v1 retry should be skipped for a given baseUrl.
+ * Returns true if:
+ * - baseUrl already includes a version path (/v1, /v2, etc.)
+ * - baseUrl looks like a unified API (/api, /proxy, etc.)
+ */
+export function shouldSkipV1Retry(baseUrl: string): boolean {
+  const cleanBase = baseUrl.replace(/\/+$/, '');
+  return hasVersionPath(cleanBase) || isUnifiedApiUrl(cleanBase);
+}
+
+/**
  * Fetch with automatic /v1 retry logic
  * - First tries the exact baseUrl + path
  * - If that fails (non-OK status, or 200 but non-JSON content) and baseUrl doesn't have /v1, retries with /v1 inserted
  * - Retry uses a fresh AbortSignal (if original signal was a timeout) with the same duration
+ * - Set retryWithV1=false to disable /v1 retry for providers known to not use /v1 paths
  */
 export async function fetchWithV1Retry(
   baseUrl: string,
   path: string,
-  options: RequestInit,
+  options: RequestInit & { skipV1Retry?: boolean } = {},
   retryWithV1 = true,
   defaultTimeoutMs = 300_000 // 5min default timeout for all external API calls (some models take >2min)
 ): Promise<Response> {
   const cleanBase = baseUrl.replace(/\/+$/, '');
   const url = `${cleanBase}${path}`;
+  const { skipV1Retry, ...fetchOptions } = options;
 
   // Apply default timeout if no signal is already set
-  const effectiveOptions = { ...options };
+  const effectiveOptions: RequestInit = { ...fetchOptions };
   if (!effectiveOptions.signal) {
     effectiveOptions.signal = AbortSignal.timeout(defaultTimeoutMs);
   }
@@ -76,25 +114,27 @@ export async function fetchWithV1Retry(
   const response = await fetch(url, effectiveOptions);
   
   // Determine if we need to retry with /v1:
-  // 1. Response is not OK (4xx/5xx)
-  // 2. Response is 200 but content is not JSON (e.g. SPA HTML page from API gateways)
-  const needsRetry = retryWithV1 && !hasVersionPath(cleanBase) && (
-    !response.ok || !isJsonLikeResponse(response)
-  );
+  // 1. retryWithV1 is explicitly enabled AND skipV1Retry is not set
+  // 2. baseUrl doesn't already have /v1 or any version path
+  // 3. URL doesn't look like a unified API that wouldn't have /v1
+  // 4. Response is not OK (4xx/5xx) or is 200 but non-JSON
+  const shouldRetryV1 = retryWithV1 
+    && !skipV1Retry
+    && !hasVersionPath(cleanBase) 
+    && !isUnifiedApiUrl(cleanBase)
+    && (!response.ok || !isJsonLikeResponse(response));
   
-  if (needsRetry) {
+  if (shouldRetryV1) {
     const v1Base = `${cleanBase}/v1`;
     const retryUrl = `${v1Base}${path}`;
     const reason = !response.ok ? `${response.status}` : `non-JSON response (${response.headers.get('content-type') || 'unknown'})`;
     console.log(`[api-helpers] ${url} needs retry (${reason}), retrying with ${retryUrl}`);
     try {
       // Create fresh options for retry with a fresh timeout signal
-      // ★ 使用 AbortSignal.any 合并原始 signal 和超时 signal，
-      // 避免覆盖调用方传入的 abort controller
-      const retryOptions: RequestInit = { ...options };
+      const retryOptions: RequestInit = { ...fetchOptions };
       const timeoutSignal = AbortSignal.timeout(defaultTimeoutMs);
-      if (options.signal) {
-        retryOptions.signal = AbortSignal.any([options.signal, timeoutSignal]);
+      if (fetchOptions.signal) {
+        retryOptions.signal = AbortSignal.any([fetchOptions.signal, timeoutSignal]);
       } else {
         retryOptions.signal = timeoutSignal;
       }

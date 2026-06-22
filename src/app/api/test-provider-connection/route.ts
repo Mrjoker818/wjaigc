@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getApiProvider } from '@/lib/server-api-config';
-import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { fetchWithV1Retry, shouldSkipV1Retry } from '@/lib/api-helpers';
 
 export async function POST(request: NextRequest) {
   try {
@@ -60,6 +60,7 @@ export async function POST(request: NextRequest) {
             stream: false,
           }),
           signal: controller.signal,
+          skipV1Retry: shouldSkipV1Retry(cleanBaseUrl),
         });
         clearTimeout(timeout);
 
@@ -116,6 +117,7 @@ export async function POST(request: NextRequest) {
           method: 'GET',
           headers,
           signal: controller.signal,
+          skipV1Retry: shouldSkipV1Retry(cleanBaseUrl),
         });
         clearTimeout(timeout);
 
