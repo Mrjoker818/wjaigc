@@ -705,7 +705,45 @@ UPSCALE_TIMEOUT_MS=300000
 
 ## 更新日志
 
-### v3.2.0 (当前版本)
+### v3.3.0 (当前版本)
+
+**P0: 任务并发控制与稳定性**
+- task-registry.ts 新增任务并发控制：每用户最大 15 个并发任务（MAX_CONCURRENT_PER_USER=15），全局 500 任务上限
+- registerTask 自动调用 enqueueTask，超额任务自动排队等待
+- 新增 waitForQueueSlot() 异步等待函数，确保任务在队列空位后执行
+- 所有 20 个 API 路由的 registerTask 调用补传 userId 参数用于并发控制
+
+**P0: 关键 Bug 修复 — 视频链路**
+- infinite-canvas.tsx 视频编辑/延长：`data.taskIds` → `data.taskId`（3处致命字段名错误）
+- poll-task/route.ts：model 参数传递为对象而非字符串导致轮询失败
+- video-edit-panel.tsx：handleSubmitEdit/handleSubmitExtend 回调未传递 model 和 providerId
+- page.tsx：视频生成请求体补传高级参数（cameraControl/motionBrush/characterReferences/motionStrength/seed/negativePrompt/multiShotScenes）
+- video/extend/route.ts：添加同步完成场景处理（第三方 API 直接返回视频 URL 时）
+
+**P0: 关键 Bug 修复 — 品牌系统**
+- brand-kit-panel.tsx：`action:'batch-generate'` → `'generate'`，`sceneTypes` → `scenarioIds`，添加 `brandDNA` 参数
+- brand-packaging-panel.tsx：所有 onAddImages 调用补传 meta（modelName/apiProvider）
+- display3d-panel.tsx：所有 onAddImages 调用补传 meta（modelName/apiProvider）
+- brand-ecommerce-panel.tsx：handleRegenerateTemplate 补传 imageProviderId/llmModel/llmProviderId
+
+**P0: 关键 Bug 修复 — 轮询与流式解析**
+- poll-task/route.ts：对不存在任务返回 `status:'failed'` 而非 `status:'processing'`，避免前端无限轮询
+- chat-panel.tsx：SSE 流式解析添加 sseBuffer 行级拼接，修复跨 chunk JSON 断裂问题
+- infinite-canvas.tsx pollForResult：添加 not_found 状态处理
+
+**P1: HTTP 状态码与安全修复**
+- page.tsx handleCanvasGenerate：添加 !res.ok 检查和错误 toast 提示
+- infinite-canvas.tsx 精修引擎：添加 !submitResp.ok 和 !pollRes.ok 检查
+- infinite-canvas.tsx：移除 5 处向 /api/image-edit 传递 apiKey 的代码（安全修复）
+- edit/route.ts：/images/edits 超时从 15s 增加到 30s
+
+**P1: 编辑功能修复**
+- 擦除模式 AI 路径：空 prompt 改为默认英文提示词，提升生成质量
+- image-editor.tsx：不支持 mask 的模型显示蒙版丢弃警告
+- node-editor.tsx：工作流轮询添加 300 次上限
+- onImagesChange 函数式更新器类型修复：`onImagesChange(prev => prev.xxx)` 改为 `onImagesChange(images.xxx)`
+
+### v3.2.0
 
 **P0: 视频生成核心功能**
 - 新增 `video-api.ts`: 6种视频API协议适配层（dashscope-kling/volcengine-ark/minimax/vidu/openai-video/fal-video）

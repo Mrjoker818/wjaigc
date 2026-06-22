@@ -438,6 +438,11 @@ function AdminSection() {
       <SubTitle>用户管理</SubTitle>
       <FeatureItem>用户创建 / 编辑 / 启用禁用</FeatureItem>
       <FeatureItem>API 权限分配</FeatureItem>
+      <SubTitle>任务管理</SubTitle>
+      <FeatureItem>每用户最大 15 个并发任务，超额自动排队</FeatureItem>
+      <FeatureItem>全局 500 任务上限，30 分钟自动清理过期任务</FeatureItem>
+      <FeatureItem>任务支持 SSE 实时进度推送 + 轮询兜底</FeatureItem>
+      <FeatureItem>支持任务取消（擦除/蒙版/放大/生成等所有异步任务）</FeatureItem>
       <SubTitle>协议兼容</SubTitle>
       <FeatureItem>6 种协议档案：openai / openai-async / apimart / pearapi / gemini-image / auto</FeatureItem>
       <FeatureItem>高级参数自定义（compatProfile / pollPathTemplate 等）</FeatureItem>
@@ -477,6 +482,9 @@ function TipsSection() {
       <FeatureItem>工作流节点模式支持 @图片引用，直接插入画布中的图片</FeatureItem>
       <FeatureItem>3D 构图支持图像模型和 LLM 模型独立选择，生成和布景分别使用不同模型</FeatureItem>
       <FeatureItem>API 协议自动推断：根据 URL 特征匹配协议档案，也支持手动指定</FeatureItem>
+      <FeatureItem>任务并发控制：每用户最多 15 个并发任务，超额自动排队等待，不会丢失</FeatureItem>
+      <FeatureItem>任务失败或过期会自动提示，不会无限等待（poll-task 对不存在任务返回 failed）</FeatureItem>
+      <FeatureItem>不支持蒙版的模型使用擦除/蒙版功能时，系统会自动提示蒙版将被忽略</FeatureItem>
     </div>
   );
 }
@@ -590,6 +598,25 @@ function ChangelogSection() {
   return (
     <div>
       <h3 className="text-sm font-bold text-[var(--color-on-surface)] mb-2">更新内容</h3>
+
+      <SubTitle>v3.3.0</SubTitle>
+      <FeatureItem>任务并发控制：每用户最大 15 个并发任务，全局 500 任务上限，30 分钟自动清理</FeatureItem>
+      <FeatureItem>任务队列管理：超额任务自动排队，支持查询排队位置</FeatureItem>
+      <FeatureItem>修复：视频编辑/延长任务 ID 解析错误导致生成失败</FeatureItem>
+      <FeatureItem>修复：品牌工厂批量生成 API 参数不匹配导致 400 错误</FeatureItem>
+      <FeatureItem>修复：视频编辑面板未传递模型和提供商信息</FeatureItem>
+      <FeatureItem>修复：poll-task 对不存在任务返回 processing 导致前端无限轮询</FeatureItem>
+      <FeatureItem>修复：聊天面板 SSE 流式解析跨 chunk JSON 断裂</FeatureItem>
+      <FeatureItem>修复：图像生成/精修引擎缺少 HTTP 状态码检查</FeatureItem>
+      <FeatureItem>修复：品牌包装/3D 展陈添加图片到画布缺少模型信息</FeatureItem>
+      <FeatureItem>修复：品牌电商重新生成缺少模型提供商参数</FeatureItem>
+      <FeatureItem>修复：前端向图片编辑 API 传递 apiKey 安全隐患</FeatureItem>
+      <FeatureItem>修复：擦除模式 AI 路径空提示词导致生成质量差</FeatureItem>
+      <FeatureItem>修复：不支持蒙版的模型静默丢弃蒙版未提示用户</FeatureItem>
+      <FeatureItem>修复：视频生成缺少高级参数传递（运镜/运动强度等）</FeatureItem>
+      <FeatureItem>修复：视频延长 API 同步完成场景未处理</FeatureItem>
+      <FeatureItem>修复：工作流轮询无上限可能导致无限轮询（添加 300 次上限）</FeatureItem>
+      <FeatureItem>修复：语言修图 /images/edits 超时 15s → 30s</FeatureItem>
 
       <SubTitle>v3.2.0</SubTitle>
       <FeatureItem>视频生成核心功能：6 种视频 API 协议适配层，20+ 视频模型注册表</FeatureItem>
