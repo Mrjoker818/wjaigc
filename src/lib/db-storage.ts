@@ -415,6 +415,34 @@ export async function migrateFileDataToDb(): Promise<void> {
     // File may not exist, that's OK
   }
 
+
+  // Reverse sync: write DB users back to persistent file if file is missing any
+  try {
+    const allDbUsers = await dbGetUsers();
+    if (allDbUsers.length > 0) {
+      const usersFilePath = path.join(getServerSystemDir(), 'users.json');
+      let fileUsersData: { users: Record<string, unknown>[] } = { users: [] };
+      try {
+        const existingContent = await fs.readFile(usersFilePath, 'utf-8');
+        fileUsersData = JSON.parse(existingContent);
+      } catch { /* file may not exist yet */ }
+      const fileUsers = fileUsersData.users || [];
+      const fileUserIds = new Set(fileUsers.map((u) => String(u.id)));
+      const missingInFile = allDbUsers.filter((u) => !fileUserIds.has(String(u.id)));
+      if (missingInFile.length > 0) {
+        console.log(`[Migration] Syncing ${missingInFile.length} DB users back to file: ${usersFilePath}`);
+        for (const dbu of missingInFile) {
+          fileUsers.push(dbu as unknown as Record<string, unknown>);
+        }
+        fileUsersData.users = fileUsers;
+        const fsSync = await import('fs');
+        fsSync.writeFileSync(usersFilePath, JSON.stringify(fileUsersData, null, 2));
+      }
+    }
+  } catch (revErr) {
+    console.warn('[Migration] Reverse sync users DB→file failed:', (revErr as Error).message);
+  }
+
   // Migrate API providers
   try {
     const providersFile = path.join(getServerSystemDir(), 'api-providers.json');
@@ -455,6 +483,40 @@ export async function migrateFileDataToDb(): Promise<void> {
     }
   } catch {
     // File may not exist, that's OK
+  }
+
+  // Reverse sync: write DB API providers back to persistent file if file is missing any
+  try {
+    const allDbProviders = await dbGetApiProviders();
+    if (allDbProviders.length > 0) {
+      const providersFilePath = path.join(getServerSystemDir(), 'api-providers.json');
+      let fileProvidersData: unknown[] = [];
+      let providersFileObj: Record<string, unknown> = {};
+      try {
+        const existingContent = await fs.readFile(providersFilePath, 'utf-8');
+        const parsed = JSON.parse(existingContent);
+        if (Array.isArray(parsed)) {
+          fileProvidersData = parsed;
+          providersFileObj = { providers: parsed };
+        } else {
+          fileProvidersData = (parsed as Record<string, unknown[]>).providers || [];
+          providersFileObj = parsed;
+        }
+      } catch { /* file may not exist yet */ }
+      const fileProviderIds = new Set(fileProvidersData.map((p: unknown) => String(((p as Record<string, unknown>)?.id) ?? '')));
+      const missingInFile = allDbProviders.filter((p) => !fileProviderIds.has(String(p.id)));
+      if (missingInFile.length > 0) {
+        console.log(`[Migration] Syncing ${missingInFile.length} DB API providers back to file`);
+        for (const dbp of missingInFile) {
+          fileProvidersData.push(dbp as unknown as Record<string, unknown>);
+        }
+        (providersFileObj as Record<string, unknown>).providers = fileProvidersData;
+        const fsSync = await import('fs');
+        fsSync.writeFileSync(providersFilePath, JSON.stringify(providersFileObj, null, 2));
+      }
+    }
+  } catch (revErr) {
+    console.warn('[Migration] Reverse sync API providers DB→file failed:', (revErr as Error).message);
   }
 
   console.log('[db-storage] Migration complete');
