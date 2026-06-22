@@ -182,6 +182,108 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(scanResult);
     }
     
+    if (action === 'sync-s3') {
+      // Download ALL images from S3 to local filesystem for faster access
+      // This is a one-time operation after deployment to pre-cache S3 images
+      const { S3Storage } = await import('coze-coding-dev-sdk');
+      const s3Endpoint = process.env.COZE_BUCKET_ENDPOINT_URL || '';
+      const s3Bucket = process.env.COZE_BUCKET_NAME || '';
+      if (!s3Endpoint || !s3Bucket) {
+        return NextResponse.json({ error: 'S3 not configured' }, { status: 503 });
+      }
+      const storage = new S3Storage({
+        endpointUrl: s3Endpoint,
+        accessKey: '',
+        secretKey: '',
+        bucketName: s3Bucket,
+        region: 'cn-beijing',
+      });
+      const dataRoot = getServerDataRoot();
+
+      try {
+        let allS3Keys: string[] = [];
+        let token: string | undefined;
+        let pages = 0;
+        const prefix = 'images/';
+
+        do {
+          const opts: Record<string, unknown> = { prefix, maxKeys: 1000 };
+          if (token) opts.continuationToken = token;
+          const result = await storage.listFiles(opts);
+          allS3Keys.push(...(result.keys || []));
+          token = result.nextContinuationToken;
+          pages++;
+          if (!token) break;
+          if (pages > 100) break; // safety
+        } while (token);
+
+        // Deduplicate and filter to image files only
+        const uniqueKeys = [...new Set(allS3Keys)];
+        const imageKeys = uniqueKeys.filter(k => /\.(png|jpg|jpeg|webp|gif|svg)$/i.test(k));
+        
+        console.log(`[sync-s3] Found ${uniqueKeys.length} unique S3 keys, ${imageKeys.length} are images`);
+        
+        let downloaded = 0;
+        let skipped = 0;
+        let failed = 0;
+        const errors: string[] = [];
+
+        for (const s3Key of imageKeys) {
+          try {
+            // Derive local filename: strip hash suffix, map to local path
+            const fname = s3Key.split('/').pop()!;
+            const localName = fname.replace(/_[0-9a-f]{8}(\.\w+)$/, '$1');
+            
+            // Determine local directory
+            let localDir: string;
+            let localFname: string;
+            if (localName.startsWith('gen-') || localName.startsWith('upload-') || localName.startsWith('erase_') || localName.startsWith('removebg_') || localName.startsWith('compressed-')) {
+              localDir = path.join(dataRoot, 'uploads');
+              localFname = localName;
+            } else if (localName.startsWith('img_')) {
+              localDir = path.join(dataRoot, 'generate');
+              localFname = localName;
+            } else {
+              localDir = path.join(dataRoot, 'uploads');
+              localFname = localName;
+            }
+            
+            const localPath = path.join(localDir, localFname);
+            
+            // Skip if already exists locally
+            if (fs.existsSync(localPath)) {
+              skipped++;
+              continue;
+            }
+            
+            // Download from S3
+            const buffer = await storage.readFile({ fileKey: s3Key });
+            if (buffer && buffer.length > 0) {
+              if (!fs.existsSync(localDir)) fs.mkdirSync(localDir, { recursive: true });
+              fs.writeFileSync(localPath, buffer);
+              downloaded++;
+            } else {
+              failed++;
+            }
+          } catch (err) {
+            failed++;
+            const msg = err instanceof Error ? err.message : String(err);
+            if (errors.length < 20) errors.push(`${s3Key}: ${msg}`);
+          }
+        }
+
+        return NextResponse.json({
+          totalS3Images: imageKeys.length,
+          downloaded,
+          skipped,
+          failed,
+          errors: errors.slice(0, 20),
+        });
+      } catch (err) {
+        return NextResponse.json({ error: 'S3 sync failed', details: err instanceof Error ? err.message : String(err) }, { status: 500 });
+      }
+    }
+
     if (action === 'recover') {
       if (targetFilename) {
         // Recover specific file
@@ -230,6 +332,7 @@ export async function GET() {
       scan: 'POST /api/recover-images?action=scan',
       recoverAll: 'POST /api/recover-images?action=recover',
       recoverOne: 'POST /api/recover-images?action=recover&filename=xxx',
+      syncS3: 'POST /api/recover-images?action=sync-s3 (download all S3 images to local)',
     },
     note: 'Requires adminKey parameter for authentication',
   });
