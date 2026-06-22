@@ -1,10 +1,11 @@
 /**
  * 检查本地 AI 模型文件状态和 Python 虚拟环境
  * 此文件独立于 instrumentation.ts，避免 Edge Runtime 加载 Node.js 模块
+ * 使用异步 exec 代替 execSync，避免阻塞 Node.js 事件循环导致启动超时
  */
 import fs from 'fs';
 import path from 'path';
-import { execSync } from 'child_process';
+import { exec } from 'child_process';
 
 export async function checkLocalModels() {
   try {
@@ -29,17 +30,41 @@ export async function checkLocalModels() {
     const venvPython = process.env.PYTHON_BIN ||
       (fs.existsSync(spaceVenvPython) ? spaceVenvPython :
        fs.existsSync(projectVenvPython) ? projectVenvPython : 'python3');
+
+    // 使用异步 exec 检查 Python 环境，不阻塞事件循环
+    const checkPythonEnv = (cmd: string): Promise<boolean> => {
+      return new Promise((resolve) => {
+        exec(cmd, { timeout: 10000 }, (err) => {
+          resolve(!err);
+        });
+      });
+    };
+
     let pythonOk = false;
     try {
       if (fs.existsSync(venvPython)) {
-        execSync(`${venvPython} -c "import torch; import iopaint"`, { stdio: 'ignore', timeout: 10000 });
-        pythonOk = true;
-        console.log(`[instrumentation] Python venv OK (${venvPython})`);
+        pythonOk = await checkPythonEnv(`${venvPython} -c "import torch; import iopaint"`);
+        if (pythonOk) {
+          console.log(`[instrumentation] Python venv OK (${venvPython})`);
+        } else {
+          console.warn(
+            `[instrumentation] Python 环境不可用 (torch/iopaint 缺失)\n` +
+            `  请运行: bash scripts/setup-venv.sh\n` +
+            `  本地 AI 功能将降级到 API 兜底`
+          );
+        }
       } else {
         console.warn(`[instrumentation] Python venv not found at ${venvPython}, trying system python3...`);
-        execSync('python3 -c "import torch; import iopaint"', { stdio: 'ignore', timeout: 10000 });
-        pythonOk = true;
-        console.log('[instrumentation] System python3 + torch + iopaint available (non-persistent!)');
+        pythonOk = await checkPythonEnv('python3 -c "import torch; import iopaint"');
+        if (pythonOk) {
+          console.log('[instrumentation] System python3 + torch + iopaint available (non-persistent!)');
+        } else {
+          console.warn(
+            `[instrumentation] Python 环境不可用 (torch/iopaint 缺失)\n` +
+            `  请运行: bash scripts/setup-venv.sh\n` +
+            `  本地 AI 功能将降级到 API 兜底`
+          );
+        }
       }
     } catch {
       console.warn(

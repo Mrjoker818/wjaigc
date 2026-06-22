@@ -36,22 +36,40 @@ export async function register() {
       checkLocalModels().catch(() => {});
     }).catch(() => {});
 
-    // 异步确保 SVG 转换 Python 依赖已安装（cairosvg/ezdxf，不阻塞启动）
+    // SVG 转换 Python 依赖安装改为后台异步非阻塞
+    // 使用 exec (异步) 代替 execSync (同步阻塞)，避免 pip install 阻塞事件循环导致启动超时
     const ensureSvgConvertDeps = async () => {
       try {
-        const { execSync } = await import('child_process');
+        const { exec } = await import('child_process');
         const missing: string[] = [];
-        try { execSync('python3 -c "import cairosvg"', { stdio: 'ignore', timeout: 5000 }); } catch { missing.push('cairosvg'); }
-        try { execSync('python3 -c "import ezdxf"', { stdio: 'ignore', timeout: 5000 }); } catch { missing.push('ezdxf'); }
+
+        // 使用异步 exec 检查依赖，不阻塞事件循环
+        const checkModule = (mod: string): Promise<void> => {
+          return new Promise((resolve) => {
+            exec(`python3 -c "import ${mod}"`, { timeout: 5000 }, (err) => {
+              if (err) missing.push(mod);
+              resolve();
+            });
+          });
+        };
+
+        await Promise.all([checkModule('cairosvg'), checkModule('ezdxf')]);
+
         if (missing.length > 0) {
           console.log(`[instrumentation] Installing SVG convert deps: ${missing.join(', ')}`);
-          execSync(`pip3 install ${missing.join(' ')} -q`, { stdio: 'ignore', timeout: 120000 });
-          console.log('[instrumentation] SVG convert deps installed successfully');
+          // 异步 pip install，不阻塞事件循环
+          exec(`pip3 install ${missing.join(' ')} -q`, { timeout: 120000 }, (err) => {
+            if (err) {
+              console.warn('[instrumentation] SVG convert deps installation failed (non-fatal):', err.message);
+            } else {
+              console.log('[instrumentation] SVG convert deps installed successfully');
+            }
+          });
         } else {
           console.log('[instrumentation] SVG convert deps (cairosvg, ezdxf) already available');
         }
       } catch (e) {
-        console.warn('[instrumentation] SVG convert deps installation failed (non-fatal):', e);
+        console.warn('[instrumentation] SVG convert deps check failed (non-fatal):', e);
       }
     };
     ensureSvgConvertDeps().catch(() => {});
