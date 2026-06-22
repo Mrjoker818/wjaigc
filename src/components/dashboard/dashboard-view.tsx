@@ -1524,8 +1524,8 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                     >
                       <span className="text-sm text-gray-400">收款码加载失败</span>
                     </div>
-                    {/* Countdown overlay */}
-                    <div className="absolute top-5 right-5 bg-black/60 text-white text-xs px-2 py-1 rounded-full">
+                    {/* Countdown badge: bottom center of QR code */}
+                    <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-black/70 text-white text-xs px-3 py-1 rounded-full whitespace-nowrap shadow-md">
                       {qrCountdown}s
                     </div>
                   </div>
