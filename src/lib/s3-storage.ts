@@ -207,9 +207,12 @@ export async function resolveS3Key(baseKey: string): Promise<string | null> {
  * e.g. "gen-123.jpg" → "images/gen-123.jpg"
  */
 export function deriveS3Key(localPath: string): string {
-  // Extract filename from path
-  const filename = localPath.split('/').pop() || localPath;
-  return `images/${filename}`;
+  // Normalize: strip leading slashes/slashes, keep subdirectory structure
+  const normalized = localPath.replace(/^\/+/, '');
+  // If already starts with images/, use as-is
+  if (normalized.startsWith('images/')) return normalized;
+  // Otherwise prefix with images/
+  return `images/${normalized}`;
 }
 
 /**
@@ -219,8 +222,23 @@ export function deriveS3Key(localPath: string): string {
 export async function getS3FallbackUrl(localPath: string): Promise<string | null> {
   const key = deriveS3Key(localPath);
   const exists = await s3FileExists(key);
-  if (!exists) return null;
-  return getS3PresignedUrl(key);
+  if (exists) {
+    const resolvedKey = await resolveS3Key(key);
+    if (resolvedKey) return getS3PresignedUrl(resolvedKey);
+  }
+  
+  // Fallback: try with just the basename
+  const basename = localPath.split('/').pop() || localPath;
+  if (basename !== localPath) {
+    const basenameKey = `images/${basename}`;
+    const basenameExists = await s3FileExists(basenameKey);
+    if (basenameExists) {
+      const basenameResolvedKey = await resolveS3Key(basenameKey);
+      if (basenameResolvedKey) return getS3PresignedUrl(basenameResolvedKey);
+    }
+  }
+  
+  return null;
 }
 
 /**
@@ -228,10 +246,20 @@ export async function getS3FallbackUrl(localPath: string): Promise<string | null
  * Alias for readImageFromS3 with key derivation
  */
 export async function downloadImageFromS3(filenameOrPath: string): Promise<Buffer | null> {
+  // Try with full relative path first (preserves subdirectory like uploads/)
   const key = deriveS3Key(filenameOrPath);
   const resolvedKey = await resolveS3Key(key);
-  if (!resolvedKey) return null;
-  return readImageFromS3(resolvedKey);
+  if (resolvedKey) return readImageFromS3(resolvedKey);
+  
+  // Fallback: try with just the basename (old format without subdirectory)
+  const basename = filenameOrPath.split('/').pop() || filenameOrPath;
+  if (basename !== filenameOrPath) {
+    const basenameKey = `images/${basename}`;
+    const basenameResolvedKey = await resolveS3Key(basenameKey);
+    if (basenameResolvedKey) return readImageFromS3(basenameResolvedKey);
+  }
+  
+  return null;
 }
 
 /**
@@ -239,10 +267,20 @@ export async function downloadImageFromS3(filenameOrPath: string): Promise<Buffe
  * Used in generate route for reference image URL resolution
  */
 export async function getS3ImageUrl(filenameOrPath: string): Promise<string | null> {
+  // Try with full relative path first (preserves subdirectory like uploads/)
   const key = deriveS3Key(filenameOrPath);
   const resolvedKey = await resolveS3Key(key);
-  if (!resolvedKey) return null;
-  return getS3PresignedUrl(resolvedKey);
+  if (resolvedKey) return getS3PresignedUrl(resolvedKey);
+  
+  // Fallback: try with just the basename (old format without subdirectory)
+  const basename = filenameOrPath.split('/').pop() || filenameOrPath;
+  if (basename !== filenameOrPath) {
+    const basenameKey = `images/${basename}`;
+    const basenameResolvedKey = await resolveS3Key(basenameKey);
+    if (basenameResolvedKey) return getS3PresignedUrl(basenameResolvedKey);
+  }
+  
+  return null;
 }
 
 /**
