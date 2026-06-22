@@ -68,9 +68,9 @@ export async function GET(
       
       // 同时恢复到本地文件系统，下次请求无需再从 S3 下载
       try {
-        const restoreDir = path.join(dataRoot, 'uploads');
+        const restoreDir = path.join(dataRoot, path.dirname(filePath));
         if (!fs.existsSync(restoreDir)) fs.mkdirSync(restoreDir, { recursive: true });
-        fs.writeFileSync(path.join(restoreDir, path.basename(filePath)), s3Buffer);
+        fs.writeFileSync(path.join(dataRoot, filePath), s3Buffer);
       } catch (writeErr) {
         console.warn(`[serve-upload] Failed to cache S3 file locally:`, writeErr instanceof Error ? writeErr.message : writeErr);
       }
@@ -84,7 +84,26 @@ export async function GET(
     }
     
     // 3. S3 也没有，尝试从 sourceUrl（原始外部 URL）重新下载
-    const sourceUrl = await getImageSourceUrl(path.basename(filePath));
+    // Try multiple key formats for source map lookup:
+    // - Full path: "generate/img_xxx.jpg"
+    // - Just filename: "img_xxx.jpg"
+    // - Without extension variations
+    let sourceUrl: string | null = null;
+    
+    // Try full relative path first
+    sourceUrl = await getImageSourceUrl(filePath);
+    
+    // If not found, try just the filename portion
+    if (!sourceUrl) {
+      sourceUrl = await getImageSourceUrl(path.basename(filePath));
+    }
+    
+    // If still not found, try filename without extension (some mappings may have been saved differently)
+    if (!sourceUrl) {
+      const basenameNoExt = path.basename(filePath, path.extname(filePath));
+      sourceUrl = await getImageSourceUrl(basenameNoExt);
+    }
+    
     if (sourceUrl) {
       try {
         const fetchRes = await fetch(sourceUrl, { signal: AbortSignal.timeout(15000) });
@@ -93,11 +112,11 @@ export async function GET(
           const ext = path.extname(filePath).toLowerCase();
           const contentType = getContentType(ext);
           
-          // 恢复到本地文件系统
+          // 恢复到本地文件系统 — 保持原始路径结构
           try {
-            const restoreDir = path.join(dataRoot, 'uploads');
+            const restoreDir = path.join(dataRoot, path.dirname(filePath));
             if (!fs.existsSync(restoreDir)) fs.mkdirSync(restoreDir, { recursive: true });
-            fs.writeFileSync(path.join(restoreDir, path.basename(filePath)), buffer);
+            fs.writeFileSync(path.join(dataRoot, filePath), buffer);
           } catch (writeErr) {
             // 忽略
           }

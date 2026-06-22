@@ -373,6 +373,8 @@ export async function dbWriteUsers(users: Array<{
 
 export async function migrateFileDataToDb(): Promise<void> {
   console.log('[db-storage] Starting file→DB migration...');
+  console.log('[db-storage] Safety: Migration only adds missing records, never overwrites existing DB data');
+  console.log('[db-storage] wujie_user_data is NOT touched by migration — it is managed by runtime dbSetUserData only');
 
   // Import file-based storage functions
   const { getServerSystemDir } = await import('./server-data-root');

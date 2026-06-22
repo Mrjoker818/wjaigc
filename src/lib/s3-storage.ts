@@ -416,9 +416,13 @@ export async function persistRemoteImage(
     console.log(`[s3-storage] Persisted image: ${filename} (${(imageBuffer.length / 1024).toFixed(0)}KB, S3: ${s3Key ? 'yes' : 'no'})`);
     
     // Record sourceUrl mapping for future recovery (e.g., redeployment without S3)
-    if (imageUrl && subfolder) {
-      saveImageDataMapping(`${subfolder}/${filename}`, imageUrl).catch((e: unknown) => {
-        console.warn('[s3-storage] Failed to save source mapping for', filename, e);
+    // Always record mapping — previously only recorded when subfolder was set,
+    // which missed img_ format files that have no subfolder
+    if (imageUrl && imageUrl.startsWith('http')) {
+      // Use the full relative path as the key (e.g., "generate/img_xxx.jpg" or "gen-xxx.png")
+      const mappingKey = subfolder ? `${subfolder}/${filename}` : filename;
+      saveImageDataMapping(mappingKey, imageUrl).catch((e: unknown) => {
+        console.warn('[s3-storage] Failed to save source mapping for', mappingKey, e);
       });
     }
     
