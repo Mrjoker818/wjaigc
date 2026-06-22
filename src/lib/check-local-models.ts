@@ -76,34 +76,51 @@ export async function checkLocalModels() {
 
     // ─── 检查核心模型文件 ────────────────────────────────
     const coreModels = [
-      { name: 'LaMa 擦除', path: path.join(iopaintDir, 'big-lama.pt'), minSize: 1_000_000 },
-      { name: 'U2Net 去背景(推荐)', path: path.join(removebgDir, 'u2net.onnx'), minSize: 100_000_000 },
-      { name: 'ISNet 去背景', path: path.join(removebgDir, 'isnet-general-use.onnx'), minSize: 100_000_000 },
-      { name: 'U2NetP 去背景', path: path.join(removebgDir, 'u2netp.onnx'), minSize: 1_000_000 },
+      // IOPaint 擦除模型
+      { name: 'LaMa 擦除', path: path.join(iopaintDir, 'big-lama.pt'), minSize: 1_000_000, required: true },
+      { name: 'Anime-Lama 动漫擦除', path: path.join(iopaintDir, 'anime-manga-big-lama.pt'), minSize: 1_000_000, required: false },
+      { name: 'ZITS 结构修复', path: path.join(iopaintDir, 'zits-inpaint-0717.pt'), minSize: 100_000, required: false },
+      // RemoveBG 去背景模型
+      { name: 'U2Net 去背景(推荐)', path: path.join(removebgDir, 'u2net.onnx'), minSize: 100_000_000, required: true },
+      { name: 'ISNet 去背景', path: path.join(removebgDir, 'isnet-general-use.onnx'), minSize: 100_000_000, required: false },
+      { name: 'Silueta 人像去背景', path: path.join(removebgDir, 'silueta.onnx'), minSize: 10_000_000, required: false },
+      { name: 'BiRefNet 通用去背景', path: path.join(removebgDir, 'birefnet-general-lite.onnx'), minSize: 100_000_000, required: false },
+      { name: 'U2NetP 轻量去背景', path: path.join(removebgDir, 'u2netp.onnx'), minSize: 1_000_000, required: false },
     ];
 
     const missing: string[] = [];
+    const missingOptional: string[] = [];
     for (const model of coreModels) {
       try {
         const stat = fs.statSync(model.path);
         if (stat.size < model.minSize) {
-          missing.push(`${model.name} (${model.path} 文件过小: ${stat.size} bytes)`);
+          const msg = `${model.name} (${model.path} 文件过小: ${stat.size} bytes)`;
+          (model.required ? missing : missingOptional).push(msg);
         }
       } catch {
-        missing.push(`${model.name} (${model.path} 不存在)`);
+        const msg = `${model.name} (${model.path} 不存在)`;
+        (model.required ? missing : missingOptional).push(msg);
       }
     }
 
     if (missing.length > 0) {
       console.warn(
-        `[instrumentation] 本地 AI 模型缺失:\n${missing.map(m => `  - ${m}`).join('\n')}\n` +
+        `[instrumentation] 本地 AI 必需模型缺失:\n${missing.map(m => `  - ${m}`).join('\n')}\n` +
         `  请运行: bash scripts/ensure-models.sh --download\n` +
         `  模型目录: IOPaint=${iopaintDir}, RemoveBG=${removebgDir}\n` +
         `  缺失模型将自动降级到 AI API 兜底`
       );
-    } else if (pythonOk) {
-      console.log('[instrumentation] 本地 AI 环境完全就绪 (Python venv + 模型)');
-    } else {
+    }
+    if (missingOptional.length > 0) {
+      console.log(
+        `[instrumentation] 可选模型缺失 (不影响核心功能，将使用默认模型):\n${missingOptional.map(m => `  - ${m}`).join('\n')}`
+      );
+    }
+    if (missing.length === 0 && missingOptional.length === 0 && pythonOk) {
+      console.log('[instrumentation] 本地 AI 环境完全就绪 (Python venv + 全部模型)');
+    } else if (missing.length === 0 && pythonOk) {
+      console.log('[instrumentation] 本地 AI 核心环境就绪 (Python venv + 必需模型，部分可选模型缺失)');
+    } else if (missing.length === 0) {
       console.log('[instrumentation] 模型文件就绪，但 Python 环境缺失');
     }
   } catch (e) {

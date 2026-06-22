@@ -54,7 +54,9 @@ export interface UpscaleResult {
 /** ONNX 模型目录 */
 function getOnnxModelsDir(): string {
   return process.env.ONNX_MODELS_DIR ||
-    path.join(process.env.COZE_WORKSPACE_PATH || '/workspace/projects', 'onnx-models');
+    (fs.existsSync('/space/onnx-models') && fs.readdirSync('/space/onnx-models').length > 0
+      ? '/space/onnx-models'
+      : path.join(process.env.COZE_WORKSPACE_PATH || '/workspace/projects', 'onnx-models'));
 }
 
 /** 检查 ONNX 放大是否可用 */
@@ -461,7 +463,9 @@ export async function performOnnxUpscale(
 /** NCNN 模型目录 */
 function getNcnnModelsDir(): string {
   return process.env.UPSCAYL_MODELS_DIR ||
-    path.join(process.env.COZE_WORKSPACE_PATH || '/workspace/projects', 'upscayl-models');
+    (fs.existsSync('/space/upscayl-models') && fs.readdirSync('/space/upscayl-models').length > 0
+      ? '/space/upscayl-models'
+      : path.join(process.env.COZE_WORKSPACE_PATH || '/workspace/projects', 'upscayl-models'));
 }
 
 /** 检查 NCNN 放大是否可用 */
