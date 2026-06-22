@@ -90,33 +90,23 @@ export async function GET(request: NextRequest) {
     let value: unknown = await dbGetUserData(sessionUser.id, key);
 
     // 【数据隔离】对 projects 类型数据做服务端过滤，防止跨用户数据泄漏
+    // 注意：GET 请求只过滤响应数据，不回写数据库，避免永久删除用户数据
     if (key === 'projects' && Array.isArray(value)) {
       const before = (value as unknown[]).length;
       value = filterProjectsForUser(value, sessionUser.id);
 
-      // 【跨用户项目ID冲突检测】检查当前用户的项目是否也存在于其他用户记录中
+      // 【跨用户项目ID冲突检测】仅记录警告，不删除数据
+      // 如果项目 ID 同时存在于其他用户记录中，可能是历史迁移导致，
+      // 不应在 GET 请求中永久删除数据。冲突将在 POST 同步时由客户端覆盖解决。
       const projectIds = (value as unknown[]).map((p) => String((p as Record<string, unknown>).id));
       const conflictingIds = await findProjectIdsOwnedByOtherUsers(projectIds, sessionUser.id);
       if (conflictingIds.size > 0) {
-        const beforeConflict = (value as unknown[]).length;
-        // 移除与其他用户冲突的项目（这些项目可能是在数据隔离修复前被错误同步的）
-        value = (value as unknown[]).filter((p) => {
-          const id = String((p as Record<string, unknown>).id);
-          return !conflictingIds.has(id);
-        });
-        const removedConflict = beforeConflict - (value as unknown[]).length;
-        if (removedConflict > 0) {
-          console.warn(`[Sync] GET projects: removed ${removedConflict} cross-user conflicting projects (${[...conflictingIds].join(', ')}) for user ${sessionUser.id}`);
-          // 回写清理后的数据，避免下次再读到脏数据
-          await dbSetUserData(sessionUser.id, key, value);
-        }
+        console.warn(`[Sync] GET projects: detected ${conflictingIds.size} cross-user project ID conflicts (${[...conflictingIds].join(', ')}) for user ${sessionUser.id} — skipping, not deleting`);
       }
 
       const removed = before - (value as unknown[]).length;
       if (removed > 0) {
-        console.warn(`[Sync] GET projects: filtered out ${removed} cross-user projects for user ${sessionUser.id}`);
-        // 回写清理后的数据，避免下次再读到脏数据
-        await dbSetUserData(sessionUser.id, key, value);
+        console.warn(`[Sync] GET projects: filtered out ${removed} cross-user projects for user ${sessionUser.id} (response only, not persisted)`);
       }
     }
 
@@ -162,18 +152,26 @@ export async function POST(request: NextRequest) {
         console.warn(`[Sync] POST projects: rejected ${removed} cross-user projects for user ${sessionUser.id}`);
       }
 
-      // 2. 跨用户项目ID冲突检测：拒绝已存在于其他用户记录中的项目
+      // 2. 跨用户项目ID冲突检测：重新分配冲突项目的 ID，而不是删除
+      // 同一项目 ID 可能因历史迁移出现在多个用户下，重新分配 ID 保留数据
       const projectIds = (value as unknown[]).map((p) => String((p as Record<string, unknown>).id));
       const conflictingIds = await findProjectIdsOwnedByOtherUsers(projectIds, sessionUser.id);
       if (conflictingIds.size > 0) {
-        const beforeConflict = (value as unknown[]).length;
-        value = (value as unknown[]).filter((p) => {
-          const id = String((p as Record<string, unknown>).id);
-          return !conflictingIds.has(id);
-        });
-        const removedConflict = beforeConflict - (value as unknown[]).length;
-        if (removedConflict > 0) {
-          console.warn(`[Sync] POST projects: rejected ${removedConflict} cross-user conflicting projects for user ${sessionUser.id}`);
+        let reassigned = 0;
+        for (const p of (value as Record<string, unknown>[])) {
+          const id = String(p.id);
+          if (conflictingIds.has(id)) {
+            // 重新分配项目 ID：添加当前用户 ID 后缀避免冲突
+            const oldId = p.id;
+            const newId = `${id}__${sessionUser.id}_${Date.now()}`;
+            p.id = newId;
+            // 如果项目名引用了旧 ID，也需更新
+            if (p.groupId === oldId) p.groupId = newId;
+            reassigned++;
+          }
+        }
+        if (reassigned > 0) {
+          console.warn(`[Sync] POST projects: reassigned ${reassigned} conflicting project IDs for user ${sessionUser.id} (was: ${[...conflictingIds].join(', ')})`);
         }
       }
 
