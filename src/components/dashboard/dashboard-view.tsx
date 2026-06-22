@@ -125,9 +125,11 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const [verifyResult, setVerifyResult] = useState<{ providerId: string; success: boolean; summary: string; tests: Array<{ name: string; status: string; detail: string }> } | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
   const [apiBalances, setApiBalances] = useState<Array<{
-    providerId: string; providerName: string; providerType: string;
-    balance: number | null; currency: string; totalUsage: number; dailyUsage: number;
-    lastUpdated: string; error?: string;
+    providerId: string; providerName: string; providerType: string; baseUrl: string;
+    balance: number | null; currency: string; totalQuota: number | null;
+    usedQuota: number | null; remainingQuota: number | null;
+    totalUsage: number; dailyUsage: number;
+    lastUpdated: string; error?: string; endpoint?: string;
   }>>([]);
 
   // ─── Admin: Data management state ───
@@ -2031,7 +2033,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                         {provider.modelType === 'vectorize' && provider.isEnabled && <div className={`mt-2 text-xs px-2 py-1 rounded ${isDark ? `bg-[${accentHex}]/10 ${accentClass}` : isMonochrome ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>已对接：矢量化工具 / 导出SVG</div>}
                         {provider.modelType === 'layer' && provider.isEnabled && <div className={`mt-2 text-xs px-2 py-1 rounded ${isDark ? `bg-[${accentHex}]/10 ${accentClass}` : isMonochrome ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>已对接：编辑元素 / 下载PSD</div>}
                         {provider.modelType === 'video' && provider.isEnabled && <div className={`mt-2 text-xs px-2 py-1 rounded ${isDark ? `bg-[${accentHex}]/10 ${accentClass}` : isMonochrome ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>已对接：文生视频 / 图生视频 / 视频延长</div>}
-                        {(() => { const bal = apiBalances.find(b => b.providerId === provider.id || b.providerName === provider.name || provider.baseUrl.includes(b.providerId)); if (!bal) return null; return (<div className={`flex items-center gap-3 mt-2 text-xs ${isDark ? 'text-[#888]' : 'text-gray-500'}`}>{bal.balance !== null && <span className="flex items-center gap-1"><Wallet className="w-3 h-3" />余额: <span className={bal.balance > 10 ? 'text-green-500' : bal.balance > 1 ? 'text-yellow-500' : 'text-red-500'}>{bal.balance.toFixed(2)} {bal.currency}</span></span>}{bal.totalUsage > 0 && <span>总用量: {bal.totalUsage}</span>}{bal.dailyUsage > 0 && <span>今日: {bal.dailyUsage}</span>}{bal.error && <span className="text-red-400 text-xs">{bal.error}</span>}</div>); })()}
+                        {(() => { const bal = apiBalances.find(b => b.providerId === provider.id || b.providerName === provider.name); if (!bal) return null; return (<div className={`mt-2 text-xs space-y-1 ${isDark ? 'text-[#888]' : 'text-gray-500'}`}><div className="flex items-center gap-3 flex-wrap">{bal.balance !== null && <span className="flex items-center gap-1"><Wallet className="w-3 h-3" />余额: <span className={`font-medium ${bal.balance > 10 ? 'text-green-500' : bal.balance > 1 ? 'text-yellow-500' : 'text-red-500'}`}>{bal.balance < 0 ? '无限' : `${bal.balance.toFixed(2)} ${bal.currency}`}</span></span>}{bal.totalQuota !== null && bal.totalQuota > 0 && <span>总额度: {(bal.totalQuota / 500000).toFixed(2)}元</span>}{bal.usedQuota !== null && bal.usedQuota > 0 && <span>已用: {(bal.usedQuota / 500000).toFixed(2)}元</span>}{bal.remainingQuota !== null && bal.remainingQuota > 0 && <span className={bal.remainingQuota < 500000 ? 'text-yellow-500' : ''}>剩余: {(bal.remainingQuota / 500000).toFixed(2)}元</span>}</div>{bal.endpoint && <div className={`text-[10px] ${isDark ? 'text-[#555]' : 'text-gray-400'}`}>查询端点: {bal.endpoint}</div>}{bal.error && <div className="text-red-400 flex items-center gap-1"><AlertTriangle className="w-3 h-3" />{bal.error}</div>}</div>); })()}
                       </div>
                     </div>
                     <div className="flex items-center justify-end gap-1 mt-3 pt-2 border-t border-current/5">
