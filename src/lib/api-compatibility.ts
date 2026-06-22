@@ -1618,6 +1618,78 @@ export function parseResponseForProfile(
     taskIds.push(apiResponse.id as string);
   }
 
+  // 3) 更多非标准响应格式兜底提取
+  // 3a) 顶层 images 数组（如 { images: [{ url: "..." }] } 或 { images: ["url1", ...] }）
+  if (!directImageUrls.length && apiResponse.images) {
+    const images = apiResponse.images;
+    if (Array.isArray(images)) {
+      for (const img of images) {
+        if (typeof img === 'string') {
+          directImageUrls.push(img);
+        } else if (typeof img === 'object' && img !== null) {
+          const imgObj = img as Record<string, unknown>;
+          if (imgObj.url && typeof imgObj.url === 'string') directImageUrls.push(imgObj.url as string);
+          else if (imgObj.image_url && typeof imgObj.image_url === 'string') directImageUrls.push(imgObj.image_url as string);
+          else if (imgObj.b64_json && typeof imgObj.b64_json === 'string') directImageUrls.push(`data:image/png;base64,${imgObj.b64_json}`);
+        }
+      }
+    }
+  }
+
+  // 3b) output 对象（如 { output: { image_url: "..." } } 或 { output: { images: [...] } }）
+  if (!directImageUrls.length && apiResponse.output && typeof apiResponse.output === 'object') {
+    const output = apiResponse.output as Record<string, unknown>;
+    if (output.image_url && typeof output.image_url === 'string') directImageUrls.push(output.image_url as string);
+    if (output.url && typeof output.url === 'string') directImageUrls.push(output.url as string);
+    if (output.b64_json && typeof output.b64_json === 'string') directImageUrls.push(`data:image/png;base64,${output.b64_json}`);
+    if (output.images && Array.isArray(output.images)) {
+      for (const img of output.images as Array<unknown>) {
+        if (typeof img === 'string') directImageUrls.push(img);
+        else if (typeof img === 'object' && img !== null) {
+          const imgObj = img as Record<string, unknown>;
+          if (imgObj.url && typeof imgObj.url === 'string') directImageUrls.push(imgObj.url as string);
+          else if (imgObj.image_url && typeof imgObj.image_url === 'string') directImageUrls.push(imgObj.image_url as string);
+          else if (imgObj.b64_json && typeof imgObj.b64_json === 'string') directImageUrls.push(`data:image/png;base64,${imgObj.b64_json}`);
+        }
+      }
+    }
+    // output 中的 task_id
+    if (output.task_id && typeof output.task_id === 'string') taskIds.push(output.task_id as string);
+    if (output.id && typeof output.id === 'string' && !taskIds.length) taskIds.push(output.id as string);
+  }
+
+  // 3c) result 对象（如 { result: { url: "..." } } 或 { result: { images: [...] } }）
+  if (!directImageUrls.length && apiResponse.result && typeof apiResponse.result === 'object') {
+    const result = apiResponse.result as Record<string, unknown>;
+    if (result.url && typeof result.url === 'string') directImageUrls.push(result.url as string);
+    if (result.image_url && typeof result.image_url === 'string') directImageUrls.push(result.image_url as string);
+    if (result.b64_json && typeof result.b64_json === 'string') directImageUrls.push(`data:image/png;base64,${result.b64_json}`);
+    if (result.images && Array.isArray(result.images)) {
+      for (const img of result.images as Array<unknown>) {
+        if (typeof img === 'string') directImageUrls.push(img);
+        else if (typeof img === 'object' && img !== null) {
+          const imgObj = img as Record<string, unknown>;
+          if (imgObj.url && typeof imgObj.url === 'string') directImageUrls.push(imgObj.url as string);
+          else if (imgObj.image_url && typeof imgObj.image_url === 'string') directImageUrls.push(imgObj.image_url as string);
+        }
+      }
+    }
+    if (result.task_id && typeof result.task_id === 'string') taskIds.push(result.task_id as string);
+  }
+
+  // 3d) 顶层 image_url / url（某些简易 API 直接返回 { image_url: "..." }）
+  if (!directImageUrls.length) {
+    if (apiResponse.image_url && typeof apiResponse.image_url === 'string') {
+      directImageUrls.push(apiResponse.image_url as string);
+    }
+    if (apiResponse.url && typeof apiResponse.url === 'string' && !apiResponse.data && !apiResponse.images && !apiResponse.output && !apiResponse.result) {
+      directImageUrls.push(apiResponse.url as string);
+    }
+    if (apiResponse.b64_json && typeof apiResponse.b64_json === 'string') {
+      directImageUrls.push(`data:image/png;base64,${apiResponse.b64_json}`);
+    }
+  }
+
   // Determine actual response mode based on what we found
   // ★ 如果同时有 directImageUrls 和 taskIds，优先认为 direct 模式
   // （有直接图片说明已完成，taskIds 可能是额外信息）

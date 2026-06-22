@@ -845,7 +845,18 @@ async function handleApiResponse(
   }
 
   // Case 3: No images or taskIds — unexpected response
-  console.error(`[refine-engine] No directImageUrls or taskIds in response for taskId=${taskId}. Raw:`, JSON.stringify(result).slice(0, 300));
+  const resultAny = result as Record<string, unknown>;
+  console.error(`[refine-engine] No directImageUrls or taskIds in response for taskId=${taskId}. Raw:`, JSON.stringify(result).slice(0, 500));
+  console.error(`[refine-engine] parseResponseForProfile result: mode=${parsed?.mode}, directImageUrls=${JSON.stringify(parsed?.directImageUrls)?.slice(0, 200)}, taskIds=${JSON.stringify(parsed?.taskIds)}`);
+  console.error(`[refine-engine] API response data field:`, JSON.stringify(resultAny?.data)?.slice(0, 300));
+  console.error(`[refine-engine] API response keys:`, Object.keys(resultAny || {}).join(', '));
+  if (resultAny?.data) {
+    const d = resultAny.data;
+    console.error(`[refine-engine] data type=${typeof d}, isArray=${Array.isArray(d)}, keys=${typeof d === 'object' && d !== null && !Array.isArray(d) ? Object.keys(d).join(',') : 'N/A'}`);
+    if (Array.isArray(d) && (d as unknown[]).length > 0) {
+      console.error(`[refine-engine] data[0] keys:`, Object.keys((d as Record<string, unknown>[])[0] || {}).join(', '));
+    }
+  }
   throw new Error('模型未返回图片结果');
 }
 

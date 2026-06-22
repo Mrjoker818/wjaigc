@@ -404,14 +404,19 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
             if (pollData.status === 'completed') {
               setProgress(100);
               setProgressLabel('精修完成');
-              // Support two response formats:
+              // Support multiple response formats:
               // 1. pollData.result.directImageUrls (from refine-engine sync mode)
-              // 2. pollData.imageUrl (from poll-task remote polling — APImart async)
+              // 2. pollData.result.imageUrls (alternative format)
+              // 3. pollData.result.imageUrl (from task-registry completed result)
+              // 4. pollData.imageUrl (from poll-task remote polling — APImart async)
               const resultUrls: string[] = [];
               if (pollData.result?.directImageUrls) {
                 resultUrls.push(...pollData.result.directImageUrls);
               } else if (pollData.result?.imageUrls) {
                 resultUrls.push(...pollData.result.imageUrls);
+              }
+              if (pollData.result?.imageUrl && !resultUrls.includes(pollData.result.imageUrl)) {
+                resultUrls.push(pollData.result.imageUrl);
               }
               if (pollData.imageUrl && !resultUrls.includes(pollData.imageUrl)) {
                 resultUrls.push(pollData.imageUrl);
