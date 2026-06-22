@@ -168,6 +168,12 @@ async function writeStore(file: StoredUsersFile): Promise<void> {
           createdAt: u.created_at, updatedAt: u.updated_at,
         }));
       }
+      // Re-write file with supplemented users to keep persistent storage in sync
+      try {
+        await writeFile(USERS_PATH, JSON.stringify(data, null, 2), 'utf8');
+      } catch (rewriteErr) {
+        console.error('[auth] Failed to re-write users file after DB supplement:', rewriteErr);
+      }
     }
   } catch {
     // DB check failed, proceed with write (UPSERT is safe)
