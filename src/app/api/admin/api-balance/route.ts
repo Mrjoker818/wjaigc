@@ -389,14 +389,14 @@ export async function GET(request: NextRequest) {
     const providers = await getApiProviders();
     const balanceInfos: BalanceInfo[] = [];
 
-    // 按 baseUrl 分组（同一来源的 API 共享余额）
+    // 按 rootUrl 分组（同一来源的 API 共享余额，忽略 /v1 等路径差异）
     const baseUrlGroups = new Map<string, ApiProvider[]>();
     for (const provider of providers) {
-      const normalizedUrl = normalizeApiBaseUrl(provider.baseUrl.replace(/\/+$/, ''));
-      if (!baseUrlGroups.has(normalizedUrl)) {
-        baseUrlGroups.set(normalizedUrl, []);
+      const groupKey = getRootUrl(normalizeApiBaseUrl(provider.baseUrl));
+      if (!baseUrlGroups.has(groupKey)) {
+        baseUrlGroups.set(groupKey, []);
       }
-      baseUrlGroups.get(normalizedUrl)!.push(provider);
+      baseUrlGroups.get(groupKey)!.push(provider);
     }
 
     // 并行查询所有来源的余额
@@ -432,9 +432,21 @@ export async function GET(request: NextRequest) {
     }
 
     const results = await Promise.allSettled(balancePromises);
-    for (const result of results) {
-      if (result.status === 'fulfilled') {
-        balanceInfos.push(result.value);
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i];
+      if (result.status !== 'fulfilled') continue;
+
+      const groupProviders = Array.from(baseUrlGroups.values())[i];
+      const baseInfo = result.value;
+
+      // 为组内每个提供商创建余额记录（同一来源共享余额数据）
+      for (const provider of groupProviders) {
+        balanceInfos.push({
+          ...baseInfo,
+          providerId: provider.id,
+          providerName: provider.name,
+          providerType: provider.type,
+        });
       }
     }
 
