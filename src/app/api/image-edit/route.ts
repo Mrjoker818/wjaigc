@@ -642,7 +642,7 @@ async function submitImageTask(
   const str = adjustedBody.strength;
   const sz = adjustedBody.size;
   const pmt = String(adjustedBody.prompt || '').substring(0, 80);
-  const hasImg = !!adjustedBody.image;
+  const hasImg = !!(adjustedBody.image || (Array.isArray(adjustedBody.images) && adjustedBody.images.length > 0));
   const inputFidelity = adjustedBody.input_fidelity;
   console.info(`[submitImageTask] API call: endpoint=${effectiveEndpoint}, profile=${profile.id}, hasImageUrls=${hasImageUrls}, hasImage=${hasImg}, inputFidelity=${inputFidelity}, urlCount=${urls?.length || 0}, urlType=${urls?.[0]?.substring(0, 30) || 'N/A'}, strength=${str}, size=${sz}, prompt=${pmt}...`);
 
@@ -668,7 +668,7 @@ async function submitImageTask(
       }
     );
 
-    // If JSON request fails with form-related errors, try multipart form data
+    // If JSON request fails, try multipart form data as fallback
     if (!submitResponse.ok) {
       const errorText = await submitResponse.text();
       const needsMultipart = errorText.includes('multipart') ||
@@ -677,13 +677,30 @@ async function submitImageTask(
         errorText.includes('expected multipart') ||
         errorText.includes('no file') ||
         errorText.includes('file required') ||
-        errorText.includes('Missing image');
+        errorText.includes('Missing image') ||
+        errorText.includes('Invalid') ||
+        errorText.includes('invalid');
 
       if (needsMultipart) {
         console.info(`[submitImageTask] JSON failed for edits endpoint, retrying with multipart form data...`);
         // Build multipart form data
+        // If adjustRequestForProfile merged image → images[], extract first image back for multipart
+        const multipartBody = { ...adjustedBody };
+        if (!multipartBody.image && Array.isArray(multipartBody.images) && multipartBody.images.length > 0) {
+          const firstImg = multipartBody.images[0] as Record<string, unknown>;
+          if (firstImg?.image_url && typeof (firstImg.image_url as Record<string, unknown>)?.url === 'string') {
+            multipartBody.image = (firstImg.image_url as Record<string, {url: string}>).url;
+          } else if (typeof firstImg?.url === 'string') {
+            multipartBody.image = firstImg.url;
+          }
+          // Remove first image from images[] to avoid duplication
+          multipartBody.images = (multipartBody.images as unknown[]).slice(1);
+          if ((multipartBody.images as unknown[]).length === 0) {
+            delete multipartBody.images;
+          }
+        }
         const formData = new FormData();
-        for (const [key, value] of Object.entries(adjustedBody)) {
+        for (const [key, value] of Object.entries(multipartBody)) {
           if (value === undefined || value === null) continue;
           if (key === 'image') {
             // image field: could be base64 data URL or plain base64
@@ -706,9 +723,35 @@ async function submitImageTask(
               formData.append('image', file);
             }
           } else if (Array.isArray(value)) {
-            // Arrays like image[] for multi-image edits
-            for (const item of value) {
-              formData.append(key, String(item));
+            // Arrays like images[] for multi-image edits
+            for (let i = 0; i < value.length; i++) {
+              const item = value[i];
+              if (typeof item === 'object' && item !== null) {
+                // OpenAI format: {image_url: {url: "data:..."}} or {image_url: {url: "https://..."}}
+                const imgUrl = (item as Record<string, unknown>)?.image_url
+                  ? ((item as Record<string, Record<string, unknown>>).image_url?.url as string)
+                  : (item as Record<string, unknown>)?.url as string;
+                if (imgUrl) {
+                  if (imgUrl.startsWith('data:')) {
+                    const match = imgUrl.match(/^data:([^;]+);base64,(.+)$/);
+                    if (match) {
+                      const mimeType = match[1];
+                      const base64Data = match[2];
+                      const binaryData = Buffer.from(base64Data, 'base64');
+                      const ext = mimeType.includes('png') ? 'png' : mimeType.includes('webp') ? 'webp' : 'jpg';
+                      const file = new File([binaryData], `image_${i}.${ext}`, { type: mimeType });
+                      formData.append(`${key}[${i}]`, file);
+                    }
+                  } else {
+                    // HTTP URL - append as string
+                    formData.append(`${key}[${i}][image_url][url]`, imgUrl);
+                  }
+                } else {
+                  formData.append(`${key}[${i}]`, JSON.stringify(item));
+                }
+              } else {
+                formData.append(key, String(item));
+              }
             }
           } else {
             formData.append(key, String(value));
