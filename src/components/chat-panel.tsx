@@ -1466,6 +1466,14 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
   const [imageModelProviderId, setImageModelProviderId] = useState('');
   const [discoveredImageModels, setDiscoveredImageModels] = useState<{id: string; name: string; provider: string; providerId: string}[]>([]);
   const [showImageModelSelector, setShowImageModelSelector] = useState(false);
+
+  // Resolve providerId to human-readable display name
+  const providerDisplayName = useCallback((pid: string | undefined): string => {
+    if (!pid) return '';
+    const m = discoveredImageModels.find(m => m.providerId === pid);
+    return m?.provider || pid;
+  }, [discoveredImageModels]);
+
   // 对话管理相关状态
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string>('');
@@ -3887,7 +3895,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                     if (newImages.length > 0) {
                       newImages.forEach((url: string) => addedImageUrls.add(url));
                       const imageModelInfo = getCurrentImageModelInfo(imageModel, imageModelProviderId);
-                      onAddImages(newImages, undefined, { modelName: imageModelInfo.model, apiProvider: imageModelInfo.providerId });
+                      onAddImages(newImages, undefined, { modelName: imageModelInfo.model, apiProvider: providerDisplayName(imageModelInfo.providerId) });
                     }
                   }
                   // 更新消息中的生成图片（使用去重后的列表）
@@ -4191,7 +4199,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                     : msg
                 ));
                 if (onAddImages) {
-                  onAddImages(uniqueResultUrls, imageSourceId, { modelName: imageModelInfo.model, apiProvider: imageModelInfo.providerId });
+                  onAddImages(uniqueResultUrls, imageSourceId, { modelName: imageModelInfo.model, apiProvider: providerDisplayName(imageModelInfo.providerId) });
                 }
               } else {
                 setMessages(prev => prev.map(msg => 
@@ -4316,7 +4324,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                       : msg
                   ));
                   if (onAddImages) {
-                    onAddImages(uniqueResultUrls, imageSourceId, { modelName: imageModelInfo.model, apiProvider: imageModelInfo.providerId });
+                    onAddImages(uniqueResultUrls, imageSourceId, { modelName: imageModelInfo.model, apiProvider: providerDisplayName(imageModelInfo.providerId) });
                   }
                 } else {
                   setMessages(prev => prev.map(msg => 
@@ -5258,7 +5266,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                       {message.role === 'assistant'
                         ? <ReactMarkdown
                             remarkPlugins={[remarkGfm]}
-                            components={createMarkdownComponents(isGold, onAddImages ? (url: string) => onAddImages([url], undefined, { modelName: message.generateModelName, apiProvider: message.generateProviderId }) : undefined)}
+                            components={createMarkdownComponents(isGold, onAddImages ? (url: string) => onAddImages([url], undefined, { modelName: message.generateModelName, apiProvider: providerDisplayName(message.generateProviderId) }) : undefined)}
                           >
                             {cleanAssistantContent(message.content)}
                           </ReactMarkdown>
@@ -5335,7 +5343,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                               alt={`AI生成图片${imgIdx + 1}`}
                               className="w-full cursor-pointer hover:opacity-95 transition-opacity"
                               style={{ maxHeight: '400px', objectFit: 'contain' }}
-                              onClick={() => onAddImages?.([imgUrl], undefined, { modelName: message.generateModelName, apiProvider: message.generateProviderId })}
+                              onClick={() => onAddImages?.([imgUrl], undefined, { modelName: message.generateModelName, apiProvider: providerDisplayName(message.generateProviderId) })}
                               title="点击添加到画布"
                               onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                             />
@@ -5343,7 +5351,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                             <div className="absolute bottom-2 right-2 flex gap-1.5 opacity-0 group-hover/chat-img:opacity-100 transition-opacity">
                               {onAddImages && (
                                 <button
-                                  onClick={(e) => { e.stopPropagation(); onAddImages([imgUrl], undefined, { modelName: message.generateModelName, apiProvider: message.generateProviderId }); }}
+                                  onClick={(e) => { e.stopPropagation(); onAddImages([imgUrl], undefined, { modelName: message.generateModelName, apiProvider: providerDisplayName(message.generateProviderId) }); }}
                                   className="bg-black/70 backdrop-blur-sm text-white text-xs px-2.5 py-1.5 rounded-lg flex items-center gap-1 hover:bg-black/90 shadow-lg"
                                 >
                                   <Plus size={12} /> 画布

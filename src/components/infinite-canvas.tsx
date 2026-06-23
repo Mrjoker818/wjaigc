@@ -995,7 +995,11 @@ export function InfiniteCanvas({
       if (m.providerName) {
         map.set(m.id, m.providerName);
         // 也映射 compositeKey（providerId::modelId 格式）
-        if (m.providerId) map.set(`${m.providerId}::${m.id}`, m.providerName);
+        if (m.providerId) {
+          map.set(`${m.providerId}::${m.id}`, m.providerName);
+          // 也映射纯 providerId → providerName（某些图片的 apiProvider 存的是 providerId）
+          if (!map.has(m.providerId)) map.set(m.providerId, m.providerName);
+        }
       }
     }
     return map;
@@ -3933,7 +3937,7 @@ export function InfiniteCanvas({
               prompt: toolbar.prompt,
               aspectRatio: toolbar.aspectRatio,
               modelName: model,
-              apiProvider: providerId ? providerId.split('::')[0] : undefined,
+              apiProvider: modelProviderMap.get(providerId?.split('::')[0] || '') || providerId?.split('::')[0] || undefined,
             }));
             onImagesChange([...imagesRef.current, ...resultImages]);
             // ★ 异步修正：API 可能忽略 size 参数返回不同尺寸的图片
@@ -8479,7 +8483,8 @@ export function InfiniteCanvas({
                 {/* Model & API info badge (bottom-left) */}
                 {(() => {
                   const displayModelName = image.modelName || '';
-                  const displayApiProvider = image.apiProvider || modelProviderMap.get(image.model || '') || modelProviderMap.get(image.modelName || '') || '';
+                  const rawApiProvider = image.apiProvider || '';
+	                  const displayApiProvider = (rawApiProvider && modelProviderMap.has(rawApiProvider)) ? (modelProviderMap.get(rawApiProvider) || rawApiProvider) : (rawApiProvider || modelProviderMap.get(image.model || '') || modelProviderMap.get(image.modelName || '') || '');
                   return (displayModelName || displayApiProvider) && !image.isProcessingPlaceholder ? (
                   <div className="absolute bottom-1 left-1 z-20 pointer-events-none flex flex-col gap-0.5"
                     style={{ fontSize: `${Math.max(8, 9 / zoom)}px` }}>
@@ -12917,7 +12922,7 @@ export function InfiniteCanvas({
                                     });
                                     const pollData = await pollRes.json();
                                     if (pollData.status === 'completed' && pollData.imageUrl) {
-                                      if (onAddImages) onAddImages([pollData.imageUrl], undefined, { modelName: hcg.toolbar.model, apiProvider: hcg.toolbar.providerId });
+                                      if (onAddImages) onAddImages([pollData.imageUrl], undefined, { modelName: hcg.toolbar.model, apiProvider: modelProviderMap.get(hcg.toolbar.providerId || '') || hcg.toolbar.providerId });
                                       setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, status: 'completed', resultImageUrl: pollData.imageUrl, progress: 100 } : g));
                                       return;
                                     } else if (pollData.status === 'failed') {
@@ -12931,7 +12936,7 @@ export function InfiniteCanvas({
                                 poll();
                               }
                             } else if (data.imageUrl) {
-                              if (onAddImages) onAddImages([data.imageUrl], undefined, { modelName: hcg.toolbar.model, apiProvider: hcg.toolbar.providerId });
+                              if (onAddImages) onAddImages([data.imageUrl], undefined, { modelName: hcg.toolbar.model, apiProvider: modelProviderMap.get(hcg.toolbar.providerId || '') || hcg.toolbar.providerId });
                               setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, status: 'completed', resultImageUrl: data.imageUrl, progress: 100 } : g));
                             } else {
                               setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, status: 'idle', progress: 0 } : g));

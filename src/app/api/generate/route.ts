@@ -1115,10 +1115,11 @@ export async function POST(request: NextRequest) {
               }
             }
 
-            // 增强 prompt：/images/generations 仅将 image_urls 视为可选参考，
+            // 增强 prompt：/images/generations 仅将 images[]/image_urls 视为可选参考，
             // 必须在 prompt 中明确指示 AI 使用参考图作为基础，否则 AI 可能忽略参考图
-            if (fallbackBody.image_urls && Array.isArray(fallbackBody.image_urls) && (fallbackBody.image_urls as string[]).length > 0) {
-              const refCount = (fallbackBody.image_urls as string[]).length;
+            const fallbackRefImages = fallbackBody.images || fallbackBody.image_urls;
+            if (fallbackRefImages && Array.isArray(fallbackRefImages) && fallbackRefImages.length > 0) {
+              const refCount = fallbackRefImages.length;
               const hasImg2ImgHint = String(fallbackBody.prompt || '').includes('[img2img]');
               if (hasImg2ImgHint) {
                 // 图生图场景：更强的约束，确保 AI 基于 reference image 生成
