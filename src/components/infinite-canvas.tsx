@@ -8460,7 +8460,7 @@ export function InfiniteCanvas({
                     </button>
                     <button
                       className={`p-1 rounded transition-colors ${isMonochrome ? 'bg-white hover:bg-gray-100 text-gray-700 border border-gray-200' : 'bg-[#1a1a1a] hover:bg-[#2a2a2a] text-white/80 border border-white/10'}`}
-                      onClick={(e) => { e.stopPropagation(); handleDownloadImage(image); hideHoverToolbar(); }}
+                      onClick={(e) => { e.stopPropagation(); handleOpenDownload(); hideHoverToolbar(); }}
                       onMouseDown={(e) => e.stopPropagation()}
                       title="下载"
                     >
