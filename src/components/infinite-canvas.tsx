@@ -1189,8 +1189,7 @@ export function InfiniteCanvas({
   // Upscale state
   const [upscaleMultiplier, setUpscaleMultiplier] = useState(2);
   const [upscaylAvailable, setUpscaylAvailable] = useState(false);
-  const [upscaylModels, setUpscaylModels] = useState<{id: string; name: string; description: string; scale: number}[]>([]);
-  const [upscaylSelectedModel, setUpscaylSelectedModel] = useState('realesrgan-x4plus');
+  const [upscaylSelectedModel] = useState('realesrgan-x4plus');
   const [upscaylChecking, setUpscaylChecking] = useState(true);
   const [upscalePreset, setUpscalePreset] = useState<'2k' | '4k' | '8k'>('2k');
   const [showUpscalePresetMenu, setShowUpscalePresetMenu] = useState(false);
@@ -1220,7 +1219,7 @@ export function InfiniteCanvas({
   const [svgTraceBwTurdSize, setSvgTraceBwTurdSize] = useState(2);
   const [svgTraceBwInvert, setSvgTraceBwInvert] = useState(false);
 
-  // Check Upscayl NCNN availability on mount
+  // Check ONNX upscale availability on mount
   useEffect(() => {
     (async () => {
       try {
@@ -1228,16 +1227,6 @@ export function InfiniteCanvas({
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         setUpscaylAvailable(data.available ?? false);
-        if (data.available && data.models) {
-          const models = data.models.map((m: { id: string; name: string; description: string; scale: number }) => ({
-            id: m.id, name: m.name, description: m.description, scale: m.scale
-          }));
-          setUpscaylModels(models);
-          const modelIds = models.map((m: { id: string }) => m.id);
-          if (modelIds.length > 0 && !modelIds.includes(upscaylSelectedModel)) {
-            setUpscaylSelectedModel(modelIds[0]);
-          }
-        }
       } catch {
         setUpscaylAvailable(false);
       } finally {
@@ -13273,7 +13262,7 @@ export function InfiniteCanvas({
                           <div className="rounded-lg overflow-hidden border mt-2" style={{ borderColor: isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.08)' }}>
                             <img src="/api/help-image?file=upscale.jpeg" alt="放大" className="w-full" loading="lazy" />
                           </div>
-                          <p className={`text-xs mt-1.5 ${isMonochrome ? 'text-gray-500' : 'text-gold-muted'}`}>选择放大模型和倍率（2x/4x），支持 PNG/JPG/WEBP 输出，upscayl-node NCNN 加速</p>
+                          <p className={`text-xs mt-1.5 ${isMonochrome ? 'text-gray-500' : 'text-gold-muted'}`}>选择放大模型和倍率（2x/4x），支持 PNG/JPG/WEBP 输出</p>
                         </div>
 
                         {/* 语言修图 */}

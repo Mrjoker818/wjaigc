@@ -6,7 +6,7 @@ import { IOPAINT_MODELS_DIR } from '@/lib/image-tools/config';
 
 export const dynamic = 'force-dynamic';
 
-// Auto-start IOPaint and Upscayl services
+// Auto-start IOPaint and check Upscayl services
 export async function POST(request: NextRequest) {
   const results: Record<string, { started: boolean; error?: string }> = {};
 
@@ -85,66 +85,45 @@ export async function POST(request: NextRequest) {
     results.iopaint = { started: false, error: String(err) };
   }
 
-  // 2. Check Upscayl availability
+  // 2. Check Upscayl (ONNX) availability
   try {
     const workspacePath = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
     const modelsDir = process.env.UPSCAYL_MODELS_DIR || path.join(workspacePath, 'upscayl-models');
+    const onnxModelsDir = process.env.ONNX_MODELS_DIR || path.join(workspacePath, 'onnx-models');
 
-    // Check for upscayl binary
-    let binFound = false;
-    const binCandidates = [
-      path.join(workspacePath, 'bin', 'upscayl-bin'),
-    ];
-
-    // Also check in node_modules
-    const nodeModulesPath = path.join(workspacePath, 'node_modules', '.pnpm');
-    if (fs.existsSync(nodeModulesPath)) {
-      const dirs = fs.readdirSync(nodeModulesPath).filter(d => d.startsWith('upscayl-node'));
-      for (const dir of dirs) {
-        binCandidates.push(
-          path.join(nodeModulesPath, dir, 'node_modules', 'upscayl-node',
-            'dist', 'upscaler', 'sub-classes', 'driver', 'command-upscayl',
-            'resources', 'linux', 'bin', 'upscayl-bin')
-        );
-      }
-    }
-
-    for (const binPath of binCandidates) {
-      if (fs.existsSync(binPath)) {
-        binFound = true;
-        break;
-      }
-    }
-
-    // Check for models
-    let modelsFound = false;
-    const modelCandidates = [modelsDir];
-    if (fs.existsSync(nodeModulesPath)) {
-      const dirs = fs.readdirSync(nodeModulesPath).filter(d => d.startsWith('upscayl-node'));
-      for (const dir of dirs) {
-        modelCandidates.push(
-          path.join(nodeModulesPath, dir, 'node_modules', 'upscayl-node',
-            'dist', 'upscaler', 'sub-classes', 'model-manager', 'models')
-        );
-      }
-    }
-
-    for (const modelPath of modelCandidates) {
-      if (fs.existsSync(modelPath)) {
-        const files = fs.readdirSync(modelPath);
-        if (files.some(f => f.endsWith('.param'))) {
-          modelsFound = true;
+    // Check for ONNX model files
+    let onnxModelsFound = false;
+    for (const dir of [onnxModelsDir, modelsDir]) {
+      if (fs.existsSync(dir)) {
+        const files = fs.readdirSync(dir);
+        if (files.some(f => f.endsWith('.onnx'))) {
+          onnxModelsFound = true;
           break;
         }
       }
     }
 
-    if (binFound && modelsFound) {
+    // Check for Python + onnxruntime
+    let onnxReady = false;
+    try {
+      const { execSync } = await import('child_process');
+      execSync('python3 -c "import onnxruntime"', { timeout: 5000, stdio: 'ignore' });
+      onnxReady = true;
+    } catch {
+      onnxReady = false;
+    }
+
+    // Check for upscale script
+    const scriptPath = path.join(workspacePath, 'scripts', 'upscale_onnx.py');
+    const scriptFound = fs.existsSync(scriptPath);
+
+    if (onnxModelsFound && onnxReady && scriptFound) {
       results.upscayl = { started: true };
     } else {
       const errors: string[] = [];
-      if (!binFound) errors.push('upscayl 二进制文件未找到');
-      if (!modelsFound) errors.push('模型文件未找到');
+      if (!onnxModelsFound) errors.push('ONNX 模型文件未找到');
+      if (!onnxReady) errors.push('Python onnxruntime 未安装');
+      if (!scriptFound) errors.push('upscale_onnx.py 脚本未找到');
       results.upscayl = { started: false, error: errors.join('，') };
     }
   } catch (err) {

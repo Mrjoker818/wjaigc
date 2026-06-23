@@ -1968,7 +1968,7 @@ export async function POST(request: NextRequest) {
       const targetH = targetHeight || origH * scaleVal;
       const upscaleMode = body.upscaleMode || 'cpu'; // "cpu" | "ai"
 
-      // ---- CPU 放大模式: NCNN → ONNX → sharp 降级链 ----
+      // ---- CPU 放大模式: ONNX → sharp 降级链 ----
       if (upscaleMode === 'cpu') {
         try {
           const { performUpscaleAuto } = await import('@/lib/image-tools/upscayl');

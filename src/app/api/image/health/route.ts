@@ -5,7 +5,7 @@
 import { NextResponse } from 'next/server';
 import { checkIOPaintHealth, REMOVEBG_MODELS, ERASE_MODELS } from '@/lib/image-tools/iopaint-client';
 import { LOCAL_AI_ENABLED, IOPAINT_MODELS_DIR } from '@/lib/image-tools/config';
-import { isOnnxUpscaleAvailable, isNcnnUpscaleAvailable } from '@/lib/image-tools/upscayl';
+import { isOnnxUpscaleAvailable } from '@/lib/image-tools/upscayl';
 import fs from 'fs';
 import path from 'path';
 
@@ -58,10 +58,9 @@ function checkPythonScripts(): { erase: boolean; removebg: boolean } {
 }
 
 export async function GET() {
-  const [iopaint, onnxStatus, ncnnStatus] = await Promise.all([
+  const [iopaint, onnxStatus] = await Promise.all([
     checkIOPaintHealth(),
     isOnnxUpscaleAvailable(),
-    isNcnnUpscaleAvailable(),
   ]);
 
   const eraseModels = checkEraseModels();
@@ -92,7 +91,6 @@ export async function GET() {
     })),
     removebg: {
       scriptAvailable: scripts.removebg,
-      // RemoveBG 模型首次使用时自动下载
       modelAutoDownload: true,
       supportedModels: REMOVEBG_MODELS.map(m => ({ id: m.id, label: m.label, group: m.group, recommended: 'recommended' in m ? m.recommended : false, description: m.description, size: m.size })),
     },
@@ -100,20 +98,18 @@ export async function GET() {
       erase: scripts.erase,
       removebg: scripts.removebg,
     },
-    // CPU 放大使用 sharp Lanczos3，始终可用
-    cpuUpscale: {
-      available: true,
-      engine: 'sharp-lanczos3',
-    },
-    onnxUpscale: {
-      available: onnxStatus.available,
-      model: onnxStatus.model,
-      error: onnxStatus.error,
-    },
-    ncnnUpscale: {
-      available: ncnnStatus.available,
-      model: ncnnStatus.model,
-      error: ncnnStatus.error,
+    // 放大引擎
+    upscale: {
+      onnx: {
+        available: onnxStatus.available,
+        model: onnxStatus.model,
+        error: onnxStatus.error,
+      },
+      sharp: {
+        available: true,
+        engine: 'lanczos3',
+        note: '仅插值放大，不增加细节',
+      },
     },
   });
 }
