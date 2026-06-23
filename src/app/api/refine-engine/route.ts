@@ -931,12 +931,21 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: '请选择生图模型' }, { status: 400 });
       }
 
-      const provider = await getImageProvider(model, providerId);
+      // ★ 从 model 中提取纯 modelId（前端可能传 providerId::modelId 格式）
+      let pureModel = model;
+      const extractedProviderId = model.includes('::') ? model.split('::')[0] : '';
+      if (model.includes('::')) {
+        pureModel = model.split('::').pop()!;
+        console.log(`[refine-engine] Stripped provider prefix from model: "${model}" → "${pureModel}"`);
+      }
+      const effectiveProviderId = providerId || extractedProviderId || '';
+
+      const provider = await getImageProvider(pureModel, effectiveProviderId);
       if (!provider) {
         return NextResponse.json({ error: `未找到模型 ${model} 对应的API提供商${providerId ? ` (providerId: ${providerId})` : ''}` }, { status: 400 });
       }
 
-      const selectedModel = model || provider.selectedModels?.[0];
+      const selectedModel = pureModel || provider.selectedModels?.[0];
 
       const refineMode = (mode === 'expert') ? 'expert' : 'standard';
       const prompt = generateRefinePrompt({

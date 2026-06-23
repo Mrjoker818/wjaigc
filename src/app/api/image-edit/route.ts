@@ -1548,7 +1548,14 @@ export async function POST(request: NextRequest) {
     } = body;
 
     // 防御性处理：确保 model 是字符串（前端可能误传对象）
-    const modelStr = typeof rawModel === 'string' ? rawModel : (rawModel as Record<string, unknown>)?.model as string || String(rawModel);
+    let modelStr = typeof rawModel === 'string' ? rawModel : (rawModel as Record<string, unknown>)?.model as string || String(rawModel);
+    // ★ 从 model 中提取纯 modelId（前端可能传 providerId::modelId 格式）
+    const extractedProviderId = modelStr.includes('::') ? modelStr.split('::')[0] : '';
+    if (modelStr.includes('::')) {
+      modelStr = modelStr.split('::').pop()!;
+      console.log(`[image-edit] Stripped provider prefix from model: "${rawModel}" → "${modelStr}" (providerId via field: "${providerId || 'none'}")`);
+    }
+    const effectiveProviderId = providerId || extractedProviderId || '';
 
     // Content safety check (for actions that accept prompt input)
     if (prompt && typeof prompt === 'string') {
@@ -1586,8 +1593,8 @@ export async function POST(request: NextRequest) {
     const allImageProviders = await findAllProvidersForType('image');
     
     // 0. 优先使用前端指定的 providerId
-    if (providerId) {
-      const specifiedProvider = await findProviderById(providerId);
+    if (effectiveProviderId) {
+      const specifiedProvider = await findProviderById(effectiveProviderId);
       if (specifiedProvider) {
         candidateModels.push({
           model: modelStr,

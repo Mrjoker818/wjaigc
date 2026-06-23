@@ -58,6 +58,18 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { image, prompt, maskDataUrl, model, providerId, maxRounds, imagePrompt, imageModel, imageProviderId, quality, aspectRatio } = body;
 
+    // ★ 从 model 中提取纯 modelId（前端可能传 providerId::modelId 格式）
+    let pureModel = model;
+    if (model && model.includes('::')) {
+      pureModel = model.split('::').pop()!;
+      console.log(`[agent-edit] Stripped provider prefix from model: "${model}" → "${pureModel}"`);
+    }
+    let pureImageModel = imageModel;
+    if (imageModel && imageModel.includes('::')) {
+      pureImageModel = imageModel.split('::').pop()!;
+      console.log(`[agent-edit] Stripped provider prefix from imageModel: "${imageModel}" → "${pureImageModel}"`);
+    }
+
     if (!image || !prompt) {
       return NextResponse.json({ success: false, error: '缺少图片或描述' }, { status: 400 });
     }
@@ -119,7 +131,7 @@ export async function POST(request: NextRequest) {
           return;
         }
 
-        const chatModel = chatProvider.selectedModels?.[0] || model || 'gpt-4o';
+        const chatModel = chatProvider.selectedModels?.[0] || pureModel || 'gpt-4o';
 
         // 构建 Agent 上下文
         const context: AgentContext = {
@@ -506,7 +518,11 @@ async function performImageEdit(
 
   const baseUrl = imageProvider.baseUrl?.replace(/\/+$/, '') || '';
   const apiKey = imageProvider.apiKey || '';
-  const imageModel = imageModelFromFrontend || imageProvider.selectedModels?.[0] || '';
+  // ★ 去除 imageModel 中的 providerId:: 前缀
+  let imageModel = imageModelFromFrontend || imageProvider.selectedModels?.[0] || '';
+  if (imageModel.includes('::')) {
+    imageModel = imageModel.split('::').pop()!;
+  }
 
   if (!baseUrl || !apiKey || !imageModel) {
     console.error('[agent-edit] Image provider config incomplete:', { baseUrl: !!baseUrl, apiKey: !!apiKey, imageModel });

@@ -7,6 +7,13 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { mode, prompt, negativePrompt, screenshotData, structureStrength, aspectRatio, imageCount, model, providerId } = body;
 
+    // ★ 从 model 中提取纯 modelId（前端可能传 providerId::modelId 格式）
+    let modelName = model;
+    if (model && model.includes('::')) {
+      modelName = model.split('::').pop()!;
+      console.log(`[scene-studio] Stripped provider prefix from model: "${model}" → "${modelName}"`);
+    }
+
     if (!prompt && mode !== 'text_to_image') {
       return NextResponse.json({ error: 'Prompt is required' }, { status: 400 });
     }
@@ -52,7 +59,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Resolve model name
-    const modelName = model || (provider.selectedModels && provider.selectedModels.length > 0 ? provider.selectedModels[0] : 'dall-e-3');
+    if (!modelName) {
+      modelName = (provider.selectedModels && provider.selectedModels.length > 0 ? provider.selectedModels[0] : 'dall-e-3');
+    }
 
     // Check for gemini-image profile — use chat/completions endpoint
     const { resolveProfileForModel, buildGeminiChatImageRequest, parseGeminiChatImageResponse, adjustRequestForProfile, parseResponseForProfile, tryChatCompletionsImageFallback, isChannelUnavailableError, persistResultImage } = await import('@/lib/api-compatibility');

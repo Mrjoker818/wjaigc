@@ -294,6 +294,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: '请输入编辑指令' }, { status: 400 });
     }
 
+    // ★ 从 model 中提取纯 modelId（前端可能传 providerId::modelId 格式）
+    let pureModel = model;
+    const extractedProviderId = model.includes('::') ? model.split('::')[0] : '';
+    if (model.includes('::')) {
+      pureModel = model.split('::').pop()!;
+      console.log(`[edit] Stripped provider prefix from model: "${model}" → "${pureModel}"`);
+    }
+
     // Content safety check
     const safetyResult = checkPromptSafety(prompt);
     if (safetyResult.level === 'block') {
@@ -312,9 +320,9 @@ export async function POST(request: NextRequest) {
     let effectiveBaseUrl = '';
     let imageProvider: ApiProvider | null = null; // 保留 provider 对象用于 API 兼容层
 
-    if (!effectiveApiKey && providerId) {
+    if (!effectiveApiKey && (extractedProviderId || providerId)) {
       try {
-        imageProvider = await findProviderById(providerId);
+        imageProvider = await findProviderById(extractedProviderId || providerId);
         if (imageProvider?.apiKey) {
           effectiveApiKey = imageProvider.apiKey;
           effectiveBaseUrl = normalizeApiBaseUrl(imageProvider.baseUrl || '');
@@ -324,7 +332,7 @@ export async function POST(request: NextRequest) {
 
     if (!effectiveApiKey) {
       try {
-        imageProvider = await findProviderForModel(model);
+        imageProvider = await findProviderForModel(pureModel);
         if (imageProvider?.apiKey) {
           effectiveApiKey = imageProvider.apiKey;
           effectiveBaseUrl = normalizeApiBaseUrl(imageProvider.baseUrl || '');
@@ -353,7 +361,7 @@ export async function POST(request: NextRequest) {
     setEditTask(taskId, { id: taskId, status: 'processing', progress: 0, stage: '初始化', createdAt: Date.now() });
     // ★ 注册到统一任务中心（SSE推送 + 取消支持）
     registerTask(taskId, 'edit', '语言修图', sessionUser?.id);
-    console.info(`[edit] ★ taskId=${taskId} 创建成功, model=${model}, providerId=${providerId || 'auto'}`);
+    console.info(`[edit] ★ taskId=${taskId} 创建成功, model=${pureModel}, providerId=${providerId || 'auto'}`);
 
     // 后台异步执行编辑流程（5分钟全局超时兜底）
     // ★ 使用 after() 确保 Next.js 不会在响应返回后终止 IIFE
@@ -788,7 +796,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
 
     // ★ mask 预处理已在 LLM 协作之前完成（openaiMaskBuffer / maskImageUrl 已就绪）
 
-    console.info(`[edit] taskId=${taskId} 开始图像编辑, model=${model}, hasMask=${!!maskBuffer}, count=${count}`);
+    console.info(`[edit] taskId=${taskId} 开始图像编辑, model=${pureModel}, hasMask=${!!maskBuffer}, count=${count}`);
 
     // 路径选择策略（通用，不针对任何模型或供应商）：
     // - 有mask时：直接走images/generations（mask作为视觉参考图+prompt语义描述），
@@ -802,7 +810,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
     try {
         const FormData = (await import('form-data')).default;
         const form = new FormData();
-        form.append('model', model);
+        form.append('model', pureModel);
         form.append('image', imageBuffer, { filename: 'image.png', contentType: mimeType });
         form.append('prompt', editInstruction);
 
@@ -810,7 +818,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
         let outputSize = size;
         if (size.includes(':')) {
           // 比例格式（如 "1:1", "16:9"）→ 根据质量转换为像素
-          const pixelSize = calculateActualPixelsFromRatio(size, quality, model);
+          const pixelSize = calculateActualPixelsFromRatio(size, quality, pureModel);
           if (pixelSize) {
             outputSize = pixelSize; // 已经是 "WxH" 格式
           } else {
@@ -904,8 +912,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
                 success: true,
                 image: images[0],
                 images,
-                model,
-                provider: 'openai-images-edit',
+                model: pureModel,                provider: 'openai-images-edit',
                 llmInstruction,
                 editRegions: llmEditRegions,
                 autoMaskGenerated: llmEditRegions.length > 0,
@@ -939,7 +946,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
     const useGenerationsPath = true; // ★ 始终尝试 images/generations
     if (useGenerationsPath) {
       try {
-        console.info(`[edit] taskId=${taskId} 使用images/generations路径, 原因: ${skipImagesEdit ? '有mask走视觉参考' : 'editEndpoint=/images/generations'}, model=${model}`);
+        console.info(`[edit] taskId=${taskId} 使用images/generations路径, 原因: ${skipImagesEdit ? '有mask走视觉参考' : 'editEndpoint=/images/generations'}, model=${pureModel}`);
 
         // 先将原图保存为可访问的 URL（images/generations 需要 URL，不支持 base64）
         let imageUrlForApi = `data:${mimeType};base64,${imageBuffer.toString('base64')}`;
@@ -986,11 +993,11 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
 
         // 构建 images/generations 请求体（image_urls 在此放入，兼容层才能正确转换）
         const genRequestBody: Record<string, unknown> = {
-          model,
+          model: pureModel,
           prompt: editInstruction,
           // 根据质量参数动态计算默认尺寸
           ...((() => {
-            const ps = calculateActualPixelsFromRatio('1:1', quality || '1K', model);
+            const ps = calculateActualPixelsFromRatio('1:1', quality || '1K', pureModel);
             return { size: size || ps || '1024x1024', quality: quality || '1K' };
           })()),
           n: Math.min(count, 4),
@@ -1091,8 +1098,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
                 success: true,
                 image: images[0],
                 images,
-                model,
-                provider: effectiveBaseUrl || 'unknown',
+                model: pureModel,                provider: effectiveBaseUrl || 'unknown',
                 llmInstruction,
                 editRegions: llmEditRegions,
                 autoMaskGenerated: llmEditRegions.length > 0,
@@ -1130,8 +1136,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
                 taskId: remoteTaskId,
                 apiBaseUrl: effectiveBaseUrl,
                 providerId: providerId || '',
-                model,
-                prompt: effectivePrompt,
+                model: pureModel,                prompt: effectivePrompt,
                 allTaskIds: parsed.taskIds,
                 compatProfile: effectiveCompatProfile,
               },
@@ -1217,12 +1222,12 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
     const outputSize = (() => {
       if (size && /^\d+x\d+$/.test(size)) return size; // 已经是像素格式
       const ratio = size || '1:1';
-      return calculateActualPixelsFromRatio(ratio, quality || '1K', model) || '1024x1024';
+      return calculateActualPixelsFromRatio(ratio, quality || '1K', pureModel) || '1024x1024';
     })();
 
-    // 构建 chat/completions 请求体
+// 构建 chat/completions 请求体
     const chatRequestBody: Record<string, unknown> = {
-      model,
+      model: pureModel,
       messages: [{
         role: 'user',
         content: contentParts,
@@ -1281,19 +1286,19 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
         failTask(taskId, '请求频率超限，请稍后再试');
         return;
       } else if (chatResponse.status === 404) {
-        failTask(taskId, `模型 ${model} 在当前 API 端点不可用，请检查模型名称或更换 API 提供商`);
+        failTask(taskId, `模型 ${pureModel} 在当前 API 端点不可用，请检查模型名称或更换 API 提供商`);
         return;
       } else if (chatResponse.status === 400) {
         // 400 可能是模型不支持图片输入，尝试降级到 /images/generations
-        if (isImageEditModel(model)) {
+        if (isImageEditModel(pureModel)) {
           try {
-            const genUrl = await tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, model, effectivePrompt, size, quality, 1);
+            const genUrl = await tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, pureModel, effectivePrompt, size, quality, 1);
             if (genUrl) {
               const images: Array<{ url: string; revisedPrompt: string }> = [{ url: genUrl, revisedPrompt: effectivePrompt }];
               // count > 1 时额外并行生成
               if (count > 1) {
                 const extraPromises = Array.from({ length: count - 1 }, () =>
-                  tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, model, effectivePrompt, size, quality, 1)
+                  tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, pureModel, effectivePrompt, size, quality, 1)
                     .then(url => url ? { url, revisedPrompt: effectivePrompt } : null)
                     .catch(() => null)
                 );
@@ -1311,8 +1316,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
                   success: true,
                   image: images[0],
                   images,
-                  model,
-                  provider: 'images-generations-fallback',
+                  model: pureModel,                  provider: 'images-generations-fallback',
                   llmInstruction,
                   editRegions: llmEditRegions,
                   autoMaskGenerated: false,
@@ -1358,7 +1362,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
     console.info(`[edit] taskId=${taskId} chat/completions图片提取: ${resultImageUrl ? '成功' : '未找到'}, 耗时=${Date.now() - editStartTime}ms`);
 
     // chat/completions 未提取到图片，尝试降级到 images/generations（★ 限时30秒，避免长时间等待）
-    if (!resultImageUrl && isImageEditModel(model)) {
+    if (!resultImageUrl && isImageEditModel(pureModel)) {
       try {
         console.info(`[edit] taskId=${taskId} chat/completions未返回图片, 尝试images/generations降级`);
         const fallbackStart = Date.now();
@@ -1390,7 +1394,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
       const extraCount = count - 1;
       const extraPromises = Array.from({ length: extraCount }, async () => {
         try {
-          if (isImageEditModel(model)) {
+          if (isImageEditModel(pureModel)) {
             // Gemini 模型：再次调用 chat/completions（不带 LLM 协作）
             const extraResp = await fetchWithV1Retry(effectiveBaseUrl, '/chat/completions', {
               method: 'POST',
@@ -1399,8 +1403,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
                 'Content-Type': 'application/json',
               },
               body: JSON.stringify({
-                model,
-                messages: [{ role: 'user', content: contentParts }],
+                model: pureModel,                messages: [{ role: 'user', content: contentParts }],
                 max_tokens: 4096,
                 stream: false,
                 ...(outputSize ? { size: outputSize } : {}),
@@ -1422,7 +1425,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
             return null;
           } else {
             // OpenAI 模型：使用 images/generations
-            const genUrl = await tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, model, effectivePrompt, size, quality, 1);
+            const genUrl = await tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, pureModel, effectivePrompt, size, quality, 1);
             return genUrl ? { url: genUrl, revisedPrompt: effectivePrompt } : null;
           }
         } catch { return null; }
@@ -1447,7 +1450,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
         success: true,
         image: images[0],
         images,
-        model,
+        model: pureModel,
         provider: effectiveBaseUrl || 'unknown',
         llmInstruction,
         editRegions: llmEditRegions,

@@ -40,13 +40,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // ★ 从 model 中提取纯 modelId（前端可能传 providerId::modelId 格式）
+    let pureModel = model;
+    const extractedProviderId = model.includes('::') ? model.split('::')[0] : '';
+    if (model.includes('::')) {
+      pureModel = model.split('::').pop()!;
+      console.log(`[video/extend] Stripped provider prefix from model: "${model}" → "${pureModel}"`);
+    }
+
     // 1. 查找视频 API 提供商
     let provider;
-    if (providerId) {
-      provider = await findProviderById(providerId);
+    const effectiveProviderId = extractedProviderId || providerId;
+    if (effectiveProviderId) {
+      provider = await findProviderById(effectiveProviderId);
     }
     if (!provider) {
-      provider = await findProviderForModel(model, 'video');
+      provider = await findProviderForModel(pureModel, 'video');
     }
     if (!provider) {
       provider = await findProviderForFeature('video');
@@ -71,13 +80,13 @@ export async function POST(request: NextRequest) {
 
     // 2. 推断视频协议
     const profile = resolveVideoCompatProfile(
-      model,
+      pureModel,
       advancedParams?.compatProfile,
       baseUrl,
     );
 
     // 3. 获取模型特征信息
-    const modelInfo = getVideoModelInfo(model);
+    const modelInfo = getVideoModelInfo(pureModel);
 
     // 检查模型是否支持延长
     if (modelInfo && !modelInfo.features.videoExtend) {
@@ -110,7 +119,7 @@ export async function POST(request: NextRequest) {
     // 4. 构建请求参数
     const videoParams: VideoGenerateParams = {
       prompt: prompt || '请延长视频',
-      model,
+      model: pureModel,
       videoUrl: resolvedVideoUrl,
       action: 'extend',
       extendDuration,
@@ -131,7 +140,7 @@ export async function POST(request: NextRequest) {
 
     // 5. 注册任务
     const taskId = `video_extend_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-    const modelName = modelInfo?.name || model;
+    const modelName = modelInfo?.name || pureModel;
     registerTask(taskId, 'video', `视频延长 · ${modelName}`, sessionUser?.id);
 
     // 6. 异步提交到第三方 API

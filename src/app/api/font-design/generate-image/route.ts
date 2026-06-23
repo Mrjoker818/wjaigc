@@ -99,6 +99,8 @@ export async function POST(request: NextRequest) {
     const matStr = String(material || '平面矢量');
     const ratioStr = String(ratio || '横版16:9');
     const modelStr = model ? String(model) : '';
+    // ★ 去除 providerId:: 前缀
+    const pureModelStr = modelStr.includes('::') ? modelStr.split('::').pop()! : modelStr;
     const numCount = Math.min(Number(count) || 1, 4);
     const isJimeng = jimengEnhanced !== false;
     const strokes: string[] = Array.isArray(strokeOptions) ? strokeOptions.map(String) : [];
@@ -168,7 +170,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '未找到可用的图像生成模型，请在管理员后台配置' }, { status: 400 });
     }
 
-    const usedModel = modelStr || (provider.selectedModels?.[0] || '');
+    const usedModel = pureModelStr || (provider.selectedModels?.[0] || '');
     const baseUrl = provider.baseUrl || '';
     const apiKey = provider.apiKey || '';
     const compatProfile = resolveCompatProfile(provider);

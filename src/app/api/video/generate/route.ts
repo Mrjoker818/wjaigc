@@ -55,6 +55,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // ★ 从 model 中提取纯 modelId（前端可能传 providerId::modelId 格式）
+    let pureModel = model;
+    const extractedProviderId = model.includes('::') ? model.split('::')[0] : '';
+    if (model.includes('::')) {
+      pureModel = model.split('::').pop()!;
+      console.log(`[video/generate] Stripped provider prefix from model: "${model}" → "${pureModel}"`);
+    }
+    const effectiveProviderId = providerId || extractedProviderId || '';
+
     // 积分扣除（登录用户才扣积分，按模型差异化扣分）
     const sessionUser = await getSessionUser(request);
     if (sessionUser) {
@@ -66,11 +75,11 @@ export async function POST(request: NextRequest) {
 
     // 1. 查找视频 API 提供商
     let provider;
-    if (providerId) {
-      provider = await findProviderById(providerId);
+    if (effectiveProviderId) {
+      provider = await findProviderById(effectiveProviderId);
     }
     if (!provider) {
-      provider = await findProviderForModel(model, 'video');
+      provider = await findProviderForModel(pureModel, 'video');
     }
     if (!provider) {
       provider = await findProviderForFeature('video');
@@ -100,14 +109,14 @@ export async function POST(request: NextRequest) {
 
     // 2. 推断视频协议
     const profile = resolveVideoCompatProfile(
-      model,
+      pureModel,
       advancedParams?.compatProfile,
       baseUrl,
     );
-    console.log(`[video/generate] model=${model}, providerId=${provider.id}, baseUrl=${baseUrl}, profile=${profile}, compatProfile=${advancedParams?.compatProfile || '(none)'}`);
+    console.log(`[video/generate] model=${pureModel}, providerId=${provider.id}, baseUrl=${baseUrl}, profile=${profile}, compatProfile=${advancedParams?.compatProfile || '(none)'}`);
 
     // 3. 获取模型特征信息
-    const modelInfo = getVideoModelInfo(model);
+    const modelInfo = getVideoModelInfo(pureModel);
 
     // 3.5 解析图片 URL（转换为第三方 API 可访问的格式）
     const rawDomain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
@@ -178,7 +187,7 @@ export async function POST(request: NextRequest) {
     // 4. 构建请求参数
     const videoParams: VideoGenerateParams = {
       prompt,
-      model,
+      model: pureModel,
       imageUrl: resolvedImageUrl,
       lastFrameImageUrl: resolvedLastFrameUrl,
       referenceImages: resolvedRefs.filter(Boolean) as string[],

@@ -166,7 +166,16 @@ export async function POST(request: NextRequest) {
       providerId,
     } = body;
     // 防御性处理：确保 model 是字符串（前端可能误传对象）
-    const model = typeof rawModel === 'string' ? rawModel : (rawModel as Record<string, unknown>)?.model as string || String(rawModel || '');
+    let model = typeof rawModel === 'string' ? rawModel : (rawModel as Record<string, unknown>)?.model as string || String(rawModel || '');
+    // ★ 从 model 中提取纯 modelId（前端可能传 providerId::modelId 格式）
+    //   providerId 已通过独立的 providerId 字段传递，model 中不应包含前缀
+    const extractedProviderId = model.includes('::') ? model.split('::')[0] : '';
+    if (model.includes('::')) {
+      model = model.split('::').pop()!;
+      console.log(`[generate] Stripped provider prefix from model: "${rawModel}" → "${model}" (providerId via field: "${providerId || 'none'}")`);
+    }
+    // 如果 providerId 字段为空但从 model 中提取到了，自动回填
+    const effectiveProviderId = providerId || extractedProviderId || '';
 
     // Content safety check
     const safetyResult = checkPromptSafety(prompt || '');
@@ -256,19 +265,19 @@ export async function POST(request: NextRequest) {
     const allImageProviders = await findAllProvidersForType('image');
     
     // 尝试找到用户指定模型对应的 provider（优先使用 providerId 精确匹配）
-    let provider = providerId ? await findProviderById(providerId) : null;
+    let provider = effectiveProviderId ? await findProviderById(effectiveProviderId) : null;
     if (provider && !(provider.selectedModels || []).includes(model)) {
-      console.warn(`[generate] ⚠️ providerId="${providerId}" 找到提供商 "${provider.displayName || provider.name}"，但该提供商的 selectedModels 不包含 "${model}"，仍使用此提供商`);
+      console.warn(`[generate] ⚠️ providerId="${effectiveProviderId}" 找到提供商 "${provider.displayName || provider.name}"，但该提供商的 selectedModels 不包含 "${model}"，仍使用此提供商`);
     }
     if (!provider) {
-      console.warn(`[generate] ⚠️ providerId="${providerId}" 未匹配到提供商，回退到 findProviderForModel(model="${model}")`);
+      console.warn(`[generate] ⚠️ providerId="${effectiveProviderId}" 未匹配到提供商，回退到 findProviderForModel(model="${model}")`);
       provider = await findProviderForModel(model, 'image');
     }
     let serverApiKey = provider?.apiKey;
     let apiBaseUrl = normalizeApiBaseUrl(provider?.baseUrl || '');
     
     // ★ 关键日志：记录实际使用的提供商信息，便于追踪
-    console.log(`[generate] 提供商选择: model="${model}", requestedProviderId="${providerId}", matched="${provider?.displayName || provider?.name || 'none'}", matchedId="${provider?.id || 'none'}", baseUrl="${apiBaseUrl}", hasApiKey=${!!serverApiKey}`);
+    console.log(`[generate] 提供商选择: model="${model}", requestedProviderId="${effectiveProviderId}", matched="${provider?.displayName || provider?.name || 'none'}", matchedId="${provider?.id || 'none'}", baseUrl="${apiBaseUrl}", hasApiKey=${!!serverApiKey}`);
     
     // 解析兼容性档案 - 决定 API 调用方式
     const initialProfile = resolveCompatProfile(provider);

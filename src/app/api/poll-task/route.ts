@@ -64,7 +64,13 @@ export async function POST(request: NextRequest) {
         retryable: false,
       }, { status: 400 });
     }
-    const model = typeof rawModel === 'string' ? rawModel : (rawModel as Record<string, unknown>)?.model as string || String(rawModel || '');
+    let model = typeof rawModel === 'string' ? rawModel : (rawModel as Record<string, unknown>)?.model as string || String(rawModel || '');
+    // ★ 从 model 中提取纯 modelId（前端可能传 providerId::modelId 格式）
+    const extractedProviderId = model.includes('::') ? model.split('::')[0] : '';
+    if (model.includes('::')) {
+      model = model.split('::').pop()!;
+    }
+    const effectiveProviderId = providerId || extractedProviderId || '';
     // ★ engine 参数：前端传递的任务引擎类型（用于 AI RemoveBG 后处理等场景）
     // 优先使用请求参数，因为 Next.js dev 模式下 task-registry 可能不共享
     const requestEngineStr = typeof requestEngine === 'string' ? requestEngine : '';
@@ -817,16 +823,16 @@ export async function POST(request: NextRequest) {
       console.log(`[poll-task] Using registry-stored provider for taskId=${taskId}, model=${regUsedModel || 'unknown'}, baseUrl=${apiBaseUrl}`);
     } else {
       // 降级：从管理员配置查找提供商
-      const provider = providerId ? await findProviderById(providerId)
+      const provider = effectiveProviderId ? await findProviderById(effectiveProviderId)
         : await findProviderForModel(model || regUsedModel || '', 'image')
         || await findProviderForModel(model || regUsedModel || '', 'image')
         || await findProviderForModel(model || regUsedModel || '', 'universal');
       apiKey = provider?.apiKey;
       apiBaseUrl = normalizeApiBaseUrl(provider?.baseUrl || '');
       providerName = provider?.name || 'unknown';
-      console.log(`[poll-task] 提供商查找: providerId="${providerId}", model="${model || regUsedModel || ''}", matched="${provider?.displayName || provider?.name || 'none'}", matchedId="${provider?.id || 'none'}", baseUrl="${apiBaseUrl}"`);
+      console.log(`[poll-task] 提供商查找: providerId="${effectiveProviderId}", model="${model || regUsedModel || ''}", matched="${provider?.displayName || provider?.name || 'none'}", matchedId="${provider?.id || 'none'}", baseUrl="${apiBaseUrl}"`);
       if (!apiKey || !apiBaseUrl) {
-        console.error(`[poll-task] No API provider for taskId=${taskId}, model=${model}, providerId=${providerId}`);
+        console.error(`[poll-task] No API provider for taskId=${taskId}, model=${model}, providerId=${effectiveProviderId}`);
         return NextResponse.json({ success: false, error: 'No API provider configured for image polling' }, { status: 400 });
       }
       profile = resolveCompatProfile(provider);
