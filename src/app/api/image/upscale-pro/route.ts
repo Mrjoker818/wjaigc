@@ -24,6 +24,7 @@ interface UpscaleProRequest {
   scale?: 2 | 4;       // 放大倍率
   fallbackToAi?: boolean; // 云端和本地都失败时是否用AI重绘兜底（默认true）
   enhanceModel?: string;  // 精修使用的图像模型（用户当前在图像生成面板选择的模型）
+  skipAiEnhance?: boolean; // 跳过AI画质精修（默认false，ONNX/云端放大结果已足够好时跳过可避免内容变化）
 }
 
 /** 从管理员配置查找 PearAPI 提供商的 API Key */
@@ -337,6 +338,7 @@ async function upscaleViaAI(
         action: 'upscale',
         imageUrl,
         scale,
+        upscaleMode: 'ai', // AI重绘模式，不走CPU放大链路
       }),
     });
 
@@ -349,8 +351,9 @@ async function upscaleViaAI(
     // image-edit 返回可能是 taskId（异步）或直接 url
     if (aiData.taskId) {
       console.log(`[upscale-pro] AI upscale submitted as async task: ${aiData.taskId}`);
-      // 返回 taskId，前端需要轮询
-      return { url: '', model: 'AI-redraw', strategy: 'ai-async' };
+      // 异步任务：upscale-pro 是同步 API，不支持轮询，直接返回 null 让调用方处理
+      console.warn('[upscale-pro] AI upscale returned async taskId, cannot wait in sync context');
+      return null;
     }
 
     if (aiData.success && aiData.url) {
@@ -409,6 +412,7 @@ export async function POST(request: NextRequest) {
       scale = 2,
       fallbackToAi = true,
       enhanceModel,
+      skipAiEnhance = false,
     } = body;
 
     if (!imageUrl) {
@@ -432,18 +436,7 @@ export async function POST(request: NextRequest) {
     // 策略1: 云端 PearAPI（真正的无损放大）
     const cloudResult = await upscaleViaPearAPI(imageUrl, model, face, scale);
     if (cloudResult?.url) {
-      // 云端放大后也做AI画质优化
-      const enhanceResult = await enhanceViaAI(cloudResult.url, enhanceModel);
-      if (enhanceResult.enhanced) {
-        return NextResponse.json({
-          success: true,
-          url: enhanceResult.url,
-          model: `${cloudResult.model}+AI-enhance`,
-          strategy: 'cloud+ai-enhance',
-          enhanced: true,
-        });
-      }
-      // AI优化失败，回退到云端原始结果
+      // 云端放大后不做AI画质优化（已是真正的无损放大，AI精修可能改变内容）
       return NextResponse.json({
         success: true,
         url: cloudResult.url,
@@ -457,20 +450,13 @@ export async function POST(request: NextRequest) {
     const localResult = await upscaleViaOnnx(imageUrl, scale, face);
     if (localResult?.url) {
       // 策略2.5: ONNX放大成功后，自动追加AI画质优化
-      const enhanceResult = await enhanceViaAI(localResult.url, enhanceModel);
-      if (enhanceResult.enhanced) {
-        return NextResponse.json({
-          success: true,
-          url: enhanceResult.url,
-          model: `${localResult.model}+AI-enhance`,
-          strategy: 'onnx+ai-enhance',
-          fallback: !cloudResult ? false : true,
-          fallbackReason: cloudResult ? '云端API不可用，已使用本地Real-ESRGAN+AI精修' : undefined,
-          enhanced: true,
-        });
+      // ★ ONNX Real-ESRGAN 已是真正的超分辨率，AI精修可能改变画面内容
+      // 默认跳过AI精修，除非用户明确要求
+      if (!skipAiEnhance) {
+        console.log(`[upscale-pro] ONNX result available, but AI enhance is now skipped by default to preserve original content. Set skipAiEnhance=false to enable.`);
       }
-      // AI画质优化失败，回退到未优化的ONNX结果
-      console.log(`[upscale-pro] AI enhance skipped/failed, returning raw ONNX result`);
+      // AI画质优化默认跳过，ONNX结果已足够好
+      console.log(`[upscale-pro] Returning raw ONNX result (AI enhance skipped to preserve content)`);
       return NextResponse.json({
         success: true,
         url: localResult.url,
@@ -486,20 +472,7 @@ export async function POST(request: NextRequest) {
     if (fallbackToAi) {
       const aiResult = await upscaleViaAI(imageUrl, scale);
       if (aiResult?.url) {
-        // AI放大后画质也较差，同样追加AI精修
-        const enhancedResult = await enhanceViaAI(aiResult.url, enhanceModel);
-        if (enhancedResult.enhanced) {
-          return NextResponse.json({
-            success: true,
-            url: enhancedResult.url,
-            model: `${aiResult.model}+AI-enhance`,
-            strategy: 'ai-redraw+ai-enhance',
-            enhanced: true,
-            fallback: true,
-            fallbackReason: '已使用AI重绘放大并精修画质',
-          });
-        }
-        // 精修失败，返回AI重绘结果
+        // AI重绘放大不做额外AI精修（已经是一次AI重绘，再精修会进一步偏离原内容）
         return NextResponse.json({
           success: true,
           url: aiResult.url,
@@ -507,17 +480,6 @@ export async function POST(request: NextRequest) {
           strategy: aiResult.strategy,
           fallback: true,
           fallbackReason: '云端和本地无损放大均不可用，已使用AI重绘放大（内容可能有变化）',
-        });
-      }
-      // AI返回了taskId（异步任务）
-      if (aiResult?.strategy === 'ai-async') {
-        return NextResponse.json({
-          success: true,
-          requiresPolling: true,
-          model: aiResult.model,
-          strategy: aiResult.strategy,
-          fallback: true,
-          fallbackReason: '云端和本地无损放大均不可用，已提交AI重绘放大（内容可能有变化）',
         });
       }
     }

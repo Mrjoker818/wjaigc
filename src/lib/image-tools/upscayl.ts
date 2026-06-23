@@ -76,10 +76,28 @@ export async function isOnnxUpscaleAvailable(): Promise<{
     return { available: false, error: '未找到 realesrgan-x4plus-fp16.onnx 模型文件' };
   }
 
-  // 检查 Python 和 onnxruntime 可用性
+  // 检查 Python 脚本
   const scriptPath = getUpscaleOnnxScriptPath();
   if (!fs.existsSync(scriptPath)) {
     return { available: false, error: 'upscale_onnx.py 脚本未找到' };
+  }
+
+  // 检查 Python 和 onnxruntime 是否可用（运行时检测，避免运行时才发现缺依赖）
+  try {
+    const { execFile } = await import('child_process');
+    const checkResult = await new Promise<string>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('timeout')), 10000);
+      execFile('python3', ['-c', 'import onnxruntime; print(onnxruntime.__version__)'], { timeout: 10000 }, (error, stdout) => {
+        clearTimeout(timeout);
+        if (error) reject(error);
+        else resolve(stdout.trim());
+      });
+    });
+    if (!checkResult) {
+      return { available: false, error: 'onnxruntime 未安装或版本不兼容' };
+    }
+  } catch {
+    return { available: false, error: 'Python 或 onnxruntime 不可用，请运行: pip3 install onnxruntime' };
   }
 
   return { available: true, model: 'realesrgan-x4plus-fp16' };
@@ -468,7 +486,7 @@ function getNcnnModelsDir(): string {
       : path.join(process.env.COZE_WORKSPACE_PATH || '/workspace/projects', 'upscayl-models'));
 }
 
-/** 检查 NCNN 放大是否可用 */
+/** 检查 NCNN 放大是否可用（需要模型文件 + Vulkan/GPU 支持） */
 export async function isNcnnUpscaleAvailable(): Promise<{
   available: boolean;
   model?: string;
@@ -485,15 +503,41 @@ export async function isNcnnUpscaleAvailable(): Promise<{
     { bin: 'realesrgan-x4plus-anime.bin', param: 'realesrgan-x4plus-anime.param', name: 'realesrgan-x4plus-anime' },
   ];
 
+  let foundModel: string | undefined;
   for (const pair of modelPairs) {
     const binPath = path.join(modelsDir, pair.bin);
     const paramPath = path.join(modelsDir, pair.param);
     if (fs.existsSync(binPath) && fs.existsSync(paramPath)) {
-      return { available: true, model: pair.name };
+      foundModel = pair.name;
+      break;
     }
   }
 
-  return { available: false, error: '未找到 NCNN 模型文件 (.bin/.param)' };
+  if (!foundModel) {
+    return { available: false, error: '未找到 NCNN 模型文件 (.bin/.param)' };
+  }
+
+  // 检查 Vulkan/GPU 是否可用（upscayl-node 的 NCNN 后端依赖 Vulkan）
+  // 检测方法：尝试加载 upscayl-node 并调用一个轻量操作
+  try {
+    const { upscaler } = await import('upscayl-node');
+    // upscayl-node 初始化时会检测 Vulkan，如果不可用会抛出错误
+    // 使用 addModel 触发初始化检测
+    const testModelPath = path.join(modelsDir, modelPairs[0].bin);
+    try {
+      upscaler.addModel(testModelPath);
+    } catch (initErr) {
+      const errMsg = initErr instanceof Error ? initErr.message : String(initErr);
+      if (errMsg.includes('vkCreateInstance') || errMsg.includes('GPU') || errMsg.includes('Vulkan') || errMsg.includes('vulkan')) {
+        return { available: false, error: 'NCNN 需要 Vulkan/GPU 支持，当前环境不可用' };
+      }
+      // 其他错误（如模型路径不存在）继续尝试
+    }
+    return { available: true, model: foundModel };
+  } catch {
+    // upscayl-node 模块无法加载
+    return { available: false, error: 'upscayl-node 模块不可用' };
+  }
 }
 
 /**

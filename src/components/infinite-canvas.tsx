@@ -7348,8 +7348,33 @@ export function InfiniteCanvas({
         return;
       }
       // PNG format - try direct fetch, fallback to server proxy for CORS
+      let downloadSuccess = false;
+      let downloadError = '';
+
+      // Step 1: 如果URL是远程URL，先通过服务器持久化确保可下载
+      let downloadUrl = image.url;
+      const isRemoteUrl = downloadUrl.startsWith('http') && !downloadUrl.includes(window.location.host);
+      if (isRemoteUrl) {
+        try {
+          setDownloadProgress('正在准备下载...');
+          const persistRes = await fetch('/api/save-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageUrl: image.url }),
+          });
+          const persistData = await persistRes.json();
+          if (persistData.success && (persistData.url || persistData.savedUrl || persistData.localUrl)) {
+            downloadUrl = persistData.url || persistData.savedUrl || persistData.localUrl;
+            console.log('[download] Remote URL persisted to:', downloadUrl);
+          }
+        } catch (e) {
+          console.warn('[download] Failed to persist remote URL, trying direct download:', e);
+        }
+      }
+
+      // Step 2: 下载图片
       try {
-        const response = await fetch(image.url);
+        const response = await fetch(downloadUrl);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const blob = await response.blob();
         const url = URL.createObjectURL(blob);
@@ -7360,8 +7385,9 @@ export function InfiniteCanvas({
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
+        downloadSuccess = true;
       } catch {
-        // Direct fetch failed (likely CORS), use server-side proxy
+        // Direct fetch failed, try server-side proxy
         try {
           const proxyRes = await fetch('/api/save-image', {
             method: 'POST',
@@ -7381,10 +7407,18 @@ export function InfiniteCanvas({
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
+            downloadSuccess = true;
+          } else {
+            downloadError = proxyData.error || '服务器无法获取图片';
           }
         } catch (proxyError) {
+          downloadError = '下载失败：无法从服务器获取图片';
           console.error('Download proxy also failed:', proxyError);
         }
+      }
+
+      if (!downloadSuccess && downloadError) {
+        toast.error(downloadError);
       }
     } catch (error) {
       console.error('Download failed:', error);

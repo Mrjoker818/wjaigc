@@ -2208,25 +2208,17 @@ export async function POST(request: NextRequest) {
       if (result.directUrl) {
         const resized = await resizeAiResultToTarget(result.directUrl);
         
-        // AI 画质精修：放大后自动优化画面质量
+        // AI 画质精修：默认跳过，避免改变画面内容
+        // AI放大已通过 resizeAiResultToTarget 做了锐化增强，无需额外AI精修
         let finalUrl = resized.url;
         let enhanced = false;
-        try {
-          const enhanceResult = await enhanceViaAI(resized.url, modelStr);
-          if (enhanceResult.enhanced) {
-            finalUrl = enhanceResult.url;
-            enhanced = true;
-            console.log(`[image-edit] AI upscale quality enhanced: ${resized.url} → ${finalUrl}`);
-          }
-        } catch (enhanceErr) {
-          console.warn(`[image-edit] AI upscale enhancement failed, using unenhanced result:`, enhanceErr instanceof Error ? enhanceErr.message : enhanceErr);
-        }
+        console.log(`[image-edit] AI upscale completed, skipping AI enhance to preserve content`);
         
         return NextResponse.json({
           success: true,
           imageUrl: finalUrl,
           action,
-          engine: enhanced ? 'ai-upscale-hq-enhanced' : 'ai-upscale-hq',
+          engine: 'ai-upscale-hq',
           usedModel: result.usedModel,
           enhanced,
           originalSize: { width: origW, height: origH },
