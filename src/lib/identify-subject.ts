@@ -13,15 +13,23 @@ import { findProviderForFeature, getApiProviders } from './server-api-config';
 import { fetchWithV1Retry } from './api-helpers';
 import type { ModelInfo } from './universal-api-types';
 
-const IDENTIFY_PROMPT = `Identify the main product/object in this image. Focus on: what is it exactly (product type, specific category), NOT what it resembles. For example: "a white medicine bottle with blue label", NOT "a cosmetic container". Be precise about the product category — distinguish between medicine, cosmetics, food, beverages, chemicals, etc.
+const IDENTIFY_PROMPT = `Analyze this image carefully and identify ALL key visual elements:
+
+1. MAIN SUBJECT: What is the primary object/character/scene? Be extremely specific about type, shape, color, texture.
+2. STYLE: What is the visual style? (e.g., photorealistic, anime, oil painting, 3D render, minimalist, etc.)
+3. COMPOSITION: How is the subject framed? (e.g., centered, close-up, full body, bird's eye, etc.)
+4. COLORS: What are the dominant colors and color palette?
+5. MOOD/ATMOSPHERE: What feeling does the image convey?
+
+You MUST be precise — describe what IS, not what it resembles. For example: "a red ceramic teapot with golden dragon pattern" NOT "a container".
 
 Reply in this exact format:
-EN: [English identification phrase, 5-15 words]
-ZH: [Chinese identification phrase, 5-20 characters]
+EN: [Comprehensive English description, 10-30 words covering subject, style, key details]
+ZH: [Chinese description, 10-40 characters covering subject, style, key details]
 
 Example:
-EN: a white medicine bottle with blue label
-ZH: 白色药瓶带蓝色标签`;
+EN: a red ceramic teapot with golden dragon pattern, traditional Chinese style, photorealistic
+ZH: 红色陶瓷茶壶配金龙纹饰，中国传统风格，写实`;
 
 interface IdentifyResult {
   /** English subject description */
@@ -130,7 +138,7 @@ async function imageToBase64(imageUrl: string): Promise<string | null> {
 
     // HTTP URL
     if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
-      const resp = await fetch(imageUrl, { signal: AbortSignal.timeout(15000) });
+      const resp = await fetch(imageUrl, { signal: AbortSignal.timeout(30000) });
       if (!resp.ok) return null;
       const contentType = resp.headers.get('content-type') || 'image/png';
       const buffer = Buffer.from(await resp.arrayBuffer());
@@ -153,20 +161,23 @@ async function imageToBase64(imageUrl: string): Promise<string | null> {
  */
 export async function identifyImageSubject(
   imageUrl: string,
-  timeoutMs: number = 15000,
+  timeoutMs: number = 30000,
 ): Promise<IdentifyResult | null> {
-  try {
-    const provider = await findChatProvider();
-    if (!provider) {
-      console.warn('[identify-subject] No chat model provider available for vision identification');
-      return null;
-    }
+  // Retry up to 2 times with different providers
+  const maxRetries = 2;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const provider = await findChatProvider();
+      if (!provider) {
+        console.warn('[identify-subject] No chat model provider available for vision identification');
+        return null;
+      }
 
-    const base64 = await imageToBase64(imageUrl);
-    if (!base64) {
-      console.warn('[identify-subject] Failed to convert image to base64');
-      return null;
-    }
+      const base64 = await imageToBase64(imageUrl);
+      if (!base64) {
+        console.warn('[identify-subject] Failed to convert image to base64');
+        return null;
+      }
 
     const requestBody = {
       model: provider.model,
@@ -257,8 +268,15 @@ export async function identifyImageSubject(
     } finally {
       clearTimeout(timeoutId);
     }
-  } catch (err) {
-    console.warn('[identify-subject] Identification failed:', err);
-    return null;
+    } catch (err) {
+      console.warn(`[identify-subject] Attempt ${attempt + 1}/${maxRetries} failed:`, err instanceof Error ? err.message : String(err));
+      if (attempt < maxRetries - 1) {
+        // Wait briefly before retry
+        await new Promise(r => setTimeout(r, 1000));
+        continue;
+      }
+      return null;
+    }
   }
+  return null;
 }

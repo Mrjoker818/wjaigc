@@ -396,7 +396,7 @@ export async function POST(request: NextRequest) {
           // Identify images in parallel (with concurrency limit of 2)
           const identifyPromises = imagesNeedingId.map(async (imgUrl: string, idx: number) => {
             try {
-              const result = await identifyImageSubject(imgUrl, 10000);
+              const result = await identifyImageSubject(imgUrl, 30000);
               return result ? result.en : null;
             } catch (err) {
               console.warn(`[generate] Vision identification failed for image ${idx}:`, err);
@@ -441,7 +441,7 @@ export async function POST(request: NextRequest) {
         enhancedPrompt = `[REFERENCE MODE] The reference image depicts: "${refDescText}". You MUST preserve the main subject identity — do NOT replace it with a different object. ${enhancedPrompt}`;
       } else {
         // 即使没有描述，也必须添加基本参考指令，确保API理解参考意图
-        enhancedPrompt = `[REFERENCE MODE] Use the provided reference image(s) as the primary guide. Preserve the main subject, style, and composition from the reference. ${enhancedPrompt}`;
+        enhancedPrompt = `[REFERENCE MODE] CRITICAL INSTRUCTION — Reference image(s) are provided as the PRIMARY source of truth. You MUST: (1) Identify and preserve the EXACT main subject from the reference — do NOT substitute a different object, person, or scene. (2) Maintain the overall composition and framing. (3) Apply the user's prompt as a MODIFICATION to the reference, not as a replacement. If the prompt is vague, lean toward minimal changes from the reference. ${enhancedPrompt}`;
       }
     }
 
@@ -504,7 +504,7 @@ export async function POST(request: NextRequest) {
         // 主体描述锚定：使用AI视觉识别+前端描述的合并结果，防止主体被替换
         const subjectAnchor = refDescText ? ` The reference image depicts: "${refDescText}".` : '';
         const subjectPrefix = hasSubjectPreserve
-          ? `CRITICAL: The main subject (product/object/person) must remain EXACTLY the same as in the reference image — it is "${refDescText || 'the depicted item'}", same identity, same appearance. Do NOT replace or change the subject to a different object.${subjectAnchor} `
+          ? `CRITICAL: The main subject (product/object/person) must remain EXACTLY the same as in the reference image — it is "${refDescText || 'the depicted item in the reference'}", same identity, same appearance. Do NOT replace or change the subject to a different object. If you cannot identify the subject, preserve the overall visual content as closely as possible.${subjectAnchor} `
           : (refDescText ? `The reference image depicts: "${refDescText}". ` : '');
 
         let categoryEnhancement = '';
@@ -523,7 +523,7 @@ export async function POST(request: NextRequest) {
         if (refDescText) {
           enhancedPrompt = `[REFERENCE MODE] The reference image depicts: "${refDescText}". You MUST preserve the main subject identity — do NOT replace it with a different object. ${enhancedPrompt}`;
         } else {
-          enhancedPrompt = `[REFERENCE MODE] Use the provided reference image(s) as the primary guide. Preserve the main subject, style, and composition from the reference. ${enhancedPrompt}`;
+          enhancedPrompt = `[REFERENCE MODE] CRITICAL INSTRUCTION — Reference image(s) are provided as the PRIMARY source of truth. You MUST: (1) Identify and preserve the EXACT main subject from the reference — do NOT substitute a different object, person, or scene. (2) Maintain the overall composition and framing. (3) Apply the user's prompt as a MODIFICATION to the reference, not as a replacement. If the prompt is vague, lean toward minimal changes from the reference. ${enhancedPrompt}`;
         }
       }
     }
@@ -619,13 +619,18 @@ export async function POST(request: NextRequest) {
           // ★ 从 referenceStrengths 计算 strength：取最大强度值（0-100→0-1）
           const maxStrength = Math.max(...referenceStrengths.filter(s => typeof s === 'number' && s > 0));
           if (maxStrength > 0) {
-            requestBody.strength = Math.min(maxStrength / 100, 1);
+            // ★ strength 映射：用户 0-100% → API 0.10-0.80
+            // 用户 100% = 最大变化 = strength 0.80
+            // 用户 50% = 中等变化 = strength 0.45
+            // 用户 0% = 完全不变 = strength 0.10
+            // 之前直接 maxStrength/100 导致 80%→0.80 过高，生成结果偏离参考图太远
+            requestBody.strength = Math.min(0.10 + (maxStrength / 100) * 0.70, 0.80);
           }
         }
         // ★ 参考图模式下如果没有显式 strength 也没有 referenceStrengths，设置默认值
         // 避免参考图被 API 完全忽略
         if (!requestBody.strength && isReferenceOnly && accessibleReferenceImages.length > 0) {
-          requestBody.strength = 0.65;
+          requestBody.strength = 0.30;
         }
         // ★ 只有非参考图模式（即图片编辑模式）才设置 image 字段
         // 参考图组模式下，不设置 image 字段，让 API 使用 /images/generations 端点并遵守 size 参数

@@ -217,7 +217,7 @@ export class UserManager {
               // blob: URL 跨会话不可用，但保留记录可让异步持久化函数尝试恢复
               if (img.url && (img.url.startsWith('blob:') || img.url.startsWith('data:'))) {
                 // 仅标记为待持久化，不清空 URL
-                (img as Record<string, unknown>)._pendingPersist = true;
+                (img as unknown as Record<string, unknown>)._pendingPersist = true;
               }
               // 回填：历史数据 modelName 为空但 model 有值时，用 model 补充
               if ((!img.modelName || img.modelName === '') && img.model) {

@@ -1446,7 +1446,11 @@ export function adjustRequestForProfile(
   }
 
   // --- input_fidelity ---
-  if (profile.supportsInputFidelity && hasImage && endpoint === '/images/edits') {
+  // ★ GPT-Image-2 needs input_fidelity='high' for BOTH /images/edits AND /images/generations
+  // when reference images are provided. Without it, the model ignores references.
+  const needsInputFidelity = profile.supportsInputFidelity &&
+    (endpoint === '/images/edits' || (endpoint === '/images/generations' && (hasImage || hasReferenceImages)));
+  if (needsInputFidelity) {
     if (!body.input_fidelity) {
       body.input_fidelity = 'high';
     }
@@ -1455,10 +1459,9 @@ export function adjustRequestForProfile(
   // input_fidelity='low' → strength=0.85 (大幅变化，如多角度功能)
   // input_fidelity='medium' → strength=0.65 (中等变化)
   // input_fidelity='high' → 不设置 strength (保持默认行为)
-  if (!profile.supportsInputFidelity || endpoint !== '/images/edits') {
+  if (!profile.supportsInputFidelity || (endpoint !== '/images/edits' && endpoint !== '/images/generations')) {
     const requestedFidelity = body.input_fidelity as string | undefined;
     if (requestedFidelity === 'low' && body.strength === undefined) {
-      // 提供商不支持 input_fidelity，但用户需要大幅变化 → 用 strength 控制
       body.strength = 0.85;
     } else if (requestedFidelity === 'medium' && body.strength === undefined) {
       body.strength = 0.65;
