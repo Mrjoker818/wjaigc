@@ -1368,9 +1368,11 @@ export function adjustRequestForProfile(
     isEditEndpoint?: boolean;
     /** Force using /images/generations endpoint even when hasImage is true (for providers that don't support /images/edits) */
     forceGenerationsEndpoint?: boolean;
+    /** Whether reference images are present (for image_urls → images[] conversion, even when hasImage=false) */
+    hasReferenceImages?: boolean;
   } = {},
 ): { body: Record<string, unknown>; endpoint: ImageEndpoint } {
-  const { hasImage = false, isEditEndpoint = false, forceGenerationsEndpoint = false } = options;
+  const { hasImage = false, isEditEndpoint = false, forceGenerationsEndpoint = false, hasReferenceImages = false } = options;
   // ★ 防御空 body 导致后续解构崩溃
   const body = requestBody ? { ...requestBody } : {};
 
@@ -1428,14 +1430,19 @@ export function adjustRequestForProfile(
 
   // When the edit endpoint is /images/generations AND there is NO image
   // field in the body, strip fields that are only valid on /images/edits.
-  // However, when hasImage=true (reference image / img2img / inpaint),
-  // Only strip image-edit-specific fields when there are NO reference images
-  // at all (neither base64 image nor image_urls).  When reference images exist
-  // we KEEP strength so the API can control img2img fidelity.
-  if (endpoint === '/images/generations' && !hasImage) {
+  // When using /images/generations endpoint with NO image/edit context,
+  // strip image-edit-specific fields.  However, when reference images exist
+  // (image_urls), we KEEP strength so the API can control img2img fidelity.
+  if (endpoint === '/images/generations' && !hasImage && !hasReferenceImages) {
     delete body.image;
     delete body.mask;
     delete body.strength;
+  }
+  // ★ 即使 hasImage=false（参考图模式用 /images/generations），也要删除 mask
+  // 但保留 strength 和 image_urls 供 API 参考图功能使用
+  if (endpoint === '/images/generations' && !hasImage && hasReferenceImages) {
+    delete body.mask;
+    // 不删除 strength 和 image_urls — 这些是参考图功能的关键参数
   }
 
   // --- input_fidelity ---
@@ -1464,9 +1471,11 @@ export function adjustRequestForProfile(
   // OpenAI's GPT Image models require the `images` array format:
   //   images: [{ image_url: { url: "data:image/jpeg;base64,..." } }]
   // Older format (image / image_urls) is not accepted by these models.
-  // Apply this conversion for openai/auto profiles when there are reference images.
-  // APImart/pearapi/gemini-image profiles use their own formats — skip conversion.
-  if ((profile.id === 'openai' || profile.id === 'auto') && hasImage) {
+  // Apply this conversion when there are reference images or source images.
+  // For reference-only mode (hasImage=false, hasReferenceImages=true),
+  // we still need to convert image_urls → images[] so the API can see them.
+  const shouldConvertImages = hasImage || hasReferenceImages;
+  if (shouldConvertImages && (profile.id === 'openai' || profile.id === 'auto' || profile.id === 'pearapi')) {
     const imagesArray: Array<{ image_url: { url: string } }> = [];
 
     // Primary: use the `image` field (base64 data URL from /images/edits preparation)
@@ -1490,6 +1499,11 @@ export function adjustRequestForProfile(
       delete body.image_urls;
     }
   }
+
+  // For apimart profile with reference images, keep image_urls as-is
+  // (apimart accepts image_urls in its native format)
+  // For other profiles that have image_urls but no images conversion,
+  // also pass image_urls through as-is — the API provider may or may not support it.
 
   return { body, endpoint };
 }

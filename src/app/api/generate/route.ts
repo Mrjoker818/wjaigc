@@ -615,6 +615,17 @@ export async function POST(request: NextRequest) {
         // 图生图 strength 参数
         if (typeof strength === 'number' && strength > 0 && strength <= 1) {
           requestBody.strength = strength;
+        } else if (referenceStrengths && Array.isArray(referenceStrengths) && referenceStrengths.length > 0) {
+          // ★ 从 referenceStrengths 计算 strength：取最大强度值（0-100→0-1）
+          const maxStrength = Math.max(...referenceStrengths.filter(s => typeof s === 'number' && s > 0));
+          if (maxStrength > 0) {
+            requestBody.strength = Math.min(maxStrength / 100, 1);
+          }
+        }
+        // ★ 参考图模式下如果没有显式 strength 也没有 referenceStrengths，设置默认值
+        // 避免参考图被 API 完全忽略
+        if (!requestBody.strength && isReferenceOnly && accessibleReferenceImages.length > 0) {
+          requestBody.strength = 0.65;
         }
         // ★ 只有非参考图模式（即图片编辑模式）才设置 image 字段
         // 参考图组模式下，不设置 image 字段，让 API 使用 /images/generations 端点并遵守 size 参数
@@ -813,8 +824,10 @@ export async function POST(request: NextRequest) {
       // 参考图组模式：hasImage=false → 使用 defaultEndpoint(/images/generations)，遵守 size
       // 图片编辑模式(erase/mask/outpaint)：hasImage=true → 使用 editEndpoint(/images/edits)
       const hasImageFlag = !!(requestBody.image || (requestBody.image_urls && !isReferenceOnly) || (accessibleReferenceImages.length > 0 && !isReferenceOnly));
+      const hasRefImagesFlag = !!(accessibleReferenceImages.length > 0 && isReferenceOnly);
       const { body: adjustedBody, endpoint } = adjustRequestForProfile(requestBody, profile, {
         hasImage: hasImageFlag,
+        hasReferenceImages: hasRefImagesFlag,
       });
 
       console.log('Submitting image task:', {
@@ -835,7 +848,11 @@ export async function POST(request: NextRequest) {
         endpoint,
         profile: profile.id,
         hasRefImages,
+        hasRefImagesFlag,
+        hasImageFlag,
         hasImageField: !!adjustedBody.image,
+        image_urls_count: Array.isArray(adjustedBody.image_urls) ? adjustedBody.image_urls.length : (adjustedBody.image_urls ? 1 : 0),
+        images_count: Array.isArray(adjustedBody.images) ? adjustedBody.images.length : 0,
         inputFidelity: adjustedBody.input_fidelity,
         refImageTypes: accessibleReferenceImages.map(u => u.startsWith('data:') ? 'base64' : u.startsWith('http') ? 'url' : 'other'),
         strength: adjustedBody.strength || undefined,
