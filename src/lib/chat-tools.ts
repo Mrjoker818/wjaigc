@@ -315,7 +315,9 @@ async function executeGenerateImage(
     console.log(`[chat-tools] generate_image: model=${model}, providerId=${providerId}, prompt="${prompt?.substring(0, 80)}...", aspectRatio=${aspectRatio}, quality=${quality}`);
 
     // 使用统一的 /api/generate 接口，确保兼容性、异步轮询、URL持久化
-    const generateRes = await fetch(`${context.origin || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`}/api/generate`, {
+    const generateUrl = `${context.origin || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`}/api/generate`;
+    console.log(`[chat-tools] generate_image: calling ${generateUrl}`);
+    const generateRes = await fetch(generateUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -329,13 +331,17 @@ async function executeGenerateImage(
       signal: AbortSignal.timeout(120000),
     });
 
+    console.log(`[chat-tools] generate_image: response status=${generateRes.ok ? 'ok' : generateRes.status}`);
     if (!generateRes.ok) {
       const errorText = await generateRes.text().catch(() => '');
+      console.error(`[chat-tools] generate_image FAILED: HTTP ${generateRes.status}, body=${errorText.substring(0, 300)}`);
       return { success: false, error: `图像生成API失败: ${generateRes.status}`, resultText: `图像生成失败（HTTP ${generateRes.status}）。${errorText.substring(0, 200)}` };
     }
 
     const data = await generateRes.json();
+    console.log(`[chat-tools] generate_image: response success=${data.success}, hasImageUrls=${!!(data.imageUrls?.length)}, hasTaskIds=${!!(data.taskIds?.length || data.taskId)}, error=${data.error || 'none'}`);
     if (!data.success) {
+      console.error(`[chat-tools] generate_image FAILED: ${data.error}`);
       return { success: false, error: data.error || '生成失败', resultText: `图像生成失败: ${data.error || '未知错误'}` };
     }
 

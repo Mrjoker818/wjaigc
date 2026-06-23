@@ -383,7 +383,7 @@ export function BrandSettingsForm({
               {models.length ? models.map(m => (
                 <button
                   key={m.id}
-                  onClick={() => { onSelectModel(m.id); onToggleModelDropdown(); localStorage.setItem('wujie_selected_model', m.id); }}
+                  onClick={() => { onSelectModel(m.id); onToggleModelDropdown(); try { const existing = JSON.parse(localStorage.getItem('wujie_selected_model') || '{}'); localStorage.setItem('wujie_selected_model', JSON.stringify({ ...existing, model: m.id.split('::').pop() || m.id, providerId: m.providerId || '' })); } catch {} }}
                   className={`w-full text-left px-3 py-2.5 text-sm transition-colors cursor-pointer ${
                     m.id === selectedModel
                       ? isMonochrome ? 'bg-blue-50 text-blue-600' : 'bg-[#d4af37]/10 text-[#d4af37]'

@@ -209,7 +209,7 @@ export async function POST(request: NextRequest) {
       
       // Handle tool_calls in non-stream mode
       if (effectiveEnableTools && retryData.choices?.[0]?.message?.tool_calls) {
-        return handleNonStreamAgentLoop(retryData, fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, availableTools);
+        return handleNonStreamAgentLoop(retryData, fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, availableTools, imageModel, imageProviderId);
       }
       
       await appendUserJsonl(userId, 'chat', { model, providerId, messageCount: messages.length, stream: false });
@@ -282,7 +282,7 @@ export async function POST(request: NextRequest) {
     
     // Handle tool_calls in non-stream mode
     if (effectiveEnableTools && data.choices?.[0]?.message?.tool_calls) {
-      return handleNonStreamAgentLoop(data, fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, availableTools);
+      return handleNonStreamAgentLoop(data, fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, availableTools, imageModel, imageProviderId);
     }
     
     await appendUserJsonl(userId, 'chat', { model, providerId, messageCount: messages.length, stream: false });
@@ -577,6 +577,8 @@ async function handleNonStreamAgentLoop(
   model: string,
   providerId: string | undefined,
   availableTools: typeof CHAT_TOOLS,
+  imgModel?: string,
+  imgProviderId?: string,
 ): Promise<NextResponse> {
   const currentMessages = [...fixedMessages];
   const allToolResults: Array<{ toolName: string; result: ToolCallResult }> = [];
@@ -609,6 +611,8 @@ async function handleNonStreamAgentLoop(
         chatBaseUrl,
         origin,
         userId,
+        imageModel: imgModel,
+        imageProviderId: imgProviderId,
       });
 
       allToolResults.push({ toolName, result: toolResult });

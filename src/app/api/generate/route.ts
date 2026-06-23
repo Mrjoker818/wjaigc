@@ -429,15 +429,24 @@ export async function POST(request: NextRequest) {
       enhancedPrompt = `[FUSION MODE] Combine and merge ${referenceImages.length} reference images into a single cohesive composition.${fusionDescHint} ${enhancedPrompt}. Seamlessly blend all visual elements together, maintaining the key characteristics of each reference while creating a unified, natural result.`;
     }
 
-    // 无分类但有参考图描述时的增强（前端图生图面板路径，不传 referenceCategories）
-    if (referenceImages && referenceImages.length > 0 && !referenceCategories) {
+    // 参考图增强：无分类或空分类时，使用描述文本增强；有分类时使用分类增强
+    const hasCategories = referenceCategories && (
+      (Array.isArray(referenceCategories) && referenceCategories.length > 0) ||
+      (!Array.isArray(referenceCategories) && Object.keys(referenceCategories as Record<string, unknown>).length > 0)
+    );
+
+    if (referenceImages && referenceImages.length > 0 && !hasCategories) {
+      // 无分类模式：使用参考图描述增强提示词
       if (refDescText) {
         enhancedPrompt = `[REFERENCE MODE] The reference image depicts: "${refDescText}". You MUST preserve the main subject identity — do NOT replace it with a different object. ${enhancedPrompt}`;
+      } else {
+        // 即使没有描述，也必须添加基本参考指令，确保API理解参考意图
+        enhancedPrompt = `[REFERENCE MODE] Use the provided reference image(s) as the primary guide. Preserve the main subject, style, and composition from the reference. ${enhancedPrompt}`;
       }
     }
 
     // 参考图分类增强 - 基于前端传递的分类和强度，增强提示词让AI正确理解参考意图
-    if (referenceImages && referenceImages.length > 0 && referenceCategories) {
+    if (referenceImages && referenceImages.length > 0 && hasCategories) {
       // 规范化分类键：中文→英文
       const normalizeCategory = (key: string): string => {
         const cnToEn: Record<string, string> = {
@@ -508,6 +517,13 @@ export async function POST(request: NextRequest) {
 
         if (categoryEnhancement) {
           enhancedPrompt = `[REFERENCE MODE] ${categoryEnhancement} ${enhancedPrompt}`;
+        }
+      } else {
+        // 有分类但所有强度为0或分类为空对象 — 使用描述兜底
+        if (refDescText) {
+          enhancedPrompt = `[REFERENCE MODE] The reference image depicts: "${refDescText}". You MUST preserve the main subject identity — do NOT replace it with a different object. ${enhancedPrompt}`;
+        } else {
+          enhancedPrompt = `[REFERENCE MODE] Use the provided reference image(s) as the primary guide. Preserve the main subject, style, and composition from the reference. ${enhancedPrompt}`;
         }
       }
     }
@@ -586,12 +602,13 @@ export async function POST(request: NextRequest) {
 
       // 添加参考图片
       const hasRefImages = accessibleReferenceImages.length > 0 && currentModelConfig.supportsImageToImage;
-      // ★ 参考图组(reference/fusion) vs 图片编辑(erase/mask/outpaint) 的关键区别：
-      // - 参考图组：用户希望按设定的尺寸生成新图，参考图仅作为风格/构图参考 → 不设置 image 字段，
+      // ★ 参考图模式(reference/fusion/style/blend/content) vs 图片编辑模式(erase/mask/outpaint) 的关键区别：
+      // - 参考图模式：用户希望按设定的尺寸生成新图，参考图仅作为风格/构图参考 → 不设置 image 字段，
       //   使用 /images/generations 端点，确保 API 遵守 size 参数
-      // - 图片编辑：用户要求在原图基础上修改（擦除/蒙版/扩展）→ 必须设置 image 字段，
+      // - 图片编辑模式：用户要求在原图基础上修改（擦除/蒙版/扩展）→ 必须设置 image 字段，
       //   使用 /images/edits 端点，强制 AI 处理源图
-      const isReferenceOnly = referenceMode === 'reference' || referenceMode === 'fusion';
+      // ★ 注意：'style'/'blend'/'content' 都是参考图模式，只有未指定 referenceMode 或为编辑操作时才是编辑模式
+      const isReferenceOnly = !referenceMode || ['reference', 'fusion', 'style', 'blend', 'content'].includes(referenceMode);
       if (hasRefImages) {
         // 始终提供 image_urls（大多数 API 代理支持此字段传递参考图 URL）
         requestBody.image_urls = accessibleReferenceImages;

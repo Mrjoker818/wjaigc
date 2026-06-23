@@ -5866,9 +5866,14 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                         onClick={() => {
                           setImageModel(m.id);
                           setImageModelProviderId(m.providerId);
-                          // 同步到localStorage，与图像生成面板共享
+                          // 同步到localStorage，与图像生成面板共享（保留 quality/aspectRatio）
                           const modelId = m.id.split('::').pop() || m.id;
-                          localStorage.setItem('wujie_selected_model', JSON.stringify({ model: modelId, providerId: m.providerId }));
+                          const existing = JSON.parse(localStorage.getItem('wujie_selected_model') || '{}');
+                          localStorage.setItem('wujie_selected_model', JSON.stringify({
+                            ...existing,
+                            model: modelId,
+                            providerId: m.providerId,
+                          }));
                           setShowImageModelSelector(false);
                         }}
                         className={`w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors ${
