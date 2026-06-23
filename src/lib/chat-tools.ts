@@ -1,5 +1,8 @@
 import { calculateActualPixels } from './canvas-generation-group';
 
+// 服务器端口，所有服务器间 fetch 调用统一使用 localhost + 此端口
+const SERVER_PORT = process.env.DEPLOY_RUN_PORT || '5000';
+
 /**
  * Chat Tool Definitions for AI Agent Function Calling
  * 
@@ -315,7 +318,8 @@ async function executeGenerateImage(
     console.log(`[chat-tools] generate_image: model=${model}, providerId=${providerId}, prompt="${prompt?.substring(0, 80)}...", aspectRatio=${aspectRatio}, quality=${quality}`);
 
     // 使用统一的 /api/generate 接口，确保兼容性、异步轮询、URL持久化
-    const generateUrl = `${context.origin || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`}/api/generate`;
+    // 服务器端调用始终使用 localhost，避免通过外部域名自引用导致的网络问题
+    const generateUrl = `http://localhost:${SERVER_PORT}/api/generate`;
     console.log(`[chat-tools] generate_image: calling ${generateUrl}`);
     const generateRes = await fetch(generateUrl, {
       method: 'POST',
@@ -400,7 +404,7 @@ async function executeEditImage(
     console.log(`[chat-tool:edit_image] model=${model}, providerId=${providerId}, prompt="${(prompt as string).slice(0, 80)}"`);
 
     // 调用语言修图 API
-    const res = await fetch(`${context.origin || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`}/api/edit`, {
+    const res = await fetch(`http://localhost:${SERVER_PORT}/api/edit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -471,7 +475,7 @@ async function executeImg2Img(
       : `${prompt}${negativePrompt ? ` [negative: ${negativePrompt}]` : ''}`;
 
     // 调用 generate API 并传入参考图
-    const res = await fetch(`${context.origin || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`}/api/generate`, {
+    const res = await fetch(`http://localhost:${SERVER_PORT}/api/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -524,7 +528,7 @@ async function executeRemoveBg(
     const imageUrl = normalizeImageUrl(args.image_url as string, context.origin);
 
     console.log(`[chat-tool:edit_image] model=${context.imageModel || 'default'}, providerId=${context.imageProviderId || 'default'}`);
-    const res = await fetch(`${context.origin || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`}/api/image-edit`, {
+    const res = await fetch(`http://localhost:${SERVER_PORT}/api/image-edit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -570,7 +574,7 @@ async function executeUpscale(
 
     console.log(`[chat-tool:upscale] model=${context.imageModel || 'default'}, providerId=${context.imageProviderId || 'default'}, scale=${scale}`);
 
-    const res = await fetch(`${context.origin || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`}/api/image-edit`, {
+    const res = await fetch(`http://localhost:${SERVER_PORT}/api/image-edit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -619,7 +623,7 @@ async function executeGenerateVideo(
 
     console.log(`[chat-tool:generate_video] model=${context.imageModel || 'default'}, providerId=${context.imageProviderId || 'default'}, aspectRatio=${aspectRatio}, duration=${duration}s`);
 
-    const res = await fetch(`${context.origin || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`}/api/video/generate`, {
+    const res = await fetch(`http://localhost:${SERVER_PORT}/api/video/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -732,7 +736,7 @@ async function executeExtendCanvas(
 
     console.log(`[chat-tool:extend_canvas] model=${context.imageModel || 'default'}, providerId=${context.imageProviderId || 'default'}, direction=${direction}, scale=${scale}`);
 
-    const res = await fetch(`${context.origin || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`}/api/image-edit`, {
+    const res = await fetch(`http://localhost:${SERVER_PORT}/api/image-edit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -775,7 +779,8 @@ async function executeExtendCanvas(
 
 function normalizeImageUrl(url: string, origin: string): string {
   if (url.startsWith('/')) {
-    return `${origin}${url}`;
+    // 服务器端调用始终使用 localhost，避免外部 URL 回环
+    return `http://localhost:${SERVER_PORT}${url}`;
   }
   return url;
 }
