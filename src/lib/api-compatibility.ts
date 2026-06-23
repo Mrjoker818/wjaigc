@@ -1469,11 +1469,11 @@ export function adjustRequestForProfile(
   // --- Convert image/image_urls to OpenAI images[] array format ---
   // OpenAI's GPT Image models require the `images` array format:
   //   images: [{ image_url: { url: "data:image/jpeg;base64,..." } }]
-  // Older format (image / image_urls) is not accepted by these models.
-  // Apply this conversion when there are reference images or source images.
-  // For reference-only mode (hasImage=false, hasReferenceImages=true),
-  // we still need to convert image_urls → images[] so the API can see them.
-  const shouldConvertImages = hasImage || hasReferenceImages;
+  // Older format (image / image_urls) is not accepted by these models on /images/generations.
+  // ★ IMPORTANT: Only convert to images[] for /images/generations endpoint.
+  // /images/edits requires the `image` field (multipart or JSON) and does NOT support images[].
+  // Converting image→images[] for /images/edits would cause "image is required" errors.
+  const shouldConvertImages = (hasImage || hasReferenceImages) && endpoint === '/images/generations';
   if (shouldConvertImages && (profile.id === 'openai' || profile.id === 'auto' || profile.id === 'pearapi')) {
     const imagesArray: Array<{ image_url: { url: string } }> = [];
 
@@ -1545,6 +1545,7 @@ export function isEditsEndpointRejected(status: number, errorBody: string): bool
     lower.includes('incompatible') ||
     lower.includes('invalid endpoint') ||
     lower.includes('unsupported endpoint') ||
+    (lower.includes('invalid') && lower.includes('image_url')) ||  // images[] format rejected by API proxy
     (status === 404) || // endpoint doesn't exist
     (status === 405) || // method not allowed on this endpoint
     (status === 422)    // unprocessable entity — endpoint doesn't accept this payload

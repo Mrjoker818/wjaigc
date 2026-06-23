@@ -1091,14 +1091,30 @@ export async function POST(request: NextRequest) {
 
             const fallbackBody = stripEditsOnlyFields(adjustedBody);
 
-            // ★ 回退到 /images/generations 时，images[] 字段不被该端点支持
-            // 将 images[] 中的 URL 提取到 image_urls 中（某些 API 代理支持）
+            // ★ 回退到 /images/generations 时的图片字段转换
+            // 情况1：旧格式 images[] → 提取为 image_urls（兼容某些 API 代理）
+            // 情况2：新格式 image_urls（从 /images/edits 保留）→ 转为 images[] 格式
+            //        （OpenAI GPT Image 等模型在 /images/generations 上要求 images[] 格式）
             if (Array.isArray(fallbackBody.images) && !fallbackBody.image_urls) {
+              // 旧格式：images[] → image_urls
               fallbackBody.image_urls = (fallbackBody.images as Array<{ image_url: { url: string } }>).map(
                 (img) => img.image_url?.url || ''
               ).filter(Boolean);
             }
             delete fallbackBody.images;
+
+            // ★ OpenAI 兼容 API (/images/generations) 需要 images[] 格式而非 image_urls
+            // 当有 image_urls 且 profile 是 openai/auto/pearapi 时，转换为 images[]
+            if (Array.isArray(fallbackBody.image_urls) && (fallbackBody.image_urls as string[]).length > 0 &&
+                (profile.id === 'openai' || profile.id === 'auto' || profile.id === 'pearapi')) {
+              const imagesArray: Array<{ image_url: { url: string } }> = (fallbackBody.image_urls as string[])
+                .filter((url: string) => typeof url === 'string' && url.length > 0)
+                .map((url: string) => ({ image_url: { url } }));
+              if (imagesArray.length > 0) {
+                fallbackBody.images = imagesArray;
+                delete fallbackBody.image_urls;
+              }
+            }
 
             // 增强 prompt：/images/generations 仅将 image_urls 视为可选参考，
             // 必须在 prompt 中明确指示 AI 使用参考图作为基础，否则 AI 可能忽略参考图
@@ -1174,7 +1190,8 @@ export async function POST(request: NextRequest) {
               errorText.includes('expected multipart') ||
               errorText.includes('no file') ||
               errorText.includes('file required') ||
-              errorText.includes('Missing image');
+              errorText.includes('Missing image') ||
+              errorText.includes('image is required');
 
             if (needsMultipart) {
               console.info('[generate] JSON failed for edits endpoint, retrying with multipart form data...');
