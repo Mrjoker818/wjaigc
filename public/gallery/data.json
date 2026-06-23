@@ -3,22 +3,22 @@
     {
       "id": "cat-0",
       "name": "书法体",
-      "count": 151
+      "count": 149
     },
     {
       "id": "cat-1",
       "name": "科技感",
-      "count": 101
+      "count": 99
     },
     {
       "id": "cat-2",
       "name": "手写体",
-      "count": 91
+      "count": 87
     },
     {
       "id": "cat-3",
       "name": "3D立体",
-      "count": 63
+      "count": 62
     },
     {
       "id": "cat-4",
@@ -28,12 +28,12 @@
     {
       "id": "cat-5",
       "name": "卡通可爱",
-      "count": 8
+      "count": 7
     },
     {
       "id": "cat-6",
       "name": "简约现代",
-      "count": 142
+      "count": 121
     },
     {
       "id": "cat-7",
@@ -53,15 +53,15 @@
     {
       "id": "cat-10",
       "name": "创意字体",
-      "count": 5
+      "count": 3
     },
     {
       "id": "cat-11",
       "name": "其他",
-      "count": 8
+      "count": 6
     }
   ],
-  "totalCount": 612,
+  "totalCount": 577,
   "items": [
     {
       "id": "g1",
@@ -1495,15 +1495,6 @@
       "localPath": "/gallery/cat-2/g294.jpg"
     },
     {
-      "id": "g302",
-      "sourceUrl": "https://jimeng.jianying.com/ai-tool/detail/7564381631620893961",
-      "prompt": "文艺手写钢笔字体“生活嘛，慢慢来，你又不差”，字体笔画非常细，巧妙连笔，灵动跳跃，错落有致，部分笔画延长，黑底白字，干净背景，大师海报作品，电影海报，小字英文“Mr.Zhang“ ” Orientalism”小字 @大 奔®",
-      "displayText": "",
-      "category": "cat-2",
-      "categoryName": "手写体",
-      "localPath": "/gallery/cat-2/g302.jpg"
-    },
-    {
       "id": "g306",
       "sourceUrl": "https://jimeng.jianying.com/ai-tool/detail/7573353788178713906",
       "prompt": "画面风格为简约文艺的手写字体风，背景为纯黑色，营造深邃静谧氛围。主体文字 “陪你漫游余生” 以流畅自然的手写笔触呈现，字体灵动飘逸，笔画粗细有致，具艺术感，与参考图字体风格一致。英文 “accompany you roaming Yusheng” 在中文下方，同样用随性的手写字体书写，与中文相互呼应。整体画面简洁干净，突出文字传达的浪漫意蕴，画面比例 16:9 ，达 4K 高清标准。",
@@ -1837,15 +1828,6 @@
       "localPath": "/gallery/cat-3/g391.jpg"
     },
     {
-      "id": "g393",
-      "sourceUrl": "https://jimeng.jianying.com/ai-tool/detail/7591805677434064137",
-      "prompt": "“Hush”文字以文艺字书写，花式字体，连笔变细，部分笔画末端连笔，背景是大部分黑+底部一点点粉色渐变，文字采用刺绣风格，上方不显眼文字：“Typography-focused design”，主标题下方有一个金属质感的小字：“Iktsuarpok2026”",
-      "displayText": "",
-      "category": "cat-3",
-      "categoryName": "3D立体",
-      "localPath": "/gallery/cat-3/g393.jpg"
-    },
-    {
       "id": "g394",
       "sourceUrl": "https://jimeng.jianying.com/ai-tool/detail/7508574763724344627",
       "prompt": "以明亮黄色为底色，绘制带有黑色粗体不规则笔画的艺术字 “现在就出发” ，字体笔触有斑驳质感，笔画连笔，流畅，左侧搭配一个带有表情的粉色花朵装饰元素，右侧有一个蓝色圆形对话框样式、里面写着 “GO” ，整体设计风格活泼、醒目，具有强烈的视觉冲击力，背景为黑色",
@@ -1936,15 +1918,6 @@
       "localPath": "/gallery/cat-5/g415.jpg"
     },
     {
-      "id": "g416",
-      "sourceUrl": "https://jimeng.jianying.com/ai-tool/detail/7492848287318314292",
-      "prompt": "字体设计“甜美”，风格圆润线条流畅，卡通唯美有艺术感，笔画巧妙变形设计，黑色干净的背景",
-      "displayText": "",
-      "category": "cat-5",
-      "categoryName": "卡通可爱",
-      "localPath": "/gallery/cat-5/g416.jpg"
-    },
-    {
       "id": "g418",
       "sourceUrl": "https://jimeng.jianying.com/ai-tool/detail/7537936422024596782",
       "prompt": "黑底背景，白色中文艺术字\"星球坠落\"，采用不规则扭曲字形设计，笔画间嵌入荧光渐变星形粒子，主笔画末端延伸出微型星球剪影，文字下方添加银河光晕效果，使用卡通风格流星符号作为笔画连接点",
@@ -1988,15 +1961,6 @@
       "category": "cat-6",
       "categoryName": "简约现代",
       "localPath": "/gallery/cat-6/g422.jpg"
-    },
-    {
-      "id": "g423",
-      "sourceUrl": "https://jimeng.jianying.com/ai-tool/detail/7494913155408153890",
-      "prompt": "矢量插画，标志，黑色背景，白色字，创意字体设计Logo，流畅且富有艺术感，中文“春日出游踏青”，绿色点缀。设计灵感:将字体进行抽象变形，给人以强烈的视觉冲击。高级感，扁平化，大师作品",
-      "displayText": "",
-      "category": "cat-6",
-      "categoryName": "简约现代",
-      "localPath": "/gallery/cat-6/g423.jpg"
     },
     {
       "id": "g424",
@@ -2305,96 +2269,6 @@
       "localPath": "/gallery/cat-6/g497.jpg"
     },
     {
-      "id": "g501",
-      "sourceUrl": "https://jimeng.jianying.com/ai-tool/detail/7570971892903873830",
-      "prompt": "生成潮流派对风格艺术字体，内容为“玩出新浪潮”，搭配英文“PLAY NEW WAVE”进行排版。同一行字，不分组，运营活动风格主题字体，字体大小变化明显，错落有致排版。部分笔画延长，字体笔画粗厚醒目，形态夸张变形，部分笔画带俏皮弧度或独特弯折，营造活波、肆意、充满活力的派对氛围，黄绿色点缀。黑色背景，背景干净。白色字体，大师作品。",
-      "displayText": "",
-      "category": "cat-6",
-      "categoryName": "简约现代",
-      "localPath": "/gallery/cat-6/g501.jpg"
-    },
-    {
-      "id": "g526",
-      "sourceUrl": "https://jimeng.jianying.com/ai-tool/detail/7521613635479719194",
-      "prompt": "创意字体设计LOGO，英文“Firming&Elastic”，线条流畅、舒展且具有艺术感，将字体进行抽象变形，似是而非，相邻两个字上一字的末笔是下一字的首笔，相邻字的笔划可以共享借代。使几个文字成为一个紧凑的整体，字与字之间有相互联系的笔划。高级感，扁平化，黑色高端大气背景，",
-      "displayText": "",
-      "category": "cat-6",
-      "categoryName": "简约现代",
-      "localPath": "/gallery/cat-6/g526.jpg"
-    },
-    {
-      "id": "g528",
-      "sourceUrl": "https://jimeng.jianying.com/ai-tool/detail/7567220415635016987",
-      "prompt": "收银设备字体设计LOGO，英文“BOWERWAY” ，线条流畅、舒展且具有艺术感，将字体进行抽象变形，似是而非，相邻两个字上一字的末笔是下一字的首笔，相邻字的笔划可以共享借代。使几个文字成为一个紧凑的整体，字与字之间有相互联系的笔划。高级感，扁平化，黑色高端大气背景。",
-      "displayText": "",
-      "category": "cat-6",
-      "categoryName": "简约现代",
-      "localPath": "/gallery/cat-6/g528.jpg"
-    },
-    {
-      "id": "g531",
-      "sourceUrl": "https://jimeng.jianying.com/ai-tool/detail/7554983347491999002",
-      "prompt": "创意字体设计LOGO，英文“FIQUOR”，线条流畅、舒展且具有艺术感，将字体进行抽象变形，似是而非，相邻两个字上一字的末笔是 Fiquor 下一字的首笔，相邻字的笔划可以共享借代。使几个文字成为一个紧凑的整体，字与字之间有相互联系的笔划。高级感，扁平化，黑色高端大气背景。",
-      "displayText": "",
-      "category": "cat-6",
-      "categoryName": "简约现代",
-      "localPath": "/gallery/cat-6/g531.jpg"
-    },
-    {
-      "id": "g533",
-      "sourceUrl": "https://jimeng.jianying.com/ai-tool/detail/7603590177314917641",
-      "prompt": "瑞士国际主义平面设计，Noël Leu风格。画面中心是极简理性几何无衬线字体“MIQIAI”，笔画由流畅的圆形与平滑的曲线组合而成，风格统一。画面上方，极细无衬线字体依次排列“2026”、“Design”、“MIQIAI”。左下角标注“MIQIAI - DESIGN”，右下角标注“东方美学.无限创造”。整体遵循严格的网格系统构图，水平与垂直轴线规整对齐。背景为浅灰色，文字为黑色，呈现哑光艺术纸肌理，边缘裁切锐利规整。",
-      "displayText": "",
-      "category": "cat-6",
-      "categoryName": "简约现代",
-      "localPath": "/gallery/cat-6/g533.jpg"
-    },
-    {
-      "id": "g534",
-      "sourceUrl": "https://jimeng.jianying.com/ai-tool/detail/7538055747725298959",
-      "prompt": "创意字体设计，线条流畅且富有艺术感，中文“潮玩新世界” ，配有英文。设计灵感：将字体进行抽象变形，创造出独特的节奏和动感，给人以强烈的视觉冲击。高级感，扁平化，大师作品。",
-      "displayText": "",
-      "category": "cat-6",
-      "categoryName": "简约现代",
-      "localPath": "/gallery/cat-6/g534.jpg"
-    },
-    {
-      "id": "g537",
-      "sourceUrl": "https://jimeng.jianying.com/ai-tool/detail/7619256527014137134",
-      "prompt": "创意童玩字体设计LOGO，英文“DevCo” ，线条流畅、舒展且具有艺术感，将字体进行抽象变形，似是而非，相邻两个字上一字的末笔是下一字的首笔，相邻字的笔划可以共享借代。使几个文字成为一个紧凑的整体，字与字之间有相互联系的笔划。高级感，扁平化，黑色高端大气背景。",
-      "displayText": "",
-      "category": "cat-6",
-      "categoryName": "简约现代",
-      "localPath": "/gallery/cat-6/g537.jpg"
-    },
-    {
-      "id": "g539",
-      "sourceUrl": "https://jimeng.jianying.com/ai-tool/detail/7510588683775511849",
-      "prompt": "文字设计,KEZENSAI，英文字体设计，均匀流畅的线条，收笔略有拖尾，起笔锐利，结构清晰，偏几何感，笔画之间距离比较均匀，连笔签名字体，#000000黑色背景，",
-      "displayText": "",
-      "category": "cat-6",
-      "categoryName": "简约现代",
-      "localPath": "/gallery/cat-6/g539.jpg"
-    },
-    {
-      "id": "g541",
-      "sourceUrl": "https://jimeng.jianying.com/ai-tool/detail/7523514303270374708",
-      "prompt": "字体设计，英文“DNA” ，线条流畅、舒展且具有艺术感，将字体进行抽象变形，似是而非，相邻两个字上一字的末笔是下一字的首笔，相邻字的笔划可以共享借代。使几个文字成为一个紧凑的整体，字与字之间有相互联系的笔划。高级感，扁平化，黑色高端大气背景。",
-      "displayText": "",
-      "category": "cat-6",
-      "categoryName": "简约现代",
-      "localPath": "/gallery/cat-6/g541.jpg"
-    },
-    {
-      "id": "g547",
-      "sourceUrl": "https://jimeng.jianying.com/ai-tool/detail/7512654267342277922",
-      "prompt": "艺术字体设计“野趣”，电商活动标题字简约时尚，字体笔画较粗黑体艺术字，字体笔画扭曲变形，有动感、视觉有张力，笔画拉长设计，极具视觉冲击力，大气，线条活泼有动态感，周围星星装饰，传奇大师字体作品，字体荧光色，黑色背景",
-      "displayText": "",
-      "category": "cat-6",
-      "categoryName": "简约现代",
-      "localPath": "/gallery/cat-6/g547.jpg"
-    },
-    {
       "id": "g548",
       "sourceUrl": "https://jimeng.jianying.com/ai-tool/detail/7526837011366415650",
       "prompt": "字体标志“夏日露营季\"，创意字体设计，线条流畅且富有艺术感，将字体进行抽象变形，创造出独特的节奏和动感，给人以强烈的视觉冲击。加入帐篷，风筝，相机等装饰元素，白色加黄绿色点缀，高级感，黑色背景，",
@@ -2584,24 +2458,6 @@
       "localPath": "/gallery/cat-10/g597.jpg"
     },
     {
-      "id": "g598",
-      "sourceUrl": "https://jimeng.jianying.com/ai-tool/detail/7574726729244200243",
-      "prompt": "字体设计。中文内容“恋与深空”采用艺术化设计，笔画转灵动，富有曲线美，哥特风格字体设计，尖锐的笔画，弯曲曲线充满神秘感，笔画变形为流星轨迹，填充闪烁星光与星座图案。部分笔画如丝带般飘逸缠绕，营造出轻盈、虚幻之感。在文字周围星星点缀，增添梦幻氛围，深蓝色背景",
-      "displayText": "",
-      "category": "cat-10",
-      "categoryName": "创意字体",
-      "localPath": "/gallery/cat-10/g598.jpg"
-    },
-    {
-      "id": "g599",
-      "sourceUrl": "",
-      "prompt": "图片中的文字修改成这个“生活，是平淡的日常”",
-      "displayText": "",
-      "category": "cat-11",
-      "categoryName": "其他",
-      "localPath": "/gallery/cat-11/g599.jpg"
-    },
-    {
       "id": "g283",
       "sourceUrl": "",
       "prompt": "##参考图中的字体颜色样式，中国风书法字体文字内容为 “冲在前面吧！”字体为耀眼的金色，带有金属光泽和高光效果，呈现 3D 立体质感书法笔触流畅且富有艺术感，呈现飘逸洒脱的风格，背景为白色",
@@ -2773,15 +2629,6 @@
       "localPath": "/gallery/cat-0/g301.jpg"
     },
     {
-      "id": "g302",
-      "sourceUrl": "",
-      "prompt": "##毛笔书法作品，书写“春风得意”四个汉字，风格为行书（笔画连贯、笔势舒展），墨色浓黑有飞白效果（笔画中露出纸张纹理的干枯笔触），纯白透明背景，排版是横向居中排列，字体大小均匀且笔画粗细有自然变化，细节：起笔收笔有毛笔顿挫感、部分笔画带轻微飞白肌理，整体气韵流畅洒脱，传统书法艺术质感 --ar 4:1 --style raw --v 6.0",
-      "displayText": "“春风得意”四个汉字",
-      "category": "cat-0",
-      "categoryName": "书法体",
-      "localPath": "/gallery/cat-0/g302.jpg"
-    },
-    {
       "id": "g303",
       "sourceUrl": "",
       "prompt": "“校园战报”用毛笔书法字体，笔画灵动飘逸，粗细变化自然随性，墨色浓淡有致，尽显潇酒豪放之感。运笔间展现出一气呵成的流畅性，富有艺术韵味。黑底白字，营造出清新雅致、充满生机的春日氛围，传递出万物在春天蓬勃生长的美好意象。",
@@ -2951,15 +2798,6 @@
       "category": "cat-0",
       "categoryName": "书法体",
       "localPath": "/gallery/cat-0/g321.jpg"
-    },
-    {
-      "id": "g322",
-      "sourceUrl": "",
-      "prompt": "##文艺手写字体“乘风破浪”艺术字体设计，手写英文小字“DESIGN BY BEIYU”要求毛笔手写风格，极强的艺术写作风格。视觉震撼，笔画增加水墨笔刷效果，笔画巧妙延长设计变形，黑底白字。",
-      "displayText": "文艺手写字体",
-      "category": "cat-0",
-      "categoryName": "书法体",
-      "localPath": "/gallery/cat-0/g322.jpg"
     },
     {
       "id": "g323",
@@ -3439,15 +3277,6 @@
       "localPath": "/gallery/cat-1/g375.jpg"
     },
     {
-      "id": "g376",
-      "sourceUrl": "",
-      "prompt": "##把图片内容建模成霓虹灯 保留粉色 霓虹灯管风，发光描边，玻璃感内发光，夜店霓虹灯质感",
-      "displayText": "把图片内容建模成霓虹",
-      "category": "cat-1",
-      "categoryName": "科技感",
-      "localPath": "/gallery/cat-1/g376.jpg"
-    },
-    {
       "id": "g377",
       "sourceUrl": "",
       "prompt": "##参考图中的logo，风格多彩段霓虹灯管招牌字体，笔画张家佳设计字体连笔变形设计，粗圆饱满的玻璃透明灯管内包裹着多色段细长灯丝。色彩明亮艳丽的渐变荧光粉发光效果，字体边缘光晕扩散和内部颗粒噪点，杰作，，透明玻璃管质感，赛博朋克，纯黑色背景。",
@@ -3590,15 +3419,6 @@
       "category": "cat-1",
       "categoryName": "科技感",
       "localPath": "/gallery/cat-1/g392.jpg"
-    },
-    {
-      "id": "g393",
-      "sourceUrl": "",
-      "prompt": "##赛博朋克未来复古风格，核心元素文字是艺术化处理，整体视觉呈现出强烈的霓虹电子感；文字风格：采用立体厚重的像素化字体，以紫粉色渐变为主色调，搭配高光、描边增强科技感，装饰元素：围绕文字的元素包括霓虹星星、六边形蜂窝图案、类似UFO的飞碟造型、能量条、以及速度感的光效拖影；整体色彩明亮、饱和度高，是典型的Y2K+赛博朋克风格，字体与元素完美融合，融合的潮流设计风格，常用于游戏、品牌标识或潮流视觉物料。纯黑色背景，大师级获奖作品",
-      "displayText": "赛博朋克未来复古风格",
-      "category": "cat-1",
-      "categoryName": "科技感",
-      "localPath": "/gallery/cat-1/g393.jpg"
     },
     {
       "id": "g394",
@@ -3754,15 +3574,6 @@
       "localPath": "/gallery/cat-2/g410.jpg"
     },
     {
-      "id": "g411",
-      "sourceUrl": "",
-      "prompt": "##画面风格为简约文艺的手写字体风，背景为纯黑色，营造深邃静谧氛围。主体文字 “百日之约·恰逢秋暖” 以流畅自然的手写笔触呈现，字体灵动飘逸，笔画粗细有致，具艺术感，与参考图字体风格一致。 在中文下方，同样用随性的手写字体书写，与中文相互呼应。整体画面简洁干净，突出文字传达的浪漫意蕴，画面比例 16:9 ，达 4K 高清标准。",
-      "displayText": "画面风格为简约文艺的",
-      "category": "cat-2",
-      "categoryName": "手写体",
-      "localPath": "/gallery/cat-2/g411.jpg"
-    },
-    {
       "id": "g412",
       "sourceUrl": "",
       "prompt": "黑底白字，主体为现代艺术手写创意字体 “把生活拍成电影”；字体笔画融合柔美曲线与锐利直线，曲线飘逸延伸，直线挺拔利落；字形呈横向舒展且略带动态倾斜的布局，字间笔画相互呼应、富有视觉流动感；笔画粗细对比细腻（主笔稳重、辅笔纤细轻盈），线条边缘光滑自然；下方搭配纤细无衬线字体 “Frame Life Into a Movie”；整体营造 浪漫细腻、心动时的轻盈艺术 氛围，突出字体的曲线韵律、动态布局与中英文风格融合的效果。",
@@ -3797,15 +3608,6 @@
       "category": "cat-2",
       "categoryName": "手写体",
       "localPath": "/gallery/cat-2/g415.jpg"
-    },
-    {
-      "id": "g416",
-      "sourceUrl": "",
-      "prompt": "##画面风格为简约文艺的手写字体风，背景为纯黑色，营造深邃静谧氛围。主体文字 “人生是旷野” 以流畅自然的手写笔触呈现，字体灵动飘逸，笔画粗细有致，具艺术感，与参考图字体风格一致。英文 “accompany you roaming Yusheng” 在中文下方，同样用随性的手写字体书写，与中文相互呼应。整体画面简洁干净，突出文字传达的浪漫意蕴，画面比例 16:9 ，达 4K 高清标准。",
-      "displayText": "画面风格为简约文艺的",
-      "category": "cat-2",
-      "categoryName": "手写体",
-      "localPath": "/gallery/cat-2/g416.jpg"
     },
     {
       "id": "g417",
@@ -3860,15 +3662,6 @@
       "category": "cat-2",
       "categoryName": "手写体",
       "localPath": "/gallery/cat-2/g422.jpg"
-    },
-    {
-      "id": "g423",
-      "sourceUrl": "",
-      "prompt": "##画面风格为简约文艺的手写字体风，背景为纯黑色，营造深邃静谧氛围。主体文字 “洞见人性” 以流畅自然的手写笔触呈现，字体灵动飘逸，笔画粗细有致，具艺术感，与参考图字体风格一致。英文 “accompany you roaming Yusheng” 在中文下方，同样用随性的手写字体书写，与中文相互呼应。整体画面简洁干净，突出文字传达的浪漫意蕴，画面比例 16:9 ，达 4K 高清标准。",
-      "displayText": "画面风格为简约文艺的",
-      "category": "cat-2",
-      "categoryName": "手写体",
-      "localPath": "/gallery/cat-2/g423.jpg"
     },
     {
       "id": "g424",
@@ -4564,15 +4357,6 @@
       "localPath": "/gallery/cat-6/g500.jpg"
     },
     {
-      "id": "g501",
-      "sourceUrl": "",
-      "prompt": "矢量插画，标志，黑色背景，白色字，创意字体设计，流畅且富有艺术感，中文”夏日出游季”，橙黄色笔画点缀。设计灵感:将字体进行抽象变形，给人以强烈的视觉冲击。高级感，扁平化，大师作品",
-      "displayText": "矢量插画",
-      "category": "cat-6",
-      "categoryName": "简约现代",
-      "localPath": "/gallery/cat-6/g501.jpg"
-    },
-    {
       "id": "g502",
       "sourceUrl": "",
       "prompt": "##线条流畅且富有艺术感，中文“拾光記”，创意字体设计，英文“Video Recording Studio”设计灵感:将字体进行抽象变形，创造出独特的节奏和动感，给人以强烈的视觉冲击。黑底白字，高级感，扁平化，大师作品",
@@ -4789,15 +4573,6 @@
       "localPath": "/gallery/cat-6/g525.jpg"
     },
     {
-      "id": "g526",
-      "sourceUrl": "",
-      "prompt": "现代字体设计,艺术字风格,主体为“轻松”，字体融合几何线条与流畅曲线的创意造型,白色,背景为 深蓝色,居中构图,简洁平面设计,色彩对比鲜明,视觉聚焦于字体本身",
-      "displayText": "现代字体设计",
-      "category": "cat-6",
-      "categoryName": "简约现代",
-      "localPath": "/gallery/cat-6/g526.jpg"
-    },
-    {
       "id": "g527",
       "sourceUrl": "",
       "prompt": "黑色背景，创意字体设计，线条流畅且富有艺术感，中文“超级品牌周” 设计灵感：将字体进行抽象变形，创造出独特的节奏和动感，给人以强烈的视觉冲击。高级感，扁平化，大师作品",
@@ -4805,15 +4580,6 @@
       "category": "cat-6",
       "categoryName": "简约现代",
       "localPath": "/gallery/cat-6/g527.jpg"
-    },
-    {
-      "id": "g528",
-      "sourceUrl": "",
-      "prompt": "“创作一幅自然治愈主题的创意字体设计双版本作品： 配色：双版本色调 —— 版本一为纯黑背景搭配纯白色字体，简洁醒目；版本二为自然风景底色（绿草地、山林、浅灰天空）搭配白色字体，清新治愈； 细节元素：主体为‘聚米开放日’白色粗体创意字体（笔画做飘逸灵动的变形，呼应‘开放’的意象）；搭配纸飞机装饰元素、‘JUMI’品牌标识，以及英文‘JUMI Open Days’（用曲线装饰线条连接）；版本一（黑底）添加‘字体设计 / FONT DESIGN’标识、设计师信息；版本二（自然背景）底部添加‘Original Font’‘All Rights Reserved’等版权信息； 风格：现代简约 + 自然清新的创意字体设计风格，以粗体字体做灵动笔画变形，融合文艺治愈的松弛氛围，兼具现代设计感与自然主题的适配性。”",
-      "displayText": "创作一幅自然治愈主题",
-      "category": "cat-6",
-      "categoryName": "简约现代",
-      "localPath": "/gallery/cat-6/g528.jpg"
     },
     {
       "id": "g529",
@@ -4834,15 +4600,6 @@
       "localPath": "/gallery/cat-6/g530.jpg"
     },
     {
-      "id": "g531",
-      "sourceUrl": "",
-      "prompt": "黑底白字，字体设计“鹊桥架梦”，字体风格简约现代且富有设计感。笔画形态独特，进行了艺术化处理，线条流畅且略带弧度，增添活泼灵动之感;整体结构规整，通过笔画的变形与点缀，呈现出时尚、新颖的视觉效果，契合青春、活力的主题。横排版",
-      "displayText": "黑底白字",
-      "category": "cat-6",
-      "categoryName": "简约现代",
-      "localPath": "/gallery/cat-6/g531.jpg"
-    },
-    {
       "id": "g532",
       "sourceUrl": "",
       "prompt": "##黑底白字，字体设计“张关合渣”，字体风格简约现代且富有设计感。笔画形态独特，进行了艺术化处理，线条流畅且略带弧度，增添活泼灵动之感;整体结构规整，通过笔画的变形与点缀，呈现出时尚、新颖的视觉效果，契合青春、活力的主题。",
@@ -4850,24 +4607,6 @@
       "category": "cat-6",
       "categoryName": "简约现代",
       "localPath": "/gallery/cat-6/g532.jpg"
-    },
-    {
-      "id": "g533",
-      "sourceUrl": "",
-      "prompt": "帮我生成图片：帮我生成图片：图片1参考图片字体风格，创意字体，内容主标题“非“塑料”关系”字体设计，的线条流畅、灵动、活泼，笔画粗壮有力，无衬线字体，极具现代感。黑底白字，高级。",
-      "displayText": "帮我生成图片",
-      "category": "cat-6",
-      "categoryName": "简约现代",
-      "localPath": "/gallery/cat-6/g533.jpg"
-    },
-    {
-      "id": "g534",
-      "sourceUrl": "",
-      "prompt": "黑底白字，背景干净，生成一种大胆、前卫的现代中文字体，内容为 “初见童颜卡” 。字体笔画粗壮、强劲，连笔，有着明显的尖锐边角，散发出充满活力和能量的氛围。呈现极简风格，标志设计，大师作品，",
-      "displayText": "黑底白字",
-      "category": "cat-6",
-      "categoryName": "简约现代",
-      "localPath": "/gallery/cat-6/g534.jpg"
     },
     {
       "id": "g535",
@@ -4888,15 +4627,6 @@
       "localPath": "/gallery/cat-6/g536.jpg"
     },
     {
-      "id": "g537",
-      "sourceUrl": "",
-      "prompt": "线条流畅且富有艺术感，中文“删繁就简，花开如棠”，搭配英文小字“Lvy”，创意字体设计，设计灵感:将字体进行抽象变形，笔画大胆夸张，创造出独特的节奏和动感，给人以强烈的视觉冲击。笔画有颗粒噪点，黑底白字，高级感，扁平化，大师作品",
-      "displayText": "线条流畅且富有艺术感",
-      "category": "cat-6",
-      "categoryName": "简约现代",
-      "localPath": "/gallery/cat-6/g537.jpg"
-    },
-    {
       "id": "g538",
       "sourceUrl": "",
       "prompt": "白底黑字，字体设计，字体居中，上下留白，战斗主题艺术字体 “冲锋衣”，激进解构笔画，融入闪电箭头元素，不规则自由排版，极端厚重切割笔画，传递激烈对抗与能量爆发氛围，适配赛事、活动宣传设计 。极简留白空间。",
@@ -4906,15 +4636,6 @@
       "localPath": "/gallery/cat-6/g538.jpg"
     },
     {
-      "id": "g539",
-      "sourceUrl": "",
-      "prompt": "白色背景，黑色字体，干净的背景，创意字体设计“成就梦想 无限创造”加入小字英文“Create Dreams”进行排版，字体居中画面，字体设计富有动感与活力，笔画线条流畅、舒展且具有艺术感，将字体进行抽象变形，相邻字的笔划可以连笔和共用。夸张的笔画弧度，字体造型充满动感且棱角分明，融合尖锐边缘与流畅曲线，营造出大胆、视觉冲击力强的装饰性字体效果，笔画转角圆角处理，笔画延伸，居于画面中心，简约而强大。部分笔画融入四角星形和爱心号图形，让整体更准确的表达和贴近主题。画面上方，极细无衬线字体依次排列“2026”、“Design”、“YOZE”。左下角标注“YOZE - DESIGN”，右下角标注“创造梦想”。",
-      "displayText": "白色背景",
-      "category": "cat-6",
-      "categoryName": "简约现代",
-      "localPath": "/gallery/cat-6/g539.jpg"
-    },
-    {
       "id": "g540",
       "sourceUrl": "",
       "prompt": "##白色背景，黑色字体，干净的背景，创意字体设计“栀子花开”，字体设计富有动感与活力，笔画线条流畅、舒展且具有艺术感，将字体进行抽象变形，相邻字的笔划可以连笔和共用。夸张的笔画弧度，字体造型充满动感且棱角分明，融合尖锐边缘与流畅曲线，营造出大胆、视觉冲击力强的装饰性字体效果，极小英文VISION。",
@@ -4922,15 +4643,6 @@
       "category": "cat-6",
       "categoryName": "简约现代",
       "localPath": "/gallery/cat-6/g540.jpg"
-    },
-    {
-      "id": "g541",
-      "sourceUrl": "",
-      "prompt": "LOGO设计，品牌标志，极简，图型设计，\"S\"“Z”巧妙的创造性的融合在一起，完美，杰作，设计感，白色背景，大师级作品，极简设计感，图形组合，极简图形logo，奇妙利用正负形，logo大师作品，创意logo @矢志",
-      "displayText": "设计",
-      "category": "cat-6",
-      "categoryName": "简约现代",
-      "localPath": "/gallery/cat-6/g541.jpg"
     },
     {
       "id": "g542",
@@ -4976,15 +4688,6 @@
       "category": "cat-6",
       "categoryName": "简约现代",
       "localPath": "/gallery/cat-6/g546.jpg"
-    },
-    {
-      "id": "g547",
-      "sourceUrl": "",
-      "prompt": "品牌标题字体设计，“自然生长”，严谨的无衬线体，现代极简风格，线条粗细统一，扁平化，大师作品，黑底白字",
-      "displayText": "品牌标题字体设计",
-      "category": "cat-6",
-      "categoryName": "简约现代",
-      "localPath": "/gallery/cat-6/g547.jpg"
     },
     {
       "id": "g548",
@@ -5435,24 +5138,6 @@
       "category": "cat-8",
       "categoryName": "霓虹灯效",
       "localPath": "/gallery/cat-8/g597.jpg"
-    },
-    {
-      "id": "g598",
-      "sourceUrl": "",
-      "prompt": "黑底白字，字体设计“在野的生活”，线条流畅且富有艺术感，字体进行抽象变形，创造出独特的节奏和动感，给人以强烈的视觉冲击。大师作品。",
-      "displayText": "黑底白字",
-      "category": "cat-10",
-      "categoryName": "创意字体",
-      "localPath": "/gallery/cat-10/g598.jpg"
-    },
-    {
-      "id": "g599",
-      "sourceUrl": "",
-      "prompt": "##图片中的文字修改成这个“生活，是平淡的日常”",
-      "displayText": "图片中的文字修改成这",
-      "category": "cat-11",
-      "categoryName": "其他",
-      "localPath": "/gallery/cat-11/g599.jpg"
     },
     {
       "id": "g600",
