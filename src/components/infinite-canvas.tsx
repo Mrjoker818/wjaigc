@@ -37,7 +37,7 @@ import type { CanvasGenGroup, GenGroupToolbar, GroupRefImage, GenGroupType, Refe
 import { createGroupRefImage, createGenGroup, generateGroupId, calculateConnectionPoints, aspectRatioToDimensions, calculateActualPixels, REFERENCE_CATEGORIES, REFERENCE_CATEGORY_LABELS, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS, MODEL_ASPECT_RATIOS, MODEL_QUALITIES, QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES, findModelConfig } from '@/lib/canvas-generation-group';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import type { PsdLayerItem } from '@/types/psdLayer';
-import { toStableImageUrl, onPersistComplete, getCachedLocalUrl } from '@/lib/stable-image-url';
+import { toStableImageUrl, awaitStableImageUrl, onPersistComplete, getCachedLocalUrl } from '@/lib/stable-image-url';
 import { taskEventsClient } from '@/lib/task-events-client';
 import { APP_VERSION_LABEL } from '@/config/app-meta';
 import OhMyPrompt from '@/components/oh-my-prompt';
@@ -5989,7 +5989,7 @@ export function InfiniteCanvas({
       }
       if (resultUrl) {
         updateProcessingFrame(placeholderId, { progress: 96, status: '正在载入结果...' });
-        const stableUrl = await toStableImageUrl(resultUrl as string);
+        const stableUrl = await awaitStableImageUrl(resultUrl as string);
         // 无损放大结果异步检测实际尺寸
         if (upscaleMode === 'lossless') {
           const imgEl = new Image();
@@ -6026,7 +6026,7 @@ export function InfiniteCanvas({
     }
     setIsEditProcessing(false);
     setActiveTool('none');
-  }, [selectedImageData, upscalePreset, upscaleMode, upscaleActualW, upscaleActualH, getApiKey, getCurrentModel, pollForResult, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, toStableImageUrl, getUpscaleTargetDimensions]);
+  }, [selectedImageData, upscalePreset, upscaleMode, upscaleActualW, upscaleActualH, getApiKey, getCurrentModel, pollForResult, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, awaitStableImageUrl, getUpscaleTargetDimensions]);
 
   // 1b. Upscale trigger - opens floating control bar
   const handleOpenUpscale = useCallback(() => {
@@ -6179,7 +6179,7 @@ export function InfiniteCanvas({
         const w = img.originalWidth || Math.round(img.width);
         const h = img.originalHeight || Math.round(img.height);
         updateProcessingFrame(placeholderId, { progress: 96, status: '正在载入透明背景结果...' });
-        const stableUrl = await toStableImageUrl(resultUrl);
+        const stableUrl = await awaitStableImageUrl(resultUrl);
         const completedImage = completeProcessingFrame(placeholderId, stableUrl, img.width, img.height, {
           originalWidth: w,
           originalHeight: h,
@@ -6191,7 +6191,7 @@ export function InfiniteCanvas({
         // 同时添加黑白蒙版图到画布（紧邻主体图右侧）
         if (maskResultUrl && completedImage) {
           try {
-            const stableMaskUrl = await toStableImageUrl(maskResultUrl);
+            const stableMaskUrl = await awaitStableImageUrl(maskResultUrl);
             const gap = 10;
             const maskImage: CanvasImage = {
               id: `mask-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
@@ -6522,6 +6522,7 @@ export function InfiniteCanvas({
       if (!res.ok) throw new Error(`多角度生成失败: HTTP ${res.status}`);
       const data = await res.json();
       if (!data.success) {
+        removeProcessingFrame(placeholderId);
         alert(translateErrorFrontend(data.error || '多角度生成失败'));
         return;
       }
@@ -6530,11 +6531,13 @@ export function InfiniteCanvas({
         updateProcessingFrame(placeholderId, { progress, status });
       });
       if (!resultUrl) {
+        removeProcessingFrame(placeholderId);
         alert(lastPollErrorRef.current || '多角度生成超时，请重试');
         return;
       }
       updateProcessingFrame(placeholderId, { progress: 96, status: '正在载入新角度图片...' });
-      const stableUrl = await toStableImageUrl(resultUrl);
+      // ★ 使用 awaitStableImageUrl 同步等待持久化完成，确保URL可被浏览器加载
+      const stableUrl = await awaitStableImageUrl(resultUrl);
       completeProcessingFrame(placeholderId, stableUrl, img.width, img.height, {
         originalWidth: img.originalWidth || Math.round(img.width),
         originalHeight: img.originalHeight || Math.round(img.height),
@@ -6545,6 +6548,7 @@ export function InfiniteCanvas({
       setActiveTool('none');
     } catch (e) {
       console.error('Multi-angle failed:', e);
+      removeProcessingFrame(placeholderId);
       alert('多角度 AI 生成失败，请检查模型或 API Key');
     } finally {
       setIsMultiAngleProcessing(false);
@@ -7086,7 +7090,7 @@ export function InfiniteCanvas({
         if (resultUrl) {
           updateProcessingFrame(placeholderId, { progress: 96, status: '正在合成编辑结果...' });
           try {
-            const stableUrl = await toStableImageUrl(resultUrl);
+            const stableUrl = await awaitStableImageUrl(resultUrl);
             completeProcessingFrame(placeholderId, stableUrl, currentEditImg.width, currentEditImg.height, { originalWidth: currentEditImg.originalWidth || Math.round(currentEditImg.width), originalHeight: currentEditImg.originalHeight || Math.round(currentEditImg.height), modelName: modelInfo.apiDisplayName || modelInfo.model, apiProvider: modelInfo.providerName || '' }, 'edit');
           } catch (stableErr) {
             console.error('Stable URL conversion failed:', stableErr);
@@ -7200,7 +7204,7 @@ export function InfiniteCanvas({
         if (resultUrl) {
           updateProcessingFrame(placeholderId, { progress: 96, status: '正在载入扩展结果...' });
           try {
-            const stableUrl = await toStableImageUrl(resultUrl);
+            const stableUrl = await awaitStableImageUrl(resultUrl);
             completeProcessingFrame(placeholderId, stableUrl, currentEditImg.width * (finalW / origW), currentEditImg.height * (finalH / origH), { originalWidth: finalW, originalHeight: finalH, modelName: modelInfo.apiDisplayName || modelInfo.model, apiProvider: modelInfo.providerName || '' }, 'edit');
           } catch (stableErr) {
             completeProcessingFrame(placeholderId, resultUrl, currentEditImg.width * (finalW / origW), currentEditImg.height * (finalH / origH), { originalWidth: finalW, originalHeight: finalH, modelName: modelInfo.apiDisplayName || modelInfo.model, apiProvider: modelInfo.providerName || '' }, 'edit');
@@ -8320,6 +8324,24 @@ export function InfiniteCanvas({
                         // 从URL提取文件名
                         const filename = url.split('/').pop()?.split('?')[0];
                         if (filename) img.src = '/api/serve-upload/' + filename;
+                        // ★ 同时触发异步持久化，成功后更新图片URL
+                        fetch('/api/save-image', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ imageUrl: url }),
+                        }).then(r => r.json()).then(data => {
+                          if (data.success && data.url && typeof data.url === 'string') {
+                            // 更新图片URL为本地持久化URL
+                            onImagesChange(images.map((im: CanvasImage) => im.id === image.id ? { ...im, url: data.url } : im));
+                          }
+                        }).catch(() => {});
+                      }
+                      // 本地路径加载失败 → 尝试通过 getCachedLocalUrl 获取持久化后的URL
+                      else if (url.startsWith('/api/serve-upload/')) {
+                        const cachedLocal = getCachedLocalUrl(url);
+                        if (cachedLocal !== url) {
+                          img.src = cachedLocal;
+                        }
                       }
                     }}
                   />

@@ -144,6 +144,58 @@ export async function toStableImageUrl(imageUrl: string): Promise<string> {
 }
 
 /**
+ * 同步等待远程URL持久化完成，返回本地URL
+ * 适用于关键路径（如 completeProcessingFrame），确保URL可被浏览器加载
+ * 如果持久化失败，返回原始远程URL（兜底）
+ */
+export async function awaitStableImageUrl(imageUrl: string, timeoutMs: number = 15000): Promise<string> {
+  if (!imageUrl || imageUrl.startsWith('data:')) return imageUrl;
+  if (!/^https?:\/\//i.test(imageUrl)) return imageUrl; // 本地路径直接返回
+
+  // 已缓存
+  const cachedLocal = persistedRemoteUrls.get(imageUrl);
+  if (cachedLocal) return cachedLocal;
+
+  // 正在持久化中，等待完成
+  if (persistingUrls.has(imageUrl)) {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(imageUrl), timeoutMs);
+      const unsub = onPersistComplete((originalUrl, localUrl) => {
+        if (originalUrl === imageUrl) {
+          clearTimeout(timer);
+          unsub();
+          resolve(localUrl);
+        }
+      });
+    });
+  }
+
+  // 尚未开始持久化，同步执行
+  try {
+    const response = await fetch('/api/save-image', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageUrl }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (response.ok) {
+      const data = await response.json();
+      if (data.success && data.url && typeof data.url === 'string') {
+        persistedRemoteUrls.set(imageUrl, data.url);
+        // 通知监听器
+        for (const listener of persistListeners) {
+          try { listener(imageUrl, data.url); } catch {}
+        }
+        return data.url;
+      }
+    }
+  } catch {}
+
+  // 兜底：返回原始URL
+  return imageUrl;
+}
+
+/**
  * 获取已缓存的本地 URL（同步），如果没有缓存则返回原始 URL
  * 用于组件渲染时快速获取最优 URL，不触发网络请求
  */

@@ -1921,7 +1921,14 @@ export async function POST(request: NextRequest) {
       }
 
       if (result?.directUrl) {
-        return NextResponse.json({ success: true, imageUrl: result.directUrl, action, usedModel: result.usedModel, endpoint: usedEndpoint });
+        // ★ 持久化远程URL到本地，确保浏览器可靠加载（部分API代理URL需要认证或会过期，浏览器直接加载会失败）
+        let persistedUrl = result.directUrl;
+        try {
+          const { persistRemoteImage } = await import('@/lib/s3-storage');
+          const localUrl = await persistRemoteImage(result.directUrl, 'generate/multi-angle');
+          if (localUrl) persistedUrl = localUrl;
+        } catch {}
+        return NextResponse.json({ success: true, imageUrl: persistedUrl, action, usedModel: result.usedModel, endpoint: usedEndpoint });
       }
       // ★ 注册异步多角度任务（存储提供商信息，供 poll-task 轮询远端API）
       if (result?.taskId) {
@@ -2961,7 +2968,14 @@ export async function POST(request: NextRequest) {
             const rawDataUrl = `data:image/png;base64,${rawBuf.toString('base64')}`;
             return NextResponse.json({ success: true, imageUrl: rawDataUrl, action, engine: 'ai-raw' });
           } catch {
-            return NextResponse.json({ success: true, imageUrl: result.directUrl, action, engine: 'ai-raw' });
+            // ★ 最后兜底：尝试持久化远程URL，避免浏览器无法加载
+            let fallbackUrl = result.directUrl;
+            try {
+              const { persistRemoteImage } = await import('@/lib/s3-storage');
+              const localUrl = await persistRemoteImage(result.directUrl, 'generate/crop');
+              if (localUrl) fallbackUrl = localUrl;
+            } catch {}
+            return NextResponse.json({ success: true, imageUrl: fallbackUrl, action, engine: 'ai-raw' });
           }
         }
       }
@@ -3208,8 +3222,15 @@ export async function POST(request: NextRequest) {
 
           return NextResponse.json({ success: true, imageUrl: compositeResultUrl, action, targetWidth: targetW, targetHeight: targetH });
         } catch (compositeErr) {
-          console.error('[outpaint] Persist failed, using raw result:', compositeErr);
-          return NextResponse.json({ success: true, imageUrl: result.directUrl, action, targetWidth: targetW, targetHeight: targetH });
+          console.error('[outpaint] Persist failed, trying to persist raw URL:', compositeErr);
+          // ★ 尝试持久化远程URL，避免浏览器无法加载
+          let fallbackUrl = result.directUrl;
+          try {
+            const { persistRemoteImage } = await import('@/lib/s3-storage');
+            const localUrl = await persistRemoteImage(result.directUrl, 'generate/outpaint');
+            if (localUrl) fallbackUrl = localUrl;
+          } catch {}
+          return NextResponse.json({ success: true, imageUrl: fallbackUrl, action, targetWidth: targetW, targetHeight: targetH });
         }
       }
 
