@@ -6,8 +6,8 @@
  * subject identity before image generation, preventing misidentification
  * (e.g. medicine bottle → cosmetics).
  *
- * The function finds an available chat model from admin-configured providers
- * and sends the image with a focused identification prompt.
+ * The function finds an available VISION-capABLE chat model from admin-configured
+ * providers and sends the image with a focused identification prompt.
  */
 import { findProviderForFeature, getApiProviders } from './server-api-config';
 import { fetchWithV1Retry } from './api-helpers';
@@ -15,7 +15,7 @@ import type { ModelInfo } from './universal-api-types';
 
 const IDENTIFY_PROMPT = `Analyze this image carefully and identify ALL key visual elements:
 
-1. MAIN SUBJECT: What is the primary object/character/scene? Be extremely specific about type, shape, color, texture.
+1. MAIN SUBJECT: What is the primary object/character/scene? Be extremely specific about type, shape, color, texture, material.
 2. STYLE: What is the visual style? (e.g., photorealistic, anime, oil painting, 3D render, minimalist, etc.)
 3. COMPOSITION: How is the subject framed? (e.g., centered, close-up, full body, bird's eye, etc.)
 4. COLORS: What are the dominant colors and color palette?
@@ -46,35 +46,111 @@ function getModelIds(provider: { selectedModels?: string[]; discoveredModels?: M
   return [...new Set([...selected, ...discovered])];
 }
 
-/** Check if a model ID is a chat/vision model (not image generation) */
+/**
+ * Check if a model ID is likely to support vision/image input
+ * ★ 关键改进：优先选择支持视觉的模型，避免发送图片到纯文本模型导致静默失败
+ */
+function isVisionModel(modelId: string): boolean {
+  const lower = modelId.toLowerCase();
+
+  // Known non-vision models — explicitly exclude
+  const nonVisionKeywords = [
+    'dall-e', 'flux', 'stable-diffusion', 'midjourney', 'sd3', 'sdxl',
+    'kandinsky', 'playground', 'ideogram', 'whisper', 'tts', 'embedding',
+    'dall-e-2', 'dall-e-3',
+    'gpt-3.5-turbo',           // ★ gpt-3.5 不支持视觉
+    'gpt-3.5-turbo-16k',
+    'gpt-3.5-turbo-instruct',
+    'text-',                    // text-embedding, text-davinci 等
+    'babbage', 'davinci', 'curie', 'ada',  // 旧版模型
+    'o1-mini', 'o1-preview',   // o1 不支持视觉
+    'deepseek-r1',             // deepseek-r1 推理模型不支持视觉
+    'deepseek-chat',           // deepseek-chat 部分不支持视觉
+  ];
+  if (nonVisionKeywords.some(kw => lower.includes(kw))) return false;
+
+  // Known vision-capable models — explicitly include
+  const visionKeywords = [
+    'gpt-4o', 'gpt-4-turbo', 'gpt-4-vision', 'gpt-4-1106', 'gpt-4-0125',
+    'gpt-4.1', 'gpt-4.5',
+    'gemini', 'claude-3', 'claude-4', 'qwen-vl', 'qwen2-vl', 'qwen2.5-vl',
+    'glm-4v', 'internvl', 'llava', 'cogvlm',
+    'vision',
+  ];
+  if (visionKeywords.some(kw => lower.includes(kw))) return true;
+
+  // Default: GPT-4 class and above are likely vision-capable
+  // But unknown models are treated as non-vision to be safe
+  return false;
+}
+
+/** Check if a model ID is a chat model (not image generation or embedding) */
 function isChatModel(modelId: string): boolean {
   const imageKeywords = ['dall-e', 'flux', 'stable-diffusion', 'midjourney', 'sd3', 'sdxl', 'kandinsky', 'playground', 'ideogram'];
   return !imageKeywords.some(kw => modelId.toLowerCase().includes(kw));
 }
 
 /**
- * Find an available chat model provider for vision identification
+ * Find an available vision-capable chat model provider
+ * ★ 核心改进：优先选择支持视觉的模型，确保图片能被正确识别
  */
-async function findChatProvider(): Promise<{ baseUrl: string; apiKey: string; model: string } | null> {
-  // 1. Try findProviderForFeature('chat') first
-  const chatProvider = await findProviderForFeature('chat');
-  if (chatProvider?.apiKey) {
-    const chatModels = getModelIds(chatProvider).filter(isChatModel);
-    if (chatModels.length > 0) {
+async function findVisionProvider(): Promise<{ baseUrl: string; apiKey: string; model: string } | null> {
+  const providers = await getApiProviders();
+
+  // Strategy 1: Find provider with explicitly vision-capable models
+  // 优先级：vlm类型 > chat类型中的视觉模型 > 任意提供商中的视觉模型
+  for (const featureType of ['vlm', 'chat'] as const) {
+    const featureProvider = await findProviderForFeature(featureType);
+    if (featureProvider?.apiKey) {
+      const models = getModelIds(featureProvider);
+      // ★ 先找支持视觉的模型
+      const visionModels = models.filter(isVisionModel);
+      if (visionModels.length > 0) {
+        // 优先选 gpt-4o / gemini 系列
+        const preferred = visionModels.find(m =>
+          m.toLowerCase().includes('gpt-4o') ||
+          m.toLowerCase().includes('gemini') ||
+          m.toLowerCase().includes('claude-3') ||
+          m.toLowerCase().includes('qwen-vl')
+        );
+        return {
+          baseUrl: featureProvider.baseUrl,
+          apiKey: featureProvider.apiKey,
+          model: preferred || visionModels[0],
+        };
+      }
+      // 如果没有已知视觉模型，尝试使用 chat 模型（可能是未知但支持视觉的模型）
+      const chatModels = models.filter(isChatModel);
+      if (chatModels.length > 0 && featureType === 'chat') {
+        return {
+          baseUrl: featureProvider.baseUrl,
+          apiKey: featureProvider.apiKey,
+          model: chatModels[0],
+        };
+      }
+    }
+  }
+
+  // Strategy 2: Scan all providers for vision models
+  for (const p of providers) {
+    if (!p.apiKey || !p.isEnabled) continue;
+    const models = getModelIds(p);
+    const visionModels = models.filter(isVisionModel);
+    if (visionModels.length > 0) {
       return {
-        baseUrl: chatProvider.baseUrl,
-        apiKey: chatProvider.apiKey,
-        model: chatModels[0],
+        baseUrl: p.baseUrl,
+        apiKey: p.apiKey,
+        model: visionModels[0],
       };
     }
   }
 
-  // 2. Try all providers for any chat model
-  const providers = await getApiProviders();
+  // Strategy 3: Fallback — use any chat model (may not support vision)
   for (const p of providers) {
     if (!p.apiKey || !p.isEnabled) continue;
     const models = getModelIds(p).filter(isChatModel);
     if (models.length > 0) {
+      console.warn(`[identify-subject] No vision model found, falling back to chat model: ${models[0]}`);
       return {
         baseUrl: p.baseUrl,
         apiKey: p.apiKey,
@@ -156,7 +232,7 @@ async function imageToBase64(imageUrl: string): Promise<string | null> {
  * Identify the main subject in an image using AI vision
  *
  * @param imageUrl - URL or path of the image to identify
- * @param timeoutMs - Timeout in milliseconds (default 15s)
+ * @param timeoutMs - Timeout in milliseconds (default 30s)
  * @returns Subject description in English and Chinese, or null if identification fails
  */
 export async function identifyImageSubject(
@@ -167,11 +243,13 @@ export async function identifyImageSubject(
   const maxRetries = 2;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
-      const provider = await findChatProvider();
+      const provider = await findVisionProvider();
       if (!provider) {
-        console.warn('[identify-subject] No chat model provider available for vision identification');
+        console.warn('[identify-subject] No vision-capable model provider available for identification');
         return null;
       }
+
+      console.info(`[identify-subject] Using model: ${provider.model} (attempt ${attempt + 1}/${maxRetries})`);
 
       const base64 = await imageToBase64(imageUrl);
       if (!base64) {
@@ -179,95 +257,122 @@ export async function identifyImageSubject(
         return null;
       }
 
-    const requestBody = {
-      model: provider.model,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: IDENTIFY_PROMPT },
-            { type: 'image_url', image_url: { url: base64 } },
-          ],
-        },
-      ],
-      max_tokens: 200,
-      temperature: 0.1,
-    };
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-    try {
-      const response = await fetchWithV1Retry(
-        provider.baseUrl,
-        '/chat/completions',
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${provider.apiKey}`,
-            'Content-Type': 'application/json',
+      // ★ 关键修复：增加 max_tokens 从 200 到 800
+      // 之前 200 token 不够用于 5 维度分析+双语输出，导致回复被截断
+      const requestBody = {
+        model: provider.model,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: IDENTIFY_PROMPT },
+              {
+                type: 'image_url',
+                image_url: {
+                  url: base64,
+                  // ★ 关键修复：添加 detail: 'high' 确保模型仔细分析图片
+                  detail: 'high',
+                },
+              },
+            ],
           },
-          body: JSON.stringify(requestBody),
-          signal: controller.signal,
-        },
-        true,
-        timeoutMs,
-      );
+        ],
+        max_tokens: 800,
+        temperature: 0.1,
+      };
 
-      clearTimeout(timeoutId);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-      if (!response.ok) {
-        console.warn('[identify-subject] Vision API error:', response.status);
-        return null;
-      }
-
-      // Handle both streaming and non-streaming responses
-      const responseText = await response.text();
-
-      // Try parsing as JSON first
-      let content = '';
       try {
-        const json = JSON.parse(responseText);
-        content = json.choices?.[0]?.message?.content || '';
-      } catch {
-        // Try parsing as SSE stream
-        const lines = responseText.split('\n');
-        for (const line of lines) {
-          if (line.startsWith('data: ') && line !== 'data: [DONE]') {
-            try {
-              const chunk = JSON.parse(line.slice(6));
-              const delta = chunk.choices?.[0]?.delta?.content || '';
-              content += delta;
-            } catch { /* skip */ }
+        const response = await fetchWithV1Retry(
+          provider.baseUrl,
+          '/chat/completions',
+          {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${provider.apiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(requestBody),
+            signal: controller.signal,
+          },
+          true,
+          timeoutMs,
+        );
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => '');
+          console.warn(`[identify-subject] Vision API error: ${response.status} ${errorText.slice(0, 200)}`);
+          if (attempt < maxRetries - 1) {
+            await new Promise(r => setTimeout(r, 1000));
+            continue;
+          }
+          return null;
+        }
+
+        // Handle both streaming and non-streaming responses
+        const responseText = await response.text();
+
+        // Try parsing as JSON first
+        let content = '';
+        try {
+          const json = JSON.parse(responseText);
+          content = json.choices?.[0]?.message?.content || '';
+        } catch {
+          // Try parsing as SSE stream
+          const lines = responseText.split('\n');
+          for (const line of lines) {
+            if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+              try {
+                const chunk = JSON.parse(line.slice(6));
+                const delta = chunk.choices?.[0]?.delta?.content || '';
+                content += delta;
+              } catch { /* skip */ }
+            }
           }
         }
+
+        if (!content) {
+          console.warn('[identify-subject] Vision API returned empty content');
+          if (attempt < maxRetries - 1) {
+            await new Promise(r => setTimeout(r, 1000));
+            continue;
+          }
+          return null;
+        }
+
+        // Clean up the content - remove quotes, extra whitespace
+        content = content.trim().replace(/^["']|["']$/g, '');
+
+        // Parse bilingual response (EN: xxx / ZH: xxx format)
+        let enDesc = content;
+        let zhDesc = content;
+
+        const enMatch = content.match(/EN:\s*(.+?)(?:\n|ZH:|$)/i);
+        const zhMatch = content.match(/ZH:\s*(.+?)$/im);
+        if (enMatch) enDesc = enMatch[1].trim();
+        if (zhMatch) zhDesc = zhMatch[1].trim();
+
+        // ★ 验证结果质量：如果描述太短（<5词），可能是幻觉或无效回复
+        if (enDesc.split(/\s+/).length < 5) {
+          console.warn(`[identify-subject] Description too short ("${enDesc}"), may be unreliable`);
+          if (attempt < maxRetries - 1) {
+            await new Promise(r => setTimeout(r, 1000));
+            continue;
+          }
+        }
+
+        console.info(`[identify-subject] Identified: en="${enDesc}", zh="${zhDesc}"`);
+        return {
+          en: enDesc,
+          zh: zhDesc || enDesc,
+        };
+      } finally {
+        clearTimeout(timeoutId);
       }
-
-      if (!content) {
-        console.warn('[identify-subject] Vision API returned empty content');
-        return null;
-      }
-
-      // Clean up the content - remove quotes, extra whitespace
-      content = content.trim().replace(/^["']|["']$/g, '');
-
-      // Parse bilingual response (EN: xxx / ZH: xxx format)
-      let enDesc = content;
-      let zhDesc = content;
-
-      const enMatch = content.match(/EN:\s*(.+?)(?:\n|ZH:|$)/i);
-      const zhMatch = content.match(/ZH:\s*(.+?)$/im);
-      if (enMatch) enDesc = enMatch[1].trim();
-      if (zhMatch) zhDesc = zhMatch[1].trim();
-
-      console.info(`[identify-subject] Identified: en="${enDesc}", zh="${zhDesc}"`);
-      return {
-        en: enDesc,
-        zh: zhDesc || enDesc,
-      };
-    } finally {
-      clearTimeout(timeoutId);
-    }
     } catch (err) {
       console.warn(`[identify-subject] Attempt ${attempt + 1}/${maxRetries} failed:`, err instanceof Error ? err.message : String(err));
       if (attempt < maxRetries - 1) {

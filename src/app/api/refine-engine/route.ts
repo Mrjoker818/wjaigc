@@ -571,12 +571,11 @@ async function submitRefineToApi(
     if (imageAsBase64) {
       rawBody.image = imageAsBase64;
     }
-    if (params.imageUrl.startsWith('http')) {
-      rawBody.image_urls = [params.imageUrl];
-    } else if (imageAsBase64) {
-      // Prefer base64 data URL in image_urls — most providers support it
-      // and it avoids issues with relative paths that APIs can't reach
+    // ★ 始终使用 base64 data URL 作为 image_urls，避免第三方 API 无法访问 coze.site 域名
+    if (imageAsBase64) {
       rawBody.image_urls = [imageAsBase64];
+    } else if (params.imageUrl.startsWith('http')) {
+      rawBody.image_urls = [params.imageUrl];
     }
 
     rawBody.strength = 0.55;
@@ -587,7 +586,7 @@ async function submitRefineToApi(
   if (params.imageUrl) {
     updateTaskProgress(taskId, { progress: 25, label: '识别图片主体...' });
     try {
-      const subjectResult = await identifyImageSubject(params.imageUrl, 12000);
+      const subjectResult = await identifyImageSubject(params.imageUrl, 30000);
       if (subjectResult) {
         identifiedSubject = subjectResult.en;
         const subjectZh = subjectResult.zh;

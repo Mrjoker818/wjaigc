@@ -4,6 +4,35 @@ import { findProviderForModel, normalizeApiBaseUrl, findAllProvidersForType, fin
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { identifyImageSubject } from '@/lib/identify-subject';
+
+/**
+ * 将参考图 URL 列表转为 base64 data URL，确保第三方 API 始终能读取图片内容。
+ * 解决问题：部分 API 提供商无法访问 coze.site 域名的图片 URL，导致参考图被忽略。
+ */
+async function convertRefImagesToBase64(urls: string[]): Promise<string[]> {
+  const result: string[] = [];
+  for (const url of urls) {
+    if (url.startsWith('data:')) {
+      result.push(url);
+      continue;
+    }
+    try {
+      const resp = await fetch(url, { signal: AbortSignal.timeout(15000) });
+      if (!resp.ok) {
+        console.warn('[generate] Failed to fetch ref image for base64: ' + resp.status + ' ' + url);
+        result.push(url);
+        continue;
+      }
+      const buf = Buffer.from(await resp.arrayBuffer());
+      const ct = resp.headers.get('content-type') || 'image/png';
+      result.push('data:' + ct + ';base64,' + buf.toString('base64'));
+    } catch (e) {
+      console.warn('[generate] Failed to convert ref image to base64: ' + url, e instanceof Error ? e.message : String(e));
+      result.push(url);
+    }
+  }
+  return result;
+}
 import { optionalApiAuth } from '@/lib/api-auth';
 import { translateApiError } from '@/lib/api-error-translate';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
@@ -611,7 +640,7 @@ export async function POST(request: NextRequest) {
       const isReferenceOnly = !referenceMode || ['reference', 'fusion', 'style', 'blend', 'content'].includes(referenceMode);
       if (hasRefImages) {
         // 始终提供 image_urls（大多数 API 代理支持此字段传递参考图 URL）
-        requestBody.image_urls = accessibleReferenceImages;
+        requestBody.image_urls = await convertRefImagesToBase64(accessibleReferenceImages);
         // 图生图 strength 参数
         if (typeof strength === 'number' && strength > 0 && strength <= 1) {
           requestBody.strength = strength;
