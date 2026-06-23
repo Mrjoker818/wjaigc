@@ -2208,11 +2208,21 @@ export async function POST(request: NextRequest) {
       if (result.directUrl) {
         const resized = await resizeAiResultToTarget(result.directUrl);
         
-        // AI 画质精修：默认跳过，避免改变画面内容
-        // AI放大已通过 resizeAiResultToTarget 做了锐化增强，无需额外AI精修
+        // AI 画质精修（带关键词约束，仅修复画质不改变内容）
         let finalUrl = resized.url;
         let enhanced = false;
-        console.log(`[image-edit] AI upscale completed, skipping AI enhance to preserve content`);
+        try {
+          const enhanceResult = await enhanceViaAI(resized.url);
+          if (enhanceResult.enhanced && enhanceResult.url) {
+            finalUrl = enhanceResult.url;
+            enhanced = true;
+            console.log(`[image-edit] AI quality enhance applied after upscale`);
+          } else {
+            console.log(`[image-edit] AI enhance skipped/failed, using raw upscale result`);
+          }
+        } catch (enhanceErr) {
+          console.warn('[image-edit] AI enhance error:', enhanceErr instanceof Error ? enhanceErr.message : enhanceErr);
+        }
         
         return NextResponse.json({
           success: true,

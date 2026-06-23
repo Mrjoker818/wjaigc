@@ -230,9 +230,6 @@ importers:
       tw-animate-css:
         specifier: ^1.4.0
         version: 1.4.0
-      upscayl-node:
-        specifier: ^3.1.1
-        version: 3.1.1
       use-image:
         specifier: ^1.1.4
         version: 1.1.4(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -6689,9 +6686,6 @@ packages:
     hasBin: true
     peerDependencies:
       browserslist: '>= 4.21.0'
-
-  upscayl-node@3.1.1:
-    resolution: {integrity: sha512-/Cz/fDVFoW4+tGhwyL34Nz6KFMeGrhG0DqPWNBomjzcRACJ74GieLJRFwwSl3UEMB+JqOsEnk2uyQ4MIs7svwA==}
 
   uri-js@4.4.1:
     resolution: {integrity: sha512-7rKUyy33Q1yc98pQ1DAmLtwX109F7TIfWlW1Ydo8Wl1ii1SeHieeh0HHfPeL2fMXK6z0s8ecKs9frCuLJvndBg==}
@@ -14123,8 +14117,6 @@ snapshots:
       browserslist: 4.28.2
       escalade: 3.2.0
       picocolors: 1.1.1
-
-  upscayl-node@3.1.1: {}
 
   uri-js@4.4.1:
     dependencies:

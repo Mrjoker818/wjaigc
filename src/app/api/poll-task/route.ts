@@ -1201,10 +1201,20 @@ export async function POST(request: NextRequest) {
             (pollResult as Record<string, unknown>).outputSize = { width: finalW, height: finalH };
             console.log(`[poll-task] AI Upscale: final output ${finalW}x${finalH}`);
 
-            // AI 画质精修：默认跳过，避免改变画面内容
-            // AI放大已通过 resize 做了锐化增强，无需额外AI精修
+            // AI 画质精修（带关键词约束，仅修复画质不改变内容）
             if (pollResult.imageUrl) {
-              console.log('[poll-task] AI Upscale completed, skipping AI enhance to preserve content');
+              try {
+                const enhanceResult = await enhanceViaAI(pollResult.imageUrl as string);
+                if (enhanceResult.enhanced && enhanceResult.url) {
+                  pollResult.imageUrl = enhanceResult.url;
+                  (pollResult as Record<string, unknown>).enhanced = true;
+                  console.log('[poll-task] AI quality enhance applied after upscale');
+                } else {
+                  console.log('[poll-task] AI enhance skipped/failed, using raw upscale result');
+                }
+              } catch (enhanceErr) {
+                console.warn('[poll-task] AI enhance error:', enhanceErr instanceof Error ? enhanceErr.message : enhanceErr);
+              }
             }
           } catch (upscaleResizeErr) {
             console.warn('[poll-task] AI Upscale post-process failed, using raw AI result:', upscaleResizeErr instanceof Error ? upscaleResizeErr.message : upscaleResizeErr);

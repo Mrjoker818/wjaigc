@@ -433,10 +433,9 @@ export async function POST(request: NextRequest) {
 
     // === 多策略降级 ===
 
-    // 策略1: 云端 PearAPI（真正的无损放大）
+    // 策略1: 云端 PearAPI（真正的无损放大）— 不需要AI精修
     const cloudResult = await upscaleViaPearAPI(imageUrl, model, face, scale);
     if (cloudResult?.url) {
-      // 云端放大后不做AI画质优化（已是真正的无损放大，AI精修可能改变内容）
       return NextResponse.json({
         success: true,
         url: cloudResult.url,
@@ -449,22 +448,33 @@ export async function POST(request: NextRequest) {
     // 策略2: 本地 ONNX Real-ESRGAN
     const localResult = await upscaleViaOnnx(imageUrl, scale, face);
     if (localResult?.url) {
-      // 策略2.5: ONNX放大成功后，自动追加AI画质优化
-      // ★ ONNX Real-ESRGAN 已是真正的超分辨率，AI精修可能改变画面内容
-      // 默认跳过AI精修，除非用户明确要求
+      // 策略2.5: ONNX放大后追加AI画质精修（带关键词约束，仅修复画质不改变内容）
+      let enhancedUrl = localResult.url;
+      let didEnhance = false;
       if (!skipAiEnhance) {
-        console.log(`[upscale-pro] ONNX result available, but AI enhance is now skipped by default to preserve original content. Set skipAiEnhance=false to enable.`);
+        try {
+          const enhanceResult = await enhanceViaAI(localResult.url);
+          if (enhanceResult.enhanced && enhanceResult.url) {
+            enhancedUrl = enhanceResult.url;
+            didEnhance = true;
+            console.log(`[upscale-pro] AI quality enhance applied after ONNX upscale`);
+          } else {
+            console.log(`[upscale-pro] AI enhance skipped/failed, using raw ONNX result`);
+          }
+        } catch (enhanceErr) {
+          console.warn('[upscale-pro] AI enhance error:', enhanceErr instanceof Error ? enhanceErr.message : enhanceErr);
+        }
+      } else {
+        console.log(`[upscale-pro] AI enhance skipped by user request`);
       }
-      // AI画质优化默认跳过，ONNX结果已足够好
-      console.log(`[upscale-pro] Returning raw ONNX result (AI enhance skipped to preserve content)`);
       return NextResponse.json({
         success: true,
-        url: localResult.url,
+        url: enhancedUrl,
         model: localResult.model,
         strategy: localResult.strategy,
         fallback: !cloudResult ? false : true,
         fallbackReason: cloudResult ? '云端API不可用，已使用本地Real-ESRGAN' : undefined,
-        enhanced: false,
+        enhanced: didEnhance,
       });
     }
 
@@ -472,14 +482,29 @@ export async function POST(request: NextRequest) {
     if (fallbackToAi) {
       const aiResult = await upscaleViaAI(imageUrl, scale);
       if (aiResult?.url) {
-        // AI重绘放大不做额外AI精修（已经是一次AI重绘，再精修会进一步偏离原内容）
+        // AI重绘放大后追加AI画质精修（带关键词约束，修复AI重绘产生的模糊/噪点）
+        let enhancedUrl = aiResult.url;
+        let didEnhance = false;
+        if (!skipAiEnhance) {
+          try {
+            const enhanceResult = await enhanceViaAI(aiResult.url);
+            if (enhanceResult.enhanced && enhanceResult.url) {
+              enhancedUrl = enhanceResult.url;
+              didEnhance = true;
+              console.log(`[upscale-pro] AI quality enhance applied after AI redraw upscale`);
+            }
+          } catch (enhanceErr) {
+            console.warn('[upscale-pro] AI enhance error (strategy 3):', enhanceErr instanceof Error ? enhanceErr.message : enhanceErr);
+          }
+        }
         return NextResponse.json({
           success: true,
-          url: aiResult.url,
+          url: enhancedUrl,
           model: aiResult.model,
           strategy: aiResult.strategy,
           fallback: true,
-          fallbackReason: '云端和本地无损放大均不可用，已使用AI重绘放大（内容可能有变化）',
+          fallbackReason: '云端和本地无损放大均不可用，已使用AI重绘放大',
+          enhanced: didEnhance,
         });
       }
     }
