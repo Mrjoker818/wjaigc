@@ -863,6 +863,70 @@ function CanvasApp() {
     return () => { if (typeof unsubscribe === 'function') unsubscribe(); };
   }, [currentUser, currentProject?.id]);
 
+  // ★ 异步持久化 data:/blob: URL：页面加载后自动检测并持久化临时 URL
+  // 解决刷新后图片消失的问题：data: URL 在 normalizeImageUrls 中不再被清空，
+  // 但需要尽快转换为服务器 URL 以确保跨会话可用
+  const persistedDataUrlIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const pendingImages = images.filter(img =>
+      img.url && (img.url.startsWith('data:') || img.url.startsWith('blob:'))
+      && !persistedDataUrlIdsRef.current.has(img.id)
+    );
+    if (pendingImages.length === 0) return;
+
+    // 标记为正在处理，避免重复提交
+    for (const img of pendingImages) {
+      persistedDataUrlIdsRef.current.add(img.id);
+    }
+
+    const persistDataUrls = async () => {
+      const urlMapping: Record<string, string> = {};
+      for (const img of pendingImages) {
+        try {
+          let urlToSave = img.url;
+          // blob: 先转 data:
+          if (urlToSave.startsWith('blob:')) {
+            try {
+              const resp = await fetch(urlToSave);
+              const blob = await resp.blob();
+              urlToSave = await new Promise<string>((resolve) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result as string);
+                reader.readAsDataURL(blob);
+              });
+            } catch { continue; }
+          }
+          const saveResp = await fetch('/api/save-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageUrl: urlToSave, userId: currentUser?.id }),
+          });
+          if (!saveResp.ok) {
+            console.warn(`[persistPendingDataUrls] save-image returned ${saveResp.status} for image ${img.id}`);
+            continue;
+          }
+          const saveData = await saveResp.json();
+          if (saveData.success && saveData.url) {
+            urlMapping[img.id] = saveData.url;
+          }
+        } catch (error) {
+          console.warn(`[persistPendingDataUrls] Failed to persist image ${img.id}:`, error);
+        }
+      }
+      // 更新 images 状态中的非持久化 URL
+      if (Object.keys(urlMapping).length > 0) {
+        setImages(prev => prev.map(img =>
+          urlMapping[img.id] ? { ...img, url: urlMapping[img.id] } : img
+        ));
+      }
+    };
+
+    // 延迟 2 秒执行，等待页面渲染和服务器数据加载完成
+    const timer = setTimeout(persistDataUrls, 2000);
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [images]);
+
   // ★ SSE 连接：实时推送任务完成事件，避免轮询延迟
   useEffect(() => {
     taskEventsClient.connect();
@@ -1784,11 +1848,19 @@ function CanvasApp() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ imageUrl: rawUrl, userId: currentUser?.id }),
           });
-          const saveData = await saveResp.json();
-          if (saveData.success && saveData.url) {
-            rawUrl = saveData.url;
+          if (!saveResp.ok) {
+            console.warn(`[handleAddImages] save-image returned ${saveResp.status} for image, keeping original URL`);
+          } else {
+            const saveData = await saveResp.json();
+            if (saveData.success && saveData.url) {
+              rawUrl = saveData.url;
+            } else {
+              console.warn('[handleAddImages] save-image returned non-success:', saveData.error || 'unknown');
+            }
           }
-        } catch { /* save failed, keep original URL */ }
+        } catch (err) {
+          console.warn('[handleAddImages] save-image failed, keeping original URL:', err);
+        }
       }
       
       // 跳过已存在的图片

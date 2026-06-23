@@ -211,9 +211,13 @@ export class UserManager {
               if (img.url && img.url.startsWith('/uploads/') && !img.url.startsWith('/api/')) {
                 img.url = `/api/serve-upload${img.url}`;
               }
-              // blob:/data: URL 是临时的，无法跨会话使用，标记为过期
+              // ★ 修复：不再清空 data:/blob: URL，而是保留用于渲染
+              // 之前清空为 '' 导致刷新后图片消失（handleAddImages 或 auto-save 持久化失败时）
+              // data: URL 在当前会话中可以正常渲染，异步持久化函数会将其转为服务器 URL
+              // blob: URL 跨会话不可用，但保留记录可让异步持久化函数尝试恢复
               if (img.url && (img.url.startsWith('blob:') || img.url.startsWith('data:'))) {
-                img.url = '';
+                // 仅标记为待持久化，不清空 URL
+                (img as Record<string, unknown>)._pendingPersist = true;
               }
               // 回填：历史数据 modelName 为空但 model 有值时，用 model 补充
               if ((!img.modelName || img.modelName === '') && img.model) {
@@ -281,7 +285,21 @@ export class UserManager {
 
     try {
       if (this.multiUserData) {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(this.multiUserData));
+        // ★ 保存到 localStorage 时，data: URL 可能导致配额溢出
+        // 先尝试直接保存，如果配额不足则将 data: URL 替换为空字符串后重试
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(this.multiUserData));
+        } catch (quotaError) {
+          // localStorage 配额溢出，将 data:/blob: URL 替换为空字符串后重试
+          console.warn('[saveData] localStorage quota exceeded, retrying without data:/blob: URLs');
+          const trimmedData = JSON.parse(JSON.stringify(this.multiUserData));
+          this.trimDataUrls(trimmedData);
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmedData));
+          } catch (retryError) {
+            console.error('[saveData] localStorage still exceeded after trimming data URLs:', retryError);
+          }
+        }
       }
       if (this.currentUserId) {
         localStorage.setItem(CURRENT_USER_KEY, this.currentUserId);
@@ -292,6 +310,24 @@ export class UserManager {
 
     // 同步当前用户的项目数据到服务器数据库（防抖）
     this.scheduleServerSync();
+  }
+
+  /** 将内存中的 data:/blob: URL 替换为空字符串（仅用于 localStorage 保存，不影响内存中的渲染数据） */
+  private trimDataUrls(data: Record<string, unknown>): void {
+    if (!data || !data.userData) return;
+    for (const ud of Object.values(data.userData as Record<string, { projects?: Array<{ canvasImages?: Array<{ url?: string }> }> }>)) {
+      if (ud.projects) {
+        for (const project of ud.projects) {
+          if (project.canvasImages) {
+            for (const img of project.canvasImages) {
+              if (img.url && (img.url.startsWith('data:') || img.url.startsWith('blob:'))) {
+                img.url = '';
+              }
+            }
+          }
+        }
+      }
+    }
   }
 
   // ====== 服务器同步 ======
