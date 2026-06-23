@@ -5,34 +5,6 @@ import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { identifyImageSubject } from '@/lib/identify-subject';
 
-/**
- * 将参考图 URL 列表转为 base64 data URL，确保第三方 API 始终能读取图片内容。
- * 解决问题：部分 API 提供商无法访问 coze.site 域名的图片 URL，导致参考图被忽略。
- */
-async function convertRefImagesToBase64(urls: string[]): Promise<string[]> {
-  const result: string[] = [];
-  for (const url of urls) {
-    if (url.startsWith('data:')) {
-      result.push(url);
-      continue;
-    }
-    try {
-      const resp = await fetch(url, { signal: AbortSignal.timeout(15000) });
-      if (!resp.ok) {
-        console.warn('[generate] Failed to fetch ref image for base64: ' + resp.status + ' ' + url);
-        result.push(url);
-        continue;
-      }
-      const buf = Buffer.from(await resp.arrayBuffer());
-      const ct = resp.headers.get('content-type') || 'image/png';
-      result.push('data:' + ct + ';base64,' + buf.toString('base64'));
-    } catch (e) {
-      console.warn('[generate] Failed to convert ref image to base64: ' + url, e instanceof Error ? e.message : String(e));
-      result.push(url);
-    }
-  }
-  return result;
-}
 import { optionalApiAuth } from '@/lib/api-auth';
 import { translateApiError } from '@/lib/api-error-translate';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
@@ -425,7 +397,7 @@ export async function POST(request: NextRequest) {
           // Identify images in parallel (with concurrency limit of 2)
           const identifyPromises = imagesNeedingId.map(async (imgUrl: string, idx: number) => {
             try {
-              const result = await identifyImageSubject(imgUrl, 30000);
+              const result = await identifyImageSubject(imgUrl, 10000);
               return result ? result.en : null;
             } catch (err) {
               console.warn(`[generate] Vision identification failed for image ${idx}:`, err);
@@ -533,7 +505,7 @@ export async function POST(request: NextRequest) {
         // 主体描述锚定：使用AI视觉识别+前端描述的合并结果，防止主体被替换
         const subjectAnchor = refDescText ? ` The reference image depicts: "${refDescText}".` : '';
         const subjectPrefix = hasSubjectPreserve
-          ? `CRITICAL: The main subject (product/object/person) must remain EXACTLY the same as in the reference image — it is "${refDescText || 'the depicted item in the reference'}", same identity, same appearance. Do NOT replace or change the subject to a different object. If you cannot identify the subject, preserve the overall visual content as closely as possible.${subjectAnchor} `
+          ? `CRITICAL: The main subject (product/object/person) must remain EXACTLY the same as in the reference image — it is "${refDescText || 'the depicted item'}", same identity, same appearance. Do NOT replace or change the subject to a different object.${subjectAnchor} `
           : (refDescText ? `The reference image depicts: "${refDescText}". ` : '');
 
         let categoryEnhancement = '';
@@ -552,7 +524,7 @@ export async function POST(request: NextRequest) {
         if (refDescText) {
           enhancedPrompt = `[REFERENCE MODE] The reference image depicts: "${refDescText}". You MUST preserve the main subject identity — do NOT replace it with a different object. ${enhancedPrompt}`;
         } else {
-          enhancedPrompt = `[REFERENCE MODE] CRITICAL INSTRUCTION — Reference image(s) are provided as the PRIMARY source of truth. You MUST: (1) Identify and preserve the EXACT main subject from the reference — do NOT substitute a different object, person, or scene. (2) Maintain the overall composition and framing. (3) Apply the user's prompt as a MODIFICATION to the reference, not as a replacement. If the prompt is vague, lean toward minimal changes from the reference. ${enhancedPrompt}`;
+          enhancedPrompt = `[REFERENCE MODE] Use the provided reference image(s) as the primary guide. Preserve the main subject, style, and composition from the reference. ${enhancedPrompt}`;
         }
       }
     }
@@ -640,7 +612,7 @@ export async function POST(request: NextRequest) {
       const isReferenceOnly = !referenceMode || ['reference', 'fusion', 'style', 'blend', 'content'].includes(referenceMode);
       if (hasRefImages) {
         // 始终提供 image_urls（大多数 API 代理支持此字段传递参考图 URL）
-        requestBody.image_urls = await convertRefImagesToBase64(accessibleReferenceImages);
+        requestBody.image_urls = accessibleReferenceImages;
         // 图生图 strength 参数
         if (typeof strength === 'number' && strength > 0 && strength <= 1) {
           requestBody.strength = strength;
@@ -648,18 +620,13 @@ export async function POST(request: NextRequest) {
           // ★ 从 referenceStrengths 计算 strength：取最大强度值（0-100→0-1）
           const maxStrength = Math.max(...referenceStrengths.filter(s => typeof s === 'number' && s > 0));
           if (maxStrength > 0) {
-            // ★ strength 映射：用户 0-100% → API 0.10-0.80
-            // 用户 100% = 最大变化 = strength 0.80
-            // 用户 50% = 中等变化 = strength 0.45
-            // 用户 0% = 完全不变 = strength 0.10
-            // 之前直接 maxStrength/100 导致 80%→0.80 过高，生成结果偏离参考图太远
-            requestBody.strength = Math.min(0.10 + (maxStrength / 100) * 0.70, 0.80);
+            requestBody.strength = Math.min(maxStrength / 100, 1);
           }
         }
         // ★ 参考图模式下如果没有显式 strength 也没有 referenceStrengths，设置默认值
         // 避免参考图被 API 完全忽略
         if (!requestBody.strength && isReferenceOnly && accessibleReferenceImages.length > 0) {
-          requestBody.strength = 0.30;
+          requestBody.strength = 0.65;
         }
         // ★ 只有非参考图模式（即图片编辑模式）才设置 image 字段
         // 参考图组模式下，不设置 image 字段，让 API 使用 /images/generations 端点并遵守 size 参数

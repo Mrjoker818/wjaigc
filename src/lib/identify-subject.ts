@@ -13,23 +13,15 @@ import { findProviderForFeature, getApiProviders } from './server-api-config';
 import { fetchWithV1Retry } from './api-helpers';
 import type { ModelInfo } from './universal-api-types';
 
-const IDENTIFY_PROMPT = `Analyze this image carefully and identify ALL key visual elements:
-
-1. MAIN SUBJECT: What is the primary object/character/scene? Be extremely specific about type, shape, color, texture, material.
-2. STYLE: What is the visual style? (e.g., photorealistic, anime, oil painting, 3D render, minimalist, etc.)
-3. COMPOSITION: How is the subject framed? (e.g., centered, close-up, full body, bird's eye, etc.)
-4. COLORS: What are the dominant colors and color palette?
-5. MOOD/ATMOSPHERE: What feeling does the image convey?
-
-You MUST be precise — describe what IS, not what it resembles. For example: "a red ceramic teapot with golden dragon pattern" NOT "a container".
+const IDENTIFY_PROMPT = `Identify the main product/object in this image. Focus on: what is it exactly (product type, specific category), NOT what it resembles. For example: "a white medicine bottle with blue label", NOT "a cosmetic container". Be precise about the product category — distinguish between medicine, cosmetics, food, beverages, chemicals, etc.
 
 Reply in this exact format:
-EN: [Comprehensive English description, 10-30 words covering subject, style, key details]
-ZH: [Chinese description, 10-40 characters covering subject, style, key details]
+EN: [English identification phrase, 5-15 words]
+ZH: [Chinese identification phrase, 5-20 characters]
 
 Example:
-EN: a red ceramic teapot with golden dragon pattern, traditional Chinese style, photorealistic
-ZH: 红色陶瓷茶壶配金龙纹饰，中国传统风格，写实`;
+EN: a white medicine bottle with blue label
+ZH: 白色药瓶带蓝色标签`;
 
 interface IdentifyResult {
   /** English subject description */
@@ -355,15 +347,6 @@ export async function identifyImageSubject(
         const zhMatch = content.match(/ZH:\s*(.+?)$/im);
         if (enMatch) enDesc = enMatch[1].trim();
         if (zhMatch) zhDesc = zhMatch[1].trim();
-
-        // ★ 验证结果质量：如果描述太短（<5词），可能是幻觉或无效回复
-        if (enDesc.split(/\s+/).length < 5) {
-          console.warn(`[identify-subject] Description too short ("${enDesc}"), may be unreliable`);
-          if (attempt < maxRetries - 1) {
-            await new Promise(r => setTimeout(r, 1000));
-            continue;
-          }
-        }
 
         console.info(`[identify-subject] Identified: en="${enDesc}", zh="${zhDesc}"`);
         return {

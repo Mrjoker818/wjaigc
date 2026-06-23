@@ -571,11 +571,10 @@ async function submitRefineToApi(
     if (imageAsBase64) {
       rawBody.image = imageAsBase64;
     }
-    // ★ 始终使用 base64 data URL 作为 image_urls，避免第三方 API 无法访问 coze.site 域名
-    if (imageAsBase64) {
-      rawBody.image_urls = [imageAsBase64];
-    } else if (params.imageUrl.startsWith('http')) {
+    if (params.imageUrl.startsWith('http')) {
       rawBody.image_urls = [params.imageUrl];
+    } else if (imageAsBase64) {
+      rawBody.image_urls = [imageAsBase64];
     }
 
     rawBody.strength = 0.55;

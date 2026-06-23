@@ -3571,19 +3571,18 @@ export function InfiniteCanvas({
       }
 
       // strength 计算：保留方面多/强 → strength 低（更接近原图）
-      // ★ 优化映射范围：0.10-0.55（之前 0.15-0.80 过高，导致生成结果与参考图差异过大）
-      // preserveRatio=0 (无保留) → strength=0.55 (允许较大变化)
-      // preserveRatio=1 (全部最高保留) → strength=0.10 (几乎不变)
+      // preserveRatio=0 (无保留) → strength=0.80 (允许较大变化)
+      // preserveRatio=1 (全部最高保留) → strength=0.15 (几乎不变)
       if (activeKeys.length > 0) {
         const totalPreserveScore = activeKeys.reduce((sum, cat) => sum + catStrengthMap[cat], 0);
         const maxScore = activeKeys.length * 100;
         const preserveRatio = totalPreserveScore / maxScore;
-        calculatedStrength = Math.round((0.55 - preserveRatio * 0.45) * 100) / 100;
+        calculatedStrength = Math.round((0.80 - preserveRatio * 0.65) * 100) / 100;
         // 当保留主体时，额外降低 strength
         if (catStrengthMap['subject'] > 0) {
           const subjectStr = catStrengthMap['subject'] || 0;
-          const subjectReduction = (subjectStr / 100) * 0.20;
-          calculatedStrength = Math.max(0.10, calculatedStrength - subjectReduction);
+          const subjectReduction = (subjectStr / 100) * 0.25;
+          calculatedStrength = Math.max(0.15, calculatedStrength - subjectReduction);
         }
       }
 
@@ -3600,8 +3599,7 @@ export function InfiniteCanvas({
       }
     } else if (group.type === 'fusion' && group.refImages.length > 0) {
       // 融图组：融合多张参考图
-      // ★ 降低 strength 从 0.65 到 0.35，避免融合结果偏离参考图太远
-      calculatedStrength = 0.35;
+      calculatedStrength = 0.65;
       const keyword = fullPrompt.trim();
       // 收集融合参考图的原始描述
       const fusionRefDescs = group.refImages
