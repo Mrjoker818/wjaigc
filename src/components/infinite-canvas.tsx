@@ -4936,10 +4936,10 @@ export function InfiniteCanvas({
     const cachedProviderId = getCurrentProviderId(); // ★ 缓存 providerId，避免轮询期间用户切换模型导致查询错误的提供商
     const maxAttempts = 300; // 300次 × 动态间隔 ≈ 900秒，兼容token link等极慢API
     const getEditPollInterval = (attempt: number) => {
-      if (attempt <= 5) return 200;
-      if (attempt <= 15) return 500;
-      if (attempt <= 30) return 1000;
-      return 1500;
+      if (attempt <= 3) return 500;   // 首次500ms，避免过早轮询
+      if (attempt <= 10) return 800;
+      if (attempt <= 25) return 1200;
+      return 2000;
     };
     lastPollErrorRef.current = '';
 

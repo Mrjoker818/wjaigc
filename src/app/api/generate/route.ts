@@ -397,7 +397,7 @@ export async function POST(request: NextRequest) {
           // Identify images in parallel (with concurrency limit of 2)
           const identifyPromises = imagesNeedingId.map(async (imgUrl: string, idx: number) => {
             try {
-              const result = await identifyImageSubject(imgUrl, 10000);
+              const result = await identifyImageSubject(imgUrl, 8000);
               return result ? result.en : null;
             } catch (err) {
               console.warn(`[generate] Vision identification failed for image ${idx}:`, err);
@@ -603,121 +603,129 @@ export async function POST(request: NextRequest) {
 
       // 添加参考图片
       const hasRefImages = accessibleReferenceImages.length > 0 && currentModelConfig.supportsImageToImage;
-      // ★ 参考图模式(reference/fusion/style/blend/content) vs 图片编辑模式(erase/mask/outpaint) 的关键区别：
-      // - 参考图模式：用户希望按设定的尺寸生成新图，参考图仅作为风格/构图参考 → 不设置 image 字段，
-      //   使用 /images/generations 端点，确保 API 遵守 size 参数
-      // - 图片编辑模式：用户要求在原图基础上修改（擦除/蒙版/扩展）→ 必须设置 image 字段，
+      // ★ 参考图模式 vs 图片编辑模式的关键区别：
+      // - 参考图模式(reference/fusion/style/blend/content)：用户希望基于参考图生成新图，需要设置 image 字段
+      //   使用 /images/edits 端点，确保 API 能看到并处理参考图
+      // - 图片编辑模式(erase/mask/outpaint)：用户要求在原图基础上修改，必须设置 image 字段
       //   使用 /images/edits 端点，强制 AI 处理源图
-      // ★ 注意：'style'/'blend'/'content' 都是参考图模式，只有未指定 referenceMode 或为编辑操作时才是编辑模式
+      // ★ 重要：之前的实现中参考图模式不设置 image 字段，走 /images/generations 端点，
+      //   但该端点不支持图片输入（忽略 image_urls/images[]），导致参考图完全丢失！
       const isReferenceOnly = !referenceMode || ['reference', 'fusion', 'style', 'blend', 'content'].includes(referenceMode);
+
+      // ★ 辅助函数：将图片 URL 转为 base64 data URL（确保第三方 API 一定能收到图片内容）
+      // 第三方 API 可能无法访问 coze.site 域名的 URL，转 base64 是最可靠的方式
+      const resolveImageToBase64 = async (imgUrl: string): Promise<string | null> => {
+        if (imgUrl.startsWith('data:')) return imgUrl;
+        try {
+          if (imgUrl.startsWith('/api/serve-upload/') || imgUrl.startsWith('/uploads/')) {
+            const fs = await import('fs/promises');
+            const path = await import('path');
+            const workspacePath = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
+            const publicDir = path.join(workspacePath, 'public');
+            let filePath = '';
+            if (imgUrl.startsWith('/api/serve-upload/')) {
+              const relativePath = imgUrl.replace('/api/serve-upload/', '');
+              try {
+                const { getServerDataRoot } = await import('@/lib/server-data-root');
+                const dataRoot = getServerDataRoot();
+                const path1 = path.join(dataRoot, 'uploads', relativePath);
+                const path2 = path.join(dataRoot, relativePath);
+                try { await fs.access(path1); filePath = path1; } catch {
+                  try { await fs.access(path2); filePath = path2; } catch {
+                    filePath = path.join(publicDir, relativePath);
+                  }
+                }
+              } catch {
+                filePath = path.join(publicDir, relativePath);
+              }
+            } else {
+              const relativePath = imgUrl.replace(/^\//, '');
+              filePath = path.join(publicDir, relativePath);
+              try { await fs.access(filePath); } catch {
+                try {
+                  const { getServerDataRoot } = await import('@/lib/server-data-root');
+                  const dataRoot = getServerDataRoot();
+                  const altPath = path.join(dataRoot, relativePath);
+                  await fs.access(altPath);
+                  filePath = altPath;
+                } catch { /* keep publicDir path */ }
+              }
+            }
+            const resolved = path.resolve(filePath);
+            const { getServerDataRoot } = await import('@/lib/server-data-root');
+            const dataRoot = getServerDataRoot();
+            if (resolved.startsWith(publicDir) || resolved.startsWith(dataRoot)) {
+              const imgBuf = await fs.readFile(resolved);
+              const ext = path.extname(resolved).toLowerCase();
+              const mimeMap: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' };
+              const mime = mimeMap[ext] || 'image/png';
+              return `data:${mime};base64,${imgBuf.toString('base64')}`;
+            }
+          } else if (imgUrl.startsWith('http')) {
+            const imgResp = await fetch(imgUrl, { signal: AbortSignal.timeout(8000) });
+            if (imgResp.ok) {
+              const imgBuf = Buffer.from(await imgResp.arrayBuffer());
+              const contentType = imgResp.headers.get('content-type') || 'image/png';
+              return `data:${contentType};base64,${imgBuf.toString('base64')}`;
+            }
+          }
+        } catch (err) {
+          console.warn('[generate] Failed to resolve image to base64:', imgUrl, err);
+        }
+        return null;
+      };
+
       if (hasRefImages) {
-        // 始终提供 image_urls（大多数 API 代理支持此字段传递参考图 URL）
-        requestBody.image_urls = accessibleReferenceImages;
+        // ★ 将所有参考图 URL 转为 base64，确保第三方 API 一定能下载到图片
+        // 这是最关键的修复：第三方 API 可能无法访问 coze.site 域名的图片 URL
+        const base64RefImages: string[] = [];
+        for (const refUrl of accessibleReferenceImages) {
+          const base64 = await resolveImageToBase64(refUrl);
+          base64RefImages.push(base64 || refUrl); // 转换失败时保留原始 URL
+        }
+        // 始终提供 image_urls（使用 base64 版本，确保 API 可访问）
+        requestBody.image_urls = base64RefImages;
+
         // 图生图 strength 参数
         if (typeof strength === 'number' && strength > 0 && strength <= 1) {
           requestBody.strength = strength;
         } else if (referenceStrengths && Array.isArray(referenceStrengths) && referenceStrengths.length > 0) {
-          // ★ 从 referenceStrengths 计算 strength：取最大强度值（0-100→0-1）
           const maxStrength = Math.max(...referenceStrengths.filter(s => typeof s === 'number' && s > 0));
           if (maxStrength > 0) {
             requestBody.strength = Math.min(maxStrength / 100, 1);
           }
         }
         // ★ 参考图模式下如果没有显式 strength 也没有 referenceStrengths，设置默认值
-        // 避免参考图被 API 完全忽略
         if (!requestBody.strength && isReferenceOnly && accessibleReferenceImages.length > 0) {
           requestBody.strength = 0.65;
         }
-        // ★ 只有非参考图模式（即图片编辑模式）才设置 image 字段
-        // 参考图组模式下，不设置 image 字段，让 API 使用 /images/generations 端点并遵守 size 参数
-        // 否则 /images/edits 会忽略 size，以原图尺寸生成结果
-        if (!isReferenceOnly) {
-          const firstRefImage = accessibleReferenceImages[0];
-          if (firstRefImage) {
-            if (firstRefImage.startsWith('data:')) {
-              requestBody.image = firstRefImage;
-            } else if (firstRefImage.startsWith('/api/serve-upload/') || firstRefImage.startsWith('/uploads/')) {
-              try {
-                const fs = await import('fs/promises');
-                const path = await import('path');
-                const workspacePath = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
-                const publicDir = path.join(workspacePath, 'public');
-                let filePath = '';
-                if (firstRefImage.startsWith('/api/serve-upload/')) {
-                  // serve-upload 路径：从数据目录读取，而非 public
-                  const relativePath = firstRefImage.replace('/api/serve-upload/', '');
-                  try {
-                    const { getServerDataRoot } = await import('@/lib/server-data-root');
-                    const dataRoot = getServerDataRoot();
-                    const path1 = path.join(dataRoot, 'uploads', relativePath);
-                    const path2 = path.join(dataRoot, relativePath);
-                    try { await fs.access(path1); filePath = path1; } catch {
-                      try { await fs.access(path2); filePath = path2; } catch {
-                        filePath = path.join(publicDir, relativePath);
-                      }
-                    }
-                  } catch {
-                    filePath = path.join(publicDir, relativePath);
-                  }
-                } else {
-                  // 直接路径如 /uploads/xxx.jpg：先尝试 publicDir，再尝试 dataRoot
-                  const relativePath = firstRefImage.replace(/^\//, '');
-                  filePath = path.join(publicDir, relativePath);
-                  try { await fs.access(filePath); } catch {
-                    try {
-                      const { getServerDataRoot } = await import('@/lib/server-data-root');
-                      const dataRoot = getServerDataRoot();
-                      const altPath = path.join(dataRoot, relativePath);
-                      await fs.access(altPath);
-                      filePath = altPath;
-                    } catch {
-                      // 保持 publicDir 路径，后续安全校验会处理
-                    }
-                  }
-                }
-                const resolved = path.resolve(filePath);
-                // 安全校验：允许 publicDir 和 dataRoot 两个合法目录
-                const { getServerDataRoot } = await import('@/lib/server-data-root');
-                const dataRoot = getServerDataRoot();
-                if (resolved.startsWith(publicDir) || resolved.startsWith(dataRoot)) {
-                  const imgBuf = await fs.readFile(resolved);
-                  const ext = path.extname(resolved).toLowerCase();
-                  const mimeMap: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' };
-                  const mime = mimeMap[ext] || 'image/png';
-                  requestBody.image = `data:${mime};base64,${imgBuf.toString('base64')}`;
-                }
-              } catch (localErr) {
-                console.warn('Failed to read local reference image:', localErr);
-              }
-            } else if (firstRefImage.startsWith('http')) {
-              try {
-                const imgResp = await fetch(firstRefImage, { signal: AbortSignal.timeout(15000) });
-                if (imgResp.ok) {
-                  const imgBuf = Buffer.from(await imgResp.arrayBuffer());
-                  const contentType = imgResp.headers.get('content-type') || 'image/png';
-                  requestBody.image = `data:${contentType};base64,${imgBuf.toString('base64')}`;
-                }
-              } catch (imgErr) {
-                console.warn('Failed to download reference image for edits endpoint:', imgErr);
-              }
-            }
+
+        // ★★★ 关键修复：参考图模式下也必须设置 image 字段 ★★★
+        // 之前的实现不设置 image 字段，导致请求走 /images/generations 端点，
+        // 该端点不支持图片输入，参考图被完全忽略！
+        // 现在统一设置 image = 第一张参考图(base64)，确保走 /images/edits 端点
+        if (!requestBody.image) {
+          const firstRefBase64 = base64RefImages[0];
+          if (firstRefBase64) {
+            requestBody.image = firstRefBase64;
           }
-          // 压缩参考图：大于1MB的base64图片用sharp压缩到最大1536px + JPEG q90
-          const requestImageStr = requestBody.image as string | undefined;
-          if (requestImageStr && requestImageStr.startsWith('data:') && requestImageStr.length > 1_000_000) {
-            try {
-              const sharp = (await import('sharp')).default;
-              const base64Data = requestImageStr.split(',')[1];
-              const imgBuf = Buffer.from(base64Data, 'base64');
-              const compressed = await sharp(imgBuf)
-                .resize(1536, 1536, { fit: 'inside', withoutEnlargement: true })
-                .jpeg({ quality: 90 })
-                .toBuffer();
-              requestBody.image = `data:image/jpeg;base64,${compressed.toString('base64')}`;
-            } catch (compressErr) {
-              console.warn('Reference image compression failed:', compressErr);
-            }
-          }
+        }
+      }
+
+      // 压缩参考图：大于1MB的base64图片用sharp压缩到最大1536px + JPEG q90
+      const requestImageStr = requestBody.image as string | undefined;
+      if (requestImageStr && requestImageStr.startsWith('data:') && requestImageStr.length > 1_000_000) {
+        try {
+          const sharp = (await import('sharp')).default;
+          const base64Data = requestImageStr.split(',')[1];
+          const imgBuf = Buffer.from(base64Data, 'base64');
+          const compressed = await sharp(imgBuf)
+            .resize(1536, 1536, { fit: 'inside', withoutEnlargement: true })
+            .jpeg({ quality: 90 })
+            .toBuffer();
+          requestBody.image = `data:image/jpeg;base64,${compressed.toString('base64')}`;
+        } catch (compressErr) {
+          console.warn('Reference image compression failed:', compressErr);
         }
       }
 
@@ -824,8 +832,9 @@ export async function POST(request: NextRequest) {
       // 因为 /images/edits 会被 image 字段强制以原图尺寸生成，忽略 size 参数
       // 参考图组模式：hasImage=false → 使用 defaultEndpoint(/images/generations)，遵守 size
       // 图片编辑模式(erase/mask/outpaint)：hasImage=true → 使用 editEndpoint(/images/edits)
-      const hasImageFlag = !!(requestBody.image || (requestBody.image_urls && !isReferenceOnly) || (accessibleReferenceImages.length > 0 && !isReferenceOnly));
-      const hasRefImagesFlag = !!(accessibleReferenceImages.length > 0 && isReferenceOnly);
+      // ★ hasImageFlag: 现在参考图模式也设置了 image 字段，所以只要有 image 就应该为 true
+      const hasImageFlag = !!requestBody.image;
+      const hasRefImagesFlag = accessibleReferenceImages.length > 0;
       const { body: adjustedBody, endpoint } = adjustRequestForProfile(requestBody, profile, {
         hasImage: hasImageFlag,
         hasReferenceImages: hasRefImagesFlag,
@@ -872,7 +881,7 @@ export async function POST(request: NextRequest) {
 
       // 构建提交请求 - 通用策略，适配所有 API 提供商
       const isEditsEndpoint = endpoint === '/images/edits';
-      const hasImageField = !!adjustedBody.image;
+      const hasImageField = !!(adjustedBody.image || (Array.isArray(adjustedBody.images) && adjustedBody.images.length > 0));
 
       // 辅助函数：解析提交响应
       const parseSubmitResponse = async (resp: Response): Promise<{ taskIds: string[]; directImageUrls: string[]; usedModel: string; usedProviderId: string }> => {
@@ -1081,6 +1090,15 @@ export async function POST(request: NextRequest) {
             const fallbackTimeoutId = setTimeout(() => fallbackController.abort(), fallbackTimeoutMs);
 
             const fallbackBody = stripEditsOnlyFields(adjustedBody);
+
+            // ★ 回退到 /images/generations 时，images[] 字段不被该端点支持
+            // 将 images[] 中的 URL 提取到 image_urls 中（某些 API 代理支持）
+            if (Array.isArray(fallbackBody.images) && !fallbackBody.image_urls) {
+              fallbackBody.image_urls = (fallbackBody.images as Array<{ image_url: { url: string } }>).map(
+                (img) => img.image_url?.url || ''
+              ).filter(Boolean);
+            }
+            delete fallbackBody.images;
 
             // 增强 prompt：/images/generations 仅将 image_urls 视为可选参考，
             // 必须在 prompt 中明确指示 AI 使用参考图作为基础，否则 AI 可能忽略参考图

@@ -206,7 +206,7 @@ async function imageToBase64(imageUrl: string): Promise<string | null> {
 
     // HTTP URL
     if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
-      const resp = await fetch(imageUrl, { signal: AbortSignal.timeout(30000) });
+      const resp = await fetch(imageUrl, { signal: AbortSignal.timeout(8000) });
       if (!resp.ok) return null;
       const contentType = resp.headers.get('content-type') || 'image/png';
       const buffer = Buffer.from(await resp.arrayBuffer());
@@ -229,10 +229,10 @@ async function imageToBase64(imageUrl: string): Promise<string | null> {
  */
 export async function identifyImageSubject(
   imageUrl: string,
-  timeoutMs: number = 30000,
+  timeoutMs: number = 8000,
 ): Promise<IdentifyResult | null> {
-  // Retry up to 2 times with different providers
-  const maxRetries = 2;
+  // Single attempt — identification is best-effort, don't waste time on retries
+  const maxRetries = 1;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       const provider = await findVisionProvider();
@@ -249,8 +249,7 @@ export async function identifyImageSubject(
         return null;
       }
 
-      // ★ 关键修复：增加 max_tokens 从 200 到 800
-      // 之前 200 token 不够用于 5 维度分析+双语输出，导致回复被截断
+      // ★ 简洁的识别回复不需要太多 token
       const requestBody = {
         model: provider.model,
         messages: [
@@ -262,14 +261,13 @@ export async function identifyImageSubject(
                 type: 'image_url',
                 image_url: {
                   url: base64,
-                  // ★ 关键修复：添加 detail: 'high' 确保模型仔细分析图片
                   detail: 'high',
                 },
               },
             ],
           },
         ],
-        max_tokens: 800,
+        max_tokens: 300,
         temperature: 0.1,
       };
 
