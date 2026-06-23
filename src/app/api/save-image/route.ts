@@ -398,13 +398,14 @@ export async function POST(request: NextRequest) {
         });
       } catch (fetchError) {
         clearTimeout(timeoutId);
-        // 下载失败时，直接返回原始远程 URL（远程 URL 本身是可持久化的）
+        // 下载远程图片失败，返回失败状态，让前端尝试兜底方案
+        console.warn(`[save-image] Failed to download remote URL: ${imageUrl}`, fetchError instanceof Error ? fetchError.message : String(fetchError));
         return NextResponse.json({
-          success: true,
+          success: false,
+          error: 'Failed to download remote image',
           url: imageUrl,
           filename: null,
           size: 0,
-          note: 'Remote URL kept as-is (download failed)',
         });
       }
     }

@@ -93,6 +93,9 @@ export interface CanvasImage {
   videoUrl?: string;
   videoDuration?: number;
   videoThumbnailUrl?: string;
+  // 持久化标记
+  _needsPersist?: boolean;  // URL被trimDataUrls清空，需要从本地恢复
+  _pendingPersist?: boolean; // data: URL待异步持久化到服务器
 }
 
 export interface ApiKey {

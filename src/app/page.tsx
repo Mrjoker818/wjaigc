@@ -767,27 +767,46 @@ function CanvasApp() {
                 img => !serverIds.has(img.id)
               );
               // 清理无效图片框：没有 url 且不是处理中占位框的图片（可能是之前生成失败残留）
+              // ★ BUG3 修复：如果服务器数据中 URL 为空但本地有有效 URL，不从 validImages 中移除
+              // 后续 enrichment 会从 localImgMap 恢复 URL
               const validImages = latest.canvasImages.filter(
-                (img) => img.url || img.isProcessingPlaceholder
+                (img) => img.url || img.isProcessingPlaceholder || img._needsPersist
               );
               // ★ 过滤近期删除的图片：防止服务器同步把刚删除的图片恢复回来
               const afterDeletedFilter = validImages.filter(
                 (img) => !recentlyDeletedIdsRef.current.has(img.id)
               );
-              // ★ 数据隔离：仅从过滤后的服务器图片 ID 集合中查找本地补充数据
-              // 防止 latestImagesRef 中残留的前用户图片通过字段回填泄露到当前用户
+              // ★ 数据隔离：仅从过滤后的服务器图片 ID 集合查找本地补充数据
               const serverImgIdSet = new Set(afterDeletedFilter.map(img => img.id));
               const localImgMap = new Map<string, CanvasImage>();
               for (const li of latestImagesRef.current) {
                 // 仅纳入服务器也有的图片 ID，排除不属于当前项目的图片
                 if (li.id && serverImgIdSet.has(li.id)) localImgMap.set(li.id, li);
               }
+              // ★ BUG3 修复：保留本地独有的图片（服务器尚未同步的新生成图片）
+              // 如果本地有图片但服务器没有（syncToServer 还没跑），不要丢失这些图片
+              const localOnlyImages = latestImagesRef.current.filter(
+                li => li.id && !serverImgIdSet.has(li.id)
+                  && !recentlyDeletedIdsRef.current.has(li.id)
+                  && !li.isProcessingPlaceholder
+                  && li.url // 必须有有效 URL
+              );
               const enrichedImages = afterDeletedFilter.map((img) => {
                 const localImg = localImgMap.get(img.id);
                 const enriched = { ...img };
                 // 回填：历史数据 modelName 为空但 model 有值时，用 model 补充
                 if ((!enriched.modelName || enriched.modelName === '') && enriched.model) {
                   enriched.modelName = enriched.model;
+                }
+                // ★ BUG3 关键修复：从本地恢复被 trimDataUrls 清空的 URL
+                // 当 localStorage 配额溢出时，trimDataUrls 会将 data:/blob: URL 清空为 ''
+                // 服务器同步下来的数据也会有空 URL，必须从本地内存数据恢复
+                if ((!enriched.url || enriched.url === '') && localImg?.url) {
+                  enriched.url = localImg.url;
+                  // 清除 _needsPersist 标记（URL 已恢复）
+                  if (enriched._needsPersist) {
+                    delete (enriched as Record<string, unknown>)._needsPersist;
+                  }
                 }
                 // ★ 关键修复：保留本地的位置信息（x, y, width, height）
                 // 用户可能在本地拖动了图片，但服务器还没同步到最新位置
@@ -848,6 +867,7 @@ function CanvasApp() {
               });
               setImages([
                 ...(enrichedImages as CanvasImage[]),
+                ...(localOnlyImages as CanvasImage[]),
                 ...uniquePlaceholders,
               ]);
             }

@@ -700,11 +700,13 @@ export async function POST(request: NextRequest) {
           requestBody.strength = 0.65;
         }
 
-        // ★★★ 关键修复：参考图模式下也必须设置 image 字段 ★★★
-        // 之前的实现不设置 image 字段，导致请求走 /images/generations 端点，
-        // 该端点不支持图片输入，参考图被完全忽略！
-        // 现在统一设置 image = 第一张参考图(base64)，确保走 /images/edits 端点
-        if (!requestBody.image) {
+        // ★ 参考图模式 vs 图生图编辑模式：路由策略区分
+        // 参考图模式 (isReferenceOnly): 用户想让 AI "参考"图片风格/内容来生成新图
+        //   → 走 /images/generations + images[] 格式，不设置 image 字段
+        //   → 这样 API 代理会将参考图作为 "参考输入" 而非 "待编辑图片"
+        // 图生图编辑模式: 用户想基于原图修改/编辑
+        //   → 走 /images/edits + image 字段，保持原行为
+        if (!requestBody.image && !isReferenceOnly) {
           const firstRefBase64 = base64RefImages[0];
           if (firstRefBase64) {
             requestBody.image = firstRefBase64;

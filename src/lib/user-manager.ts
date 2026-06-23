@@ -211,12 +211,13 @@ export class UserManager {
               if (img.url && img.url.startsWith('/uploads/') && !img.url.startsWith('/api/')) {
                 img.url = `/api/serve-upload${img.url}`;
               }
-              // ★ 修复：不再清空 data:/blob: URL，而是保留用于渲染
-              // 之前清空为 '' 导致刷新后图片消失（handleAddImages 或 auto-save 持久化失败时）
-              // data: URL 在当前会话中可以正常渲染，异步持久化函数会将其转为服务器 URL
-              // blob: URL 跨会话不可用，但保留记录可让异步持久化函数尝试恢复
-              if (img.url && (img.url.startsWith('blob:') || img.url.startsWith('data:'))) {
-                // 仅标记为待持久化，不清空 URL
+              // ★ 修复：blob: URL 跨会话不可用，清空并标记需要持久化
+              // data: URL 保留（当前会话可渲染），但标记为待持久化以便异步转存
+              if (img.url && img.url.startsWith('blob:')) {
+                img.url = '';
+                (img as unknown as Record<string, unknown>)._needsPersist = true;
+              } else if (img.url && img.url.startsWith('data:')) {
+                // data: URL 在当前会话中可以正常渲染，保留但标记待持久化
                 (img as unknown as Record<string, unknown>)._pendingPersist = true;
               }
               // 回填：历史数据 modelName 为空但 model 有值时，用 model 补充
@@ -312,16 +313,24 @@ export class UserManager {
     this.scheduleServerSync();
   }
 
-  /** 将内存中的 data:/blob: URL 替换为空字符串（仅用于 localStorage 保存，不影响内存中的渲染数据） */
+  /** 清理 data:/blob: URL 以避免 localStorage 配额溢出
+   * 策略：对包含 data:/blob: URL 的图片，将 URL 清空为空字符串以释放空间
+   * 同时标记 _needsPersist=true，以便后续 onProjectsChanged 合并时
+   * 从本地数据恢复 URL（因为内存中的原始数据仍保留 data:/blob: URL）
+   * 注意：此函数操作的是 data 的深拷贝（trimmedData），不影响内存中的原始数据
+   */
   private trimDataUrls(data: Record<string, unknown>): void {
     if (!data || !data.userData) return;
-    for (const ud of Object.values(data.userData as Record<string, { projects?: Array<{ canvasImages?: Array<{ url?: string }> }> }>)) {
+    for (const ud of Object.values(data.userData as Record<string, { projects?: Array<{ canvasImages?: Array<{ url?: string; _needsPersist?: boolean }> }> }>)) {
       if (ud.projects) {
         for (const project of ud.projects) {
           if (project.canvasImages) {
             for (const img of project.canvasImages) {
               if (img.url && (img.url.startsWith('data:') || img.url.startsWith('blob:'))) {
+                // 清空 URL 以释放 localStorage 空间
                 img.url = '';
+                // 标记为需要恢复，onProjectsChanged 合并时从本地数据恢复 URL
+                img._needsPersist = true;
               }
             }
           }
@@ -527,6 +536,15 @@ export class UserManager {
                 enriched.modelName = enriched.model;
               }
               if (!lImg) return enriched;
+              // ★ BUG3 关键修复：从本地恢复被 trimDataUrls 清空的 URL
+              // 服务器同步下来的数据 URL 可能为空（trimDataUrls 为节省 localStorage 配额而清空）
+              // 必须从本地内存数据恢复，否则图片会从画布消失
+              if ((!enriched.url || enriched.url === '') && lImg.url) {
+                enriched.url = lImg.url;
+                if (enriched._needsPersist) {
+                  delete (enriched as Record<string, unknown>)._needsPersist;
+                }
+              }
               // ★ 关键修复：保留本地的位置信息（x, y, width, height）
               // 用户可能在本地拖动了图片，但服务器还没同步到最新位置
               // 优先使用本地的位置数据，避免图片"回位"
