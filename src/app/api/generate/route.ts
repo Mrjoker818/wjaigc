@@ -700,13 +700,11 @@ export async function POST(request: NextRequest) {
           requestBody.strength = 0.65;
         }
 
-        // ★ 参考图模式 vs 图生图编辑模式：路由策略区分
-        // 参考图模式 (isReferenceOnly): 用户想让 AI "参考"图片风格/内容来生成新图
-        //   → 走 /images/generations + images[] 格式，不设置 image 字段
-        //   → 这样 API 代理会将参考图作为 "参考输入" 而非 "待编辑图片"
-        // 图生图编辑模式: 用户想基于原图修改/编辑
-        //   → 走 /images/edits + image 字段，保持原行为
-        if (!requestBody.image && !isReferenceOnly) {
+        // ★ 参考图 + 图生图模式：同时设置 image 和 image_urls
+        // image 字段：确保 /images/edits 端点可用（部分 API 代理仅支持此端点处理参考图）
+        // image_urls 字段：在 adjustRequestForProfile 中转为 images[] 格式（OpenAI 官方规范）
+        // 两者同时存在 → images[] 合并包含所有参考图，最大化兼容性
+        if (!requestBody.image) {
           const firstRefBase64 = base64RefImages[0];
           if (firstRefBase64) {
             requestBody.image = firstRefBase64;
@@ -830,11 +828,10 @@ export async function POST(request: NextRequest) {
       }
 
       // 使用兼容性层自动调整请求（size格式、端点选择等）
-      // ★ 关键修复：参考图组模式(reference/fusion)不应使用 editEndpoint(/images/edits)
-      // 因为 /images/edits 会被 image 字段强制以原图尺寸生成，忽略 size 参数
-      // 参考图组模式：hasImage=false → 使用 defaultEndpoint(/images/generations)，遵守 size
-      // 图片编辑模式(erase/mask/outpaint)：hasImage=true → 使用 editEndpoint(/images/edits)
-      // ★ hasImageFlag: 现在参考图模式也设置了 image 字段，所以只要有 image 就应该为 true
+      // ★ 参考图模式：同时设置 image + image_urls，hasImageFlag=true → 先尝试 /images/edits
+      //   /images/edits 支持更多第三方 API 代理（它们可能不支持 /images/generations 的 images[] 格式）
+      //   如果 /images/edits 被拒绝 → 自动回退到 /images/generations + images[] 格式
+      // ★ 图片编辑模式(erase/mask/outpaint)：hasImage=true → 使用 editEndpoint(/images/edits)
       const hasImageFlag = !!requestBody.image;
       const hasRefImagesFlag = accessibleReferenceImages.length > 0;
       const { body: adjustedBody, endpoint } = adjustRequestForProfile(requestBody, profile, {
@@ -1278,8 +1275,10 @@ export async function POST(request: NextRequest) {
         }
       } else {
         // /images/generations 或无 image 字段：标准 JSON 编码
-        // 当 /images/generations 携带 image_urls 时，增强 prompt 以确保 AI 使用参考图
-        if (endpoint === '/images/generations' && hasRefImages && adjustedBody.image_urls) {
+        // 当 /images/generations 携带参考图时（image_urls 或 images[]），增强 prompt 以确保 AI 使用参考图
+        const hasRefImagesInBody = (Array.isArray(adjustedBody.image_urls) && adjustedBody.image_urls.length > 0) ||
+                                    (Array.isArray(adjustedBody.images) && adjustedBody.images.length > 0);
+        if (endpoint === '/images/generations' && hasRefImages && hasRefImagesInBody) {
           const p = String(adjustedBody.prompt || '');
           const hasImg2ImgHint = p.includes('[img2img]');
           if (hasImg2ImgHint) {
