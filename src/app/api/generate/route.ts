@@ -37,7 +37,13 @@ export function calculateActualPixelsFromRatio(aspectRatio: string, quality?: st
   const ratio = rw / rh;
 
   // 根据质量确定长边像素
-  const qualityPixels: Record<string, number> = { '1K': 1024, '2K': 2048, '3K': 3072, '4K': 4096 };
+  // ★ 支持 '1K'/'2K'/'3K'/'4K' 和 'standard'/'hd'/'high' 等常见质量值
+  const qualityPixels: Record<string, number> = {
+    '1K': 1024, '2K': 2048, '3K': 3072, '4K': 4096,
+    'standard': 1024, 'std': 1024,     // standard → 1K (OpenAI 默认)
+    'hd': 1792, 'high': 1792,          // hd → 1792 (OpenAI DALL-E 3 hd 模式)
+    'low': 1024, 'medium': 1024, 'auto': 1024, // 通用质量兜底
+  };
   const longEdge = qualityPixels[quality];
   if (!longEdge) return null;
 
@@ -565,6 +571,9 @@ export async function POST(request: NextRequest) {
         // aspect-ratio 格式的 profile: size 保持比例格式（如 "16:9"），
         // 但 width/height/size_px 已附带，API 可自行选择使用
       }
+
+      // ★ 诊断日志：记录发送给 API 的关键分辨率参数，便于排查"用户设置4K但实际生成1K"问题
+      console.log(`[generate] Resolution params → model: ${currentModelConfig.modelId}, paramType: ${currentModelConfig.paramType}, quality: ${quality}, effectiveSize: ${effectiveSize}, pixelSize: ${pixelSize || 'null'}, requestBody.size: ${requestBody.size}, requestBody.resolution: ${requestBody.resolution || 'N/A'}, requestBody.width: ${requestBody.width || 'N/A'}, requestBody.height: ${requestBody.height || 'N/A'}, profile.sizeFormat: ${profile.sizeFormat}`);
 
       // 添加参考图片
       const hasRefImages = accessibleReferenceImages.length > 0 && currentModelConfig.supportsImageToImage;

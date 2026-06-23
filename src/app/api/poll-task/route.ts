@@ -1044,6 +1044,24 @@ export async function POST(request: NextRequest) {
           if (persistedUrl) {
             pollResult.imageUrl = persistedUrl;
             completedTaskCache.set(taskId, { imageUrl: persistedUrl, modelName: regModelName || model || '', providerName: regProviderName || providerName || '', timestamp: Date.now() });
+
+            // ★ 诊断日志：验证持久化后的图片实际尺寸，排查"4K变1K"问题
+            try {
+              const sharp = (await import('sharp')).default;
+              const { getServerDataRoot } = await import('@/lib/server-data-root');
+              const path = (await import('path')).default;
+              const fs = (await import('fs')).default;
+              const dataRoot = getServerDataRoot();
+              const filePath = path.join(dataRoot, persistedUrl.replace(/^\/api\/serve-upload\//, ''));
+              if (fs.existsSync(filePath)) {
+                const buf = fs.readFileSync(filePath);
+                const meta = await sharp(buf).metadata();
+                console.log(`[poll-task] Persisted image dimensions: ${meta.width}x${meta.height}, source: ${sourceImageUrl.substring(0, 80)}...`);
+              }
+            } catch (dimErr) {
+              // 尺寸检测失败不影响主流程
+            }
+
             // Save source mapping for future reference
             try {
               const { saveImageDataMapping } = await import('@/lib/image-source-map');
