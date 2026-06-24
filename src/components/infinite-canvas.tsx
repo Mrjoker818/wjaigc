@@ -6530,7 +6530,7 @@ export function InfiniteCanvas({
       completeProcessingFrame(placeholderId, stableUrl, img.width, img.height, {
         originalWidth: img.originalWidth || Math.round(img.width),
         originalHeight: img.originalHeight || Math.round(img.height),
-        modifyPrompt: `AI视角变换 / ${multiAngleMode === 'image' ? '环绕观察' : '摄像机位移'} / 水平 ${multiAngleRotation}° / 垂直 ${multiAngleTilt}° / ${['特写', '标准', '广角'][multiAngleZoom]}`,
+        modifyPrompt: `AI视角变换 / ${multiAngleMode === 'image' ? '相机环绕(Orbit)' : '相机位移(Dolly)'} / 水平${multiAngleRotation >= 0 ? '右转' : '左转'}${Math.abs(multiAngleRotation)}°(露出${multiAngleRotation >= 0 ? '左' : '右'}侧) / ${multiAngleTilt === 0 ? '平视' : multiAngleTilt > 0 ? `仰视${multiAngleTilt}°` : `俯视${Math.abs(multiAngleTilt)}°`} / ${['特写', '标准', '广角'][multiAngleZoom]}`,
         modelName: modelInfo.apiDisplayName || modelInfo.model,
         apiProvider: modelInfo.providerName || '',
       }, 'variant');
@@ -11672,7 +11672,7 @@ export function InfiniteCanvas({
 
                 {([
                   { label: '旋转', value: multiAngleRotation, min: -90, max: 90, step: 1, onChange: setMultiAngleRotation,
-                    desc: multiAngleRotation === 0 ? '正面' : multiAngleRotation > 0 ? `向右${Math.abs(multiAngleRotation)}°` : `向左${Math.abs(multiAngleRotation)}°` },
+                    desc: multiAngleRotation === 0 ? '正面' : multiAngleRotation > 0 ? `左转${Math.abs(multiAngleRotation)}°（露出左侧）` : `右转${Math.abs(multiAngleRotation)}°（露出右侧）` },
                   { label: multiAngleMode === 'camera' ? '俯仰' : '倾斜', value: multiAngleTilt, min: -30, max: 60, step: 1, onChange: setMultiAngleTilt,
                     desc: multiAngleTilt === 0 ? '平视' : multiAngleTilt > 0 ? `仰视${Math.abs(multiAngleTilt)}°` : `俯视${Math.abs(multiAngleTilt)}°` },
                 ]).map(item => (

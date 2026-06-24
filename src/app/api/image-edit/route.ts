@@ -1833,45 +1833,79 @@ export async function POST(request: NextRequest) {
       const absRot = Math.abs(rotation);
       const absTilt = Math.abs(tilt);
 
-      // ── 倾斜 (Tilt/Pitch) — 视觉化描述新视角能看到什么 ──
-      const tiltVisual = tilt === 0 ? '' :
-        tilt > 0 && absTilt <= 20 ? 'looking slightly upward, ground plane tilts away' :
-        tilt > 0 && absTilt <= 45 ? 'looking upward from below, seeing undersides of objects, ground recedes steeply' :
-        tilt > 0 ? "extreme low-angle from ground level, looking straight up, sky/ceiling dominates" :
-        absTilt <= 20 ? 'looking slightly downward, tops of objects become partially visible' :
-        absTilt <= 45 ? 'looking down from above, seeing the tops of everything, ground plane clearly visible' :
-        "bird's-eye view from directly overhead, looking straight down, only top surfaces visible";
+      // ── 倾斜 (Tilt/Pitch) — 精确描述新视角俯仰 ──
+      // tilt>0 仰视(相机低于主体往上看)，tilt<0 俯视(相机高于主体往下看)
+      // 范围 -30 ~ +60
+      let tiltVisual = '';
+      let tiltLabel = 'eye-level';
+      if (tilt > 0) {
+        if (absTilt <= 15) { tiltVisual = 'low-angle shot looking slightly upward, camera positioned slightly below the subject'; tiltLabel = 'slight low-angle'; }
+        else if (absTilt <= 35) { tiltVisual = 'low-angle shot looking upward from below, camera positioned well below the subject, undersides and bottom edges become visible'; tiltLabel = 'low-angle'; }
+        else { tiltVisual = 'extreme low-angle shot looking steeply upward from near ground level, camera far below subject pointing up, undersides dominate, sky/ceiling visible above'; tiltLabel = 'extreme low-angle'; }
+      } else if (tilt < 0) {
+        if (absTilt <= 15) { tiltVisual = 'high-angle shot looking slightly downward, camera positioned slightly above the subject'; tiltLabel = 'slight high-angle'; }
+        else { tiltVisual = `high-angle shot looking down from above (${absTilt}° downward), camera positioned well above the subject looking down, tops of objects and ground clearly visible`; tiltLabel = 'high-angle'; }
+      }
 
-      // ── 旋转 (Rotation/Yaw) — 视觉化描述新视角能看到什么 ──
-      const yawVisual = rotation === 0 ? '' :
-        absRot <= 25 ? (rotation > 0 ? 'left side of the scene now visible, right side receding' : 'right side of the scene now visible, left side receding') :
-        absRot <= 55 ? (rotation > 0 ? 'mostly seeing the left side of everything, original front now faces right' : 'mostly seeing the right side of everything, original front now faces left') :
-        (rotation > 0 ? 'side view from the left, original front is no longer visible' : 'side view from the right, original front is no longer visible');
+      // ── 旋转 (Rotation/Yaw) — 精确描述水平旋转角度 ──
+      // 与前端CSS立方体/球体预览对齐：
+      //   rotation > 0 (左转)：相机向右环绕(camera orbits right)→看到主体左侧面(Subject's left side visible)
+      //   rotation < 0 (右转)：相机向左环绕(camera orbits left)→看到主体右侧面(Subject's right side visible)
+      // 范围 -90 ~ +90
+      let yawVisual = '';
+      let facingLabel = 'front-facing';
+      if (rotation > 0) {
+        // 相机环绕到右侧，看到主体左侧面
+        if (absRot <= 15) { yawVisual = `camera orbits ${absRot}° to the right around the subject, revealing a sliver of the subject's left cheek/side, subject still mostly front-facing with a subtle three-quarter turn to the left`; facingLabel = 'three-quarter front-left'; }
+        else if (absRot <= 35) { yawVisual = `camera orbits ${absRot}° to the right around the subject (three-quarter view), subject turns to show their left side prominently, left cheek/left profile visible, original front now angled away toward the right of the frame`; facingLabel = 'three-quarter left'; }
+        else if (absRot <= 65) { yawVisual = `camera orbits ${absRot}° to the right around the subject, subject is now in a near left-profile view with left side of face/body dominant, very little of the original front remains visible, subject's left shoulder/cheek faces camera`; facingLabel = 'near profile-left'; }
+        else { yawVisual = `camera orbits ${absRot}° fully to the right side of the subject (full profile), subject is in complete left profile — the subject's left side faces the camera directly, original front face/chest is no longer visible`; facingLabel = 'profile left'; }
+      } else if (rotation < 0) {
+        // 相机环绕到左侧，看到主体右侧面
+        if (absRot <= 15) { yawVisual = `camera orbits ${absRot}° to the left around the subject, revealing a sliver of the subject's right cheek/side, subject still mostly front-facing with a subtle three-quarter turn to the right`; facingLabel = 'three-quarter front-right'; }
+        else if (absRot <= 35) { yawVisual = `camera orbits ${absRot}° to the left around the subject (three-quarter view), subject turns to show their right side prominently, right cheek/right profile visible, original front now angled away toward the left of the frame`; facingLabel = 'three-quarter right'; }
+        else if (absRot <= 65) { yawVisual = `camera orbits ${absRot}° to the left around the subject, subject is now in a near right-profile view with right side of face/body dominant, very little of the original front remains visible, subject's right shoulder/cheek faces camera`; facingLabel = 'near profile-right'; }
+        else { yawVisual = `camera orbits ${absRot}° fully to the left side of the subject (full profile), subject is in complete right profile — the subject's right side faces the camera directly, original front face/chest is no longer visible`; facingLabel = 'profile right'; }
+      }
 
       // ── 缩放 (Zoom) ──
       const zoomIdx = typeof zoom === 'number' ? zoom : 1;
-      const zoomVisual = zoomIdx === 0 ? ', zoomed in close-up' : zoomIdx === 2 ? ', zoomed out wide shot' : '';
+      let zoomVisual = '';
+      let shotLabel = 'medium shot';
+      if (zoomIdx === 0) { zoomVisual = ', tight close-up framing with the subject filling most of the frame'; shotLabel = 'close-up'; }
+      else if (zoomIdx === 2) { zoomVisual = ', wide shot showing more of the surrounding environment, subject smaller in frame'; shotLabel = 'wide shot'; }
 
-      // ── 组合: 描述"新视角下的结果画面应该长什么样" ──
+      // ── 组合视角描述 ──
       const viewClauses: string[] = [];
       if (tiltVisual) viewClauses.push(tiltVisual);
       if (yawVisual) viewClauses.push(yawVisual);
 
       const viewDescription = viewClauses.length > 0
         ? viewClauses.join('; ')
-        : 'frontal view, same angle as original';
+        : 'exact frontal eye-level view, same angle as original';
 
-      // v8 Prompt: 描述新视角结果 + 元素/风格保持约束
-      // 关键: 不用camera/rotate/orbit/move/transform等变换词
-      // 只描述"新视角下的画面" + "保持一切外观不变"
+      // 视角数字标签（用于prompt头部强约束）
+      const angleTag = `${facingLabel}, ${tiltLabel}, ${shotLabel}, yaw=${rotation}°, tilt=${tilt}°`;
+
+      // v9 Prompt: 更精确的视角描述 + 明确角度数字 + 严格元素保持约束
+      // 核心策略：用"camera position"描述新视角，明确告诉AI相机在主体的哪个方位
+      // 避免使用模糊方向词，使用"camera orbits right/left"明确表示相机环绕方向
+      const modeIntro = angleMode === 'camera'
+        ? 'CAMERA DOLLY MODE: The camera physically moves (dollies) through the 3D scene to a new position, while all subjects/objects stay in place. Foreground objects shift significantly relative to background due to parallax.'
+        : 'ORBIT MODE: The camera orbits around the central subject as if on a circular dolly track. The subject stays centered in frame but we see a new side/angle. Background shifts realistically.';
+
       const multiAnglePrompt = prompt || (
-        `Reimagine this EXACT scene from a new viewpoint: ${viewDescription}${zoomVisual}. ` +
-        `Every person, animal, object, building, tree, and detail must appear in the new view ` +
-        `with their front/back/side facing the new direction — they are NOT standing still ` +
-        `while only the ground changes. Every element physically rotates with the scene as one ` +
-        `rigid 3D world. Faces, bodies, buildings, and objects all show their new angle. ` +
-        `Keep every element's identity, color, style, and relative position unchanged. ` +
-        `This is the same world seen from a different position, not a different world.`
+        `[ANGLE: ${angleTag}] ` +
+        `${modeIntro}\n\n` +
+        `Reproduce this EXACT scene from the new camera position described below:\n${viewDescription}${zoomVisual}.\n\n` +
+        `CRITICAL COMPOSITION RULES — MUST follow ALL:\n` +
+        `1. EVERY element present in the original (people, faces, bodies, objects, furniture, buildings, trees, background details, text, logos) MUST appear in this new view. Do NOT remove, add, or replace any element.\n` +
+        `2. Each element must show its CORRECT side for this camera position. When the camera orbits to its RIGHT (viewer's right), we see the subject's LEFT side/cheek/profile. When the camera orbits to its LEFT (viewer's left), we see the subject's RIGHT side/cheek/profile. When looking up from below, we see undersides (chin, table undersides, eaves). When looking down, we see tops of heads/objects. Elements are NOT frozen facing forward while only the background rotates.\n` +
+        `3. Maintain IDENTICAL colors, materials, lighting direction, textures, clothing, hairstyles, expressions, poses, and relative positions. Same lighting, same time of day, same atmosphere.\n` +
+        `4. The scene behaves as a single rigid 3D world. When viewed from a new angle, every element shows the appropriate new perspective coherently. Foreground/background parallax must be correct: closer objects shift more relative to background.\n` +
+        `5. Do NOT mirror/flip the image. Do NOT change aspect ratio. Do NOT change the image style (photograph stays photograph, illustration stays illustration, 3D render stays 3D render).\n` +
+        `6. The yaw rotation is ${Math.abs(rotation)}° and tilt is ${tilt}° from eye-level — apply these exact angles to every element's perspective consistently.\n` +
+        `This is the SAME scene viewed from a DIFFERENT camera position — not a different scene, not a rearrangement, not a different person/object.`
       );
 
       // Use original image aspect ratio
@@ -1882,42 +1916,64 @@ export async function POST(request: NextRequest) {
       // Resolve image to base64 for maximum content preservation
       const multiAngleBase64 = await resolveImageToBase64(imageUrl);
 
-      // Strategy 1: Try /images/edits endpoint
+      // Strategy selection based on angle magnitude:
+      // - Small angles (<25° rotation AND <15° tilt): use /images/edits with medium fidelity (subtle change)
+      // - Large angles: use /images/generations with image as reference (allows bigger viewpoint shift)
+      const isSmallAngle = absRot < 25 && absTilt < 15;
       let result: { taskId?: string; directUrl?: string; usedModel?: string } | null = null;
-      let usedEndpoint: '/images/edits' | '/images/generations' = '/images/edits';
+      let usedEndpoint: '/images/edits' | '/images/generations' = isSmallAngle ? '/images/edits' : '/images/generations';
 
-      try {
-        if (multiAngleBase64) {
-          result = await autoTrySubmitImageTask(candidateModels, (m) => ({
-            model: m,
-            prompt: multiAnglePrompt,
-            size: maAspectRatio,
-            n: 1,
-            image: multiAngleBase64,
-            // ★ 不传strength — 避免不同提供商解释不一致
-            // ★ input_fidelity: 'low' — 允许大幅度视角变换
-            //   'high'只做微调→角度变化无效(v7问题)
-            //   'low'需靠prompt约束保持元素/风格
-            input_fidelity: 'low' as const,
-          }), '多角度(edits)', '/images/edits');
-          console.info(`[multi-angle] Used /images/edits, fidelity=low, no strength, rotation=${rotation}, tilt=${tilt}`);
-        } else {
-          throw new ModelCapabilityError('No base64 image available for edits endpoint');
-        }
-      } catch (editsErr: unknown) {
-        const editsErrMsg = editsErr instanceof Error ? editsErr.message : String(editsErr);
-        console.warn(`[multi-angle] /images/edits failed: ${editsErrMsg}, falling back to /images/generations`);
-        usedEndpoint = '/images/generations';
+      // Try preferred endpoint first, fallback to the other
+      const tryEdits = async () => {
+        if (!multiAngleBase64) throw new ModelCapabilityError('No base64 image available for edits endpoint');
+        return await autoTrySubmitImageTask(candidateModels, (m) => ({
+          model: m,
+          prompt: multiAnglePrompt,
+          size: maAspectRatio,
+          n: 1,
+          image: multiAngleBase64,
+          // Small angles: medium fidelity to preserve original while allowing subtle angle shift
+          input_fidelity: 'medium' as const,
+        }), '多角度(edits)', '/images/edits');
+      };
 
-        result = await autoTrySubmitImageTask(candidateModels, (m) => ({
+      const tryGenerations = async () => {
+        return await autoTrySubmitImageTask(candidateModels, (m) => ({
           model: m,
           prompt: multiAnglePrompt,
           size: maAspectRatio,
           n: 1,
           image_urls: [imageUrl],
           ...(multiAngleBase64 ? { image: multiAngleBase64 } : {}),
-          // ★ 同样不传strength
+          // Large angles: low fidelity to allow significant perspective change
+          input_fidelity: 'low' as const,
         }), '多角度(generations)');
+      };
+
+      try {
+        if (isSmallAngle) {
+          result = await tryEdits();
+          console.info(`[multi-angle] Small angle (rot=${rotation}, tilt=${tilt}), tried /images/edits (medium fidelity) first`);
+        } else {
+          result = await tryGenerations();
+          console.info(`[multi-angle] Large angle (rot=${rotation}, tilt=${tilt}), using /images/generations (low fidelity) for bigger viewpoint shift`);
+        }
+      } catch (primaryErr: unknown) {
+        const primaryErrMsg = primaryErr instanceof Error ? primaryErr.message : String(primaryErr);
+        console.warn(`[multi-angle] Primary endpoint ${usedEndpoint} failed: ${primaryErrMsg}, trying fallback`);
+        try {
+          if (isSmallAngle) {
+            usedEndpoint = '/images/generations';
+            result = await tryGenerations();
+          } else {
+            usedEndpoint = '/images/edits';
+            result = await tryEdits();
+          }
+        } catch (fbErr: unknown) {
+          const fbErrMsg = fbErr instanceof Error ? fbErr.message : String(fbErr);
+          console.error(`[multi-angle] Fallback endpoint also failed: ${fbErrMsg}`);
+          throw fbErr;
+        }
       }
 
       if (result?.directUrl) {
