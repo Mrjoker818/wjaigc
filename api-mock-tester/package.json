@@ -1,0 +1,25 @@
+{
+  "name": "api-mock-tester",
+  "version": "1.0.0",
+  "description": "Mock-based API virtual testing framework for web applications",
+  "type": "module",
+  "scripts": {
+    "mock": "node mock-server.mjs",
+    "test": "node test-runner.mjs",
+    "test:verbose": "node test-runner.mjs --verbose",
+    "test:infra": "node test-runner.mjs --group infra",
+    "test:auth": "node test-runner.mjs --group auth",
+    "test:admin": "node test-runner.mjs --group admin",
+    "test:image": "node test-runner.mjs --group image-gen",
+    "test:chat": "node test-runner.mjs --group chat",
+    "test:edit": "node test-runner.mjs --group image-edit",
+    "test:video": "node test-runner.mjs --group video",
+    "test:workflow": "node test-runner.mjs --group workflow",
+    "test:upscale": "node test-runner.mjs --group upscale",
+    "test:data": "node test-runner.mjs --group data-persist",
+    "test:svg": "node test-runner.mjs --group svg-trace",
+    "test:agent": "node test-runner.mjs --group agent",
+    "test:task": "node test-runner.mjs --group task-mgmt",
+    "test:upload": "node test-runner.mjs --group upload"
+  }
+}
