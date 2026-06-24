@@ -4927,12 +4927,14 @@ export function InfiniteCanvas({
     // 避免用户在轮询期间切换模型导致查询错误的提供商
     const pollModel = apiKeyOrModel || getCurrentModel().model;
     const cachedProviderId = getCurrentProviderId(); // ★ 缓存 providerId，避免轮询期间用户切换模型导致查询错误的提供商
-    const maxAttempts = 300; // 300次 × 动态间隔 ≈ 900秒，兼容token link等极慢API
+    const maxAttempts = 360; // 360次 × 动态间隔 ≈ 最长15分钟，适配各种慢速API
+    let consecutiveErrors = 0;
     const getEditPollInterval = (attempt: number) => {
-      if (attempt <= 3) return 500;   // 首次500ms，避免过早轮询
-      if (attempt <= 10) return 800;
-      if (attempt <= 25) return 1200;
-      return 2000;
+      if (attempt <= 2) return 800;    // 前期快轮询，尽快捕获短任务
+      if (attempt <= 8) return 1200;
+      if (attempt <= 20) return 1800;
+      if (attempt <= 60) return 2500;  // 中期2.5s
+      return 4000;                    // 后期4s，避免高频请求浪费
     };
     lastPollErrorRef.current = '';
 
@@ -4940,6 +4942,7 @@ export function InfiniteCanvas({
     const abortController = new AbortController();
     pollingAbortRef.current = abortController;
 
+    const startTime = Date.now();
     for (let i = 0; i < maxAttempts; i++) {
       // ★ 检查是否被取消
       if (abortController.signal.aborted) {
@@ -4947,9 +4950,17 @@ export function InfiniteCanvas({
         return null;
       }
 
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      const elapsedStr = elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed/60)}m${elapsed%60}s`;
+      // 进度曲线：0-30s快速爬升(20→40)，30-120s平缓(40→75)，120s+缓慢(75→92)
+      const baseProgress = elapsed < 30
+        ? 20 + Math.round((elapsed / 30) * 20)
+        : elapsed < 120
+          ? 40 + Math.round(((elapsed - 30) / 90) * 35)
+          : Math.min(92, 75 + Math.round(((elapsed - 120) / 600) * 17));
       onProgress?.(
-        Math.min(95, 18 + Math.round((i / Math.max(1, maxAttempts - 1)) * 76)),
-        i < 2 ? '任务已提交，等待模型响应...' : 'AI 正在生成结果...'
+        Math.min(92, baseProgress),
+        `AI 正在生成中... (已等待 ${elapsedStr})`
       );
       // ★ SSE加速：同时等待定时器和SSE完成事件
       const pollDelay = getEditPollInterval(i);
@@ -4975,6 +4986,13 @@ export function InfiniteCanvas({
         });
         if (!res.ok) throw new Error(`Poll HTTP ${res.status}`);
         const data = await res.json();
+        consecutiveErrors = 0;
+
+        // ★ 检查服务端返回的真实进度（若有）
+        if (typeof data.progress === 'number' && data.progress > 0) {
+          const serverProgress = Math.min(92, Math.round(data.progress * 0.9) + 10);
+          onProgress?.(serverProgress, data.status || `AI 正在生成中... (已等待 ${elapsedStr})`);
+        }
 
         // ★ 检查服务端取消状态
         if (data.status === 'cancelled') {
@@ -4983,6 +5001,7 @@ export function InfiniteCanvas({
         }
 
         if (data.status === 'completed' && data.imageUrl) {
+          onProgress?.(95, '生成完成，正在处理图片...');
           // ★ 视频任务：将视频元数据暂存到全局变量，供调用方使用
           if (data.taskType === 'video' && data.videoUrl) {
             lastVideoResultRef.current = {
@@ -5009,8 +5028,15 @@ export function InfiniteCanvas({
           lastPollErrorRef.current = '任务已被取消';
           return null;
         }
-        // Network/polling errors — continue polling
+        // Network/polling errors — continue polling with backoff
+        consecutiveErrors++;
         console.error('Poll error:', e);
+        if (consecutiveErrors >= 10) {
+          lastPollErrorRef.current = '网络连接不稳定，请重试';
+          return null;
+        }
+        // 网络错误时多等一会
+        await new Promise(r => setTimeout(r, 2000));
       }
     }
     lastPollErrorRef.current = '生成超时，AI 模型响应时间过长，请稍后重试或切换其他模型';
@@ -6489,7 +6515,8 @@ export function InfiniteCanvas({
     setIsMultiAngleProcessing(true);
     try {
       const modelInfo = getCurrentModel();
-      updateProcessingFrame(placeholderId, { progress: 12, status: '正在提交角度参数...' });
+      updateProcessingFrame(placeholderId, { progress: 8, status: '正在提交角度参数...' });
+      const submitStart = Date.now();
       const res = await fetch('/api/image-edit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -6508,6 +6535,7 @@ export function InfiniteCanvas({
           providerId: modelInfo.providerId || getCurrentProviderId(),
         }),
       });
+      const submitElapsed = Math.round((Date.now() - submitStart) / 1000);
       if (!res.ok) throw new Error(`多角度生成失败: HTTP ${res.status}`);
       const data = await res.json();
       if (!data.success) {
@@ -6515,7 +6543,22 @@ export function InfiniteCanvas({
         alert(translateErrorFrontend(data.error || '多角度生成失败'));
         return;
       }
-      updateProcessingFrame(placeholderId, { progress: 24, status: 'AI 正在重建立体视角...' });
+      // 提交完成后，如果是同步返回结果（directUrl），直接使用
+      if (data.imageUrl && !data.taskId) {
+        updateProcessingFrame(placeholderId, { progress: 90, status: '正在载入新角度图片...' });
+        const stableUrl = await awaitStableImageUrl(data.imageUrl);
+        completeProcessingFrame(placeholderId, stableUrl, img.width, img.height, {
+          originalWidth: img.originalWidth || Math.round(img.width),
+          originalHeight: img.originalHeight || Math.round(img.height),
+          modifyPrompt: `AI视角变换 / ${multiAngleMode === 'image' ? '相机环绕(Orbit)' : '相机位移(Dolly)'} / 水平${multiAngleRotation >= 0 ? '右转' : '左转'}${Math.abs(multiAngleRotation)}°(露出${multiAngleRotation >= 0 ? '左' : '右'}侧) / ${multiAngleTilt === 0 ? '平视' : multiAngleTilt > 0 ? `仰视${multiAngleTilt}°` : `俯视${Math.abs(multiAngleTilt)}°`} / ${['特写', '标准', '广角'][multiAngleZoom]}`,
+          modelName: modelInfo.apiDisplayName || modelInfo.model,
+          apiProvider: modelInfo.providerName || '',
+        }, 'variant');
+        setActiveTool('none');
+        return;
+      }
+      // 异步任务：开始轮询
+      updateProcessingFrame(placeholderId, { progress: 15, status: `任务已提交，等待模型响应${submitElapsed > 2 ? `(提交耗时 ${submitElapsed}s)` : ''}...` });
       const resultUrl = data.imageUrl || await pollForResult(data.taskId, modelInfo.model, (progress, status) => {
         updateProcessingFrame(placeholderId, { progress, status });
       });
@@ -11613,7 +11656,7 @@ export function InfiniteCanvas({
                           width: '110px',
                           height: '110px',
                           transformStyle: 'preserve-3d',
-                          transform: `rotateX(${-multiAngleTilt * 0.8}deg) rotateY(${multiAngleRotation * 1.2}deg)`,
+                          transform: `rotateX(${multiAngleTilt * 0.8}deg) rotateY(${multiAngleRotation * 1.2}deg)`,
                           transition: isMultiAngleDragging ? 'none' : 'transform 0.15s ease-out',
                         }}
                       >
