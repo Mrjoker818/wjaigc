@@ -64,6 +64,8 @@ async function upscaleViaPearAPI(
   model: UpscaleProModel,
   face: boolean,
   scale: number | undefined,
+  targetWidth?: number,
+  targetHeight?: number,
 ): Promise<{ url: string; model: string; strategy: string } | null> {
   const pearConfig = await findPearApiKey();
   if (!pearConfig) {
@@ -79,7 +81,7 @@ async function upscaleViaPearAPI(
     task_type: 'sync',
   };
 
-  if (model === 'Real-ESRGAN' && scale) {
+  if (scale) {
     requestBody.scale = scale;
   }
 
@@ -109,8 +111,43 @@ async function upscaleViaPearAPI(
     const resultImageUrl = resultData.image_url as string;
     if (!resultImageUrl) return null;
 
+    // ★ 精确resize：PearAPI返回的图片尺寸可能不精确匹配目标（如SeedVR2默认1.5×而非用户选的4×）
+    // 当targetWidth/targetHeight有值时，强制resize到目标尺寸
+    let finalUrl = resultImageUrl;
+    if (targetWidth && targetHeight && targetWidth > 0 && targetHeight > 0) {
+      try {
+        const sharp = await import('sharp');
+        const path = await import('path');
+        const fs = await import('fs');
+        // 下载 PearAPI 结果
+        const resp = await fetch(resultImageUrl);
+        if (resp.ok) {
+          const buf = Buffer.from(await resp.arrayBuffer());
+          // 检查当前尺寸
+          const meta = await sharp.default(buf).metadata();
+          const curW = meta.width || 0;
+          const curH = meta.height || 0;
+          if (curW > 0 && curH > 0 && (curW !== targetWidth || curH !== targetHeight)) {
+            console.log(`[upscale-pro] PearAPI resize: ${curW}x${curH} -> ${targetWidth}x${targetHeight}`);
+            const resizedBuf = await sharp.default(buf)
+              .resize(targetWidth, targetHeight, { kernel: 'lanczos3' })
+              .png({ quality: 95 })
+              .toBuffer();
+            // 保存到持久化目录
+            const outDir = path.join(process.env.COZE_WORKSPACE_PATH || '/workspace/projects', 'data', 'uploads', 'upscale');
+            fs.mkdirSync(outDir, { recursive: true });
+            const outFile = path.join(outDir, `pear-resize-${Date.now()}.png`);
+            fs.writeFileSync(outFile, resizedBuf);
+            finalUrl = `/api/serve-upload/uploads/upscale/pear-resize-${Date.now()}.png`;
+          }
+        }
+      } catch (resizeErr) {
+        console.warn('[upscale-pro] PearAPI resize failed, using original:', resizeErr instanceof Error ? resizeErr.message : String(resizeErr));
+      }
+    }
+
     // 持久化结果
-    const persistedUrl = await persistResult(resultImageUrl);
+    const persistedUrl = await persistResult(finalUrl);
     console.log(`[upscale-pro] PearAPI success: ${persistedUrl.slice(0, 80)}`);
     return { url: persistedUrl, model, strategy: 'cloud-Real-ESRGAN' };
   } catch (err) {
@@ -198,11 +235,12 @@ async function upscaleViaOnnx(
     const sharp = await import('sharp');
     const metadata = await sharp.default(inputPath).metadata();
     let maxDim = Math.max(metadata.width || 512, metadata.height || 512);
-    let effectiveScale = scale;
-    
-    // 性能优化：大图先缩小再放大，避免CPU处理超时
-    // Real-ESRGAN x4模型最大输入建议≤512px，x2建议≤768px
-    const maxInputSize = scale >= 4 ? 384 : scale >= 2 ? 512 : 768;
+    // ONNX Real-ESRGAN x4模型固定4×放大
+    // 策略：先让模型4×放大，再精确resize到目标尺寸(origW*scale × origH*scale)
+    // 对于2×：可先用sharp缩小到一半再4×放大(2×效果)，或直接4×再缩小
+    // 直接4×再缩小更简单且质量更好（模型4×输出包含更多细节，缩小不会丢失）
+    // 对于超大图(>1024px)先缩小输入避免CPU超时，缩小后4×放大+resize补偿
+    const maxInputSize = 1024;
     if (maxDim > maxInputSize) {
       const ratio = maxInputSize / maxDim;
       const newW = Math.round((metadata.width || 512) * ratio);
@@ -215,21 +253,20 @@ async function upscaleViaOnnx(
       fs.writeFileSync(resizedPath, resizedBuf);
       inputPath = resizedPath;
       maxDim = Math.max(newW, newH);
-      // 调整实际放大倍率以尽量达到目标尺寸
-      const targetSize = (metadata.width || 512) * scale;
-      effectiveScale = Math.min(4, Math.max(2, Math.round(targetSize / newW)));
+      // 注意：不修改effectiveScale，保持用户选择的倍率
+      // 后续会精确resize到目标尺寸 origW*scale × origH*scale
     }
 
     let tileSize = 256;
     if (maxDim > 512) tileSize = 128;
     else if (maxDim > 256) tileSize = 192;
 
-    console.log(`[upscale-pro] ONNX upscale: input=${maxDim}px, model=${modelName}, tile=${tileSize}, scale=${effectiveScale}x`);
+    console.log(`[upscale-pro] ONNX upscale: input=${maxDim}px, model=${modelName}, tile=${tileSize}, target=${scale}x (model=4x then resize)`);
 
     // 调用Python ONNX脚本
     const params = JSON.stringify({
       inputFile: inputPath,
-      scale: effectiveScale,
+      scale: 4,  // ONNX Real-ESRGAN 模型固定4×放大，后续用sharp精确resize到目标尺寸
       tileSize,
       model: modelName,
     });
@@ -272,10 +309,15 @@ async function upscaleViaOnnx(
       return null;
     }
 
-    // 如果输入图被缩小过，需要将ONNX输出resize到目标尺寸
-    if (effectiveScale !== scale) {
-      const targetW = (metadata.width || 512) * scale;
-      const targetH = (metadata.height || 512) * scale;
+    // 精确resize到目标尺寸：ONNX模型固定4×放大，但用户可能选2×/4×/8×
+    // 始终检查并精确调整到 origW*scale × origH*scale
+    const originalWidth = metadata.width || 512;
+    const originalHeight = metadata.height || 512;
+    const targetW = originalWidth * scale;
+    const targetH = originalHeight * scale;
+    // 需要resize的情况：输入被缩小过、scale≠4、或tile对齐偏差
+    // 始终精确调整到 origW*scale × origH*scale
+    {
       if (fs.existsSync(resultUrl)) {
         const resizedBuf = await sharp.default(resultUrl)
           .resize(targetW, targetH, { kernel: 'lanczos3' })
@@ -434,7 +476,8 @@ export async function POST(request: NextRequest) {
     if (targetScale && targetScale > scale) {
       console.log(`[upscale-pro] Chain upscale: target ${targetScale}×, first pass ${scale}×...`);
       // 第一步：使用当前 scale（通常 4×）
-      const firstPassResult = await performUpscaleChain(imageUrl, model, face, scale, fallbackToAi, skipAiEnhance);
+      const firstPassResult = await performUpscaleChain(imageUrl, model, face, scale, fallbackToAi, skipAiEnhance,
+        originalWidth ? originalWidth * scale : undefined, originalHeight ? originalHeight * scale : undefined);
       if (!firstPassResult.success || !firstPassResult.url) {
         return NextResponse.json(firstPassResult, { status: firstPassResult.success ? 200 : 502 });
       }
@@ -443,6 +486,7 @@ export async function POST(request: NextRequest) {
       console.log(`[upscale-pro] Chain upscale: second pass ${secondScale}× on first result...`);
       const secondPassResult = await performUpscaleChain(
         firstPassResult.url as string, model, face, Math.min(4, Math.max(2, Math.round(secondScale))), fallbackToAi, skipAiEnhance,
+        originalWidth ? Math.round(originalWidth * targetScale) : undefined, originalHeight ? Math.round(originalHeight * targetScale) : undefined,
       );
       if (secondPassResult.success && secondPassResult.url) {
         // 标记链式放大
@@ -495,7 +539,45 @@ export async function POST(request: NextRequest) {
     }
 
     // ★ 常规 2× / 4× 放大
-    const result = await performUpscaleChain(imageUrl, model, face, scale, fallbackToAi, skipAiEnhance);
+    const result = await performUpscaleChain(imageUrl, model, face, scale, fallbackToAi, skipAiEnhance,
+      originalWidth ? originalWidth * scale : undefined, originalHeight ? originalHeight * scale : undefined);
+
+    // ★ 最终精确尺寸校验：确保输出图片尺寸 = 原图 × scale
+    if (result.success && result.url && originalWidth && originalHeight) {
+      const exactW = originalWidth * scale;
+      const exactH = originalHeight * scale;
+      try {
+        const sharp = (await import('sharp')).default;
+        const resultUrl = result.url as string;
+        let imgBuf: Buffer;
+        if (resultUrl.startsWith('data:')) {
+          const b64match = resultUrl.match(/^data:image\/\w+;base64,(.+)$/);
+          imgBuf = b64match ? Buffer.from(b64match[1], 'base64') : Buffer.from([]);
+        } else if (resultUrl.startsWith('/')) {
+          const baseUrl = process.env.DEPLOY_RUN_PORT ? `http://localhost:${process.env.DEPLOY_RUN_PORT}` : 'http://localhost:5000';
+          const resp = await fetch(`${baseUrl}${resultUrl}`);
+          imgBuf = Buffer.from(await resp.arrayBuffer());
+        } else {
+          const resp = await fetch(resultUrl);
+          imgBuf = Buffer.from(await resp.arrayBuffer());
+        }
+        const meta = await sharp(imgBuf).metadata();
+        if (meta.width !== exactW || meta.height !== exactH) {
+          console.log(`[upscale-pro] Final resize: ${meta.width}x${meta.height} → ${exactW}x${exactH}`);
+          const resizedBuf = await sharp(imgBuf)
+            .resize(exactW, exactH, { kernel: 'lanczos3' })
+            .png({ quality: 95 })
+            .toBuffer();
+          const persistedUrl = await persistResult(`data:image/png;base64,${resizedBuf.toString('base64')}`);
+          result.url = persistedUrl;
+          result.outputWidth = exactW;
+          result.outputHeight = exactH;
+        }
+      } catch (finalResizeErr) {
+        console.warn('[upscale-pro] Final exact resize failed:', finalResizeErr instanceof Error ? finalResizeErr.message : finalResizeErr);
+      }
+    }
+
     return NextResponse.json(result, { status: result.success ? 200 : 502 });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
@@ -515,11 +597,13 @@ async function performUpscaleChain(
   scale: number,
   fallbackToAi: boolean,
   skipAiEnhance: boolean,
+  targetWidth?: number,
+  targetHeight?: number,
 ): Promise<Record<string, unknown>> {
   // === 多策略降级 ===
 
   // 策略1: 云端 PearAPI（真正的无损放大）— 不需要AI精修
-  const cloudResult = await upscaleViaPearAPI(imageUrl, model, face, scale);
+  const cloudResult = await upscaleViaPearAPI(imageUrl, model, face, scale, targetWidth, targetHeight);
   if (cloudResult?.url) {
     return {
       success: true,
