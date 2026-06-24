@@ -1008,8 +1008,11 @@ export function getNodeInputs(
   const inputs: Record<string, unknown> = {};
 
   // 从config中获取用户设置的值
-  for (const [key, val] of Object.entries(node.config)) {
-    if (val !== undefined && val !== '') inputs[key] = val;
+  const nodeAny = node as unknown as { config?: Record<string, unknown> };
+  if (nodeAny.config && typeof nodeAny.config === 'object') {
+    for (const [key, val] of Object.entries(nodeAny.config)) {
+      if (val !== undefined && val !== '') inputs[key] = val;
+    }
   }
 
   // 构建图片URL映射 (用于[img:xxx]引用解析)

@@ -477,8 +477,8 @@ async function executeWorkflow(
         fetchOptions.body = JSON.stringify(req.body);
       }
 
-      // 对于异步API (generate, image-edit, edit, agent-edit, video/generate)，使用提交+轮询模式
-      const isAsyncApi = ['/api/generate', '/api/image-edit', '/api/edit', '/api/agent-edit', '/api/video/generate'].includes(req.endpoint);
+      // 对于异步API (generate, image-edit, edit, agent-edit, video/generate, video/extend)，使用提交+轮询模式
+      const isAsyncApi = ['/api/generate', '/api/image-edit', '/api/edit', '/api/agent-edit', '/api/video/generate', '/api/video/extend'].includes(req.endpoint);
 
       // P1: 分镜串行 — 多场景按序生成
       if (node.type === 'storyboard-sequence' && req.body._storyboard) {
@@ -619,11 +619,33 @@ async function executeAsyncTask(
   // 获取taskId(s)
   const taskIds: string[] = submitData.taskIds || (submitData.taskId ? [submitData.taskId] : []);
   if (taskIds.length === 0) {
-    // 同步返回结果
+    // 同步返回结果 — 持久化图片/视频URL
+    const syncOutput = parseApiOutput(nodeType, submitData);
+    const syncUrls = [syncOutput.imageUrl, syncOutput.videoUrl, syncOutput.videoThumbnailUrl, ...(Array.isArray(syncOutput.imageUrls) ? syncOutput.imageUrls as string[] : [])].filter(Boolean) as string[];
+    for (const rawUrl of syncUrls) {
+      if (typeof rawUrl === 'string' && (rawUrl.startsWith('data:') || rawUrl.startsWith('http'))) {
+        try {
+          const saveResp = await fetch(getInternalApiUrl('/api/save-image'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageUrl: rawUrl }),
+          });
+          const saveData = await saveResp.json();
+          if (saveData.success && saveData.url) {
+            if (syncOutput.imageUrl === rawUrl) syncOutput.imageUrl = saveData.url;
+            if (syncOutput.videoUrl === rawUrl) syncOutput.videoUrl = saveData.url;
+            if (syncOutput.videoThumbnailUrl === rawUrl) syncOutput.videoThumbnailUrl = saveData.url;
+            if (Array.isArray(syncOutput.imageUrls)) {
+              syncOutput.imageUrls = (syncOutput.imageUrls as string[]).map(u => u === rawUrl ? saveData.url : u);
+            }
+          }
+        } catch { /* save failed */ }
+      }
+    }
     return {
       nodeId,
       status: 'success',
-      output: parseApiOutput(nodeType, submitData),
+      output: syncOutput,
       durationMs: Date.now() - start,
     };
   }
@@ -696,11 +718,15 @@ async function executeAsyncTask(
       mergedOutput.imageUrls = allImageUrls;
     }
 
-    // 持久化图片URL（data:和http:转存到服务器，避免外部URL过期）
-    const allUrls = [mergedOutput.imageUrl, ...(Array.isArray(mergedOutput.imageUrls) ? mergedOutput.imageUrls as string[] : [])].filter(Boolean) as string[];
-    const persistedUrls: string[] = [];
+    // 持久化所有远程URL（图片+视频，data:和http:转存到服务器，避免外部URL过期）
+    const allUrls = [
+      mergedOutput.imageUrl,
+      mergedOutput.videoUrl,
+      mergedOutput.videoThumbnailUrl,
+      ...(Array.isArray(mergedOutput.imageUrls) ? mergedOutput.imageUrls as string[] : []),
+    ].filter(Boolean) as string[];
     for (const rawUrl of allUrls) {
-      if (rawUrl.startsWith('data:') || rawUrl.startsWith('http')) {
+      if (typeof rawUrl === 'string' && (rawUrl.startsWith('data:') || rawUrl.startsWith('http'))) {
         try {
           const saveResp = await fetch(getInternalApiUrl('/api/save-image'), {
             method: 'POST',
@@ -709,17 +735,15 @@ async function executeAsyncTask(
           });
           const saveData = await saveResp.json();
           if (saveData.success && saveData.url) {
-            persistedUrls.push(saveData.url);
-            continue;
+            if (mergedOutput.imageUrl === rawUrl) mergedOutput.imageUrl = saveData.url;
+            if (mergedOutput.videoUrl === rawUrl) mergedOutput.videoUrl = saveData.url;
+            if (mergedOutput.videoThumbnailUrl === rawUrl) mergedOutput.videoThumbnailUrl = saveData.url;
+            if (Array.isArray(mergedOutput.imageUrls)) {
+              mergedOutput.imageUrls = (mergedOutput.imageUrls as string[]).map(u => u === rawUrl ? saveData.url : u);
+            }
           }
         } catch { /* save failed */ }
       }
-      persistedUrls.push(rawUrl);
-    }
-    // 用持久化后的URL替换
-    if (persistedUrls.length > 0) {
-      mergedOutput.imageUrl = persistedUrls[0];
-      mergedOutput.imageUrls = persistedUrls;
     }
 
     return {
@@ -825,6 +849,11 @@ function parseApiOutput(nodeType: NodeType, data: Record<string, unknown>): Reco
   // 3D模型输出
   if (data.modelUrl) output.modelUrl = data.modelUrl;
   if (data.modelData) output.modelData = data.modelData;
+
+  // 视频输出
+  if (data.videoUrl) output.videoUrl = data.videoUrl;
+  if (data.videoThumbnailUrl) output.videoThumbnailUrl = data.videoThumbnailUrl;
+  if (data.videoDuration) output.videoDuration = data.videoDuration;
 
   // 条件评估结果
   if (nodeType.startsWith('condition-')) {
