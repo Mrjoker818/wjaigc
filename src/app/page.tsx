@@ -49,7 +49,7 @@ interface FavoriteItem {
 }
 import { User, Project, ImageGroupData, CanvasImage as PersistableCanvasImage } from '@/lib/user-types';
 import { UserManager as UserManagerCore } from '@/lib/user-manager';
-import { toStableImageUrl } from '@/lib/stable-image-url';
+import { toStableImageUrl, awaitStableImageUrl } from '@/lib/stable-image-url';
 import { APP_FULL_VERSION_LABEL, APP_NAME } from '@/config/app-meta';
 
 type ThemeStyle = 'gold' | 'monochrome';
@@ -2388,8 +2388,8 @@ function CanvasApp() {
             if (rawVideoUrl) {
               // ★ 持久化远程URL到本地，防止过期后图片/视频消失
               const [stableThumbnail, stableVideo] = await Promise.all([
-                toStableImageUrl(rawThumbnailUrl),
-                toStableImageUrl(rawVideoUrl),
+                awaitStableImageUrl(rawThumbnailUrl),
+                awaitStableImageUrl(rawVideoUrl),
               ]);
               if (!isMountedRef.current) return; // 持久化期间组件可能卸载
               setImages(prev => prev.map(img =>

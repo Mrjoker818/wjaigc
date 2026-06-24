@@ -12238,16 +12238,17 @@ export function InfiniteCanvas({
               imageUrl={agentEditImage?.url}
               imagePrompt={agentEditImage?.prompt}
               isMonochrome={isMonochrome}
-              onApply={(resultUrl: string) => {
+              onApply={async (resultUrl: string) => {
+                const stableUrl = await awaitStableImageUrl(resultUrl);
                 if (agentEditImage) {
                   // ★ 保留模型信息：替换原图但保留 modelName/apiProvider
                   const updated = images.map(img =>
-                    img.id === agentEditImage.id ? { ...img, url: resultUrl } : img
+                    img.id === agentEditImage.id ? { ...img, url: stableUrl } : img
                   );
                   onImagesChange(updated);
                 } else {
                   // 没有原图时，将结果作为新图片添加到画布
-                  onAddImages([resultUrl]);
+                  onAddImages([stableUrl]);
                 }
                 setShowAgentEditor(false);
                 setAgentEditImage(null);
