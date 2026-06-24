@@ -5871,7 +5871,10 @@ export function InfiniteCanvas({
               imageUrl: img.url,
               model: upMultiplier > 2 ? 'SeedVR2-Upscaler' : 'Real-ESRGAN',
               face: false,
-              scale: upMultiplier === 4 ? 4 : 2,
+              scale: upMultiplier >= 4 ? 4 : 2,
+              targetScale: upMultiplier, // 告知后端用户实际期望的最终倍率（用于8×链式放大）
+              originalWidth: origW,
+              originalHeight: origH,
               enhanceModel: modelInfo.model, // 精修使用用户当前选择的图像模型
             }),
             signal: upscaleController.signal,
