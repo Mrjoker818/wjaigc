@@ -5,17 +5,52 @@
 import fs from 'fs';
 import path from 'path';
 
-/** 项目根目录下的 public 目录 */
+let _serverDataRootCache: string | null = null;
+function getServerDataRootSync(): string {
+  if (_serverDataRootCache) return _serverDataRootCache;
+  // 服务器持久化目录，与 getServerDataRoot() 保持一致
+  const env = process.env.COZE_PROJECT_ENV;
+  if (env === 'PROD') {
+    _serverDataRootCache = process.env.SERVER_DATA_ROOT || '/space/wujie-data';
+  } else {
+    _serverDataRootCache = process.env.COZE_WORKSPACE_PATH
+      ? path.join(process.env.COZE_WORKSPACE_PATH, '.wujie-data')
+      : path.join(process.cwd(), '.wujie-data');
+  }
+  return _serverDataRootCache;
+}
+
+/** 项目根目录下的 public 目录（开发模式HMR用） */
 export const PUBLIC_DIR = path.join(process.cwd(), 'public');
 
+/**
+ * 统一输出目录 — 生产环境使用持久化 uploads/，开发环境使用 public/outputs/
+ * 返回 [实际存储目录, URL前缀]
+ */
+function resolveOutputDir(subdir: string): { dir: string; urlPrefix: string } {
+  const isProd = process.env.COZE_PROJECT_ENV === 'PROD';
+  if (isProd) {
+    const dir = path.join(getServerDataRootSync(), 'uploads', subdir);
+    return { dir, urlPrefix: `/api/serve-upload/uploads/${subdir}` };
+  }
+  // 开发环境：写 public/outputs，Next.js HMR 直接访问
+  const dir = path.join(PUBLIC_DIR, 'outputs', subdir);
+  return { dir, urlPrefix: `/outputs/${subdir}` };
+}
+
 /** 放大输出目录 */
-export const UPSCALE_OUTPUT_DIR = path.join(PUBLIC_DIR, 'outputs', 'upscale');
+const _upscaleDir = resolveOutputDir('upscale');
+export const UPSCALE_OUTPUT_DIR = _upscaleDir.dir;
+export const UPSCALE_OUTPUT_URL_PREFIX = _upscaleDir.urlPrefix;
 
 /** 修复输出目录 */
-export const INPAINT_OUTPUT_DIR = path.join(PUBLIC_DIR, 'outputs', 'inpaint');
+const _inpaintDir = resolveOutputDir('inpaint');
+export const INPAINT_OUTPUT_DIR = _inpaintDir.dir;
+export const INPAINT_OUTPUT_URL_PREFIX = _inpaintDir.urlPrefix;
 
 /** 临时文件目录 */
-export const TEMP_DIR = path.join(PUBLIC_DIR, 'outputs', 'temp');
+const _tempDir = resolveOutputDir('temp');
+export const TEMP_DIR = _tempDir.dir;
 
 /** 放大模型目录 (优先使用 /space 持久存储，不受沙箱重启影响) */
 export const UPSCAYL_MODELS_DIR =

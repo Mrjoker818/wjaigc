@@ -9,7 +9,7 @@ import fs from 'fs';
 import os from 'os';
 import { spawn } from 'child_process';
 import sharp from 'sharp';
-import { UPSCALE_DEFAULT_SCALE, UPSCALE_TIMEOUT_MS } from './config';
+import { UPSCALE_DEFAULT_SCALE, UPSCALE_TIMEOUT_MS, UPSCALE_OUTPUT_DIR, UPSCALE_OUTPUT_URL_PREFIX } from './config';
 
 // ---- 目录配置 ----
 
@@ -24,7 +24,7 @@ function getOnnxModelsDir(): string {
 }
 
 function getUpscaleOutputDir(): string {
-  return path.join(process.env.COZE_WORKSPACE_PATH || '/workspace/projects', 'public', 'outputs', 'upscale');
+  return UPSCALE_OUTPUT_DIR;
 }
 
 function ensureOutputDirs() {
@@ -347,7 +347,7 @@ export async function performOnnxUpscale(
         try { fs.unlinkSync(result.outputFile); } catch {}
       }
 
-      const imageUrl = `/outputs/upscale/${filename}`;
+      const imageUrl = `${UPSCALE_OUTPUT_URL_PREFIX}/${filename}`;
       console.log(`[upscayl] ONNX CPU upscale complete (file): ${procW}x${procH} -> ${outW}x${outH} (${result.elapsed}s)`);
 
       return {
@@ -380,7 +380,7 @@ export async function performOnnxUpscale(
     const outputPath = path.join(getUpscaleOutputDir(), filename);
     fs.writeFileSync(outputPath, finalBuffer);
 
-    const imageUrl = `/outputs/upscale/${filename}`;
+    const imageUrl = `${UPSCALE_OUTPUT_URL_PREFIX}/${filename}`;
     console.log(`[upscayl] ONNX CPU upscale complete: ${procW}x${procH} -> ${outW}x${outH} (${result.elapsed}s)`);
 
     return {
@@ -450,7 +450,7 @@ export async function performUpscaleAuto(
 
     return {
       success: true,
-      imageUrl: `/outputs/upscale/${filename}`,
+      imageUrl: `${UPSCALE_OUTPUT_URL_PREFIX}/${filename}`,
       originalSize: { width: origW, height: origH },
       outputSize: { width: outW, height: outH },
       model: 'lanczos3',

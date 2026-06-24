@@ -222,9 +222,11 @@ export async function POST(request: NextRequest) {
     // 本地 /api/serve-upload/ 路径 — 通过 localhost fetch 获取后保存
     if (imageUrl.startsWith('/api/serve-upload/') || imageUrl.startsWith('/')) {
       try {
-        const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || 'http://localhost:5000';
-        const baseUrl = domain.startsWith('http') ? domain : `https://${domain}`;
-        const fullUrl = `${baseUrl}${imageUrl}`;
+        const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
+        const baseUrl = domain.startsWith('http') ? domain.replace(/\/+$/, '') : `https://${domain.replace(/\/+$/, '')}`;
+        // 确保 baseUrl 和 imageUrl 之间只有一个斜杠
+        const normalizedPath = imageUrl.startsWith('/') ? imageUrl : `/${imageUrl}`;
+        const fullUrl = `${baseUrl}${normalizedPath}`;
         const response = await fetch(fullUrl, { signal: AbortSignal.timeout(120000) }); // 2min for 4K images
         if (!response.ok) {
           return NextResponse.json({ error: `Failed to fetch local image: ${response.status}` }, { status: 400 });

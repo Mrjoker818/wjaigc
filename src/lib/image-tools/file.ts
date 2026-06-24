@@ -12,6 +12,9 @@ import {
   TEMP_DIR,
   IMAGE_MAX_SIZE_MB,
   IMAGE_MAX_EDGE,
+  UPSCALE_OUTPUT_URL_PREFIX,
+  INPAINT_OUTPUT_URL_PREFIX,
+  PUBLIC_DIR,
 } from './config';
 
 /** 确保输出目录存在 */
@@ -63,8 +66,42 @@ export async function readImageToBuffer(
         break;
       }
     }
+    // 开发环境：也尝试 public 目录
+    if (!found && process.env.COZE_PROJECT_ENV !== 'PROD') {
+      const pubPath = path.join(PUBLIC_DIR, imageUrl);
+      if (fs.existsSync(pubPath)) {
+        buffer = await fs.promises.readFile(pubPath);
+        found = true;
+      }
+      // /outputs/xxx 路径
+      const pubOutputs = path.join(PUBLIC_DIR, relativePath);
+      if (!found && fs.existsSync(pubOutputs)) {
+        buffer = await fs.promises.readFile(pubOutputs);
+        found = true;
+      }
+    }
     if (!found) {
       throw new Error(`serve-upload 图片文件不存在: ${relativePath} (搜索目录: ${possibleDirs.join(', ')})`);
+    }
+  } else if (imageUrl.startsWith('/outputs/')) {
+    // /outputs/xxx 路径：开发环境从 public/outputs，生产环境从 dataRoot/uploads
+    const relPath = imageUrl.replace(/^\/outputs\//, '');
+    const { getServerDataRoot } = await import('@/lib/server-data-root');
+    const dataRoot = getServerDataRoot();
+    const candidates = [
+      path.join(dataRoot, 'uploads', relPath),
+      path.join(PUBLIC_DIR, 'outputs', relPath),
+    ];
+    let found = false;
+    for (const p of candidates) {
+      if (fs.existsSync(p)) {
+        buffer = await fs.promises.readFile(p);
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      throw new Error(`outputs 图片文件不存在: ${imageUrl}`);
     }
   } else if (imageUrl.startsWith('/')) {
     // 本地公共路径 (/uploads/xxx.png)
@@ -124,7 +161,7 @@ export async function resizeIfTooLarge(
   return { buffer: resized, width: newW, height: newH };
 }
 
-/** 保存 Buffer 到输出目录 */
+/** 保存 Buffer 到输出目录，返回可访问的 URL */
 export function saveOutputBuffer(
   buffer: Buffer,
   prefix: string,
@@ -135,12 +172,32 @@ export function saveOutputBuffer(
   const filename = generateFilename(prefix, ext);
   const filepath = path.join(outputDir, filename);
   fs.writeFileSync(filepath, buffer);
-  // 返回相对 public 的路径
-  const relativePath = path.relative(
-    path.join(process.cwd(), 'public'),
-    filepath,
-  );
-  return '/' + relativePath.replace(/\\/g, '/');
+
+  // 根据输出目录确定 URL 前缀
+  let urlPrefix = '';
+  if (outputDir === UPSCALE_OUTPUT_DIR) {
+    urlPrefix = UPSCALE_OUTPUT_URL_PREFIX;
+  } else if (outputDir === INPAINT_OUTPUT_DIR) {
+    urlPrefix = INPAINT_OUTPUT_URL_PREFIX;
+  } else if (outputDir.startsWith(PUBLIC_DIR)) {
+    // 回退：public 下的路径转为相对URL
+    const rel = path.relative(PUBLIC_DIR, filepath).replace(/\\/g, '/');
+    urlPrefix = '/' + rel.replace(/\/[^/]+$/, '');
+  } else {
+    // 其他路径：作为 serve-upload 路径返回
+    urlPrefix = '/api/serve-upload' + path.dirname(filepath).replace(/\\/g, '/');
+  }
+
+  // 开发环境：额外复制到 public 目录供 Next.js 静态serve
+  if (process.env.COZE_PROJECT_ENV !== 'PROD' && !filepath.startsWith(PUBLIC_DIR)) {
+    try {
+      const publicTarget = path.join(PUBLIC_DIR, urlPrefix.replace(/^\//, ''), filename);
+      fs.mkdirSync(path.dirname(publicTarget), { recursive: true });
+      fs.copyFileSync(filepath, publicTarget);
+    } catch { /* best effort */ }
+  }
+
+  return `${urlPrefix}/${filename}`;
 }
 
 /** 清理临时文件 */

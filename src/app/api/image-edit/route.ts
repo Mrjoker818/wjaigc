@@ -10,6 +10,7 @@ import { saveImageFile } from '@/lib/server-data-root';
 import sharp from 'sharp';
 import fsSync from 'fs';
 import fs from 'fs/promises';
+const { writeFile, mkdir, copyFile } = fs;
 import path from 'path';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import { isS3Available, uploadImageToS3 } from '@/lib/s3-storage';
@@ -1555,13 +1556,64 @@ async function pollTaskUntilComplete(
 /**
  * 保存 buffer 到 public 目录并返回可访问的 URL 路径
  */
+/**
+ * 将 buffer 保存到持久化目录，并返回可访问的本地URL（/api/serve-upload/uploads/xxx）
+ * 三级兜底: uploads持久化目录 → public/uploads(HMR) → data URL
+ * 重要：URL统一使用 /api/serve-upload/uploads/ 前缀（生产环境唯一可访问的上传路径），
+ * 不要写入 public/images/（Next.js生产构建后无法serve运行时新增文件）
+ */
 async function saveBufferToPublic(buffer: Buffer, filename: string): Promise<string> {
+  const webPath = '/api/serve-upload/uploads';
+  // 优先S3（生产环境重部署不丢失）
   if (isS3Available()) {
-    const s3Url = await uploadImageToS3(buffer, filename, 'image/png');
-    if (s3Url) return s3Url;
+    try {
+      const ext = (filename.split('.').pop() || 'png').toLowerCase();
+      const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg'
+        : ext === 'webp' ? 'image/webp'
+        : ext === 'svg' ? 'image/svg+xml'
+        : 'image/png';
+      const s3Url = await uploadImageToS3(buffer, filename, mime);
+      if (s3Url) return s3Url;
+    } catch (s3e) {
+      console.warn('[saveBufferToPublic] S3 upload failed, fallback to local:', (s3e as Error).message);
+    }
   }
-  // 直接返回 base64 data URL，彻底避免文件路径可达性问题
-  return `data:image/png;base64,${buffer.toString('base64')}`;
+
+  try {
+    const { getServerDataRoot } = await import('@/lib/server-data-root');
+    const uploadDir = path.join(getServerDataRoot(), 'uploads');
+    await mkdir(uploadDir, { recursive: true });
+    const filePath = path.join(uploadDir, filename);
+    await writeFile(filePath, buffer);
+
+    // 开发环境同时写入 public/uploads 供HMR直接访问
+    if (process.env.COZE_PROJECT_ENV !== 'PROD') {
+      try {
+        const publicDir = path.join(process.cwd(), 'public', 'uploads');
+        await mkdir(publicDir, { recursive: true });
+        await copyFile(filePath, path.join(publicDir, filename));
+      } catch { /* best effort */ }
+    }
+
+    return `${webPath}/${filename}`;
+  } catch (e) {
+    console.warn('[saveBufferToPublic] Failed to save to persistent uploads dir, fallback to public/uploads:', e);
+  }
+
+  // Fallback 2: public/uploads
+  try {
+    const publicDir = path.join(process.cwd(), 'public', 'uploads');
+    await mkdir(publicDir, { recursive: true });
+    const publicPath = path.join(publicDir, filename);
+    await writeFile(publicPath, buffer);
+    return `/uploads/${filename}`;
+  } catch (e) {
+    console.error('[saveBufferToPublic] public/uploads fallback failed, using data URL:', e);
+  }
+
+  // Last resort: data URL
+  const mimeType = filename.endsWith('.jpg') || filename.endsWith('.jpeg') ? 'image/jpeg' : 'image/png';
+  return `data:${mimeType};base64,${buffer.toString('base64')}`;
 }
 
 export async function POST(request: NextRequest) {
