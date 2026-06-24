@@ -1,0 +1,9 @@
+{
+  "name": "api-mock-tester",
+  "display_name": "API Mock 测试框架",
+  "description": "为 Web 项目提供 Mock API 服务器和自动化测试运行器，支持 30+ 接口的虚拟测试覆盖",
+  "version": "1.0.0",
+  "type": "testing",
+  "entry": "test-runner.mjs",
+  "files": ["mock-server.mjs", "test-runner.mjs", "package.json", "SKILL.md"]
+}

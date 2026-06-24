@@ -41,7 +41,7 @@ node api-mock-tester/mock-server.mjs --port 3456
 node api-mock-tester/test-runner.mjs
 
 # 指定应用地址和 Mock 端口
-node api-mock-tester/test-runner.mjs --app-url http://localhost:5000 --mock-port 3456
+node api-mock-tester/test-runner.mjs --target http://localhost:5000 --mock-port 3456
 
 # 运行特定测试组
 node api-mock-tester/test-runner.mjs --group image-gen
@@ -143,7 +143,7 @@ node api-mock-tester/test-runner.mjs --timeout 60
 ## 注意事项
 
 1. **先启动 Mock Server，再运行测试**：测试运行器需要 Mock Server 提前运行
-2. **管理员账户**：默认使用 admin/admin123，可在 CONFIG 中修改
+2. **管理员账户**：默认使用环境变量 ADMIN_USER/ADMIN_PASS，可在 CONFIG 中修改
 3. **测试隔离**：每个测试用例应独立运行，不依赖其他测试的副作用
 4. **异步任务**：涉及异步API的测试（生成、编辑等）会自动轮询任务状态
 5. **Mock Provider 注册**：测试前会自动向管理员系统注册 Mock 提供商
