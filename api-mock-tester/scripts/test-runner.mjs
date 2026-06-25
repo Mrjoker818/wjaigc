@@ -105,6 +105,9 @@ async function login() {
   });
 }
 
+// 记录测试期间注册的Mock提供商ID，测试结束后清理
+const registeredProviderIds = [];
+
 async function registerMockProviders() {
   const providers = [
     {
@@ -146,9 +149,26 @@ async function registerMockProviders() {
 
   for (const p of providers) {
     try {
-      await request('POST', `${CONFIG.target}/api/admin/apis`, p);
+      const r = await request('POST', `${CONFIG.target}/api/admin/apis`, p);
+      // 记录注册成功的providerId以便清理
+      if (r.json?.provider?.id) {
+        registeredProviderIds.push(r.json.provider.id);
+      }
     } catch {}
   }
+}
+
+async function cleanupMockProviders() {
+  if (registeredProviderIds.length === 0) return;
+  console.log('\n📌 清理Mock测试数据...');
+  let cleaned = 0;
+  for (const pid of registeredProviderIds) {
+    try {
+      const r = await request('POST', `${CONFIG.target}/api/admin/apis`, { action: 'delete', providerId: pid });
+      if (r.json?.success) cleaned++;
+    } catch {}
+  }
+  console.log(`  ✅ 已清理 ${cleaned}/${registeredProviderIds.length} 个Mock提供商`);
 }
 
 async function pollTask(taskId) {
@@ -756,11 +776,19 @@ async function main() {
     console.log(`    ${group.name}: ${group.tests.length} 个用例`);
   }
 
+  // Step 7: 清理Mock数据（无论测试是否通过都执行）
+  await cleanupMockProviders();
+
   console.log('\n');
   process.exit(results.failed > 0 ? 1 : 0);
 }
 
+// 确保进程退出前清理Mock数据
+process.on('SIGINT', async () => { await cleanupMockProviders(); process.exit(130); });
+process.on('SIGTERM', async () => { await cleanupMockProviders(); process.exit(143); });
+
 main().catch(e => {
   console.error('Fatal error:', e);
-  process.exit(2);
+  // 即使致命错误也尝试清理
+  cleanupMockProviders().finally(() => process.exit(2));
 });
