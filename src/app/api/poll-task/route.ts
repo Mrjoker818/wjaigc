@@ -479,6 +479,15 @@ export async function POST(request: NextRequest) {
           retryable: false,
         }, { status: 200 });
       }
+      // ★ generate-async（submitOnly）任务：后台IIFE处理中，直接返回registry状态
+      if (registryTask.type === 'generate-async') {
+        return NextResponse.json({
+          success: true,
+          status: registryTask.status,
+          progress: registryTask.progress,
+          label: registryTask.label,
+        }, { status: 200 });
+      }
       // ★ 视频任务轮询：使用 video-api 协议适配器
       if (registryTask.type === 'video') {
         const regResult = (registryTask.result as Record<string, unknown>) || {};
@@ -720,7 +729,7 @@ export async function POST(request: NextRequest) {
       // 对于所有远端异步任务类型，必须继续查询远端API获取真实状态
       // 只有纯本地任务（edit/agent-edit）才由后端自行更新 registry，直接返回
       // ★ refine-engine/brand-ecommerce 使用远端 API（APImart等），需要远程轮询
-      const LOCAL_TASK_TYPES = ['edit', 'agent-edit', 'brand-ecommerce'];
+      const LOCAL_TASK_TYPES = ['edit', 'agent-edit', 'brand-ecommerce', 'generate-async'];
       if (LOCAL_TASK_TYPES.includes(registryTask.type)) {
         // 纯本地任务：由后端自行更新 registry，直接返回当前状态
         // ★ 增量结果：将 partialResults 传递给前端

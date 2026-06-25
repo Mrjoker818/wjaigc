@@ -317,10 +317,10 @@ async function executeGenerateImage(
 
     console.log(`[chat-tools] generate_image: model=${model}, providerId=${providerId}, prompt="${prompt?.substring(0, 80)}...", aspectRatio=${aspectRatio}, quality=${quality}`);
 
-    // 使用统一的 /api/generate 接口，确保兼容性、异步轮询、URL持久化
+    // 使用统一的 /api/generate 接口，submitOnly 模式立即返回 taskId，不阻塞等待生成完成
     // 服务器端调用始终使用 localhost，避免通过外部域名自引用导致的网络问题
     const generateUrl = `http://localhost:${SERVER_PORT}/api/generate`;
-    console.log(`[chat-tools] generate_image: calling ${generateUrl}`);
+    console.log(`[chat-tools] generate_image: calling ${generateUrl} with submitOnly`);
     const generateRes = await fetch(generateUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -331,8 +331,9 @@ async function executeGenerateImage(
         aspectRatio,
         quality,
         outputCount: count,
+        submitOnly: true,
       }),
-      signal: AbortSignal.timeout(120000),
+      signal: AbortSignal.timeout(30000),
     });
 
     console.log(`[chat-tools] generate_image: response status=${generateRes.ok ? 'ok' : generateRes.status}`);
@@ -474,7 +475,7 @@ async function executeImg2Img(
       ? `${refPrefixes.join(', ')}. ${prompt}${negativePrompt ? ` [negative: ${negativePrompt}]` : ''}`
       : `${prompt}${negativePrompt ? ` [negative: ${negativePrompt}]` : ''}`;
 
-    // 调用 generate API 并传入参考图
+    // 调用 generate API 并传入参考图（submitOnly 模式，不阻塞等待生成完成）
     const res = await fetch(`http://localhost:${SERVER_PORT}/api/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -485,7 +486,9 @@ async function executeImg2Img(
         referenceImages: [imageUrl],
         strength,
         aspectRatio: '1:1',
+        submitOnly: true,
       }),
+      signal: AbortSignal.timeout(30000),
     });
 
     if (!res.ok) {

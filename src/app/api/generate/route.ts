@@ -165,6 +165,7 @@ export async function POST(request: NextRequest) {
       userId: requestUserId,
       strength,
       providerId,
+      submitOnly,
     } = body;
     // 防御性处理：确保 model 是字符串（前端可能误传对象）
     let model = typeof rawModel === 'string' ? rawModel : (rawModel as Record<string, unknown>)?.model as string || String(rawModel || '');
@@ -189,6 +190,152 @@ export async function POST(request: NextRequest) {
 
     const sessionUser = await getSessionUser(request);
     const userId = sessionUser?.id ?? requestUserId ?? "anonymous";
+
+    // ★ submitOnly 模式：立即注册任务并返回 taskId，后台执行实际生成
+    // 解决 chat-tools 调用 /api/generate 时因第三方 API 响应慢（2-11分钟）导致 120s 超时的问题
+    if (submitOnly) {
+      const asyncTaskId = `async-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      registerTask(asyncTaskId, 'generate-async', '生成图片', userId);
+      updateTaskProgress(asyncTaskId, { status: 'processing', progress: 0, label: '准备中...' });
+      console.log(`[generate] submitOnly mode: taskId=${asyncTaskId}, returning immediately`);
+
+      // ★ 后台执行生成逻辑（fire-and-forget）
+      // 重新构造请求体，去掉 submitOnly 标志，然后调用自身
+      const backgroundBody = { ...body, submitOnly: false };
+      (async () => {
+        try {
+          const bgRes = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(backgroundBody),
+            signal: AbortSignal.timeout(600000), // 10分钟超时
+          });
+          const bgData = await bgRes.json();
+
+          if (!bgData.success) {
+            updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: bgData.error || '生成失败', label: '生成失败' });
+            return;
+          }
+
+          // 如果有直接返回的图片URL（直接模式），标记完成
+          if (bgData.directImageUrls?.length > 0) {
+            updateTaskProgress(asyncTaskId, {
+              status: 'completed',
+              progress: 100,
+              label: '生成完成',
+              result: {
+                imageUrl: bgData.directImageUrls[0],
+                usedModel: bgData.model,
+                modelName: bgData.modelName,
+                providerName: bgData.providerName,
+                apiBaseUrl: bgData.apiBaseUrl,
+                providerId: bgData.providerId,
+              }
+            });
+            return;
+          }
+
+          // 如果有异步 taskIds，后台轮询直到完成
+          const bgTaskIds: string[] = bgData.taskIds || [];
+          if (bgTaskIds.length > 0) {
+            updateTaskProgress(asyncTaskId, {
+              status: 'processing',
+              progress: 10,
+              label: '生成中...',
+              result: {
+                usedModel: bgData.model,
+                modelName: bgData.modelName,
+                providerName: bgData.providerName,
+                apiBaseUrl: bgData.apiBaseUrl,
+                apiKey: bgData.apiKey,
+                providerId: bgData.providerId,
+                advancedParams: bgData.advancedParams,
+              }
+            });
+
+            // 后台轮询：等待后台 taskIds 完成并更新 asyncTaskId
+            const bgPollModel = bgData.model || model;
+            const bgPollProviderId = bgData.providerId || effectiveProviderId;
+            let bgPollAttempts = 0;
+            const bgMaxPollAttempts = 120;
+
+            while (bgPollAttempts < bgMaxPollAttempts) {
+              bgPollAttempts++;
+              await new Promise(r => setTimeout(r, bgPollAttempts <= 3 ? 2000 : 5000));
+
+              try {
+                const pollRes = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/poll-task`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ taskId: bgTaskIds[0], model: bgPollModel, providerId: bgPollProviderId }),
+                });
+                const pollData = await pollRes.json();
+
+                if (pollData.status === 'completed' && pollData.success) {
+                  updateTaskProgress(asyncTaskId, {
+                    status: 'completed',
+                    progress: 100,
+                    label: '生成完成',
+                    result: {
+                      ...(pollData.data || {}),
+                      usedModel: bgData.model,
+                      modelName: bgData.modelName,
+                      providerName: bgData.providerName,
+                      apiBaseUrl: bgData.apiBaseUrl,
+                      providerId: bgData.providerId,
+                    }
+                  });
+                  return;
+                }
+
+                if (pollData.status === 'failed') {
+                  updateTaskProgress(asyncTaskId, {
+                    status: 'failed',
+                    progress: 0,
+                    error: pollData.error || '生成失败',
+                    label: '生成失败',
+                  });
+                  return;
+                }
+
+                if (pollData.progress) {
+                  const mappedProgress = 10 + Math.round(pollData.progress * 0.9);
+                  updateTaskProgress(asyncTaskId, { progress: mappedProgress, label: pollData.label || '生成中...' });
+                }
+
+                if (isTaskCancelled(asyncTaskId)) {
+                  return;
+                }
+              } catch (pollErr) {
+                console.error(`[generate] submitOnly poll error for ${asyncTaskId}:`, pollErr);
+              }
+            }
+
+            updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: '生成超时', label: '生成超时' });
+            return;
+          }
+
+          // 无图片也无 taskIds — 失败
+          updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: '未获得生成结果', label: '生成失败' });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error(`[generate] submitOnly background error for ${asyncTaskId}:`, msg);
+          updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: msg, label: '生成失败' });
+        }
+      })();
+
+      // 立即返回，不等待后台完成
+      return NextResponse.json({
+        success: true,
+        mode: 'polling',
+        taskIds: [asyncTaskId],
+        model: model,
+        modelName: '',
+        providerId: effectiveProviderId,
+        estimatedTime: 90,
+        submitOnly: true,
+      });
+    }
 
     // 解析参考图片 URL（转换为 API 可访问的格式）
     // 优化：并行处理所有参考图，加速提交
