@@ -2654,15 +2654,24 @@ function CanvasApp() {
         }
       }
 
-      // Priority 2: Fallback - search for a vision-capable model
+      // Priority 2: Fallback - search for a vision-capable model (chat + VLM)
       if (!visionModel) {
         try {
-          const response = await fetch('/api/models?type=chat');
-          const data = await response.json();
-          const providers = Array.isArray(data.providers) ? data.providers : [];
-          const models = Array.isArray(data.models) ? data.models : [];
+          // Search both chat and VLM model types
+          const [chatRes, vlmRes] = await Promise.all([
+            fetch('/api/models?type=chat').then(r => r.json()).catch(() => ({ providers: [], models: [] })),
+            fetch('/api/models?type=vlm').then(r => r.json()).catch(() => ({ providers: [], models: [] })),
+          ]);
+          const providers = [
+            ...(Array.isArray(chatRes.providers) ? chatRes.providers : []),
+            ...(Array.isArray(vlmRes.providers) ? vlmRes.providers : []),
+          ];
+          const models = [
+            ...(Array.isArray(chatRes.models) ? chatRes.models : []),
+            ...(Array.isArray(vlmRes.models) ? vlmRes.models : []),
+          ];
           const visionModelPatterns = [
-            /gpt-4o/i, /gpt-4-turbo/i, /gpt-4\./i,
+            /gpt-4o/i, /gpt-4-turbo/i, /gpt-4\./i, /gpt-5/i,
             /claude-3/i, /claude-4/i, /claude-3\.5/i,
             /gemini/i,
             /qwen-vl/i, /qwen2-vl/i, /qwen2\.5-vl/i, /qvq/i,
@@ -3708,7 +3717,15 @@ function CanvasApp() {
           height: img.height,
           prompt: img.prompt,
           model: img.model,
+          quality: img.quality,
+          aspectRatio: img.aspectRatio,
+          stylePreset: img.stylePreset,
+          category: img.category,
+          size: img.size,
           createdAt: img.createdAt,
+          negativePrompt: img.negativePrompt,
+          modelName: img.modelName,
+          apiProvider: img.apiProvider,
         }))}
         onDeleteImages={(ids) => {
           setImages(prev => prev.filter(img => !ids.includes(img.id)));
@@ -3716,6 +3733,16 @@ function CanvasApp() {
         }}
         onNavigateToImage={(imageId) => {
           setNavigateToImageId(imageId);
+          setShowProjectData(false);
+        }}
+        onMakeSame={(img) => {
+          setFavoriteParams({
+            prompt: img.prompt || '',
+            model: img.model,
+            aspectRatio: img.aspectRatio,
+            quality: img.quality,
+            negativePrompt: img.negativePrompt,
+          });
           setShowProjectData(false);
         }}
         isMonochrome={themeStyle === 'monochrome'}

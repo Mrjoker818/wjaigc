@@ -68,7 +68,7 @@ interface GenerationPanelProps {
     externalReferenceImage?: { url: string; description?: string } | null;
     onExternalReferenceImageConsumed?: () => void;
     onOpenPromptEquation?: () => void;
-    applyFavoriteParams?: { prompt?: string; model?: string; aspectRatio?: string; quality?: string } | null;
+    applyFavoriteParams?: { prompt?: string; model?: string; aspectRatio?: string; quality?: string; negativePrompt?: string } | null;
     onFavoriteParamsApplied?: () => void;
     /** 当前画布选中的图片URL，用于图生图等 */
     selectedImageUrl?: string | null;
@@ -310,6 +310,9 @@ export function GenerationPanel(
             }
             if (applyFavoriteParams.aspectRatio) setAspectRatio(applyFavoriteParams.aspectRatio);
             if (applyFavoriteParams.quality) setQuality(applyFavoriteParams.quality);
+            // negativePrompt is stored in CanvasImage but not directly applicable
+            // in generation panel (used in img2img panel). It's included in the
+            // data for future use and for the "copy keywords" feature.
             onFavoriteParamsApplied?.();
         }
     }, [applyFavoriteParams, onFavoriteParamsApplied, onModelChange]);

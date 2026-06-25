@@ -279,7 +279,10 @@ export async function POST(request: NextRequest) {
         visionModel = provider.selectedModels[0];
       }
     } else if (visionModel) {
-      const provider = await findProviderForModel(visionModel, 'chat');
+      // Search across chat, vlm, and image model types for vision capability
+      const provider = await findProviderForModel(visionModel, 'chat')
+        || await findProviderForModel(visionModel, 'vlm')
+        || await findProviderForModel(visionModel, 'image');
       if (provider?.apiKey) {
         visionApiKey = provider.apiKey;
         visionBaseUrl = normalizeApiBaseUrl(provider.baseUrl);
