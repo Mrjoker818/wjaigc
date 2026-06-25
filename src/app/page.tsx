@@ -2638,25 +2638,95 @@ function CanvasApp() {
   // 一键提取关键词（从画布图片提取）
   const handleExtractKeywords = useCallback(async (image: { id: string; url: string }) => {
     try {
-      const response = await fetch('/api/analyze', {
+      // 使用管理员配置的视觉模型（与"灵感提示词"功能共用模型选择逻辑）
+      let visionModel = '';
+      let providerId: string | undefined;
+      let providerPreset: string | undefined;
+
+      // Priority 1: Use the currently selected chat model
+      if (currentChatModelInfo) {
+        if (currentChatModelInfo.providerId) {
+          visionModel = currentChatModelInfo.model;
+          providerId = currentChatModelInfo.providerId;
+          providerPreset = currentChatModelInfo.providerPreset;
+        } else {
+          visionModel = currentChatModelInfo.model;
+        }
+      }
+
+      // Priority 2: Fallback - search for a vision-capable model
+      if (!visionModel) {
+        try {
+          const response = await fetch('/api/models?type=chat');
+          const data = await response.json();
+          const providers = Array.isArray(data.providers) ? data.providers : [];
+          const models = Array.isArray(data.models) ? data.models : [];
+          const visionModelPatterns = [
+            /gpt-4o/i, /gpt-4-turbo/i, /gpt-4\./i,
+            /claude-3/i, /claude-4/i, /claude-3\.5/i,
+            /gemini/i,
+            /qwen-vl/i, /qwen2-vl/i, /qwen2\.5-vl/i, /qvq/i,
+            /glm-4v/i, /glm-4\.6v/i,
+            /internvl/i, /llava/i, /cogvlm/i, /doubao/i, /seed/i,
+          ];
+          const foundModel = models.find((model: { id?: string; name?: string; providerId?: string }) => {
+            const haystack = `${model.id || ''} ${model.name || ''}`;
+            return visionModelPatterns.some(pat => pat.test(haystack));
+          });
+          if (foundModel?.id) {
+            const provider = providers.find((item: { id?: string; providerPreset?: string }) => item.id === foundModel.providerId);
+            visionModel = foundModel.id;
+            providerId = foundModel.providerId;
+            providerPreset = provider?.providerPreset;
+          }
+        } catch {}
+      }
+
+      if (!visionModel) {
+        toast.error('未找到支持图片理解的模型', {
+          description: '请在智能对话面板中选择一个支持视觉的模型',
+          className: 'bg-[#141414] border border-red-900 text-white',
+        });
+        return;
+      }
+
+      const response = await fetch('/api/vision-prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: image.url, category: 'general' }),
+        body: JSON.stringify({
+          imageUrl: image.url,
+          model: visionModel,
+          providerId,
+          providerPreset,
+          userId: currentUser?.id,
+        }),
       });
-      const data = await response.json();
-      if (data.success && data.prompt) {
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || `API 调用失败: ${response.status}`);
+      }
+
+      const result = await response.json();
+      const prompt = result?.data?.bilingual || result?.data?.english || result?.data?.chinese || result?.prompt || '';
+
+      if (prompt) {
         toast.success('关键词已提取', {
-          description: data.prompt.substring(0, 80) + (data.prompt.length > 80 ? '...' : ''),
+          description: prompt.substring(0, 80) + (prompt.length > 80 ? '...' : ''),
           className: themeStyle === 'monochrome' ? 'bg-white border-blue-500 text-gray-900' : 'bg-[#141414] border-[#d4af37] text-white',
         });
-        // 同时复制到剪贴板
         if (navigator.clipboard) {
-          await navigator.clipboard.writeText(data.prompt);
+          await navigator.clipboard.writeText(prompt);
           toast.info('已复制到剪贴板', {
             description: '可粘贴到右侧图片描述区',
             className: themeStyle === 'monochrome' ? 'bg-white border-blue-500 text-gray-900' : 'bg-[#141414] border-[#d4af37] text-white',
           });
         }
+      } else {
+        toast.error('提取结果为空', {
+          description: '模型未返回有效关键词',
+          className: 'bg-[#141414] border border-red-900 text-white',
+        });
       }
     } catch (error) {
       console.error('Extract keywords error:', error);
@@ -2665,7 +2735,7 @@ function CanvasApp() {
         className: 'bg-[#141414] border border-red-900 text-white',
       });
     }
-  }, []);
+  }, [currentChatModelInfo, currentUser, themeStyle]);
 
   // 提示词大师 - 从chat-panel传递到generation-panel
   const [externalPrompt, setExternalPrompt] = useState<string | undefined>(undefined);

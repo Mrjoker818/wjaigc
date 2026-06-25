@@ -1485,10 +1485,16 @@ export function InfiniteCanvas({
     return { model: 'gemini-3-pro-image-preview' };
   }, []);
 
-  // Helper: check if a native event originates from a dialog/modal/overlay (should be ignored by canvas)
+  // Helper: check if keyboard event target is an input field (should not trigger canvas shortcuts)
+  const isInputFocused = useCallback((e: KeyboardEvent): boolean => {
+    const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
+    return tag === 'input' || tag === 'textarea' || (e.target as HTMLElement)?.isContentEditable === true;
+  }, []);
+
+  // Helper: check if a native event originates from a dialog/modal/overlay/panel (should be ignored by canvas)
   const isEventFromOverlay = useCallback((e: Event): boolean => {
     const target = e.target as HTMLElement;
-    return !!target?.closest?.('[data-compare-dialog], [data-modal], [data-popup], [data-floating-panel]');
+    return !!target?.closest?.('[data-compare-dialog], [data-modal], [data-popup], [data-floating-panel], [data-toolbar], [role="dialog"], [role="tabpanel"]');
   }, []);
 
   // Sync selectedImage prop
@@ -1690,12 +1696,21 @@ export function InfiniteCanvas({
     const handleKeyDown = (e: KeyboardEvent) => {
       // Skip if event originates from dialog/modal/overlay
       if (isEventFromOverlay(e)) return;
+      // Skip if user is typing in an input field (unified check)
+      const inputFocused = isInputFocused(e);
+
       // Ctrl+Z / Cmd+Z: Undo
       if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ' && !e.shiftKey) {
-        const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
-        if (tag === 'input' || tag === 'textarea' || (e.target as HTMLElement)?.isContentEditable) return;
+        if (inputFocused) return;
         e.preventDefault();
         onUndo?.();
+        return;
+      }
+      // Ctrl+Shift+Z / Cmd+Shift+Z: Redo (prevent browser redo conflict)
+      if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ' && e.shiftKey) {
+        if (inputFocused) return;
+        e.preventDefault();
+        // Redo not implemented in canvas yet, just prevent browser default
         return;
       }
       // Ctrl + Plus: Zoom in
@@ -1730,10 +1745,9 @@ export function InfiniteCanvas({
         setZoom(newZoom);
         return;
       }
-      // Ctrl + D: Duplicate selected images
+      // Ctrl + D: Duplicate selected images (prevent browser bookmark shortcut)
       if ((e.ctrlKey || e.metaKey) && e.code === 'KeyD') {
-        const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
-        if (tag === 'input' || tag === 'textarea' || (e.target as HTMLElement)?.isContentEditable) return;
+        if (inputFocused) return;
         e.preventDefault();
         if (selectedIds.size > 0) {
           const offset = 30;
@@ -1753,20 +1767,27 @@ export function InfiniteCanvas({
         }
         return;
       }
-      // Ctrl+G: Create group from selected images
-      if ((e.ctrlKey || e.metaKey) && e.code === 'KeyG') {
-        const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
-        if (tag === 'input' || tag === 'textarea' || (e.target as HTMLElement)?.isContentEditable) return;
+      // Ctrl+Shift+G: Create group from selected images (Shift+G to avoid browser Ctrl+G search conflict)
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.code === 'KeyG') {
+        if (inputFocused) return;
         e.preventDefault();
         if (selectedIds.size >= 2) {
           handleCreateGroup();
         }
         return;
       }
-      // Ctrl+Q: Masonry layout for selected images
-      if ((e.ctrlKey || e.metaKey) && e.code === 'KeyQ') {
-        const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
-        if (tag === 'input' || tag === 'textarea' || (e.target as HTMLElement)?.isContentEditable) return;
+      // Ctrl+G is also accepted for backward compatibility, but prevent browser default
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.code === 'KeyG') {
+        if (inputFocused) return;
+        e.preventDefault();
+        if (selectedIds.size >= 2) {
+          handleCreateGroup();
+        }
+        return;
+      }
+      // Ctrl+Shift+Q: Masonry layout for selected images (Shift+Q to avoid Firefox Ctrl+Q close tab)
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.code === 'KeyQ') {
+        if (inputFocused) return;
         e.preventDefault();
         if (selectedIds.size > 1) {
           const selImgs = images.filter(i => selectedIds.has(i.id));
@@ -1789,10 +1810,34 @@ export function InfiniteCanvas({
         }
         return;
       }
-      // C key: Toggle annotation mode (ChatCanvas)
+      // Ctrl+Q without Shift also accepted for backward compatibility, but prevent Firefox close
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.code === 'KeyQ') {
+        if (inputFocused) return;
+        e.preventDefault();
+        if (selectedIds.size > 1) {
+          const selImgs = images.filter(i => selectedIds.has(i.id));
+          const COL_WIDTH = 280;
+          const GAP = 16;
+          const numCols = Math.min(5, Math.max(2, Math.ceil(Math.sqrt(selImgs.length))));
+          const colHeights = new Array(numCols).fill(0);
+          const updated = images.map(img => {
+            if (!selectedIds.has(img.id)) return img;
+            const scale = COL_WIDTH / img.width;
+            const newW = COL_WIDTH;
+            const newH = Math.round(img.height * scale);
+            const minCol = colHeights.indexOf(Math.min(...colHeights));
+            const newX = minCol * (COL_WIDTH + GAP);
+            const newY = colHeights[minCol];
+            colHeights[minCol] += newH + GAP;
+            return { ...img, x: newX, y: newY, width: newW, height: newH };
+          });
+          onImagesChange(updated);
+        }
+        return;
+      }
+      // C key: Toggle annotation mode (ChatCanvas) — only when no modifier and not in overlay
       if (e.code === 'KeyC' && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
-        if (tag === 'input' || tag === 'textarea' || (e.target as HTMLElement)?.isContentEditable) return;
+        if (inputFocused) return;
         e.preventDefault();
         setAnnotationMode(prev => !prev);
         if (!annotationMode) { setAnnotationTool('pin'); setEditMode('none'); } // reset to pin + exit any edit mode when entering
@@ -1800,22 +1845,18 @@ export function InfiniteCanvas({
       }
       // B key to toggle brush tool in annotation mode
       if (e.code === 'KeyB' && annotationMode && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
-        if (tag === 'input' || tag === 'textarea' || (e.target as HTMLElement)?.isContentEditable) return;
+        if (inputFocused) return;
         setAnnotationTool(prev => prev === 'brush' ? 'pin' : 'brush');
         return;
       }
       // R key to toggle region tool in annotation mode
       if (e.code === 'KeyR' && annotationMode && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
-        if (tag === 'input' || tag === 'textarea' || (e.target as HTMLElement)?.isContentEditable) return;
+        if (inputFocused) return;
         setAnnotationTool(prev => prev === 'region' ? 'pin' : 'region');
         return;
       }
       if (e.code === 'Space' && !e.repeat) {
-        // Don't capture Space when user is typing in an input/textarea
-        const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
-        if (tag === 'input' || tag === 'textarea' || (e.target as HTMLElement)?.isContentEditable) return;
+        if (inputFocused) return;
         e.preventDefault();
         setIsSpacePressed(true);
       }
@@ -1857,9 +1898,9 @@ export function InfiniteCanvas({
         setShowCanvasMenu(false);
       }
       if (e.code === 'Delete' || e.code === 'Backspace') {
-        // Don't delete images when user is typing in an input/textarea
-        const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
-        if (tag === 'input' || tag === 'textarea' || (e.target as HTMLElement)?.isContentEditable) return;
+        if (inputFocused) return;
+        // Prevent browser Backspace navigation
+        e.preventDefault();
         if (selectedIds.size > 0 && editMode === 'none') {
           const deletingIds = selectedIds;
           onImagesChange(images.filter(img => !deletingIds.has(img.id)));
