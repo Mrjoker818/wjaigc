@@ -358,7 +358,7 @@ export async function POST(request: NextRequest) {
       enhancedPrompt = `${enhancedPrompt}, ${categoryHints[imageCategory]}`;
     }
     
-    if (productCategory && productCategory.trim()) {
+    if (productCategory && productCategory.trim() && productCategory.trim().toLowerCase() !== 'none') {
       enhancedPrompt = `${enhancedPrompt}, product category: ${productCategory}`;
     }
     

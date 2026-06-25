@@ -19,7 +19,7 @@ export interface GenerationParams {
     referenceDescriptions?: string[]; // per-image descriptions for better subject recognition
     referenceMode: 'style' | 'content' | 'fusion';
     imageCategory: string;
-    productCategory: string;
+    productCategory?: string;
     aspectRatio: string;
     stylePreset: string;
     outputCount: number;
@@ -498,7 +498,7 @@ export function GenerationPanel(
             referenceDescriptions,
             referenceMode: 'style',
             imageCategory: 'general',
-            productCategory,
+            productCategory: productCategory !== 'none' ? productCategory : undefined,
             aspectRatio,
             stylePreset,
             outputCount,
