@@ -11,6 +11,9 @@ import {
   Loader2, Settings, ChevronDown, ShieldCheck, AlertTriangle,
   ArrowUp, ArrowDown, ShoppingBag, Users, Server, Database,
   XCircle, BarChart3, Upload, RotateCcw, Film, CreditCard,
+  // Asset library icons
+  LayoutGrid, List, ArrowUpDown, CheckSquare, Download, Square,
+  Grid3X3,
 } from 'lucide-react';
 import { UserManager } from '@/lib/user-manager';
 import { RECHARGE_PACKAGES } from '@/lib/credits-constants';
@@ -18,6 +21,7 @@ import type { Project, CanvasImage, User, UsageStats } from '@/lib/user-types';
 import { ConfirmDialog } from '@/components/custom-dialogs';
 import type { ApiProvider, ModelInfo } from '@/lib/universal-api-types';
 import { getModelDisplayName } from '@/lib/model-name-map';
+import JSZip from 'jszip';
 
 type TabType = 'projects' | 'templates' | 'assets' | 'stats' | 'credits' | 'settings' | 'users' | 'apis' | 'data' | 'ecom-templates' | 'payment-config';
 type ProjectFilter = 'all' | 'recent' | 'starred';
@@ -66,6 +70,7 @@ interface DashboardViewProps {
   onNewProject: () => void;
   onLogout?: () => void;
   isMonochrome?: boolean;
+  onSetFavoriteParams?: (params: { prompt: string; model?: string; aspectRatio?: string; quality?: string; negativePrompt?: string }) => void;
 }
 
 interface PromptEntry {
@@ -74,7 +79,7 @@ interface PromptEntry {
   projectName: string;
 }
 
-export default function DashboardView({ user, onOpenProject, onNewProject, onLogout, isMonochrome }: DashboardViewProps) {
+export default function DashboardView({ user, onOpenProject, onNewProject, onLogout, isMonochrome, onSetFavoriteParams }: DashboardViewProps) {
   const isAdmin = user.role === 'admin';
 
   // ─── Navigation state ───
@@ -83,11 +88,17 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const [searchQuery, setSearchQuery] = useState('');
   const [assetTab, setAssetTab] = useState<AssetSubTab>('images');
   const [imageFilter, setImageFilter] = useState<'all' | 'generated' | 'uploaded'>('all');
+  // Asset library enhanced state
+  const [assetViewMode, setAssetViewMode] = useState<'grid' | 'list'>('grid');
+  const [assetSortOrder, setAssetSortOrder] = useState<'newest' | 'oldest'>('newest');
+  const [assetManageMode, setAssetManageMode] = useState(false);
+  const [selectedAssetIds, setSelectedAssetIds] = useState<Set<string>>(new Set());
+  const [assetCopiedId, setAssetCopiedId] = useState<string | null>(null);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [starredIds, setStarredIds] = useState<Set<string>>(() => {
     try { return new Set(JSON.parse(localStorage.getItem('wujie-starred-projects') || '[]')); } catch { return new Set(); }
   });
-  const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+  const [copiedIdx, setCopiedIdx] = useState<string | number | null>(null);
   const [showUserProfile, setShowUserProfile] = useState(false);
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
@@ -273,10 +284,10 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const stats: UsageStats | null = statsArr.length > 0 ? statsArr[statsArr.length - 1] : null;
 
   const allImages = useMemo(() => {
-    const imgs: (CanvasImage & { projectName: string })[] = [];
+    const imgs: (CanvasImage & { projectName: string; _projectId: string })[] = [];
     projects.forEach((p: Project) => {
       (p.canvasImages || []).forEach((img: CanvasImage) => {
-        imgs.push({ ...img, projectName: p.name });
+        imgs.push({ ...img, projectName: p.name, _projectId: p.id });
       });
     });
     return imgs;
@@ -330,10 +341,15 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   }, [projects, searchQuery, projectFilter, starredIds]);
 
   const filteredImages = useMemo(() => {
-    if (imageFilter === 'all') return allImages;
-    if (imageFilter === 'generated') return allImages.filter(i => i.model);
-    return allImages.filter(i => !i.model);
-  }, [allImages, imageFilter]);
+    let result = imageFilter === 'all' ? allImages : imageFilter === 'generated' ? allImages.filter(i => i.model) : allImages.filter(i => !i.model);
+    // Sort by time
+    result = [...result].sort((a, b) => {
+      const ta = a.createdAt || 0;
+      const tb = b.createdAt || 0;
+      return assetSortOrder === 'newest' ? tb - ta : ta - tb;
+    });
+    return result;
+  }, [allImages, imageFilter, assetSortOrder]);
 
   // ─── Project handlers ───
   const toggleStar = useCallback((id: string, e: React.MouseEvent) => {
@@ -364,6 +380,122 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       setTimeout(() => setCopiedIdx(null), 2000);
     });
   }, []);
+
+  // Copy full image info (prompt + params)
+  const handleCopyImageInfo = useCallback((img: any) => {
+    const parts: string[] = [];
+    if (img.prompt) parts.push(img.prompt);
+    if (img.negativePrompt) parts.push(`反向提示词: ${img.negativePrompt}`);
+    if (img.modelName || img.model) parts.push(`模型: ${img.modelName || img.model}`);
+    if (img.aspectRatio) parts.push(`比例: ${img.aspectRatio}`);
+    if (img.quality) parts.push(`质量: ${img.quality}`);
+    if (img.apiProvider) parts.push(`提供商: ${img.apiProvider}`);
+    if (img.size) parts.push(`尺寸: ${img.size}`);
+    navigator.clipboard.writeText(parts.join('\n')).then(() => {
+      setCopiedIdx(img.id);
+      setTimeout(() => setCopiedIdx(null), 1500);
+    });
+  }, []);
+
+  // Make same: open project and inject params
+  const handleMakeSame = useCallback((img: any) => {
+    const projectId = img._projectId;
+    if (projectId) {
+      const mgr = UserManager.getInstance();
+      const project = mgr.getProjects().find(p => p.id === projectId);
+      if (project) onOpenProject(project);
+    }
+    // Set favorite params after a delay to ensure generation panel is mounted
+    setTimeout(() => {
+      if (onSetFavoriteParams) {
+        onSetFavoriteParams({
+          prompt: img.prompt || '',
+          model: img.model || '',
+          aspectRatio: img.aspectRatio || '',
+          quality: img.quality || '',
+          negativePrompt: img.negativePrompt || '',
+        });
+      }
+    }, 500);
+  }, [onOpenProject, onSetFavoriteParams]);
+
+  // Batch download selected images as zip
+  const handleBatchDownload = useCallback(async () => {
+    if (selectedAssetIds.size === 0) return;
+    const zip = new JSZip();
+    const folder = zip.folder('assets')!;
+    let count = 0;
+    for (const id of selectedAssetIds) {
+      const img = allImages.find(i => i.id === id);
+      if (!img) continue;
+      try {
+        const url = img.url || '';
+        if (!url) continue;
+        const resp = await fetch(url);
+        if (!resp.ok) continue;
+        const blob = await resp.blob();
+        const ext = blob.type.includes('png') ? 'png' : blob.type.includes('webp') ? 'webp' : 'jpg';
+        const name = (img.prompt || `image_${count}`).slice(0, 30).replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '_');
+        folder.file(`${name}_${count}.${ext}`, blob);
+        count++;
+      } catch { /* skip failed */ }
+    }
+    if (count === 0) return;
+    const content = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(content);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `assets_${count}_images.zip`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    setAssetManageMode(false);
+    setSelectedAssetIds(new Set());
+  }, [selectedAssetIds, allImages]);
+
+  // Batch delete selected images
+  const handleBatchDeleteAssets = useCallback(() => {
+    if (selectedAssetIds.size === 0) return;
+    // Collect affected projects and their images to remove
+    const projectRemovals: Record<string, string[]> = {};
+    for (const id of selectedAssetIds) {
+      const img = allImages.find(i => i.id === id);
+      if (img?._projectId) {
+        if (!projectRemovals[img._projectId]) projectRemovals[img._projectId] = [];
+        projectRemovals[img._projectId].push(id);
+      }
+    }
+    // Update each project to remove selected images
+    for (const [projId, imgIds] of Object.entries(projectRemovals)) {
+      const proj = mgr.getProject(projId);
+      if (proj) {
+        const removeSet = new Set(imgIds);
+        const newImages = (proj.canvasImages || []).filter(i => !removeSet.has(i.id));
+        mgr.updateProject(projId, { canvasImages: newImages });
+      }
+    }
+    setSelectedAssetIds(new Set());
+    setAssetManageMode(false);
+  }, [selectedAssetIds, allImages, mgr]);
+
+  // Toggle asset selection
+  const toggleAssetSelection = useCallback((id: string) => {
+    setSelectedAssetIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
+
+  // Select/deselect all assets
+  const toggleSelectAllAssets = useCallback(() => {
+    if (selectedAssetIds.size === filteredImages.length) {
+      setSelectedAssetIds(new Set());
+    } else {
+      setSelectedAssetIds(new Set(filteredImages.map(i => i.id)));
+    }
+  }, [selectedAssetIds.size, filteredImages]);
 
   const handleRenameProject = useCallback((projectId: string, currentName: string) => {
     setRenamingProjectId(projectId);
@@ -1200,8 +1332,24 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
         {activeTab === 'assets' && (
           <div className="h-full flex flex-col">
             <div className={`px-8 pt-8 pb-4 ${isDark ? 'bg-[#0a0a0f]' : 'bg-gray-50'}`}>
-              <h1 className={`text-2xl font-bold ${textPrimary}`}>资产库</h1>
-              <div className="flex gap-2 mt-4">
+              <div className="flex items-center justify-between">
+                <h1 className={`text-2xl font-bold ${textPrimary}`}>资产库</h1>
+                <div className="flex items-center gap-2">
+                  {/* View mode toggle */}
+                  <button onClick={() => setAssetViewMode(assetViewMode === 'grid' ? 'list' : 'grid')} className={`p-1.5 rounded-lg ${isDark ? 'hover:bg-white/10' : 'hover:bg-gray-200'} cursor-pointer`} title={assetViewMode === 'grid' ? '列表模式' : '大图模式'}>
+                    {assetViewMode === 'grid' ? <List className="w-4 h-4" /> : <Grid3X3 className="w-4 h-4" />}
+                  </button>
+                  {/* Sort menu */}
+                  <button onClick={() => setAssetSortOrder(assetSortOrder === 'newest' ? 'oldest' : 'newest')} className={`p-1.5 rounded-lg ${isDark ? 'hover:bg-white/10' : 'hover:bg-gray-200'} cursor-pointer`} title={assetSortOrder === 'newest' ? '切换为最早优先' : '切换为最新优先'}>
+                    <ArrowUpDown className="w-4 h-4" />
+                  </button>
+                  {/* Manage mode toggle */}
+                  <button onClick={() => { setAssetManageMode(!assetManageMode); setSelectedAssetIds(new Set()); }} className={`px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer ${assetManageMode ? `${accentBgLight} ${accentClass}` : `${isDark ? 'hover:bg-white/10' : 'hover:bg-gray-200'} ${textSecondary}`}`}>
+                    {assetManageMode ? '退出管理' : '批量管理'}
+                  </button>
+                </div>
+              </div>
+              <div className="flex gap-2 mt-4 items-center flex-wrap">
                 {(['images', 'prompts', 'brands'] as const).map(t => (
                   <button key={t} onClick={() => setAssetTab(t)} className={`px-4 py-1.5 rounded-lg text-xs font-medium cursor-pointer ${assetTab === t ? `${accentBgLight} ${accentClass}` : `${textSecondary} ${isDark ? 'hover:bg-white/5' : 'hover:bg-gray-100'}`}`}>
                     {{ images: '图片', prompts: '提示词', brands: '品牌' }[t]}
@@ -1216,18 +1364,92 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                     ))}
                   </div>
                 )}
+                {assetManageMode && assetTab === 'images' && (
+                  <div className="flex gap-2 ml-auto items-center">
+                    <button onClick={toggleSelectAllAssets} className={`text-xs ${accentClass} hover:underline cursor-pointer`}>
+                      {selectedAssetIds.size === filteredImages.length ? '取消全选' : '全选'}
+                    </button>
+                    {selectedAssetIds.size > 0 && (
+                      <>
+                        <button onClick={handleBatchDeleteAssets} className="text-xs text-red-400 hover:underline cursor-pointer">删除({selectedAssetIds.size})</button>
+                        <button onClick={handleBatchDownload} className="text-xs text-blue-400 hover:underline cursor-pointer">下载({selectedAssetIds.size})</button>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
             <div className="flex-1 overflow-y-auto px-8 pb-8">
               {assetTab === 'images' && (
                 filteredImages.length === 0 ? (
                   <div className={`flex flex-col items-center justify-center h-64 ${textSecondary}`}><Image className="w-12 h-12 mb-3 opacity-30" /><p className="text-sm">暂无图片</p></div>
-                ) : (
+                ) : assetViewMode === 'grid' ? (
+                  /* Grid mode */
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 mt-4">
                     {filteredImages.map((img, idx) => (
-                      <div key={idx} className={`rounded-xl border overflow-hidden ${isDark ? 'bg-[#1a1a2e]/80 border-primary/20' : 'bg-white border-gray-200'}`}>
-                        <div className="h-28 overflow-hidden"><img src={img.url} alt="" className="w-full h-full object-cover" /></div>
-                        <div className="p-2"><p className={`text-[10px] truncate ${textSecondary}`}>{img.projectName}</p>{img.model && <p className={`text-[9px] ${accentClass} truncate`}>{img.model}</p>}</div>
+                      <div key={img.id || idx} className={`group rounded-xl border overflow-hidden ${assetManageMode && selectedAssetIds.has(img.id) ? `${accentBorderClass} ring-1 ring-primary/30` : isDark ? 'bg-[#1a1a2e]/80 border-primary/20' : 'bg-white border-gray-200'} ${assetManageMode ? 'cursor-pointer' : ''}`} onClick={() => assetManageMode && toggleAssetSelection(img.id)}>
+                        {assetManageMode && (
+                          <div className="absolute top-2 left-2 z-10">
+                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${selectedAssetIds.has(img.id) ? `${accentBgLight} ${accentClass} border-primary` : 'border-gray-400 bg-black/30'}`}>
+                              {selectedAssetIds.has(img.id) && <span className="text-[10px]">✓</span>}
+                            </div>
+                          </div>
+                        )}
+                        <div className="h-28 overflow-hidden relative"><img src={img.url} alt="" className="w-full h-full object-cover" />{img.mediaType === 'video' && <div className="absolute inset-0 flex items-center justify-center bg-black/30"><Film className="w-6 h-6 text-white" /></div>}</div>
+                        <div className="p-2">
+                          {(img.prompt || img.model) && (
+                            <p className={`text-[10px] line-clamp-2 mb-1 ${textSecondary}`}>{img.prompt || '(无提示词)'}</p>
+                          )}
+                          <div className="flex items-center gap-1 flex-wrap">
+                            {img.modelName && <span className={`text-[9px] px-1 py-0.5 rounded ${accentBgLight} ${accentClass}`}>{img.modelName.length > 12 ? img.modelName.slice(0, 12) + '…' : img.modelName}</span>}
+                            {img.aspectRatio && <span className={`text-[9px] px-1 py-0.5 rounded ${isDark ? 'bg-white/10 text-white/60' : 'bg-gray-100 text-gray-500'}`}>{img.aspectRatio}</span>}
+                            {img.quality && <span className={`text-[9px] px-1 py-0.5 rounded ${isDark ? 'bg-white/10 text-white/60' : 'bg-gray-100 text-gray-500'}`}>{img.quality}</span>}
+                          </div>
+                          <p className={`text-[9px] truncate mt-1 ${textSecondary}`}>{img.projectName}</p>
+                          {!assetManageMode && (
+                            <div className="flex gap-1 mt-1.5">
+                              <button onClick={(e) => { e.stopPropagation(); handleMakeSame(img); }} className={`text-[9px] px-1.5 py-0.5 rounded ${accentBgLight} ${accentClass} hover:opacity-80 cursor-pointer`}>同款</button>
+                              <button onClick={(e) => { e.stopPropagation(); handleCopyImageInfo(img); }} className={`text-[9px] px-1.5 py-0.5 rounded ${isDark ? 'bg-white/10 text-white/60' : 'bg-gray-100 text-gray-500'} hover:opacity-80 cursor-pointer`}>{copiedIdx === img.id ? '已复制' : '复制'}</button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  /* List mode */
+                  <div className="space-y-2 mt-4">
+                    {filteredImages.map((img, idx) => (
+                      <div key={img.id || idx} className={`group flex gap-3 rounded-xl border p-3 ${assetManageMode && selectedAssetIds.has(img.id) ? `${accentBorderClass} ring-1 ring-primary/30` : isDark ? 'bg-[#1a1a2e]/80 border-primary/20' : 'bg-white border-gray-200'} ${assetManageMode ? 'cursor-pointer' : ''}`} onClick={() => assetManageMode && toggleAssetSelection(img.id)}>
+                        {assetManageMode && (
+                          <div className="flex items-center">
+                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${selectedAssetIds.has(img.id) ? `${accentBgLight} ${accentClass} border-primary` : 'border-gray-400'}`}>
+                              {selectedAssetIds.has(img.id) && <span className="text-[10px]">✓</span>}
+                            </div>
+                          </div>
+                        )}
+                        <div className="w-16 h-16 rounded-lg overflow-hidden shrink-0"><img src={img.url} alt="" className="w-full h-full object-cover" /></div>
+                        <div className="flex-1 min-w-0">
+                          {(img.prompt || img.model) && (
+                            <p className={`text-xs line-clamp-2 ${textPrimary}`}>{img.prompt || '(无提示词)'}</p>
+                          )}
+                          <div className="flex items-center gap-1 flex-wrap mt-1">
+                            {img.modelName && <span className={`text-[9px] px-1 py-0.5 rounded ${accentBgLight} ${accentClass}`}>{img.modelName}</span>}
+                            {img.aspectRatio && <span className={`text-[9px] px-1 py-0.5 rounded ${isDark ? 'bg-white/10 text-white/60' : 'bg-gray-100 text-gray-500'}`}>{img.aspectRatio}</span>}
+                            {img.quality && <span className={`text-[9px] px-1 py-0.5 rounded ${isDark ? 'bg-white/10 text-white/60' : 'bg-gray-100 text-gray-500'}`}>{img.quality}</span>}
+                            {img.size && <span className={`text-[9px] px-1 py-0.5 rounded ${isDark ? 'bg-white/10 text-white/60' : 'bg-gray-100 text-gray-500'}`}>{img.size}</span>}
+                          </div>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className={`text-[9px] ${textSecondary}`}>{img.projectName}</span>
+                            {img.createdAt && <span className={`text-[9px] ${textSecondary}`}>{new Date(img.createdAt).toLocaleDateString()}</span>}
+                          </div>
+                        </div>
+                        {!assetManageMode && (
+                          <div className="flex flex-col gap-1 shrink-0">
+                            <button onClick={(e) => { e.stopPropagation(); handleMakeSame(img); }} className={`text-[9px] px-2 py-1 rounded ${accentBgLight} ${accentClass} hover:opacity-80 cursor-pointer whitespace-nowrap`}>制作同款</button>
+                            <button onClick={(e) => { e.stopPropagation(); handleCopyImageInfo(img); }} className={`text-[9px] px-2 py-1 rounded ${isDark ? 'bg-white/10 text-white/60' : 'bg-gray-100 text-gray-500'} hover:opacity-80 cursor-pointer whitespace-nowrap`}>{copiedIdx === img.id ? '已复制' : '复制关键词'}</button>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>

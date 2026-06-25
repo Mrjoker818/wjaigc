@@ -296,6 +296,7 @@ export function ProjectDataPanel({
           title="批量管理"
         >
           <Trash2 className="h-3.5 w-3.5" />
+          <span className="text-[10px] ml-0.5">{isManageMode ? '退出' : '管理'}</span>
         </button>
       </div>
 

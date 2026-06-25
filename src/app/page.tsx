@@ -3157,6 +3157,9 @@ function CanvasApp() {
           setAppMode('canvas');
           loadProjectById(project.id);
         }}
+        onSetFavoriteParams={(params) => {
+          setFavoriteParams(params);
+        }}
         onNewProject={async () => {
           try {
             const mgr = UserManagerCore.getInstance();
