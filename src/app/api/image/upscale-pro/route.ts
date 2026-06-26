@@ -1,6 +1,7 @@
 // ============================================================
 // POST /api/image/upscale-pro — 无损放大（多策略降级 + AI画质精修）
-// 1. 云端专用API（PearAPI photo-enhancer: Real-ESRGAN/SeedVR2）
+// 1a. 云端 PearAPI photo-enhancer（Real-ESRGAN/SeedVR2）
+// 1b. 云端 fal.ai SeedVR2（高质量扩散超分辨率，$0.001/MP）
 // 2. 本地 ONNX Real-ESRGAN（CPU分块处理）
 // 2.5 AI画质精修（放大后自动追加，修复模糊/噪点/失真）
 // 3. AI重绘兜底（图像生成模型放大）
@@ -103,7 +104,11 @@ async function upscaleViaPearAPI(
 
     if (pearData.code !== 200 || !pearData.data) {
       const errMsg = pearData.msg || pearData.error || `PearAPI code=${pearData.code}`;
-      console.warn(`[upscale-pro] PearAPI failed: ${errMsg}`);
+      if (pearData.code === 402) {
+        console.warn(`[upscale-pro] PearAPI balance insufficient (402). Tip: Add fal.ai provider for SeedVR2 upscale.`);
+      } else {
+        console.warn(`[upscale-pro] PearAPI failed: ${errMsg}`);
+      }
       return null;
     }
 
@@ -112,50 +117,304 @@ async function upscaleViaPearAPI(
     if (!resultImageUrl) return null;
 
     // ★ 精确resize：PearAPI返回的图片尺寸可能不精确匹配目标（如SeedVR2默认1.5×而非用户选的4×）
-    // 当targetWidth/targetHeight有值时，强制resize到目标尺寸
     let finalUrl = resultImageUrl;
     if (targetWidth && targetHeight && targetWidth > 0 && targetHeight > 0) {
-      try {
-        const sharp = await import('sharp');
-        const path = await import('path');
-        const fs = await import('fs');
-        // 下载 PearAPI 结果
-        const resp = await fetch(resultImageUrl);
-        if (resp.ok) {
-          const buf = Buffer.from(await resp.arrayBuffer());
-          // 检查当前尺寸
-          const meta = await sharp.default(buf).metadata();
-          const curW = meta.width || 0;
-          const curH = meta.height || 0;
-          if (curW > 0 && curH > 0 && (curW !== targetWidth || curH !== targetHeight)) {
-            console.log(`[upscale-pro] PearAPI resize: ${curW}x${curH} -> ${targetWidth}x${targetHeight}`);
-            const resizedBuf = await sharp.default(buf)
-              .resize(targetWidth, targetHeight, { kernel: 'lanczos3' })
-              .png({ quality: 95 })
-              .toBuffer();
-            // 保存到持久化目录
-            const outDir = path.join(process.env.COZE_WORKSPACE_PATH || '/workspace/projects', 'data', 'uploads', 'upscale');
-            fs.mkdirSync(outDir, { recursive: true });
-            const outFile = path.join(outDir, `pear-resize-${Date.now()}.png`);
-            fs.writeFileSync(outFile, resizedBuf);
-            finalUrl = `/api/serve-upload/uploads/upscale/pear-resize-${Date.now()}.png`;
-          }
-        }
-      } catch (resizeErr) {
-        console.warn('[upscale-pro] PearAPI resize failed, using original:', resizeErr instanceof Error ? resizeErr.message : String(resizeErr));
-      }
+      finalUrl = await resizeToTarget(resultImageUrl, targetWidth, targetHeight);
     }
 
     // 持久化结果
     const persistedUrl = await persistResult(finalUrl);
     console.log(`[upscale-pro] PearAPI success: ${persistedUrl.slice(0, 80)}`);
-    return { url: persistedUrl, model, strategy: 'cloud-Real-ESRGAN' };
+    return { url: persistedUrl, model, strategy: model === 'SeedVR2-Upscaler' ? 'cloud-PearAPI-SeedVR2' : 'cloud-PearAPI-Real-ESRGAN' };
   } catch (err) {
     clearTimeout(timeout);
     const errMsg = err instanceof Error ? err.message : String(err);
     console.warn(`[upscale-pro] PearAPI error: ${errMsg}`);
     return null;
   }
+}
+
+/** 从管理员配置查找 fal.ai 提供商的 API Key */
+async function findFalApiKey(): Promise<{ apiKey: string; baseUrl: string } | null> {
+  try {
+    const { getApiProviders } = await import('@/lib/server-api-config');
+    const providers = await getApiProviders();
+    // 查找 baseUrl 包含 fal.ai 的提供商
+    const falProvider = providers.find(
+      (p: { baseUrl: string }) => p.baseUrl.includes('fal.ai') || p.baseUrl.includes('fal.run'),
+    );
+    if (falProvider?.apiKey && falProvider?.baseUrl) {
+      return {
+        apiKey: falProvider.apiKey,
+        baseUrl: falProvider.baseUrl,
+      };
+    }
+  } catch {
+    // 忽略
+  }
+
+  // 环境变量兜底
+  const envKey = process.env.FAL_KEY || process.env.FAL_API_KEY;
+  if (envKey) {
+    return { apiKey: envKey, baseUrl: 'https://fal.run' };
+  }
+  return null;
+}
+
+/** 策略1b: 云端 fal.ai SeedVR2（高质量扩散超分辨率）
+ *  API 文档: https://fal.ai/models/fal-ai/seedvr/upscale/image
+ *  定价: $0.001/MP，支持 factor/target 两种放大模式
+ */
+async function upscaleViaFalSeedVR2(
+  imageUrl: string,
+  scale: number,
+  targetWidth?: number,
+  targetHeight?: number,
+): Promise<{ url: string; model: string; strategy: string } | null> {
+  const falConfig = await findFalApiKey();
+  if (!falConfig) {
+    console.log('[upscale-pro] No fal.ai key configured, skipping SeedVR2 cloud upscale');
+    return null;
+  }
+
+  // 构建请求体
+  const requestBody: Record<string, unknown> = {
+    image_url: imageUrl,
+    output_format: 'png',
+  };
+
+  // 如果有精确目标尺寸，使用 target 模式；否则用 factor 模式
+  if (targetWidth && targetHeight && targetWidth > 0 && targetHeight > 0) {
+    // 根据 targetWidth 选择最接近的 target_resolution
+    const maxDim = Math.max(targetWidth, targetHeight);
+    if (maxDim >= 2160) {
+      requestBody.target_resolution = '2160p';
+    } else if (maxDim >= 1440) {
+      requestBody.target_resolution = '1440p';
+    } else if (maxDim >= 1080) {
+      requestBody.target_resolution = '1080p';
+    } else {
+      requestBody.target_resolution = '720p';
+    }
+    requestBody.upscale_mode = 'target';
+    // fal.ai target 模式下会自动计算倍率，但我们仍需确保结果尺寸精确
+    // 使用 factor 模式 + 精确 resize 更可控
+    requestBody.upscale_mode = 'factor';
+    requestBody.upscale_factor = Math.min(Math.max(scale, 1), 10);
+  } else {
+    requestBody.upscale_mode = 'factor';
+    requestBody.upscale_factor = Math.min(Math.max(scale, 1), 10);
+  }
+
+  console.log(`[upscale-pro] Strategy 1b: fal.ai SeedVR2 (mode=${requestBody.upscale_mode}, factor=${requestBody.upscale_factor})`);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 300000);
+
+  try {
+    // 尝试同步模式（sync_mode=true 直接返回图片）
+    const syncBody = { ...requestBody, sync_mode: true };
+
+    const falRes = await fetch('https://fal.run/fal-ai/seedvr/upscale/image', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Key ${falConfig.apiKey}`,
+      },
+      body: JSON.stringify(syncBody),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeout);
+
+    if (!falRes.ok) {
+      const errText = await falRes.text().catch(() => '');
+      console.warn(`[upscale-pro] fal.ai SeedVR2 HTTP ${falRes.status}: ${errText.slice(0, 300)}`);
+
+      // 422 = 参数错误，429 = 限流，401/403 = 鉴权失败 — 不再重试
+      if (falRes.status === 401 || falRes.status === 403 || falRes.status === 422) {
+        return null;
+      }
+
+      // 同步失败，尝试异步模式
+      return await upscaleViaFalSeedVR2Async(imageUrl, requestBody, falConfig.apiKey);
+    }
+
+    const falData = await falRes.json() as Record<string, unknown>;
+
+    // 异步模式返回 request_id（需要轮询）
+    if (falData.request_id && !falData.image) {
+      return await pollFalSeedVR2Result(falData.request_id as string, falConfig.apiKey, targetWidth, targetHeight);
+    }
+
+    // 同步模式直接返回 image
+    const imageObj = falData.image as Record<string, unknown> | undefined;
+    const resultImageUrl = imageObj?.url as string;
+    if (!resultImageUrl) {
+      console.warn('[upscale-pro] fal.ai SeedVR2: no image URL in response');
+      return null;
+    }
+
+    // 精确 resize 到目标尺寸
+    let finalUrl = resultImageUrl;
+    if (targetWidth && targetHeight && targetWidth > 0 && targetHeight > 0) {
+      finalUrl = await resizeToTarget(resultImageUrl, targetWidth, targetHeight);
+    }
+
+    // 持久化结果
+    const persistedUrl = await persistResult(finalUrl);
+    console.log(`[upscale-pro] fal.ai SeedVR2 success: ${persistedUrl.slice(0, 80)}`);
+    return { url: persistedUrl, model: 'SeedVR2-Upscaler', strategy: 'cloud-fal-SeedVR2' };
+  } catch (err) {
+    clearTimeout(timeout);
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.warn(`[upscale-pro] fal.ai SeedVR2 error: ${errMsg}`);
+    return null;
+  }
+}
+
+/** fal.ai SeedVR2 异步提交 + 轮询 */
+async function upscaleViaFalSeedVR2Async(
+  imageUrl: string,
+  requestBody: Record<string, unknown>,
+  apiKey: string,
+): Promise<{ url: string; model: string; strategy: string } | null> {
+  console.log('[upscale-pro] fal.ai SeedVR2: trying async queue mode...');
+
+  try {
+    // 提交异步请求
+    const submitRes = await fetch('https://queue.fal.run/fal-ai/seedvr/upscale/image', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Key ${apiKey}`,
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!submitRes.ok) {
+      const errText = await submitRes.text().catch(() => '');
+      console.warn(`[upscale-pro] fal.ai async submit HTTP ${submitRes.status}: ${errText.slice(0, 200)}`);
+      return null;
+    }
+
+    const submitData = await submitRes.json() as Record<string, unknown>;
+    const requestId = submitData.request_id as string;
+    if (!requestId) {
+      console.warn('[upscale-pro] fal.ai async: no request_id in response');
+      return null;
+    }
+
+    return await pollFalSeedVR2Result(requestId, apiKey);
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.warn(`[upscale-pro] fal.ai SeedVR2 async error: ${errMsg}`);
+    return null;
+  }
+}
+
+/** 轮询 fal.ai 异步任务结果 */
+async function pollFalSeedVR2Result(
+  requestId: string,
+  apiKey: string,
+  targetWidth?: number,
+  targetHeight?: number,
+): Promise<{ url: string; model: string; strategy: string } | null> {
+  const maxAttempts = 120; // 最多轮询120次
+  const intervalMs = 3000; // 每3秒一次
+
+  for (let i = 0; i < maxAttempts; i++) {
+    await new Promise(r => setTimeout(r, intervalMs));
+
+    const statusRes = await fetch(
+      `https://queue.fal.run/fal-ai/seedvr/upscale/image/requests/${requestId}/status`,
+      { headers: { 'Authorization': `Key ${apiKey}` } },
+    );
+
+    if (!statusRes.ok) {
+      console.warn(`[upscale-pro] fal.ai poll status HTTP ${statusRes.status}`);
+      continue;
+    }
+
+    const statusData = await statusRes.json() as Record<string, unknown>;
+    const status = statusData.status as string;
+
+    if (status === 'COMPLETED') {
+      // 获取结果
+      const resultRes = await fetch(
+        `https://queue.fal.run/fal-ai/seedvr/upscale/image/requests/${requestId}`,
+        { headers: { 'Authorization': `Key ${apiKey}` } },
+      );
+      if (!resultRes.ok) {
+        console.warn(`[upscale-pro] fal.ai get result HTTP ${resultRes.status}`);
+        return null;
+      }
+      const resultData = await resultRes.json() as Record<string, unknown>;
+      const imageObj = resultData.image as Record<string, unknown> | undefined;
+      const resultImageUrl = imageObj?.url as string;
+      if (!resultImageUrl) {
+        console.warn('[upscale-pro] fal.ai async: no image URL in result');
+        return null;
+      }
+
+      let finalUrl = resultImageUrl;
+      if (targetWidth && targetHeight && targetWidth > 0 && targetHeight > 0) {
+        finalUrl = await resizeToTarget(resultImageUrl, targetWidth, targetHeight);
+      }
+
+      const persistedUrl = await persistResult(finalUrl);
+      console.log(`[upscale-pro] fal.ai SeedVR2 async success: ${persistedUrl.slice(0, 80)}`);
+      return { url: persistedUrl, model: 'SeedVR2-Upscaler', strategy: 'cloud-fal-SeedVR2' };
+    }
+
+    if (status === 'FAILED') {
+      const error = statusData.error as string || 'Unknown error';
+      console.warn(`[upscale-pro] fal.ai async task failed: ${error}`);
+      return null;
+    }
+
+    // IN_PROGRESS or IN_QUEUE — continue polling
+    if (i % 10 === 0) {
+      console.log(`[upscale-pro] fal.ai SeedVR2 polling... status=${status}, attempt=${i + 1}/${maxAttempts}`);
+    }
+  }
+
+  console.warn('[upscale-pro] fal.ai SeedVR2 async: polling timeout');
+  return null;
+}
+
+/** 精确 resize 到目标尺寸（共享工具函数） */
+async function resizeToTarget(
+  imageUrl: string,
+  targetWidth: number,
+  targetHeight: number,
+): Promise<string> {
+  try {
+    const sharp = await import('sharp');
+    const path = await import('path');
+    const fs = await import('fs');
+    const resp = await fetch(imageUrl);
+    if (!resp.ok) return imageUrl;
+    const buf = Buffer.from(await resp.arrayBuffer());
+    const meta = await sharp.default(buf).metadata();
+    const curW = meta.width || 0;
+    const curH = meta.height || 0;
+    if (curW > 0 && curH > 0 && (curW !== targetWidth || curH !== targetHeight)) {
+      console.log(`[upscale-pro] resizeToTarget: ${curW}x${curH} -> ${targetWidth}x${targetHeight}`);
+      const resizedBuf = await sharp.default(buf)
+        .resize(targetWidth, targetHeight, { kernel: 'lanczos3' })
+        .png({ quality: 95 })
+        .toBuffer();
+      const outDir = path.join(process.env.COZE_WORKSPACE_PATH || '/workspace/projects', 'data', 'uploads', 'upscale');
+      fs.mkdirSync(outDir, { recursive: true });
+      const outFile = path.join(outDir, `fal-resize-${Date.now()}.png`);
+      fs.writeFileSync(outFile, resizedBuf);
+      return `/api/serve-upload/uploads/upscale/fal-resize-${Date.now()}.png`;
+    }
+  } catch (resizeErr) {
+    console.warn('[upscale-pro] resizeToTarget failed:', resizeErr instanceof Error ? resizeErr.message : String(resizeErr));
+  }
+  return imageUrl;
 }
 
 /** 策略2: 本地 Python ONNX Real-ESRGAN（纯CPU，无需GPU） */
@@ -602,7 +861,7 @@ async function performUpscaleChain(
 ): Promise<Record<string, unknown>> {
   // === 多策略降级 ===
 
-  // 策略1: 云端 PearAPI（真正的无损放大）— 不需要AI精修
+  // 策略1a: 云端 PearAPI（Real-ESRGAN / SeedVR2）— 不需要AI精修
   const cloudResult = await upscaleViaPearAPI(imageUrl, model, face, scale, targetWidth, targetHeight);
   if (cloudResult?.url) {
     return {
@@ -612,6 +871,21 @@ async function performUpscaleChain(
       strategy: cloudResult.strategy,
       enhanced: false,
     };
+  }
+
+  // 策略1b: 云端 fal.ai SeedVR2（高质量扩散超分辨率）— 不需要AI精修
+  // 仅在用户选择 SeedVR2 模型时尝试（fal.ai 仅支持 SeedVR2，不支持 Real-ESRGAN）
+  if (model === 'SeedVR2-Upscaler') {
+    const falResult = await upscaleViaFalSeedVR2(imageUrl, scale, targetWidth, targetHeight);
+    if (falResult?.url) {
+      return {
+        success: true,
+        url: falResult.url,
+        model: falResult.model,
+        strategy: falResult.strategy,
+        enhanced: false,
+      };
+    }
   }
 
   // 策略2: 本地 ONNX Real-ESRGAN
@@ -678,5 +952,5 @@ async function performUpscaleChain(
     }
   }
 
-  return { success: false, error: '所有放大策略均失败：云端API不可用、本地放大服务未启动' };
+  return { success: false, error: '所有放大策略均失败：云端API(PearAPI/fal.ai)不可用、本地放大服务未启动' };
 }

@@ -6064,7 +6064,7 @@ export function InfiniteCanvas({
           originalHeight: actualOutH,
           modifyPrompt: `${upMultiplier}x ${upscaleMode === 'lossless' ? '无损' : 'HD'} ${upscalePreset.toUpperCase()} 放大`,
           modelName: usedModelName,
-          apiProvider: upscaleMode === 'lossless' ? (proStrategy === 'local-upscayl' ? '本地' : proStrategy === 'ai-redraw' ? 'AI重绘' : 'PearAPI') : (modelInfo.providerName || ''),
+          apiProvider: upscaleMode === 'lossless' ? (proStrategy === 'local-upscayl' ? '本地' : proStrategy === 'ai-redraw' ? 'AI重绘' : proStrategy === 'cloud-fal-SeedVR2' ? 'fal.ai' : 'PearAPI') : (modelInfo.providerName || ''),
         }, 'upscale');
       } else {
         const pollError = lastPollErrorRef.current || '放大超时，请重试';
