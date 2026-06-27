@@ -13,7 +13,7 @@ import {
   XCircle, BarChart3, Upload, RotateCcw, Film, CreditCard,
   // Asset library icons
   LayoutGrid, List, ArrowUpDown, CheckSquare, Download, Square,
-  Grid3X3,
+  Grid3X3, ZoomIn,
 } from 'lucide-react';
 import { UserManager } from '@/lib/user-manager';
 import { RECHARGE_PACKAGES } from '@/lib/credits-constants';
@@ -26,8 +26,8 @@ import JSZip from 'jszip';
 type TabType = 'projects' | 'templates' | 'assets' | 'stats' | 'credits' | 'settings' | 'users' | 'apis' | 'data' | 'ecom-templates' | 'payment-config';
 type ProjectFilter = 'all' | 'recent' | 'starred';
 type AssetSubTab = 'images' | 'prompts' | 'brands';
-type ApiKind = 'general' | 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'universal';
-type UserPermissionKey = 'image' | 'chat' | 'threeD' | 'vectorize' | 'layer' | 'video' | 'vlm';
+type ApiKind = 'general' | 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler' | 'universal';
+type UserPermissionKey = 'image' | 'chat' | 'threeD' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler';
 type AdminProvider = ApiProvider & { apiKeyPreview?: string };
 
 const apiKindLabels: Record<ApiKind, string> = {
@@ -39,6 +39,7 @@ const apiKindLabels: Record<ApiKind, string> = {
   layer: '图片分层模型',
   video: '视频模型',
   vlm: 'VLM视觉模型',
+  upscaler: '放大模型',
   universal: '通用模型',
 };
 
@@ -51,6 +52,7 @@ const apiKindDescriptions: Record<ApiKind, string> = {
   layer: '添加API后系统自动识别 qwen-image-layered 模型，对接到编辑元素和下载PSD',
   video: '添加API后系统自动识别视频模型（可灵/Seedance/海螺/Vidu/Runway/Pika/Sora等），对接到文生视频和图生视频功能',
   vlm: '视觉语言模型，支持图片理解和SVG生成，自动识别 qwen-vl/glm-4v/gemini-vision 等模型，对接到SVG矢量化功能',
+  upscaler: '自动识别 SeedVR2/Real-ESRGAN 等放大模型，对接到无损放大Pro功能，支持 PearAPI / fal.ai 等提供商',
   universal: '通用模型，支持多种能力',
 };
 
@@ -62,6 +64,7 @@ const userPermissionLabels: Record<UserPermissionKey, string> = {
   layer: '分层',
   video: '视频',
   vlm: 'VLM',
+  upscaler: '放大',
 };
 
 interface DashboardViewProps {
@@ -671,6 +674,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       vectorize: u.apiPermissions?.vectorize ?? true, layer: u.apiPermissions?.layer ?? true,
       video: u.apiPermissions?.video ?? true,
       vlm: u.apiPermissions?.vlm ?? true,
+      upscaler: u.apiPermissions?.upscaler ?? true,
     };
     await fetch('/api/admin/users', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
@@ -697,6 +701,9 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       } else if (apiKind === 'layer') {
         const lModels = models.filter((m: ModelInfo) => { const id = m.id.toLowerCase(); return id.includes('layer') || id.includes('segment') || id.includes('qwen-image-layered'); });
         setSelectedModels(lModels.length > 0 ? lModels.map((m: ModelInfo) => m.id) : []);
+      } else if (apiKind === 'upscaler') {
+        const uModels = models.filter((m: ModelInfo) => { const id = m.id.toLowerCase(); return id.includes('upscale') || id.includes('seedvr') || id.includes('esrgan') || id.includes('realesrgan') || id.includes('swinir') || id.includes('hat'); });
+        setSelectedModels(uModels.length > 0 ? uModels.map((m: ModelInfo) => m.id) : []);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : '识别模型失败';
@@ -712,7 +719,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         name: apiName.trim(), baseUrl: apiBaseUrl.trim(), apiKey: apiKey.trim(), modelType: apiKind, selectedModels: models,
-        requestStyle: apiKind === 'general' ? 'auto' : apiKind === 'chat' ? 'chat-completions' : apiKind === 'vectorize' || apiKind === 'layer' ? 'chat-completions' : apiKind === 'video' ? 'images-generations' : 'images-generations',
+        requestStyle: apiKind === 'general' ? 'auto' : apiKind === 'chat' ? 'chat-completions' : apiKind === 'vectorize' || apiKind === 'layer' || apiKind === 'upscaler' ? 'chat-completions' : apiKind === 'video' ? 'images-generations' : 'images-generations',
         advancedParams: [...advancedParams.filter(p => p.key.trim()), ...(compatProfile !== 'auto' ? [{ key: 'compatProfile', value: compatProfile }] : [])],
       }),
     });
@@ -775,7 +782,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       advancedParams.forEach(p => { if (p.key.trim()) advParams[p.key.trim()] = p.value; });
       const response = await fetch('/api/test-provider-connection', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-        body: JSON.stringify({ baseUrl: apiBaseUrl, apiKey, requestStyle: apiKind === 'chat' ? 'chat-completions' : apiKind === 'vectorize' || apiKind === 'layer' ? 'chat-completions' : apiKind === 'video' ? 'images-generations' : 'images-generations', advancedParams: advParams }),
+        body: JSON.stringify({ baseUrl: apiBaseUrl, apiKey, requestStyle: apiKind === 'chat' ? 'chat-completions' : apiKind === 'vectorize' || apiKind === 'layer' || apiKind === 'upscaler' ? 'chat-completions' : apiKind === 'video' ? 'images-generations' : 'images-generations', advancedParams: advParams }),
       });
       if (!response.ok) throw new Error(`测试连接失败: HTTP ${response.status}`);
       const data = await response.json();
@@ -1139,7 +1146,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                     { key: 'image', label: '图像', icon: '🎨' }, { key: 'chat', label: '对话', icon: '💬' },
                     { key: 'threeD', label: '3D', icon: '🧊' },
                     { key: 'vectorize', label: '矢量', icon: '📐' }, { key: 'layer', label: '分层', icon: '🗂️' },
-                    { key: 'video', label: '视频', icon: '🎬' },
+                    { key: 'upscaler', label: '放大', icon: '🔍' }, { key: 'video', label: '视频', icon: '🎬' },
                   ].map(perm => {
                     const enabled = user.apiPermissions?.[perm.key as keyof typeof user.apiPermissions] ?? false;
                     return (<span key={perm.key} className={`text-[10px] px-1.5 py-0.5 rounded-md flex items-center gap-1 ${enabled ? `${accentBgLight} ${accentClass}` : isDark ? 'bg-white/5 text-gray-600' : 'bg-gray-100 text-gray-300'}`}><span>{perm.icon}</span><span>{perm.label}</span></span>);
@@ -2068,6 +2075,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                   { key: 'vectorize', label: '矢量化', icon: Palette },
                   { key: 'vlm', label: 'VLM视觉', icon: Eye },
                   { key: 'layer', label: '图层分离', icon: Layers },
+                  { key: 'upscaler', label: 'AI放大', icon: ZoomIn },
                 ].map(perm => {
                   const enabled = user?.apiPermissions?.[perm.key as keyof typeof user.apiPermissions] ?? false;
                   const PermIcon = perm.icon;
@@ -2255,6 +2263,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                         {provider.modelType === 'vectorize' && provider.isEnabled && <div className={`mt-2 text-xs px-2 py-1 rounded ${isDark ? `bg-[${accentHex}]/10 ${accentClass}` : isMonochrome ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>已对接：矢量化工具 / 导出SVG</div>}
                         {provider.modelType === 'layer' && provider.isEnabled && <div className={`mt-2 text-xs px-2 py-1 rounded ${isDark ? `bg-[${accentHex}]/10 ${accentClass}` : isMonochrome ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>已对接：编辑元素 / 下载PSD</div>}
                         {provider.modelType === 'video' && provider.isEnabled && <div className={`mt-2 text-xs px-2 py-1 rounded ${isDark ? `bg-[${accentHex}]/10 ${accentClass}` : isMonochrome ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>已对接：文生视频 / 图生视频 / 视频延长</div>}
+                        {provider.modelType === 'upscaler' && provider.isEnabled && <div className={`mt-2 text-xs px-2 py-1 rounded ${isDark ? `bg-[${accentHex}]/10 ${accentClass}` : isMonochrome ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>已对接：无损放大Pro / SeedVR2 / Real-ESRGAN</div>}
                         {(() => { const bal = apiBalances.find(b => b.providerId === provider.id || b.providerName === provider.name); if (!bal) return null; const isUsd = bal.currency === 'USD'; const isUnlimited = bal.balance === -1 || bal.remainingQuota === -1; const fmtQuota = (v: number | null, fallback = '-') => { if (v === null) return fallback; if (v === -1) return '无限'; if (isUsd) { return `$${(v / 100).toFixed(2)}`; } return Math.abs(v) > 10000 ? `¥${(v / 500000).toFixed(2)}` : `¥${v.toFixed(2)}`; }; const fmtBalance = (v: number | null) => { if (v === null) return null; if (v === -1) return '无限'; return isUsd ? `$${v.toFixed(2)}` : `¥${v.toFixed(2)}`; }; const balanceColor = bal.balance === null ? '' : bal.balance < 0 ? 'text-green-500' : bal.balance > 10 ? 'text-green-500' : bal.balance > 1 ? 'text-yellow-500' : 'text-red-500'; return (<div className={`mt-2 text-xs space-y-1 ${isDark ? 'text-[#888]' : 'text-gray-500'}`}><div className="flex items-center gap-3 flex-wrap">{bal.balance !== null && <span className="flex items-center gap-1"><Wallet className="w-3 h-3" />{isUnlimited ? '额度' : '余额'}: <span className={`font-medium ${balanceColor}`}>{fmtBalance(bal.balance)}</span></span>}{bal.totalUsage > 0 && <span>已用: {isUsd ? `$${(bal.totalUsage / 100).toFixed(2)}` : fmtQuota(bal.usedQuota)}</span>}{!isUnlimited && bal.remainingQuota !== null && bal.remainingQuota > 0 && <span className={!isUsd && bal.remainingQuota < 500000 ? 'text-yellow-500' : ''}>剩余: {fmtQuota(bal.remainingQuota)}</span>}</div>{bal.endpoint && <div className={`text-[10px] ${isDark ? 'text-[#555]' : 'text-gray-400'}`}>查询端点: {bal.endpoint}</div>}{bal.error && <div className="text-red-400 flex items-center gap-1"><AlertTriangle className="w-3 h-3" />{bal.error}</div>}</div>); })()}
                       </div>
                     </div>

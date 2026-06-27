@@ -22,7 +22,7 @@ export function normalizeApiBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, '');
 }
 
-export type ApiKind = 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'universal' | 'general' | 'vlm' | 'imageEdit';
+export type ApiKind = 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'universal' | 'general' | 'vlm' | 'imageEdit' | 'upscaler';
 
 /**
  * Normalize advancedParams from DB storage format to Record<string, string>.
@@ -120,7 +120,7 @@ function modelTypeForProvider(provider: ApiProvider): 'image' | 'chat' | '3d' | 
   return 'image';
 }
 
-function inferModelType(modelId: string, fallback: 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm'): 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' {
+function inferModelType(modelId: string, fallback: 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler'): 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler' {
   const id = modelId.toLowerCase();
   // 视频模型关键词匹配 — 必须在图像之前检查，避免视频模型被误判为图像
   if (
@@ -161,6 +161,17 @@ function inferModelType(modelId: string, fallback: 'image' | 'chat' | '3d' | 've
     id.includes('qwen2.5-vl') || id.includes('qwen3.6-vl') ||
     (id.includes('qwen') && id.includes('vl'))
   ) return 'vlm';
+  // 放大模型关键词匹配 — 必须在图像之前检查，因为 SeedVR2 等包含 seed 关键词会被误判为图像
+  if (
+    id.includes('seedvr') || id.includes('seed-vr') ||
+    id.includes('upscaler') || id.includes('upscale') ||
+    id.includes('real-esrgan') || id.includes('realesrgan') ||
+    id.includes('swinir') || id.includes('scunet') ||
+    id.includes('hat') && id.includes('super') ||
+    id.includes('gfpgan') || id.includes('codeformer') ||
+    id.includes('remacri') || id.includes('ultramix') ||
+    id.includes('4x-anime') || id.includes('4x-ultrasharp')
+  ) return 'upscaler';
   // 分层模型关键词匹配
   if (id.includes('qwen-image-layered') || id.includes('layer') || id.includes('segment') || id.includes('sam') || id.includes('detection') || id.includes('yolo')) return 'layer';
   // 3D模型关键词匹配
@@ -264,7 +275,7 @@ function normalizeSelectedModels(val: unknown): string[] {
 
 /** Normalize discovered_models from DB: handle JSON string or array */
 function normalizeDiscoveredModels(val: unknown, providerId: string, modelType: string): ModelInfo[] {
-  const validTypes = ['image', 'chat', '3d', 'vectorize', 'layer', 'video', 'vlm'] as const;
+  const validTypes = ['image', 'chat', '3d', 'vectorize', 'layer', 'video', 'vlm', 'upscaler'] as const;
   type ModelType = typeof validTypes[number];
   const resolveType = (t: unknown): ModelType => {
     if (typeof t === 'string' && validTypes.includes(t as ModelType)) return t as ModelType;
@@ -484,11 +495,12 @@ export async function discoverModelsForCredentials(
     const models = rawModels
       .map((m: Record<string, unknown>) => formatModel(m, probeProvider))
       .filter((m: ModelInfo) => m.id && (
-        // For general/universal/vectorize/layer: show all models (admin picks what they need)
+        // For general/universal/vectorize/layer/upscaler: show all models (admin picks what they need)
         modelType === 'universal' ||
         modelType === 'general' ||
         modelType === 'vectorize' ||
         modelType === 'layer' ||
+        modelType === 'upscaler' ||
         // For image/chat/3d: also show other types so admin can pick cross-type models
         m.type === modelType
       ));
@@ -774,7 +786,7 @@ export async function findProviderById(providerId: string): Promise<ApiProvider 
 }
 
 /** 根据功能类型查找对应的 API 提供商（矢量化/分层/3D/聊天等） */
-export async function findProviderForFeature(feature: 'vectorize' | 'layer' | '3d' | 'imageEdit' | 'chat' | 'video' | 'vlm'): Promise<ApiProvider | null> {
+export async function findProviderForFeature(feature: 'vectorize' | 'layer' | '3d' | 'imageEdit' | 'chat' | 'video' | 'vlm' | 'upscaler'): Promise<ApiProvider | null> {
   const kindMap: Record<string, ApiKind> = {
     vectorize: 'vectorize',
     layer: 'layer',
@@ -783,6 +795,7 @@ export async function findProviderForFeature(feature: 'vectorize' | 'layer' | '3
     chat: 'chat',
     video: 'video',
     vlm: 'vlm',
+    upscaler: 'upscaler',
   };
   const kind = kindMap[feature];
   if (!kind) return null;

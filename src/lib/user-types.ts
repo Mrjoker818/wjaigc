@@ -15,6 +15,7 @@ export interface User {
     vlm: boolean;
     layer: boolean;
     video: boolean;
+    upscaler: boolean;
   };
   storageFolder?: string;
   email?: string;

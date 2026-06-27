@@ -71,6 +71,7 @@ function defaultApiPermissions() {
     vlm: true,
     layer: true,
     video: true,
+    upscaler: true,
   };
 }
 

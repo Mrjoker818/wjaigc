@@ -6,11 +6,11 @@ export interface ApiProvider {
   baseUrl: string;
   apiKey: string;
   isEnabled: boolean;
-  type: 'image' | 'chat' | 'universal' | 'general' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'imageEdit';
+  type: 'image' | 'chat' | 'universal' | 'general' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'imageEdit' | 'upscaler';
   createdAt: number;
   updatedAt: number;
   // 新增：模型类型区分
-  modelType?: 'image' | 'chat' | '3d' | 'universal' | 'general' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'imageEdit';
+  modelType?: 'image' | 'chat' | '3d' | 'universal' | 'general' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'imageEdit' | 'upscaler';
   // 新增：显示名称
   displayName?: string;
   // 新增：提供商预设ID
@@ -38,7 +38,7 @@ export interface ModelInfo {
   id: string;
   name: string;
   providerId: string;
-  type: 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm';
+  type: 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler';
   description?: string;
   supportedAspectRatios?: string[];
   supportedQualities?: string[];

@@ -19,6 +19,7 @@ const defaultApiPermissions = () => ({
   vlm: true,
   layer: true,
   video: true,
+  upscaler: true,
 });
 
 interface MultiUserData {

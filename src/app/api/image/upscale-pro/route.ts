@@ -37,15 +37,23 @@ async function findPearApiKey(): Promise<{ apiKey: string; baseUrl: string } | n
   try {
     const { getApiProviders } = await import('@/lib/server-api-config');
     const providers = await getApiProviders();
-    // 查找 baseUrl 包含 pearapi 的提供商
+    // 查找 baseUrl 包含 pearapi 的 upscaler 提供商
     const pearProvider = providers.find(
-      (p: { baseUrl: string }) => p.baseUrl.includes('pearapi')
+      (p: { baseUrl: string; modelType?: string }) =>
+        p.baseUrl.includes('pearapi') && (p.modelType === 'upscaler' || p.modelType === 'image' || !p.modelType)
     );
     if (pearProvider?.apiKey && pearProvider?.baseUrl) {
       return {
         apiKey: pearProvider.apiKey,
         baseUrl: pearProvider.baseUrl,
       };
+    }
+    // 兜底：查找任意 pearapi 提供商
+    const anyPear = providers.find(
+      (p: { baseUrl: string }) => p.baseUrl.includes('pearapi')
+    );
+    if (anyPear?.apiKey && anyPear?.baseUrl) {
+      return { apiKey: anyPear.apiKey, baseUrl: anyPear.baseUrl };
     }
   } catch {
     // 忽略，回退到环境变量
@@ -137,9 +145,17 @@ async function upscaleViaPearAPI(
 /** 从管理员配置查找 fal.ai 提供商的 API Key */
 async function findFalApiKey(): Promise<{ apiKey: string; baseUrl: string } | null> {
   try {
-    const { getApiProviders } = await import('@/lib/server-api-config');
+    const { getApiProviders, findProviderForFeature } = await import('@/lib/server-api-config');
+    // 优先查找 upscaler 类型的提供商
+    const upscalerProvider = await findProviderForFeature('upscaler');
+    if (upscalerProvider?.apiKey && upscalerProvider?.baseUrl) {
+      const url = upscalerProvider.baseUrl;
+      if (url.includes('fal.ai') || url.includes('fal.run')) {
+        return { apiKey: upscalerProvider.apiKey, baseUrl: url };
+      }
+    }
+    // 兜底：查找任意 fal.ai 提供商
     const providers = await getApiProviders();
-    // 查找 baseUrl 包含 fal.ai 的提供商
     const falProvider = providers.find(
       (p: { baseUrl: string }) => p.baseUrl.includes('fal.ai') || p.baseUrl.includes('fal.run'),
     );
