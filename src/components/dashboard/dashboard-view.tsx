@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import AdminTabs from './admin-tabs';
+import DataManagerTab from './data-manager-tab';
 import {
   FolderOpen, Plus, Search, Star, Trash2, MoreVertical, MoreHorizontal, Image,
   Sparkles, LayoutTemplate, Layers, Clock, ChevronRight, ArrowRight,
@@ -1991,26 +1992,17 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
         {/* ── Tab: Data Management ── */}
         {activeTab === 'data' && isAdmin && (
-          <div className="h-full overflow-y-auto p-6">
-            <div className="flex items-center justify-between mb-6">
-              <div><h1 className={`text-xl font-bold ${textPrimary}`}>数据管理</h1><p className={`text-sm ${textSecondary}`}>导出和导入系统数据</p></div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className={`p-5 rounded-xl ${isDark ? 'bg-white/[0.03] border border-white/[0.06]' : 'bg-white border border-gray-100'}`}>
-                <h3 className={`font-semibold mb-3 ${textPrimary}`}>导出数据</h3>
-                <p className={`text-xs mb-4 ${textSecondary}`}>将用户数据、API配置、系统设置导出为JSON文件</p>
-                <button onClick={async () => { try { const r = await fetch('/api/admin/users', { credentials: 'include' }); const d = await r.json(); const blob = new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `wujie-export-${new Date().toISOString().slice(0,10)}.json`; a.click(); URL.revokeObjectURL(url); } catch(e) { console.error(e); } }} className={`text-xs px-4 py-2 rounded-lg font-medium cursor-pointer ${accentBgClass} ${accentTextOnBgClass}`}>导出全部数据</button>
-              </div>
-              <div className={`p-5 rounded-xl ${isDark ? 'bg-white/[0.03] border border-white/[0.06]' : 'bg-white border border-gray-100'}`}>
-                <h3 className={`font-semibold mb-3 ${textPrimary}`}>导入数据</h3>
-                <p className={`text-xs mb-4 ${textSecondary}`}>从JSON文件导入用户数据、API配置（将覆盖现有数据）</p>
-                <label className={`text-xs px-4 py-2 rounded-lg font-medium cursor-pointer inline-block ${isDark ? 'bg-white/5 text-[#ccc] hover:bg-white/10' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
-                  选择文件导入
-                  <input type="file" accept=".json" className="hidden" onChange={async (e) => { const f = e.target.files?.[0]; if (!f) return; try { const txt = await f.text(); const data = JSON.parse(txt); console.log('Import data:', Object.keys(data)); } catch(err) { console.error(err); } }} />
-                </label>
-              </div>
-            </div>
-          </div>
+          <DataManagerTab
+            isDark={isDark}
+            isMonochrome={isMonochrome}
+            textPrimary={textPrimary}
+            textSecondary={textSecondary}
+            softClass={softClass}
+            inputClass={inputClass}
+            accentBgClass={accentBgClass}
+            accentTextOnBgClass={accentTextOnBgClass}
+            accentHoverBgClass={accentHoverBgClass}
+          />
         )}
 
         {/* ── Tab: Ecom Templates ── */}
