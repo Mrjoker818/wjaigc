@@ -64,6 +64,7 @@ interface AdminTabsProps {
   onToggleUserPermission: (user: AdminUser, key: string) => Promise<void>;
   onRechargeCredits: (userId: string, amount: number, description: string) => Promise<void>;
   providers: AdminProvider[];
+  onTabChange?: (tab: string) => void;
 }
 
 /* ── Mapping: prototype M3 class → shadcn class ── */
@@ -172,6 +173,7 @@ export default function AdminTabs(props: AdminTabsProps) {
     alerts: { type: string; severity: string; items: { name: string; value: string }[] }[];
     recentUsers: { name: string; date: string; email: string }[];
   } | null>(null);
+  const [overviewPeriod, setOverviewPeriod] = useState<'7' | '30'>('7');
 
   /* ── Users state ── */
   const [userSearch, setUserSearch] = useState('');
@@ -207,9 +209,9 @@ export default function AdminTabs(props: AdminTabsProps) {
   const [settingsDirty, setSettingsDirty] = useState(false);
 
   /* ── Data loading ── */
-  const loadDashboardStats = useCallback(async () => {
+  const loadDashboardStats = useCallback(async (period: '7' | '30' = '7') => {
     try {
-      const res = await fetch('/api/admin/dashboard-stats');
+      const res = await fetch(`/api/admin/dashboard-stats?period=${period}`);
       if (res.ok) { const data = await res.json(); setOverviewData(data); }
     } catch {}
   }, []);
@@ -293,14 +295,32 @@ export default function AdminTabs(props: AdminTabsProps) {
   /* ── Render: Overview Tab ── */
   if (activeTab === 'overview') {
     const s = overviewData;
+    const handleRefresh = () => loadDashboardStats(overviewPeriod);
+    const handleTogglePeriod = (p: '7' | '30') => { setOverviewPeriod(p); loadDashboardStats(p); };
+    const viewAllAlerts = () => { if (props.onTabChange) props.onTabChange('audit'); };
+    const viewAllUsers = () => { if (props.onTabChange) props.onTabChange('users'); };
+    const viewProviders = () => { if (props.onTabChange) props.onTabChange('apis'); };
+
+    // Compute chart data from API or defaults
+    const trendDates = s?.userTrend?.map(t => t.date) || [];
+    const trendCounts = s?.userTrend?.map(t => t.count) || [];
+    const creditIncome = s?.creditTrend?.map(t => t.income) || [];
+    const creditExpense = s?.creditTrend?.map(t => t.expense) || [];
+
+    // SVG chart helper
+    const svgW = 500, svgH = 200, padL = 40, padB = 30, padR = 10, padT = 10;
+    const chartW = svgW - padL - padR;
+    const chartH = svgH - padT - padB;
+    const maxVal = (arr: number[]) => Math.max(...arr, 1);
+
     return (
       <div className="space-y-4 pb-8">
         {/* 1. 统计卡片 */}
         <div className="grid grid-cols-4 gap-4">
           <StatCard icon={Users} label="总用户" value={s ? formatNumber(s.totalUsers) : '-'} sub={s ? `周活 ${formatNumber(s.weekActive)}` : ''} colorClass="text-primary" iconBg="bg-primary/15" />
-          <StatCard icon={TrendingUp} label="用户活跃趋势" value={s ? formatNumber(s.weekActive) : '-'} sub="近7日" colorClass="text-green-500" iconBg="bg-green-500/15" />
+          <StatCard icon={TrendingUp} label="用户活跃趋势" value={s ? formatNumber(s.weekActive) : '-'} sub={`近${overviewPeriod}日`} colorClass="text-green-500" iconBg="bg-green-500/15" />
           <StatCard icon={Wallet} label="积分总余额" value={s ? formatNumber(s.totalCredits) : '-'} sub="全平台" colorClass="text-yellow-500" iconBg="bg-yellow-500/15" />
-          <StatCard icon={Activity} label="API 调用量" value={s ? formatNumber(s.totalApiCalls) : '-'} sub="近24h" colorClass="text-blue-500" iconBg="bg-blue-500/15" />
+          <StatCard icon={Activity} label="API 调用量" value={s ? formatNumber(s.totalApiCalls) : '-'} sub={`近${overviewPeriod}日`} colorClass="text-blue-500" iconBg="bg-blue-500/15" />
         </div>
 
         {/* 2. 趋势图区 */}
@@ -310,47 +330,47 @@ export default function AdminTabs(props: AdminTabsProps) {
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h2 className="text-base font-semibold text-foreground">用户活跃趋势</h2>
-                <p className="text-xs text-muted-foreground mt-0.5">DAU / WAU</p>
+                <p className="text-xs text-muted-foreground mt-0.5">DAU / 新增</p>
               </div>
               <div className="flex items-center gap-1 bg-muted rounded-md p-0.5">
-                <button className="px-2.5 py-1 rounded text-xs font-medium bg-primary/15 text-primary transition-colors">7天</button>
-                <button className="px-2.5 py-1 rounded text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">30天</button>
+                <button onClick={() => handleTogglePeriod('7')} className={`px-2.5 py-1 rounded text-xs font-medium transition-colors cursor-pointer ${overviewPeriod === '7' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground'}`}>7天</button>
+                <button onClick={() => handleTogglePeriod('30')} className={`px-2.5 py-1 rounded text-xs font-medium transition-colors cursor-pointer ${overviewPeriod === '30' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground'}`}>30天</button>
               </div>
             </div>
             <div className="flex items-center gap-4 mb-3">
-              <div className="flex items-center gap-1.5"><span className="w-3 h-3 bg-primary/60 rounded-sm" /><span className="text-xs text-muted-foreground">DAU</span></div>
+              <div className="flex items-center gap-1.5"><span className="w-3 h-3 bg-primary/60 rounded-sm" /><span className="text-xs text-muted-foreground">活跃</span></div>
               <div className="flex items-center gap-1.5"><span className="w-3 h-3 bg-green-500/60 rounded-sm" /><span className="text-xs text-muted-foreground">新增</span></div>
             </div>
             <div className="relative">
-              <svg viewBox="0 0 500 200" className="w-full" style={{ overflow: 'visible' }}>
-                <line x1="40" y1="10" x2="40" y2="170" stroke="#252529" strokeWidth="0.5" />
-                <line x1="40" y1="170" x2="490" y2="170" stroke="#252529" strokeWidth="0.5" />
-                {[130, 90, 50, 10].map((y, i) => <line key={i} x1="40" y1={y} x2="490" y2={y} stroke="#1f1f24" strokeWidth="0.5" strokeDasharray="4,4" />)}
-                {['0', '50k', '100k', '150k', '200k'].map((label, i) => <text key={i} x="35" y={173 - i * 40} fill="#a1a1aa" fontSize="9" textAnchor="end">{label}</text>)}
-                {/* Polyline: DAU */}
-                <polyline fill="none" stroke="#d4af37" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round"
-                  points="75,100 140,85 205,90 270,75 335,80 400,65 465,55" />
-                {/* Area fill under DAU */}
-                <polygon fill="url(#dauGrad)" opacity="0.3" points="75,100 140,85 205,90 270,75 335,80 400,65 465,55 465,170 75,170" />
-                {/* Polyline: 新增 */}
-                <polyline fill="none" stroke="#22c55e" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round"
-                  points="75,145 140,138 205,142 270,130 335,135 400,125 465,120" />
-                {/* Dots */}
-                {[75,140,205,270,335,400,465].map((x, i) => {
-                  const dauY = [100,85,90,75,80,65,55][i];
-                  const newY = [145,138,142,130,135,125,120][i];
-                  return <React.Fragment key={i}><circle cx={x} cy={dauY} r="3" fill="#d4af37" /><circle cx={x} cy={newY} r="3" fill="#22c55e" /></React.Fragment>;
-                })}
-                {/* Gradient defs */}
-                <defs><linearGradient id="dauGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#d4af37" /><stop offset="100%" stopColor="#d4af37" stopOpacity="0" /></linearGradient></defs>
-                {/* Labels */}
-                {['12/14','12/15','12/16','12/17','12/18','12/19','12/20'].map((d, i) => {
-                  const x = 75 + i * 65;
-                  return <text key={i} x={x} y="188" fill="#a1a1aa" fontSize="9" textAnchor="middle">{d}</text>;
-                })}
-                <text x="465" y="48" fill="#d4af37" fontSize="9" fontWeight="600" textAnchor="middle">5,842</text>
-                <text x="465" y="113" fill="#22c55e" fontSize="9" fontWeight="600" textAnchor="middle">327</text>
-              </svg>
+              {trendCounts.length > 0 ? (
+                <svg viewBox={`0 0 ${svgW} ${svgH}`} className="w-full" style={{ overflow: 'visible' }}>
+                  <line x1={padL} y1={padT} x2={padL} y2={svgH - padB} stroke="currentColor" className="text-border" strokeWidth="0.5" />
+                  <line x1={padL} y1={svgH - padB} x2={svgW - padR} y2={svgH - padB} stroke="currentColor" className="text-border" strokeWidth="0.5" />
+                  {[0.25, 0.5, 0.75].map((pct, i) => <line key={i} x1={padL} y1={padT + chartH * (1 - pct)} x2={svgW - padR} y2={padT + chartH * (1 - pct)} stroke="currentColor" className="text-border" strokeWidth="0.5" strokeDasharray="4,4" />)}
+                  {/* DAU line */}
+                  {(() => {
+                    const max = maxVal(trendCounts);
+                    const pts = trendCounts.map((v, i) => {
+                      const x = padL + (chartW / Math.max(trendCounts.length - 1, 1)) * i;
+                      const y = padT + chartH * (1 - v / max);
+                      return `${x},${y}`;
+                    }).join(' ');
+                    return <>
+                      <polyline fill="none" stroke="#d4af37" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" points={pts} />
+                      <polygon fill="url(#dauGrad)" opacity="0.3" points={`${pts} ${padL + chartW},${svgH - padB} ${padL},${svgH - padB}`} />
+                    </>;
+                  })()}
+                  <defs><linearGradient id="dauGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#d4af37" /><stop offset="100%" stopColor="#d4af37" stopOpacity="0" /></linearGradient></defs>
+                  {/* Date labels */}
+                  {trendDates.map((d, i) => {
+                    const x = padL + (chartW / Math.max(trendDates.length - 1, 1)) * i;
+                    const short = d.slice(5);
+                    return <text key={i} x={x} y={svgH - 8} fill="#a1a1aa" fontSize="9" textAnchor="middle">{short}</text>;
+                  })}
+                </svg>
+              ) : (
+                <div className="h-[180px] flex items-center justify-center text-muted-foreground text-sm">暂无趋势数据</div>
+              )}
             </div>
           </div>
 
@@ -362,8 +382,8 @@ export default function AdminTabs(props: AdminTabsProps) {
                 <p className="text-xs text-muted-foreground mt-0.5">充值 / 消耗对比</p>
               </div>
               <div className="flex items-center gap-1 bg-muted rounded-md p-0.5">
-                <button className="px-2.5 py-1 rounded text-xs font-medium bg-primary/15 text-primary transition-colors">7天</button>
-                <button className="px-2.5 py-1 rounded text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">30天</button>
+                <button onClick={() => handleTogglePeriod('7')} className={`px-2.5 py-1 rounded text-xs font-medium transition-colors cursor-pointer ${overviewPeriod === '7' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground'}`}>7天</button>
+                <button onClick={() => handleTogglePeriod('30')} className={`px-2.5 py-1 rounded text-xs font-medium transition-colors cursor-pointer ${overviewPeriod === '30' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground'}`}>30天</button>
               </div>
             </div>
             <div className="flex items-center gap-4 mb-3">
@@ -371,33 +391,37 @@ export default function AdminTabs(props: AdminTabsProps) {
               <div className="flex items-center gap-1.5"><span className="w-3 h-3 bg-yellow-500/60 rounded-sm" /><span className="text-xs text-muted-foreground">消耗</span></div>
             </div>
             <div className="relative">
-              <svg viewBox="0 0 500 200" className="w-full" style={{ overflow: 'visible' }}>
-                <line x1="40" y1="10" x2="40" y2="170" stroke="#252529" strokeWidth="0.5" />
-                <line x1="40" y1="170" x2="490" y2="170" stroke="#252529" strokeWidth="0.5" />
-                {[130, 90, 50, 10].map((y, i) => <line key={i} x1="40" y1={y} x2="490" y2={y} stroke="#1f1f24" strokeWidth="0.5" strokeDasharray="4,4" />)}
-                {['0', '50k', '100k', '150k', '200k'].map((label, i) => <text key={i} x="35" y={173 - i * 40} fill="#a1a1aa" fontSize="9" textAnchor="end">{label}</text>)}
-                {/* Bar pairs - 7 days */}
-                {[
-                  { x: 58, h1: 100, h2: 80 },
-                  { x: 123, h1: 115, h2: 95 },
-                  { x: 188, h1: 90, h2: 110 },
-                  { x: 253, h1: 120, h2: 100 },
-                  { x: 318, h1: 105, h2: 115 },
-                  { x: 383, h1: 125, h2: 110 },
-                  { x: 448, h1: 135, h2: 120 },
-                ].map((bar, i) => (
-                  <React.Fragment key={i}>
-                    <rect x={bar.x} y={170 - bar.h1} width="16" height={bar.h1} rx="2" fill="rgba(34,197,94,0.6)" />
-                    <rect x={bar.x + 18} y={170 - bar.h2} width="16" height={bar.h2} rx="2" fill="rgba(245,158,11,0.6)" />
-                  </React.Fragment>
-                ))}
-                {['12/14','12/15','12/16','12/17','12/18','12/19','12/20'].map((d, i) => {
-                  const x = 75 + i * 65;
-                  return <text key={i} x={x} y="188" fill="#a1a1aa" fontSize="9" textAnchor="middle">{d}</text>;
-                })}
-                <text x="456" y="28" fill="#22c55e" fontSize="9" fontWeight="600" textAnchor="middle">168k</text>
-                <text x="474" y="43" fill="#f59e0b" fontSize="9" fontWeight="600" textAnchor="middle">150k</text>
-              </svg>
+              {creditIncome.length > 0 || creditExpense.length > 0 ? (
+                <svg viewBox={`0 0 ${svgW} ${svgH}`} className="w-full" style={{ overflow: 'visible' }}>
+                  <line x1={padL} y1={padT} x2={padL} y2={svgH - padB} stroke="currentColor" className="text-border" strokeWidth="0.5" />
+                  <line x1={padL} y1={svgH - padB} x2={svgW - padR} y2={svgH - padB} stroke="currentColor" className="text-border" strokeWidth="0.5" />
+                  {[0.25, 0.5, 0.75].map((pct, i) => <line key={i} x1={padL} y1={padT + chartH * (1 - pct)} x2={svgW - padR} y2={padT + chartH * (1 - pct)} stroke="currentColor" className="text-border" strokeWidth="0.5" strokeDasharray="4,4" />)}
+                  {/* Bar pairs */}
+                  {(() => {
+                    const max = Math.max(maxVal(creditIncome), maxVal(creditExpense));
+                    const n = Math.max(creditIncome.length, creditExpense.length, 1);
+                    const barW = Math.min(16, (chartW / n) * 0.35);
+                    const gap = 2;
+                    return Array.from({ length: n }, (_, i) => {
+                      const cx = padL + (chartW / n) * (i + 0.5);
+                      const h1 = Math.max((creditIncome[i] || 0) / max * chartH, 1);
+                      const h2 = Math.max((creditExpense[i] || 0) / max * chartH, 1);
+                      return <React.Fragment key={i}>
+                        <rect x={cx - barW - gap/2} y={padT + chartH - h1} width={barW} height={h1} rx="2" fill="rgba(34,197,94,0.6)" />
+                        <rect x={cx + gap/2} y={padT + chartH - h2} width={barW} height={h2} rx="2" fill="rgba(245,158,11,0.6)" />
+                      </React.Fragment>;
+                    });
+                  })()}
+                  {/* Date labels */}
+                  {(s?.creditTrend || []).map((t, i) => {
+                    const n = Math.max(s?.creditTrend?.length || 1, 1);
+                    const cx = padL + (chartW / n) * (i + 0.5);
+                    return <text key={i} x={cx} y={svgH - 8} fill="#a1a1aa" fontSize="9" textAnchor="middle">{t.date.slice(5)}</text>;
+                  })}
+                </svg>
+              ) : (
+                <div className="h-[180px] flex items-center justify-center text-muted-foreground text-sm">暂无收支数据</div>
+              )}
             </div>
           </div>
         </div>
@@ -409,45 +433,38 @@ export default function AdminTabs(props: AdminTabsProps) {
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h2 className="text-base font-semibold text-foreground">模型调用量排行</h2>
-                <p className="text-xs text-muted-foreground mt-0.5">Top 10 模型近24h调用统计</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Top 10 模型近{overviewPeriod}日调用统计</p>
               </div>
-              <button onClick={() => {}} className="text-xs text-primary hover:underline inline-flex items-center gap-1">查看全部 <ChevronRight className="w-3 h-3" /></button>
+              <button onClick={viewAllAlerts} className="text-xs text-primary hover:underline inline-flex items-center gap-1 cursor-pointer">查看全部 <ChevronRight className="w-3 h-3" /></button>
             </div>
             <div className="space-y-2.5">
-              {(s?.modelRank || [
-                { name: 'GPT-4o', calls: 42831, successRate: 98.7 },
-                { name: 'Claude-3.5-Sonnet', calls: 38412, successRate: 99.1 },
-                { name: 'DALL-E 3', calls: 24567, successRate: 97.2 },
-                { name: 'Stable Diffusion XL', calls: 19843, successRate: 88.4 },
-                { name: 'Midjourney v6', calls: 15234, successRate: 96.8 },
-                { name: 'Gemini Pro', calls: 12876, successRate: 95.1 },
-                { name: 'Runway Gen-3', calls: 8432, successRate: 89.2 },
-                { name: 'Whisper v3', calls: 6215, successRate: 99.4 },
-                { name: 'Llama 3.1 70B', calls: 4567, successRate: 84.3 },
-                { name: 'Qwen-VL-Max', calls: 3128, successRate: 96.5 },
-              ]).map((m, i) => {
-                const maxCalls = 42831;
-                const pct = (m.calls / maxCalls * 100).toFixed(1);
-                const barColors = ['bg-primary', 'bg-primary/80', 'bg-primary/60', 'bg-blue-500/60', 'bg-blue-500/50', 'bg-blue-500/40', 'bg-blue-500/30', 'bg-blue-500/25', 'bg-blue-500/20', 'bg-blue-500/15'];
-                const rateColor = m.successRate >= 95 ? 'text-green-500' : m.successRate >= 90 ? 'text-yellow-500' : 'text-destructive';
-                return (
-                  <div key={i} className="flex items-center gap-3">
-                    <span className={`w-5 text-xs font-bold text-right ${i < 3 ? 'text-primary' : 'text-muted-foreground'}`}>{i + 1}</span>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-sm font-medium text-foreground truncate">{m.name}</span>
-                        <div className="flex items-center gap-3">
-                          <span className={`text-xs ${rateColor}`}>{m.successRate}%</span>
-                          <span className="text-xs font-mono text-muted-foreground">{m.calls.toLocaleString()}</span>
+              {(s?.modelRank || []).length > 0 ? (
+                (s!.modelRank || []).map((m, i) => {
+                  const maxCalls = s!.modelRank![0]?.calls || 1;
+                  const pct = (m.calls / maxCalls * 100).toFixed(1);
+                  const barColors = ['bg-primary', 'bg-primary/80', 'bg-primary/60', 'bg-blue-500/60', 'bg-blue-500/50', 'bg-blue-500/40', 'bg-blue-500/30', 'bg-blue-500/25', 'bg-blue-500/20', 'bg-blue-500/15'];
+                  const rateColor = m.successRate >= 95 ? 'text-green-500' : m.successRate >= 90 ? 'text-yellow-500' : 'text-destructive';
+                  return (
+                    <div key={i} className="flex items-center gap-3">
+                      <span className={`w-5 text-xs font-bold text-right ${i < 3 ? 'text-primary' : 'text-muted-foreground'}`}>{i + 1}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-sm font-medium text-foreground truncate">{m.name}</span>
+                          <div className="flex items-center gap-3">
+                            <span className={`text-xs ${rateColor}`}>{m.successRate}%</span>
+                            <span className="text-xs font-mono text-muted-foreground">{m.calls.toLocaleString()}</span>
+                          </div>
+                        </div>
+                        <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                          <div className={`h-full ${barColors[i] || 'bg-blue-500/15'} rounded-full`} style={{ width: `${pct}%` }} />
                         </div>
                       </div>
-                      <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                        <div className={`h-full ${barColors[i] || 'bg-blue-500/15'} rounded-full`} style={{ width: `${pct}%` }} />
-                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              ) : (
+                <div className="py-8 text-center text-sm text-muted-foreground">暂无模型调用数据</div>
+              )}
             </div>
           </div>
 
@@ -458,34 +475,31 @@ export default function AdminTabs(props: AdminTabsProps) {
                 <h2 className="text-base font-semibold text-foreground">API 提供商状态</h2>
                 <p className="text-xs text-muted-foreground mt-0.5">近24h健康监控</p>
               </div>
-              <button onClick={() => {}} className="text-xs text-primary hover:underline inline-flex items-center gap-1">管理配置 <ChevronRight className="w-3 h-3" /></button>
+              <button onClick={viewProviders} className="text-xs text-primary hover:underline inline-flex items-center gap-1 cursor-pointer">管理配置 <ChevronRight className="w-3 h-3" /></button>
             </div>
             <div className="space-y-3">
-              {(s?.providerStatus || [
-                { name: 'OpenAI', calls24h: 68412, failRate: 1.2, status: '正常' },
-                { name: 'Anthropic', calls24h: 38412, failRate: 0.9, status: '正常' },
-                { name: 'Stability AI', calls24h: 19843, failRate: 11.6, status: '告警' },
-                { name: 'Midjourney', calls24h: 15234, failRate: 3.2, status: '正常' },
-                { name: 'Google AI', calls24h: 12876, failRate: 4.9, status: '正常' },
-                { name: 'Replicate', calls24h: 4567, failRate: 15.7, status: '异常' },
-              ]).map((p, i) => {
-                const dotColor = p.status === '正常' ? 'bg-green-500' : p.status === '告警' ? 'bg-yellow-500' : 'bg-destructive';
-                const badgeBg = p.status === '正常' ? 'bg-green-500/15 text-green-500' : p.status === '告警' ? 'bg-yellow-500/15 text-yellow-500' : 'bg-destructive/15 text-destructive';
-                const rateColor = p.failRate < 5 ? 'text-green-500' : p.failRate < 10 ? 'text-yellow-500' : 'text-destructive';
-                return (
-                  <div key={i} className="flex items-center gap-4 p-3 bg-muted/50 rounded-lg">
-                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                      <span className={`w-2 h-2 rounded-full ${dotColor} shrink-0`} />
-                      <span className="text-sm font-medium text-foreground truncate">{p.name}</span>
+              {(s?.providerStatus || []).length > 0 ? (
+                (s!.providerStatus || []).map((p, i) => {
+                  const dotColor = p.status === '正常' ? 'bg-green-500' : p.status === '告警' ? 'bg-yellow-500' : 'bg-destructive';
+                  const badgeBg = p.status === '正常' ? 'bg-green-500/15 text-green-500' : p.status === '告警' ? 'bg-yellow-500/15 text-yellow-500' : 'bg-destructive/15 text-destructive';
+                  const rateColor = p.failRate < 5 ? 'text-green-500' : p.failRate < 10 ? 'text-yellow-500' : 'text-destructive';
+                  return (
+                    <div key={i} className="flex items-center gap-4 p-3 bg-muted/50 rounded-lg">
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                        <span className={`w-2 h-2 rounded-full ${dotColor} shrink-0`} />
+                        <span className="text-sm font-medium text-foreground truncate">{p.name}</span>
+                      </div>
+                      <div className="flex items-center gap-6 text-xs">
+                        <div className="text-muted-foreground">24h <span className="text-foreground font-mono font-medium">{p.calls24h.toLocaleString()}</span></div>
+                        <div className="text-muted-foreground">失败率 <span className={`${rateColor} font-mono font-medium`}>{p.failRate}%</span></div>
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium ${badgeBg}`}>{p.status}</span>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-6 text-xs">
-                      <div className="text-muted-foreground">24h <span className="text-foreground font-mono font-medium">{p.calls24h.toLocaleString()}</span></div>
-                      <div className="text-muted-foreground">失败率 <span className={`${rateColor} font-mono font-medium`}>{p.failRate}%</span></div>
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium ${badgeBg}`}>{p.status}</span>
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              ) : (
+                <div className="py-8 text-center text-sm text-muted-foreground">暂无提供商数据</div>
+              )}
             </div>
           </div>
         </div>
@@ -502,41 +516,37 @@ export default function AdminTabs(props: AdminTabsProps) {
                 <p className="text-xs text-muted-foreground mt-0.5">需要关注的系统异常</p>
               </div>
             </div>
-            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-destructive/15 text-destructive">{(s?.alerts || []).length || 4} 条预警</span>
+            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-destructive/15 text-destructive">{(s?.alerts || []).length} 条预警</span>
           </div>
-          <div className="grid grid-cols-3 gap-4">
-            {/* 余额不足 */}
-            <div className="bg-muted/50 rounded-lg p-4 border-l-2 border-yellow-500">
-              <div className="flex items-center gap-2 mb-2"><Wallet className="w-3.5 h-3.5 text-yellow-500" /><span className="text-xs font-semibold text-yellow-500">余额不足</span></div>
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between"><span className="text-xs text-foreground">Stability AI</span><span className="text-xs font-mono text-yellow-500">$12.40</span></div>
-                <div className="flex items-center justify-between"><span className="text-xs text-foreground">Replicate</span><span className="text-xs font-mono text-destructive">$3.20</span></div>
-              </div>
+          {(s?.alerts || []).length > 0 ? (
+            <div className="grid grid-cols-3 gap-4">
+              {(s?.alerts || []).map((alert, ai) => {
+                const borderColor = alert.severity === 'error' ? 'border-destructive' : alert.severity === 'warning' ? 'border-yellow-500' : 'border-blue-500';
+                const iconColor = alert.severity === 'error' ? 'text-destructive' : alert.severity === 'warning' ? 'text-yellow-500' : 'text-blue-500';
+                const Icon = alert.type === 'balance' ? Wallet : alert.type === 'failRate' ? Activity : AlertTriangle;
+                const label = alert.type === 'balance' ? '余额不足' : alert.type === 'failRate' ? '高失败率' : '系统警告';
+                return (
+                  <div key={ai} className={`bg-muted/50 rounded-lg p-4 border-l-2 ${borderColor}`}>
+                    <div className="flex items-center gap-2 mb-2"><Icon className={`w-3.5 h-3.5 ${iconColor}`} /><span className={`text-xs font-semibold ${iconColor}`}>{label}</span></div>
+                    <div className="space-y-1.5">
+                      {(alert.items || []).map((item, ii) => (
+                        <div key={ii} className="flex items-center justify-between"><span className="text-xs text-foreground">{item.name}</span><span className={`text-xs font-mono ${item.value.includes('异常') || item.value.includes('高') ? 'text-yellow-500' : 'text-foreground'}`}>{item.value}</span></div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-            {/* 高失败率 */}
-            <div className="bg-muted/50 rounded-lg p-4 border-l-2 border-destructive">
-              <div className="flex items-center gap-2 mb-2"><Activity className="w-3.5 h-3.5 text-destructive" /><span className="text-xs font-semibold text-destructive">高失败率</span></div>
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between"><span className="text-xs text-foreground">Replicate</span><span className="text-xs font-mono text-destructive">15.7%</span></div>
-                <div className="flex items-center justify-between"><span className="text-xs text-foreground">Llama 3.1 70B</span><span className="text-xs font-mono text-yellow-500">84.3%</span></div>
-              </div>
-            </div>
-            {/* 系统警告 */}
-            <div className="bg-muted/50 rounded-lg p-4 border-l-2 border-blue-500">
-              <div className="flex items-center gap-2 mb-2"><AlertTriangle className="w-3.5 h-3.5 text-blue-500" /><span className="text-xs font-semibold text-blue-500">系统警告</span></div>
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between"><span className="text-xs text-foreground">数据库连接</span><span className="text-xs font-mono text-yellow-500">延迟高</span></div>
-                <div className="flex items-center justify-between"><span className="text-xs text-foreground">缓存命中率</span><span className="text-xs font-mono text-yellow-500">68%</span></div>
-              </div>
-            </div>
-          </div>
+          ) : (
+            <div className="py-8 text-center text-sm text-muted-foreground">暂无预警信息，系统运行正常</div>
+          )}
         </div>
 
         {/* 5. 最近注册 */}
         <div className="bg-card rounded-lg shadow-card p-5 border border-border/50">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-base font-semibold text-foreground">最近注册用户</h2>
-            <button onClick={() => {}} className="text-xs text-primary hover:underline inline-flex items-center gap-1">查看全部 <ChevronRight className="w-3 h-3" /></button>
+            <button onClick={viewAllUsers} className="text-xs text-primary hover:underline inline-flex items-center gap-1 cursor-pointer">查看全部 <ChevronRight className="w-3 h-3" /></button>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -558,6 +568,11 @@ export default function AdminTabs(props: AdminTabsProps) {
               </tbody>
             </table>
           </div>
+        </div>
+
+        {/* 6. 操作栏 */}
+        <div className="flex items-center justify-end gap-3">
+          <button onClick={handleRefresh} className="h-9 px-4 rounded-lg bg-muted text-muted-foreground text-sm font-medium hover:text-foreground transition-colors flex items-center gap-2 cursor-pointer"><RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />刷新数据</button>
         </div>
       </div>
     );
@@ -805,7 +820,7 @@ export default function AdminTabs(props: AdminTabsProps) {
           <div className="bg-card rounded-lg shadow-card p-5 border border-border/50">
             <h2 className="text-base font-semibold text-foreground mb-4">积分定价配置</h2>
             <div className="space-y-4">
-              {(providers || []).filter(p => p.model_type === 'image').slice(0, 5).map((p, i) => (
+              {(providers || []).filter(p => (p.model_type || (p as any).modelType) === 'image').slice(0, 5).map((p, i) => (
                 <div key={i} className="flex items-center gap-4 p-3 bg-muted/30 rounded-lg">
                   <span className="text-sm font-medium text-foreground min-w-[120px] truncate">{p.name}</span>
                   <div className="flex-1 text-xs text-muted-foreground">图像模型</div>
@@ -904,68 +919,108 @@ export default function AdminTabs(props: AdminTabsProps) {
 
   /* ── Render: Settings Tab ── */
   if (activeTab === 'settings') {
+    const imageModelOpts = (providers || []).filter(p => (p.model_type || (p as any).modelType) === 'image').flatMap(p => ((p.selected_models || (p as any).selectedModels || []) as string[]).map(m => ({ value: `${p.id}::${m}`, label: m })));
+    const chatModelOpts = (providers || []).filter(p => (p.model_type || (p as any).modelType) === 'chat').flatMap(p => ((p.selected_models || (p as any).selectedModels || []) as string[]).map(m => ({ value: `${p.id}::${m}`, label: m })));
+
     const settingGroups = [
-      { title: '基础设置', icon: Settings2, items: [
-        { key: 'defaultImageModel', label: '默认图像模型', type: 'select', options: (providers || []).filter(p => p.model_type === 'image').flatMap(p => (p.selected_models || []).map(m => ({ value: `${p.id}::${m}`, label: m }))) },
-        { key: 'defaultChatModel', label: '默认聊天模型', type: 'select', options: (providers || []).filter(p => p.model_type === 'chat').flatMap(p => (p.selected_models || []).map(m => ({ value: `${p.id}::${m}`, label: m }))) },
+      { title: '基础设置', icon: Settings2, desc: '平台基本配置', items: [
+        { key: 'platformName', label: '平台名称', desc: '显示在浏览器标题和登录页', type: 'text' as const },
+        { key: 'openRegistration', label: '开放注册', desc: '允许新用户自主注册账号', type: 'toggle' as const },
+        { key: 'initialCredits', label: '新用户初始积分', desc: '新注册用户获得的默认积分数量', type: 'number' as const },
+        { key: 'defaultUserRole', label: '默认用户角色', desc: '新注册用户的默认权限角色', type: 'select' as const, options: [{ value: 'user', label: '普通用户' }, { value: 'vip', label: 'VIP用户' }] },
       ]},
-      { title: '安全设置', icon: Lock, items: [
-        { key: 'openRegistration', label: '开放注册', type: 'toggle' },
-        { key: 'apiRateLimit', label: 'API 限流', type: 'toggle' },
+      { title: '安全设置', icon: Lock, desc: '访问控制与安全策略', items: [
+        { key: 'ipWhitelist', label: 'IP 白名单', desc: '仅允许指定IP访问管理后台，留空不限制', type: 'text' as const, placeholder: '如: 192.168.1.0/24, 10.0.0.1' },
+        { key: 'sessionTimeout', label: '会话超时(分钟)', desc: '用户无操作后自动退出登录的时间', type: 'number' as const },
+        { key: 'passwordExpiryDays', label: '密码过期周期(天)', desc: '设置0表示永不过期', type: 'number' as const },
       ]},
-      { title: '存储设置', icon: HardDrive, items: [
-        { key: 'maxUploadMB', label: '图片上传限制 (MB)', type: 'number' },
-        { key: 'maxConcurrentTasks', label: '最大并发任务', type: 'number' },
+      { title: '存储设置', icon: HardDrive, desc: '文件上传与存储限制', items: [
+        { key: 'storageQuotaMB', label: '单用户存储配额(MB)', desc: '每个用户可使用的总存储空间', type: 'number' as const },
+        { key: 'maxUploadMB', label: '单文件上传限制(MB)', desc: '单个图片或文件的最大上传大小', type: 'number' as const },
+        { key: 'maxVideoDuration', label: '视频最大时长(秒)', desc: '用户可生成的视频最大时长', type: 'number' as const },
       ]},
-      { title: '模型配置', icon: Cpu, items: [
-        { key: 'videoGenerationEnabled', label: '视频生成', type: 'toggle' },
-        { key: '3dModelEnabled', label: '3D 模型', type: 'toggle' },
+      { title: '模型配置', icon: Cpu, desc: 'AI模型与生成能力', items: [
+        { key: 'defaultImageModel', label: '默认图像模型', desc: '新用户未选择模型时使用的默认图像生成模型', type: 'select' as const, options: imageModelOpts },
+        { key: 'defaultChatModel', label: '默认 LLM 模型', desc: 'AI对话和提示词优化使用的默认语言模型', type: 'select' as const, options: chatModelOpts },
+        { key: 'videoGenerationEnabled', label: '视频生成', desc: '启用后用户可以使用文生视频和图生视频功能', type: 'toggle' as const },
+        { key: '3dModelEnabled', label: '3D 模型预览', desc: '启用后用户可以生成和预览3D模型', type: 'toggle' as const },
       ]},
-      { title: '系统公告', icon: Bell, items: [
-        { key: 'announcement', label: '公告内容', type: 'textarea' },
+      { title: '系统公告', icon: Bell, desc: '向用户展示通知与公告', items: [
+        { key: 'announcementEnabled', label: '启用公告', desc: '开启后用户登录时将看到公告横幅', type: 'toggle' as const },
+        { key: 'announcementType', label: '公告类型', desc: '不同类型对应不同的显示样式', type: 'select' as const, options: [{ value: 'info', label: '信息提示' }, { value: 'warning', label: '重要通知' }, { value: 'update', label: '版本更新' }] },
+        { key: 'announcementExpiry', label: '到期时间', desc: '公告自动隐藏的时间，留空则永久显示', type: 'text' as const, placeholder: '如: 2025-12-31' },
+        { key: 'announcement', label: '公告内容', desc: '支持基本文本格式', type: 'textarea' as const },
       ]},
     ];
 
     return (
-      <div className="space-y-4 pb-8">
+      <div className="space-y-5 pb-20">
         {settingGroups.map((group, gi) => (
-          <div key={gi} className="bg-card rounded-lg shadow-card p-5 border border-border/50">
-            <div className="flex items-center gap-2 mb-4">
-              <group.icon className="w-4 h-4 text-primary" />
-              <h2 className="text-base font-semibold text-foreground">{group.title}</h2>
+          <div key={gi} className="bg-card rounded-lg shadow-card border border-border/50 overflow-hidden">
+            {/* 组标题 */}
+            <div className="px-5 py-3.5 border-b border-border/30 flex items-center gap-2.5">
+              <div className="w-7 h-7 rounded-md bg-primary/15 flex items-center justify-center">
+                <group.icon className="w-3.5 h-3.5 text-primary" />
+              </div>
+              <div>
+                <h2 className="text-sm font-semibold text-foreground">{group.title}</h2>
+                <p className="text-xs text-muted-foreground">{group.desc}</p>
+              </div>
             </div>
-            <div className="space-y-4">
+            {/* 设置项 */}
+            <div className="p-5 space-y-5">
               {group.items.map((item, ii) => (
-                <div key={ii} className="flex items-center justify-between">
-                  <span className="text-sm text-foreground">{item.label}</span>
-                  {item.type === 'select' && (
-                    <select value={systemSettings[item.key] || ''} onChange={e => { setSystemSettings(s => ({ ...s, [item.key]: e.target.value })); setSettingsDirty(true); }} className="w-56 h-9 px-3 rounded-lg bg-muted border border-border/50 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30">
-                      <option value="">未选择</option>
-                      {'options' in item && item.options?.map((o: { value: string; label: string }) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                    </select>
-                  )}
-                  {item.type === 'toggle' && (
-                    <button onClick={() => { setSystemSettings(s => ({ ...s, [item.key]: s[item.key] === 'true' ? 'false' : 'true' })); setSettingsDirty(true); }} className={`w-10 h-5 rounded-full relative transition-colors ${systemSettings[item.key] === 'true' ? 'bg-primary' : 'bg-muted'}`}>
-                      <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${systemSettings[item.key] === 'true' ? 'left-5.5' : 'left-0.5'}`} />
-                    </button>
-                  )}
-                  {item.type === 'number' && (
-                    <input type="number" value={systemSettings[item.key] || ''} onChange={e => { setSystemSettings(s => ({ ...s, [item.key]: e.target.value })); setSettingsDirty(true); }} className="w-24 h-9 px-3 rounded-lg bg-muted border border-border/50 text-sm text-foreground text-center focus:outline-none focus:ring-2 focus:ring-primary/30" />
-                  )}
-                  {item.type === 'textarea' && (
-                    <textarea value={systemSettings[item.key] || ''} onChange={e => { setSystemSettings(s => ({ ...s, [item.key]: e.target.value })); setSettingsDirty(true); }} placeholder="输入公告内容…" rows={3} className="w-full max-w-md px-3 py-2 rounded-lg bg-muted border border-border/50 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none" />
-                  )}
+                <div key={ii} className="flex items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-foreground">{item.label}</div>
+                    {item.desc && <div className="text-xs text-muted-foreground mt-0.5">{item.desc}</div>}
+                  </div>
+                  <div className="flex-shrink-0 w-52">
+                    {item.type === 'text' && (
+                      <input type="text" value={systemSettings[item.key] || ''} onChange={e => { setSystemSettings(s => ({ ...s, [item.key]: e.target.value })); setSettingsDirty(true); }} placeholder={(item as { placeholder?: string }).placeholder || ''} className="w-full h-8 px-3 rounded-md bg-muted border border-border/50 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30" />
+                    )}
+                    {item.type === 'select' && (
+                      <select value={systemSettings[item.key] || ''} onChange={e => { setSystemSettings(s => ({ ...s, [item.key]: e.target.value })); setSettingsDirty(true); }} className="w-full h-8 px-3 rounded-md bg-muted border border-border/50 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30">
+                        <option value="">未选择</option>
+                        {(item as { options?: Array<{ value: string; label: string }> }).options?.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                      </select>
+                    )}
+                    {item.type === 'toggle' && (
+                      <div className="flex justify-end">
+                        <button onClick={() => { setSystemSettings(s => ({ ...s, [item.key]: s[item.key] === 'true' ? 'false' : 'true' })); setSettingsDirty(true); }} className={`w-11 h-6 rounded-full relative transition-colors cursor-pointer ${systemSettings[item.key] === 'true' ? 'bg-primary' : 'bg-muted-foreground/30'}`}>
+                          <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-md transition-transform ${systemSettings[item.key] === 'true' ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                        </button>
+                      </div>
+                    )}
+                    {item.type === 'number' && (
+                      <input type="number" value={systemSettings[item.key] || ''} onChange={e => { setSystemSettings(s => ({ ...s, [item.key]: e.target.value })); setSettingsDirty(true); }} className="w-full h-8 px-3 rounded-md bg-muted border border-border/50 text-sm text-foreground text-right focus:outline-none focus:ring-2 focus:ring-primary/30" />
+                    )}
+                    {item.type === 'textarea' && (
+                      <textarea value={systemSettings[item.key] || ''} onChange={e => { setSystemSettings(s => ({ ...s, [item.key]: e.target.value })); setSettingsDirty(true); }} placeholder="输入公告内容…" rows={3} className="w-full px-3 py-2 rounded-md bg-muted border border-border/50 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none" />
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
           </div>
         ))}
 
-        {/* 保存按钮 */}
-        <div className="flex justify-end gap-3 pt-2 pb-8">
-          <button onClick={() => loadSystemSettings()} className="h-10 px-5 rounded-lg bg-muted text-muted-foreground text-sm font-medium cursor-pointer hover:text-foreground transition-colors flex items-center gap-2"><RotateCcw className="w-4 h-4" />重置</button>
-          <button onClick={() => handleSaveSettings()} className="h-10 px-5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold cursor-pointer hover:bg-primary/90 transition-colors flex items-center gap-2"><Save className="w-4 h-4" />保存设置</button>
-        </div>
+        {/* 固定底栏：保存/重置 */}
+        {settingsDirty && (
+          <div className="fixed bottom-0 right-0 left-0 bg-card/95 backdrop-blur-sm border-t border-border/50 px-6 py-3 flex items-center justify-between z-50" style={{ maxWidth: 'calc(100% - 0px)' }}>
+            <span className="text-sm text-muted-foreground flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-amber-400" />有未保存的修改</span>
+            <div className="flex gap-3">
+              <button onClick={() => loadSystemSettings()} className="h-9 px-4 rounded-lg bg-muted text-muted-foreground text-sm font-medium cursor-pointer hover:text-foreground transition-colors flex items-center gap-2"><RotateCcw className="w-3.5 h-3.5" />重置</button>
+              <button onClick={() => handleSaveSettings()} className="h-9 px-5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold cursor-pointer hover:bg-primary/90 transition-colors flex items-center gap-2"><Save className="w-3.5 h-3.5" />保存设置</button>
+            </div>
+          </div>
+        )}
+        {!settingsDirty && (
+          <div className="flex justify-end gap-3 pt-2 pb-4">
+            <button onClick={() => loadSystemSettings()} className="h-9 px-4 rounded-lg bg-muted text-muted-foreground text-sm font-medium cursor-pointer hover:text-foreground transition-colors flex items-center gap-2"><RotateCcw className="w-3.5 h-3.5" />重置</button>
+            <button onClick={() => handleSaveSettings()} className="h-9 px-5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold cursor-pointer hover:bg-primary/90 transition-colors flex items-center gap-2"><Save className="w-3.5 h-3.5" />保存设置</button>
+          </div>
+        )}
       </div>
     );
   }
