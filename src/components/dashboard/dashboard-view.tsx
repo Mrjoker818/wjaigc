@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import {
-  FolderOpen, Plus, Search, Star, Trash2, MoreVertical, Image,
+  FolderOpen, Plus, Search, Star, Trash2, MoreVertical, MoreHorizontal, Image,
   Sparkles, LayoutTemplate, Layers, Clock, ChevronRight, ArrowRight,
   Box, Copy, Check, Palette, Type, BookOpen,
   LogOut, Shield, X, Eye, Mail, Calendar, KeyRound, Zap, Pencil,
@@ -147,6 +147,15 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     totalUsage: number; dailyUsage: number;
     lastUpdated: string; error?: string; endpoint?: string;
   }>>([]);
+  // API management UI state
+  const [apiFilterType, setApiFilterType] = useState<ApiKind | 'all'>('all');
+  const [apiFilterStatus, setApiFilterStatus] = useState<'all' | 'enabled' | 'disabled'>('all');
+  const [apiSearchQuery, setApiSearchQuery] = useState('');
+  const [showApiDrawer, setShowApiDrawer] = useState(false);
+  const [selectedProviderIds, setSelectedProviderIds] = useState<Set<string>>(new Set());
+  const [apiBatchLoading, setApiBatchLoading] = useState(false);
+  const [refreshingProviderIds, setRefreshingProviderIds] = useState<Set<string>>(new Set());
+  const [moreMenuProviderId, setMoreMenuProviderId] = useState<string | null>(null);
 
   // ─── Admin: Data management state ───
   const [selectedDataUser, setSelectedDataUser] = useState<string | null>(null);
@@ -281,6 +290,14 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const cardBg = isDark ? 'bg-[#1a1a2e]/80' : 'bg-white';
   const borderColor = isDark ? 'border-primary/20' : 'border-gray-200';
   const inputBg = isDark ? 'bg-white/5' : 'bg-gray-50';
+
+  const toggleSelectProvider = useCallback((pid: string) => {
+    setSelectedProviderIds(prev => {
+      const next = new Set(prev);
+      if (next.has(pid)) next.delete(pid); else next.add(pid);
+      return next;
+    });
+  }, []);
 
   // ─── Project data ───
   const mgr = UserManager.getInstance();
@@ -599,12 +616,99 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     } catch { setApiBalances([]); }
   }, []);
 
+  // ─── Filtered providers for API management ───
+  const filteredProviders = useMemo(() => {
+    let list = [...providers];
+    if (apiFilterType !== 'all') list = list.filter(p => p.modelType === apiFilterType);
+    if (apiFilterStatus === 'enabled') list = list.filter(p => p.isEnabled !== false);
+    else if (apiFilterStatus === 'disabled') list = list.filter(p => p.isEnabled === false);
+    if (apiSearchQuery.trim()) {
+      const q = apiSearchQuery.toLowerCase();
+      list = list.filter(p => (p.name || '').toLowerCase().includes(q) || (p.baseUrl || '').toLowerCase().includes(q) || (p.selectedModels || []).some(m => m.toLowerCase().includes(q)));
+    }
+    return list;
+  }, [providers, apiFilterType, apiFilterStatus, apiSearchQuery]);
+
+  const toggleSelectAllProviders = useCallback(() => {
+    if (selectedProviderIds.size === filteredProviders.length && filteredProviders.length > 0) {
+      setSelectedProviderIds(new Set());
+    } else {
+      setSelectedProviderIds(new Set(filteredProviders.map(p => p.id)));
+    }
+  }, [selectedProviderIds, filteredProviders]);
+
+  // ─── Batch operations ───
+  const handleBatchToggleApi = useCallback(async (enable: boolean) => {
+    setApiBatchLoading(true);
+    try {
+      const ids = Array.from(selectedProviderIds);
+      for (const pid of ids) {
+        await fetch('/api/admin/apis', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'update', providerId: pid, updates: { isEnabled: enable } }) });
+      }
+      window.dispatchEvent(new Event('wujie-admin-apis-updated'));
+      await refreshAdmin();
+      setSelectedProviderIds(new Set());
+    } finally { setApiBatchLoading(false); }
+  }, [selectedProviderIds, refreshAdmin]);
+
+  const handleBatchDeleteApi = useCallback(async () => {
+    if (!confirm(`确认删除选中的 ${selectedProviderIds.size} 个提供商？`)) return;
+    setApiBatchLoading(true);
+    try {
+      const ids = Array.from(selectedProviderIds);
+      for (const pid of ids) await fetch('/api/admin/apis', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', providerId: pid }) });
+      window.dispatchEvent(new Event('wujie-admin-apis-updated'));
+      await refreshAdmin();
+      setSelectedProviderIds(new Set());
+    } finally { setApiBatchLoading(false); }
+  }, [selectedProviderIds, refreshAdmin]);
+
+  const handleBatchTestConnection = useCallback(async () => {
+    setApiBatchLoading(true);
+    const ids = Array.from(selectedProviderIds);
+    let ok = 0, fail = 0;
+    for (const pid of ids) {
+      try {
+        const p = providers.find(x => x.id === pid);
+        if (!p) continue;
+        const res = await fetch('/api/admin/test-connection', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ providerId: pid })
+        });
+        const d = await res.json();
+        if (d.success) ok++; else fail++;
+      } catch { fail++; }
+    }
+    setApiBatchLoading(false);
+    alert(`批量测试完成：${ok} 个成功，${fail} 个失败`);
+  }, [selectedProviderIds, providers]);
+
+  // ─── Reset API form helper ───
+  const resetApiForm = useCallback(() => {
+    setApiKind('image'); setApiName(''); setApiBaseUrl(''); setApiKey(''); setApiModel('');
+    setCompatProfile('auto'); setDiscoveredModels([]); setSelectedModels([]);
+    setAdvancedParams([]); setShowAdvancedParams(false);
+    setBalanceUsername(''); setBalancePassword('');
+    setEditingProviderId(null);
+  }, []);
+
   useEffect(() => {
     if (isAdmin) {
       void refreshAdmin();
       void refreshBalances();
     }
   }, [isAdmin, refreshAdmin, refreshBalances]);
+
+  // Close "more" dropdown on outside click
+  useEffect(() => {
+    if (!moreMenuProviderId) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('[data-more-menu]')) setMoreMenuProviderId(null);
+    };
+    document.addEventListener('click', handler);
+    return () => document.removeEventListener('click', handler);
+  }, [moreMenuProviderId]);
 
   // ─── Credits data loading ───
 
@@ -731,6 +835,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     setDiscoveredModels([]); setSelectedModels([]); setEditingProviderId(null);
     setAdvancedParams([]); setShowAdvancedParams(false);
     setBalanceUsername(''); setBalancePassword('');
+    setShowApiDrawer(false);
     window.dispatchEvent(new Event('wujie-admin-apis-updated'));
     await refreshAdmin();
   };
@@ -768,6 +873,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     setEditingProviderId(null); setApiName(''); setApiBaseUrl(''); setApiKey(''); setApiModel(''); setCompatProfile('auto');
     setDiscoveredModels([]); setSelectedModels([]); setAdvancedParams([]); setShowAdvancedParams(false);
     setBalanceUsername(''); setBalancePassword('');
+    setShowApiDrawer(false);
     window.dispatchEvent(new Event('wujie-admin-apis-updated'));
     await refreshAdmin();
   };
@@ -2191,117 +2297,228 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
         {/* ── Tab: API Management ── */}
         {activeTab === 'apis' && isAdmin && (
-          <div className="h-full overflow-y-auto p-6">
-            <h1 className={`text-xl font-bold mb-1 ${textPrimary}`}>API 管理</h1>
-            <p className={`text-sm mb-6 ${textSecondary}`}>配置图像、对话、3D、矢量等模型接口</p>
-            <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-4">
-              {/* Add/Edit API form */}
-              <div className={`rounded-xl border p-4 h-fit ${softClass}`}>
-                <h3 className="text-sm font-semibold mb-3">{editingProviderId ? '编辑 API' : '添加 API'}</h3>
-                <div className="space-y-3">
-                  <div><label className={labelClass}>API 类型</label>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {(Object.keys(apiKindLabels) as ApiKind[]).map(kind => (
-                        <button key={kind} onClick={() => setApiKind(kind)} className={`px-2 py-1.5 rounded-lg text-[11px] font-medium cursor-pointer ${apiKind === kind ? `${accentBgClass} ${accentTextOnBgClass}` : isDark ? 'bg-white/5 text-[#999] border border-white/10' : 'bg-gray-50 text-gray-600 border border-gray-200'}`}>{apiKindLabels[kind]}</button>
-                      ))}
-                    </div>
-                    <p className={`mt-1 text-[10px] ${isDark ? 'text-[#555]' : 'text-gray-400'}`}>{apiKindDescriptions[apiKind]}</p>
-                  </div>
-                  <div><label className={labelClass}>接口地址</label><input className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="https://接口域名" value={apiBaseUrl} onChange={e => setApiBaseUrl(e.target.value)} /></div>
-                  <div><label className={labelClass}>固定 API 密钥</label><input className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="只保存在服务端配置" type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} /></div>
-                  {/* Balance account credentials */}
-                  <div className={`p-3 rounded-lg border ${isDark ? 'border-white/10 bg-white/[0.03]' : 'border-gray-200 bg-gray-50/50'}`}>
-                    <p className={`text-xs font-medium mb-2 ${isDark ? 'text-[#888]' : 'text-gray-500'}`}>余额查询账号 <span className={`text-[10px] ${isDark ? 'text-[#555]' : 'text-gray-400'}`}>(One API / New API 中转站登录账号，用于自动查余额)</span></p>
-                    <div className="grid grid-cols-2 gap-2">
-                      <input className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="平台登录用户名" value={balanceUsername} onChange={e => setBalanceUsername(e.target.value)} />
-                      <input className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="平台登录密码" type="password" value={balancePassword} onChange={e => setBalancePassword(e.target.value)} />
-                    </div>
-                  </div>
-                  {/* Discover models */}
-                  <button onClick={() => void handleDiscoverModels()} disabled={isDiscovering || !apiBaseUrl.trim() || !apiKey.trim()} className={`w-full h-9 rounded-lg text-sm font-semibold flex items-center justify-center gap-1.5 border ${isDark ? 'border-white/20 hover:bg-white/5' : 'border-gray-200 hover:bg-gray-50'} ${accentClass} disabled:opacity-40 cursor-pointer`}>
-                    <RefreshCw className={`w-3.5 h-3.5 ${isDiscovering ? 'animate-spin' : ''}`} />{isDiscovering ? '识别中...' : '自动识别模型'}
-                  </button>
-                  {discoveredModels.length > 0 && (
-                    <div>
-                      <div className="flex items-center justify-between mb-1"><p className={`text-xs ${isDark ? 'text-[#777]' : 'text-gray-500'}`}>选择前端可见模型</p>
-                        <button onClick={() => { const allIds = discoveredModels.map(m => m.id); setSelectedModels(selectedModels.length === allIds.length ? [] : allIds); }} className={`text-xs px-2 py-0.5 rounded border cursor-pointer ${accentClass} ${accentBorderClass} ${accentBgLight}`}>{selectedModels.length === discoveredModels.length ? '取消全选' : '全选'}</button>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {(() => { const q = modelSearchQuery.toLowerCase().trim(); const sorted = q ? [...discoveredModels].sort((a, b) => { const aMatch = (a.name || a.id).toLowerCase().includes(q) ? 0 : 1; const bMatch = (b.name || b.id).toLowerCase().includes(q) ? 0 : 1; return aMatch - bMatch; }) : discoveredModels; return sorted.map(model => (<button key={model.id} onClick={() => setSelectedModels(prev => prev.includes(model.id) ? prev.filter(id => id !== model.id) : [...prev, model.id])} className={`px-2.5 py-1 rounded-md text-xs border cursor-pointer ${selectedModels.includes(model.id) ? `${accentBgClass} ${accentTextOnBgClass} border-transparent` : isDark ? 'bg-white/5 text-[#999] border-white/10' : 'bg-gray-50 text-gray-600 border-gray-200'}`}>{model.name && model.name !== model.id ? model.name : getModelDisplayName(model.id)}</button>)); })()}
-                      </div>
-                    </div>
-                  )}
-                  <div><label className={labelClass}>显示名称</label><input className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="例如：图像生成接口" value={apiName} onChange={e => setApiName(e.target.value)} /></div>
-                  <div><label className={labelClass}>默认模型 ID（可选）</label><input className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="未自动识别时填写" value={apiModel} onChange={e => setApiModel(e.target.value)} /></div>
-                  <div><label className={labelClass}>API 兼容模式</label>
-                    <select className={`w-full h-10 px-3 rounded-lg border text-sm ${isDark ? 'bg-white/5 border-white/10 text-[#ccc]' : 'bg-white border-gray-200 text-gray-800'}`} value={compatProfile} onChange={e => setCompatProfile(e.target.value)}>
-                      <option value="auto">自动检测</option><option value="apimart">异步轮询 (宽高比)</option><option value="openai">OpenAI 兼容 (直接返回)</option><option value="openai-async">OpenAI 兼容 (异步轮询)</option>
-                    </select>
-                  </div>
-                  {/* Advanced params */}
-                  <div>
-                    <button type="button" onClick={() => setShowAdvancedParams(!showAdvancedParams)} className={`flex items-center gap-2 text-sm font-medium cursor-pointer ${isDark ? 'text-[#ccc]' : 'text-gray-700'}`}><Settings className="w-4 h-4" /><span>高级参数{advancedParams.length > 0 ? `(${advancedParams.length})` : ''}</span><ChevronDown className={`w-3.5 h-3.5 transition-transform ${showAdvancedParams ? 'rotate-180' : ''}`} /></button>
-                    {showAdvancedParams && (
-                      <div className="mt-2 space-y-2">
-                        {advancedParams.map((param, idx) => (<div key={idx} className="flex items-center gap-2"><input className={`w-[35%] shrink-0 h-9 px-2.5 rounded-lg border text-sm ${inputClass}`} placeholder="参数名" value={param.key} onChange={e => { const next = [...advancedParams]; next[idx] = { ...next[idx], key: e.target.value }; setAdvancedParams(next); }} /><input className={`flex-1 min-w-0 h-9 px-2.5 rounded-lg border text-sm ${inputClass}`} placeholder="参数值" value={param.value} onChange={e => { const next = [...advancedParams]; next[idx] = { ...next[idx], value: e.target.value }; setAdvancedParams(next); }} /><button type="button" onClick={() => setAdvancedParams(prev => prev.filter((_, i) => i !== idx))} className="p-1.5 rounded-md text-red-500 hover:bg-red-500/10 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button></div>))}
-                        <button type="button" onClick={() => setAdvancedParams(prev => [...prev, { key: `param_${Date.now().toString().slice(-5)}`, value: '' }])} className={`flex items-center gap-1.5 text-xs cursor-pointer ${isDark ? 'text-[#888] hover:text-[#aaa]' : 'text-gray-500 hover:text-gray-700'}`}><Plus className="w-3.5 h-3.5" />添加参数</button>
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex gap-2">
-                    <button type="button" onClick={() => void handleTestNewConnection()} disabled={isTestingNew || !apiBaseUrl || !apiKey} className={`flex-1 h-9 rounded-lg text-sm font-semibold flex items-center justify-center gap-1.5 border disabled:opacity-40 cursor-pointer ${isDark ? `border-white/20 ${accentClass} hover:bg-white/5` : `border-gray-300 ${accentClass} hover:bg-gray-50`}`}><RefreshCw className={`w-3.5 h-3.5 ${isTestingNew ? 'animate-spin' : ''}`} />{isTestingNew ? '测试中...' : '测试连接'}</button>
-                    <button onClick={() => editingProviderId ? void handleUpdateApi() : void handleAddApi()} className={`flex-1 h-9 rounded-lg text-sm font-semibold cursor-pointer ${editingProviderId ? 'bg-blue-600 text-white' : `${accentBgClass} ${accentTextOnBgClass}`}`}>{editingProviderId ? '更新 API' : '添加 API'}</button>
-                  </div>
-                  {testNewResult && (<div className={`text-xs px-3 py-2 rounded-lg ${testNewResult.success ? (isDark ? 'bg-green-500/10 text-green-400' : 'bg-green-50 text-green-700') : (isDark ? 'bg-red-500/10 text-red-400' : 'bg-red-50 text-red-700')}`}>{testNewResult.success ? `连接成功 · ${testNewResult.modelCount ?? 0} 个模型可用` : `连接失败：${testNewResult.error || testNewResult.message}`}</div>)}
-                  {editingProviderId && (<button onClick={() => { setEditingProviderId(null); setApiName(''); setApiBaseUrl(''); setApiKey(''); setApiModel(''); setDiscoveredModels([]); setSelectedModels([]); setModelSearchQuery(''); }} className={`w-full h-9 rounded-lg text-sm border cursor-pointer ${isDark ? 'border-white/20 text-[#888] hover:bg-white/5' : 'border-gray-300 text-gray-500 hover:bg-gray-50'}`}>取消编辑</button>)}
-                </div>
+          <div className="h-full overflow-y-auto p-6 relative">
+            {/* ── Header with add button ── */}
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h1 className={`text-xl font-bold ${textPrimary}`}>API 管理</h1>
+                <p className={`text-sm ${textSecondary}`}>配置图像、对话、3D、矢量等模型接口</p>
               </div>
-              {/* Provider list */}
-              <div className="space-y-2">
-                <div className="flex justify-end gap-2">
-                  <button onClick={() => void refreshBalances()} className={`text-xs px-3 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer ${isDark ? 'bg-white/5 text-[#aaa]' : 'bg-gray-100 text-gray-600'}`}><Activity className="w-3 h-3" />刷新余额</button>
-                  <button onClick={() => void refreshAdmin()} className={`text-xs px-3 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer ${isDark ? 'bg-white/5 text-[#aaa]' : 'bg-gray-100 text-gray-600'}`}><RefreshCw className="w-3 h-3" />刷新模型</button>
-                </div>
-                {providers.map((provider, providerIndex) => (
-                  <div key={provider.id} className={`rounded-xl border p-4 ${softClass}`}>
-                    <div className="flex items-start gap-3">
-                      <Plug className={`w-5 h-5 mt-0.5 shrink-0 ${provider.isEnabled ? accentClass : 'text-gray-500'}`} />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <p className="text-sm font-semibold">{provider.displayName || provider.name}</p>
-                          <span className={`text-xs px-2 py-0.5 rounded ${isDark ? 'bg-[#222] text-[#aaa]' : 'bg-gray-200 text-gray-600'}`}>{apiKindLabels[provider.modelType as ApiKind] || provider.modelType}</span>
-                          {provider.isEnabled && <span className="text-xs px-1.5 py-0.5 rounded bg-green-500/15 text-green-500">启用</span>}
-                        </div>
-                        <p className={`text-xs mt-1 truncate ${isDark ? 'text-[#666]' : 'text-gray-500'}`}>{provider.baseUrl}</p>
-                        <p className={`text-xs mt-1 font-mono ${isDark ? 'text-[#555]' : 'text-gray-400'}`}>{provider.apiKeyPreview || `${provider.apiKey.slice(0, 8)}****************`}</p>
-                        {provider.selectedModels && provider.selectedModels.length > 0 && (
-                          <div className="mt-2"><p className={`text-xs mb-1 ${isDark ? 'text-[#888]' : 'text-gray-500'}`}>当前模型：</p><div className="flex flex-wrap gap-1">{provider.selectedModels.map(modelId => { const discovered = (provider.discoveredModels || []).find((dm: { id: string }) => dm.id === modelId); const displayName = discovered?.name && discovered.name !== modelId ? discovered.name : getModelDisplayName(modelId); return <span key={modelId} className={`text-xs px-2 py-0.5 rounded ${isDark ? `bg-[${accentHex}]/15 ${accentClass}` : isMonochrome ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>{displayName}</span>; })}</div></div>
-                        )}
-                        {provider.modelType === 'vectorize' && provider.isEnabled && <div className={`mt-2 text-xs px-2 py-1 rounded ${isDark ? `bg-[${accentHex}]/10 ${accentClass}` : isMonochrome ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>已对接：矢量化工具 / 导出SVG</div>}
-                        {provider.modelType === 'layer' && provider.isEnabled && <div className={`mt-2 text-xs px-2 py-1 rounded ${isDark ? `bg-[${accentHex}]/10 ${accentClass}` : isMonochrome ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>已对接：编辑元素 / 下载PSD</div>}
-                        {provider.modelType === 'video' && provider.isEnabled && <div className={`mt-2 text-xs px-2 py-1 rounded ${isDark ? `bg-[${accentHex}]/10 ${accentClass}` : isMonochrome ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>已对接：文生视频 / 图生视频 / 视频延长</div>}
-                        {provider.modelType === 'upscaler' && provider.isEnabled && <div className={`mt-2 text-xs px-2 py-1 rounded ${isDark ? `bg-[${accentHex}]/10 ${accentClass}` : isMonochrome ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>已对接：无损放大Pro / SeedVR2 / Real-ESRGAN</div>}
-                        {(() => { const bal = apiBalances.find(b => b.providerId === provider.id || b.providerName === provider.name); if (!bal) return null; const isUsd = bal.currency === 'USD'; const isUnlimited = bal.balance === -1 || bal.remainingQuota === -1; const fmtQuota = (v: number | null, fallback = '-') => { if (v === null) return fallback; if (v === -1) return '无限'; if (isUsd) { return `$${(v / 100).toFixed(2)}`; } return Math.abs(v) > 10000 ? `¥${(v / 500000).toFixed(2)}` : `¥${v.toFixed(2)}`; }; const fmtBalance = (v: number | null) => { if (v === null) return null; if (v === -1) return '无限'; return isUsd ? `$${v.toFixed(2)}` : `¥${v.toFixed(2)}`; }; const balanceColor = bal.balance === null ? '' : bal.balance < 0 ? 'text-green-500' : bal.balance > 10 ? 'text-green-500' : bal.balance > 1 ? 'text-yellow-500' : 'text-red-500'; return (<div className={`mt-2 text-xs space-y-1 ${isDark ? 'text-[#888]' : 'text-gray-500'}`}><div className="flex items-center gap-3 flex-wrap">{bal.balance !== null && <span className="flex items-center gap-1"><Wallet className="w-3 h-3" />{isUnlimited ? '额度' : '余额'}: <span className={`font-medium ${balanceColor}`}>{fmtBalance(bal.balance)}</span></span>}{bal.totalUsage > 0 && <span>已用: {isUsd ? `$${(bal.totalUsage / 100).toFixed(2)}` : fmtQuota(bal.usedQuota)}</span>}{!isUnlimited && bal.remainingQuota !== null && bal.remainingQuota > 0 && <span className={!isUsd && bal.remainingQuota < 500000 ? 'text-yellow-500' : ''}>剩余: {fmtQuota(bal.remainingQuota)}</span>}</div>{bal.endpoint && <div className={`text-[10px] ${isDark ? 'text-[#555]' : 'text-gray-400'}`}>查询端点: {bal.endpoint}</div>}{bal.error && <div className="text-red-400 flex items-center gap-1"><AlertTriangle className="w-3 h-3" />{bal.error}</div>}</div>); })()}
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-end gap-1 mt-3 pt-2 border-t border-current/5">
-                      <button onClick={() => void handleReorderApi(provider.id, 'up')} disabled={providerIndex === 0} className={`p-1.5 rounded-lg disabled:opacity-20 cursor-pointer disabled:cursor-not-allowed ${isDark ? 'hover:bg-[#222] text-[#999]' : 'hover:bg-gray-100 text-gray-500'}`} title="上移"><ArrowUp className="w-3.5 h-3.5" /></button>
-                      <button onClick={() => void handleReorderApi(provider.id, 'down')} disabled={providerIndex === providers.length - 1} className={`p-1.5 rounded-lg disabled:opacity-20 cursor-pointer disabled:cursor-not-allowed ${isDark ? 'hover:bg-[#222] text-[#999]' : 'hover:bg-gray-100 text-gray-500'}`} title="下移"><ArrowDown className="w-3.5 h-3.5" /></button>
-                      <div className={`w-px h-4 mx-1 ${isDark ? 'bg-[#333]' : 'bg-gray-200'}`} />
-                      <button onClick={() => void handleRefreshApi(provider)} className={`p-1.5 rounded-lg cursor-pointer ${isDark ? 'hover:bg-[#222] text-[#999]' : 'hover:bg-gray-100 text-gray-500'}`} title="重新探测模型"><RefreshCw className="w-3.5 h-3.5" /></button>
-                      <button onClick={() => void handleTestConnection(provider)} disabled={isTesting} className={`p-1.5 rounded-lg cursor-pointer ${isDark ? 'hover:bg-[#222]' : 'hover:bg-gray-100'}`} title="测试连接">{isTesting && testResult?.providerId === provider.id ? <Loader2 className="w-3.5 h-3.5 animate-spin text-yellow-500" /> : <Zap className="w-3.5 h-3.5 text-yellow-500" />}</button>
-                      <button onClick={() => void handleVerifyProtocol(provider)} disabled={isVerifying} className={`p-1.5 rounded-lg cursor-pointer ${isDark ? 'hover:bg-[#222]' : 'hover:bg-gray-100'}`} title="协议验证">{isVerifying && verifyResult?.providerId === provider.id ? <Loader2 className="w-3.5 h-3.5 animate-spin text-cyan-400" /> : <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />}</button>
-                      <button onClick={() => void handleToggleApi(provider)} className={`p-1.5 rounded-lg cursor-pointer ${isDark ? 'hover:bg-[#222]' : 'hover:bg-gray-100'}`} title={provider.isEnabled ? '停用' : '启用'}>{provider.isEnabled ? <CheckCircle2 className="w-3.5 h-3.5 text-green-500" /> : <XCircle className="w-3.5 h-3.5 text-gray-500" />}</button>
-                      <button onClick={() => handleEditApi(provider)} className={`p-1.5 rounded-lg cursor-pointer ${isDark ? 'hover:bg-[#222]' : 'hover:bg-gray-100'}`} title="编辑"><Pencil className="w-3.5 h-3.5 text-blue-400" /></button>
-                      <button onClick={() => handleDeleteApi(provider)} className={`p-1.5 rounded-lg cursor-pointer ${isDark ? 'hover:bg-red-950/40' : 'hover:bg-red-50'}`} title="删除"><Trash2 className="w-3.5 h-3.5 text-red-500" /></button>
-                    </div>
-                    {testResult && testResult.providerId === provider.id && (<div className={`mt-2 px-3 py-2 rounded-lg text-xs flex items-center gap-2 ${testResult.success ? (isDark ? 'bg-green-900/20 text-green-400' : 'bg-green-50 text-green-700') : (isDark ? 'bg-red-900/20 text-red-400' : 'bg-red-50 text-red-700')}`}>{testResult.success ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : <XCircle className="w-3.5 h-3.5 shrink-0" />}<span>{testResult.message}</span><button onClick={() => setTestResult(null)} className="ml-auto opacity-50 hover:opacity-100 cursor-pointer"><X size={12} /></button></div>)}
-                    {verifyResult && verifyResult.providerId === provider.id && (<div className={`mt-2 px-3 py-2 rounded-lg text-xs ${isDark ? 'bg-cyan-900/20 text-cyan-300' : 'bg-cyan-50 text-cyan-800'}`}><div className="flex items-center gap-2 mb-1"><ShieldCheck className="w-3.5 h-3.5 shrink-0" /><span className="font-medium">协议验证: {verifyResult.summary}</span><button onClick={() => setVerifyResult(null)} className="ml-auto opacity-50 hover:opacity-100 cursor-pointer"><X size={12} /></button></div><div className="space-y-1 ml-5">{verifyResult.tests.map((test, i) => (<div key={i} className="flex items-center gap-1.5">{test.status === 'pass' ? <CheckCircle2 className="w-3 h-3 text-green-400 shrink-0" /> : test.status === 'warn' ? <AlertTriangle className="w-3 h-3 text-yellow-400 shrink-0" /> : <XCircle className="w-3 h-3 text-red-400 shrink-0" />}<span className="opacity-80">{test.name}:</span><span className="opacity-60">{test.detail}</span></div>))}</div></div>)}
-                    {editingProviderId === provider.id && (<div className={`mt-2 px-3 py-2 rounded-lg text-xs flex items-center gap-2 ${isDark ? 'bg-blue-900/20 text-blue-400' : 'bg-blue-50 text-blue-700'}`}><Pencil className="w-3.5 h-3.5 shrink-0" /><span>正在编辑此 API，请在左侧表单中修改</span></div>)}
-                  </div>
-                ))}
+              <div className="flex items-center gap-2">
+                <button onClick={() => void refreshBalances()} className={`text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer ${isDark ? 'bg-white/5 text-[#aaa] hover:bg-white/10' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}><Activity className="w-3.5 h-3.5" />刷新余额</button>
+                <button onClick={() => { void refreshAdmin(); }} className={`text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer ${isDark ? 'bg-white/5 text-[#aaa] hover:bg-white/10' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}><RefreshCw className="w-3.5 h-3.5" />刷新列表</button>
+                <button onClick={() => { resetApiForm(); setShowApiDrawer(true); }} className={`text-xs px-4 py-2 rounded-lg font-semibold flex items-center gap-1.5 cursor-pointer ${accentBgClass} ${accentTextOnBgClass}`}><Plus className="w-4 h-4" />添加 API</button>
               </div>
             </div>
+
+            {/* ── Filter bar ── */}
+            <div className={`flex items-center gap-2 mb-3 p-2 rounded-xl ${isDark ? 'bg-white/[0.03] border border-white/5' : 'bg-gray-50 border border-gray-100'}`}>
+              <select className={`h-8 px-2.5 rounded-lg text-xs border ${isDark ? 'bg-white/5 border-white/10 text-[#ccc]' : 'bg-white border-gray-200 text-gray-800'}`} value={apiFilterType} onChange={e => setApiFilterType(e.target.value as ApiKind | 'all')}>
+                <option value="all">全部类型</option>
+                {(Object.keys(apiKindLabels) as ApiKind[]).map(k => <option key={k} value={k}>{apiKindLabels[k]}</option>)}
+              </select>
+              <select className={`h-8 px-2.5 rounded-lg text-xs border ${isDark ? 'bg-white/5 border-white/10 text-[#ccc]' : 'bg-white border-gray-200 text-gray-800'}`} value={apiFilterStatus} onChange={e => setApiFilterStatus(e.target.value as 'all' | 'enabled' | 'disabled')}>
+                <option value="all">全部状态</option>
+                <option value="enabled">已启用</option>
+                <option value="disabled">已停用</option>
+              </select>
+              <div className="relative flex-1">
+                <Search className={`w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 ${isDark ? 'text-[#555]' : 'text-gray-400'}`} />
+                <input className={`w-full h-8 pl-8 pr-3 rounded-lg text-xs border ${inputClass}`} placeholder="搜索名称、地址、模型..." value={apiSearchQuery} onChange={e => setApiSearchQuery(e.target.value)} />
+              </div>
+              {selectedProviderIds.size > 0 && (
+                <div className="flex items-center gap-1.5 ml-auto">
+                  <span className={`text-xs ${textSecondary}`}>已选 {selectedProviderIds.size} 项</span>
+                  <button onClick={() => void handleBatchToggleApi(true)} disabled={apiBatchLoading} className={`text-xs px-2.5 py-1 rounded-lg cursor-pointer bg-green-500/10 text-green-500 hover:bg-green-500/20 disabled:opacity-50`}>批量启用</button>
+                  <button onClick={() => void handleBatchToggleApi(false)} disabled={apiBatchLoading} className={`text-xs px-2.5 py-1 rounded-lg cursor-pointer bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500/20 disabled:opacity-50`}>批量停用</button>
+                  <button onClick={() => void handleBatchTestConnection()} disabled={apiBatchLoading} className={`text-xs px-2.5 py-1 rounded-lg cursor-pointer bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 disabled:opacity-50`}>批量测试</button>
+                  <button onClick={() => void handleBatchDeleteApi()} disabled={apiBatchLoading} className={`text-xs px-2.5 py-1 rounded-lg cursor-pointer bg-red-500/10 text-red-500 hover:bg-red-500/20 disabled:opacity-50`}>批量删除</button>
+                  <button onClick={() => setSelectedProviderIds(new Set())} className={`text-xs px-2 py-1 rounded-lg cursor-pointer ${isDark ? 'text-[#888] hover:bg-white/5' : 'text-gray-500 hover:bg-gray-100'}`}>取消选择</button>
+                </div>
+              )}
+            </div>
+
+            {/* ── Provider list (full width) ── */}
+            <div className="space-y-2">
+              {filteredProviders.length === 0 && (
+                <div className={`text-center py-12 ${textSecondary}`}>
+                  <Plug className="w-10 h-10 mx-auto mb-3 opacity-30" />
+                  <p className="text-sm">暂无 API 提供商</p>
+                  <p className="text-xs mt-1">点击右上角"添加 API"开始配置</p>
+                </div>
+              )}
+              {filteredProviders.map((provider, providerIndex) => {
+                const isSelected = selectedProviderIds.has(provider.id);
+                const isRefreshing = refreshingProviderIds.has(provider.id);
+                const bal = apiBalances.find(b => b.providerId === provider.id || b.providerName === provider.name);
+                return (
+                <div key={provider.id} className={`rounded-xl border p-4 transition-colors ${softClass} ${isSelected ? (isDark ? 'ring-1 ring-[#d4af37]/40' : 'ring-1 ring-primary/30') : ''}`}>
+                  <div className="flex items-start gap-3">
+                    {/* Checkbox */}
+                    <button onClick={() => toggleSelectProvider(provider.id)} className={`mt-1 w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 cursor-pointer transition-colors ${isSelected ? `${accentBgClass} ${accentTextOnBgClass} border-transparent` : isDark ? 'border-white/20 hover:border-white/40' : 'border-gray-300 hover:border-gray-400'}`}>
+                      {isSelected && <Check className="w-2.5 h-2.5" />}
+                    </button>
+                    {/* Status indicator */}
+                    <div className="mt-1.5 w-2 h-2 rounded-full shrink-0" title={provider.isEnabled ? '已启用' : '已停用'} style={{ backgroundColor: provider.isEnabled ? '#22c55e' : isDark ? '#555' : '#ccc' }} />
+                    {/* Content */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className={`text-sm font-semibold ${provider.isEnabled ? textPrimary : isDark ? 'text-[#666]' : 'text-gray-400'}`}>{provider.displayName || provider.name}</p>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded ${isDark ? 'bg-white/10 text-[#aaa]' : 'bg-gray-100 text-gray-500'}`}>{apiKindLabels[provider.modelType as ApiKind] || provider.modelType}</span>
+                        {provider.isEnabled && <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/15 text-green-500">启用</span>}
+                        {provider.isEnabled === false && <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-400">停用</span>}
+                      </div>
+                      <p className={`text-xs mt-1 truncate ${isDark ? 'text-[#666]' : 'text-gray-500'}`}>{provider.baseUrl}</p>
+                      {/* Models */}
+                      {provider.selectedModels && provider.selectedModels.length > 0 && (
+                        <div className="mt-1.5 flex flex-wrap gap-1">
+                          {provider.selectedModels.slice(0, 8).map(modelId => { const discovered = (provider.discoveredModels || []).find((dm: { id: string }) => dm.id === modelId); const displayName = discovered?.name && discovered.name !== modelId ? discovered.name : getModelDisplayName(modelId); return <span key={modelId} className={`text-[10px] px-1.5 py-0.5 rounded ${isDark ? `${accentBgLight} ${accentClass}` : isMonochrome ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>{displayName}</span>; })}
+                          {provider.selectedModels.length > 8 && <span className={`text-[10px] px-1.5 py-0.5 rounded ${isDark ? 'bg-white/5 text-[#888]' : 'bg-gray-100 text-gray-500'}`}>+{provider.selectedModels.length - 8}</span>}
+                        </div>
+                      )}
+                      {/* Integration badges */}
+                      {provider.modelType === 'vectorize' && provider.isEnabled && <span className={`mt-1.5 inline-block text-[10px] px-1.5 py-0.5 rounded ${accentBgLight} ${accentClass}`}>矢量化工具 / 导出SVG</span>}
+                      {provider.modelType === 'layer' && provider.isEnabled && <span className={`mt-1.5 inline-block text-[10px] px-1.5 py-0.5 rounded ${accentBgLight} ${accentClass}`}>编辑元素 / 下载PSD</span>}
+                      {provider.modelType === 'video' && provider.isEnabled && <span className={`mt-1.5 inline-block text-[10px] px-1.5 py-0.5 rounded ${accentBgLight} ${accentClass}`}>文生视频 / 图生视频 / 视频延长</span>}
+                      {provider.modelType === 'upscaler' && provider.isEnabled && <span className={`mt-1.5 inline-block text-[10px] px-1.5 py-0.5 rounded ${accentBgLight} ${accentClass}`}>无损放大Pro</span>}
+                      {/* Balance inline */}
+                      {bal && (() => { const isUsd = bal.currency === 'USD'; const isUnlimited = bal.balance === -1 || bal.remainingQuota === -1; const fmtQuota = (v: number | null, fallback = '-') => { if (v === null) return fallback; if (v === -1) return '无限'; if (isUsd) return `$${(v / 100).toFixed(2)}`; return Math.abs(v) > 10000 ? `¥${(v / 500000).toFixed(2)}` : `¥${v.toFixed(2)}`; }; const fmtBalance = (v: number | null) => { if (v === null) return null; if (v === -1) return '无限'; return isUsd ? `$${v.toFixed(2)}` : `¥${v.toFixed(2)}`; }; const balanceColor = bal.balance === null ? '' : bal.balance < 0 ? 'text-green-500' : bal.balance > 10 ? 'text-green-500' : bal.balance > 1 ? 'text-yellow-500' : 'text-red-500'; return (<div className={`mt-1.5 flex items-center gap-3 text-[10px] flex-wrap ${isDark ? 'text-[#888]' : 'text-gray-500'}`}>{bal.balance !== null && <span className="flex items-center gap-1"><Wallet className="w-3 h-3" />{isUnlimited ? '额度' : '余额'}: <span className={`font-medium ${balanceColor}`}>{fmtBalance(bal.balance)}</span></span>}{bal.totalUsage > 0 && <span>已用: {isUsd ? `$${(bal.totalUsage / 100).toFixed(2)}` : fmtQuota(bal.usedQuota)}</span>}{!isUnlimited && bal.remainingQuota !== null && bal.remainingQuota > 0 && <span className={!isUsd && bal.remainingQuota < 500000 ? 'text-yellow-500' : ''}>剩余: {fmtQuota(bal.remainingQuota)}</span>}{bal.error && <span className="text-red-400 flex items-center gap-1"><AlertTriangle className="w-3 h-3" />{bal.error}</span>}</div>); })()}
+                    </div>
+                    {/* Action buttons - main actions visible */}
+                    <div className="flex items-center gap-1 shrink-0">
+                      {/* Toggle enable/disable */}
+                      <button onClick={() => void handleToggleApi(provider)} className={`px-2.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-colors ${provider.isEnabled ? (isDark ? 'bg-green-500/10 text-green-400 hover:bg-green-500/20' : 'bg-green-50 text-green-600 hover:bg-green-100') : (isDark ? 'bg-white/5 text-[#888] hover:bg-white/10' : 'bg-gray-100 text-gray-500 hover:bg-gray-200')}`}>{provider.isEnabled ? '停用' : '启用'}</button>
+                      {/* Edit */}
+                      <button onClick={() => { handleEditApi(provider); setShowApiDrawer(true); }} className={`px-2.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-colors ${isDark ? 'bg-blue-500/10 text-blue-400 hover:bg-blue-500/20' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'}`}>编辑</button>
+                      {/* Delete */}
+                      <button onClick={() => handleDeleteApi(provider)} className={`px-2.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-colors ${isDark ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20' : 'bg-red-50 text-red-500 hover:bg-red-100'}`}>删除</button>
+                      {/* More menu */}
+                      <div className="relative">
+                        <button onClick={() => setMoreMenuProviderId(moreMenuProviderId === provider.id ? null : provider.id)} className={`p-1.5 rounded-lg cursor-pointer ${isDark ? 'hover:bg-white/5 text-[#888]' : 'hover:bg-gray-100 text-gray-500'}`}><MoreHorizontal className="w-4 h-4" /></button>
+                        {moreMenuProviderId === provider.id && (
+                          <div className={`absolute right-0 top-8 z-50 min-w-[160px] rounded-xl border shadow-xl py-1 ${isDark ? 'bg-[#1a1a2e] border-white/10' : 'bg-white border-gray-200'}`}>
+                            <button onClick={() => { void handleTestConnection(provider); setMoreMenuProviderId(null); }} disabled={isTesting} className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 cursor-pointer ${isDark ? 'hover:bg-white/5 text-[#ccc]' : 'hover:bg-gray-50 text-gray-700'}`}>
+                              {isTesting && testResult?.providerId === provider.id ? <Loader2 className="w-3.5 h-3.5 animate-spin text-yellow-500" /> : <Zap className="w-3.5 h-3.5 text-yellow-500" />}测试连接
+                            </button>
+                            <button onClick={() => { void handleRefreshApi(provider); setRefreshingProviderIds(prev => new Set(prev).add(provider.id)); setTimeout(() => setRefreshingProviderIds(prev => { const n = new Set(prev); n.delete(provider.id); return n; }), 5000); setMoreMenuProviderId(null); }} className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 cursor-pointer ${isDark ? 'hover:bg-white/5 text-[#ccc]' : 'hover:bg-gray-50 text-gray-700'}`}>
+                              <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />重新探测模型
+                            </button>
+                            <button onClick={() => { void handleVerifyProtocol(provider); setMoreMenuProviderId(null); }} disabled={isVerifying} className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 cursor-pointer ${isDark ? 'hover:bg-white/5 text-[#ccc]' : 'hover:bg-gray-50 text-gray-700'}`}>
+                              {isVerifying && verifyResult?.providerId === provider.id ? <Loader2 className="w-3.5 h-3.5 animate-spin text-cyan-400" /> : <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />}协议验证
+                            </button>
+                            <div className={`my-1 h-px ${isDark ? 'bg-white/10' : 'bg-gray-100'}`} />
+                            <button onClick={() => { void handleReorderApi(provider.id, 'up'); setMoreMenuProviderId(null); }} disabled={providerIndex === 0} className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 cursor-pointer disabled:opacity-30 ${isDark ? 'hover:bg-white/5 text-[#ccc]' : 'hover:bg-gray-50 text-gray-700'}`}><ArrowUp className="w-3.5 h-3.5" />上移</button>
+                            <button onClick={() => { void handleReorderApi(provider.id, 'down'); setMoreMenuProviderId(null); }} disabled={providerIndex === filteredProviders.length - 1} className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 cursor-pointer disabled:opacity-30 ${isDark ? 'hover:bg-white/5 text-[#ccc]' : 'hover:bg-gray-50 text-gray-700'}`}><ArrowDown className="w-3.5 h-3.5" />下移</button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  {/* Test/Verify results inline */}
+                  {testResult && testResult.providerId === provider.id && (<div className={`mt-2 px-3 py-2 rounded-lg text-xs flex items-center gap-2 ${testResult.success ? (isDark ? 'bg-green-900/20 text-green-400' : 'bg-green-50 text-green-700') : (isDark ? 'bg-red-900/20 text-red-400' : 'bg-red-50 text-red-700')}`}>{testResult.success ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : <XCircle className="w-3.5 h-3.5 shrink-0" />}<span>{testResult.message}</span><button onClick={() => setTestResult(null)} className="ml-auto opacity-50 hover:opacity-100 cursor-pointer"><X size={12} /></button></div>)}
+                  {verifyResult && verifyResult.providerId === provider.id && (<div className={`mt-2 px-3 py-2 rounded-lg text-xs ${isDark ? 'bg-cyan-900/20 text-cyan-300' : 'bg-cyan-50 text-cyan-800'}`}><div className="flex items-center gap-2 mb-1"><ShieldCheck className="w-3.5 h-3.5 shrink-0" /><span className="font-medium">协议验证: {verifyResult.summary}</span><button onClick={() => setVerifyResult(null)} className="ml-auto opacity-50 hover:opacity-100 cursor-pointer"><X size={12} /></button></div><div className="space-y-1 ml-5">{verifyResult.tests.map((test, i) => (<div key={i} className="flex items-center gap-1.5">{test.status === 'pass' ? <CheckCircle2 className="w-3 h-3 text-green-400 shrink-0" /> : test.status === 'warn' ? <AlertTriangle className="w-3 h-3 text-yellow-400 shrink-0" /> : <XCircle className="w-3 h-3 text-red-400 shrink-0" />}<span className="opacity-80">{test.name}:</span><span className="opacity-60">{test.detail}</span></div>))}</div></div>)}
+                </div>
+              );
+              })}
+            </div>
+
+            {/* ── Drawer for Add/Edit API ── */}
+            {showApiDrawer && (
+              <div className="fixed inset-0 z-[200] flex justify-end">
+                <div className="absolute inset-0 bg-black/50" onClick={() => { setShowApiDrawer(false); if (editingProviderId) { setEditingProviderId(null); resetApiForm(); } }} />
+                <div className={`relative w-full max-w-[480px] h-full overflow-y-auto shadow-2xl ${isDark ? 'bg-[#111119]' : 'bg-white'}`}>
+                  {/* Drawer header */}
+                  <div className={`sticky top-0 z-10 px-5 py-4 border-b flex items-center justify-between ${isDark ? 'bg-[#111119] border-white/10' : 'bg-white border-gray-200'}`}>
+                    <h2 className={`text-lg font-bold ${textPrimary}`}>{editingProviderId ? '编辑 API' : '添加 API'}</h2>
+                    <button onClick={() => { setShowApiDrawer(false); if (editingProviderId) { setEditingProviderId(null); resetApiForm(); } }} className={`p-2 rounded-lg cursor-pointer ${isDark ? 'hover:bg-white/5 text-[#888]' : 'hover:bg-gray-100 text-gray-500'}`}><X className="w-5 h-5" /></button>
+                  </div>
+                  {/* Drawer content */}
+                  <div className="px-5 py-5 space-y-4">
+                    {/* Step 1: Core info */}
+                    <div>
+                      <p className={`text-xs font-bold mb-3 ${accentClass}`}>基本信息</p>
+                      <div className="space-y-3">
+                        <div><label className={labelClass}>显示名称</label><input className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="例如：图像生成接口" value={apiName} onChange={e => setApiName(e.target.value)} /></div>
+                        <div><label className={labelClass}>API 类型</label>
+                          <div className="grid grid-cols-3 gap-1.5">
+                            {(Object.keys(apiKindLabels) as ApiKind[]).map(kind => (
+                              <button key={kind} onClick={() => setApiKind(kind)} className={`px-2 py-1.5 rounded-lg text-[11px] font-medium cursor-pointer ${apiKind === kind ? `${accentBgClass} ${accentTextOnBgClass}` : isDark ? 'bg-white/5 text-[#999] border border-white/10' : 'bg-gray-50 text-gray-600 border border-gray-200'}`}>{apiKindLabels[kind]}</button>
+                            ))}
+                          </div>
+                          <p className={`mt-1 text-[10px] ${isDark ? 'text-[#555]' : 'text-gray-400'}`}>{apiKindDescriptions[apiKind]}</p>
+                        </div>
+                        <div><label className={labelClass}>接口地址</label><input className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="https://接口域名" value={apiBaseUrl} onChange={e => setApiBaseUrl(e.target.value)} /></div>
+                        <div><label className={labelClass}>API 密钥</label><input className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="只保存在服务端配置" type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} /></div>
+                      </div>
+                    </div>
+
+                    {/* Discover & test */}
+                    <div>
+                      <p className={`text-xs font-bold mb-3 ${accentClass}`}>识别 & 测试</p>
+                      <div className="flex gap-2">
+                        <button onClick={() => void handleDiscoverModels()} disabled={isDiscovering || !apiBaseUrl.trim() || !apiKey.trim()} className={`flex-1 h-9 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 border ${isDark ? 'border-white/20 hover:bg-white/5' : 'border-gray-200 hover:bg-gray-50'} ${accentClass} disabled:opacity-40 cursor-pointer`}>
+                          <RefreshCw className={`w-3.5 h-3.5 ${isDiscovering ? 'animate-spin' : ''}`} />{isDiscovering ? '识别中...' : '自动识别模型'}
+                        </button>
+                        <button onClick={() => void handleTestNewConnection()} disabled={isTestingNew || !apiBaseUrl || !apiKey} className={`h-9 px-4 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 border disabled:opacity-40 cursor-pointer ${isDark ? `border-white/20 ${accentClass} hover:bg-white/5` : `border-gray-300 ${accentClass} hover:bg-gray-50`}`}>
+                          <Zap className="w-3.5 h-3.5" />{isTestingNew ? '测试中...' : '测试连接'}
+                        </button>
+                      </div>
+                      {testNewResult && (<div className={`mt-2 text-xs px-3 py-2 rounded-lg ${testNewResult.success ? (isDark ? 'bg-green-500/10 text-green-400' : 'bg-green-50 text-green-700') : (isDark ? 'bg-red-500/10 text-red-400' : 'bg-red-50 text-red-700')}`}>{testNewResult.success ? `连接成功 · ${testNewResult.modelCount ?? 0} 个模型可用` : `连接失败：${testNewResult.error || testNewResult.message}`}</div>)}
+                    </div>
+
+                    {/* Step 2: Model selection */}
+                    {discoveredModels.length > 0 && (
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <p className={`text-xs font-bold ${accentClass}`}>选择模型</p>
+                          <button onClick={() => { const allIds = discoveredModels.map(m => m.id); setSelectedModels(selectedModels.length === allIds.length ? [] : allIds); }} className={`text-xs px-2 py-0.5 rounded border cursor-pointer ${accentClass} ${accentBorderClass} ${accentBgLight}`}>{selectedModels.length === discoveredModels.length ? '取消全选' : '全选'}</button>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 max-h-[200px] overflow-y-auto">
+                          {(() => { const q = modelSearchQuery.toLowerCase().trim(); const sorted = q ? [...discoveredModels].sort((a, b) => { const aMatch = (a.name || a.id).toLowerCase().includes(q) ? 0 : 1; const bMatch = (b.name || b.id).toLowerCase().includes(q) ? 0 : 1; return aMatch - bMatch; }) : discoveredModels; return sorted.map(model => (<button key={model.id} onClick={() => setSelectedModels(prev => prev.includes(model.id) ? prev.filter(id => id !== model.id) : [...prev, model.id])} className={`px-2.5 py-1 rounded-md text-xs border cursor-pointer ${selectedModels.includes(model.id) ? `${accentBgClass} ${accentTextOnBgClass} border-transparent` : isDark ? 'bg-white/5 text-[#999] border-white/10' : 'bg-gray-50 text-gray-600 border-gray-200'}`}>{model.name && model.name !== model.id ? model.name : getModelDisplayName(model.id)}</button>)); })()}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Step 3: Advanced config */}
+                    <div>
+                      <p className={`text-xs font-bold mb-3 ${accentClass}`}>高级配置</p>
+                      <div className="space-y-3">
+                        <div><label className={labelClass}>默认模型 ID（可选）</label><input className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="未自动识别时填写" value={apiModel} onChange={e => setApiModel(e.target.value)} /></div>
+                        <div><label className={labelClass}>API 兼容模式</label>
+                          <select className={`w-full h-10 px-3 rounded-lg border text-sm ${isDark ? 'bg-white/5 border-white/10 text-[#ccc]' : 'bg-white border-gray-200 text-gray-800'}`} value={compatProfile} onChange={e => setCompatProfile(e.target.value)}>
+                            <option value="auto">自动检测</option><option value="apimart">异步轮询 (宽高比)</option><option value="openai">OpenAI 兼容 (直接返回)</option><option value="openai-async">OpenAI 兼容 (异步轮询)</option>
+                          </select>
+                        </div>
+                        {/* Balance account */}
+                        <div className={`p-3 rounded-lg border ${isDark ? 'border-white/10 bg-white/[0.03]' : 'border-gray-200 bg-gray-50/50'}`}>
+                          <p className={`text-xs font-medium mb-2 ${isDark ? 'text-[#888]' : 'text-gray-500'}`}>余额查询账号 <span className={`text-[10px] ${isDark ? 'text-[#555]' : 'text-gray-400'}`}>(One API / New API 中转站登录账号)</span></p>
+                          <div className="grid grid-cols-2 gap-2">
+                            <input className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="平台登录用户名" value={balanceUsername} onChange={e => setBalanceUsername(e.target.value)} />
+                            <input className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="平台登录密码" type="password" value={balancePassword} onChange={e => setBalancePassword(e.target.value)} />
+                          </div>
+                        </div>
+                        {/* Advanced params */}
+                        <div>
+                          <button type="button" onClick={() => setShowAdvancedParams(!showAdvancedParams)} className={`flex items-center gap-2 text-xs font-medium cursor-pointer ${isDark ? 'text-[#ccc]' : 'text-gray-700'}`}><Settings className="w-3.5 h-3.5" /><span>高级参数{advancedParams.length > 0 ? `(${advancedParams.length})` : ''}</span><ChevronDown className={`w-3.5 h-3.5 transition-transform ${showAdvancedParams ? 'rotate-180' : ''}`} /></button>
+                          {showAdvancedParams && (
+                            <div className="mt-2 space-y-2">
+                              {advancedParams.map((param, idx) => (<div key={idx} className="flex items-center gap-2"><input className={`w-[35%] shrink-0 h-9 px-2.5 rounded-lg border text-sm ${inputClass}`} placeholder="参数名" value={param.key} onChange={e => { const next = [...advancedParams]; next[idx] = { ...next[idx], key: e.target.value }; setAdvancedParams(next); }} /><input className={`flex-1 min-w-0 h-9 px-2.5 rounded-lg border text-sm ${inputClass}`} placeholder="参数值" value={param.value} onChange={e => { const next = [...advancedParams]; next[idx] = { ...next[idx], value: e.target.value }; setAdvancedParams(next); }} /><button type="button" onClick={() => setAdvancedParams(prev => prev.filter((_, i) => i !== idx))} className="p-1.5 rounded-md text-red-500 hover:bg-red-500/10 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button></div>))}
+                              <button type="button" onClick={() => setAdvancedParams(prev => [...prev, { key: `param_${Date.now().toString().slice(-5)}`, value: '' }])} className={`flex items-center gap-1.5 text-xs cursor-pointer ${isDark ? 'text-[#888] hover:text-[#aaa]' : 'text-gray-500 hover:text-gray-700'}`}><Plus className="w-3.5 h-3.5" />添加参数</button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Action buttons */}
+                    <div className="flex gap-2 pt-2">
+                      <button onClick={() => { setShowApiDrawer(false); if (editingProviderId) { setEditingProviderId(null); resetApiForm(); } }} className={`flex-1 h-10 rounded-lg text-sm font-medium border cursor-pointer ${isDark ? 'border-white/20 text-[#888] hover:bg-white/5' : 'border-gray-300 text-gray-500 hover:bg-gray-50'}`}>取消</button>
+                      <button onClick={() => { editingProviderId ? void handleUpdateApi() : void handleAddApi(); }} className={`flex-1 h-10 rounded-lg text-sm font-semibold cursor-pointer ${editingProviderId ? 'bg-blue-600 text-white hover:bg-blue-700' : `${accentBgClass} ${accentTextOnBgClass}`}`}>{editingProviderId ? '更新 API' : '添加 API'}</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
