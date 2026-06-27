@@ -2,6 +2,7 @@
  * Responses API SSE 流式保活模块
  *
  * 参考 Image-Studio 的 SSE 流式保活设计，实现 OpenAI Responses API 的 SSE 解析。
+ * 同时兼容 Images API SSE 格式（image_generation.*），支持多种中转站协议。
  *
  * 核心原理：
  * - 使用 /v1/responses 端点 + image_generation 工具 + SSE 流式协议
@@ -15,8 +16,11 @@
  * - 纯新增模块，不修改现有代码结构
  */
 
+import { shouldUseResponsesAPI } from './model-capabilities';
+
 /** Responses API SSE 事件类型 */
 export type ResponsesApiEventType =
+  // OpenAI Responses API 格式 (response.*)
   | 'response.created'
   | 'response.in_progress'
   | 'response.image_generation_call.in_progress'
@@ -25,6 +29,11 @@ export type ResponsesApiEventType =
   | 'response.output_item.done'
   | 'response.completed'
   | 'response.failed'
+  // Images API SSE 格式 (image_generation.* — 部分中转站使用)
+  | 'image_generation.partial_image'
+  | 'image_generation.completed'
+  | 'image_generation.failed'
+  // 通用事件
   | 'error'
   | 'unknown';
 
@@ -37,13 +46,15 @@ export interface ResponsesApiSSEEvent {
   stage: string;
   /** 是否有最终图片结果 */
   hasFinalImage: boolean;
-  /** 最终图片 base64（仅 output_item.done 时有值） */
+  /** 最终图片 base64（仅 output_item.done / image_generation.completed 时有值） */
   finalImageB64: string | null;
+  /** 最终图片 URL（部分中转站返回 URL 而非 base64） */
+  finalImageUrl: string | null;
   /** 修订后的 prompt（可选） */
   revisedPrompt: string | null;
   /** 部分图片 base64（partial_image 事件时更新） */
   partialImageB64: string | null;
-  /** 错误信息（error / response.failed 时有值） */
+  /** 错误信息（error / response.failed / image_generation.failed 时有值） */
   error: string | null;
 }
 
@@ -51,6 +62,8 @@ export interface ResponsesApiSSEEvent {
 export interface ResponsesApiResult {
   success: boolean;
   imageB64: string | null;
+  /** 最终图片 URL（部分中转站返回 URL 而非 base64） */
+  imageUrl: string | null;
   revisedPrompt: string | null;
   partialImageB64: string | null;
   isPartial: boolean;
@@ -194,6 +207,7 @@ function extractEventDetails(
     stage: getStageDescription(eventType),
     hasFinalImage: false,
     finalImageB64: null,
+    finalImageUrl: null,
     revisedPrompt: null,
     partialImageB64: null,
     error: null,
@@ -201,7 +215,7 @@ function extractEventDetails(
 
   switch (eventType) {
     case 'response.image_generation_call.partial_image': {
-      // 提取部分图片
+      // Responses API 格式: 提取部分图片
       const b64 = raw['partial_image_b64'] as string | undefined;
       if (b64) {
         result.partialImageB64 = b64;
@@ -209,8 +223,17 @@ function extractEventDetails(
       break;
     }
 
+    case 'image_generation.partial_image': {
+      // Images API SSE 格式: 部分图片 (部分中转站使用此格式)
+      const b64 = (raw['b64_json'] || raw['partial_image_b64']) as string | undefined;
+      if (b64) {
+        result.partialImageB64 = b64;
+      }
+      break;
+    }
+
     case 'response.output_item.done': {
-      // 提取最终图片
+      // Responses API 格式: 提取最终图片
       const item = raw['item'] as Record<string, unknown> | undefined;
       if (item) {
         const itemType = String(item.type || '');
@@ -231,6 +254,32 @@ function extractEventDetails(
           }
         }
       }
+      break;
+    }
+
+    case 'image_generation.completed': {
+      // Images API SSE 格式: 最终图片 (部分中转站使用此格式)
+      const b64 = (raw['b64_json'] || raw['image_b64']) as string | undefined;
+      const url = (raw['url'] || raw['image_url']) as string | undefined;
+      if (b64) {
+        result.hasFinalImage = true;
+        result.finalImageB64 = b64;
+        result.revisedPrompt = String(raw['revised_prompt'] || '') || null;
+      } else if (url) {
+        // URL 格式的结果，标记为最终图片
+        result.hasFinalImage = true;
+        result.finalImageUrl = url;
+        result.revisedPrompt = String(raw['revised_prompt'] || '') || null;
+      }
+      break;
+    }
+
+    case 'image_generation.failed': {
+      // Images API SSE 格式: 失败
+      const errorObj = raw['error'] as Record<string, unknown> | undefined;
+      result.error = errorObj
+        ? String(errorObj.message || JSON.stringify(errorObj))
+        : '图片生成失败';
       break;
     }
 
@@ -281,6 +330,12 @@ function getStageDescription(eventType: ResponsesApiEventType): string {
       return '接口已完成';
     case 'response.failed':
       return '生成失败';
+    case 'image_generation.partial_image':
+      return '已收到图片数据片段';
+    case 'image_generation.completed':
+      return '图片生成完成';
+    case 'image_generation.failed':
+      return '生成失败';
     case 'error':
       return '接口错误';
     default:
@@ -295,6 +350,7 @@ function getStageDescription(eventType: ResponsesApiEventType): string {
  */
 export function extractResultFromSSERaw(rawText: string): ResponsesApiResult {
   let finalImageB64: string | null = null;
+  let finalImageUrl: string | null = null;
   let revisedPrompt: string | null = null;
   let lastPartialB64: string | null = null;
   let lastError: string | null = null;
@@ -307,8 +363,9 @@ export function extractResultFromSSERaw(rawText: string): ResponsesApiResult {
     if (event.partialImageB64) {
       lastPartialB64 = event.partialImageB64;
     }
-    if (event.hasFinalImage && event.finalImageB64) {
-      finalImageB64 = event.finalImageB64;
+    if (event.hasFinalImage) {
+      if (event.finalImageB64) finalImageB64 = event.finalImageB64;
+      if (event.finalImageUrl) finalImageUrl = event.finalImageUrl;
       revisedPrompt = event.revisedPrompt;
     }
     if (event.error) {
@@ -316,10 +373,11 @@ export function extractResultFromSSERaw(rawText: string): ResponsesApiResult {
     }
   }
 
-  if (finalImageB64) {
+  if (finalImageB64 || finalImageUrl) {
     return {
       success: true,
       imageB64: finalImageB64,
+      imageUrl: finalImageUrl,
       revisedPrompt,
       partialImageB64: lastPartialB64,
       isPartial: false,
@@ -332,6 +390,7 @@ export function extractResultFromSSERaw(rawText: string): ResponsesApiResult {
     return {
       success: true,
       imageB64: lastPartialB64,
+      imageUrl: null,
       revisedPrompt: null,
       partialImageB64: lastPartialB64,
       isPartial: true,
@@ -342,6 +401,7 @@ export function extractResultFromSSERaw(rawText: string): ResponsesApiResult {
   return {
     success: false,
     imageB64: null,
+    imageUrl: null,
     revisedPrompt: null,
     partialImageB64: null,
     isPartial: false,
@@ -356,21 +416,14 @@ export function extractResultFromSSERaw(rawText: string): ResponsesApiResult {
  * 1. 上游实现了 /v1/responses 端点
  * 2. 模型内置了 image_generation 工具
  *
- * 当前已确认支持的模型系列:
- * - gpt-image 系列 (gpt-image-1, gpt-image-2 等)
- * - chatgpt-image 系列 (chatgpt-image-latest 等)
- * - dall-e-3 (通过 Responses API 可获得 SSE 保活优势)
+ * 当前已确认支持的模型系列由 model-capabilities 注册表统一管理，
+ * 新增模型只需在注册表中设置 supportsResponsesAPI: true 即可。
  *
  * 注意: 即使模型在此列表中，如果上游不支持 /v1/responses，
  * 也会自动降级到标准 Images API 路径
  */
 export function isResponsesApiSupportedModel(modelId: string): boolean {
-  const lower = modelId.toLowerCase();
-  return (
-    lower.includes('gpt-image') ||
-    lower.includes('chatgpt-image') ||
-    lower === 'dall-e-3'
-  );
+  return shouldUseResponsesAPI(modelId);
 }
 
 /**
@@ -384,21 +437,42 @@ export function needsTextModel(modelId: string): boolean {
 /**
  * 推断合适的文本模型 ID
  *
- * Responses API 需要一个文本模型来驱动 image_generation 工具
+ * Responses API 需要一个文本模型来驱动 image_generation 工具。
+ * 不同模型家族需要配合不同的文本模型。
  */
 export function inferTextModel(imageModel: string): string {
   const lower = imageModel.toLowerCase();
 
-  // GPT-Image-2 配合 GPT-4o
-  if (lower.includes('gpt-image-2') || lower.includes('chatgpt-image')) {
+  // GPT-Image-2+ 配合 GPT-4o
+  if (lower.includes('gpt-image-2') || lower.includes('gpt-image-3') || lower.includes('chatgpt-image')) {
     return 'gpt-4o';
   }
-  // GPT-Image-1 配合 GPT-4o-mini
-  if (lower.includes('gpt-image-1')) {
+  // GPT-Image-1 / GPT-Image-mini 配合 GPT-4o-mini
+  if (lower.includes('gpt-image-1') || lower.includes('gpt-image-mini')) {
     return 'gpt-4o-mini';
   }
+  // Flux 系列配合 claude-sonnet (常用中转站组合)
+  if (lower.includes('flux')) {
+    return 'gpt-4o'; // 通用文本模型，大多数中转站支持
+  }
+  // Seedream 系列配合豆包文本模型
+  if (lower.includes('seedream') || lower.includes('doubao')) {
+    return 'doubao-pro-32k'; // 豆包文本模型
+  }
+  // Ideogram 系列
+  if (lower.includes('ideogram')) {
+    return 'gpt-4o';
+  }
+  // HiDream 系列
+  if (lower.includes('hidream')) {
+    return 'gpt-4o';
+  }
+  // Gemini 图像系列配合 Gemini 文本模型
+  if (lower.includes('gemini')) {
+    return 'gemini-2.5-flash';
+  }
 
-  // 默认使用 gpt-4o
+  // 默认使用 gpt-4o（最通用的选择）
   return 'gpt-4o';
 }
 
@@ -420,6 +494,7 @@ export async function streamResponsesApiSSE(
   const decoder = new TextDecoder();
   let buffer = '';
   let finalImageB64: string | null = null;
+  let finalImageUrl: string | null = null;
   let revisedPrompt: string | null = null;
   let lastPartialB64: string | null = null;
   let lastError: string | null = null;
@@ -451,8 +526,13 @@ export async function streamResponsesApiSSE(
         if (event.partialImageB64) {
           lastPartialB64 = event.partialImageB64;
         }
-        if (event.hasFinalImage && event.finalImageB64) {
-          finalImageB64 = event.finalImageB64;
+        if (event.hasFinalImage) {
+          if (event.finalImageB64) {
+            finalImageB64 = event.finalImageB64;
+          }
+          if (event.finalImageUrl) {
+            finalImageUrl = event.finalImageUrl;
+          }
           revisedPrompt = event.revisedPrompt;
         }
         if (event.error) {
@@ -467,8 +547,9 @@ export async function streamResponsesApiSSE(
       if (event) {
         onEvent(event);
         if (event.partialImageB64) lastPartialB64 = event.partialImageB64;
-        if (event.hasFinalImage && event.finalImageB64) {
-          finalImageB64 = event.finalImageB64;
+        if (event.hasFinalImage) {
+          if (event.finalImageB64) finalImageB64 = event.finalImageB64;
+          if (event.finalImageUrl) finalImageUrl = event.finalImageUrl;
           revisedPrompt = event.revisedPrompt;
         }
         if (event.error) lastError = event.error;
@@ -476,10 +557,11 @@ export async function streamResponsesApiSSE(
     }
   } catch (err) {
     // 流中断，尝试用 partial image 兜底
-    if (!finalImageB64 && lastPartialB64) {
+    if (!finalImageB64 && !finalImageUrl && lastPartialB64) {
       return {
         success: true,
         imageB64: lastPartialB64,
+        imageUrl: null,
         revisedPrompt: null,
         partialImageB64: lastPartialB64,
         isPartial: true,
@@ -489,6 +571,7 @@ export async function streamResponsesApiSSE(
     return {
       success: false,
       imageB64: null,
+      imageUrl: null,
       revisedPrompt: null,
       partialImageB64: lastPartialB64,
       isPartial: false,
@@ -496,10 +579,11 @@ export async function streamResponsesApiSSE(
     };
   }
 
-  if (finalImageB64) {
+  if (finalImageB64 || finalImageUrl) {
     return {
       success: true,
       imageB64: finalImageB64,
+      imageUrl: finalImageUrl,
       revisedPrompt,
       partialImageB64: lastPartialB64,
       isPartial: false,
@@ -512,6 +596,7 @@ export async function streamResponsesApiSSE(
     return {
       success: true,
       imageB64: lastPartialB64,
+      imageUrl: null,
       revisedPrompt: null,
       partialImageB64: lastPartialB64,
       isPartial: true,
@@ -522,6 +607,7 @@ export async function streamResponsesApiSSE(
   return {
     success: false,
     imageB64: null,
+    imageUrl: null,
     revisedPrompt: null,
     partialImageB64: null,
     isPartial: false,

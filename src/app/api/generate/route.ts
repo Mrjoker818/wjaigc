@@ -10,8 +10,8 @@ import { translateApiError } from '@/lib/api-error-translate';
 import { classifyApiError, type ClassifiedError, isCloudflareTimeoutError, translateApiError as translateApiErrorV2 } from '@/lib/api-error-translator';
 import { detectInvalidSizeError, repairSize, classifyImageModelFamily } from '@/lib/size-auto-repair';
 import { fetchWithSmartRetry } from '@/lib/smart-retry';
-import { streamResponsesApiSSE, isResponsesApiSupportedModel, buildResponsesApiPayload, type ResponsesApiResult, type ResponsesApiSSEEvent } from '@/lib/responses-api-sse';
-import { getModelCapabilities, filterRequestForModel, type ModelCapabilities } from '@/lib/model-capabilities';
+import { streamResponsesApiSSE, buildResponsesApiPayload, type ResponsesApiResult, type ResponsesApiSSEEvent } from '@/lib/responses-api-sse';
+import { getModelCapabilities, filterRequestForModel, shouldUseResponsesAPI, type ModelCapabilities } from '@/lib/model-capabilities';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { consumeCredits } from '@/lib/credits';
 
@@ -1031,12 +1031,11 @@ export async function POST(request: NextRequest) {
         if (!timeoutCleared) { clearTimeout(timeoutId); timeoutCleared = true; }
       };
 
-      // ★ Responses API SSE 流式保活路径 — 仅对 gpt-image 系模型启用
+      // ★ Responses API SSE 流式保活路径 — 对支持 Responses API 的模型启用
       // 通过 Cloudflare 代理的中转站长时间推理容易 524/504 断连，
       // /v1/responses + SSE 心跳保活可避免此问题
-      const modelIdLower = currentModelConfig.modelId.toLowerCase();
-      const isGptImageModel = modelIdLower.startsWith('gpt-image') || modelIdLower.startsWith('chatgpt-image');
-      const responsesApiEnabled = isGptImageModel && process.env.RESPONSES_API_ENABLED !== 'false';
+      // 模型支持列表由 model-capabilities 注册表统一管理
+      const responsesApiEnabled = shouldUseResponsesAPI(currentModelConfig.modelId);
 
       if (responsesApiEnabled) {
         try {
@@ -1094,6 +1093,16 @@ export async function POST(request: NextRequest) {
             return {
               taskIds: [],
               directImageUrls: [`data:image/png;base64,${sseResult.imageB64}`],
+              usedModel: currentModelConfig.modelId,
+              usedProviderId: currentProviderId,
+            };
+          }
+          // SSE returned URL (部分中转站返回 URL 而非 base64)
+          if (sseResult.imageUrl) {
+            console.log('[generate] Responses API SSE succeeded, got image URL');
+            return {
+              taskIds: [],
+              directImageUrls: [sseResult.imageUrl],
               usedModel: currentModelConfig.modelId,
               usedProviderId: currentProviderId,
             };
