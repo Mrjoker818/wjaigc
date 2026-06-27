@@ -12,8 +12,9 @@ import {
 /* ── Types ── */
 interface AdminUser {
   id: string; name: string; role: string; status: string;
-  email?: string; credits: number; created_at: string;
+  email?: string; credits?: number; createdAt?: number; created_at?: string;
   last_login?: string; project_count?: number; api_permissions?: string[];
+  apiPermissions?: Record<string, boolean>;
 }
 
 interface AdminProvider {
@@ -21,6 +22,34 @@ interface AdminProvider {
   model_type: string; selected_models: string[]; discovered_models: string[];
   isEnabled: boolean; balance?: number; balanceCurrency?: string;
   compatProfile?: string; advancedParams?: Record<string, unknown>;
+}
+
+interface DashboardStats {
+  totalUsers: number; dau: number; wau: number; mau: number;
+  totalCredits: number; creditsUsedToday: number; creditsUsedWeek: number;
+  totalProviders: number; activeProviders: number;
+  recentUsers?: Array<{ name: string; date: string; email?: string }>;
+  providerHealth?: Array<{ name: string; status: 'healthy' | 'degraded' | 'down'; latency?: number }>;
+  alerts?: Array<{ type: 'warning' | 'error'; message: string; time: string }>;
+}
+
+interface AuditLogEntry {
+  id: string; userId: string; userName: string; action: string;
+  targetType?: string; targetId?: string; detail?: string;
+  ipAddress?: string; createdAt: number;
+}
+
+interface AuditStats {
+  todayCount: number; weekCount: number; totalCount: number;
+  byAction?: Record<string, number>;
+}
+
+interface SystemSettings {
+  defaultImageModel?: string; defaultChatModel?: string;
+  maxConcurrentTasks?: number; imageMaxSizeMB?: number;
+  openRegistration?: boolean; apiRateLimiting?: boolean;
+  videoGenerationEnabled?: boolean; threeDModelEnabled?: boolean;
+  announcement?: string;
 }
 
 interface AdminTabsProps {
@@ -53,11 +82,19 @@ function formatNumber(n: number): string {
   return String(n);
 }
 
-function formatDate(iso: string): string {
+function formatDate(iso: string | number | undefined): string {
   if (!iso) return '-';
-  const d = new Date(iso);
+  const d = new Date(typeof iso === 'number' ? iso : iso);
+  if (isNaN(d.getTime())) return '-';
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
+
+function getUserCredits(u: AdminUser): number { return u.credits ?? 0; }
+function getUserProjects(u: AdminUser): number { return u.project_count ?? 0; }
+function getUserCreated(u: AdminUser): string { return formatDate(u.createdAt ?? u.created_at); }
+function getUserLastLogin(u: AdminUser): string { return u.last_login ? formatDate(u.last_login) : '从未'; }
+function getUserEmail(u: AdminUser): string { return u.email ?? '-'; }
+function getUserPermissions(u: AdminUser): Record<string, boolean> { return u.apiPermissions ?? {}; }
 
 function formatDateTime(iso: string): string {
   if (!iso) return '-';
@@ -511,7 +548,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                 </tr>
               </thead>
               <tbody>
-                {(s?.recentUsers || adminUsers.slice(0, 5).map(u => ({ name: u.name, date: u.created_at || '', email: u.email || '' }))).map((u, i) => (
+                {(s?.recentUsers || adminUsers.slice(0, 5).map(u => ({ name: u.name, date: getUserCreated(u), email: getUserEmail(u) }))).map((u, i) => (
                   <tr key={i} className="border-b border-border/30 hover:bg-muted/30 transition-colors">
                     <td className="py-2.5 px-3 text-foreground font-medium">{u.name}</td>
                     <td className="py-2.5 px-3 text-muted-foreground">{u.email || '-'}</td>
@@ -576,10 +613,10 @@ export default function AdminTabs(props: AdminTabsProps) {
                   <input type="checkbox" checked={isSelected} onClick={e => { e.stopPropagation(); setSelectedUserIds(prev => { const n = new Set(prev); n.has(u.id) ? n.delete(u.id) : n.add(u.id); return n; }); }} className="w-4 h-4 rounded border-border accent-primary" />
                 </div>
                 <div className="space-y-1.5 text-xs">
-                  <div className="flex items-center justify-between"><span className="text-muted-foreground">邮箱</span><span className="text-foreground truncate ml-2">{u.email || '-'}</span></div>
-                  <div className="flex items-center justify-between"><span className="text-muted-foreground">积分</span><span className="text-foreground font-mono">{u.credits.toLocaleString()}</span></div>
-                  <div className="flex items-center justify-between"><span className="text-muted-foreground">作品</span><span className="text-foreground font-mono">{u.project_count ?? '-'}</span></div>
-                  <div className="flex items-center justify-between"><span className="text-muted-foreground">注册</span><span className="text-foreground font-mono">{formatDate(u.created_at)}</span></div>
+                  <div className="flex items-center justify-between"><span className="text-muted-foreground">邮箱</span><span className="text-foreground truncate ml-2">{getUserEmail(u)}</span></div>
+                  <div className="flex items-center justify-between"><span className="text-muted-foreground">积分</span><span className="text-foreground font-mono">{getUserCredits(u).toLocaleString()}</span></div>
+                  <div className="flex items-center justify-between"><span className="text-muted-foreground">作品</span><span className="text-foreground font-mono">{getUserProjects(u) || '-'}</span></div>
+                  <div className="flex items-center justify-between"><span className="text-muted-foreground">注册</span><span className="text-foreground font-mono">{getUserCreated(u)}</span></div>
                 </div>
               </div>
             );
@@ -606,9 +643,9 @@ export default function AdminTabs(props: AdminTabsProps) {
                   </div>
                 </div>
                 <div className="grid grid-cols-3 gap-3">
-                  <div className="bg-muted/50 rounded-lg p-3 text-center"><p className="text-lg font-bold text-foreground">{detailUser.credits.toLocaleString()}</p><p className="text-[10px] text-muted-foreground mt-0.5">积分余额</p></div>
+                  <div className="bg-muted/50 rounded-lg p-3 text-center"><p className="text-lg font-bold text-foreground">{(detailUser.credits ?? 0).toLocaleString()}</p><p className="text-[10px] text-muted-foreground mt-0.5">积分余额</p></div>
                   <div className="bg-muted/50 rounded-lg p-3 text-center"><p className="text-lg font-bold text-foreground">{detailUser.project_count ?? '-'}</p><p className="text-[10px] text-muted-foreground mt-0.5">作品数</p></div>
-                  <div className="bg-muted/50 rounded-lg p-3 text-center"><p className="text-xs font-bold text-foreground">{formatDate(detailUser.created_at)}</p><p className="text-[10px] text-muted-foreground mt-0.5">注册时间</p></div>
+                  <div className="bg-muted/50 rounded-lg p-3 text-center"><p className="text-xs font-bold text-foreground">{getUserCreated(detailUser)}</p><p className="text-[10px] text-muted-foreground mt-0.5">注册时间</p></div>
                 </div>
                 {/* 权限 */}
                 <div>
@@ -832,7 +869,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                 return (
                   <React.Fragment key={logId}>
                     <tr className={`border-b border-border/30 hover:bg-muted/30 transition-colors ${isDanger ? 'bg-destructive/5' : ''}`}>
-                      <td className="py-3 px-4 text-muted-foreground font-mono text-xs">{formatDateTime(String(log.created_at || ''))}</td>
+                      <td className="py-3 px-4 text-muted-foreground font-mono text-xs">{formatDateTime(String(log.createdAt || ''))}</td>
                       <td className="py-3 px-4 text-foreground font-medium">{String(log.user_name || log.user_id || '-')}</td>
                       <td className="py-3 px-4"><span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${actionColors[action] || 'bg-muted text-muted-foreground'}`}>{actionLabels[action] || action}</span></td>
                       <td className="py-3 px-4 text-muted-foreground">{String(log.target_type || '')}{log.target_id ? ` #${log.target_id}` : ''}</td>

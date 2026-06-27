@@ -25,7 +25,33 @@ export async function GET(request: NextRequest) {
     }
 
     const users = await listManagedUsers();
-    return NextResponse.json({ success: true, users });
+    // Enrich users with credits and project count from user_data
+    const enrichedUsers = await Promise.all((users || []).map(async (u: User) => {
+      let credits = 0;
+      let projectCount = 0;
+      try {
+        const ud = await dbGetUserData(u.id, 'credits') as Record<string, unknown> | null;
+        if (ud && typeof ud === 'object' && 'data_value' in ud) {
+          const dv = (ud as Record<string, unknown>).data_value;
+          const parsed = typeof dv === 'string' ? JSON.parse(dv) : dv;
+          credits = Number((parsed as Record<string, unknown>)?.balance ?? (parsed as Record<string, unknown>)?.credits ?? 0) || 0;
+        }
+      } catch {}
+      try {
+        const pd = await dbGetUserData(u.id, 'projects') as Record<string, unknown> | null;
+        if (pd && typeof pd === 'object' && 'data_value' in pd) {
+          const dv = (pd as Record<string, unknown>).data_value;
+          const parsed = typeof dv === 'string' ? JSON.parse(dv) : dv;
+          projectCount = Array.isArray(parsed) ? parsed.length : (typeof parsed === 'object' ? Object.keys(parsed as Record<string, unknown>).length : 0);
+        }
+      } catch {}
+      return {
+        ...u,
+        credits,
+        project_count: projectCount,
+      };
+    }));
+    return NextResponse.json({ success: true, users: enrichedUsers });
   } catch (error) {
     console.error('[admin/users] GET error:', error);
     return NextResponse.json({ success: false, error: 'Failed to load users', users: [] }, { status: 500 });
