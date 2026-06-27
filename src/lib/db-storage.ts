@@ -1271,3 +1271,180 @@ export async function dbGetRecentTransactions(limit: number = 100): Promise<DbCr
     return [];
   }
 }
+
+export async function dbGetUserTransactions(userId: string, limit: number = 100): Promise<DbCreditTransaction[]> {
+  try {
+    const result = await execSql(
+      `SELECT * FROM wujie_credit_transactions WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2`,
+      [userId, limit]
+    );
+    return result.rows as unknown as DbCreditTransaction[];
+  } catch (e) {
+    console.error('[db-storage] dbGetUserTransactions error:', e);
+    return [];
+  }
+}
+
+// ─── Audit Log ────────────────────────────────────────────────────────────────
+
+interface DbAuditLog {
+  id: string;
+  user_id: string;
+  user_name: string | null;
+  action: string;
+  target_type: string | null;
+  target_id: string | null;
+  detail: string | null;
+  ip_address: string | null;
+  created_at: number;
+}
+
+export async function dbAddAuditLog(entry: Omit<DbAuditLog, 'id'>): Promise<string> {
+  try {
+    const id = `audit_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    await execSql(
+      `INSERT INTO wujie_audit_log (id, user_id, user_name, action, target_type, target_id, detail, ip_address, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [id, entry.user_id, entry.user_name || null, entry.action, entry.target_type || null, entry.target_id || null, entry.detail || null, entry.ip_address || null, entry.created_at || Date.now()]
+    );
+    return id;
+  } catch (e) {
+    console.error('[db-storage] dbAddAuditLog error:', e);
+    return '';
+  }
+}
+
+export async function dbGetAuditLogs(options?: {
+  action?: string;
+  userId?: string;
+  startTime?: number;
+  endTime?: number;
+  limit?: number;
+  offset?: number;
+}): Promise<{ logs: DbAuditLog[]; total: number }> {
+  try {
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    let paramIdx = 1;
+
+    if (options?.action) {
+      conditions.push(`action = $${paramIdx++}`);
+      params.push(options.action);
+    }
+    if (options?.userId) {
+      conditions.push(`user_id = $${paramIdx++}`);
+      params.push(options.userId);
+    }
+    if (options?.startTime) {
+      conditions.push(`created_at >= $${paramIdx++}`);
+      params.push(options.startTime);
+    }
+    if (options?.endTime) {
+      conditions.push(`created_at <= $${paramIdx++}`);
+      params.push(options.endTime);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const limit = options?.limit || 50;
+    const offset = options?.offset || 0;
+
+    // Get total count
+    const countResult = await execSql(`SELECT COUNT(*) as count FROM wujie_audit_log ${whereClause}`, params);
+    const total = (countResult.rows as { count: number }[])[0]?.count || 0;
+
+    // Get logs
+    const result = await execSql(
+      `SELECT * FROM wujie_audit_log ${whereClause} ORDER BY created_at DESC LIMIT $${paramIdx++} OFFSET $${paramIdx++}`,
+      [...params, limit, offset]
+    );
+    return { logs: result.rows as unknown as DbAuditLog[], total };
+  } catch (e) {
+    console.error('[db-storage] dbGetAuditLogs error:', e);
+    return { logs: [], total: 0 };
+  }
+}
+
+export async function dbGetAuditStats(): Promise<{
+  totalActions: number;
+  todayActions: number;
+  uniqueUsers: number;
+  actionBreakdown: Record<string, number>;
+}> {
+  try {
+    const now = Date.now();
+    const todayStart = now - (now % 86400000);
+
+    const [totalRes, todayRes, usersRes, breakdownRes] = await Promise.all([
+      execSql('SELECT COUNT(*) as count FROM wujie_audit_log'),
+      execSql('SELECT COUNT(*) as count FROM wujie_audit_log WHERE created_at >= $1', [todayStart]),
+      execSql('SELECT COUNT(DISTINCT user_id) as count FROM wujie_audit_log'),
+      execSql('SELECT action, COUNT(*) as count FROM wujie_audit_log GROUP BY action ORDER BY count DESC LIMIT 20'),
+    ]);
+
+    const breakdown: Record<string, number> = {};
+    for (const row of breakdownRes.rows as { action: string; count: number }[]) {
+      breakdown[row.action] = row.count;
+    }
+
+    return {
+      totalActions: (totalRes.rows as { count: number }[])[0]?.count || 0,
+      todayActions: (todayRes.rows as { count: number }[])[0]?.count || 0,
+      uniqueUsers: (usersRes.rows as { count: number }[])[0]?.count || 0,
+      actionBreakdown: breakdown,
+    };
+  } catch (e) {
+    console.error('[db-storage] dbGetAuditStats error:', e);
+    return { totalActions: 0, todayActions: 0, uniqueUsers: 0, actionBreakdown: {} };
+  }
+}
+
+// ─── Dashboard Stats ─────────────────────────────────────────────────────────
+
+export async function dbGetDashboardStats(): Promise<{
+  totalUsers: number;
+  activeUsersToday: number;
+  activeUsersWeek: number;
+  activeUsersMonth: number;
+  totalCreditsRecharged: number;
+  totalCreditsConsumed: number;
+  newUsersToday: number;
+  newUsersWeek: number;
+  newUsersMonth: number;
+}> {
+  try {
+    const now = Date.now();
+    const todayStart = now - (now % 86400000);
+    const weekStart = now - 7 * 86400000;
+    const monthStart = now - 30 * 86400000;
+
+    const [usersRes, creditsRes, todayRes, weekRes, monthRes] = await Promise.all([
+      execSql('SELECT COUNT(*) as count FROM wujie_users'),
+      execSql('SELECT COALESCE(SUM(total_recharged), 0) as recharged, COALESCE(SUM(total_used), 0) as consumed FROM wujie_credits'),
+      execSql('SELECT COUNT(*) as count FROM wujie_users WHERE created_at >= $1', [todayStart]),
+      execSql('SELECT COUNT(*) as count FROM wujie_users WHERE created_at >= $1', [weekStart]),
+      execSql('SELECT COUNT(*) as count FROM wujie_users WHERE created_at >= $1', [monthStart]),
+    ]);
+
+    // Active users = users with credit transactions in the period
+    const [activeTodayRes, activeWeekRes, activeMonthRes] = await Promise.all([
+      execSql('SELECT COUNT(DISTINCT user_id) as count FROM wujie_credit_transactions WHERE created_at >= $1', [todayStart]),
+      execSql('SELECT COUNT(DISTINCT user_id) as count FROM wujie_credit_transactions WHERE created_at >= $1', [weekStart]),
+      execSql('SELECT COUNT(DISTINCT user_id) as count FROM wujie_credit_transactions WHERE created_at >= $1', [monthStart]),
+    ]);
+
+    return {
+      totalUsers: (usersRes.rows as { count: number }[])[0]?.count || 0,
+      activeUsersToday: (activeTodayRes.rows as { count: number }[])[0]?.count || 0,
+      activeUsersWeek: (activeWeekRes.rows as { count: number }[])[0]?.count || 0,
+      activeUsersMonth: (activeMonthRes.rows as { count: number }[])[0]?.count || 0,
+      totalCreditsRecharged: (creditsRes.rows as { recharged: number; consumed: number }[])[0]?.recharged || 0,
+      totalCreditsConsumed: (creditsRes.rows as { recharged: number; consumed: number }[])[0]?.consumed || 0,
+      newUsersToday: (todayRes.rows as { count: number }[])[0]?.count || 0,
+      newUsersWeek: (weekRes.rows as { count: number }[])[0]?.count || 0,
+      newUsersMonth: (monthRes.rows as { count: number }[])[0]?.count || 0,
+    };
+  } catch (e) {
+    console.error('[db-storage] dbGetDashboardStats error:', e);
+    return { totalUsers: 0, activeUsersToday: 0, activeUsersWeek: 0, activeUsersMonth: 0, totalCreditsRecharged: 0, totalCreditsConsumed: 0, newUsersToday: 0, newUsersWeek: 0, newUsersMonth: 0 };
+  }
+}

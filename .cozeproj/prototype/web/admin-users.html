@@ -1,0 +1,1048 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/jquery/jquery-3.7.1.min.js"></script>
+  <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/lucide/lucide-1.11.0.min.js"></script>
+  <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/tailwindcss/tailwindcss-browser-4.2.4.min.js"></script>
+
+  <style type="text/tailwindcss">
+    @theme {
+      /* === 品牌色 === */
+      --color-primary:              #d4af37;
+      --color-primary-container:    #2a2410;
+      --color-on-primary:           #0a0a0b;
+      /* === 背景 / 表面 === */
+      --color-background:                 #0a0a0b;
+      --color-surface-container-lowest:   #111113;
+      --color-surface:                    #1a1a1e;
+      --color-surface-container:          #252529;
+      --color-surface-container-high:     #2e2e33;
+      --color-surface-container-highest:  #38383e;
+      /* === 文字 === */
+      --color-on-surface:           #f5f5f5;
+      --color-on-surface-variant:   #a1a1aa;
+      /* === 功能色 === */
+      --color-success:  #22c55e;
+      --color-error:    #ef4444;
+      --color-warning:  #f59e0b;
+      --color-info:     #3b82f6;
+      /* === 边框 === */
+      --color-outline:          #2e2e33;
+      --color-outline-variant:  #1f1f24;
+      /* === 圆角 === */
+      --radius-sm:   0.375rem;
+      --radius-md:   0.5rem;
+      --radius-lg:   0.5rem;
+      --radius-xl:   0.75rem;
+      --radius-2xl:  1rem;
+      --radius-full: 9999px;
+      /* === 阴影 === */
+      --shadow-card:   0 2px 8px rgba(0,0,0,0.3);
+      --shadow-float:  0 10px 25px rgba(0,0,0,0.5);
+      --shadow-dialog: 0 25px 50px rgba(0,0,0,0.6);
+      --shadow-glow:   0 0 20px rgba(212,175,55,0.15);
+      /* === 字体 === */
+      --font-sans: system-ui, -apple-system, sans-serif;
+      --font-mono: ui-monospace, 'Cascadia Code', 'Fira Code', monospace;
+    }
+  </style>
+
+  <style>
+    /* 抽屉滑入动画 */
+    #user-drawer {
+      transform: translateX(100%);
+      transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    #user-drawer.open {
+      transform: translateX(0);
+    }
+    /* 遮罩层 */
+    #drawer-overlay {
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+    }
+    #drawer-overlay.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    /* 更多菜单 */
+    .more-menu {
+      display: none;
+    }
+    .more-menu.show {
+      display: block;
+    }
+    /* 复选框自定义 */
+    .custom-checkbox {
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 4px;
+      border: 1.5px solid #38383e;
+      background: #252529;
+      cursor: pointer;
+      transition: all 0.15s;
+      flex-shrink: 0;
+    }
+    .custom-checkbox:checked {
+      background: #d4af37;
+      border-color: #d4af37;
+      background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' stroke='%230a0a0b' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: center;
+      background-size: 12px;
+    }
+    /* 表格行选中态 */
+    .table-row.selected {
+      background: rgba(212, 175, 55, 0.06);
+    }
+    /* 滚动条美化 */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #38383e; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #4a4a50; }
+  </style>
+
+  <script>
+    document.addEventListener('error', function (e) {
+      const img = e.target;
+      if (img.tagName !== 'IMG' || img.dataset.fallback) return;
+      img.dataset.fallback = '1';
+      const w = img.width || 400, h = img.height || 300;
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="%231a1a1e"/><text x="50%" y="50%" text-anchor="middle" font-size="14" fill="%23a1a1aa" font-family="system-ui" dominant-baseline="central">Image</text></svg>`;
+      img.src = 'data:image/svg+xml,' + svg;
+    }, true);
+  </script>
+</head>
+
+<body class="bg-background text-on-surface font-sans">
+
+  <!-- @nav:start 管理员系统侧边导航 -->
+  <aside class="fixed left-0 top-0 bottom-0 w-56 bg-surface border-r border-outline-variant/20 flex flex-col z-40">
+    <div class="p-4 border-b border-outline-variant/20">
+      <div class="flex items-center gap-2">
+        <div class="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
+          <i data-lucide="zap" class="w-4 h-4 text-on-primary"></i>
+        </div>
+        <div>
+          <div class="text-sm font-bold text-on-surface">无界AI</div>
+          <div class="text-[10px] text-on-surface-variant">管理后台</div>
+        </div>
+      </div>
+    </div>
+    <nav class="flex-1 py-2 overflow-y-auto">
+      <a href="admin-overview.html" class="nav-item flex items-center gap-3 px-4 py-2.5 text-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors">
+        <i data-lucide="layout-dashboard" class="w-4 h-4"></i>运营看板
+      </a>
+      <a href="admin-users.html" class="nav-item flex items-center gap-3 px-4 py-2.5 text-sm bg-primary/10 text-primary font-medium" aria-current="page">
+        <i data-lucide="users" class="w-4 h-4"></i>用户管理
+      </a>
+      <a href="admin-credits.html" class="nav-item flex items-center gap-3 px-4 py-2.5 text-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors">
+        <i data-lucide="coins" class="w-4 h-4"></i>积分管理
+      </a>
+      <a href="admin-audit.html" class="nav-item flex items-center gap-3 px-4 py-2.5 text-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors">
+        <i data-lucide="shield-check" class="w-4 h-4"></i>审计日志
+      </a>
+      <a href="admin-settings.html" class="nav-item flex items-center gap-3 px-4 py-2.5 text-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors">
+        <i data-lucide="settings" class="w-4 h-4"></i>系统设置
+      </a>
+    </nav>
+    <div class="p-3 border-t border-outline-variant/20">
+      <div class="flex items-center gap-2 px-2 py-1.5">
+        <div class="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center text-xs font-bold text-primary">A</div>
+        <div class="flex-1 min-w-0">
+          <div class="text-xs font-medium text-on-surface truncate">Mr.joker</div>
+          <div class="text-[10px] text-on-surface-variant">管理员</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+  <!-- @nav:end 管理员系统侧边导航 -->
+
+  <main class="ml-56 min-h-screen">
+    <!-- @main-content:start -->
+
+    <!-- 页面头部 -->
+    <div class="px-6 pt-6 pb-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <h1 class="text-2xl font-bold text-on-surface">用户管理</h1>
+          <p class="text-sm text-on-surface-variant mt-1">管理系统用户、角色分配与状态控制</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 顶部操作栏 -->
+    <div class="px-6 pb-4">
+      <div class="flex items-center justify-between gap-4 flex-wrap">
+        <!-- 左侧：搜索 + 筛选 -->
+        <div class="flex items-center gap-3 flex-wrap">
+          <div class="relative">
+            <i data-lucide="search" class="w-4 h-4 text-on-surface-variant absolute left-3 top-1/2 -translate-y-1/2"></i>
+            <input id="search-input" type="text" placeholder="搜索用户名 / 邮箱" class="bg-surface-container border-none rounded-md pl-9 pr-3 py-2 text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/30 w-64 transition-colors" />
+          </div>
+          <div class="relative inline-flex items-center">
+            <select id="filter-role" class="bg-surface-container border-none rounded-md pl-3 pr-8 py-2 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer appearance-none">
+              <option value="all">全部角色</option>
+              <option value="admin">Admin</option>
+              <option value="user">User</option>
+            </select>
+            <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-on-surface-variant absolute right-2.5 pointer-events-none"></i>
+          </div>
+          <div class="relative inline-flex items-center">
+            <select id="filter-status" class="bg-surface-container border-none rounded-md pl-3 pr-8 py-2 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer appearance-none">
+              <option value="all">全部状态</option>
+              <option value="active">活跃</option>
+              <option value="disabled">禁用</option>
+            </select>
+            <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-on-surface-variant absolute right-2.5 pointer-events-none"></i>
+          </div>
+        </div>
+        <!-- 右侧：批量操作 + 添加 -->
+        <div class="flex items-center gap-2">
+          <button id="btn-batch-enable" class="bg-surface-container text-on-surface-variant px-3 py-2 rounded-md text-sm font-medium transition-all cursor-not-allowed opacity-50" disabled>
+            <span class="flex items-center gap-1.5"><i data-lucide="check-circle" class="w-3.5 h-3.5"></i>批量启用</span>
+          </button>
+          <button id="btn-batch-disable" class="bg-surface-container text-on-surface-variant px-3 py-2 rounded-md text-sm font-medium transition-all cursor-not-allowed opacity-50" disabled>
+            <span class="flex items-center gap-1.5"><i data-lucide="ban" class="w-3.5 h-3.5"></i>批量禁用</span>
+          </button>
+          <button id="btn-batch-delete" class="bg-surface-container text-on-surface-variant px-3 py-2 rounded-md text-sm font-medium transition-all cursor-not-allowed opacity-50" disabled>
+            <span class="flex items-center gap-1.5"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i>批量删除</span>
+          </button>
+          <div class="w-px h-6 bg-outline-variant/30 mx-1"></div>
+          <button id="btn-add-user" class="bg-primary text-on-primary px-4 py-2 rounded-md text-sm font-medium hover:opacity-90 active:scale-[0.98] transition-all inline-flex items-center gap-2">
+            <i data-lucide="user-plus" class="w-4 h-4"></i>添加用户
+          </button>
+        </div>
+      </div>
+      <!-- 选中提示 -->
+      <div id="selection-bar" class="hidden mt-3 flex items-center gap-2 text-sm text-primary bg-primary/10 rounded-md px-3 py-2">
+        <i data-lucide="info" class="w-4 h-4"></i>
+        <span id="selection-count">已选择 0 位用户</span>
+        <button id="btn-clear-selection" class="text-on-surface-variant hover:text-on-surface ml-auto text-xs">取消选择</button>
+      </div>
+    </div>
+
+    <!-- 用户列表表格 -->
+    <div class="px-6 pb-4">
+      <div class="bg-surface rounded-lg shadow-card overflow-hidden border border-outline-variant/10">
+        <!-- 表头 -->
+        <div class="grid grid-cols-[40px_1fr_1.2fr_80px_90px_90px_70px_100px_110px_100px] items-center px-4 py-3 bg-surface-container text-xs font-semibold text-on-surface-variant uppercase tracking-wider border-b border-outline-variant/20">
+          <div class="flex items-center justify-center">
+            <input id="select-all" type="checkbox" class="custom-checkbox" />
+          </div>
+          <span>用户名</span>
+          <span>邮箱</span>
+          <span>角色</span>
+          <span>状态</span>
+          <span>积分余额</span>
+          <span>作品数</span>
+          <span>注册时间</span>
+          <span>最后登录</span>
+          <span class="text-right">操作</span>
+        </div>
+
+        <!-- 表体 -->
+        <div id="user-table-body" class="divide-y divide-outline-variant/20">
+
+          <!-- 列表-用户1 -->
+          <div class="table-row grid grid-cols-[40px_1fr_1.2fr_80px_90px_90px_70px_100px_110px_100px] items-center px-4 py-3 hover:bg-surface-container/50 transition-colors" data-user-id="u001">
+            <div class="flex items-center justify-center">
+              <input type="checkbox" class="custom-checkbox row-checkbox" data-id="u001" />
+            </div>
+            <div class="flex items-center gap-2.5">
+              <div class="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center text-xs font-bold text-primary flex-shrink-0">陈</div>
+              <span class="text-sm font-medium text-on-surface truncate">陈星辰</span>
+            </div>
+            <span class="text-sm text-on-surface-variant truncate">xingchen@example.com</span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-primary/15 text-primary w-fit">admin</span>
+            <span class="inline-flex items-center gap-1.5 text-sm">
+              <span class="w-1.5 h-1.5 rounded-full bg-success flex-shrink-0"></span>
+              <span class="text-success text-xs">活跃</span>
+            </span>
+            <span class="text-sm font-medium text-on-surface">12,580</span>
+            <span class="text-sm text-on-surface-variant">156</span>
+            <span class="text-xs text-on-surface-variant">2023-06-15</span>
+            <span class="text-xs text-on-surface-variant">2025-01-10 14:32</span>
+            <div class="flex items-center justify-end gap-1">
+              <button class="btn-view-detail p-1.5 rounded-md hover:bg-surface-container-high transition-colors text-on-surface-variant hover:text-on-surface" data-id="u001" title="详情"><i data-lucide="eye" class="w-3.5 h-3.5"></i></button>
+              <button class="btn-edit-user p-1.5 rounded-md hover:bg-surface-container-high transition-colors text-primary" data-id="u001" title="编辑"><i data-lucide="pencil" class="w-3.5 h-3.5"></i></button>
+              <button class="btn-toggle-status p-1.5 rounded-md hover:bg-surface-container-high transition-colors text-warning" data-id="u001" data-status="active" title="禁用"><i data-lucide="ban" class="w-3.5 h-3.5"></i></button>
+              <div class="relative">
+                <button class="btn-more-menu p-1.5 rounded-md hover:bg-surface-container-high transition-colors text-on-surface-variant hover:text-on-surface" data-id="u001" title="更多"><i data-lucide="more-vertical" class="w-3.5 h-3.5"></i></button>
+                <div class="more-menu absolute right-0 top-full mt-1 bg-surface-container-high rounded-lg shadow-float border border-outline-variant/20 py-1 w-32 z-30">
+                  <button class="btn-delete-user w-full text-left px-3 py-1.5 text-sm text-error hover:bg-error/10 transition-colors" data-id="u001">删除用户</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 列表-用户2 -->
+          <div class="table-row grid grid-cols-[40px_1fr_1.2fr_80px_90px_90px_70px_100px_110px_100px] items-center px-4 py-3 hover:bg-surface-container/50 transition-colors" data-user-id="u002">
+            <div class="flex items-center justify-center">
+              <input type="checkbox" class="custom-checkbox row-checkbox" data-id="u002" />
+            </div>
+            <div class="flex items-center gap-2.5">
+              <div class="w-7 h-7 rounded-full bg-info/20 flex items-center justify-center text-xs font-bold text-info flex-shrink-0">林</div>
+              <span class="text-sm font-medium text-on-surface truncate">林墨白</span>
+            </div>
+            <span class="text-sm text-on-surface-variant truncate">mobai.lin@example.com</span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-info/15 text-info w-fit">user</span>
+            <span class="inline-flex items-center gap-1.5 text-sm">
+              <span class="w-1.5 h-1.5 rounded-full bg-success flex-shrink-0"></span>
+              <span class="text-success text-xs">活跃</span>
+            </span>
+            <span class="text-sm font-medium text-on-surface">5,230</span>
+            <span class="text-sm text-on-surface-variant">89</span>
+            <span class="text-xs text-on-surface-variant">2023-08-22</span>
+            <span class="text-xs text-on-surface-variant">2025-01-09 18:15</span>
+            <div class="flex items-center justify-end gap-1">
+              <button class="btn-view-detail p-1.5 rounded-md hover:bg-surface-container-high transition-colors text-on-surface-variant hover:text-on-surface" data-id="u002" title="详情"><i data-lucide="eye" class="w-3.5 h-3.5"></i></button>
+              <button class="btn-edit-user p-1.5 rounded-md hover:bg-surface-container-high transition-colors text-primary" data-id="u002" title="编辑"><i data-lucide="pencil" class="w-3.5 h-3.5"></i></button>
+              <button class="btn-toggle-status p-1.5 rounded-md hover:bg-surface-container-high transition-colors text-warning" data-id="u002" data-status="active" title="禁用"><i data-lucide="ban" class="w-3.5 h-3.5"></i></button>
+              <div class="relative">
+                <button class="btn-more-menu p-1.5 rounded-md hover:bg-surface-container-high transition-colors text-on-surface-variant hover:text-on-surface" data-id="u002" title="更多"><i data-lucide="more-vertical" class="w-3.5 h-3.5"></i></button>
+                <div class="more-menu absolute right-0 top-full mt-1 bg-surface-container-high rounded-lg shadow-float border border-outline-variant/20 py-1 w-32 z-30">
+                  <button class="btn-delete-user w-full text-left px-3 py-1.5 text-sm text-error hover:bg-error/10 transition-colors" data-id="u002">删除用户</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 列表-用户3 -->
+          <div class="table-row grid grid-cols-[40px_1fr_1.2fr_80px_90px_90px_70px_100px_110px_100px] items-center px-4 py-3 hover:bg-surface-container/50 transition-colors" data-user-id="u003">
+            <div class="flex items-center justify-center">
+              <input type="checkbox" class="custom-checkbox row-checkbox" data-id="u003" />
+            </div>
+            <div class="flex items-center gap-2.5">
+              <div class="w-7 h-7 rounded-full bg-success/20 flex items-center justify-center text-xs font-bold text-success flex-shrink-0">苏</div>
+              <span class="text-sm font-medium text-on-surface truncate">苏晚晴</span>
+            </div>
+            <span class="text-sm text-on-surface-variant truncate">wanqing@example.com</span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-info/15 text-info w-fit">user</span>
+            <span class="inline-flex items-center gap-1.5 text-sm">
+              <span class="w-1.5 h-1.5 rounded-full bg-error flex-shrink-0"></span>
+              <span class="text-error text-xs">禁用</span>
+            </span>
+            <span class="text-sm font-medium text-on-surface">0</span>
+            <span class="text-sm text-on-surface-variant">12</span>
+            <span class="text-xs text-on-surface-variant">2023-03-10</span>
+            <span class="text-xs text-on-surface-variant">2024-11-05 09:48</span>
+            <div class="flex items-center justify-end gap-1">
+              <button class="btn-view-detail p-1.5 rounded-md hover:bg-surface-container-high transition-colors text-on-surface-variant hover:text-on-surface" data-id="u003" title="详情"><i data-lucide="eye" class="w-3.5 h-3.5"></i></button>
+              <button class="btn-edit-user p-1.5 rounded-md hover:bg-surface-container-high transition-colors text-primary" data-id="u003" title="编辑"><i data-lucide="pencil" class="w-3.5 h-3.5"></i></button>
+              <button class="btn-toggle-status p-1.5 rounded-md hover:bg-surface-container-high transition-colors text-success" data-id="u003" data-status="disabled" title="启用"><i data-lucide="check-circle" class="w-3.5 h-3.5"></i></button>
+              <div class="relative">
+                <button class="btn-more-menu p-1.5 rounded-md hover:bg-surface-container-high transition-colors text-on-surface-variant hover:text-on-surface" data-id="u003" title="更多"><i data-lucide="more-vertical" class="w-3.5 h-3.5"></i></button>
+                <div class="more-menu absolute right-0 top-full mt-1 bg-surface-container-high rounded-lg shadow-float border border-outline-variant/20 py-1 w-32 z-30">
+                  <button class="btn-delete-user w-full text-left px-3 py-1.5 text-sm text-error hover:bg-error/10 transition-colors" data-id="u003">删除用户</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 列表-用户4 -->
+          <div class="table-row grid grid-cols-[40px_1fr_1.2fr_80px_90px_90px_70px_100px_110px_100px] items-center px-4 py-3 hover:bg-surface-container/50 transition-colors" data-user-id="u004">
+            <div class="flex items-center justify-center">
+              <input type="checkbox" class="custom-checkbox row-checkbox" data-id="u004" />
+            </div>
+            <div class="flex items-center gap-2.5">
+              <div class="w-7 h-7 rounded-full bg-warning/20 flex items-center justify-center text-xs font-bold text-warning flex-shrink-0">周</div>
+              <span class="text-sm font-medium text-on-surface truncate">周逸风</span>
+            </div>
+            <span class="text-sm text-on-surface-variant truncate">yifeng.zhou@example.com</span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-info/15 text-info w-fit">user</span>
+            <span class="inline-flex items-center gap-1.5 text-sm">
+              <span class="w-1.5 h-1.5 rounded-full bg-success flex-shrink-0"></span>
+              <span class="text-success text-xs">活跃</span>
+            </span>
+            <span class="text-sm font-medium text-on-surface">3,890</span>
+            <span class="text-sm text-on-surface-variant">67</span>
+            <span class="text-xs text-on-surface-variant">2023-11-08</span>
+            <span class="text-xs text-on-surface-variant">2025-01-10 22:08</span>
+            <div class="flex items-center justify-end gap-1">
+              <button class="btn-view-detail p-1.5 rounded-md hover:bg-surface-container-high transition-colors text-on-surface-variant hover:text-on-surface" data-id="u004" title="详情"><i data-lucide="eye" class="w-3.5 h-3.5"></i></button>
+              <button class="btn-edit-user p-1.5 rounded-md hover:bg-surface-container-high transition-colors text-primary" data-id="u004" title="编辑"><i data-lucide="pencil" class="w-3.5 h-3.5"></i></button>
+              <button class="btn-toggle-status p-1.5 rounded-md hover:bg-surface-container-high transition-colors text-warning" data-id="u004" data-status="active" title="禁用"><i data-lucide="ban" class="w-3.5 h-3.5"></i></button>
+              <div class="relative">
+                <button class="btn-more-menu p-1.5 rounded-md hover:bg-surface-container-high transition-colors text-on-surface-variant hover:text-on-surface" data-id="u004" title="更多"><i data-lucide="more-vertical" class="w-3.5 h-3.5"></i></button>
+                <div class="more-menu absolute right-0 top-full mt-1 bg-surface-container-high rounded-lg shadow-float border border-outline-variant/20 py-1 w-32 z-30">
+                  <button class="btn-delete-user w-full text-left px-3 py-1.5 text-sm text-error hover:bg-error/10 transition-colors" data-id="u004">删除用户</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 列表-用户5 -->
+          <div class="table-row grid grid-cols-[40px_1fr_1.2fr_80px_90px_90px_70px_100px_110px_100px] items-center px-4 py-3 hover:bg-surface-container/50 transition-colors" data-user-id="u005">
+            <div class="flex items-center justify-center">
+              <input type="checkbox" class="custom-checkbox row-checkbox" data-id="u005" />
+            </div>
+            <div class="flex items-center gap-2.5">
+              <div class="w-7 h-7 rounded-full bg-error/20 flex items-center justify-center text-xs font-bold text-error flex-shrink-0">韩</div>
+              <span class="text-sm font-medium text-on-surface truncate">韩雪瑶</span>
+            </div>
+            <span class="text-sm text-on-surface-variant truncate">xueyao.han@example.com</span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-primary/15 text-primary w-fit">admin</span>
+            <span class="inline-flex items-center gap-1.5 text-sm">
+              <span class="w-1.5 h-1.5 rounded-full bg-success flex-shrink-0"></span>
+              <span class="text-success text-xs">活跃</span>
+            </span>
+            <span class="text-sm font-medium text-on-surface">28,100</span>
+            <span class="text-sm text-on-surface-variant">432</span>
+            <span class="text-xs text-on-surface-variant">2022-12-01</span>
+            <span class="text-xs text-on-surface-variant">2025-01-11 08:20</span>
+            <div class="flex items-center justify-end gap-1">
+              <button class="btn-view-detail p-1.5 rounded-md hover:bg-surface-container-high transition-colors text-on-surface-variant hover:text-on-surface" data-id="u005" title="详情"><i data-lucide="eye" class="w-3.5 h-3.5"></i></button>
+              <button class="btn-edit-user p-1.5 rounded-md hover:bg-surface-container-high transition-colors text-primary" data-id="u005" title="编辑"><i data-lucide="pencil" class="w-3.5 h-3.5"></i></button>
+              <button class="btn-toggle-status p-1.5 rounded-md hover:bg-surface-container-high transition-colors text-warning" data-id="u005" data-status="active" title="禁用"><i data-lucide="ban" class="w-3.5 h-3.5"></i></button>
+              <div class="relative">
+                <button class="btn-more-menu p-1.5 rounded-md hover:bg-surface-container-high transition-colors text-on-surface-variant hover:text-on-surface" data-id="u005" title="更多"><i data-lucide="more-vertical" class="w-3.5 h-3.5"></i></button>
+                <div class="more-menu absolute right-0 top-full mt-1 bg-surface-container-high rounded-lg shadow-float border border-outline-variant/20 py-1 w-32 z-30">
+                  <button class="btn-delete-user w-full text-left px-3 py-1.5 text-sm text-error hover:bg-error/10 transition-colors" data-id="u005">删除用户</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 列表-用户6 -->
+          <div class="table-row grid grid-cols-[40px_1fr_1.2fr_80px_90px_90px_70px_100px_110px_100px] items-center px-4 py-3 hover:bg-surface-container/50 transition-colors" data-user-id="u006">
+            <div class="flex items-center justify-center">
+              <input type="checkbox" class="custom-checkbox row-checkbox" data-id="u006" />
+            </div>
+            <div class="flex items-center gap-2.5">
+              <div class="w-7 h-7 rounded-full bg-surface-container-high flex items-center justify-center text-xs font-bold text-on-surface-variant flex-shrink-0">吴</div>
+              <span class="text-sm font-medium text-on-surface truncate">吴瀚宇</span>
+            </div>
+            <span class="text-sm text-on-surface-variant truncate">hanyu.wu@example.com</span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-info/15 text-info w-fit">user</span>
+            <span class="inline-flex items-center gap-1.5 text-sm">
+              <span class="w-1.5 h-1.5 rounded-full bg-success flex-shrink-0"></span>
+              <span class="text-success text-xs">活跃</span>
+            </span>
+            <span class="text-sm font-medium text-on-surface">1,750</span>
+            <span class="text-sm text-on-surface-variant">34</span>
+            <span class="text-xs text-on-surface-variant">2024-04-18</span>
+            <span class="text-xs text-on-surface-variant">2025-01-08 16:45</span>
+            <div class="flex items-center justify-end gap-1">
+              <button class="btn-view-detail p-1.5 rounded-md hover:bg-surface-container-high transition-colors text-on-surface-variant hover:text-on-surface" data-id="u006" title="详情"><i data-lucide="eye" class="w-3.5 h-3.5"></i></button>
+              <button class="btn-edit-user p-1.5 rounded-md hover:bg-surface-container-high transition-colors text-primary" data-id="u006" title="编辑"><i data-lucide="pencil" class="w-3.5 h-3.5"></i></button>
+              <button class="btn-toggle-status p-1.5 rounded-md hover:bg-surface-container-high transition-colors text-warning" data-id="u006" data-status="active" title="禁用"><i data-lucide="ban" class="w-3.5 h-3.5"></i></button>
+              <div class="relative">
+                <button class="btn-more-menu p-1.5 rounded-md hover:bg-surface-container-high transition-colors text-on-surface-variant hover:text-on-surface" data-id="u006" title="更多"><i data-lucide="more-vertical" class="w-3.5 h-3.5"></i></button>
+                <div class="more-menu absolute right-0 top-full mt-1 bg-surface-container-high rounded-lg shadow-float border border-outline-variant/20 py-1 w-32 z-30">
+                  <button class="btn-delete-user w-full text-left px-3 py-1.5 text-sm text-error hover:bg-error/10 transition-colors" data-id="u006">删除用户</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 列表-用户7 -->
+          <div class="table-row grid grid-cols-[40px_1fr_1.2fr_80px_90px_90px_70px_100px_110px_100px] items-center px-4 py-3 hover:bg-surface-container/50 transition-colors" data-user-id="u007">
+            <div class="flex items-center justify-center">
+              <input type="checkbox" class="custom-checkbox row-checkbox" data-id="u007" />
+            </div>
+            <div class="flex items-center gap-2.5">
+              <div class="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center text-xs font-bold text-primary flex-shrink-0">赵</div>
+              <span class="text-sm font-medium text-on-surface truncate">赵明远</span>
+            </div>
+            <span class="text-sm text-on-surface-variant truncate">mingyuan@example.com</span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-info/15 text-info w-fit">user</span>
+            <span class="inline-flex items-center gap-1.5 text-sm">
+              <span class="w-1.5 h-1.5 rounded-full bg-error flex-shrink-0"></span>
+              <span class="text-error text-xs">禁用</span>
+            </span>
+            <span class="text-sm font-medium text-on-surface">320</span>
+            <span class="text-sm text-on-surface-variant">5</span>
+            <span class="text-xs text-on-surface-variant">2024-07-02</span>
+            <span class="text-xs text-on-surface-variant">2024-10-20 11:33</span>
+            <div class="flex items-center justify-end gap-1">
+              <button class="btn-view-detail p-1.5 rounded-md hover:bg-surface-container-high transition-colors text-on-surface-variant hover:text-on-surface" data-id="u007" title="详情"><i data-lucide="eye" class="w-3.5 h-3.5"></i></button>
+              <button class="btn-edit-user p-1.5 rounded-md hover:bg-surface-container-high transition-colors text-primary" data-id="u007" title="编辑"><i data-lucide="pencil" class="w-3.5 h-3.5"></i></button>
+              <button class="btn-toggle-status p-1.5 rounded-md hover:bg-surface-container-high transition-colors text-success" data-id="u007" data-status="disabled" title="启用"><i data-lucide="check-circle" class="w-3.5 h-3.5"></i></button>
+              <div class="relative">
+                <button class="btn-more-menu p-1.5 rounded-md hover:bg-surface-container-high transition-colors text-on-surface-variant hover:text-on-surface" data-id="u007" title="更多"><i data-lucide="more-vertical" class="w-3.5 h-3.5"></i></button>
+                <div class="more-menu absolute right-0 top-full mt-1 bg-surface-container-high rounded-lg shadow-float border border-outline-variant/20 py-1 w-32 z-30">
+                  <button class="btn-delete-user w-full text-left px-3 py-1.5 text-sm text-error hover:bg-error/10 transition-colors" data-id="u007">删除用户</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 列表-用户8 -->
+          <div class="table-row grid grid-cols-[40px_1fr_1.2fr_80px_90px_90px_70px_100px_110px_100px] items-center px-4 py-3 hover:bg-surface-container/50 transition-colors" data-user-id="u008">
+            <div class="flex items-center justify-center">
+              <input type="checkbox" class="custom-checkbox row-checkbox" data-id="u008" />
+            </div>
+            <div class="flex items-center gap-2.5">
+              <div class="w-7 h-7 rounded-full bg-info/20 flex items-center justify-center text-xs font-bold text-info flex-shrink-0">沈</div>
+              <span class="text-sm font-medium text-on-surface truncate">沈若曦</span>
+            </div>
+            <span class="text-sm text-on-surface-variant truncate">ruoxi.shen@example.com</span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-info/15 text-info w-fit">user</span>
+            <span class="inline-flex items-center gap-1.5 text-sm">
+              <span class="w-1.5 h-1.5 rounded-full bg-success flex-shrink-0"></span>
+              <span class="text-success text-xs">活跃</span>
+            </span>
+            <span class="text-sm font-medium text-on-surface">8,460</span>
+            <span class="text-sm text-on-surface-variant">203</span>
+            <span class="text-xs text-on-surface-variant">2023-09-14</span>
+            <span class="text-xs text-on-surface-variant">2025-01-11 02:17</span>
+            <div class="flex items-center justify-end gap-1">
+              <button class="btn-view-detail p-1.5 rounded-md hover:bg-surface-container-high transition-colors text-on-surface-variant hover:text-on-surface" data-id="u008" title="详情"><i data-lucide="eye" class="w-3.5 h-3.5"></i></button>
+              <button class="btn-edit-user p-1.5 rounded-md hover:bg-surface-container-high transition-colors text-primary" data-id="u008" title="编辑"><i data-lucide="pencil" class="w-3.5 h-3.5"></i></button>
+              <button class="btn-toggle-status p-1.5 rounded-md hover:bg-surface-container-high transition-colors text-warning" data-id="u008" data-status="active" title="禁用"><i data-lucide="ban" class="w-3.5 h-3.5"></i></button>
+              <div class="relative">
+                <button class="btn-more-menu p-1.5 rounded-md hover:bg-surface-container-high transition-colors text-on-surface-variant hover:text-on-surface" data-id="u008" title="更多"><i data-lucide="more-vertical" class="w-3.5 h-3.5"></i></button>
+                <div class="more-menu absolute right-0 top-full mt-1 bg-surface-container-high rounded-lg shadow-float border border-outline-variant/20 py-1 w-32 z-30">
+                  <button class="btn-delete-user w-full text-left px-3 py-1.5 text-sm text-error hover:bg-error/10 transition-colors" data-id="u008">删除用户</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- 分页器 -->
+    <div class="px-6 pb-6">
+      <div class="flex items-center justify-between">
+        <div class="text-sm text-on-surface-variant">
+          共 <span class="text-on-surface font-medium">128</span> 位用户，当前第 <span class="text-on-surface font-medium">1</span> / 13 页
+        </div>
+        <div class="flex items-center gap-2">
+          <div class="flex items-center gap-1.5 mr-4">
+            <span class="text-sm text-on-surface-variant">每页</span>
+            <select id="page-size" class="bg-surface-container border-none rounded-md px-2 py-1 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer">
+              <option value="10" selected>10</option>
+              <option value="20">20</option>
+              <option value="50">50</option>
+            </select>
+            <span class="text-sm text-on-surface-variant">条</span>
+          </div>
+          <button id="btn-prev-page" class="p-2 rounded-md bg-surface-container text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors disabled:opacity-40 disabled:cursor-not-allowed" disabled>
+            <i data-lucide="chevron-left" class="w-4 h-4"></i>
+          </button>
+          <div class="flex items-center gap-1">
+            <button class="page-btn w-8 h-8 rounded-md text-sm font-medium bg-primary text-on-primary transition-colors">1</button>
+            <button class="page-btn w-8 h-8 rounded-md text-sm font-medium text-on-surface-variant hover:bg-surface-container transition-colors">2</button>
+            <button class="page-btn w-8 h-8 rounded-md text-sm font-medium text-on-surface-variant hover:bg-surface-container transition-colors">3</button>
+            <span class="text-on-surface-variant text-sm px-1">...</span>
+            <button class="page-btn w-8 h-8 rounded-md text-sm font-medium text-on-surface-variant hover:bg-surface-container transition-colors">13</button>
+          </div>
+          <button id="btn-next-page" class="p-2 rounded-md bg-surface-container text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors">
+            <i data-lucide="chevron-right" class="w-4 h-4"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- @main-content:end -->
+  </main>
+
+  <!-- 抽屉遮罩 -->
+  <div id="drawer-overlay" class="fixed inset-0 bg-black/50 z-50"></div>
+
+  <!-- 用户详情抽屉 -->
+  <div id="user-drawer" class="fixed right-0 top-0 bottom-0 w-[480px] bg-surface z-50 flex flex-col shadow-dialog overflow-hidden">
+    <!-- 抽屉头部 -->
+    <div class="flex items-center justify-between px-6 py-4 border-b border-outline-variant/20 flex-shrink-0">
+      <h2 class="text-lg font-semibold text-on-surface">用户详情</h2>
+      <button id="btn-close-drawer" class="p-1.5 rounded-md hover:bg-surface-container-high transition-colors text-on-surface-variant hover:text-on-surface">
+        <i data-lucide="x" class="w-5 h-5"></i>
+      </button>
+    </div>
+
+    <!-- 抽屉内容区 -->
+    <div class="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+
+      <!-- 基础信息卡 -->
+      <div class="bg-surface-container rounded-lg p-4">
+        <div class="flex items-center gap-4 mb-4">
+          <div class="w-14 h-14 rounded-full bg-primary/20 flex items-center justify-center text-xl font-bold text-primary flex-shrink-0">陈</div>
+          <div>
+            <div class="text-base font-semibold text-on-surface">陈星辰</div>
+            <div class="text-sm text-on-surface-variant">xingchen@example.com</div>
+          </div>
+          <span class="ml-auto inline-flex items-center px-2.5 py-1 rounded-sm text-xs font-medium bg-primary/15 text-primary">admin</span>
+        </div>
+        <div class="grid grid-cols-2 gap-3 text-sm">
+          <div>
+            <div class="text-on-surface-variant text-xs mb-0.5">注册时间</div>
+            <div class="text-on-surface">2023-06-15</div>
+          </div>
+          <div>
+            <div class="text-on-surface-variant text-xs mb-0.5">最后登录</div>
+            <div class="text-on-surface">2025-01-10 14:32</div>
+          </div>
+          <div>
+            <div class="text-on-surface-variant text-xs mb-0.5">账户状态</div>
+            <div class="flex items-center gap-1.5">
+              <span class="w-1.5 h-1.5 rounded-full bg-success"></span>
+              <span class="text-success">活跃</span>
+            </div>
+          </div>
+          <div>
+            <div class="text-on-surface-variant text-xs mb-0.5">用户 ID</div>
+            <div class="text-on-surface font-mono text-xs">u001</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 积分信息卡 -->
+      <div class="bg-surface-container rounded-lg p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-semibold text-on-surface">积分信息</h3>
+          <button id="btn-drawer-recharge" class="text-xs text-primary hover:underline font-medium">充值</button>
+        </div>
+        <div class="grid grid-cols-3 gap-3">
+          <div class="text-center">
+            <div class="text-xl font-bold text-on-surface">12,580</div>
+            <div class="text-xs text-on-surface-variant mt-0.5">当前余额</div>
+          </div>
+          <div class="text-center">
+            <div class="text-xl font-bold text-success">45,200</div>
+            <div class="text-xs text-on-surface-variant mt-0.5">累计充值</div>
+          </div>
+          <div class="text-center">
+            <div class="text-xl font-bold text-warning">32,620</div>
+            <div class="text-xs text-on-surface-variant mt-0.5">累计消耗</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 资产统计卡 -->
+      <div class="bg-surface-container rounded-lg p-4">
+        <h3 class="text-sm font-semibold text-on-surface mb-3">资产统计</h3>
+        <div class="grid grid-cols-3 gap-3">
+          <div class="bg-surface-container-high rounded-md p-3 text-center">
+            <div class="text-lg font-bold text-on-surface">156</div>
+            <div class="text-xs text-on-surface-variant mt-0.5">作品数</div>
+          </div>
+          <div class="bg-surface-container-high rounded-md p-3 text-center">
+            <div class="text-lg font-bold text-on-surface">8</div>
+            <div class="text-xs text-on-surface-variant mt-0.5">项目数</div>
+          </div>
+          <div class="bg-surface-container-high rounded-md p-3 text-center">
+            <div class="text-lg font-bold text-on-surface">2.3G</div>
+            <div class="text-xs text-on-surface-variant mt-0.5">存储使用</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 行为数据卡 -->
+      <div class="bg-surface-container rounded-lg p-4">
+        <h3 class="text-sm font-semibold text-on-surface mb-3">行为数据</h3>
+        <!-- 常用模型 Top3 -->
+        <div class="mb-4">
+          <div class="text-xs text-on-surface-variant mb-2">常用模型 Top 3</div>
+          <div class="space-y-2">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="w-5 h-5 rounded bg-primary/20 text-primary text-[10px] font-bold flex items-center justify-center">1</span>
+                <span class="text-sm text-on-surface">DALL·E 3</span>
+              </div>
+              <span class="text-xs text-on-surface-variant">528 次</span>
+            </div>
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="w-5 h-5 rounded bg-primary/15 text-primary text-[10px] font-bold flex items-center justify-center">2</span>
+                <span class="text-sm text-on-surface">Stable Diffusion XL</span>
+              </div>
+              <span class="text-xs text-on-surface-variant">412 次</span>
+            </div>
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="w-5 h-5 rounded bg-primary/10 text-primary text-[10px] font-bold flex items-center justify-center">3</span>
+                <span class="text-sm text-on-surface">Midjourney v6</span>
+              </div>
+              <span class="text-xs text-on-surface-variant">287 次</span>
+            </div>
+          </div>
+        </div>
+        <!-- 最近生成记录 -->
+        <div>
+          <div class="text-xs text-on-surface-variant mb-2">最近生成记录</div>
+          <div class="space-y-1.5">
+            <div class="flex items-center justify-between py-1.5 border-b border-outline-variant/10">
+              <span class="text-sm text-on-surface truncate flex-1 mr-2">赛博朋克城市夜景</span>
+              <span class="text-xs text-on-surface-variant flex-shrink-0">01-10 14:32</span>
+            </div>
+            <div class="flex items-center justify-between py-1.5 border-b border-outline-variant/10">
+              <span class="text-sm text-on-surface truncate flex-1 mr-2">水墨山水风格人物肖像</span>
+              <span class="text-xs text-on-surface-variant flex-shrink-0">01-09 22:18</span>
+            </div>
+            <div class="flex items-center justify-between py-1.5 border-b border-outline-variant/10">
+              <span class="text-sm text-on-surface truncate flex-1 mr-2">机械朋克猫咪插画</span>
+              <span class="text-xs text-on-surface-variant flex-shrink-0">01-08 16:45</span>
+            </div>
+            <div class="flex items-center justify-between py-1.5 border-b border-outline-variant/10">
+              <span class="text-sm text-on-surface truncate flex-1 mr-2">极简风格 LOGO 设计</span>
+              <span class="text-xs text-on-surface-variant flex-shrink-0">01-07 10:22</span>
+            </div>
+            <div class="flex items-center justify-between py-1.5">
+              <span class="text-sm text-on-surface truncate flex-1 mr-2">梦幻森林精灵概念图</span>
+              <span class="text-xs text-on-surface-variant flex-shrink-0">01-06 09:05</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- 抽屉底部操作区 -->
+    <div class="flex-shrink-0 px-6 py-4 border-t border-outline-variant/20 bg-surface">
+      <div class="grid grid-cols-2 gap-2">
+        <button id="btn-drawer-edit" class="bg-primary text-on-primary px-4 py-2 rounded-md text-sm font-medium hover:opacity-90 active:scale-[0.98] transition-all flex items-center justify-center gap-1.5">
+          <i data-lucide="pencil" class="w-3.5 h-3.5"></i>编辑信息
+        </button>
+        <button id="btn-drawer-reset-pwd" class="bg-surface-container text-on-surface px-4 py-2 rounded-md text-sm font-medium hover:bg-surface-container-high active:scale-[0.98] transition-all flex items-center justify-center gap-1.5">
+          <i data-lucide="key-round" class="w-3.5 h-3.5"></i>重置密码
+        </button>
+        <button id="btn-drawer-adjust-credits" class="bg-surface-container text-on-surface px-4 py-2 rounded-md text-sm font-medium hover:bg-surface-container-high active:scale-[0.98] transition-all flex items-center justify-center gap-1.5">
+          <i data-lucide="coins" class="w-3.5 h-3.5"></i>调整积分
+        </button>
+        <button id="btn-drawer-disable" class="bg-error/10 text-error px-4 py-2 rounded-md text-sm font-medium hover:bg-error/20 active:scale-[0.98] transition-all flex items-center justify-center gap-1.5">
+          <i data-lucide="ban" class="w-3.5 h-3.5"></i>禁用账户
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    $(function() {
+
+      // === 选择交互 ===
+
+      // 全选/取消全选
+      $('#select-all').on('change', function() {
+        var checked = $(this).is(':checked');
+        $('.row-checkbox').prop('checked', checked);
+        if (checked) {
+          $('.table-row').addClass('selected');
+        } else {
+          $('.table-row').removeClass('selected');
+        }
+        updateSelectionBar();
+      });
+
+      // 单行勾选
+      $('#user-table-body').on('change', '.row-checkbox', function() {
+        var $row = $(this).closest('.table-row');
+        if ($(this).is(':checked')) {
+          $row.addClass('selected');
+        } else {
+          $row.removeClass('selected');
+        }
+        updateSelectionBar();
+      });
+
+      // 更新选中提示栏和批量按钮状态
+      function updateSelectionBar() {
+        var count = $('.row-checkbox:checked').length;
+        var total = $('.row-checkbox').length;
+        if (count > 0) {
+          $('#selection-bar').removeClass('hidden').addClass('flex');
+          $('#selection-count').text('已选择 ' + count + ' 位用户');
+          // 启用批量操作按钮
+          $('#btn-batch-enable, #btn-batch-disable, #btn-batch-delete')
+            .removeClass('cursor-not-allowed opacity-50 text-on-surface-variant')
+            .addClass('cursor-pointer text-on-surface')
+            .prop('disabled', false);
+        } else {
+          $('#selection-bar').addClass('hidden').removeClass('flex');
+          $('#selection-count').text('已选择 0 位用户');
+          // 禁用批量操作按钮
+          $('#btn-batch-enable, #btn-batch-disable, #btn-batch-delete')
+            .addClass('cursor-not-allowed opacity-50 text-on-surface-variant')
+            .removeClass('cursor-pointer text-on-surface')
+            .prop('disabled', true);
+        }
+        // 更新全选状态
+        if (count === total && total > 0) {
+          $('#select-all').prop('checked', true);
+        } else {
+          $('#select-all').prop('checked', false);
+        }
+      }
+
+      // 取消选择
+      $('#btn-clear-selection').on('click', function() {
+        $('.row-checkbox').prop('checked', false);
+        $('.table-row').removeClass('selected');
+        $('#select-all').prop('checked', false);
+        updateSelectionBar();
+      });
+
+      // === 抽屉交互 ===
+
+      // 打开抽屉 - 详情按钮
+      $('#user-table-body').on('click', '.btn-view-detail', function() {
+        var userId = $(this).data('id');
+        openDrawer(userId);
+      });
+
+      // 关闭抽屉
+      $('#btn-close-drawer').on('click', closeDrawer);
+      $('#drawer-overlay').on('click', closeDrawer);
+
+      function openDrawer(userId) {
+        $('#drawer-overlay').addClass('open');
+        $('#user-drawer').addClass('open');
+        $('body').css('overflow', 'hidden');
+      }
+
+      function closeDrawer() {
+        $('#drawer-overlay').removeClass('open');
+        $('#user-drawer').removeClass('open');
+        $('body').css('overflow', '');
+      }
+
+      // === 更多菜单 ===
+
+      $('#user-table-body').on('click', '.btn-more-menu', function(e) {
+        e.stopPropagation();
+        var $menu = $(this).siblings('.more-menu');
+        // 先关闭所有其他菜单
+        $('.more-menu').not($menu).removeClass('show');
+        $menu.toggleClass('show');
+      });
+
+      // 点击其他区域关闭更多菜单
+      $(document).on('click', function() {
+        $('.more-menu').removeClass('show');
+      });
+
+      // === 操作按钮 ===
+
+      // 删除用户（更多菜单中）
+      $('#user-table-body').on('click', '.btn-delete-user', function(e) {
+        e.stopPropagation();
+        var userId = $(this).data('id');
+        // 复杂交互 - 删除确认：
+        // 1. 弹出确认对话框，显示"确定要删除用户 XXX 吗？删除后数据将不可恢复"
+        // 2. 确认后发送 DELETE 请求到后端
+        // 3. 成功后从表格中移除该行
+        // 4. 更新分页总数
+        console.log('删除用户:', userId);
+        $(this).closest('.more-menu').removeClass('show');
+      });
+
+      // 切换用户状态（启用/禁用）
+      $('#user-table-body').on('click', '.btn-toggle-status', function() {
+        var userId = $(this).data('id');
+        var currentStatus = $(this).data('status');
+        var $row = $(this).closest('.table-row');
+        // 简单交互 - 切换状态显示
+        if (currentStatus === 'active') {
+          // 切换为禁用
+          $row.find('.bg-success').removeClass('bg-success').addClass('bg-error');
+          $row.find('.text-success').removeClass('text-success').addClass('text-error').text('禁用');
+          $(this).data('status', 'disabled');
+          $(this).attr('title', '启用');
+          $(this).find('i').attr('data-lucide', 'check-circle');
+          $(this).removeClass('text-warning').addClass('text-success');
+        } else {
+          // 切换为活跃
+          $row.find('.bg-error').removeClass('bg-error').addClass('bg-success');
+          $row.find('.text-error').removeClass('text-error').addClass('text-success').text('活跃');
+          $(this).data('status', 'active');
+          $(this).attr('title', '禁用');
+          $(this).find('i').attr('data-lucide', 'ban');
+          $(this).removeClass('text-success').addClass('text-warning');
+        }
+        lucide.createIcons();
+        console.log('切换用户状态:', userId, currentStatus === 'active' ? '-> 禁用' : '-> 活跃');
+      });
+
+      // 编辑用户
+      $('#user-table-body').on('click', '.btn-edit-user', function() {
+        var userId = $(this).data('id');
+        // 复杂交互 - 编辑用户：
+        // 1. 打开编辑弹窗，预填当前用户信息（用户名、邮箱、角色）
+        // 2. 支持修改角色下拉选择
+        // 3. 保存时校验必填项和邮箱格式
+        // 4. 提交后更新表格中对应行数据
+        console.log('编辑用户:', userId);
+      });
+
+      // === 批量操作 ===
+
+      // 批量启用
+      $('#btn-batch-enable').on('click', function() {
+        if ($(this).prop('disabled')) return;
+        var ids = [];
+        $('.row-checkbox:checked').each(function() {
+          ids.push($(this).data('id'));
+        });
+        // 复杂交互 - 批量启用：
+        // 1. 弹出确认框"确定要启用选中的 N 位用户吗？"
+        // 2. 确认后批量调用启用接口
+        // 3. 成功后刷新表格中对应行状态为"活跃"
+        console.log('批量启用:', ids);
+      });
+
+      // 批量禁用
+      $('#btn-batch-disable').on('click', function() {
+        if ($(this).prop('disabled')) return;
+        var ids = [];
+        $('.row-checkbox:checked').each(function() {
+          ids.push($(this).data('id'));
+        });
+        // 复杂交互 - 批量禁用：
+        // 1. 弹出确认框"确定要禁用选中的 N 位用户吗？禁用后用户将无法登录"
+        // 2. 确认后批量调用禁用接口
+        // 3. 成功后刷新表格中对应行状态为"禁用"
+        console.log('批量禁用:', ids);
+      });
+
+      // 批量删除
+      $('#btn-batch-delete').on('click', function() {
+        if ($(this).prop('disabled')) return;
+        var ids = [];
+        $('.row-checkbox:checked').each(function() {
+          ids.push($(this).data('id'));
+        });
+        // 复杂交互 - 批量删除：
+        // 1. 弹出确认框"确定要删除选中的 N 位用户吗？删除后数据不可恢复"
+        // 2. 需输入"DELETE"确认
+        // 3. 确认后批量调用删除接口
+        // 4. 成功后从表格移除对应行
+        console.log('批量删除:', ids);
+      });
+
+      // === 搜索与筛选 ===
+
+      // 搜索输入
+      $('#search-input').on('input', function() {
+        var keyword = $(this).val().toLowerCase().trim();
+        // 简单交互 - 客户端筛选
+        $('#user-table-body .table-row').each(function() {
+          var name = $(this).find('.text-sm.font-medium.text-on-surface').first().text().toLowerCase();
+          var email = $(this).find('.text-sm.text-on-surface-variant').first().text().toLowerCase();
+          if (keyword === '' || name.indexOf(keyword) > -1 || email.indexOf(keyword) > -1) {
+            $(this).show();
+          } else {
+            $(this).hide();
+          }
+        });
+      });
+
+      // 角色筛选
+      $('#filter-role').on('change', function() {
+        var role = $(this).val();
+        $('#user-table-body .table-row').each(function() {
+          var rowRole = $(this).find('.rounded-sm.text-xs').text().trim().toLowerCase();
+          if (role === 'all' || rowRole === role) {
+            $(this).show();
+          } else {
+            $(this).hide();
+          }
+        });
+      });
+
+      // 状态筛选
+      $('#filter-status').on('change', function() {
+        var status = $(this).val();
+        $('#user-table-body .table-row').each(function() {
+          var rowStatus = $(this).find('.rounded-full').parent().find('span:last').text().trim();
+          var statusVal = rowStatus === '活跃' ? 'active' : 'disabled';
+          if (status === 'all' || statusVal === status) {
+            $(this).show();
+          } else {
+            $(this).hide();
+          }
+        });
+      });
+
+      // === 分页 ===
+
+      // 分页按钮点击
+      $(document).on('click', '.page-btn', function() {
+        $('.page-btn').removeClass('bg-primary text-on-primary').addClass('text-on-surface-variant');
+        $(this).removeClass('text-on-surface-variant').addClass('bg-primary text-on-primary');
+        // 实际项目应请求对应页码数据并重新渲染表格
+        console.log('跳转到第', $(this).text(), '页');
+      });
+
+      // 上一页
+      $('#btn-prev-page').on('click', function() {
+        console.log('上一页');
+      });
+
+      // 下一页
+      $('#btn-next-page').on('click', function() {
+        console.log('下一页');
+      });
+
+      // 每页条数切换
+      $('#page-size').on('change', function() {
+        console.log('每页显示', $(this).val(), '条');
+      });
+
+      // === 添加用户 ===
+      $('#btn-add-user').on('click', function() {
+        // 复杂交互 - 添加用户：
+        // 1. 弹出添加用户对话框，包含字段：用户名（必填）、邮箱（必填）、角色（下拉选择）、初始积分
+        // 2. 校验用户名不重复、邮箱格式正确
+        // 3. 提交后刷新用户列表
+        console.log('添加用户');
+      });
+
+      // === 抽屉内操作 ===
+
+      // 抽屉内编辑信息
+      $('#btn-drawer-edit').on('click', function() {
+        // 复杂交互 - 编辑用户信息：
+        // 1. 打开编辑弹窗，预填当前用户信息
+        // 2. 支持修改用户名、邮箱、角色
+        // 3. 保存后更新抽屉和表格中信息
+        console.log('抽屉内编辑信息');
+      });
+
+      // 抽屉内重置密码
+      $('#btn-drawer-reset-pwd').on('click', function() {
+        // 复杂交互 - 重置密码：
+        // 1. 弹出确认框"确定要重置该用户的密码吗？"
+        // 2. 确认后生成随机密码并显示给管理员
+        // 3. 可选发送密码重置邮件
+        console.log('重置密码');
+      });
+
+      // 抽屉内调整积分
+      $('#btn-drawer-adjust-credits').on('click', function() {
+        // 复杂交互 - 调整积分：
+        // 1. 弹出积分调整对话框
+        // 2. 选择操作类型：增加/扣减
+        // 3. 输入积分数量和备注原因
+        // 4. 提交后更新抽屉中积分显示
+        console.log('调整积分');
+      });
+
+      // 抽屉内禁用账户
+      $('#btn-drawer-disable').on('click', function() {
+        // 简单交互 - 禁用确认
+        console.log('禁用账户');
+      });
+
+      // 抽屉内充值按钮
+      $('#btn-drawer-recharge').on('click', function() {
+        // 复杂交互 - 充值积分：
+        // 1. 弹出充值对话框，输入充值数量
+        // 2. 选择充值套餐或自定义数量
+        // 3. 确认充值并更新余额
+        console.log('充值积分');
+      });
+
+    });
+  </script>
+
+  <script>lucide.createIcons();</script>
+</body>
+</html>

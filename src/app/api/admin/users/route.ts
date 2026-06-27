@@ -8,7 +8,7 @@ import {
   updateManagedUser,
 } from '@/lib/server-auth';
 import type { User } from '@/lib/user-types';
-import { dbListUserData, dbGetUserData, dbDeleteUserData } from '@/lib/db-storage';
+import { dbListUserData, dbGetUserData, dbDeleteUserData, dbAddAuditLog } from '@/lib/db-storage';
 
 export const dynamic = 'force-dynamic';
 
@@ -56,6 +56,7 @@ export async function POST(request: NextRequest) {
         password: String(body.password || ''),
         email: body.email ? String(body.email) : undefined,
       });
+      await dbAddAuditLog({ user_id: admin.id, user_name: admin.name, action: 'user_create', target_type: 'user', target_id: user?.id, detail: `创建用户 ${body.name}`, ip_address: null, created_at: Date.now() });
       return NextResponse.json({ success: true, user });
     }
 
@@ -72,6 +73,7 @@ export async function POST(request: NextRequest) {
           ? { apiPermissions: body.updates.apiPermissions as User['apiPermissions'] }
           : {}),
       });
+      await dbAddAuditLog({ user_id: admin.id, user_name: admin.name, action: 'user_update', target_type: 'user', target_id: body.userId, detail: `更新用户 ${body.userId}: ${JSON.stringify(body.updates)}`, ip_address: null, created_at: Date.now() });
       return NextResponse.json({ success: Boolean(user), user });
     }
 
@@ -80,6 +82,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: false, error: 'Missing userId' }, { status: 400 });
       }
       const deleted = await deleteManagedUser(body.userId);
+      await dbAddAuditLog({ user_id: admin.id, user_name: admin.name, action: 'user_delete', target_type: 'user', target_id: body.userId, detail: `删除用户 ${body.userId}`, ip_address: null, created_at: Date.now() });
       return NextResponse.json({ success: deleted, deleted });
     }
 

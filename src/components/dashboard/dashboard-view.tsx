@@ -23,7 +23,7 @@ import type { ApiProvider, ModelInfo } from '@/lib/universal-api-types';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import JSZip from 'jszip';
 
-type TabType = 'projects' | 'templates' | 'assets' | 'stats' | 'credits' | 'settings' | 'users' | 'apis' | 'data' | 'ecom-templates' | 'payment-config';
+type TabType = 'projects' | 'templates' | 'assets' | 'stats' | 'credits' | 'settings' | 'users' | 'apis' | 'data' | 'ecom-templates' | 'payment-config' | 'audit' | 'overview';
 type ProjectFilter = 'all' | 'recent' | 'starred';
 type AssetSubTab = 'images' | 'prompts' | 'brands';
 type ApiKind = 'general' | 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler' | 'universal';
@@ -156,6 +156,42 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const [apiBatchLoading, setApiBatchLoading] = useState(false);
   const [refreshingProviderIds, setRefreshingProviderIds] = useState<Set<string>>(new Set());
   const [moreMenuProviderId, setMoreMenuProviderId] = useState<string | null>(null);
+
+  // ─── Admin: User management enhanced state ───
+  const [userSearchQuery, setUserSearchQuery] = useState('');
+  const [userFilterStatus, setUserFilterStatus] = useState<'all' | 'active' | 'disabled'>('all');
+  const [userFilterRole, setUserFilterRole] = useState<'all' | 'admin' | 'user'>('all');
+  const [selectedUserIds, setSelectedUserIds] = useState<Set<string>>(new Set());
+  const [userDetailId, setUserDetailId] = useState<string | null>(null);
+  const [userDetailCredits, setUserDetailCredits] = useState<{ balance: number; totalRecharged: number; totalUsed: number } | null>(null);
+  const [userDetailTransactions, setUserDetailTransactions] = useState<Array<{ id: string; type: string; amount: number; balanceAfter: number; description: string; createdAt: number }>>([]);
+  const [showUserDrawer, setShowUserDrawer] = useState(false);
+  const [showUserAddDrawer, setShowUserAddDrawer] = useState(false);
+
+  // ─── Admin: System settings state ───
+  const [systemSettings, setSystemSettings] = useState<{
+    defaultImageModel: string; defaultChatModel: string; maxConcurrentTasks: number; imageMaxSizeMB: number; announcement: string;
+  }>({ defaultImageModel: '', defaultChatModel: '', maxConcurrentTasks: 15, imageMaxSizeMB: 20, announcement: '' });
+
+  // ─── Admin: Credits management enhanced state ───
+  const [creditsSubTab, setCreditsSubTab] = useState<'overview' | 'consumption' | 'stats' | 'packages'>('overview');
+  const [creditsConsumptionData, setCreditsConsumptionData] = useState<Array<{ userId: string; userName: string; model: string; credits: number; type: string; createdAt: number }>>([]);
+
+  // ─── Admin: Audit log state ───
+  const [auditLogs, setAuditLogs] = useState<Array<{ id: string; userId: string; userName: string; action: string; targetType: string | null; targetId: string | null; detail: string | null; ipAddress: string | null; createdAt: number }>>([]);
+  const [auditStats, setAuditStats] = useState<{ totalActions: number; todayActions: number; uniqueUsers: number; actionBreakdown: Record<string, number>; todayCount?: number; weekCount?: number; totalCount?: number; } | null>(null);
+  const [auditFilterAction, setAuditFilterAction] = useState<string>('all');
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditTotal, setAuditTotal] = useState(0);
+  const [auditPage, setAuditPage] = useState(0);
+
+  // ─── Admin: Dashboard overview state ───
+  const [dashboardStats, setDashboardStats] = useState<{
+    totalUsers: number; activeUsersToday: number; activeUsersWeek: number; activeUsersMonth: number;
+    totalCreditsRecharged: number; totalCreditsConsumed: number;
+    newUsersToday: number; newUsersWeek: number; newUsersMonth: number;
+    totalProviders?: number; activeProviders?: number; todayActive?: number;
+  } | null>(null);
 
   // ─── Admin: Data management state ───
   const [selectedDataUser, setSelectedDataUser] = useState<string | null>(null);
@@ -692,12 +728,127 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     setEditingProviderId(null);
   }, []);
 
+  // ─── Admin: User management computed ───
+  const filteredAdminUsers = useMemo(() => {
+    let list = [...adminUsers];
+    if (userFilterRole !== 'all') list = list.filter(u => u.role === userFilterRole);
+    if (userFilterStatus === 'active') list = list.filter(u => u.status !== 'disabled');
+    else if (userFilterStatus === 'disabled') list = list.filter(u => u.status === 'disabled');
+    if (userSearchQuery.trim()) {
+      const q = userSearchQuery.toLowerCase();
+      list = list.filter(u => (u.name || '').toLowerCase().includes(q) || (u.id || '').toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q));
+    }
+    return list;
+  }, [adminUsers, userFilterRole, userFilterStatus, userSearchQuery]);
+
+  const handleBatchToggleUsers = useCallback(async (enable: boolean) => {
+    const ids = Array.from(selectedUserIds);
+    if (ids.length === 0) return;
+    try {
+      for (const uid of ids) {
+        await fetch('/api/admin/users', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+          body: JSON.stringify({ action: enable ? 'enable' : 'disable', userId: uid })
+        });
+      }
+      setSelectedUserIds(new Set());
+      await refreshAdmin();
+    } catch { /* ignore */ }
+  }, [selectedUserIds, refreshAdmin]);
+
   useEffect(() => {
     if (isAdmin) {
       void refreshAdmin();
       void refreshBalances();
     }
   }, [isAdmin, refreshAdmin, refreshBalances]);
+
+  // ─── Load dashboard stats (admin overview) ───
+  const loadDashboardStats = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/dashboard-stats', { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) setDashboardStats(data.stats);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  // ─── Load audit logs ───
+  const loadAuditLogs = useCallback(async (page = 0) => {
+    setAuditLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: '50', offset: String(page * 50) });
+      if (auditFilterAction && auditFilterAction !== 'all') params.set('action', auditFilterAction);
+      const res = await fetch(`/api/admin/audit?${params}`, { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          setAuditLogs(data.logs || []);
+          setAuditTotal(data.total || 0);
+          setAuditPage(page);
+        }
+      }
+    } catch { /* ignore */ }
+    setAuditLoading(false);
+  }, [auditFilterAction]);
+
+  const loadAuditStats = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/audit?stats=true', { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) setAuditStats(data.stats);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  // ─── Load user detail (drawer) ───
+  const loadUserDetail = useCallback(async (userId: string) => {
+    setUserDetailId(userId);
+    setShowUserDrawer(true);
+    try {
+      // Load credits for this user
+      const creditsRes = await fetch('/api/credits', { credentials: 'include' });
+      // Use the credits admin endpoint
+      const allCreditsRes = await fetch('/api/credits/admin?action=list', { credentials: 'include' });
+      if (allCreditsRes.ok) {
+        const data = await allCreditsRes.json();
+        if (data.success && data.users) {
+          const userCredit = data.users.find((u: { userId: string }) => u.userId === userId);
+          if (userCredit) setUserDetailCredits({ balance: userCredit.balance, totalRecharged: userCredit.totalRecharged, totalUsed: userCredit.totalUsed });
+        }
+      }
+      // Load user transactions
+      const txRes = await fetch(`/api/credits/admin?action=transactions&userId=${userId}`, { credentials: 'include' });
+      if (txRes.ok) {
+        const txData = await txRes.json();
+        if (txData.success && txData.transactions) {
+          setUserDetailTransactions(txData.transactions.map((t: { id: string; type: string; amount: number; balance_after: number; description: string; created_at: number }) => ({
+            id: t.id, type: t.type, amount: t.amount, balanceAfter: t.balance_after, description: t.description, createdAt: t.created_at,
+          })));
+        }
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  // ─── Load data when switching admin tabs ───
+  useEffect(() => {
+    if (!isAdmin) return;
+    if (activeTab === 'overview') void loadDashboardStats();
+    if (activeTab === 'audit') { void loadAuditLogs(0); void loadAuditStats(); }
+    if (activeTab === 'settings') {
+      void (async () => {
+        try {
+          const res = await fetch('/api/admin/settings', { credentials: 'include' });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.success && data.settings) setSystemSettings(prev => ({ ...prev, ...data.settings }));
+          }
+        } catch { /* ignore */ }
+      })();
+    }
+  }, [isAdmin, activeTab, loadDashboardStats, loadAuditLogs, loadAuditStats]);
 
   // Close "more" dropdown on outside click
   useEffect(() => {
@@ -1300,10 +1451,12 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 <span className={`text-[10px] uppercase tracking-wider font-semibold ${textSecondary} px-3`}>管理</span>
               </div>
               {[
+                { key: 'overview' as TabType, label: '运营总览', icon: BarChart3, count: null },
                 { key: 'users' as TabType, label: '用户管理', icon: Users, count: adminUsers.length },
+                { key: 'credits' as TabType, label: '积分管理', icon: Wallet, count: null },
+                { key: 'audit' as TabType, label: '审计日志', icon: ShieldCheck, count: null },
                 { key: 'apis' as TabType, label: 'API 管理', icon: Server, count: providers.length },
                 { key: 'data' as TabType, label: '数据管理', icon: Database, count: null },
-                { key: 'credits' as TabType, label: '积分管理', icon: Wallet, count: null },
                 { key: 'payment-config' as TabType, label: '支付配置', icon: CreditCard, count: null },
                 { key: 'ecom-templates' as TabType, label: '电商模板', icon: ShoppingBag, count: ecomTemplates.length },
               ].map(item => (
@@ -1635,6 +1788,153 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               <div className={`flex flex-col items-center justify-center h-48 ${textSecondary}`}>
                 <BarChart3 className="w-12 h-12 mb-3 opacity-30" />
                 <p className="text-sm">暂无统计数据</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Tab: Admin Overview (运营总览) ── */}
+        {activeTab === 'overview' && isAdmin && (
+          <div className="h-full overflow-y-auto p-6">
+            <h1 className={`text-xl font-bold mb-1 ${textPrimary}`}>运营总览</h1>
+            <p className={`text-sm mb-4 ${textSecondary}`}>核心运营指标与趋势</p>
+
+            {/* Key metrics */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+              {[
+                { label: '用户总数', value: dashboardStats?.totalUsers ?? adminUsers.length, icon: Users, color: 'text-blue-400' },
+                { label: 'API 提供商', value: dashboardStats?.totalProviders ?? providers.length, icon: Server, color: 'text-green-400' },
+                { label: '已启用 API', value: dashboardStats?.activeProviders ?? providers.filter(p => p.isEnabled !== false).length, icon: Zap, color: accentClass },
+                { label: '今日活跃', value: dashboardStats?.todayActive ?? dashboardStats?.activeUsersToday ?? '—', icon: Activity, color: 'text-orange-400' },
+              ].map((stat, i) => (
+                <div key={i} className={`rounded-xl border p-4 ${softClass}`}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <stat.icon className={`w-4 h-4 ${stat.color}`} />
+                    <span className={`text-xs ${textSecondary}`}>{stat.label}</span>
+                  </div>
+                  <p className={`text-2xl font-bold ${textPrimary}`}>{stat.value}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* API Provider Health */}
+            <div className={`rounded-xl border p-5 mb-4 ${softClass}`}>
+              <h3 className={`text-sm font-semibold mb-3 ${textPrimary}`}>API 提供商状态</h3>
+              <div className="space-y-2">
+                {providers.map(p => (
+                  <div key={p.id} className="flex items-center gap-3">
+                    <div className={`w-2 h-2 rounded-full ${p.isEnabled !== false ? 'bg-green-400' : 'bg-red-400'}`} />
+                    <span className={`text-sm flex-1 ${textPrimary}`}>{p.name}</span>
+                    <span className={`text-xs ${textSecondary}`}>{p.modelType || '—'}</span>
+                    <span className={`text-xs ${p.isEnabled !== false ? 'text-green-400' : 'text-red-400'}`}>{p.isEnabled !== false ? '正常' : '已停用'}</span>
+                  </div>
+                ))}
+                {providers.length === 0 && <div className={`text-center py-4 ${textSecondary} text-xs`}>暂无API提供商</div>}
+              </div>
+            </div>
+
+            {/* User activity summary */}
+            <div className={`rounded-xl border p-5 ${softClass}`}>
+              <h3 className={`text-sm font-semibold mb-3 ${textPrimary}`}>最近注册用户</h3>
+              <div className="space-y-2">
+                {[...adminUsers].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, 5).map(u => (
+                  <div key={u.id} className="flex items-center gap-3">
+                    <div className={`w-7 h-7 rounded-lg ${accentBgLight} ${accentClass} flex items-center justify-center font-bold text-xs`}>{u.name.slice(0, 1).toUpperCase()}</div>
+                    <span className={`text-sm flex-1 ${textPrimary}`}>{u.name}</span>
+                    <span className={`text-xs ${textSecondary}`}>{u.createdAt ? new Date(u.createdAt * 1000).toLocaleDateString('zh-CN') : '—'}</span>
+                    {u.role === 'admin' && <span className={`text-[10px] px-1.5 py-0.5 rounded ${isMonochrome ? 'bg-[#3b82f6]/15 text-[#3b82f6]' : 'bg-[#d4af37]/15 text-[#d4af37]'}`}>管理员</span>}
+                  </div>
+                ))}
+                {adminUsers.length === 0 && <div className={`text-center py-4 ${textSecondary} text-xs`}>暂无用户</div>}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Tab: Audit Log (审计日志) ── */}
+        {activeTab === 'audit' && isAdmin && (
+          <div className="h-full overflow-y-auto p-6">
+            <div className="flex items-center justify-between mb-1">
+              <h1 className={`text-xl font-bold ${textPrimary}`}>审计日志</h1>
+              <button onClick={() => { void loadAuditLogs(0); void loadAuditStats(); }} className={`flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs cursor-pointer ${isDark ? 'border-white/10 hover:bg-white/5 text-[#aaa]' : 'border-gray-200 hover:bg-gray-50 text-gray-600'}`}><RefreshCw className="w-3.5 h-3.5" />刷新</button>
+            </div>
+            <p className={`text-sm mb-4 ${textSecondary}`}>记录管理员操作，保障系统安全</p>
+
+            {/* Audit stats */}
+            <div className="grid grid-cols-3 gap-3 mb-4">
+              {[
+                { label: '今日操作', value: auditStats?.todayCount ?? auditStats?.todayActions ?? '—', color: 'text-blue-400' },
+                { label: '本周操作', value: auditStats?.weekCount ?? '—', color: 'text-green-400' },
+                { label: '总操作数', value: auditStats?.totalCount ?? auditStats?.totalActions ?? '—', color: accentClass },
+              ].map((stat, i) => (
+                <div key={i} className={`rounded-xl border p-4 ${softClass}`}>
+                  <div className={`text-xs ${textSecondary} mb-1`}>{stat.label}</div>
+                  <div className={`text-xl font-bold ${stat.color}`}>{stat.value}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Filter bar */}
+            <div className="flex items-center gap-2 mb-4 flex-wrap">
+              <select value={auditFilterAction} onChange={e => { setAuditFilterAction(e.target.value); setTimeout(() => void loadAuditLogs(0), 0); }} className={`h-9 px-3 rounded-lg border text-sm ${inputClass} cursor-pointer`}>
+                <option value="all">全部操作</option>
+                <option value="user_create">创建用户</option>
+                <option value="user_delete">删除用户</option>
+                <option value="user_toggle">启用/禁用</option>
+                <option value="user_rename">重命名</option>
+                <option value="password_reset">重置密码</option>
+                <option value="api_create">添加API</option>
+                <option value="api_update">更新API</option>
+                <option value="api_delete">删除API</option>
+                <option value="credits_recharge">积分充值</option>
+                <option value="settings_update">修改设置</option>
+              </select>
+            </div>
+
+            {/* Audit log table */}
+            <div className={`rounded-xl border overflow-hidden ${softClass}`}>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className={`border-b ${isDark ? 'border-white/5 bg-white/[0.02]' : 'border-gray-100 bg-gray-50/50'}`}>
+                      <th className={`px-4 py-2.5 text-left font-medium ${textSecondary}`}>时间</th>
+                      <th className={`px-4 py-2.5 text-left font-medium ${textSecondary}`}>操作者</th>
+                      <th className={`px-4 py-2.5 text-left font-medium ${textSecondary}`}>操作</th>
+                      <th className={`px-4 py-2.5 text-left font-medium ${textSecondary}`}>目标</th>
+                      <th className={`px-4 py-2.5 text-left font-medium ${textSecondary}`}>详情</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {auditLoading ? (
+                      <tr><td colSpan={5} className={`text-center py-8 ${textSecondary}`}><RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2" />加载中…</td></tr>
+                    ) : auditLogs.length === 0 ? (
+                      <tr><td colSpan={5} className={`text-center py-8 ${textSecondary}`}>暂无审计日志</td></tr>
+                    ) : auditLogs.map((log) => {
+                      const actionColors: Record<string, string> = { user_create: 'text-green-400', user_delete: 'text-red-400', user_toggle: 'text-yellow-400', password_reset: 'text-orange-400', api_create: 'text-green-400', api_delete: 'text-red-400', api_update: 'text-blue-400', credits_recharge: 'text-purple-400', settings_update: 'text-cyan-400' };
+                      const actionLabels: Record<string, string> = { user_create: '创建用户', user_delete: '删除用户', user_toggle: '启用/禁用', user_rename: '重命名', password_reset: '重置密码', api_create: '添加API', api_update: '更新API', api_delete: '删除API', credits_recharge: '积分充值', settings_update: '修改设置' };
+                      return (
+                        <tr key={log.id} className={`border-b last:border-b-0 ${isDark ? 'border-white/5 hover:bg-white/[0.02]' : 'border-gray-50 hover:bg-gray-50/50'}`}>
+                          <td className={`px-4 py-2.5 text-xs ${textSecondary} whitespace-nowrap`}>{log.createdAt ? new Date(log.createdAt * 1000).toLocaleString('zh-CN') : '—'}</td>
+                          <td className={`px-4 py-2.5 text-xs ${textPrimary}`}>{log.userName || '系统'}</td>
+                          <td className="px-4 py-2.5"><span className={`text-xs font-medium ${actionColors[log.action] || 'text-[#aaa]'}`}>{actionLabels[log.action] || log.action}</span></td>
+                          <td className={`px-4 py-2.5 text-xs ${textSecondary}`}>{log.targetType ? `${log.targetType}` : ''}{log.targetId ? ` #${log.targetId.slice(0, 8)}` : ''}</td>
+                          <td className={`px-4 py-2.5 text-xs ${textSecondary} max-w-[200px] truncate`}>{log.detail || '—'}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Pagination */}
+            {auditTotal > 50 && (
+              <div className="flex items-center justify-between mt-4">
+                <span className={`text-xs ${textSecondary}`}>共 {auditTotal} 条 · 第 {auditPage + 1} 页</span>
+                <div className="flex gap-2">
+                  <button disabled={auditPage === 0} onClick={() => void loadAuditLogs(auditPage - 1)} className={`h-8 px-3 rounded-lg border text-xs cursor-pointer disabled:opacity-30 ${isDark ? 'border-white/10 text-[#aaa]' : 'border-gray-200 text-gray-600'}`}>上一页</button>
+                  <button disabled={(auditPage + 1) * 50 >= auditTotal} onClick={() => void loadAuditLogs(auditPage + 1)} className={`h-8 px-3 rounded-lg border text-xs cursor-pointer disabled:opacity-30 ${isDark ? 'border-white/10 text-[#aaa]' : 'border-gray-200 text-gray-600'}`}>下一页</button>
+                </div>
               </div>
             )}
           </div>
@@ -1989,163 +2289,196 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
         {/* ── Tab: Credits (Admin) ── */}
         {activeTab === 'credits' && isAdmin && (
-          <div className="h-full overflow-y-auto p-8">
-            <h1 className={`text-2xl font-bold mb-1 ${textPrimary}`}>积分管理</h1>
-            <p className={`text-sm mb-6 ${textSecondary}`}>查看用户积分情况，进行充值与调整（1积分 ≈ ¥0.01）</p>
+          <div className="h-full overflow-y-auto p-6">
+            <h1 className={`text-xl font-bold mb-1 ${textPrimary}`}>积分管理</h1>
+            <p className={`text-sm mb-4 ${textSecondary}`}>查看用户积分情况，进行充值与调整（1积分 ≈ ¥0.01）</p>
 
             {/* Overview Stats */}
-            <div className="grid grid-cols-3 gap-4 mb-6">
-              <div className={`${cardBg} rounded-xl p-5 border ${borderColor}`}>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+              <div className={`rounded-xl p-4 border ${softClass}`}>
                 <div className={`text-xs ${textSecondary} mb-1`}>总用户数</div>
                 <div className="text-2xl font-bold text-blue-500">{creditsUsers.length}</div>
               </div>
-              <div className={`${cardBg} rounded-xl p-5 border ${borderColor}`}>
+              <div className={`rounded-xl p-4 border ${softClass}`}>
                 <div className={`text-xs ${textSecondary} mb-1`}>总充值积分</div>
                 <div className="text-2xl font-bold text-green-500">{creditsUsers.reduce((sum: number, u: { totalRecharged: number }) => sum + (u.totalRecharged || 0), 0)}</div>
               </div>
-              <div className={`${cardBg} rounded-xl p-5 border ${borderColor}`}>
+              <div className={`rounded-xl p-4 border ${softClass}`}>
                 <div className={`text-xs ${textSecondary} mb-1`}>总消耗积分</div>
                 <div className="text-2xl font-bold text-orange-500">{creditsUsers.reduce((sum: number, u: { totalUsed: number }) => sum + (u.totalUsed || 0), 0)}</div>
               </div>
-            </div>
-
-            {/* User Credits Table */}
-            <div className="mb-6">
-              <h3 className={`text-base font-semibold ${textPrimary} mb-3`}>用户积分概览</h3>
-              <div className={`${cardBg} rounded-xl border ${borderColor} overflow-hidden`}>
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className={`${inputBg} border-b ${borderColor}`}>
-                      <th className={`text-left px-4 py-3 ${textSecondary} font-medium`}>用户</th>
-                      <th className={`text-right px-4 py-3 ${textSecondary} font-medium`}>余额</th>
-                      <th className={`text-right px-4 py-3 ${textSecondary} font-medium`}>累计充值</th>
-                      <th className={`text-right px-4 py-3 ${textSecondary} font-medium`}>累计使用</th>
-                      <th className={`text-center px-4 py-3 ${textSecondary} font-medium`}>操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {creditsUsers.length === 0 ? (
-                      <tr><td colSpan={5} className={`text-center py-6 ${textSecondary}`}>暂无数据</td></tr>
-                    ) : creditsUsers.map((user) => (
-                      <tr key={user.userId} className={`border-b ${borderColor} hover:bg-muted/50 transition-colors`}>
-                        <td className={`px-4 py-3 ${textPrimary} font-medium`}>{user.userName || user.userId}</td>
-                        <td className="px-4 py-3 text-right font-semibold text-blue-500">{user.balance}</td>
-                        <td className="px-4 py-3 text-right text-green-500">{user.totalRecharged}</td>
-                        <td className="px-4 py-3 text-right text-orange-500">{user.totalUsed}</td>
-                        <td className="px-4 py-3 text-center">
-                          <button
-                            onClick={() => { setSelectedCreditsUser(user.userId); loadCreditsTransactions(user.userId); }}
-                            className="text-xs text-blue-500 hover:text-blue-600 font-medium"
-                          >
-                            详情/充值
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className={`rounded-xl p-4 border ${softClass}`}>
+                <div className={`text-xs ${textSecondary} mb-1`}>总余额</div>
+                <div className={`text-2xl font-bold ${accentClass}`}>{creditsUsers.reduce((sum: number, u: { balance: number }) => sum + (u.balance || 0), 0)}</div>
               </div>
             </div>
 
-            {/* Selected User Detail */}
-            {selectedCreditsUser && (
-              <div className={`${cardBg} rounded-xl border ${borderColor} p-6 mb-6`}>
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className={`text-base font-semibold ${textPrimary}`}>
-                    {(creditsUsers.find(u => u.userId === selectedCreditsUser)?.userName || selectedCreditsUser)} 的积分详情
-                  </h3>
-                  <button onClick={() => setSelectedCreditsUser(null)} className={`text-xs ${textSecondary} hover:text-red-500`}>关闭</button>
-                </div>
+            {/* Sub-tabs */}
+            <div className={`flex gap-1 mb-4 p-1 rounded-lg ${isDark ? 'bg-white/5' : 'bg-gray-100'}`}>
+              {[
+                { key: 'overview' as const, label: '用户积分' },
+                { key: 'consumption' as const, label: '消耗明细' },
+                { key: 'stats' as const, label: '统计分析' },
+                { key: 'packages' as const, label: '套餐管理' },
+              ].map(tab => (
+                <button key={tab.key} onClick={() => setCreditsSubTab(tab.key)} className={`flex-1 h-8 rounded-md text-xs font-medium cursor-pointer transition-all ${creditsSubTab === tab.key ? `${accentBgClass} ${accentTextOnBgClass}` : `${textSecondary} hover:${isDark ? 'bg-white/5' : 'bg-gray-50'}`}`}>{tab.label}</button>
+              ))}
+            </div>
 
-                {/* Admin Recharge */}
-                <div className="mb-4">
-                  <div className={`text-sm font-medium ${textPrimary} mb-2`}>管理员充值</div>
-                  <div className="flex gap-2 mb-2 flex-wrap">
-                    {[50, 100, 500, 1000, 5000].map(amount => (
-                      <button
-                        key={amount}
-                        onClick={() => setAdminRechargeAmount(amount)}
-                        className={`px-3 py-1.5 text-xs rounded-lg border ${adminRechargeAmount === amount ? 'border-blue-500 bg-blue-500/10 text-blue-500' : `${borderColor} ${textSecondary} hover:border-blue-500/50`} transition-colors`}
-                      >
-                        {amount}积分
-                      </button>
-                    ))}
-                  </div>
-                  <div className="flex gap-2">
-                    <input
-                      type="number"
-                      min="1"
-                      value={adminRechargeAmount}
-                      onChange={(e) => setAdminRechargeAmount(Math.max(1, parseInt(e.target.value) || 0))}
-                      className={`flex-1 px-3 py-2 rounded-lg border ${borderColor} ${inputBg} ${textPrimary} text-sm focus:outline-none focus:border-blue-500`}
-                      placeholder="自定义积分"
-                    />
-                    <input
-                      type="text"
-                      value={adminRechargeDesc}
-                      onChange={(e) => setAdminRechargeDesc(e.target.value)}
-                      className={`flex-1 px-3 py-2 rounded-lg border ${borderColor} ${inputBg} ${textPrimary} text-sm focus:outline-none focus:border-blue-500`}
-                      placeholder="备注说明"
-                    />
-                    <button
-                      onClick={async () => {
-                        if (!selectedCreditsUser || Number(adminRechargeAmount || 0) <= 0) return;
-                        setIsAdminRecharging(true);
-                        try {
-                          const res = await fetch('/api/credits', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                              action: 'admin-recharge',
-                              userId: selectedCreditsUser,
-                              amount: adminRechargeAmount,
-                              description: adminRechargeDesc || `管理员充值 ${adminRechargeAmount} 积分`,
-                            }),
-                          });
-                          const data = await res.json();
-                          if (data.success) {
-                            setAdminRechargeAmount(100);
-                            setAdminRechargeDesc('');
-                            loadCreditsOverview();
-                            loadCreditsTransactions(selectedCreditsUser);
-                          } else {
-                            alert(data.error || '充值失败');
-                          }
-                        } catch { alert('网络错误'); }
-                        setIsAdminRecharging(false);
-                      }}
-                      disabled={isAdminRecharging || Number(adminRechargeAmount || 0) <= 0}
-                      className="px-4 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 disabled:opacity-50"
-                    >
-                      {isAdminRecharging ? '处理中...' : '充值'}
-                    </button>
-                  </div>
-                </div>
-
-                {/* User Transactions */}
-                <div>
-                  <div className={`text-sm font-medium ${textPrimary} mb-2`}>交易记录</div>
-                  {creditsTransactions.length === 0 ? (
-                    <div className={`text-center py-4 ${textSecondary} text-sm`}>暂无记录</div>
-                  ) : (
-                    <div className="space-y-1.5 max-h-60 overflow-y-auto">
-                      {creditsTransactions.map((tx: { id: string; type: string; amount: number; balanceAfter: number; description: string; createdAt: number }) => (
-                        <div key={tx.id} className={`flex items-center justify-between px-3 py-2 rounded-lg ${inputBg}`}>
-                          <div>
-                            <span className={`text-xs font-medium ${tx.amount > 0 ? 'text-green-500' : 'text-red-500'}`}>
-                              {tx.amount > 0 ? '+' : ''}{tx.amount}
-                            </span>
-                            <span className={`text-xs ${textSecondary} ml-2`}>
-                              {tx.type === 'recharge' ? '充值' : tx.type === 'consume' ? '使用' : tx.type === 'refund' ? '退款' : '调整'}
-                            </span>
-                          </div>
-                          <div className={`text-xs ${textSecondary}`}>
-                            余额 {tx.balanceAfter} · {new Date(tx.createdAt).toLocaleString('zh-CN')}
-                          </div>
-                        </div>
+            {/* Sub-tab: User Credits Overview */}
+            {creditsSubTab === 'overview' && (
+              <div>
+                <div className={`rounded-xl border overflow-hidden ${softClass}`}>
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className={`border-b ${isDark ? 'border-white/5 bg-white/[0.02]' : 'border-gray-100 bg-gray-50/50'}`}>
+                        <th className={`text-left px-4 py-2.5 ${textSecondary} font-medium`}>用户</th>
+                        <th className={`text-right px-4 py-2.5 ${textSecondary} font-medium`}>余额</th>
+                        <th className={`text-right px-4 py-2.5 ${textSecondary} font-medium`}>累计充值</th>
+                        <th className={`text-right px-4 py-2.5 ${textSecondary} font-medium`}>累计使用</th>
+                        <th className={`text-center px-4 py-2.5 ${textSecondary} font-medium`}>操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {creditsUsers.length === 0 ? (
+                        <tr><td colSpan={5} className={`text-center py-6 ${textSecondary}`}>暂无数据</td></tr>
+                      ) : creditsUsers.map((user: { userId: string; userName: string; balance: number; totalRecharged: number; totalUsed: number }) => (
+                        <tr key={user.userId} className={`border-b last:border-b-0 transition-colors ${isDark ? 'border-white/5 hover:bg-white/[0.02]' : 'border-gray-50 hover:bg-gray-50/50'}`}>
+                          <td className={`px-4 py-2.5 ${textPrimary} font-medium`}>{user.userName || user.userId}</td>
+                          <td className="px-4 py-2.5 text-right font-semibold text-blue-500">{user.balance}</td>
+                          <td className="px-4 py-2.5 text-right text-green-500">{user.totalRecharged}</td>
+                          <td className="px-4 py-2.5 text-right text-orange-500">{user.totalUsed}</td>
+                          <td className="px-4 py-2.5 text-center">
+                            <button onClick={() => { setSelectedCreditsUser(user.userId); loadCreditsTransactions(user.userId); }} className={`text-xs font-medium cursor-pointer ${accentClass} hover:underline`}>详情/充值</button>
+                          </td>
+                        </tr>
                       ))}
+                    </tbody>
+                  </table>
+                </div>
+                {/* Selected User Detail */}
+                {selectedCreditsUser && (
+                  <div className={`rounded-xl border p-5 mt-4 ${softClass}`}>
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className={`text-base font-semibold ${textPrimary}`}>{(creditsUsers.find((u: { userId: string }) => u.userId === selectedCreditsUser) as { userName?: string } | undefined)?.userName || selectedCreditsUser} 的积分详情</h3>
+                      <button onClick={() => setSelectedCreditsUser(null)} className={`text-xs ${textSecondary} cursor-pointer hover:underline`}>关闭</button>
                     </div>
-                  )}
+                    {/* Admin Recharge */}
+                    <div className="mb-4">
+                      <div className={`text-sm font-medium ${textPrimary} mb-2`}>管理员充值</div>
+                      <div className="flex gap-2 mb-2 flex-wrap">
+                        {[50, 100, 500, 1000, 5000].map(amount => (
+                          <button key={amount} onClick={() => setAdminRechargeAmount(amount)} className={`px-3 py-1.5 text-xs rounded-lg border cursor-pointer ${adminRechargeAmount === amount ? `${accentBgLight} ${accentClass} border-transparent` : `${isDark ? 'border-white/10 text-[#888]' : 'border-gray-200 text-gray-500'} hover:border-current/30`}`}>{amount}积分</button>
+                        ))}
+                      </div>
+                      <div className="flex gap-2">
+                        <input type="number" min="1" value={adminRechargeAmount} onChange={e => setAdminRechargeAmount(Math.max(1, parseInt(e.target.value) || 0))} className={`flex-1 h-9 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="自定义积分" />
+                        <input type="text" value={adminRechargeDesc} onChange={e => setAdminRechargeDesc(e.target.value)} className={`flex-1 h-9 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="备注说明" />
+                        <button onClick={async () => { if (!selectedCreditsUser || Number(adminRechargeAmount || 0) <= 0) return; setIsAdminRecharging(true); try { const res = await fetch('/api/credits', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'admin-recharge', userId: selectedCreditsUser, amount: adminRechargeAmount, description: adminRechargeDesc || `管理员充值 ${adminRechargeAmount} 积分` }), }); const data = await res.json(); if (data.success) { setAdminRechargeAmount(100); setAdminRechargeDesc(''); loadCreditsOverview(); loadCreditsTransactions(selectedCreditsUser); } else { alert(data.error || '充值失败'); } } catch { alert('网络错误'); } setIsAdminRecharging(false); }} disabled={isAdminRecharging || Number(adminRechargeAmount || 0) <= 0} className={`h-9 px-4 rounded-lg ${accentBgClass} ${accentTextOnBgClass} text-sm font-semibold cursor-pointer disabled:opacity-50`}>{isAdminRecharging ? '处理中...' : '充值'}</button>
+                      </div>
+                    </div>
+                    {/* User Transactions */}
+                    <div>
+                      <div className={`text-sm font-medium ${textPrimary} mb-2`}>交易记录</div>
+                      {creditsTransactions.length === 0 ? <div className={`text-center py-4 ${textSecondary} text-sm`}>暂无记录</div> : (
+                        <div className="space-y-1.5 max-h-60 overflow-y-auto">
+                          {creditsTransactions.map((tx: { id: string; type: string; amount: number; balanceAfter: number; description: string; createdAt: number }) => (
+                            <div key={tx.id} className={`flex items-center justify-between px-3 py-2 rounded-lg ${isDark ? 'bg-white/[0.02]' : 'bg-gray-50/50'}`}>
+                              <div>
+                                <span className={`text-xs font-semibold ${tx.amount > 0 ? 'text-green-500' : 'text-red-500'}`}>{tx.amount > 0 ? '+' : ''}{tx.amount}</span>
+                                <span className={`text-xs ${textSecondary} ml-2`}>{tx.type === 'recharge' ? '充值' : tx.type === 'consume' ? '使用' : tx.type === 'refund' ? '退款' : '调整'}</span>
+                                {tx.description && <span className={`text-xs ${textSecondary} ml-2`}>{tx.description}</span>}
+                              </div>
+                              <div className={`text-xs ${textSecondary}`}>余额 {tx.balanceAfter} · {new Date(tx.createdAt).toLocaleString('zh-CN')}</div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Sub-tab: Consumption Details */}
+            {creditsSubTab === 'consumption' && (
+              <div>
+                <div className={`rounded-xl border p-6 ${softClass}`}>
+                  <h3 className={`text-sm font-semibold mb-3 ${textPrimary}`}>消耗明细</h3>
+                  <p className={`text-xs ${textSecondary} mb-4`}>按时间倒序展示所有用户的积分消耗记录</p>
+                  <div className="space-y-1.5">
+                    {creditsUsers.flatMap((u: { userId: string; userName: string }) => 
+                      (creditsTransactions as { id: string; type: string; amount: number; balanceAfter: number; description: string; createdAt: number }[])
+                        .filter(tx => tx.type === 'consume' && tx.amount < 0)
+                        .slice(0, 5)
+                        .map(tx => (
+                          <div key={tx.id} className={`flex items-center justify-between px-3 py-2 rounded-lg ${isDark ? 'bg-white/[0.02]' : 'bg-gray-50/50'}`}>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-semibold text-red-400">{tx.amount}</span>
+                              <span className={`text-xs ${textSecondary}`}>{tx.description || '消费'}</span>
+                            </div>
+                            <span className={`text-xs ${textSecondary}`}>{u.userName || u.userId} · {new Date(tx.createdAt).toLocaleString('zh-CN')}</span>
+                          </div>
+                        ))
+                    )}
+                    {creditsUsers.length === 0 && <div className={`text-center py-6 ${textSecondary} text-xs`}>暂无消耗记录</div>}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Sub-tab: Statistics */}
+            {creditsSubTab === 'stats' && (
+              <div className="space-y-4">
+                {/* Top consumers */}
+                <div className={`rounded-xl border p-5 ${softClass}`}>
+                  <h3 className={`text-sm font-semibold mb-3 ${textPrimary}`}>消耗排行 Top 10</h3>
+                  <div className="space-y-2">
+                    {[...creditsUsers].sort((a: { totalUsed: number }, b: { totalUsed: number }) => (b.totalUsed || 0) - (a.totalUsed || 0)).slice(0, 10).map((u: { userId: string; userName: string; totalUsed: number; balance: number }, i: number) => (
+                      <div key={u.userId} className="flex items-center gap-3">
+                        <span className={`w-5 text-xs font-bold ${i < 3 ? accentClass : textSecondary}`}>{i + 1}</span>
+                        <span className={`text-sm flex-1 ${textPrimary}`}>{u.userName || u.userId}</span>
+                        <span className="text-sm font-semibold text-orange-500">{u.totalUsed || 0}</span>
+                      </div>
+                    ))}
+                    {creditsUsers.length === 0 && <div className={`text-center py-4 ${textSecondary} text-xs`}>暂无数据</div>}
+                  </div>
+                </div>
+                {/* Balance distribution */}
+                <div className={`rounded-xl border p-5 ${softClass}`}>
+                  <h3 className={`text-sm font-semibold mb-3 ${textPrimary}`}>余额分布</h3>
+                  <div className="grid grid-cols-3 gap-3 text-center">
+                    <div><p className={`text-xl font-bold text-green-400`}>{creditsUsers.filter((u: { balance: number }) => u.balance > 100).length}</p><p className={`text-[10px] ${textSecondary}`}>余额 &gt;100</p></div>
+                    <div><p className={`text-xl font-bold text-blue-400`}>{creditsUsers.filter((u: { balance: number }) => u.balance > 0 && u.balance <= 100).length}</p><p className={`text-[10px] ${textSecondary}`}>余额 1-100</p></div>
+                    <div><p className={`text-xl font-bold text-red-400`}>{creditsUsers.filter((u: { balance: number }) => u.balance <= 0).length}</p><p className={`text-[10px] ${textSecondary}`}>余额为0</p></div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Sub-tab: Packages */}
+            {creditsSubTab === 'packages' && (
+              <div className={`rounded-xl border p-6 ${softClass}`}>
+                <h3 className={`text-sm font-semibold mb-3 ${textPrimary}`}>积分套餐</h3>
+                <p className={`text-xs ${textSecondary} mb-4`}>配置预设充值套餐，方便用户快速购买</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {[
+                    { name: '体验包', credits: 50, price: '¥0.5', desc: '新用户体验' },
+                    { name: '基础包', credits: 500, price: '¥5', desc: '日常使用' },
+                    { name: '专业包', credits: 2000, price: '¥20', desc: '高频创作' },
+                    { name: '团队包', credits: 5000, price: '¥50', desc: '团队协作' },
+                    { name: '企业包', credits: 20000, price: '¥200', desc: '企业批量' },
+                    { name: '旗舰包', credits: 50000, price: '¥500', desc: '无限创作' },
+                  ].map(pkg => (
+                    <div key={pkg.name} className={`rounded-xl border p-4 ${isDark ? 'border-white/10 hover:border-[#d4af37]/30' : 'border-gray-200 hover:border-[#d4af37]/50'} transition-all cursor-pointer`}>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className={`text-sm font-bold ${textPrimary}`}>{pkg.name}</span>
+                        <span className={`text-sm font-bold ${accentClass}`}>{pkg.price}</span>
+                      </div>
+                      <p className={`text-xl font-bold ${textPrimary} mb-1`}>{pkg.credits} <span className={`text-xs font-normal ${textSecondary}`}>积分</span></p>
+                      <p className={`text-xs ${textSecondary}`}>{pkg.desc}</p>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
@@ -2154,12 +2487,12 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
         {/* ── Tab: Settings ── */}
         {activeTab === 'settings' && (
-          <div className="h-full overflow-y-auto p-8">
-            <h1 className={`text-2xl font-bold mb-1 ${textPrimary}`}>设置</h1>
-            <p className={`text-sm mb-6 ${textSecondary}`}>账户信息与偏好设置</p>
+          <div className="h-full overflow-y-auto p-6">
+            <h1 className={`text-xl font-bold mb-1 ${textPrimary}`}>设置</h1>
+            <p className={`text-sm mb-4 ${textSecondary}`}>账户信息与偏好设置</p>
 
             {/* User Info */}
-            <div className={`rounded-xl border p-5 mb-4 ${isDark ? 'bg-[#1a1a2e]/80 border-primary/20' : 'bg-white border-gray-200'}`}>
+            <div className={`rounded-xl border p-5 mb-4 ${softClass}`}>
               <div className="flex items-center gap-4 mb-4">
                 <div className={`w-14 h-14 rounded-xl flex items-center justify-center text-white font-bold text-xl ${isMonochrome ? 'bg-gradient-to-br from-[#3b82f6] to-[#1d4ed8]' : isDark ? 'bg-gradient-to-br from-[#d4af37] to-[#b8860b]' : 'bg-gradient-to-br from-gray-600 to-gray-800'}`}>
                   {user?.name?.charAt(0).toUpperCase() || 'U'}
@@ -2179,7 +2512,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
             </div>
 
             {/* API Permissions */}
-            <div className={`rounded-xl border p-5 mb-4 ${isDark ? 'bg-[#1a1a2e]/80 border-primary/20' : 'bg-white border-gray-200'}`}>
+            <div className={`rounded-xl border p-5 mb-4 ${softClass}`}>
               <p className={`text-xs font-medium uppercase tracking-wider mb-3 ${textSecondary}`}>API 权限</p>
               <div className="grid grid-cols-3 gap-2">
                 {[
@@ -2205,8 +2538,54 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               </div>
             </div>
 
+            {/* Admin: System Settings */}
+            {isAdmin && (
+              <div className="space-y-4 mb-4">
+                <div className={`rounded-xl border p-5 ${softClass}`}>
+                  <p className={`text-xs font-medium uppercase tracking-wider mb-4 ${textSecondary}`}>系统配置</p>
+                  <div className="space-y-4">
+                    {/* Default image model */}
+                    <div>
+                      <label className={`text-sm font-medium ${textPrimary} mb-1.5 block`}>默认图像模型</label>
+                      <select value={systemSettings.defaultImageModel || ''} onChange={e => setSystemSettings(prev => ({ ...prev, defaultImageModel: e.target.value }))} className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass} cursor-pointer`}>
+                        <option value="">跟随API提供商默认</option>
+                        {providers.filter(p => p.modelType === 'image' && p.isEnabled !== false).flatMap(p => (p.selectedModels || []).map(m => <option key={`${p.id}::${m}`} value={`${p.id}::${m}`}>{m} ({p.name})</option>))}
+                      </select>
+                    </div>
+                    {/* Default chat model */}
+                    <div>
+                      <label className={`text-sm font-medium ${textPrimary} mb-1.5 block`}>默认聊天模型</label>
+                      <select value={systemSettings.defaultChatModel || ''} onChange={e => setSystemSettings(prev => ({ ...prev, defaultChatModel: e.target.value }))} className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass} cursor-pointer`}>
+                        <option value="">跟随API提供商默认</option>
+                        {providers.filter(p => p.modelType === 'chat' && p.isEnabled !== false).flatMap(p => (p.selectedModels || []).map(m => <option key={`${p.id}::${m}`} value={`${p.id}::${m}`}>{m} ({p.name})</option>))}
+                      </select>
+                    </div>
+                    {/* Max concurrent tasks */}
+                    <div>
+                      <label className={`text-sm font-medium ${textPrimary} mb-1.5 block`}>每用户最大并发任务</label>
+                      <input type="number" min="1" max="50" value={systemSettings.maxConcurrentTasks || 15} onChange={e => setSystemSettings(prev => ({ ...prev, maxConcurrentTasks: parseInt(e.target.value) || 15 }))} className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`} />
+                    </div>
+                    {/* Image upload limit */}
+                    <div>
+                      <label className={`text-sm font-medium ${textPrimary} mb-1.5 block`}>图片上传最大尺寸 (MB)</label>
+                      <input type="number" min="1" max="100" value={systemSettings.imageMaxSizeMB || 20} onChange={e => setSystemSettings(prev => ({ ...prev, imageMaxSizeMB: parseInt(e.target.value) || 20 }))} className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`} />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Announcement */}
+                <div className={`rounded-xl border p-5 ${softClass}`}>
+                  <p className={`text-xs font-medium uppercase tracking-wider mb-4 ${textSecondary}`}>系统公告</p>
+                  <textarea value={systemSettings.announcement || ''} onChange={e => setSystemSettings(prev => ({ ...prev, announcement: e.target.value }))} placeholder="输入公告内容，所有用户可见…" rows={3} className={`w-full px-3 py-2 rounded-lg border text-sm resize-y ${inputClass}`} />
+                  <div className="flex justify-end mt-3">
+                    <button onClick={async () => { try { const res = await fetch('/api/admin/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(systemSettings) }); if (res.ok) { const data = await res.json(); if (data.success) { /* saved */ } } } catch { /* ignore */ } }} className={`h-9 px-6 rounded-lg ${accentBgClass} ${accentTextOnBgClass} text-sm font-semibold cursor-pointer`}>保存设置</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Actions */}
-            <div className={`rounded-xl border p-5 ${isDark ? 'bg-[#1a1a2e]/80 border-primary/20' : 'bg-white border-gray-200'}`}>
+            <div className={`rounded-xl border p-5 ${softClass}`}>
               <div className="flex flex-col gap-3">
                 <button onClick={() => { if (user) { mgr.setCurrentUser(user.id); } }} className={`w-full inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-medium transition-all cursor-pointer ${isDark ? `bg-white/5 border border-white/10 ${accentClass} hover:bg-white/10` : 'bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200'}`}>
                   <RotateCcw className="w-4 h-4" /> 刷新会话
@@ -2224,74 +2603,208 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
         {/* ── Tab: Users ── */}
         {activeTab === 'users' && isAdmin && (
           <div className="h-full overflow-y-auto p-6">
-            <h1 className={`text-xl font-bold mb-1 ${textPrimary}`}>用户管理</h1>
-            <p className={`text-sm mb-6 ${textSecondary}`}>创建用户、管理权限和账户状态</p>
-            <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-4">
-              {/* Add user form */}
-              <div className={`rounded-xl border p-4 h-fit ${softClass}`}>
-                <h3 className="text-sm font-semibold mb-3 flex items-center gap-2"><UserPlus className="w-4 h-4" />添加用户</h3>
-                <div className="space-y-3">
-                  <div><label className={labelClass} htmlFor="admin-new-user-name">用户名</label><input id="admin-new-user-name" className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="例如 设计师01" value={newUserName} onChange={e => setNewUserName(e.target.value)} /></div>
-                  <div><label className={labelClass} htmlFor="admin-new-user-password">初始密码</label><input id="admin-new-user-password" type="password" className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="至少 6 位" value={newUserPassword} onChange={e => setNewUserPassword(e.target.value)} /></div>
-                  <div><label className={labelClass} htmlFor="admin-new-user-email">邮箱（可选）</label><input id="admin-new-user-email" type="email" className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="邮箱地址" value={newUserEmail} onChange={e => setNewUserEmail(e.target.value)} /></div>
-                  <button onClick={() => void handleCreateUser()} className={`w-full h-9 rounded-lg ${accentBgClass} ${accentTextOnBgClass} text-sm font-semibold cursor-pointer`}>创建用户</button>
-                </div>
+            <div className="flex items-center justify-between mb-1">
+              <h1 className={`text-xl font-bold ${textPrimary}`}>用户管理</h1>
+              <button onClick={() => setShowUserAddDrawer(true)} className={`flex items-center gap-1.5 h-9 px-4 rounded-lg ${accentBgClass} ${accentTextOnBgClass} text-sm font-semibold cursor-pointer`}><UserPlus className="w-4 h-4" />添加用户</button>
+            </div>
+            <p className={`text-sm mb-4 ${textSecondary}`}>管理用户账号、权限和积分</p>
+
+            {/* ── Search & filter bar ── */}
+            <div className="flex items-center gap-2 mb-4 flex-wrap">
+              <div className={`relative flex-1 min-w-[200px]`}>
+                <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${textSecondary}`} />
+                <input value={userSearchQuery} onChange={e => setUserSearchQuery(e.target.value)} placeholder="搜索用户名、ID、邮箱…" className={`w-full h-9 pl-9 pr-3 rounded-lg border text-sm ${inputClass}`} />
               </div>
-              {/* User list */}
-              <div className="space-y-2">
-                {adminUsers.map(u => (
-                  <div key={u.id} className={`rounded-xl border p-4 ${softClass}`}>
-                    <div className="flex items-center gap-3">
-                      <div className={`w-10 h-10 rounded-xl ${accentBgClass} ${accentTextOnBgClass} flex items-center justify-center font-bold shrink-0`}>{u.name.slice(0, 1).toUpperCase()}</div>
-                      <div className="flex-1 min-w-0">
-                        {editingUser === u.id ? (
-                          <div className="flex items-center gap-2">
-                            <input className={`h-8 px-2 rounded-lg border text-sm flex-1 ${inputClass}`} value={editName} onChange={e => setEditName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') void handleRenameUser(u.id); if (e.key === 'Escape') { setEditingUser(null); setEditName(''); } }} autoFocus />
-                            <button onClick={() => void handleRenameUser(u.id)} className={`px-2 py-1 rounded-lg ${accentBgClass} ${accentTextOnBgClass} text-xs font-semibold cursor-pointer`}>保存</button>
-                            <button onClick={() => { setEditingUser(null); setEditName(''); }} className={`px-2 py-1 rounded-lg text-xs border cursor-pointer ${isDark ? 'border-white/10 text-[#888]' : 'border-gray-200 text-gray-500'}`}>取消</button>
+              <select value={userFilterRole} onChange={e => setUserFilterRole(e.target.value as 'all' | 'admin' | 'user')} className={`h-9 px-3 rounded-lg border text-sm ${inputClass} cursor-pointer`}>
+                <option value="all">全部角色</option><option value="admin">管理员</option><option value="user">普通用户</option>
+              </select>
+              <select value={userFilterStatus} onChange={e => setUserFilterStatus(e.target.value as 'all' | 'active' | 'disabled')} className={`h-9 px-3 rounded-lg border text-sm ${inputClass} cursor-pointer`}>
+                <option value="all">全部状态</option><option value="active">正常</option><option value="disabled">已禁用</option>
+              </select>
+              {selectedUserIds.size > 0 && (
+                <div className="flex items-center gap-2 ml-1">
+                  <span className={`text-xs ${textSecondary}`}>已选 {selectedUserIds.size} 项</span>
+                  <button onClick={() => void handleBatchToggleUsers(true)} className="text-xs px-2 py-1 rounded-lg bg-green-500/10 text-green-400 cursor-pointer hover:bg-green-500/20">批量启用</button>
+                  <button onClick={() => void handleBatchToggleUsers(false)} className="text-xs px-2 py-1 rounded-lg bg-red-500/10 text-red-400 cursor-pointer hover:bg-red-500/20">批量禁用</button>
+                  <button onClick={() => setSelectedUserIds(new Set())} className={`text-xs px-2 py-1 rounded-lg cursor-pointer ${isDark ? 'hover:bg-white/10 text-[#888]' : 'hover:bg-gray-100 text-gray-500'}`}>取消选择</button>
+                </div>
+              )}
+            </div>
+
+            {/* ── User table ── */}
+            <div className={`rounded-xl border overflow-hidden ${softClass}`}>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className={`border-b ${isDark ? 'border-white/5 bg-white/[0.02]' : 'border-gray-100 bg-gray-50/50'}`}>
+                      <th className="w-10 px-3 py-2.5"><input type="checkbox" checked={filteredAdminUsers.length > 0 && filteredAdminUsers.every(u => selectedUserIds.has(u.id))} onChange={() => { if (filteredAdminUsers.every(u => selectedUserIds.has(u.id))) setSelectedUserIds(new Set()); else setSelectedUserIds(new Set(filteredAdminUsers.map(u => u.id))); }} className="cursor-pointer" /></th>
+                      <th className={`px-3 py-2.5 text-left font-medium ${textSecondary}`}>用户</th>
+                      <th className={`px-3 py-2.5 text-left font-medium ${textSecondary}`}>ID</th>
+                      <th className={`px-3 py-2.5 text-left font-medium ${textSecondary}`}>角色</th>
+                      <th className={`px-3 py-2.5 text-left font-medium ${textSecondary}`}>状态</th>
+                      <th className={`px-3 py-2.5 text-left font-medium ${textSecondary}`}>注册时间</th>
+                      <th className={`px-3 py-2.5 text-right font-medium ${textSecondary}`}>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredAdminUsers.map(u => (
+                      <tr key={u.id} className={`border-b last:border-b-0 transition-colors ${isDark ? 'border-white/5 hover:bg-white/[0.02]' : 'border-gray-50 hover:bg-gray-50/50'} ${u.status === 'disabled' ? 'opacity-60' : ''}`}>
+                        <td className="px-3 py-2.5"><input type="checkbox" checked={selectedUserIds.has(u.id)} onChange={() => { const s = new Set(selectedUserIds); s.has(u.id) ? s.delete(u.id) : s.add(u.id); setSelectedUserIds(s); }} className="cursor-pointer" /></td>
+                        <td className="px-3 py-2.5">
+                          <div className="flex items-center gap-2.5">
+                            <div className={`w-8 h-8 rounded-lg ${accentBgLight} ${accentClass} flex items-center justify-center font-bold text-xs shrink-0`}>{u.name.slice(0, 1).toUpperCase()}</div>
+                            <div className="min-w-0">
+                              <p className={`font-medium truncate ${textPrimary}`}>{u.name}</p>
+                              <p className={`text-xs truncate ${textSecondary}`}>{u.email || '—'}</p>
+                            </div>
                           </div>
-                        ) : (
-                          <div className="flex items-center gap-2">
-                            <p className="text-sm font-semibold truncate">{u.name}</p>
-                            {u.role === 'admin' && <span className={`text-[10px] px-1.5 py-0.5 rounded ${isMonochrome ? 'bg-[#3b82f6]/20 text-[#3b82f6]' : 'bg-[#d4af37]/20 text-[#d4af37]'}`}>管理员</span>}
-                            {u.status === 'disabled' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400">已禁用</span>}
+                        </td>
+                        <td className={`px-3 py-2.5 font-mono text-xs ${textSecondary}`}>{u.id.slice(0, 8)}…</td>
+                        <td className="px-3 py-2.5">
+                          {u.role === 'admin' ? <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${isMonochrome ? 'bg-[#3b82f6]/15 text-[#3b82f6]' : 'bg-[#d4af37]/15 text-[#d4af37]'}`}>管理员</span> : <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${isDark ? 'bg-white/5 text-[#888]' : 'bg-gray-100 text-gray-500'}`}>用户</span>}
+                        </td>
+                        <td className="px-3 py-2.5">
+                          {u.status === 'disabled' ? <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-red-500/15 text-red-400">已禁用</span> : <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-green-500/15 text-green-400">正常</span>}
+                        </td>
+                        <td className={`px-3 py-2.5 text-xs ${textSecondary}`}>{u.createdAt ? new Date(u.createdAt * 1000).toLocaleDateString('zh-CN') : '—'}</td>
+                        <td className="px-3 py-2.5 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <button onClick={() => void loadUserDetail(u.id)} className={`text-xs px-2 py-1 rounded-lg cursor-pointer ${isDark ? 'hover:bg-white/10 text-[#aaa]' : 'hover:bg-gray-100 text-gray-600'}`}>详情</button>
+                            {u.role !== 'admin' && (
+                              <button onClick={() => void handleToggleUser(u)} className={`text-xs px-2 py-1 rounded-lg cursor-pointer ${u.status === 'disabled' ? 'text-green-400 hover:bg-green-500/10' : isDark ? 'hover:bg-white/10 text-[#aaa]' : 'hover:bg-gray-100 text-gray-600'}`}>{u.status === 'disabled' ? '启用' : '禁用'}</button>
+                            )}
+                            {u.role !== 'admin' && <button onClick={() => handleDeleteUser(u)} className="text-xs px-2 py-1 rounded-lg text-red-400 hover:bg-red-500/10 cursor-pointer">删除</button>}
                           </div>
-                        )}
-                        <p className={`text-xs mt-0.5 ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>{u.email || '无邮箱'} · {u.id}</p>
-                      </div>
-                    </div>
-                    {/* Permissions */}
-                    <div className="mt-3 flex flex-wrap gap-1.5">
-                      {(Object.keys(userPermissionLabels) as UserPermissionKey[]).map(key => {
-                        const enabled = u.apiPermissions?.[key] ?? true;
-                        return (<button key={key} onClick={() => void handleToggleUserPermission(u, key)} className={`text-[10px] px-2 py-1 rounded-md border cursor-pointer ${enabled ? `${accentBgLight} ${accentClass} border-transparent` : isDark ? 'bg-white/5 text-[#555] border-white/10' : 'bg-gray-50 text-gray-300 border-gray-200'}`}>{userPermissionLabels[key]}</button>);
-                      })}
-                    </div>
-                    {/* Actions */}
-                    <div className="flex items-center gap-2 mt-3 pt-2 border-t border-current/5">
-                      <button onClick={() => { setEditingUser(u.id); setEditName(u.name); }} className={`text-xs px-2 py-1 rounded-lg cursor-pointer ${isDark ? 'hover:bg-white/10 text-[#888]' : 'hover:bg-gray-100 text-gray-500'}`}><Pencil className="w-3 h-3 inline mr-1" />重命名</button>
-                      {resetPwdUser === u.id ? (
-                        <div className="flex items-center gap-1">
-                          <input type="password" className={`h-7 px-2 rounded-lg border text-xs w-24 ${inputClass}`} placeholder="新密码" value={newPassword} onChange={e => setNewPassword(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') void handleResetPassword(u.id); }} autoFocus />
-                          <button onClick={() => void handleResetPassword(u.id)} className={`text-[10px] px-2 py-1 rounded-lg ${accentBgClass} ${accentTextOnBgClass} font-semibold cursor-pointer`}>确定</button>
-                          <button onClick={() => { setResetPwdUser(null); setNewPassword(''); }} className={`text-[10px] px-2 py-1 rounded-lg cursor-pointer ${isDark ? 'text-[#888]' : 'text-gray-500'}`}>取消</button>
-                        </div>
-                      ) : (
-                        <button onClick={() => { setResetPwdUser(u.id); setNewPassword(''); }} className={`text-xs px-2 py-1 rounded-lg cursor-pointer ${isDark ? 'hover:bg-white/10 text-[#888]' : 'hover:bg-gray-100 text-gray-500'}`}><KeyRound className="w-3 h-3 inline mr-1" />重置密码</button>
-                      )}
-                      {u.role !== 'admin' && (
-                        <>
-                          <button onClick={() => void handleToggleUser(u)} className={`text-xs px-2 py-1 rounded-lg cursor-pointer ${u.status === 'disabled' ? 'text-green-400 hover:bg-green-500/10' : isDark ? 'hover:bg-white/10 text-[#888]' : 'hover:bg-gray-100 text-gray-500'}`}>
-                            {u.status === 'disabled' ? <><CheckCircle2 className="w-3 h-3 inline mr-1" />启用</> : <><Ban className="w-3 h-3 inline mr-1" />禁用</>}
-                          </button>
-                          <button onClick={() => handleDeleteUser(u)} className="text-xs px-2 py-1 rounded-lg text-red-400 hover:bg-red-500/10 cursor-pointer"><Trash2 className="w-3 h-3 inline mr-1" />删除</button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                ))}
+                        </td>
+                      </tr>
+                    ))}
+                    {filteredAdminUsers.length === 0 && (
+                      <tr><td colSpan={7} className={`px-3 py-8 text-center ${textSecondary}`}>暂无匹配的用户</td></tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
+
+            {/* ── User detail drawer ── */}
+            {showUserDrawer && (
+              <div className="fixed inset-0 z-[200] flex justify-end">
+                <div className="absolute inset-0 bg-black/40" onClick={() => setShowUserDrawer(false)} />
+                <div className={`relative w-full max-w-md h-full overflow-y-auto ${isDark ? 'bg-[#141620]' : 'bg-white'} shadow-2xl`}>
+                  <div className={`sticky top-0 z-10 flex items-center justify-between px-6 py-4 border-b ${isDark ? 'border-white/5 bg-[#141620]' : 'border-gray-100 bg-white'}`}>
+                    <h2 className={`text-lg font-bold ${textPrimary}`}>用户详情</h2>
+                    <button onClick={() => setShowUserDrawer(false)} className={`p-1.5 rounded-lg cursor-pointer ${isDark ? 'hover:bg-white/10' : 'hover:bg-gray-100'}`}><X className="w-5 h-5" /></button>
+                  </div>
+                  {userDetailId && (() => {
+                    const user = adminUsers.find(u => u.id === userDetailId);
+                    if (!user) return <div className={`p-6 text-center ${textSecondary}`}>用户不存在</div>;
+                    return (
+                      <div className="p-6 space-y-6">
+                        {/* Basic info */}
+                        <div className="flex items-center gap-3">
+                          <div className={`w-12 h-12 rounded-xl ${accentBgClass} ${accentTextOnBgClass} flex items-center justify-center font-bold text-lg`}>{user.name.slice(0, 1).toUpperCase()}</div>
+                          <div>
+                            <p className={`text-lg font-bold ${textPrimary}`}>{user.name}</p>
+                            <p className={`text-xs ${textSecondary}`}>{user.email || '无邮箱'} · {user.id}</p>
+                          </div>
+                        </div>
+                        {/* Status & role */}
+                        <div className="flex gap-2">
+                          {user.role === 'admin' ? <span className={`text-xs px-2 py-1 rounded-lg font-medium ${isMonochrome ? 'bg-[#3b82f6]/15 text-[#3b82f6]' : 'bg-[#d4af37]/15 text-[#d4af37]'}`}>管理员</span> : <span className={`text-xs px-2 py-1 rounded-lg font-medium ${isDark ? 'bg-white/5 text-[#888]' : 'bg-gray-100 text-gray-500'}`}>普通用户</span>}
+                          {user.status === 'disabled' ? <span className="text-xs px-2 py-1 rounded-lg font-medium bg-red-500/15 text-red-400">已禁用</span> : <span className="text-xs px-2 py-1 rounded-lg font-medium bg-green-500/15 text-green-400">正常</span>}
+                        </div>
+                        {/* Credits */}
+                        <div className={`rounded-xl border p-4 ${softClass}`}>
+                          <h4 className={`text-sm font-semibold mb-3 ${textPrimary}`}>积分信息</h4>
+                          <div className="grid grid-cols-3 gap-3 text-center">
+                            <div><p className={`text-xl font-bold ${accentClass}`}>{userDetailCredits?.balance ?? '—'}</p><p className={`text-[10px] ${textSecondary}`}>当前余额</p></div>
+                            <div><p className="text-xl font-bold text-green-400">{userDetailCredits?.totalRecharged ?? '—'}</p><p className={`text-[10px] ${textSecondary}`}>累计充值</p></div>
+                            <div><p className="text-xl font-bold text-red-400">{userDetailCredits?.totalUsed ?? '—'}</p><p className={`text-[10px] ${textSecondary}`}>累计消耗</p></div>
+                          </div>
+                        </div>
+                        {/* Permissions */}
+                        <div className={`rounded-xl border p-4 ${softClass}`}>
+                          <h4 className={`text-sm font-semibold mb-3 ${textPrimary}`}>功能权限</h4>
+                          <div className="flex flex-wrap gap-1.5">
+                            {(Object.keys(userPermissionLabels) as UserPermissionKey[]).map(key => {
+                              const enabled = user.apiPermissions?.[key] ?? true;
+                              return (<button key={key} onClick={() => void handleToggleUserPermission(user, key)} className={`text-[10px] px-2 py-1 rounded-md border cursor-pointer ${enabled ? `${accentBgLight} ${accentClass} border-transparent` : isDark ? 'bg-white/5 text-[#555] border-white/10' : 'bg-gray-50 text-gray-300 border-gray-200'}`}>{userPermissionLabels[key]}</button>);
+                            })}
+                          </div>
+                        </div>
+                        {/* Recent transactions */}
+                        <div className={`rounded-xl border p-4 ${softClass}`}>
+                          <h4 className={`text-sm font-semibold mb-3 ${textPrimary}`}>最近交易</h4>
+                          {userDetailTransactions.length === 0 ? <p className={`text-xs ${textSecondary}`}>暂无交易记录</p> : (
+                            <div className="space-y-2">
+                              {userDetailTransactions.slice(0, 10).map(tx => (
+                                <div key={tx.id} className="flex items-center justify-between">
+                                  <div><p className={`text-xs font-medium ${textPrimary}`}>{tx.description || tx.type}</p><p className={`text-[10px] ${textSecondary}`}>{tx.createdAt ? new Date(tx.createdAt * 1000).toLocaleString('zh-CN') : ''}</p></div>
+                                  <span className={`text-xs font-semibold ${tx.amount > 0 ? 'text-green-400' : 'text-red-400'}`}>{tx.amount > 0 ? '+' : ''}{tx.amount}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        {/* Actions */}
+                        <div className="space-y-2">
+                          <button onClick={() => { setEditingUser(user.id); setEditName(user.name); }} className={`w-full h-9 rounded-lg border text-sm font-medium cursor-pointer ${isDark ? 'border-white/10 hover:bg-white/5 text-[#ccc]' : 'border-gray-200 hover:bg-gray-50 text-gray-600'}`}><Pencil className="w-3.5 h-3.5 inline mr-2" />重命名</button>
+                          <button onClick={() => { setResetPwdUser(user.id); setNewPassword(''); }} className={`w-full h-9 rounded-lg border text-sm font-medium cursor-pointer ${isDark ? 'border-white/10 hover:bg-white/5 text-[#ccc]' : 'border-gray-200 hover:bg-gray-50 text-gray-600'}`}><KeyRound className="w-3.5 h-3.5 inline mr-2" />重置密码</button>
+                          {user.role !== 'admin' && <button onClick={() => void handleToggleUser(user)} className={`w-full h-9 rounded-lg text-sm font-medium cursor-pointer ${user.status === 'disabled' ? 'bg-green-500/10 text-green-400 hover:bg-green-500/20' : 'bg-red-500/10 text-red-400 hover:bg-red-500/20'}`}>{user.status === 'disabled' ? '启用用户' : '禁用用户'}</button>}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+            )}
+
+            {/* ── Add user drawer ── */}
+            {showUserAddDrawer && (
+              <div className="fixed inset-0 z-[200] flex justify-end">
+                <div className="absolute inset-0 bg-black/40" onClick={() => setShowUserAddDrawer(false)} />
+                <div className={`relative w-full max-w-sm h-full overflow-y-auto ${isDark ? 'bg-[#141620]' : 'bg-white'} shadow-2xl`}>
+                  <div className={`sticky top-0 z-10 flex items-center justify-between px-6 py-4 border-b ${isDark ? 'border-white/5 bg-[#141620]' : 'border-gray-100 bg-white'}`}>
+                    <h2 className={`text-lg font-bold ${textPrimary}`}>添加用户</h2>
+                    <button onClick={() => setShowUserAddDrawer(false)} className={`p-1.5 rounded-lg cursor-pointer ${isDark ? 'hover:bg-white/10' : 'hover:bg-gray-100'}`}><X className="w-5 h-5" /></button>
+                  </div>
+                  <div className="p-6 space-y-4">
+                    <div><label className={`text-xs font-medium ${textSecondary} mb-1 block`}>用户名</label><input className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="例如 设计师01" value={newUserName} onChange={e => setNewUserName(e.target.value)} /></div>
+                    <div><label className={`text-xs font-medium ${textSecondary} mb-1 block`}>初始密码</label><input type="password" className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="至少 6 位" value={newUserPassword} onChange={e => setNewUserPassword(e.target.value)} /></div>
+                    <div><label className={`text-xs font-medium ${textSecondary} mb-1 block`}>邮箱（可选）</label><input type="email" className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="邮箱地址" value={newUserEmail} onChange={e => setNewUserEmail(e.target.value)} /></div>
+                    <button onClick={() => { void handleCreateUser(); setShowUserAddDrawer(false); }} className={`w-full h-10 rounded-lg ${accentBgClass} ${accentTextOnBgClass} text-sm font-semibold cursor-pointer`}>创建用户</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── Inline editing / reset password modals ── */}
+            {editingUser && (
+              <div className="fixed inset-0 z-[201] flex items-center justify-center">
+                <div className="absolute inset-0 bg-black/40" onClick={() => { setEditingUser(null); setEditName(''); }} />
+                <div className={`relative w-full max-w-sm rounded-xl border p-6 shadow-2xl ${isDark ? 'bg-[#1a1d27] border-white/10' : 'bg-white border-gray-200'}`}>
+                  <h3 className={`text-base font-bold mb-4 ${textPrimary}`}>重命名用户</h3>
+                  <input className={`w-full h-10 px-3 rounded-lg border text-sm mb-4 ${inputClass}`} value={editName} onChange={e => setEditName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') void handleRenameUser(editingUser); if (e.key === 'Escape') { setEditingUser(null); setEditName(''); } }} autoFocus />
+                  <div className="flex justify-end gap-2">
+                    <button onClick={() => { setEditingUser(null); setEditName(''); }} className={`h-9 px-4 rounded-lg border text-sm cursor-pointer ${isDark ? 'border-white/10 text-[#aaa]' : 'border-gray-200 text-gray-500'}`}>取消</button>
+                    <button onClick={() => void handleRenameUser(editingUser)} className={`h-9 px-4 rounded-lg ${accentBgClass} ${accentTextOnBgClass} text-sm font-semibold cursor-pointer`}>保存</button>
+                  </div>
+                </div>
+              </div>
+            )}
+            {resetPwdUser && (
+              <div className="fixed inset-0 z-[201] flex items-center justify-center">
+                <div className="absolute inset-0 bg-black/40" onClick={() => { setResetPwdUser(null); setNewPassword(''); }} />
+                <div className={`relative w-full max-w-sm rounded-xl border p-6 shadow-2xl ${isDark ? 'bg-[#1a1d27] border-white/10' : 'bg-white border-gray-200'}`}>
+                  <h3 className={`text-base font-bold mb-4 ${textPrimary}`}>重置密码</h3>
+                  <input type="password" className={`w-full h-10 px-3 rounded-lg border text-sm mb-4 ${inputClass}`} placeholder="输入新密码" value={newPassword} onChange={e => setNewPassword(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') void handleResetPassword(resetPwdUser); }} autoFocus />
+                  <div className="flex justify-end gap-2">
+                    <button onClick={() => { setResetPwdUser(null); setNewPassword(''); }} className={`h-9 px-4 rounded-lg border text-sm cursor-pointer ${isDark ? 'border-white/10 text-[#aaa]' : 'border-gray-200 text-gray-500'}`}>取消</button>
+                    <button onClick={() => void handleResetPassword(resetPwdUser)} className={`h-9 px-4 rounded-lg ${accentBgClass} ${accentTextOnBgClass} text-sm font-semibold cursor-pointer`}>确认重置</button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

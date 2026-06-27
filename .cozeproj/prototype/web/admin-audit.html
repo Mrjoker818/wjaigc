@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/jquery/jquery-3.7.1.min.js"></script>
+  <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/lucide/lucide-1.11.0.min.js"></script>
+  <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/tailwindcss/tailwindcss-browser-4.2.4.min.js"></script>
+
+  <style type="text/tailwindcss">
+    @theme {
+      /* === 品牌色 === */
+      --color-primary:              #d4af37;
+      --color-primary-container:    #2a2410;
+      --color-on-primary:           #0a0a0b;
+      /* === 背景 / 表面 === */
+      --color-background:                 #0a0a0b;
+      --color-surface-container-lowest:   #111113;
+      --color-surface:                    #1a1a1e;
+      --color-surface-container:          #252529;
+      --color-surface-container-high:     #2e2e33;
+      --color-surface-container-highest:  #38383e;
+      /* === 文字 === */
+      --color-on-surface:           #f5f5f5;
+      --color-on-surface-variant:   #a1a1aa;
+      /* === 功能色 === */
+      --color-success:  #22c55e;
+      --color-error:    #ef4444;
+      --color-warning:  #f59e0b;
+      --color-info:     #3b82f6;
+      /* === 边框 === */
+      --color-outline:          #2e2e33;
+      --color-outline-variant:  #1f1f24;
+      /* === 圆角 === */
+      --radius-sm:   0.375rem;
+      --radius-md:   0.5rem;
+      --radius-lg:   0.5rem;
+      --radius-xl:   0.75rem;
+      --radius-2xl:  1rem;
+      --radius-full: 9999px;
+      /* === 阴影 === */
+      --shadow-card:   0 2px 8px rgba(0,0,0,0.3);
+      --shadow-float:  0 10px 25px rgba(0,0,0,0.5);
+      --shadow-dialog: 0 25px 50px rgba(0,0,0,0.6);
+      --shadow-glow:   0 0 20px rgba(212,175,55,0.15);
+      /* === 字体 === */
+      --font-sans: system-ui, -apple-system, sans-serif;
+      --font-mono: ui-monospace, 'Cascadia Code', 'Fira Code', monospace;
+    }
+  </style>
+
+  <script>
+    document.addEventListener('error', function (e) {
+      const img = e.target;
+      if (img.tagName !== 'IMG' || img.dataset.fallback) return;
+      img.dataset.fallback = '1';
+      const w = img.width || 400, h = img.height || 300;
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="%231a1a1e"/><text x="50%" y="50%" text-anchor="middle" font-size="14" fill="%23a1a1aa" font-family="system-ui" dominant-baseline="central">Image</text></svg>`;
+      img.src = 'data:image/svg+xml,' + svg;
+    }, true);
+  </script>
+</head>
+
+<body class="bg-background text-on-surface font-sans">
+
+  <!-- @nav:start 管理员系统侧边导航 -->
+  <aside class="fixed left-0 top-0 bottom-0 w-56 bg-surface border-r border-outline-variant/20 flex flex-col z-40">
+    <div class="p-4 border-b border-outline-variant/20">
+      <div class="flex items-center gap-2">
+        <div class="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
+          <i data-lucide="zap" class="w-4 h-4 text-on-primary"></i>
+        </div>
+        <div>
+          <div class="text-sm font-bold text-on-surface">无界AI</div>
+          <div class="text-[10px] text-on-surface-variant">管理后台</div>
+        </div>
+      </div>
+    </div>
+    <nav class="flex-1 py-2 overflow-y-auto">
+      <a href="admin-overview.html" class="nav-item flex items-center gap-3 px-4 py-2.5 text-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors">
+        <i data-lucide="layout-dashboard" class="w-4 h-4"></i>运营看板
+      </a>
+      <a href="admin-users.html" class="nav-item flex items-center gap-3 px-4 py-2.5 text-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors">
+        <i data-lucide="users" class="w-4 h-4"></i>用户管理
+      </a>
+      <a href="admin-credits.html" class="nav-item flex items-center gap-3 px-4 py-2.5 text-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors">
+        <i data-lucide="coins" class="w-4 h-4"></i>积分管理
+      </a>
+      <a href="admin-audit.html" class="nav-item flex items-center gap-3 px-4 py-2.5 text-sm bg-primary/10 text-primary font-medium rounded-none" aria-current="page">
+        <i data-lucide="shield-check" class="w-4 h-4"></i>审计日志
+      </a>
+      <a href="admin-settings.html" class="nav-item flex items-center gap-3 px-4 py-2.5 text-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors">
+        <i data-lucide="settings" class="w-4 h-4"></i>系统设置
+      </a>
+    </nav>
+    <div class="p-3 border-t border-outline-variant/20">
+      <div class="flex items-center gap-2 px-2 py-1.5">
+        <div class="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center text-xs font-bold text-primary">A</div>
+        <div class="flex-1 min-w-0">
+          <div class="text-xs font-medium text-on-surface truncate">Mr.joker</div>
+          <div class="text-[10px] text-on-surface-variant">管理员</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+  <!-- @nav:end 管理员系统侧边导航 -->
+
+  <main class="ml-56 min-h-screen">
+    <!-- @main-content:start -->
+
+    <!-- 页面头部 -->
+    <div class="px-6 pt-6 pb-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <h1 class="text-2xl font-bold text-on-surface">审计日志</h1>
+          <p class="text-sm text-on-surface-variant mt-1">记录所有管理员敏感操作，日志不可删除或篡改</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <div class="flex items-center gap-1.5 text-xs text-on-surface-variant bg-surface-container px-3 py-1.5 rounded-md">
+            <i data-lucide="lock" class="w-3 h-3 text-primary"></i>
+            <span>只读模式 · 数据受保护</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 统计摘要卡片 -->
+    <div class="px-6 pb-4">
+      <div class="grid grid-cols-3 gap-4">
+        <!-- 卡片-今日操作数 -->
+        <div class="bg-surface rounded-lg shadow-card p-4 border border-outline-variant/10">
+          <div class="flex items-center justify-between">
+            <div>
+              <div class="text-xs text-on-surface-variant font-medium">今日操作数</div>
+              <div class="text-2xl font-bold text-on-surface mt-1">128</div>
+            </div>
+            <div class="w-10 h-10 rounded-lg bg-info/10 flex items-center justify-center">
+              <i data-lucide="activity" class="w-5 h-5 text-info"></i>
+            </div>
+          </div>
+          <div class="flex items-center gap-1 mt-2">
+            <i data-lucide="trending-up" class="w-3 h-3 text-success"></i>
+            <span class="text-xs text-success font-medium">+12.5%</span>
+            <span class="text-xs text-on-surface-variant ml-1">较昨日</span>
+          </div>
+        </div>
+        <!-- 卡片-今日登录数 -->
+        <div class="bg-surface rounded-lg shadow-card p-4 border border-outline-variant/10">
+          <div class="flex items-center justify-between">
+            <div>
+              <div class="text-xs text-on-surface-variant font-medium">今日登录数</div>
+              <div class="text-2xl font-bold text-on-surface mt-1">24</div>
+            </div>
+            <div class="w-10 h-10 rounded-lg bg-success/10 flex items-center justify-center">
+              <i data-lucide="log-in" class="w-5 h-5 text-success"></i>
+            </div>
+          </div>
+          <div class="flex items-center gap-1 mt-2">
+            <i data-lucide="trending-down" class="w-3 h-3 text-on-surface-variant"></i>
+            <span class="text-xs text-on-surface-variant font-medium">-3.2%</span>
+            <span class="text-xs text-on-surface-variant ml-1">较昨日</span>
+          </div>
+        </div>
+        <!-- 卡片-近7天异常操作 -->
+        <div class="bg-surface rounded-lg shadow-card p-4 border border-outline-variant/10">
+          <div class="flex items-center justify-between">
+            <div>
+              <div class="text-xs text-on-surface-variant font-medium">近7天异常操作</div>
+              <div class="text-2xl font-bold text-error mt-1">3</div>
+            </div>
+            <div class="w-10 h-10 rounded-lg bg-error/10 flex items-center justify-center">
+              <i data-lucide="alert-triangle" class="w-5 h-5 text-error"></i>
+            </div>
+          </div>
+          <div class="flex items-center gap-1 mt-2">
+            <i data-lucide="trending-up" class="w-3 h-3 text-error"></i>
+            <span class="text-xs text-error font-medium">+1</span>
+            <span class="text-xs text-on-surface-variant ml-1">较上周</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 筛选栏 -->
+    <div class="px-6 pb-4">
+      <div class="bg-surface rounded-lg shadow-card p-4 border border-outline-variant/10">
+        <div class="flex items-center gap-3 flex-wrap">
+          <!-- 时间范围选择器 -->
+          <div class="flex items-center gap-1" id="time-range-group">
+            <button id="btn-time-today" class="px-3 py-1.5 text-xs font-medium rounded-md bg-primary/15 text-primary transition-colors">今日</button>
+            <button id="btn-time-7d" class="px-3 py-1.5 text-xs font-medium rounded-md text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors">近7天</button>
+            <button id="btn-time-30d" class="px-3 py-1.5 text-xs font-medium rounded-md text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors">近30天</button>
+            <button id="btn-time-custom" class="px-3 py-1.5 text-xs font-medium rounded-md text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors">自定义</button>
+          </div>
+          <div class="w-px h-5 bg-outline-variant/30"></div>
+          <!-- 操作类型筛选 -->
+          <select id="filter-type" class="bg-surface-container border-none rounded-md px-3 py-1.5 text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors appearance-none min-w-[120px]">
+            <option value="all">全部类型</option>
+            <option value="user">用户管理</option>
+            <option value="api">API管理</option>
+            <option value="credit">积分操作</option>
+            <option value="system">系统设置</option>
+          </select>
+          <!-- 操作人筛选 -->
+          <select id="filter-operator" class="bg-surface-container border-none rounded-md px-3 py-1.5 text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors appearance-none min-w-[110px]">
+            <option value="all">全部操作人</option>
+            <option value="mrjoker">Mr.joker</option>
+            <option value="alice">Alice_W</option>
+            <option value="bob">Bob_Z</option>
+          </select>
+          <!-- 搜索框 -->
+          <div class="flex-1 min-w-[200px] relative">
+            <i data-lucide="search" class="w-3.5 h-3.5 text-on-surface-variant/50 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"></i>
+            <input id="search-input" type="text" placeholder="搜索操作对象或详情..." class="w-full bg-surface-container border-none rounded-md pl-9 pr-3 py-1.5 text-xs text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
+          </div>
+          <!-- 导出按钮 -->
+          <button id="btn-export" class="bg-surface-container text-on-surface-variant px-3 py-1.5 rounded-md text-xs font-medium hover:bg-surface-container-high active:scale-[0.98] transition-all inline-flex items-center gap-1.5">
+            <i data-lucide="download" class="w-3.5 h-3.5"></i>导出
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 审计日志表格 -->
+    <div class="px-6 pb-4">
+      <div class="bg-surface rounded-lg shadow-card border border-outline-variant/10 overflow-hidden">
+        <!-- 表头 -->
+        <div class="grid grid-cols-[160px_100px_110px_140px_1fr_130px_40px] px-4 py-3 bg-surface-container text-xs font-semibold text-on-surface-variant uppercase tracking-wide">
+          <span>时间</span>
+          <span>操作人</span>
+          <span>操作类型</span>
+          <span>操作对象</span>
+          <span>操作详情</span>
+          <span>IP 地址</span>
+          <span></span>
+        </div>
+        <!-- 表体 -->
+        <div id="audit-table-body" class="divide-y divide-outline-variant/30">
+
+          <!-- 日志行1 -->
+          <div class="audit-row" data-id="log-001">
+            <div class="grid grid-cols-[160px_100px_110px_140px_1fr_130px_40px] px-4 py-3 hover:bg-surface-container/50 transition-colors items-center">
+              <span class="text-xs font-mono text-on-surface-variant">2025-01-15 14:32:08</span>
+              <span class="text-sm font-medium text-on-surface">Mr.joker</span>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-info/15 text-info w-fit">用户管理</span>
+              <span class="text-sm text-on-surface">用户 #U2048</span>
+              <span class="text-sm text-on-surface-variant truncate">修改用户状态为「已封禁」</span>
+              <span class="text-xs font-mono text-on-surface-variant">192.168.1.101</span>
+              <button class="btn-expand-row w-6 h-6 flex items-center justify-center rounded hover:bg-surface-container-high transition-colors" data-target="detail-log-001">
+                <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-on-surface-variant/50"></i>
+              </button>
+            </div>
+            <!-- 展开详情 -->
+            <div id="detail-log-001" class="hidden px-4 pb-3">
+              <div class="bg-surface-container rounded-md p-3 border border-outline-variant/10">
+                <div class="text-xs font-semibold text-on-surface-variant mb-2">操作详情 JSON</div>
+                <pre class="text-xs font-mono text-on-surface-variant leading-relaxed whitespace-pre-wrap">{
+  "action": "user.status.update",
+  "operator": "Mr.joker",
+  "operator_id": "A001",
+  "target": { "user_id": "U2048", "username": "test_user_42" },
+  "before": { "status": "active" },
+  "after": { "status": "banned", "reason": "违规发布敏感内容" },
+  "timestamp": "2025-01-15T14:32:08.412Z",
+  "ip": "192.168.1.101",
+  "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+  "request_id": "req_a8f2c1d4e3"
+}</pre>
+              </div>
+            </div>
+          </div>
+
+          <!-- 日志行2 -->
+          <div class="audit-row" data-id="log-002">
+            <div class="grid grid-cols-[160px_100px_110px_140px_1fr_130px_40px] px-4 py-3 hover:bg-surface-container/50 transition-colors items-center">
+              <span class="text-xs font-mono text-on-surface-variant">2025-01-15 13:18:45</span>
+              <span class="text-sm font-medium text-on-surface">Alice_W</span>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-purple-500/15 text-purple-400 w-fit">API管理</span>
+              <span class="text-sm text-on-surface">API密钥 #K3072</span>
+              <span class="text-sm text-on-surface-variant truncate">重新生成 API 密钥</span>
+              <span class="text-xs font-mono text-on-surface-variant">10.0.0.55</span>
+              <button class="btn-expand-row w-6 h-6 flex items-center justify-center rounded hover:bg-surface-container-high transition-colors" data-target="detail-log-002">
+                <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-on-surface-variant/50"></i>
+              </button>
+            </div>
+            <div id="detail-log-002" class="hidden px-4 pb-3">
+              <div class="bg-surface-container rounded-md p-3 border border-outline-variant/10">
+                <div class="text-xs font-semibold text-on-surface-variant mb-2">操作详情 JSON</div>
+                <pre class="text-xs font-mono text-on-surface-variant leading-relaxed whitespace-pre-wrap">{
+  "action": "api.key.regenerate",
+  "operator": "Alice_W",
+  "operator_id": "A003",
+  "target": { "key_id": "K3072", "key_prefix": "sk-***x9m2" },
+  "before": { "key_status": "active", "key_prefix": "sk-***k7p1" },
+  "after": { "key_status": "active", "key_prefix": "sk-***x9m2" },
+  "timestamp": "2025-01-15T13:18:45.891Z",
+  "ip": "10.0.0.55",
+  "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+  "request_id": "req_b3e7d9f1a2"
+}</pre>
+              </div>
+            </div>
+          </div>
+
+          <!-- 日志行3 -->
+          <div class="audit-row" data-id="log-003">
+            <div class="grid grid-cols-[160px_100px_110px_140px_1fr_130px_40px] px-4 py-3 hover:bg-surface-container/50 transition-colors items-center">
+              <span class="text-xs font-mono text-on-surface-variant">2025-01-15 11:05:22</span>
+              <span class="text-sm font-medium text-on-surface">Mr.joker</span>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-warning/15 text-warning w-fit">积分操作</span>
+              <span class="text-sm text-on-surface">用户 #U1567</span>
+              <span class="text-sm text-on-surface-variant truncate">手动调整积分 +500</span>
+              <span class="text-xs font-mono text-on-surface-variant">192.168.1.101</span>
+              <button class="btn-expand-row w-6 h-6 flex items-center justify-center rounded hover:bg-surface-container-high transition-colors" data-target="detail-log-003">
+                <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-on-surface-variant/50"></i>
+              </button>
+            </div>
+            <div id="detail-log-003" class="hidden px-4 pb-3">
+              <div class="bg-surface-container rounded-md p-3 border border-outline-variant/10">
+                <div class="text-xs font-semibold text-on-surface-variant mb-2">操作详情 JSON</div>
+                <pre class="text-xs font-mono text-on-surface-variant leading-relaxed whitespace-pre-wrap">{
+  "action": "credit.manual.adjust",
+  "operator": "Mr.joker",
+  "operator_id": "A001",
+  "target": { "user_id": "U1567", "username": "premium_user_lw" },
+  "before": { "credits": 1200 },
+  "after": { "credits": 1700, "delta": "+500" },
+  "reason": "客户投诉补偿",
+  "timestamp": "2025-01-15T11:05:22.345Z",
+  "ip": "192.168.1.101",
+  "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+  "request_id": "req_c5f8a2b6d9"
+}</pre>
+              </div>
+            </div>
+          </div>
+
+          <!-- 日志行4 -->
+          <div class="audit-row" data-id="log-004">
+            <div class="grid grid-cols-[160px_100px_110px_140px_1fr_130px_40px] px-4 py-3 hover:bg-surface-container/50 transition-colors items-center">
+              <span class="text-xs font-mono text-on-surface-variant">2025-01-15 09:47:31</span>
+              <span class="text-sm font-medium text-on-surface">Bob_Z</span>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-surface-container-high text-on-surface-variant w-fit">系统设置</span>
+              <span class="text-sm text-on-surface">系统配置</span>
+              <span class="text-sm text-on-surface-variant truncate">修改全局速率限制为 1000次/分钟</span>
+              <span class="text-xs font-mono text-on-surface-variant">172.16.0.22</span>
+              <button class="btn-expand-row w-6 h-6 flex items-center justify-center rounded hover:bg-surface-container-high transition-colors" data-target="detail-log-004">
+                <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-on-surface-variant/50"></i>
+              </button>
+            </div>
+            <div id="detail-log-004" class="hidden px-4 pb-3">
+              <div class="bg-surface-container rounded-md p-3 border border-outline-variant/10">
+                <div class="text-xs font-semibold text-on-surface-variant mb-2">操作详情 JSON</div>
+                <pre class="text-xs font-mono text-on-surface-variant leading-relaxed whitespace-pre-wrap">{
+  "action": "system.config.update",
+  "operator": "Bob_Z",
+  "operator_id": "A005",
+  "target": { "config_key": "rate_limit.global" },
+  "before": { "value": "500/min" },
+  "after": { "value": "1000/min" },
+  "timestamp": "2025-01-15T09:47:31.678Z",
+  "ip": "172.16.0.22",
+  "user_agent": "Mozilla/5.0 (X11; Linux x86_64)",
+  "request_id": "req_d7g1c4e8f0"
+}</pre>
+              </div>
+            </div>
+          </div>
+
+          <!-- 日志行5 -->
+          <div class="audit-row" data-id="log-005">
+            <div class="grid grid-cols-[160px_100px_110px_140px_1fr_130px_40px] px-4 py-3 hover:bg-surface-container/50 transition-colors items-center">
+              <span class="text-xs font-mono text-on-surface-variant">2025-01-14 22:15:03</span>
+              <span class="text-sm font-medium text-on-surface">Alice_W</span>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-info/15 text-info w-fit">用户管理</span>
+              <span class="text-sm text-on-surface">用户 #U3891</span>
+              <span class="text-sm text-on-surface-variant truncate">创建新用户账号</span>
+              <span class="text-xs font-mono text-on-surface-variant">10.0.0.55</span>
+              <button class="btn-expand-row w-6 h-6 flex items-center justify-center rounded hover:bg-surface-container-high transition-colors" data-target="detail-log-005">
+                <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-on-surface-variant/50"></i>
+              </button>
+            </div>
+            <div id="detail-log-005" class="hidden px-4 pb-3">
+              <div class="bg-surface-container rounded-md p-3 border border-outline-variant/10">
+                <div class="text-xs font-semibold text-on-surface-variant mb-2">操作详情 JSON</div>
+                <pre class="text-xs font-mono text-on-surface-variant leading-relaxed whitespace-pre-wrap">{
+  "action": "user.create",
+  "operator": "Alice_W",
+  "operator_id": "A003",
+  "target": { "user_id": "U3891", "username": "new_partner_01" },
+  "after": { "role": "partner", "status": "active", "credits": 0 },
+  "timestamp": "2025-01-14T22:15:03.223Z",
+  "ip": "10.0.0.55",
+  "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+  "request_id": "req_e9h2d5f1b3"
+}</pre>
+              </div>
+            </div>
+          </div>
+
+          <!-- 日志行6 -->
+          <div class="audit-row" data-id="log-006">
+            <div class="grid grid-cols-[160px_100px_110px_140px_1fr_130px_40px] px-4 py-3 hover:bg-surface-container/50 transition-colors items-center">
+              <span class="text-xs font-mono text-on-surface-variant">2025-01-14 18:42:17</span>
+              <span class="text-sm font-medium text-on-surface">Mr.joker</span>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-warning/15 text-warning w-fit">积分操作</span>
+              <span class="text-sm text-on-surface">批量操作</span>
+              <span class="text-sm text-on-surface-variant truncate">批量重置过期积分（影响 256 用户）</span>
+              <span class="text-xs font-mono text-on-surface-variant">192.168.1.101</span>
+              <button class="btn-expand-row w-6 h-6 flex items-center justify-center rounded hover:bg-surface-container-high transition-colors" data-target="detail-log-006">
+                <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-on-surface-variant/50"></i>
+              </button>
+            </div>
+            <div id="detail-log-006" class="hidden px-4 pb-3">
+              <div class="bg-surface-container rounded-md p-3 border border-outline-variant/10">
+                <div class="text-xs font-semibold text-on-surface-variant mb-2">操作详情 JSON</div>
+                <pre class="text-xs font-mono text-on-surface-variant leading-relaxed whitespace-pre-wrap">{
+  "action": "credit.batch.reset",
+  "operator": "Mr.joker",
+  "operator_id": "A001",
+  "target": { "batch_id": "B20250114_01", "affected_count": 256 },
+  "before": { "total_expired_credits": 128000 },
+  "after": { "total_expired_credits": 0 },
+  "reason": "月度过期积分清理",
+  "timestamp": "2025-01-14T18:42:17.001Z",
+  "ip": "192.168.1.101",
+  "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+  "request_id": "req_f1i3e6g9c4"
+}</pre>
+              </div>
+            </div>
+          </div>
+
+          <!-- 日志行7 -->
+          <div class="audit-row" data-id="log-007">
+            <div class="grid grid-cols-[160px_100px_110px_140px_1fr_130px_40px] px-4 py-3 hover:bg-surface-container/50 transition-colors items-center">
+              <span class="text-xs font-mono text-on-surface-variant">2025-01-14 16:08:55</span>
+              <span class="text-sm font-medium text-on-surface">Bob_Z</span>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-purple-500/15 text-purple-400 w-fit">API管理</span>
+              <span class="text-sm text-on-surface">API密钥 #K1024</span>
+              <span class="text-sm text-on-surface-variant truncate">吊销 API 密钥访问权限</span>
+              <span class="text-xs font-mono text-on-surface-variant">172.16.0.22</span>
+              <button class="btn-expand-row w-6 h-6 flex items-center justify-center rounded hover:bg-surface-container-high transition-colors" data-target="detail-log-007">
+                <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-on-surface-variant/50"></i>
+              </button>
+            </div>
+            <div id="detail-log-007" class="hidden px-4 pb-3">
+              <div class="bg-surface-container rounded-md p-3 border border-outline-variant/10">
+                <div class="text-xs font-semibold text-on-surface-variant mb-2">操作详情 JSON</div>
+                <pre class="text-xs font-mono text-on-surface-variant leading-relaxed whitespace-pre-wrap">{
+  "action": "api.key.revoke",
+  "operator": "Bob_Z",
+  "operator_id": "A005",
+  "target": { "key_id": "K1024", "key_prefix": "sk-***m3n7" },
+  "before": { "key_status": "active" },
+  "after": { "key_status": "revoked", "reason": "密钥泄露风险" },
+  "timestamp": "2025-01-14T16:08:55.567Z",
+  "ip": "172.16.0.22",
+  "user_agent": "Mozilla/5.0 (X11; Linux x86_64)",
+  "request_id": "req_g2j4f7h0d5"
+}</pre>
+              </div>
+            </div>
+          </div>
+
+          <!-- 日志行8 - 异常操作标记 -->
+          <div class="audit-row" data-id="log-008">
+            <div class="grid grid-cols-[160px_100px_110px_140px_1fr_130px_40px] px-4 py-3 hover:bg-surface-container/50 transition-colors items-center bg-error/5">
+              <span class="text-xs font-mono text-on-surface-variant">2025-01-14 03:21:44</span>
+              <span class="text-sm font-medium text-on-surface">Mr.joker</span>
+              <span class="inline-flex items-center gap-1 w-fit">
+                <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-warning/15 text-warning">积分操作</span>
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-medium bg-error/15 text-error">异常</span>
+              </span>
+              <span class="text-sm text-on-surface">用户 #U0891</span>
+              <span class="text-sm text-on-surface-variant truncate">非常规时间大批量积分调整 +50,000</span>
+              <span class="text-xs font-mono text-on-surface-variant">192.168.1.101</span>
+              <button class="btn-expand-row w-6 h-6 flex items-center justify-center rounded hover:bg-surface-container-high transition-colors" data-target="detail-log-008">
+                <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-on-surface-variant/50"></i>
+              </button>
+            </div>
+            <div id="detail-log-008" class="hidden px-4 pb-3">
+              <div class="bg-surface-container rounded-md p-3 border border-outline-variant/10 border-error/20">
+                <div class="flex items-center gap-2 mb-2">
+                  <div class="text-xs font-semibold text-on-surface-variant">操作详情 JSON</div>
+                  <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-medium bg-error/15 text-error">⚠ 异常操作</span>
+                </div>
+                <pre class="text-xs font-mono text-on-surface-variant leading-relaxed whitespace-pre-wrap">{
+  "action": "credit.manual.adjust",
+  "operator": "Mr.joker",
+  "operator_id": "A001",
+  "target": { "user_id": "U0891", "username": "vip_enterprise" },
+  "before": { "credits": 5000 },
+  "after": { "credits": 55000, "delta": "+50000" },
+  "reason": "企业客户合同追加积分",
+  "anomaly_flags": ["off_hours", "large_amount", "no_ticket_ref"],
+  "timestamp": "2025-01-14T03:21:44.890Z",
+  "ip": "192.168.1.101",
+  "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+  "request_id": "req_h3k5g8i1e6"
+}</pre>
+              </div>
+            </div>
+          </div>
+
+          <!-- 日志行9 -->
+          <div class="audit-row" data-id="log-009">
+            <div class="grid grid-cols-[160px_100px_110px_140px_1fr_130px_40px] px-4 py-3 hover:bg-surface-container/50 transition-colors items-center">
+              <span class="text-xs font-mono text-on-surface-variant">2025-01-13 20:33:12</span>
+              <span class="text-sm font-medium text-on-surface">Alice_W</span>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-surface-container-high text-on-surface-variant w-fit">系统设置</span>
+              <span class="text-sm text-on-surface">邮件配置</span>
+              <span class="text-sm text-on-surface-variant truncate">更新 SMTP 服务器配置</span>
+              <span class="text-xs font-mono text-on-surface-variant">10.0.0.55</span>
+              <button class="btn-expand-row w-6 h-6 flex items-center justify-center rounded hover:bg-surface-container-high transition-colors" data-target="detail-log-009">
+                <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-on-surface-variant/50"></i>
+              </button>
+            </div>
+            <div id="detail-log-009" class="hidden px-4 pb-3">
+              <div class="bg-surface-container rounded-md p-3 border border-outline-variant/10">
+                <div class="text-xs font-semibold text-on-surface-variant mb-2">操作详情 JSON</div>
+                <pre class="text-xs font-mono text-on-surface-variant leading-relaxed whitespace-pre-wrap">{
+  "action": "system.config.update",
+  "operator": "Alice_W",
+  "operator_id": "A003",
+  "target": { "config_key": "mail.smtp" },
+  "before": { "host": "smtp.old.com", "port": 587 },
+  "after": { "host": "smtp.new.com", "port": 465, "encryption": "ssl" },
+  "timestamp": "2025-01-13T20:33:12.456Z",
+  "ip": "10.0.0.55",
+  "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+  "request_id": "req_i4l6h9j2f7"
+}</pre>
+              </div>
+            </div>
+          </div>
+
+          <!-- 日志行10 -->
+          <div class="audit-row" data-id="log-010">
+            <div class="grid grid-cols-[160px_100px_110px_140px_1fr_130px_40px] px-4 py-3 hover:bg-surface-container/50 transition-colors items-center">
+              <span class="text-xs font-mono text-on-surface-variant">2025-01-13 15:57:39</span>
+              <span class="text-sm font-medium text-on-surface">Bob_Z</span>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-info/15 text-info w-fit">用户管理</span>
+              <span class="text-sm text-on-surface">用户 #U2756</span>
+              <span class="text-sm text-on-surface-variant truncate">提升用户权限至管理员</span>
+              <span class="text-xs font-mono text-on-surface-variant">172.16.0.22</span>
+              <button class="btn-expand-row w-6 h-6 flex items-center justify-center rounded hover:bg-surface-container-high transition-colors" data-target="detail-log-010">
+                <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-on-surface-variant/50"></i>
+              </button>
+            </div>
+            <div id="detail-log-010" class="hidden px-4 pb-3">
+              <div class="bg-surface-container rounded-md p-3 border border-outline-variant/10">
+                <div class="text-xs font-semibold text-on-surface-variant mb-2">操作详情 JSON</div>
+                <pre class="text-xs font-mono text-on-surface-variant leading-relaxed whitespace-pre-wrap">{
+  "action": "user.role.update",
+  "operator": "Bob_Z",
+  "operator_id": "A005",
+  "target": { "user_id": "U2756", "username": "ops_manager_zhao" },
+  "before": { "role": "operator" },
+  "after": { "role": "admin", "approved_by": "Bob_Z" },
+  "timestamp": "2025-01-13T15:57:39.123Z",
+  "ip": "172.16.0.22",
+  "user_agent": "Mozilla/5.0 (X11; Linux x86_64)",
+  "request_id": "req_j5m7i0k3g8"
+}</pre>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- 分页器 -->
+    <div class="px-6 pb-6">
+      <div class="flex items-center justify-between">
+        <div class="text-xs text-on-surface-variant">共 <span class="font-medium text-on-surface">1,284</span> 条记录，当前显示第 <span class="font-medium text-on-surface">1-10</span> 条</div>
+        <div class="flex items-center gap-1">
+          <button id="btn-page-prev" class="w-8 h-8 flex items-center justify-center rounded-md text-on-surface-variant hover:bg-surface-container transition-colors disabled:opacity-30" disabled>
+            <i data-lucide="chevron-left" class="w-4 h-4"></i>
+          </button>
+          <button id="btn-page-1" class="w-8 h-8 flex items-center justify-center rounded-md text-xs font-medium bg-primary/15 text-primary">1</button>
+          <button id="btn-page-2" class="w-8 h-8 flex items-center justify-center rounded-md text-xs font-medium text-on-surface-variant hover:bg-surface-container transition-colors">2</button>
+          <button id="btn-page-3" class="w-8 h-8 flex items-center justify-center rounded-md text-xs font-medium text-on-surface-variant hover:bg-surface-container transition-colors">3</button>
+          <span class="w-8 h-8 flex items-center justify-center text-xs text-on-surface-variant">...</span>
+          <button id="btn-page-129" class="w-8 h-8 flex items-center justify-center rounded-md text-xs font-medium text-on-surface-variant hover:bg-surface-container transition-colors">129</button>
+          <button id="btn-page-next" class="w-8 h-8 flex items-center justify-center rounded-md text-on-surface-variant hover:bg-surface-container transition-colors">
+            <i data-lucide="chevron-right" class="w-4 h-4"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- @main-content:end -->
+  </main>
+
+  <script>
+    $(function () {
+
+      // === 时间范围选择器切换 ===
+      $('#time-range-group').on('click', 'button', function () {
+        // 移除所有按钮的激活样式，恢复默认样式
+        $('#time-range-group button').removeClass('bg-primary/15 text-primary').addClass('text-on-surface-variant');
+        // 当前按钮设为激活态
+        $(this).removeClass('text-on-surface-variant').addClass('bg-primary/15 text-primary');
+
+        // 自定义时间范围 - 点击后应实现：
+        // 1. 在按钮旁展开日期范围选择面板（开始日期 - 结束日期）
+        // 2. 日期选择使用 date input 或日历组件
+        // 3. 选择完成后自动筛选对应时间范围的日志
+        if ($(this).attr('id') === 'btn-time-custom') {
+          console.log('自定义时间范围：需展开日期选择器面板');
+        }
+      });
+
+      // === 操作类型筛选 ===
+      $('#filter-type').on('change', function () {
+        var selectedType = $(this).val();
+        // 筛选操作类型 - 应实现：
+        // 1. 遍历所有 .audit-row，根据行内操作类型标签决定是否显示
+        // 2. 用户管理 = info色标签，API管理 = purple色标签，积分操作 = warning色标签，系统设置 = 灰色标签
+        // 3. all 显示全部，其他只显示匹配类型
+        // 4. 筛选后更新分页器总数
+        console.log('筛选操作类型:', selectedType);
+      });
+
+      // === 操作人筛选 ===
+      $('#filter-operator').on('change', function () {
+        var selectedOperator = $(this).val();
+        // 筛选操作人 - 应实现：
+        // 1. 遍历所有 .audit-row，根据行内操作人名称匹配筛选
+        // 2. all 显示全部，其他只显示匹配的操作人
+        // 3. 筛选后更新分页器总数
+        console.log('筛选操作人:', selectedOperator);
+      });
+
+      // === 搜索 ===
+      $('#search-input').on('input', function () {
+        var keyword = $(this).val().trim().toLowerCase();
+        // 搜索功能 - 应实现：
+        // 1. 遍历所有 .audit-row，匹配操作对象或操作详情文字
+        // 2. 包含关键词的行显示，不包含的隐藏
+        // 3. 无结果时显示空状态提示
+        // 4. 筛选后更新分页器总数
+        console.log('搜索关键词:', keyword);
+      });
+
+      // === 展开/收起操作详情 ===
+      $('#audit-table-body').on('click', '.btn-expand-row', function () {
+        var targetId = $(this).data('target');
+        var $detail = $('#' + targetId);
+        var $icon = $(this).find('[data-lucide]');
+
+        if ($detail.is(':hidden')) {
+          $detail.removeClass('hidden');
+          // 旋转箭头图标表示展开状态
+          $(this).addClass('rotate-180');
+        } else {
+          $detail.addClass('hidden');
+          $(this).removeClass('rotate-180');
+        }
+      });
+
+      // === 分页器 ===
+      // 分页按钮点击 - 应实现：
+      // 1. 切换页码激活态样式
+      // 2. 根据页码请求对应数据并重新渲染表格
+      // 3. 第一页时禁用上一页按钮，最后一页时禁用下一页按钮
+      // 4. 更新底部记录数显示
+      $('[id^="btn-page-"]').not('#btn-page-prev, #btn-page-next').on('click', function () {
+        $('[id^="btn-page-"]').not('#btn-page-prev, #btn-page-next')
+          .removeClass('bg-primary/15 text-primary')
+          .addClass('text-on-surface-variant');
+        $(this).removeClass('text-on-surface-variant').addClass('bg-primary/15 text-primary');
+        console.log('跳转页码:', $(this).text());
+      });
+
+      $('#btn-page-prev').on('click', function () {
+        console.log('上一页');
+      });
+
+      $('#btn-page-next').on('click', function () {
+        console.log('下一页');
+      });
+
+      // === 导出按钮 ===
+      // 导出功能 - 应实现：
+      // 1. 根据当前筛选条件导出审计日志为 CSV/Excel 文件
+      // 2. 导出前显示确认弹窗，确认导出范围（当前页/全部/筛选结果）
+      // 3. 导出操作本身也应记录到审计日志
+      $('#btn-export').on('click', function () {
+        console.log('导出审计日志：需实现导出为 CSV/Excel 功能');
+      });
+
+    });
+  </script>
+
+  <script>lucide.createIcons();</script>
+</body>
+
+</html>

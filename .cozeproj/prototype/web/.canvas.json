@@ -3,9 +3,41 @@
     {
       "type": "html",
       "options": {
-        "path": ".cozeproj/prototype/web/node-editor.html"
+        "path": ".cozeproj/prototype/web/admin-overview.html"
       },
-      "title": "节点编辑器",
+      "title": "运营总览",
+      "size": "web"
+    },
+    {
+      "type": "html",
+      "options": {
+        "path": ".cozeproj/prototype/web/admin-users.html"
+      },
+      "title": "用户管理",
+      "size": "web"
+    },
+    {
+      "type": "html",
+      "options": {
+        "path": ".cozeproj/prototype/web/admin-credits.html"
+      },
+      "title": "积分管理",
+      "size": "web"
+    },
+    {
+      "type": "html",
+      "options": {
+        "path": ".cozeproj/prototype/web/admin-audit.html"
+      },
+      "title": "审计日志",
+      "size": "web"
+    },
+    {
+      "type": "html",
+      "options": {
+        "path": ".cozeproj/prototype/web/admin-settings.html"
+      },
+      "title": "系统设置",
       "size": "web"
     }
   ]

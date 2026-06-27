@@ -1,0 +1,1209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/jquery/jquery-3.7.1.min.js"></script>
+  <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/lucide/lucide-1.11.0.min.js"></script>
+  <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/tailwindcss/tailwindcss-browser-4.2.4.min.js"></script>
+
+  <style type="text/tailwindcss">
+    @theme {
+      /* === 品牌色 === */
+      --color-primary:              #d4af37;
+      --color-primary-container:    #2a2410;
+      --color-on-primary:           #0a0a0b;
+      /* === 背景 / 表面 === */
+      --color-background:                 #0a0a0b;
+      --color-surface-container-lowest:   #111113;
+      --color-surface:                    #1a1a1e;
+      --color-surface-container:          #252529;
+      --color-surface-container-high:     #2e2e33;
+      --color-surface-container-highest:  #38383e;
+      /* === 文字 === */
+      --color-on-surface:           #f5f5f5;
+      --color-on-surface-variant:   #a1a1aa;
+      /* === 功能色 === */
+      --color-success:  #22c55e;
+      --color-error:    #ef4444;
+      --color-warning:  #f59e0b;
+      --color-info:     #3b82f6;
+      /* === 边框 === */
+      --color-outline:          #2e2e33;
+      --color-outline-variant:  #1f1f24;
+      /* === 圆角 === */
+      --radius-sm:   0.375rem;
+      --radius-md:   0.5rem;
+      --radius-lg:   0.5rem;
+      --radius-xl:   0.75rem;
+      --radius-2xl:  1rem;
+      --radius-full: 9999px;
+      /* === 阴影 === */
+      --shadow-card:   0 2px 8px rgba(0,0,0,0.3);
+      --shadow-float:  0 10px 25px rgba(0,0,0,0.5);
+      --shadow-dialog: 0 25px 50px rgba(0,0,0,0.6);
+      --shadow-glow:   0 0 20px rgba(212,175,55,0.15);
+      /* === 字体 === */
+      --font-sans: system-ui, -apple-system, sans-serif;
+      --font-mono: ui-monospace, 'Cascadia Code', 'Fira Code', monospace;
+    }
+  </style>
+
+  <style>
+    /* CSS-only 环形图 */
+    .donut-chart {
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+    .donut-chart .inner {
+      width: 68%;
+      height: 68%;
+      border-radius: 50%;
+      background: #1a1a1e;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      z-index: 1;
+    }
+    /* 柱状图条 */
+    .bar-col {
+      transition: height 0.3s ease;
+      border-radius: 4px 4px 0 0;
+      min-width: 28px;
+    }
+    /* Tab 激活下划线动画 */
+    .tab-btn {
+      position: relative;
+      padding-bottom: 12px;
+      transition: color 0.2s;
+    }
+    .tab-btn::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%) scaleX(0);
+      width: 80%;
+      height: 2px;
+      background: #d4af37;
+      border-radius: 1px;
+      transition: transform 0.25s ease;
+    }
+    .tab-btn.active::after {
+      transform: translateX(-50%) scaleX(1);
+    }
+    .tab-btn.active {
+      color: #d4af37;
+    }
+    /* 充值金额按钮选中态 */
+    .amount-btn.selected {
+      background: #2a2410;
+      border-color: #d4af37;
+      color: #d4af37;
+    }
+  </style>
+
+  <script>
+    document.addEventListener('error', function (e) {
+      const img = e.target;
+      if (img.tagName !== 'IMG' || img.dataset.fallback) return;
+      img.dataset.fallback = '1';
+      const w = img.width || 400, h = img.height || 300;
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="%231a1a1e"/><text x="50%" y="50%" text-anchor="middle" font-size="14" fill="%23a1a1aa" font-family="system-ui" dominant-baseline="central">Image</text></svg>`;
+      img.src = 'data:image/svg+xml,' + svg;
+    }, true);
+  </script>
+</head>
+
+<body class="bg-background text-on-surface font-sans">
+
+  <!-- @nav:start 管理员系统侧边导航 -->
+  <aside class="fixed left-0 top-0 bottom-0 w-56 bg-surface border-r border-outline-variant/20 flex flex-col z-40">
+    <div class="p-4 border-b border-outline-variant/20">
+      <div class="flex items-center gap-2">
+        <div class="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
+          <i data-lucide="zap" class="w-4 h-4 text-on-primary"></i>
+        </div>
+        <div>
+          <div class="text-sm font-bold text-on-surface">无界AI</div>
+          <div class="text-[10px] text-on-surface-variant">管理后台</div>
+        </div>
+      </div>
+    </div>
+    <nav class="flex-1 py-2 overflow-y-auto">
+      <a href="admin-overview.html" class="nav-item flex items-center gap-3 px-4 py-2.5 text-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors">
+        <i data-lucide="layout-dashboard" class="w-4 h-4"></i>运营看板
+      </a>
+      <a href="admin-users.html" class="nav-item flex items-center gap-3 px-4 py-2.5 text-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors">
+        <i data-lucide="users" class="w-4 h-4"></i>用户管理
+      </a>
+      <a href="admin-credits.html" class="nav-item flex items-center gap-3 px-4 py-2.5 text-sm font-medium bg-primary/10 text-primary" aria-current="page">
+        <i data-lucide="coins" class="w-4 h-4"></i>积分管理
+      </a>
+      <a href="admin-audit.html" class="nav-item flex items-center gap-3 px-4 py-2.5 text-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors">
+        <i data-lucide="shield-check" class="w-4 h-4"></i>审计日志
+      </a>
+      <a href="admin-settings.html" class="nav-item flex items-center gap-3 px-4 py-2.5 text-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors">
+        <i data-lucide="settings" class="w-4 h-4"></i>系统设置
+      </a>
+    </nav>
+    <div class="p-3 border-t border-outline-variant/20">
+      <div class="flex items-center gap-2 px-2 py-1.5">
+        <div class="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center text-xs font-bold text-primary">A</div>
+        <div class="flex-1 min-w-0">
+          <div class="text-xs font-medium text-on-surface truncate">Mr.joker</div>
+          <div class="text-[10px] text-on-surface-variant">管理员</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+  <!-- @nav:end 管理员系统侧边导航 -->
+
+  <main class="ml-56 min-h-screen">
+    <!-- @main-content:start -->
+
+    <!-- 页面头部 -->
+    <div class="px-6 pt-6 pb-4 border-b border-outline-variant/20">
+      <div class="flex items-center justify-between">
+        <div>
+          <h1 class="text-2xl font-bold text-on-surface">积分管理</h1>
+          <p class="text-sm text-on-surface-variant mt-1">管理用户积分、消耗明细与套餐配置</p>
+        </div>
+        <div class="flex items-center gap-2 text-xs text-on-surface-variant">
+          <i data-lucide="clock" class="w-3.5 h-3.5"></i>
+          <span>数据更新于 2024-12-20 14:30</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 顶部统计卡片 -->
+    <div class="px-6 pt-5 pb-2">
+      <div class="grid grid-cols-4 gap-4">
+        <!-- 统计卡片1-总用户数 -->
+        <div class="bg-surface rounded-lg shadow-card p-5 border border-outline-variant/10">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-xs font-medium text-on-surface-variant uppercase tracking-wide">总用户数</span>
+            <div class="w-8 h-8 rounded-lg bg-info/15 flex items-center justify-center">
+              <i data-lucide="users" class="w-4 h-4 text-info"></i>
+            </div>
+          </div>
+          <div class="text-2xl font-bold text-on-surface font-mono">12,847</div>
+          <div class="flex items-center gap-1 mt-2">
+            <i data-lucide="trending-up" class="w-3 h-3 text-success"></i>
+            <span class="text-xs text-success font-medium">+5.2%</span>
+            <span class="text-xs text-on-surface-variant ml-1">较上月</span>
+          </div>
+        </div>
+        <!-- 统计卡片2-总充值积分 -->
+        <div class="bg-surface rounded-lg shadow-card p-5 border border-outline-variant/10">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-xs font-medium text-on-surface-variant uppercase tracking-wide">总充值积分</span>
+            <div class="w-8 h-8 rounded-lg bg-primary/15 flex items-center justify-center">
+              <i data-lucide="arrow-down-circle" class="w-4 h-4 text-primary"></i>
+            </div>
+          </div>
+          <div class="text-2xl font-bold text-primary font-mono">8,562,400</div>
+          <div class="flex items-center gap-1 mt-2">
+            <i data-lucide="trending-up" class="w-3 h-3 text-success"></i>
+            <span class="text-xs text-success font-medium">+12.8%</span>
+            <span class="text-xs text-on-surface-variant ml-1">较上月</span>
+          </div>
+        </div>
+        <!-- 统计卡片3-总消耗积分 -->
+        <div class="bg-surface rounded-lg shadow-card p-5 border border-outline-variant/10">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-xs font-medium text-on-surface-variant uppercase tracking-wide">总消耗积分</span>
+            <div class="w-8 h-8 rounded-lg bg-error/15 flex items-center justify-center">
+              <i data-lucide="arrow-up-circle" class="w-4 h-4 text-error"></i>
+            </div>
+          </div>
+          <div class="text-2xl font-bold text-on-surface font-mono">6,231,850</div>
+          <div class="flex items-center gap-1 mt-2">
+            <i data-lucide="trending-up" class="w-3 h-3 text-error"></i>
+            <span class="text-xs text-error font-medium">+8.3%</span>
+            <span class="text-xs text-on-surface-variant ml-1">较上月</span>
+          </div>
+        </div>
+        <!-- 统计卡片4-系统结余 -->
+        <div class="bg-surface rounded-lg shadow-card p-5 border border-outline-variant/10 shadow-glow">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-xs font-medium text-on-surface-variant uppercase tracking-wide">系统结余</span>
+            <div class="w-8 h-8 rounded-lg bg-success/15 flex items-center justify-center">
+              <i data-lucide="wallet" class="w-4 h-4 text-success"></i>
+            </div>
+          </div>
+          <div class="text-2xl font-bold text-primary font-mono">2,330,550</div>
+          <div class="flex items-center gap-1 mt-2">
+            <span class="text-xs text-on-surface-variant">充值 − 消耗</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 切换区 -->
+    <div class="px-6 pt-4">
+      <div class="flex items-center gap-6 border-b border-outline-variant/20">
+        <button id="tab-user-credits" class="tab-btn active text-sm font-medium text-primary pb-3 cursor-pointer bg-transparent border-none">用户积分</button>
+        <button id="tab-consumption" class="tab-btn text-sm font-medium text-on-surface-variant pb-3 cursor-pointer bg-transparent border-none hover:text-on-surface transition-colors">消耗明细</button>
+        <button id="tab-statistics" class="tab-btn text-sm font-medium text-on-surface-variant pb-3 cursor-pointer bg-transparent border-none hover:text-on-surface transition-colors">统计分析</button>
+        <button id="tab-packages" class="tab-btn text-sm font-medium text-on-surface-variant pb-3 cursor-pointer bg-transparent border-none hover:text-on-surface transition-colors">套餐管理</button>
+      </div>
+    </div>
+
+    <!-- ======== Tab 1: 用户积分 ======== -->
+    <div id="panel-user-credits" class="tab-panel px-6 pt-5 pb-8">
+      <!-- 搜索与排序 -->
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-3">
+          <div class="relative">
+            <i data-lucide="search" class="w-4 h-4 text-on-surface-variant absolute left-3 top-1/2 -translate-y-1/2"></i>
+            <input id="search-user" type="text" placeholder="搜索用户名或邮箱..." class="bg-surface-container border-none rounded-md pl-9 pr-3 py-2 text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/30 w-64 transition-colors" />
+          </div>
+          <select id="sort-credits" class="bg-surface-container border-none rounded-md px-3 py-2 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer">
+            <option value="balance">按余额排序</option>
+            <option value="recharge">按充值排序</option>
+            <option value="consume">按消耗排序</option>
+          </select>
+        </div>
+        <div class="text-xs text-on-surface-variant">
+          共 <span class="text-on-surface font-medium font-mono">12,847</span> 用户
+        </div>
+      </div>
+
+      <!-- 用户积分表格 -->
+      <div class="bg-surface rounded-lg shadow-card overflow-hidden border border-outline-variant/10">
+        <div class="grid grid-cols-5 px-5 py-3 bg-surface-container text-xs font-semibold text-on-surface-variant uppercase tracking-wide">
+          <span>用户名</span>
+          <span>当前余额</span>
+          <span>累计充值</span>
+          <span>累计消耗</span>
+          <span class="text-right">操作</span>
+        </div>
+        <div class="divide-y divide-outline-variant/30">
+          <!-- 列表-用户1 -->
+          <div class="grid grid-cols-5 px-5 py-3.5 hover:bg-surface-container/50 transition-colors items-center">
+            <div class="flex items-center gap-2.5">
+              <div class="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center text-xs font-bold text-primary">林</div>
+              <div>
+                <div class="text-sm font-medium text-on-surface">林小溪</div>
+                <div class="text-xs text-on-surface-variant">linxiaoxi@mail.com</div>
+              </div>
+            </div>
+            <span class="text-sm font-bold text-primary font-mono">28,450</span>
+            <span class="text-sm text-on-surface font-mono">56,200</span>
+            <span class="text-sm text-on-surface-variant font-mono">27,750</span>
+            <div class="flex justify-end">
+              <button id="btn-recharge-1" class="bg-primary/10 text-primary px-3 py-1.5 rounded-md text-xs font-medium hover:bg-primary/20 active:scale-[0.98] transition-all" data-user="林小溪">充值</button>
+            </div>
+          </div>
+          <!-- 列表-用户2 -->
+          <div class="grid grid-cols-5 px-5 py-3.5 hover:bg-surface-container/50 transition-colors items-center">
+            <div class="flex items-center gap-2.5">
+              <div class="w-7 h-7 rounded-full bg-info/20 flex items-center justify-center text-xs font-bold text-info">陈</div>
+              <div>
+                <div class="text-sm font-medium text-on-surface">陈墨白</div>
+                <div class="text-xs text-on-surface-variant">chenmobai@mail.com</div>
+              </div>
+            </div>
+            <span class="text-sm font-bold text-primary font-mono">15,300</span>
+            <span class="text-sm text-on-surface font-mono">42,000</span>
+            <span class="text-sm text-on-surface-variant font-mono">26,700</span>
+            <div class="flex justify-end">
+              <button id="btn-recharge-2" class="bg-primary/10 text-primary px-3 py-1.5 rounded-md text-xs font-medium hover:bg-primary/20 active:scale-[0.98] transition-all" data-user="陈墨白">充值</button>
+            </div>
+          </div>
+          <!-- 列表-用户3 -->
+          <div class="grid grid-cols-5 px-5 py-3.5 hover:bg-surface-container/50 transition-colors items-center">
+            <div class="flex items-center gap-2.5">
+              <div class="w-7 h-7 rounded-full bg-success/20 flex items-center justify-center text-xs font-bold text-success">王</div>
+              <div>
+                <div class="text-sm font-medium text-on-surface">王天宇</div>
+                <div class="text-xs text-on-surface-variant">wangtianyu@mail.com</div>
+              </div>
+            </div>
+            <span class="text-sm font-bold text-primary font-mono">9,870</span>
+            <span class="text-sm text-on-surface font-mono">30,500</span>
+            <span class="text-sm text-on-surface-variant font-mono">20,630</span>
+            <div class="flex justify-end">
+              <button id="btn-recharge-3" class="bg-primary/10 text-primary px-3 py-1.5 rounded-md text-xs font-medium hover:bg-primary/20 active:scale-[0.98] transition-all" data-user="王天宇">充值</button>
+            </div>
+          </div>
+          <!-- 列表-用户4 -->
+          <div class="grid grid-cols-5 px-5 py-3.5 hover:bg-surface-container/50 transition-colors items-center">
+            <div class="flex items-center gap-2.5">
+              <div class="w-7 h-7 rounded-full bg-warning/20 flex items-center justify-center text-xs font-bold text-warning">赵</div>
+              <div>
+                <div class="text-sm font-medium text-on-surface">赵雨薇</div>
+                <div class="text-xs text-on-surface-variant">zhaoyuwei@mail.com</div>
+              </div>
+            </div>
+            <span class="text-sm font-bold text-primary font-mono">4,200</span>
+            <span class="text-sm text-on-surface font-mono">18,600</span>
+            <span class="text-sm text-on-surface-variant font-mono">14,400</span>
+            <div class="flex justify-end">
+              <button id="btn-recharge-4" class="bg-primary/10 text-primary px-3 py-1.5 rounded-md text-xs font-medium hover:bg-primary/20 active:scale-[0.98] transition-all" data-user="赵雨薇">充值</button>
+            </div>
+          </div>
+          <!-- 列表-用户5 -->
+          <div class="grid grid-cols-5 px-5 py-3.5 hover:bg-surface-container/50 transition-colors items-center">
+            <div class="flex items-center gap-2.5">
+              <div class="w-7 h-7 rounded-full bg-error/20 flex items-center justify-center text-xs font-bold text-error">孙</div>
+              <div>
+                <div class="text-sm font-medium text-on-surface">孙浩然</div>
+                <div class="text-xs text-on-surface-variant">sunhaoran@mail.com</div>
+              </div>
+            </div>
+            <span class="text-sm font-bold text-primary font-mono">1,560</span>
+            <span class="text-sm text-on-surface font-mono">10,000</span>
+            <span class="text-sm text-on-surface-variant font-mono">8,440</span>
+            <div class="flex justify-end">
+              <button id="btn-recharge-5" class="bg-primary/10 text-primary px-3 py-1.5 rounded-md text-xs font-medium hover:bg-primary/20 active:scale-[0.98] transition-all" data-user="孙浩然">充值</button>
+            </div>
+          </div>
+        </div>
+        <!-- 分页 -->
+        <div class="flex items-center justify-between px-5 py-3 border-t border-outline-variant/20">
+          <span class="text-xs text-on-surface-variant">显示 1-5 / 共 12,847 条</span>
+          <div class="flex items-center gap-1">
+            <button class="w-8 h-8 rounded-md bg-surface-container text-on-surface-variant text-xs flex items-center justify-center hover:bg-surface-container-high transition-colors">&lt;</button>
+            <button class="w-8 h-8 rounded-md bg-primary/10 text-primary text-xs font-medium flex items-center justify-center">1</button>
+            <button class="w-8 h-8 rounded-md bg-surface-container text-on-surface-variant text-xs flex items-center justify-center hover:bg-surface-container-high transition-colors">2</button>
+            <button class="w-8 h-8 rounded-md bg-surface-container text-on-surface-variant text-xs flex items-center justify-center hover:bg-surface-container-high transition-colors">3</button>
+            <span class="text-xs text-on-surface-variant px-1">...</span>
+            <button class="w-8 h-8 rounded-md bg-surface-container text-on-surface-variant text-xs flex items-center justify-center hover:bg-surface-container-high transition-colors">257</button>
+            <button class="w-8 h-8 rounded-md bg-surface-container text-on-surface-variant text-xs flex items-center justify-center hover:bg-surface-container-high transition-colors">&gt;</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ======== Tab 2: 消耗明细 ======== -->
+    <div id="panel-consumption" class="tab-panel px-6 pt-5 pb-8 hidden">
+      <!-- 筛选栏 -->
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-3">
+          <div class="flex items-center gap-2">
+            <label class="text-xs text-on-surface-variant">时间范围</label>
+            <input type="date" value="2024-12-01" class="bg-surface-container border-none rounded-md px-3 py-1.5 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30" />
+            <span class="text-xs text-on-surface-variant">至</span>
+            <input type="date" value="2024-12-20" class="bg-surface-container border-none rounded-md px-3 py-1.5 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30" />
+          </div>
+          <select id="filter-user" class="bg-surface-container border-none rounded-md px-3 py-1.5 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer">
+            <option value="">全部用户</option>
+            <option value="linxiaoxi">林小溪</option>
+            <option value="chenmobai">陈墨白</option>
+            <option value="wangtianyu">王天宇</option>
+            <option value="zhaoyuwei">赵雨薇</option>
+            <option value="sunhaoran">孙浩然</option>
+          </select>
+          <select id="filter-model" class="bg-surface-container border-none rounded-md px-3 py-1.5 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer">
+            <option value="">全部模型</option>
+            <option value="flux-pro">FLUX.1 Pro</option>
+            <option value="flux-dev">FLUX.1 Dev</option>
+            <option value="sdxl">SDXL Turbo</option>
+            <option value="cogvideox">CogVideoX</option>
+            <option value="kling">Kling v1.5</option>
+          </select>
+          <select id="filter-type" class="bg-surface-container border-none rounded-md px-3 py-1.5 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer">
+            <option value="">全部类型</option>
+            <option value="image">生图</option>
+            <option value="video">视频</option>
+            <option value="edit">编辑</option>
+            <option value="3d">3D</option>
+            <option value="vectorize">矢量化</option>
+          </select>
+        </div>
+        <button id="btn-export-csv" class="bg-surface-container text-on-surface px-3 py-1.5 rounded-md text-xs font-medium hover:bg-surface-container-high active:scale-[0.98] transition-all inline-flex items-center gap-1.5 border-none cursor-pointer">
+          <i data-lucide="download" class="w-3.5 h-3.5"></i>导出 CSV
+        </button>
+      </div>
+
+      <!-- 消耗明细表格 -->
+      <div class="bg-surface rounded-lg shadow-card overflow-hidden border border-outline-variant/10">
+        <div class="grid grid-cols-6 px-5 py-3 bg-surface-container text-xs font-semibold text-on-surface-variant uppercase tracking-wide">
+          <span>时间</span>
+          <span>用户</span>
+          <span>类型</span>
+          <span>模型</span>
+          <span>消耗积分</span>
+          <span>状态</span>
+        </div>
+        <div class="divide-y divide-outline-variant/30">
+          <!-- 列表-消耗1 -->
+          <div class="grid grid-cols-6 px-5 py-3 hover:bg-surface-container/50 transition-colors items-center">
+            <span class="text-sm text-on-surface-variant font-mono">2024-12-20 14:22</span>
+            <span class="text-sm font-medium text-on-surface">林小溪</span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-primary/15 text-primary w-fit">生图</span>
+            <span class="text-sm text-on-surface-variant">FLUX.1 Pro</span>
+            <span class="text-sm font-bold text-on-surface font-mono">-120</span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-success/15 text-success w-fit">已完成</span>
+          </div>
+          <!-- 列表-消耗2 -->
+          <div class="grid grid-cols-6 px-5 py-3 hover:bg-surface-container/50 transition-colors items-center">
+            <span class="text-sm text-on-surface-variant font-mono">2024-12-20 13:55</span>
+            <span class="text-sm font-medium text-on-surface">陈墨白</span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-info/15 text-info w-fit">视频</span>
+            <span class="text-sm text-on-surface-variant">CogVideoX</span>
+            <span class="text-sm font-bold text-on-surface font-mono">-500</span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-success/15 text-success w-fit">已完成</span>
+          </div>
+          <!-- 列表-消耗3 -->
+          <div class="grid grid-cols-6 px-5 py-3 hover:bg-surface-container/50 transition-colors items-center">
+            <span class="text-sm text-on-surface-variant font-mono">2024-12-20 12:10</span>
+            <span class="text-sm font-medium text-on-surface">王天宇</span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-warning/15 text-warning w-fit">编辑</span>
+            <span class="text-sm text-on-surface-variant">SDXL Turbo</span>
+            <span class="text-sm font-bold text-on-surface font-mono">-80</span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-success/15 text-success w-fit">已完成</span>
+          </div>
+          <!-- 列表-消耗4 -->
+          <div class="grid grid-cols-6 px-5 py-3 hover:bg-surface-container/50 transition-colors items-center">
+            <span class="text-sm text-on-surface-variant font-mono">2024-12-20 11:38</span>
+            <span class="text-sm font-medium text-on-surface">赵雨薇</span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-info/15 text-info w-fit">视频</span>
+            <span class="text-sm text-on-surface-variant">Kling v1.5</span>
+            <span class="text-sm font-bold text-on-surface font-mono">-350</span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-warning/15 text-warning w-fit">处理中</span>
+          </div>
+          <!-- 列表-消耗5 -->
+          <div class="grid grid-cols-6 px-5 py-3 hover:bg-surface-container/50 transition-colors items-center">
+            <span class="text-sm text-on-surface-variant font-mono">2024-12-20 10:05</span>
+            <span class="text-sm font-medium text-on-surface">林小溪</span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-success/15 text-success w-fit">3D</span>
+            <span class="text-sm text-on-surface-variant">TripoSR</span>
+            <span class="text-sm font-bold text-on-surface font-mono">-200</span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-success/15 text-success w-fit">已完成</span>
+          </div>
+          <!-- 列表-消耗6 -->
+          <div class="grid grid-cols-6 px-5 py-3 hover:bg-surface-container/50 transition-colors items-center">
+            <span class="text-sm text-on-surface-variant font-mono">2024-12-19 22:45</span>
+            <span class="text-sm font-medium text-on-surface">孙浩然</span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-error/15 text-error w-fit">矢量化</span>
+            <span class="text-sm text-on-surface-variant">Vectorizer AI</span>
+            <span class="text-sm font-bold text-on-surface font-mono">-60</span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-error/15 text-error w-fit">已失败</span>
+          </div>
+        </div>
+        <!-- 分页 -->
+        <div class="flex items-center justify-between px-5 py-3 border-t border-outline-variant/20">
+          <span class="text-xs text-on-surface-variant">显示 1-6 / 共 89,432 条</span>
+          <div class="flex items-center gap-1">
+            <button class="w-8 h-8 rounded-md bg-surface-container text-on-surface-variant text-xs flex items-center justify-center hover:bg-surface-container-high transition-colors">&lt;</button>
+            <button class="w-8 h-8 rounded-md bg-primary/10 text-primary text-xs font-medium flex items-center justify-center">1</button>
+            <button class="w-8 h-8 rounded-md bg-surface-container text-on-surface-variant text-xs flex items-center justify-center hover:bg-surface-container-high transition-colors">2</button>
+            <button class="w-8 h-8 rounded-md bg-surface-container text-on-surface-variant text-xs flex items-center justify-center hover:bg-surface-container-high transition-colors">3</button>
+            <span class="text-xs text-on-surface-variant px-1">...</span>
+            <button class="w-8 h-8 rounded-md bg-surface-container text-on-surface-variant text-xs flex items-center justify-center hover:bg-surface-container-high transition-colors">14,906</button>
+            <button class="w-8 h-8 rounded-md bg-surface-container text-on-surface-variant text-xs flex items-center justify-center hover:bg-surface-container-high transition-colors">&gt;</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ======== Tab 3: 统计分析 ======== -->
+    <div id="panel-statistics" class="tab-panel px-6 pt-5 pb-8 hidden">
+      <!-- 第一行：饼图 -->
+      <div class="grid grid-cols-2 gap-5 mb-5">
+        <!-- 按模型消耗占比 -->
+        <div class="bg-surface rounded-lg shadow-card p-5 border border-outline-variant/10">
+          <h3 class="text-base font-semibold text-on-surface mb-4">按模型消耗占比</h3>
+          <div class="flex items-center gap-6">
+            <div class="donut-chart w-44 h-44 shrink-0" style="background: conic-gradient(#d4af37 0% 35%, #3b82f6 35% 55%, #22c55e 55% 72%, #f59e0b 72% 86%, #a78bfa 86% 100%);">
+              <div class="inner">
+                <span class="text-lg font-bold text-primary font-mono">6.23M</span>
+                <span class="text-[10px] text-on-surface-variant">总消耗</span>
+              </div>
+            </div>
+            <div class="flex flex-col gap-3 flex-1">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <div class="w-2.5 h-2.5 rounded-full bg-primary"></div>
+                  <span class="text-sm text-on-surface">FLUX.1 Pro</span>
+                </div>
+                <span class="text-sm font-medium text-on-surface font-mono">35%</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <div class="w-2.5 h-2.5 rounded-full bg-info"></div>
+                  <span class="text-sm text-on-surface">CogVideoX</span>
+                </div>
+                <span class="text-sm font-medium text-on-surface font-mono">20%</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <div class="w-2.5 h-2.5 rounded-full bg-success"></div>
+                  <span class="text-sm text-on-surface">SDXL Turbo</span>
+                </div>
+                <span class="text-sm font-medium text-on-surface font-mono">17%</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <div class="w-2.5 h-2.5 rounded-full bg-warning"></div>
+                  <span class="text-sm text-on-surface">Kling v1.5</span>
+                </div>
+                <span class="text-sm font-medium text-on-surface font-mono">14%</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <div class="w-2.5 h-2.5 rounded-full" style="background:#a78bfa"></div>
+                  <span class="text-sm text-on-surface">其他</span>
+                </div>
+                <span class="text-sm font-medium text-on-surface font-mono">14%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 按功能类型消耗占比 -->
+        <div class="bg-surface rounded-lg shadow-card p-5 border border-outline-variant/10">
+          <h3 class="text-base font-semibold text-on-surface mb-4">按功能类型消耗占比</h3>
+          <div class="flex items-center gap-6">
+            <div class="donut-chart w-44 h-44 shrink-0" style="background: conic-gradient(#d4af37 0% 42%, #3b82f6 42% 63%, #22c55e 63% 78%, #f59e0b 78% 90%, #a78bfa 90% 100%);">
+              <div class="inner">
+                <span class="text-lg font-bold text-primary font-mono">6.23M</span>
+                <span class="text-[10px] text-on-surface-variant">总消耗</span>
+              </div>
+            </div>
+            <div class="flex flex-col gap-3 flex-1">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <div class="w-2.5 h-2.5 rounded-full bg-primary"></div>
+                  <span class="text-sm text-on-surface">生图</span>
+                </div>
+                <span class="text-sm font-medium text-on-surface font-mono">42%</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <div class="w-2.5 h-2.5 rounded-full bg-info"></div>
+                  <span class="text-sm text-on-surface">视频</span>
+                </div>
+                <span class="text-sm font-medium text-on-surface font-mono">21%</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <div class="w-2.5 h-2.5 rounded-full bg-success"></div>
+                  <span class="text-sm text-on-surface">编辑</span>
+                </div>
+                <span class="text-sm font-medium text-on-surface font-mono">15%</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <div class="w-2.5 h-2.5 rounded-full bg-warning"></div>
+                  <span class="text-sm text-on-surface">3D</span>
+                </div>
+                <span class="text-sm font-medium text-on-surface font-mono">12%</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <div class="w-2.5 h-2.5 rounded-full" style="background:#a78bfa"></div>
+                  <span class="text-sm text-on-surface">矢量化</span>
+                </div>
+                <span class="text-sm font-medium text-on-surface font-mono">10%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 第二行：Top10 + 趋势图 -->
+      <div class="grid grid-cols-2 gap-5">
+        <!-- Top10消耗用户 -->
+        <div class="bg-surface rounded-lg shadow-card p-5 border border-outline-variant/10">
+          <h3 class="text-base font-semibold text-on-surface mb-4">Top 10 消耗用户</h3>
+          <div class="space-y-2.5">
+            <!-- 排行1 -->
+            <div class="flex items-center gap-3">
+              <span class="w-5 text-xs font-bold text-primary text-center">1</span>
+              <div class="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center text-[10px] font-bold text-primary">林</div>
+              <span class="text-sm text-on-surface flex-1">林小溪</span>
+              <div class="flex items-center gap-2 flex-1">
+                <div class="h-1.5 rounded-full bg-primary" style="width:100%"></div>
+              </div>
+              <span class="text-sm font-bold text-primary font-mono w-16 text-right">27,750</span>
+            </div>
+            <!-- 排行2 -->
+            <div class="flex items-center gap-3">
+              <span class="w-5 text-xs font-bold text-on-surface-variant text-center">2</span>
+              <div class="w-6 h-6 rounded-full bg-info/20 flex items-center justify-center text-[10px] font-bold text-info">陈</div>
+              <span class="text-sm text-on-surface flex-1">陈墨白</span>
+              <div class="flex items-center gap-2 flex-1">
+                <div class="h-1.5 rounded-full bg-info" style="width:96%"></div>
+              </div>
+              <span class="text-sm font-medium text-on-surface font-mono w-16 text-right">26,700</span>
+            </div>
+            <!-- 排行3 -->
+            <div class="flex items-center gap-3">
+              <span class="w-5 text-xs font-bold text-on-surface-variant text-center">3</span>
+              <div class="w-6 h-6 rounded-full bg-success/20 flex items-center justify-center text-[10px] font-bold text-success">王</div>
+              <span class="text-sm text-on-surface flex-1">王天宇</span>
+              <div class="flex items-center gap-2 flex-1">
+                <div class="h-1.5 rounded-full bg-success" style="width:74%"></div>
+              </div>
+              <span class="text-sm font-medium text-on-surface font-mono w-16 text-right">20,630</span>
+            </div>
+            <!-- 排行4 -->
+            <div class="flex items-center gap-3">
+              <span class="w-5 text-xs font-bold text-on-surface-variant text-center">4</span>
+              <div class="w-6 h-6 rounded-full bg-warning/20 flex items-center justify-center text-[10px] font-bold text-warning">赵</div>
+              <span class="text-sm text-on-surface flex-1">赵雨薇</span>
+              <div class="flex items-center gap-2 flex-1">
+                <div class="h-1.5 rounded-full bg-warning" style="width:52%"></div>
+              </div>
+              <span class="text-sm font-medium text-on-surface font-mono w-16 text-right">14,400</span>
+            </div>
+            <!-- 排行5 -->
+            <div class="flex items-center gap-3">
+              <span class="w-5 text-xs font-bold text-on-surface-variant text-center">5</span>
+              <div class="w-6 h-6 rounded-full bg-error/20 flex items-center justify-center text-[10px] font-bold text-error">孙</div>
+              <span class="text-sm text-on-surface flex-1">孙浩然</span>
+              <div class="flex items-center gap-2 flex-1">
+                <div class="h-1.5 rounded-full bg-error" style="width:30%"></div>
+              </div>
+              <span class="text-sm font-medium text-on-surface font-mono w-16 text-right">8,440</span>
+            </div>
+            <!-- 排行6 -->
+            <div class="flex items-center gap-3">
+              <span class="w-5 text-xs font-bold text-on-surface-variant text-center">6</span>
+              <div class="w-6 h-6 rounded-full bg-surface-container-high flex items-center justify-center text-[10px] font-bold text-on-surface-variant">周</div>
+              <span class="text-sm text-on-surface flex-1">周明远</span>
+              <div class="flex items-center gap-2 flex-1">
+                <div class="h-1.5 rounded-full bg-on-surface-variant/50" style="width:27%"></div>
+              </div>
+              <span class="text-sm font-medium text-on-surface font-mono w-16 text-right">7,520</span>
+            </div>
+            <!-- 排行7 -->
+            <div class="flex items-center gap-3">
+              <span class="w-5 text-xs font-bold text-on-surface-variant text-center">7</span>
+              <div class="w-6 h-6 rounded-full bg-surface-container-high flex items-center justify-center text-[10px] font-bold text-on-surface-variant">吴</div>
+              <span class="text-sm text-on-surface flex-1">吴晓峰</span>
+              <div class="flex items-center gap-2 flex-1">
+                <div class="h-1.5 rounded-full bg-on-surface-variant/50" style="width:24%"></div>
+              </div>
+              <span class="text-sm font-medium text-on-surface font-mono w-16 text-right">6,680</span>
+            </div>
+            <!-- 排行8 -->
+            <div class="flex items-center gap-3">
+              <span class="w-5 text-xs font-bold text-on-surface-variant text-center">8</span>
+              <div class="w-6 h-6 rounded-full bg-surface-container-high flex items-center justify-center text-[10px] font-bold text-on-surface-variant">刘</div>
+              <span class="text-sm text-on-surface flex-1">刘诗涵</span>
+              <div class="flex items-center gap-2 flex-1">
+                <div class="h-1.5 rounded-full bg-on-surface-variant/50" style="width:21%"></div>
+              </div>
+              <span class="text-sm font-medium text-on-surface font-mono w-16 text-right">5,930</span>
+            </div>
+            <!-- 排行9 -->
+            <div class="flex items-center gap-3">
+              <span class="w-5 text-xs font-bold text-on-surface-variant text-center">9</span>
+              <div class="w-6 h-6 rounded-full bg-surface-container-high flex items-center justify-center text-[10px] font-bold text-on-surface-variant">黄</div>
+              <span class="text-sm text-on-surface flex-1">黄子轩</span>
+              <div class="flex items-center gap-2 flex-1">
+                <div class="h-1.5 rounded-full bg-on-surface-variant/50" style="width:18%"></div>
+              </div>
+              <span class="text-sm font-medium text-on-surface font-mono w-16 text-right">5,100</span>
+            </div>
+            <!-- 排行10 -->
+            <div class="flex items-center gap-3">
+              <span class="w-5 text-xs font-bold text-on-surface-variant text-center">10</span>
+              <div class="w-6 h-6 rounded-full bg-surface-container-high flex items-center justify-center text-[10px] font-bold text-on-surface-variant">张</div>
+              <span class="text-sm text-on-surface flex-1">张若萱</span>
+              <div class="flex items-center gap-2 flex-1">
+                <div class="h-1.5 rounded-full bg-on-surface-variant/50" style="width:16%"></div>
+              </div>
+              <span class="text-sm font-medium text-on-surface font-mono w-16 text-right">4,450</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 近30天收支趋势 -->
+        <div class="bg-surface rounded-lg shadow-card p-5 border border-outline-variant/10">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-base font-semibold text-on-surface">近 30 天积分收支趋势</h3>
+            <div class="flex items-center gap-4">
+              <div class="flex items-center gap-1.5">
+                <div class="w-2.5 h-2.5 rounded-full bg-primary"></div>
+                <span class="text-xs text-on-surface-variant">充值</span>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <div class="w-2.5 h-2.5 rounded-full bg-error"></div>
+                <span class="text-xs text-on-surface-variant">消耗</span>
+              </div>
+            </div>
+          </div>
+          <div class="relative" style="height: 260px;">
+            <!-- Y 轴标签 -->
+            <div class="absolute left-0 top-0 bottom-6 w-10 flex flex-col justify-between text-right">
+              <span class="text-[10px] text-on-surface-variant font-mono">600K</span>
+              <span class="text-[10px] text-on-surface-variant font-mono">450K</span>
+              <span class="text-[10px] text-on-surface-variant font-mono">300K</span>
+              <span class="text-[10px] text-on-surface-variant font-mono">150K</span>
+              <span class="text-[10px] text-on-surface-variant font-mono">0</span>
+            </div>
+            <!-- 图表区域 -->
+            <div class="ml-12 h-full flex flex-col justify-end">
+              <!-- 网格线 -->
+              <div class="absolute left-12 right-0 top-0 bottom-6 flex flex-col justify-between pointer-events-none">
+                <div class="border-b border-outline-variant/10"></div>
+                <div class="border-b border-outline-variant/10"></div>
+                <div class="border-b border-outline-variant/10"></div>
+                <div class="border-b border-outline-variant/10"></div>
+                <div class="border-b border-outline-variant/20"></div>
+              </div>
+              <!-- 柱状图 - 6个时间点 -->
+              <div class="flex items-end justify-between gap-3 relative z-10" style="height: calc(100% - 24px);">
+                <!-- 12/15 -->
+                <div class="flex-1 flex items-end gap-1">
+                  <div class="flex-1 bar-col bg-primary/70" style="height:78%"></div>
+                  <div class="flex-1 bar-col bg-error/70" style="height:60%"></div>
+                </div>
+                <!-- 12/16 -->
+                <div class="flex-1 flex items-end gap-1">
+                  <div class="flex-1 bar-col bg-primary/70" style="height:65%"></div>
+                  <div class="flex-1 bar-col bg-error/70" style="height:55%"></div>
+                </div>
+                <!-- 12/17 -->
+                <div class="flex-1 flex items-end gap-1">
+                  <div class="flex-1 bar-col bg-primary/70" style="height:90%"></div>
+                  <div class="flex-1 bar-col bg-error/70" style="height:72%"></div>
+                </div>
+                <!-- 12/18 -->
+                <div class="flex-1 flex items-end gap-1">
+                  <div class="flex-1 bar-col bg-primary/70" style="height:70%"></div>
+                  <div class="flex-1 bar-col bg-error/70" style="height:85%"></div>
+                </div>
+                <!-- 12/19 -->
+                <div class="flex-1 flex items-end gap-1">
+                  <div class="flex-1 bar-col bg-primary/70" style="height:85%"></div>
+                  <div class="flex-1 bar-col bg-error/70" style="height:68%"></div>
+                </div>
+                <!-- 12/20 -->
+                <div class="flex-1 flex items-end gap-1">
+                  <div class="flex-1 bar-col bg-primary" style="height:95%"></div>
+                  <div class="flex-1 bar-col bg-error" style="height:80%"></div>
+                </div>
+              </div>
+              <!-- X 轴标签 -->
+              <div class="flex justify-between mt-1.5">
+                <span class="text-[10px] text-on-surface-variant flex-1 text-center">12/15</span>
+                <span class="text-[10px] text-on-surface-variant flex-1 text-center">12/16</span>
+                <span class="text-[10px] text-on-surface-variant flex-1 text-center">12/17</span>
+                <span class="text-[10px] text-on-surface-variant flex-1 text-center">12/18</span>
+                <span class="text-[10px] text-on-surface-variant flex-1 text-center">12/19</span>
+                <span class="text-[10px] text-on-surface-variant flex-1 text-center font-medium text-primary">12/20</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ======== Tab 4: 套餐管理 ======== -->
+    <div id="panel-packages" class="tab-panel px-6 pt-5 pb-8 hidden">
+      <!-- 套餐列表 -->
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-base font-semibold text-on-surface">积分套餐</h3>
+        <button id="btn-add-package" class="bg-primary text-on-primary px-4 py-2 rounded-md text-sm font-medium hover:opacity-90 active:scale-[0.98] transition-all inline-flex items-center gap-2 border-none cursor-pointer">
+          <i data-lucide="plus" class="w-3.5 h-3.5"></i>添加套餐
+        </button>
+      </div>
+
+      <div class="bg-surface rounded-lg shadow-card overflow-hidden border border-outline-variant/10 mb-6">
+        <div class="grid grid-cols-6 px-5 py-3 bg-surface-container text-xs font-semibold text-on-surface-variant uppercase tracking-wide">
+          <span>套餐名称</span>
+          <span>价格 (元)</span>
+          <span>积分数量</span>
+          <span>单价 (积分/元)</span>
+          <span>状态</span>
+          <span class="text-right">操作</span>
+        </div>
+        <div class="divide-y divide-outline-variant/30">
+          <!-- 列表-套餐1 -->
+          <div class="grid grid-cols-6 px-5 py-3.5 hover:bg-surface-container/50 transition-colors items-center">
+            <span class="text-sm font-medium text-on-surface">体验包</span>
+            <span class="text-sm text-on-surface font-mono">¥9.9</span>
+            <span class="text-sm font-bold text-primary font-mono">100</span>
+            <span class="text-sm text-on-surface-variant font-mono">10.1</span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-success/15 text-success w-fit">已上架</span>
+            <div class="flex justify-end gap-3">
+              <button id="btn-edit-pkg-1" class="text-primary text-sm font-medium hover:underline cursor-pointer bg-transparent border-none">编辑</button>
+              <button id="btn-toggle-pkg-1" class="text-on-surface-variant text-sm hover:text-on-surface cursor-pointer bg-transparent border-none">下架</button>
+            </div>
+          </div>
+          <!-- 列表-套餐2 -->
+          <div class="grid grid-cols-6 px-5 py-3.5 hover:bg-surface-container/50 transition-colors items-center">
+            <span class="text-sm font-medium text-on-surface">基础包</span>
+            <span class="text-sm text-on-surface font-mono">¥49</span>
+            <span class="text-sm font-bold text-primary font-mono">600</span>
+            <span class="text-sm text-on-surface-variant font-mono">12.2</span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-success/15 text-success w-fit">已上架</span>
+            <div class="flex justify-end gap-3">
+              <button id="btn-edit-pkg-2" class="text-primary text-sm font-medium hover:underline cursor-pointer bg-transparent border-none">编辑</button>
+              <button id="btn-toggle-pkg-2" class="text-on-surface-variant text-sm hover:text-on-surface cursor-pointer bg-transparent border-none">下架</button>
+            </div>
+          </div>
+          <!-- 列表-套餐3 -->
+          <div class="grid grid-cols-6 px-5 py-3.5 hover:bg-surface-container/50 transition-colors items-center">
+            <div class="flex items-center gap-1.5">
+              <span class="text-sm font-medium text-on-surface">专业包</span>
+              <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-bold bg-primary/15 text-primary">热门</span>
+            </div>
+            <span class="text-sm text-on-surface font-mono">¥99</span>
+            <span class="text-sm font-bold text-primary font-mono">1,500</span>
+            <span class="text-sm text-on-surface-variant font-mono">15.2</span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-success/15 text-success w-fit">已上架</span>
+            <div class="flex justify-end gap-3">
+              <button id="btn-edit-pkg-3" class="text-primary text-sm font-medium hover:underline cursor-pointer bg-transparent border-none">编辑</button>
+              <button id="btn-toggle-pkg-3" class="text-on-surface-variant text-sm hover:text-on-surface cursor-pointer bg-transparent border-none">下架</button>
+            </div>
+          </div>
+          <!-- 列表-套餐4 -->
+          <div class="grid grid-cols-6 px-5 py-3.5 hover:bg-surface-container/50 transition-colors items-center">
+            <span class="text-sm font-medium text-on-surface">旗舰包</span>
+            <span class="text-sm text-on-surface font-mono">¥299</span>
+            <span class="text-sm font-bold text-primary font-mono">5,000</span>
+            <span class="text-sm text-on-surface-variant font-mono">16.7</span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-success/15 text-success w-fit">已上架</span>
+            <div class="flex justify-end gap-3">
+              <button id="btn-edit-pkg-4" class="text-primary text-sm font-medium hover:underline cursor-pointer bg-transparent border-none">编辑</button>
+              <button id="btn-toggle-pkg-4" class="text-on-surface-variant text-sm hover:text-on-surface cursor-pointer bg-transparent border-none">下架</button>
+            </div>
+          </div>
+          <!-- 列表-套餐5 -->
+          <div class="grid grid-cols-6 px-5 py-3.5 hover:bg-surface-container/50 transition-colors items-center">
+            <span class="text-sm font-medium text-on-surface">企业包</span>
+            <span class="text-sm text-on-surface font-mono">¥999</span>
+            <span class="text-sm font-bold text-primary font-mono">20,000</span>
+            <span class="text-sm text-on-surface-variant font-mono">20.0</span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-on-surface-variant/15 text-on-surface-variant w-fit">已下架</span>
+            <div class="flex justify-end gap-3">
+              <button id="btn-edit-pkg-5" class="text-primary text-sm font-medium hover:underline cursor-pointer bg-transparent border-none">编辑</button>
+              <button id="btn-toggle-pkg-5" class="text-primary text-sm hover:underline cursor-pointer bg-transparent border-none">上架</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 差异化定价配置区 -->
+      <div class="bg-surface rounded-lg shadow-card p-5 border border-outline-variant/10">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-base font-semibold text-on-surface">差异化定价配置</h3>
+          <button id="btn-save-pricing" class="bg-primary text-on-primary px-4 py-1.5 rounded-md text-xs font-medium hover:opacity-90 active:scale-[0.98] transition-all border-none cursor-pointer">保存配置</button>
+        </div>
+        <p class="text-xs text-on-surface-variant mb-4">按模型和功能类型设置不同的积分消耗单价，未配置的按默认价格计费</p>
+        <div class="grid grid-cols-2 gap-5">
+          <!-- 按模型定价 -->
+          <div>
+            <h4 class="text-sm font-medium text-on-surface mb-3 flex items-center gap-2">
+              <i data-lucide="cpu" class="w-4 h-4 text-on-surface-variant"></i>按模型定价
+            </h4>
+            <div class="space-y-2.5">
+              <div class="flex items-center justify-between px-3 py-2 bg-surface-container rounded-md">
+                <span class="text-sm text-on-surface">FLUX.1 Pro</span>
+                <div class="flex items-center gap-1">
+                  <input type="number" value="120" class="w-16 bg-surface-container-high border-none rounded px-2 py-1 text-sm text-on-surface text-right font-mono focus:outline-none focus:ring-2 focus:ring-primary/30" />
+                  <span class="text-xs text-on-surface-variant">积分/次</span>
+                </div>
+              </div>
+              <div class="flex items-center justify-between px-3 py-2 bg-surface-container rounded-md">
+                <span class="text-sm text-on-surface">FLUX.1 Dev</span>
+                <div class="flex items-center gap-1">
+                  <input type="number" value="60" class="w-16 bg-surface-container-high border-none rounded px-2 py-1 text-sm text-on-surface text-right font-mono focus:outline-none focus:ring-2 focus:ring-primary/30" />
+                  <span class="text-xs text-on-surface-variant">积分/次</span>
+                </div>
+              </div>
+              <div class="flex items-center justify-between px-3 py-2 bg-surface-container rounded-md">
+                <span class="text-sm text-on-surface">SDXL Turbo</span>
+                <div class="flex items-center gap-1">
+                  <input type="number" value="30" class="w-16 bg-surface-container-high border-none rounded px-2 py-1 text-sm text-on-surface text-right font-mono focus:outline-none focus:ring-2 focus:ring-primary/30" />
+                  <span class="text-xs text-on-surface-variant">积分/次</span>
+                </div>
+              </div>
+              <div class="flex items-center justify-between px-3 py-2 bg-surface-container rounded-md">
+                <span class="text-sm text-on-surface">CogVideoX</span>
+                <div class="flex items-center gap-1">
+                  <input type="number" value="500" class="w-16 bg-surface-container-high border-none rounded px-2 py-1 text-sm text-on-surface text-right font-mono focus:outline-none focus:ring-2 focus:ring-primary/30" />
+                  <span class="text-xs text-on-surface-variant">积分/次</span>
+                </div>
+              </div>
+              <div class="flex items-center justify-between px-3 py-2 bg-surface-container rounded-md">
+                <span class="text-sm text-on-surface">Kling v1.5</span>
+                <div class="flex items-center gap-1">
+                  <input type="number" value="350" class="w-16 bg-surface-container-high border-none rounded px-2 py-1 text-sm text-on-surface text-right font-mono focus:outline-none focus:ring-2 focus:ring-primary/30" />
+                  <span class="text-xs text-on-surface-variant">积分/次</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- 按功能类型定价 -->
+          <div>
+            <h4 class="text-sm font-medium text-on-surface mb-3 flex items-center gap-2">
+              <i data-lucide="layers" class="w-4 h-4 text-on-surface-variant"></i>按功能类型定价
+            </h4>
+            <div class="space-y-2.5">
+              <div class="flex items-center justify-between px-3 py-2 bg-surface-container rounded-md">
+                <span class="text-sm text-on-surface">生图</span>
+                <div class="flex items-center gap-1">
+                  <input type="number" value="80" class="w-16 bg-surface-container-high border-none rounded px-2 py-1 text-sm text-on-surface text-right font-mono focus:outline-none focus:ring-2 focus:ring-primary/30" />
+                  <span class="text-xs text-on-surface-variant">积分/次</span>
+                </div>
+              </div>
+              <div class="flex items-center justify-between px-3 py-2 bg-surface-container rounded-md">
+                <span class="text-sm text-on-surface">视频生成</span>
+                <div class="flex items-center gap-1">
+                  <input type="number" value="400" class="w-16 bg-surface-container-high border-none rounded px-2 py-1 text-sm text-on-surface text-right font-mono focus:outline-none focus:ring-2 focus:ring-primary/30" />
+                  <span class="text-xs text-on-surface-variant">积分/次</span>
+                </div>
+              </div>
+              <div class="flex items-center justify-between px-3 py-2 bg-surface-container rounded-md">
+                <span class="text-sm text-on-surface">图片编辑</span>
+                <div class="flex items-center gap-1">
+                  <input type="number" value="50" class="w-16 bg-surface-container-high border-none rounded px-2 py-1 text-sm text-on-surface text-right font-mono focus:outline-none focus:ring-2 focus:ring-primary/30" />
+                  <span class="text-xs text-on-surface-variant">积分/次</span>
+                </div>
+              </div>
+              <div class="flex items-center justify-between px-3 py-2 bg-surface-container rounded-md">
+                <span class="text-sm text-on-surface">3D 生成</span>
+                <div class="flex items-center gap-1">
+                  <input type="number" value="200" class="w-16 bg-surface-container-high border-none rounded px-2 py-1 text-sm text-on-surface text-right font-mono focus:outline-none focus:ring-2 focus:ring-primary/30" />
+                  <span class="text-xs text-on-surface-variant">积分/次</span>
+                </div>
+              </div>
+              <div class="flex items-center justify-between px-3 py-2 bg-surface-container rounded-md">
+                <span class="text-sm text-on-surface">矢量化</span>
+                <div class="flex items-center gap-1">
+                  <input type="number" value="60" class="w-16 bg-surface-container-high border-none rounded px-2 py-1 text-sm text-on-surface text-right font-mono focus:outline-none focus:ring-2 focus:ring-primary/30" />
+                  <span class="text-xs text-on-surface-variant">积分/次</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ======== 充值弹窗 ======== -->
+    <div id="modal-recharge" class="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50 hidden">
+      <div class="bg-surface rounded-xl shadow-dialog max-w-md w-full p-6 border border-outline-variant/10">
+        <div class="flex items-center justify-between mb-5">
+          <h3 class="text-lg font-bold text-on-surface">积分充值</h3>
+          <button id="btn-close-recharge" class="w-8 h-8 rounded-md hover:bg-surface-container flex items-center justify-center transition-colors cursor-pointer bg-transparent border-none">
+            <i data-lucide="x" class="w-4 h-4 text-on-surface-variant"></i>
+          </button>
+        </div>
+        <div class="mb-4">
+          <span class="text-xs text-on-surface-variant">充值用户</span>
+          <div id="recharge-user-name" class="text-sm font-medium text-on-surface mt-1">林小溪</div>
+        </div>
+        <!-- 预设金额 -->
+        <div class="mb-4">
+          <span class="text-xs text-on-surface-variant mb-2 block">选择充值金额</span>
+          <div class="grid grid-cols-3 gap-2">
+            <button class="amount-btn bg-surface-container border border-outline-variant/20 rounded-md px-3 py-2.5 text-sm font-medium text-on-surface hover:border-primary/50 transition-all cursor-pointer" data-amount="50">50</button>
+            <button class="amount-btn bg-surface-container border border-outline-variant/20 rounded-md px-3 py-2.5 text-sm font-medium text-on-surface hover:border-primary/50 transition-all cursor-pointer" data-amount="100">100</button>
+            <button class="amount-btn selected bg-surface-container border border-outline-variant/20 rounded-md px-3 py-2.5 text-sm font-medium text-on-surface hover:border-primary/50 transition-all cursor-pointer" data-amount="500">500</button>
+            <button class="amount-btn bg-surface-container border border-outline-variant/20 rounded-md px-3 py-2.5 text-sm font-medium text-on-surface hover:border-primary/50 transition-all cursor-pointer" data-amount="1000">1,000</button>
+            <button class="amount-btn bg-surface-container border border-outline-variant/20 rounded-md px-3 py-2.5 text-sm font-medium text-on-surface hover:border-primary/50 transition-all cursor-pointer" data-amount="5000">5,000</button>
+            <button class="amount-btn bg-surface-container border border-outline-variant/20 rounded-md px-3 py-2.5 text-sm font-medium text-on-surface hover:border-primary/50 transition-all cursor-pointer" data-amount="custom">自定义</button>
+          </div>
+        </div>
+        <!-- 自定义金额输入 -->
+        <div id="custom-amount-input" class="mb-4 hidden">
+          <label class="text-xs text-on-surface-variant mb-1.5 block">自定义金额</label>
+          <input id="input-custom-amount" type="number" placeholder="请输入充值积分数量" class="w-full bg-surface-container border-none rounded-md px-3 py-2 text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/30 font-mono transition-colors" />
+        </div>
+        <!-- 备注 -->
+        <div class="mb-5">
+          <label class="text-xs text-on-surface-variant mb-1.5 block">备注（可选）</label>
+          <input id="input-recharge-note" type="text" placeholder="充值原因或备注信息" class="w-full bg-surface-container border-none rounded-md px-3 py-2 text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
+        </div>
+        <!-- 确认信息 -->
+        <div class="bg-primary/5 rounded-md px-4 py-3 mb-5 border border-primary/10">
+          <div class="flex items-center justify-between">
+            <span class="text-xs text-on-surface-variant">充值数量</span>
+            <span id="recharge-confirm-amount" class="text-lg font-bold text-primary font-mono">500</span>
+          </div>
+        </div>
+        <!-- 操作按钮 -->
+        <div class="flex items-center gap-3">
+          <button id="btn-cancel-recharge" class="flex-1 bg-surface-container text-on-surface px-4 py-2.5 rounded-md text-sm font-medium hover:bg-surface-container-high active:scale-[0.98] transition-all border-none cursor-pointer">取消</button>
+          <button id="btn-confirm-recharge" class="flex-1 bg-primary text-on-primary px-4 py-2.5 rounded-md text-sm font-bold hover:opacity-90 active:scale-[0.98] transition-all border-none cursor-pointer">确认充值</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- @main-content:end -->
+  </main>
+
+  <script>
+    $(function() {
+
+      // ======== Tab 切换 ========
+      var tabMap = {
+        'tab-user-credits': 'panel-user-credits',
+        'tab-consumption': 'panel-consumption',
+        'tab-statistics': 'panel-statistics',
+        'tab-packages': 'panel-packages'
+      };
+
+      $('.tab-btn').on('click', function() {
+        var tabId = $(this).attr('id');
+        var panelId = tabMap[tabId];
+        // 切换按钮激活态
+        $('.tab-btn').removeClass('active text-primary').addClass('text-on-surface-variant');
+        $(this).addClass('active text-primary').removeClass('text-on-surface-variant');
+        // 切换面板
+        $('.tab-panel').addClass('hidden');
+        $('#' + panelId).removeClass('hidden');
+        // 切换后重新渲染 lucide 图标
+        lucide.createIcons();
+      });
+
+      // ======== 充值弹窗 ========
+      var selectedAmount = 500;
+
+      // 打开充值弹窗
+      $('[id^="btn-recharge-"]').on('click', function() {
+        var userName = $(this).data('user');
+        $('#recharge-user-name').text(userName);
+        $('#modal-recharge').removeClass('hidden');
+        // 重置选择状态
+        selectedAmount = 500;
+        $('.amount-btn').removeClass('selected');
+        $('.amount-btn[data-amount="500"]').addClass('selected');
+        $('#custom-amount-input').addClass('hidden');
+        $('#recharge-confirm-amount').text('500');
+      });
+
+      // 关闭充值弹窗
+      $('#btn-close-recharge, #btn-cancel-recharge').on('click', function() {
+        $('#modal-recharge').addClass('hidden');
+      });
+
+      // 点击弹窗背景关闭
+      $('#modal-recharge').on('click', function(e) {
+        if ($(e.target).is('#modal-recharge')) {
+          $('#modal-recharge').addClass('hidden');
+        }
+      });
+
+      // 选择预设金额
+      $('.amount-btn').on('click', function() {
+        var amount = $(this).data('amount');
+        $('.amount-btn').removeClass('selected');
+        $(this).addClass('selected');
+
+        if (amount === 'custom') {
+          $('#custom-amount-input').removeClass('hidden');
+          $('#input-custom-amount').focus();
+          selectedAmount = 0;
+          $('#recharge-confirm-amount').text('--');
+        } else {
+          $('#custom-amount-input').addClass('hidden');
+          selectedAmount = parseInt(amount);
+          $('#recharge-confirm-amount').text(amount);
+        }
+      });
+
+      // 自定义金额输入
+      $('#input-custom-amount').on('input', function() {
+        var val = $(this).val();
+        if (val && parseInt(val) > 0) {
+          selectedAmount = parseInt(val);
+          $('#recharge-confirm-amount').text(parseInt(val).toLocaleString());
+        } else {
+          selectedAmount = 0;
+          $('#recharge-confirm-amount').text('--');
+        }
+      });
+
+      // 确认充值
+      $('#btn-confirm-recharge').on('click', function() {
+        if (selectedAmount <= 0) {
+          // 简单提示：自定义金额时未输入有效值
+          console.log('请输入有效的充值金额');
+          return;
+        }
+        // 充值确认 - 后续应实现：
+        // 1. 调用后端接口提交充值请求（用户名 + 金额 + 备注）
+        // 2. 接口成功后更新用户余额显示
+        // 3. 记录充值操作到审计日志
+        // 4. 弹出成功提示并关闭弹窗
+        console.log('确认充值: 用户=' + $('#recharge-user-name').text() + ', 金额=' + selectedAmount + ', 备注=' + $('#input-recharge-note').val());
+        $('#modal-recharge').addClass('hidden');
+      });
+
+      // ======== 导出 CSV ========
+      $('#btn-export-csv').on('click', function() {
+        // 导出CSV - 后续应实现：
+        // 1. 根据当前筛选条件收集参数
+        // 2. 调用后端导出接口获取CSV数据
+        // 3. 前端创建 Blob 并触发下载
+        console.log('导出CSV：按当前筛选条件导出消耗明细');
+      });
+
+      // ======== 套餐管理交互 ========
+
+      // 添加套餐按钮 - 后续应实现：
+      // 1. 打开套餐编辑弹窗（与充值弹窗类似的模态框）
+      // 2. 弹窗包含：套餐名称输入、价格输入、积分数量输入、上架状态开关
+      // 3. 确认后调用后端接口创建套餐
+      // 4. 成功后刷新套餐列表
+      $('#btn-add-package').on('click', function() {
+        console.log('添加套餐：打开套餐编辑弹窗');
+      });
+
+      // 编辑套餐按钮 - 后续应实现：
+      // 1. 打开套餐编辑弹窗，预填当前套餐数据
+      // 2. 修改后调用后端接口更新套餐
+      // 3. 成功后刷新套餐列表
+      $('[id^="btn-edit-pkg-"]').on('click', function() {
+        console.log('编辑套餐：打开套餐编辑弹窗，预填当前数据');
+      });
+
+      // 上架/下架套餐切换 - 后续应实现：
+      // 1. 调用后端接口切换套餐状态
+      // 2. 成功后更新当前行的状态标签和操作按钮文案
+      // 3. 下架前需确认是否有用户正在使用该套餐
+      $('[id^="btn-toggle-pkg-"]').on('click', function() {
+        var action = $(this).text();
+        console.log(action + '套餐：切换套餐上下架状态');
+      });
+
+      // 保存定价配置 - 后续应实现：
+      // 1. 收集所有模型和功能类型的定价输入值
+      // 2. 调用后端接口批量更新定价配置
+      // 3. 成功后显示保存成功提示
+      $('#btn-save-pricing').on('click', function() {
+        console.log('保存差异化定价配置');
+      });
+
+      // ======== 搜索用户 ========
+      // 搜索功能 - 后续应实现：
+      // 1. 输入关键词后按回车或点击搜索按钮
+      // 2. 调用后端接口按用户名/邮箱模糊搜索
+      // 3. 更新用户积分表格显示搜索结果
+      $('#search-user').on('keyup', function(e) {
+        if (e.key === 'Enter') {
+          console.log('搜索用户: ' + $(this).val());
+        }
+      });
+
+      // 排序切换 - 后续应实现：
+      // 1. 调用后端接口按指定字段排序
+      // 2. 更新用户积分表格显示排序结果
+      $('#sort-credits').on('change', function() {
+        console.log('排序方式切换: ' + $(this).val());
+      });
+
+    });
+  </script>
+
+  <script>lucide.createIcons();</script>
+</body>
+
+</html>
