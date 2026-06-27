@@ -599,7 +599,7 @@ function ChangelogSection() {
     <div>
       <h3 className="text-sm font-bold text-[var(--color-on-surface)] mb-2">更新内容</h3>
 
-      <SubTitle>v3.4.0</SubTitle>
+      <SubTitle>v3.5.0</SubTitle>
       <FeatureItem>API 错误中文翻译：9 类错误码结构化翻译，友好提示+建议+是否可重试</FeatureItem>
       <FeatureItem>尺寸自动修复：检测 Invalid Size 错误后自动修正为 16 对齐合法尺寸</FeatureItem>
       <FeatureItem>Responses API SSE 保活：解决 Cloudflare 524/504 超时断连，Feature Flag 控制自动降级</FeatureItem>

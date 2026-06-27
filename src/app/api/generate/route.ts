@@ -11,6 +11,7 @@ import { classifyApiError, type ClassifiedError, isCloudflareTimeoutError, trans
 import { detectInvalidSizeError, repairSize, classifyImageModelFamily } from '@/lib/size-auto-repair';
 import { fetchWithSmartRetry } from '@/lib/smart-retry';
 import { streamResponsesApiSSE, isResponsesApiSupportedModel, buildResponsesApiPayload, type ResponsesApiResult, type ResponsesApiSSEEvent } from '@/lib/responses-api-sse';
+import { getModelCapabilities, filterRequestForModel, type ModelCapabilities } from '@/lib/model-capabilities';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { consumeCredits } from '@/lib/credits';
 
@@ -708,46 +709,47 @@ export async function POST(request: NextRequest) {
         ? requestedSize 
         : currentModelConfig.supportedSizes[0] || '1:1';
 
-      // ★ 始终附带前端计算的精确像素尺寸，确保第三方 API 收到完整分辨率信息
       const pixelSize = requestedPixelSize || calculateActualPixelsFromRatio(effectiveSize, quality);
 
       const requestBody: Record<string, unknown> = {
         model: currentModelConfig.modelId,
         prompt: enhancedPrompt,
-        size: effectiveSize,
         n: requestN,
-        ...(pixelSize ? { width: parseInt(pixelSize.split('x')[0]), height: parseInt(pixelSize.split('x')[1]), size_px: pixelSize } : {}),
+        size: pixelSize || effectiveSize,
       };
 
-      // 根据模型参数类型添加质量/分辨率参数
-      // ★ 关键修复：paramType 为 'none' 时也需要传递 quality/resolution，
-      //   否则用户选择的 4K 分辨率会被完全忽略，API 使用默认 1K
-      if (currentModelConfig.paramType === 'resolution' && quality) {
-        requestBody.resolution = quality;
-      } else if (currentModelConfig.paramType === 'quality' && quality) {
+      // 像素辅助字段
+      if (pixelSize) {
+        requestBody.width = parseInt(pixelSize.split('x')[0]);
+        requestBody.height = parseInt(pixelSize.split('x')[1]);
+        requestBody.size_px = pixelSize;
+      }
+
+      // quality / resolution 参数
+      if (quality) {
         const qualityMap: Record<string, string> = {
           '1K': 'low', '2K': 'medium', '4K': 'high',
           'standard': 'auto', 'high': 'high', 'auto': 'auto',
           'low': 'low', 'medium': 'medium',
         };
-        requestBody.quality = qualityMap[quality] || quality;
-      } else if (currentModelConfig.paramType === 'none' && quality) {
-        // ★ 未知模型类型：同时传递 resolution 和 quality，让 API 选择支持的参数
-        // 很多第三方 API 至少支持其中一个
-        requestBody.resolution = quality;
-        requestBody.quality = quality;
+        if (currentModelConfig.paramType === 'quality') {
+          requestBody.quality = qualityMap[quality] || quality;
+        } else if (currentModelConfig.paramType === 'resolution') {
+          requestBody.resolution = quality;
+          requestBody.quality = qualityMap[quality] || quality;
+        } else {
+          // paramType === 'none' — send both for maximum compatibility
+          requestBody.quality = qualityMap[quality] || quality;
+        }
       }
 
-      // ★ 确保像素格式 size 始终存在（覆盖比例格式 size，确保 API 生成正确分辨率）
-      if (pixelSize) {
-        // 对于 pixel 格式的 profile，直接用像素值覆盖 size
-        // 对于 aspect-ratio 格式的 profile，保留比例格式 size，但 pixel size 已在 width/height/size_px 中
-        if (profile.sizeFormat === 'pixel') {
-          requestBody.size = pixelSize;
-        }
-        // aspect-ratio 格式的 profile: size 保持比例格式（如 "16:9"），
-        // 但 width/height/size_px 已附带，API 可自行选择使用
+      // 像素格式 size 优先级调整
+      if (pixelSize && profile.sizeFormat === 'pixel') {
+        requestBody.size = pixelSize;
       }
+
+      // ★ 基于模型能力的参数过滤：只发送模型实际支持的字段，避免 API 报错
+      const filteredBody = filterRequestForModel(currentModelConfig.modelId, requestBody);
 
       // ★ 诊断日志：记录发送给 API 的关键分辨率参数，便于排查"用户设置4K但实际生成1K"问题
       console.log(`[generate] Resolution params → model: ${currentModelConfig.modelId}, paramType: ${currentModelConfig.paramType}, quality: ${quality}, effectiveSize: ${effectiveSize}, pixelSize: ${pixelSize || 'null'}, requestBody.size: ${requestBody.size}, requestBody.resolution: ${requestBody.resolution || 'N/A'}, requestBody.width: ${requestBody.width || 'N/A'}, requestBody.height: ${requestBody.height || 'N/A'}, profile.sizeFormat: ${profile.sizeFormat}`);

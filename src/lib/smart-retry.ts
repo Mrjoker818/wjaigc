@@ -56,7 +56,7 @@ const CF_TIMEOUT_MARKERS = [
   'service temporarily unavailable',
 ];
 
-/** 网络层错误关键词 */
+/** 网络层 / 传输层错误关键词 (Image-Studio isTransportishError + 扩展) */
 const NETWORK_ERROR_MARKERS = [
   'connection reset',
   'econnreset',
@@ -71,6 +71,30 @@ const NETWORK_ERROR_MARKERS = [
   'socket hang up',
   'upstream connect error',
   'fetch failed',
+  'epipe',
+  'broken pipe',
+  'premature close',
+  'content-length',
+  'redirect was aborted',
+  'request aborted',
+];
+
+/** 上游可重试标记 (Image-Studio retryableMarkers + 扩展) */
+const UPSTREAM_RETRYABLE_MARKERS = [
+  'upstream request failed',
+  'error code 524',
+  '524: a timeout occurred',
+  'error code 503',
+  'service unavailable',
+  'error code 504',
+  'gateway time-out',
+  'service temporarily unavailable',
+  'origin_gateway_timeout',
+  'overloaded',
+  'capacity',
+  'try again',
+  'please retry',
+  'temporarily unavailable',
 ];
 
 /**
@@ -217,7 +241,33 @@ export function classifyApiError(
     };
   }
 
-  // 11. 未知错误
+  // 11. 上游可重试标记（来自响应体中的 retryable 标志或 upstreamStatus）
+  if (responseBody && isUpstreamRetryable(responseBody)) {
+    return {
+      category: 'server_error',
+      rawMessage: errorMessage,
+      isRetryable: true,
+      suggestedRetries: 1,
+      retryDelayMs: 15000,
+      friendlyMessage: '上游服务暂时不可用',
+      suggestion: '上游标记为可重试错误，自动重试中...',
+    };
+  }
+
+  // 12. 传输层错误（来自 Image-Studio 的 isTransportishError）
+  if (isTransportError(combinedLower)) {
+    return {
+      category: 'network_error',
+      rawMessage: errorMessage,
+      isRetryable: true,
+      suggestedRetries: 2,
+      retryDelayMs: 8000,
+      friendlyMessage: '传输层连接异常',
+      suggestion: '连接被重置或中断，自动重试中...',
+    };
+  }
+
+  // 13. 未知错误
   return {
     category: 'unknown',
     rawMessage: errorMessage,
@@ -296,6 +346,76 @@ function isSizeError(lower: string): boolean {
 /** 识别网络层错误 */
 function isNetworkError(lower: string): boolean {
   return NETWORK_ERROR_MARKERS.some(marker => lower.includes(marker));
+}
+
+/** 识别上游可重试错误（含响应体检查） */
+function isUpstreamRetryable(body: string): boolean {
+  if (!body) return false;
+  const lower = body.toLowerCase();
+
+  // 1. 关键词匹配
+  if (UPSTREAM_RETRYABLE_MARKERS.some(m => lower.includes(m))) return true;
+
+  // 2. SSE 事件流中有 partial_image 但无 final image（流中断）
+  let partialSeen = false;
+  let finalSeen = false;
+  for (const line of body.split(/\r?\n/)) {
+    if (!line.startsWith('data: ')) continue;
+    const payload = line.slice(6).trim();
+    if (!payload || payload === '[DONE]') continue;
+    try {
+      const ev = JSON.parse(payload);
+      const evType = ev?.type;
+      if (evType === 'response.image_generation_call.partial_image' && ev?.partial_image_b64) partialSeen = true;
+      if (evType === 'response.output_item.done' && ev?.item?.type === 'image_generation_call' && ev?.item?.result) finalSeen = true;
+      if ((evType === 'image_generation.partial_image' || evType === 'image_edit.partial_image') && ev?.b64_json) partialSeen = true;
+      if ((evType === 'image_generation.completed' || evType === 'image_edit.completed') && ev?.b64_json) finalSeen = true;
+    } catch { /* skip */ }
+  }
+  if (partialSeen && !finalSeen) return true;
+
+  // 3. JSON 结构化检查
+  try {
+    const data = JSON.parse(body);
+    if (data?.retryable === true) return true;
+    if ([403, 502, 503, 504, 524].includes(Number(data?.status))) return true;
+    const err = data?.error;
+    if (err && typeof err === 'object') {
+      const upstreamStatus = Number(err.upstreamStatus ?? err.upstream_status ?? err.status);
+      if ([403, 502, 503, 504, 524].includes(upstreamStatus)) return true;
+      const msg = String(err.message || '').toLowerCase();
+      if (msg.includes('temporarily unavailable') || msg.includes('upstream request failed')) return true;
+      const errType = String(err.type || '').toLowerCase();
+      if (['api_error', 'server_error', 'upstream_error'].includes(errType)) return true;
+    }
+  } catch { /* not JSON */ }
+
+  return false;
+}
+
+/** 传输层错误关键词（来自 Image-Studio isTransportishError） */
+const TRANSPORT_ERROR_MARKERS = [
+  'connection reset',
+  'eof',
+  'timeout',
+  'deadline exceeded',
+  'i/o timeout',
+  'tls handshake',
+  'no such host',
+  'upstream connect error',
+  'socket hang up',
+  'econnrefused',
+  'econnreset',
+  'etimedout',
+  'enotfound',
+  'epipe',
+];
+
+/** 识别传输层错误 */
+function isTransportError(errorMessage: string): boolean {
+  if (!errorMessage) return false;
+  const lower = errorMessage.toLowerCase();
+  return TRANSPORT_ERROR_MARKERS.some(m => lower.includes(m));
 }
 
 /**

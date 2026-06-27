@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/server-auth';
-import { getApiProviders, normalizeApiBaseUrl } from '@/lib/server-api-config';
+import { getApiProviders } from '@/lib/server-api-config';
 import type { ApiProvider } from '@/lib/universal-api-types';
 
 interface BalanceInfo {
@@ -13,7 +13,7 @@ interface BalanceInfo {
   totalQuota: number | null;     // 总额度（毫）
   usedQuota: number | null;      // 已用额度（毫）
   remainingQuota: number | null; // 剩余额度（毫）
-  totalUsage: number;            // 总使用量（美分）
+  totalUsage: number;
   dailyUsage: number;
   lastUpdated: string;
   error?: string;
@@ -38,9 +38,22 @@ function quotaToYuan(quota: number | null): number | null {
 }
 
 /**
+ * 从 Set-Cookie 头中提取 session cookie 值
+ */
+function extractSessionCookie(setCookieHeaders: string[]): string | null {
+  for (const header of setCookieHeaders) {
+    const match = header.match(/^session=([^;]+)/);
+    if (match) return match[1];
+  }
+  return null;
+}
+
+type PlatformType = 'one-api' | 'new-api' | 'pearapi' | '302ai' | 'openai' | 'siliconflow' | 'unknown';
+
+/**
  * 检测平台类型
  */
-function detectPlatform(baseUrl: string): 'one-api' | 'new-api' | 'pearapi' | '302ai' | 'openai' | 'siliconflow' | 'unknown' {
+function detectPlatform(baseUrl: string): PlatformType {
   const root = getRootUrl(baseUrl).toLowerCase();
   if (root.includes('pearapi')) return 'pearapi';
   if (root.includes('302ai')) return '302ai';
@@ -51,63 +64,130 @@ function detectPlatform(baseUrl: string): 'one-api' | 'new-api' | 'pearapi' | '3
 }
 
 /**
- * Strategy 1: One API / New API — 登录获取 session token，再查余额
+ * Strategy 1: One API / New API — 登录获取 session cookie + user ID，再查余额
+ *
+ * 流程：
+ * 1. POST /api/user/login { username, password } → Set-Cookie: session=xxx + body: { data: { id, username, ... } }
+ * 2. GET /api/user/self Cookie: session=xxx, New-Api-User: {userId} → { data: { quota, used_quota, ... } }
  */
 async function queryOneApiBalance(baseUrl: string, username: string, password: string): Promise<Omit<BalanceInfo, 'providerId' | 'providerName' | 'providerType' | 'baseUrl'> | null> {
   const root = getRootUrl(baseUrl);
-  
+
   try {
-    // Step 1: 登录获取 session token
+    // Step 1: 登录获取 session cookie 和 user ID
     const loginRes = await fetch(`${root}/api/user/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
       signal: AbortSignal.timeout(15000),
+      redirect: 'manual', // 不自动跟随重定向
     });
-    
-    if (!loginRes.ok) {
-      const text = await loginRes.text().catch(() => '');
-      return { balance: null, currency: 'CNY', totalQuota: null, usedQuota: null, remainingQuota: null, totalUsage: 0, dailyUsage: 0, lastUpdated: new Date().toISOString(), error: `登录失败 (HTTP ${loginRes.ok}): ${text.slice(0, 100)}`, endpoint: '/api/user/login', platform: 'one-api', loginRequired: true };
+
+    // 提取 session cookie
+    const setCookieHeaders = loginRes.headers.getSetCookie?.() || [];
+    const sessionCookie = extractSessionCookie(setCookieHeaders);
+
+    let loginData: Record<string, unknown>;
+    try {
+      loginData = await loginRes.json();
+    } catch {
+      return {
+        balance: null, currency: 'CNY', totalQuota: null, usedQuota: null, remainingQuota: null,
+        totalUsage: 0, dailyUsage: 0, lastUpdated: new Date().toISOString(),
+        error: `登录响应解析失败 (HTTP ${loginRes.status})`,
+        endpoint: '/api/user/login', platform: 'new-api', loginRequired: true,
+      };
     }
-    
-    const loginData = await loginRes.json();
+
     if (!loginData.success && !loginData.data) {
-      return { balance: null, currency: 'CNY', totalQuota: null, usedQuota: null, remainingQuota: null, totalUsage: 0, dailyUsage: 0, lastUpdated: new Date().toISOString(), error: `登录失败: ${loginData.message || '未知错误'}`, endpoint: '/api/user/login', platform: 'one-api', loginRequired: true };
+      return {
+        balance: null, currency: 'CNY', totalQuota: null, usedQuota: null, remainingQuota: null,
+        totalUsage: 0, dailyUsage: 0, lastUpdated: new Date().toISOString(),
+        error: `登录失败: ${(loginData as Record<string, unknown>).message || '未知错误'}`,
+        endpoint: '/api/user/login', platform: 'new-api', loginRequired: true,
+      };
     }
-    
-    const sessionToken = loginData.data;
-    if (!sessionToken || typeof sessionToken !== 'string') {
-      return { balance: null, currency: 'CNY', totalQuota: null, usedQuota: null, remainingQuota: null, totalUsage: 0, dailyUsage: 0, lastUpdated: new Date().toISOString(), error: '登录成功但未获取到会话令牌', endpoint: '/api/user/login', platform: 'one-api', loginRequired: true };
+
+    // 提取 user ID（登录响应中包含 id 字段）
+    const loginDataObj = (loginData.data || loginData) as Record<string, unknown>;
+    const userId = loginDataObj.id;
+
+    // 有些平台在登录响应中直接返回了 quota 信息
+    if (typeof loginDataObj.quota === 'number' && typeof loginDataObj.used_quota === 'number') {
+      const totalQuota = loginDataObj.quota as number;
+      const usedQuota = loginDataObj.used_quota as number;
+      const remainingQuota = totalQuota - usedQuota;
+      return {
+        balance: quotaToYuan(remainingQuota),
+        currency: 'CNY',
+        totalQuota,
+        usedQuota,
+        remainingQuota,
+        totalUsage: 0,
+        dailyUsage: 0,
+        lastUpdated: new Date().toISOString(),
+        endpoint: '/api/user/login',
+        platform: 'new-api',
+        loginRequired: false,
+      };
     }
-    
-    // Step 2: 获取用户信息（含额度）
+
+    // 没有 session cookie 也没有 quota，无法继续
+    if (!sessionCookie && !userId) {
+      return {
+        balance: null, currency: 'CNY', totalQuota: null, usedQuota: null, remainingQuota: null,
+        totalUsage: 0, dailyUsage: 0, lastUpdated: new Date().toISOString(),
+        error: '登录成功但未获取到 session cookie 或 user ID',
+        endpoint: '/api/user/login', platform: 'new-api', loginRequired: true,
+      };
+    }
+
+    // Step 2: 使用 session cookie + New-Api-User header 查询余额
+    const headers: Record<string, string> = {};
+    if (sessionCookie) {
+      headers['Cookie'] = `session=${sessionCookie}`;
+    }
+    if (userId) {
+      headers['New-Api-User'] = String(userId);
+    }
+
     const selfRes = await fetch(`${root}/api/user/self`, {
-      headers: { 'Authorization': `Bearer ${sessionToken}` },
+      headers,
       signal: AbortSignal.timeout(10000),
     });
-    
-    let balance: number | null = null;
-    let totalQuota: number | null = null;
-    let usedQuota: number | null = null;
-    let remainingQuota: number | null = null;
-    
-    if (selfRes.ok) {
-      const selfData = await selfRes.json();
-      if (selfData.success && selfData.data) {
-        const user = selfData.data;
-        totalQuota = user.quota ?? user.total_quota ?? null;
-        usedQuota = user.used_quota ?? null;
-        remainingQuota = user.quota ?? null;
-        balance = quotaToYuan(remainingQuota);
-      }
+
+    if (!selfRes.ok) {
+      return {
+        balance: null, currency: 'CNY', totalQuota: null, usedQuota: null, remainingQuota: null,
+        totalUsage: 0, dailyUsage: 0, lastUpdated: new Date().toISOString(),
+        error: `余额查询失败 (HTTP ${selfRes.status})`,
+        endpoint: '/api/user/self', platform: 'new-api', loginRequired: false,
+      };
     }
-    
+
+    const selfData = await selfRes.json();
+    if (!selfData.success && !selfData.data) {
+      return {
+        balance: null, currency: 'CNY', totalQuota: null, usedQuota: null, remainingQuota: null,
+        totalUsage: 0, dailyUsage: 0, lastUpdated: new Date().toISOString(),
+        error: `余额查询失败: ${selfData.message || '未知错误'}`,
+        endpoint: '/api/user/self', platform: 'new-api', loginRequired: false,
+      };
+    }
+
+    const user = selfData.data || selfData;
+    const totalQuota = user.quota ?? user.total_quota ?? null;
+    const usedQuota = user.used_quota ?? null;
+    const remainingQuota = totalQuota !== null && usedQuota !== null
+      ? totalQuota - usedQuota
+      : totalQuota;
+
     // Step 3: 尝试获取 dashboard 用量统计
     let totalUsage = 0;
     let dailyUsage = 0;
     try {
       const dashRes = await fetch(`${root}/api/user/dashboard`, {
-        headers: { 'Authorization': `Bearer ${sessionToken}` },
+        headers,
         signal: AbortSignal.timeout(10000),
       });
       if (dashRes.ok) {
@@ -118,9 +198,9 @@ async function queryOneApiBalance(baseUrl: string, username: string, password: s
         }
       }
     } catch {}
-    
+
     return {
-      balance,
+      balance: quotaToYuan(remainingQuota),
       currency: 'CNY',
       totalQuota,
       usedQuota,
@@ -129,17 +209,21 @@ async function queryOneApiBalance(baseUrl: string, username: string, password: s
       dailyUsage,
       lastUpdated: new Date().toISOString(),
       endpoint: '/api/user/self',
-      platform: 'one-api',
+      platform: 'new-api',
       loginRequired: false,
     };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    return { balance: null, currency: 'CNY', totalQuota: null, usedQuota: null, remainingQuota: null, totalUsage: 0, dailyUsage: 0, lastUpdated: new Date().toISOString(), error: `查询失败: ${msg}`, platform: 'one-api', loginRequired: true };
+    return {
+      balance: null, currency: 'CNY', totalQuota: null, usedQuota: null, remainingQuota: null,
+      totalUsage: 0, dailyUsage: 0, lastUpdated: new Date().toISOString(),
+      error: `查询失败: ${msg}`, platform: 'new-api', loginRequired: true,
+    };
   }
 }
 
 /**
- * Strategy 2: 302.ai — 使用 API Key 直接查询
+ * Strategy 2: 302.ai — 使用 API Key 直接查询（非 One API 平台）
  */
 async function query302AiBalance(apiKey: string): Promise<Omit<BalanceInfo, 'providerId' | 'providerName' | 'providerType' | 'baseUrl'> | null> {
   try {
@@ -148,11 +232,16 @@ async function query302AiBalance(apiKey: string): Promise<Omit<BalanceInfo, 'pro
       signal: AbortSignal.timeout(15000),
     });
     const data = await res.json();
-    
+
     if (data.error) {
-      return { balance: null, currency: 'USD', totalQuota: null, usedQuota: null, remainingQuota: null, totalUsage: 0, dailyUsage: 0, lastUpdated: new Date().toISOString(), error: data.error.message || '查询失败', platform: '302ai' };
+      return {
+        balance: null, currency: 'USD', totalQuota: null, usedQuota: null, remainingQuota: null,
+        totalUsage: 0, dailyUsage: 0, lastUpdated: new Date().toISOString(),
+        error: data.error.message || data.error.message_cn || '查询失败',
+        platform: '302ai',
+      };
     }
-    
+
     return {
       balance: data.total_available ?? data.balance ?? null,
       currency: 'USD',
@@ -167,7 +256,11 @@ async function query302AiBalance(apiKey: string): Promise<Omit<BalanceInfo, 'pro
     };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    return { balance: null, currency: 'USD', totalQuota: null, usedQuota: null, remainingQuota: null, totalUsage: 0, dailyUsage: 0, lastUpdated: new Date().toISOString(), error: `查询失败: ${msg}`, platform: '302ai' };
+    return {
+      balance: null, currency: 'USD', totalQuota: null, usedQuota: null, remainingQuota: null,
+      totalUsage: 0, dailyUsage: 0, lastUpdated: new Date().toISOString(),
+      error: `查询失败: ${msg}`, platform: '302ai',
+    };
   }
 }
 
@@ -176,38 +269,34 @@ async function query302AiBalance(apiKey: string): Promise<Omit<BalanceInfo, 'pro
  */
 async function queryOpenAIBalance(apiKey: string): Promise<Omit<BalanceInfo, 'providerId' | 'providerName' | 'providerType' | 'baseUrl'> | null> {
   try {
-    // 获取订阅信息
     const subRes = await fetch('https://api.openai.com/v1/dashboard/billing/subscription', {
       headers: { 'Authorization': `Bearer ${apiKey}` },
       signal: AbortSignal.timeout(15000),
     });
-    
+
     let hardLimit = 0;
-    let softLimit = 0;
     if (subRes.ok) {
       const subData = await subRes.json();
       hardLimit = subData.hard_limit_usd ?? subData.system_hard_limit_usd ?? 0;
-      softLimit = subData.soft_limit_usd ?? 0;
     }
-    
-    // 获取用量信息
+
     const now = new Date();
     const startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
     const endDate = now.toISOString().split('T')[0];
-    
+
     const usageRes = await fetch(
       `https://api.openai.com/v1/dashboard/billing/usage?start_date=${startDate}&end_date=${endDate}`,
       { headers: { 'Authorization': `Bearer ${apiKey}` }, signal: AbortSignal.timeout(15000) }
     );
-    
+
     let totalUsage = 0;
     if (usageRes.ok) {
       const usageData = await usageRes.json();
       totalUsage = usageData.total_usage ?? 0; // 美分
     }
-    
+
     const balance = hardLimit > 0 ? Math.round((hardLimit - totalUsage / 100) * 10000) / 10000 : null;
-    
+
     return {
       balance,
       currency: 'USD',
@@ -222,7 +311,11 @@ async function queryOpenAIBalance(apiKey: string): Promise<Omit<BalanceInfo, 'pr
     };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    return { balance: null, currency: 'USD', totalQuota: null, usedQuota: null, remainingQuota: null, totalUsage: 0, dailyUsage: 0, lastUpdated: new Date().toISOString(), error: `查询失败: ${msg}`, platform: 'openai' };
+    return {
+      balance: null, currency: 'USD', totalQuota: null, usedQuota: null, remainingQuota: null,
+      totalUsage: 0, dailyUsage: 0, lastUpdated: new Date().toISOString(),
+      error: `查询失败: ${msg}`, platform: 'openai',
+    };
   }
 }
 
@@ -236,11 +329,16 @@ async function querySiliconFlowBalance(apiKey: string): Promise<Omit<BalanceInfo
       signal: AbortSignal.timeout(15000),
     });
     const data = await res.json();
-    
+
     if (data.code || data.error) {
-      return { balance: null, currency: 'CNY', totalQuota: null, usedQuota: null, remainingQuota: null, totalUsage: 0, dailyUsage: 0, lastUpdated: new Date().toISOString(), error: data.message || data.error?.message || '查询失败', platform: 'siliconflow' };
+      return {
+        balance: null, currency: 'CNY', totalQuota: null, usedQuota: null, remainingQuota: null,
+        totalUsage: 0, dailyUsage: 0, lastUpdated: new Date().toISOString(),
+        error: data.message || data.error?.message || '查询失败',
+        platform: 'siliconflow',
+      };
     }
-    
+
     return {
       balance: data.balance ?? data.totalBalance ?? null,
       currency: 'CNY',
@@ -255,48 +353,27 @@ async function querySiliconFlowBalance(apiKey: string): Promise<Omit<BalanceInfo
     };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    return { balance: null, currency: 'CNY', totalQuota: null, usedQuota: null, remainingQuota: null, totalUsage: 0, dailyUsage: 0, lastUpdated: new Date().toISOString(), error: `查询失败: ${msg}`, platform: 'siliconflow' };
+    return {
+      balance: null, currency: 'CNY', totalQuota: null, usedQuota: null, remainingQuota: null,
+      totalUsage: 0, dailyUsage: 0, lastUpdated: new Date().toISOString(),
+      error: `查询失败: ${msg}`, platform: 'siliconflow',
+    };
   }
 }
 
 /**
- * Strategy 5: PearAPI — 使用 API Key 的 photo-enhancer 风格
+ * Strategy 5: PearAPI — 自定义平台，暂不支持 API 余额查询
  */
-async function queryPearApiBalance(apiKey: string): Promise<Omit<BalanceInfo, 'providerId' | 'providerName' | 'providerType' | 'baseUrl'> | null> {
-  // PearAPI 没有公开的余额查询 API，尝试多种端点
-  const endpoints = [
-    { url: 'https://api.pearapi.ai/api/user/self', method: 'GET', auth: 'Bearer' },
-    { url: 'https://api.pearapi.ai/api/user/balance', method: 'GET', auth: 'Bearer' },
-  ];
-  
-  for (const ep of endpoints) {
-    try {
-      const res = await fetch(ep.url, {
-        method: ep.method,
-        headers: { 'Authorization': `${ep.auth} ${apiKey}`, 'Content-Type': 'application/json' },
-        signal: AbortSignal.timeout(10000),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const balance = data.data?.balance ?? data.data?.quota ?? data.balance ?? data.quota ?? null;
-        if (balance !== null) {
-          return {
-            balance: typeof balance === 'number' ? quotaToYuan(balance) ?? balance : balance,
-            currency: 'CNY',
-            totalQuota: data.data?.total_quota ?? data.data?.totalQuota ?? null,
-            usedQuota: data.data?.used_quota ?? data.data?.usedQuota ?? null,
-            remainingQuota: data.data?.quota ?? data.data?.remainingQuota ?? null,
-            totalUsage: 0, dailyUsage: 0,
-            lastUpdated: new Date().toISOString(),
-            endpoint: ep.url.replace('https://api.pearapi.ai', ''),
-            platform: 'pearapi',
-          };
-        }
-      }
-    } catch {}
-  }
-  
-  return { balance: null, currency: 'CNY', totalQuota: null, usedQuota: null, remainingQuota: null, totalUsage: 0, dailyUsage: 0, lastUpdated: new Date().toISOString(), error: 'PearAPI 暂不支持余额查询 API，请登录控制台查看', platform: 'pearapi', loginRequired: false };
+async function queryPearApiBalance(_apiKey: string): Promise<Omit<BalanceInfo, 'providerId' | 'providerName' | 'providerType' | 'baseUrl'> | null> {
+  // PearAPI 使用自定义认证体系（/auth/login + /auth/me），
+  // 但 nginx 层阻止了直接 API 调用（返回 405），
+  // 只能通过浏览器控制台查看余额
+  return {
+    balance: null, currency: 'CNY', totalQuota: null, usedQuota: null, remainingQuota: null,
+    totalUsage: 0, dailyUsage: 0, lastUpdated: new Date().toISOString(),
+    error: 'PearAPI 暂不支持 API 余额查询，请登录 pearapi.ai 控制台查看',
+    platform: 'pearapi', loginRequired: false,
+  };
 }
 
 /**
@@ -311,7 +388,7 @@ async function queryGenericBalance(baseUrl: string, apiKey: string): Promise<Omi
     `${root}/v1/balance`,
     `${root}/balance`,
   ];
-  
+
   for (const url of endpoints) {
     try {
       const res = await fetch(url, {
@@ -340,7 +417,7 @@ async function queryGenericBalance(baseUrl: string, apiKey: string): Promise<Omi
       }
     } catch {}
   }
-  
+
   return null;
 }
 
@@ -365,12 +442,19 @@ async function queryProviderBalance(
     dailyUsage: 0,
     lastUpdated: new Date().toISOString(),
   };
-  
+
   const platform = detectPlatform(provider.baseUrl);
   base.platform = platform;
-  
+
   const apiKey = provider.apiKey;
-  
+  // 从 provider 读取保存的登录凭据
+  const savedUsername = (provider as unknown as Record<string, unknown>).balanceUsername as string | undefined;
+  const savedPassword = (provider as unknown as Record<string, unknown>).balancePassword as string | undefined;
+  // 优先使用传入的凭据，否则使用保存的凭据
+  const creds = (loginCredentials?.username && loginCredentials?.password)
+    ? loginCredentials
+    : (savedUsername && savedPassword ? { username: savedUsername, password: savedPassword } : undefined);
+
   // 根据平台选择策略
   switch (platform) {
     case 'openai': {
@@ -393,49 +477,21 @@ async function queryProviderBalance(
     case 'new-api':
     default: {
       // One API / New API 需要 username + password 登录
-      if (loginCredentials?.username && loginCredentials?.password) {
-        const result = await queryOneApiBalance(provider.baseUrl, loginCredentials.username, loginCredentials.password);
+      if (creds?.username && creds?.password) {
+        const result = await queryOneApiBalance(provider.baseUrl, creds.username, creds.password);
         return { ...base, ...result };
       }
-      
+
       // 没有登录凭据，先尝试通用 API Key 查询
       const genericResult = await queryGenericBalance(provider.baseUrl, apiKey);
       if (genericResult && genericResult.balance !== null) {
         return { ...base, ...genericResult };
       }
-      
-      // 尝试 One API 用 API Key 作为 session token（部分平台支持）
-      try {
-        const root = getRootUrl(provider.baseUrl);
-        const selfRes = await fetch(`${root}/api/user/self`, {
-          headers: { 'Authorization': `Bearer ${apiKey}` },
-          signal: AbortSignal.timeout(8000),
-        });
-        if (selfRes.ok) {
-          const selfData = await selfRes.json();
-          if (selfData.success && selfData.data) {
-            const user = selfData.data;
-            const remainingQuota = user.quota ?? null;
-            return {
-              ...base,
-              balance: quotaToYuan(remainingQuota),
-              currency: 'CNY',
-              totalQuota: user.total_quota ?? null,
-              usedQuota: user.used_quota ?? null,
-              remainingQuota,
-              lastUpdated: new Date().toISOString(),
-              endpoint: '/api/user/self',
-              platform: 'new-api',
-              loginRequired: false,
-            };
-          }
-        }
-      } catch {}
-      
+
       // 所有策略失败，提示需要登录凭据
       return {
         ...base,
-        error: '需要登录凭据才能查询余额，请在提供商设置中填写账号密码',
+        error: '需要登录凭据才能查询余额，请在提供商设置中填写余额账号和密码',
         platform: 'new-api',
         loginRequired: true,
       };
@@ -451,25 +507,25 @@ export async function GET(request: NextRequest) {
   if (!user || user.role !== 'admin') {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
-  
+
   try {
     const providers = await getApiProviders();
     const results: BalanceInfo[] = [];
-    
+
     // 并行查询所有提供商
     const promises = providers
       .filter(p => p.isEnabled !== false)
       .map(async (provider) => {
         return queryProviderBalance(provider);
       });
-    
+
     const settled = await Promise.allSettled(promises);
     for (const result of settled) {
       if (result.status === 'fulfilled' && result.value) {
         results.push(result.value);
       }
     }
-    
+
     return NextResponse.json({ success: true, providers: results });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -485,25 +541,25 @@ export async function POST(request: NextRequest) {
   if (!user || user.role !== 'admin') {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
-  
+
   try {
     const body = await request.json();
     const { providerId, username, password } = body as { providerId?: string; username?: string; password?: string };
-    
+
     if (!providerId) {
       return NextResponse.json({ error: 'providerId is required' }, { status: 400 });
     }
-    
+
     const providers = await getApiProviders();
     const provider = providers.find(p => p.id === providerId);
-    
+
     if (!provider) {
       return NextResponse.json({ error: 'Provider not found' }, { status: 404 });
     }
-    
+
     const loginCredentials = (username && password) ? { username, password } : undefined;
     const result = await queryProviderBalance(provider, loginCredentials);
-    
+
     return NextResponse.json({ success: true, ...result });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);

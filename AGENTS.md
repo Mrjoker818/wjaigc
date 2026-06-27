@@ -98,7 +98,8 @@ src/
 │   ├── api-error-translator.ts     # API错误中文翻译（结构化错误码→中文标题+描述+建议）
 │   ├── size-auto-repair.ts         # 尺寸自动修复（检测Invalid Size错误→16对齐修正）
 │   ├── responses-api-sse.ts        # Responses API SSE保活（/v1/responses+SSE心跳, Feature Flag控制）
-│   ├── smart-retry.ts              # 智能重试引擎（CF 524/504识别+同模型重试+Partial Image兜底）
+│   ├── model-capabilities.ts       # 通用模型能力注册表（30+模型能力检测+参数过滤+尺寸规范+Responses API支持判定）
+│   ├── smart-retry.ts              # 智能重试引擎（CF 524/504识别+同模型重试+Partial Image兜底+传输层错误+上游可重试检测）
 │   └── image-tools/
 │       ├── config.ts               # 本地图像工具配置 (环境变量/目录/超时)
 │       ├── file.ts                 # 文件工具 (读取/缩放/保存/清理)
@@ -720,6 +721,18 @@ UPSCALE_TIMEOUT_MS=300000
 - 集成到 `poll-task/route.ts`: 错误分类 `classifyApiError()` + CF超时检测 + 中文友好提示
 - 集成到 `infinite-canvas.tsx`: 前端 `translateErrorFrontend()` 增强 CF 524/504 识别
 - **零风险设计**: 所有新功能为纯增量，不修改现有函数签名，Feature Flag 默认关闭，降级路径完整
+
+**P0: 通用模型能力优化 — 覆盖30+图像模型**
+- 新增 `model-capabilities.ts`: 通用模型能力注册表，覆盖6大模型家族（OpenAI/DALL-E/Flux/Midjourney/Stable Diffusion/国产模型），30+模型精细能力检测
+  - `getModelCapabilities()`: 按模型ID自动识别家族和能力配置
+  - `filterRequestForModel()`: 按模型能力自动过滤请求参数（去掉不支持的 background/output_compression/input_fidelity/style 等）
+  - `normalizeSizeForModel()`: 按模型家族约束规范化尺寸（OpenAI 16对齐/Flux 8对齐/SD 64对齐等）
+  - `isResponsesApiSupportedModel()`: 判定模型是否支持 Responses API（从 responses-api-sse.ts 迁移）
+  - `getSupportedSizes()`: 按模型返回支持的尺寸列表
+- 升级 `size-auto-repair.ts`: 多约束优化算法（最小/最大边长+像素上限+宽高比约束+模型特定对齐+三重评分找最近合法尺寸）
+- 增强 `smart-retry.ts`: 传输层错误识别（connection reset/EOF/TLS handshake等6种关键词）+ 上游可重试检测（origin_gateway_timeout/api_error/server_error等）+ Partial Image 流中断检测
+- 扩展 Responses API 支持范围: 从仅 GPT-Image 扩展到 OpenAI 全系（gpt-image-1/1.5/2/3/mini/chatgpt-image-latest）+ Flux/Seedream/HiDream/Ideogram 等
+- 集成到 `generate/route.ts`: `filterRequestForModel()` 自动按模型能力过滤请求参数，避免发送不支持的字段导致上游报错
 
 ### v3.3.1
 

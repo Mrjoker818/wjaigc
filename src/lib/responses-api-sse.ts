@@ -352,13 +352,24 @@ export function extractResultFromSSERaw(rawText: string): ResponsesApiResult {
 /**
  * 判断模型是否支持 Responses API
  *
- * 只有 OpenAI 的 gpt-image 系列和 chatgpt-image 系列支持
+ * 支持 Responses API 的模型需要满足:
+ * 1. 上游实现了 /v1/responses 端点
+ * 2. 模型内置了 image_generation 工具
+ *
+ * 当前已确认支持的模型系列:
+ * - gpt-image 系列 (gpt-image-1, gpt-image-2 等)
+ * - chatgpt-image 系列 (chatgpt-image-latest 等)
+ * - dall-e-3 (通过 Responses API 可获得 SSE 保活优势)
+ *
+ * 注意: 即使模型在此列表中，如果上游不支持 /v1/responses，
+ * 也会自动降级到标准 Images API 路径
  */
 export function isResponsesApiSupportedModel(modelId: string): boolean {
   const lower = modelId.toLowerCase();
   return (
     lower.includes('gpt-image') ||
-    lower.includes('chatgpt-image')
+    lower.includes('chatgpt-image') ||
+    lower === 'dall-e-3'
   );
 }
 
