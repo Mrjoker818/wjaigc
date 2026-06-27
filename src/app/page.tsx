@@ -2720,17 +2720,12 @@ function CanvasApp() {
       const prompt = result?.data?.bilingual || result?.data?.english || result?.data?.chinese || result?.prompt || '';
 
       if (prompt) {
-        toast.success('关键词已提取', {
+        // 直接填充到图像生成面板的提示词输入框
+        setExternalPrompt(prompt);
+        toast.success('关键词已提取并填入描述区', {
           description: prompt.substring(0, 80) + (prompt.length > 80 ? '...' : ''),
           className: themeStyle === 'monochrome' ? 'bg-white border-blue-500 text-gray-900' : 'bg-[#141414] border-[#d4af37] text-white',
         });
-        if (navigator.clipboard) {
-          await navigator.clipboard.writeText(prompt);
-          toast.info('已复制到剪贴板', {
-            description: '可粘贴到右侧图片描述区',
-            className: themeStyle === 'monochrome' ? 'bg-white border-blue-500 text-gray-900' : 'bg-[#141414] border-[#d4af37] text-white',
-          });
-        }
       } else {
         toast.error('提取结果为空', {
           description: '模型未返回有效关键词',
