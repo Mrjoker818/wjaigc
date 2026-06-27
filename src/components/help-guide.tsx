@@ -599,6 +599,13 @@ function ChangelogSection() {
     <div>
       <h3 className="text-sm font-bold text-[var(--color-on-surface)] mb-2">更新内容</h3>
 
+      <SubTitle>v3.4.0</SubTitle>
+      <FeatureItem>API 错误中文翻译：9 类错误码结构化翻译，友好提示+建议+是否可重试</FeatureItem>
+      <FeatureItem>尺寸自动修复：检测 Invalid Size 错误后自动修正为 16 对齐合法尺寸</FeatureItem>
+      <FeatureItem>Responses API SSE 保活：解决 Cloudflare 524/504 超时断连，Feature Flag 控制自动降级</FeatureItem>
+      <FeatureItem>智能重试引擎：CF 超时同模型重试 3 次+指数退避，Partial Image 兜底保存半成品</FeatureItem>
+      <FeatureItem>零风险设计：纯增量改造，不修改现有函数签名，降级路径完整</FeatureItem>
+
       <SubTitle>v3.3.0</SubTitle>
       <FeatureItem>任务并发控制：每用户最大 15 个并发任务，全局 500 任务上限，30 分钟自动清理</FeatureItem>
       <FeatureItem>任务队列管理：超额任务自动排队，支持查询排队位置</FeatureItem>
