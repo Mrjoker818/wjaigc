@@ -32,6 +32,9 @@ export interface ApiProvider {
   isDefault?: boolean;
   // 排序顺序（数值越小越靠前，管理员可调整）
   sortOrder?: number;
+  // 余额查询账号（用于登录中转站查询余额）
+  balanceUsername?: string;
+  balancePassword?: string;
 }
 
 export interface ModelInfo {

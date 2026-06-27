@@ -333,6 +333,8 @@ async function readConfig(): Promise<StoredApiConfig> {
         connectionStatus: (['untested', 'success', 'failed'].includes(p.connection_status || '') ? p.connection_status as ApiProvider['connectionStatus'] : undefined),
         discoveredModels: normalizeDiscoveredModels(p.discovered_models, p.id, p.model_type),
         sortOrder: p.sort_order ?? i,
+        balanceUsername: p.balance_username || '',
+        balancePassword: p.balance_password || '',
       }));
       return {
         providers,
@@ -382,6 +384,8 @@ async function migrateProvidersToDb(providers: ApiProvider[]): Promise<void> {
       connection_status: p.connectionStatus,
       discovered_models: (p.discoveredModels || []) as unknown as Record<string, unknown>[],
       sort_order: p.sortOrder ?? i,
+      balance_username: p.balanceUsername || '',
+      balance_password: p.balancePassword || '',
     });
   }
 }

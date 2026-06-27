@@ -125,6 +125,8 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const [apiModel, setApiModel] = useState('');
   const [compatProfile, setCompatProfile] = useState('auto');
   const [apiKind, setApiKind] = useState<ApiKind>('image');
+  const [balanceUsername, setBalanceUsername] = useState('');
+  const [balancePassword, setBalancePassword] = useState('');
   const [discoveredModels, setDiscoveredModels] = useState<ModelInfo[]>([]);
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
   const [isDiscovering, setIsDiscovering] = useState(false);
@@ -721,12 +723,14 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
         name: apiName.trim(), baseUrl: apiBaseUrl.trim(), apiKey: apiKey.trim(), modelType: apiKind, selectedModels: models,
         requestStyle: apiKind === 'general' ? 'auto' : apiKind === 'chat' ? 'chat-completions' : apiKind === 'vectorize' || apiKind === 'layer' || apiKind === 'upscaler' ? 'chat-completions' : apiKind === 'video' ? 'images-generations' : 'images-generations',
         advancedParams: [...advancedParams.filter(p => p.key.trim()), ...(compatProfile !== 'auto' ? [{ key: 'compatProfile', value: compatProfile }] : [])],
+        balanceUsername: balanceUsername.trim(), balancePassword: balancePassword.trim(),
       }),
     });
     if (!res.ok) { const data = await res.json().catch(() => ({ error: '保存失败' })); alert(data.error || '保存失败，请重试'); return; }
     setApiName(''); setApiBaseUrl(''); setApiKey(''); setApiModel(''); setCompatProfile('auto');
     setDiscoveredModels([]); setSelectedModels([]); setEditingProviderId(null);
     setAdvancedParams([]); setShowAdvancedParams(false);
+    setBalanceUsername(''); setBalancePassword('');
     window.dispatchEvent(new Event('wujie-admin-apis-updated'));
     await refreshAdmin();
   };
@@ -741,6 +745,8 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     if (providerModels.length > 0) { setDiscoveredModels(providerModels); setSelectedModels(provider.selectedModels || []); setModelSearchQuery(''); }
     else { setDiscoveredModels([]); setSelectedModels([]); }
     setApiModel('');
+    setBalanceUsername((provider as unknown as Record<string, unknown>).balanceUsername as string || '');
+    setBalancePassword((provider as unknown as Record<string, unknown>).balancePassword as string || '');
   };
 
   const handleUpdateApi = async () => {
@@ -755,10 +761,13 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     const filteredParams = advancedParams.filter(p => p.key.trim());
     const paramsWithCompat = [...filteredParams.filter(p => p.key !== 'compatProfile'), ...(compatProfile !== 'auto' ? [{ key: 'compatProfile', value: compatProfile }] : [])];
     if (paramsWithCompat.length > 0) updates.advancedParams = paramsWithCompat;
+    if (balanceUsername.trim()) updates.balanceUsername = balanceUsername.trim();
+    if (balancePassword.trim()) updates.balancePassword = balancePassword.trim();
     const res = await fetch('/api/admin/apis', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'update', providerId: editingProviderId, updates }) });
     if (!res.ok) { const data = await res.json().catch(() => ({ error: '更新失败' })); alert(data.error || '更新失败，请重试'); return; }
     setEditingProviderId(null); setApiName(''); setApiBaseUrl(''); setApiKey(''); setApiModel(''); setCompatProfile('auto');
     setDiscoveredModels([]); setSelectedModels([]); setAdvancedParams([]); setShowAdvancedParams(false);
+    setBalanceUsername(''); setBalancePassword('');
     window.dispatchEvent(new Event('wujie-admin-apis-updated'));
     await refreshAdmin();
   };
@@ -2200,6 +2209,14 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                   </div>
                   <div><label className={labelClass}>接口地址</label><input className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="https://接口域名" value={apiBaseUrl} onChange={e => setApiBaseUrl(e.target.value)} /></div>
                   <div><label className={labelClass}>固定 API 密钥</label><input className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="只保存在服务端配置" type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} /></div>
+                  {/* Balance account credentials */}
+                  <div className={`p-3 rounded-lg border ${isDark ? 'border-white/10 bg-white/[0.03]' : 'border-gray-200 bg-gray-50/50'}`}>
+                    <p className={`text-xs font-medium mb-2 ${isDark ? 'text-[#888]' : 'text-gray-500'}`}>余额查询账号 <span className={`text-[10px] ${isDark ? 'text-[#555]' : 'text-gray-400'}`}>(One API / New API 中转站登录账号，用于自动查余额)</span></p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="平台登录用户名" value={balanceUsername} onChange={e => setBalanceUsername(e.target.value)} />
+                      <input className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="平台登录密码" type="password" value={balancePassword} onChange={e => setBalancePassword(e.target.value)} />
+                    </div>
+                  </div>
                   {/* Discover models */}
                   <button onClick={() => void handleDiscoverModels()} disabled={isDiscovering || !apiBaseUrl.trim() || !apiKey.trim()} className={`w-full h-9 rounded-lg text-sm font-semibold flex items-center justify-center gap-1.5 border ${isDark ? 'border-white/20 hover:bg-white/5' : 'border-gray-200 hover:bg-gray-50'} ${accentClass} disabled:opacity-40 cursor-pointer`}>
                     <RefreshCw className={`w-3.5 h-3.5 ${isDiscovering ? 'animate-spin' : ''}`} />{isDiscovering ? '识别中...' : '自动识别模型'}
