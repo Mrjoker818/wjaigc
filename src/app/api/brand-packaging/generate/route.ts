@@ -66,7 +66,7 @@ export async function POST(request: NextRequest) {
     const selectedModel = model || provider.selectedModels?.find(m => m) || 'gpt-image-2';
 
     // Build request body
-    const effectiveSize = calculateActualPixelsFromRatio(aspectRatio, quality) || '2048x2048';
+    const effectiveSize = calculateActualPixelsFromRatio(aspectRatio, quality, selectedModel) || '2048x2048';
     const rawBody: Record<string, unknown> = {
       model: selectedModel,
       prompt,

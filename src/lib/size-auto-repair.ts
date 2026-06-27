@@ -11,6 +11,7 @@
  */
 
 import { calculateActualPixels } from './canvas-generation-group';
+import { calculateActualPixelsFromRatio } from '@/app/api/generate/route';
 import { getModelCapabilities, classifyModelFamily, type ModelFamily } from './model-capabilities';
 
 /** 向后兼容的旧模型族类型 */
@@ -285,13 +286,30 @@ export function classifyImageModelFamily(modelId: string): LegacyModelFamily {
 /**
  * 从比例格式（如 "16:9"）和 quality 计算合法像素尺寸
  * 用于在 size 错误后重新计算
+ * ★ 优先使用后端规范表（传入 modelId），确保与 API 官方文档一致
  */
 export function recalculatePixelSize(
   aspectRatio: string,
   quality: string,
+  modelId?: string,
 ): string | null {
+  // 优先使用后端规范表（更准确，已对照 API 官方文档校验）
+  if (modelId) {
+    try {
+      const pixelSize = calculateActualPixelsFromRatio(aspectRatio, quality, modelId);
+      if (pixelSize) {
+        const [w, h] = pixelSize.split('x').map(Number);
+        if (w >= 64 && h >= 64) {
+          return pixelSize;
+        }
+      }
+    } catch {
+      // fall through to frontend table
+    }
+  }
+  // 兜底：使用前端像素表
   try {
-    const pixelSize = calculateActualPixels(aspectRatio, quality);
+    const pixelSize = calculateActualPixels(aspectRatio, quality, modelId);
     if (pixelSize) {
       const [w, h] = pixelSize.split('x').map(Number);
       if (w >= 64 && h >= 64) {

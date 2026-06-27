@@ -709,7 +709,10 @@ export async function POST(request: NextRequest) {
         ? requestedSize 
         : currentModelConfig.supportedSizes[0] || '1:1';
 
-      const pixelSize = requestedPixelSize || calculateActualPixelsFromRatio(effectiveSize, quality);
+      // ★ 关键修复：优先使用后端规范表计算像素尺寸（传入 modelId），
+      // 确保与 API 官方文档一致；前端传来的 requestedPixelSize 仅作兜底
+      const calculatedPixelSize = calculateActualPixelsFromRatio(effectiveSize, quality, currentModelConfig.modelId);
+      const pixelSize = calculatedPixelSize || requestedPixelSize;
 
       const requestBody: Record<string, unknown> = {
         model: currentModelConfig.modelId,
@@ -1609,9 +1612,9 @@ export async function POST(request: NextRequest) {
         // Size Auto-Repair: 检测尺寸错误，自动修正后重试一次
         if (isSizeError && !sizeRepairAttempted) {
           sizeRepairAttempted = true;
-          const repairedSize = repairSize(errMsg);
+          const repairedSize = repairSize(errMsg, modelConfig.modelId);
           if (repairedSize) {
-            console.log(`[generate] Size auto-repair: detected invalid size, repairing to ${repairedSize}, retrying...`);
+            console.log(`[generate] Size auto-repair: detected invalid size for model ${modelConfig.modelId}, repairing to ${repairedSize}, retrying...`);
             try {
               const repairedConfig = { ...modelConfig, size: repairedSize };
               const result = await submitSingleTask(repairedConfig, serverApiKey, apiBaseUrl, provider?.id || 'env', 1, provider);

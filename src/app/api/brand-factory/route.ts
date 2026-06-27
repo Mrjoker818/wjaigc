@@ -1050,7 +1050,7 @@ export async function POST(request: NextRequest) {
         const prompt = buildKVImagePrompt(brandDna, body);
 
         const result = await generateImageWithPoll(prompt, imageModel, {
-          size: calculateActualPixelsFromRatio(body.ratio as string || aspectRatio, quality) || calculateActualPixelsFromRatio('3:4', '2K') || '2048x3072',
+          size: calculateActualPixelsFromRatio(body.ratio as string || aspectRatio, quality, imageModel) || calculateActualPixelsFromRatio('3:4', '2K', imageModel) || '2048x3072',
           quality,
         }, imageProviderId);
 
@@ -1090,7 +1090,7 @@ export async function POST(request: NextRequest) {
         const results: { item: string; imageUrl?: string; error?: string }[] = [];
         for (const item of items) {
           const prompt = buildBatchMaterialPrompt(brandDna, materialType, item);
-          const result = await generateImageWithPoll(prompt, imageModel, { size: calculateActualPixelsFromRatio(aspectRatio, quality) || '2048x2048', quality }, imageProviderId);
+          const result = await generateImageWithPoll(prompt, imageModel, { size: calculateActualPixelsFromRatio(aspectRatio, quality, imageModel) || '2048x2048', quality }, imageProviderId);
           results.push({
             item,
             imageUrl: result.imageUrl,
@@ -1215,7 +1215,7 @@ export async function POST(request: NextRequest) {
         if (!text) return NextResponse.json({ error: '请输入标题文字' }, { status: 400 });
 
         const prompt = buildChineseTitlePrompt(text, scene, style, brandDna);
-        const result = await generateImageWithPoll(prompt, imageModel, { size: calculateActualPixelsFromRatio('3:2', quality) || '1536x1024', quality }, imageProviderId);
+        const result = await generateImageWithPoll(prompt, imageModel, { size: calculateActualPixelsFromRatio('3:2', quality, imageModel) || '1536x1024', quality }, imageProviderId);
 
         if (!result.success) {
           return NextResponse.json({ error: result.error || '标题图生成失败' }, { status: 500 });

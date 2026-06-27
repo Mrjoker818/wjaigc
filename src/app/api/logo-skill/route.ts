@@ -143,7 +143,7 @@ async function handleGenerateImage(body: Record<string, unknown>) {
   const quality = body.quality as string | undefined;
   const aspectRatio = (body.aspectRatio as string) || '1:1';
   const effectiveQuality = quality || '1K';
-  const size = (body.size as string) || calculateActualPixelsFromRatio(aspectRatio, effectiveQuality) || '1024x1024';
+  const size = (body.size as string) || calculateActualPixelsFromRatio(aspectRatio, effectiveQuality, imageModel) || '1024x1024';
   const n = (body.n as number) || 1;
 
   const provider = await getImageProvider(imageModel, imageProviderId);

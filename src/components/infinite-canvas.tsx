@@ -14009,69 +14009,63 @@ export function InfiniteCanvas({
           </button>
         </div>
 
-        {/* ── Far-right: Auxiliary controls (collapsible, lowest priority) ── */}
-        <div
-          className={`flex items-center transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${
-            bottomBarHovered ? 'max-w-[400px] opacity-100 ml-1.5 overflow-visible' : 'max-w-0 opacity-0 ml-0 overflow-hidden'
-          }`}
+        {/* ── Far-right: Auxiliary controls (always visible) ── */}
+        <div className={`w-px h-5 ml-1.5 ${separatorCls}`} />
+
+        {/* Zoom controls */}
+        <button
+          onClick={() => { setZoom(z => Math.max(0.1, z / 1.2)); }}
+          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
+          title="缩小画布"
         >
-          <div className={`w-px h-5 mr-1.5 ${separatorCls}`} />
+          <ZoomOut className={`h-3.5 w-3.5 ${mIcon.zoomOut}`} />
+          <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">缩小</span>
+        </button>
 
-          {/* Zoom controls */}
-          <button
-            onClick={() => { setZoom(z => Math.max(0.1, z / 1.2)); }}
-            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
-            title="缩小画布"
-          >
-            <ZoomOut className={`h-3.5 w-3.5 ${mIcon.zoomOut}`} />
-            <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">缩小</span>
-          </button>
+        <span className={`text-xs font-mono w-10 text-center select-none shrink-0 ${isMonochrome ? 'text-gray-500' : 'text-gold'}`}>
+          {Math.round(zoom * 100)}%
+        </span>
 
-          <span className={`text-xs font-mono w-10 text-center select-none shrink-0 ${isMonochrome ? 'text-gray-500' : 'text-gold'}`}>
-            {Math.round(zoom * 100)}%
-          </span>
+        <button
+          onClick={() => { setZoom(z => Math.min(5, z * 1.2)); }}
+          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
+          title="放大画布"
+        >
+          <ZoomIn className={`h-3.5 w-3.5 ${mIcon.zoomIn}`} />
+          <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">放大</span>
+        </button>
 
-          <button
-            onClick={() => { setZoom(z => Math.min(5, z * 1.2)); }}
-            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
-            title="放大画布"
-          >
-            <ZoomIn className={`h-3.5 w-3.5 ${mIcon.zoomIn}`} />
-            <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">放大</span>
-          </button>
+        <div className={`w-px h-5 mx-1 ${separatorCls} shrink-0`} />
 
-          <div className={`w-px h-5 mx-1 ${separatorCls} shrink-0`} />
+        {/* Reset view */}
+        <button
+          onClick={() => { setZoom(1); setViewOffset({ x: 0, y: 0 }); }}
+          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
+          title="重置视图"
+        >
+          <Maximize2 className="h-4 w-4" />
+          <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">重置视图</span>
+        </button>
 
-          {/* Reset view */}
-          <button
-            onClick={() => { setZoom(1); setViewOffset({ x: 0, y: 0 }); }}
-            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
-            title="重置视图"
-          >
-            <Maximize2 className="h-4 w-4" />
-            <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">重置视图</span>
-          </button>
+        {/* Grid mode toggle */}
+        <button
+          onClick={() => setGridMode(prev => prev === 'dots' ? 'lines' : prev === 'lines' ? 'blank' : 'dots')}
+          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
+          title={`网格: ${gridMode === 'dots' ? '点阵' : gridMode === 'lines' ? '线条' : '空白'}`}
+        >
+          <LayoutGrid className="h-4 w-4" />
+          <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">{gridMode === 'dots' ? '点阵' : gridMode === 'lines' ? '线条' : '空白'}</span>
+        </button>
 
-          {/* Grid mode toggle */}
-          <button
-            onClick={() => setGridMode(prev => prev === 'dots' ? 'lines' : prev === 'lines' ? 'blank' : 'dots')}
-            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
-            title={`网格: ${gridMode === 'dots' ? '点阵' : gridMode === 'lines' ? '线条' : '空白'}`}
-          >
-            <LayoutGrid className="h-4 w-4" />
-            <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">{gridMode === 'dots' ? '点阵' : gridMode === 'lines' ? '线条' : '空白'}</span>
-          </button>
-
-          {/* Connection lines toggle */}
-          <button
-            onClick={() => setShowConnections(prev => !prev)}
-            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 ${showConnections ? (isMonochrome ? 'text-blue-500 bg-blue-50 ring-1 ring-blue-500/30' : 'text-gold bg-gold/20 ring-1 ring-gold/40') : (isMonochrome ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100' : 'text-gold-muted hover:text-gold-light hover:bg-gold/10')}`}
-            title={showConnections ? '隐藏连线' : '显示连线'}
-          >
-            <GitMerge className="h-4 w-4" />
-            <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">{showConnections ? '隐藏连线' : '显示连线'}</span>
-          </button>
-        </div>
+        {/* Connection lines toggle */}
+        <button
+          onClick={() => setShowConnections(prev => !prev)}
+          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 ${showConnections ? (isMonochrome ? 'text-blue-500 bg-blue-50 ring-1 ring-blue-500/30' : 'text-gold bg-gold/20 ring-1 ring-gold/40') : (isMonochrome ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100' : 'text-gold-muted hover:text-gold-light hover:bg-gold/10')}`}
+          title={showConnections ? '隐藏连线' : '显示连线'}
+        >
+          <GitMerge className="h-4 w-4" />
+          <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">{showConnections ? '隐藏连线' : '显示连线'}</span>
+        </button>
 
         {/* Generating progress (always visible when active) */}
         {isGenerating && (

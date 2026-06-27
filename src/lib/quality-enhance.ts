@@ -132,7 +132,7 @@ export async function enhanceViaAI(
       model: enhanceModel,
       prompt: enhancePrompt,
       n: 1,
-      size: calculateActualPixelsFromRatio(aspectRatio, '2K') || '1024x1024',
+      size: calculateActualPixelsFromRatio(aspectRatio, '2K', enhanceModel) || '1024x1024',
       response_format: 'url',
       // 以放大结果为参考图，低强度保持内容不变
       image_urls: [absoluteUrl],
