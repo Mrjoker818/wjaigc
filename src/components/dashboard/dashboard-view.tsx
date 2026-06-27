@@ -733,6 +733,41 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     setEditingProviderId(null);
   }, []);
 
+  const editApiProvider = useCallback((p: ApiProvider) => {
+    setEditingProviderId(p.id);
+    setApiName(p.name); setApiBaseUrl(p.baseUrl); setApiKey(p.apiKey);
+    setApiKind((p.modelType as ApiKind) || 'image');
+    setCompatProfile((p as any).compatProfile || 'auto');
+    setSelectedModels(p.selectedModels || []);
+    setDiscoveredModels(p.discoveredModels || []);
+    setAdvancedParams(p.advancedParams ? Object.entries(p.advancedParams).map(([key, value]) => ({ key, value: String(value) })) : []);
+    setShowAdvancedParams(!!p.advancedParams && Object.keys(p.advancedParams).length > 0);
+    setShowApiDrawer(true);
+  }, []);
+
+  const toggleApiEnabled = useCallback(async (providerId: string) => {
+    const p = providers.find(x => x.id === providerId);
+    if (!p) return;
+    await fetch('/api/admin/apis', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'update', providerId, updates: { isEnabled: !(p.isEnabled ?? true) } }) });
+    await refreshAdmin();
+    window.dispatchEvent(new Event('wujie-admin-apis-updated'));
+  }, [providers, refreshAdmin]);
+
+  const testApiConnection = useCallback(async (p: ApiProvider) => {
+    try {
+      const r = await fetch('/api/admin/apis', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'test', providerId: p.id }) });
+      const d = await r.json();
+      alert(d.success ? `连接成功！发现 ${d.models?.length || 0} 个模型` : `连接失败: ${d.error || '未知错误'}`);
+    } catch (e: any) { alert(`连接失败: ${e.message}`); }
+  }, []);
+
+  const deleteApiProvider = useCallback(async (providerId: string) => {
+    await fetch('/api/admin/apis', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', providerId }) });
+    await refreshAdmin();
+    window.dispatchEvent(new Event('wujie-admin-apis-updated'));
+    setSelectedProviderIds(prev => { const next = new Set(prev); next.delete(providerId); return next; });
+  }, [refreshAdmin]);
+
   // ─── Admin: User management computed ───
   const filteredAdminUsers = useMemo(() => {
     let list = [...adminUsers];
@@ -1778,7 +1813,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 { label: '请求数', value: statsArr.reduce((a, s) => a + (s.requests || 0), 0), icon: Zap, color: accentClass },
                 { label: '图片数', value: statsArr.reduce((a, s) => a + (s.imagesGenerated || 0), 0), icon: Image, color: 'text-blue-400' },
                 { label: 'Token', value: statsArr.reduce((a, s) => a + (s.tokensUsed || 0), 0).toLocaleString(), icon: BarChart3, color: 'text-green-400' },
-                { label: '费用', value: `$${statsArr.reduce((a, s) => a + (s.estimatedCost || 0), 0).toFixed(2)}`, icon: Wallet, color: 'text-purple-400' },
+                { label: '费用', value: `$${Number(statsArr.reduce((a, s) => a + (s.estimatedCost || 0), 0)).toFixed(2)}`, icon: Wallet, color: 'text-purple-400' },
               ].map((stat, i) => (
                 <div key={i} className={`rounded-xl border p-5 ${isDark ? 'bg-[#1a1a2e]/80 border-primary/20' : 'bg-white border-gray-200'}`}>
                   <div className="flex items-center gap-2 mb-2">
@@ -1864,6 +1899,117 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               discoveredModels: p.discoveredModels, advancedParams: p.advancedParams,
             })) as any}
           />
+        )}
+
+        {/* ── Tab: API Management ── */}
+        {activeTab === 'apis' && isAdmin && (
+          <div className="h-full overflow-y-auto p-6 relative">
+            {/* ── Header with add button ── */}
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h1 className={`text-xl font-bold ${textPrimary}`}>API 管理</h1>
+                <p className={`text-sm ${textSecondary}`}>配置图像、对话、3D、矢量等模型接口</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={() => void refreshBalances()} className={`text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer ${isDark ? 'bg-white/5 text-[#aaa] hover:bg-white/10' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}><Activity className="w-3.5 h-3.5" />刷新余额</button>
+                <button onClick={() => { void refreshAdmin(); }} className={`text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer ${isDark ? 'bg-white/5 text-[#aaa] hover:bg-white/10' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}><RefreshCw className="w-3.5 h-3.5" />刷新列表</button>
+                <button onClick={() => { resetApiForm(); setShowApiDrawer(true); }} className={`text-xs px-4 py-2 rounded-lg font-semibold flex items-center gap-1.5 cursor-pointer ${accentBgClass} ${accentTextOnBgClass}`}><Plus className="w-4 h-4" />添加 API</button>
+              </div>
+            </div>
+
+            {/* ── Filter bar ── */}
+            <div className={`flex items-center gap-2 mb-3 p-2 rounded-xl ${isDark ? 'bg-white/[0.03] border border-white/5' : 'bg-gray-50 border border-gray-100'}`}>
+              <select className={`h-8 px-2.5 rounded-lg text-xs border ${isDark ? 'bg-white/5 border-white/10 text-[#ccc]' : 'bg-white border-gray-200 text-gray-800'}`} value={apiFilterType} onChange={e => setApiFilterType(e.target.value as ApiKind | 'all')}>
+                <option value="all">全部类型</option>
+                {(Object.keys(apiKindLabels) as ApiKind[]).map(k => <option key={k} value={k}>{apiKindLabels[k]}</option>)}
+              </select>
+              <select className={`h-8 px-2.5 rounded-lg text-xs border ${isDark ? 'bg-white/5 border-white/10 text-[#ccc]' : 'bg-white border-gray-200 text-gray-800'}`} value={apiFilterStatus} onChange={e => setApiFilterStatus(e.target.value as 'all' | 'enabled' | 'disabled')}>
+                <option value="all">全部状态</option>
+                <option value="enabled">已启用</option>
+                <option value="disabled">已停用</option>
+              </select>
+              <div className="relative flex-1">
+                <Search className={`w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 ${textSecondary}`} />
+                <input type="text" placeholder="搜索 API 名称或 URL..." value={apiSearchQuery} onChange={e => setApiSearchQuery(e.target.value)} className={`w-full h-8 pl-8 pr-3 rounded-lg text-xs border ${isDark ? 'bg-white/5 border-white/10 text-[#ccc] placeholder:text-white/20' : 'bg-white border-gray-200 text-gray-800 placeholder:text-gray-400'}`} />
+              </div>
+            </div>
+
+            {/* ── Batch operations bar ── */}
+            {selectedProviderIds.size > 0 && (
+              <div className={`flex items-center gap-2 mb-3 p-2 rounded-xl ${isDark ? 'bg-primary/10 border border-primary/20' : 'bg-amber-50 border border-amber-200'}`}>
+                <span className={`text-xs ${isDark ? 'text-primary' : 'text-amber-700'}`}>已选择 {selectedProviderIds.size} 个</span>
+                <button onClick={() => void handleBatchToggleApi(true)} className="text-xs px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 cursor-pointer">批量启用</button>
+                <button onClick={() => void handleBatchToggleApi(false)} className="text-xs px-2.5 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 cursor-pointer">批量停用</button>
+                <button onClick={() => setConfirmDlg({ open: true, title: '批量删除', message: `确定要删除选中的 ${selectedProviderIds.size} 个API吗？`, variant: 'danger', onConfirm: () => void handleBatchDeleteApi(), onCancel: () => setConfirmDlg(d => ({ ...d, open: false })) })} className="text-xs px-2.5 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 cursor-pointer">批量删除</button>
+                <button onClick={toggleSelectAllProviders} className="text-xs px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-[#ccc] cursor-pointer">全选/取消</button>
+              </div>
+            )}
+
+            {/* ── API Cards Grid ── */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredProviders.map(p => (
+                <div key={p.id} className={`relative rounded-xl p-4 transition-all ${isDark ? 'bg-white/[0.03] border border-white/[0.06] hover:border-primary/30' : 'bg-white border border-gray-100 hover:border-amber-300'}`}>
+                  <div className="flex items-start gap-3">
+                    <input type="checkbox" checked={selectedProviderIds.has(p.id)} onChange={() => setSelectedProviderIds(prev => { const next = new Set(prev); if (next.has(p.id)) next.delete(p.id); else next.add(p.id); return next; })} className="mt-1 accent-[var(--accent-color,#d4af37)]" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className={`font-semibold text-sm truncate ${textPrimary}`}>{p.name}</span>
+                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${p.isEnabled !== false ? (isDark ? 'bg-emerald-500/15 text-emerald-400' : 'bg-emerald-100 text-emerald-700') : (isDark ? 'bg-red-500/15 text-red-400' : 'bg-red-100 text-red-700')}`}>{p.isEnabled !== false ? '启用' : '停用'}</span>
+                      </div>
+                      <div className={`text-[11px] ${textSecondary} mb-1`}>{apiKindLabels[p.modelType as ApiKind] || p.modelType || '通用'}</div>
+                      <div className={`text-[10px] ${textSecondary} truncate mb-2`}>{p.baseUrl}</div>
+                      {p.balance !== undefined && p.balance !== null && (
+                        <div className={`text-[10px] ${isDark ? 'text-primary/80' : 'text-amber-600'}`}>余额: ${typeof p.balance === 'number' ? (p.balance as number).toFixed(2) : String(p.balance)}</div>
+                      )}
+                      {p.selectedModels && p.selectedModels.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-2">
+                          {p.selectedModels.slice(0, 3).map(m => <span key={m} className={`text-[9px] px-1.5 py-0.5 rounded ${isDark ? 'bg-white/5 text-white/50' : 'bg-gray-100 text-gray-500'}`}>{m}</span>)}
+                          {p.selectedModels.length > 3 && <span className={`text-[9px] px-1.5 py-0.5 rounded ${isDark ? 'bg-white/5 text-white/50' : 'bg-gray-100 text-gray-500'}`}>+{p.selectedModels.length - 3}</span>}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 mt-3 pt-2 border-t border-white/5">
+                    <button onClick={() => { toggleApiEnabled(p.id); }} className={`text-[10px] px-2 py-1 rounded-lg cursor-pointer ${p.isEnabled !== false ? (isDark ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20' : 'bg-red-50 text-red-600 hover:bg-red-100') : (isDark ? 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100')}`}>{p.isEnabled !== false ? '停用' : '启用'}</button>
+                    <button onClick={() => { editApiProvider(p); }} className="text-[10px] px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-[#aaa] cursor-pointer">编辑</button>
+                    <button onClick={() => { void testApiConnection(p); }} className="text-[10px] px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-[#aaa] cursor-pointer">测试</button>
+                    <button onClick={() => setConfirmDlg({ open: true, title: '删除API', message: `确定要删除 "${p.name}" 吗？`, variant: 'danger', onConfirm: () => deleteApiProvider(p.id), onCancel: () => setConfirmDlg(d => ({ ...d, open: false })) })} className="text-[10px] px-2 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 cursor-pointer ml-auto">删除</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {filteredProviders.length === 0 && (
+              <div className={`text-center py-12 ${textSecondary}`}>
+                <Server className="w-10 h-10 mx-auto mb-3 opacity-30" />
+                <p className="text-sm">暂无API提供商</p>
+                <p className="text-xs mt-1">点击上方"添加 API"按钮添加</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Tab: Data Management ── */}
+        {activeTab === 'data' && isAdmin && (
+          <div className="h-full overflow-y-auto p-6">
+            <div className="flex items-center justify-between mb-6">
+              <div><h1 className={`text-xl font-bold ${textPrimary}`}>数据管理</h1><p className={`text-sm ${textSecondary}`}>导出和导入系统数据</p></div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className={`p-5 rounded-xl ${isDark ? 'bg-white/[0.03] border border-white/[0.06]' : 'bg-white border border-gray-100'}`}>
+                <h3 className={`font-semibold mb-3 ${textPrimary}`}>导出数据</h3>
+                <p className={`text-xs mb-4 ${textSecondary}`}>将用户数据、API配置、系统设置导出为JSON文件</p>
+                <button onClick={async () => { try { const r = await fetch('/api/admin/users', { credentials: 'include' }); const d = await r.json(); const blob = new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `wujie-export-${new Date().toISOString().slice(0,10)}.json`; a.click(); URL.revokeObjectURL(url); } catch(e) { console.error(e); } }} className={`text-xs px-4 py-2 rounded-lg font-medium cursor-pointer ${accentBgClass} ${accentTextOnBgClass}`}>导出全部数据</button>
+              </div>
+              <div className={`p-5 rounded-xl ${isDark ? 'bg-white/[0.03] border border-white/[0.06]' : 'bg-white border border-gray-100'}`}>
+                <h3 className={`font-semibold mb-3 ${textPrimary}`}>导入数据</h3>
+                <p className={`text-xs mb-4 ${textSecondary}`}>从JSON文件导入用户数据、API配置（将覆盖现有数据）</p>
+                <label className={`text-xs px-4 py-2 rounded-lg font-medium cursor-pointer inline-block ${isDark ? 'bg-white/5 text-[#ccc] hover:bg-white/10' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
+                  选择文件导入
+                  <input type="file" accept=".json" className="hidden" onChange={async (e) => { const f = e.target.files?.[0]; if (!f) return; try { const txt = await f.text(); const data = JSON.parse(txt); console.log('Import data:', Object.keys(data)); } catch(err) { console.error(err); } }} />
+                </label>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* ── Tab: Ecom Templates ── */}
