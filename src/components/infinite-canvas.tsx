@@ -423,20 +423,61 @@ type ThreeDType = 'ip' | 'figure' | 'product' | 'character';
 function translateErrorFrontend(msg: string): string {
   if (!msg) return '操作失败，请重试';
   const lower = msg.toLowerCase();
-  if (lower.includes('try again later') || lower.includes('please wait')) {
-    return '当前模型暂时不可用，请稍后重试或切换其他模型';
+
+  // ★ Cloudflare 超时专用检测 (524/504)
+  if (lower.includes('524') || lower.includes('a timeout occurred') || lower.includes('origin_gateway_timeout')) {
+    return '网络网关超时 (524)，服务器处理时间过长。建议：1) 切换其他模型重试 2) 稍后再试';
   }
-  if (lower.includes('insufficient balance') || lower.includes('insufficient')) {
-    return 'API 余额不足，请联系管理员充值';
+  if (lower.includes('504') || lower.includes('gateway time-out') || lower.includes('gateway timeout')) {
+    return '网络网关超时 (504)，服务器未及时响应。建议：1) 切换其他模型重试 2) 稍后再试';
   }
+  if (lower.includes('503') || lower.includes('service unavailable') || lower.includes('service temporarily unavailable')) {
+    return '服务暂时不可用 (503)，请稍后重试或切换其他模型';
+  }
+  if (lower.includes('502') || lower.includes('bad gateway')) {
+    return '网关错误 (502)，上游服务异常。请稍后重试';
+  }
+
+  // ★ 内容审核拦截
+  if (lower.includes('moderation_blocked') || lower.includes('content_policy_violation') || lower.includes('content policy')) {
+    return '内容审核拦截：生成内容违反了安全策略。请修改提示词后重试（避免涉及版权角色、公众人物等）';
+  }
+
+  // ★ 限速与余额
   if (lower.includes('rate limit') || lower.includes('too many requests')) {
     return '请求过于频繁，请稍后再试';
   }
+  if (lower.includes('insufficient_quota') || lower.includes('billing_hard_limit') || lower.includes('insufficient balance') || lower.includes('insufficient')) {
+    return 'API 余额不足，请联系管理员充值';
+  }
+
+  // ★ API Key 问题
+  if (lower.includes('invalid_api_key') || lower.includes('incorrect_api_key') || lower.includes('invalid api key')) {
+    return 'API Key 无效或已过期，请联系管理员更新';
+  }
+
+  // ★ 模型问题
   if (lower.includes('model not found')) {
     return '模型不存在或已下线，请尝试切换其他模型';
   }
+
+  // ★ 尺寸无效
+  if (lower.includes('invalid size') || lower.includes('must be divisible by 16')) {
+    return '图片尺寸不符合模型要求，请尝试切换画面比例后重试';
+  }
+
+  // ★ 超时
   if (lower.includes('timeout') || lower.includes('timed out')) {
-    return '请求超时，请稍后重试';
+    return '请求超时，请稍后重试或切换其他模型';
+  }
+
+  // ★ 部分结果
+  if (lower.includes('partial') && lower.includes('image')) {
+    return '生成中断，仅获取到部分结果。请重试以获取完整图片';
+  }
+
+  if (lower.includes('try again later') || lower.includes('please wait')) {
+    return '当前模型暂时不可用，请稍后重试或切换其他模型';
   }
   // 纯英文兜底
   if (/^[a-zA-Z]/.test(msg) && !/[\u4e00-\u9fff]/.test(msg)) {

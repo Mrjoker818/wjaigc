@@ -11,6 +11,7 @@ import { fetchImageBuffer } from '@/lib/fetch-image-buffer';
 import { getEditTask, deleteEditTask, setEditTask, failEditTask } from '@/lib/edit-task-store';
 import { isTaskCancelled, updateTaskProgress, getTaskInfo, releaseQueueSlot } from '@/lib/task-registry';
 import { translateApiError } from '@/lib/api-error-translate';
+import { classifyApiError, type ClassifiedError, isCloudflareTimeoutError } from '@/lib/api-error-translator';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getRefineResult } from '@/app/api/refine-engine/route';
 import { getBrandResult } from '@/app/api/brand-ecommerce/route';
@@ -365,12 +366,18 @@ export async function POST(request: NextRequest) {
               const rawError = (typeof taskError === 'object' && taskError.message)
                 ? String(taskError.message)
                 : String(taskData.error_message || taskData.message || '远程任务失败');
-              failEditTask(taskId, translateApiError(rawError));
+              const classifiedErr = classifyApiError(rawError);
+              const translatedErrMsg = classifiedErr.friendlyMessage + (classifiedErr.suggestion ? ' — ' + classifiedErr.suggestion : '');
+              const isCfTimeout = isCloudflareTimeoutError(rawError);
+              failEditTask(taskId, translatedErrMsg);
               return NextResponse.json({
                 success: false,
                 status: 'failed',
-                error: translateApiError(rawError),
-                retryable: true,
+                error: translatedErrMsg,
+                errorCategory: classifiedErr.category,
+                isRetryable: classifiedErr.isRetryable,
+                isCfTimeout,
+                retryable: classifiedErr.isRetryable,
               }, { status: 200 });
             } else {
               // 仍在处理中
@@ -1387,18 +1394,26 @@ export async function POST(request: NextRequest) {
       if (!pollResult.imageUrl) {
         const taskError = taskData?.error as Record<string, unknown> | undefined;
         const errorDetail = (taskError?.message as string) || '';
-        pollResult.error = translateApiError(errorDetail) || '模型返回了文本而不是生成图像，请尝试重新措辞提示';
+        const classifiedNoImgErr = classifyApiError(errorDetail || '模型返回了文本而不是生成图像');
+        pollResult.error = classifiedNoImgErr.friendlyMessage || translateApiError(errorDetail) || '模型返回了文本而不是生成图像，请尝试重新措辞提示';
         pollResult.success = false;
-        pollResult.retryable = true;
+        pollResult.retryable = classifiedNoImgErr.isRetryable;
+        (pollResult as Record<string, unknown>).errorCategory = classifiedNoImgErr.category;
+        (pollResult as Record<string, unknown>).isCfTimeout = isCloudflareTimeoutError(errorDetail);
       }
     } else if (taskStatus === 'failed') {
       const rawError = ((taskData?.error as Record<string, unknown>)?.message as string) || '图像生成任务失败';
-      const translatedError = translateApiError(rawError);
+      const classifiedErr = classifyApiError(rawError);
+      const translatedError = classifiedErr.friendlyMessage + (classifiedErr.suggestion ? ' — ' + classifiedErr.suggestion : '');
+      const isCfTimeout = isCloudflareTimeoutError(rawError);
       updateTaskProgress(taskId, { status: 'failed', error: translatedError });
       failedTaskCache.set(taskId, { error: translatedError, timestamp: Date.now() });
       releaseQueueSlot(taskId);
       pollResult.error = translatedError;
       pollResult.success = false;
+      (pollResult as Record<string, unknown>).errorCategory = classifiedErr.category;
+      (pollResult as Record<string, unknown>).isRetryable = classifiedErr.isRetryable;
+      (pollResult as Record<string, unknown>).isCfTimeout = isCfTimeout;
     } else if (taskStatus === 'cancelled') {
       pollResult.error = '任务已被取消';
       pollResult.success = false;
@@ -1409,11 +1424,16 @@ export async function POST(request: NextRequest) {
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : String(error);
     console.error('Poll task route error:', errMsg);
+    const classifiedErr = classifyApiError(errMsg);
+    const translatedErrMsg = classifiedErr.friendlyMessage + (classifiedErr.suggestion ? ' — ' + classifiedErr.suggestion : '');
     return NextResponse.json({
       success: false,
       status: 'error',
-      error: translateApiError(errMsg),
-      retryable: true,
+      error: translatedErrMsg,
+      errorCategory: classifiedErr.category,
+      isRetryable: classifiedErr.isRetryable,
+      isCfTimeout: isCloudflareTimeoutError(errMsg),
+      retryable: classifiedErr.isRetryable,
     }, { status: 500 });
   }
 }

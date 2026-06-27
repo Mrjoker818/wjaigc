@@ -7,6 +7,10 @@ import { identifyImageSubject } from '@/lib/identify-subject';
 
 import { optionalApiAuth } from '@/lib/api-auth';
 import { translateApiError } from '@/lib/api-error-translate';
+import { classifyApiError, type ClassifiedError, isCloudflareTimeoutError, translateApiError as translateApiErrorV2 } from '@/lib/api-error-translator';
+import { detectInvalidSizeError, repairSize, classifyImageModelFamily } from '@/lib/size-auto-repair';
+import { fetchWithSmartRetry } from '@/lib/smart-retry';
+import { streamResponsesApiSSE, isResponsesApiSupportedModel, buildResponsesApiPayload, type ResponsesApiResult, type ResponsesApiSSEEvent } from '@/lib/responses-api-sse';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { consumeCredits } from '@/lib/credits';
 
@@ -1025,6 +1029,90 @@ export async function POST(request: NextRequest) {
         if (!timeoutCleared) { clearTimeout(timeoutId); timeoutCleared = true; }
       };
 
+      // ★ Responses API SSE 流式保活路径 — 仅对 gpt-image 系模型启用
+      // 通过 Cloudflare 代理的中转站长时间推理容易 524/504 断连，
+      // /v1/responses + SSE 心跳保活可避免此问题
+      const modelIdLower = currentModelConfig.modelId.toLowerCase();
+      const isGptImageModel = modelIdLower.startsWith('gpt-image') || modelIdLower.startsWith('chatgpt-image');
+      const responsesApiEnabled = isGptImageModel && process.env.RESPONSES_API_ENABLED !== 'false';
+
+      if (responsesApiEnabled) {
+        try {
+          console.log('[generate] Trying Responses API SSE keepalive path for model:', currentModelConfig.modelId);
+          // Build Responses API payload
+          const payload = buildResponsesApiPayload(
+            String(adjustedBody.prompt || enhancedPrompt),
+            currentModelConfig.modelId,
+            currentModelConfig.modelId, // textModel: use image model as text model for /v1/responses
+            {
+              size: adjustedBody.size as string | undefined,
+              quality: adjustedBody.quality as string | undefined,
+              outputFormat: adjustedBody.output_format as string | undefined,
+              background: adjustedBody.background as string | undefined,
+              negativePrompt: adjustedBody.negative_prompt as string | undefined,
+              seed: adjustedBody.seed as number | undefined,
+              imageUrls: (adjustedBody.image_urls as string[]) || (adjustedBody.image ? [adjustedBody.image as string] : undefined),
+              maskB64: (adjustedBody.mask as string) || undefined,
+              noPromptRevision: true,
+            },
+          );
+
+          const respRes = await fetchWithV1Retry(
+            currentApiBaseUrl,
+            '/v1/responses',
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${currentApiKey}`,
+              },
+              body: JSON.stringify(payload),
+              signal: controller.signal,
+            },
+          );
+
+          if (!respRes.ok) {
+            throw new Error(`Responses API HTTP ${respRes.status}`);
+          }
+
+          if (!respRes.body) {
+            throw new Error('Responses API returned no body');
+          }
+
+          const sseResult = await streamResponsesApiSSE(
+            respRes.body.getReader(),
+            (event: ResponsesApiSSEEvent) => {
+              try { updateTaskProgress(`resp-progress`, { progress: 50, label: event.type }); } catch {}
+            },
+            controller.signal,
+          );
+
+          if (sseResult.imageB64) {
+            console.log('[generate] Responses API SSE succeeded, got image directly');
+            return {
+              taskIds: [],
+              directImageUrls: [`data:image/png;base64,${sseResult.imageB64}`],
+              usedModel: currentModelConfig.modelId,
+              usedProviderId: currentProviderId,
+            };
+          }
+          // SSE returned partial image as fallback
+          if (sseResult.partialImageB64) {
+            console.log('[generate] Responses API SSE got partial image (stream interrupted)');
+            return {
+              taskIds: [],
+              directImageUrls: [`data:image/png;base64,${sseResult.partialImageB64}`],
+              usedModel: currentModelConfig.modelId,
+              usedProviderId: currentProviderId,
+            };
+          }
+          console.warn('[generate] Responses API SSE returned no image, falling back to standard path');
+        } catch (sseErr) {
+          console.warn('[generate] Responses API SSE failed, falling back to standard path:', sseErr instanceof Error ? sseErr.message : sseErr);
+          // 不抛出错误，降级到标准路径
+        }
+      }
+
       // 构建提交请求 - 通用策略，适配所有 API 提供商
       const isEditsEndpoint = endpoint === '/images/edits';
       const hasImageField = !!(adjustedBody.image || (Array.isArray(adjustedBody.images) && adjustedBody.images.length > 0));
@@ -1465,6 +1553,8 @@ export async function POST(request: NextRequest) {
     const directImageUrls: string[] = [];
     let usedModelName = modelConfig.modelId; // 使用模型ID而非config.name（config.name可能被providerName覆盖）
     let usedModelId = modelConfig.modelId;
+    let sizeRepairAttempted = false; // Size Auto-Repair 只重试一次
+    let cfRetryAttempted = false;    // CF 524/504 智能重试只触发一次
     let usedProviderId = provider?.id || 'env';
     let usedProviderName = provider?.displayName || provider?.name || '';
     let usedApiBaseUrl = apiBaseUrl || '';
@@ -1500,7 +1590,55 @@ export async function POST(request: NextRequest) {
         const errMsg = singleError instanceof Error ? singleError.message : String(singleError);
         const isRetryable = singleError instanceof Error && (singleError as Error & { retryable?: boolean }).retryable;
         
-        if (isRetryable && candidateModels.length > 0) {
+        // ★ 智能重试: 识别 CF 524/504 超时，同模型重试后再切换备选模型
+        const errorClassify = classifyApiError(errMsg, singleError instanceof Error ? (singleError as any).status : undefined);
+        const isCloudflareTimeout = errorClassify.category === 'cloudflare_timeout';
+        const isSizeError = errorClassify.category === 'invalid_size';
+        
+        // Size Auto-Repair: 检测尺寸错误，自动修正后重试一次
+        if (isSizeError && !sizeRepairAttempted) {
+          sizeRepairAttempted = true;
+          const repairedSize = repairSize(errMsg);
+          if (repairedSize) {
+            console.log(`[generate] Size auto-repair: detected invalid size, repairing to ${repairedSize}, retrying...`);
+            try {
+              const repairedConfig = { ...modelConfig, size: repairedSize };
+              const result = await submitSingleTask(repairedConfig, serverApiKey, apiBaseUrl, provider?.id || 'env', 1, provider);
+              if (result.directImageUrls?.length > 0) directImageUrls.push(...result.directImageUrls);
+              if (result.taskIds?.length > 0) taskIds.push(...result.taskIds);
+              usedModelId = result.usedModel;
+              usedProviderId = result.usedProviderId;
+              submitted = true;
+              console.log(`[generate] Size auto-repair succeeded with size ${repairedSize}`);
+            } catch (repairErr) {
+              console.warn(`[generate] Size auto-repair retry failed:`, repairErr instanceof Error ? repairErr.message : repairErr);
+            }
+          }
+        }
+        
+        // CF 524/504: 同模型重试 2 次（间隔递增），因为可能是临时网络问题
+        if (isCloudflareTimeout && !cfRetryAttempted) {
+          cfRetryAttempted = true;
+          for (let cfRetry = 1; cfRetry <= 2; cfRetry++) {
+            const delay = cfRetry * 10000; // 10s, 20s
+            console.log(`[generate] CF timeout detected, retry #${cfRetry}/2 after ${delay/1000}s...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            try {
+              const result = await submitSingleTask(modelConfig, serverApiKey, apiBaseUrl, provider?.id || 'env', 1, provider);
+              if (result.directImageUrls?.length > 0) directImageUrls.push(...result.directImageUrls);
+              if (result.taskIds?.length > 0) taskIds.push(...result.taskIds);
+              usedModelId = result.usedModel;
+              usedProviderId = result.usedProviderId;
+              submitted = true;
+              console.log(`[generate] CF timeout retry #${cfRetry} succeeded`);
+              break;
+            } catch (retryErr) {
+              console.warn(`[generate] CF timeout retry #${cfRetry} failed:`, retryErr instanceof Error ? retryErr.message : retryErr);
+            }
+          }
+        }
+        
+        if (!submitted && isRetryable && candidateModels.length > 0) {
           console.log(`模型 ${modelConfig.modelId} 不可用 (${errMsg})，尝试备选模型...`);
           
           for (let ci = 0; ci < candidateModels.length; ci++) {
@@ -1549,19 +1687,25 @@ export async function POST(request: NextRequest) {
         }
         
         if (!submitted) {
-          if (errMsg.includes('abort') || errMsg.includes('timeout')) {
+          // ★ 使用增强的错误翻译
+          const translatedError = translateApiError(errMsg);
+          if (errMsg.includes('abort') || errMsg.includes('timeout') || isCloudflareTimeout) {
             return NextResponse.json({
               success: false,
-              error: '提交任务超时，请检查网络后重试',
+              error: isCloudflareTimeout 
+                ? '网络超时（Cloudflare 524/504），建议稍后重试或在管理员面板配置支持 Responses API 的提供商'
+                : translatedError,
               networkError: true,
+              errorCategory: errorClassify.category,
             }, { status: 504 });
           }
           
           if (i === 0) {
             return NextResponse.json({
               success: false,
-              error: `${usedModelName} 提交失败: ${errMsg}`,
+              error: `${usedModelName} 提交失败: ${translatedError}`,
               modelName: usedModelName,
+              errorCategory: errorClassify.category,
             }, { status: 500 });
           }
         }

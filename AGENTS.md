@@ -95,6 +95,10 @@ src/
 │   ├── config.ts                   # 配置文件
 │   ├── api-compatibility.ts        # API 兼容层（通用多提供商适配，自动推断请求格式）
 │   ├── video-api.ts                # 视频API协议适配层（6种协议适配器, 20+视频模型注册表）
+│   ├── api-error-translator.ts     # API错误中文翻译（结构化错误码→中文标题+描述+建议）
+│   ├── size-auto-repair.ts         # 尺寸自动修复（检测Invalid Size错误→16对齐修正）
+│   ├── responses-api-sse.ts        # Responses API SSE保活（/v1/responses+SSE心跳, Feature Flag控制）
+│   ├── smart-retry.ts              # 智能重试引擎（CF 524/504识别+同模型重试+Partial Image兜底）
 │   └── image-tools/
 │       ├── config.ts               # 本地图像工具配置 (环境变量/目录/超时)
 │       ├── file.ts                 # 文件工具 (读取/缩放/保存/清理)
@@ -705,7 +709,19 @@ UPSCALE_TIMEOUT_MS=300000
 
 ## 更新日志
 
-### v3.3.1 (当前版本)
+### v3.4.0 (当前版本)
+
+**P0: Image-Studio 借鉴升级 — 5项容错与稳定性增强**
+- 新增 `api-error-translator.ts`: API错误码结构化中文翻译（9类错误→标题+描述+建议+是否可重试），前端展示友好提示
+- 新增 `size-auto-repair.ts`: 检测 "Invalid size" 错误后自动修正为16对齐的最近合法尺寸，无需用户手动调整
+- 新增 `responses-api-sse.ts`: Responses API SSE 保活路径（`/v1/responses` + SSE心跳事件保持TCP活跃），解决 Cloudflare 524/504 超时断连；Feature Flag 控制，仅 `isResponsesApiSupportedModel()` 匹配时激活，失败自动降级回现有 Images API
+- 新增 `smart-retry.ts`: 智能重试引擎，识别 CF 524/504 超时错误后同模型重试（3次+指数退避），Partial Image 兜底保存半成品图片
+- 集成到 `generate/route.ts`: Responses API 路径尝试→自动降级、CF超时智能重试、Size Auto-Repair
+- 集成到 `poll-task/route.ts`: 错误分类 `classifyApiError()` + CF超时检测 + 中文友好提示
+- 集成到 `infinite-canvas.tsx`: 前端 `translateErrorFrontend()` 增强 CF 524/504 识别
+- **零风险设计**: 所有新功能为纯增量，不修改现有函数签名，Feature Flag 默认关闭，降级路径完整
+
+### v3.3.1
 
 **P0: 生产环境用户数据丢失修复**
 - 发现生产数据库3个用户账号记录丢失（有项目数据但无用户记录），已直接通过 SQL 恢复
