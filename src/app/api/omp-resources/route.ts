@@ -12,10 +12,26 @@ let cachedDataDir: string | null | undefined = undefined;
 function findDataDir(): string | null {
   if (cachedDataDir !== undefined) return cachedDataDir;
   const candidates = [
+    // Standard Next.js layout: process.cwd() == project root
     join(process.cwd(), 'public', 'data', 'omp-resources'),
+    // Alternative: src directory
     join(process.cwd(), 'src', 'data', 'omp-resources'),
+    // Coze deployment: may run from /app/ with .next/ output
+    join(process.cwd(), '.next', 'static', 'data', 'omp-resources'),
+    // Standalone output: server.js in .next/standalone/
+    join(process.cwd(), 'public', 'data', 'omp-resources'),
   ];
-  for (const dir of candidates) {
+  // Also check COZE_WORKSPACE_PATH env var for the project root
+  const cozeWorkspace = process.env.COZE_WORKSPACE_PATH;
+  if (cozeWorkspace) {
+    candidates.push(
+      join(cozeWorkspace, 'public', 'data', 'omp-resources'),
+      join(cozeWorkspace, 'src', 'data', 'omp-resources'),
+    );
+  }
+  // Deduplicate
+  const uniqueCandidates = [...new Set(candidates)];
+  for (const dir of uniqueCandidates) {
     try {
       if (existsSync(join(dir, 'index.json'))) {
         cachedDataDir = dir;

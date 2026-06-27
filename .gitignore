@@ -123,6 +123,7 @@ public/outpaint/
 public/upscaled/
 public/outputs/
 public/data/
+!public/data/omp-resources/
 assets/
 
 # Preview files
