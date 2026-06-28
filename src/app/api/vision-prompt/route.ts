@@ -272,8 +272,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Resolve API key and base URL from server-side provider config only
-    // Build a list of (apiKey, baseUrl, model, preset) candidates to try in order
+    // Resolve API key and base URL — use the user's selected chat model only (no VLM fallback)
+    // Build candidate list: same model across different providers that have it
     interface VisionCandidate {
       apiKey: string;
       baseUrl: string;
@@ -286,6 +286,7 @@ export async function POST(request: NextRequest) {
     const allProviders = (await getApiProviders()).filter(p => p.isEnabled);
 
     if (resolvedProviderId) {
+      // User specified a provider — use it directly
       const provider = allProviders.find(item => item.id === resolvedProviderId);
       if (!provider) {
         return NextResponse.json({ error: 'Admin provider config not found' }, { status: 400 });
@@ -301,51 +302,42 @@ export async function POST(request: NextRequest) {
         });
       }
     } else if (resolvedModel) {
-      // Search across chat, vlm, and image model types for the requested model
-      const provider = await findProviderForModel(resolvedModel, 'chat', resolvedProviderId)
-        || await findProviderForModel(resolvedModel, 'vlm', resolvedProviderId)
-        || await findProviderForModel(resolvedModel, 'image', resolvedProviderId);
-      if (provider?.apiKey) {
-        candidates.push({
-          apiKey: provider.apiKey,
-          baseUrl: normalizeApiBaseUrl(provider.baseUrl),
-          model: resolvedModel,
-          preset: provider.providerPreset,
-          providerName: provider.name,
-        });
-      }
-    }
-
-    // Always add fallback vision-capable models from all providers
-    // Priority: vlm > chat > image providers with vision-capable models
-    for (const modelType of ['vlm', 'chat', 'image'] as const) {
+      // No providerId — find all providers that have this model (user's chat model)
+      // Search across chat, vlm, and image types to find the right provider
       for (const provider of allProviders) {
-        if (provider.modelType !== modelType) continue;
         const models = provider.selectedModels || [];
-        const visionModels = models.filter(m =>
-          /vision|vlm|gemini.*flash|gpt-4o|gpt-4-turbo|claude-3|qwen-vl/i.test(m)
-        );
-        if (visionModels.length > 0) {
-          // Skip if this provider+model is already in candidates
-          const alreadyAdded = candidates.some(c => c.apiKey === provider.apiKey && c.baseUrl === normalizeApiBaseUrl(provider.baseUrl));
-          if (!alreadyAdded) {
-            candidates.push({
-              apiKey: provider.apiKey,
-              baseUrl: normalizeApiBaseUrl(provider.baseUrl),
-              model: visionModels[0],
-              preset: provider.providerPreset,
-              providerName: provider.name,
-            });
-          }
+        if (models.includes(resolvedModel)) {
+          candidates.push({
+            apiKey: provider.apiKey,
+            baseUrl: normalizeApiBaseUrl(provider.baseUrl),
+            model: resolvedModel,
+            preset: provider.providerPreset,
+            providerName: provider.name,
+          });
+        }
+      }
+      // If no provider has the exact model, fall back to findProviderForModel
+      if (candidates.length === 0) {
+        const provider = await findProviderForModel(resolvedModel, 'chat')
+          || await findProviderForModel(resolvedModel, 'vlm')
+          || await findProviderForModel(resolvedModel, 'image');
+        if (provider?.apiKey) {
+          candidates.push({
+            apiKey: provider.apiKey,
+            baseUrl: normalizeApiBaseUrl(provider.baseUrl),
+            model: resolvedModel,
+            preset: provider.providerPreset,
+            providerName: provider.name,
+          });
         }
       }
     }
 
     if (candidates.length === 0) {
-      return NextResponse.json({ error: 'Configure a vision or chat model in admin panel first' }, { status: 400 });
+      return NextResponse.json({ error: '请在聊天面板选择一个支持图片理解的模型（如 GPT-4o、Gemini、Claude 等）' }, { status: 400 });
     }
 
-    console.log(`[vision-prompt] ${candidates.length} candidate(s) to try: ${candidates.map(c => `${c.model}@${c.providerName}`).join(', ')}`);
+    console.log(`[vision-prompt] Using user's chat model: ${candidates.map(c => `${c.model}@${c.providerName}`).join(' → ')}`);
 
     // Convert image to base64 for API accessibility (once, shared across candidates)
     const imageBase64 = await imageUrlToBase64(imageUrl);
