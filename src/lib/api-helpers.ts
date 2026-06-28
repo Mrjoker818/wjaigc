@@ -122,6 +122,7 @@ export async function fetchWithV1Retry(
     && !skipV1Retry
     && !hasVersionPath(cleanBase) 
     && !isUnifiedApiUrl(cleanBase)
+    && !path.startsWith('/v1/') // path已含/v1时跳过，避免双重/v1/v1/
     && (!response.ok || !isJsonLikeResponse(response));
   
   if (shouldRetryV1) {

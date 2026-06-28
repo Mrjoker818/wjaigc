@@ -1072,6 +1072,7 @@ export async function POST(request: NextRequest) {
               },
               body: JSON.stringify(payload),
               signal: controller.signal,
+              skipV1Retry: true, // path已包含/v1，避免重试时出现/v1/v1/双重路径
             },
           );
 
