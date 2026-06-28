@@ -230,7 +230,10 @@ export default function UserCreditsTab({
       return;
     }
     // Directly redirect to payment (mobile browser)
-    window.location.href = orderInfo.payLink;
+    // Use <a> click for better mobile protocol handling (wxp://, https://qr.alipay.com/)
+    const a = document.createElement('a');
+    a.href = orderInfo.payLink;
+    a.click();
   };
 
   // 确认已付款

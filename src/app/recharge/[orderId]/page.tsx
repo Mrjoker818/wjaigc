@@ -75,8 +75,10 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
     try { sessionStorage.setItem(`recharge_pay_${orderId}`, '1'); } catch { /* ignore */ }
     setHasGoneToPay(true);
 
-    // Directly redirect to payment (mobile browser)
-    window.location.href = link;
+    // Use hidden <a> click for better mobile protocol handling (wxp://, https://qr.alipay.com/)
+    const a = document.createElement('a');
+    a.href = link;
+    a.click();
   }
 
   // User confirms payment completed
