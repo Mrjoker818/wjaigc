@@ -28,6 +28,7 @@ function filterSensitiveFields(obj: unknown): unknown {
 interface PollRequest {
   taskId: string;
   version?: 'rapid' | 'pro'; // 混元3D: rapid=极速版, pro=专业版
+  mode?: 'single-image' | 'multi-image' | 'text-to-3d'; // 生成模式
   provider: {
     id?: string;
     name?: string;
@@ -93,11 +94,25 @@ function buildPollConfig(request: PollRequest): PollConfig | undefined {
       };
     }
 
-    case 'meshy':
+    case 'meshy': {
+      // Meshy: multi-image-to-3d / text-to-3d / image-to-3d use same poll pattern
+      if (request.mode === 'text-to-3d') {
+        return {
+          endpoint: `${baseUrl}/text-to-3d/${request.taskId}`,
+          method: 'GET',
+        };
+      }
+      if (request.mode === 'multi-image') {
+        return {
+          endpoint: `${baseUrl}/multi-image-to-3d/${request.taskId}`,
+          method: 'GET',
+        };
+      }
       return {
         endpoint: `${baseUrl}/image-to-3d/${request.taskId}`,
         method: 'GET',
       };
+    }
 
     case 'tripo':
       return {
@@ -277,17 +292,70 @@ export async function POST(request: NextRequest) {
         status = 'running';
       }
     } else {
-      // Generic parsing
+      // Generic parsing (Meshy, Tripo, Rodin, etc.)
       const taskStatus = (data.status || data.StatusCode || data.state) as string | undefined;
-      if (taskStatus === 'succeeded' || taskStatus === 'completed' || taskStatus === 'done') {
+      if (taskStatus === 'SUCCEEDED' || taskStatus === 'succeeded' || taskStatus === 'completed' || taskStatus === 'done') {
         status = 'succeeded';
         const inner = (data.data || data.result || data) as Record<string, unknown>;
-        assetUrl = (inner.model_url || inner.glb_url || inner.obj_url || inner.assetUrl || inner.url) as string | undefined;
-        previewImageUrl = (inner.preview_url || inner.thumbnail_url || inner.previewImageUrl) as string | undefined;
-      } else if (taskStatus === 'failed' || taskStatus === 'error') {
+
+        // Meshy rich response: model_urls, thumbnail_url, thumbnail_urls, texture_urls
+        const meshyModelUrls = data.model_urls as Record<string, string> | undefined;
+        const meshyThumbnailUrl = (data.thumbnail_url || data.alpha_thumbnail_url) as string | undefined;
+        const meshyThumbnailUrls = data.thumbnail_urls as Record<string, string> | undefined;
+        const meshyTextureUrls = data.texture_urls as Array<Record<string, string>> | undefined;
+        const meshyProgress = data.progress as number | undefined;
+
+        if (meshyModelUrls) {
+          // Meshy-style response with rich data
+          assetUrl = meshyModelUrls.glb || meshyModelUrls.obj || meshyModelUrls.fbx;
+          previewImageUrl = meshyThumbnailUrl;
+          modelUrls = { ...meshyModelUrls };
+        } else {
+          assetUrl = (inner.model_url || inner.glb_url || inner.obj_url || inner.assetUrl || inner.url) as string | undefined;
+          previewImageUrl = (inner.preview_url || inner.thumbnail_url || inner.previewImageUrl) as string | undefined;
+        }
+
+        // Include extra metadata for frontend
+        const extraData: Record<string, unknown> = {};
+        if (meshyThumbnailUrls) extraData.thumbnail_urls = meshyThumbnailUrls;
+        if (meshyTextureUrls) extraData.texture_urls = meshyTextureUrls;
+        if (meshyProgress !== undefined) extraData.progress = meshyProgress;
+        if (data.consumed_credits !== undefined) extraData.consumed_credits = data.consumed_credits;
+
+        return NextResponse.json({
+          success: true,
+          taskId: body.taskId,
+          status,
+          assetUrl,
+          previewImageUrl,
+          modelUrls,
+          ...(Object.keys(extraData).length > 0 ? extraData : {}),
+          rawData: filterSensitiveFields(data),
+        });
+      } else if (taskStatus === 'FAILED' || taskStatus === 'failed' || taskStatus === 'error') {
         status = 'failed';
+        const taskError = data.task_error as Record<string, unknown> | undefined;
+        const errorMsg = (taskError?.message || data.error_message || data.message) as string | undefined;
+        return NextResponse.json({
+          success: true,
+          taskId: body.taskId,
+          status,
+          error: errorMsg || '3D generation failed',
+          rawData: filterSensitiveFields(data),
+        });
       } else {
+        // PENDING / IN_PROGRESS / running
         status = 'running';
+        const progress = data.progress as number | undefined;
+        const precedingTasks = data.preceding_tasks as number | undefined;
+        return NextResponse.json({
+          success: true,
+          taskId: body.taskId,
+          status,
+          progress: progress || 0,
+          precedingTasks,
+          rawData: filterSensitiveFields(data),
+        });
       }
     }
 

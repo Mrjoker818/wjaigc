@@ -83,7 +83,10 @@ export interface CanvasImage {
   apiProvider?: string;
   apiBaseUrl?: string;
   threeDModelUrl?: string;
-  threeDModelUrls?: string[];
+  threeDModelUrls?: Record<string, string>;
+  threeDThumbnailUrls?: Record<string, string>;
+  threeDTextureUrls?: Array<Record<string, string>>;
+  threeDModelInfo?: { faceCount?: number; vertexCount?: number; fileSize?: string };
   isProcessingPlaceholder?: boolean;
   processing?: string;
   generatedFromImageId?: string;

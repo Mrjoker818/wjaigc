@@ -16,7 +16,7 @@ import { EventEmitter } from 'events';
 
 // ─── 类型 ────────────────────────────────────────────────────────────
 
-export type TaskType = 'generate' | 'generate-async' | 'image-edit' | 'edit' | 'svg-trace' | 'upscale' | 'removebg' | 'extend' | 'mask' | 'erase' | 'vectorize' | 'segment' | 'batch' | 'outpaint' | 'multi-angle' | 'brand-generate' | 'brand-ecommerce' | 'refine-engine' | 'font-design' | 'ai-psd' | 'video' | 'packaging' | 'display3d' | 'display3d-decompose';
+export type TaskType = 'generate' | 'generate-async' | 'image-edit' | 'edit' | 'svg-trace' | 'upscale' | 'removebg' | 'extend' | 'mask' | 'erase' | 'vectorize' | 'segment' | 'batch' | 'outpaint' | 'multi-angle' | 'brand-generate' | 'brand-ecommerce' | 'refine-engine' | 'font-design' | 'ai-psd' | 'video' | 'packaging' | 'display3d' | 'display3d-decompose' | '3d' | '3d-auto-multi-view' | '3d-retexture' | '3d-remesh';
 export type TaskStatus = 'queued' | 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
 
 export interface TaskInfo {

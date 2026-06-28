@@ -32,7 +32,13 @@ src/
 │       ├── optimize-prompt/route.ts # 提示词优化 API
 │       ├── analyze-psd/route.ts    # AI 视觉分析图片结构 API
 │       ├── vision-prompt/route.ts  # 图片识词 API (SSE流+JSON双模式)
-│       ├── poll-3d-task/route.ts   # 3D 模型任务轮询 API
+│       ├── image-to-3d/
+│       │   ├── route.ts            # 图片转3D API (单图/多图/文生3D, 4提供商Hunyuan3D/Meshy/Tripo/Rodin)
+│       │   ├── auto-multi-view/route.ts  # 自动多视角转3D API (AI生成4视角图→合并转3D)
+│       │   ├── meshy-stream/route.ts    # Meshy SSE流式进度代理 API
+│       │   ├── post-process/route.ts    # 3D后处理API (重贴图/减面, Meshy Retexture/Remesh)
+│       │   └── poll-post-process/route.ts  # 3D后处理轮询API
+│       ├── poll-3d-task/route.ts   # 3D 模型任务轮询 API (支持Meshy SSE流式+多图结果)
 │       ├── segment-elements/route.ts  # 元素分层 API (支持管理员配置的分层模型)
 │       ├── edit/route.ts             # 语言修图 API (OpenAI + Gemini，自然语言描述修改图片，异步提交+轮询)
 │       ├── image-edit/route.ts       # 图片编辑 API (擦除/蒙版/放大/扩展，AI优先+BFS兜底，异步提交+轮询)
@@ -73,7 +79,7 @@ src/
 │   ├── agent-editor.tsx             # Agent编排编辑器组件 (智能选择工具，多轮编辑)
 │   ├── font-design-panel.tsx        # 字境大师Pro字体设计面板 (黑金/单色双主题, 左右分栏)
 │   ├── node-editor.tsx              # 节点编辑器组件 (工作流DAG编辑, AI建图, 提示词库, 画布助手, 撤销重做)
-│   ├── model-viewer-3d.tsx         # 3D 模型预览组件
+│   ├── model-viewer-3d.tsx         # 3D 模型预览组件 (视角切换/光照/线框/下载/后处理/多视角缩略图)
 │   ├── image-editor/
 │   │   ├── ImageEditPanel.tsx      # 擦除/蒙版修图浮窗面板 (黑金UI)
 │   │   ├── ImageEditToolbar.tsx    # 图像编辑工具栏
@@ -259,9 +265,30 @@ scripts/
   - Studio: 精细矢量化（6bit颜色精度，5次Chaikin平滑，最精细简化）
 - **关键参数**: colorPrecision / cornerThreshold / filterSpeckle / segmentLength / spliceThreshold
 
-### 8. 3D 模型预览 (model-viewer-3d.tsx)
-- 基于 Three.js + OrbitControls
-- 左键旋转 · 滚轮缩放（已移除右键平移避免冲突）
+### 8. 3D 模型生成与预览
+
+- **3D模型生成** (api/image-to-3d/)
+  - 支持3种模式：单图转3D / 多图转3D / 文生3D
+  - 支持4种提供商：Hunyuan3D(3.0/3.1八视图) / Meshy(5/6) / Tripo / Rodin
+  - 高级参数：PBR材质 / 目标面数 / 姿态模式(A-Pose/T-Pose) / 导出格式(GLB/OBJ/FBX/USDZ/STL)
+  - 自动多视角生成：AI先生成4视角图(front/left/right/back)再合并转3D
+  - Meshy SSE流式进度推送（替代轮询）
+  - 3D后处理：重贴图(retexture) / 重网格(remesh)
+- **3D模型预览** (model-viewer-3d.tsx)
+  - 基于 Three.js + OrbitControls
+  - 6预设视角(前/后/左/右/上/下)一键切换
+  - 3种光照模式(柔和/影棚/户外) + 线框/实体/材质切换
+  - 自动旋转开关 + 中键平移 + 双指缩放
+  - 多视角缩略图(front/right/back/left)
+  - 格式选择下载(GLB/OBJ/FBX/USDZ/STL)
+  - 模型信息面板(面数/顶点数/文件大小)
+  - 一键截图导出PNG
+  - 后处理按钮(重贴图/重网格)
+- **画布3D弹窗** (infinite-canvas.tsx)
+  - 单图/多图/文生3D 三Tab切换
+  - 多图模式：8个视角槽位(正面/左面/右面/背面/顶面/底面/自由1/自由2)
+  - 自动生成视角图按钮(AI先出图再转3D)
+  - 高级参数面板(PBR/面数/格式/姿态)
 
 ### 9. 图片识词 (vision-prompt API)
 - 支持图片URL上传识别关键词
@@ -710,7 +737,47 @@ UPSCALE_TIMEOUT_MS=300000
 
 ## 更新日志
 
-### v3.4.0 (当前版本)
+### v3.5.0 (当前版本)
+
+**P0: 图片转3D全面升级 — 多图/文生3D/3D预览器增强**
+- `api/image-to-3d/route.ts` 全面升级：新增 `mode` 字段支持 `single-image`/`multi-image`/`text-to-3d` 三种模式
+- 新增 `images` 多图数组字段，支持1-8张不同视角图片输入
+- 新增 `prompt` 文生3D描述字段
+- 新增 `enablePBR`/`faceCount`/`pose` 参数，支持PBR材质/目标面数/A-Pose/T-Pose
+- Meshy 提供商适配 `/openapi/v1/multi-image-to-3d` 多图端点 + `/openapi/v1/text-to-3d` 文生3D端点
+- Tripo(阿里云) 提供商适配 `images` 多图数组 + `prompt` 文生3D
+- 混元3D 3.1 提供商适配 `MultiViewImages` 八视图输入
+- Rodin 提供商适配多图输入
+- `api/poll-3d-task/route.ts` 升级：Meshy 多图任务轮询 + 返回 `thumbnail_urls`/`texture_urls`/`model_urls` 多格式/多视角
+- 画布3D弹窗重构：单图/多图/文生3D三Tab切换UI
+  - 单图模式：当前选中图片预览
+  - 多图模式：8个视角上传槽位(正面/左面/右面/背面/顶面/底面/自由1/自由2)，支持拖拽上传
+  - 文生3D模式：文字描述输入框
+  - 新增：纹理质量(标准/PBR/4K)、目标面数、导出格式(GLB/OBJ/FBX/USDZ/STL)、姿态模式(无/A-Pose/T-Pose)
+- `model-viewer-3d.tsx` 3D预览器全面升级：
+  - 6个预设视角一键切换(前/后/左/右/上/下)
+  - 3种光照模式(柔和/影棚/户外)
+  - 4种材质显示(实体/线框/材质/PBR)
+  - 自动旋转开关
+  - 多格式下载(GLB/OBJ/FBX/USDZ/STL)
+  - 模型信息面板(面数/顶点数/文件大小/提供商/模型)
+  - 4格多视角缩略图(front/right/back/left)
+  - 重贴图/减面后处理按钮
+  - 截图导出PNG
+
+**P1: 工作流3D节点增强**
+- `ai-3d-model` 节点字段扩展：mode/prompt/texture/enablePBR/faceCount/format/pose
+- 新增 `image_multi` 输入端口类型，支持从上游接收多张图片
+- 执行逻辑扩展：多图模式构建 `images` 数组传递给 `/api/image-to-3d`
+
+**P2: 高级3D功能**
+- 混元3D 3.1 八视图支持：API路由自动在多图模式下使用 `Model: '3.1'` + `MultiViewImages`
+- 多视角自动生成：新增 `/api/image-to-3d/auto-multi-view` API，AI先用图像模型生成4个视角图，再自动提交3D转换
+- Meshy SSE流式进度：新增 `/api/image-to-3d/meshy-stream` SSE代理端点，代理Meshy API的SSE事件流
+- 3D模型后处理：新增 `/api/image-to-3d/post-process` + `/api/image-to-3d/poll-post-process` API，支持重贴图(retexture)/减面(remesh)
+- `task-registry.ts` 新增 `3d-retexture`/`3d-remesh` 任务类型
+
+### v3.4.0
 
 **P0: Image-Studio 借鉴升级 — 5项容错与稳定性增强**
 - 新增 `api-error-translator.ts`: API错误码结构化中文翻译（9类错误→标题+描述+建议+是否可重试），前端展示友好提示

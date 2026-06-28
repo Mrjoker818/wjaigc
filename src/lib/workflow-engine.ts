@@ -303,7 +303,7 @@ export const NODE_TEMPLATES: { type: NodeType; category: NodeCategory; label: st
   { type: 'ai-brand-ecommerce', category: 'ai', label: '品牌电商', desc: '电商视觉内容生成' },
   { type: 'ai-segment', category: 'ai', label: '元素分层', desc: '智能分层+PSD导出' },
   { type: 'ai-multi-angle', category: 'ai', label: '多角度生成', desc: '多视角旋转生成' },
-  { type: 'ai-3d-model', category: 'ai', label: '3D模型', desc: '图片转3D模型预览' },
+  { type: 'ai-3d-model', category: 'ai', label: '3D模型', desc: '单图/多图转3D模型，支持文生3D' },
   { type: 'condition-if', category: 'logic', label: '条件分支', desc: 'If/Else 条件判断' },
   { type: 'condition-switch', category: 'logic', label: '开关分支', desc: '多路选择器' },
   { type: 'loop-for', category: 'logic', label: '循环', desc: '固定次数循环' },
@@ -339,6 +339,10 @@ function createDefaultPorts(type: NodeType): NodePort[] {
       // AI节点都有图片输入和提示词输入
       ports.push({ id: 'in-image', label: '图片', type: 'image', direction: 'in' });
       ports.push({ id: 'in-prompt', label: '提示词', type: 'prompt', direction: 'in' });
+      // 3D模型节点额外添加多图输入端口
+      if (type === 'ai-3d-model') {
+        ports.push({ id: 'in-image-multi', label: '多图', type: 'image', direction: 'in' });
+      }
     } else if (type === 'video-speed-change' || type === 'video-filter' || type === 'video-trim') {
       // 视频后处理节点：视频输入
       ports.push({ id: 'in-video', label: '视频', type: 'video', direction: 'in' });
@@ -380,6 +384,9 @@ function createDefaultPorts(type: NodeType): NodePort[] {
       // 视频节点输出video端口
       if (type === 'ai-video-generate' || type === 'ai-video-i2v') {
         ports.push({ id: 'out-video', label: '视频', type: 'video', direction: 'out' });
+      } else if (type === 'ai-3d-model') {
+        ports.push({ id: 'out-image', label: '缩略图', type: 'image', direction: 'out' });
+        ports.push({ id: 'out-model', label: '3D模型', type: 'data', direction: 'out' });
       } else {
         ports.push({ id: 'out-image', label: '图片', type: 'image', direction: 'out' });
       }
@@ -728,9 +735,27 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
 
   if (type === 'ai-3d-model') {
     fields.push({ key: 'model', label: '3D模型', type: 'model-select', modelFilter: '3d' });
+    fields.push({ key: 'mode', label: '生成模式', type: 'select', options: [
+      { label: '单图转3D', value: 'single-image' },
+      { label: '多图转3D', value: 'multi-image' },
+      { label: '文生3D', value: 'text-to-3d' },
+    ], defaultValue: 'single-image' });
+    fields.push({ key: 'prompt', label: '3D描述', type: 'textarea', placeholder: '文生3D时填写描述...' });
     fields.push({ key: 'quality', label: '模型质量', type: 'select', options: [
-      { label: '标准', value: 'standard' }, { label: '高清', value: 'hd' }
+      { label: '标准', value: 'standard' }, { label: '高清', value: 'hd' }, { label: '极致', value: 'ultra' }
     ], defaultValue: 'standard' });
+    fields.push({ key: 'texture', label: '纹理质量', type: 'select', options: [
+      { label: '标准', value: 'standard' }, { label: 'PBR', value: 'pbr' }, { label: '4K高清', value: '4k' }
+    ], defaultValue: 'standard' });
+    fields.push({ key: 'enablePBR', label: 'PBR材质', type: 'toggle', defaultValue: false });
+    fields.push({ key: 'faceCount', label: '目标面数', type: 'number', min: 3000, max: 1500000, defaultValue: 30000 });
+    fields.push({ key: 'format', label: '导出格式', type: 'select', options: [
+      { label: 'GLB', value: 'glb' }, { label: 'OBJ', value: 'obj' }, { label: 'FBX', value: 'fbx' },
+      { label: 'USDZ', value: 'usdz' }, { label: 'STL', value: 'stl' }
+    ], defaultValue: 'glb' });
+    fields.push({ key: 'pose', label: '姿态模式', type: 'select', options: [
+      { label: '无', value: '' }, { label: 'A-Pose', value: 'a-pose' }, { label: 'T-Pose', value: 't-pose' }
+    ], defaultValue: '' });
   }
 
   // ─── 逻辑控制节点 ───
@@ -1413,11 +1438,35 @@ export function buildNodeExecutionRequest(
       return null;
 
     case 'ai-3d-model': {
+      const t3dMode = (config.mode as string) || 'single-image';
       const t3dBody: Record<string, unknown> = {
         imageUrl: config.imageUrl || '',
         model: config.model || '',
         quality: config.quality || 'standard',
+        mode: t3dMode,
+        texture: config.texture || 'standard',
+        format: config.format || 'glb',
       };
+      // 文生3D模式传递prompt
+      if (t3dMode === 'text-to-3d' && config.prompt) {
+        t3dBody.prompt = config.prompt;
+      }
+      // 多图模式传递images数组
+      if (t3dMode === 'multi-image' && config.images) {
+        t3dBody.images = config.images;
+      }
+      // PBR材质
+      if (config.enablePBR) {
+        t3dBody.enablePBR = true;
+      }
+      // 目标面数
+      if (config.faceCount && Number(config.faceCount) > 0) {
+        t3dBody.faceCount = Number(config.faceCount);
+      }
+      // 姿态模式
+      if (config.pose) {
+        t3dBody.pose = config.pose;
+      }
       if (config.providerId) t3dBody.providerId = config.providerId;
       return {
         endpoint: '/api/poll-3d-task',

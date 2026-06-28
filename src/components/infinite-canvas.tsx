@@ -326,6 +326,9 @@ export interface CanvasImage {
   svgDataUrl?: string; // 保存SVG数据用于下载（画布显示PNG预览时）
   svgUrl?: string; // SVG服务器文件URL（轻量级，用于下载矢量图，避免存储超大svgDataUrl）
   threeDModelUrls?: Record<string, string>;
+  threeDThumbnailUrls?: Record<string, string>;
+  threeDTextureUrls?: Array<Record<string, string>>;
+  threeDModelInfo?: { faceCount?: number; vertexCount?: number; fileSize?: string };
   negativePrompt?: string;
   modelName?: string;
   /** ID of the source image that this image was generated from (for SVG connection lines) */
@@ -1291,12 +1294,14 @@ export function InfiniteCanvas({
   const [imageEditMode, setImageEditMode] = useState<'erase' | 'mask'>('erase');
   const [threeDBackend, setThreeDBackend] = useState<ThreeDBackend>('api');
   const [threeDType, setThreeDType] = useState<ThreeDType>('ip');
-
   // 3D Model Viewer state
   const [show3DViewer, setShow3DViewer] = useState(false);
   const [viewer3DModelUrl, setViewer3DModelUrl] = useState('');
   const [viewer3DPreviewUrl, setViewer3DPreviewUrl] = useState('');
   const [viewer3DModelUrls, setViewer3DModelUrls] = useState<Record<string, string>>({});
+  const [viewer3DThumbnailUrls, setViewer3DThumbnailUrls] = useState<Record<string, string>>({});
+  const [viewer3DTextureUrls, setViewer3DTextureUrls] = useState<Array<Record<string, string>>>([]);
+  const [viewer3DModelInfo, setViewer3DModelInfo] = useState<{ faceCount?: number; vertexCount?: number; fileSize?: string; providerId?: string; modelTaskId?: string }>({});
 
   // Video player state
   const [videoPlayerUrl, setVideoPlayerUrl] = useState('');
@@ -1344,6 +1349,15 @@ export function InfiniteCanvas({
   const [threeDQuality, setThreeDQuality] = useState('high');
   const [threeDTexture, setThreeDTexture] = useState('4k');
   const [threeDFormat, setThreeDFormat] = useState('glb');
+
+  // 3D mode: single-image / multi-image / text-to-3d
+  const [threeDMode, setThreeDMode] = useState<'single-image' | 'multi-image' | 'text-to-3d'>('single-image');
+  const [threeDPrompt, setThreeDPrompt] = useState('');
+  const [threeDEnablePBR, setThreeDEnablePBR] = useState(false);
+  const [threeDFaceCount, setThreeDFaceCount] = useState(30000);
+  const [threeDPose, setThreeDPose] = useState<'' | 'a-pose' | 't-pose'>('');
+  // Multi-image views for 3D generation
+  const [threeDMultiImages, setThreeDMultiImages] = useState<Array<{ url: string; view: string; label: string }>>([]);
 
   const [threeDProviderId, setThreeDProviderId] = useState('');
   const [threeDLocalEndpoint, setThreeDLocalEndpoint] = useState('http://127.0.0.1:7860/api/image-to-3d');
@@ -6684,19 +6698,32 @@ export function InfiniteCanvas({
   }, [selectedImageData]);
 
   const handleOpen3D = useCallback(() => {
-    if (!selectedImageData) return;
+    if (!selectedImageData && threeDMode === 'single-image') return;
     const providers = getThreeDProviders();
     if (!threeDProviderId && providers[0]) {
       setThreeDProviderId(providers[0].id);
     }
+    // Auto-add selected image as front view for multi-image mode
+    if (selectedImageData && threeDMode === 'multi-image' && !threeDMultiImages.find(img => img.view === 'front')) {
+      setThreeDMultiImages(prev => [{ url: selectedImageData.url, view: 'front', label: '正面' }, ...prev]);
+    }
     setShow3DModal(true);
     setActiveTool('to3d');
     setThreeDProgress(null);
-  }, [selectedImageData, getThreeDProviders, threeDProviderId]);
+  }, [selectedImageData, getThreeDProviders, threeDProviderId, threeDMode, threeDMultiImages]);
 
   const handle3DConfirm = useCallback(async () => {
     const img = getActiveImageData();
-    if (!img) return;
+    // For text-to-3D, no image is needed; for single-image, image is required
+    if (threeDMode === 'single-image' && !img) return;
+    if (threeDMode === 'text-to-3d' && !threeDPrompt.trim()) {
+      alert('请输入3D模型描述');
+      return;
+    }
+    if (threeDMode === 'multi-image' && threeDMultiImages.length === 0) {
+      alert('请至少上传一张图片');
+      return;
+    }
     const modelInfo = getCurrentModel();
     const providers = getThreeDProviders();
     const provider = providers.find(p => p.id === threeDProviderId);
@@ -6707,13 +6734,10 @@ export function InfiniteCanvas({
 
     setThreeDProgress('正在创建 3D 转换任务...');
     try {
-      const placeholderId = createProcessingFrameRightOf(
-        img,
-        '转 3D 中',
-        img.width,
-        img.height,
-        '正在创建图生 3D 任务...'
-      );
+      const sourceImage = img || selectedImageData;
+      const placeholderId = sourceImage
+        ? createProcessingFrameRightOf(sourceImage, '转 3D 中', sourceImage.width, sourceImage.height, '正在创建图生 3D 任务...')
+        : createProcessingFrameRightOf({ x: 100, y: 100, width: 300, height: 200 } as any, '转 3D 中', 300, 200, '正在创建文生 3D 任务...');
       updateProcessingFrame(placeholderId, { progress: 16, status: '正在提交 3D 转换参数...' });
       // 关闭3D弹窗，回到画布查看进度
       setShow3DModal(false);
@@ -6727,13 +6751,19 @@ export function InfiniteCanvas({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          imageUrl: img.url,
+          imageUrl: sourceImage?.url || '',
+          mode: threeDMode,
+          images: threeDMode === 'multi-image' ? threeDMultiImages : undefined,
+          prompt: threeDMode === 'text-to-3d' ? threeDPrompt : undefined,
           backend: threeDBackend,
           type: threeDType,
           quality: threeDQuality,
           texture: threeDTexture,
           format: threeDFormat,
           version: threeDVersion,
+          enablePBR: threeDEnablePBR,
+          faceCount: threeDFaceCount,
+          pose: threeDPose,
           provider,
           local: {
             endpoint: threeDLocalEndpoint,
@@ -6816,19 +6846,22 @@ export function InfiniteCanvas({
         previewUrl = data.previewImageUrl || data.assetUrl;
       } else {
         // No taskId and no assetUrl - fallback
-        previewUrl = data.previewImageUrl || await renderEditElementsPreview(img);
+        previewUrl = data.previewImageUrl || (img ? await renderEditElementsPreview(img) : '');
       }
 
       updateProcessingFrame(placeholderId, { progress: 94, status: '正在载入 3D 预览...' });
       // Pick first available model URL from modelUrls (format-agnostic), then fallback
       const firstModelEntry = threeDModelUrls ? Object.values(threeDModelUrls).find((v: string) => v && typeof v === 'string') as string | undefined : undefined;
       const threeDAssetUrl = firstModelEntry || data.assetUrl || '';
-      completeProcessingFrame(placeholderId, previewUrl || '', img.width, img.height, {
-        originalWidth: img.originalWidth || Math.round(img.width),
-        originalHeight: img.originalHeight || Math.round(img.height),
+      completeProcessingFrame(placeholderId, previewUrl || '', img?.width || 1024, img?.height || 1024, {
+        originalWidth: img?.originalWidth || Math.round(img?.width || 1024),
+        originalHeight: img?.originalHeight || Math.round(img?.height || 1024),
         modifyPrompt: `图生3D/${threeDType}/${threeDBackend}/${threeDQuality}/${threeDFormat}${threeDAssetUrl ? ` → ${threeDAssetUrl}` : ''}`,
         threeDModelUrl: threeDAssetUrl || data.assetUrl || '',
         threeDModelUrls: threeDModelUrls || data.modelUrls,
+        threeDThumbnailUrls: data.thumbnailUrls || {},
+        threeDTextureUrls: data.textureUrls || [],
+        threeDModelInfo: { ...(data.modelInfo || {}), providerId: modelInfo.providerId || '', modelTaskId: data.taskId || '' },
         modelName: modelInfo.apiDisplayName || modelInfo.model,
         apiProvider: modelInfo.providerName || '',
       }, 'variant');
@@ -6838,7 +6871,7 @@ export function InfiniteCanvas({
       alert('图生 3D 调用失败，请检查 API 或本地模型服务');
       setThreeDProgress(null);
     }
-  }, [selectedImageData, getThreeDProviders, threeDProviderId, threeDBackend, threeDType, threeDQuality, threeDTexture, threeDFormat, threeDLocalEndpoint, threeDLocalModel, renderEditElementsPreview, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, removeProcessingFrame]);
+  }, [selectedImageData, getThreeDProviders, threeDProviderId, threeDBackend, threeDMode, threeDMultiImages, threeDPrompt, threeDType, threeDQuality, threeDTexture, threeDFormat, threeDEnablePBR, threeDFaceCount, threeDPose, threeDLocalEndpoint, threeDLocalModel, renderEditElementsPreview, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, removeProcessingFrame]);
 
   // 4. ERASE - floating window mode
   const handleOpenErase = useCallback(() => {
@@ -7726,7 +7759,7 @@ export function InfiniteCanvas({
   ] : [
     { label: '复制', shortcut: 'Ctrl+C', action: () => { const img = selectedImageData; if (img) handleCopyImage(img); } },
     { label: '下载', action: () => { handleOpenDownload(); } },
-    ...(selectedImageData?.threeDModelUrl ? [{ label: '3D 预览', action: () => { setViewer3DModelUrl(selectedImageData.threeDModelUrl || ''); setViewer3DPreviewUrl(selectedImageData.url); setViewer3DModelUrls(selectedImageData.threeDModelUrls || {}); setShow3DViewer(true); } }] : []),
+    ...(selectedImageData?.threeDModelUrl ? [{ label: '3D 预览', action: () => { setViewer3DModelUrl(selectedImageData.threeDModelUrl || ''); setViewer3DPreviewUrl(selectedImageData.url); setViewer3DModelUrls(selectedImageData.threeDModelUrls || {}); setViewer3DThumbnailUrls(selectedImageData.threeDThumbnailUrls || {}); setViewer3DTextureUrls(selectedImageData.threeDTextureUrls || []); setViewer3DModelInfo(selectedImageData.threeDModelInfo || {}); setShow3DViewer(true); } }] : []),
     ...(selectedImageData?.mediaType === 'video' && selectedImageData?.videoUrl ? [{ label: '播放视频', action: () => { setVideoPlayerUrl(selectedImageData.videoUrl!); setVideoPlayerVisible(true); } }] : []),
     ...(selectedImageData?.mediaType === 'video' && selectedImageData?.videoUrl ? [{ label: '视频编辑', action: () => { setVideoEditTarget(selectedImageData); setShowVideoEditPanel(true); } }] : []),
     ...(selectedImageData?.mediaType === 'video' && selectedImageData?.videoUrl ? [{ label: '视频延长', action: () => { setVideoEditTarget(selectedImageData); setShowVideoEditPanel(true); setVideoEditTab('extend'); } }] : []),
@@ -8536,6 +8569,9 @@ export function InfiniteCanvas({
                         setViewer3DModelUrl(image.threeDModelUrl || '');
                         setViewer3DPreviewUrl(image.url);
                         setViewer3DModelUrls(image.threeDModelUrls || {});
+                        setViewer3DThumbnailUrls(image.threeDThumbnailUrls || {});
+                        setViewer3DTextureUrls(image.threeDTextureUrls || []);
+                        setViewer3DModelInfo(image.threeDModelInfo || {});
                         setShow3DViewer(true);
                       }}
                       className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md font-bold shadow-lg transition-colors cursor-pointer ${isMonochrome ? 'bg-blue-500/90 text-white hover:bg-blue-500' : 'bg-gold/90 text-black hover:bg-gold'}`}
@@ -11987,11 +12023,11 @@ export function InfiniteCanvas({
 
 
         {/* ====== IMAGE TO 3D MODAL ====== */}
-        {show3DModal && selectedImageData && (() => {
+        {show3DModal && (() => {
           const providers = getThreeDProviders();
           return (
             <div
-              className="fixed inset-0 z-[998] flex items-center justify-center bg-[#1a1a1a]"
+              className="fixed inset-0 z-[998] flex items-center justify-center bg-[#1a1a1a]/80"
               data-modal="3d-conversion"
               onMouseDown={(e) => e.stopPropagation()}
               onWheel={(e) => e.stopPropagation()}
@@ -12002,13 +12038,14 @@ export function InfiniteCanvas({
                 }
               }}
             >
-              <div className={`w-[520px] max-h-[86vh] overflow-hidden rounded-2xl border shadow-2xl ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-[#444]'}`}>
+              <div className={`w-[560px] max-h-[90vh] overflow-hidden rounded-2xl border shadow-2xl ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-[#444]'}`}>
+                {/* Header */}
                 <div className={`flex items-center justify-between px-4 py-3 border-b ${isMonochrome ? 'border-gray-100' : 'border-white/[0.14]'}`}>
                   <div className="flex items-center gap-2">
                     <BoxIcon size={16} className={isMonochrome ? 'text-blue-500' : 'text-gold'} />
                     <div>
-                      <div className={`text-sm font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>一键转 3D</div>
-                      <div className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#777]'}`}>API 大模型 / 本地模型双后端，结果会在当前图片右侧生成</div>
+                      <div className={`text-sm font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>转换 3D 模型</div>
+                      <div className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#777]'}`}>支持单图/多图/文生3D，结果在当前图片右侧生成</div>
                     </div>
                   </div>
                   <button
@@ -12020,12 +12057,169 @@ export function InfiniteCanvas({
                   </button>
                 </div>
 
-                <div className="p-4 space-y-4 overflow-y-auto max-h-[70vh]">
-                  {/* Source image thumbnail - larger display */}
-                  <div className={`rounded-2xl overflow-hidden flex items-center justify-center p-3 ${isMonochrome ? 'bg-gray-50' : 'bg-[#0a0a0a]/90'}`}>
-                    <img src={selectedImageData.url} alt="3D source" className="max-w-full max-h-[200px] object-contain rounded-lg" />
+                <div className="p-4 space-y-3 overflow-y-auto max-h-[75vh]">
+                  {/* Mode tabs */}
+                  <div className={`grid grid-cols-3 gap-1.5 p-1 rounded-xl ${isMonochrome ? 'bg-gray-100' : 'bg-[#0a0a0a]/90'}`}>
+                    {([
+                      { value: 'single-image' as const, label: '单图转3D', icon: '🖼' },
+                      { value: 'multi-image' as const, label: '多图转3D', icon: '📷' },
+                      { value: 'text-to-3d' as const, label: '文生3D', icon: '✏️' },
+                    ]).map(item => (
+                      <button
+                        key={item.value}
+                        onClick={() => setThreeDMode(item.value)}
+                        className={`px-3 py-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1.5 ${
+                          threeDMode === item.value
+                            ? isMonochrome ? 'bg-blue-500 text-white shadow-sm' : 'bg-gold text-black shadow-sm'
+                            : isMonochrome ? 'text-blue-500 hover:text-blue-700' : 'text-[#777] hover:text-white'
+                        }`}
+                      >
+                        <span>{item.icon}</span>
+                        <span>{item.label}</span>
+                      </button>
+                    ))}
                   </div>
 
+                  {/* Single image mode - show source image */}
+                  {threeDMode === 'single-image' && selectedImageData && (
+                    <div className={`rounded-2xl overflow-hidden flex items-center justify-center p-3 ${isMonochrome ? 'bg-gray-50' : 'bg-[#0a0a0a]/90'}`}>
+                      <img src={selectedImageData.url} alt="3D source" className="max-w-full max-h-[160px] object-contain rounded-lg" />
+                    </div>
+                  )}
+
+                  {/* Multi-image mode - view slots */}
+                  {threeDMode === 'multi-image' && (
+                    <div className="space-y-2">
+                      <div className={`text-xs ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`}>
+                        上传同一物体不同角度的图片，获得更精准的3D模型
+                      </div>
+                      <div className="grid grid-cols-4 gap-2">
+                        {[
+                          { view: 'front', label: '正面' },
+                          { view: 'left', label: '左面' },
+                          { view: 'right', label: '右面' },
+                          { view: 'back', label: '背面' },
+                          { view: 'top', label: '顶面' },
+                          { view: 'bottom', label: '底面' },
+                          { view: 'free1', label: '自由1' },
+                          { view: 'free2', label: '自由2' },
+                        ].map(slot => {
+                          const existing = threeDMultiImages.find(img => img.view === slot.view);
+                          return (
+                            <div key={slot.view} className="flex flex-col items-center gap-1">
+                              <div
+                                className={`w-full aspect-square rounded-xl border-2 border-dashed flex flex-col items-center justify-center overflow-hidden relative cursor-pointer transition-colors ${
+                                  existing
+                                    ? isMonochrome ? 'border-blue-400 bg-blue-50' : 'border-gold/60 bg-gold/5'
+                                    : isMonochrome ? 'border-gray-300 bg-gray-50 hover:border-blue-400 hover:bg-blue-50' : 'border-white/20 bg-[#0a0a0a]/90 hover:border-gold/40 hover:bg-gold/5'
+                                }`}
+                                onClick={() => {
+                                  // If existing, remove it
+                                  if (existing) {
+                                    setThreeDMultiImages(prev => prev.filter(img => img.view !== slot.view));
+                                    return;
+                                  }
+                                  // Otherwise open file picker
+                                  const input = document.createElement('input');
+                                  input.type = 'file';
+                                  input.accept = 'image/*';
+                                  input.onchange = async (e) => {
+                                    const file = (e.target as HTMLInputElement).files?.[0];
+                                    if (!file) return;
+                                    const formData = new FormData();
+                                    formData.append('file', file);
+                                    try {
+                                      const res = await fetch('/api/save-image', { method: 'POST', body: formData });
+                                      const data = await res.json();
+                                      if (data.url) {
+                                        setThreeDMultiImages(prev => [...prev.filter(img => img.view !== slot.view), { url: data.url, view: slot.view, label: slot.label }]);
+                                      }
+                                    } catch { /* ignore */ }
+                                  };
+                                  input.click();
+                                }}
+                              >
+                                {existing ? (
+                                  <>
+                                    <img src={existing.url} alt={slot.label} className="w-full h-full object-cover absolute inset-0" />
+                                    <div className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/60 flex items-center justify-center">
+                                      <X size={10} className="text-white" />
+                                    </div>
+                                  </>
+                                ) : (
+                                  <Plus size={18} className={isMonochrome ? 'text-gray-400' : 'text-white/30'} />
+                                )}
+                              </div>
+                              <span className={`text-[10px] ${isMonochrome ? 'text-gray-500' : 'text-[#666]'}`}>{slot.label}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {/* Quick add: use selected canvas image as front view */}
+                      {selectedImageData && !threeDMultiImages.find(img => img.view === 'front') && (
+                        <button
+                          onClick={() => setThreeDMultiImages(prev => [...prev, { url: selectedImageData.url, view: 'front', label: '正面' }])}
+                          className={`w-full py-2 rounded-xl text-xs border transition-colors ${isMonochrome ? 'border-blue-200 text-blue-600 hover:bg-blue-50' : 'border-gold/30 text-gold hover:bg-gold/10'}`}
+                        >
+                          + 使用当前选中图片作为正面
+                        </button>
+                      )}
+                      {/* Auto-generate multi-view images using AI */}
+                      <button
+                        onClick={async () => {
+                          const prompt = threeDPrompt || '一个精美的3D物体';
+                          if (!confirm(`将使用AI自动生成4个视角的图片（正面/左面/右面/背面），然后自动提交3D生成。提示词：${prompt}\n\n确认开始？`)) return;
+                          try {
+                            toast.loading('正在自动生成多视角图片...', { id: 'auto-3d-multi' });
+                            const res = await fetch('/api/image-to-3d/auto-multi-view', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ prompt, model: threeDType, apiProviderId: threeDBackend }),
+                            });
+                            const data = await res.json();
+                            if (!res.ok || data.error) {
+                              toast.error(data.error || '自动生成多视角图片失败', { id: 'auto-3d-multi' });
+                              return;
+                            }
+                            // Fill multi-image slots with generated views
+                            const generatedImages: Array<{url: string; view: string; label: string}> = [];
+                            if (data.frontImageUrl) generatedImages.push({ url: data.frontImageUrl, view: 'front', label: '正面' });
+                            if (data.leftImageUrl) generatedImages.push({ url: data.leftImageUrl, view: 'left', label: '左面' });
+                            if (data.rightImageUrl) generatedImages.push({ url: data.rightImageUrl, view: 'right', label: '右面' });
+                            if (data.backImageUrl) generatedImages.push({ url: data.backImageUrl, view: 'back', label: '背面' });
+                            setThreeDMultiImages(generatedImages);
+                            toast.success(`已生成${generatedImages.length}张视角图`, { id: 'auto-3d-multi' });
+                          } catch (err) {
+                            toast.error('自动生成多视角图片失败', { id: 'auto-3d-multi' });
+                          }
+                        }}
+                        className={`w-full py-2 rounded-xl text-xs border transition-colors flex items-center justify-center gap-1 ${isMonochrome ? 'border-purple-200 text-purple-600 hover:bg-purple-50' : 'border-purple-500/30 text-purple-400 hover:bg-purple-500/10'}`}
+                      >
+                        <Sparkles size={12} /> AI自动生成视角图
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Text-to-3D mode - prompt input */}
+                  {threeDMode === 'text-to-3d' && (
+                    <div className="space-y-2">
+                      <div className={`text-xs ${isMonochrome ? 'text-gray-500' : 'text-[#888]'}`}>
+                        用文字描述你想生成的3D模型，支持中英文
+                      </div>
+                      <textarea
+                        value={threeDPrompt}
+                        onChange={(e) => setThreeDPrompt(e.target.value)}
+                        className={`w-full h-24 px-3 py-2 rounded-xl text-xs border resize-y ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900 placeholder:text-gray-400' : 'bg-[#0a0a0a]/90 border-white/[0.14] text-white placeholder:text-[#555]'}`}
+                        placeholder="例如：一只可爱的卡通猫咪，圆润的造型，大眼睛，粉色鼻子..."
+                        maxLength={1024}
+                      />
+                      <div className={`text-right text-[10px] ${isMonochrome ? 'text-gray-400' : 'text-[#555]'}`}>
+                        {threeDPrompt.length}/1024
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Backend selector */}
                   <div className={`grid grid-cols-2 gap-2 p-1 rounded-xl ${isMonochrome ? 'bg-gray-100' : 'bg-[#0a0a0a]/90'}`}>
                     {([
                       { value: 'api' as const, label: 'API 大模型' },
@@ -12045,6 +12239,7 @@ export function InfiniteCanvas({
                     ))}
                   </div>
 
+                  {/* Provider selector */}
                   {threeDBackend === 'api' ? (
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
@@ -12058,13 +12253,11 @@ export function InfiniteCanvas({
                       >
                         <option value="">选择 3D 模型</option>
                         {(() => {
-                          // Separate admin and third-party providers
                           const adminProviders = providers.filter(p => p.id.startsWith('admin-3d::'));
                           const thirdPartyProviders = providers.filter(p => !p.id.startsWith('admin-3d::'));
                           const groups: Array<{ label: string; items: typeof providers }> = [];
                           if (adminProviders.length > 0) groups.push({ label: '管理员配置', items: adminProviders });
                           if (thirdPartyProviders.length > 0) groups.push({ label: '第三方 API', items: thirdPartyProviders });
-                          // If no groups but single list, use name grouping
                           if (groups.length === 0 && providers.length > 0) {
                             const grouped = new Map<string, typeof providers>();
                             for (const p of providers) {
@@ -12119,6 +12312,7 @@ export function InfiniteCanvas({
                     </div>
                   )}
 
+                  {/* Quality / Texture / Format row */}
                   <div className="grid grid-cols-3 gap-2">
                     <div>
                       <label className={panelSmallLabelClass}>质量</label>
@@ -12146,6 +12340,43 @@ export function InfiniteCanvas({
                     </div>
                   </div>
 
+                  {/* Advanced options row */}
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className={panelSmallLabelClass}>PBR 材质</label>
+                      <button
+                        type="button"
+                        onClick={() => setThreeDEnablePBR(!threeDEnablePBR)}
+                        className={`mt-1 w-full px-2 py-2 rounded-lg text-xs border transition-colors ${
+                          threeDEnablePBR
+                            ? isMonochrome ? 'bg-blue-500 text-white border-blue-500' : 'bg-gold text-black border-gold'
+                            : isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-500' : 'bg-[#0a0a0a]/90 border-white/[0.14] text-[#777]'
+                        }`}
+                      >
+                        {threeDEnablePBR ? '已开启' : '关闭'}
+                      </button>
+                    </div>
+                    <div>
+                      <label className={panelSmallLabelClass}>面数</label>
+                      <select value={threeDFaceCount} onChange={(e) => setThreeDFaceCount(Number(e.target.value))} className={`mt-1 w-full px-2 py-2 rounded-lg text-xs border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900' : 'bg-[#0a0a0a]/90 border-white/[0.14] text-white'}`}>
+                        <option value={3000}>低 (3K)</option>
+                        <option value={10000}>中 (10K)</option>
+                        <option value={30000}>标准 (30K)</option>
+                        <option value={100000}>高 (100K)</option>
+                        <option value={500000}>极高 (500K)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className={panelSmallLabelClass}>姿态</label>
+                      <select value={threeDPose} onChange={(e) => setThreeDPose(e.target.value as '' | 'a-pose' | 't-pose')} className={`mt-1 w-full px-2 py-2 rounded-lg text-xs border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900' : 'bg-[#0a0a0a]/90 border-white/[0.14] text-white'}`}>
+                        <option value="">无</option>
+                        <option value="a-pose">A-Pose</option>
+                        <option value="t-pose">T-Pose</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Progress indicator */}
                   {threeDProgress && (
                     <div className={`flex items-center gap-2 px-3 py-2 rounded-xl ${isMonochrome ? 'bg-gray-50 text-gray-600' : 'bg-[#0a0a0a]/90 text-muted-foreground'}`}>
                       <div className="w-3 h-3 rounded-full border-2 border-gold border-t-transparent animate-spin" />
@@ -12154,9 +12385,10 @@ export function InfiniteCanvas({
                   )}
                 </div>
 
+                {/* Footer */}
                 <div className={`flex items-center justify-end gap-2 px-4 py-3 border-t ${isMonochrome ? 'border-gray-100' : 'border-white/[0.14]'}`}>
                   <button
-                    onClick={() => { setShow3DModal(false); setActiveTool('none'); setThreeDProgress(null); }}
+                    onClick={() => { setShow3DModal(false); setActiveTool('none'); setThreeDProgress(null); setThreeDMultiImages([]); }}
                     className={panelCancelBtnClass}
                     disabled={!!threeDProgress}
                   >
@@ -12181,7 +12413,34 @@ export function InfiniteCanvas({
             modelUrl={viewer3DModelUrl}
             modelUrls={viewer3DModelUrls}
             previewImageUrl={viewer3DPreviewUrl}
-            onClose={() => { setShow3DViewer(false); setViewer3DModelUrl(''); setViewer3DPreviewUrl(''); setViewer3DModelUrls({}); }}
+            thumbnailUrls={viewer3DThumbnailUrls}
+            textureUrls={viewer3DTextureUrls}
+            modelInfo={viewer3DModelInfo}
+            onRetexture={() => {
+              const glbUrl = viewer3DModelUrls?.glb || viewer3DModelUrl;
+              if (!glbUrl) { toast.error('未找到模型文件'); return; }
+              fetch('/api/image-to-3d/post-process', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ modelUrl: glbUrl, action: '3d-retexture', providerId: viewer3DModelInfo?.providerId }),
+              }).then(res => res.json()).then(data => {
+                if (data.error) { toast.error(data.error); return; }
+                toast.success('重贴图任务已提交');
+              }).catch(() => toast.error('重贴图请求失败'));
+            }}
+            onRemesh={() => {
+              const glbUrl = viewer3DModelUrls?.glb || viewer3DModelUrl;
+              if (!glbUrl) { toast.error('未找到模型文件'); return; }
+              fetch('/api/image-to-3d/post-process', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ modelUrl: glbUrl, action: '3d-remesh', providerId: viewer3DModelInfo?.providerId }),
+              }).then(res => res.json()).then(data => {
+                if (data.error) { toast.error(data.error); return; }
+                toast.success('重网格任务已提交');
+              }).catch(() => toast.error('重网格请求失败'));
+            }}
+            onClose={() => { setShow3DViewer(false); setViewer3DModelUrl(''); setViewer3DPreviewUrl(''); setViewer3DModelUrls({}); setViewer3DThumbnailUrls({}); setViewer3DTextureUrls([]); setViewer3DModelInfo({}); }}
           />
         )}
 

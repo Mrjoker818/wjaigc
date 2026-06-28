@@ -26,8 +26,16 @@ interface Local3DConfig {
   model?: string;
 }
 
+interface MultiViewImage {
+  url: string;
+  view?: 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom';
+}
+
 interface ImageTo3DRequest {
-  imageUrl: string;
+  imageUrl: string;              // 主图（单图模式必填）
+  images?: MultiViewImage[];     // 多图模式：多视角图片列表
+  prompt?: string;               // 文生3D描述
+  mode: 'single-image' | 'multi-image' | 'text-to-3d'; // 生成模式
   backend: 'api' | 'local';
   type: string;
   quality: string;
@@ -37,6 +45,9 @@ interface ImageTo3DRequest {
   providerId?: string;
   provider?: ThreeDProvider;
   local?: Local3DConfig;
+  enablePBR?: boolean;           // PBR材质
+  faceCount?: number;            // 目标面数
+  pose?: 'a-pose' | 't-pose' | '';  // 姿态模式
 }
 
 // ==================== Image URL to Base64 Helper ====================
@@ -225,8 +236,16 @@ function buildEndpoint(request: ImageTo3DRequest): string | undefined {
       return `${baseUrl}/tencent/hunyuan3d/${effectiveJobPath}`;
     }
 
-    case 'meshy':
+    case 'meshy': {
+      // Meshy: multi-image / text-to-3d / single-image
+      if (request.mode === 'text-to-3d') {
+        return `${baseUrl}/text-to-3d`;
+      }
+      if (request.mode === 'multi-image' && request.images && request.images.length > 1) {
+        return `${baseUrl}/multi-image-to-3d`;
+      }
       return `${baseUrl}/image-to-3d`;
+    }
 
     case 'tripo':
       return `${baseUrl.replace(/\/v\d+$/, '')}/v2/openapi/image2model`;
@@ -252,13 +271,43 @@ async function buildHunyuan3DBody(request: ImageTo3DRequest): Promise<Record<str
   const modelName = (request.provider?.model || '').toLowerCase();
   const isRapid = modelName.includes('lite') || modelName.includes('rapid') || modelName.includes('quick') || modelName.includes('极速') || request.version === 'rapid';
 
-  // 混元3D仅支持图生3D（Base64格式），不支持文生3D
-  const base64Data = await imageUrlToBase64(request.imageUrl);
-  if (!base64Data) {
-    throw new Error('图片转Base64失败，无法调用混元3D API。请确保图片URL可访问。');
-  }
+  const body: Record<string, unknown> = {};
 
-  const body: Record<string, unknown> = { ImageBase64: base64Data };
+  if (request.mode === 'text-to-3d' && request.prompt) {
+    // 文生3D模式：混元专业版支持纯文字生成
+    body.Prompt = request.prompt;
+  } else if (request.mode === 'multi-image' && request.images && request.images.length > 1) {
+    // 多图模式：混元3D 3.1支持MultiViewImages（最多8张八视图）
+    // 第一张图作为主图ImageBase64
+    const mainBase64 = await imageUrlToBase64(request.imageUrl);
+    if (!mainBase64) {
+      throw new Error('主图转Base64失败，无法调用混元3D API。请确保图片URL可访问。');
+    }
+    body.ImageBase64 = mainBase64;
+
+    // 附加多视角图片
+    const multiViewImages: Array<{ ImageBase64: string; View: string }> = [];
+    for (const img of request.images) {
+      if (img.url === request.imageUrl) continue; // 主图已处理
+      const b64 = await imageUrlToBase64(img.url);
+      if (b64) {
+        multiViewImages.push({
+          ImageBase64: b64,
+          View: img.view || 'front',
+        });
+      }
+    }
+    if (multiViewImages.length > 0) {
+      body.MultiViewImages = multiViewImages;
+    }
+  } else {
+    // 单图模式
+    const base64Data = await imageUrlToBase64(request.imageUrl);
+    if (!base64Data) {
+      throw new Error('图片转Base64失败，无法调用混元3D API。请确保图片URL可访问。');
+    }
+    body.ImageBase64 = base64Data;
+  }
 
   if (isRapid) {
     // 极速版 (rapid-job) parameters - no Model parameter
@@ -273,12 +322,15 @@ async function buildHunyuan3DBody(request: ImageTo3DRequest): Promise<Record<str
     if (request.format && rapidFormatMap[request.format]) {
       body.ResultFormat = rapidFormatMap[request.format];
     }
-    if (request.texture === 'pbr' || request.texture === '4k' || request.texture === '4096') {
+    if (request.texture === 'pbr' || request.texture === '4k' || request.texture === '4096' || request.enablePBR) {
       body.EnablePBR = true;
     }
   } else {
     // 专业版 (pro-job) parameters
-    body.Model = '3.0';
+    // 混元3D 3.1支持多图八视图，3.0不支持
+    const isMultiView = request.mode === 'multi-image' && request.images && request.images.length > 1;
+    body.Model = isMultiView ? '3.1' : '3.0';
+
     const qualityMap: Record<string, string> = {
       'low': 'LowPoly',
       'standard': 'Normal',
@@ -294,7 +346,7 @@ async function buildHunyuan3DBody(request: ImageTo3DRequest): Promise<Record<str
     if (request.format && proFormatMap[request.format]) {
       body.ResultFormat = proFormatMap[request.format];
     }
-    if (request.texture === '4k' || request.texture === '4096') {
+    if (request.texture === '4k' || request.texture === '4096' || request.enablePBR) {
       body.EnablePBR = true;
     }
     const faceMap: Record<string, number> = {
@@ -307,23 +359,99 @@ async function buildHunyuan3DBody(request: ImageTo3DRequest): Promise<Record<str
     if (request.quality && faceMap[request.quality]) {
       body.FaceCount = faceMap[request.quality];
     }
+    // 用户自定义面数优先
+    if (request.faceCount && request.faceCount > 0) {
+      body.FaceCount = Math.min(Math.max(request.faceCount, 3000), 1500000);
+    }
   }
 
   return body;
 }
 
 function buildMeshyBody(request: ImageTo3DRequest): Record<string, unknown> {
-  return {
+  // Meshy: multi-image / text-to-3d / single-image
+  if (request.mode === 'text-to-3d' && request.prompt) {
+    const body: Record<string, unknown> = {
+      prompt: request.prompt,
+      ai_model: 'meshy-6',
+    };
+    if (request.texture === 'pbr' || request.texture === '4k' || request.enablePBR) body.enable_pbr = true;
+    if (request.texture === '4k' || request.texture === '4096') body.hd_texture = true;
+    if (request.format) body.target_formats = [request.format];
+    if (request.faceCount && request.faceCount > 0) {
+      body.should_remesh = true;
+      body.target_polycount = Math.min(Math.max(request.faceCount, 100), 300000);
+    }
+    if (request.pose) body.pose_mode = request.pose;
+    return body;
+  }
+
+  if (request.mode === 'multi-image' && request.images && request.images.length > 1) {
+    const imageUrls = request.images.map(img => img.url);
+    const body: Record<string, unknown> = {
+      image_urls: imageUrls,
+      ai_model: 'meshy-6',
+      should_texture: request.texture !== 'none',
+      image_enhancement: true,
+      remove_lighting: true,
+    };
+    if (request.texture === 'pbr' || request.texture === '4k' || request.enablePBR) body.enable_pbr = true;
+    if (request.texture === '4k' || request.texture === '4096') body.hd_texture = true;
+    if (request.format) body.target_formats = [request.format];
+    if (request.faceCount && request.faceCount > 0) {
+      body.should_remesh = true;
+      body.target_polycount = Math.min(Math.max(request.faceCount, 100), 300000);
+    }
+    if (request.pose) body.pose_mode = request.pose;
+    return body;
+  }
+
+  // 单图转3D
+  const body: Record<string, unknown> = {
     image_url: request.imageUrl,
-    mode: 'image_to_3d',
-    art_style: 'realistic',
-    topology: request.quality === 'ultra' ? '0' : '1',
-    target_poly_count: request.quality === 'ultra' ? 10000 : 3000,
-    texture_resolution: request.texture === '4k' ? '4K' : '2K',
+    ai_model: 'meshy-6',
+    should_texture: request.texture !== 'none',
+    image_enhancement: true,
+    remove_lighting: true,
   };
+  if (request.texture === 'pbr' || request.texture === '4k' || request.enablePBR) body.enable_pbr = true;
+  if (request.texture === '4k' || request.texture === '4096') body.hd_texture = true;
+  if (request.format) body.target_formats = [request.format];
+  if (request.faceCount && request.faceCount > 0) {
+    body.should_remesh = true;
+    body.target_polycount = Math.min(Math.max(request.faceCount, 100), 300000);
+  }
+  if (request.pose) body.pose_mode = request.pose;
+  return body;
 }
 
 function buildTripoBody(request: ImageTo3DRequest): Record<string, unknown> {
+  if (request.mode === 'text-to-3d' && request.prompt) {
+    // Tripo文生3D
+    return {
+      prompt: request.prompt,
+      type: 'text_to_model',
+      settings: {
+        face_limit: request.quality === 'ultra' ? 20000 : 10000,
+        texture_resolution: request.texture === '4k' ? 4096 : 2048,
+        model_format: request.format,
+      },
+    };
+  }
+
+  if (request.mode === 'multi-image' && request.images && request.images.length > 1) {
+    // Tripo多图转3D
+    return {
+      images: request.images.map(img => img.url),
+      type: 'multi_image_to_model',
+      settings: {
+        face_limit: request.quality === 'ultra' ? 20000 : 10000,
+        texture_resolution: request.texture === '4k' ? 4096 : 2048,
+        model_format: request.format,
+      },
+    };
+  }
+
   return {
     file: { type: 'image', data: request.imageUrl },
     type: 'image_to_model',
@@ -336,6 +464,22 @@ function buildTripoBody(request: ImageTo3DRequest): Record<string, unknown> {
 }
 
 function buildRodinBody(request: ImageTo3DRequest): Record<string, unknown> {
+  if (request.mode === 'text-to-3d' && request.prompt) {
+    return {
+      prompt: request.prompt,
+      format: request.format,
+      quality: request.quality,
+      texture_resolution: request.texture,
+    };
+  }
+  if (request.mode === 'multi-image' && request.images && request.images.length > 1) {
+    return {
+      images: request.images.map(img => img.url),
+      format: request.format,
+      quality: request.quality,
+      texture_resolution: request.texture,
+    };
+  }
   return {
     image: request.imageUrl,
     format: request.format,
@@ -345,15 +489,24 @@ function buildRodinBody(request: ImageTo3DRequest): Record<string, unknown> {
 }
 
 function buildGenericBody(request: ImageTo3DRequest): Record<string, unknown> {
-  return {
-    image_url: request.imageUrl,
+  const body: Record<string, unknown> = {
     model: request.provider?.model,
     type: request.type,
     quality: request.quality,
     texture: request.texture,
     format: request.format,
-    advanced_params: request.provider?.advancedParams || {},
   };
+  if (request.mode === 'text-to-3d' && request.prompt) {
+    body.prompt = request.prompt;
+  } else if (request.mode === 'multi-image' && request.images && request.images.length > 1) {
+    body.image_urls = request.images.map(img => img.url);
+  } else {
+    body.image_url = request.imageUrl;
+  }
+  if (request.enablePBR) body.enable_pbr = true;
+  if (request.faceCount) body.face_count = request.faceCount;
+  if (request.pose) body.pose_mode = request.pose;
+  return body;
 }
 
 async function buildRequestBody(request: ImageTo3DRequest): Promise<Record<string, unknown>> {
@@ -552,7 +705,7 @@ function buildPlaceholderAsset(request: ImageTo3DRequest): string {
 function buildPreviewSvg(request: ImageTo3DRequest, note?: string): string {
   const label = typeLabel(request.type);
   const qualityLabel = request.quality.charAt(0).toUpperCase() + request.quality.slice(1);
-  const formatLabel = request.format.toUpperCase();
+  const formatLabel = (request.format || 'glb').toUpperCase();
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400">
     <defs>
       <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -568,7 +721,7 @@ function buildPreviewSvg(request: ImageTo3DRequest, note?: string): string {
     <polygon points="200,60 340,180 300,340 100,340 60,180" fill="none" stroke="url(#gold)" stroke-width="2" opacity="0.8"/>
     <polygon points="200,80 320,185 285,325 115,325 80,185" fill="#0d0d0d" stroke="#d4af37" stroke-width="1" opacity="0.5"/>
     <text x="200" y="220" text-anchor="middle" fill="#d4af37" font-size="20" font-weight="bold">${label}</text>
-    <text x="200" y="245" text-anchor="middle" fill="#aaa" font-size="11">API Model / ${formatLabel} / ${request.texture.toUpperCase()}</text>
+    <text x="200" y="245" text-anchor="middle" fill="#aaa" font-size="11">API Model / ${formatLabel} / ${(request.texture || 'standard').toUpperCase()}</text>
     <text x="200" y="265" text-anchor="middle" fill="#888" font-size="10">${qualityLabel} mesh + balanced topology</text>
     <text x="200" y="310" text-anchor="middle" fill="#666" font-size="9">${note || 'Preview'}</text>
   </svg>`;
@@ -678,24 +831,52 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (!body.imageUrl) {
-      return NextResponse.json({ success: false, error: 'Missing imageUrl' }, { status: 400 });
+    // Validate: text-to-3d needs prompt; single-image/multi-image needs imageUrl
+    const mode = body.mode || 'single-image';
+    if (mode === 'text-to-3d') {
+      if (!body.prompt) {
+        return NextResponse.json({ success: false, error: '文生3D模式需要提供描述文本(prompt)' }, { status: 400 });
+      }
+    } else if (mode === 'multi-image') {
+      if (!body.images || body.images.length === 0) {
+        return NextResponse.json({ success: false, error: '多图模式需要提供至少一张图片(images)' }, { status: 400 });
+      }
+    } else {
+      if (!body.imageUrl) {
+        return NextResponse.json({ success: false, error: 'Missing imageUrl' }, { status: 400 });
+      }
     }
     if (body.backend === 'api' && !body.provider?.apiKey) {
       return NextResponse.json({ success: false, error: '请先在管理员系统配置可用的 3D 模型' }, { status: 400 });
     }
 
     // Resolve local image URLs to accessible format for external APIs
-    body.imageUrl = await resolveImageUrlForProvider(body.imageUrl);
+    if (body.imageUrl) {
+      body.imageUrl = await resolveImageUrlForProvider(body.imageUrl);
+    }
+    // Resolve multi-image URLs
+    if (body.images && Array.isArray(body.images)) {
+      for (let i = 0; i < body.images.length; i++) {
+        if (body.images[i].url) {
+          body.images[i].url = await resolveImageUrlForProvider(body.images[i].url);
+        }
+      }
+    }
 
     const providerType = detectProviderType(body);
     console.log('[image-to-3d] Request:', JSON.stringify({
       backend: body.backend,
       providerType,
+      mode: body.mode || 'single-image',
       type: body.type,
       quality: body.quality,
       texture: body.texture,
       format: body.format,
+      imageCount: body.images?.length || (body.imageUrl ? 1 : 0),
+      hasPrompt: !!body.prompt,
+      enablePBR: body.enablePBR,
+      faceCount: body.faceCount,
+      pose: body.pose,
       provider: body.provider ? { name: body.provider.name, baseUrl: body.provider.baseUrl, model: body.provider.model, preset: body.provider.providerPreset } : undefined,
       local: body.local,
     }));
