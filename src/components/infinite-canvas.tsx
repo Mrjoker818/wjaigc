@@ -14111,6 +14111,8 @@ export function InfiniteCanvas({
           <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">图像生成器</span>
         </button>
 
+        <div className={`w-px h-5 mx-1.5 ${separatorCls}`} />
+
         {/* 图片转3D - always visible */}
         <button
           onClick={() => handleOpen3D(true)}
