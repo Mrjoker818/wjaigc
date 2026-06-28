@@ -347,9 +347,10 @@ export async function POST(request: NextRequest) {
         }
 
         // Update order status to paid
+        const nowTs = Date.now();
         await execSql(
-          `UPDATE wujie_recharge_orders SET payment_status = 'paid', paid_at = NOW(), updated_at = NOW() WHERE id = $1`,
-          [orderId]
+          `UPDATE wujie_recharge_orders SET payment_status = 'paid', paid_at = $2, updated_at = $3 WHERE id = $1`,
+          [orderId, nowTs, nowTs]
         );
 
         return NextResponse.json({ success: true, message: '积分已到账', balance: adjustResult.balance, amount: orderAmount });
@@ -387,9 +388,10 @@ export async function POST(request: NextRequest) {
         }
 
         // Update order status
+        const nowTs2 = Date.now();
         await execSql(
-          `UPDATE wujie_recharge_orders SET payment_status = 'paid', paid_at = NOW(), updated_at = NOW() WHERE id = $1`,
-          [orderId]
+          `UPDATE wujie_recharge_orders SET payment_status = 'paid', paid_at = $2, updated_at = $3 WHERE id = $1`,
+          [orderId, nowTs2, nowTs2]
         );
 
         return NextResponse.json({ success: true, message: '订单已确认，积分已到账' });
@@ -406,8 +408,8 @@ export async function POST(request: NextRequest) {
       }
       try {
         await execSql(
-          `UPDATE wujie_recharge_orders SET payment_status = 'failed', updated_at = NOW() WHERE id = $1`,
-          [orderId]
+          `UPDATE wujie_recharge_orders SET payment_status = 'failed', updated_at = $2 WHERE id = $1`,
+          [orderId, Date.now()]
         );
         return NextResponse.json({ success: true, message: '订单已拒绝' });
       } catch (dbErr) {
@@ -446,8 +448,8 @@ export async function POST(request: NextRequest) {
 
         // Update order status to reversed
         await execSql(
-          `UPDATE wujie_recharge_orders SET payment_status = 'reversed', updated_at = NOW() WHERE id = $1`,
-          [orderId]
+          `UPDATE wujie_recharge_orders SET payment_status = 'reversed', updated_at = $2 WHERE id = $1`,
+          [orderId, Date.now()]
         );
 
         return NextResponse.json({ success: true, message: '订单已撤销，积分已扣回', balance: deductResult.balance });

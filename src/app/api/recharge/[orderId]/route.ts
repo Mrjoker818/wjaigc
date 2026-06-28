@@ -51,8 +51,8 @@ export async function GET(
         bonus: Number(order.bonus) || 0,
         paymentMethod: method,
         paymentStatus: order.payment_status,
-        createdAt: order.created_at,
-        expiresAt: order.expires_at,
+        createdAt: Number(order.created_at) || 0,
+        expiresAt: Number(order.expires_at) || 0,
         isExpired,
       },
       note,
@@ -115,8 +115,8 @@ export async function POST(
 
     // Update order status to paid
     await execSql(
-      `UPDATE wujie_recharge_orders SET payment_status = 'paid', paid_at = NOW(), updated_at = NOW() WHERE id = $1`,
-      [orderId]
+      `UPDATE wujie_recharge_orders SET payment_status = 'paid', paid_at = $2, updated_at = $3 WHERE id = $1`,
+      [orderId, Date.now(), Date.now()]
     );
 
     return NextResponse.json({
@@ -127,6 +127,7 @@ export async function POST(
     });
   } catch (e) {
     console.error('[recharge] POST confirm error:', e);
-    return NextResponse.json({ success: false, error: '确认失败' }, { status: 500 });
+    const errorMsg = e instanceof Error ? e.message : '确认失败';
+    return NextResponse.json({ success: false, error: `确认失败: ${errorMsg}` }, { status: 500 });
   }
 }
