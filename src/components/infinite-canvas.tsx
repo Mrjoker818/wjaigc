@@ -623,6 +623,7 @@ export function InfiniteCanvas({
   const [showAiPsd, setShowAiPsd] = useState(false);
   const [showStickerAssistant, setShowStickerAssistant] = useState(false);
   const [showSceneStudio, setShowSceneStudio] = useState(false);
+  const [pendingSceneStudioModel, setPendingSceneStudioModel] = useState<{url: string; name: string} | null>(null);
   const [showBrandPackaging, setShowBrandPackaging] = useState(false);
   const [showDisplay3D, setShowDisplay3D] = useState(false);
 
@@ -12557,10 +12558,12 @@ export function InfiniteCanvas({
               }).catch(() => toast.error('截图保存失败'));
             }}
             onSendToSceneStudio={() => {
-              // 关闭3D预览器，打开3D构图面板
+              // 关闭3D预览器，传递模型URL到3D构图面板
+              const modelUrl = viewer3DModelUrl || viewer3DModelUrls?.glb || '';
+              const modelName = (viewer3DModelInfo as any)?.model3DName || '3D模型';
+              setPendingSceneStudioModel(modelUrl ? { url: modelUrl, name: modelName } : null);
               setShow3DViewer(false);
               setShowSceneStudio(true);
-              toast.success('3D模型已准备就绪，请在3D构图面板中导入');
             }}
             onClose={() => { setShow3DViewer(false); setViewer3DModelUrl(''); setViewer3DPreviewUrl(''); setViewer3DModelUrls({}); setViewer3DThumbnailUrls({}); setViewer3DTextureUrls([]); setViewer3DModelInfo({}); }}
           />
@@ -12902,11 +12905,13 @@ export function InfiniteCanvas({
         {showSceneStudio && (
           <Suspense fallback={null}>
             <SceneStudioPanel
-              onClose={() => setShowSceneStudio(false)}
+              onClose={() => { setShowSceneStudio(false); setPendingSceneStudioModel(null); }}
               onAddImages={(urls: string[], meta?: { modelName?: string; apiProvider?: string }) => {
                 onAddImages?.(urls, undefined, meta);
               }}
               isMonochrome={isMonochrome}
+              initialModelUrl={pendingSceneStudioModel?.url || ''}
+              initialModelName={pendingSceneStudioModel?.name || ''}
             />
           </Suspense>
         )}

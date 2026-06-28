@@ -104,6 +104,8 @@ interface SceneStudioProps {
   onClose: () => void;
   onAddImages: (urls: string[], meta?: { modelName?: string; apiProvider?: string }) => void;
   isMonochrome?: boolean;
+  initialModelUrl?: string;
+  initialModelName?: string;
 }
 
 /* ========== CONSTANTS ========== */
@@ -1249,7 +1251,7 @@ function LightEditorPanel({ lights, onLightsChange, isMonochrome }: {
 
 /* ========== MAIN COMPONENT ========== */
 
-export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }: SceneStudioProps) {
+export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, initialModelUrl, initialModelName }: SceneStudioProps) {
   // Sync theme ref so child components get correct colors
   _themeRef.mono = !!isMonochrome;
 
@@ -1481,6 +1483,37 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome }:
     setObjects(prev => [...prev, newObj]);
     setSelectedId(id);
   }, []);
+
+  // Add 3D model from URL (e.g. from 3D preview "send to scene studio")
+  const addModelFromUrl = useCallback((modelUrl: string, modelName?: string) => {
+    const id = `obj_model_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const name = modelName || '3D Model';
+    const newObj: SceneObject = {
+      id,
+      type: 'model',
+      name,
+      modelUrl,
+      position: [0, 0.5, 0],
+      rotation: [0, 0, 0],
+      scale: [1, 1, 1],
+      color: '#cccccc',
+      visible: true,
+      locked: false,
+    };
+    setObjects(prev => [...prev, newObj]);
+    setSelectedId(id);
+  }, []);
+
+  // Auto-load initial model URL when component mounts
+  useEffect(() => {
+    if (initialModelUrl) {
+      // Small delay to ensure the scene is ready
+      const timer = setTimeout(() => {
+        addModelFromUrl(initialModelUrl, initialModelName);
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [initialModelUrl, initialModelName, addModelFromUrl]);
 
   const updateObject = useCallback((id: string, updates: Partial<SceneObject>) => {
     setObjects(prev => prev.map(o => o.id === id ? { ...o, ...updates } : o));
