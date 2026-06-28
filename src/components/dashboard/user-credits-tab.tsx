@@ -229,7 +229,8 @@ export default function UserCreditsTab({
       onToast?.('支付链接未配置，请联系管理员');
       return;
     }
-    window.open(orderInfo.payLink, '_blank');
+    // Directly redirect to payment (mobile browser)
+    window.location.href = orderInfo.payLink;
   };
 
   // 确认已付款

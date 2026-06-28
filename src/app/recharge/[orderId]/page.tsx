@@ -75,19 +75,8 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
     try { sessionStorage.setItem(`recharge_pay_${orderId}`, '1'); } catch { /* ignore */ }
     setHasGoneToPay(true);
 
-    // Directly redirect to payment
-    if (link.startsWith('wxp://') || link.startsWith('weixin://')) {
-      // WeChat: try window.open first, fallback to location.href
-      try {
-        const opened = window.open(link, '_blank');
-        if (!opened) window.location.href = link;
-      } catch {
-        window.location.href = link;
-      }
-    } else {
-      // Alipay / generic HTTPS: direct redirect
-      window.location.href = link;
-    }
+    // Directly redirect to payment (mobile browser)
+    window.location.href = link;
   }
 
   // User confirms payment completed

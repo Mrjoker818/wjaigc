@@ -737,11 +737,13 @@ export function shouldUseGeminiChatRoute(modelId: string): boolean {
  * 本函数将别名剥离质量后缀，还原为 API 可识别的基础模型名，
  * 同时返回从后缀推断的质量/尺寸信息，供后续请求参数使用。
  *
- * 已知后缀模式：
- *   -2k / -4k / -hd / -uhd / -8k  → 分辨率等级
- *   -lite / -pro / -max            → 质量等级
+ * 已知后缀模式（仅分辨率后缀，质量后缀如 pro/max/lite 是模型名的一部分，不剥离）：
+ *   -2k / -4k / -hd / -uhd / -8k  → 分辨率等级（管理员在别名中标注质量/尺寸）
+ *   
+ * 注意：-pro / -max / -lite 是模型名称固有部分（如 qwen-vl-max, gemini-3.1-pro），
+ * 不应剥离。只有管理员手动添加的分辨率后缀（如 gpt-image-2-2k）才需要。
  */
-const QUALITY_SUFFIX_RE = /-(2k|4k|8k|hd|uhd|lite|pro|max)$/i;
+const QUALITY_SUFFIX_RE = /-(2k|4k|8k|hd|uhd)$/i;
 
 export interface NormalizedModelInfo {
   /** API 可识别的基础模型名（如 gpt-image-2） */
@@ -766,8 +768,8 @@ export function normalizeModelForApi(modelId: string): NormalizedModelInfo {
 
   const suffix = match[1].toLowerCase();
   const apiModelName = modelId.slice(0, match.index);
+  // Resolution suffixes only (2k/4k/8k/hd/uhd); pro/max/lite are part of model name
   const isResolution = ['2k', '4k', '8k', 'hd', 'uhd'].includes(suffix);
-  const isQuality = ['lite', 'pro', 'max'].includes(suffix);
 
   console.log(`[normalizeModelForApi] 模型别名规范化: "${modelId}" → "${apiModelName}" (suffix: ${suffix})`);
 
@@ -775,6 +777,6 @@ export function normalizeModelForApi(modelId: string): NormalizedModelInfo {
     apiModelName,
     wasNormalized: true,
     resolutionTier: isResolution ? suffix : null,
-    qualityTier: isQuality ? suffix : null,
+    qualityTier: null, // pro/max/lite不再剥离，质量等级由模型自身决定
   };
 }

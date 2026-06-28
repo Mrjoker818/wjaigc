@@ -273,82 +273,85 @@ export async function POST(request: NextRequest) {
     }
 
     // Resolve API key and base URL from server-side provider config only
-    let visionApiKey = '';
-    let visionBaseUrl = '';
-    let visionModel = resolvedModel;
-    let resolvedProviderPreset = providerPreset;
+    // Build a list of (apiKey, baseUrl, model, preset) candidates to try in order
+    interface VisionCandidate {
+      apiKey: string;
+      baseUrl: string;
+      model: string;
+      preset?: string;
+      providerName: string;
+    }
+    const candidates: VisionCandidate[] = [];
+
+    const allProviders = (await getApiProviders()).filter(p => p.isEnabled);
 
     if (resolvedProviderId) {
-      const provider = (await getApiProviders()).find(item => item.id === resolvedProviderId && item.isEnabled);
+      const provider = allProviders.find(item => item.id === resolvedProviderId);
       if (!provider) {
         return NextResponse.json({ error: 'Admin provider config not found' }, { status: 400 });
       }
-      visionApiKey = provider.apiKey;
-      const baseUrl = normalizeApiBaseUrl(provider.baseUrl);
-      visionBaseUrl = baseUrl;
-      resolvedProviderPreset = providerPreset || provider.providerPreset;
-      if (!visionModel && provider.selectedModels?.length) {
-        visionModel = provider.selectedModels[0];
-      }
-    } else if (visionModel) {
-      // Search across chat, vlm, and image model types for vision capability
-      const provider = await findProviderForModel(visionModel, 'chat', resolvedProviderId)
-        || await findProviderForModel(visionModel, 'vlm', resolvedProviderId)
-        || await findProviderForModel(visionModel, 'image', resolvedProviderId);
-      if (provider?.apiKey) {
-        visionApiKey = provider.apiKey;
-        visionBaseUrl = normalizeApiBaseUrl(provider.baseUrl);
-        resolvedProviderPreset = providerPreset || provider.providerPreset;
-      }
-    } else {
-      // No model specified — try to find any available vision-capable model
-      const allProviders = (await getApiProviders()).filter(p => p.isEnabled);
-      // Priority: vlm > chat > image providers with vision-capable models
-      for (const modelType of ['vlm', 'chat', 'image'] as const) {
-        const provider = allProviders.find(p => {
-          if (p.modelType !== modelType) return false;
-          const models = p.selectedModels || [];
-          // Check for vision-capable model names
-          return models.some(m => /vision|vlm|gemini.*flash|gpt-4o|gpt-4-turbo|claude-3|qwen-vl/i.test(m));
+      const m = resolvedModel || provider.selectedModels?.[0] || '';
+      if (m) {
+        candidates.push({
+          apiKey: provider.apiKey,
+          baseUrl: normalizeApiBaseUrl(provider.baseUrl),
+          model: m,
+          preset: providerPreset || provider.providerPreset,
+          providerName: provider.name,
         });
-        if (provider) {
-          visionApiKey = provider.apiKey;
-          visionBaseUrl = normalizeApiBaseUrl(provider.baseUrl);
-          resolvedProviderPreset = provider.providerPreset;
-          // Pick the first vision-capable model from the provider
-          const visionModels = (provider.selectedModels || []).filter(m =>
-            /vision|vlm|gemini.*flash|gpt-4o|gpt-4-turbo|claude-3|qwen-vl/i.test(m)
-          );
-          visionModel = visionModels[0] || provider.selectedModels?.[0] || '';
-          console.log(`[vision-prompt] Auto-selected vision model: ${visionModel} from provider: ${provider.name}`);
-          break;
+      }
+    } else if (resolvedModel) {
+      // Search across chat, vlm, and image model types for the requested model
+      const provider = await findProviderForModel(resolvedModel, 'chat', resolvedProviderId)
+        || await findProviderForModel(resolvedModel, 'vlm', resolvedProviderId)
+        || await findProviderForModel(resolvedModel, 'image', resolvedProviderId);
+      if (provider?.apiKey) {
+        candidates.push({
+          apiKey: provider.apiKey,
+          baseUrl: normalizeApiBaseUrl(provider.baseUrl),
+          model: resolvedModel,
+          preset: provider.providerPreset,
+          providerName: provider.name,
+        });
+      }
+    }
+
+    // Always add fallback vision-capable models from all providers
+    // Priority: vlm > chat > image providers with vision-capable models
+    for (const modelType of ['vlm', 'chat', 'image'] as const) {
+      for (const provider of allProviders) {
+        if (provider.modelType !== modelType) continue;
+        const models = provider.selectedModels || [];
+        const visionModels = models.filter(m =>
+          /vision|vlm|gemini.*flash|gpt-4o|gpt-4-turbo|claude-3|qwen-vl/i.test(m)
+        );
+        if (visionModels.length > 0) {
+          // Skip if this provider+model is already in candidates
+          const alreadyAdded = candidates.some(c => c.apiKey === provider.apiKey && c.baseUrl === normalizeApiBaseUrl(provider.baseUrl));
+          if (!alreadyAdded) {
+            candidates.push({
+              apiKey: provider.apiKey,
+              baseUrl: normalizeApiBaseUrl(provider.baseUrl),
+              model: visionModels[0],
+              preset: provider.providerPreset,
+              providerName: provider.name,
+            });
+          }
         }
       }
     }
 
-    if (!visionApiKey) {
+    if (candidates.length === 0) {
       return NextResponse.json({ error: 'Configure a vision or chat model in admin panel first' }, { status: 400 });
     }
-    if (!visionModel) {
-      return NextResponse.json(
-        { error: '未指定视觉模型，请添加支持图片理解的模型（如GPT-4o、Gemini、Claude-3等）' },
-        { status: 400 }
-      );
-    }
 
-    // Normalize model name for API
-    const { apiModelName: effectiveVisionModel } = normalizeModelForApi(visionModel);
-    if (effectiveVisionModel !== visionModel) {
-      console.log(`[vision-prompt] Model normalized: ${visionModel} → ${effectiveVisionModel}`);
-    }
+    console.log(`[vision-prompt] ${candidates.length} candidate(s) to try: ${candidates.map(c => `${c.model}@${c.providerName}`).join(', ')}`);
 
-    // Convert image to base64 for API accessibility
+    // Convert image to base64 for API accessibility (once, shared across candidates)
     const imageBase64 = await imageUrlToBase64(imageUrl);
     const usingBase64 = imageBase64.startsWith('data:');
-    console.log(`[vision-prompt] Using model: ${visionModel}, base64: ${usingBase64}, preset: ${resolvedProviderPreset}`);
 
     // Build the vision request with image content
-    // Use OpenAI-compatible chat completions with vision capability
     const imageContent: { type: string; image_url?: { url: string }; text?: string } = {
       type: 'image_url',
       image_url: {
@@ -356,144 +359,160 @@ export async function POST(request: NextRequest) {
       },
     };
 
-    const requestBody = {
-      model: effectiveVisionModel,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text: VISION_SYSTEM_PROMPT,
-            },
-            imageContent,
-          ],
-        },
-      ],
-      max_tokens: 4096,
-      temperature: 0.5,
-      stream: false,
-    };
+    // Try each candidate provider in order until one succeeds
+    let lastError: string | null = null;
+    let lastStatus = 500;
 
-    // Build the correct endpoint
-    console.log(`[vision-prompt] Calling endpoint with base: ${visionBaseUrl}`);
-
-    const response = await fetchWithV1Retry(
-      visionBaseUrl,
-      '/chat/completions',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${visionApiKey}`,
-        },
-        body: JSON.stringify(requestBody),
-        signal: AbortSignal.timeout(90000),
+    for (const candidate of candidates) {
+      const { apiModelName: effectiveModel } = normalizeModelForApi(candidate.model);
+      if (effectiveModel !== candidate.model) {
+        console.log(`[vision-prompt] Model normalized: ${candidate.model} → ${effectiveModel}`);
       }
-    );
+      console.log(`[vision-prompt] Trying model: ${candidate.model} (${effectiveModel}) @ ${candidate.providerName}, base64: ${usingBase64}`);
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('[vision-prompt] API error:', response.status, errorText.substring(0, 500));
+      const requestBody = {
+        model: effectiveModel,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: VISION_SYSTEM_PROMPT,
+              },
+              imageContent,
+            ],
+          },
+        ],
+        max_tokens: 4096,
+        temperature: 0.5,
+        stream: false,
+      };
 
-      // Provide more helpful error messages
-      let errorMessage = `Vision API 调用失败: ${response.status}`;
-      if (response.status === 503) {
-        errorMessage = 'Vision API 暂时不可用 (503)，该模型可能不支持图片理解功能，请尝试切换到支持视觉的模型（如 GPT-4o、Gemini、Claude 等）';
-      } else if (response.status === 401) {
-        errorMessage = 'API Key 无效，请检查配置';
-      } else if (response.status === 400) {
-        try {
-          const errJson = JSON.parse(errorText);
-          const rawMsg = errJson.error?.message || errJson.message || '';
-          if (rawMsg) {
-            // 翻译常见英文错误为中文
-            const lowerMsg = rawMsg.toLowerCase();
-            if (lowerMsg.includes('try again later') || lowerMsg.includes('please wait')) {
-              errorMessage = '当前模型暂时不可用，请稍后重试';
-            } else if (lowerMsg.includes('invalid api key') || lowerMsg.includes('invalid api_key')) {
-              errorMessage = 'API 密钥无效，请检查配置';
-            } else if (/^[a-zA-Z]/.test(rawMsg) && !/[\u4e00-\u9fff]/.test(rawMsg)) {
-              errorMessage = `API 返回错误: ${rawMsg}`;
-            } else {
-              errorMessage = rawMsg;
+      try {
+        console.log(`[vision-prompt] Calling endpoint with base: ${candidate.baseUrl}`);
+
+        const response = await fetchWithV1Retry(
+          candidate.baseUrl,
+          '/chat/completions',
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${candidate.apiKey}`,
+            },
+            body: JSON.stringify(requestBody),
+            signal: AbortSignal.timeout(90000),
+          }
+        );
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error(`[vision-prompt] Candidate ${candidate.model}@${candidate.providerName} failed: ${response.status} ${errorText.substring(0, 300)}`);
+
+          lastStatus = response.status;
+          // Build error message
+          if (response.status === 503) {
+            lastError = 'Vision API 暂时不可用 (503)，该模型可能不支持图片理解功能，请尝试切换到支持视觉的模型（如 GPT-4o、Gemini、Claude 等）';
+          } else if (response.status === 401) {
+            lastError = 'API Key 无效，请检查配置';
+          } else if (response.status === 400) {
+            try {
+              const errJson = JSON.parse(errorText);
+              const rawMsg = errJson.error?.message || errJson.message || '';
+              if (rawMsg) {
+                const lowerMsg = rawMsg.toLowerCase();
+                if (lowerMsg.includes('try again later') || lowerMsg.includes('please wait')) {
+                  lastError = '当前模型暂时不可用，请稍后重试';
+                } else if (lowerMsg.includes('invalid api key') || lowerMsg.includes('invalid api_key')) {
+                  lastError = 'API 密钥无效，请检查配置';
+                } else if (/^[a-zA-Z]/.test(rawMsg) && !/[\u4e00-\u9fff]/.test(rawMsg)) {
+                  lastError = `API 返回错误: ${rawMsg}`;
+                } else {
+                  lastError = rawMsg;
+                }
+              }
+            } catch {}
+          } else if (response.status === 404) {
+            lastError = `模型 ${candidate.model} 在提供商 ${candidate.providerName} 中不可用`;
+          } else {
+            lastError = `Vision API 调用失败: ${response.status}`;
+          }
+          continue; // Try next candidate
+        }
+
+        // Handle both SSE stream and JSON responses
+        const contentType = response.headers.get('content-type') || '';
+        let data: Record<string, unknown>;
+
+        if (contentType.includes('text/event-stream')) {
+          const text = await response.text();
+          const lines = text.split('\n');
+          let lastData = '';
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const payload = line.slice(6).trim();
+              if (payload && payload !== '[DONE]') {
+                lastData = payload;
+              }
             }
           }
-        } catch {}
-      }
-
-      return NextResponse.json(
-        { error: errorMessage },
-        { status: response.status }
-      );
-    }
-
-    // Handle both SSE stream and JSON responses
-    const contentType = response.headers.get('content-type') || '';
-    let data: Record<string, unknown>;
-
-    if (contentType.includes('text/event-stream')) {
-      // API returned SSE stream despite stream:false - read and extract last data event
-      const text = await response.text();
-      const lines = text.split('\n');
-      let lastData = '';
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const payload = line.slice(6).trim();
-          if (payload && payload !== '[DONE]') {
-            lastData = payload;
+          if (!lastData) {
+            lastError = 'API返回了空的流式响应';
+            lastStatus = 502;
+            continue;
+          }
+          try {
+            const parsed = JSON.parse(lastData) as Record<string, unknown>;
+            data = (parsed.Response ? parsed.Response : parsed) as Record<string, unknown>;
+          } catch {
+            lastError = '解析流式响应失败';
+            lastStatus = 502;
+            continue;
+          }
+        } else {
+          try {
+            const raw = await response.json() as Record<string, unknown>;
+            data = (raw.Response ? raw.Response : raw) as Record<string, unknown>;
+          } catch {
+            lastError = '解析API响应失败';
+            lastStatus = 502;
+            continue;
           }
         }
-      }
-      if (!lastData) {
-        return NextResponse.json(
-          { error: 'API返回了空的流式响应' },
-          { status: 502 }
-        );
-      }
-      try {
-        const parsed = JSON.parse(lastData) as Record<string, unknown>;
-        data = (parsed.Response ? parsed.Response : parsed) as Record<string, unknown>;
-      } catch {
-        console.error('[vision-prompt] Failed to parse SSE data:', lastData.slice(0, 300));
-        return NextResponse.json(
-          { error: '解析流式响应失败' },
-          { status: 502 }
-        );
-      }
-    } else {
-      // Standard JSON response
-      try {
-        const raw = await response.json() as Record<string, unknown>;
-        data = (raw.Response ? raw.Response : raw) as Record<string, unknown>;
-      } catch {
-        console.error('[vision-prompt] Failed to parse JSON response');
-        return NextResponse.json(
-          { error: '解析API响应失败' },
-          { status: 502 }
-        );
+
+        const choices = data.choices as Array<{ message?: { content?: string } }> | undefined;
+        const content = choices?.[0]?.message?.content || '';
+
+        // Try to parse JSON from the response
+        let parsed: Record<string, unknown> | null = null;
+        try {
+          const jsonStr = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+          parsed = JSON.parse(jsonStr);
+        } catch {
+          parsed = null;
+        }
+
+        console.log(`[vision-prompt] Success with ${candidate.model}@${candidate.providerName}`);
+        return NextResponse.json({
+          success: true,
+          data: parsed || { raw: content },
+          model: candidate.model,
+        });
+      } catch (fetchErr) {
+        console.error(`[vision-prompt] Candidate ${candidate.model}@${candidate.providerName} fetch error:`, fetchErr);
+        lastError = `请求失败: ${fetchErr instanceof Error ? fetchErr.message : '网络错误'}`;
+        lastStatus = 503;
+        continue;
       }
     }
 
-    const choices = data.choices as Array<{ message?: { content?: string } }> | undefined;
-    const content = choices?.[0]?.message?.content || '';
-
-    // Try to parse JSON from the response
-    let parsed: Record<string, unknown> | null = null;
-    try {
-      // Handle potential markdown code blocks
-      const jsonStr = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-      parsed = JSON.parse(jsonStr);
-    } catch {
-      // If parsing fails, return raw content
-      parsed = null;
-    }
-
-    return NextResponse.json({
-      success: true,
-      data: parsed || { raw: content },
-      model: visionModel,
-    });
+    // All candidates failed
+    console.error(`[vision-prompt] All ${candidates.length} candidate(s) failed. Last error: ${lastError}`);
+    return NextResponse.json(
+      { error: lastError || '所有视觉模型提供商均不可用，请检查管理员面板配置' },
+      { status: lastStatus }
+    );
   } catch (error) {
     console.error('[vision-prompt] Error:', error);
     return NextResponse.json(
