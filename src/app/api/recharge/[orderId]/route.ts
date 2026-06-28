@@ -32,13 +32,20 @@ export async function GET(
     const expiresAt = Number(order.expires_at) || 0;
     const isExpired = expiresAt > 0 && Date.now() > expiresAt;
 
-    // Get admin note if configured
+    // Get admin payment config (note + QR code for payment)
     let note = '';
+    let adminQrUrl = '';
     try {
       const dbVal = await dbGetSystemSetting('payment_config');
       if (dbVal) {
-        const config = typeof dbVal === 'string' ? JSON.parse(dbVal) : dbVal;
-        note = (config as Record<string, unknown>)?.note as string || '';
+        const config = typeof dbVal === 'string' ? JSON.parse(dbVal) : dbVal as Record<string, unknown>;
+        note = (config.note as string) || '';
+        // Return the QR URL matching the payment method
+        if (method === 'wechat' && config.wechatEnabled && config.wechatQrUrl) {
+          adminQrUrl = config.wechatQrUrl as string;
+        } else if (method === 'alipay' && config.alipayEnabled && config.alipayQrUrl) {
+          adminQrUrl = config.alipayQrUrl as string;
+        }
       }
     } catch { /* ignore */ }
 
@@ -55,6 +62,7 @@ export async function GET(
         expiresAt: Number(order.expires_at) || 0,
         isExpired,
       },
+      adminQrUrl,
       note,
     });
   } catch (e) {
