@@ -277,6 +277,30 @@ main.dashboard-scrollable {
   body {
     @apply bg-background text-foreground;
   }
+  /* 深色主题下原生 select 的 option 下拉菜单可读性修复 */
+  /* 原生 option 无法继承 Tailwind 主题色，必须显式设置 */
+  :root option,
+  .dark option {
+    background-color: #1c2128;
+    color: #e6edf3;
+  }
+  :root option:hover,
+  .dark option:hover,
+  :root option:checked,
+  .dark option:checked {
+    background-color: #262c36;
+    color: #d4af37;
+  }
+  /* Monochrome 主题下的 option */
+  .theme-monochrome option {
+    background-color: #ffffff;
+    color: #1e293b;
+  }
+  .theme-monochrome option:hover,
+  .theme-monochrome option:checked {
+    background-color: #f1f5f9;
+    color: #3b82f6;
+  }
 }
 
 body {

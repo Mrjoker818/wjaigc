@@ -6697,8 +6697,13 @@ export function InfiniteCanvas({
     setShowPsdEditor(true);
   }, [selectedImageData]);
 
-  const handleOpen3D = useCallback(() => {
-    if (!selectedImageData && threeDMode === 'single-image') return;
+  const handleOpen3D = useCallback((fromToolbar?: boolean) => {
+    // If no image selected and opened from bottom toolbar, default to text-to-3d mode
+    if (!selectedImageData && fromToolbar) {
+      setThreeDMode('text-to-3d');
+    }
+    // For single-image mode without selection, switch to multi-image
+    if (!selectedImageData && threeDMode === 'single-image' && !fromToolbar) return;
     const providers = getThreeDProviders();
     if (!threeDProviderId && providers[0]) {
       setThreeDProviderId(providers[0].id);
@@ -8175,7 +8180,7 @@ export function InfiniteCanvas({
               <div className={`text-xs leading-relaxed space-y-1 ${isMonochrome ? 'text-gray-400' : 'text-gray-500'}`}>
                 <p>拖入图片 / 上传图片 / AI 生成图片到画布</p>
                 <p>左键选择 · 滚轮缩放 · 空格+拖动平移 · 右键菜单</p>
-                <p>底部工具栏：图像生成 · 修图 · Agent编排 · 字境大师 · 精修引擎 · 品牌电商</p>
+                <p>底部工具栏：图像生成 · 转3D · 修图 · Agent编排 · 字境大师 · 精修引擎 · 品牌电商</p>
               </div>
               <div className="flex items-center justify-center gap-3 pointer-events-auto">
                 <button onClick={() => setShowHelpModal('instructions')} className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-all border ${isMonochrome ? 'text-blue-600 border-blue-200 hover:text-blue-700 hover:border-blue-400' : 'text-gold-muted border-white/[0.14] hover:text-gold hover:border-gold/40'}`}>
@@ -14104,6 +14109,16 @@ export function InfiniteCanvas({
         >
           <Sparkles className="h-4 w-4" />
           <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">图像生成器</span>
+        </button>
+
+        {/* 图片转3D - always visible */}
+        <button
+          onClick={() => handleOpen3D(true)}
+          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 ${show3DModal ? (isMonochrome ? 'text-indigo-600 bg-indigo-50 ring-2 ring-indigo-500/50' : 'text-text-bright bg-gold/20 ring-2 ring-gold/40') : (isMonochrome ? 'text-indigo-500 hover:text-indigo-600 hover:bg-indigo-50' : 'text-gold-muted hover:text-gold-light hover:bg-gold/10')}`}
+          title="图片转3D"
+        >
+          <BoxIcon className={`h-4 w-4 ${isMonochrome ? 'text-indigo-500' : ''}`} />
+          <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">转3D</span>
         </button>
 
         {/* ── Right: Feature buttons (collapsible) ── */}
