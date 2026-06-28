@@ -1147,7 +1147,7 @@ export function InfiniteCanvas({
     if (typeof window !== 'undefined') {
       try { const saved = localStorage.getItem('wujie_toolbar_order'); if (saved) return JSON.parse(saved); } catch {}
     }
-    return ['放大','移除背景','SVG智能描摹','擦除','蒙版','编辑元素','多角度','转3D','扩展','裁切','精修引擎','语言修图','Agent编排','下载'];
+    return ['放大','移除背景','SVG智能描摹','擦除','蒙版','编辑元素','多角度','图转3D工厂','扩展','裁切','精修引擎','语言修图','Agent编排','下载'];
   });
   const [toolbarHiddenItems, setToolbarHiddenItems] = useState<Set<string>>(() => {
     if (typeof window !== 'undefined') {
@@ -1353,6 +1353,8 @@ export function InfiniteCanvas({
   // 3D mode: single-image / multi-image / text-to-3d
   const [threeDMode, setThreeDMode] = useState<'single-image' | 'multi-image' | 'text-to-3d'>('single-image');
   const [threeDPrompt, setThreeDPrompt] = useState('');
+  const [threeDSingleImageUrl, setThreeDSingleImageUrl] = useState<string>('');
+  const [threeDShowCanvasPicker, setThreeDShowCanvasPicker] = useState(false);
   const [threeDEnablePBR, setThreeDEnablePBR] = useState(false);
   const [threeDFaceCount, setThreeDFaceCount] = useState(30000);
   const [threeDPose, setThreeDPose] = useState<'' | 'a-pose' | 't-pose'>('');
@@ -6698,15 +6700,20 @@ export function InfiniteCanvas({
   }, [selectedImageData]);
 
   const handleOpen3D = useCallback((fromToolbar?: boolean) => {
-    // If no image selected and opened from bottom toolbar, default to text-to-3d mode
-    if (!selectedImageData && fromToolbar) {
-      setThreeDMode('text-to-3d');
-    }
-    // For single-image mode without selection, switch to multi-image
-    if (!selectedImageData && threeDMode === 'single-image' && !fromToolbar) return;
     const providers = getThreeDProviders();
     if (!threeDProviderId && providers[0]) {
       setThreeDProviderId(providers[0].id);
+    }
+    // Auto-fill single image URL from selected canvas image
+    if (selectedImageData) {
+      setThreeDSingleImageUrl(selectedImageData.url);
+      if (threeDMode === 'single-image') {
+        // Keep single-image mode, selected image auto-fills
+      }
+    } else if (fromToolbar) {
+      // No selected image from toolbar — default to single-image mode with empty image
+      setThreeDMode('single-image');
+      setThreeDSingleImageUrl('');
     }
     // Auto-add selected image as front view for multi-image mode
     if (selectedImageData && threeDMode === 'multi-image' && !threeDMultiImages.find(img => img.view === 'front')) {
@@ -6719,8 +6726,12 @@ export function InfiniteCanvas({
 
   const handle3DConfirm = useCallback(async () => {
     const img = getActiveImageData();
-    // For text-to-3D, no image is needed; for single-image, image is required
-    if (threeDMode === 'single-image' && !img) return;
+    // For single-image, prefer threeDSingleImageUrl (from upload/canvas pick), fallback to selected image
+    const singleImageUrl = threeDSingleImageUrl || img?.url || selectedImageData?.url || '';
+    if (threeDMode === 'single-image' && !singleImageUrl) {
+      alert('请先选择或上传一张图片');
+      return;
+    }
     if (threeDMode === 'text-to-3d' && !threeDPrompt.trim()) {
       alert('请输入3D模型描述');
       return;
@@ -6741,9 +6752,9 @@ export function InfiniteCanvas({
     try {
       const sourceImage = img || selectedImageData;
       const placeholderId = sourceImage
-        ? createProcessingFrameRightOf(sourceImage, '转 3D 中', sourceImage.width, sourceImage.height, '正在创建图生 3D 任务...')
-        : createProcessingFrameRightOf({ x: 100, y: 100, width: 300, height: 200 } as any, '转 3D 中', 300, 200, '正在创建文生 3D 任务...');
-      updateProcessingFrame(placeholderId, { progress: 16, status: '正在提交 3D 转换参数...' });
+        ? createProcessingFrameRightOf(sourceImage, '图转3D中', sourceImage.width, sourceImage.height, '正在创建图转3D任务...')
+        : createProcessingFrameRightOf({ x: 100, y: 100, width: 300, height: 200 } as any, '图转3D中', 300, 200, '正在创建文生3D任务...');
+      updateProcessingFrame(placeholderId, { progress: 16, status: '正在提交3D转换参数...' });
       // 关闭3D弹窗，回到画布查看进度
       setShow3DModal(false);
       setActiveTool('none');
@@ -6756,7 +6767,7 @@ export function InfiniteCanvas({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          imageUrl: sourceImage?.url || '',
+          imageUrl: singleImageUrl,
           mode: threeDMode,
           images: threeDMode === 'multi-image' ? threeDMultiImages : undefined,
           prompt: threeDMode === 'text-to-3d' ? threeDPrompt : undefined,
@@ -7598,7 +7609,7 @@ export function InfiniteCanvas({
   const monoColors: Record<string, string> = {
     '放大': 'text-blue-600', '移除背景': 'text-pink-500', 'SVG智能描摹': 'text-blue-500',
     '擦除': 'text-orange-500', '蒙版': 'text-violet-500', '编辑元素': 'text-cyan-500',
-    '多角度': 'text-teal-500', '转3D': 'text-indigo-500', '扩展': 'text-amber-500',
+    '多角度': 'text-teal-500', '图转3D工厂': 'text-indigo-500', '扩展': 'text-amber-500',
     '裁切': 'text-rose-500', '精修引擎': 'text-violet-500', '语言修图': 'text-sky-500', 'Agent编排': 'text-fuchsia-500',
     '下载': 'text-gray-600',
   };
@@ -7610,7 +7621,7 @@ export function InfiniteCanvas({
     { icon: <Wand2 size={14} className={isMonochrome ? monoColors['蒙版'] : ''} />, label: '蒙版', desc: '精准遮罩控制，只改露出的区域', action: handleOpenMask },
     { icon: <Layers size={14} className={isMonochrome ? monoColors['编辑元素'] : ''} />, label: '编辑元素', desc: '按元素分层，独立编辑', action: handleEditElements },
     { icon: <RotateCcw size={14} className={isMonochrome ? monoColors['多角度'] : ''} />, label: '多角度', desc: '多视角生成', action: handleOpenMultiAngle },
-    { icon: <BoxIcon size={14} className={isMonochrome ? monoColors['转3D'] : ''} />, label: '转3D', desc: '生成3D模型预览', action: handleOpen3D },
+    { icon: <BoxIcon size={14} className={isMonochrome ? monoColors['图转3D工厂'] : ''} />, label: '图转3D工厂', desc: '生成3D模型预览', action: handleOpen3D },
     { icon: <Expand size={14} className={isMonochrome ? monoColors['扩展'] : ''} />, label: '扩展', desc: '向四周延伸画面，自动补齐背景', action: handleOpenExpand },
     { icon: <Scissors size={14} className={isMonochrome ? monoColors['裁切'] : ''} />, label: '裁切', desc: '自由/预设比例裁切', action: handleOpenCrop },
     { icon: <Scan size={14} className={isMonochrome ? monoColors['精修引擎'] : ''} />, label: '精修引擎', desc: '产品精修：标准/专家模式，AI商业级修图', action: () => { const img = selectedImageData || selectedImage; setRefineEngineImageUrl(img?.url || ''); setShowRefineEngine(true); } },
@@ -8180,7 +8191,7 @@ export function InfiniteCanvas({
               <div className={`text-xs leading-relaxed space-y-1 ${isMonochrome ? 'text-gray-400' : 'text-gray-500'}`}>
                 <p>拖入图片 / 上传图片 / AI 生成图片到画布</p>
                 <p>左键选择 · 滚轮缩放 · 空格+拖动平移 · 右键菜单</p>
-                <p>底部工具栏：图像生成 · 转3D · 修图 · Agent编排 · 字境大师 · 精修引擎 · 品牌电商</p>
+                <p>底部工具栏：图像生成 · 图转3D工厂 · 修图 · Agent编排 · 字境大师 · 精修引擎 · 品牌电商</p>
               </div>
               <div className="flex items-center justify-center gap-3 pointer-events-auto">
                 <button onClick={() => setShowHelpModal('instructions')} className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-all border ${isMonochrome ? 'text-blue-600 border-blue-200 hover:text-blue-700 hover:border-blue-400' : 'text-gold-muted border-white/[0.14] hover:text-gold hover:border-gold/40'}`}>
@@ -12049,7 +12060,7 @@ export function InfiniteCanvas({
                   <div className="flex items-center gap-2">
                     <BoxIcon size={16} className={isMonochrome ? 'text-blue-500' : 'text-gold'} />
                     <div>
-                      <div className={`text-sm font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>转换 3D 模型</div>
+                      <div className={`text-sm font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>图转3D工厂</div>
                       <div className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#777]'}`}>支持单图/多图/文生3D，结果在当前图片右侧生成</div>
                     </div>
                   </div>
@@ -12085,10 +12096,79 @@ export function InfiniteCanvas({
                     ))}
                   </div>
 
-                  {/* Single image mode - show source image */}
-                  {threeDMode === 'single-image' && selectedImageData && (
-                    <div className={`rounded-2xl overflow-hidden flex items-center justify-center p-3 ${isMonochrome ? 'bg-gray-50' : 'bg-[#0a0a0a]/90'}`}>
-                      <img src={selectedImageData.url} alt="3D source" className="max-w-full max-h-[160px] object-contain rounded-lg" />
+                  {/* Single image mode - upload / select from canvas */}
+                  {threeDMode === 'single-image' && (
+                    <div className="space-y-2">
+                      {threeDSingleImageUrl ? (
+                        <div className={`rounded-2xl overflow-hidden flex items-center justify-center p-3 relative group ${isMonochrome ? 'bg-gray-50' : 'bg-[#0a0a0a]/90'}`}>
+                          <img src={threeDSingleImageUrl} alt="3D source" className="max-w-full max-h-[160px] object-contain rounded-lg" />
+                          <button
+                            onClick={() => setThreeDSingleImageUrl('')}
+                            className={`absolute top-2 right-2 w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity ${isMonochrome ? 'bg-gray-200 text-gray-600 hover:bg-gray-300' : 'bg-black/60 text-white hover:bg-black/80'}`}
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className={`rounded-2xl border-2 border-dashed flex flex-col items-center justify-center py-8 gap-3 ${isMonochrome ? 'border-gray-300 bg-gray-50' : 'border-white/20 bg-[#0a0a0a]/90'}`}>
+                          <ImagePlus size={32} className={isMonochrome ? 'text-gray-400' : 'text-white/30'} />
+                          <div className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>请选择或上传一张图片</div>
+                        </div>
+                      )}
+                      {/* Upload and canvas-select buttons */}
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => {
+                            const input = document.createElement('input');
+                            input.type = 'file';
+                            input.accept = 'image/*';
+                            input.onchange = async (e) => {
+                              const file = (e.target as HTMLInputElement).files?.[0];
+                              if (!file) return;
+                              const formData = new FormData();
+                              formData.append('file', file);
+                              try {
+                                const res = await fetch('/api/save-image', { method: 'POST', body: formData });
+                                const data = await res.json();
+                                if (data.url) setThreeDSingleImageUrl(data.url);
+                              } catch { /* ignore */ }
+                            };
+                            input.click();
+                          }}
+                          className={`flex-1 py-2 rounded-xl text-xs font-medium border transition-colors flex items-center justify-center gap-1.5 ${isMonochrome ? 'border-blue-200 text-blue-600 hover:bg-blue-50' : 'border-gold/30 text-gold hover:bg-gold/10'}`}
+                        >
+                          <Upload size={13} />
+                          上传图片
+                        </button>
+                        <div className="relative flex-1">
+                          <button
+                            onClick={() => setThreeDShowCanvasPicker(!threeDShowCanvasPicker)}
+                            className={`w-full py-2 rounded-xl text-xs font-medium border transition-colors flex items-center justify-center gap-1.5 ${isMonochrome ? 'border-blue-200 text-blue-600 hover:bg-blue-50' : 'border-gold/30 text-gold hover:bg-gold/10'}`}
+                          >
+                            <LayoutGrid size={13} />
+                            从画布选择
+                          </button>
+                          {/* Canvas image picker dropdown */}
+                          {threeDShowCanvasPicker && (
+                            <div className={`absolute top-full left-0 right-0 mt-1 rounded-xl border shadow-xl z-50 max-h-[200px] overflow-y-auto ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-[#444]'}`}>
+                              {images.length === 0 ? (
+                                <div className={`px-3 py-4 text-xs text-center ${isMonochrome ? 'text-gray-400' : 'text-[#666]'}`}>画布上暂无图片</div>
+                              ) : (
+                                images.map(img => (
+                                  <button
+                                    key={img.id}
+                                    onClick={() => { setThreeDSingleImageUrl(img.url); setThreeDShowCanvasPicker(false); }}
+                                    className={`w-full flex items-center gap-2 px-3 py-2 text-left transition-colors ${isMonochrome ? 'hover:bg-blue-50' : 'hover:bg-[#252525]'}`}
+                                  >
+                                    <img src={img.url} alt="" className="w-8 h-8 object-cover rounded-md" />
+                                    <span className={`text-xs truncate flex-1 ${isMonochrome ? 'text-gray-700' : 'text-white/80'}`}>{img.prompt || '未命名图片'}</span>
+                                  </button>
+                                ))
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   )}
 
@@ -13745,7 +13825,7 @@ export function InfiniteCanvas({
                             <span className={`text-xs font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>其他工具</span>
                           </div>
                           <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-                            {[['编辑元素', '按元素智能分层'], ['多角度', '多视角旋转生成'], ['转3D', '生成3D模型预览'], ['裁切', '自由/预设比例裁切'], ['Logo Pro', 'AI Logo设计与生成'], ['图生图', '基于原图风格生成'], ['品牌工厂', '品牌视觉资产生成'], ['下载', 'PNG/SVG/PSD多格式']].map(([k, v]) => (
+                            {[['编辑元素', '按元素智能分层'], ['多角度', '多视角旋转生成'], ['图转3D工厂', '生成3D模型预览'], ['裁切', '自由/预设比例裁切'], ['Logo Pro', 'AI Logo设计与生成'], ['图生图', '基于原图风格生成'], ['品牌工厂', '品牌视觉资产生成'], ['下载', 'PNG/SVG/PSD多格式']].map(([k, v]) => (
                               <div key={k} className="flex items-center justify-between"><span className={isMonochrome ? 'text-gray-600' : 'text-[#999]'}>{k}</span><span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-gold-muted/70'}`}>{v}</span></div>
                             ))}
                           </div>
@@ -13817,7 +13897,7 @@ export function InfiniteCanvas({
                         '字境大师 Pro：9大字体风格库+12种使用场景+AI设计方案生成+即梦提示词增强',
                         '精修引擎：标准/专家双模式，AI商业级产品精修',
                         '品牌电商：品牌电商视觉内容生成，商品场景图/营销素材一键出图',
-                        '图片编辑：放大/移除背景/SVG描摹/擦除/蒙版/编辑元素/多角度/转3D/扩展/裁切/图生图',
+                        '图片编辑：放大/移除背景/SVG描摹/擦除/蒙版/编辑元素/多角度/图转3D工厂/扩展/裁切/图生图',
                         '移除背景：同时生成透明底主体图+黑白蒙版图，BiRefNet/U2Net/Silueta优先+边缘修复',
                         '擦除：LaMa/ZITS/Anime-Lama优先，AI修复+边界扩散兜底',
                         '蒙版：AI重新生成指定区域，精确蒙版合成+边缘羽化过渡',
@@ -14113,14 +14193,14 @@ export function InfiniteCanvas({
 
         <div className={`w-px h-5 mx-1.5 ${separatorCls}`} />
 
-        {/* 图片转3D - always visible */}
+        {/* 图转3D工厂 - always visible */}
         <button
           onClick={() => handleOpen3D(true)}
           className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 ${show3DModal ? (isMonochrome ? 'text-indigo-600 bg-indigo-50 ring-2 ring-indigo-500/50' : 'text-text-bright bg-gold/20 ring-2 ring-gold/40') : (isMonochrome ? 'text-indigo-500 hover:text-indigo-600 hover:bg-indigo-50' : 'text-gold-muted hover:text-gold-light hover:bg-gold/10')}`}
-          title="图片转3D"
+          title="图转3D工厂"
         >
           <BoxIcon className={`h-4 w-4 ${isMonochrome ? 'text-indigo-500' : ''}`} />
-          <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">转3D</span>
+          <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">图转3D工厂</span>
         </button>
 
         {/* ── Right: Feature buttons (collapsible) ── */}

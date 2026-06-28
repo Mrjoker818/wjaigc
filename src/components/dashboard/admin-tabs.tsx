@@ -315,6 +315,18 @@ export default function AdminTabs(props: AdminTabsProps) {
 
     return (
       <div className="space-y-4 pb-8">
+        {/* 页面头部 */}
+        <div className="flex items-center justify-between mb-2">
+          <div>
+            <h1 className="text-xl font-bold text-foreground">运营总览</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">平台运营数据与趋势分析</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setOverviewPeriod('7')} className={`px-3 py-1.5 text-xs rounded-md border transition-colors ${overviewPeriod === '7' ? 'bg-primary text-primary-foreground border-primary' : 'bg-muted text-muted-foreground border-border hover:bg-muted/80'}`}>7天</button>
+            <button onClick={() => setOverviewPeriod('30')} className={`px-3 py-1.5 text-xs rounded-md border transition-colors ${overviewPeriod === '30' ? 'bg-primary text-primary-foreground border-primary' : 'bg-muted text-muted-foreground border-border hover:bg-muted/80'}`}>30天</button>
+            <button onClick={() => loadDashboardStats(overviewPeriod)} className="px-3 py-1.5 text-xs rounded-md bg-muted text-muted-foreground border border-border hover:bg-muted/80 transition-colors flex items-center gap-1"><RefreshCw className="w-3 h-3" />刷新</button>
+          </div>
+        </div>
         {/* 1. 统计卡片 */}
         <div className="grid grid-cols-4 gap-4">
           <StatCard icon={Users} label="总用户" value={s ? formatNumber(s.totalUsers) : '-'} sub={s ? `周活 ${formatNumber(s.weekActive)}` : ''} colorClass="text-primary" iconBg="bg-primary/15" />
@@ -583,6 +595,16 @@ export default function AdminTabs(props: AdminTabsProps) {
     const detailUser = userDetailId ? adminUsers.find(u => u.id === userDetailId) : null;
     return (
       <div className="space-y-4 pb-8">
+        {/* 页面标题 */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-xl font-bold text-foreground">用户管理</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">查看和管理平台所有用户</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={handleRefresh} className="h-9 px-4 rounded-lg bg-muted text-muted-foreground text-sm font-medium hover:text-foreground transition-colors flex items-center gap-2 cursor-pointer"><RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />刷新</button>
+          </div>
+        </div>
         {/* 筛选栏 */}
         <div className="flex items-center gap-3">
           <div className="relative flex-1 max-w-xs">
@@ -724,6 +746,13 @@ export default function AdminTabs(props: AdminTabsProps) {
     const creditTabLabels: Record<string, string> = { overview: '概览', consumption: '消耗明细', statistics: '统计分析', packages: '套餐管理' };
     return (
       <div className="space-y-4 pb-8">
+        {/* 页面标题 */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-xl font-bold text-foreground">积分管理</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">管理平台积分、消耗和套餐</p>
+          </div>
+        </div>
         {/* 统计卡片 */}
         <div className="grid grid-cols-4 gap-4">
           <StatCard icon={Wallet} label="积分总余额" value={co ? formatNumber(co.totalBalance) : '-'} colorClass="text-primary" iconBg="bg-primary/15" />
@@ -839,6 +868,13 @@ export default function AdminTabs(props: AdminTabsProps) {
     const as = auditStats;
     return (
       <div className="space-y-4 pb-8">
+        {/* 页面标题 */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-xl font-bold text-foreground">审计日志</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">追踪平台所有操作的完整记录</p>
+          </div>
+        </div>
         {/* 摘要卡片 */}
         <div className="grid grid-cols-3 gap-4">
           <StatCard icon={ShieldCheck} label="今日操作" value={as ? formatNumber(as.todayCount) : '-'} colorClass="text-primary" iconBg="bg-primary/15" />
@@ -955,6 +991,19 @@ export default function AdminTabs(props: AdminTabsProps) {
 
     return (
       <div className="space-y-5 pb-20">
+        {/* 页面标题 */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-xl font-bold text-foreground">系统设置</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">配置平台参数、安全策略与系统公告</p>
+          </div>
+          {settingsDirty && (
+            <div className="flex items-center gap-1.5 text-xs text-amber-500">
+              <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+              有未保存的修改
+            </div>
+          )}
+        </div>
         {settingGroups.map((group, gi) => (
           <div key={gi} className="bg-card rounded-lg shadow-card border border-border/50 overflow-hidden">
             {/* 组标题 */}
