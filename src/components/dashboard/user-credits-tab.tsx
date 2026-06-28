@@ -81,7 +81,7 @@ export default function UserCreditsTab({
   };
 
   return (
-    <div className="space-y-5 px-1">
+    <div className="space-y-5 p-6">
       {/* 页面头部 */}
       <div className="flex items-center justify-between">
         <div>

@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
-import { X, Download, ZoomIn, ZoomOut, Maximize2, RotateCcw, Move, Box, Image, Eye, ChevronDown, GripVertical, Camera, Sun, Lightbulb, Aperture, Grid3x3, BoxSelect, RefreshCw, Palette } from 'lucide-react';
+import { X, Download, ZoomIn, ZoomOut, Maximize2, RotateCcw, Move, Box, Image, ImagePlus, Eye, ChevronDown, GripVertical, Camera, Sun, Lightbulb, Aperture, Grid3x3, BoxSelect, RefreshCw, Palette } from 'lucide-react';
 
 /* ------------------------------------------------------------------ */
 /*  Simple Error Boundary for Three.js loading failures                */
@@ -426,6 +426,8 @@ interface ModelViewer3DProps {
   modelInfo?: Record<string, unknown>;
   onRetexture?: (modelTaskId: string) => void;
   onRemesh?: (modelTaskId: string) => void;
+  onScreenshotToCanvas?: (dataUrl: string) => void;
+  onSendToSceneStudio?: (modelUrl: string, model3DInfo?: Record<string, unknown>) => void;
   onClose: () => void;
 }
 
@@ -439,6 +441,8 @@ export default function ModelViewer3D({
   modelInfo: modelInfoProp,
   onRetexture,
   onRemesh,
+  onScreenshotToCanvas,
+  onSendToSceneStudio,
   onClose,
 }: ModelViewer3DProps) {
   const [modelInfo, setModelInfo] = useState<ModelInfo | null>(null);
@@ -526,6 +530,21 @@ export default function ModelViewer3D({
     return () => window.removeEventListener('keydown', handleKey);
   }, [onClose]);
 
+  /* Block context menu and prevent scroll/keyboard events from reaching canvas */
+  useEffect(() => {
+    const blockContextMenu = (e: MouseEvent) => e.preventDefault();
+    const blockWheel = (e: WheelEvent) => { e.stopPropagation(); };
+    const blockKeyDown = (e: KeyboardEvent) => { e.stopPropagation(); };
+    document.addEventListener('contextmenu', blockContextMenu, true);
+    document.addEventListener('wheel', blockWheel, true);
+    document.addEventListener('keydown', blockKeyDown, true);
+    return () => {
+      document.removeEventListener('contextmenu', blockContextMenu, true);
+      document.removeEventListener('wheel', blockWheel, true);
+      document.removeEventListener('keydown', blockKeyDown, true);
+    };
+  }, []);
+
   const formatNumber = (n: number) =>
     n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${(n / 1_000).toFixed(1)}K` : `${n}`;
 
@@ -565,6 +584,23 @@ export default function ModelViewer3D({
       console.error('Screenshot failed:', err);
     }
   }, []);
+
+  /* Screenshot to canvas */
+  const handleScreenshotToCanvas = useCallback(() => {
+    const canvas = canvasRef.current?.querySelector('canvas');
+    if (!canvas) return;
+    try {
+      const dataUrl = canvas.toDataURL('image/png');
+      onScreenshotToCanvas?.(dataUrl);
+    } catch (err) {
+      console.error('Screenshot to canvas failed:', err);
+    }
+  }, [onScreenshotToCanvas]);
+
+  /* Send to Scene Studio */
+  const handleSendToSceneStudio = useCallback(() => {
+    onSendToSceneStudio?.(modelUrl, model3DInfo as Record<string, unknown>);
+  }, [onSendToSceneStudio, modelUrl, model3DInfo]);
 
   /* Build available download options from modelUrls */
   const downloadOptions = useMemo(() => {
@@ -625,12 +661,24 @@ export default function ModelViewer3D({
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
-      onPointerDown={(e) => e.stopPropagation()}
-      onPointerMove={(e) => e.stopPropagation()}
-      onWheel={(e) => e.stopPropagation()}
-      onContextMenu={(e) => e.preventDefault()}
+      onPointerDown={(e) => { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation(); }}
+      onPointerMove={(e) => { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation(); }}
+      onPointerUp={(e) => { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation(); }}
+      onWheel={(e) => { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation(); }}
+      onMouseDown={(e) => { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation(); }}
+      onMouseMove={(e) => { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation(); }}
+      onMouseUp={(e) => { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation(); }}
+      onKeyDown={(e) => { e.stopPropagation(); }}
+      onKeyUp={(e) => { e.stopPropagation(); }}
+      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
     >
-      <div className="relative w-[92vw] max-w-[1200px] h-[85vh] max-h-[800px] rounded-2xl border border-[#2a2a2a]/80 bg-gradient-to-b from-[#141414] to-[#0a0a0a] overflow-hidden flex flex-col shadow-2xl shadow-black/50">
+      <div
+        className="relative w-[92vw] max-w-[1200px] h-[85vh] max-h-[800px] rounded-2xl border border-[#2a2a2a]/80 bg-gradient-to-b from-[#141414] to-[#0a0a0a] overflow-hidden flex flex-col shadow-2xl shadow-black/50"
+        onPointerDown={(e) => e.stopPropagation()}
+        onPointerMove={(e) => e.stopPropagation()}
+        onWheel={(e) => e.stopPropagation()}
+        onContextMenu={(e) => e.preventDefault()}
+      >
         {/* Header */}
         <div className="flex items-center gap-2 px-3 py-2 border-b border-[#2a2a2a]/60 bg-[#0d0d0d]/80 shrink-0 select-none">
           <GripVertical size={14} style={{ color: 'rgba(255,255,255,0.3)' }} />
@@ -644,6 +692,26 @@ export default function ModelViewer3D({
             </span>
           )}
           <div className="flex items-center gap-1">
+            {/* Screenshot to canvas */}
+            {onScreenshotToCanvas && (
+            <button
+              onClick={handleScreenshotToCanvas}
+              className="p-1.5 rounded-md text-[#777] hover:text-white hover:bg-white/5 transition-all"
+              title="截图到画布"
+            >
+              <ImagePlus size={13} />
+            </button>
+            )}
+            {/* Send to Scene Studio */}
+            {onSendToSceneStudio && (
+            <button
+              onClick={handleSendToSceneStudio}
+              className="p-1.5 rounded-md text-[#777] hover:text-[#d4af37] hover:bg-[#d4af37]/10 transition-all"
+              title="发送到3D构图"
+            >
+              <Box size={13} />
+            </button>
+            )}
             {/* Screenshot */}
             <button
               onClick={handleScreenshot}

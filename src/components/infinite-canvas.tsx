@@ -328,7 +328,7 @@ export interface CanvasImage {
   threeDModelUrls?: Record<string, string>;
   threeDThumbnailUrls?: Record<string, string>;
   threeDTextureUrls?: Array<Record<string, string>>;
-  threeDModelInfo?: { faceCount?: number; vertexCount?: number; fileSize?: string };
+  threeDModelInfo?: { faceCount?: number; vertexCount?: number; fileSize?: string; providerId?: string; providerName?: string; model3DName?: string; modelTaskId?: string };
   negativePrompt?: string;
   modelName?: string;
   /** ID of the source image that this image was generated from (for SVG connection lines) */
@@ -6889,9 +6889,9 @@ export function InfiniteCanvas({
         threeDModelUrls: threeDModelUrls || data.modelUrls,
         threeDThumbnailUrls: data.thumbnailUrls || {},
         threeDTextureUrls: data.textureUrls || [],
-        threeDModelInfo: { ...(data.modelInfo || {}), providerId: modelInfo.providerId || '', modelTaskId: data.taskId || '' },
-        modelName: modelInfo.apiDisplayName || modelInfo.model,
-        apiProvider: modelInfo.providerName || '',
+        threeDModelInfo: { ...(data.modelInfo || {}), providerId: modelInfo.providerId || '', providerName: provider?.name || provider?.providerName || '', model3DName: provider?.model || threeDType, modelTaskId: data.taskId || '' },
+        modelName: provider?.model || threeDType,
+        apiProvider: provider?.name || provider?.providerName || '',
       }, 'variant');
       setThreeDProgress(null);
     } catch (e) {
@@ -8720,9 +8720,15 @@ export function InfiniteCanvas({
                 )}
                 {/* Model & API info badge (bottom-left) */}
                 {(() => {
-                  const displayModelName = image.modelName || '';
-                  const rawApiProvider = image.apiProvider || '';
-	                  const displayApiProvider = (rawApiProvider && modelProviderMap.has(rawApiProvider)) ? (modelProviderMap.get(rawApiProvider) || rawApiProvider) : (rawApiProvider || modelProviderMap.get(image.model || '') || modelProviderMap.get(image.modelName || '') || '');
+                  // 3D模型优先使用3D提供商信息
+                  const is3DImage = !!(image as any).threeDModelInfo;
+                  const displayModelName = is3DImage
+                    ? ((image as any).threeDModelInfo?.model3DName || image.modelName || '')
+                    : (image.modelName || '');
+                  const rawApiProvider = is3DImage
+                    ? ((image as any).threeDModelInfo?.providerName || image.apiProvider || '')
+                    : (image.apiProvider || '');
+                  const displayApiProvider = (rawApiProvider && modelProviderMap.has(rawApiProvider)) ? (modelProviderMap.get(rawApiProvider) || rawApiProvider) : (rawApiProvider || modelProviderMap.get(image.model || '') || modelProviderMap.get(image.modelName || '') || '');
                   return (displayModelName || displayApiProvider) && !image.isProcessingPlaceholder ? (
                   <div className="absolute bottom-1 left-1 z-20 pointer-events-none flex flex-col gap-0.5"
                     style={{ fontSize: `${Math.max(8, 9 / zoom)}px` }}>
@@ -12536,6 +12542,25 @@ export function InfiniteCanvas({
                 if (data.error) { toast.error(data.error); return; }
                 toast.success('重网格任务已提交');
               }).catch(() => toast.error('重网格请求失败'));
+            }}
+            onScreenshotToCanvas={(dataUrl: string) => {
+              // 将3D截图添加到画布
+              const fileName = `3d-screenshot-${Date.now()}.png`;
+              fetch('/api/save-image', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ imageData: dataUrl, fileName }),
+              }).then(res => res.json()).then(data => {
+                if (data.url) {
+                  onAddImages?.([data.url], undefined, { modelName: '3D截图', apiProvider: (viewer3DModelInfo as any)?.providerName || '' });
+                }
+              }).catch(() => toast.error('截图保存失败'));
+            }}
+            onSendToSceneStudio={() => {
+              // 关闭3D预览器，打开3D构图面板
+              setShow3DViewer(false);
+              setShowSceneStudio(true);
+              toast.success('3D模型已准备就绪，请在3D构图面板中导入');
             }}
             onClose={() => { setShow3DViewer(false); setViewer3DModelUrl(''); setViewer3DPreviewUrl(''); setViewer3DModelUrls({}); setViewer3DThumbnailUrls({}); setViewer3DTextureUrls([]); setViewer3DModelInfo({}); }}
           />

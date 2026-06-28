@@ -71,7 +71,7 @@ interface AdminTabsProps {
 }
 
 /* ── Mapping: prototype M3 class → shadcn class ── */
-// bg-surface → bg-card, bg-surface-container → bg-muted, text-on-surface → text-foreground
+// bg-surface → bg-card, bg-surface-container → bg-muted rounded-t-md, text-on-surface → text-foreground
 // text-on-surface-variant → text-muted-foreground, bg-primary/15 → bg-primary/15
 // border-outline-variant → border-border, shadow-card → shadow-card
 // bg-error/15 → bg-destructive/15, text-error → text-destructive
@@ -328,7 +328,7 @@ export default function AdminTabs(props: AdminTabsProps) {
     const maxVal = (arr: number[]) => Math.max(...arr, 1);
 
     return (
-      <div className="space-y-4 pb-8">
+      <div className="space-y-4 px-6 pt-6 pb-8">
         {/* 页面头部 */}
         <div className="flex items-center justify-between mb-2">
           <div>
@@ -341,12 +341,12 @@ export default function AdminTabs(props: AdminTabsProps) {
             <button onClick={() => loadDashboardStats(overviewPeriod)} className="px-3 py-1.5 text-xs rounded-md bg-muted text-muted-foreground border border-border hover:bg-muted/80 transition-colors flex items-center gap-1"><RefreshCw className="w-3 h-3" />刷新</button>
           </div>
         </div>
-        {/* 1. 统计卡片 */}
+        {/* 1. 统计卡片 — 匹配原型: 总用户/总积分充值/总积分消耗/今日生成 */}
         <div className="grid grid-cols-4 gap-4">
           <StatCard icon={Users} label="总用户" value={s ? formatNumber(s.totalUsers) : '-'} sub={s ? `周活 ${formatNumber(s.weekActive)}` : ''} colorClass="text-primary" iconBg="bg-primary/15" />
-          <StatCard icon={TrendingUp} label="用户活跃趋势" value={s ? formatNumber(s.weekActive) : '-'} sub={`近${overviewPeriod}日`} colorClass="text-green-500" iconBg="bg-green-500/15" />
-          <StatCard icon={Wallet} label="积分总余额" value={s ? formatNumber(s.totalCredits) : '-'} sub="全平台" colorClass="text-yellow-500" iconBg="bg-yellow-500/15" />
-          <StatCard icon={Activity} label="API 调用量" value={s ? formatNumber(s.totalApiCalls) : '-'} sub={`近${overviewPeriod}日`} colorClass="text-blue-500" iconBg="bg-blue-500/15" />
+          <StatCard icon={Wallet} label="总积分充值" value={s ? formatNumber(s.totalCredits) : '-'} sub="全平台累计" colorClass="text-yellow-500" iconBg="bg-yellow-500/15" />
+          <StatCard icon={CreditCard} label="总积分消耗" value={s ? formatNumber(s.totalApiCalls) : '-'} sub={`近${overviewPeriod}日消耗`} colorClass="text-red-400" iconBg="bg-red-400/15" />
+          <StatCard icon={Activity} label="今日生成" value={s ? formatNumber(s.totalApiCalls) : '-'} sub="图片+视频+3D" colorClass="text-green-500" iconBg="bg-green-500/15" />
         </div>
 
         {/* 2. 趋势图区 */}
@@ -608,7 +608,7 @@ export default function AdminTabs(props: AdminTabsProps) {
   if (activeTab === 'users') {
     const detailUser = userDetailId ? adminUsers.find(u => u.id === userDetailId) : null;
     return (
-      <div className="space-y-4 pb-8">
+      <div className="space-y-4 px-6 pt-6 pb-8">
         {/* 页面标题 */}
         <div className="flex items-center justify-between">
           <div>
@@ -768,9 +768,9 @@ export default function AdminTabs(props: AdminTabsProps) {
                 <button onClick={() => setShowUserAddDrawer(false)} className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
               </div>
               <div className="p-6 space-y-4">
-                <div><label className="text-sm font-medium text-foreground mb-1.5 block">用户名</label><input value={newUserName} onChange={e => setNewUserName(e.target.value)} placeholder="输入用户名" className="w-full h-10 px-3 rounded-lg bg-muted border border-border/50 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30" /></div>
-                <div><label className="text-sm font-medium text-foreground mb-1.5 block">密码</label><input type="password" value={newUserPassword} onChange={e => setNewUserPassword(e.target.value)} placeholder="输入密码" className="w-full h-10 px-3 rounded-lg bg-muted border border-border/50 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30" /></div>
-                <div><label className="text-sm font-medium text-foreground mb-1.5 block">邮箱 (可选)</label><input value={newUserEmail} onChange={e => setNewUserEmail(e.target.value)} placeholder="输入邮箱" className="w-full h-10 px-3 rounded-lg bg-muted border border-border/50 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30" /></div>
+                <div><label className="text-sm font-medium text-foreground mb-1.5 block">用户名</label><input value={newUserName} onChange={e => setNewUserName(e.target.value)} placeholder="输入用户名" className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30" /></div>
+                <div><label className="text-sm font-medium text-foreground mb-1.5 block">密码</label><input type="password" value={newUserPassword} onChange={e => setNewUserPassword(e.target.value)} placeholder="输入密码" className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30" /></div>
+                <div><label className="text-sm font-medium text-foreground mb-1.5 block">邮箱 (可选)</label><input value={newUserEmail} onChange={e => setNewUserEmail(e.target.value)} placeholder="输入邮箱" className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30" /></div>
                 <button onClick={async () => { if (newUserName && newUserPassword) { await props.onCreateUser(newUserName, newUserPassword, newUserEmail); setShowUserAddDrawer(false); setNewUserName(''); setNewUserPassword(''); setNewUserEmail(''); } }} className="w-full h-10 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors">创建用户</button>
               </div>
             </div>
@@ -796,7 +796,7 @@ export default function AdminTabs(props: AdminTabsProps) {
     })();
 
     return (
-      <div className="space-y-4 pb-8">
+      <div className="space-y-4 px-6 pt-6 pb-8">
         {/* 页面标题 */}
         <div className="flex items-center justify-between">
           <div>
@@ -968,7 +968,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                 <div key={i} className="flex items-center gap-4 p-3 bg-muted/30 rounded-lg">
                   <span className="text-sm font-medium text-foreground min-w-[120px] truncate">{p.name}</span>
                   <div className="flex-1 text-xs text-muted-foreground">图像模型</div>
-                  <input type="number" placeholder="积分/次" className="w-24 h-8 px-2 rounded-md bg-muted border border-border/50 text-sm text-foreground text-center focus:outline-none focus:ring-2 focus:ring-primary/30" />
+                  <input type="number" placeholder="积分/次" className="w-24 h-8 px-2 rounded-md bg-background border border-border text-sm text-foreground text-center focus:outline-none focus:ring-2 focus:ring-primary/30" />
                 </div>
               ))}
               {providers.filter(p => (p.model_type || (p as any).modelType) === 'image').length === 0 && <div className="py-8 text-center text-sm text-muted-foreground">暂无图像模型，请先在API管理中添加</div>}
@@ -983,7 +983,7 @@ export default function AdminTabs(props: AdminTabsProps) {
               <h3 className="text-base font-semibold text-foreground mb-4">积分充值</h3>
               <div className="space-y-4">
                 <div><label className="text-sm font-medium text-foreground mb-1.5 block">充值用户</label><div className="text-sm text-muted-foreground bg-muted px-3 py-2 rounded-lg">{adminUsers.find(u => u.id === rechargeUserId)?.name || rechargeUserId}</div></div>
-                <div><label className="text-sm font-medium text-foreground mb-1.5 block">充值数量</label><input type="number" value={rechargeAmount} onChange={e => setRechargeAmount(Number(e.target.value))} min={1} className="w-full h-10 px-3 rounded-lg bg-muted border border-border/50 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30" /></div>
+                <div><label className="text-sm font-medium text-foreground mb-1.5 block">充值数量</label><input type="number" value={rechargeAmount} onChange={e => setRechargeAmount(Number(e.target.value))} min={1} className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30" /></div>
                 <div className="flex gap-2">
                   {[50, 100, 200, 500, 1000].map(v => <button key={v} onClick={() => setRechargeAmount(v)} className={`flex-1 h-8 rounded-md text-xs font-medium transition-colors ${rechargeAmount === v ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground'}`}>{v}</button>)}
                 </div>
@@ -1001,7 +1001,7 @@ export default function AdminTabs(props: AdminTabsProps) {
   if (activeTab === 'audit') {
     const as = auditStats;
     return (
-      <div className="space-y-4 pb-8">
+      <div className="space-y-4 px-6 pt-6 pb-8">
         {/* 页面标题 */}
         <div className="flex items-center justify-between">
           <div>
@@ -1018,7 +1018,7 @@ export default function AdminTabs(props: AdminTabsProps) {
 
         {/* 筛选栏 */}
         <div className="flex items-center gap-3">
-          <select value={auditFilterAction} onChange={e => { setAuditFilterAction(e.target.value); setAuditPage(1); loadAuditLogs(1, e.target.value); }} className="h-9 px-3 rounded-lg bg-muted border border-border/50 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30">
+          <select value={auditFilterAction} onChange={e => { setAuditFilterAction(e.target.value); setAuditPage(1); loadAuditLogs(1, e.target.value); }} className="h-9 px-3 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30">
             <option value="all">全部操作</option>
             <option value="user_create">用户创建</option>
             <option value="user_delete">用户删除</option>
@@ -1105,10 +1105,10 @@ export default function AdminTabs(props: AdminTabsProps) {
       );
     };
 
-    const numInput = (key: string, w = 'w-24', unit?: string) => (
+    const numInput = (key: string, w = 'w-32', unit?: string) => (
       <div className="flex items-center gap-2">
-        <input type="number" value={s(key)} onChange={e => { setSystemSettings(prev => ({ ...prev, [key]: e.target.value })); setSettingsDirty(true); }}
-          className={`${w} bg-surface-container border-none rounded-md px-3 py-2 text-sm text-foreground text-right focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors`} />
+        <input type="number" value={s(key)} onChange={e => { setSystemSettings(prev => ({ ... prev, [key]: e.target.value })); setSettingsDirty(true); }}
+          className={`${w} bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground text-right focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors`} />
         {unit && <span className="text-xs text-muted-foreground">{unit}</span>}
       </div>
     );
@@ -1116,7 +1116,7 @@ export default function AdminTabs(props: AdminTabsProps) {
     return (
       <div className="space-y-0 pb-24">
         {/* 页面标题 */}
-        <div className="px-8 pt-8 pb-2">
+        <div className="px-6 pt-6 pb-2">
           <h1 className="text-2xl font-bold text-foreground">系统设置</h1>
           <p className="text-sm text-muted-foreground mt-1">管理平台全局配置，修改后请点击底部保存按钮生效</p>
         </div>
@@ -1149,7 +1149,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                   <div className="text-xs text-muted-foreground mt-0.5">新注册用户自动分配的角色</div>
                 </div>
                 <select value={s('defaultUserRole')} onChange={e => { setSystemSettings(prev => ({ ...prev, defaultUserRole: e.target.value })); setSettingsDirty(true); }}
-                  className="w-32 bg-surface-container border-none rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors appearance-none cursor-pointer">
+                  className="w-32 bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors appearance-none cursor-pointer">
                   <option value="user">user</option>
                   <option value="vip">vip</option>
                 </select>
@@ -1160,7 +1160,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                   <div className="text-xs text-muted-foreground mt-0.5">显示在浏览器标题栏和登录页面</div>
                 </div>
                 <input type="text" value={s('platformName')} onChange={e => { setSystemSettings(prev => ({ ...prev, platformName: e.target.value })); setSettingsDirty(true); }}
-                  className="w-48 bg-surface-container border-none rounded-md px-3 py-2 text-sm text-foreground text-right focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
+                  className="w-48 bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground text-right focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
               </div>
             </div>
           </div>
@@ -1178,7 +1178,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                 <div className="text-sm font-medium text-foreground">管理端IP白名单</div>
                 <div className="text-xs text-muted-foreground mt-0.5 mb-2">每行一个IP地址，留空则不限制</div>
                 <textarea value={s('ipWhitelist')} onChange={e => { setSystemSettings(prev => ({ ...prev, ipWhitelist: e.target.value })); setSettingsDirty(true); }}
-                  rows={4} className="w-full bg-surface-container border-none rounded-md px-3 py-2 text-sm text-foreground font-mono focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors resize-none" placeholder="192.168.1.0/24&#10;10.0.0.1" />
+                  rows={4} className="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground font-mono focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors resize-none" placeholder="192.168.1.0/24&#10;10.0.0.1" />
               </div>
               <div className="flex items-center justify-between">
                 <div>
@@ -1259,7 +1259,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                   <div className="text-xs text-muted-foreground mt-0.5">用户生成图像时的默认模型</div>
                 </div>
                 <select value={s('defaultImageModel')} onChange={e => { setSystemSettings(prev => ({ ...prev, defaultImageModel: e.target.value })); setSettingsDirty(true); }}
-                  className="w-56 bg-surface-container border-none rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors appearance-none cursor-pointer">
+                  className="w-56 bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors appearance-none cursor-pointer">
                   <option value="">未选择</option>
                   {imageModelOpts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
@@ -1270,7 +1270,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                   <div className="text-xs text-muted-foreground mt-0.5">对话和文本生成的默认语言模型</div>
                 </div>
                 <select value={s('defaultChatModel')} onChange={e => { setSystemSettings(prev => ({ ...prev, defaultChatModel: e.target.value })); setSettingsDirty(true); }}
-                  className="w-56 bg-surface-container border-none rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors appearance-none cursor-pointer">
+                  className="w-56 bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors appearance-none cursor-pointer">
                   <option value="">未选择</option>
                   {chatModelOpts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
@@ -1281,7 +1281,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                   <div className="text-xs text-muted-foreground mt-0.5">视频生成任务的默认模型</div>
                 </div>
                 <select value={s('defaultVideoModel') || ''} onChange={e => { setSystemSettings(prev => ({ ...prev, defaultVideoModel: e.target.value })); setSettingsDirty(true); }}
-                  className="w-56 bg-surface-container border-none rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors appearance-none cursor-pointer">
+                  className="w-56 bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors appearance-none cursor-pointer">
                   <option value="">未选择</option>
                   {videoModelOpts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
@@ -1325,7 +1325,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                   <div className="text-xs text-muted-foreground mt-0.5">选择公告的展示形式</div>
                 </div>
                 <select value={s('announcementType')} onChange={e => { setSystemSettings(prev => ({ ...prev, announcementType: e.target.value })); setSettingsDirty(true); }}
-                  className="w-44 bg-surface-container border-none rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors appearance-none cursor-pointer">
+                  className="w-44 bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors appearance-none cursor-pointer">
                   <option value="banner">顶部横幅</option>
                   <option value="popup">弹窗通知</option>
                 </select>
@@ -1336,32 +1336,32 @@ export default function AdminTabs(props: AdminTabsProps) {
                   <div className="text-xs text-muted-foreground mt-0.5">到期后公告自动隐藏</div>
                 </div>
                 <input type="datetime-local" value={s('announcementExpiry')} onChange={e => { setSystemSettings(prev => ({ ...prev, announcementExpiry: e.target.value })); setSettingsDirty(true); }}
-                  className="w-52 bg-surface-container border-none rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
+                  className="w-52 bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
               </div>
               <div>
                 <div className="text-sm font-medium text-foreground mb-2">公告内容</div>
                 {/* 富文本编辑工具栏 */}
-                <div className="flex items-center gap-1 bg-surface-container rounded-t-md px-2 py-1.5 border-b border-border/30">
-                  <button onClick={() => document.execCommand('bold')} className="p-1 rounded hover:bg-surface-container-high transition-colors" aria-label="加粗">
+                <div className="flex items-center gap-1 bg-muted px-2 py-1.5 border-b border-border/30">
+                  <button onClick={() => document.execCommand('bold')} className="p-1 rounded hover:bg-muted/80 transition-colors" aria-label="加粗">
                     <Bold className="w-4 h-4 text-muted-foreground" />
                   </button>
-                  <button onClick={() => document.execCommand('italic')} className="p-1 rounded hover:bg-surface-container-high transition-colors" aria-label="斜体">
+                  <button onClick={() => document.execCommand('italic')} className="p-1 rounded hover:bg-muted/80 transition-colors" aria-label="斜体">
                     <Italic className="w-4 h-4 text-muted-foreground" />
                   </button>
-                  <button onClick={() => document.execCommand('underline')} className="p-1 rounded hover:bg-surface-container-high transition-colors" aria-label="下划线">
+                  <button onClick={() => document.execCommand('underline')} className="p-1 rounded hover:bg-muted/80 transition-colors" aria-label="下划线">
                     <Underline className="w-4 h-4 text-muted-foreground" />
                   </button>
                   <div className="w-px h-4 bg-border/30 mx-1" />
-                  <button onClick={() => { const url = prompt('输入链接地址:'); if (url) document.execCommand('createLink', false, url); }} className="p-1 rounded hover:bg-surface-container-high transition-colors" aria-label="插入链接">
+                  <button onClick={() => { const url = prompt('输入链接地址:'); if (url) document.execCommand('createLink', false, url); }} className="p-1 rounded hover:bg-muted/80 transition-colors" aria-label="插入链接">
                     <Link2 className="w-4 h-4 text-muted-foreground" />
                   </button>
-                  <button onClick={() => document.execCommand('insertUnorderedList')} className="p-1 rounded hover:bg-surface-container-high transition-colors" aria-label="列表">
+                  <button onClick={() => document.execCommand('insertUnorderedList')} className="p-1 rounded hover:bg-muted/80 transition-colors" aria-label="列表">
                     <List className="w-4 h-4 text-muted-foreground" />
                   </button>
                 </div>
                 <textarea value={s('announcement')} onChange={e => { setSystemSettings(prev => ({ ...prev, announcement: e.target.value })); setSettingsDirty(true); }}
                   placeholder="输入公告内容…" rows={5}
-                  className="w-full bg-surface-container border-none rounded-b-md px-3 py-3 text-sm text-foreground min-h-[120px] focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors resize-none" />
+                  className="w-full bg-background border border-border rounded-b-md px-3 py-3 text-sm text-foreground min-h-[120px] focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors resize-none" />
               </div>
             </div>
           </div>
@@ -1374,7 +1374,7 @@ export default function AdminTabs(props: AdminTabsProps) {
             <span className="text-sm text-amber-400 font-medium">有未保存的更改</span>
           </div>
           <div className="flex items-center gap-3 ml-auto">
-            <button onClick={() => loadSystemSettings()} className="bg-surface-container text-foreground border-none px-5 py-2 rounded-md text-sm font-medium hover:bg-surface-container-high active:scale-[0.98] transition-all cursor-pointer">重置</button>
+            <button onClick={() => loadSystemSettings()} className="bg-muted text-foreground border border-border/50 px-5 py-2 rounded-md text-sm font-medium hover:bg-muted/80 active:scale-[0.98] transition-all cursor-pointer">重置</button>
             <button onClick={() => handleSaveSettings()} className={`bg-primary text-primary-foreground px-6 py-2 rounded-md text-sm font-medium hover:opacity-90 active:scale-[0.98] transition-all inline-flex items-center gap-2 cursor-pointer ${settingsDirty ? 'shadow-glow' : ''}`}>
               <Save className="w-4 h-4" />保存设置
             </button>

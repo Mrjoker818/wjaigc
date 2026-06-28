@@ -112,7 +112,7 @@ export default function UserSettingsTab({
     `inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${on ? 'translate-x-6' : 'translate-x-1'}`;
 
   return (
-    <div className="space-y-5 px-1">
+    <div className="space-y-5 p-6">
       {/* 个人资料 + 安全 - 双列布局 */}
       <div className="grid grid-cols-2 gap-4">
         {/* 个人资料 */}
@@ -150,7 +150,7 @@ export default function UserSettingsTab({
           <div className="space-y-2">
             <button
               onClick={() => setShowPasswordDialog(true)}
-              className="w-full flex items-center justify-between px-3 py-2.5 rounded-md bg-muted border border-border/30 text-foreground text-sm hover:bg-muted/80 transition-colors"
+              className="w-full flex items-center justify-between px-3 py-2.5 rounded-md bg-background border border-border text-foreground text-sm hover:bg-muted/80 transition-colors"
             >
               <div className="flex items-center gap-2">
                 <Lock className="w-4 h-4 text-muted-foreground" />
@@ -158,7 +158,7 @@ export default function UserSettingsTab({
               </div>
               <ChevronRight className="w-4 h-4 text-muted-foreground" />
             </button>
-            <button className="w-full flex items-center justify-between px-3 py-2.5 rounded-md bg-muted border border-border/30 text-foreground text-sm hover:bg-muted/80 transition-colors">
+            <button className="w-full flex items-center justify-between px-3 py-2.5 rounded-md bg-background border border-border text-foreground text-sm hover:bg-muted/80 transition-colors">
               <div className="flex items-center gap-2">
                 <History className="w-4 h-4 text-muted-foreground" />
                 <span>登录记录</span>
@@ -223,7 +223,7 @@ export default function UserSettingsTab({
               <select
                 value={imageQuality}
                 onChange={(e) => { setImageQuality(e.target.value as typeof imageQuality); markChanged(); }}
-                className="bg-muted border border-border/30 rounded-md px-3 py-1.5 text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                className="bg-background border border-border rounded-md px-3 py-1.5 text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
               >
                 <option value="standard">标准</option>
                 <option value="high">高清</option>
@@ -278,7 +278,7 @@ export default function UserSettingsTab({
         <div className="sticky bottom-0 bg-card border border-border/50 rounded-lg p-3 flex items-center justify-between shadow-lg">
           <span className="text-sm text-primary">有未保存的修改</span>
           <div className="flex items-center gap-2">
-            <button onClick={handleReset} className="px-3 py-1.5 rounded-md text-sm bg-muted border border-border/30 text-muted-foreground hover:text-foreground transition-colors">
+            <button onClick={handleReset} className="px-3 py-1.5 rounded-md text-sm bg-background border border-border text-muted-foreground hover:text-foreground transition-colors">
               重置
             </button>
             <button onClick={handleSave} disabled={saving} className="px-4 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50">
@@ -297,11 +297,11 @@ export default function UserSettingsTab({
             <div className="space-y-3">
               <div>
                 <label className="text-sm font-medium text-foreground mb-1.5 block">新密码</label>
-                <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="至少6位" className="w-full h-10 px-3 rounded-lg bg-muted border border-border/30 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30" />
+                <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="至少6位" className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30" />
               </div>
               <div>
                 <label className="text-sm font-medium text-foreground mb-1.5 block">确认密码</label>
-                <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="再次输入新密码" className="w-full h-10 px-3 rounded-lg bg-muted border border-border/30 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30" />
+                <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="再次输入新密码" className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30" />
               </div>
               <button onClick={handlePasswordChange} className="w-full h-10 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors">确认修改</button>
             </div>
