@@ -115,15 +115,19 @@ async function imageUrlToBase64(imageUrl: string): Promise<string> {
     return imageUrl;
   }
 
-  // Relative path (e.g., /uploads/xxx.png) — read from local filesystem
+  // Relative path (e.g., /uploads/xxx.png, /api/serve-upload/generate/img_xxx.png) — read from local filesystem
   if (imageUrl.startsWith('/')) {
     const fsSync = await import('fs');
     const fsPromises = fsSync.promises;
     const path = await import('path');
     const workspacePath = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
 
+    // Strip /api/serve-upload/ prefix to get the actual file sub-path
+    // e.g., /api/serve-upload/generate/img_xxx.png → generate/img_xxx.png
+    const strippedPath = imageUrl.replace(/^\/api\/serve-upload\//, '').replace(/^\//, '');
+
     // 1. Try local public directory
-    const localPath = path.join(workspacePath, 'public', imageUrl);
+    const localPath = path.join(workspacePath, 'public', strippedPath);
     if (fsSync.existsSync(localPath)) {
       const buffer = await fsPromises.readFile(localPath);
       const ext = path.extname(localPath).toLowerCase();
@@ -139,16 +143,23 @@ async function imageUrlToBase64(imageUrl: string): Promise<string> {
     try {
       const { getServerDataRoot } = await import('@/lib/server-data-root');
       const dataRoot = await getServerDataRoot();
-      const persistentPath = path.join(dataRoot, imageUrl.replace(/^\//, ''));
-      if (fsSync.existsSync(persistentPath)) {
-        const buffer = await fsPromises.readFile(persistentPath);
-        const ext = path.extname(persistentPath).toLowerCase();
-        const mimeMap: Record<string, string> = {
-          '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-          '.webp': 'image/webp', '.gif': 'image/gif',
-        };
-        const contentType = mimeMap[ext] || 'image/png';
-        return `data:${contentType};base64,${buffer.toString('base64')}`;
+      // Try multiple possible locations (matching serve-upload route logic)
+      const possiblePaths = [
+        path.join(dataRoot, strippedPath),              // dataRoot/generate/img_xxx.png
+        path.join(dataRoot, 'uploads', strippedPath),   // dataRoot/uploads/generate/img_xxx.png
+        path.join(workspacePath, 'public', 'uploads', path.basename(strippedPath)), // public/uploads/img_xxx.png
+      ];
+      for (const persistentPath of possiblePaths) {
+        if (fsSync.existsSync(persistentPath)) {
+          const buffer = await fsPromises.readFile(persistentPath);
+          const ext = path.extname(persistentPath).toLowerCase();
+          const mimeMap: Record<string, string> = {
+            '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+            '.webp': 'image/webp', '.gif': 'image/gif',
+          };
+          const contentType = mimeMap[ext] || 'image/png';
+          return `data:${contentType};base64,${buffer.toString('base64')}`;
+        }
       }
     } catch {}
 
@@ -156,9 +167,9 @@ async function imageUrlToBase64(imageUrl: string): Promise<string> {
     try {
       const { isS3Available, downloadImageFromS3 } = await import('@/lib/s3-storage');
       if (isS3Available()) {
-        const filename = imageUrl.replace(/^\/api\/serve-upload\//, '').replace(/^\//, '');
-        for (const prefix of ['images/', 'uploads/']) {
-          const s3Key = `${prefix}${filename}`;
+        const filename = strippedPath;
+        for (const prefix of ['images/', 'uploads/', 'generate/', ''] ) {
+          const s3Key = prefix ? `${prefix}${filename}` : filename;
           const s3Buffer = await downloadImageFromS3(s3Key);
           if (s3Buffer) {
             const ext = filename.split('.').pop()?.toLowerCase() || 'png';
@@ -175,7 +186,7 @@ async function imageUrlToBase64(imageUrl: string): Promise<string> {
 
     // 4. Try source URL mapping (re-download from original external URL)
     try {
-      const filename = imageUrl.replace(/^\/api\/serve-upload\//, '').replace(/^\//, '');
+      const filename = strippedPath;
       const { getImageSourceUrl } = await import('@/lib/image-source-map');
       const sourceUrl = await getImageSourceUrl(filename);
       if (sourceUrl) {
@@ -281,13 +292,37 @@ export async function POST(request: NextRequest) {
       }
     } else if (visionModel) {
       // Search across chat, vlm, and image model types for vision capability
-      const provider = await findProviderForModel(visionModel, 'chat')
-        || await findProviderForModel(visionModel, 'vlm')
-        || await findProviderForModel(visionModel, 'image');
+      const provider = await findProviderForModel(visionModel, 'chat', resolvedProviderId)
+        || await findProviderForModel(visionModel, 'vlm', resolvedProviderId)
+        || await findProviderForModel(visionModel, 'image', resolvedProviderId);
       if (provider?.apiKey) {
         visionApiKey = provider.apiKey;
         visionBaseUrl = normalizeApiBaseUrl(provider.baseUrl);
         resolvedProviderPreset = providerPreset || provider.providerPreset;
+      }
+    } else {
+      // No model specified — try to find any available vision-capable model
+      const allProviders = (await getApiProviders()).filter(p => p.isEnabled);
+      // Priority: vlm > chat > image providers with vision-capable models
+      for (const modelType of ['vlm', 'chat', 'image'] as const) {
+        const provider = allProviders.find(p => {
+          if (p.modelType !== modelType) return false;
+          const models = p.selectedModels || [];
+          // Check for vision-capable model names
+          return models.some(m => /vision|vlm|gemini.*flash|gpt-4o|gpt-4-turbo|claude-3|qwen-vl/i.test(m));
+        });
+        if (provider) {
+          visionApiKey = provider.apiKey;
+          visionBaseUrl = normalizeApiBaseUrl(provider.baseUrl);
+          resolvedProviderPreset = provider.providerPreset;
+          // Pick the first vision-capable model from the provider
+          const visionModels = (provider.selectedModels || []).filter(m =>
+            /vision|vlm|gemini.*flash|gpt-4o|gpt-4-turbo|claude-3|qwen-vl/i.test(m)
+          );
+          visionModel = visionModels[0] || provider.selectedModels?.[0] || '';
+          console.log(`[vision-prompt] Auto-selected vision model: ${visionModel} from provider: ${provider.name}`);
+          break;
+        }
       }
     }
 
