@@ -22,6 +22,7 @@ import {
   type NodeType,
 } from '@/lib/workflow-engine';
 import { findProviderForModel, findProviderForFeature, findProviderById } from '@/lib/server-api-config';
+import { normalizeModelForApi } from '@/lib/model-capabilities';
 
 // 内存中的执行状态
 const executionCache = new Map<string, {
@@ -252,14 +253,19 @@ async function executeWorkflow(
         const pureModelId = sepIdx >= 0 ? modelStr.slice(sepIdx + 2) : modelStr;
         const existingProviderId = sepIdx >= 0 ? modelStr.slice(0, sepIdx) : '';
         if (!existingProviderId) {
-          const provider = await findProviderForModel(pureModelId);
+          const provider = await findProviderForModel(pureModelId, undefined, undefined);
           if (provider) {
             node.config.providerId = provider.id;
             console.log(`[workflow-execute] 自动注入 providerId=${provider.id} for model=${pureModelId}`);
           }
         } else {
           node.config.providerId = existingProviderId;
-          node.config.model = pureModelId;
+          // ★ 规范化模型名别名
+          const wfModelNorm = normalizeModelForApi(pureModelId);
+          node.config.model = wfModelNorm.wasNormalized ? wfModelNorm.apiModelName : pureModelId;
+          if (wfModelNorm.wasNormalized) {
+            console.log(`[workflow-execute] Normalized model alias: "${pureModelId}" → "${wfModelNorm.apiModelName}"`);
+          }
         }
       }
 
@@ -364,7 +370,7 @@ async function executeWorkflow(
                   }
                   // 2. 按模型名称查找
                   if (!dsApiKey && dsModelName) {
-                    const provider = await findProviderForModel(dsModelName);
+                    const provider = await findProviderForModel(dsModelName, undefined, dsConfigProviderId);
                     if (provider) {
                       dsApiKey = provider.apiKey;
                       dsBaseUrl = provider.baseUrl;
@@ -436,7 +442,7 @@ async function executeWorkflow(
 
       // 2. 按模型名称查找
       if (!apiKey && modelName) {
-        const provider = await findProviderForModel(modelName);
+        const provider = await findProviderForModel(modelName, undefined, configProviderId);
         if (provider) {
           apiKey = provider.apiKey;
           baseUrl = provider.baseUrl;

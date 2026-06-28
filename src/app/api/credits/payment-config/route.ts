@@ -3,6 +3,7 @@ import { dbGetSystemSetting, dbSetSystemSetting } from '@/lib/db-storage';
 import { getSessionUser } from '@/lib/server-auth';
 import { uploadImageToS3, isS3Available } from '@/lib/s3-storage';
 import { getServerDataRoot } from '@/lib/server-data-root';
+import { decodeQrFromUrl, isPaymentLink } from '@/lib/qr-decode';
 import path from 'path';
 import fs from 'fs';
 
@@ -10,6 +11,8 @@ import fs from 'fs';
 interface QrPaymentConfig {
   wechatQrUrl: string;      // 微信收款码图片URL
   alipayQrUrl: string;      // 支付宝收款码图片URL
+  wechatPayLink: string;    // 微信支付链接（从收款码解码，如 wxp://xxx）
+  alipayPayLink: string;    // 支付宝支付链接（从收款码解码，如 https://qr.alipay.com/xxx）
   wechatEnabled: boolean;   // 是否启用微信收款
   alipayEnabled: boolean;   // 是否启用支付宝收款
   confirmMode: 'manual';    // 确认模式：仅手动（管理员确认到账）
@@ -22,6 +25,8 @@ function getDefaultConfig(): QrPaymentConfig {
   return {
     wechatQrUrl: '',
     alipayQrUrl: '',
+    wechatPayLink: '',
+    alipayPayLink: '',
     wechatEnabled: false,
     alipayEnabled: false,
     confirmMode: 'manual',
@@ -48,15 +53,15 @@ export async function GET(request: NextRequest) {
   if (user.role !== 'admin') return NextResponse.json({ success: false, error: '需要管理员权限' }, { status: 403 });
 
   const cfg = await loadConfig();
-  const canAcceptPayments = (cfg.wechatEnabled && !!cfg.wechatQrUrl) || (cfg.alipayEnabled && !!cfg.alipayQrUrl);
+  const canAcceptPayments = (cfg.wechatEnabled && (!!cfg.wechatQrUrl || !!cfg.wechatPayLink)) || (cfg.alipayEnabled && (!!cfg.alipayQrUrl || !!cfg.alipayPayLink));
 
   return NextResponse.json({
     success: true,
     config: cfg,
     status: {
       canAcceptPayments,
-      wechatReady: cfg.wechatEnabled && !!cfg.wechatQrUrl,
-      alipayReady: cfg.alipayEnabled && !!cfg.alipayQrUrl,
+      wechatReady: cfg.wechatEnabled && (!!cfg.wechatQrUrl || !!cfg.wechatPayLink),
+      alipayReady: cfg.alipayEnabled && (!!cfg.alipayQrUrl || !!cfg.alipayPayLink),
     },
   });
 }
@@ -79,9 +84,34 @@ export async function POST(request: NextRequest) {
     if (body.confirmMode !== undefined) currentCfg.confirmMode = body.confirmMode;
     if (body.note !== undefined) currentCfg.note = body.note;
 
-    // 自动启用：有收款码URL就自动启用，清空URL就自动禁用
-    if (body.wechatQrUrl !== undefined) currentCfg.wechatEnabled = !!body.wechatQrUrl;
-    if (body.alipayQrUrl !== undefined) currentCfg.alipayEnabled = !!body.alipayQrUrl;
+    // 保存 payLink 字段
+    if (body.wechatPayLink !== undefined) currentCfg.wechatPayLink = body.wechatPayLink;
+    if (body.alipayPayLink !== undefined) currentCfg.alipayPayLink = body.alipayPayLink;
+
+    // 自动启用：有收款码URL或支付链接就自动启用
+    if (body.wechatQrUrl !== undefined) currentCfg.wechatEnabled = !!(body.wechatQrUrl || currentCfg.wechatPayLink);
+    if (body.alipayQrUrl !== undefined) currentCfg.alipayEnabled = !!(body.alipayQrUrl || currentCfg.alipayPayLink);
+    if (body.wechatPayLink !== undefined) currentCfg.wechatEnabled = !!(currentCfg.wechatQrUrl || body.wechatPayLink);
+    if (body.alipayPayLink !== undefined) currentCfg.alipayEnabled = !!(currentCfg.alipayQrUrl || body.alipayPayLink);
+
+    // 自动从收款码图片解码支付链接（微信 wxp:// / 支付宝 https://qr.alipay.com/）
+    const tryDecodeQr = async (qrUrl: string, method: 'wechat' | 'alipay') => {
+      if (!qrUrl) return;
+      try {
+        const decoded = await decodeQrFromUrl(qrUrl);
+        if (decoded && isPaymentLink(decoded)) {
+          if (method === 'wechat') currentCfg.wechatPayLink = decoded;
+          else currentCfg.alipayPayLink = decoded;
+          console.log(`[payment-config] Auto-decoded ${method} pay link: ${decoded.substring(0, 30)}...`);
+        }
+      } catch (err) {
+        console.warn(`[payment-config] Failed to decode ${method} QR:`, err instanceof Error ? err.message : err);
+      }
+    };
+
+    // 当收款码URL变更时自动解码
+    if (body.wechatQrUrl !== undefined && body.wechatQrUrl) await tryDecodeQr(body.wechatQrUrl, 'wechat');
+    if (body.alipayQrUrl !== undefined && body.alipayQrUrl) await tryDecodeQr(body.alipayQrUrl, 'alipay');
 
     // 主动将收款码图片备份到 S3（防止重新部署后本地文件丢失）
     const urlsToBackup = [currentCfg.wechatQrUrl, currentCfg.alipayQrUrl].filter(u => u && u.startsWith('/api/serve-upload/'));
@@ -117,15 +147,15 @@ export async function POST(request: NextRequest) {
 
     await dbSetSystemSetting(CONFIG_KEY, JSON.stringify(currentCfg));
 
-    const canAcceptPayments = (currentCfg.wechatEnabled && !!currentCfg.wechatQrUrl) || (currentCfg.alipayEnabled && !!currentCfg.alipayQrUrl);
+    const canAcceptPayments = (currentCfg.wechatEnabled && !!(currentCfg.wechatQrUrl || currentCfg.wechatPayLink)) || (currentCfg.alipayEnabled && !!(currentCfg.alipayQrUrl || currentCfg.alipayPayLink));
 
     return NextResponse.json({
       success: true,
       config: currentCfg,
       status: {
         canAcceptPayments,
-        wechatReady: currentCfg.wechatEnabled && !!currentCfg.wechatQrUrl,
-        alipayReady: currentCfg.alipayEnabled && !!currentCfg.alipayQrUrl,
+        wechatReady: currentCfg.wechatEnabled && !!(currentCfg.wechatQrUrl || currentCfg.wechatPayLink),
+        alipayReady: currentCfg.alipayEnabled && !!(currentCfg.alipayQrUrl || currentCfg.alipayPayLink),
       },
     });
   } catch (err) {

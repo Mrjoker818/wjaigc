@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
       provider = await findProviderById(effectiveProviderId);
     }
     if (!provider) {
-      provider = await findProviderForModel(pureModel, 'video');
+      provider = await findProviderForModel(pureModel, 'video', effectiveProviderId);
     }
     if (!provider) {
       provider = await findProviderForFeature('video');

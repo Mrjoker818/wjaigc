@@ -1243,6 +1243,20 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     setConfigSaving(true);
     setConfigSaveMsg(null);
     try {
+      // 自动从收款码图片中解码支付链接
+      let wechatPayLink = paymentConfig.wechatPayLink || '';
+      let alipayPayLink = paymentConfig.alipayPayLink || '';
+      try {
+        const { decodeQrFromUrlClient } = await import('@/lib/qr-decode-client');
+        if (paymentConfig.wechatQrUrl && !wechatPayLink) {
+          wechatPayLink = await decodeQrFromUrlClient(paymentConfig.wechatQrUrl) || '';
+        }
+        if (paymentConfig.alipayQrUrl && !alipayPayLink) {
+          alipayPayLink = await decodeQrFromUrlClient(paymentConfig.alipayQrUrl) || '';
+        }
+      } catch (e) {
+        console.warn('[payment-config] QR decode skipped:', e);
+      }
       const resp = await fetch('/api/credits/payment-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1250,9 +1264,11 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
           action: 'save',
           wechatQrUrl: paymentConfig.wechatQrUrl,
           alipayQrUrl: paymentConfig.alipayQrUrl,
+          wechatPayLink,
+          alipayPayLink,
           // 上传收款码时自动启用对应支付方式
-          wechatEnabled: !!paymentConfig.wechatQrUrl,
-          alipayEnabled: !!paymentConfig.alipayQrUrl,
+          wechatEnabled: !!(paymentConfig.wechatQrUrl || wechatPayLink),
+          alipayEnabled: !!(paymentConfig.alipayQrUrl || alipayPayLink),
         }),
       });
       const data = await resp.json();
@@ -2218,6 +2234,14 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                           const data = await res.json();
                           if (data.success && data.url) {
                             setPaymentConfig(prev => ({ ...prev, wechatQrUrl: data.url }));
+                            // 自动解码QR码提取支付链接
+                            try {
+                              const { decodeQrFromUrlClient } = await import('@/lib/qr-decode-client');
+                              const decoded = await decodeQrFromUrlClient(data.url);
+                              if (decoded) {
+                                setPaymentConfig(prev => ({ ...prev, wechatPayLink: decoded }));
+                              }
+                            } catch {}
                           } else {
                             alert('上传失败：' + (data.error || '未知错误'));
                           }
@@ -2282,6 +2306,14 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                           const data = await res.json();
                           if (data.success && data.url) {
                             setPaymentConfig(prev => ({ ...prev, alipayQrUrl: data.url }));
+                            // 自动解码QR码提取支付链接
+                            try {
+                              const { decodeQrFromUrlClient } = await import('@/lib/qr-decode-client');
+                              const decoded = await decodeQrFromUrlClient(data.url);
+                              if (decoded) {
+                                setPaymentConfig(prev => ({ ...prev, alipayPayLink: decoded }));
+                              }
+                            } catch {}
                           } else {
                             alert('上传失败：' + (data.error || '未知错误'));
                           }

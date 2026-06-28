@@ -32,16 +32,21 @@ export async function GET(_request: NextRequest) {
         alipay: alipayReady,
         wechat: wechatReady,
       },
-      // 返回收款码图片URL供前端展示
+      // 收款码图片URL（仅管理员后台展示用，充值页面不展示）
       qrUrls: {
         wechat: wechatReady ? wechatQrUrl : '',
         alipay: alipayReady ? alipayQrUrl : '',
+      },
+      // 支付链接（wxp:// 或 https://qr.alipay.com/），用户点击直接跳转付款
+      payLinks: {
+        wechat: wechatReady ? wechatPayLink : '',
+        alipay: alipayReady ? alipayPayLink : '',
       },
       note,
       canRecharge: methods.length > 0,
       methods,
     });
   } catch {
-    return NextResponse.json({ success: false, canRecharge: false, methods: [], qrUrls: { wechat: '', alipay: '' }, note: '' });
+    return NextResponse.json({ success: false, canRecharge: false, methods: [], qrUrls: { wechat: '', alipay: '' }, payLinks: { wechat: '', alipay: '' }, note: '' });
   }
 }

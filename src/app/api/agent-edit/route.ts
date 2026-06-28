@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { findProviderForFeature, findProviderById, findProviderForModel } from '@/lib/server-api-config';
+import { normalizeModelForApi } from '@/lib/model-capabilities';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import { fetchWithV1Retry, getInternalApiUrl } from '@/lib/api-helpers';
 import { optionalApiAuth } from '@/lib/api-auth';
@@ -64,10 +65,21 @@ export async function POST(request: NextRequest) {
       pureModel = model.split('::').pop()!;
       console.log(`[agent-edit] Stripped provider prefix from model: "${model}" → "${pureModel}"`);
     }
+    // ★ 规范化模型名（如 gpt-image-2-2k → gpt-image-2）
+    const modelNorm = normalizeModelForApi(pureModel);
+    if (modelNorm.wasNormalized) {
+      console.log(`[agent-edit] Normalized model alias: "${pureModel}" → "${modelNorm.apiModelName}"`);
+      pureModel = modelNorm.apiModelName;
+    }
     let pureImageModel = imageModel;
     if (imageModel && imageModel.includes('::')) {
       pureImageModel = imageModel.split('::').pop()!;
       console.log(`[agent-edit] Stripped provider prefix from imageModel: "${imageModel}" → "${pureImageModel}"`);
+    }
+    const imgModelNorm = normalizeModelForApi(pureImageModel);
+    if (imgModelNorm.wasNormalized) {
+      console.log(`[agent-edit] Normalized imageModel alias: "${pureImageModel}" → "${imgModelNorm.apiModelName}"`);
+      pureImageModel = imgModelNorm.apiModelName;
     }
 
     if (!image || !prompt) {
@@ -503,7 +515,7 @@ async function performImageEdit(
     console.log('[agent-edit] findProviderById result:', imageProvider ? imageProvider.name : 'null');
   }
   if (!imageProvider && imageModelFromFrontend) {
-    imageProvider = await findProviderForModel(imageModelFromFrontend, 'image');
+    imageProvider = await findProviderForModel(imageModelFromFrontend, 'image', imageProviderIdFromFrontend);
     console.log('[agent-edit] findProviderForModel result:', imageProvider ? imageProvider.name : 'null');
   }
   if (!imageProvider) {
@@ -518,10 +530,15 @@ async function performImageEdit(
 
   const baseUrl = imageProvider.baseUrl?.replace(/\/+$/, '') || '';
   const apiKey = imageProvider.apiKey || '';
-  // ★ 去除 imageModel 中的 providerId:: 前缀
+  // ★ 去除 imageModel 中的 providerId:: 前缀 + 规范化模型别名
   let imageModel = imageModelFromFrontend || imageProvider.selectedModels?.[0] || '';
   if (imageModel.includes('::')) {
     imageModel = imageModel.split('::').pop()!;
+  }
+  const pImgNorm = normalizeModelForApi(imageModel);
+  if (pImgNorm.wasNormalized) {
+    console.log(`[agent-edit] Normalized performImageEdit model: "${imageModel}" → "${pImgNorm.apiModelName}"`);
+    imageModel = pImgNorm.apiModelName;
   }
 
   if (!baseUrl || !apiKey || !imageModel) {

@@ -12,6 +12,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, findProviderForFeature, findProviderById } from '@/lib/server-api-config';
+import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { optionalApiAuth } from '@/lib/api-auth';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, buildPollUrl, extractImageUrl, tryChatCompletionsImageFallback, isChannelUnavailableError, persistResultImage } from '@/lib/api-compatibility';
@@ -80,7 +81,7 @@ async function getImageProvider(imageModel?: string, imageProviderId?: string): 
     console.warn(`[brand-factory] imageProviderId="${imageProviderId}" 未找到提供商，回退到模型匹配`);
   }
   if (imageModel) {
-    const provider = await findProviderForModel(imageModel, 'image');
+    const provider = await findProviderForModel(imageModel, 'image', imageProviderId);
     if (provider) return provider;
   }
   return findProviderForFeature('imageEdit');

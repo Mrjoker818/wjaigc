@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { findProviderForModel, findProviderById } from '@/lib/server-api-config';
+import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, tryChatCompletionsImageFallback, isChannelUnavailableError, persistResultImage } from '@/lib/api-compatibility';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
@@ -155,7 +156,7 @@ export async function POST(request: NextRequest) {
       }
     }
     if (!provider) {
-      provider = modelStr ? await findProviderForModel(modelStr) : null;
+      provider = modelStr ? await findProviderForModel(modelStr, 'image', providerId as string) : null;
     }
     if (!provider) {
       // Fallback: find any provider with image models
@@ -170,7 +171,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '未找到可用的图像生成模型，请在管理员后台配置' }, { status: 400 });
     }
 
-    const usedModel = pureModelStr || (provider.selectedModels?.[0] || '');
+    const usedModelRaw = pureModelStr || (provider.selectedModels?.[0] || '');
+    // ★ 规范化模型名（如 gpt-image-2-2k → gpt-image-2）
+    const usedModelNorm = normalizeModelForApi(usedModelRaw);
+    const usedModel = usedModelNorm.wasNormalized ? usedModelNorm.apiModelName : usedModelRaw;
+    if (usedModelNorm.wasNormalized) {
+      console.log(`[font-design/generate-image] Normalized model alias: "${usedModelRaw}" → "${usedModel}"`);
+    }
     const baseUrl = provider.baseUrl || '';
     const apiKey = provider.apiKey || '';
     const compatProfile = resolveCompatProfile(provider);
