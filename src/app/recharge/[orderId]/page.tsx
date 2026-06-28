@@ -152,6 +152,7 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
 
   const { order, note, payLink } = data;
   const pkg = RECHARGE_PACKAGES.find(p => p.amount + p.bonus === order.amount || p.amount === order.amount - order.bonus);
+  const isCustomPkg = !pkg;
   const methodLabel = order.paymentMethod === 'alipay' ? '支付宝' : '微信支付';
   const methodIcon = order.paymentMethod === 'alipay' ? '💙' : '💚';
   const methodColor = order.paymentMethod === 'alipay' ? '#1677FF' : '#07C160';
@@ -260,10 +261,10 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
                 </p>
               </div>
             </div>
-            {pkg && (
+            {(pkg || isCustomPkg) && (
               <div className="flex items-center gap-2 text-xs">
                 <span className="bg-[#d4af37]/20 text-[#d4af37] px-2 py-0.5 rounded-full">
-                  {pkg.label}
+                  {isCustomPkg ? `自定义 ${order.amount} 积分` : pkg.label}
                 </span>
                 <span className="bg-white/10 text-white/60 px-2 py-0.5 rounded-full">
                   {methodIcon} {methodLabel}

@@ -47,6 +47,8 @@ export default function UserCreditsTab({
   // 充值相关状态
   const [showRecharge, setShowRecharge] = useState(false);
   const [selectedPackage, setSelectedPackage] = useState<number | null>(null);
+  const [isCustomAmount, setIsCustomAmount] = useState(false);
+  const [customAmount, setCustomAmount] = useState<number>(0);
   const [paymentMethod, setPaymentMethod] = useState<'wechat' | 'alipay'>('wechat');
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus | null>(null);
   const [orderInfo, setOrderInfo] = useState<{
@@ -157,12 +159,15 @@ export default function UserCreditsTab({
 
   // 创建充值订单
   const handleCreateOrder = async () => {
-    if (!selectedPackage) {
-      onToast?.('请选择充值套餐');
+    const rechargeAmount = isCustomAmount ? customAmount : selectedPackage;
+    if (!rechargeAmount || rechargeAmount <= 0) {
+      onToast?.('请选择充值套餐或输入自定义金额');
       return;
     }
-    const pkg = RECHARGE_PACKAGES.find(p => p.amount === selectedPackage);
-    if (!pkg) return;
+    if (isCustomAmount && rechargeAmount < 10) {
+      onToast?.('自定义金额最少10积分');
+      return;
+    }
 
     try {
       setConfirming(true);
@@ -171,7 +176,7 @@ export default function UserCreditsTab({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'create-order',
-          amount: pkg.amount,
+          amount: rechargeAmount,
           paymentMethod,
         }),
       });
@@ -334,7 +339,7 @@ export default function UserCreditsTab({
                 积分充值
               </h2>
               <button
-                onClick={() => { setShowRecharge(false); setOrderInfo(null); setSelectedPackage(null); setQrDataUrl(''); }}
+                onClick={() => { setShowRecharge(false); setOrderInfo(null); setSelectedPackage(null); setIsCustomAmount(false); setCustomAmount(0); setQrDataUrl(''); }}
                 className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
               >
                 <X className="w-4 h-4" />
@@ -412,9 +417,9 @@ export default function UserCreditsTab({
                       {RECHARGE_PACKAGES.map((pkg) => (
                         <button
                           key={pkg.amount}
-                          onClick={() => setSelectedPackage(pkg.amount)}
+                          onClick={() => { setSelectedPackage(pkg.amount); setIsCustomAmount(false); }}
                           className={`relative text-left p-3.5 rounded-lg border transition-all ${
-                            selectedPackage === pkg.amount
+                            selectedPackage === pkg.amount && !isCustomAmount
                               ? 'border-primary bg-primary/5 ring-1 ring-primary/30'
                               : `${inputBg} hover:border-primary/40`
                           }`}
@@ -434,7 +439,66 @@ export default function UserCreditsTab({
                           </div>
                         </button>
                       ))}
+                      {/* 自定义金额选项 */}
+                      <button
+                        onClick={() => { setIsCustomAmount(true); setSelectedPackage(null); }}
+                        className={`relative text-left p-3.5 rounded-lg border transition-all ${
+                          isCustomAmount
+                            ? 'border-primary bg-primary/5 ring-1 ring-primary/30'
+                            : `${inputBg} hover:border-primary/40`
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 text-base font-bold text-foreground">
+                          <Coins className="w-4 h-4 text-primary" />
+                          自定义
+                        </div>
+                        <div className="text-xs text-muted-foreground mt-0.5">输入任意金额</div>
+                        <div className="text-sm text-primary font-semibold mt-1">自定义</div>
+                        <div className="text-[10px] text-muted-foreground">
+                          最低10积分起
+                        </div>
+                      </button>
                     </div>
+
+                    {/* 自定义金额输入框 */}
+                    {isCustomAmount && (
+                      <div className="mt-3 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            min={10}
+                            step={10}
+                            value={customAmount || ''}
+                            onChange={(e) => setCustomAmount(Math.max(0, parseInt(e.target.value) || 0))}
+                            placeholder="输入积分数量"
+                            className={`flex-1 px-3 py-2.5 rounded-lg text-sm ${inputBg} text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
+                          />
+                          <span className="text-sm text-muted-foreground whitespace-nowrap">积分</span>
+                        </div>
+                        {customAmount > 0 && (
+                          <div className="flex items-center justify-between text-xs text-muted-foreground bg-muted/50 px-3 py-2 rounded-lg">
+                            <span>需付款</span>
+                            <span className="text-primary font-semibold">¥{(customAmount * CREDITS_TO_CNY).toFixed(2)}</span>
+                          </div>
+                        )}
+                        {/* 快捷金额 */}
+                        <div className="flex gap-2">
+                          {[100, 200, 500, 1000, 2000, 5000].map(val => (
+                            <button
+                              key={val}
+                              onClick={() => setCustomAmount(val)}
+                              className={`px-2.5 py-1 rounded-md text-xs transition-colors ${
+                                customAmount === val
+                                  ? 'bg-primary/10 text-primary border border-primary/30'
+                                  : `${inputBg} text-muted-foreground hover:text-foreground`
+                              }`}
+                            >
+                              {val}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* 支付方式 */}
@@ -495,13 +559,18 @@ export default function UserCreditsTab({
                   </div>
 
                   {/* 订单预览 */}
-                  {selectedPackage && (
+                  {(selectedPackage || (isCustomAmount && customAmount >= 10)) && (
                     <div className={`${cardBg} p-4`}>
                       <div className="flex justify-between text-sm mb-1">
                         <span className="text-muted-foreground">充值套餐</span>
-                        <span className="text-foreground">{RECHARGE_PACKAGES.find(p => p.amount === selectedPackage)?.label}</span>
+                        <span className="text-foreground">
+                          {isCustomAmount
+                            ? `自定义 ${customAmount.toLocaleString()} 积分`
+                            : RECHARGE_PACKAGES.find(p => p.amount === selectedPackage)?.label}
+                        </span>
                       </div>
                       {(() => {
+                        if (isCustomAmount) return null;
                         const pkg = RECHARGE_PACKAGES.find(p => p.amount === selectedPackage);
                         return pkg?.bonus ? (
                           <div className="flex justify-between text-sm mb-1">
@@ -513,7 +582,9 @@ export default function UserCreditsTab({
                       <div className="flex justify-between text-sm pt-2 border-t border-border/30 mt-2">
                         <span className="text-muted-foreground">需付款</span>
                         <span className="text-primary font-bold">
-                          ¥{RECHARGE_PACKAGES.find(p => p.amount === selectedPackage)?.price.toFixed(2)}
+                          ¥{isCustomAmount
+                            ? (customAmount * CREDITS_TO_CNY).toFixed(2)
+                            : RECHARGE_PACKAGES.find(p => p.amount === selectedPackage)?.price.toFixed(2)}
                         </span>
                       </div>
                     </div>
@@ -522,10 +593,14 @@ export default function UserCreditsTab({
                   {/* 提交按钮 */}
                   <button
                     onClick={handleCreateOrder}
-                    disabled={!selectedPackage || !paymentStatus?.canRecharge || confirming}
+                    disabled={(!selectedPackage && !(isCustomAmount && customAmount >= 10)) || !paymentStatus?.canRecharge || confirming}
                     className="w-full py-3 rounded-lg font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    {confirming ? '创建订单中...' : selectedPackage ? `立即充值 ¥${RECHARGE_PACKAGES.find(p => p.amount === selectedPackage)?.price}` : '请选择充值套餐'}
+                    {confirming ? '创建订单中...' : (selectedPackage || (isCustomAmount && customAmount >= 10))
+                      ? `立即充值 ¥${isCustomAmount
+                          ? (customAmount * CREDITS_TO_CNY).toFixed(2)
+                          : RECHARGE_PACKAGES.find(p => p.amount === selectedPackage)?.price.toFixed(2)}`
+                      : '请选择充值套餐'}
                   </button>
                 </>
               )}
