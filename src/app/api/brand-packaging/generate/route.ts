@@ -6,6 +6,7 @@ import { registerTask, updateTaskProgress } from '@/lib/task-registry';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getSessionUser } from '@/lib/server-auth';
 import { calculateActualPixelsFromRatio } from '@/app/api/generate/route';
+import { normalizeModelForApi } from '@/lib/model-capabilities';
 
 export async function POST(request: NextRequest) {
   try {
@@ -51,7 +52,7 @@ export async function POST(request: NextRequest) {
       ? await findProviderById(providerId)
       : null;
     if (!provider && model) {
-      provider = await findProviderForModel(model, 'image');
+      provider = await findProviderForModel(model, 'image', providerId);
     }
     if (!provider) {
       // Fallback: find any available image provider
@@ -63,7 +64,11 @@ export async function POST(request: NextRequest) {
 
     const profile = resolveCompatProfile(provider);
     // Use user-selected model first, then provider's configured models, then sensible defaults
-    const selectedModel = model || provider.selectedModels?.find(m => m) || 'gpt-image-2';
+    const rawSelectedModel = model || provider.selectedModels?.find(m => m) || 'gpt-image-2';
+    const { apiModelName: selectedModel } = normalizeModelForApi(rawSelectedModel);
+    if (selectedModel !== rawSelectedModel) {
+      console.log(`[brand-packaging] Model normalized: ${rawSelectedModel} → ${selectedModel}`);
+    }
 
     // Build request body
     const effectiveSize = calculateActualPixelsFromRatio(aspectRatio, quality, selectedModel) || '2048x2048';
@@ -120,7 +125,8 @@ export async function POST(request: NextRequest) {
             const modelsToTry = model ? [model] : (providerModels.length > 0 ? providerModels : ['gpt-image-2']);
 
             let providerSuccess = false;
-            for (const tryModel of modelsToTry) {
+            for (const rawTryModel of modelsToTry) {
+              const { apiModelName: tryModel } = normalizeModelForApi(rawTryModel);
               const currentBody = { ...adjustedBody, model: tryModel };
               const { body: reAdjustedBody } = adjustRequestForProfile(currentBody, currentProfile);
 

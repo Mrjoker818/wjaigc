@@ -5,6 +5,7 @@ import { buildDisplay3DDecomposePrompt } from '@/lib/display3d-prompts';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getSessionUser } from '@/lib/server-auth';
+import { normalizeModelForApi } from '@/lib/model-capabilities';
 
 export async function POST(request: NextRequest) {
   try {
@@ -31,7 +32,8 @@ export async function POST(request: NextRequest) {
     }
 
     const profile = resolveCompatProfile(provider);
-    const selectedModel = provider.selectedModels?.[0] || model || 'gemini-2.5-flash';
+    const rawSelectedModel = provider.selectedModels?.[0] || model || 'gemini-2.5-flash';
+    const { apiModelName: selectedModel } = normalizeModelForApi(rawSelectedModel);
 
     // Register task
     const sessionUser = await getSessionUser(request).catch(() => null);

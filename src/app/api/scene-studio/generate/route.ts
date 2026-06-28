@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { calculateActualPixelsFromRatio } from '@/app/api/generate/route';
+import { normalizeModelForApi } from '@/lib/model-capabilities';
 
 // POST: generate image from 3D scene
 export async function POST(request: NextRequest) {
@@ -62,6 +63,12 @@ export async function POST(request: NextRequest) {
     if (!modelName) {
       modelName = (provider.selectedModels && provider.selectedModels.length > 0 ? provider.selectedModels[0] : 'dall-e-3');
     }
+    // Normalize model name for API (strip quality/size suffixes like -2k, -4k)
+    const { apiModelName: normalizedModelName } = normalizeModelForApi(modelName);
+    if (normalizedModelName !== modelName) {
+      console.log(`[scene-studio] Model normalized: ${modelName} → ${normalizedModelName}`);
+    }
+    const effectiveModelName = normalizedModelName;
 
     // Check for gemini-image profile — use chat/completions endpoint
     const { resolveProfileForModel, buildGeminiChatImageRequest, parseGeminiChatImageResponse, adjustRequestForProfile, parseResponseForProfile, tryChatCompletionsImageFallback, isChannelUnavailableError, persistResultImage } = await import('@/lib/api-compatibility');
@@ -69,7 +76,7 @@ export async function POST(request: NextRequest) {
 
     // Calculate size based on aspect ratio and quality (user setting from panel)
     const quality = body.quality || '1K';
-    const calculatedSize = calculateActualPixelsFromRatio(aspectRatio, quality, modelName);
+    const calculatedSize = calculateActualPixelsFromRatio(aspectRatio, quality, effectiveModelName);
     const size = calculatedSize || undefined;
 
     const n = imageCount || 1;
@@ -81,11 +88,11 @@ export async function POST(request: NextRequest) {
 
     // === Gemini-image route ===
     if (profile.id === 'gemini-image') {
-      console.log(`[SceneStudio] Using gemini-image route for model ${modelName}`);
+      console.log(`[SceneStudio] Using gemini-image route for model ${effectiveModelName} (raw: ${modelName})`);
 
       const imageUrls: string[] = hasImage ? [screenshotData] : [];
       const chatBody = buildGeminiChatImageRequest({
-        model: modelName,
+        model: effectiveModelName,
         prompt: enhancedPrompt,
         size,
         n,
@@ -130,7 +137,7 @@ export async function POST(request: NextRequest) {
 
     // === Standard route (openai / apimart / pearapi / auto) ===
     const requestBody: Record<string, unknown> = {
-      model: modelName,
+      model: effectiveModelName,
       prompt: enhancedPrompt,
       n,
       size,
@@ -181,7 +188,7 @@ export async function POST(request: NextRequest) {
           const chatImageUrls = await tryChatCompletionsImageFallback({
             baseUrl,
             apiKey,
-            model: modelName,
+            model: effectiveModelName,
             prompt: enhancedPrompt,
             imageBase64: hasImage ? screenshotData : undefined,
             imageUrls: hasImage ? [screenshotData] : undefined,
@@ -223,7 +230,7 @@ export async function POST(request: NextRequest) {
           const chatImageUrls = await tryChatCompletionsImageFallback({
             baseUrl,
             apiKey,
-            model: modelName,
+            model: effectiveModelName,
             prompt: enhancedPrompt,
             imageBase64: hasImage ? screenshotData : undefined,
             imageUrls: hasImage ? [screenshotData] : undefined,

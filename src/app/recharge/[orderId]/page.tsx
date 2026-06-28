@@ -34,6 +34,11 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
 
   useEffect(() => {
     fetchOrderDetails();
+    // Restore step from sessionStorage (user may have returned from payment app)
+    try {
+      const savedStep = sessionStorage.getItem(`recharge_step_${orderId}`);
+      if (savedStep === 'paying') setStep('paying');
+    } catch { /* ignore */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderId]);
 
@@ -60,10 +65,37 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
   // Step 2: User clicks "确认支付" → redirect to payment link
   function handleGoToPay() {
     if (data?.payLink) {
-      // Open payment link in current tab (on mobile this will launch WeChat/Alipay)
-      window.location.href = data.payLink;
-      // After redirect, when user comes back they'll see the "paying" step
-      setStep('paying');
+      const link = data.payLink;
+
+      // Save current step so when user comes back they see the "paying" step
+      try { sessionStorage.setItem(`recharge_step_${orderId}`, 'paying'); } catch { /* ignore */ }
+
+      if (link.startsWith('wxp://')) {
+        // WeChat pay link: try to open via scheme URL
+        // On mobile, wxp:// can sometimes be opened directly
+        // Try location.href first (works in some mobile browsers/WebView)
+        // Also try weixin:// scheme as fallback
+        try {
+          // Try opening the wxp:// link directly
+          const opened = window.open(link, '_blank');
+          // If window.open was blocked or returned null, try location.href
+          if (!opened) {
+            window.location.href = link;
+          }
+        } catch {
+          window.location.href = link;
+        }
+      } else if (link.includes('qr.alipay.com')) {
+        // Alipay link: use https:// which works in mobile browsers
+        // Alipay's qr.alipay.com will auto-redirect to Alipay app if installed
+        window.location.href = link;
+      } else {
+        // Generic HTTPS payment link
+        window.location.href = link;
+      }
+
+      // Switch to paying step after a short delay (allows redirect to initiate)
+      setTimeout(() => setStep('paying'), 800);
     } else {
       // No pay link configured, go to paying step with manual confirmation
       setStep('paying');
@@ -276,24 +308,65 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
                   <div className="w-14 h-14 rounded-2xl mx-auto mb-4 flex items-center justify-center" style={{ backgroundColor: methodColor + '20' }}>
                     <span className="text-2xl">{methodIcon}</span>
                   </div>
-                  <p className="text-white/80 text-sm mb-3">
-                    如果未自动跳转到{methodLabel}，请点击下方按钮
-                  </p>
-                  <a
-                    href={payLink}
-                    className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-base font-bold transition-all text-white hover:opacity-90 active:scale-[0.98]"
-                    style={{ backgroundColor: methodColor }}
-                  >
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                    </svg>
-                    打开{methodLabel}付款 ¥{order.priceCny.toFixed(2)}
-                  </a>
-                  <p className="text-[#d4af37] text-lg font-bold mt-4">
-                    ¥{order.priceCny.toFixed(2)}
-                  </p>
-                  <p className="text-white/40 text-xs mt-1">
-                    {methodIcon} {methodLabel} · {order.amount}积分
+
+                  {/* Amount to pay - prominently displayed */}
+                  <div className="bg-black/30 rounded-lg py-3 px-4 mb-4">
+                    <p className="text-white/40 text-xs mb-1">请付款金额</p>
+                    <p className="text-[#d4af37] text-3xl font-bold">¥{order.priceCny.toFixed(2)}</p>
+                  </div>
+
+                  {payLink.startsWith('wxp://') ? (
+                    /* WeChat: wxp:// needs to be opened in WeChat app */
+                    <div className="space-y-3">
+                      <p className="text-white/80 text-sm">
+                        请在微信中完成付款
+                      </p>
+                      <a
+                        href={payLink}
+                        className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-base font-bold transition-all text-white hover:opacity-90 active:scale-[0.98]"
+                        style={{ backgroundColor: methodColor }}
+                      >
+                        打开微信付款
+                      </a>
+                      <div className="bg-[#07C160]/10 rounded-lg p-3 mt-2">
+                        <p className="text-white/50 text-xs leading-relaxed">
+                          💡 点击按钮后若未跳转微信，请：<br/>
+                          1. 复制下方链接 → 打开微信 → 任意聊天粘贴发送 → 点击打开<br/>
+                          2. 或截图后用微信扫一扫识别付款码
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 bg-white/5 rounded-lg px-3 py-2">
+                        <input
+                          readOnly
+                          value={payLink}
+                          className="flex-1 bg-transparent text-white/60 text-xs outline-none font-mono truncate"
+                        />
+                        <button
+                          onClick={() => { navigator.clipboard.writeText(payLink); }}
+                          className="shrink-0 px-2 py-1 rounded text-[10px] bg-[#07C160]/20 text-[#07C160] hover:bg-[#07C160]/30"
+                        >
+                          复制
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Alipay: https:// works in mobile browsers */
+                    <div className="space-y-3">
+                      <p className="text-white/80 text-sm">
+                        如果未自动跳转到{methodLabel}，请点击下方按钮
+                      </p>
+                      <a
+                        href={payLink}
+                        className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-base font-bold transition-all text-white hover:opacity-90 active:scale-[0.98]"
+                        style={{ backgroundColor: methodColor }}
+                      >
+                        打开{methodLabel}付款 ¥{order.priceCny.toFixed(2)}
+                      </a>
+                    </div>
+                  )}
+
+                  <p className="text-white/40 text-xs mt-3">
+                    付款时请确认金额为 <span className="text-[#d4af37] font-bold">¥{order.priceCny.toFixed(2)}</span>
                   </p>
                 </div>
               )}
@@ -307,10 +380,13 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
                     </svg>
                   </div>
                   <p className="text-white/60 text-sm">
-                    管理员尚未配置{methodLabel}支付链接
+                    {methodLabel}支付链接暂未配置
                   </p>
                   <p className="text-white/40 text-xs mt-1">
-                    请联系管理员在后台设置支付链接
+                    请联系管理员在后台设置收款码或支付链接
+                  </p>
+                  <p className="text-white/30 text-xs mt-2">
+                    您也可以在付款后点击下方"我已完成付款"
                   </p>
                 </div>
               )}

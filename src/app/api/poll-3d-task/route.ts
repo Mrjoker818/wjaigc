@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, getApiProviders, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
+import { normalizeModelForApi } from '@/lib/model-capabilities';
 
 // Filter sensitive fields (apiKey, secret, token, password) from response data before sending to client
 function filterSensitiveFields(obj: unknown): unknown {
@@ -162,7 +163,8 @@ function splitProviderSelection(selection?: string): { providerId?: string; mode
 
 async function resolvePollRequest(body: PollRequest & { providerId?: string }): Promise<PollRequest | null> {
   const selection = splitProviderSelection(body.providerId || body.provider?.id);
-  const selectedModel = body.provider?.model || selection.model;
+  const rawSelectedModel = body.provider?.model || selection.model;
+  const { apiModelName: selectedModel } = normalizeModelForApi(rawSelectedModel || '');
   const providers = await getApiProviders();
   const byId = selection.providerId ? providers.find(item => item.id === selection.providerId && item.isEnabled) : null;
   const byModel = !byId && selectedModel ? await findProviderForModel(selectedModel, '3d') : null;

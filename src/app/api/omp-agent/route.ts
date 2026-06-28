@@ -15,6 +15,7 @@ import { parseAgentGenerateResult, parseEcommerceGenerateResult, type AgentTempl
 import { translateApiError } from '@/lib/api-error-translate';
 import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits } from '@/lib/credits';
+import { normalizeModelForApi } from '@/lib/model-capabilities';
 
 const API_TIMEOUT_MS = 300000;
 const DEFAULT_AGENT_MAX_TOKENS = 4096;
@@ -272,7 +273,8 @@ export async function POST(request: NextRequest) {
 
     const baseUrl = provider.baseUrl.replace(/\/+$/, '');
     const apiKey = provider.apiKey;
-    const selectedModel = model || provider.selectedModels?.[0] || provider.selectedModel || '';
+    const rawSelectedModel = model || provider.selectedModels?.[0] || provider.selectedModel || '';
+    const { apiModelName: selectedModel } = normalizeModelForApi(rawSelectedModel);
 
     if (!selectedModel) {
       return NextResponse.json({ success: false, error: '未选择聊天模型' }, { status: 400 });

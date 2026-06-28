@@ -3,6 +3,7 @@ import { findProviderForModel, getApiProviders, normalizeApiBaseUrl } from '@/li
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { consumeCredits } from '@/lib/credits';
+import { normalizeModelForApi } from '@/lib/model-capabilities';
 
 export const maxDuration = 60;
 
@@ -300,6 +301,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Normalize model name for API
+    const { apiModelName: effectiveVisionModel } = normalizeModelForApi(visionModel);
+    if (effectiveVisionModel !== visionModel) {
+      console.log(`[vision-prompt] Model normalized: ${visionModel} → ${effectiveVisionModel}`);
+    }
+
     // Convert image to base64 for API accessibility
     const imageBase64 = await imageUrlToBase64(imageUrl);
     const usingBase64 = imageBase64.startsWith('data:');
@@ -315,7 +322,7 @@ export async function POST(request: NextRequest) {
     };
 
     const requestBody = {
-      model: visionModel,
+      model: effectiveVisionModel,
       messages: [
         {
           role: 'user',

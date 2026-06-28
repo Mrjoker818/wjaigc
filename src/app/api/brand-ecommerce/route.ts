@@ -6,6 +6,7 @@ import { fetchWithV1Retry, getInternalApiUrl } from '@/lib/api-helpers';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
 import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits } from '@/lib/credits';
+import { normalizeModelForApi } from '@/lib/model-capabilities';
 import sharp from 'sharp';
 
 export const dynamic = 'force-dynamic';
@@ -459,7 +460,7 @@ async function getImageProvider(model?: string, providerId?: string) {
     console.warn(`[brand-ecommerce] getImageProvider: providerId="${providerId}" 未匹配到提供商，回退到模型匹配`);
   }
   if (model) {
-    const p = await findProviderForModel(model);
+    const p = await findProviderForModel(model, 'image', providerId);
     if (p) return p;
   }
   // fallback: find any image provider
@@ -539,9 +540,13 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: '未找到可用的图像模型，请在管理员后台配置' }, { status: 400 });
       }
 
-      const selectedModel = model || provider.selectedModels?.[0];
-      if (!selectedModel) {
+      const rawSelectedModel = model || provider.selectedModels?.[0];
+      if (!rawSelectedModel) {
         return NextResponse.json({ error: '未指定模型' }, { status: 400 });
+      }
+      const { apiModelName: selectedModel } = normalizeModelForApi(rawSelectedModel);
+      if (selectedModel !== rawSelectedModel) {
+        console.log(`[brand-ecommerce] Model normalized: ${rawSelectedModel} → ${selectedModel}`);
       }
 
       // ★ Dynamic template resolution: DB first, then fallback to built-in

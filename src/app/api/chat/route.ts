@@ -7,6 +7,7 @@ import { optionalApiAuth } from '@/lib/api-auth';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { consumeCredits } from '@/lib/credits';
 import { CHAT_TOOLS, executeToolCall, parseToolCallsFromStream, ToolCallResult } from '@/lib/chat-tools';
+import { normalizeModelForApi } from '@/lib/model-capabilities';
 
 export const maxDuration = 120;
 
@@ -96,7 +97,10 @@ export async function POST(request: NextRequest) {
     // Detect thinking mode
     const isThinkingModel = model.endsWith('-thinking');
     const baseModel = isThinkingModel ? model.replace(/-thinking$/, '') : model;
-    const requestModel = baseModel;
+    const { apiModelName: requestModel } = normalizeModelForApi(baseModel);
+    if (requestModel !== baseModel) {
+      console.log(`[chat] Model normalized: ${baseModel} → ${requestModel}`);
+    }
 
     // Convert relative image URLs to absolute URLs
     const origin = request.headers.get('origin') || process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';

@@ -5,6 +5,7 @@ import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { consumeCredits } from '@/lib/credits';
+import { normalizeModelForApi } from '@/lib/model-capabilities';
 
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
@@ -116,6 +117,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '请先在管理员后台配置可用的 LLM 模型 API' }, { status: 400 });
     }
 
+    // Normalize model name for API (strip quality/size suffixes)
+    const { apiModelName: normalizedModel } = normalizeModelForApi(selectedModel);
+    if (normalizedModel !== selectedModel) {
+      console.log(`[optimize-prompt] Model normalized: ${selectedModel} → ${normalizedModel}`);
+    }
+
     const systemPrompt = customSystemPrompt || OPTIMIZE_SYSTEM_PROMPT;
     const userMessage = `请优化以下图像生成提示词：\n\n${prompt}`;
 
@@ -129,7 +136,7 @@ export async function POST(request: NextRequest) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: selectedModel,
+          model: normalizedModel,
           messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userMessage },

@@ -6,6 +6,7 @@ import { registerTask, updateTaskProgress } from '@/lib/task-registry';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getSessionUser } from '@/lib/server-auth';
 import { calculateActualPixelsFromRatio } from '@/app/api/generate/route';
+import { normalizeModelForApi } from '@/lib/model-capabilities';
 
 export async function POST(request: NextRequest) {
   try {
@@ -71,7 +72,11 @@ export async function POST(request: NextRequest) {
     }
 
     const profile = resolveCompatProfile(provider);
-    const selectedModel = provider.selectedModels?.[0] || model || 'gpt-image-2';
+    const rawSelectedModel = provider.selectedModels?.[0] || model || 'gpt-image-2';
+    const { apiModelName: selectedModel } = normalizeModelForApi(rawSelectedModel);
+    if (selectedModel !== rawSelectedModel) {
+      console.log(`[display-3d] Model normalized: ${rawSelectedModel} → ${selectedModel}`);
+    }
 
     // Build request body
     const effectiveQuality = quality || '1K';

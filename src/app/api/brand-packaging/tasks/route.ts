@@ -3,6 +3,7 @@ import { getTaskInfo } from '@/lib/task-registry';
 import { findProviderForModel } from '@/lib/server-api-config';
 import { resolveCompatProfile, parseResponseForProfile } from '@/lib/api-compatibility';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { normalizeModelForApi } from '@/lib/model-capabilities';
 
 export async function GET(request: NextRequest) {
   try {
@@ -24,7 +25,8 @@ export async function GET(request: NextRequest) {
       const model = result.model as string | undefined;
 
       if (pollUrl && providerId) {
-        const provider = await findProviderForModel(model || '', 'image');
+        const { apiModelName: normalizedModel } = normalizeModelForApi(model || '');
+        const provider = await findProviderForModel(normalizedModel, 'image', providerId);
         if (provider) {
           const profile = resolveCompatProfile(provider);
           let apiBase = provider.baseUrl.replace(/\/+$/, '');

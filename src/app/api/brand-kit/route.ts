@@ -5,6 +5,7 @@ import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
 import { dbListBrandKits, dbUpsertBrandKit, dbDeleteBrandKit } from '@/lib/db-storage';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
+import { normalizeModelForApi } from '@/lib/model-capabilities';
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -464,7 +465,11 @@ async function handleGenerate(body: {
   }
 
   // Step 3: Batch generate images using image model
-  const { provider: imgProvider, modelId: imgModelId } = imageInfo;
+  const { provider: imgProvider, modelId: rawImgModelId } = imageInfo;
+  const { apiModelName: imgModelId } = normalizeModelForApi(rawImgModelId);
+  if (imgModelId !== rawImgModelId) {
+    console.log(`[brand-kit] Image model normalized: ${rawImgModelId} → ${imgModelId}`);
+  }
   const imgBaseUrl = imgProvider.baseUrl || imgProvider.baseUrl || '';
   const imgApiKey = imgProvider.apiKey || imgProvider.apiKey || '';
   const compatProfile = resolveCompatProfile(imgProvider);

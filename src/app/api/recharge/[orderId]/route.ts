@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { execSql } from '@/lib/db-client';
-import { dbAdjustCredits, dbGetSystemSetting } from '@/lib/db-storage';
+import { dbAdjustCredits, dbGetSystemSetting, dbSetSystemSetting } from '@/lib/db-storage';
+import { decodeQrFromUrl, isPaymentLink } from '@/lib/qr-decode';
 
 /**
  * GET /api/recharge/[orderId]
@@ -35,6 +36,7 @@ export async function GET(
     // Get admin payment config (note + pay link for payment)
     let note = '';
     let payLink = '';
+    let configSaved = false;
     try {
       const dbVal = await dbGetSystemSetting('payment_config');
       if (dbVal) {
@@ -45,6 +47,34 @@ export async function GET(
           payLink = config.wechatPayLink as string;
         } else if (method === 'alipay' && config.alipayEnabled && config.alipayPayLink) {
           payLink = config.alipayPayLink as string;
+        }
+
+        // Fallback: auto-decode QR code image on-the-fly if payLink is missing
+        if (!payLink) {
+          const qrUrl = method === 'wechat'
+            ? (config.wechatQrUrl as string) || ''
+            : (config.alipayQrUrl as string) || '';
+
+          if (qrUrl) {
+            console.log(`[recharge] payLink missing for ${method}, auto-decoding QR: ${qrUrl.substring(0, 60)}`);
+            try {
+              const decoded = await decodeQrFromUrl(qrUrl);
+              if (decoded && isPaymentLink(decoded)) {
+                payLink = decoded;
+                console.log(`[recharge] Auto-decoded ${method} pay link: ${decoded.substring(0, 30)}...`);
+                // Save back to config for future use
+                const updatedConfig = { ...config };
+                if (method === 'wechat') updatedConfig.wechatPayLink = decoded;
+                else updatedConfig.alipayPayLink = decoded;
+                if (!configSaved) {
+                  await dbSetSystemSetting('payment_config', JSON.stringify(updatedConfig));
+                  configSaved = true;
+                }
+              }
+            } catch (decodeErr) {
+              console.warn(`[recharge] Auto-decode failed for ${method}:`, decodeErr instanceof Error ? decodeErr.message : decodeErr);
+            }
+          }
         }
       }
     } catch { /* ignore */ }

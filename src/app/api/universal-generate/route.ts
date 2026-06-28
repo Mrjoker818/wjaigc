@@ -4,6 +4,7 @@ import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile } from '@/lib/api-compatibility';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
+import { normalizeModelForApi } from '@/lib/model-capabilities';
 
 // 通用API生成路由 - 支持第三方OpenAI兼容API的图像生成
 // 当用户使用非 APIMart 管理的第三方模型时，图像生成请求会被路由到这里
@@ -49,7 +50,11 @@ export async function POST(request: NextRequest) {
       logSafetyWarning(prompt, safetyResult);
     }
 
-    const resolvedModel = model.includes('::') ? model.split('::').slice(1).join('::') : model;
+    const rawResolvedModel = model.includes('::') ? model.split('::').slice(1).join('::') : model;
+    const { apiModelName: resolvedModel } = normalizeModelForApi(rawResolvedModel);
+    if (resolvedModel !== rawResolvedModel) {
+      console.log(`[universal-generate] Model normalized: ${rawResolvedModel} → ${resolvedModel}`);
+    }
     // 优先使用 providerId 精确匹配提供商
     let provider = providerId ? await findProviderById(providerId) : null;
     if (!provider) {

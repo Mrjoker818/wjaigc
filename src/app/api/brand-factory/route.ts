@@ -112,7 +112,8 @@ async function callLLM(
     return { success: false, error: '未找到可用的LLM模型提供商，请在管理员后台配置' };
   }
 
-  const model = llmModel || provider.selectedModels?.[0] || 'gpt-4o';
+  const rawLlmModel = llmModel || provider.selectedModels?.[0] || 'gpt-4o';
+  const { apiModelName: model } = normalizeModelForApi(rawLlmModel);
   const baseUrl = provider.baseUrl.replace(/\/+$/, '');
 
   try {
@@ -331,9 +332,14 @@ async function generateImage(
     return { success: false, error: '未找到可用的图像模型提供商，请在管理员后台配置' };
   }
 
-  const model = imageModel || provider.selectedModels?.[0] || 'dall-e-3';
+  const rawModel = imageModel || provider.selectedModels?.[0] || 'dall-e-3';
+  const { apiModelName: model } = normalizeModelForApi(rawModel);
   const baseUrl = provider.baseUrl.replace(/\/+$/, '');
   const profile = resolveCompatProfile(provider);
+
+  if (model !== rawModel) {
+    console.log(`[brand-factory] Model normalized: ${rawModel} → ${model}`);
+  }
 
   try {
     const rawBody: Record<string, unknown> = {
@@ -366,7 +372,7 @@ async function generateImage(
           const chatImageUrls = await tryChatCompletionsImageFallback({
             baseUrl,
             apiKey: provider.apiKey,
-            model: rawBody.model as string,
+            model,
             prompt: rawBody.prompt as string,
             size: rawBody.size as string | undefined,
             originalError: errText,

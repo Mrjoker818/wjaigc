@@ -13,6 +13,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, findProviderForFeature, findProviderById } from '@/lib/server-api-config';
+import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { resolveCompatProfile, adjustRequestForProfile, tryChatCompletionsImageFallback, isChannelUnavailableError, persistResultImage } from '@/lib/api-compatibility';
 import { calculateActualPixelsFromRatio } from '@/app/api/generate/route';
@@ -151,7 +152,11 @@ async function handleGenerateImage(body: Record<string, unknown>) {
     return NextResponse.json({ error: '未找到可用的图像模型提供商，请在管理员后台配置' }, { status: 400 });
   }
 
-  const model = imageModel || provider.selectedModels?.[0] || 'dall-e-3';
+  const rawModel = imageModel || provider.selectedModels?.[0] || 'dall-e-3';
+  const { apiModelName: model } = normalizeModelForApi(rawModel);
+  if (model !== rawModel) {
+    console.log(`[logo-skill] Model normalized: ${rawModel} → ${model}`);
+  }
   const baseUrl = provider.baseUrl.replace(/\/+$/, '');
   const profile = resolveCompatProfile(provider);
 
@@ -159,7 +164,8 @@ async function handleGenerateImage(body: Record<string, unknown>) {
   const triedProviderIds = new Set<string>();
   if (provider.id) triedProviderIds.add(provider.id);
 
-  const attemptGenerate = async (prov: ApiProvider, mdl: string): Promise<NextResponse> => {
+  const attemptGenerate = async (prov: ApiProvider, rawMdl: string): Promise<NextResponse> => {
+    const { apiModelName: mdl } = normalizeModelForApi(rawMdl);
     const baseUrl = prov.baseUrl.replace(/\/+$/, '');
     const profile = resolveCompatProfile(prov);
 
