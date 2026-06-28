@@ -290,6 +290,62 @@ function TransformControlsWrapper({ meshRef, mode, objId, onTransformChange }: {
   return <TransformControls ref={controlsRef} mode={mode} />;
 }
 
+/** GLB model loader component for scene studio with auto-normalization */
+function GLBModel({ url, position, rotation, scale }: {
+  url: string;
+  position: [number, number, number];
+  rotation: [number, number, number];
+  scale: [number, number, number];
+}) {
+  const { scene: originalScene } = useGLTF(url);
+  const [normalizedScene, setNormalizedScene] = useState<THREE.Group | null>(null);
+
+  // Clone and normalize model when loaded
+  useEffect(() => {
+    if (!originalScene) return;
+
+    // Clone the scene so we don't modify the cached original
+    const cloned = originalScene.clone(true) as THREE.Group;
+
+    const box = new THREE.Box3().setFromObject(cloned);
+    const size = new THREE.Vector3();
+    const center = new THREE.Vector3();
+    box.getSize(size);
+    box.getCenter(center);
+
+    // Normalize: scale down if too large (>2 units), scale up if too small (<0.1 units)
+    const maxDim = Math.max(size.x, size.y, size.z);
+    if (maxDim > 2 || maxDim < 0.1) {
+      const targetSize = 1.5;
+      const normalizeScale = targetSize / maxDim;
+      cloned.scale.multiplyScalar(normalizeScale);
+    }
+
+    // Center the model
+    const newBox = new THREE.Box3().setFromObject(cloned);
+    newBox.getCenter(center);
+    cloned.position.sub(center);
+    // Lift so bottom sits at y=0
+    const newBox2 = new THREE.Box3().setFromObject(cloned);
+    cloned.position.y -= newBox2.min.y;
+
+    setNormalizedScene(cloned);
+  }, [originalScene]);
+
+  if (!normalizedScene) return null;
+
+  return (
+    <primitive
+      object={normalizedScene}
+      position={position}
+      rotation={rotation}
+      scale={scale}
+      castShadow
+      receiveShadow
+    />
+  );
+}
+
 function SceneObjectMesh({ obj, isSelected, onSelect, transformMode, onTransformChange }: {
   obj: SceneObject;
   isSelected: boolean;
@@ -324,12 +380,47 @@ function SceneObjectMesh({ obj, isSelected, onSelect, transformMode, onTransform
 
   if (!obj.visible) return null;
 
+  const rotationRad = obj.rotation.map(r => r * Math.PI / 180) as [number, number, number];
+
+  // GLB model rendering - use primitive instead of mesh geometry
+  if (obj.type === 'model' && obj.modelUrl) {
+    return (
+      <>
+        <group
+          position={obj.position}
+          rotation={rotationRad}
+          scale={obj.scale}
+          onClick={handleClick}
+          onPointerOver={() => setHovered(true)}
+          onPointerOut={() => setHovered(false)}
+        >
+          <Suspense fallback={
+            <mesh castShadow receiveShadow>
+              <boxGeometry args={[1, 1, 1]} />
+              <meshStandardMaterial color="#666" wireframe />
+            </mesh>
+          }>
+            <GLBModel url={obj.modelUrl} position={[0, 0, 0]} rotation={[0, 0, 0]} scale={[1, 1, 1]} />
+          </Suspense>
+        </group>
+        {isSelected && !obj.locked && (
+          <TransformControlsWrapper
+            meshRef={meshRef}
+            mode={transformMode}
+            objId={obj.id}
+            onTransformChange={onTransformChange}
+          />
+        )}
+      </>
+    );
+  }
+
   return (
     <>
       <mesh
         ref={meshRef}
         position={obj.position}
-        rotation={obj.rotation.map(r => r * Math.PI / 180) as [number, number, number]}
+        rotation={rotationRad}
         scale={obj.scale}
         onClick={handleClick}
         onPointerOver={() => setHovered(true)}

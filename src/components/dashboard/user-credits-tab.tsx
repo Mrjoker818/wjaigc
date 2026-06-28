@@ -3,8 +3,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Coins, ArrowUpRight, ArrowDownRight, Gift, Clock,
-  TrendingUp, Calendar, Zap, History, RefreshCw
+  TrendingUp, Zap, History, RefreshCw, CreditCard,
+  X, CheckCircle, AlertCircle, QrCode, Smartphone
 } from 'lucide-react';
+import { RECHARGE_PACKAGES, CREDITS_TO_CNY } from '@/lib/credits-constants';
 
 interface UserCreditsTabProps {
   isDark: boolean;
@@ -21,6 +23,14 @@ interface CreditTransaction {
   created_at: string;
 }
 
+interface PaymentStatus {
+  canRecharge: boolean;
+  methods: string[];
+  qrUrls: { wechat: string; alipay: string };
+  note: string;
+  status: { wechat: boolean; alipay: boolean };
+}
+
 export default function UserCreditsTab({
   isDark,
   userId,
@@ -32,6 +42,22 @@ export default function UserCreditsTab({
   const [transactions, setTransactions] = useState<CreditTransaction[]>([]);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState<'all' | 'earn' | 'spend'>('all');
+
+  // 充值相关状态
+  const [showRecharge, setShowRecharge] = useState(false);
+  const [selectedPackage, setSelectedPackage] = useState<number | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<'wechat' | 'alipay'>('wechat');
+  const [paymentStatus, setPaymentStatus] = useState<PaymentStatus | null>(null);
+  const [orderInfo, setOrderInfo] = useState<{
+    orderId: string;
+    amount: number;
+    priceCny: number;
+    bonusCredits: number;
+    qrUrl: string;
+    note: string;
+  } | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [orderQuerying, setOrderQuerying] = useState(false);
 
   const loadCredits = useCallback(async () => {
     setLoading(true);
@@ -47,7 +73,14 @@ export default function UserCreditsTab({
         const txRes = await fetch('/api/credits?action=transactions');
         const txData = await txRes.json();
         if (txData.success) {
-          setTransactions(txData.transactions || []);
+          setTransactions((txData.transactions || []).map((t: Record<string, unknown>) => ({
+            id: t.id as string,
+            type: t.type as CreditTransaction['type'],
+            amount: t.amount as number,
+            balance_after: (t.balanceAfter || t.balance_after || 0) as number,
+            description: (t.description || '') as string,
+            created_at: (t.createdAt || t.created_at || '') as string,
+          })));
         }
       }
     } catch (err) {
@@ -57,7 +90,20 @@ export default function UserCreditsTab({
     }
   }, []);
 
-  useEffect(() => { loadCredits(); }, [loadCredits]);
+  const loadPaymentStatus = useCallback(async () => {
+    try {
+      const res = await fetch('/api/credits/payment-status');
+      const data = await res.json();
+      if (data.success) {
+        setPaymentStatus(data as PaymentStatus);
+        // 设置默认支付方式
+        if (data.methods?.includes('wechat')) setPaymentMethod('wechat');
+        else if (data.methods?.includes('alipay')) setPaymentMethod('alipay');
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => { loadCredits(); loadPaymentStatus(); }, [loadCredits, loadPaymentStatus]);
 
   const filteredTransactions = filter === 'all'
     ? transactions
@@ -86,22 +132,142 @@ export default function UserCreditsTab({
     }
   };
 
+  // 创建充值订单
+  const handleCreateOrder = async () => {
+    if (!selectedPackage) {
+      onToast?.('请选择充值套餐');
+      return;
+    }
+    const pkg = RECHARGE_PACKAGES.find(p => p.amount === selectedPackage);
+    if (!pkg) return;
+
+    try {
+      setConfirming(true);
+      const res = await fetch('/api/credits', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'create-order',
+          amount: pkg.amount,
+          paymentMethod,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setOrderInfo({
+          orderId: data.orderId,
+          amount: data.amount,
+          priceCny: data.priceCny,
+          bonusCredits: data.bonusCredits,
+          qrUrl: data.qrUrl,
+          note: data.note,
+        });
+        onToast?.('订单创建成功，请扫码付款');
+      } else {
+        onToast?.(data.error || '创建订单失败');
+      }
+    } catch (err) {
+      console.error('Create order error:', err);
+      onToast?.('创建订单失败，请稍后重试');
+    } finally {
+      setConfirming(false);
+    }
+  };
+
+  // 确认已付款
+  const handleConfirmPaid = async () => {
+    if (!orderInfo) return;
+    try {
+      setConfirming(true);
+      const res = await fetch('/api/credits', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'confirm-paid',
+          orderId: orderInfo.orderId,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        onToast?.('确认付款成功！积分已到账');
+        setOrderInfo(null);
+        setShowRecharge(false);
+        setSelectedPackage(null);
+        loadCredits(); // 刷新余额
+      } else {
+        onToast?.(data.error || '确认付款失败');
+      }
+    } catch (err) {
+      console.error('Confirm paid error:', err);
+      onToast?.('确认付款失败，请稍后重试');
+    } finally {
+      setConfirming(false);
+    }
+  };
+
+  // 查询订单状态
+  const handleQueryOrder = async () => {
+    if (!orderInfo) return;
+    try {
+      setOrderQuerying(true);
+      const res = await fetch('/api/credits', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'query-order',
+          orderId: orderInfo.orderId,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        const order = data.order;
+        if (order?.paymentStatus === 'paid' || order?.status === 'paid') {
+          onToast?.('订单已确认，积分已到账');
+          setOrderInfo(null);
+          setShowRecharge(false);
+          setSelectedPackage(null);
+          loadCredits();
+        } else {
+          onToast?.('订单尚未确认，请耐心等待或联系管理员');
+        }
+      }
+    } catch {
+      onToast?.('查询订单失败');
+    } finally {
+      setOrderQuerying(false);
+    }
+  };
+
+  const cardBg = 'bg-card border border-border/50 rounded-lg';
+  const inputBg = 'bg-background border border-border rounded-md';
+
   return (
     <div className="space-y-5 p-6">
       {/* 页面头部 */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-foreground">我的积分</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">查看积分余额和使用记录</p>
+          <p className="text-sm text-muted-foreground mt-0.5">查看积分余额、充值和使用记录</p>
         </div>
-        <button
-          onClick={loadCredits}
-          disabled={loading}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm bg-muted border border-border/30 text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-          刷新
-        </button>
+        <div className="flex items-center gap-2">
+          {paymentStatus?.canRecharge && (
+            <button
+              onClick={() => setShowRecharge(true)}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+            >
+              <CreditCard className="w-4 h-4" />
+              充值
+            </button>
+          )}
+          <button
+            onClick={loadCredits}
+            disabled={loading}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm ${inputBg} text-muted-foreground hover:text-foreground transition-colors`}
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            刷新
+          </button>
+        </div>
       </div>
 
       {/* 余额卡片 */}
@@ -134,6 +300,201 @@ export default function UserCreditsTab({
         </div>
       </div>
 
+      {/* ===== 充值弹窗 ===== */}
+      {showRecharge && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className={`w-full max-w-lg mx-4 ${isDark ? 'bg-[#1a1a1a]' : 'bg-white'} rounded-xl shadow-2xl border border-border/50 overflow-hidden`}>
+            {/* 弹窗头 */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border/30">
+              <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+                <CreditCard className="w-5 h-5 text-primary" />
+                积分充值
+              </h2>
+              <button
+                onClick={() => { setShowRecharge(false); setOrderInfo(null); setSelectedPackage(null); }}
+                className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-5 max-h-[70vh] overflow-y-auto">
+              {/* 订单已创建 - 显示扫码付款 */}
+              {orderInfo ? (
+                <div className="space-y-4">
+                  <div className="text-center">
+                    <CheckCircle className="w-12 h-12 text-primary mx-auto mb-2" />
+                    <h3 className="text-base font-semibold text-foreground">订单已创建</h3>
+                    <p className="text-xs text-muted-foreground mt-1">订单号: {orderInfo.orderId}</p>
+                  </div>
+
+                  <div className={`${cardBg} p-4 space-y-3`}>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">充值积分</span>
+                      <span className="text-foreground font-medium">{orderInfo.amount.toLocaleString()} 积分</span>
+                    </div>
+                    {orderInfo.bonusCredits > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">赠送积分</span>
+                        <span className="text-green-500 font-medium">+{orderInfo.bonusCredits.toLocaleString()}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-sm pt-2 border-t border-border/30">
+                      <span className="text-muted-foreground">需付款</span>
+                      <span className="text-primary font-bold text-lg">¥{orderInfo.priceCny.toFixed(2)}</span>
+                    </div>
+                  </div>
+
+                  {/* 收款码 */}
+                  {orderInfo.qrUrl && (
+                    <div className={`${cardBg} p-4 text-center`}>
+                      <p className="text-sm text-muted-foreground mb-3">
+                        请使用{paymentMethod === 'wechat' ? '微信' : '支付宝'}扫描下方收款码付款
+                      </p>
+                      <div className="inline-block p-3 bg-white rounded-lg">
+                        <img
+                          src={orderInfo.qrUrl}
+                          alt="收款码"
+                          className="w-48 h-48 object-contain"
+                        />
+                      </div>
+                      {orderInfo.note && (
+                        <p className="text-xs text-muted-foreground mt-3">{orderInfo.note}</p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 操作按钮 */}
+                  <div className="space-y-2">
+                    <button
+                      onClick={handleConfirmPaid}
+                      disabled={confirming}
+                      className="w-full py-3 rounded-lg font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+                    >
+                      {confirming ? '处理中...' : '我已完成付款'}
+                    </button>
+                    <button
+                      onClick={handleQueryOrder}
+                      disabled={orderQuerying}
+                      className="w-full py-2.5 rounded-lg text-sm bg-muted border border-border/30 text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      {orderQuerying ? '查询中...' : '查询订单状态'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {/* 选择套餐 */}
+                  <div>
+                    <h3 className="text-sm font-medium text-foreground mb-3">选择充值套餐</h3>
+                    <div className="grid grid-cols-2 gap-3">
+                      {RECHARGE_PACKAGES.map((pkg) => (
+                        <button
+                          key={pkg.amount}
+                          onClick={() => setSelectedPackage(pkg.amount)}
+                          className={`relative text-left p-3.5 rounded-lg border transition-all ${
+                            selectedPackage === pkg.amount
+                              ? 'border-primary bg-primary/5 ring-1 ring-primary/30'
+                              : `${inputBg} hover:border-primary/40`
+                          }`}
+                        >
+                          {pkg.popular && (
+                            <span className="absolute -top-2 right-2 px-2 py-0.5 text-[10px] font-bold bg-primary text-primary-foreground rounded-full">
+                              热门
+                            </span>
+                          )}
+                          <div className="text-base font-bold text-foreground">{pkg.amount.toLocaleString()}</div>
+                          {pkg.bonus > 0 && (
+                            <div className="text-xs text-green-500 mt-0.5">+赠送 {pkg.bonus.toLocaleString()}</div>
+                          )}
+                          <div className="text-sm text-primary font-semibold mt-1">¥{pkg.price}</div>
+                          <div className="text-[10px] text-muted-foreground">
+                            约{(pkg.amount * CREDITS_TO_CNY / pkg.price * 100).toFixed(0)}积分/元
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 支付方式 */}
+                  <div>
+                    <h3 className="text-sm font-medium text-foreground mb-3">支付方式</h3>
+                    <div className="flex gap-3">
+                      {paymentStatus?.status?.wechat && (
+                        <button
+                          onClick={() => setPaymentMethod('wechat')}
+                          className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg border transition-all ${
+                            paymentMethod === 'wechat'
+                              ? 'border-green-500 bg-green-500/5 ring-1 ring-green-500/30'
+                              : `${inputBg} hover:border-green-500/40`
+                          }`}
+                        >
+                          <Smartphone className="w-4 h-4 text-green-500" />
+                          <span className="text-sm font-medium text-foreground">微信支付</span>
+                        </button>
+                      )}
+                      {paymentStatus?.status?.alipay && (
+                        <button
+                          onClick={() => setPaymentMethod('alipay')}
+                          className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg border transition-all ${
+                            paymentMethod === 'alipay'
+                              ? 'border-blue-500 bg-blue-500/5 ring-1 ring-blue-500/30'
+                              : `${inputBg} hover:border-blue-500/40`
+                          }`}
+                        >
+                          <QrCode className="w-4 h-4 text-blue-500" />
+                          <span className="text-sm font-medium text-foreground">支付宝</span>
+                        </button>
+                      )}
+                    </div>
+                    {!paymentStatus?.canRecharge && (
+                      <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
+                        <AlertCircle className="w-3.5 h-3.5" />
+                        收款码暂未配置，请联系管理员
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 订单预览 */}
+                  {selectedPackage && (
+                    <div className={`${cardBg} p-4`}>
+                      <div className="flex justify-between text-sm mb-1">
+                        <span className="text-muted-foreground">充值套餐</span>
+                        <span className="text-foreground">{RECHARGE_PACKAGES.find(p => p.amount === selectedPackage)?.label}</span>
+                      </div>
+                      {(() => {
+                        const pkg = RECHARGE_PACKAGES.find(p => p.amount === selectedPackage);
+                        return pkg?.bonus ? (
+                          <div className="flex justify-between text-sm mb-1">
+                            <span className="text-muted-foreground">赠送积分</span>
+                            <span className="text-green-500">+{pkg.bonus.toLocaleString()}</span>
+                          </div>
+                        ) : null;
+                      })()}
+                      <div className="flex justify-between text-sm pt-2 border-t border-border/30 mt-2">
+                        <span className="text-muted-foreground">需付款</span>
+                        <span className="text-primary font-bold">
+                          ¥{RECHARGE_PACKAGES.find(p => p.amount === selectedPackage)?.price.toFixed(2)}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 提交按钮 */}
+                  <button
+                    onClick={handleCreateOrder}
+                    disabled={!selectedPackage || !paymentStatus?.canRecharge || confirming}
+                    className="w-full py-3 rounded-lg font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {confirming ? '创建订单中...' : selectedPackage ? `立即充值 ¥${RECHARGE_PACKAGES.find(p => p.amount === selectedPackage)?.price}` : '请选择充值套餐'}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 筛选栏 */}
       <div className="flex items-center gap-2">
         {[
@@ -147,7 +508,7 @@ export default function UserCreditsTab({
             className={`px-3 py-1.5 rounded-md text-sm transition-colors ${
               filter === id
                 ? 'bg-primary/10 text-primary border border-primary/30'
-                : 'bg-muted border border-border/30 text-muted-foreground hover:text-foreground'
+                : `${inputBg} text-muted-foreground hover:text-foreground`
             }`}
           >
             {label}
@@ -159,7 +520,7 @@ export default function UserCreditsTab({
       </div>
 
       {/* 交易列表 */}
-      <div className="bg-card border border-border/50 rounded-lg overflow-hidden">
+      <div className={`${cardBg} overflow-hidden`}>
         {filteredTransactions.length === 0 ? (
           <div className="p-8 text-center">
             <History className="w-10 h-10 text-muted-foreground mx-auto mb-2 opacity-50" />
