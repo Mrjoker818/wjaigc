@@ -6,17 +6,15 @@ export const dynamic = 'force-dynamic';
 
 const ALL_SETTING_KEYS = [
   'platformName', 'openRegistration', 'initialCredits', 'defaultUserRole',
-  'ipWhitelist', 'sessionTimeout', 'passwordExpiryDays',
-  'storageQuotaMB', 'maxUploadMB', 'maxVideoDuration',
-  'defaultImageModel', 'defaultChatModel', 'videoGenerationEnabled', '3dModelEnabled',
+  'ipWhitelist', 'sessionTimeout', 'passwordExpiryDays', 'maxConcurrentTasks',
+  'storageQuotaMB', 'maxUploadMB', 'maxVideoDuration', 'imageMaxSizeMB',
+  'defaultImageModel', 'defaultChatModel', 'defaultVideoModel', 'videoGenerationEnabled', '3dModelEnabled',
   'announcementEnabled', 'announcementType', 'announcementExpiry', 'announcement',
-  'maxConcurrentTasks', 'imageMaxSizeMB',
 ];
 
 const NUMBER_KEYS = new Set([
-  'initialCredits', 'sessionTimeout', 'passwordExpiryDays',
-  'storageQuotaMB', 'maxUploadMB', 'maxVideoDuration',
-  'maxConcurrentTasks', 'imageMaxSizeMB',
+  'initialCredits', 'sessionTimeout', 'passwordExpiryDays', 'maxConcurrentTasks',
+  'storageQuotaMB', 'maxUploadMB', 'maxVideoDuration', 'imageMaxSizeMB',
 ]);
 
 // GET: Read system settings

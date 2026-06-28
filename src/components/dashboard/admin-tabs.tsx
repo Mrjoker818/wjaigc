@@ -6,7 +6,10 @@ import {
   Settings2, Search, RefreshCw, Plus, ChevronRight, ChevronDown,
   ChevronLeft, AlertTriangle, Eye, EyeOff, RotateCcw, Save,
   X, Check, Ban, MoreHorizontal, UserPlus, ArrowUpDown, Filter,
-  CircleDot, Server, Database, Bell, Lock, HardDrive, Cpu
+  CircleDot, Server, Database, Bell, Lock, HardDrive, Cpu,
+  SlidersHorizontal, Shield, Brain, Megaphone, Bold, Italic,
+  Underline, Link2, List, AlertCircle, Download,
+  CheckCircle, Trash2, Info, Pencil
 } from 'lucide-react';
 
 /* ── Types ── */
@@ -187,13 +190,18 @@ export default function AdminTabs(props: AdminTabsProps) {
   const [newUserEmail, setNewUserEmail] = useState('');
 
   /* ── Credits state ── */
-  const [creditsSubTab, setCreditsSubTab] = useState('overview');
   const [creditsOverview, setCreditsOverview] = useState<{
-    totalBalance: number; totalRecharged: number; totalConsumed: number; avgPerUser: number;
+    totalBalance: number; totalRecharged: number; totalConsumed: number; totalUsers: number; avgPerUser: number;
     distribution: { label: string; value: number; color: string; pct: string }[];
     topUsers: { name: string; consumed: number; pct: string }[];
     recentTransactions: { id: string; user: string; type: string; amount: number; desc: string; time: string }[];
   } | null>(null);
+  const [rechargeUserId, setRechargeUserId] = useState<string | null>(null);
+  const [rechargeAmount, setRechargeAmount] = useState(100);
+  const [showRechargeModal, setShowRechargeModal] = useState(false);
+  const [creditSubTab, setCreditSubTab] = useState('user-credits');
+  const [creditSearch, setCreditSearch] = useState('');
+  const [creditSort, setCreditSort] = useState('balance');
 
   /* ── Audit state ── */
   const [auditLogs, setAuditLogs] = useState<Array<Record<string, unknown>>>([]);
@@ -271,14 +279,20 @@ export default function AdminTabs(props: AdminTabsProps) {
   /* ── Handlers ── */
   const handleRefresh = async () => { setLoading(true); await onRefreshAdmin(); setLoading(false); };
 
+  const [settingsSaved, setSettingsSaved] = useState(false);
+
   const handleSaveSettings = async () => {
     try {
-      await fetch('/api/admin/settings', {
+      const res = await fetch('/api/admin/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(systemSettings)
       });
-      setSettingsDirty(false);
+      if (res.ok) {
+        setSettingsDirty(false);
+        setSettingsSaved(true);
+        setTimeout(() => setSettingsSaved(false), 2500);
+      }
     } catch {}
   };
 
@@ -605,61 +619,88 @@ export default function AdminTabs(props: AdminTabsProps) {
             <button onClick={handleRefresh} className="h-9 px-4 rounded-lg bg-muted text-muted-foreground text-sm font-medium hover:text-foreground transition-colors flex items-center gap-2 cursor-pointer"><RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />刷新</button>
           </div>
         </div>
-        {/* 筛选栏 */}
-        <div className="flex items-center gap-3">
-          <div className="relative flex-1 max-w-xs">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <input value={userSearch} onChange={e => setUserSearch(e.target.value)} placeholder="搜索用户名 / 邮箱…" className="w-full h-9 pl-9 pr-3 rounded-lg bg-muted border border-border/50 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30" />
-          </div>
-          <select value={userFilterRole} onChange={e => setUserFilterRole(e.target.value)} className="h-9 px-3 rounded-lg bg-muted border border-border/50 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30">
-            <option value="all">全部角色</option><option value="admin">管理员</option><option value="user">用户</option>
-          </select>
-          <select value={userFilterStatus} onChange={e => setUserFilterStatus(e.target.value)} className="h-9 px-3 rounded-lg bg-muted border border-border/50 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30">
-            <option value="all">全部状态</option><option value="active">活跃</option><option value="disabled">停用</option>
-          </select>
-          <div className="flex-1" />
-          {selectedUserIds.size > 0 && (
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">已选 {selectedUserIds.size} 人</span>
-              <button onClick={() => handleBatchToggleUsers(true)} className="h-8 px-3 rounded-lg bg-green-500/15 text-green-500 text-xs font-medium hover:bg-green-500/25 transition-colors">批量启用</button>
-              <button onClick={() => handleBatchToggleUsers(false)} className="h-8 px-3 rounded-lg bg-destructive/15 text-destructive text-xs font-medium hover:bg-destructive/25 transition-colors">批量停用</button>
+        {/* 操作栏：搜索 + 筛选 + 批量操作 + 添加 */}
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <input value={userSearch} onChange={e => setUserSearch(e.target.value)} placeholder="搜索用户名 / 邮箱" className="bg-muted border-none rounded-md pl-9 pr-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 w-64 transition-colors" />
             </div>
-          )}
-          <button onClick={() => setShowUserAddDrawer(true)} className="h-9 px-4 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors flex items-center gap-1.5"><Plus className="w-4 h-4" />新建用户</button>
-          <button onClick={handleRefresh} className="h-9 px-3 rounded-lg bg-muted text-muted-foreground hover:text-foreground transition-colors"><RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /></button>
+            <div className="relative inline-flex items-center">
+              <select value={userFilterRole} onChange={e => setUserFilterRole(e.target.value)} className="bg-muted border-none rounded-md pl-3 pr-8 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer appearance-none">
+                <option value="all">全部角色</option><option value="admin">Admin</option><option value="user">User</option>
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 text-muted-foreground absolute right-2.5 pointer-events-none" />
+            </div>
+            <div className="relative inline-flex items-center">
+              <select value={userFilterStatus} onChange={e => setUserFilterStatus(e.target.value)} className="bg-muted border-none rounded-md pl-3 pr-8 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer appearance-none">
+                <option value="all">全部状态</option><option value="active">活跃</option><option value="disabled">禁用</option>
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 text-muted-foreground absolute right-2.5 pointer-events-none" />
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={() => handleBatchToggleUsers(true)} disabled={selectedUserIds.size === 0} className={`bg-muted text-muted-foreground px-3 py-2 rounded-md text-sm font-medium transition-all inline-flex items-center gap-1.5 ${selectedUserIds.size === 0 ? 'cursor-not-allowed opacity-50' : 'hover:text-foreground cursor-pointer'}`}><CheckCircle className="w-3.5 h-3.5" />批量启用</button>
+            <button onClick={() => handleBatchToggleUsers(false)} disabled={selectedUserIds.size === 0} className={`bg-muted text-muted-foreground px-3 py-2 rounded-md text-sm font-medium transition-all inline-flex items-center gap-1.5 ${selectedUserIds.size === 0 ? 'cursor-not-allowed opacity-50' : 'hover:text-foreground cursor-pointer'}`}><Ban className="w-3.5 h-3.5" />批量禁用</button>
+            <button onClick={() => { if (selectedUserIds.size > 0) selectedUserIds.forEach(id => props.onDeleteUser(adminUsers.find(u => u.id === id)!)); }} disabled={selectedUserIds.size === 0} className={`bg-muted text-muted-foreground px-3 py-2 rounded-md text-sm font-medium transition-all inline-flex items-center gap-1.5 ${selectedUserIds.size === 0 ? 'cursor-not-allowed opacity-50' : 'hover:text-destructive cursor-pointer'}`}><Trash2 className="w-3.5 h-3.5" />批量删除</button>
+            <div className="w-px h-6 bg-border/30 mx-1" />
+            <button onClick={() => setShowUserAddDrawer(true)} className="bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-medium hover:opacity-90 active:scale-[0.98] transition-all inline-flex items-center gap-2"><UserPlus className="w-4 h-4" />添加用户</button>
+          </div>
         </div>
+        {/* 选中提示 */}
+        {selectedUserIds.size > 0 && (
+          <div className="flex items-center gap-2 text-sm text-primary bg-primary/10 rounded-md px-3 py-2">
+            <Info className="w-4 h-4" />
+            <span>已选择 {selectedUserIds.size} 位用户</span>
+            <button onClick={() => setSelectedUserIds(new Set())} className="text-muted-foreground hover:text-foreground ml-auto text-xs">取消选择</button>
+          </div>
+        )}
 
-        {/* 用户卡片网格 */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredUsers.map(u => {
-            const isActive = u.status === 'active';
-            const isSelected = selectedUserIds.has(u.id);
-            return (
-              <div key={u.id} onClick={() => setUserDetailId(u.id)} className={`bg-card rounded-lg shadow-card p-5 border cursor-pointer hover:border-primary/50 transition-colors ${isSelected ? 'border-primary/50' : 'border-border/50'}`}>
-                <div className="flex items-start gap-3 mb-3">
-                  <div className="w-10 h-10 rounded-full bg-primary/15 flex items-center justify-center shrink-0">
-                    <span className="text-sm font-bold text-primary">{u.name.charAt(0).toUpperCase()}</span>
+        {/* 用户列表表格 */}
+        <div className="bg-card rounded-lg shadow-card overflow-hidden border border-border/50">
+          {/* 表头 */}
+          <div className="grid grid-cols-[40px_1fr_1.2fr_80px_90px_90px_70px_100px_110px_100px] items-center px-4 py-3 bg-muted text-xs font-semibold text-muted-foreground uppercase tracking-wider border-b border-border/20">
+            <div className="flex items-center justify-center">
+              <input type="checkbox" checked={selectedUserIds.size > 0 && selectedUserIds.size === filteredUsers.length} onChange={() => { if (selectedUserIds.size === filteredUsers.length) setSelectedUserIds(new Set()); else setSelectedUserIds(new Set(filteredUsers.map(u => u.id))); }} className="w-4 h-4 rounded border-border accent-primary" />
+            </div>
+            <span>用户名</span><span>邮箱</span><span>角色</span><span>状态</span><span>积分余额</span><span>作品数</span><span>注册时间</span><span>最后登录</span><span className="text-right">操作</span>
+          </div>
+          {/* 表体 */}
+          <div className="divide-y divide-border/20">
+            {filteredUsers.map(u => {
+              const isActive = u.status === 'active';
+              const isSelected = selectedUserIds.has(u.id);
+              return (
+                <div key={u.id} className={`grid grid-cols-[40px_1fr_1.2fr_80px_90px_90px_70px_100px_110px_100px] items-center px-4 py-3 hover:bg-muted/30 transition-colors ${isSelected ? 'bg-primary/5' : ''}`}>
+                  <div className="flex items-center justify-center">
+                    <input type="checkbox" checked={isSelected} onChange={() => setSelectedUserIds(prev => { const n = new Set(prev); n.has(u.id) ? n.delete(u.id) : n.add(u.id); return n; })} className="w-4 h-4 rounded border-border accent-primary" />
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-semibold text-foreground truncate">{u.name}</span>
-                      <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${u.role === 'admin' ? 'bg-primary/15 text-primary' : 'bg-blue-500/15 text-blue-500'}`}>{u.role === 'admin' ? '管理员' : '用户'}</span>
-                    </div>
-                    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium mt-1 ${isActive ? 'bg-green-500/15 text-green-500' : 'bg-muted text-muted-foreground'}`}>{isActive ? '活跃' : '停用'}</span>
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center text-xs font-bold text-primary shrink-0">{u.name.charAt(0).toUpperCase()}</div>
+                    <span className="text-sm font-medium text-foreground truncate">{u.name}</span>
                   </div>
-                  <input type="checkbox" checked={isSelected} onClick={e => { e.stopPropagation(); setSelectedUserIds(prev => { const n = new Set(prev); n.has(u.id) ? n.delete(u.id) : n.add(u.id); return n; }); }} className="w-4 h-4 rounded border-border accent-primary" />
+                  <span className="text-sm text-muted-foreground truncate">{getUserEmail(u) || '-'}</span>
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium w-fit ${u.role === 'admin' ? 'bg-primary/15 text-primary' : 'bg-blue-500/15 text-blue-500'}`}>{u.role === 'admin' ? 'admin' : 'user'}</span>
+                  <span className="inline-flex items-center gap-1.5 text-sm">
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isActive ? 'bg-green-500' : 'bg-muted-foreground'}`} />
+                    <span className={`text-xs ${isActive ? 'text-green-500' : 'text-muted-foreground'}`}>{isActive ? '活跃' : '禁用'}</span>
+                  </span>
+                  <span className="text-sm font-medium text-foreground">{getUserCredits(u).toLocaleString()}</span>
+                  <span className="text-sm text-muted-foreground">{getUserProjects(u) || '-'}</span>
+                  <span className="text-xs text-muted-foreground">{formatDate(getUserCreated(u))}</span>
+                  <span className="text-xs text-muted-foreground">-</span>
+                  <div className="flex items-center justify-end gap-1">
+                    <button onClick={() => setUserDetailId(u.id)} className="p-1.5 rounded-md hover:bg-muted transition-colors text-muted-foreground hover:text-foreground" title="详情"><Eye className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => setUserDetailId(u.id)} className="p-1.5 rounded-md hover:bg-muted transition-colors text-primary" title="编辑"><Pencil className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => props.onToggleUser(u)} className="p-1.5 rounded-md hover:bg-muted transition-colors text-yellow-500" title={isActive ? '禁用' : '启用'}><Ban className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => props.onDeleteUser(u)} className="p-1.5 rounded-md hover:bg-muted transition-colors text-destructive" title="删除"><Trash2 className="w-3.5 h-3.5" /></button>
+                  </div>
                 </div>
-                <div className="space-y-1.5 text-xs">
-                  <div className="flex items-center justify-between"><span className="text-muted-foreground">邮箱</span><span className="text-foreground truncate ml-2">{getUserEmail(u)}</span></div>
-                  <div className="flex items-center justify-between"><span className="text-muted-foreground">积分</span><span className="text-foreground font-mono">{getUserCredits(u).toLocaleString()}</span></div>
-                  <div className="flex items-center justify-between"><span className="text-muted-foreground">作品</span><span className="text-foreground font-mono">{getUserProjects(u) || '-'}</span></div>
-                  <div className="flex items-center justify-between"><span className="text-muted-foreground">注册</span><span className="text-foreground font-mono">{getUserCreated(u)}</span></div>
-                </div>
-              </div>
-            );
-          })}
+              );
+            })}
+            {filteredUsers.length === 0 && <div className="py-12 text-center text-sm text-muted-foreground">暂无用户数据</div>}
+          </div>
         </div>
-        {filteredUsers.length === 0 && <div className="text-center py-16 text-muted-foreground">暂无用户数据</div>}
 
         {/* 用户详情抽屉 */}
         {detailUser && (
@@ -742,36 +783,148 @@ export default function AdminTabs(props: AdminTabsProps) {
   /* ── Render: Credits Tab ── */
   if (activeTab === 'credits') {
     const co = creditsOverview;
-    const creditTabs = ['overview', 'consumption', 'statistics', 'packages'];
-    const creditTabLabels: Record<string, string> = { overview: '概览', consumption: '消耗明细', statistics: '统计分析', packages: '套餐管理' };
+    const creditTabs = ['user-credits', 'consumption', 'statistics', 'packages'];
+    const creditTabLabels: Record<string, string> = { 'user-credits': '用户积分', consumption: '消耗明细', statistics: '统计分析', packages: '套餐管理' };
+    // Filter users by search (inline computation, not useMemo to avoid conditional hooks)
+    const creditFilteredUsers = (() => {
+      let users = [...adminUsers];
+      if (creditSearch) { const q = creditSearch.toLowerCase(); users = users.filter(u => u.name.toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q)); }
+      if (creditSort === 'balance') users.sort((a, b) => (b.credits || 0) - (a.credits || 0));
+      else if (creditSort === 'recharge') users.sort((a, b) => ((b as any).totalRecharged || 0) - ((a as any).totalRecharged || 0));
+      else if (creditSort === 'consume') users.sort((a, b) => ((b as any).totalConsumed || 0) - ((a as any).totalConsumed || 0));
+      return users;
+    })();
+
     return (
       <div className="space-y-4 pb-8">
         {/* 页面标题 */}
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-xl font-bold text-foreground">积分管理</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">管理平台积分、消耗和套餐</p>
+            <p className="text-sm text-muted-foreground mt-0.5">管理用户积分、消耗明细与套餐配置</p>
+          </div>
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>数据更新于 {new Date().toLocaleDateString()}</span>
           </div>
         </div>
         {/* 统计卡片 */}
         <div className="grid grid-cols-4 gap-4">
-          <StatCard icon={Wallet} label="积分总余额" value={co ? formatNumber(co.totalBalance) : '-'} colorClass="text-primary" iconBg="bg-primary/15" />
-          <StatCard icon={TrendingUp} label="总充值" value={co ? formatNumber(co.totalRecharged) : '-'} sub="累计" colorClass="text-green-500" iconBg="bg-green-500/15" />
-          <StatCard icon={BarChart3} label="总消耗" value={co ? formatNumber(co.totalConsumed) : '-'} sub="累计" colorClass="text-yellow-500" iconBg="bg-yellow-500/15" />
-          <StatCard icon={Users} label="人均积分" value={co ? formatNumber(co.avgPerUser) : '-'} colorClass="text-blue-500" iconBg="bg-blue-500/15" />
+          <StatCard icon={Users} label="总用户数" value={co ? formatNumber(co.totalUsers || adminUsers.length) : formatNumber(adminUsers.length)} colorClass="text-blue-500" iconBg="bg-blue-500/15" />
+          <StatCard icon={Wallet} label="总充值积分" value={co ? formatNumber(co.totalRecharged) : '-'} colorClass="text-primary" iconBg="bg-primary/15" />
+          <StatCard icon={TrendingUp} label="总消耗积分" value={co ? formatNumber(co.totalConsumed) : '-'} colorClass="text-destructive" iconBg="bg-destructive/15" />
+          <StatCard icon={BarChart3} label="系统结余" value={co ? formatNumber(co.totalBalance) : '-'} sub="充值 − 消耗" colorClass="text-green-500" iconBg="bg-green-500/15" />
         </div>
 
-        {/* 子Tab */}
-        <div className="flex items-center gap-1 bg-muted rounded-lg p-1 w-fit">
+        {/* Tab 切换 */}
+        <div className="flex items-center gap-6 border-b border-border/20">
           {creditTabs.map(t => (
-            <button key={t} onClick={() => setCreditsSubTab(t)} className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${creditsSubTab === t ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground'}`}>{creditTabLabels[t]}</button>
+            <button key={t} onClick={() => setCreditSubTab(t)} className={`text-sm font-medium pb-3 cursor-pointer bg-transparent border-none transition-colors ${creditSubTab === t ? 'text-primary border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground'}`}>{creditTabLabels[t]}</button>
           ))}
         </div>
 
-        {/* 概览 */}
-        {creditsSubTab === 'overview' && (
+        {/* Tab 1: 用户积分 */}
+        {creditSubTab === 'user-credits' && (
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <input value={creditSearch} onChange={e => setCreditSearch(e.target.value)} placeholder="搜索用户名或邮箱..." className="bg-muted border-none rounded-md pl-9 pr-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 w-64 transition-colors" />
+                </div>
+                <div className="relative inline-flex items-center">
+                  <select value={creditSort} onChange={e => setCreditSort(e.target.value)} className="bg-muted border-none rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer appearance-none pr-8">
+                    <option value="balance">按余额排序</option>
+                    <option value="recharge">按充值排序</option>
+                    <option value="consume">按消耗排序</option>
+                  </select>
+                  <ChevronDown className="w-3.5 h-3.5 text-muted-foreground absolute right-2.5 pointer-events-none" />
+                </div>
+              </div>
+              <div className="text-xs text-muted-foreground">
+                共 <span className="text-foreground font-medium font-mono">{creditFilteredUsers.length}</span> 用户
+              </div>
+            </div>
+            <div className="bg-card rounded-lg shadow-card overflow-hidden border border-border/50">
+              <div className="grid grid-cols-5 px-5 py-3 bg-muted text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                <span>用户名</span><span>当前余额</span><span>累计充值</span><span>累计消耗</span><span className="text-right">操作</span>
+              </div>
+              <div className="divide-y divide-border/30">
+                {creditFilteredUsers.slice(0, 20).map(u => (
+                  <div key={u.id} className="grid grid-cols-5 px-5 py-3.5 hover:bg-muted/30 transition-colors items-center">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center text-xs font-bold text-primary">{u.name.charAt(0).toUpperCase()}</div>
+                      <div>
+                        <div className="text-sm font-medium text-foreground">{u.name}</div>
+                        <div className="text-xs text-muted-foreground">{getUserEmail(u) || '-'}</div>
+                      </div>
+                    </div>
+                    <span className="text-sm font-bold text-primary font-mono">{getUserCredits(u).toLocaleString()}</span>
+                    <span className="text-sm text-foreground font-mono">{((u as any).totalRecharged || 0).toLocaleString()}</span>
+                    <span className="text-sm text-muted-foreground font-mono">{((u as any).totalConsumed || 0).toLocaleString()}</span>
+                    <div className="flex justify-end">
+                      <button onClick={() => { setRechargeUserId(u.id); setRechargeAmount(100); setShowRechargeModal(true); }} className="bg-primary/10 text-primary px-3 py-1.5 rounded-md text-xs font-medium hover:bg-primary/20 active:scale-[0.98] transition-all">充值</button>
+                    </div>
+                  </div>
+                ))}
+                {creditFilteredUsers.length === 0 && <div className="py-8 text-center text-sm text-muted-foreground">暂无用户积分数据</div>}
+              </div>
+              {/* 分页 */}
+              {creditFilteredUsers.length > 20 && (
+                <div className="flex items-center justify-between px-5 py-3 border-t border-border/20">
+                  <span className="text-xs text-muted-foreground">显示 1-{Math.min(20, creditFilteredUsers.length)} / 共 {creditFilteredUsers.length} 条</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Tab 2: 消耗明细 */}
+        {creditSubTab === 'consumption' && (
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <select className="bg-muted border-none rounded-md px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer">
+                  <option value="">全部用户</option>
+                  {adminUsers.slice(0, 20).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
+                <select className="bg-muted border-none rounded-md px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer">
+                  <option value="">全部类型</option>
+                  <option value="image">生图</option>
+                  <option value="video">视频</option>
+                  <option value="edit">编辑</option>
+                  <option value="3d">3D</option>
+                  <option value="vectorize">矢量化</option>
+                </select>
+              </div>
+              <button onClick={() => { /* CSV export placeholder */ }} className="bg-muted text-foreground px-3 py-1.5 rounded-md text-xs font-medium hover:bg-muted/80 active:scale-[0.98] transition-all inline-flex items-center gap-1.5 border-none cursor-pointer">
+                <Download className="w-3.5 h-3.5" />导出 CSV
+              </button>
+            </div>
+            <div className="bg-card rounded-lg shadow-card overflow-hidden border border-border/50">
+              <div className="grid grid-cols-6 px-5 py-3 bg-muted text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                <span>时间</span><span>用户</span><span>类型</span><span>模型</span><span>消耗积分</span><span>状态</span>
+              </div>
+              <div className="divide-y divide-border/30">
+                {(co?.recentTransactions || []).map((t, i) => (
+                  <div key={i} className="grid grid-cols-6 px-5 py-3 hover:bg-muted/30 transition-colors items-center">
+                    <span className="text-sm text-muted-foreground font-mono">{t.time}</span>
+                    <span className="text-sm font-medium text-foreground">{t.user}</span>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium w-fit ${t.type === 'recharge' ? 'bg-primary/15 text-primary' : t.type === 'image' ? 'bg-primary/15 text-primary' : t.type === 'video' ? 'bg-blue-500/15 text-blue-500' : 'bg-green-500/15 text-green-500'}`}>{t.type === 'recharge' ? '充值' : t.type === 'image' ? '生图' : t.type === 'video' ? '视频' : t.type === 'edit' ? '编辑' : t.desc || t.type}</span>
+                    <span className="text-sm text-muted-foreground">{t.desc || '-'}</span>
+                    <span className={`text-sm font-bold font-mono ${t.type === 'recharge' ? 'text-green-500' : 'text-foreground'}`}>{t.type === 'recharge' ? '+' : '-'}{Math.abs(t.amount).toLocaleString()}</span>
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-green-500/15 text-green-500 w-fit">已完成</span>
+                  </div>
+                ))}
+                {(!co?.recentTransactions || co.recentTransactions.length === 0) && <div className="py-8 text-center text-sm text-muted-foreground">暂无消耗明细</div>}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Tab 3: 统计分析 */}
+        {creditSubTab === 'statistics' && (
           <div className="grid grid-cols-2 gap-4">
-            {/* 积分分布 */}
             <div className="bg-card rounded-lg shadow-card p-5 border border-border/50">
               <h2 className="text-base font-semibold text-foreground mb-4">积分消耗分布</h2>
               <DonutChart segments={co?.distribution || [
@@ -781,29 +934,19 @@ export default function AdminTabs(props: AdminTabsProps) {
                 { label: '其他', value: 12, color: '#a1a1aa', pct: '12%' },
               ]} />
             </div>
-            {/* Top 10 用户消耗排行 */}
             <div className="bg-card rounded-lg shadow-card p-5 border border-border/50">
               <h2 className="text-base font-semibold text-foreground mb-4">消耗排行 Top 10</h2>
               <div className="space-y-2.5">
-                {(co?.topUsers || [
-                  { name: 'user_001', consumed: 42831, pct: '28.3%' },
-                  { name: 'user_002', consumed: 38412, pct: '25.4%' },
-                  { name: 'user_003', consumed: 24567, pct: '16.2%' },
-                  { name: 'user_004', consumed: 19843, pct: '13.1%' },
-                  { name: 'user_005', consumed: 15234, pct: '10.1%' },
-                ]).map((u, i) => (
+                {(co?.topUsers || adminUsers.sort((a, b) => ((b as any).totalConsumed || 0) - ((a as any).totalConsumed || 0)).slice(0, 10)).map((u, i) => (
                   <div key={i} className="flex items-center gap-3">
                     <span className={`w-5 text-xs font-bold text-right ${i < 3 ? 'text-primary' : 'text-muted-foreground'}`}>{i + 1}</span>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-sm font-medium text-foreground truncate">{u.name}</span>
-                        <div className="flex items-center gap-3">
-                          <span className="text-xs text-muted-foreground">{u.pct}</span>
-                          <span className="text-xs font-mono text-muted-foreground">{u.consumed.toLocaleString()}</span>
-                        </div>
+                        <span className="text-xs font-mono text-muted-foreground">{((u as any).consumed || (u as any).totalConsumed || 0).toLocaleString()}</span>
                       </div>
                       <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                        <div className="h-full bg-primary/60 rounded-full" style={{ width: u.pct.replace('%', '') }} />
+                        <div className="h-full bg-primary/60 rounded-full" style={{ width: `${Math.min(100, ((u as any).consumed || (u as any).totalConsumed || 0) / Math.max((co?.topUsers?.[0]?.consumed || (co?.topUsers?.[0] as any)?.totalConsumed || 1), 1) * 100)}%` }} />
                       </div>
                     </div>
                   </div>
@@ -813,49 +956,40 @@ export default function AdminTabs(props: AdminTabsProps) {
           </div>
         )}
 
-        {/* 消耗明细 */}
-        {creditsSubTab === 'consumption' && (
+        {/* Tab 4: 套餐管理 */}
+        {creditSubTab === 'packages' && (
           <div className="bg-card rounded-lg shadow-card p-5 border border-border/50">
-            <h2 className="text-base font-semibold text-foreground mb-4">消耗明细</h2>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead><tr className="text-xs text-muted-foreground border-b border-border/50"><th className="text-left py-2.5 px-3 font-medium">用户</th><th className="text-left py-2.5 px-3 font-medium">类型</th><th className="text-left py-2.5 px-3 font-medium">数量</th><th className="text-left py-2.5 px-3 font-medium">描述</th><th className="text-left py-2.5 px-3 font-medium">时间</th></tr></thead>
-                <tbody>
-                  {(co?.recentTransactions || []).map((t, i) => (
-                    <tr key={i} className="border-b border-border/30 hover:bg-muted/30 transition-colors">
-                      <td className="py-2.5 px-3 text-foreground font-medium">{t.user}</td>
-                      <td className="py-2.5 px-3"><span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${t.type === 'recharge' ? 'bg-green-500/15 text-green-500' : 'bg-yellow-500/15 text-yellow-500'}`}>{t.type === 'recharge' ? '充值' : '消耗'}</span></td>
-                      <td className="py-2.5 px-3 font-mono">{t.amount}</td>
-                      <td className="py-2.5 px-3 text-muted-foreground">{t.desc}</td>
-                      <td className="py-2.5 px-3 text-muted-foreground font-mono text-xs">{t.time}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-base font-semibold text-foreground">积分定价配置</h2>
+              <button className="bg-primary/10 text-primary px-3 py-1.5 rounded-md text-xs font-medium hover:bg-primary/20 transition-all">+ 新增套餐</button>
             </div>
-          </div>
-        )}
-
-        {/* 统计分析 */}
-        {creditsSubTab === 'statistics' && (
-          <div className="bg-card rounded-lg shadow-card p-5 border border-border/50">
-            <h2 className="text-base font-semibold text-foreground mb-4">积分趋势</h2>
-            <div className="h-48 flex items-center justify-center text-muted-foreground">趋势图加载中…</div>
-          </div>
-        )}
-
-        {/* 套餐管理 */}
-        {creditsSubTab === 'packages' && (
-          <div className="bg-card rounded-lg shadow-card p-5 border border-border/50">
-            <h2 className="text-base font-semibold text-foreground mb-4">积分定价配置</h2>
-            <div className="space-y-4">
-              {(providers || []).filter(p => (p.model_type || (p as any).modelType) === 'image').slice(0, 5).map((p, i) => (
+            <div className="space-y-3">
+              {(providers || []).filter(p => (p.model_type || (p as any).modelType) === 'image').slice(0, 8).map((p, i) => (
                 <div key={i} className="flex items-center gap-4 p-3 bg-muted/30 rounded-lg">
                   <span className="text-sm font-medium text-foreground min-w-[120px] truncate">{p.name}</span>
                   <div className="flex-1 text-xs text-muted-foreground">图像模型</div>
-                  <input type="number" placeholder="积分/次" className="w-24 h-8 px-2 rounded-lg bg-muted border border-border/50 text-sm text-foreground text-center focus:outline-none focus:ring-2 focus:ring-primary/30" />
+                  <input type="number" placeholder="积分/次" className="w-24 h-8 px-2 rounded-md bg-muted border border-border/50 text-sm text-foreground text-center focus:outline-none focus:ring-2 focus:ring-primary/30" />
                 </div>
               ))}
+              {providers.filter(p => (p.model_type || (p as any).modelType) === 'image').length === 0 && <div className="py-8 text-center text-sm text-muted-foreground">暂无图像模型，请先在API管理中添加</div>}
+            </div>
+          </div>
+        )}
+        {/* 充值弹窗 */}
+        {showRechargeModal && rechargeUserId && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/50" onClick={() => setShowRechargeModal(false)} />
+            <div className="relative bg-card rounded-xl shadow-lg border border-border/50 p-6 w-[360px]">
+              <h3 className="text-base font-semibold text-foreground mb-4">积分充值</h3>
+              <div className="space-y-4">
+                <div><label className="text-sm font-medium text-foreground mb-1.5 block">充值用户</label><div className="text-sm text-muted-foreground bg-muted px-3 py-2 rounded-lg">{adminUsers.find(u => u.id === rechargeUserId)?.name || rechargeUserId}</div></div>
+                <div><label className="text-sm font-medium text-foreground mb-1.5 block">充值数量</label><input type="number" value={rechargeAmount} onChange={e => setRechargeAmount(Number(e.target.value))} min={1} className="w-full h-10 px-3 rounded-lg bg-muted border border-border/50 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30" /></div>
+                <div className="flex gap-2">
+                  {[50, 100, 200, 500, 1000].map(v => <button key={v} onClick={() => setRechargeAmount(v)} className={`flex-1 h-8 rounded-md text-xs font-medium transition-colors ${rechargeAmount === v ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground'}`}>{v}</button>)}
+                </div>
+                <button onClick={async () => { try { const res = await fetch('/api/admin/credits/recharge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: rechargeUserId, amount: rechargeAmount }) }); if (res.ok) { setShowRechargeModal(false); loadCreditsOverview(); onRefreshAdmin(); } else { const d = await res.json(); alert(d.error || '充值失败'); } } catch { alert('充值请求失败'); } }} className="w-full h-10 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors">确认充值</button>
+              </div>
+              <button onClick={() => setShowRechargeModal(false)} className="absolute top-4 right-4 w-8 h-8 rounded-lg bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
             </div>
           </div>
         )}
@@ -957,119 +1091,301 @@ export default function AdminTabs(props: AdminTabsProps) {
   if (activeTab === 'settings') {
     const imageModelOpts = (providers || []).filter(p => (p.model_type || (p as any).modelType) === 'image').flatMap(p => ((p.selected_models || (p as any).selectedModels || []) as string[]).map(m => ({ value: `${p.id}::${m}`, label: m })));
     const chatModelOpts = (providers || []).filter(p => (p.model_type || (p as any).modelType) === 'chat').flatMap(p => ((p.selected_models || (p as any).selectedModels || []) as string[]).map(m => ({ value: `${p.id}::${m}`, label: m })));
+    const videoModelOpts = (providers || []).filter(p => (p.model_type || (p as any).modelType) === 'image').flatMap(p => ((p.selected_models || (p as any).selectedModels || []) as string[]).filter(m => /kling|seedance|vidu|runway|sora|veo|pika|luma|minimax/i.test(m)).map(m => ({ value: `${p.id}::${m}`, label: m })));
 
-    const settingGroups = [
-      { title: '基础设置', icon: Settings2, desc: '平台基本配置', items: [
-        { key: 'platformName', label: '平台名称', desc: '显示在浏览器标题和登录页', type: 'text' as const },
-        { key: 'openRegistration', label: '开放注册', desc: '允许新用户自主注册账号', type: 'toggle' as const },
-        { key: 'initialCredits', label: '新用户初始积分', desc: '新注册用户获得的默认积分数量', type: 'number' as const },
-        { key: 'defaultUserRole', label: '默认用户角色', desc: '新注册用户的默认权限角色', type: 'select' as const, options: [{ value: 'user', label: '普通用户' }, { value: 'vip', label: 'VIP用户' }] },
-      ]},
-      { title: '安全设置', icon: Lock, desc: '访问控制与安全策略', items: [
-        { key: 'ipWhitelist', label: 'IP 白名单', desc: '仅允许指定IP访问管理后台，留空不限制', type: 'text' as const, placeholder: '如: 192.168.1.0/24, 10.0.0.1' },
-        { key: 'sessionTimeout', label: '会话超时(分钟)', desc: '用户无操作后自动退出登录的时间', type: 'number' as const },
-        { key: 'passwordExpiryDays', label: '密码过期周期(天)', desc: '设置0表示永不过期', type: 'number' as const },
-      ]},
-      { title: '存储设置', icon: HardDrive, desc: '文件上传与存储限制', items: [
-        { key: 'storageQuotaMB', label: '单用户存储配额(MB)', desc: '每个用户可使用的总存储空间', type: 'number' as const },
-        { key: 'maxUploadMB', label: '单文件上传限制(MB)', desc: '单个图片或文件的最大上传大小', type: 'number' as const },
-        { key: 'maxVideoDuration', label: '视频最大时长(秒)', desc: '用户可生成的视频最大时长', type: 'number' as const },
-      ]},
-      { title: '模型配置', icon: Cpu, desc: 'AI模型与生成能力', items: [
-        { key: 'defaultImageModel', label: '默认图像模型', desc: '新用户未选择模型时使用的默认图像生成模型', type: 'select' as const, options: imageModelOpts },
-        { key: 'defaultChatModel', label: '默认 LLM 模型', desc: 'AI对话和提示词优化使用的默认语言模型', type: 'select' as const, options: chatModelOpts },
-        { key: 'videoGenerationEnabled', label: '视频生成', desc: '启用后用户可以使用文生视频和图生视频功能', type: 'toggle' as const },
-        { key: '3dModelEnabled', label: '3D 模型预览', desc: '启用后用户可以生成和预览3D模型', type: 'toggle' as const },
-      ]},
-      { title: '系统公告', icon: Bell, desc: '向用户展示通知与公告', items: [
-        { key: 'announcementEnabled', label: '启用公告', desc: '开启后用户登录时将看到公告横幅', type: 'toggle' as const },
-        { key: 'announcementType', label: '公告类型', desc: '不同类型对应不同的显示样式', type: 'select' as const, options: [{ value: 'info', label: '信息提示' }, { value: 'warning', label: '重要通知' }, { value: 'update', label: '版本更新' }] },
-        { key: 'announcementExpiry', label: '到期时间', desc: '公告自动隐藏的时间，留空则永久显示', type: 'text' as const, placeholder: '如: 2025-12-31' },
-        { key: 'announcement', label: '公告内容', desc: '支持基本文本格式', type: 'textarea' as const },
-      ]},
-    ];
+    const s = (key: string) => systemSettings[key] ?? '';
+
+    const toggleBtn = (key: string) => {
+      const on = s(key) === 'true';
+      return (
+        <button onClick={() => { setSystemSettings(prev => ({ ...prev, [key]: on ? 'false' : 'true' })); setSettingsDirty(true); }}
+          className={`relative w-11 h-6 rounded-full transition-colors cursor-pointer ${on ? 'bg-primary' : 'bg-muted-foreground/30'}`}>
+          <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${on ? 'left-[22px]' : 'left-[2px]'}`} />
+        </button>
+      );
+    };
+
+    const numInput = (key: string, w = 'w-24', unit?: string) => (
+      <div className="flex items-center gap-2">
+        <input type="number" value={s(key)} onChange={e => { setSystemSettings(prev => ({ ...prev, [key]: e.target.value })); setSettingsDirty(true); }}
+          className={`${w} bg-surface-container border-none rounded-md px-3 py-2 text-sm text-foreground text-right focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors`} />
+        {unit && <span className="text-xs text-muted-foreground">{unit}</span>}
+      </div>
+    );
 
     return (
-      <div className="space-y-5 pb-20">
+      <div className="space-y-0 pb-24">
         {/* 页面标题 */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-bold text-foreground">系统设置</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">配置平台参数、安全策略与系统公告</p>
-          </div>
-          {settingsDirty && (
-            <div className="flex items-center gap-1.5 text-xs text-amber-500">
-              <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-              有未保存的修改
-            </div>
-          )}
+        <div className="px-8 pt-8 pb-2">
+          <h1 className="text-2xl font-bold text-foreground">系统设置</h1>
+          <p className="text-sm text-muted-foreground mt-1">管理平台全局配置，修改后请点击底部保存按钮生效</p>
         </div>
-        {settingGroups.map((group, gi) => (
-          <div key={gi} className="bg-card rounded-lg shadow-card border border-border/50 overflow-hidden">
-            {/* 组标题 */}
-            <div className="px-5 py-3.5 border-b border-border/30 flex items-center gap-2.5">
-              <div className="w-7 h-7 rounded-md bg-primary/15 flex items-center justify-center">
-                <group.icon className="w-3.5 h-3.5 text-primary" />
+
+        {/* 基础设置 */}
+        <div className="px-8 mt-6">
+          <div className="bg-card rounded-lg shadow-card p-5">
+            <div className="flex items-center gap-2 mb-5">
+              <SlidersHorizontal className="w-4 h-4 text-primary" />
+              <h2 className="text-base font-semibold text-foreground">基础设置</h2>
+            </div>
+            <div className="space-y-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium text-foreground">允许用户注册</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">关闭后新用户将无法自行注册账号</div>
+                </div>
+                {toggleBtn('openRegistration')}
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium text-foreground">新用户默认积分</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">新注册用户获得的初始积分数量</div>
+                </div>
+                {numInput('initialCredits', 'w-32')}
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium text-foreground">新用户默认角色</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">新注册用户自动分配的角色</div>
+                </div>
+                <select value={s('defaultUserRole')} onChange={e => { setSystemSettings(prev => ({ ...prev, defaultUserRole: e.target.value })); setSettingsDirty(true); }}
+                  className="w-32 bg-surface-container border-none rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors appearance-none cursor-pointer">
+                  <option value="user">user</option>
+                  <option value="vip">vip</option>
+                </select>
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium text-foreground">平台名称</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">显示在浏览器标题栏和登录页面</div>
+                </div>
+                <input type="text" value={s('platformName')} onChange={e => { setSystemSettings(prev => ({ ...prev, platformName: e.target.value })); setSettingsDirty(true); }}
+                  className="w-48 bg-surface-container border-none rounded-md px-3 py-2 text-sm text-foreground text-right focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 安全设置 */}
+        <div className="px-8 mt-6">
+          <div className="bg-card rounded-lg shadow-card p-5">
+            <div className="flex items-center gap-2 mb-5">
+              <Shield className="w-4 h-4 text-primary" />
+              <h2 className="text-base font-semibold text-foreground">安全设置</h2>
+            </div>
+            <div className="space-y-5">
+              <div>
+                <div className="text-sm font-medium text-foreground">管理端IP白名单</div>
+                <div className="text-xs text-muted-foreground mt-0.5 mb-2">每行一个IP地址，留空则不限制</div>
+                <textarea value={s('ipWhitelist')} onChange={e => { setSystemSettings(prev => ({ ...prev, ipWhitelist: e.target.value })); setSettingsDirty(true); }}
+                  rows={4} className="w-full bg-surface-container border-none rounded-md px-3 py-2 text-sm text-foreground font-mono focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors resize-none" placeholder="192.168.1.0/24&#10;10.0.0.1" />
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium text-foreground">会话超时时间</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">用户无操作后自动登出的时间</div>
+                </div>
+                {numInput('sessionTimeout', 'w-24', '分钟')}
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium text-foreground">强制密码修改周期</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">设为 0 则不强制修改密码</div>
+                </div>
+                {numInput('passwordExpiryDays', 'w-24', '天')}
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium text-foreground">用户可执行任务数量</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">单个用户同时执行的异步任务上限</div>
+                </div>
+                {numInput('maxConcurrentTasks', 'w-24', '个')}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 存储设置 */}
+        <div className="px-8 mt-6">
+          <div className="bg-card rounded-lg shadow-card p-5">
+            <div className="flex items-center gap-2 mb-5">
+              <HardDrive className="w-4 h-4 text-primary" />
+              <h2 className="text-base font-semibold text-foreground">存储设置</h2>
+            </div>
+            <div className="space-y-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium text-foreground">单用户存储配额</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">每个用户可使用的最大存储空间</div>
+                </div>
+                {numInput('storageQuotaMB', 'w-24', 'MB')}
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium text-foreground">图片最大尺寸</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">上传图片允许的最大分辨率</div>
+                </div>
+                {numInput('imageMaxSizeMB', 'w-24', 'MB')}
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium text-foreground">单文件上传限制</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">单个图片或文件的最大上传大小</div>
+                </div>
+                {numInput('maxUploadMB', 'w-24', 'MB')}
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium text-foreground">视频最大时长</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">用户可生成的视频最大时长</div>
+                </div>
+                {numInput('maxVideoDuration', 'w-24', '秒')}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 默认模型配置 */}
+        <div className="px-8 mt-6">
+          <div className="bg-card rounded-lg shadow-card p-5">
+            <div className="flex items-center gap-2 mb-5">
+              <Brain className="w-4 h-4 text-primary" />
+              <h2 className="text-base font-semibold text-foreground">默认模型配置</h2>
+            </div>
+            <div className="space-y-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium text-foreground">默认图像模型</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">用户生成图像时的默认模型</div>
+                </div>
+                <select value={s('defaultImageModel')} onChange={e => { setSystemSettings(prev => ({ ...prev, defaultImageModel: e.target.value })); setSettingsDirty(true); }}
+                  className="w-56 bg-surface-container border-none rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors appearance-none cursor-pointer">
+                  <option value="">未选择</option>
+                  {imageModelOpts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium text-foreground">默认 LLM 模型</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">对话和文本生成的默认语言模型</div>
+                </div>
+                <select value={s('defaultChatModel')} onChange={e => { setSystemSettings(prev => ({ ...prev, defaultChatModel: e.target.value })); setSettingsDirty(true); }}
+                  className="w-56 bg-surface-container border-none rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors appearance-none cursor-pointer">
+                  <option value="">未选择</option>
+                  {chatModelOpts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium text-foreground">默认视频模型</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">视频生成任务的默认模型</div>
+                </div>
+                <select value={s('defaultVideoModel') || ''} onChange={e => { setSystemSettings(prev => ({ ...prev, defaultVideoModel: e.target.value })); setSettingsDirty(true); }}
+                  className="w-56 bg-surface-container border-none rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors appearance-none cursor-pointer">
+                  <option value="">未选择</option>
+                  {videoModelOpts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium text-foreground">视频生成功能</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">启用后用户可以使用文生视频和图生视频功能</div>
+                </div>
+                {toggleBtn('videoGenerationEnabled')}
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium text-foreground">3D 模型预览</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">启用后用户可以生成和预览3D模型</div>
+                </div>
+                {toggleBtn('3dModelEnabled')}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 公告管理 */}
+        <div className="px-8 mt-6">
+          <div className="bg-card rounded-lg shadow-card p-5">
+            <div className="flex items-center gap-2 mb-5">
+              <Megaphone className="w-4 h-4 text-primary" />
+              <h2 className="text-base font-semibold text-foreground">公告管理</h2>
+            </div>
+            <div className="space-y-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium text-foreground">启用公告</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">开启后公告将对所有用户展示</div>
+                </div>
+                {toggleBtn('announcementEnabled')}
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium text-foreground">公告类型</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">选择公告的展示形式</div>
+                </div>
+                <select value={s('announcementType')} onChange={e => { setSystemSettings(prev => ({ ...prev, announcementType: e.target.value })); setSettingsDirty(true); }}
+                  className="w-44 bg-surface-container border-none rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors appearance-none cursor-pointer">
+                  <option value="banner">顶部横幅</option>
+                  <option value="popup">弹窗通知</option>
+                </select>
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium text-foreground">公告到期时间</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">到期后公告自动隐藏</div>
+                </div>
+                <input type="datetime-local" value={s('announcementExpiry')} onChange={e => { setSystemSettings(prev => ({ ...prev, announcementExpiry: e.target.value })); setSettingsDirty(true); }}
+                  className="w-52 bg-surface-container border-none rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
               </div>
               <div>
-                <h2 className="text-sm font-semibold text-foreground">{group.title}</h2>
-                <p className="text-xs text-muted-foreground">{group.desc}</p>
+                <div className="text-sm font-medium text-foreground mb-2">公告内容</div>
+                {/* 富文本编辑工具栏 */}
+                <div className="flex items-center gap-1 bg-surface-container rounded-t-md px-2 py-1.5 border-b border-border/30">
+                  <button onClick={() => document.execCommand('bold')} className="p-1 rounded hover:bg-surface-container-high transition-colors" aria-label="加粗">
+                    <Bold className="w-4 h-4 text-muted-foreground" />
+                  </button>
+                  <button onClick={() => document.execCommand('italic')} className="p-1 rounded hover:bg-surface-container-high transition-colors" aria-label="斜体">
+                    <Italic className="w-4 h-4 text-muted-foreground" />
+                  </button>
+                  <button onClick={() => document.execCommand('underline')} className="p-1 rounded hover:bg-surface-container-high transition-colors" aria-label="下划线">
+                    <Underline className="w-4 h-4 text-muted-foreground" />
+                  </button>
+                  <div className="w-px h-4 bg-border/30 mx-1" />
+                  <button onClick={() => { const url = prompt('输入链接地址:'); if (url) document.execCommand('createLink', false, url); }} className="p-1 rounded hover:bg-surface-container-high transition-colors" aria-label="插入链接">
+                    <Link2 className="w-4 h-4 text-muted-foreground" />
+                  </button>
+                  <button onClick={() => document.execCommand('insertUnorderedList')} className="p-1 rounded hover:bg-surface-container-high transition-colors" aria-label="列表">
+                    <List className="w-4 h-4 text-muted-foreground" />
+                  </button>
+                </div>
+                <textarea value={s('announcement')} onChange={e => { setSystemSettings(prev => ({ ...prev, announcement: e.target.value })); setSettingsDirty(true); }}
+                  placeholder="输入公告内容…" rows={5}
+                  className="w-full bg-surface-container border-none rounded-b-md px-3 py-3 text-sm text-foreground min-h-[120px] focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors resize-none" />
               </div>
             </div>
-            {/* 设置项 */}
-            <div className="p-5 space-y-5">
-              {group.items.map((item, ii) => (
-                <div key={ii} className="flex items-start justify-between gap-4">
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-foreground">{item.label}</div>
-                    {item.desc && <div className="text-xs text-muted-foreground mt-0.5">{item.desc}</div>}
-                  </div>
-                  <div className="flex-shrink-0 w-52">
-                    {item.type === 'text' && (
-                      <input type="text" value={systemSettings[item.key] || ''} onChange={e => { setSystemSettings(s => ({ ...s, [item.key]: e.target.value })); setSettingsDirty(true); }} placeholder={(item as { placeholder?: string }).placeholder || ''} className="w-full h-8 px-3 rounded-md bg-muted border border-border/50 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30" />
-                    )}
-                    {item.type === 'select' && (
-                      <select value={systemSettings[item.key] || ''} onChange={e => { setSystemSettings(s => ({ ...s, [item.key]: e.target.value })); setSettingsDirty(true); }} className="w-full h-8 px-3 rounded-md bg-muted border border-border/50 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30">
-                        <option value="">未选择</option>
-                        {(item as { options?: Array<{ value: string; label: string }> }).options?.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                      </select>
-                    )}
-                    {item.type === 'toggle' && (
-                      <div className="flex justify-end">
-                        <button onClick={() => { setSystemSettings(s => ({ ...s, [item.key]: s[item.key] === 'true' ? 'false' : 'true' })); setSettingsDirty(true); }} className={`w-11 h-6 rounded-full relative transition-colors cursor-pointer ${systemSettings[item.key] === 'true' ? 'bg-primary' : 'bg-muted-foreground/30'}`}>
-                          <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-md transition-transform ${systemSettings[item.key] === 'true' ? 'translate-x-5' : 'translate-x-0.5'}`} />
-                        </button>
-                      </div>
-                    )}
-                    {item.type === 'number' && (
-                      <input type="number" value={systemSettings[item.key] || ''} onChange={e => { setSystemSettings(s => ({ ...s, [item.key]: e.target.value })); setSettingsDirty(true); }} className="w-full h-8 px-3 rounded-md bg-muted border border-border/50 text-sm text-foreground text-right focus:outline-none focus:ring-2 focus:ring-primary/30" />
-                    )}
-                    {item.type === 'textarea' && (
-                      <textarea value={systemSettings[item.key] || ''} onChange={e => { setSystemSettings(s => ({ ...s, [item.key]: e.target.value })); setSettingsDirty(true); }} placeholder="输入公告内容…" rows={3} className="w-full px-3 py-2 rounded-md bg-muted border border-border/50 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none" />
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
           </div>
-        ))}
+        </div>
 
-        {/* 固定底栏：保存/重置 */}
-        {settingsDirty && (
-          <div className="fixed bottom-0 right-0 left-0 bg-card/95 backdrop-blur-sm border-t border-border/50 px-6 py-3 flex items-center justify-between z-50" style={{ maxWidth: 'calc(100% - 0px)' }}>
-            <span className="text-sm text-muted-foreground flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-amber-400" />有未保存的修改</span>
-            <div className="flex gap-3">
-              <button onClick={() => loadSystemSettings()} className="h-9 px-4 rounded-lg bg-muted text-muted-foreground text-sm font-medium cursor-pointer hover:text-foreground transition-colors flex items-center gap-2"><RotateCcw className="w-3.5 h-3.5" />重置</button>
-              <button onClick={() => handleSaveSettings()} className="h-9 px-5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold cursor-pointer hover:bg-primary/90 transition-colors flex items-center gap-2"><Save className="w-3.5 h-3.5" />保存设置</button>
-            </div>
+        {/* 底部固定保存栏 */}
+        <div className="fixed bottom-0 right-0 bg-card border-t border-border/50 px-8 py-4 z-50 flex items-center justify-between" style={{ left: '224px' }}>
+          <div className={`flex items-center gap-2 transition-opacity ${settingsDirty ? 'opacity-100' : 'opacity-0'}`}>
+            <AlertCircle className="w-4 h-4 text-amber-400" />
+            <span className="text-sm text-amber-400 font-medium">有未保存的更改</span>
           </div>
-        )}
-        {!settingsDirty && (
-          <div className="flex justify-end gap-3 pt-2 pb-4">
-            <button onClick={() => loadSystemSettings()} className="h-9 px-4 rounded-lg bg-muted text-muted-foreground text-sm font-medium cursor-pointer hover:text-foreground transition-colors flex items-center gap-2"><RotateCcw className="w-3.5 h-3.5" />重置</button>
-            <button onClick={() => handleSaveSettings()} className="h-9 px-5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold cursor-pointer hover:bg-primary/90 transition-colors flex items-center gap-2"><Save className="w-3.5 h-3.5" />保存设置</button>
+          <div className="flex items-center gap-3 ml-auto">
+            <button onClick={() => loadSystemSettings()} className="bg-surface-container text-foreground border-none px-5 py-2 rounded-md text-sm font-medium hover:bg-surface-container-high active:scale-[0.98] transition-all cursor-pointer">重置</button>
+            <button onClick={() => handleSaveSettings()} className={`bg-primary text-primary-foreground px-6 py-2 rounded-md text-sm font-medium hover:opacity-90 active:scale-[0.98] transition-all inline-flex items-center gap-2 cursor-pointer ${settingsDirty ? 'shadow-glow' : ''}`}>
+              <Save className="w-4 h-4" />保存设置
+            </button>
           </div>
-        )}
+        </div>
+
+        {/* 保存成功提示 */}
+        <div className={`fixed top-6 right-6 bg-success/15 text-success border border-success/20 rounded-lg px-4 py-3 text-sm font-medium flex items-center gap-2 z-[60] transition-all pointer-events-none ${settingsSaved ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2.5'}`}>
+          <Check className="w-4 h-4" />
+          <span>设置已保存成功</span>
+        </div>
       </div>
     );
   }

@@ -1807,105 +1807,124 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
         )}
 
         {/* ── Tab: Stats ── */}
-        {activeTab === 'stats' && (
+        {activeTab === 'stats' && (() => {
+          const freshStats = mgr.getUsageStats();
+          const totalRequests = freshStats.reduce((a: number, s: UsageStats) => a + (s.requests || 0), 0);
+          const totalImages = freshStats.reduce((a: number, s: UsageStats) => a + (s.imagesGenerated || 0), 0);
+          const totalVideos = freshStats.reduce((a: number, s: UsageStats) => a + (s.videosGenerated || 0), 0);
+          const totalEdits = freshStats.reduce((a: number, s: UsageStats) => a + (s.editsPerformed || 0), 0);
+          const total3d = freshStats.reduce((a: number, s: UsageStats) => a + (s.models3dGenerated || 0), 0);
+          const totalChats = freshStats.reduce((a: number, s: UsageStats) => a + (s.chatsCount || 0), 0);
+          const totalErase = freshStats.reduce((a: number, s: UsageStats) => a + (s.eraseCount || 0), 0);
+          const totalRemoveBg = freshStats.reduce((a: number, s: UsageStats) => a + (s.removeBgCount || 0), 0);
+          const totalUpscale = freshStats.reduce((a: number, s: UsageStats) => a + (s.upscaleCount || 0), 0);
+          // Also count actual images in projects as a real data source
+          const projectImageCount = allImages.length;
+          const projectCount = projects.length;
+          const genMax = Math.max(totalImages, totalVideos, total3d, totalChats, 1);
+          const editMax = Math.max(totalEdits, totalErase, totalRemoveBg, totalUpscale, 1);
+          const barColor = 'bg-primary';
+          const barBg = 'bg-muted';
+          return (
           <div className="h-full overflow-y-auto p-8">
             <div className="flex items-center justify-between mb-6">
               <div>
-                <h1 className={`text-xl font-bold ${textPrimary}`}>统计</h1>
-                <p className={`text-sm ${textSecondary} mt-0.5`}>查看你的使用数据和用量统计</p>
+                <h1 className="text-xl font-bold text-foreground">统计</h1>
+                <p className="text-sm text-muted-foreground mt-0.5">查看你的使用数据和用量统计</p>
               </div>
             </div>
             {/* 核心统计卡片 */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
               {[
-                { label: '总请求数', value: statsArr.reduce((a, s) => a + (s.requests || 0), 0), icon: Zap, color: accentClass },
-                { label: '图片生成', value: statsArr.reduce((a, s) => a + (s.imagesGenerated || 0), 0), icon: Image, color: 'text-blue-400' },
-                { label: '视频生成', value: statsArr.reduce((a, s) => a + (s.videosGenerated || 0), 0), icon: Film, color: 'text-purple-400' },
-                { label: '编辑操作', value: statsArr.reduce((a, s) => a + (s.editsPerformed || 0), 0), icon: Pencil, color: 'text-orange-400' },
-              ].map((stat, i) => (
-                <div key={i} className={`rounded-xl border p-5 ${isDark ? 'bg-[#1a1a2e]/80 border-primary/20' : 'bg-white border-gray-200'}`}>
+                { label: '项目总数', value: projectCount, icon: FolderOpen, desc: '画布项目' },
+                { label: '图片总数', value: projectImageCount, icon: Image, desc: '画布中图片' },
+                { label: '生成请求', value: totalRequests, icon: Zap, desc: 'API调用次数' },
+                { label: '编辑操作', value: totalEdits, icon: Pencil, desc: '图片编辑次数' },
+              ].map((s, i) => (
+                <div key={i} className="rounded-xl border border-border/50 bg-card p-5">
                   <div className="flex items-center gap-2 mb-2">
-                    <stat.icon className={`w-4 h-4 ${stat.color}`} />
-                    <span className={`text-xs ${textSecondary}`}>{stat.label}</span>
+                    <s.icon className="w-4 h-4 text-primary" />
+                    <span className="text-xs text-muted-foreground">{s.label}</span>
                   </div>
-                  <p className={`text-2xl font-bold ${textPrimary}`}>{stat.value}</p>
+                  <p className="text-2xl font-bold text-foreground">{s.value}</p>
+                  <p className="text-xs text-muted-foreground mt-1">{s.desc}</p>
                 </div>
               ))}
             </div>
             {/* 详细统计 */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
-              <div className={`rounded-xl border p-5 ${isDark ? 'bg-[#1a1a2e]/80 border-primary/20' : 'bg-white border-gray-200'}`}>
-                <h3 className={`text-sm font-semibold ${textPrimary} mb-4`}>生成统计</h3>
+              <div className="rounded-xl border border-border/50 bg-card p-5">
+                <h3 className="text-sm font-semibold text-foreground mb-4">生成统计</h3>
                 <div className="space-y-3">
                   {[
-                    { label: 'AI 图片生成', value: statsArr.reduce((a, s) => a + (s.imagesGenerated || 0), 0), color: 'bg-blue-500' },
-                    { label: 'AI 视频生成', value: statsArr.reduce((a, s) => a + (s.videosGenerated || 0), 0), color: 'bg-purple-500' },
-                    { label: '3D 模型生成', value: statsArr.reduce((a, s) => a + (s.models3dGenerated || 0), 0), color: 'bg-cyan-500' },
-                    { label: '聊天对话', value: statsArr.reduce((a, s) => a + (s.chatsCount || 0), 0), color: 'bg-green-500' },
-                  ].map((item, i) => {
-                    const maxVal = Math.max(...[statsArr.reduce((a, s) => a + (s.imagesGenerated || 0), 0), statsArr.reduce((a, s) => a + (s.videosGenerated || 0), 0), statsArr.reduce((a, s) => a + (s.models3dGenerated || 0), 0), statsArr.reduce((a, s) => a + (s.chatsCount || 0), 0)], 1);
-                    return (
-                      <div key={i}>
-                        <div className="flex justify-between mb-1">
-                          <span className={`text-xs ${textSecondary}`}>{item.label}</span>
-                          <span className={`text-xs font-medium ${textPrimary}`}>{item.value}</span>
-                        </div>
-                        <div className={`h-2 rounded-full ${isDark ? 'bg-[#2a2a3e]' : 'bg-gray-100'}`}>
-                          <div className={`h-full rounded-full ${item.color} transition-all duration-500`} style={{ width: `${Math.min((item.value / maxVal) * 100, 100)}%` }} />
-                        </div>
+                    { label: 'AI 图片生成', value: totalImages },
+                    { label: 'AI 视频生成', value: totalVideos },
+                    { label: '3D 模型生成', value: total3d },
+                    { label: '聊天对话', value: totalChats },
+                  ].map((item, i) => (
+                    <div key={i}>
+                      <div className="flex justify-between mb-1">
+                        <span className="text-xs text-muted-foreground">{item.label}</span>
+                        <span className="text-xs font-medium text-foreground">{item.value}</span>
                       </div>
-                    );
-                  })}
+                      <div className={`h-2 rounded-full ${barBg}`}>
+                        <div className={`h-full rounded-full ${barColor} transition-all duration-500`} style={{ width: `${Math.min((item.value / genMax) * 100, 100)}%` }} />
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
-              <div className={`rounded-xl border p-5 ${isDark ? 'bg-[#1a1a2e]/80 border-primary/20' : 'bg-white border-gray-200'}`}>
-                <h3 className={`text-sm font-semibold ${textPrimary} mb-4`}>编辑统计</h3>
+              <div className="rounded-xl border border-border/50 bg-card p-5">
+                <h3 className="text-sm font-semibold text-foreground mb-4">编辑统计</h3>
                 <div className="space-y-3">
                   {[
-                    { label: '图片编辑', value: statsArr.reduce((a, s) => a + (s.editsPerformed || 0), 0), color: 'bg-orange-500' },
-                    { label: '擦除/修复', value: statsArr.reduce((a, s) => a + (s.eraseCount || 0), 0), color: 'bg-red-500' },
-                    { label: '背景移除', value: statsArr.reduce((a, s) => a + (s.removeBgCount || 0), 0), color: 'bg-yellow-500' },
-                    { label: '图片放大', value: statsArr.reduce((a, s) => a + (s.upscaleCount || 0), 0), color: 'bg-indigo-500' },
-                  ].map((item, i) => {
-                    const maxVal = Math.max(...[statsArr.reduce((a, s) => a + (s.editsPerformed || 0), 0), statsArr.reduce((a, s) => a + (s.eraseCount || 0), 0), statsArr.reduce((a, s) => a + (s.removeBgCount || 0), 0), statsArr.reduce((a, s) => a + (s.upscaleCount || 0), 0)], 1);
-                    return (
-                      <div key={i}>
-                        <div className="flex justify-between mb-1">
-                          <span className={`text-xs ${textSecondary}`}>{item.label}</span>
-                          <span className={`text-xs font-medium ${textPrimary}`}>{item.value}</span>
-                        </div>
-                        <div className={`h-2 rounded-full ${isDark ? 'bg-[#2a2a3e]' : 'bg-gray-100'}`}>
-                          <div className={`h-full rounded-full ${item.color} transition-all duration-500`} style={{ width: `${Math.min((item.value / maxVal) * 100, 100)}%` }} />
-                        </div>
+                    { label: '图片编辑', value: totalEdits },
+                    { label: '擦除/修复', value: totalErase },
+                    { label: '背景移除', value: totalRemoveBg },
+                    { label: '图片放大', value: totalUpscale },
+                  ].map((item, i) => (
+                    <div key={i}>
+                      <div className="flex justify-between mb-1">
+                        <span className="text-xs text-muted-foreground">{item.label}</span>
+                        <span className="text-xs font-medium text-foreground">{item.value}</span>
                       </div>
-                    );
-                  })}
+                      <div className={`h-2 rounded-full ${barBg}`}>
+                        <div className={`h-full rounded-full ${barColor} transition-all duration-500`} style={{ width: `${Math.min((item.value / editMax) * 100, 100)}%` }} />
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
-            {statsArr.length === 0 && (
-              <div className={`flex flex-col items-center justify-center h-48 ${textSecondary}`}>
+            {freshStats.length === 0 && projectImageCount === 0 && (
+              <div className="flex flex-col items-center justify-center h-48 text-muted-foreground">
                 <BarChart3 className="w-12 h-12 mb-3 opacity-30" />
                 <p className="text-sm">暂无统计数据，开始创作后数据将自动记录</p>
               </div>
             )}
           </div>
-        )}
+          );
+        })()}
 
         {activeTab === 'settings' && !isAdmin && (
           <UserSettingsTab
-            isDark={!!isDark}
+            isDark={!isMonochrome}
             isMonochrome={!!isMonochrome}
-            onToggleTheme={() => {}}
+            onToggleTheme={(theme) => {
+              // Theme is controlled by the parent, this is just a UI callback
+              console.log('Theme toggle requested:', theme);
+            }}
             userName={user?.name || ''}
             userRole={user?.role || 'user'}
+            onToast={(msg) => console.log('[Settings]', msg)}
           />
         )}
 
         {activeTab === 'credits' && !isAdmin && (
           <UserCreditsTab
             userId={user.id}
-            isDark={!!isDark}
+            isDark={!isMonochrome}
+            onToast={(msg) => console.log('[Credits]', msg)}
           />
         )}
 

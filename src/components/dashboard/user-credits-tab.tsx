@@ -53,13 +53,6 @@ export default function UserCreditsTab({
 
   useEffect(() => { loadCredits(); }, [loadCredits]);
 
-  const textPrimary = isDark ? 'text-white' : 'text-gray-900';
-  const textSecondary = isDark ? 'text-gray-400' : 'text-gray-500';
-  const cardBg = isDark ? 'bg-[#1a1a2e]/60' : 'bg-white';
-  const borderColor = isDark ? 'border-white/10' : 'border-gray-200';
-  const accentClass = isDark ? 'text-[#d4af37]' : 'text-amber-600';
-  const inputBg = isDark ? 'bg-[#0d0d1a]/60' : 'bg-gray-50';
-
   const filteredTransactions = filter === 'all'
     ? transactions
     : transactions.filter(t => filter === 'earn' ? t.amount > 0 : t.amount < 0);
@@ -72,9 +65,9 @@ export default function UserCreditsTab({
   };
 
   const getTypeIcon = (type: string, amount: number) => {
-    if (amount > 0) return <ArrowUpRight className="w-4 h-4 text-green-400" />;
-    if (type === 'daily_bonus') return <Gift className="w-4 h-4 text-blue-400" />;
-    return <ArrowDownRight className="w-4 h-4 text-red-400" />;
+    if (amount > 0) return <ArrowUpRight className="w-4 h-4 text-green-500" />;
+    if (type === 'daily_bonus') return <Gift className="w-4 h-4 text-primary" />;
+    return <ArrowDownRight className="w-4 h-4 text-destructive" />;
   };
 
   const getTypeLabel = (type: string) => {
@@ -88,17 +81,17 @@ export default function UserCreditsTab({
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5 px-1">
       {/* 页面头部 */}
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className={`text-xl font-bold ${textPrimary}`}>我的积分</h1>
-          <p className={`text-sm ${textSecondary} mt-0.5`}>查看积分余额和使用记录</p>
+          <h1 className="text-xl font-bold text-foreground">我的积分</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">查看积分余额和使用记录</p>
         </div>
         <button
           onClick={loadCredits}
           disabled={loading}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm ${inputBg} border ${borderColor} ${textSecondary} hover:${textPrimary} transition-colors`}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm bg-muted border border-border/30 text-muted-foreground hover:text-foreground transition-colors"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
           刷新
@@ -106,31 +99,31 @@ export default function UserCreditsTab({
       </div>
 
       {/* 余额卡片 */}
-      <div className={`${isDark ? 'bg-gradient-to-br from-[#d4af37]/20 to-[#1a1a2e]/80' : 'bg-gradient-to-br from-amber-50 to-white'} border ${isDark ? 'border-[#d4af37]/30' : 'border-amber-200'} rounded-lg p-5`}>
+      <div className="bg-gradient-to-br from-primary/10 to-card border border-primary/20 rounded-lg p-5">
         <div className="flex items-center justify-between">
           <div>
-            <div className={`text-sm ${textSecondary} flex items-center gap-1.5`}>
-              <Coins className={`w-4 h-4 ${accentClass}`} />
+            <div className="text-sm text-muted-foreground flex items-center gap-1.5">
+              <Coins className="w-4 h-4 text-primary" />
               当前余额
             </div>
-            <div className={`text-4xl font-bold ${accentClass} mt-1`}>
+            <div className="text-4xl font-bold text-primary mt-1">
               {balance.toLocaleString()}
             </div>
           </div>
-          <div className={`w-16 h-16 rounded-full ${isDark ? 'bg-[#d4af37]/10' : 'bg-amber-100'} flex items-center justify-center`}>
-            <Coins className={`w-8 h-8 ${accentClass}`} />
+          <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
+            <Coins className="w-8 h-8 text-primary" />
           </div>
         </div>
-        <div className="flex gap-4 mt-4 pt-3 border-t ${isDark ? 'border-white/10' : 'border-gray-200'}" style={{ borderTopColor: isDark ? 'rgba(255,255,255,0.1)' : '#e5e7eb' }}>
+        <div className="flex gap-4 mt-4 pt-3 border-t border-border/30">
           <div className="flex items-center gap-1.5">
-            <TrendingUp className="w-3.5 h-3.5 text-green-400" />
-            <span className={`text-xs ${textSecondary}`}>累计获得</span>
-            <span className={`text-sm font-medium text-green-400`}>{totalEarned.toLocaleString()}</span>
+            <TrendingUp className="w-3.5 h-3.5 text-green-500" />
+            <span className="text-xs text-muted-foreground">累计获得</span>
+            <span className="text-sm font-medium text-green-500">{totalEarned.toLocaleString()}</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <Zap className="w-3.5 h-3.5 text-red-400" />
-            <span className={`text-xs ${textSecondary}`}>累计消费</span>
-            <span className={`text-sm font-medium text-red-400`}>{totalSpent.toLocaleString()}</span>
+            <Zap className="w-3.5 h-3.5 text-destructive" />
+            <span className="text-xs text-muted-foreground">累计消费</span>
+            <span className="text-sm font-medium text-destructive">{totalSpent.toLocaleString()}</span>
           </div>
         </div>
       </div>
@@ -147,48 +140,46 @@ export default function UserCreditsTab({
             onClick={() => setFilter(id)}
             className={`px-3 py-1.5 rounded-md text-sm transition-colors ${
               filter === id
-                ? `${isDark ? 'bg-[#d4af37]/20 text-[#d4af37]' : 'bg-amber-100 text-amber-700'}`
-                : `${inputBg} border ${borderColor} ${textSecondary}`
+                ? 'bg-primary/10 text-primary border border-primary/30'
+                : 'bg-muted border border-border/30 text-muted-foreground hover:text-foreground'
             }`}
           >
             {label}
           </button>
         ))}
-        <span className={`ml-auto text-xs ${textSecondary}`}>
+        <span className="ml-auto text-xs text-muted-foreground">
           共 {filteredTransactions.length} 条记录
         </span>
       </div>
 
       {/* 交易列表 */}
-      <div className={`${cardBg} border ${borderColor} rounded-lg overflow-hidden`}>
+      <div className="bg-card border border-border/50 rounded-lg overflow-hidden">
         {filteredTransactions.length === 0 ? (
           <div className="p-8 text-center">
-            <History className={`w-10 h-10 ${textSecondary} mx-auto mb-2 opacity-50`} />
-            <div className={`text-sm ${textSecondary}`}>暂无{filter === 'earn' ? '收入' : filter === 'spend' ? '支出' : ''}记录</div>
+            <History className="w-10 h-10 text-muted-foreground mx-auto mb-2 opacity-50" />
+            <div className="text-sm text-muted-foreground">暂无{filter === 'earn' ? '收入' : filter === 'spend' ? '支出' : ''}记录</div>
           </div>
         ) : (
-          <div className="divide-y divide-white/5">
+          <div className="divide-y divide-border/30">
             {filteredTransactions.map((t) => (
-              <div key={t.id} className="flex items-center gap-3 px-4 py-3 hover:opacity-90 transition-opacity">
+              <div key={t.id} className="flex items-center gap-3 px-4 py-3 hover:bg-muted/30 transition-colors">
                 <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                  t.amount > 0
-                    ? (isDark ? 'bg-green-500/20' : 'bg-green-100')
-                    : (isDark ? 'bg-red-500/20' : 'bg-red-100')
+                  t.amount > 0 ? 'bg-green-500/10' : 'bg-destructive/10'
                 }`}>
                   {getTypeIcon(t.type, t.amount)}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className={`text-sm ${textPrimary} truncate`}>{t.description || getTypeLabel(t.type)}</div>
-                  <div className={`text-xs ${textSecondary} flex items-center gap-1`}>
+                  <div className="text-sm text-foreground truncate">{t.description || getTypeLabel(t.type)}</div>
+                  <div className="text-xs text-muted-foreground flex items-center gap-1">
                     <Clock className="w-3 h-3" />
                     {formatDate(t.created_at)}
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className={`text-sm font-medium ${t.amount > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  <div className={`text-sm font-medium ${t.amount > 0 ? 'text-green-500' : 'text-destructive'}`}>
                     {t.amount > 0 ? '+' : ''}{t.amount}
                   </div>
-                  <div className={`text-xs ${textSecondary}`}>余额 {t.balance_after}</div>
+                  <div className="text-xs text-muted-foreground">余额 {t.balance_after}</div>
                 </div>
               </div>
             ))}
