@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, use } from 'react';
+import QRCode from 'qrcode';
 import { RECHARGE_PACKAGES } from '@/lib/credits-constants';
 
 interface OrderInfo {
@@ -31,6 +32,7 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
   const [paid, setPaid] = useState(false);
   const [payResult, setPayResult] = useState<{ balance: number; amount: number } | null>(null);
   const [hasGoneToPay, setHasGoneToPay] = useState(false);
+  const [payQrDataUrl, setPayQrDataUrl] = useState('');
 
   useEffect(() => {
     fetchOrderDetails();
@@ -41,6 +43,20 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
     } catch { /* ignore */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderId]);
+
+  // Generate QR code from payLink for fallback scanning
+  useEffect(() => {
+    if (!data?.payLink) {
+      setPayQrDataUrl('');
+      return;
+    }
+    QRCode.toDataURL(data.payLink, {
+      width: 200,
+      margin: 2,
+      color: { dark: '#000000', light: '#ffffff' },
+      errorCorrectionLevel: 'M',
+    }).then(setPayQrDataUrl).catch(() => setPayQrDataUrl(''));
+  }, [data?.payLink]);
 
   async function fetchOrderDetails() {
     try {
@@ -61,24 +77,10 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
     }
   }
 
-  // Click "立即支付" → directly redirect to payment link
-  function handlePayNow() {
-    if (!data?.payLink) {
-      // No pay link, show tip
-      setError('支付链接未配置，请联系管理员');
-      return;
-    }
-
-    const link = data.payLink;
-
-    // Remember user has gone to pay
+  // Track that user clicked pay (called from <a> onClick)
+  function handlePayClick() {
     try { sessionStorage.setItem(`recharge_pay_${orderId}`, '1'); } catch { /* ignore */ }
     setHasGoneToPay(true);
-
-    // Use hidden <a> click for better mobile protocol handling (wxp://, https://qr.alipay.com/)
-    const a = document.createElement('a');
-    a.href = link;
-    a.click();
   }
 
   // User confirms payment completed
@@ -131,9 +133,10 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
   const { order, note, payLink } = data;
   const pkg = RECHARGE_PACKAGES.find(p => p.amount + p.bonus === order.amount || p.amount === order.amount - order.bonus);
   const isCustomPkg = !pkg;
-  const methodLabel = order.paymentMethod === 'alipay' ? '支付宝' : '微信支付';
-  const methodIcon = order.paymentMethod === 'alipay' ? '💙' : '💚';
-  const methodColor = order.paymentMethod === 'alipay' ? '#1677FF' : '#07C160';
+  const isWechat = order.paymentMethod === 'wechat';
+  const methodLabel = isWechat ? '微信支付' : '支付宝';
+  const methodIcon = isWechat ? '💚' : '💙';
+  const methodColor = isWechat ? '#07C160' : '#1677FF';
   const expiresDate = order.expiresAt > 0 ? new Date(order.expiresAt).toLocaleString('zh-CN') : '';
 
   // Success state
@@ -246,25 +249,62 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
             </div>
           </div>
 
-          {/* Main pay button — directly opens WeChat/Alipay */}
+          {/* ===== Main pay area ===== */}
           {!hasGoneToPay ? (
-            <button
-              onClick={handlePayNow}
-              className="w-full py-4 rounded-xl text-lg font-bold transition-all text-white hover:opacity-90 active:scale-[0.98] shadow-lg"
-              style={{ backgroundColor: methodColor, boxShadow: `0 8px 24px ${methodColor}30` }}
-            >
-              立即支付 ¥{order.priceCny.toFixed(2)}
-            </button>
+            <div className="space-y-4">
+              {/* Primary: 立即支付 — real <a> link so mobile browsers honor the protocol scheme */}
+              {payLink ? (
+                <a
+                  href={payLink}
+                  onClick={handlePayClick}
+                  className="block w-full py-4 rounded-xl text-lg font-bold transition-all text-white text-center hover:opacity-90 active:scale-[0.98] shadow-lg no-underline"
+                  style={{ backgroundColor: methodColor, boxShadow: `0 8px 24px ${methodColor}30` }}
+                >
+                  立即支付 ¥{order.priceCny.toFixed(2)}
+                </a>
+              ) : (
+                <div className="w-full py-4 rounded-xl text-center bg-white/5 text-white/40 text-lg">
+                  支付链接未配置
+                </div>
+              )}
+
+              {/* Fallback: QR code image from payLink */}
+              {payQrDataUrl && (
+                <div className="text-center">
+                  <p className="text-white/30 text-xs mb-3">
+                    {isWechat
+                      ? '点击按钮未打开微信？长按下方二维码保存，打开微信扫一扫 → 相册选图'
+                      : '点击按钮未打开支付宝？长按下方二维码保存，打开支付宝扫一扫 → 相册选图'
+                    }
+                  </p>
+                  <div className="inline-block p-3 bg-white rounded-xl">
+                    <img
+                      src={payQrDataUrl}
+                      alt="支付二维码"
+                      className="w-44 h-44 object-contain"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {!payLink && (
+                <p className="text-red-400/60 text-xs text-center">支付链接未配置，请联系管理员</p>
+              )}
+            </div>
           ) : (
             /* User returned from payment — show confirm button */
             <div className="space-y-3">
-              <button
-                onClick={() => { setHasGoneToPay(false); handlePayNow(); }}
-                className="w-full py-3.5 rounded-xl text-base font-bold transition-all text-white hover:opacity-90 active:scale-[0.98]"
+              <a
+                href={payLink || '#'}
+                onClick={(e) => {
+                  if (!payLink) { e.preventDefault(); return; }
+                  handlePayClick();
+                }}
+                className="block w-full py-3.5 rounded-xl text-base font-bold transition-all text-white text-center hover:opacity-90 active:scale-[0.98] no-underline"
                 style={{ backgroundColor: methodColor }}
               >
                 重新支付 ¥{order.priceCny.toFixed(2)}
-              </button>
+              </a>
               <button
                 onClick={handleConfirmPaid}
                 disabled={confirming}
@@ -283,10 +323,29 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
                   '我已完成付款'
                 )}
               </button>
+
+              {/* QR fallback after returning from pay */}
+              {payQrDataUrl && (
+                <div className="text-center pt-2">
+                  <p className="text-white/25 text-xs mb-2">
+                    {isWechat
+                      ? '如未完成支付，长按二维码保存，微信扫一扫 → 相册'
+                      : '如未完成支付，长按二维码保存，支付宝扫一扫 → 相册'
+                    }
+                  </p>
+                  <div className="inline-block p-2 bg-white rounded-lg">
+                    <img
+                      src={payQrDataUrl}
+                      alt="支付二维码"
+                      className="w-32 h-32 object-contain"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
-          {!hasGoneToPay && (
+          {!hasGoneToPay && payLink && (
             <p className="text-white/25 text-xs text-center mt-3">
               点击后将打开{methodLabel}完成付款
             </p>

@@ -1521,6 +1521,37 @@ export function buildNodeExecutionRequest(
       };
     }
 
+    case 'agent-chat': {
+      const chatBody: Record<string, unknown> = {
+        model: config.model || '',
+        messages: [
+          { role: 'system', content: config.systemPrompt || '你是一个AI图像创作助手。' },
+          { role: 'user', content: config.prompt || config.textContent || config.text || '' },
+        ],
+        stream: false,
+        enableTools: false,
+        temperature: ((config.temperature as number) ?? 70) / 100,
+      };
+      if (config.providerId) chatBody.providerId = config.providerId;
+      // 注入上游图片到消息
+      const chatImageUrl = inputs.imageUrl as string | undefined;
+      if (chatImageUrl) {
+        const userMsg = chatBody.messages as Array<{ role: string; content: unknown }>;
+        const lastMsg = userMsg[userMsg.length - 1];
+        if (lastMsg) {
+          lastMsg.content = [
+            { type: 'text', text: lastMsg.content as string || '' },
+            { type: 'image_url', image_url: { url: chatImageUrl } },
+          ];
+        }
+      }
+      return {
+        endpoint: '/api/chat',
+        method: 'POST',
+        body: chatBody,
+      };
+    }
+
     case 'output-save':
       return {
         endpoint: '/api/save-image',

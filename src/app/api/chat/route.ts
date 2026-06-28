@@ -270,7 +270,20 @@ export async function POST(request: NextRequest) {
       if (error.includes('No available channel') || error.includes('model_not_found') || error.includes('not configured')) {
         return NextResponse.json({ error: `模型 ${model || requestModel} 在当前渠道暂不可用，请稍后重试或更换模型` }, { status: 503 });
       }
-      return NextResponse.json({ error: `API 调用失败: ${response.status}` }, { status: response.status });
+      // 外部API内部错误(如 [GetContextManager] / Key not found)翻译为中文友好提示
+      if (error.includes('GetContextManager') || error.includes('context manager')) {
+        return NextResponse.json({ error: 'API提供商内部错误(上下文管理失败)，请稍后重试或更换模型' }, { status: 502 });
+      }
+      if (error.includes('Key not found') || error.includes('key not found')) {
+        return NextResponse.json({ error: 'API密钥无效或已过期，请检查管理员后台配置' }, { status: 401 });
+      }
+      // 尝试从错误JSON中提取友好消息
+      let apiErrMsg = `API 调用失败: ${response.status}`;
+      try {
+        const ej = JSON.parse(error);
+        apiErrMsg = ej.error?.message || ej.message || ej.msg || apiErrMsg;
+      } catch { /* not JSON */ }
+      return NextResponse.json({ error: apiErrMsg }, { status: response.status });
     }
 
     // Stream: forward directly

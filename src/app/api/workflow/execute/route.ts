@@ -549,18 +549,56 @@ async function executeWorkflow(
           signal: AbortSignal.timeout(120000), // 2分钟超时
         });
 
-        const data = await response.json();
+        // 处理非JSON响应（外部API可能返回HTML错误页）
+        let data: Record<string, unknown>;
+        try {
+          data = await response.json();
+        } catch {
+          const rawText = await response.text().catch(() => '');
+          const result: ExecutionResult = {
+            nodeId: node.id,
+            status: 'failed',
+            error: `API返回非JSON响应 (HTTP ${response.status}): ${rawText.slice(0, 200)}`,
+            durationMs: Date.now() - nodeStart,
+          };
+          resultMap.set(node.id, result);
+          execState.results[node.id] = result;
+          console.warn(`[Workflow] 节点 ${node.label} 返回非JSON: HTTP ${response.status}`);
+          continue;
+        }
+
+        // 翻译常见外部API错误为用户友好的中文提示
+        let errorMessage: string | undefined = response.ok ? undefined : String(data.error || `HTTP ${response.status}`);
+        if (!response.ok && typeof errorMessage === 'string') {
+          // [NodeRunError] [GetContextManager] → 上下文管理失败，通常是API提供商内部错误
+          if (errorMessage.includes('GetContextManager') || errorMessage.includes('context manager')) {
+            errorMessage = 'API提供商内部错误(上下文管理失败)，请稍后重试或更换模型';
+          }
+          // Key not found → API密钥或配置问题
+          if (errorMessage.includes('Key not found') || errorMessage.includes('key not found')) {
+            errorMessage = 'API密钥无效或已过期，请检查管理员后台配置';
+          }
+          // No available channel → 渠道不可用
+          if (/no\s+available\s+channel/i.test(errorMessage)) {
+            errorMessage = '当前模型渠道暂不可用，请稍后重试或更换模型';
+          }
+        }
+        // 检查成功响应中的隐藏错误（某些API返回200但包含错误信息）
+        if (response.ok && data.error) {
+          errorMessage = String(data.error);
+        }
+
         const result: ExecutionResult = {
           nodeId: node.id,
-          status: response.ok ? 'success' : 'failed',
-          output: response.ok ? parseApiOutput(node.type as NodeType, data) : undefined,
-          error: response.ok ? undefined : (data.error || `HTTP ${response.status}`),
+          status: response.ok && !data.error ? 'success' : 'failed',
+          output: response.ok && !data.error ? parseApiOutput(node.type as NodeType, data) : undefined,
+          error: errorMessage,
           durationMs: Date.now() - nodeStart,
         };
         resultMap.set(node.id, result);
         execState.results[node.id] = result;
 
-        if (!response.ok) {
+        if (result.status === 'failed') {
           console.warn(`[Workflow] 节点 ${node.label} 执行失败: ${result.error}`);
         }
       }

@@ -383,13 +383,13 @@ export default function UserCreditsTab({
             </div>
 
             <div className="p-5 space-y-5 max-h-[70vh] overflow-y-auto">
-              {/* 订单已创建 - 直接支付 */}
+              {/* 订单已创建 - 扫码支付 */}
               {orderInfo ? (
                 <div className="space-y-4">
                   <div className="text-center">
                     <CheckCircle className="w-12 h-12 text-primary mx-auto mb-2" />
-                    <h3 className="text-base font-semibold text-foreground">确认支付信息</h3>
-                    <p className="text-xs text-muted-foreground mt-1">点击立即支付，完成付款后积分自动到账</p>
+                    <h3 className="text-base font-semibold text-foreground">扫码完成支付</h3>
+                    <p className="text-xs text-muted-foreground mt-1">请用手机扫描下方二维码，在充值页面完成付款</p>
                   </div>
 
                   <div className={`${cardBg} p-4 space-y-3`}>
@@ -413,51 +413,39 @@ export default function UserCreditsTab({
                     </div>
                   </div>
 
-                  {/* 立即支付按钮 - 直接打开微信/支付宝 */}
-                  {orderInfo.payLink ? (
-                    <button
-                      onClick={handlePayNow}
-                      className="w-full py-3 rounded-lg text-sm font-bold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors flex items-center justify-center gap-2"
-                    >
-                      {orderInfo.paymentMethod === 'wechat' ? (
-                        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M8.691 2.188C3.891 2.188 0 5.476 0 9.53c0 2.212 1.17 4.203 3.002 5.55a.59.59 0 0 1 .213.665l-.39 1.48c-.019.07-.048.141-.048.213 0 .163.13.295.29.295a.326.326 0 0 0 .167-.054l1.903-1.114a.864.864 0 0 1 .717-.098 10.16 10.16 0 0 0 2.837.403c.276 0 .543-.027.811-.05-.857-2.578.157-4.972 1.932-6.446 1.703-1.415 3.882-1.98 5.853-1.838-.576-3.583-4.196-6.348-8.596-6.348zM5.785 5.991c.642 0 1.162.529 1.162 1.18a1.17 1.17 0 0 1-1.162 1.178A1.17 1.17 0 0 1 4.623 7.17c0-.651.52-1.18 1.162-1.18zm5.813 0c.642 0 1.162.529 1.162 1.18a1.17 1.17 0 0 1-1.162 1.178 1.17 1.17 0 0 1-1.162-1.178c0-.651.52-1.18 1.162-1.18zm3.822 3.232c-3.748 0-6.792 2.512-6.792 5.607 0 3.097 3.044 5.609 6.792 5.609.766 0 1.506-.113 2.204-.314a.66.66 0 0 1 .548.075l1.456.852a.249.249 0 0 0 .128.042.225.225 0 0 0 .222-.226c0-.055-.022-.11-.037-.163l-.298-1.13a.453.453 0 0 1 .163-.509c1.4-1.032 2.298-2.557 2.298-4.236 0-3.095-3.044-5.607-6.784-5.607zm-2.396 3.196c.491 0 .889.405.889.904a.896.896 0 0 1-.889.903.896.896 0 0 1-.889-.903c0-.499.398-.904.89-.904zm4.792 0c.491 0 .889.405.889.904a.896.896 0 0 1-.889.903.896.896 0 0 1-.889-.903c0-.499.398-.904.89-.904z"/></svg>
-                      ) : (
-                        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M21.422 15.358c-3.83-1.153-6.055-3.327-6.055-3.327s.87-2.578.317-5.165c-.553-2.588-2.387-3.79-3.766-3.79-1.378 0-2.4.959-2.772 1.95-.372.992-.14 2.577.358 3.993.497 1.417 1.654 3.18 1.654 3.18s-2.597 2.736-5.632 4.246C2.49 17.955.24 17.79.24 17.79s.87 2.46 3.607 3.626c2.737 1.167 5.712-.143 5.712-.143s-.086 1.587 1.248 2.595c1.334 1.008 3.11.762 3.11.762s-.859-.775-.554-2.004c.305-1.23 1.64-2.192 1.64-2.192s2.4 1.556 4.378.74c1.978-.816 2.553-3.086 2.553-3.086s-.677-.055-2.472-.73zM12.1 6.425c.34-.887 1.067-1.322 1.067-1.322s.249.568.007 1.392c-.242.823-1.066 1.26-1.066 1.26s-.349-.442-.008-1.33z"/></svg>
-                      )}
-                      立即支付 ¥{orderInfo.priceCny.toFixed(2)}
-                    </button>
-                  ) : (
-                    <div className={`${cardBg} p-3 rounded-lg text-center`}>
-                      <p className="text-sm text-muted-foreground">管理员尚未配置支付链接，请联系管理员</p>
+                  {/* QR码 - 主展示区 */}
+                  {qrDataUrl && (
+                    <div className="text-center">
+                      <div className="inline-block p-3 bg-white rounded-xl">
+                        <img
+                          src={qrDataUrl}
+                          alt="充值二维码"
+                          className="w-48 h-48 object-contain"
+                        />
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-3">
+                        打开{orderInfo.paymentMethod === 'wechat' ? '微信' : '支付宝'}扫一扫，扫描此二维码
+                      </p>
                     </div>
                   )}
 
-                  {/* 二维码扫码支付 - 次要选项 */}
-                  {orderInfo.payLink && qrDataUrl && (
+                  {/* 没有QR码时的提示 */}
+                  {!qrDataUrl && (
+                    <div className={`${cardBg} p-3 rounded-lg text-center`}>
+                      <p className="text-sm text-muted-foreground">二维码生成中，请稍候...</p>
+                    </div>
+                  )}
+
+                  {/* 备选：直接打开支付链接（手机端场景） */}
+                  {orderInfo.payLink && (
                     <div className="text-center">
-                      <button
-                        onClick={() => {
-                          const el = document.getElementById('qr-section');
-                          el?.classList.toggle('hidden');
-                        }}
-                        className="text-xs text-muted-foreground hover:text-primary transition-colors underline underline-offset-2"
+                      <a
+                        href={orderInfo.payLink}
+                        className="text-xs text-muted-foreground hover:text-primary transition-colors underline underline-offset-2 inline-flex items-center gap-1"
                       >
-                        没有打开支付应用？扫描二维码付款
-                      </button>
-                      <div id="qr-section" className="hidden mt-3">
-                        <div className={`${cardBg} p-4 rounded-lg inline-block`}>
-                          <div className="inline-block p-3 bg-white rounded-lg">
-                            <img
-                              src={qrDataUrl}
-                              alt="支付二维码"
-                              className="w-40 h-40 object-contain"
-                            />
-                          </div>
-                          <p className="text-xs text-muted-foreground mt-2">
-                            用{orderInfo.paymentMethod === 'wechat' ? '微信' : '支付宝'}扫描二维码完成付款
-                          </p>
-                        </div>
-                      </div>
+                        <Smartphone className="w-3 h-3" />
+                        在手机上？直接打开{orderInfo.paymentMethod === 'wechat' ? '微信' : '支付宝'}支付
+                      </a>
                     </div>
                   )}
 
