@@ -26,22 +26,21 @@ export async function GET(
     }
 
     const order = result.rows[0] as Record<string, unknown>;
+    const method = order.payment_method as string;
 
     // Check expiry
     const expiresAt = Number(order.expires_at) || 0;
     const isExpired = expiresAt > 0 && Date.now() > expiresAt;
 
-    // Get payment config (admin's QR codes)
-    let paymentConfig: Record<string, unknown> | null = null;
+    // Get admin note if configured
+    let note = '';
     try {
       const dbVal = await dbGetSystemSetting('payment_config');
-      if (dbVal) paymentConfig = typeof dbVal === 'string' ? JSON.parse(dbVal) : dbVal;
+      if (dbVal) {
+        const config = typeof dbVal === 'string' ? JSON.parse(dbVal) : dbVal;
+        note = (config as Record<string, unknown>)?.note as string || '';
+      }
     } catch { /* ignore */ }
-
-    const method = order.payment_method as string;
-    const adminQrUrl = method === 'alipay'
-      ? (paymentConfig?.alipayQrUrl as string) || ''
-      : (paymentConfig?.wechatQrUrl as string) || '';
 
     return NextResponse.json({
       success: true,
@@ -56,8 +55,7 @@ export async function GET(
         expiresAt: order.expires_at,
         isExpired,
       },
-      adminQrUrl,
-      note: (paymentConfig?.note as string) || '付款时请备注您的用户名，方便管理员确认',
+      note,
     });
   } catch (e) {
     console.error('[recharge] GET error:', e);

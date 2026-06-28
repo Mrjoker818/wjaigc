@@ -18,7 +18,6 @@ interface OrderInfo {
 interface RechargeData {
   success: boolean;
   order: OrderInfo;
-  adminQrUrl: string;
   note: string;
 }
 
@@ -27,10 +26,9 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
   const [data, setData] = useState<RechargeData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [confirming, setConfirming] = useState(false);
-  const [confirmed, setConfirmed] = useState(false);
-  const [confirmResult, setConfirmResult] = useState<{ balance: number; amount: number } | null>(null);
-  const [qrLoaded, setQrLoaded] = useState(false);
+  const [paying, setPaying] = useState(false);
+  const [paid, setPaid] = useState(false);
+  const [payResult, setPayResult] = useState<{ balance: number; amount: number } | null>(null);
 
   useEffect(() => {
     fetchOrderDetails();
@@ -46,7 +44,7 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
       } else {
         setData(json);
         if (json.order?.paymentStatus === 'paid') {
-          setConfirmed(true);
+          setPaid(true);
         }
       }
     } catch {
@@ -56,22 +54,22 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
     }
   }
 
-  async function handleConfirmPaid() {
-    if (confirming || confirmed) return;
-    setConfirming(true);
+  async function handlePay() {
+    if (paying || paid) return;
+    setPaying(true);
     try {
       const res = await fetch(`/api/recharge/${orderId}`, { method: 'POST' });
       const json = await res.json();
       if (json.success) {
-        setConfirmed(true);
-        setConfirmResult({ balance: json.balance, amount: json.amount });
+        setPaid(true);
+        setPayResult({ balance: json.balance, amount: json.amount });
       } else {
-        setError(json.error || '确认失败');
+        setError(json.error || '支付失败');
       }
     } catch {
       setError('网络错误，请重试');
     } finally {
-      setConfirming(false);
+      setPaying(false);
     }
   }
 
@@ -102,14 +100,14 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
 
   if (!data) return null;
 
-  const { order, adminQrUrl, note } = data;
+  const { order, note } = data;
   const pkg = RECHARGE_PACKAGES.find(p => p.amount + p.bonus === order.amount || p.amount === order.amount - order.bonus);
   const methodLabel = order.paymentMethod === 'alipay' ? '支付宝' : '微信支付';
   const methodIcon = order.paymentMethod === 'alipay' ? '💙' : '💚';
   const expiresDate = order.expiresAt > 0 ? new Date(order.expiresAt).toLocaleString('zh-CN') : '';
 
   // Success state
-  if (confirmed) {
+  if (paid) {
     return (
       <div className="min-h-screen bg-[#0d1117] flex items-center justify-center p-6">
         <div className="bg-[#1c2128] border border-[#30363d] rounded-2xl p-8 max-w-md w-full text-center">
@@ -119,11 +117,11 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
             </svg>
           </div>
           <h2 className="text-white text-xl font-bold mb-2">充值成功！</h2>
-          <p className="text-[#d4af37] text-2xl font-bold mb-1">{confirmResult?.amount || order.amount} 积分</p>
+          <p className="text-[#d4af37] text-2xl font-bold mb-1">{payResult?.amount || order.amount} 积分</p>
           <p className="text-white/50 text-sm mb-6">已到账，可在无界AI工作台查看余额</p>
           <div className="bg-white/5 rounded-xl p-4 mb-4">
             <p className="text-white/40 text-xs mb-1">当前余额</p>
-            <p className="text-white text-lg font-semibold">{confirmResult?.balance || '--'} 积分</p>
+            <p className="text-white text-lg font-semibold">{payResult?.balance || '--'} 积分</p>
           </div>
           <p className="text-white/30 text-xs">您可以关闭此页面</p>
         </div>
@@ -145,6 +143,9 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
     );
   }
 
+  // Error with data loaded
+  const showError = error && data;
+
   // Main recharge page
   return (
     <div className="min-h-screen bg-[#0d1117] flex items-center justify-center p-4">
@@ -159,7 +160,7 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
             </div>
             <div>
               <h1 className="text-white text-lg font-bold">无界AI 积分充值</h1>
-              <p className="text-white/40 text-xs">扫码支付，即时到账</p>
+              <p className="text-white/40 text-xs">一键付款，即时到账</p>
             </div>
           </div>
         </div>
@@ -196,60 +197,44 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
             )}
           </div>
 
-          {/* Admin QR code */}
-          <div className="text-center mb-5">
-            <p className="text-white/60 text-sm mb-3">
-              请使用 <span className="text-white font-medium">{methodLabel}</span> 扫描下方收款码完成付款
-            </p>
-            <div className="bg-white rounded-2xl p-4 inline-block mx-auto relative">
-              {adminQrUrl ? (
-                <>
-                  {!qrLoaded && (
-                    <div className="w-48 h-48 flex items-center justify-center">
-                      <div className="w-8 h-8 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
-                    </div>
-                  )}
-                  <img
-                    src={adminQrUrl}
-                    alt="收款码"
-                    className={`w-48 h-48 object-contain ${qrLoaded ? '' : 'hidden'}`}
-                    onLoad={() => setQrLoaded(true)}
-                    onError={() => setQrLoaded(false)}
-                  />
-                </>
-              ) : (
-                <div className="w-48 h-48 flex items-center justify-center text-gray-400 text-sm">
-                  收款码未配置
-                </div>
-              )}
+          {/* Error message */}
+          {showError && (
+            <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 mb-4 text-center">
+              <p className="text-red-400 text-sm">{error}</p>
             </div>
-            {note && (
-              <p className="text-white/30 text-xs mt-2 px-4">{note}</p>
-            )}
-          </div>
+          )}
 
-          {/* Confirm button */}
+          {/* Pay button */}
           <button
-            onClick={handleConfirmPaid}
-            disabled={confirming}
-            className={`w-full py-3.5 rounded-xl text-base font-semibold transition-all ${
-              confirming
+            onClick={handlePay}
+            disabled={paying}
+            className={`w-full py-4 rounded-xl text-lg font-bold transition-all ${
+              paying
                 ? 'bg-white/10 text-white/30 cursor-not-allowed'
-                : 'bg-[#d4af37] text-black hover:bg-[#e5c047] active:scale-[0.98]'
+                : 'bg-[#d4af37] text-black hover:bg-[#e5c047] active:scale-[0.98] shadow-lg shadow-[#d4af37]/20'
             }`}
           >
-            {confirming ? (
+            {paying ? (
               <span className="flex items-center justify-center gap-2">
-                <div className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" />
-                处理中...
+                <div className="w-5 h-5 border-2 border-black/30 border-t-black rounded-full animate-spin" />
+                支付处理中...
               </span>
             ) : (
-              '我已完成付款'
+              <span className="flex items-center justify-center gap-2">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                </svg>
+                确认支付 ¥{order.priceCny.toFixed(2)}
+              </span>
             )}
           </button>
 
+          {note && (
+            <p className="text-white/30 text-xs text-center mt-3">{note}</p>
+          )}
+
           <p className="text-white/20 text-xs text-center mt-3">
-            付款后点击上方按钮，积分将自动到账
+            点击付款后积分将自动到账
           </p>
         </div>
 

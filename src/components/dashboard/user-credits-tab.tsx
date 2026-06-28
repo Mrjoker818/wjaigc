@@ -348,7 +348,7 @@ export default function UserCreditsTab({
                   <div className="text-center">
                     <CheckCircle className="w-12 h-12 text-primary mx-auto mb-2" />
                     <h3 className="text-base font-semibold text-foreground">扫码进入充值页面</h3>
-                    <p className="text-xs text-muted-foreground mt-1">用手机扫描下方二维码，进入充值页面完成付款</p>
+                    <p className="text-xs text-muted-foreground mt-1">用手机扫描下方二维码，在充值页面直接付款</p>
                   </div>
 
                   <div className={`${cardBg} p-4 space-y-3`}>
@@ -382,7 +382,7 @@ export default function UserCreditsTab({
                         />
                       </div>
                       <p className="text-xs text-muted-foreground mt-3">
-                        扫码后将打开无界AI充值页面，显示实际付款金额
+                        扫码后进入充值页面，点击付款即可完成充值
                       </p>
                     </div>
                   )}
@@ -394,23 +394,14 @@ export default function UserCreditsTab({
                     </div>
                   )}
 
-                  {/* 操作按钮 */}
-                  <div className="space-y-2">
-                    <button
-                      onClick={handleConfirmPaid}
-                      disabled={confirming}
-                      className="w-full py-3 rounded-lg font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
-                    >
-                      {confirming ? '处理中...' : '我已完成付款（在此页面确认）'}
-                    </button>
-                    <button
-                      onClick={handleQueryOrder}
-                      disabled={orderQuerying}
-                      className="w-full py-2.5 rounded-lg text-sm bg-muted border border-border/30 text-muted-foreground hover:text-foreground transition-colors"
-                    >
-                      {orderQuerying ? '查询中...' : '查询订单状态'}
-                    </button>
-                  </div>
+                  {/* 查询订单状态按钮 */}
+                  <button
+                    onClick={handleQueryOrder}
+                    disabled={orderQuerying}
+                    className="w-full py-2.5 rounded-lg text-sm bg-muted border border-border/30 text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {orderQuerying ? '查询中...' : '查询订单状态（付款后点击）'}
+                  </button>
                 </div>
               ) : (
                 <>
@@ -496,7 +487,7 @@ export default function UserCreditsTab({
                       <span>扫码进入充值页</span>
                       <span className="mx-1">→</span>
                       <span className="bg-primary/10 text-primary px-1.5 py-0.5 rounded">3</span>
-                      <span>付款并确认</span>
+                      <span>点击付款</span>
                       <span className="mx-1">→</span>
                       <span className="bg-green-500/10 text-green-500 px-1.5 py-0.5 rounded">✓</span>
                       <span>积分到账</span>
