@@ -625,16 +625,16 @@ export default function AdminTabs(props: AdminTabsProps) {
           <div className="flex items-center gap-3 flex-wrap">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <input value={userSearch} onChange={e => setUserSearch(e.target.value)} placeholder="搜索用户名 / 邮箱" className="bg-muted border-none rounded-md pl-9 pr-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 w-64 transition-colors" />
+              <input value={userSearch} onChange={e => setUserSearch(e.target.value)} placeholder="搜索用户名 / 邮箱" className="bg-background border border-border rounded-md pl-9 pr-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 w-64 transition-colors" />
             </div>
             <div className="relative inline-flex items-center">
-              <select value={userFilterRole} onChange={e => setUserFilterRole(e.target.value)} className="bg-muted border-none rounded-md pl-3 pr-8 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer appearance-none">
+              <select value={userFilterRole} onChange={e => setUserFilterRole(e.target.value)} className="bg-background border border-border rounded-md pl-3 pr-8 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer appearance-none">
                 <option value="all">全部角色</option><option value="admin">Admin</option><option value="user">User</option>
               </select>
               <ChevronDown className="w-3.5 h-3.5 text-muted-foreground absolute right-2.5 pointer-events-none" />
             </div>
             <div className="relative inline-flex items-center">
-              <select value={userFilterStatus} onChange={e => setUserFilterStatus(e.target.value)} className="bg-muted border-none rounded-md pl-3 pr-8 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer appearance-none">
+              <select value={userFilterStatus} onChange={e => setUserFilterStatus(e.target.value)} className="bg-background border border-border rounded-md pl-3 pr-8 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer appearance-none">
                 <option value="all">全部状态</option><option value="active">活跃</option><option value="disabled">禁用</option>
               </select>
               <ChevronDown className="w-3.5 h-3.5 text-muted-foreground absolute right-2.5 pointer-events-none" />
@@ -833,10 +833,10 @@ export default function AdminTabs(props: AdminTabsProps) {
               <div className="flex items-center gap-3">
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                  <input value={creditSearch} onChange={e => setCreditSearch(e.target.value)} placeholder="搜索用户名或邮箱..." className="bg-muted border-none rounded-md pl-9 pr-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 w-64 transition-colors" />
+                  <input value={creditSearch} onChange={e => setCreditSearch(e.target.value)} placeholder="搜索用户名或邮箱..." className="bg-background border border-border rounded-md pl-9 pr-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 w-64 transition-colors" />
                 </div>
                 <div className="relative inline-flex items-center">
-                  <select value={creditSort} onChange={e => setCreditSort(e.target.value)} className="bg-muted border-none rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer appearance-none pr-8">
+                  <select value={creditSort} onChange={e => setCreditSort(e.target.value)} className="bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer appearance-none pr-8">
                     <option value="balance">按余额排序</option>
                     <option value="recharge">按充值排序</option>
                     <option value="consume">按消耗排序</option>
@@ -886,11 +886,11 @@ export default function AdminTabs(props: AdminTabsProps) {
           <div>
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
-                <select className="bg-muted border-none rounded-md px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer">
+                <select className="bg-background border border-border rounded-md px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer">
                   <option value="">全部用户</option>
                   {adminUsers.slice(0, 20).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
                 </select>
-                <select className="bg-muted border-none rounded-md px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer">
+                <select className="bg-background border border-border rounded-md px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer">
                   <option value="">全部类型</option>
                   <option value="image">生图</option>
                   <option value="video">视频</option>
