@@ -5109,6 +5109,18 @@ export function InfiniteCanvas({
               videoThumbnailUrl: data.videoThumbnailUrl,
             };
           }
+          // ★ 记录使用统计
+          try {
+            const taskType = data.taskType || 'image';
+            const usageTypeMap: Record<string, 'image' | 'video' | 'edit' | '3d' | 'chat'> = {
+              image: 'image', video: 'video', edit: 'edit',
+              erase: 'edit', mask: 'edit', upscale: 'edit',
+              extend: 'edit', removebg: 'edit', outpaint: 'edit',
+              refine: 'edit', '3d': '3d', agent: 'edit',
+            };
+            const um = await import('@/lib/user-manager').then(m => m.UserManager.getInstance());
+            um.recordUsage(usageTypeMap[taskType] ?? 'image');
+          } catch {}
           return data.imageUrl;
         }
         if (data.status === 'failed' || data.status === 'error') {

@@ -3,6 +3,8 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import AdminTabs from './admin-tabs';
 import DataManagerTab from './data-manager-tab';
+import UserSettingsTab from './user-settings-tab';
+import UserCreditsTab from './user-credits-tab';
 import {
   FolderOpen, Plus, Search, Star, Trash2, MoreVertical, MoreHorizontal, Image,
   Sparkles, LayoutTemplate, Layers, Clock, ChevronRight, ArrowRight,
@@ -1807,14 +1809,19 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
         {/* ── Tab: Stats ── */}
         {activeTab === 'stats' && (
           <div className="h-full overflow-y-auto p-8">
-            <h1 className={`text-2xl font-bold mb-1 ${textPrimary}`}>统计</h1>
-            <p className={`text-sm mb-6 ${textSecondary}`}>用量统计（近 30 天）</p>
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h1 className={`text-xl font-bold ${textPrimary}`}>统计</h1>
+                <p className={`text-sm ${textSecondary} mt-0.5`}>查看你的使用数据和用量统计</p>
+              </div>
+            </div>
+            {/* 核心统计卡片 */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
               {[
-                { label: '请求数', value: statsArr.reduce((a, s) => a + (s.requests || 0), 0), icon: Zap, color: accentClass },
-                { label: '图片数', value: statsArr.reduce((a, s) => a + (s.imagesGenerated || 0), 0), icon: Image, color: 'text-blue-400' },
-                { label: 'Token', value: statsArr.reduce((a, s) => a + (s.tokensUsed || 0), 0).toLocaleString(), icon: BarChart3, color: 'text-green-400' },
-                { label: '费用', value: `$${Number(statsArr.reduce((a, s) => a + (s.estimatedCost || 0), 0)).toFixed(2)}`, icon: Wallet, color: 'text-purple-400' },
+                { label: '总请求数', value: statsArr.reduce((a, s) => a + (s.requests || 0), 0), icon: Zap, color: accentClass },
+                { label: '图片生成', value: statsArr.reduce((a, s) => a + (s.imagesGenerated || 0), 0), icon: Image, color: 'text-blue-400' },
+                { label: '视频生成', value: statsArr.reduce((a, s) => a + (s.videosGenerated || 0), 0), icon: Film, color: 'text-purple-400' },
+                { label: '编辑操作', value: statsArr.reduce((a, s) => a + (s.editsPerformed || 0), 0), icon: Pencil, color: 'text-orange-400' },
               ].map((stat, i) => (
                 <div key={i} className={`rounded-xl border p-5 ${isDark ? 'bg-[#1a1a2e]/80 border-primary/20' : 'bg-white border-gray-200'}`}>
                   <div className="flex items-center gap-2 mb-2">
@@ -1825,13 +1832,81 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 </div>
               ))}
             </div>
+            {/* 详细统计 */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
+              <div className={`rounded-xl border p-5 ${isDark ? 'bg-[#1a1a2e]/80 border-primary/20' : 'bg-white border-gray-200'}`}>
+                <h3 className={`text-sm font-semibold ${textPrimary} mb-4`}>生成统计</h3>
+                <div className="space-y-3">
+                  {[
+                    { label: 'AI 图片生成', value: statsArr.reduce((a, s) => a + (s.imagesGenerated || 0), 0), color: 'bg-blue-500' },
+                    { label: 'AI 视频生成', value: statsArr.reduce((a, s) => a + (s.videosGenerated || 0), 0), color: 'bg-purple-500' },
+                    { label: '3D 模型生成', value: statsArr.reduce((a, s) => a + (s.models3dGenerated || 0), 0), color: 'bg-cyan-500' },
+                    { label: '聊天对话', value: statsArr.reduce((a, s) => a + (s.chatsCount || 0), 0), color: 'bg-green-500' },
+                  ].map((item, i) => {
+                    const maxVal = Math.max(...[statsArr.reduce((a, s) => a + (s.imagesGenerated || 0), 0), statsArr.reduce((a, s) => a + (s.videosGenerated || 0), 0), statsArr.reduce((a, s) => a + (s.models3dGenerated || 0), 0), statsArr.reduce((a, s) => a + (s.chatsCount || 0), 0)], 1);
+                    return (
+                      <div key={i}>
+                        <div className="flex justify-between mb-1">
+                          <span className={`text-xs ${textSecondary}`}>{item.label}</span>
+                          <span className={`text-xs font-medium ${textPrimary}`}>{item.value}</span>
+                        </div>
+                        <div className={`h-2 rounded-full ${isDark ? 'bg-[#2a2a3e]' : 'bg-gray-100'}`}>
+                          <div className={`h-full rounded-full ${item.color} transition-all duration-500`} style={{ width: `${Math.min((item.value / maxVal) * 100, 100)}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className={`rounded-xl border p-5 ${isDark ? 'bg-[#1a1a2e]/80 border-primary/20' : 'bg-white border-gray-200'}`}>
+                <h3 className={`text-sm font-semibold ${textPrimary} mb-4`}>编辑统计</h3>
+                <div className="space-y-3">
+                  {[
+                    { label: '图片编辑', value: statsArr.reduce((a, s) => a + (s.editsPerformed || 0), 0), color: 'bg-orange-500' },
+                    { label: '擦除/修复', value: statsArr.reduce((a, s) => a + (s.eraseCount || 0), 0), color: 'bg-red-500' },
+                    { label: '背景移除', value: statsArr.reduce((a, s) => a + (s.removeBgCount || 0), 0), color: 'bg-yellow-500' },
+                    { label: '图片放大', value: statsArr.reduce((a, s) => a + (s.upscaleCount || 0), 0), color: 'bg-indigo-500' },
+                  ].map((item, i) => {
+                    const maxVal = Math.max(...[statsArr.reduce((a, s) => a + (s.editsPerformed || 0), 0), statsArr.reduce((a, s) => a + (s.eraseCount || 0), 0), statsArr.reduce((a, s) => a + (s.removeBgCount || 0), 0), statsArr.reduce((a, s) => a + (s.upscaleCount || 0), 0)], 1);
+                    return (
+                      <div key={i}>
+                        <div className="flex justify-between mb-1">
+                          <span className={`text-xs ${textSecondary}`}>{item.label}</span>
+                          <span className={`text-xs font-medium ${textPrimary}`}>{item.value}</span>
+                        </div>
+                        <div className={`h-2 rounded-full ${isDark ? 'bg-[#2a2a3e]' : 'bg-gray-100'}`}>
+                          <div className={`h-full rounded-full ${item.color} transition-all duration-500`} style={{ width: `${Math.min((item.value / maxVal) * 100, 100)}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
             {statsArr.length === 0 && (
               <div className={`flex flex-col items-center justify-center h-48 ${textSecondary}`}>
                 <BarChart3 className="w-12 h-12 mb-3 opacity-30" />
-                <p className="text-sm">暂无统计数据</p>
+                <p className="text-sm">暂无统计数据，开始创作后数据将自动记录</p>
               </div>
             )}
           </div>
+        )}
+
+        {activeTab === 'settings' && !isAdmin && (
+          <UserSettingsTab
+            isDark={!!isDark}
+            isMonochrome={!!isMonochrome}
+            onToggleTheme={() => {}}
+            userName={user?.name || ''}
+            userRole={user?.role || 'user'}
+          />
+        )}
+
+        {activeTab === 'credits' && !isAdmin && (
+          <UserCreditsTab
+            userId={user.id}
+            isDark={!!isDark}
+          />
         )}
 
         {/* ── Admin Tabs Component ── */}

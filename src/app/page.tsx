@@ -2412,6 +2412,10 @@ function CanvasApp() {
               setImages(prev => prev.filter(img => img.id !== phId));
               toast.error('视频生成失败', { description: '未获取到视频地址', className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
             }
+            // Track video usage
+            if (pollData.status === 'completed') {
+              try { UserManagerCore.getInstance().recordUsage('video'); } catch {}
+            }
             setActiveGenerationCount(prev => Math.max(0, prev - 1));
           } else if (pollData.status === 'failed') {
             setImages(prev => prev.filter(img => img.id !== phId));

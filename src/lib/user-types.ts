@@ -119,6 +119,13 @@ export interface UsageStats {
   date: string; // YYYY-MM-DD
   requests: number;
   imagesGenerated: number;
+  videosGenerated: number;
+  models3dGenerated: number;
+  editsPerformed: number;
+  eraseCount: number;
+  removeBgCount: number;
+  upscaleCount: number;
+  chatsCount: number;
   tokensUsed: number;
   estimatedCost: number;
 }

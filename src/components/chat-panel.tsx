@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Bot, Send, Sparkles, Copy, Check, Trash2, Loader2, Eye, EyeOff, Wand2, User, Upload, X, Image as ImageIcon, Languages, Settings, Plug, Plus, History, FolderOpen, MessageSquare, Bookmark, BookmarkCheck, Lightbulb, Zap, ArrowRight, Palette, Target, Sliders, Download, AlertCircle, LocateFixed, RotateCcw, FileText, Cpu, ChevronRight, AtSign } from 'lucide-react';
+import { UserManager } from '@/lib/user-manager';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -4349,6 +4350,8 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       // 保存对话
       const finalMessages = [...newMessages, { id: assistantMessageId, role: 'assistant' as const, content: assistantContent, timestamp: Date.now() }];
       saveSession(finalMessages, model, systemPrompt);
+      // 记录聊天使用
+      try { UserManager.getInstance().recordUsage('chat'); } catch {}
     } catch (error) {
       console.error('Chat error:', error);
       const errorMessage: Message = {

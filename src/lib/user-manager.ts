@@ -1046,7 +1046,7 @@ export class UserManager {
   }
 
   // 使用统计相关方法
-  recordUsage(type: 'image' | 'chat', tokensUsed: number = 0, cost: number = 0): UsageStats {
+  recordUsage(type: 'image' | 'chat' | 'video' | '3d' | 'edit' | 'erase' | 'removebg' | 'upscale', tokensUsed: number = 0, cost: number = 0): UsageStats {
     const userData = this.getCurrentUserData();
     if (!userData?.user) {
       throw new Error('No user found');
@@ -1061,8 +1061,15 @@ export class UserManager {
         date: today,
         requests: 0,
         imagesGenerated: 0,
+        videosGenerated: 0,
+        models3dGenerated: 0,
+        editsPerformed: 0,
+        chatsCount: 0,
         tokensUsed: 0,
         estimatedCost: 0,
+        eraseCount: 0,
+        removeBgCount: 0,
+        upscaleCount: 0,
       };
       userData.usageStats.unshift(stats);
     }
@@ -1070,6 +1077,23 @@ export class UserManager {
     stats.requests += 1;
     if (type === 'image') {
       stats.imagesGenerated += 1;
+    } else if (type === 'video') {
+      stats.videosGenerated += 1;
+    } else if (type === '3d') {
+      stats.models3dGenerated += 1;
+    } else if (type === 'edit') {
+      stats.editsPerformed += 1;
+    } else if (type === 'chat') {
+      stats.chatsCount += 1;
+    } else if (type === 'erase') {
+      stats.eraseCount += 1;
+      stats.editsPerformed += 1;
+    } else if (type === 'removebg') {
+      stats.removeBgCount += 1;
+      stats.editsPerformed += 1;
+    } else if (type === 'upscale') {
+      stats.upscaleCount += 1;
+      stats.editsPerformed += 1;
     }
     stats.tokensUsed += tokensUsed;
     stats.estimatedCost += cost;
