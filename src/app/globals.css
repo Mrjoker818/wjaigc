@@ -279,15 +279,15 @@ main.dashboard-scrollable {
   }
   /* 深色主题下原生 select 的 option 下拉菜单可读性修复 */
   /* 原生 option 无法继承 Tailwind 主题色，必须显式设置 */
-  :root option,
-  .dark option {
+  .dark option,
+  .dashboard-root option {
     background-color: #1c2128;
     color: #e6edf3;
   }
-  :root option:hover,
   .dark option:hover,
-  :root option:checked,
-  .dark option:checked {
+  .dark option:checked,
+  .dashboard-root option:hover,
+  .dashboard-root option:checked {
     background-color: #262c36;
     color: #d4af37;
   }

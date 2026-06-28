@@ -1415,7 +1415,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
   // =================== RENDER ===================
   return (
-    <div className="h-screen w-screen flex overflow-hidden" style={{ '--dash-accent': accentHex, '--dash-accent-light': isMonochrome ? 'rgba(59,130,246,0.1)' : 'rgba(212,175,55,0.15)', '--dash-accent-mid': isMonochrome ? 'rgba(59,130,246,0.2)' : 'rgba(212,175,55,0.2)', '--dash-accent-ring': isMonochrome ? 'rgba(59,130,246,0.3)' : 'rgba(212,175,55,0.3)', '--dash-accent-hover': isMonochrome ? '#2563eb' : '#e0b840', '--dash-accent-text': isMonochrome ? '#fff' : '#000', } as React.CSSProperties }>
+    <div className="dashboard-root h-screen w-screen flex overflow-hidden" style={{ '--dash-accent': accentHex, '--dash-accent-light': isMonochrome ? 'rgba(59,130,246,0.1)' : 'rgba(212,175,55,0.15)', '--dash-accent-mid': isMonochrome ? 'rgba(59,130,246,0.2)' : 'rgba(212,175,55,0.2)', '--dash-accent-ring': isMonochrome ? 'rgba(59,130,246,0.3)' : 'rgba(212,175,55,0.3)', '--dash-accent-hover': isMonochrome ? '#2563eb' : '#e0b840', '--dash-accent-text': isMonochrome ? '#fff' : '#000', } as React.CSSProperties }>
       {/* ===== Sidebar ===== */}
       <aside className={`w-[260px] shrink-0 flex flex-col ${isDark ? 'bg-[#0e0e1a]' : 'bg-white'} border-r ${isDark ? 'border-white/5' : 'border-gray-200'} overflow-hidden`}>
         {/* User info */}
