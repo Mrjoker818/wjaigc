@@ -18,6 +18,7 @@ import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-re
 import { eraseWithLama, removeBgWithIOPaint, generateRemoveBgMask, DEFAULT_REMOVEBG_MODEL, VALID_ERASE_MODELS, REMOVEBG_MODELS } from '@/lib/image-tools/iopaint-client';
 import { LOCAL_AI_ENABLED } from '@/lib/image-tools/config';
 import { postProcessAIRemoveBG, postProcessLocalRemoveBG } from '@/lib/remove-bg-postprocess';
+import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { fetchImageBuffer } from '@/lib/fetch-image-buffer';
 import { consumeCredits } from '@/lib/credits';
 import { enhanceViaAI } from '@/lib/quality-enhance';
@@ -1652,6 +1653,13 @@ export async function POST(request: NextRequest) {
     }
     const effectiveProviderId = providerId || extractedProviderId || '';
 
+    // ★ 模型别名规范化：将 gpt-image-2-2k → gpt-image-2 等别名映射为 API 可识别的基础模型名
+    const normalized = normalizeModelForApi(modelStr);
+    if (normalized.wasNormalized) {
+      console.log(`[image-edit] 模型别名规范化: "${modelStr}" → "${normalized.apiModelName}"`);
+      modelStr = normalized.apiModelName;
+    }
+
     // Content safety check (for actions that accept prompt input)
     if (prompt && typeof prompt === 'string') {
       const safetyResult = checkPromptSafety(prompt);
@@ -1702,8 +1710,8 @@ export async function POST(request: NextRequest) {
       }
     }
     
-    // 1. 前端指定的模型（如果匹配到 provider）
-    const preferredProvider = await findProviderForModel(modelStr, 'image')
+    // 1. 前端指定的模型（如果匹配到 provider，优先使用 providerId）
+    const preferredProvider = await findProviderForModel(modelStr, 'image', effectiveProviderId || undefined)
       || await findProviderForModel(modelStr, 'universal');
     if (preferredProvider) {
       candidateModels.push({

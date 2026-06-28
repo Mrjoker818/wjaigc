@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import sharp from 'sharp';
 import { findProviderForModel, findProviderById, normalizeApiBaseUrl, getApiProviders } from '@/lib/server-api-config';
+import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { optionalApiAuth } from '@/lib/api-auth';
 import { getSessionUser } from '@/lib/server-auth';
@@ -302,6 +303,13 @@ export async function POST(request: NextRequest) {
       console.log(`[edit] Stripped provider prefix from model: "${model}" → "${pureModel}"`);
     }
 
+    // ★ 规范化模型名（如 gpt-image-2-2k → gpt-image-2）
+    const modelNorm = normalizeModelForApi(pureModel);
+    if (modelNorm.wasNormalized) {
+      console.log(`[edit] Normalized model alias: "${pureModel}" → "${modelNorm.apiModelName}"`);
+      pureModel = modelNorm.apiModelName;
+    }
+
     // Content safety check
     const safetyResult = checkPromptSafety(prompt);
     if (safetyResult.level === 'block') {
@@ -332,7 +340,7 @@ export async function POST(request: NextRequest) {
 
     if (!effectiveApiKey) {
       try {
-        imageProvider = await findProviderForModel(pureModel);
+        imageProvider = await findProviderForModel(pureModel, 'image', extractedProviderId || providerId);
         if (imageProvider?.apiKey) {
           effectiveApiKey = imageProvider.apiKey;
           effectiveBaseUrl = normalizeApiBaseUrl(imageProvider.baseUrl || '');

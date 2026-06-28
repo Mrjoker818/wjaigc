@@ -236,7 +236,9 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const [paymentConfig, setPaymentConfig] = useState<{
     wechatQrUrl: string;
     alipayQrUrl: string;
-  }>({ wechatQrUrl: '', alipayQrUrl: '' });
+    wechatPayLink?: string;
+    alipayPayLink?: string;
+  }>({ wechatQrUrl: '', alipayQrUrl: '', wechatPayLink: '', alipayPayLink: '' });
   const [paymentStatus, setPaymentStatus] = useState<{ alipay: boolean; wechat: boolean; qrUrls?: { wechat: string; alipay: string }; note?: string }>({ alipay: false, wechat: false });
   const [configSaving, setConfigSaving] = useState(false);
   const [configSaveMsg, setConfigSaveMsg] = useState<string | null>(null);
@@ -2163,7 +2165,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               <div className="flex items-center gap-2">
                 {paymentStatus.wechat && <span className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-green-500/15 text-green-400"><CheckCircle2 size={12}/> 微信已配置</span>}
                 {paymentStatus.alipay && <span className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-blue-500/15 text-blue-400"><CheckCircle2 size={12}/> 支付宝已配置</span>}
-                {!paymentStatus.alipay && !paymentStatus.wechat && <span className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-red-500/15 text-red-400"><AlertTriangle size={12}/> 未配置收款码，充值不可用</span>}
+                {!paymentConfig.wechatPayLink && !paymentConfig.alipayPayLink && <span className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-red-500/15 text-red-400"><AlertTriangle size={12}/> 未配置支付链接，充值不可用</span>}
               </div>
             </div>
 
@@ -2182,7 +2184,17 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 </div>
                 <div className="space-y-3">
                   <div>
-                    <label className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>收款码图片URL</label>
+                    <label className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>微信支付链接 <span className="text-red-400">*必填</span></label>
+                    <input
+                      className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`}
+                      placeholder="wxp://xxxxx 微信收款链接，用户点击后直接跳转付款"
+                      value={paymentConfig.wechatPayLink || ''}
+                      onChange={e => setPaymentConfig(prev => ({ ...prev, wechatPayLink: e.target.value }))}
+                    />
+                    <p className={`text-[10px] ${textSecondary} mt-1`}>打开微信→收付款→二维码收款→右上角···→复制链接，粘贴到此处</p>
+                  </div>
+                  <div>
+                    <label className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>收款码图片URL（备用）</label>
                     <input
                       className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`}
                       placeholder="粘贴微信收款码图片URL，或上传图片后自动填入"
@@ -2236,7 +2248,17 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 </div>
                 <div className="space-y-3">
                   <div>
-                    <label className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>收款码图片URL</label>
+                    <label className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>支付宝支付链接 <span className="text-red-400">*必填</span></label>
+                    <input
+                      className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`}
+                      placeholder="https://qr.alipay.com/xxxxx 支付宝收款链接，用户点击后直接跳转付款"
+                      value={paymentConfig.alipayPayLink || ''}
+                      onChange={e => setPaymentConfig(prev => ({ ...prev, alipayPayLink: e.target.value }))}
+                    />
+                    <p className={`text-[10px] ${textSecondary} mt-1`}>打开支付宝→收付款→二维码收款→保存图片→识别链接，粘贴到此处</p>
+                  </div>
+                  <div>
+                    <label className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>收款码图片URL（备用）</label>
                     <input
                       className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`}
                       placeholder="粘贴支付宝收款码图片URL，或上传图片后自动填入"

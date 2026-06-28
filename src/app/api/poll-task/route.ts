@@ -8,6 +8,7 @@ import { getSessionUser } from '@/lib/server-auth';
 import { resolveCompatProfile, buildPollUrl, extractImageUrl, type ApiCompatProfile } from '@/lib/api-compatibility';
 import { postProcessAIRemoveBG } from '@/lib/remove-bg-postprocess';
 import { fetchImageBuffer } from '@/lib/fetch-image-buffer';
+import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { getEditTask, deleteEditTask, setEditTask, failEditTask } from '@/lib/edit-task-store';
 import { isTaskCancelled, updateTaskProgress, getTaskInfo, releaseQueueSlot } from '@/lib/task-registry';
 import { translateApiError } from '@/lib/api-error-translate';
@@ -72,6 +73,12 @@ export async function POST(request: NextRequest) {
       model = model.split('::').pop()!;
     }
     const effectiveProviderId = providerId || extractedProviderId || '';
+    // ★ 模型别名规范化
+    const normalized = normalizeModelForApi(model);
+    if (normalized.wasNormalized) {
+      console.log(`[poll-task] 模型别名规范化: "${model}" → "${normalized.apiModelName}"`);
+      model = normalized.apiModelName;
+    }
     // ★ engine 参数：前端传递的任务引擎类型（用于 AI RemoveBG 后处理等场景）
     // 优先使用请求参数，因为 Next.js dev 模式下 task-registry 可能不共享
     const requestEngineStr = typeof requestEngine === 'string' ? requestEngine : '';
@@ -838,11 +845,9 @@ export async function POST(request: NextRequest) {
       providerName = `registry(${regUsedModel || 'unknown'})`;
       console.log(`[poll-task] Using registry-stored provider for taskId=${taskId}, model=${regUsedModel || 'unknown'}, baseUrl=${apiBaseUrl}`);
     } else {
-      // 降级：从管理员配置查找提供商
-      const provider = effectiveProviderId ? await findProviderById(effectiveProviderId)
-        : await findProviderForModel(model || regUsedModel || '', 'image')
-        || await findProviderForModel(model || regUsedModel || '', 'image')
-        || await findProviderForModel(model || regUsedModel || '', 'universal');
+      // 降级：从管理员配置查找提供商（优先使用 providerId 精确匹配）
+      const provider = await findProviderForModel(model || regUsedModel || '', 'image', effectiveProviderId || undefined)
+        || await findProviderForModel(model || regUsedModel || '', 'universal', effectiveProviderId || undefined);
       apiKey = provider?.apiKey;
       apiBaseUrl = normalizeApiBaseUrl(provider?.baseUrl || '');
       providerName = provider?.name || 'unknown';

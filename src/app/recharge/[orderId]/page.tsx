@@ -18,7 +18,7 @@ interface OrderInfo {
 interface RechargeData {
   success: boolean;
   order: OrderInfo;
-  adminQrUrl: string;
+  payLink: string;
   note: string;
 }
 
@@ -57,12 +57,20 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
     }
   }
 
-  // Step 2: User clicks "确认支付" → show admin QR code for scanning
-  function handleShowPayment() {
-    setStep('paying');
+  // Step 2: User clicks "确认支付" → redirect to payment link
+  function handleGoToPay() {
+    if (data?.payLink) {
+      // Open payment link in current tab (on mobile this will launch WeChat/Alipay)
+      window.location.href = data.payLink;
+      // After redirect, when user comes back they'll see the "paying" step
+      setStep('paying');
+    } else {
+      // No pay link configured, go to paying step with manual confirmation
+      setStep('paying');
+    }
   }
 
-  // Step 3: User has paid by scanning admin QR → confirm and credit points
+  // Step 3: User has paid → confirm and credit points
   async function handleConfirmPaid() {
     if (confirming || paid) return;
     setConfirming(true);
@@ -110,10 +118,11 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
 
   if (!data) return null;
 
-  const { order, note, adminQrUrl } = data;
+  const { order, note, payLink } = data;
   const pkg = RECHARGE_PACKAGES.find(p => p.amount + p.bonus === order.amount || p.amount === order.amount - order.bonus);
   const methodLabel = order.paymentMethod === 'alipay' ? '支付宝' : '微信支付';
   const methodIcon = order.paymentMethod === 'alipay' ? '💙' : '💚';
+  const methodColor = order.paymentMethod === 'alipay' ? '#1677FF' : '#07C160';
   const expiresDate = order.expiresAt > 0 ? new Date(order.expiresAt).toLocaleString('zh-CN') : '';
 
   // Success state
@@ -170,7 +179,7 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
             </div>
             <div>
               <h1 className="text-white text-lg font-bold">无界AI 积分充值</h1>
-              <p className="text-white/40 text-xs">扫码付款，即时到账</p>
+              <p className="text-white/40 text-xs">安全付款，即时到账</p>
             </div>
           </div>
         </div>
@@ -188,14 +197,14 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
             <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${step === 'paying' ? 'bg-[#d4af37]/20 text-[#d4af37]' : 'bg-white/10 text-white/30'}`}>
               2
             </div>
-            <span>扫码付款</span>
+            <span>付款</span>
           </div>
           <div className="flex-1 h-px bg-white/10" />
           <div className="flex items-center gap-1.5 text-white/30">
             <div className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold bg-white/10 text-white/30">
               3
             </div>
-            <span>到账完成</span>
+            <span>到账</span>
           </div>
         </div>
 
@@ -238,11 +247,11 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
             </div>
           )}
 
-          {/* Step 1: Confirm order → show payment */}
+          {/* Step 1: Confirm order */}
           {step === 'info' && (
             <>
               <button
-                onClick={handleShowPayment}
+                onClick={handleGoToPay}
                 className="w-full py-4 rounded-xl text-lg font-bold transition-all bg-[#d4af37] text-black hover:bg-[#e5c047] active:scale-[0.98] shadow-lg shadow-[#d4af37]/20"
               >
                 <span className="flex items-center justify-center gap-2">
@@ -253,52 +262,70 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
                 </span>
               </button>
               <p className="text-white/20 text-xs text-center mt-3">
-                点击后将显示收款码，扫码完成付款
+                点击后将跳转到{methodLabel}完成付款
               </p>
             </>
           )}
 
-          {/* Step 2: Show admin QR code for payment */}
+          {/* Step 2: Payment redirect + manual confirm */}
           {step === 'paying' && (
             <div className="space-y-4">
-              {/* Admin QR code */}
-              <div className="bg-white/5 rounded-xl p-5 text-center">
-                <p className="text-white/60 text-sm mb-4">
-                  请使用{methodLabel}扫描下方收款码完成付款
-                </p>
-                {adminQrUrl ? (
-                  <div className="bg-white rounded-xl p-3 inline-block mb-3">
-                    <img
-                      src={adminQrUrl}
-                      alt="收款码"
-                      className="w-48 h-48 object-contain"
-                    />
+              {/* Payment redirect card */}
+              {payLink && (
+                <div className="bg-white/5 rounded-xl p-5 text-center">
+                  <div className="w-14 h-14 rounded-2xl mx-auto mb-4 flex items-center justify-center" style={{ backgroundColor: methodColor + '20' }}>
+                    <span className="text-2xl">{methodIcon}</span>
                   </div>
-                ) : (
-                  <div className="bg-white/10 rounded-xl p-8 mb-3 inline-block">
-                    <div className="w-48 h-48 flex items-center justify-center">
-                      <div className="text-center">
-                        <svg className="w-12 h-12 text-white/20 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5zM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 01-1.125-1.125v-4.5zM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0113.5 9.375v-4.5z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 6.75h.75v.75h-.75v-.75zM6.75 16.5h.75v.75h-.75v-.75zM16.5 6.75h.75v.75h-.75v-.75zM13.5 13.5h.75v.75h-.75v-.75zM13.5 19.5h.75v.75h-.75v-.75zM19.5 13.5h.75v.75h-.75v-.75zM19.5 19.5h.75v.75h-.75v-.75zM16.5 16.5h.75v.75h-.75v-.75z" />
-                        </svg>
-                        <p className="text-white/30 text-xs">管理员未配置收款码</p>
-                        <p className="text-white/20 text-xs mt-1">请联系管理员设置{methodLabel}收款码</p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-                <p className="text-[#d4af37] text-lg font-bold">
-                  ¥{order.priceCny.toFixed(2)}
-                </p>
-                <p className="text-white/40 text-xs mt-1">
-                  {methodIcon} {methodLabel} · {order.amount}积分
-                </p>
-                {note && (
-                  <p className="text-white/30 text-xs mt-2 bg-white/5 rounded-lg py-1.5 px-3 inline-block">
-                    💡 {note}
+                  <p className="text-white/80 text-sm mb-3">
+                    如果未自动跳转到{methodLabel}，请点击下方按钮
                   </p>
-                )}
+                  <a
+                    href={payLink}
+                    className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-base font-bold transition-all text-white hover:opacity-90 active:scale-[0.98]"
+                    style={{ backgroundColor: methodColor }}
+                  >
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                    </svg>
+                    打开{methodLabel}付款 ¥{order.priceCny.toFixed(2)}
+                  </a>
+                  <p className="text-[#d4af37] text-lg font-bold mt-4">
+                    ¥{order.priceCny.toFixed(2)}
+                  </p>
+                  <p className="text-white/40 text-xs mt-1">
+                    {methodIcon} {methodLabel} · {order.amount}积分
+                  </p>
+                </div>
+              )}
+
+              {/* No pay link configured */}
+              {!payLink && (
+                <div className="bg-white/5 rounded-xl p-5 text-center">
+                  <div className="w-14 h-14 bg-[#d4af37]/20 rounded-2xl mx-auto mb-4 flex items-center justify-center">
+                    <svg className="w-7 h-7 text-[#d4af37]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                    </svg>
+                  </div>
+                  <p className="text-white/60 text-sm">
+                    管理员尚未配置{methodLabel}支付链接
+                  </p>
+                  <p className="text-white/40 text-xs mt-1">
+                    请联系管理员在后台设置支付链接
+                  </p>
+                </div>
+              )}
+
+              {note && (
+                <div className="bg-white/5 rounded-lg py-2 px-3 text-center">
+                  <p className="text-white/40 text-xs">💡 {note}</p>
+                </div>
+              )}
+
+              {/* Divider */}
+              <div className="flex items-center gap-3 py-1">
+                <div className="flex-1 h-px bg-white/10" />
+                <span className="text-white/20 text-xs">付款完成后请点击下方按钮</span>
+                <div className="flex-1 h-px bg-white/10" />
               </div>
 
               {/* Confirm paid button */}
@@ -326,7 +353,7 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
                 )}
               </button>
               <p className="text-white/30 text-xs text-center">
-                付款后请点击此按钮，积分将自动到账
+                付款后点击此按钮，积分将自动到账
               </p>
             </div>
           )}

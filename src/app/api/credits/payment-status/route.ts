@@ -12,12 +12,15 @@ export async function GET(_request: NextRequest) {
 
     const wechatEnabled = (cfg?.wechatEnabled as boolean) || false;
     const wechatQrUrl = (cfg?.wechatQrUrl as string) || '';
+    const wechatPayLink = (cfg?.wechatPayLink as string) || '';
     const alipayEnabled = (cfg?.alipayEnabled as boolean) || false;
     const alipayQrUrl = (cfg?.alipayQrUrl as string) || '';
+    const alipayPayLink = (cfg?.alipayPayLink as string) || '';
     const note = (cfg?.note as string) || '付款时请备注您的用户名，方便管理员确认';
 
-    const wechatReady = wechatEnabled && !!wechatQrUrl;
-    const alipayReady = alipayEnabled && !!alipayQrUrl;
+    // 支付方式就绪条件：已启用 + (有收款码图片 或 有支付链接)
+    const wechatReady = wechatEnabled && (!!wechatQrUrl || !!wechatPayLink);
+    const alipayReady = alipayEnabled && (!!alipayQrUrl || !!alipayPayLink);
 
     const methods: string[] = [];
     if (wechatReady) methods.push('wechat');

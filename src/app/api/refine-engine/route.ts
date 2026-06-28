@@ -9,6 +9,7 @@ import { registerTask, updateTaskProgress } from '@/lib/task-registry';
 import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits } from '@/lib/credits';
 import { identifyImageSubject } from '@/lib/identify-subject';
+import { normalizeModelForApi } from '@/lib/model-capabilities';
 
 // ─── Persist result image to local server ───
 async function persistResultImage(imageUrl: string): Promise<string> {
@@ -417,8 +418,14 @@ async function getImageProvider(model?: string, providerId?: string): Promise<Ap
     console.warn(`[refine-engine] ⚠️ providerId="${providerId}" 未找到匹配的提供商，回退到模型匹配`);
   }
   if (model) {
-    const p = await findProviderForModel(model);
+    // 先用原始别名查找，再用规范化后的基础模型名查找
+    const p = await findProviderForModel(model, 'image');
     if (p) return p;
+    const normalized = normalizeModelForApi(model);
+    if (normalized.wasNormalized) {
+      const pNorm = await findProviderForModel(normalized.apiModelName, 'image');
+      if (pNorm) return pNorm;
+    }
   }
   const p = await findProviderForModel('', 'image');
   return p;
@@ -938,12 +945,22 @@ export async function POST(request: NextRequest) {
       }
       const effectiveProviderId = providerId || extractedProviderId || '';
 
-      const provider = await getImageProvider(pureModel, effectiveProviderId);
+      // ★ 模型别名规范化：将 gpt-image-2-2k → gpt-image-2 等别名映射为基础模型名
+      const normalized = normalizeModelForApi(pureModel);
+      const apiModelName = normalized.apiModelName; // 发送给第三方 API 的实际模型名
+      const displayName = pureModel; // 用于日志和用户展示的原始模型名
+
+      const provider = await getImageProvider(normalized.wasNormalized ? pureModel : apiModelName, effectiveProviderId);
       if (!provider) {
         return NextResponse.json({ error: `未找到模型 ${model} 对应的API提供商${providerId ? ` (providerId: ${providerId})` : ''}` }, { status: 400 });
       }
 
-      const selectedModel = pureModel || provider.selectedModels?.[0];
+      // selectedModel 用于发送给第三方 API，必须是 API 可识别的基础模型名
+      const selectedModel = apiModelName || provider.selectedModels?.[0] || model;
+
+      if (normalized.wasNormalized) {
+        console.log(`[refine-engine] 模型别名规范化: "${displayName}" → API模型名 "${selectedModel}"`);
+      }
 
       const refineMode = (mode === 'expert') ? 'expert' : 'standard';
       const prompt = generateRefinePrompt({

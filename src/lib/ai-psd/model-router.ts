@@ -47,9 +47,14 @@ function splitUrl(fullUrl: string): { baseUrl: string; path: string } {
 }
 
 /** 获取图像模型提供商 */
-export async function getImageProvider(imageModel?: string): Promise<ApiProvider | null> {
+export async function getImageProvider(imageModel?: string, providerId?: string): Promise<ApiProvider | null> {
   if (imageModel) {
-    const provider = await findProviderForModel(imageModel, 'image');
+    const provider = await findProviderForModel(imageModel, 'image', providerId);
+    if (provider) return provider;
+  } else if (providerId) {
+    // 即使没传 imageModel，如果传了 providerId 也尝试精确匹配
+    const { findProviderById } = await import('@/lib/server-api-config');
+    const provider = await findProviderById(providerId);
     if (provider) return provider;
   }
   // 回退到默认图像提供商
@@ -57,9 +62,13 @@ export async function getImageProvider(imageModel?: string): Promise<ApiProvider
 }
 
 /** 获取LLM模型提供商 */
-export async function getLLMProvider(llmModel?: string): Promise<ApiProvider | null> {
+export async function getLLMProvider(llmModel?: string, providerId?: string): Promise<ApiProvider | null> {
   if (llmModel) {
-    const provider = await findProviderForModel(llmModel, 'chat');
+    const provider = await findProviderForModel(llmModel, 'chat', providerId);
+    if (provider) return provider;
+  } else if (providerId) {
+    const { findProviderById } = await import('@/lib/server-api-config');
+    const provider = await findProviderById(providerId);
     if (provider) return provider;
   }
   // 回退到默认聊天提供商

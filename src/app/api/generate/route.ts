@@ -11,7 +11,7 @@ import { classifyApiError, type ClassifiedError, isCloudflareTimeoutError, trans
 import { detectInvalidSizeError, repairSize, classifyImageModelFamily } from '@/lib/size-auto-repair';
 import { fetchWithSmartRetry } from '@/lib/smart-retry';
 import { streamResponsesApiSSE, buildResponsesApiPayload, type ResponsesApiResult, type ResponsesApiSSEEvent } from '@/lib/responses-api-sse';
-import { getModelCapabilities, filterRequestForModel, shouldUseResponsesAPI, type ModelCapabilities } from '@/lib/model-capabilities';
+import { getModelCapabilities, filterRequestForModel, shouldUseResponsesAPI, type ModelCapabilities, normalizeModelForApi } from '@/lib/model-capabilities';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { consumeCredits } from '@/lib/credits';
 
@@ -183,6 +183,13 @@ export async function POST(request: NextRequest) {
     }
     // 如果 providerId 字段为空但从 model 中提取到了，自动回填
     const effectiveProviderId = providerId || extractedProviderId || '';
+
+    // ★ 模型别名规范化：将 gpt-image-2-2k → gpt-image-2 等别名映射为 API 可识别的基础模型名
+    const normalized = normalizeModelForApi(model);
+    if (normalized.wasNormalized) {
+      console.log(`[generate] 模型别名规范化: "${model}" → "${normalized.apiModelName}"`);
+      model = normalized.apiModelName;
+    }
 
     // Content safety check
     const safetyResult = checkPromptSafety(prompt || '');
@@ -418,14 +425,7 @@ export async function POST(request: NextRequest) {
     const allImageProviders = await findAllProvidersForType('image');
     
     // 尝试找到用户指定模型对应的 provider（优先使用 providerId 精确匹配）
-    let provider = effectiveProviderId ? await findProviderById(effectiveProviderId) : null;
-    if (provider && !(provider.selectedModels || []).includes(model)) {
-      console.warn(`[generate] ⚠️ providerId="${effectiveProviderId}" 找到提供商 "${provider.displayName || provider.name}"，但该提供商的 selectedModels 不包含 "${model}"，仍使用此提供商`);
-    }
-    if (!provider) {
-      console.warn(`[generate] ⚠️ providerId="${effectiveProviderId}" 未匹配到提供商，回退到 findProviderForModel(model="${model}")`);
-      provider = await findProviderForModel(model, 'image');
-    }
+    let provider = await findProviderForModel(model, 'image', effectiveProviderId || undefined);
     let serverApiKey = provider?.apiKey;
     let apiBaseUrl = normalizeApiBaseUrl(provider?.baseUrl || '');
     

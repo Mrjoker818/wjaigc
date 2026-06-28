@@ -728,3 +728,53 @@ export function shouldUseResponsesAPI(modelId: string): boolean {
 export function shouldUseGeminiChatRoute(modelId: string): boolean {
   return classifyModelFamily(modelId) === 'gemini-image';
 }
+
+// ======================== 模型别名规范化 ========================
+
+/**
+ * 管理员可能配置自定义模型别名（如 gpt-image-2-2k、gpt-image-2-4k），
+ * 这些别名在第三方 API 端点上不被识别（第三方只认 gpt-image-2）。
+ * 本函数将别名剥离质量后缀，还原为 API 可识别的基础模型名，
+ * 同时返回从后缀推断的质量/尺寸信息，供后续请求参数使用。
+ *
+ * 已知后缀模式：
+ *   -2k / -4k / -hd / -uhd / -8k  → 分辨率等级
+ *   -lite / -pro / -max            → 质量等级
+ */
+const QUALITY_SUFFIX_RE = /-(2k|4k|8k|hd|uhd|lite|pro|max)$/i;
+
+export interface NormalizedModelInfo {
+  /** API 可识别的基础模型名（如 gpt-image-2） */
+  apiModelName: string;
+  /** 是否经过了别名规范化（原名 != API 名） */
+  wasNormalized: boolean;
+  /** 从后缀推断的分辨率等级（如 '2k', '4k', 'hd'），无后缀时为 null */
+  resolutionTier: string | null;
+  /** 从后缀推断的质量等级（如 'lite', 'pro', 'max'），无后缀时为 null */
+  qualityTier: string | null;
+}
+
+export function normalizeModelForApi(modelId: string): NormalizedModelInfo {
+  if (!modelId) {
+    return { apiModelName: modelId, wasNormalized: false, resolutionTier: null, qualityTier: null };
+  }
+
+  const match = QUALITY_SUFFIX_RE.exec(modelId);
+  if (!match) {
+    return { apiModelName: modelId, wasNormalized: false, resolutionTier: null, qualityTier: null };
+  }
+
+  const suffix = match[1].toLowerCase();
+  const apiModelName = modelId.slice(0, match.index);
+  const isResolution = ['2k', '4k', '8k', 'hd', 'uhd'].includes(suffix);
+  const isQuality = ['lite', 'pro', 'max'].includes(suffix);
+
+  console.log(`[normalizeModelForApi] 模型别名规范化: "${modelId}" → "${apiModelName}" (suffix: ${suffix})`);
+
+  return {
+    apiModelName,
+    wasNormalized: true,
+    resolutionTier: isResolution ? suffix : null,
+    qualityTier: isQuality ? suffix : null,
+  };
+}

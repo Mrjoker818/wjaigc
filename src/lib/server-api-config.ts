@@ -747,11 +747,30 @@ export async function refreshApiProvider(providerId: string): Promise<ApiProvide
   });
 }
 
-export async function findProviderForModel(modelId: string, modelType?: ApiKind): Promise<ApiProvider | null> {
+export async function findProviderForModel(modelId: string, modelType?: ApiKind, preferredProviderId?: string): Promise<ApiProvider | null> {
   const providers = await getApiProviders();
   const enabled = providers.filter(provider => provider.isEnabled);
   const isFlexibleType = !modelType || modelType === 'universal' || modelType === 'general';
   const matchesType = (p: ApiProvider) => isFlexibleType || p.modelType === modelType || p.modelType === 'universal' || p.modelType === 'general';
+
+  // 0. 如果指定了 preferredProviderId，优先精确匹配该提供商
+  if (preferredProviderId) {
+    const preferred = enabled.find(provider =>
+      provider.id === preferredProviderId &&
+      matchesType(provider) &&
+      (provider.selectedModels || []).includes(modelId),
+    );
+    if (preferred) {
+      return preferred;
+    }
+    // 即使该提供商不包含此模型，也尝试直接返回该提供商（可能别名模型只有该提供商有）
+    const byIdOnly = enabled.find(provider => provider.id === preferredProviderId && matchesType(provider));
+    if (byIdOnly) {
+      console.log(`[findProviderForModel] 指定提供商 "${byIdOnly.displayName || byIdOnly.name}" 不包含模型 "${modelId}"，但仍使用该提供商`);
+      return byIdOnly;
+    }
+    console.warn(`[findProviderForModel] ⚠️ preferredProviderId="${preferredProviderId}" 未找到匹配的提供商，回退到模型匹配`);
+  }
 
   // 1. Exact match — 当多个提供商有同名模型时，记录警告
   const exactMatches = enabled.filter(provider =>
