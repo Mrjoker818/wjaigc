@@ -89,7 +89,7 @@ export default function DataManagerTab({
 }: DataManagerTabProps) {
   // State
   const [view, setView] = useState<'overview' | 'gallery' | 'users'>('overview');
-  const [returnView, setReturnView] = useState<'overview' | 'users'>('users');
+  const [returnView, setReturnView] = useState<'overview' | 'users'>('overview');
   const [images, setImages] = useState<ImageRecord[]>([]);
   const [stats, setDataStats] = useState<DataStats | null>(null);
   const [loading, setLoading] = useState(false);
@@ -236,22 +236,41 @@ export default function DataManagerTab({
   );
 
   // Gallery: filterable image grid/list
-  const renderGallery = () => (
+  const renderGallery = () => {
+    // Find the filtered user name
+    const filteredUser = stats?.userStats?.find(u => u.userId === filterUserId);
+    return (
     <div className="space-y-4">
-      {/* Breadcrumb: back to source view when filtering by user */}
-      {filterUserId && (
-        <div className={`flex items-center gap-2 px-4 py-2.5 rounded-lg ${isDark ? 'bg-[#d4af37]/5 border border-[#d4af37]/10' : 'bg-amber-50 border border-amber-100'}`}>
+      {/* Breadcrumb: always visible, consistent navigation */}
+      <div className={`flex items-center gap-2 px-4 py-2.5 rounded-lg ${isDark ? 'bg-white/[0.03] border border-white/5' : 'bg-gray-50 border border-gray-100'}`}>
+        <button
+          onClick={() => { setFilterUserId(''); setView(returnView); }}
+          className={`flex items-center gap-1.5 text-sm cursor-pointer transition-colors ${isDark ? 'text-white/40 hover:text-white/70' : 'text-gray-400 hover:text-gray-600'}`}
+        >
+          <ChevronLeft size={14} />
+          {returnView === 'overview' ? '概览' : '用户数据'}
+        </button>
+        <ChevronRight size={12} className={textSecondary} />
+        <span className={`text-sm font-medium ${textPrimary}`}>内容库</span>
+        {filterUserId && filteredUser && (
+          <>
+            <ChevronRight size={12} className={textSecondary} />
+            <span className={`text-sm font-medium ${isDark ? 'text-[#d4af37]' : 'text-amber-600'}`}>{filteredUser.userName}</span>
+          </>
+        )}
+        <div className="flex-1" />
+        {/* Quick links to all sub-views */}
+        <div className="flex items-center gap-1">
           <button
-            onClick={() => { setFilterUserId(''); setView(returnView); }}
-            className={`flex items-center gap-1.5 text-sm font-medium cursor-pointer transition-colors ${isDark ? 'text-[#d4af37] hover:text-[#d4af37]/80' : 'text-amber-600 hover:text-amber-700'}`}
-          >
-            <ChevronLeft size={16} />
-            {returnView === 'overview' ? '运营概览' : '用户数据列表'}
-          </button>
-          <span className={textSecondary}>/</span>
-          <span className={`text-sm ${textPrimary}`}>用户内容</span>
+            onClick={() => { setFilterUserId(''); setView('overview'); }}
+            className={`px-2.5 py-1 rounded text-xs cursor-pointer transition-colors ${returnView === 'overview' ? (isDark ? 'bg-[#d4af37]/10 text-[#d4af37]' : 'bg-amber-50 text-amber-600') : (isDark ? 'text-white/40 hover:text-white/60' : 'text-gray-400 hover:text-gray-600')}`}
+          >概览</button>
+          <button
+            onClick={() => { setFilterUserId(''); setView('users'); }}
+            className={`px-2.5 py-1 rounded text-xs cursor-pointer transition-colors ${view === 'gallery' && !filterUserId ? (isDark ? 'bg-[#d4af37]/10 text-[#d4af37]' : 'bg-amber-50 text-amber-600') : (isDark ? 'text-white/40 hover:text-white/60' : 'text-gray-400 hover:text-gray-600')}`}
+          >用户列表</button>
         </div>
-      )}
+      </div>
       {/* Filter bar */}
       <div className="flex items-center gap-3 flex-wrap">
         <div className={`relative flex-1 min-w-[200px] max-w-[300px]`}>
@@ -273,14 +292,17 @@ export default function DataManagerTab({
           <option value="uploaded">上传</option>
           <option value="edited">编辑</option>
         </select>
-        {filterUserId && (
-          <button
-            onClick={() => { setFilterUserId(''); setView(returnView); }}
-            className={`flex items-center gap-1 h-9 px-3 rounded-lg border text-xs ${isDark ? 'border-[#d4af37]/30 text-[#d4af37] hover:bg-[#d4af37]/10' : 'border-amber-200 text-amber-600 hover:bg-amber-50'} cursor-pointer transition-colors`}
-          >
-            <ChevronLeft size={14} />
-            返回{returnView === 'overview' ? '概览' : '用户列表'}
-          </button>
+        {filterUserId && filteredUser && (
+          <div className={`flex items-center gap-1.5 h-9 px-3 rounded-lg text-xs ${isDark ? 'bg-[#d4af37]/10 text-[#d4af37] border border-[#d4af37]/20' : 'bg-amber-50 text-amber-600 border border-amber-200'}`}>
+            <User size={12} />
+            <span>{filteredUser.userName}</span>
+            <button
+              onClick={() => setFilterUserId('')}
+              className="ml-1 cursor-pointer hover:opacity-70"
+            >
+              <XCircle size={13} />
+            </button>
+          </div>
         )}
         <div className="ml-auto flex items-center gap-2">
           <button
@@ -427,7 +449,8 @@ export default function DataManagerTab({
         </div>
       )}
     </div>
-  );
+    );
+  };
 
   // Users: detailed user data listing
   const renderUsers = () => (
