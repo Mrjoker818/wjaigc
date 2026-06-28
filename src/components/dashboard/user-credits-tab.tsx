@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import QRCode from 'qrcode';
 import {
   Coins, ArrowUpRight, ArrowDownRight, Gift, Clock,
   TrendingUp, Zap, History, RefreshCw, CreditCard,
@@ -53,11 +54,14 @@ export default function UserCreditsTab({
     amount: number;
     priceCny: number;
     bonusCredits: number;
-    qrUrl: string;
+    paymentMethod: string;
     note: string;
   } | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [orderQuerying, setOrderQuerying] = useState(false);
+
+  // 程序化生成的QR码data URL
+  const [qrDataUrl, setQrDataUrl] = useState<string>('');
 
   const loadCredits = useCallback(async () => {
     setLoading(true);
@@ -69,7 +73,6 @@ export default function UserCreditsTab({
         setBalance(c.balance || 0);
         setTotalEarned(c.totalRecharged || 0);
         setTotalSpent(c.totalUsed || 0);
-        // transactions from API
         const txRes = await fetch('/api/credits?action=transactions');
         const txData = await txRes.json();
         if (txData.success) {
@@ -96,7 +99,6 @@ export default function UserCreditsTab({
       const data = await res.json();
       if (data.success) {
         setPaymentStatus(data as PaymentStatus);
-        // 设置默认支付方式
         if (data.methods?.includes('wechat')) setPaymentMethod('wechat');
         else if (data.methods?.includes('alipay')) setPaymentMethod('alipay');
       }
@@ -104,6 +106,27 @@ export default function UserCreditsTab({
   }, []);
 
   useEffect(() => { loadCredits(); loadPaymentStatus(); }, [loadCredits, loadPaymentStatus]);
+
+  // 当订单创建后，生成程序化QR码
+  useEffect(() => {
+    if (!orderInfo?.orderId) {
+      setQrDataUrl('');
+      return;
+    }
+    const domain = typeof window !== 'undefined'
+      ? (process.env.NEXT_PUBLIC_COZE_PROJECT_DOMAIN_DEFAULT || window.location.origin)
+      : '';
+    const rechargeUrl = `${domain}/recharge/${orderInfo.orderId}`;
+    QRCode.toDataURL(rechargeUrl, {
+      width: 240,
+      margin: 2,
+      color: { dark: '#000000', light: '#ffffff' },
+      errorCorrectionLevel: 'M',
+    }).then(setQrDataUrl).catch(err => {
+      console.error('QR generation error:', err);
+      setQrDataUrl('');
+    });
+  }, [orderInfo?.orderId]);
 
   const filteredTransactions = filter === 'all'
     ? transactions
@@ -159,10 +182,10 @@ export default function UserCreditsTab({
           amount: data.amount,
           priceCny: data.priceCny,
           bonusCredits: data.bonusCredits,
-          qrUrl: data.qrUrl,
+          paymentMethod: data.paymentMethod || paymentMethod,
           note: data.note,
         });
-        onToast?.('订单创建成功，请扫码付款');
+        onToast?.('订单创建成功，请用手机扫描下方二维码');
       } else {
         onToast?.(data.error || '创建订单失败');
       }
@@ -193,7 +216,7 @@ export default function UserCreditsTab({
         setOrderInfo(null);
         setShowRecharge(false);
         setSelectedPackage(null);
-        loadCredits(); // 刷新余额
+        loadCredits();
       } else {
         onToast?.(data.error || '确认付款失败');
       }
@@ -228,7 +251,7 @@ export default function UserCreditsTab({
           setSelectedPackage(null);
           loadCredits();
         } else {
-          onToast?.('订单尚未确认，请耐心等待或联系管理员');
+          onToast?.('订单尚未确认，请在充值页面点击"我已完成付款"');
         }
       }
     } catch {
@@ -311,7 +334,7 @@ export default function UserCreditsTab({
                 积分充值
               </h2>
               <button
-                onClick={() => { setShowRecharge(false); setOrderInfo(null); setSelectedPackage(null); }}
+                onClick={() => { setShowRecharge(false); setOrderInfo(null); setSelectedPackage(null); setQrDataUrl(''); }}
                 className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
               >
                 <X className="w-4 h-4" />
@@ -319,13 +342,13 @@ export default function UserCreditsTab({
             </div>
 
             <div className="p-5 space-y-5 max-h-[70vh] overflow-y-auto">
-              {/* 订单已创建 - 显示扫码付款 */}
+              {/* 订单已创建 - 显示程序化QR码 */}
               {orderInfo ? (
                 <div className="space-y-4">
                   <div className="text-center">
                     <CheckCircle className="w-12 h-12 text-primary mx-auto mb-2" />
-                    <h3 className="text-base font-semibold text-foreground">订单已创建</h3>
-                    <p className="text-xs text-muted-foreground mt-1">订单号: {orderInfo.orderId}</p>
+                    <h3 className="text-base font-semibold text-foreground">扫码进入充值页面</h3>
+                    <p className="text-xs text-muted-foreground mt-1">用手机扫描下方二维码，进入充值页面完成付款</p>
                   </div>
 
                   <div className={`${cardBg} p-4 space-y-3`}>
@@ -345,22 +368,29 @@ export default function UserCreditsTab({
                     </div>
                   </div>
 
-                  {/* 收款码 */}
-                  {orderInfo.qrUrl && (
+                  {/* 程序化生成的QR码 - 指向充值页面 */}
+                  {qrDataUrl && (
                     <div className={`${cardBg} p-4 text-center`}>
                       <p className="text-sm text-muted-foreground mb-3">
-                        请使用{paymentMethod === 'wechat' ? '微信' : '支付宝'}扫描下方收款码付款
+                        用手机扫描二维码进入充值页面
                       </p>
                       <div className="inline-block p-3 bg-white rounded-lg">
                         <img
-                          src={orderInfo.qrUrl}
-                          alt="收款码"
+                          src={qrDataUrl}
+                          alt="充值二维码"
                           className="w-48 h-48 object-contain"
                         />
                       </div>
-                      {orderInfo.note && (
-                        <p className="text-xs text-muted-foreground mt-3">{orderInfo.note}</p>
-                      )}
+                      <p className="text-xs text-muted-foreground mt-3">
+                        扫码后将打开无界AI充值页面，显示实际付款金额
+                      </p>
+                    </div>
+                  )}
+
+                  {!qrDataUrl && orderInfo.orderId && (
+                    <div className={`${cardBg} p-4 text-center`}>
+                      <div className="w-12 h-12 border-2 border-primary/30 border-t-primary rounded-full animate-spin mx-auto mb-3" />
+                      <p className="text-sm text-muted-foreground">正在生成二维码...</p>
                     </div>
                   )}
 
@@ -371,7 +401,7 @@ export default function UserCreditsTab({
                       disabled={confirming}
                       className="w-full py-3 rounded-lg font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
                     >
-                      {confirming ? '处理中...' : '我已完成付款'}
+                      {confirming ? '处理中...' : '我已完成付款（在此页面确认）'}
                     </button>
                     <button
                       onClick={handleQueryOrder}
@@ -453,6 +483,24 @@ export default function UserCreditsTab({
                         收款码暂未配置，请联系管理员
                       </div>
                     )}
+                  </div>
+
+                  {/* 充值流程说明 */}
+                  <div className={`${cardBg} p-3`}>
+                    <p className="text-xs text-muted-foreground mb-2 font-medium">充值流程</p>
+                    <div className="flex items-center gap-1 text-[10px] text-muted-foreground/70">
+                      <span className="bg-primary/10 text-primary px-1.5 py-0.5 rounded">1</span>
+                      <span>选择套餐</span>
+                      <span className="mx-1">→</span>
+                      <span className="bg-primary/10 text-primary px-1.5 py-0.5 rounded">2</span>
+                      <span>扫码进入充值页</span>
+                      <span className="mx-1">→</span>
+                      <span className="bg-primary/10 text-primary px-1.5 py-0.5 rounded">3</span>
+                      <span>付款并确认</span>
+                      <span className="mx-1">→</span>
+                      <span className="bg-green-500/10 text-green-500 px-1.5 py-0.5 rounded">✓</span>
+                      <span>积分到账</span>
+                    </div>
                   </div>
 
                   {/* 订单预览 */}
