@@ -49,12 +49,15 @@ export async function GET(request: NextRequest) {
       totalUsers: stats.totalUsers,
       weekActive: stats.weekActive,
       totalCredits: stats.totalCredits,
+      creditsRecharged: stats.creditsRecharged || 0,
+      creditsConsumed: stats.creditsConsumed || 0,
+      todayGenerations: stats.todayGenerations || 0,
       totalApiCalls: stats.totalApiCalls || 0,
       userTrend: stats.userTrend || [],
       creditTrend: stats.creditTrend || [],
-      modelRank: modelRank.length > 0 ? modelRank.slice(0, 10) : [],
-      providerStatus,
-      alerts,
+      modelRank: stats.modelRank && stats.modelRank.length > 0 ? stats.modelRank.slice(0, 10) : modelRank.slice(0, 10),
+      providerStatus: stats.providerStatus && stats.providerStatus.length > 0 ? stats.providerStatus : providerStatus,
+      alerts: stats.alerts && stats.alerts.length > 0 ? stats.alerts : alerts,
       recentUsers: stats.recentUsers || [],
     });
   } catch (error) {

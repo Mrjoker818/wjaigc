@@ -1491,6 +1491,16 @@ export async function dbGetDashboardStats(periodDays = 7) {
       alerts.push({ type: 'no_usage', severity: 'info', items: [{ name: '模型使用', value: `近${periodDays}天无模型调用记录` }] });
     }
 
+    const creditsRecharged = Number((creditsRes.rows as { recharged: number }[])[0]?.recharged || 0);
+    const creditsConsumed = Number((creditsRes.rows as { consumed: number }[])[0]?.consumed || 0);
+
+    // Today's generations count (credit transactions with negative amount in last 24h)
+    const todayGenRes = await execSql(
+      `SELECT COUNT(*) as count FROM wujie_credit_transactions WHERE created_at >= $1 AND amount < 0`,
+      [todayStart]
+    );
+    const todayGenerations = (todayGenRes.rows as { count: number }[])[0]?.count || 0;
+
     // Total credits balance
     const creditsBalanceRes = await execSql(
       'SELECT COALESCE(SUM(balance), 0) as total FROM wujie_credits'
@@ -1501,6 +1511,9 @@ export async function dbGetDashboardStats(periodDays = 7) {
       totalUsers: (usersRes.rows as { count: number }[])[0]?.count || 0,
       weekActive: (activeWeekRes.rows as { count: number }[])[0]?.count || 0,
       totalCredits,
+      creditsRecharged,
+      creditsConsumed,
+      todayGenerations,
       totalApiCalls,
       userTrend,
       creditTrend,

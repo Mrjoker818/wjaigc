@@ -39,10 +39,16 @@ export default function UserCreditsTab({
       const res = await fetch('/api/credits');
       const data = await res.json();
       if (data.success) {
-        setBalance(data.balance || 0);
-        setTotalEarned(data.totalEarned || 0);
-        setTotalSpent(data.totalSpent || 0);
-        setTransactions(data.transactions || []);
+        const c = data.credits || {};
+        setBalance(c.balance || 0);
+        setTotalEarned(c.totalRecharged || 0);
+        setTotalSpent(c.totalUsed || 0);
+        // transactions from API
+        const txRes = await fetch('/api/credits?action=transactions');
+        const txData = await txRes.json();
+        if (txData.success) {
+          setTransactions(txData.transactions || []);
+        }
       }
     } catch (err) {
       console.error('Failed to load credits:', err);

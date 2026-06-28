@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo, useCallback, useEffect } from 'react';
+import { toast } from 'sonner';
 import AdminTabs from './admin-tabs';
 import DataManagerTab from './data-manager-tab';
 import UserSettingsTab from './user-settings-tab';
@@ -81,6 +82,7 @@ interface DashboardViewProps {
   onNewProject: () => void;
   onLogout?: () => void;
   isMonochrome?: boolean;
+  onSetIsMonochrome?: (value: boolean) => void;
   onSetFavoriteParams?: (params: { prompt: string; model?: string; aspectRatio?: string; quality?: string; negativePrompt?: string }) => void;
 }
 
@@ -90,7 +92,7 @@ interface PromptEntry {
   projectName: string;
 }
 
-export default function DashboardView({ user, onOpenProject, onNewProject, onLogout, isMonochrome, onSetFavoriteParams }: DashboardViewProps) {
+export default function DashboardView({ user, onOpenProject, onNewProject, onLogout, isMonochrome, onSetIsMonochrome, onSetFavoriteParams }: DashboardViewProps) {
   const isAdmin = user.role === 'admin';
 
   // ─── Navigation state ───
@@ -1910,13 +1912,13 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
           <UserSettingsTab
             isDark={!isMonochrome}
             isMonochrome={!!isMonochrome}
-            onToggleTheme={(theme) => {
-              // Theme is controlled by the parent, this is just a UI callback
-              console.log('Theme toggle requested:', theme);
+            onToggleTheme={(_theme) => {
+              // Theme toggle resets monochrome mode
+              if (onSetIsMonochrome) onSetIsMonochrome(false);
             }}
             userName={user?.name || ''}
             userRole={user?.role || 'user'}
-            onToast={(msg) => console.log('[Settings]', msg)}
+            onToast={(msg) => toast.success(msg)}
           />
         )}
 
@@ -1924,7 +1926,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
           <UserCreditsTab
             userId={user.id}
             isDark={!isMonochrome}
-            onToast={(msg) => console.log('[Credits]', msg)}
+            onToast={(msg) => toast.success(msg)}
           />
         )}
 

@@ -532,16 +532,48 @@ export default function ModelViewer3D({
 
   /* Block context menu and prevent scroll/keyboard events from reaching canvas */
   useEffect(() => {
-    const blockContextMenu = (e: MouseEvent) => e.preventDefault();
+    const container = canvasRef.current;
+    if (!container) return;
+
+    const blockContextMenu = (e: Event) => { e.preventDefault(); e.stopPropagation(); };
     const blockWheel = (e: WheelEvent) => { e.stopPropagation(); };
-    const blockKeyDown = (e: KeyboardEvent) => { e.stopPropagation(); };
-    document.addEventListener('contextmenu', blockContextMenu, true);
-    document.addEventListener('wheel', blockWheel, true);
+    const blockKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') return; // Allow Escape to close viewer
+      e.stopPropagation();
+    };
+
+    // Apply to container div immediately
+    container.addEventListener('contextmenu', blockContextMenu, true);
+    container.addEventListener('wheel', blockWheel);
     document.addEventListener('keydown', blockKeyDown, true);
+
+    // Use MutationObserver to find the Three.js canvas once it's created
+    const observer = new MutationObserver(() => {
+      const threeCanvas = container.querySelector('canvas');
+      if (threeCanvas) {
+        threeCanvas.addEventListener('contextmenu', blockContextMenu, true);
+        observer.disconnect(); // No need to observe once we found the canvas
+      }
+    });
+    observer.observe(container, { childList: true, subtree: true });
+
+    // Also try immediately in case the canvas already exists
+    const existingCanvas = container.querySelector('canvas');
+    if (existingCanvas) {
+      existingCanvas.addEventListener('contextmenu', blockContextMenu, true);
+      observer.disconnect();
+    }
+
     return () => {
-      document.removeEventListener('contextmenu', blockContextMenu, true);
-      document.removeEventListener('wheel', blockWheel, true);
+      observer.disconnect();
+      container.removeEventListener('contextmenu', blockContextMenu, true);
+      container.removeEventListener('wheel', blockWheel);
       document.removeEventListener('keydown', blockKeyDown, true);
+      // Clean up canvas listeners
+      const threeCanvas = container.querySelector('canvas');
+      if (threeCanvas) {
+        threeCanvas.removeEventListener('contextmenu', blockContextMenu, true);
+      }
     };
   }, []);
 
@@ -661,21 +693,13 @@ export default function ModelViewer3D({
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
-      onPointerDown={(e) => { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation(); }}
-      onPointerMove={(e) => { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation(); }}
-      onPointerUp={(e) => { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation(); }}
-      onWheel={(e) => { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation(); }}
-      onMouseDown={(e) => { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation(); }}
-      onMouseMove={(e) => { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation(); }}
-      onMouseUp={(e) => { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation(); }}
+      onWheel={(e) => { e.stopPropagation(); }}
       onKeyDown={(e) => { e.stopPropagation(); }}
       onKeyUp={(e) => { e.stopPropagation(); }}
       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
     >
       <div
         className="relative w-[92vw] max-w-[1200px] h-[85vh] max-h-[800px] rounded-2xl border border-[#2a2a2a]/80 bg-gradient-to-b from-[#141414] to-[#0a0a0a] overflow-hidden flex flex-col shadow-2xl shadow-black/50"
-        onPointerDown={(e) => e.stopPropagation()}
-        onPointerMove={(e) => e.stopPropagation()}
         onWheel={(e) => e.stopPropagation()}
         onContextMenu={(e) => e.preventDefault()}
       >
@@ -939,7 +963,7 @@ export default function ModelViewer3D({
           )}
 
           {/* 3D Canvas */}
-          <div className="flex-1 relative" ref={canvasRef} onContextMenu={(e) => e.preventDefault()}>
+          <div className="flex-1 relative" ref={canvasRef}>
             {loadError ? (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-[#0d0d0d]">
                 <div className="w-16 h-16 rounded-2xl bg-[#d4af37]/10 flex items-center justify-center">
@@ -999,17 +1023,18 @@ export default function ModelViewer3D({
                     ref={orbitRef}
                     makeDefault
                     enableDamping
-                    dampingFactor={0.15}
-                    rotateSpeed={0.8}
-                    zoomSpeed={1.2}
+                    dampingFactor={0.08}
+                    rotateSpeed={0.6}
+                    panSpeed={0.5}
+                    zoomSpeed={0.8}
                     minDistance={0.5}
                     maxDistance={50}
-                    enablePan={viewMode === 'pan'}
+                    enablePan={true}
                     target={[0, 0, 0]}
                     mouseButtons={{
                       LEFT: viewMode === 'pan' ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE,
                       MIDDLE: THREE.MOUSE.DOLLY,
-                      RIGHT: viewMode === 'orbit' ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE,
+                      RIGHT: viewMode === 'pan' ? THREE.MOUSE.ROTATE : THREE.MOUSE.PAN,
                     }}
                   />
                 </Canvas>

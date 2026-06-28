@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
-  Users, TrendingUp, Wallet, ShieldCheck, Activity, BarChart3,
+  Users, TrendingUp, Wallet, ShieldCheck, Activity, BarChart3, CreditCard,
   Settings2, Search, RefreshCw, Plus, ChevronRight, ChevronDown,
   ChevronLeft, AlertTriangle, Eye, EyeOff, RotateCcw, Save,
   X, Check, Ban, MoreHorizontal, UserPlus, ArrowUpDown, Filter,
@@ -169,6 +169,7 @@ export default function AdminTabs(props: AdminTabsProps) {
   /* ── Overview state ── */
   const [overviewData, setOverviewData] = useState<{
     totalUsers: number; weekActive: number; totalCredits: number; totalApiCalls: number;
+    creditsRecharged: number; creditsConsumed: number; todayGenerations: number;
     userTrend: { date: string; count: number }[];
     creditTrend: { date: string; income: number; expense: number }[];
     modelRank: { name: string; calls: number; successRate: number }[];
@@ -193,7 +194,7 @@ export default function AdminTabs(props: AdminTabsProps) {
   const [creditsOverview, setCreditsOverview] = useState<{
     totalBalance: number; totalRecharged: number; totalConsumed: number; totalUsers: number; avgPerUser: number;
     distribution: { label: string; value: number; color: string; pct: string }[];
-    topUsers: { name: string; consumed: number; pct: string }[];
+    topUsers: { name: string; consumed: number; totalConsumed: number; balance: number; totalRecharged: number; pct?: string }[];
     recentTransactions: { id: string; user: string; type: string; amount: number; desc: string; time: string }[];
   } | null>(null);
   const [rechargeUserId, setRechargeUserId] = useState<string | null>(null);
@@ -344,9 +345,9 @@ export default function AdminTabs(props: AdminTabsProps) {
         {/* 1. 统计卡片 — 匹配原型: 总用户/总积分充值/总积分消耗/今日生成 */}
         <div className="grid grid-cols-4 gap-4">
           <StatCard icon={Users} label="总用户" value={s ? formatNumber(s.totalUsers) : '-'} sub={s ? `周活 ${formatNumber(s.weekActive)}` : ''} colorClass="text-primary" iconBg="bg-primary/15" />
-          <StatCard icon={Wallet} label="总积分充值" value={s ? formatNumber(s.totalCredits) : '-'} sub="全平台累计" colorClass="text-yellow-500" iconBg="bg-yellow-500/15" />
-          <StatCard icon={CreditCard} label="总积分消耗" value={s ? formatNumber(s.totalApiCalls) : '-'} sub={`近${overviewPeriod}日消耗`} colorClass="text-red-400" iconBg="bg-red-400/15" />
-          <StatCard icon={Activity} label="今日生成" value={s ? formatNumber(s.totalApiCalls) : '-'} sub="图片+视频+3D" colorClass="text-green-500" iconBg="bg-green-500/15" />
+          <StatCard icon={Wallet} label="总积分充值" value={s ? formatNumber(s.creditsRecharged ?? s.totalCredits) : '-'} sub="全平台累计" colorClass="text-yellow-500" iconBg="bg-yellow-500/15" />
+          <StatCard icon={CreditCard} label="总积分消耗" value={s ? formatNumber(s.creditsConsumed ?? 0) : '-'} sub="全平台累计" colorClass="text-red-400" iconBg="bg-red-400/15" />
+          <StatCard icon={Activity} label="今日生成" value={s ? formatNumber(s.todayGenerations ?? 0) : '-'} sub="图片+视频+3D" colorClass="text-green-500" iconBg="bg-green-500/15" />
         </div>
 
         {/* 2. 趋势图区 */}
@@ -782,16 +783,18 @@ export default function AdminTabs(props: AdminTabsProps) {
 
   /* ── Render: Credits Tab ── */
   if (activeTab === 'credits') {
+    // Get users with real credit data from the credits overview API
     const co = creditsOverview;
     const creditTabs = ['user-credits', 'consumption', 'statistics', 'packages'];
     const creditTabLabels: Record<string, string> = { 'user-credits': '用户积分', consumption: '消耗明细', statistics: '统计分析', packages: '套餐管理' };
-    // Filter users by search (inline computation, not useMemo to avoid conditional hooks)
-    const creditFilteredUsers = (() => {
-      let users = [...adminUsers];
-      if (creditSearch) { const q = creditSearch.toLowerCase(); users = users.filter(u => u.name.toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q)); }
-      if (creditSort === 'balance') users.sort((a, b) => (b.credits || 0) - (a.credits || 0));
-      else if (creditSort === 'recharge') users.sort((a, b) => ((b as any).totalRecharged || 0) - ((a as any).totalRecharged || 0));
-      else if (creditSort === 'consume') users.sort((a, b) => ((b as any).totalConsumed || 0) - ((a as any).totalConsumed || 0));
+    // Use credit overview topUsers (real data from DB) filtered by search
+    const creditUsers = (() => {
+      let users = co?.topUsers ? [...co.topUsers] : [];
+      if (creditSearch) { const q = creditSearch.toLowerCase(); users = users.filter(u => u.name.toLowerCase().includes(q)); }
+      if (creditSort === 'balance') users.sort((a, b) => b.balance - a.balance);
+      else if (creditSort === 'recharge') users.sort((a, b) => b.totalRecharged - a.totalRecharged);
+      else if (creditSort === 'consume') users.sort((a, b) => b.consumed - a.consumed);
+      else users.sort((a, b) => b.consumed - a.consumed); // default by consumed desc
       return users;
     })();
 
@@ -842,7 +845,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                 </div>
               </div>
               <div className="text-xs text-muted-foreground">
-                共 <span className="text-foreground font-medium font-mono">{creditFilteredUsers.length}</span> 用户
+                共 <span className="text-foreground font-medium font-mono">{creditUsers.length}</span> 用户
               </div>
             </div>
             <div className="bg-card rounded-lg shadow-card overflow-hidden border border-border/50">
@@ -850,29 +853,28 @@ export default function AdminTabs(props: AdminTabsProps) {
                 <span>用户名</span><span>当前余额</span><span>累计充值</span><span>累计消耗</span><span className="text-right">操作</span>
               </div>
               <div className="divide-y divide-border/30">
-                {creditFilteredUsers.slice(0, 20).map(u => (
-                  <div key={u.id} className="grid grid-cols-5 px-5 py-3.5 hover:bg-muted/30 transition-colors items-center">
+                {creditUsers.slice(0, 20).map((u, i) => (
+                  <div key={i} className="grid grid-cols-5 px-5 py-3.5 hover:bg-muted/30 transition-colors items-center">
                     <div className="flex items-center gap-2.5">
                       <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center text-xs font-bold text-primary">{u.name.charAt(0).toUpperCase()}</div>
                       <div>
                         <div className="text-sm font-medium text-foreground">{u.name}</div>
-                        <div className="text-xs text-muted-foreground">{getUserEmail(u) || '-'}</div>
                       </div>
                     </div>
-                    <span className="text-sm font-bold text-primary font-mono">{getUserCredits(u).toLocaleString()}</span>
-                    <span className="text-sm text-foreground font-mono">{((u as any).totalRecharged || 0).toLocaleString()}</span>
-                    <span className="text-sm text-muted-foreground font-mono">{((u as any).totalConsumed || 0).toLocaleString()}</span>
+                    <span className="text-sm font-bold text-primary font-mono">{u.balance.toLocaleString()}</span>
+                    <span className="text-sm text-foreground font-mono">{u.totalRecharged.toLocaleString()}</span>
+                    <span className="text-sm text-muted-foreground font-mono">{u.consumed.toLocaleString()}</span>
                     <div className="flex justify-end">
-                      <button onClick={() => { setRechargeUserId(u.id); setRechargeAmount(100); setShowRechargeModal(true); }} className="bg-primary/10 text-primary px-3 py-1.5 rounded-md text-xs font-medium hover:bg-primary/20 active:scale-[0.98] transition-all">充值</button>
+                      <button onClick={() => { setRechargeUserId((u as any).userId || u.name); setRechargeAmount(100); setShowRechargeModal(true); }} className="bg-primary/10 text-primary px-3 py-1.5 rounded-md text-xs font-medium hover:bg-primary/20 active:scale-[0.98] transition-all">充值</button>
                     </div>
                   </div>
                 ))}
-                {creditFilteredUsers.length === 0 && <div className="py-8 text-center text-sm text-muted-foreground">暂无用户积分数据</div>}
+                {creditUsers.length === 0 && <div className="py-8 text-center text-sm text-muted-foreground">暂无用户积分数据</div>}
               </div>
               {/* 分页 */}
-              {creditFilteredUsers.length > 20 && (
+              {creditUsers.length > 20 && (
                 <div className="flex items-center justify-between px-5 py-3 border-t border-border/20">
-                  <span className="text-xs text-muted-foreground">显示 1-{Math.min(20, creditFilteredUsers.length)} / 共 {creditFilteredUsers.length} 条</span>
+                  <span className="text-xs text-muted-foreground">显示 1-{Math.min(20, creditUsers.length)} / 共 {creditUsers.length} 条</span>
                 </div>
               )}
             </div>
@@ -937,7 +939,7 @@ export default function AdminTabs(props: AdminTabsProps) {
             <div className="bg-card rounded-lg shadow-card p-5 border border-border/50">
               <h2 className="text-base font-semibold text-foreground mb-4">消耗排行 Top 10</h2>
               <div className="space-y-2.5">
-                {(co?.topUsers || adminUsers.sort((a, b) => ((b as any).totalConsumed || 0) - ((a as any).totalConsumed || 0)).slice(0, 10)).map((u, i) => (
+                {(co?.topUsers || []).map((u, i) => (
                   <div key={i} className="flex items-center gap-3">
                     <span className={`w-5 text-xs font-bold text-right ${i < 3 ? 'text-primary' : 'text-muted-foreground'}`}>{i + 1}</span>
                     <div className="flex-1 min-w-0">
