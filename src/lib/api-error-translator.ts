@@ -214,21 +214,24 @@ export function translateApiError(
     };
   }
 
-  // ── 6. 模型不存在 ──
+  // ── 6. 模型不存在 / 渠道不可用 ──
   if (
     lower.includes('model_not_found') ||
     lower.includes('model not found') ||
     lower.includes('does not exist') && lower.includes('model') ||
-    lower.includes('no such model')
+    lower.includes('no such model') ||
+    lower.includes('no available compatible account') ||
+    (lower.includes('is not supported on') && lower.includes('use '))
   ) {
     return {
       category: 'model_not_found',
       title: '模型不可用',
-      description: '当前 API 提供商不支持所选模型，或 Key 没有该模型的权限。',
+      description: '当前 API 提供商不支持所选模型，或该模型渠道暂时不可用。',
       suggestions: [
         '在管理员后台检查图像模型 ID 是否正确',
         '确认 Key 所在分组拥有此模型权限',
         '切换到其他可用的模型',
+        '如果是渠道暂时不可用，请稍后重试',
       ],
       isRetryable: false,
       originalMessage: raw,

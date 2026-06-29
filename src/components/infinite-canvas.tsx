@@ -1038,13 +1038,14 @@ export function InfiniteCanvas({
     const map = new Map<string, string>();
     for (const m of canvasGenModels) {
       if (m.providerName) {
-        map.set(m.id, m.providerName);
-        // 也映射 compositeKey（providerId::modelId 格式）
+        // 复合键映射（providerId::modelId）始终写入，保证精确匹配
         if (m.providerId) {
           map.set(`${m.providerId}::${m.id}`, m.providerName);
           // 也映射纯 providerId → providerName（某些图片的 apiProvider 存的是 providerId）
           if (!map.has(m.providerId)) map.set(m.providerId, m.providerName);
         }
+        // 纯 modelId 映射仅首次写入，避免多提供商同名模型时后者覆盖前者
+        if (!map.has(m.id)) map.set(m.id, m.providerName);
       }
     }
     return map;
@@ -5312,7 +5313,7 @@ export function InfiniteCanvas({
 
       const taskIds: string[] = data.taskIds || (data.taskId ? [data.taskId] : []);
       // 使用服务端实际使用的模型（可能因自动切换而与请求模型不同）
-      const actualGenModel = data.model || (canvasGenModel?.includes('::') ? canvasGenModel.split('::')[0] : canvasGenModel) || undefined;
+      const actualGenModel = data.model || (canvasGenModel?.includes('::') ? canvasGenModel.split('::').pop()! : canvasGenModel) || undefined;
 
       if (taskIds.length === 0) {
         throw new Error('未获取到任务ID');
@@ -5389,10 +5390,10 @@ export function InfiniteCanvas({
                 isProcessingPlaceholder: false as const,
                 processing: undefined as string | undefined,
                 prompt: canvasGenPrompt,
-                model: canvasGenModel,
+                model: canvasGenPureModel || (canvasGenModel?.includes('::') ? canvasGenModel.split('::').pop()! : canvasGenModel),
                 quality: canvasGenQuality,
                 aspectRatio: canvasGenAspectRatio,
-                modelName: lastPollData?.modelName || canvasGenModel,
+                modelName: lastPollData?.modelName || canvasGenPureModel || canvasGenModel,
                 apiProvider: lastPollData?.providerName || '',
               } as CanvasImage;
             }
@@ -5412,10 +5413,10 @@ export function InfiniteCanvas({
             width: canvasGenFrameWidth,
             height: canvasGenFrameHeight,
             prompt: canvasGenPrompt,
-            model: canvasGenModel,
+            model: canvasGenPureModel || (canvasGenModel?.includes('::') ? canvasGenModel.split('::').pop()! : canvasGenModel),
             quality: canvasGenQuality,
             aspectRatio: canvasGenAspectRatio,
-            modelName: lastPollData?.modelName || canvasGenModel,
+            modelName: lastPollData?.modelName || canvasGenPureModel || canvasGenModel,
             apiProvider: lastPollData?.providerName || '',
           } as CanvasImage));
           onImagesChange([...imagesRef.current, ...additionalImages]);
@@ -8729,7 +8730,32 @@ export function InfiniteCanvas({
                   const rawApiProvider = is3DImage
                     ? ((image as any).threeDModelInfo?.providerName || image.apiProvider || '')
                     : (image.apiProvider || '');
-                  const displayApiProvider = (rawApiProvider && modelProviderMap.has(rawApiProvider)) ? (modelProviderMap.get(rawApiProvider) || rawApiProvider) : (rawApiProvider || modelProviderMap.get(image.model || '') || modelProviderMap.get(image.modelName || '') || '');
+                  const displayApiProvider = (() => {
+                    // 1. 优先使用 apiProvider 直接值（后端返回的提供商名称）
+                    if (rawApiProvider) {
+                      // 如果 apiProvider 本身是 providerId（如 api_xxx），尝试从 map 查找友好名称
+                      const mapped = modelProviderMap.get(rawApiProvider);
+                      return mapped || rawApiProvider;
+                    }
+                    // 2. 如果图片有 modelName，尝试匹配复合键
+                    const imgModel = image.model || '';
+                    const imgModelName = image.modelName || '';
+                    if (imgModel) {
+                      // 遍历所有已知的复合键，查找 modelId 匹配的
+                      for (const [key, name] of modelProviderMap.entries()) {
+                        if (key.includes('::') && key.endsWith(`::${imgModel}`)) return name;
+                      }
+                      // 回退到纯 modelId 映射
+                      const pureModelMatch = modelProviderMap.get(imgModel);
+                      if (pureModelMatch) return pureModelMatch;
+                    }
+                    // 3. 最后尝试 modelName 映射
+                    if (imgModelName) {
+                      const nameMatch = modelProviderMap.get(imgModelName);
+                      if (nameMatch) return nameMatch;
+                    }
+                    return '';
+                  })();
                   return (displayModelName || displayApiProvider) && !image.isProcessingPlaceholder ? (
                   <div className="absolute bottom-1 left-1 z-20 pointer-events-none flex flex-col gap-0.5"
                     style={{ fontSize: `${Math.max(8, 9 / zoom)}px` }}>

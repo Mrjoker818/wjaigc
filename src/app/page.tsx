@@ -2512,12 +2512,26 @@ function CanvasApp() {
       
       const fullPrompt = params.prompt + qualityPrompt;
       
+      // ★ 获取当前选择的模型和提供商
+      const currentModelRaw = typeof window !== 'undefined' ? localStorage.getItem('wujie_selected_model') : null;
+      let fusionModel: string | undefined;
+      let fusionProviderId: string | undefined;
+      if (currentModelRaw) {
+        try {
+          const wsm = JSON.parse(currentModelRaw);
+          fusionModel = wsm.model;
+          fusionProviderId = wsm.providerId;
+        } catch {}
+      }
+
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: fullPrompt,
           size,
+          model: fusionModel,
+          providerId: fusionProviderId,
           referenceImages: params.referenceImages,
           referenceMode: 'blend',
           imageCategory: 'general',
@@ -3680,10 +3694,23 @@ function CanvasApp() {
           onClose={() => setShowFavorites(false)}
           isMonochrome={themeStyle === 'monochrome'}
           onApplyParams={(item) => {
+            // ★ 修复：尝试为收藏夹中的纯 modelId 构建 providerId::modelId 复合键
+            let favModel = item.model || '';
+            if (favModel && !favModel.includes('::')) {
+              try {
+                const wsmStr = localStorage.getItem('wujie_selected_model');
+                if (wsmStr) {
+                  const wsm = JSON.parse(wsmStr);
+                  if (wsm.providerId && wsm.model === favModel) {
+                    favModel = `${wsm.providerId}::${favModel}`;
+                  }
+                }
+              } catch {}
+            }
             setFavoriteParams({
               prompt: item.prompt || '',
               negativePrompt: item.negativePrompt || '',
-              model: item.model || '',
+              model: favModel,
               aspectRatio: item.aspectRatio || '',
               quality: item.quality || '',
             });
@@ -3738,9 +3765,37 @@ function CanvasApp() {
           setShowProjectData(false);
         }}
         onMakeSame={(img) => {
+          // ★ 修复：构建包含 providerId 的复合键，避免多提供商同名模型选错
+          // img.apiProvider 存的是提供商名称，需要反查 providerId
+          let modelValue = img.model || '';
+          if (img.model && img.apiProvider && !img.model.includes('::')) {
+            // 尝试从画布模型列表反查 providerId
+            const canvasModelsStr = localStorage.getItem('wujie_canvas_gen_models');
+            if (canvasModelsStr) {
+              try {
+                const canvasModels = JSON.parse(canvasModelsStr);
+                const match = canvasModels.find((m: any) => m.id === img.model && m.providerName === img.apiProvider);
+                if (match?.providerId) {
+                  modelValue = `${match.providerId}::${img.model}`;
+                }
+              } catch {}
+            }
+            // 如果反查失败，尝试从 wujie_selected_model 读取
+            if (!modelValue.includes('::')) {
+              try {
+                const wsmStr = localStorage.getItem('wujie_selected_model');
+                if (wsmStr) {
+                  const wsm = JSON.parse(wsmStr);
+                  if (wsm.providerId && wsm.model === img.model) {
+                    modelValue = `${wsm.providerId}::${img.model}`;
+                  }
+                }
+              } catch {}
+            }
+          }
           setFavoriteParams({
             prompt: img.prompt || '',
-            model: img.model,
+            model: modelValue,
             aspectRatio: img.aspectRatio,
             quality: img.quality,
             negativePrompt: img.negativePrompt,

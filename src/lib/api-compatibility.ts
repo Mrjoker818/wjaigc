@@ -483,6 +483,20 @@ export function parseGeminiChatImageResponse(
           imageUrls.push(base64Match[0]);
         }
 
+        // FHL and similar proxies return image as markdown link: ![alt](https://...)
+        const markdownImageMatch = content.match(/!\[.*?\]\((https?:\/\/[^\s)]+)\)/);
+        if (!base64Match && markdownImageMatch && markdownImageMatch[1]) {
+          imageUrls.push(markdownImageMatch[1]);
+        }
+
+        // Also check for bare HTTP image URLs in content (some proxies)
+        if (!base64Match && !markdownImageMatch) {
+          const httpImageMatch = content.match(/(https?:\/\/[^\s"'<>]+\.(?:png|jpg|jpeg|webp|gif)(?:\?[^\s"'<>]*)?)/i);
+          if (httpImageMatch && httpImageMatch[1]) {
+            imageUrls.push(httpImageMatch[1]);
+          }
+        }
+
         // Some providers return the raw base64 in content
         // Be more careful: require content to be mostly non-text (no common words/punctuation)
         if (!base64Match && content.length > 1000 && /^[A-Za-z0-9+/=\s]+$/.test(content.substring(0, 100))) {
@@ -684,7 +698,7 @@ export async function persistResultImage(imageUrl: string): Promise<string> {
 export function isChannelUnavailableError(error: string | unknown): boolean {
   const msg = typeof error === 'string' ? error : error instanceof Error ? error.message : String(error);
   // 精确匹配渠道/路由级错误，不匹配通用的超时/中断（这些可能是临时网络问题，不需要触发全量 failover）
-  return /failover|渠道不可用|no available channel|channel not found|get_channel_failed|model_not_found|not configured|bad_response_status|暂不可用/i.test(msg);
+  return /failover|渠道不可用|no available channel|channel not found|get_channel_failed|model_not_found|not configured|bad_response_status|暂不可用|no available compatible account/i.test(msg);
 }
 
 /**

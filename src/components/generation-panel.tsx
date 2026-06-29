@@ -305,8 +305,28 @@ export function GenerationPanel(
         if (applyFavoriteParams) {
             if (applyFavoriteParams.prompt) setPrompt(applyFavoriteParams.prompt);
             if (applyFavoriteParams.model) {
-                setModel(applyFavoriteParams.model);
-                onModelChange?.(applyFavoriteParams.model);
+                // ★ 修复：当传入纯 modelId 时，尝试解析为复合键（providerId::modelId）
+                let resolvedModel = applyFavoriteParams.model;
+                if (!resolvedModel.includes('::')) {
+                  // 从 discoveredModels 查找匹配的复合键
+                  const matched = discoveredModels.find(m => m.id === resolvedModel);
+                  if (matched?.providerId) {
+                    resolvedModel = `${matched.providerId}::${matched.id}`;
+                  } else {
+                    // 从 localStorage 读取当前选择的提供商
+                    try {
+                      const wsmStr = localStorage.getItem('wujie_selected_model');
+                      if (wsmStr) {
+                        const wsm = JSON.parse(wsmStr);
+                        if (wsm.providerId && wsm.model === resolvedModel) {
+                          resolvedModel = `${wsm.providerId}::${wsm.model}`;
+                        }
+                      }
+                    } catch {}
+                  }
+                }
+                setModel(resolvedModel);
+                onModelChange?.(resolvedModel.includes('::') ? resolvedModel.split('::').pop()! : resolvedModel);
             }
             if (applyFavoriteParams.aspectRatio) setAspectRatio(applyFavoriteParams.aspectRatio);
             if (applyFavoriteParams.quality) setQuality(applyFavoriteParams.quality);
@@ -499,7 +519,29 @@ export function GenerationPanel(
         
         // 从复合键 providerId::modelId 中拆解出纯 modelId 和 providerId
         const pureModelId = model.includes('::') ? model.split('::').pop()! : model;
-        const compositeProviderId = model.includes('::') ? model.split('::')[0] : undefined;
+        let compositeProviderId = model.includes('::') ? model.split('::')[0] : undefined;
+        
+        // ★ 修复：当 model 不含 :: 时（如 applyFavoriteParams 传入的纯 modelId），
+        // 尝试从 localStorage 或 discoveredModels 回填 providerId，避免多提供商同名模型选错
+        if (!compositeProviderId && pureModelId) {
+          // 1. 优先从 localStorage wujie_selected_model 读取
+          try {
+            const wsmStr = localStorage.getItem('wujie_selected_model');
+            if (wsmStr) {
+              const wsm = JSON.parse(wsmStr);
+              if (wsm.providerId && wsm.model === pureModelId) {
+                compositeProviderId = wsm.providerId;
+              }
+            }
+          } catch {}
+          // 2. 如果 localStorage 没有，从 discoveredModels 查找第一个匹配的提供商
+          if (!compositeProviderId) {
+            const matchedModel = discoveredModels.find(m => m.id === pureModelId);
+            if (matchedModel?.providerId) {
+              compositeProviderId = matchedModel.providerId;
+            }
+          }
+        }
         
         // ★ 调试日志：确认前端传递的 providerId
         console.log('[generation-panel] 提交生成请求:', { model, pureModelId, compositeProviderId, hasProviderId: !!compositeProviderId });

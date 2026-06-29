@@ -1156,65 +1156,90 @@ export async function POST(request: NextRequest) {
           } catch { /* ignore */ }
 
           // 5xx 服务器错误处理
-          if (resp.status >= 502 && resp.status <= 599) {
-            // 仅真正的渠道不可用错误标记为 retryable（会触发候选模型切换）
-            // 临时性的 502/503/504（网关超时、CDN 错误等）不应切换渠道，应让用户重试
+          // ★ 重要：对 5xx 错误先尝试 /chat/completions 兜底，再决定是否回退候选模型
+          // 某些 API 代理（如 FHL、AI link）仅通过 /chat/completions 支持 gpt-image-2 等模型，
+          // /images/generations 端点会返回 502/503，但 /chat/completions 能正常生图
+          if (resp.status >= 500 && resp.status !== 501) {
             const combinedForCheck = `${errorMsg} ${errorText}`;
             const isChannelError = isChannelUnavailableError(combinedForCheck);
+            // Cloudflare/CDN 纯 HTML 错误页（如 "error code: 502"）— 模型上游持续不可用
+            const isCloudflareDown = /error code:\s*50[23]/i.test(errorText.substring(0, 500));
+            // "No available compatible accounts" — 中转服务渠道完全不可用
+            const isNoCompatibleAccount = combinedForCheck.includes('no available compatible account') || combinedForCheck.includes('No available compatible');
+
+            const shouldTryChatFallback = isChannelError || isCloudflareDown || isNoCompatibleAccount || resp.status >= 502;
+
+            // ★ 先尝试 /chat/completions 兜底生图
+            if (shouldTryChatFallback) {
+              console.info(`[generate] ${resp.status} error detected (${isChannelError ? 'channel' : isCloudflareDown ? 'cloudflare' : isNoCompatibleAccount ? 'no-compatible-account' : '5xx'}), trying /chat/completions fallback for model "${currentModelConfig.modelId}"...`);
+              try {
+                const chatImageUrls = await tryChatCompletionsImageFallback({
+                  baseUrl: currentApiBaseUrl,
+                  apiKey: currentApiKey,
+                  model: currentModelConfig.modelId,
+                  prompt: enhancedPrompt,
+                  imageBase64: (adjustedBody.image as string) || undefined,
+                  imageUrls: (adjustedBody.image_urls as string[]) || undefined,
+                  size: adjustedBody.size as string | undefined,
+                  originalError: combinedForCheck,
+                  requestIdPrefix: 'generate',
+                  skipChannelCheck: true,
+                });
+                if (chatImageUrls && chatImageUrls.length > 0) {
+                  console.log('[generate] /chat/completions fallback succeeded, got', chatImageUrls.length, 'images');
+                  return {
+                    taskIds: [],
+                    directImageUrls: chatImageUrls,
+                    usedModel: currentModelConfig.modelId,
+                    usedProviderId: currentProviderId,
+                  };
+                }
+              } catch (chatErr) {
+                console.warn('[generate] /chat/completions fallback error:', chatErr);
+              }
+            }
+
+            // /chat/completions 兜底也失败 → 标记为可重试（触发候选模型回退）
+            const isRetryable = isChannelError || isCloudflareDown || isNoCompatibleAccount;
             const retryErr = new Error(
-              isChannelError
+              isRetryable
                 ? `当前模型渠道不可用，已尝试其他模型`
                 : `API 服务器错误 (${resp.status})，请稍后重试`
             );
-            (retryErr as Error & { retryable?: boolean }).retryable = isChannelError;
-            throw retryErr;
-          }
-
-          // 合并 errorMsg + errorText 做可重试检测，兼容各种 API 错误格式
-          const combinedErrorText = `${errorMsg} ${errorText}`;
-
-          // ★ 5xx 渠道不可用 → 先尝试 /chat/completions 兜底
-          // 某些 API 代理（如 AI link）仅通过 /chat/completions 支持 gpt-image-2 等模型
-          // /images/edits 和 /images/generations 端点均可能返回 500/502/503 "渠道不可用"
-          if (resp.status >= 500 && resp.status !== 501 && isChannelUnavailableError(combinedErrorText)) {
-            console.info('[generate] 500 channel error detected, trying /chat/completions fallback...');
-            try {
-              const chatImageUrls = await tryChatCompletionsImageFallback({
-                baseUrl: currentApiBaseUrl,
-                apiKey: currentApiKey,
-                model: currentModelConfig.modelId,
-                prompt: enhancedPrompt,
-                imageBase64: (adjustedBody.image as string) || undefined,
-                imageUrls: (adjustedBody.image_urls as string[]) || undefined,
-                size: adjustedBody.size as string | undefined,
-                originalError: combinedErrorText,
-                requestIdPrefix: 'generate',
-                skipChannelCheck: true,
-              });
-              if (chatImageUrls && chatImageUrls.length > 0) {
-                console.log('[generate] /chat/completions fallback succeeded, got', chatImageUrls.length, 'images');
-                return {
-                  taskIds: [],
-                  directImageUrls: chatImageUrls,
-                  usedModel: currentModelConfig.modelId,
-                  usedProviderId: currentProviderId,
-                };
-              }
-            } catch (chatErr) {
-              console.warn('[generate] /chat/completions fallback error:', chatErr);
-            }
-            // chat fallback also failed → mark as retryable for candidate model fallback
-            const retryErr = new Error(`当前模型暂不可用，请稍后重试或更换模型`);
-            (retryErr as Error & { retryable?: boolean }).retryable = true;
+            (retryErr as Error & { retryable?: boolean }).retryable = isRetryable;
             throw retryErr;
           }
 
           // 通用可重试错误检测 - 不针对特定提供商
+          const combinedErrorText = `${errorMsg} ${errorText}`;
           if (combinedErrorText.includes('ratio or price') || combinedErrorText.includes('not configured') || combinedErrorText.includes('model_not_found') || combinedErrorText.includes('model not found') || errorCode === 'model_not_found' || combinedErrorText.includes('No available channel') || combinedErrorText.includes('no available channel')) {
             const retryErr = new Error(`当前模型暂不可用，请稍后重试或更换模型`);
             (retryErr as Error & { retryable?: boolean }).retryable = true;
             throw retryErr;
           }
+          // ★ 模型名称建议自动重试：某些中转服务（如 FHL）拒绝带后缀的模型名（如 gpt-image-2-4k），
+          // 但错误信息中会建议使用正确的模型名（如 "Use gpt-image-2"），自动提取并重试
+          const modelSuggestionMatch = combinedErrorText.match(/use\s+([a-z][\w.-]*[a-z0-9])/i);
+          if (modelSuggestionMatch && modelSuggestionMatch[1] && modelSuggestionMatch[1] !== currentModelConfig.modelId) {
+            const suggestedModel = modelSuggestionMatch[1];
+            console.log(`[generate] Model "${currentModelConfig.modelId}" not supported, provider suggests "${suggestedModel}", auto-retrying...`);
+            try {
+              const suggestedConfig = { ...currentModelConfig, modelId: suggestedModel };
+              const result = await submitSingleTask(suggestedConfig, currentApiKey, currentApiBaseUrl, currentProviderId, 1, currentProvider);
+              return result; // success with suggested model name
+            } catch (suggestedErr) {
+              console.warn(`[generate] Retry with suggested model "${suggestedModel}" also failed:`, suggestedErr instanceof Error ? suggestedErr.message : suggestedErr);
+              // Fall through to other error handling
+            }
+          }
+
+          // "No available compatible accounts" - 中转服务的渠道完全不可用
+          if (combinedErrorText.includes('no available compatible account') || combinedErrorText.includes('No available compatible')) {
+            const retryErr = new Error(`当前模型渠道暂不可用，请稍后重试或更换模型`);
+            (retryErr as Error & { retryable?: boolean }).retryable = true;
+            throw retryErr;
+          }
+
           if (combinedErrorText.includes('Insufficient balance') || combinedErrorText.includes('insufficient') || combinedErrorText.includes('余额')) {
             throw new Error(`API 余额不足，请联系管理员充值`);
           }
