@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Play, Pause, Volume2, VolumeX, RotateCcw, Download, Sparkles, X, Film, Clock, Wand2 } from 'lucide-react';
+import { Play, Pause, Volume2, VolumeX, RotateCcw, Download, Sparkles, X, Film, Clock, Wand2, Loader2 } from 'lucide-react';
 
 interface VideoEditPanelProps {
   /** 是否打开 */
@@ -56,6 +56,8 @@ export function VideoEditPanel({
   const [extendDuration, setExtendDuration] = useState(5);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const isDark = themeStyle === 'gold';
 
@@ -73,8 +75,28 @@ export function VideoEditPanel({
       setExtendPrompt('');
       setActiveTab('edit');
       setIsPlaying(false);
+      setIsSubmitting(false);
+      setSubmitError(null);
     }
   }, [isOpen]);
+
+  // 同步 video 元素真实状态（防止外部控制/快捷键导致状态不一致）
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v || !isOpen) return;
+    const syncPlay = () => setIsPlaying(!v.paused);
+    const syncMute = () => setIsMuted(v.muted);
+    v.addEventListener('play', syncPlay);
+    v.addEventListener('pause', syncPlay);
+    v.addEventListener('ended', syncPlay);
+    v.addEventListener('volumechange', syncMute);
+    return () => {
+      v.removeEventListener('play', syncPlay);
+      v.removeEventListener('pause', syncPlay);
+      v.removeEventListener('ended', syncPlay);
+      v.removeEventListener('volumechange', syncMute);
+    };
+  }, [isOpen, videoUrl]);
 
   const togglePlay = () => {
     if (!videoRef.current) return;
@@ -93,25 +115,41 @@ export function VideoEditPanel({
     setIsMuted(!isMuted);
   };
 
-  const handleSubmitEdit = () => {
-    if (!editPrompt.trim()) return;
-    onEdit({
-      videoUrl,
-      prompt: editPrompt.trim(),
-      model: selectedVideoModel,
-      providerId: selectedVideoProviderId,
-    });
+  const handleSubmitEdit = async () => {
+    if (!editPrompt.trim() || isSubmitting) return;
+    setIsSubmitting(true);
+    setSubmitError(null);
+    try {
+      await onEdit({
+        videoUrl,
+        prompt: editPrompt.trim(),
+        model: selectedVideoModel,
+        providerId: selectedVideoProviderId,
+      });
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : '提交失败');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleSubmitExtend = () => {
-    if (!onExtend) return;
-    onExtend({
-      videoUrl,
-      prompt: extendPrompt.trim() || undefined,
-      duration: extendDuration,
-      model: selectedVideoModel,
-      providerId: selectedVideoProviderId,
-    });
+  const handleSubmitExtend = async () => {
+    if (!onExtend || isSubmitting) return;
+    setIsSubmitting(true);
+    setSubmitError(null);
+    try {
+      await onExtend({
+        videoUrl,
+        prompt: extendPrompt.trim() || undefined,
+        duration: extendDuration,
+        model: selectedVideoModel,
+        providerId: selectedVideoProviderId,
+      });
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : '提交失败');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   if (!isOpen) return null;
@@ -213,18 +251,24 @@ export function VideoEditPanel({
               </div>
             )}
 
+            {submitError && (
+              <div className="text-xs px-3 py-2 rounded-lg bg-red-500/10 text-red-400 border border-red-500/20">
+                {submitError}
+              </div>
+            )}
+
             <button
               onClick={handleSubmitEdit}
-              disabled={!editPrompt.trim()}
+              disabled={!editPrompt.trim() || isSubmitting}
               className={`w-full py-2.5 px-4 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all ${
-                editPrompt.trim()
+                editPrompt.trim() && !isSubmitting
                   ? isDark ? 'bg-gradient-to-r from-[#d4af37] to-[#b8941f] text-black hover:from-[#e5c249] hover:to-[#d4af37] shadow-md hover:shadow-lg active:shadow-sm'
                     : 'bg-gradient-to-r from-blue-500 to-blue-600 text-white hover:from-blue-600 hover:to-blue-700 shadow-md hover:shadow-lg active:shadow-sm'
                   : isDark ? 'bg-[#2a2a2a] text-gray-600 cursor-not-allowed' : 'bg-gray-200 text-gray-400 cursor-not-allowed'
               }`}
             >
-              <Sparkles className="w-4 h-4" />
-              应用编辑
+              {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+              {isSubmitting ? '提交中...' : '应用编辑'}
             </button>
           </div>
         )}
@@ -267,16 +311,26 @@ export function VideoEditPanel({
             </div>
 
             {onExtend && (
-              <button
-                onClick={handleSubmitExtend}
-                className={`w-full py-2.5 px-4 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all ${
-                  isDark ? 'bg-gradient-to-r from-[#d4af37] to-[#b8941f] text-black hover:from-[#e5c249] hover:to-[#d4af37] shadow-md hover:shadow-lg active:shadow-sm'
-                    : 'bg-gradient-to-r from-blue-500 to-blue-600 text-white hover:from-blue-600 hover:to-blue-700 shadow-md hover:shadow-lg active:shadow-sm'
-                }`}
-              >
-                <Clock className="w-4 h-4" />
-                延长视频
-              </button>
+              <>
+                {submitError && (
+                  <div className="text-xs px-3 py-2 rounded-lg bg-red-500/10 text-red-400 border border-red-500/20">
+                    {submitError}
+                  </div>
+                )}
+                <button
+                  onClick={handleSubmitExtend}
+                  disabled={isSubmitting}
+                  className={`w-full py-2.5 px-4 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all ${
+                    !isSubmitting
+                      ? isDark ? 'bg-gradient-to-r from-[#d4af37] to-[#b8941f] text-black hover:from-[#e5c249] hover:to-[#d4af37] shadow-md hover:shadow-lg active:shadow-sm'
+                        : 'bg-gradient-to-r from-blue-500 to-blue-600 text-white hover:from-blue-600 hover:to-blue-700 shadow-md hover:shadow-lg active:shadow-sm'
+                      : isDark ? 'bg-[#2a2a2a] text-gray-600 cursor-not-allowed' : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                  }`}
+                >
+                  {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Clock className="w-4 h-4" />}
+                  {isSubmitting ? '提交中...' : '延长视频'}
+                </button>
+              </>
             )}
           </div>
         )}

@@ -72,19 +72,15 @@ src/
 │   ├── infinite-canvas.tsx         # 无限画布组件
 │   ├── chat-panel.tsx              # AI 聊天面板
 │   ├── image-preview.tsx           # 图片预览组件
-│   ├── image-editor.tsx             # 语言修图编辑器组件 (自然语言描述修改图片)
-│   ├── video-player.tsx             # 视频播放器组件 (进度条/音量/倍速/全屏, 黑金主题)
-│   ├── video-generation-panel.tsx   # 视频生成面板组件 (文生视频/图生视频/首尾帧/多参考图/延长/音效)
-│   ├── video-edit-panel.tsx         # 视频编辑面板组件 (语言编辑/视频延长, 黑金主题)
-│   ├── agent-editor.tsx             # Agent编排编辑器组件 (智能选择工具，多轮编辑)
+│   ├── image-editor.tsx             # 语言修图编辑器组件 (自然语言描述修改图片，内联画笔/橡皮/撤销/清除蒙版能力，无独立 image-editor/ 子目录)
+│   ├── video-player.tsx             # 视频播放器组件 (进度条/音量/倍速/全屏, 黑金主题, 已同步fullscreenchange/volumechange)
+│   ├── video-generation-panel.tsx   # 视频生成面板组件 (文生视频/图生视频/首尾帧/多参考图/延长/音效, URL输入受控)
+│   ├── video-edit-panel.tsx         # 视频编辑面板组件 (语言编辑/视频延长, 黑金主题, 已补loading+错误提示)
+│   ├── agent-editor.tsx             # Agent编排编辑器组件 (智能选择工具，多轮编辑, 已补unmount清理)
 │   ├── font-design-panel.tsx        # 字境大师Pro字体设计面板 (黑金/单色双主题, 左右分栏)
 │   ├── node-editor.tsx              # 节点编辑器组件 (工作流DAG编辑, AI建图, 提示词库, 画布助手, 撤销重做)
 │   ├── model-viewer-3d.tsx         # 3D 模型预览组件 (视角切换/光照/线框/下载/后处理/多视角缩略图)
-│   ├── image-editor/
-│   │   ├── ImageEditPanel.tsx      # 擦除/蒙版修图浮窗面板 (黑金UI)
-│   │   ├── ImageEditToolbar.tsx    # 图像编辑工具栏
-│   │   ├── MaskBrushCanvas.tsx     # 蒙版画布 (react-konva, 画笔/橡皮擦/撤销/导出)
-│   │   └── UpscaleDialog.tsx       # 无损放大弹窗 (模型/倍率/格式选择)
+│   ├── motion-brush-canvas.tsx      # 视频运动笔刷画布组件 (画笔/橡皮/撤销/箭头轨迹, 已修复空蒙版恒导出bug)
 │   └── ui/                         # shadcn/ui 组件库
 ├── lib/
 │   ├── db-client.ts                # PostgreSQL 连接池（使用 PGDATABASE_URL 环境变量）

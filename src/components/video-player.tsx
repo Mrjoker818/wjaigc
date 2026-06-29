@@ -108,12 +108,16 @@ export default function VideoPlayer({
     const onTimeUpdate = () => setCurrentTime(video.currentTime);
     const onDurationChange = () => setTotalDuration(video.duration);
     const onEnded = () => { setIsPlaying(false); setShowControls(true); };
+    const onVolumeChange = () => setIsMuted(video.muted);
+    const onFullscreenChange = () => setIsFullscreen(!!document.fullscreenElement);
 
     video.addEventListener('play', onPlay);
     video.addEventListener('pause', onPause);
     video.addEventListener('timeupdate', onTimeUpdate);
     video.addEventListener('durationchange', onDurationChange);
     video.addEventListener('ended', onEnded);
+    video.addEventListener('volumechange', onVolumeChange);
+    document.addEventListener('fullscreenchange', onFullscreenChange);
 
     return () => {
       video.removeEventListener('play', onPlay);
@@ -121,6 +125,8 @@ export default function VideoPlayer({
       video.removeEventListener('timeupdate', onTimeUpdate);
       video.removeEventListener('durationchange', onDurationChange);
       video.removeEventListener('ended', onEnded);
+      video.removeEventListener('volumechange', onVolumeChange);
+      document.removeEventListener('fullscreenchange', onFullscreenChange);
     };
   }, []);
 

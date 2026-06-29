@@ -172,6 +172,10 @@ export async function POST(request: NextRequest) {
       providerId,
       submitOnly,
     } = body;
+    // 必填参数校验
+    if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
+      return NextResponse.json({ success: false, error: '请输入创意描述（prompt）' }, { status: 400 });
+    }
     // 防御性处理：确保 model 是字符串（前端可能误传对象）
     let model = typeof rawModel === 'string' ? rawModel : (rawModel as Record<string, unknown>)?.model as string || String(rawModel || '');
     // ★ 从 model 中提取纯 modelId（前端可能传 providerId::modelId 格式）

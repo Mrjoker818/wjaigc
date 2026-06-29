@@ -215,9 +215,11 @@ const MotionBrushCanvas = forwardRef<MotionBrushCanvasHandle, MotionBrushCanvasP
       // 将蒙版转为黑白（有内容的区域为白色）
       maskCtx.drawImage(overlay, 0, 0);
       const imageData = maskCtx.getImageData(0, 0, overlay.width, overlay.height);
+      let hasMask = false;
       for (let i = 0; i < imageData.data.length; i += 4) {
         const alpha = imageData.data[i + 3];
-        if (alpha > 0) {
+        if (alpha > 10) { // 有实际涂抹
+          hasMask = true;
           imageData.data[i] = 255;
           imageData.data[i + 1] = 255;
           imageData.data[i + 2] = 255;
@@ -229,8 +231,10 @@ const MotionBrushCanvas = forwardRef<MotionBrushCanvasHandle, MotionBrushCanvasP
           imageData.data[i + 3] = 255;
         }
       }
+      // 无蒙版且无轨迹时返回 null
+      if (!hasMask && trajectories.length === 0) return null;
       maskCtx.putImageData(imageData, 0, 0);
-      const maskDataUrl = maskCanvas.toDataURL('image/png');
+      const maskDataUrl = hasMask ? maskCanvas.toDataURL('image/png') : '';
 
       return { maskDataUrl, trajectories };
     }, [trajectories]);
@@ -242,7 +246,7 @@ const MotionBrushCanvas = forwardRef<MotionBrushCanvasHandle, MotionBrushCanvasP
 
     const handleConfirm = useCallback(() => {
       const result = exportResult();
-      if (result && (result.trajectories.length > 0 || result.maskDataUrl)) {
+      if (result) {
         onExport?.(result);
       }
     }, [exportResult, onExport]);

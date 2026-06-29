@@ -60,11 +60,28 @@ export interface DesktopUpdateConfig {
   publishedAt: number;
 }
 
+// ========= 安全大小限制常量 =========
+export const SIZE_LIMITS = {
+  BACKUP_BYTES: 50 * 1024 * 1024, // 备份最大 50MB (文件字节)
+  BACKUP_BASE64_LEN: 50 * 1024 * 1024 * 4 / 3 + 1024, // base64 字符数上限 ≈ 66MB 字符串
+  THUMBNAIL_BYTES: 1024 * 1024, // 缩略图 1MB
+  THUMBNAIL_BASE64_LEN: 1024 * 1024 * 4 / 3 + 1024,
+  PARAMS_JSON_LEN: 32 * 1024, // params JSON 32KB
+};
+
 function tokenSecret(): string {
-  return process.env.WUJIE_DESKTOP_TOKEN_SECRET
+  const secret = process.env.WUJIE_DESKTOP_TOKEN_SECRET
     || process.env.WUJIE_AUTH_SECRET
     || process.env.NEXTAUTH_SECRET
-    || 'wujie-ai-desktop-token-secret';
+    || process.env.DESKTOP_TOKEN_SECRET;
+  if (!secret) {
+    if (process.env.NODE_ENV === 'production' || process.env.COZE_PROJECT_ENV === 'PROD') {
+      throw new Error('DESKTOP_TOKEN_SECRET is required in production, please set WUJIE_DESKTOP_TOKEN_SECRET env');
+    }
+    console.warn('[desktop-cloud] ⚠️  WUJIE_DESKTOP_TOKEN_SECRET not set, using dev-only fallback. This is INSECURE for production!');
+    return 'dev-only-insecure-secret-change-me';
+  }
+  return secret;
 }
 
 function encodeToken(payload: Record<string, unknown>): string {
@@ -352,9 +369,18 @@ export async function createBackup(input: {
   metadata?: Record<string, unknown>;
 }): Promise<CloudBackup> {
   await ensureDesktopTables();
+  if (!input.dataBase64 || typeof input.dataBase64 !== 'string') {
+    throw new Error('备份数据不能为空');
+  }
+  if (input.dataBase64.length > SIZE_LIMITS.BACKUP_BASE64_LEN) {
+    throw new Error(`备份文件过大（上限 ${Math.round(SIZE_LIMITS.BACKUP_BYTES / 1024 / 1024)}MB）`);
+  }
   const now = Date.now();
   const id = `backup_${now}_${Math.random().toString(36).slice(2, 8)}`;
   const size = Buffer.from(input.dataBase64, 'base64').length;
+  if (size > SIZE_LIMITS.BACKUP_BYTES) {
+    throw new Error(`备份文件过大（上限 ${Math.round(SIZE_LIMITS.BACKUP_BYTES / 1024 / 1024)}MB）`);
+  }
   const filename = safeFilename(`${now}_${input.filename || 'backup.bin'}`);
   await execSql(`
     INSERT INTO wujie_backups (id, user_id, device_id, category, filename, original_filename, content_type, size, storage_key, file_data, metadata, created_at, updated_at)
@@ -531,15 +557,26 @@ export async function addGenerationRecord(input: {
   createdAt?: number;
 }): Promise<string> {
   await ensureDesktopTables();
+  // 长度安全校验
+  if (input.thumbnailUrl && input.thumbnailUrl.length > SIZE_LIMITS.THUMBNAIL_BASE64_LEN) {
+    throw new Error(`缩略图过大（上限 ${Math.round(SIZE_LIMITS.THUMBNAIL_BYTES / 1024)}KB），请压缩后重试`);
+  }
+  const paramsStr = JSON.stringify(input.params || {});
+  if (paramsStr.length > SIZE_LIMITS.PARAMS_JSON_LEN) {
+    throw new Error(`参数过长（上限 ${Math.round(SIZE_LIMITS.PARAMS_JSON_LEN / 1024)}KB）`);
+  }
+  if (input.prompt && input.prompt.length > 8000) {
+    throw new Error('提示词过长（上限 8000 字符）');
+  }
   const now = Date.now();
   const id = `local_gen_${now}_${Math.random().toString(36).slice(2, 8)}`;
   await execSql(`
     INSERT INTO wujie_local_generation_records (id, user_id, device_id, thumbnail_url, prompt, negative_prompt, model, provider_id, provider_name, params, source, created_at)
     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
   `, [
-    id, input.userId, input.deviceId || '', input.thumbnailUrl || '', input.prompt || '',
-    input.negativePrompt || '', input.model || '', input.providerId || '', input.providerName || '',
-    JSON.stringify(input.params || {}), input.source || 'generated', input.createdAt || now,
+    id, input.userId, input.deviceId || '', input.thumbnailUrl || '', (input.prompt || '').slice(0, 8000),
+    (input.negativePrompt || '').slice(0, 2000), (input.model || '').slice(0, 200), (input.providerId || '').slice(0, 200),
+    (input.providerName || '').slice(0, 200), paramsStr, (input.source || 'generated').slice(0, 64), input.createdAt || now,
   ]);
   return id;
 }

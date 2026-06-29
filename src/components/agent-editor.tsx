@@ -153,6 +153,17 @@ export function AgentEditor({
     }
   }, [imageUrl, imageWidth, imageHeight]);
 
+  // 组件卸载时清理轮询定时器
+  useEffect(() => {
+    return () => {
+      if (pollTimer.current) {
+        clearTimeout(pollTimer.current);
+        pollTimer.current = null;
+      }
+      stopTimer();
+    };
+  }, [stopTimer]);
+
   // 主题色变量
   const accentColor = isMonochrome ? MONO_ACCENT : GOLD;
   const accentDim = isMonochrome ? '#2563eb' : GOLD_DIM;

@@ -499,7 +499,7 @@ export default function VideoGenerationPanel({
     setMotionBrush(motionBrushParams);
   }, []);
 
-  const handleGenerate = useCallback(() => {
+  const handleGenerate = useCallback(async () => {
     if (!prompt.trim() && mode === 'text2video') {
       onError?.('请输入视频描述');
       return;
@@ -526,8 +526,6 @@ export default function VideoGenerationPanel({
     }
 
     setIsGenerating(true);
-    // 注意：isGenerating 在 onVideoGenerate 回调返回后恢复为 false
-    // 实际生成进度由父组件通过 activeGenerationCount 追踪
 
     // 提取 providerId（如果 model 是复合键）
     const pureModelId = model.includes('::') ? model.split('::').pop()! : model;
@@ -538,31 +536,37 @@ export default function VideoGenerationPanel({
       ? multiShotScenes.filter(s => s.prompt.trim()).map((s, i) => `[镜头${i + 1}] ${s.prompt}`).join('\n')
       : prompt.trim();
 
-    onVideoGenerate({
-      prompt: finalPrompt,
-      mode,
-      model: pureModelId,
-      providerId,
-      aspectRatio,
-      duration,
-      quality,
-      generateAudio,
-      firstFrameUrl: (mode !== 'text2video' && mode !== 'video-extend' && mode !== 'multi-shot') ? firstFrameUrl : undefined,
-      lastFrameUrl: (mode === 'image2video-firstlast') ? lastFrameUrl : undefined,
-      referenceImages: (mode === 'image2video-ref') ? referenceImages : undefined,
-      resolution,
-      videoUrl: (mode === 'video-extend') ? videoUrl : undefined,
-      extendDuration: (mode === 'video-extend') ? extendDuration : undefined,
-      // 高级参数
-      cameraControl: cameraControl || undefined,
-      motionBrush: motionBrush || undefined,
-      characterReferences: characterReferences.length > 0 ? characterReferences : undefined,
-      motionStrength: cameraControl ? motionStrength : undefined,
-      seed: seed || undefined,
-      negativePrompt: negativePrompt.trim() || undefined,
-      // 多镜头参数
-      multiShotScenes: mode === 'multi-shot' ? multiShotScenes.filter(s => s.prompt.trim()) : undefined,
-    });
+    try {
+      await onVideoGenerate({
+        prompt: finalPrompt,
+        mode,
+        model: pureModelId,
+        providerId,
+        aspectRatio,
+        duration,
+        quality,
+        generateAudio,
+        firstFrameUrl: (mode !== 'text2video' && mode !== 'video-extend' && mode !== 'multi-shot') ? firstFrameUrl : undefined,
+        lastFrameUrl: (mode === 'image2video-firstlast') ? lastFrameUrl : undefined,
+        referenceImages: (mode === 'image2video-ref') ? referenceImages : undefined,
+        resolution,
+        videoUrl: (mode === 'video-extend') ? videoUrl : undefined,
+        extendDuration: (mode === 'video-extend') ? extendDuration : undefined,
+        // 高级参数
+        cameraControl: cameraControl || undefined,
+        motionBrush: motionBrush || undefined,
+        characterReferences: characterReferences.length > 0 ? characterReferences : undefined,
+        motionStrength: cameraControl ? motionStrength : undefined,
+        seed: seed || undefined,
+        negativePrompt: negativePrompt.trim() || undefined,
+        // 多镜头参数
+        multiShotScenes: mode === 'multi-shot' ? multiShotScenes.filter(s => s.prompt.trim()) : undefined,
+      });
+    } catch (err) {
+      onError?.(err instanceof Error ? err.message : '生成失败');
+    } finally {
+      setIsGenerating(false);
+    }
   }, [prompt, mode, model, aspectRatio, duration, quality, generateAudio, firstFrameUrl, lastFrameUrl, referenceImages, resolution, videoUrl, extendDuration, cameraControl, motionBrush, characterReferences, motionStrength, seed, negativePrompt, multiShotScenes, onVideoGenerate, onError]);
 
   // 处理图片上传
@@ -841,10 +845,10 @@ export default function VideoGenerationPanel({
                   <input
                     type="text"
                     placeholder="输入视频URL..."
+                    value={videoUrl}
+                    onChange={(e) => setVideoUrl(e.target.value)}
                     className="flex-1 px-3 py-2 rounded-md text-xs"
                     style={{ background: inputBg, color: textColor, border: `1px solid ${borderColor}`, outline: 'none' }}
-                    onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value; if (v) setVideoUrl(v); } }}
-                    onBlur={(e: React.FocusEvent<HTMLInputElement>) => { if (e.target.value) setVideoUrl(e.target.value); }}
                   />
                 </div>
               </div>
@@ -1164,6 +1168,7 @@ export default function VideoGenerationPanel({
                 ref={motionBrushRef}
                 imageUrl={firstFrameUrl}
                 onExport={handleMotionBrushExport}
+                onClose={() => setShowMotionBrush(false)}
               />
               
               {motionBrush && motionBrush.trajectories.length > 0 && (

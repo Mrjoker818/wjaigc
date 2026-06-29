@@ -16,6 +16,7 @@ import { translateApiError } from '@/lib/api-error-translate';
 import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits } from '@/lib/credits';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
+import { getDesktopAuth, tokenFromHeader } from '@/lib/desktop-cloud';
 
 const API_TIMEOUT_MS = 300000;
 const DEFAULT_AGENT_MAX_TOKENS = 4096;
@@ -231,6 +232,16 @@ function parseSSETextToJSON(text: string): Record<string, unknown> {
 
 export async function POST(request: NextRequest) {
   try {
+    // 鉴权：要求 Web 登录态 或 桌面端 Token 二选一（P0 修复：防止未授权盗刷）
+    const sessionUser = await getSessionUser(request).catch(() => null);
+    const desktopAuth = await getDesktopAuth(tokenFromHeader(
+      request.headers.get('authorization'),
+      request.headers.get('x-desktop-token') || ''
+    )).catch(() => null);
+    if (!sessionUser && !desktopAuth) {
+      return NextResponse.json({ success: false, error: 'Authorization required' }, { status: 401 });
+    }
+
     const body = await request.json();
     const { inputText, imageData, templateCategory, ecommerceConfig, model, providerId } = body as {
       inputText: string;
@@ -245,8 +256,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: '请输入描述文字' }, { status: 400 });
     }
 
-    // 积分检查与扣除
-    const sessionUser = await getSessionUser(request).catch(() => null);
+    // 积分检查与扣除（桌面端无 sessionUser 时跳过积分，走桌面端配额）
     if (sessionUser) {
       const creditResult = await consumeCredits(sessionUser.id, 'chat', undefined, undefined, model);
       if (!creditResult.success) {

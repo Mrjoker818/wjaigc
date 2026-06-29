@@ -208,6 +208,8 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   const [isDrawing, setIsDrawing] = useState(false);
   const [brushSize, setBrushSize] = useState(20);
   const [tool, setTool] = useState<'brush' | 'eraser'>('brush');
+  // 蒙版撤销栈（保存每笔开始前的 ImageData 快照）
+  const [maskHistory, setMaskHistory] = useState<ImageData[]>([]);
   const [prompt, setPrompt] = useState('');
   const [aspectRatio, setAspectRatio] = useState(initialAspectRatio || '1:1');
   const [quality, setQuality] = useState(initialQuality || 'high');
@@ -695,16 +697,28 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    ctx.lineWidth = brushSize;
+    // 坐标缩放：canvas 显示尺寸(rect.width/height) 与 像素尺寸(canvas.width/height) 不一致时
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
+    ctx.lineWidth = brushSize * Math.max(scaleX, scaleY);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    ctx.strokeStyle = tool === 'brush' ? 'rgba(255, 0, 0, 0.5)' : 'rgba(0, 0, 0, 1)';
+    if (tool === 'eraser') {
+      // 橡皮擦：使用 destination-out 擦除像素 alpha
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.strokeStyle = 'rgba(0,0,0,1)';
+    } else {
+      // 画笔：红色半透明标记蒙版区域
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
+    }
     ctx.lineTo(x, y);
     ctx.stroke();
     ctx.beginPath();
     ctx.moveTo(x, y);
+    ctx.globalCompositeOperation = 'source-over';
   }, [brushSize, tool]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -719,9 +733,16 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+    // 保存快照用于撤销（限制20步）
+    try {
+      const snapshot = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      setMaskHistory(prev => [...prev.slice(-19), snapshot]);
+    } catch {}
     const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
     ctx.beginPath();
     ctx.moveTo(x, y);
   }, [currentModelSupportsMask, autoMaskPreview]);
@@ -739,6 +760,21 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    setMaskHistory([]);
+  }, []);
+
+  // 撤销上一笔
+  const undoMask = useCallback(() => {
+    setMaskHistory(prev => {
+      if (prev.length === 0) return prev;
+      const canvas = canvasRef.current;
+      const ctx = canvas?.getContext('2d');
+      if (ctx && canvas) {
+        const last = prev[prev.length - 1];
+        ctx.putImageData(last, 0, 0);
+      }
+      return prev.slice(0, -1);
+    });
   }, []);
 
   const exportMask = useCallback((): string | null => {
@@ -1941,6 +1977,17 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
               }`}
             >
               <Eraser className="h-3.5 w-3.5" />橡皮
+            </button>
+            <button
+              onClick={() => currentModelSupportsMask && undoMask()}
+              disabled={!currentModelSupportsMask || maskHistory.length === 0}
+              className={`flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-medium transition-all ${
+                !currentModelSupportsMask || maskHistory.length === 0
+                  ? isMonochrome ? 'bg-gray-100 text-gray-300 border border-gray-100 cursor-not-allowed' : 'bg-[#1a1a1a] text-gray-600 border border-white/[0.04] cursor-not-allowed'
+                  : isMonochrome ? 'bg-gray-100 text-gray-500 hover:text-gray-900 border border-gray-200' : 'bg-[#1a1a1a] text-gray-400 hover:text-white border border-white/[0.08]'
+              }`}
+            >
+              <History className="h-3.5 w-3.5" />撤销
             </button>
             <button
               onClick={() => currentModelSupportsMask && clearMask()}

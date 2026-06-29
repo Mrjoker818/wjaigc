@@ -614,7 +614,11 @@ export default function OhMyPrompt({ onInsertPrompt, onVisionPrompt, isVisionAna
             </p>
           </div>
           {onVisionPrompt && (
-            <button onClick={() => {}} className={`mt-2 px-4 py-1.5 rounded-lg text-xs font-medium transition-colors ${isMonochrome ? 'bg-blue-500/20 border border-blue-500/40 text-blue-600 hover:bg-blue-500/30' : 'bg-[#d4af37]/20 border border-[#d4af37]/40 text-[#d4af37] hover:bg-[#d4af37]/30'}`}>
+            <button
+              onClick={() => onClose?.()}
+              title="关闭面板后，请在画布上点击图片右下角的 ✨ 按钮进行识词"
+              className={`mt-2 px-4 py-1.5 rounded-lg text-xs font-medium transition-colors ${isMonochrome ? 'bg-blue-500/20 border border-blue-500/40 text-blue-600 hover:bg-blue-500/30' : 'bg-[#d4af37]/20 border border-[#d4af37]/40 text-[#d4af37] hover:bg-[#d4af37]/30'}`}
+            >
               选择画布图片识别
             </button>
           )}
