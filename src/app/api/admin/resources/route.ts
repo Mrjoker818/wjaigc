@@ -23,7 +23,12 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const admin = await requireAdminUser(request);
   if (!admin) return NextResponse.json({ success: false, error: 'Admin access required' }, { status: 403 });
-  const body = await request.json();
+  let body: Record<string, any> = {};
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ success: false, error: '请求体格式错误，请检查JSON格式' }, { status: 400 });
+  }
   if (body.action === 'delete') {
     const id = String(body.id || '');
     if (!id) return NextResponse.json({ success: false, error: 'Missing id' }, { status: 400 });

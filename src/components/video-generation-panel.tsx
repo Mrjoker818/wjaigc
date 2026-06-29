@@ -1327,6 +1327,61 @@ export default function VideoGenerationPanel({
                 ))}
               </div>
             </div>
+            {/* 反向提示词 */}
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">反向提示词（可选）</label>
+              <textarea
+                value={negativePrompt}
+                onChange={e => setNegativePrompt(e.target.value)}
+                placeholder="描述你不想出现的内容，如：模糊、变形、低质量..."
+                rows={2}
+                className={`w-full rounded-md px-2.5 py-1.5 text-xs resize-none focus:outline-none focus:ring-1 ${
+                  isMonochrome
+                    ? 'bg-gray-50 border border-gray-200 text-gray-800 placeholder:text-gray-400 focus:ring-blue-300'
+                    : ''
+                }`}
+                style={isMonochrome ? {} : {
+                  background: '#1e1e1e',
+                  color: '#e5e5e5',
+                  border: '1px solid #333',
+                }}
+              />
+            </div>
+            {/* 随机种子 */}
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-gray-500 shrink-0">随机种子</label>
+              <input
+                type="number"
+                value={seed ?? ''}
+                onChange={e => {
+                  const v = e.target.value;
+                  setSeed(v ? parseInt(v, 10) : undefined);
+                }}
+                placeholder="随机"
+                className={`flex-1 rounded-md px-2.5 py-1 text-xs focus:outline-none focus:ring-1 ${
+                  isMonochrome
+                    ? 'bg-gray-50 border border-gray-200 text-gray-800 placeholder:text-gray-400 focus:ring-blue-300'
+                    : ''
+                }`}
+                style={isMonochrome ? {} : {
+                  background: '#1e1e1e',
+                  color: '#e5e5e5',
+                  border: '1px solid #333',
+                }}
+              />
+              <button
+                onClick={() => setSeed(Math.floor(Math.random() * 2147483647))}
+                className={`text-xs px-2 py-1 rounded-md transition-colors cursor-pointer ${
+                  isMonochrome
+                    ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    : ''
+                }`}
+                style={isMonochrome ? {} : { background: '#2a2a2a', color: subTextColor }}
+                title="随机生成种子"
+              >
+                🎲
+              </button>
+            </div>
           </div>
         )}
       </div>

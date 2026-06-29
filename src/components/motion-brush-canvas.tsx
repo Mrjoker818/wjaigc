@@ -380,6 +380,10 @@ const MotionBrushCanvas = forwardRef<MotionBrushCanvasHandle, MotionBrushCanvasP
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
+            onWheel={(e) => {
+              e.preventDefault();
+              setBrushSize(prev => Math.max(5, Math.min(100, prev - Math.sign(e.deltaY) * 3)));
+            }}
             onMouseLeave={() => { setIsDrawing(false); setTrajStart(null); setTrajEnd(null); }}
           />
 

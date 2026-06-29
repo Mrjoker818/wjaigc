@@ -15,7 +15,12 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const admin = await requireAdminUser(request);
   if (!admin) return NextResponse.json({ success: false, error: 'Admin access required' }, { status: 403 });
-  const body = await request.json();
+  let body: Record<string, any> = {};
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ success: false, error: '请求体格式错误，请检查JSON格式' }, { status: 400 });
+  }
   const config = await saveDesktopUpdateConfig(body || {});
   const files = await listDesktopUpdateFiles();
   await dbAddAuditLog({ user_id: admin.id, user_name: admin.name, action: 'desktop_update_publish', target_type: 'desktop-update', target_id: config.version, detail: JSON.stringify({ enabled: config.enabled, packageUrl: config.packageUrl }), ip_address: null, created_at: Date.now() });

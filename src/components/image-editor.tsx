@@ -322,6 +322,20 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     };
   }, [editStartTime, editTotalTime]);
 
+  // 点击外部关闭 @提及下拉和模板弹层
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (showTemplatePopup && containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setShowTemplatePopup(false);
+      }
+      if (atImagePickerOpen && atDropdownRef.current && !atDropdownRef.current.contains(e.target as Node) && textareaRef.current && !textareaRef.current.contains(e.target as Node)) {
+        setAtImagePickerOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showTemplatePopup, atImagePickerOpen]);
+
   // 格式化时间 mm:ss
   const formatElapsed = (seconds: number) => {
     const m = Math.floor(seconds / 60);
