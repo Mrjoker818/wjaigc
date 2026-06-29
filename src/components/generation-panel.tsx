@@ -479,7 +479,20 @@ export function GenerationPanel(
             altRefPrefix = altRefMarkers.map(m => `[参考图R${m.number}]`).join(' ') + ' ';
         }
         
-        const fullPrompt = [altRefPrefix + prompt.trim(), ...selectedTags].filter(Boolean).join(", ");
+        // Resolve #N reference anchors in prompt (e.g., #1 → [参考图1: description])
+        let resolvedPrompt = altRefPrefix + prompt.trim();
+        if (referenceImages.length > 0) {
+            resolvedPrompt = resolvedPrompt.replace(/#(\d+)/g, (_match, numStr) => {
+                const num = parseInt(numStr, 10);
+                if (num >= 1 && num <= referenceImages.length) {
+                    const desc = referenceDescriptions[num - 1]?.trim();
+                    return desc ? `[参考图${num}: ${desc}]` : `[参考图${num}]`;
+                }
+                return _match; // keep original if out of range
+            });
+        }
+        
+        const fullPrompt = [resolvedPrompt, ...selectedTags].filter(Boolean).join(", ");
         
         // Check if model is from a universal provider
         const universalModel = discoveredModels.find(m => m.id === model);
@@ -1169,7 +1182,11 @@ export function GenerationPanel(
                                     }
                                 }
                             }}
-                            placeholder={altRefMarkers.length > 0 ? "用 R1、R2... 引用参考图来控制生成效果..." : "描述你想要创建的图像... (输入 / 使用模板)"}
+                            placeholder={referenceImages.length > 0
+                                ? "用 #1、#2... 引用参考图，如：#1的风格，#2的构图... (输入 / 使用模板)"
+                                : altRefMarkers.length > 0
+                                    ? "用 R1、R2... 引用参考图来控制生成效果..."
+                                    : "描述你想要创建的图像... (输入 / 使用模板)"}
                             style={{ height: prompt ? promptHeight : undefined, minHeight: 80 }}
                             className={`w-full px-3 py-2.5 text-sm resize-none ${mc ? 'bg-gray-50 text-gray-900 placeholder:text-gray-400' : 'bg-white/5 text-text-bright placeholder:text-gold-muted/50'} leading-relaxed focus:outline-none focus:ring-1 ${mc ? 'focus:ring-gray-300' : 'focus:ring-gold/30'} rounded-lg transition-shadow`}
                         />
@@ -1410,9 +1427,15 @@ export function GenerationPanel(
                                 }`}>
                                     {img ? (
                                         <div className="flex items-center gap-2 p-1.5">
-                                            {/* 缩略图 */}
+                                            {/* 缩略图 + 序号锚点 */}
                                             <div className="relative w-12 h-12 flex-shrink-0 rounded overflow-hidden group">
                                                 <img src={img} className="w-full h-full object-cover" alt="" />
+                                                {/* 序号锚点标签 #1, #2, #3... */}
+                                                <span className={`absolute top-0 left-0 text-[10px] font-bold px-1 py-0 rounded-br leading-tight ${
+                                                    mc ? 'bg-indigo-500 text-white' : 'bg-gold/90 text-black'
+                                                }`}>
+                                                    #{i + 1}
+                                                </span>
                                                 <button
                                                     onClick={() => removeReferenceImage(i)}
                                                     className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-red-500/90 rounded-full text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10"
