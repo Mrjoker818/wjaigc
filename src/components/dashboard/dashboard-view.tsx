@@ -4,6 +4,7 @@ import { useState, useMemo, useCallback, useEffect } from 'react';
 import { toast } from 'sonner';
 import AdminTabs from './admin-tabs';
 import DataManagerTab from './data-manager-tab';
+import DesktopAdminTab from './desktop-admin-tab';
 import UserSettingsTab from './user-settings-tab';
 import UserCreditsTab from './user-credits-tab';
 import {
@@ -2189,104 +2190,16 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
         )}
 
         {activeTab === 'desktop-admin' && isAdmin && (
-          <div className="h-full overflow-y-auto p-6">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h1 className={`text-xl font-bold ${textPrimary}`}>本地无界管理</h1>
-                <p className={`text-sm ${textSecondary}`}>统一管理本地无界实例、资源、备份、桌面更新与生成记录</p>
-              </div>
-              <button
-                onClick={() => loadDesktopAdminData()}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium ${softClass} ${textPrimary}`}
-              >
-                <RefreshCw size={12} className={desktopAdminLoading ? 'animate-spin' : ''} />
-                刷新
-              </button>
-            </div>
-
-            <div className="grid grid-cols-5 gap-3 mb-5">
-              {[
-                ['在线/注册设备', desktopAdminData.devices.length],
-                ['云端备份', desktopAdminData.backups.length],
-                ['资源中心', desktopAdminData.resources.length],
-                ['本地生成记录', desktopAdminData.records.length],
-                [
-                  '桌面更新',
-                  desktopAdminData.updateConfig?.enabled
-                    ? String(desktopAdminData.updateConfig.version || '已启用')
-                    : '未启用',
-                ],
-              ].map(([label, value]) => (
-                <div key={String(label)} className={`${softClass} rounded-xl p-4 border ${isDark ? 'border-white/10' : 'border-gray-200'}`}>
-                  <div className={`text-xs ${textSecondary}`}>{label}</div>
-                  <div className={`text-xl font-bold mt-1 ${textPrimary}`}>{String(value)}</div>
-                </div>
-              ))}
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className={`${softClass} rounded-xl p-4 border ${isDark ? 'border-white/10' : 'border-gray-200'}`}>
-                <h2 className={`font-semibold mb-3 ${textPrimary}`}>最近设备</h2>
-                <div className="space-y-2">
-                  {desktopAdminData.devices.slice(0, 8).map((item, idx) => (
-                    <div key={String(item.id || idx)} className="flex items-center justify-between text-xs">
-                      <span className={textPrimary}>{String(item.device_id || item.deviceId || item.id || 'unknown')}</span>
-                      <span className={textSecondary}>
-                        {item.last_seen_at ? new Date(Number(item.last_seen_at)).toLocaleString() : '-'}
-                      </span>
-                    </div>
-                  ))}
-                  {desktopAdminData.devices.length === 0 && <div className={`text-sm ${textSecondary}`}>暂无本地实例连接</div>}
-                </div>
-              </div>
-
-              <div className={`${softClass} rounded-xl p-4 border ${isDark ? 'border-white/10' : 'border-gray-200'}`}>
-                <h2 className={`font-semibold mb-3 ${textPrimary}`}>最近备份</h2>
-                <div className="space-y-2">
-                  {desktopAdminData.backups.slice(0, 8).map((item, idx) => (
-                    <div key={String(item.id || idx)} className="flex items-center justify-between text-xs gap-3">
-                      <span className={`${textPrimary} truncate`}>{String(item.originalFilename || item.filename || item.id)}</span>
-                      <span className={textSecondary}>{String(item.category || '-')}</span>
-                    </div>
-                  ))}
-                  {desktopAdminData.backups.length === 0 && <div className={`text-sm ${textSecondary}`}>暂无备份</div>}
-                </div>
-              </div>
-
-              <div className={`${softClass} rounded-xl p-4 border ${isDark ? 'border-white/10' : 'border-gray-200'}`}>
-                <h2 className={`font-semibold mb-3 ${textPrimary}`}>资源中心</h2>
-                <div className="space-y-2">
-                  {desktopAdminData.resources.slice(0, 8).map((item, idx) => (
-                    <div key={String(item.id || idx)} className="flex items-center justify-between text-xs gap-3">
-                      <span className={`${textPrimary} truncate`}>{String(item.name || item.id)}</span>
-                      <span className={textSecondary}>{String(item.type || '-')}</span>
-                    </div>
-                  ))}
-                  {desktopAdminData.resources.length === 0 && <div className={`text-sm ${textSecondary}`}>暂无资源，可通过 /api/admin/resources 导入</div>}
-                </div>
-              </div>
-
-              <div className={`${softClass} rounded-xl p-4 border ${isDark ? 'border-white/10' : 'border-gray-200'}`}>
-                <h2 className={`font-semibold mb-3 ${textPrimary}`}>本地生成记录</h2>
-                <div className="space-y-2">
-                  {desktopAdminData.records.slice(0, 8).map((item, idx) => (
-                    <div key={String(item.id || idx)} className="flex items-center gap-3 text-xs">
-                      {item.thumbnail_url ? (
-                        <img src={String(item.thumbnail_url)} alt="" className="w-10 h-10 object-cover rounded" />
-                      ) : (
-                        <div className="w-10 h-10 rounded bg-black/10" />
-                      )}
-                      <div className="min-w-0">
-                        <div className={`${textPrimary} truncate`}>{String(item.prompt || '无提示词')}</div>
-                        <div className={textSecondary}>{String(item.model || '-')}</div>
-                      </div>
-                    </div>
-                  ))}
-                  {desktopAdminData.records.length === 0 && <div className={`text-sm ${textSecondary}`}>暂无本地生成记录</div>}
-                </div>
-              </div>
-            </div>
-          </div>
+          <DesktopAdminTab
+            isDark={isDark}
+            textPrimary={textPrimary}
+            textSecondary={textSecondary}
+            softClass={softClass}
+            inputClass={inputClass}
+            accentBgClass={accentBgLight}
+            accentTextOnBgClass={accentClass}
+            accentHoverBgClass={isMonochrome ? 'hover:bg-[#3b82f6]/20' : 'hover:bg-[#d4af37]/20'}
+          />
         )}
 
         {/* ── Tab: Connector Admin (DCC / Creative) ── */}
