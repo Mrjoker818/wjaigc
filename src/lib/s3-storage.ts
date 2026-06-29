@@ -74,7 +74,8 @@ export async function uploadImageToS3(
       contentType,
     });
     console.log(`[s3-storage] Uploaded: ${key} (${(buffer.length / 1024).toFixed(0)}KB)`);
-    return key;
+    // Return path with leading slash so URL concatenation (domainBase + savedPath) always works
+    return key.startsWith('/') ? key : `/${key}`;
   } catch (e) {
     console.error('[s3-storage] Upload failed:', e);
     return null;
@@ -95,7 +96,7 @@ export async function uploadImageFromUrlToS3(url: string): Promise<string | null
       timeout: 30000,
     });
     console.log(`[s3-storage] Uploaded from URL: ${key}`);
-    return key;
+    return key.startsWith('/') ? key : `/${key}`;
   } catch (e) {
     console.error('[s3-storage] Upload from URL failed:', e);
     return null;

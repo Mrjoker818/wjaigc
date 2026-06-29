@@ -6108,6 +6108,7 @@ export function InfiniteCanvas({
 
         if (isFallback && fallbackReason) {
           console.warn(`[upscale] 降级提示: ${fallbackReason}`);
+          toast.warning(`无损放大提示: ${fallbackReason}`);
         }
       } else {
         usedModelName = String(data.usedModel || modelInfo.model);

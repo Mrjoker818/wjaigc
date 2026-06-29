@@ -18,6 +18,23 @@
 
 import { shouldUseResponsesAPI } from './model-capabilities';
 
+/**
+ * 从 Markdown 文本中提取图片 URL
+ * 支持格式: ![alt](url) 或裸 URL
+ */
+export function extractImageUrlFromMarkdown(text: string): string | null {
+  // 匹配 Markdown 图片语法 ![alt](url)
+  const mdMatch = text.match(/!\[.*?\]\((https?:\/\/[^\s)]+)\)/);
+  if (mdMatch) return mdMatch[1];
+  // 匹配裸 URL (http(s)://...png/jpg/jpeg/webp/gif)
+  const urlMatch = text.match(/(https?:\/\/[^\s)]+\.(?:png|jpg|jpeg|webp|gif)(?:\?[^\s)]*)?)/i);
+  if (urlMatch) return urlMatch[1];
+  // 匹配其他 http URL (中转站可能返回非标准扩展名)
+  const anyUrlMatch = text.match(/(https?:\/\/[^\s)]+)/);
+  if (anyUrlMatch) return anyUrlMatch[1];
+  return null;
+}
+
 /** Responses API SSE 事件类型 */
 export type ResponsesApiEventType =
   // OpenAI Responses API 格式 (response.*)
@@ -27,6 +44,11 @@ export type ResponsesApiEventType =
   | 'response.image_generation_call.generating'
   | 'response.image_generation_call.partial_image'
   | 'response.output_item.done'
+  | 'response.output_item.added'
+  | 'response.content_part.added'
+  | 'response.output_text.delta'
+  | 'response.output_text.done'
+  | 'response.content_part.done'
   | 'response.completed'
   | 'response.failed'
   // Images API SSE 格式 (image_generation.* — 部分中转站使用)
@@ -252,6 +274,22 @@ function extractEventDetails(
               ? String(errorObj.message || JSON.stringify(errorObj))
               : `图片生成状态: ${status}`;
           }
+        } else if (itemType === 'message') {
+          // 部分中转站 (如 FHL) 通过 message 类型 + markdown 文本返回图片 URL
+          const content = item.content as Array<Record<string, unknown>> | undefined;
+          if (Array.isArray(content)) {
+            for (const part of content) {
+              if (String(part.type || '') === 'output_text') {
+                const text = String(part.text || '');
+                const imageUrl = extractImageUrlFromMarkdown(text);
+                if (imageUrl) {
+                  result.hasFinalImage = true;
+                  result.finalImageUrl = imageUrl;
+                  break;
+                }
+              }
+            }
+          }
         }
       }
       break;
@@ -295,6 +333,57 @@ function extractEventDetails(
       break;
     }
 
+    case 'response.output_text.done': {
+      // 部分中转站 (如 FHL) 通过文本事件返回图片 URL
+      const text = String(raw['text'] || '');
+      if (text) {
+        const imageUrl = extractImageUrlFromMarkdown(text);
+        if (imageUrl) {
+          result.hasFinalImage = true;
+          result.finalImageUrl = imageUrl;
+        }
+      }
+      break;
+    }
+
+    case 'response.completed': {
+      // 最终完成事件，提取 response.output 中的图片
+      const resp = raw['response'] as Record<string, unknown> | undefined;
+      if (resp) {
+        const output = resp['output'] as Array<Record<string, unknown>> | undefined;
+        if (Array.isArray(output)) {
+          for (const outItem of output) {
+            // 标准 image_generation_call 格式
+            if (String(outItem.type || '') === 'image_generation_call' && outItem.result) {
+              result.hasFinalImage = true;
+              result.finalImageB64 = String(outItem.result);
+              result.revisedPrompt = String(outItem.revised_prompt || '') || null;
+              break;
+            }
+            // 中转站 message+markdown 格式
+            if (String(outItem.type || '') === 'message') {
+              const content = outItem.content as Array<Record<string, unknown>> | undefined;
+              if (Array.isArray(content)) {
+                for (const part of content) {
+                  if (String(part.type || '') === 'output_text') {
+                    const text = String(part.text || '');
+                    const imageUrl = extractImageUrlFromMarkdown(text);
+                    if (imageUrl) {
+                      result.hasFinalImage = true;
+                      result.finalImageUrl = imageUrl;
+                      break;
+                    }
+                  }
+                }
+              }
+            }
+            if (result.hasFinalImage) break;
+          }
+        }
+      }
+      break;
+    }
+
     case 'error': {
       const errorObj = raw['error'] as Record<string, unknown> | undefined;
       if (errorObj) {
@@ -326,6 +415,16 @@ function getStageDescription(eventType: ResponsesApiEventType): string {
       return '已收到图片数据片段';
     case 'response.output_item.done':
       return '图片生成完成';
+    case 'response.output_item.added':
+      return '生成输出项创建';
+    case 'response.content_part.added':
+      return '内容片段创建';
+    case 'response.output_text.delta':
+      return '文本输出中';
+    case 'response.output_text.done':
+      return '文本输出完成';
+    case 'response.content_part.done':
+      return '内容片段完成';
     case 'response.completed':
       return '接口已完成';
     case 'response.failed':

@@ -82,8 +82,22 @@ async function upscaleViaPearAPI(
     return null;
   }
 
+  // PearAPI needs a publicly accessible URL; convert relative paths to absolute
+  let accessibleImageUrl = imageUrl;
+  if (imageUrl.startsWith('/')) {
+    const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
+    if (domain) {
+      const domainBase = domain.startsWith('http') ? domain.replace(/\/+$/, '') : `https://${domain.replace(/\/+$/, '')}`;
+      accessibleImageUrl = `${domainBase}${imageUrl}`;
+    } else {
+      // Fallback to localhost (only works in dev)
+      const port = process.env.DEPLOY_RUN_PORT || '5000';
+      accessibleImageUrl = `http://localhost:${port}${imageUrl}`;
+    }
+  }
+
   const requestBody: Record<string, unknown> = {
-    image: imageUrl,
+    image: accessibleImageUrl,
     face,
     key: pearConfig.apiKey,
     model,
@@ -488,7 +502,10 @@ async function upscaleViaOnnx(
         ? `http://localhost:${process.env.DEPLOY_RUN_PORT}`
         : 'http://localhost:5000';
       inputPath = path.join('/tmp', `upscale-input-${Date.now()}.png`);
-      const resp = await fetch(`${baseUrl}${imageUrl}`);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30000);
+      const resp = await fetch(`${baseUrl}${imageUrl}`, { signal: controller.signal });
+      clearTimeout(timeout);
       if (!resp.ok) {
         console.warn(`[upscale-pro] Failed to download local image: ${resp.status}`);
         return null;
@@ -496,14 +513,32 @@ async function upscaleViaOnnx(
       const buf = Buffer.from(await resp.arrayBuffer());
       fs.writeFileSync(inputPath, buf);
     } else {
+      // 外部 URL — 带重试机制，避免偶发网络问题导致降级
       inputPath = path.join('/tmp', `upscale-input-${Date.now()}.png`);
-      const resp = await fetch(imageUrl);
-      if (!resp.ok) {
-        console.warn(`[upscale-pro] Failed to download remote image: ${resp.status}`);
-        return null;
+      let lastError: Error | null = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 30000);
+          const resp = await fetch(imageUrl, { signal: controller.signal });
+          clearTimeout(timeout);
+          if (!resp.ok) {
+            console.warn(`[upscale-pro] Failed to download remote image (attempt ${attempt}/3): ${resp.status}`);
+            lastError = new Error(`HTTP ${resp.status}`);
+            if (attempt < 3) { await new Promise(r => setTimeout(r, 1000 * attempt)); continue; }
+            return null;
+          }
+          const buf = Buffer.from(await resp.arrayBuffer());
+          fs.writeFileSync(inputPath, buf);
+          lastError = null;
+          break;
+        } catch (err: unknown) {
+          lastError = err instanceof Error ? err : new Error(String(err));
+          console.warn(`[upscale-pro] Download remote image failed (attempt ${attempt}/3): ${lastError.message}`);
+          if (attempt < 3) { await new Promise(r => setTimeout(r, 1000 * attempt)); }
+        }
       }
-      const buf = Buffer.from(await resp.arrayBuffer());
-      fs.writeFileSync(inputPath, buf);
+      if (lastError) return null;
     }
 
     // 计算tile大小：根据图片尺寸动态调整，避免OOM
@@ -874,6 +909,8 @@ async function performUpscaleChain(
   skipAiEnhance: boolean,
   targetWidth?: number,
   targetHeight?: number,
+  enhanceModel?: string,
+  enhanceProviderId?: string,
 ): Promise<Record<string, unknown>> {
   // === 多策略降级 ===
 
@@ -912,7 +949,7 @@ async function performUpscaleChain(
     let didEnhance = false;
     if (!skipAiEnhance) {
       try {
-        const enhanceResult = await enhanceViaAI(localResult.url);
+        const enhanceResult = await enhanceViaAI(localResult.url, enhanceModel, effectiveProviderId);
         if (enhanceResult.enhanced && enhanceResult.url) {
           enhancedUrl = enhanceResult.url;
           didEnhance = true;
@@ -946,7 +983,7 @@ async function performUpscaleChain(
       let didEnhance = false;
       if (!skipAiEnhance) {
         try {
-          const enhanceResult = await enhanceViaAI(aiResult.url);
+          const enhanceResult = await enhanceViaAI(aiResult.url, enhanceModel, effectiveProviderId);
           if (enhanceResult.enhanced && enhanceResult.url) {
             enhancedUrl = enhanceResult.url;
             didEnhance = true;

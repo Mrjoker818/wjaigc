@@ -81,6 +81,7 @@ export interface EnhanceResult {
 export async function enhanceViaAI(
   imageUrl: string,
   model?: string,
+  providerId?: string,
 ): Promise<EnhanceResult> {
   try {
     // 解析图片URL获取绝对路径
@@ -110,8 +111,8 @@ export async function enhanceViaAI(
     // 确定使用的模型
     const enhanceModel = model || 'gpt-image-1';
 
-    // 查找API提供商
-    const provider = await findProviderForModel(enhanceModel);
+    // 查找API提供商（优先使用指定的 providerId）
+    const provider = await findProviderForModel(enhanceModel, 'image', providerId || undefined);
     if (!provider) {
       console.warn('[quality-enhance] No provider found for model:', enhanceModel);
       return { url: imageUrl, enhanced: false };

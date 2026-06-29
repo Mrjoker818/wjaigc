@@ -2114,7 +2114,8 @@ export async function POST(request: NextRequest) {
               const savedPath = await saveBufferToPublic(resizedBuf, filename);
               const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
               const domainBase = domain.startsWith('http') ? domain.replace(/\/+$/, '') : `https://${domain.replace(/\/+$/, '')}`;
-              const finalUrl = savedPath.startsWith('data:') ? savedPath : `${domainBase}${savedPath}`;
+              const normalizedPath = savedPath.startsWith('data:') || savedPath.startsWith('http') ? savedPath : (savedPath.startsWith('/') ? savedPath : `/${savedPath}`);
+              const finalUrl = normalizedPath.startsWith('data:') || normalizedPath.startsWith('http') ? normalizedPath : `${domainBase}${normalizedPath}`;
 
               return NextResponse.json({
                 success: true,
@@ -2275,7 +2276,9 @@ export async function POST(request: NextRequest) {
 
             const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
             const domainBase = domain.startsWith('http') ? domain.replace(/\/+$/, '') : `https://${domain.replace(/\/+$/, '')}`;
-            const finalUrl = savedPath.startsWith('data:') ? savedPath : `${domainBase}${savedPath}`;
+            // Ensure savedPath has leading / when it's a relative path (S3 key may return "images/xxx" without leading /)
+            const normalizedPath = savedPath.startsWith('data:') || savedPath.startsWith('http') ? savedPath : (savedPath.startsWith('/') ? savedPath : `/${savedPath}`);
+            const finalUrl = normalizedPath.startsWith('data:') || normalizedPath.startsWith('http') ? normalizedPath : `${domainBase}${normalizedPath}`;
 
             console.log(`[image-edit] AI upscale downsampled to ${targetW}x${targetH} (${(finalResizedBuffer.length / 1024).toFixed(0)}KB)`);
             return { url: finalUrl, actualW: targetW, actualH: targetH };
@@ -2310,7 +2313,8 @@ export async function POST(request: NextRequest) {
 
           const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
           const domainBase = domain.startsWith('http') ? domain.replace(/\/+$/, '') : `https://${domain.replace(/\/+$/, '')}`;
-          const finalUrl = savedPath.startsWith('data:') ? savedPath : `${domainBase}${savedPath}`;
+          const normalizedPath = savedPath.startsWith('data:') || savedPath.startsWith('http') ? savedPath : (savedPath.startsWith('/') ? savedPath : `/${savedPath}`);
+          const finalUrl = normalizedPath.startsWith('data:') || normalizedPath.startsWith('http') ? normalizedPath : `${domainBase}${normalizedPath}`;
 
           console.log(`[image-edit] AI upscale result: ${aiW}x${aiH} → ${targetW}x${targetH} (AI enhanced + Lanczos3 upscale, ${resizedBuffer ? (resizedBuffer.length / 1024).toFixed(0) + 'KB' : 'N/A'})`);
           return { url: finalUrl, actualW: targetW, actualH: targetH };

@@ -10,7 +10,7 @@ import { translateApiError } from '@/lib/api-error-translate';
 import { classifyApiError, type ClassifiedError, isCloudflareTimeoutError, translateApiError as translateApiErrorV2 } from '@/lib/api-error-translator';
 import { detectInvalidSizeError, repairSize, classifyImageModelFamily } from '@/lib/size-auto-repair';
 import { fetchWithSmartRetry } from '@/lib/smart-retry';
-import { streamResponsesApiSSE, buildResponsesApiPayload, type ResponsesApiResult, type ResponsesApiSSEEvent } from '@/lib/responses-api-sse';
+import { streamResponsesApiSSE, buildResponsesApiPayload, extractImageUrlFromMarkdown, type ResponsesApiResult, type ResponsesApiSSEEvent } from '@/lib/responses-api-sse';
 import { getModelCapabilities, filterRequestForModel, shouldUseResponsesAPI, type ModelCapabilities, normalizeModelForApi } from '@/lib/model-capabilities';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { consumeCredits } from '@/lib/credits';
@@ -687,6 +687,40 @@ export async function POST(request: NextRequest) {
     // 设置生成数量 - 不受模型maxN限制，因为我们逐个提交任务(n=1)
     const totalCount = outputCount && outputCount >= 1 ? Math.min(outputCount, 10) : 1;
 
+    // 判断 URL 是否使用私有 IP（10.x / 172.16-31.x / 192.168.x / 127.x）
+    const isPrivateIp = (urlStr: string): boolean => {
+      try {
+        const host = new URL(urlStr).hostname;
+        return /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.)/.test(host);
+      } catch { return false; }
+    };
+
+    // 服务器端代理下载图片并保存为可访问 URL（处理私有 IP 图片 URL 等场景）
+    const downloadAndSaveImage = async (imageUrl: string): Promise<string | null> => {
+      try {
+        const resp = await fetch(imageUrl, { signal: AbortSignal.timeout(30000) });
+        if (!resp.ok) return null;
+        const contentType = resp.headers.get('content-type') || '';
+        if (!contentType.startsWith('image/') && !contentType.includes('octet-stream')) return null;
+        const buffer = Buffer.from(await resp.arrayBuffer());
+        if (buffer.length < 100) return null; // 太小，不是有效图片
+        // 通过 /api/save-image 持久化
+        const saveResp = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/save-image`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            imageData: `data:${contentType.includes('png') ? 'image/png' : contentType.includes('webp') ? 'image/webp' : 'image/jpeg'};base64,${buffer.toString('base64')}`,
+          }),
+        });
+        if (!saveResp.ok) return null;
+        const saveData = await saveResp.json();
+        return saveData.url || saveData.savedUrl || null;
+      } catch (e) {
+        console.error('[generate] downloadAndSaveImage failed:', (e as Error).message);
+        return null;
+      }
+    };
+
     // 构建提交任务的辅助函数 — 单次提交可能返回多张图片/多个taskId
     const submitSingleTask = async (
       currentModelConfig: ModelConfig,
@@ -1040,9 +1074,10 @@ export async function POST(request: NextRequest) {
       // 模型支持列表由 model-capabilities 注册表统一管理
       const responsesApiEnabled = shouldUseResponsesAPI(currentModelConfig.modelId);
 
+
       if (responsesApiEnabled) {
         try {
-          console.log('[generate] Trying Responses API SSE keepalive path for model:', currentModelConfig.modelId);
+
           // Build Responses API payload
           const payload = buildResponsesApiPayload(
             String(adjustedBody.prompt || enhancedPrompt),
@@ -1093,7 +1128,7 @@ export async function POST(request: NextRequest) {
           );
 
           if (sseResult.imageB64) {
-            console.log('[generate] Responses API SSE succeeded, got image directly');
+
             return {
               taskIds: [],
               directImageUrls: [`data:image/png;base64,${sseResult.imageB64}`],
@@ -1103,10 +1138,117 @@ export async function POST(request: NextRequest) {
           }
           // SSE returned URL (部分中转站返回 URL 而非 base64)
           if (sseResult.imageUrl) {
-            console.log('[generate] Responses API SSE succeeded, got image URL');
+            let imageUrl = sseResult.imageUrl;
+            let isUrlAccessible = true;
+            // 修复私有 IP URL: 部分中转站 (如 FHL) 返回内部 IP 图片 URL
+            // 策略: 用提供商域名替换私有 IP → 服务器端代理下载 → /chat/completions 重试获取外部 URL
+            const privateIpMatch = imageUrl.match(/^(https?:\/\/)(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})(:\d+)?\/(.+)$/);
+            if (privateIpMatch) {
+              isUrlAccessible = false;
+              const [, proto, , port, pathRest] = privateIpMatch;
+              const providerDomain = currentApiBaseUrl.replace(/^https?:\/\//, '');
+              const fixedUrl = `${proto}${providerDomain}${port || ''}/${pathRest}`;
+              console.log(`[generate] Private IP image URL detected: ${imageUrl}`);
+              // 尝试1: 用提供商域名替换私有 IP
+              try {
+                const probeResp = await fetch(fixedUrl, { method: 'HEAD', signal: AbortSignal.timeout(10000) });
+                const ct = probeResp.headers.get('content-type') || '';
+                if (probeResp.ok && (ct.startsWith('image/') || ct.includes('png') || ct.includes('jpeg') || ct.includes('webp'))) {
+                  imageUrl = fixedUrl;
+                  isUrlAccessible = true;
+                  console.log('[generate] Provider domain fix succeeded (image content-type)');
+                }
+              } catch {
+                console.log('[generate] Provider domain fix failed (unreachable)');
+              }
+              // 尝试2: 服务器端代理下载
+              if (!isUrlAccessible) {
+                const downloadedUrl = await downloadAndSaveImage(imageUrl);
+                if (downloadedUrl) {
+                  imageUrl = downloadedUrl;
+                  isUrlAccessible = true;
+                  console.log('[generate] Server-side proxy download succeeded');
+                }
+              }
+              // 尝试3: 如果私有 IP URL 不可达，用 /chat/completions 获取外部 URL
+              if (!isUrlAccessible) {
+                console.log('[generate] Private IP URL not accessible, retrying via /chat/completions for external URL...');
+                try {
+                  const chatResult = await tryChatCompletionsImageFallback({
+                    baseUrl: currentApiBaseUrl,
+                    apiKey: currentApiKey,
+                    model: currentModelConfig.modelId,
+                    prompt: String(requestBody.prompt || ''),
+                    size: String(requestBody.size || '1024x1024'),
+                    originalError: 'Private IP image URL not accessible',
+                    skipChannelCheck: true,
+                  });
+                  if (chatResult && chatResult.length > 0) {
+                    imageUrl = chatResult[0];
+                    isUrlAccessible = true;
+                    console.log('[generate] /chat/completions retry succeeded, got external URL:', imageUrl.substring(0, 100));
+                  }
+                } catch (chatErr) {
+                  console.log('[generate] /chat/completions retry failed:', (chatErr as Error).message?.substring(0, 100));
+                }
+              }
+              // 尝试4: 非流式 Responses API 重试 (部分中转站 stream:true 返回私有 IP，stream:false 返回外部 URL)
+              if (!isUrlAccessible) {
+                console.log('[generate] Trying non-stream /v1/responses for external image URL...');
+                try {
+                  const nsPayload = buildResponsesApiPayload(
+                    String(requestBody.prompt || ''),
+                    currentModelConfig.modelId,
+                    currentModelConfig.modelId,
+                    { size: String(requestBody.size || '1024x1024'), quality: requestBody.quality as string | undefined, outputFormat: requestBody.output_format as string | undefined }
+                  );
+                  nsPayload.stream = false;
+                  const nsResp = await fetchWithV1Retry(currentApiBaseUrl, '/v1/responses', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentApiKey}` },
+                    body: JSON.stringify(nsPayload),
+                    signal: AbortSignal.timeout(120000),
+                  }, true);
+                  if (nsResp.ok) {
+                    const nsData = await nsResp.json() as { output?: Array<{ type?: string; result?: string; content?: Array<{ type?: string; text?: string }> }> };
+                    if (nsData.output && Array.isArray(nsData.output)) {
+                      for (const item of nsData.output) {
+                        if (item.result && item.type === 'image_generation_call') {
+                          // base64 result
+                          const b64Data = item.result;
+                          const savedUrl = await downloadAndSaveImage(`data:image/png;base64,${b64Data}`);
+                          if (savedUrl) {
+                            imageUrl = savedUrl;
+                            isUrlAccessible = true;
+                            console.log('[generate] Non-stream Responses API got base64, saved as:', savedUrl.substring(0, 80));
+                            break;
+                          }
+                        }
+                        if (item.type === 'message' && item.content) {
+                          const mdUrl = extractImageUrlFromMarkdown(item.content.map((c: { text?: string }) => c.text || '').join(' '));
+                          if (mdUrl && !isPrivateIp(mdUrl)) {
+                            imageUrl = mdUrl;
+                            isUrlAccessible = true;
+                            console.log('[generate] Non-stream Responses API got external URL:', imageUrl.substring(0, 100));
+                            break;
+                          }
+                        }
+                      }
+                    }
+                  }
+                } catch (nsErr) {
+                  console.log('[generate] Non-stream Responses API retry failed:', (nsErr as Error).message?.substring(0, 100));
+                }
+              }
+              // 所有方法都失败，保留原始 URL (前端可能无法访问)
+              if (!isUrlAccessible) {
+                console.log('[generate] All URL fix attempts failed, keeping original private IP URL (may not be accessible)');
+              }
+            }
+            console.log('[generate] Responses API SSE succeeded, got image URL:', imageUrl.substring(0, 100));
             return {
               taskIds: [],
-              directImageUrls: [sseResult.imageUrl],
+              directImageUrls: [imageUrl],
               usedModel: currentModelConfig.modelId,
               usedProviderId: currentProviderId,
             };

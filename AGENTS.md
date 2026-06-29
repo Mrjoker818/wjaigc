@@ -737,6 +737,23 @@ UPSCALE_TIMEOUT_MS=300000
 
 ## 更新日志
 
+### v3.6.0 (当前版本)
+
+**P0: FHL API 兼容性修复 — Responses API + 私有IP回退**
+
+- `responses-api-sse.ts` 增强：新增 `extractImageUrlFromMarkdown` 辅助函数，支持从 `response.output_item.done` 和 `response.completed` 事件的 `message` 类型文本中提取 Markdown 格式图片 URL
+- `responses-api-sse.ts` 新增 `response.output_text.done` 和 `response.output_text.delta` 事件类型解析
+- `parseResponsesApiSSEEvent` 支持 FHL 返回的 `item.type === 'message'` + Markdown `![...](url)` 图片格式（替代标准 `image_generation_call.item.result` base64 格式）
+- `generate/route.ts` 新增私有IP图片URL检测和三级回退策略：
+  1. 优先尝试提供商域名替换（将私有IP替换为API base_url的域名）
+  2. 回退到非流式 `/v1/responses`（`stream: false`），获取外部可访问的图片URL
+  3. 最终回退到 `/chat/completions` 获取外部URL
+- `generate/route.ts` 新增 `downloadAndSaveImage` 辅助函数，通过服务端代理下载不可达的图片URL并保存为本地可访问路径
+- `generate/route.ts` 新增 `isPrivateIp` 辅助函数，检测 10.x / 172.16-31.x / 192.168.x 私有网段
+- `api-compatibility.ts` `isChannelUnavailableError` 新增 `no available compatible account` 模式匹配
+- `api-error-translator.ts` 新增 FHL 特定错误模式（渠道不可用 + 模型不支持建议）和中文翻译
+- **根因**: FHL 的 `/images/generations` 端点不可用（502/503），图像生成需通过 `/v1/responses` 端点，且流式响应返回私有IP图片URL，非流式返回外部可访问URL
+
 ### v3.5.0 (当前版本)
 
 **P0: 图片转3D全面升级 — 多图/文生3D/3D预览器增强**
