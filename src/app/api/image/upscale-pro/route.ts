@@ -1,6 +1,6 @@
 // ============================================================
 // POST /api/image/upscale-pro — 无损放大（多策略降级 + AI画质精修）
-// 1a. 云端 PearAPI photo-enhancer（Real-ESRGAN/SeedVR2）
+// 1a. 云端放大API（PearAPI Real-ESRGAN/SeedVR2，标准 /v1/images/edits 端点）
 // 1b. 云端 fal.ai SeedVR2（高质量扩散超分辨率，$0.001/MP）
 // 2. 本地 ONNX Real-ESRGAN（CPU分块处理）
 // 2.5 AI画质精修（放大后自动追加，修复模糊/噪点/失真）
@@ -33,28 +33,42 @@ interface UpscaleProRequest {
   originalHeight?: number; // 原图高度（用于链式放大精确 resize 到目标尺寸）
 }
 
-/** 从管理员配置查找 PearAPI 提供商的 API Key */
-async function findPearApiKey(): Promise<{ apiKey: string; baseUrl: string } | null> {
+/** 从管理员配置查找 upscaler 提供商的 API Key 和配置 */
+async function findUpscaleProvider(): Promise<{ apiKey: string; baseUrl: string; providerId: string } | null> {
   try {
     const { getApiProviders } = await import('@/lib/server-api-config');
     const providers = await getApiProviders();
-    // 查找 baseUrl 包含 pearapi 的 upscaler 提供商
+    console.log(`[upscale-pro] findUpscaleProvider: ${providers.length} providers, modelTypes: [${providers.map((p: { modelType?: string; name?: string }) => `${p.name}(${p.modelType})`).join(', ')}]`);
+    // 优先查找 modelType === 'upscaler' 的提供商（管理员后台专门配置的放大API）
+    const upscalerProvider = providers.find(
+      (p: { baseUrl?: string; modelType?: string; isEnabled?: boolean }) =>
+        p.modelType === 'upscaler' && p.isEnabled !== false
+    );
+    if (upscalerProvider?.apiKey && upscalerProvider?.baseUrl) {
+      return {
+        apiKey: upscalerProvider.apiKey,
+        baseUrl: upscalerProvider.baseUrl,
+        providerId: upscalerProvider.id || '',
+      };
+    }
+    // 兜底：查找包含 pearapi 的 upscaler/image 提供商
     const pearProvider = providers.find(
-      (p: { baseUrl: string; modelType?: string }) =>
-        p.baseUrl.includes('pearapi') && (p.modelType === 'upscaler' || p.modelType === 'image' || !p.modelType)
+      (p: { baseUrl?: string; modelType?: string }) =>
+        (p.baseUrl || '').includes('pearapi') && (p.modelType === 'upscaler' || p.modelType === 'image' || !p.modelType)
     );
     if (pearProvider?.apiKey && pearProvider?.baseUrl) {
       return {
         apiKey: pearProvider.apiKey,
         baseUrl: pearProvider.baseUrl,
+        providerId: pearProvider.id || '',
       };
     }
     // 兜底：查找任意 pearapi 提供商
     const anyPear = providers.find(
-      (p: { baseUrl: string }) => p.baseUrl.includes('pearapi')
+      (p: { baseUrl?: string }) => (p.baseUrl || '').includes('pearapi')
     );
     if (anyPear?.apiKey && anyPear?.baseUrl) {
-      return { apiKey: anyPear.apiKey, baseUrl: anyPear.baseUrl };
+      return { apiKey: anyPear.apiKey, baseUrl: anyPear.baseUrl, providerId: anyPear.id || '' };
     }
   } catch {
     // 忽略，回退到环境变量
@@ -63,12 +77,17 @@ async function findPearApiKey(): Promise<{ apiKey: string; baseUrl: string } | n
   // 环境变量兜底
   const envKey = process.env.PEAR_API_KEY || process.env.PEARAPI_KEY;
   if (envKey) {
-    return { apiKey: envKey, baseUrl: 'https://api.pearapi.ai' };
+    return { apiKey: envKey, baseUrl: 'https://api.pearapi.ai', providerId: '' };
   }
   return null;
 }
 
-/** 策略1: 云端 PearAPI photo-enhancer */
+/** 策略1: 云端放大API（PearAPI /v1/images/generations + /v1/images/edits）
+ *  PearAPI 的 Real-ESRGAN 和 SeedVR2-Upscaler 模型使用标准 OpenAI 兼容端点：
+ *  - POST /v1/images/generations （带 image 参数作为参考图）
+ *  - POST /v1/images/edits （带 image 参数）
+ *  认证方式：Authorization: Bearer <apiKey>
+ */
 async function upscaleViaPearAPI(
   imageUrl: string,
   model: UpscaleProModel,
@@ -77,13 +96,13 @@ async function upscaleViaPearAPI(
   targetWidth?: number,
   targetHeight?: number,
 ): Promise<{ url: string; model: string; strategy: string } | null> {
-  const pearConfig = await findPearApiKey();
-  if (!pearConfig) {
-    console.log('[upscale-pro] No PearAPI key configured, skipping cloud upscale');
+  const providerConfig = await findUpscaleProvider();
+  if (!providerConfig) {
+    console.log('[upscale-pro] No upscale API provider configured, skipping cloud upscale');
     return null;
   }
 
-  // PearAPI needs a publicly accessible URL; convert relative paths to absolute
+  // 提供商需要外部可访问的图片URL；转换相对路径为绝对URL
   let accessibleImageUrl = imageUrl;
   if (imageUrl.startsWith('/')) {
     const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
@@ -91,55 +110,116 @@ async function upscaleViaPearAPI(
       const domainBase = domain.startsWith('http') ? domain.replace(/\/+$/, '') : `https://${domain.replace(/\/+$/, '')}`;
       accessibleImageUrl = `${domainBase}${imageUrl}`;
     } else {
-      // Fallback to localhost (only works in dev)
       const port = process.env.DEPLOY_RUN_PORT || '5000';
       accessibleImageUrl = `http://localhost:${port}${imageUrl}`;
     }
   }
 
-  const requestBody: Record<string, unknown> = {
-    image: accessibleImageUrl,
-    face,
-    key: pearConfig.apiKey,
-    model,
-    task_type: 'sync',
-  };
+  // PearAPI 放大模型调用说明：
+  // - Real-ESRGAN: 使用 /v1/images/edits + multipart form-data 上传图片，不支持自定义 size 参数（auto size）
+  // - SeedVR2-Upscaler: PearAPI 当前不支持通过标准端点调用此模型（返回"仅支持图生视频"错误），
+  //   需要等待 PearAPI 修复或提供正确的调用方式
+  const prompt = model === 'SeedVR2-Upscaler'
+    ? 'Upscale and enhance this image to higher resolution. Restore details, reduce noise and blur, improve clarity while maintaining the original composition and content exactly.'
+    : 'Enhance and upscale this image. Improve details and sharpness while preserving the original content and composition.';
 
-  if (scale) {
-    requestBody.scale = scale;
+  // SeedVR2-Upscaler 在 PearAPI 上当前不可用，直接跳过云端路径
+  if (model === 'SeedVR2-Upscaler') {
+    console.log('[upscale-pro] SeedVR2-Upscaler is not supported via PearAPI standard endpoints yet, skipping cloud upscale');
+    return null;
   }
 
-  console.log(`[upscale-pro] Strategy 1: PearAPI photo-enhancer (model=${model}, face=${face}, scale=${scale || 'auto'})`);
+  // Real-ESRGAN 不需要传 size 参数，PearAPI 会根据输入图片自动计算输出尺寸
+  // 传 size 参数会导致 "Invalid size" 错误
+
+  console.log(`[upscale-pro] Strategy 1: Cloud upscale API (model=${model}, auto-size)`);
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 300000);
 
   try {
-    const pearRes = await fetch(`${pearConfig.baseUrl}/api/photo-enhancer`, {
+    const baseUrl = providerConfig.baseUrl.replace(/\/+$/, '');
+    let resultImageUrl: string | null = null;
+
+    // 下载原始图片到 Buffer，用于 multipart 上传
+    console.log(`[upscale-pro] Downloading image for multipart upload: ${accessibleImageUrl.slice(0, 100)}`);
+    const imgResponse = await fetchWithRetry(accessibleImageUrl, { signal: controller.signal });
+    if (!imgResponse.ok) {
+      throw new Error(`Failed to download image for upload: ${imgResponse.status}`);
+    }
+    const imgBuffer = Buffer.from(await imgResponse.arrayBuffer());
+    const imgContentType = imgResponse.headers.get('content-type') || 'image/png';
+    const imgExt = imgContentType.includes('jpeg') || imgContentType.includes('jpg') ? 'jpg' : 'png';
+    const imgFilename = `image.${imgExt}`;
+
+    // 尝试 1: /v1/images/edits 端点 (multipart form-data, 标准图片编辑端点)
+    // 注意：不传 size 参数，让 PearAPI 根据输入图片自动计算输出尺寸（传 size 会导致 Invalid size 错误）
+    const editsUrl = `${baseUrl}/v1/images/edits`;
+    const editsForm = new FormData();
+    editsForm.append('model', model);
+    editsForm.append('prompt', prompt);
+    editsForm.append('image', new Blob([imgBuffer], { type: imgContentType }), imgFilename);
+
+    console.log(`[upscale-pro] Trying /v1/images/edits with multipart form-data`);
+    const editsRes = await fetchWithRetry(editsUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody),
+      headers: {
+        'Authorization': `Bearer ${providerConfig.apiKey}`,
+      },
+      body: editsForm,
       signal: controller.signal,
     });
 
-    clearTimeout(timeout);
-    const pearData = await pearRes.json() as Record<string, unknown>;
-
-    if (pearData.code !== 200 || !pearData.data) {
-      const errMsg = pearData.msg || pearData.error || `PearAPI code=${pearData.code}`;
-      if (pearData.code === 402) {
-        console.warn(`[upscale-pro] PearAPI balance insufficient (402). Tip: Add fal.ai provider for SeedVR2 upscale.`);
-      } else {
-        console.warn(`[upscale-pro] PearAPI failed: ${errMsg}`);
+    if (editsRes.ok) {
+      const editsData = await editsRes.json() as Record<string, unknown>;
+      resultImageUrl = extractImageUrlFromResponse(editsData);
+      if (!resultImageUrl && editsData.task_id) {
+        resultImageUrl = await pollForImageUrl(baseUrl, editsData.task_id as string, providerConfig.apiKey, controller.signal);
       }
+    } else {
+      const editsErrText = await editsRes.text().catch(() => '');
+      const editsRejected = isEditsEndpointRejected(editsRes.status, editsErrText);
+      console.warn(`[upscale-pro] /v1/images/edits failed (${editsRes.status}): ${editsErrText.slice(0, 300)}`);
+
+      // 尝试 2: /v1/images/generations 端点 (multipart form-data, 部分 API 支持)
+      if (editsRejected) {
+        const genUrl = `${baseUrl}/v1/images/generations`;
+        const genForm = new FormData();
+        genForm.append('model', model);
+        genForm.append('prompt', prompt);
+        genForm.append('image', new Blob([imgBuffer], { type: imgContentType }), imgFilename);
+
+        console.log(`[upscale-pro] Trying /v1/images/generations with multipart form-data`);
+        const genRes = await fetchWithRetry(genUrl, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${providerConfig.apiKey}`,
+          },
+          body: genForm,
+          signal: controller.signal,
+        });
+
+        if (genRes.ok) {
+          const genData = await genRes.json() as Record<string, unknown>;
+          resultImageUrl = extractImageUrlFromResponse(genData);
+          if (!resultImageUrl && genData.task_id) {
+            resultImageUrl = await pollForImageUrl(baseUrl, genData.task_id as string, providerConfig.apiKey, controller.signal);
+          }
+        } else {
+          const genErrText = await genRes.text().catch(() => '');
+          console.warn(`[upscale-pro] /v1/images/generations failed (${genRes.status}): ${genErrText.slice(0, 300)}`);
+        }
+      }
+    }
+
+    clearTimeout(timeout);
+
+    if (!resultImageUrl) {
+      console.warn('[upscale-pro] Cloud upscale API: no image URL in response');
       return null;
     }
 
-    const resultData = pearData.data as Record<string, unknown>;
-    const resultImageUrl = resultData.image_url as string;
-    if (!resultImageUrl) return null;
-
-    // ★ 精确resize：PearAPI返回的图片尺寸可能不精确匹配目标（如SeedVR2默认1.5×而非用户选的4×）
+    // ★ 精确resize：云端API返回的图片尺寸可能不精确匹配目标
     let finalUrl = resultImageUrl;
     if (targetWidth && targetHeight && targetWidth > 0 && targetHeight > 0) {
       finalUrl = await resizeToTarget(resultImageUrl, targetWidth, targetHeight);
@@ -147,14 +227,120 @@ async function upscaleViaPearAPI(
 
     // 持久化结果
     const persistedUrl = await persistResult(finalUrl);
-    console.log(`[upscale-pro] PearAPI success: ${persistedUrl.slice(0, 80)}`);
-    return { url: persistedUrl, model, strategy: model === 'SeedVR2-Upscaler' ? 'cloud-PearAPI-SeedVR2' : 'cloud-PearAPI-Real-ESRGAN' };
+    console.log(`[upscale-pro] Cloud upscale API success: ${persistedUrl.slice(0, 80)}`);
+    return { url: persistedUrl, model, strategy: 'cloud-Real-ESRGAN' };
   } catch (err) {
     clearTimeout(timeout);
     const errMsg = err instanceof Error ? err.message : String(err);
-    console.warn(`[upscale-pro] PearAPI error: ${errMsg}`);
+    console.warn(`[upscale-pro] Cloud upscale API error: ${errMsg}`);
     return null;
   }
+}
+
+/** 从标准 OpenAI 图像 API 响应中提取图片 URL */
+function extractImageUrlFromResponse(data: Record<string, unknown>): string | null {
+  // 标准格式: { data: [{ url: "..." }] } 或 { data: [{ b64_json: "..." }] }
+  const dataArray = data.data as Array<Record<string, unknown>> | undefined;
+  if (dataArray && Array.isArray(dataArray) && dataArray.length > 0) {
+    const firstItem = dataArray[0];
+    if (firstItem.url && typeof firstItem.url === 'string') {
+      return firstItem.url;
+    }
+    if (firstItem.b64_json && typeof firstItem.b64_json === 'string') {
+      return `data:image/png;base64,${firstItem.b64_json}`;
+    }
+  }
+  // PearAPI 特殊格式: { image_url: "..." }
+  if (data.image_url && typeof data.image_url === 'string') {
+    return data.image_url;
+  }
+  // 旧 PearAPI 格式: { code: 200, data: { image_url: "..." } }
+  if (data.code === 200 && data.data) {
+    const innerData = data.data as Record<string, unknown>;
+    if (innerData.image_url && typeof innerData.image_url === 'string') {
+      return innerData.image_url;
+    }
+  }
+  // output 字段
+  if (data.output && typeof data.output === 'string') {
+    return data.output;
+  }
+  return null;
+}
+
+/** 检测 /images/edits 端点是否被拒绝（404/405/422 等） */
+function isEditsEndpointRejected(status: number, body: string): boolean {
+  if (status === 404 || status === 405) return true;
+  if (status === 422 || status === 400) {
+    const lower = body.toLowerCase();
+    return lower.includes('not found') || lower.includes('not supported') ||
+           lower.includes('does not support') || lower.includes('unsupported') ||
+           lower.includes('invalid endpoint') || lower.includes('no route');
+  }
+  // PearAPI 返回 500 + "该模型仅支持图生视频"时，说明 /images/edits 不支持 JSON 方式传图
+  if (status === 500) {
+    const lower = body.toLowerCase();
+    return lower.includes('图生视频') || lower.includes('图生图') ||
+           lower.includes('请上传参考图') || lower.includes('upload') ||
+           lower.includes('reference image');
+  }
+  return false;
+}
+
+/** 带重试的 fetch（3次重试，指数退避） */
+async function fetchWithRetry(url: string, options: RequestInit, maxRetries = 3): Promise<Response> {
+  let lastError: Error | null = null;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      const res = await fetch(url, options);
+      return res;
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if (i < maxRetries - 1) {
+        const delay = Math.pow(2, i) * 1000;
+        console.log(`[upscale-pro] Fetch retry ${i + 1}/${maxRetries} after ${delay}ms: ${lastError.message}`);
+        await new Promise(r => setTimeout(r, delay));
+      }
+    }
+  }
+  throw lastError || new Error('Fetch failed after retries');
+}
+
+/** 轮询异步任务直到获取图片URL */
+async function pollForImageUrl(
+  baseUrl: string,
+  taskId: string,
+  apiKey: string,
+  signal: AbortSignal,
+  maxPolls = 60,
+): Promise<string | null> {
+  const pollUrl = `${baseUrl}/v1/tasks/${taskId}`;
+  for (let i = 0; i < maxPolls; i++) {
+    if (signal.aborted) return null;
+    await new Promise(r => setTimeout(r, 3000)); // 3秒轮询间隔
+    try {
+      const res = await fetch(pollUrl, {
+        headers: { 'Authorization': `Bearer ${apiKey}` },
+        signal,
+      });
+      if (res.ok) {
+        const data = await res.json() as Record<string, unknown>;
+        const imageUrl = extractImageUrlFromResponse(data);
+        if (imageUrl) return imageUrl;
+        // 检查任务状态
+        const status = data.status as string;
+        if (status === 'failed' || status === 'error') {
+          console.warn(`[upscale-pro] Poll task ${taskId} failed: ${data.error || data.message || 'unknown'}`);
+          return null;
+        }
+        // status === 'processing' | 'pending' | 'queued' → continue polling
+      }
+    } catch {
+      // 网络错误，继续轮询
+    }
+  }
+  console.warn(`[upscale-pro] Poll task ${taskId} timed out after ${maxPolls} attempts`);
+  return null;
 }
 
 /** 从管理员配置查找 fal.ai 提供商的 API Key */
