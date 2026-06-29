@@ -1565,7 +1565,8 @@ async function pollTaskUntilComplete(
  */
 async function saveBufferToPublic(buffer: Buffer, filename: string): Promise<string> {
   const webPath = '/api/serve-upload/uploads';
-  // 优先S3（生产环境重部署不丢失）
+  // S3 上传（仅作持久化备份，不直接用作访问路径）
+  let s3Uploaded = false;
   if (isS3Available()) {
     try {
       const ext = (filename.split('.').pop() || 'png').toLowerCase();
@@ -1573,13 +1574,15 @@ async function saveBufferToPublic(buffer: Buffer, filename: string): Promise<str
         : ext === 'webp' ? 'image/webp'
         : ext === 'svg' ? 'image/svg+xml'
         : 'image/png';
-      const s3Url = await uploadImageToS3(buffer, filename, mime);
-      if (s3Url) return s3Url;
+      const s3Result = await uploadImageToS3(buffer, filename, mime);
+      if (s3Result) s3Uploaded = true;
     } catch (s3e) {
-      console.warn('[saveBufferToPublic] S3 upload failed, fallback to local:', (s3e as Error).message);
+      console.warn('[saveBufferToPublic] S3 upload failed:', (s3e as Error).message);
     }
   }
 
+  // 始终保存到本地并返回 serve-upload 路径（S3 仅作持久化备份）
+  // 这样 URL 一定走 /api/serve-upload/ 路由，该路由支持本地文件 + S3 回退
   try {
     const { getServerDataRoot } = await import('@/lib/server-data-root');
     const uploadDir = path.join(getServerDataRoot(), 'uploads');
@@ -1598,6 +1601,12 @@ async function saveBufferToPublic(buffer: Buffer, filename: string): Promise<str
 
     return `${webPath}/${filename}`;
   } catch (e) {
+    // 本地保存失败但 S3 成功时，仍尝试返回 serve-upload 路径
+    // serve-upload 路由会自动从 S3 回退下载
+    if (s3Uploaded) {
+      console.warn('[saveBufferToPublic] Local save failed but S3 backup exists, using serve-upload path');
+      return `${webPath}/${filename}`;
+    }
     console.warn('[saveBufferToPublic] Failed to save to persistent uploads dir, fallback to public/uploads:', e);
   }
 

@@ -27,6 +27,7 @@ interface UpscaleProRequest {
   targetScale?: number; // 用户期望的最终倍率（如8，用于链式放大：先4×再2×）
   fallbackToAi?: boolean; // 云端和本地都失败时是否用AI重绘兜底（默认true）
   enhanceModel?: string;  // 精修使用的图像模型（用户当前在图像生成面板选择的模型）
+  providerId?: string;    // 精修模型的提供商ID（优先于 enhanceModel 中的 :: 前缀）
   skipAiEnhance?: boolean; // 跳过AI画质精修（默认false，ONNX/云端放大结果已足够好时跳过可避免内容变化）
   originalWidth?: number;  // 原图宽度（用于链式放大精确 resize 到目标尺寸）
   originalHeight?: number; // 原图高度（用于链式放大精确 resize 到目标尺寸）
@@ -769,10 +770,15 @@ export async function POST(request: NextRequest) {
       targetScale,
       fallbackToAi = true,
       enhanceModel,
+      providerId,
       skipAiEnhance = false,
       originalWidth,
       originalHeight,
     } = body;
+
+    // 从 enhanceModel 中提取 providerId（如果 enhanceModel 含 ::）
+    const extractedEnhanceProviderId = enhanceModel?.includes('::') ? enhanceModel.split('::')[0] : undefined;
+    const effectiveProviderId = providerId || extractedEnhanceProviderId || undefined;
 
     if (!imageUrl) {
       return NextResponse.json(
@@ -787,7 +793,7 @@ export async function POST(request: NextRequest) {
       console.log(`[upscale-pro] Chain upscale: target ${targetScale}×, first pass ${scale}×...`);
       // 第一步：使用当前 scale（通常 4×）
       const firstPassResult = await performUpscaleChain(imageUrl, model, face, scale, fallbackToAi, skipAiEnhance,
-        originalWidth ? originalWidth * scale : undefined, originalHeight ? originalHeight * scale : undefined);
+        originalWidth ? originalWidth * scale : undefined, originalHeight ? originalHeight * scale : undefined, enhanceModel, effectiveProviderId);
       if (!firstPassResult.success || !firstPassResult.url) {
         return NextResponse.json(firstPassResult, { status: firstPassResult.success ? 200 : 502 });
       }
@@ -797,6 +803,7 @@ export async function POST(request: NextRequest) {
       const secondPassResult = await performUpscaleChain(
         firstPassResult.url as string, model, face, Math.min(4, Math.max(2, Math.round(secondScale))), fallbackToAi, skipAiEnhance,
         originalWidth ? Math.round(originalWidth * targetScale) : undefined, originalHeight ? Math.round(originalHeight * targetScale) : undefined,
+        enhanceModel, effectiveProviderId,
       );
       if (secondPassResult.success && secondPassResult.url) {
         // 标记链式放大
@@ -850,7 +857,9 @@ export async function POST(request: NextRequest) {
 
     // ★ 常规 2× / 4× 放大
     const result = await performUpscaleChain(imageUrl, model, face, scale, fallbackToAi, skipAiEnhance,
-      originalWidth ? originalWidth * scale : undefined, originalHeight ? originalHeight * scale : undefined);
+      originalWidth ? originalWidth * scale : undefined, originalHeight ? originalHeight * scale : undefined,
+      enhanceModel, effectiveProviderId,
+    );
 
     // ★ 最终精确尺寸校验：确保输出图片尺寸 = 原图 × scale
     if (result.success && result.url && originalWidth && originalHeight) {
@@ -949,7 +958,7 @@ async function performUpscaleChain(
     let didEnhance = false;
     if (!skipAiEnhance) {
       try {
-        const enhanceResult = await enhanceViaAI(localResult.url, enhanceModel, effectiveProviderId);
+        const enhanceResult = await enhanceViaAI(localResult.url, enhanceModel, enhanceProviderId);
         if (enhanceResult.enhanced && enhanceResult.url) {
           enhancedUrl = enhanceResult.url;
           didEnhance = true;
@@ -983,7 +992,7 @@ async function performUpscaleChain(
       let didEnhance = false;
       if (!skipAiEnhance) {
         try {
-          const enhanceResult = await enhanceViaAI(aiResult.url, enhanceModel, effectiveProviderId);
+          const enhanceResult = await enhanceViaAI(aiResult.url, enhanceModel, enhanceProviderId);
           if (enhanceResult.enhanced && enhanceResult.url) {
             enhancedUrl = enhanceResult.url;
             didEnhance = true;
