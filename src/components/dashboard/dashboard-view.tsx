@@ -22,7 +22,7 @@ import {
   // Admin prototype icons
   LayoutDashboard, Flame, Coins, TrendingUp, TrendingDown,
   AlertCircle, SlidersHorizontal, HardDrive, Megaphone, Save,
-  Brain, Link, Lock, LogIn, Info, ChevronLeft,
+  Brain, Link, Lock, LogIn, Info, ChevronLeft, Globe2, ListChecks,
 } from 'lucide-react';
 import { UserManager } from '@/lib/user-manager';
 import { RECHARGE_PACKAGES } from '@/lib/credits-constants';
@@ -32,7 +32,7 @@ import type { ApiProvider, ModelInfo } from '@/lib/universal-api-types';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import JSZip from 'jszip';
 
-type TabType = 'projects' | 'templates' | 'assets' | 'stats' | 'credits' | 'settings' | 'users' | 'apis' | 'data' | 'ecom-templates' | 'payment-config' | 'audit' | 'overview' | 'desktop-admin';
+type TabType = 'projects' | 'templates' | 'assets' | 'stats' | 'credits' | 'settings' | 'users' | 'apis' | 'data' | 'ecom-templates' | 'payment-config' | 'audit' | 'overview' | 'desktop-admin' | 'connector-admin';
 type ProjectFilter = 'all' | 'recent' | 'starred';
 type AssetSubTab = 'images' | 'prompts' | 'brands';
 type ApiKind = 'general' | 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler' | 'universal';
@@ -105,6 +105,16 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     updateConfig?: Record<string, unknown>;
   }>({ devices: [], backups: [], resources: [], records: [] });
   const [desktopAdminLoading, setDesktopAdminLoading] = useState(false);
+  const [connectorStatus, setConnectorStatus] = useState<{
+    dcc: Record<string, unknown> | null;
+    dccPreflight: Record<string, unknown> | null;
+    dccTemplates: Record<string, unknown>[];
+    creative: Record<string, unknown> | null;
+    psTemplates: Record<string, unknown>[];
+    aiTemplates: Record<string, unknown>[];
+    loading: boolean;
+    error?: string;
+  }>({ dcc: null, dccPreflight: null, dccTemplates: [], creative: null, psTemplates: [], aiTemplates: [], loading: false });
   const [projectFilter, setProjectFilter] = useState<ProjectFilter>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [assetTab, setAssetTab] = useState<AssetSubTab>('images');
@@ -1427,6 +1437,36 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     if (activeTab === 'desktop-admin' && isAdmin) void loadDesktopAdminData();
   }, [activeTab, isAdmin, loadDesktopAdminData]);
 
+  const loadConnectorStatus = useCallback(async () => {
+    if (!isAdmin) return;
+    setConnectorStatus(prev => ({ ...prev, loading: true, error: undefined }));
+    try {
+      const [dccHealth, dccPreflight, dccTpl, creativeHealth, psTpl, aiTpl] = await Promise.all([
+        fetch('/api/dcc/health').then(r => r.json()).catch(() => null),
+        fetch('/api/dcc/preflight').then(r => r.json()).catch(() => null),
+        fetch('/api/dcc/templates').then(r => r.json()).catch(() => ({ templates: [] })),
+        fetch('/api/creative/health').then(r => r.json()).catch(() => null),
+        fetch('/api/creative/templates?host=photoshop').then(r => r.json()).catch(() => ({ templates: [] })),
+        fetch('/api/creative/templates?host=illustrator').then(r => r.json()).catch(() => ({ templates: [] })),
+      ]);
+      setConnectorStatus({
+        dcc: dccHealth,
+        dccPreflight: dccPreflight,
+        dccTemplates: Array.isArray(dccTpl?.templates) ? dccTpl.templates : [],
+        creative: creativeHealth,
+        psTemplates: Array.isArray(psTpl?.templates) ? psTpl.templates : [],
+        aiTemplates: Array.isArray(aiTpl?.templates) ? aiTpl.templates : [],
+        loading: false,
+      });
+    } catch (e) {
+      setConnectorStatus(prev => ({ ...prev, loading: false, error: String(e) }));
+    }
+  }, [isAdmin]);
+
+  useEffect(() => {
+    if (activeTab === 'connector-admin' && isAdmin) void loadConnectorStatus();
+  }, [activeTab, isAdmin, loadConnectorStatus]);
+
   const saveEcomTemplate = useCallback(async (tpl: Record<string, unknown>) => {
     setIsEcomTplSaving(true);
     try {
@@ -1562,6 +1602,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 { key: 'audit' as TabType, label: '审计日志', icon: ShieldCheck, count: null },
                 { key: 'apis' as TabType, label: 'API 管理', icon: Server, count: providers.length },
                 { key: 'desktop-admin' as TabType, label: '本地无界', icon: HardDrive, count: desktopAdminData.devices.length },
+                { key: 'connector-admin' as TabType, label: '插件连接器', icon: Plug, count: null },
                 { key: 'data' as TabType, label: '数据管理', icon: Database, count: null },
                 { key: 'payment-config' as TabType, label: '支付配置', icon: CreditCard, count: null },
                 { key: 'ecom-templates' as TabType, label: '电商模板', icon: ShoppingBag, count: ecomTemplates.length },
@@ -2245,6 +2286,224 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* ── Tab: Connector Admin (DCC / Creative) ── */}
+        {activeTab === 'connector-admin' && isAdmin && (
+          <div className="h-full overflow-y-auto p-6">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h1 className={`text-xl font-bold ${textPrimary}`}>插件连接器管理</h1>
+                <p className={`text-sm ${textSecondary}`}>SketchUp / 3ds Max / Photoshop / Illustrator / 窗口拾取脚本 等外部插件云端对接状态</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    navigator.clipboard?.writeText(typeof window !== 'undefined' ? window.location.origin : '');
+                    toast.success('云端地址已复制');
+                  }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium ${softClass} ${textPrimary}`}
+                >
+                  <Link size={12} /> 复制云端地址
+                </button>
+                <button
+                  onClick={() => loadConnectorStatus()}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium ${softClass} ${textPrimary}`}
+                >
+                  <RefreshCw size={12} className={connectorStatus.loading ? 'animate-spin' : ''} />
+                  刷新检测
+                </button>
+              </div>
+            </div>
+
+            {/* 环境地址卡片 */}
+            <div className={`${softClass} rounded-xl p-4 border ${isDark ? 'border-white/10' : 'border-gray-200'} mb-5`}>
+              <div className="flex items-center gap-2 mb-2">
+                <Globe2 size={14} className={accentClass} />
+                <span className={`text-sm font-semibold ${textPrimary}`}>插件连接配置</span>
+              </div>
+              <div className="grid grid-cols-2 gap-4 text-xs">
+                <div>
+                  <div className={textSecondary}>公共云端地址</div>
+                  <div className={`font-mono mt-1 ${textPrimary}`}>{typeof window !== 'undefined' ? window.location.origin : ''}</div>
+                </div>
+                <div>
+                  <div className={textSecondary}>本地无界默认地址</div>
+                  <div className={`font-mono mt-1 ${textPrimary}`}>http://127.0.0.1:5000</div>
+                </div>
+                <div>
+                  <div className={textSecondary}>鉴权策略</div>
+                  <div className={`mt-1 ${textPrimary}`}>公共云默认免鉴权；私有云可通过 <code className="text-[11px]">WUJIE_DCC_PLUGIN_TOKEN</code> / <code className="text-[11px]">x-api-key</code> 开启</div>
+                </div>
+                <div>
+                  <div className={textSecondary}>支持的请求头</div>
+                  <div className={`mt-1 ${textPrimary} font-mono`}>Authorization: Bearer &lt;token&gt;; x-api-key: &lt;key&gt;</div>
+                </div>
+              </div>
+            </div>
+
+            {/* 核心接口健康状态 */}
+            <div className="grid grid-cols-4 gap-3 mb-5">
+              {[
+                { label: 'DCC Health', path: '/api/dcc/health', ok: !!connectorStatus.dcc?.success },
+                { label: 'DCC Preflight', path: '/api/dcc/preflight', ok: !!connectorStatus.dccPreflight?.success },
+                { label: 'Creative Health', path: '/api/creative/health', ok: !!connectorStatus.creative?.success },
+                { label: 'PS/AI 模板', path: '/api/creative/templates', ok: connectorStatus.psTemplates.length + connectorStatus.aiTemplates.length > 0 },
+              ].map(item => (
+                <div key={item.label} className={`${softClass} rounded-xl p-4 border ${isDark ? 'border-white/10' : 'border-gray-200'}`}>
+                  <div className="flex items-center justify-between">
+                    <div className={`text-xs ${textSecondary}`}>{item.label}</div>
+                    {item.ok ? (
+                      <CheckCircle2 size={14} className="text-emerald-500" />
+                    ) : (
+                      <XCircle size={14} className="text-red-500" />
+                    )}
+                  </div>
+                  <div className={`text-xs font-mono mt-2 ${textSecondary}`}>{item.path}</div>
+                </div>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              {/* DCC 插件 (SketchUp / 3ds Max / 窗口拾取) */}
+              <div className={`${softClass} rounded-xl p-4 border ${isDark ? 'border-white/10' : 'border-gray-200'}`}>
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className={`font-semibold ${textPrimary} flex items-center gap-2`}>
+                    <Box size={16} className={accentClass} /> DCC 插件接口（SketchUp / 3ds Max）
+                  </h2>
+                  <span className={`text-[11px] px-2 py-0.5 rounded-full ${connectorStatus.dcc?.success ? 'bg-emerald-500/15 text-emerald-500' : 'bg-red-500/15 text-red-500'}`}>
+                    {connectorStatus.dcc?.success ? '在线' : '未就绪'}
+                  </span>
+                </div>
+                <div className="space-y-2 text-xs mb-3">
+                  <div className="flex justify-between"><span className={textSecondary}>服务名</span><span className={textPrimary}>{String(connectorStatus.dcc?.name || '-')}</span></div>
+                  <div className="flex justify-between"><span className={textSecondary}>版本</span><span className={textPrimary}>{String(connectorStatus.dcc?.version || '-')}</span></div>
+                  <div className="flex justify-between"><span className={textSecondary}>模板数</span><span className={textPrimary}>{connectorStatus.dccTemplates.length}</span></div>
+                  <div className="flex justify-between"><span className={textSecondary}>推荐渲染模式</span><span className={textPrimary}>{String((connectorStatus.dccPreflight as any)?.recommended?.defaultRenderMode || '-')}</span></div>
+                </div>
+                <h3 className={`text-xs font-semibold ${textPrimary} mb-2 mt-3`}>DCC 提示词模板</h3>
+                <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                  {connectorStatus.dccTemplates.map((t: Record<string, unknown>) => (
+                    <div key={String(t.id)} className={`text-xs p-2 rounded-lg ${isDark ? 'bg-white/5' : 'bg-gray-100'}`}>
+                      <div className={`${textPrimary} font-medium`}>{String(t.name)} <span className={`${textSecondary} font-normal`}>· {String(t.category)}</span></div>
+                      <div className={`${textSecondary} mt-0.5 line-clamp-2`}>{String(t.content)}</div>
+                    </div>
+                  ))}
+                  {connectorStatus.dccTemplates.length === 0 && <div className={`text-xs ${textSecondary}`}>暂无模板</div>}
+                </div>
+              </div>
+
+              {/* CEP 插件 (Photoshop / Illustrator) */}
+              <div className={`${softClass} rounded-xl p-4 border ${isDark ? 'border-white/10' : 'border-gray-200'}`}>
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className={`font-semibold ${textPrimary} flex items-center gap-2`}>
+                    <Palette size={16} className={accentClass} /> Adobe CEP 创意连接器（PS / AI）
+                  </h2>
+                  <span className={`text-[11px] px-2 py-0.5 rounded-full ${connectorStatus.creative?.success ? 'bg-emerald-500/15 text-emerald-500' : 'bg-red-500/15 text-red-500'}`}>
+                    {connectorStatus.creative?.success ? '在线' : '未就绪'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs mb-3">
+                  <div className="flex justify-between"><span className={textSecondary}>Photoshop</span><span className={(connectorStatus.creative as any)?.hosts?.photoshopCep ? 'text-emerald-500' : 'text-red-500'}>{(connectorStatus.creative as any)?.hosts?.photoshopCep ? '已启用' : '未启用'}</span></div>
+                  <div className="flex justify-between"><span className={textSecondary}>Illustrator</span><span className={(connectorStatus.creative as any)?.hosts?.illustratorCep ? 'text-emerald-500' : 'text-red-500'}>{(connectorStatus.creative as any)?.hosts?.illustratorCep ? '已启用' : '未启用'}</span></div>
+                  <div className="flex justify-between"><span className={textSecondary}>版本</span><span className={textPrimary}>{String(connectorStatus.creative?.version || '-')}</span></div>
+                  <div className="flex justify-between"><span className={textSecondary}>鉴权</span><span className={textPrimary}>{connectorStatus.creative?.authRequired ? '开启' : '免鉴权'}</span></div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <h3 className={`text-xs font-semibold ${textPrimary} mb-2`}>Photoshop 模板</h3>
+                    <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                      {connectorStatus.psTemplates.map((t: Record<string, unknown>) => (
+                        <div key={String(t.id)} className={`text-[11px] p-2 rounded-lg ${isDark ? 'bg-white/5' : 'bg-gray-100'}`}>
+                          <div className={`${textPrimary} font-medium`}>{String(t.name)}</div>
+                          <div className={`${textSecondary} line-clamp-2`}>{String(t.prompt)}</div>
+                        </div>
+                      ))}
+                      {connectorStatus.psTemplates.length === 0 && <div className={`text-xs ${textSecondary}`}>暂无</div>}
+                    </div>
+                  </div>
+                  <div>
+                    <h3 className={`text-xs font-semibold ${textPrimary} mb-2`}>Illustrator 模板</h3>
+                    <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                      {connectorStatus.aiTemplates.map((t: Record<string, unknown>) => (
+                        <div key={String(t.id)} className={`text-[11px] p-2 rounded-lg ${isDark ? 'bg-white/5' : 'bg-gray-100'}`}>
+                          <div className={`${textPrimary} font-medium`}>{String(t.name)}</div>
+                          <div className={`${textSecondary} line-clamp-2`}>{String(t.prompt)}</div>
+                        </div>
+                      ))}
+                      {connectorStatus.aiTemplates.length === 0 && <div className={`text-xs ${textSecondary}`}>暂无</div>}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 能力矩阵 */}
+              <div className={`${softClass} rounded-xl p-4 border ${isDark ? 'border-white/10' : 'border-gray-200'}`}>
+                <h2 className={`font-semibold mb-3 ${textPrimary} flex items-center gap-2`}><Zap size={16} className={accentClass} /> Creative 能力矩阵</h2>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  {(connectorStatus.creative?.capabilities ? Object.entries(connectorStatus.creative.capabilities as Record<string, boolean>) : []).map(([k, v]) => (
+                    <div key={k} className={`flex items-center justify-between px-2 py-1.5 rounded-lg ${isDark ? 'bg-white/5' : 'bg-gray-100'}`}>
+                      <span className={textPrimary}>{k}</span>
+                      {v ? <CheckCircle2 size={12} className="text-emerald-500" /> : <XCircle size={12} className="text-red-500" />}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* 预飞检查 */}
+              <div className={`${softClass} rounded-xl p-4 border ${isDark ? 'border-white/10' : 'border-gray-200'}`}>
+                <h2 className={`font-semibold mb-3 ${textPrimary} flex items-center gap-2`}><Shield size={16} className={accentClass} /> DCC 预飞检查（Preflight）</h2>
+                <div className="space-y-2 text-xs">
+                  {(Array.isArray(connectorStatus.dccPreflight?.checks) ? (connectorStatus.dccPreflight as any).checks : []).map((c: Record<string, unknown>) => (
+                    <div key={String(c.id)} className="flex items-center justify-between">
+                      <span className={textPrimary}>{String(c.label)}</span>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] ${String(c.status) === 'pass' ? 'bg-emerald-500/15 text-emerald-500' : 'bg-sky-500/15 text-sky-500'}`}>{String(c.status)}</span>
+                    </div>
+                  ))}
+                  <h3 className={`text-xs font-semibold ${textPrimary} mt-3 mb-1`}>渲染模式</h3>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {(Array.isArray(connectorStatus.dccPreflight?.renderModes) ? (connectorStatus.dccPreflight as any).renderModes : []).map((m: Record<string, unknown>) => (
+                      <div key={String(m.id)} className={`text-[11px] p-1.5 rounded ${isDark ? 'bg-white/5' : 'bg-gray-100'}`}>
+                        <div className={`${textPrimary} font-medium`}>{String(m.name)}</div>
+                        <div className={`${textSecondary} line-clamp-1`}>{String(m.description)}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 端点清单 */}
+            <div className={`${softClass} rounded-xl p-4 border ${isDark ? 'border-white/10' : 'border-gray-200'} mt-4`}>
+              <h2 className={`font-semibold mb-3 ${textPrimary} flex items-center gap-2`}><ListChecks size={16} className={accentClass} /> 端点清单（可直接复制到插件配置）</h2>
+              <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-xs font-mono">
+                {[
+                  ['DCC 健康检测', 'GET /api/dcc/health'],
+                  ['DCC 预飞配置', 'GET /api/dcc/preflight'],
+                  ['DCC 中文模板', 'GET /api/dcc/templates'],
+                  ['创意连接器健康', 'GET /api/creative/health'],
+                  ['创意模板（PS/AI）', 'GET /api/creative/templates?host=photoshop|illustrator'],
+                  ['Photoshop 操作入口', 'POST /api/creative/photoshop'],
+                  ['Illustrator 操作入口', 'POST /api/creative/illustrator'],
+                  ['提交生图任务', 'POST /api/generate'],
+                  ['轮询任务结果', 'POST /api/poll-task'],
+                  ['图片编辑/抠图/放大', 'POST /api/image-edit'],
+                  ['位图矢量化', 'POST /api/design/vectorize'],
+                  ['SVG 智能描摹', 'POST /api/svg-trace'],
+                ].map(([label, path]) => (
+                  <div key={path} className="flex items-center justify-between gap-3">
+                    <span className={`${textSecondary} shrink-0`}>{label}</span>
+                    <code className={`${textPrimary} truncate`}>{path}</code>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {connectorStatus.error && (
+              <div className={`mt-4 p-3 rounded-xl bg-red-500/10 text-red-500 text-xs`}>检测失败：{connectorStatus.error}</div>
+            )}
           </div>
         )}
 
