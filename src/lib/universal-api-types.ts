@@ -40,9 +40,11 @@ export interface ApiProvider {
 export interface ModelInfo {
   id: string;
   name: string;
+  displayName?: string;
   providerId: string;
   type: 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler';
   description?: string;
+  contextWindow?: number;
   supportedAspectRatios?: string[];
   supportedQualities?: string[];
   maxImages?: number;

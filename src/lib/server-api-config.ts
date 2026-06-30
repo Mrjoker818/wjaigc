@@ -65,6 +65,7 @@ interface StoredApiConfig {
 
 interface AddProviderInput {
   name: string;
+  displayName?: string;
   baseUrl: string;
   apiKey: string;
   modelType: ApiKind;
@@ -604,7 +605,7 @@ export async function addApiProvider(input: AddProviderInput): Promise<ApiProvid
   const provider: ApiProvider = {
     id,
     name: input.name.trim(),
-    displayName: input.name.trim(),
+    displayName: input.displayName?.trim() || input.name.trim(),
     baseUrl: normalizeBaseUrl(input.baseUrl),
     apiKey: input.apiKey.trim(),
     isEnabled: true,

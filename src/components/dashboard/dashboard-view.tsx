@@ -11,10 +11,10 @@ import {
   FolderOpen, Plus, Search, Star, Trash2, MoreVertical, MoreHorizontal, Image,
   Sparkles, LayoutTemplate, Layers, Clock, ChevronRight, ArrowRight,
   Box, Copy, Check, Palette, Type, BookOpen,
-  LogOut, Shield, X, Eye, Mail, Calendar, KeyRound, Zap, Pencil,
+  LogOut, Shield, X, Eye, Mail, Calendar, KeyRound, Zap, Pencil, EyeOff,
   // Admin/User management icons
   UserPlus, Ban, CheckCircle2, CheckCircle, Plug, RefreshCw, Activity, Wallet,
-  Loader2, Settings, ChevronDown, ShieldCheck, AlertTriangle,
+  Loader2, Settings, ChevronDown, ShieldCheck, AlertTriangle, AlertCircle, DollarSign,
   ArrowUp, ArrowDown, ShoppingBag, Users, Server, Database,
   XCircle, BarChart3, Upload, RotateCcw, Film, CreditCard,
   // Asset library icons
@@ -22,7 +22,7 @@ import {
   Grid3X3, ZoomIn,
   // Admin prototype icons
   LayoutDashboard, Flame, Coins, TrendingUp, TrendingDown,
-  AlertCircle, SlidersHorizontal, HardDrive, Megaphone, Save,
+  SlidersHorizontal, HardDrive, Megaphone, Save,
   Brain, Link, Lock, LogIn, Info, ChevronLeft, Globe2, ListChecks,
 } from 'lucide-react';
 import { UserManager } from '@/lib/user-manager';
@@ -149,6 +149,8 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   // ─── Admin: API management state ───
   const [providers, setProviders] = useState<AdminProvider[]>([]);
   const [apiName, setApiName] = useState('');
+  const [apiDisplayName, setApiDisplayName] = useState('');
+  const [showApiKey, setShowApiKey] = useState(false);
   const [apiBaseUrl, setApiBaseUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [apiModel, setApiModel] = useState('');
@@ -167,6 +169,11 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const [providerTestStatus, setProviderTestStatus] = useState<Record<string, { testing: boolean; success: boolean | null; message: string; modelCount: number }>>({});
   const [isTestingNew, setIsTestingNew] = useState(false);
   const [testNewResult, setTestNewResult] = useState<{ success: boolean; message: string; modelCount?: number; error?: string } | null>(null);
+  // 抽屉内验证/余额结果
+  const [drawerVerifyResult, setDrawerVerifyResult] = useState<{ success: boolean; checks?: { models: boolean; imageGen: boolean; chat: boolean }; detected?: string; message?: string } | null>(null);
+  const [drawerBalanceResult, setDrawerBalanceResult] = useState<{ success: boolean; message: string; balance?: number; currency?: string } | null>(null);
+  const [isVerifyingDrawer, setIsVerifyingDrawer] = useState(false);
+  const [isQueryingBalanceDrawer, setIsQueryingBalanceDrawer] = useState(false);
   const [verifyResult, setVerifyResult] = useState<{ providerId: string; success: boolean; summary: string; tests: Array<{ name: string; status: string; detail: string }> } | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
   const [apiBalances, setApiBalances] = useState<Array<{
@@ -752,24 +759,105 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
   // ─── Reset API form helper ───
   const resetApiForm = useCallback(() => {
-    setApiKind('image'); setApiName(''); setApiBaseUrl(''); setApiKey(''); setApiModel('');
+    setApiKind('image'); setApiName(''); setApiDisplayName(''); setApiBaseUrl(''); setApiKey(''); setApiModel('');
     setCompatProfile('auto'); setDiscoveredModels([]); setSelectedModels([]);
-    setAdvancedParams([]); setShowAdvancedParams(false);
+    setAdvancedParams([]); setShowAdvancedParams(false); setShowApiKey(false);
     setBalanceUsername(''); setBalancePassword('');
+    setTestNewResult(null); setDrawerVerifyResult(null); setDrawerBalanceResult(null);
     setEditingProviderId(null);
   }, []);
 
   const editApiProvider = useCallback((p: ApiProvider) => {
     setEditingProviderId(p.id);
-    setApiName(p.name); setApiBaseUrl(p.baseUrl); setApiKey(p.apiKey);
+    setApiName(p.name);
+    setApiDisplayName((p as any).displayName || '');
+    setApiBaseUrl(p.baseUrl);
+    setApiKey(''); // Don't pre-fill key for security; user can enter new key to update
+    setApiModel('');
     setApiKind((p.modelType as ApiKind) || 'image');
     setCompatProfile((p as any).compatProfile || 'auto');
     setSelectedModels(p.selectedModels || []);
     setDiscoveredModels(p.discoveredModels || []);
     setAdvancedParams(p.advancedParams ? Object.entries(p.advancedParams).map(([key, value]) => ({ key, value: String(value) })) : []);
     setShowAdvancedParams(!!p.advancedParams && Object.keys(p.advancedParams).length > 0);
+    setTestNewResult(null); setDrawerVerifyResult(null); setDrawerBalanceResult(null);
+    setShowApiKey(false);
     setShowApiDrawer(true);
   }, []);
+
+  // 抽屉内验证协议
+  const handleDrawerVerifyProtocol = useCallback(async () => {
+    if (!apiBaseUrl) return;
+    // Use existing provider key when editing and no new key provided
+    const effectiveKey = apiKey || (editingProviderId ? providers.find(p => p.id === editingProviderId)?.apiKey : undefined);
+    setIsVerifyingDrawer(true);
+    setDrawerVerifyResult(null);
+    try {
+      const advParams: Record<string, string> = {};
+      advancedParams.forEach(p => { if (p.key.trim()) advParams[p.key.trim()] = p.value; });
+      if (compatProfile !== 'auto') advParams.compatProfile = compatProfile;
+      const res = await fetch('/api/verify-protocol', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          baseUrl: apiBaseUrl,
+          apiKey: effectiveKey,
+          modelType: apiKind,
+          advancedParams: Object.keys(advParams).length > 0 ? advParams : undefined,
+        }),
+      });
+      const data = await res.json();
+      setDrawerVerifyResult({
+        success: data.success !== false,
+        checks: data.checks || { models: false, imageGen: false, chat: false },
+        detected: data.detected || data.profile,
+        message: data.summary || data.message,
+      });
+    } catch (e: any) {
+      setDrawerVerifyResult({ success: false, message: e?.message || '验证失败' });
+    } finally {
+      setIsVerifyingDrawer(false);
+    }
+  }, [apiBaseUrl, apiKey, apiKind, editingProviderId, providers, advancedParams, compatProfile]);
+
+  // 抽屉内查询余额
+  const handleDrawerQueryBalance = useCallback(async () => {
+    if (!apiBaseUrl) return;
+    const effectiveKey = apiKey || (editingProviderId ? providers.find(p => p.id === editingProviderId)?.apiKey : undefined);
+    setIsQueryingBalanceDrawer(true);
+    setDrawerBalanceResult(null);
+    try {
+      const advParams: Record<string, string> = {};
+      advancedParams.forEach(p => { if (p.key.trim()) advParams[p.key.trim()] = p.value; });
+      // 先尝试用临时配置查询
+      const tempRes = await fetch('/api/admin/api-balance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          baseUrl: apiBaseUrl,
+          apiKey: effectiveKey,
+          modelType: apiKind,
+          advancedParams: Object.keys(advParams).length > 0 ? advParams : undefined,
+        }),
+      });
+      const data = await tempRes.json();
+      if (data.success !== false && data.balances?.[0]) {
+        const bal = data.balances[0];
+        setDrawerBalanceResult({
+          success: true,
+          message: bal.error ? `查询完成：${bal.error}` : '余额查询成功',
+          balance: bal.balance ?? undefined,
+          currency: bal.currency,
+        });
+      } else {
+        setDrawerBalanceResult({ success: false, message: data.error || '当前API暂不支持余额查询或密钥无效' });
+      }
+    } catch (e: any) {
+      setDrawerBalanceResult({ success: false, message: e?.message || '查询失败' });
+    } finally {
+      setIsQueryingBalanceDrawer(false);
+    }
+  }, [apiBaseUrl, apiKey, apiKind, editingProviderId, providers, advancedParams]);
 
   const toggleApiEnabled = useCallback(async (providerId: string) => {
     const p = providers.find(x => x.id === providerId);
@@ -801,6 +889,61 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       }));
     } finally {
       setTestingProviderId(null);
+    }
+  }, []);
+
+  // 卡片上的验证协议按钮
+  const [providerVerifyStatus, setProviderVerifyStatus] = useState<Record<string, { verifying: boolean; result?: { success: boolean; summary: string } }>>({});
+  const verifyProtocolForProvider = useCallback(async (p: ApiProvider) => {
+    setProviderVerifyStatus(prev => ({ ...prev, [p.id]: { verifying: true } }));
+    setProviderTestStatus(prev => ({ ...prev, [p.id]: { testing: true, success: null, message: '正在验证协议...', modelCount: 0 } }));
+    try {
+      const res = await fetch('/api/verify-protocol', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ providerId: p.id }),
+      });
+      const data = await res.json();
+      setProviderTestStatus(prev => ({
+        ...prev,
+        [p.id]: {
+          testing: false,
+          success: data.success !== false,
+          message: data.summary || (data.success !== false ? '协议验证通过' : '协议验证失败'),
+          modelCount: 0,
+        }
+      }));
+      setProviderVerifyStatus(prev => ({ ...prev, [p.id]: { verifying: false, result: { success: data.success !== false, summary: data.summary || '' } } }));
+    } catch (e: any) {
+      setProviderTestStatus(prev => ({ ...prev, [p.id]: { testing: false, success: false, message: `验证失败: ${e.message}`, modelCount: 0 } }));
+      setProviderVerifyStatus(prev => ({ ...prev, [p.id]: { verifying: false } }));
+    }
+  }, []);
+
+  // 卡片上的查询余额按钮
+  const [providerBalanceStatus, setProviderBalanceStatus] = useState<Record<string, { loading: boolean; message?: string }>>({});
+  const queryBalanceForProvider = useCallback(async (p: ApiProvider) => {
+    setProviderBalanceStatus(prev => ({ ...prev, [p.id]: { loading: true } }));
+    setProviderTestStatus(prev => ({ ...prev, [p.id]: { testing: true, success: null, message: '正在查询余额...', modelCount: 0 } }));
+    try {
+      const res = await fetch('/api/admin/api-balance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ providerId: p.id }),
+      });
+      const data = await res.json();
+      const balInfo = data.balances?.find((b: any) => b.providerId === p.id);
+      const msg = balInfo
+        ? (balInfo.error ? balInfo.error : `余额查询成功：${balInfo.balance ?? '未知'} ${balInfo.currency || ''}${balInfo.remainingQuota != null ? `，剩余额度 ${balInfo.remainingQuota}` : ''}`)
+        : (data.error || '未找到余额信息');
+      setProviderTestStatus(prev => ({
+        ...prev,
+        [p.id]: { testing: false, success: !balInfo?.error, message: msg, modelCount: 0 }
+      }));
+      setProviderBalanceStatus(prev => ({ ...prev, [p.id]: { loading: false, message: msg } }));
+    } catch (e: any) {
+      setProviderTestStatus(prev => ({ ...prev, [p.id]: { testing: false, success: false, message: `查询失败: ${e.message}`, modelCount: 0 } }));
+      setProviderBalanceStatus(prev => ({ ...prev, [p.id]: { loading: false } }));
     }
   }, []);
 
@@ -1026,15 +1169,41 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
   // ─── Admin: API management handlers ───
   const handleDiscoverModels = async () => {
-    if (!apiBaseUrl.trim() || !apiKey.trim()) return;
+    if (!apiBaseUrl.trim()) return;
+    // For drawer: if no new key entered but editing existing provider, allow test with existing key via test action
+    setIsTestingNew(true);
     setIsDiscovering(true);
     try {
-      const response = await fetch('/api/admin/apis', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'discover', baseUrl: apiBaseUrl.trim(), apiKey: apiKey.trim(), modelType: apiKind }) });
+      const requestBody: Record<string, unknown> = {
+        baseUrl: apiBaseUrl.trim(),
+        modelType: apiKind,
+      };
+      // Pass advanced params including compatProfile
+      const advParams: Record<string, string> = {};
+      advancedParams.filter(p => p.key.trim()).forEach(p => { advParams[p.key.trim()] = p.value; });
+      if (compatProfile !== 'auto') advParams.compatProfile = compatProfile;
+      if (Object.keys(advParams).length > 0) requestBody.advancedParams = advParams;
+
+      if (apiKey.trim()) {
+        requestBody.apiKey = apiKey.trim();
+        requestBody.action = 'discover';
+      } else if (editingProviderId) {
+        // Use existing provider's key
+        requestBody.action = 'test';
+        requestBody.providerId = editingProviderId;
+      } else {
+        setTestNewResult({ success: false, message: '请先填写 API Key' });
+        setIsDiscovering(false);
+        setIsTestingNew(false);
+        return;
+      }
+      const response = await fetch('/api/admin/apis', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody) });
       if (!response.ok) throw new Error(`模型发现失败: HTTP ${response.status}`);
       const data = await response.json();
-      if (!data.success && data.error) { setTestNewResult({ success: false, message: data.error }); setDiscoveredModels([]); return; }
+      if (!data.success && data.error) { setTestNewResult({ success: false, message: data.error }); setDiscoveredModels([]); setIsTestingNew(false); return; }
       const models = data.models || [];
       setDiscoveredModels(models); setModelSearchQuery('');
+      setTestNewResult({ success: true, message: `连接成功，发现 ${models.length} 个可用模型`, modelCount: models.length });
       if (apiKind === 'vectorize') {
         const vModels = models.filter((m: ModelInfo) => { const id = m.id.toLowerCase(); return id.includes('vector') || id.includes('vectorize') || id.includes('svg') || id.includes('tracer') || id.includes('starvector'); });
         setSelectedModels(vModels.length > 0 ? vModels.map((m: ModelInfo) => m.id) : []);
@@ -1044,31 +1213,36 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       } else if (apiKind === 'upscaler') {
         const uModels = models.filter((m: ModelInfo) => { const id = m.id.toLowerCase(); return id.includes('upscale') || id.includes('seedvr') || id.includes('esrgan') || id.includes('realesrgan') || id.includes('swinir') || id.includes('hat'); });
         setSelectedModels(uModels.length > 0 ? uModels.map((m: ModelInfo) => m.id) : []);
+      } else if (selectedModels.length === 0 && models.length > 0) {
+        // Auto-select all models on first discover
+        setSelectedModels(models.map((m: ModelInfo) => m.id));
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : '识别模型失败';
       setTestNewResult({ success: false, message: msg.includes('JSON') ? 'API 返回了非 JSON 响应，请检查 Base URL 是否正确' : msg });
       setDiscoveredModels([]);
-    } finally { setIsDiscovering(false); }
+    } finally { setIsDiscovering(false); setIsTestingNew(false); }
   };
 
   const handleAddApi = async () => {
-    if (!apiName.trim() || !apiBaseUrl.trim() || !apiKey.trim()) return;
+    if (!apiName.trim() || !apiBaseUrl.trim()) return;
     const models = selectedModels.length ? selectedModels : apiModel.trim() ? [apiModel.trim()] : [];
     const res = await fetch('/api/admin/apis', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        name: apiName.trim(), baseUrl: apiBaseUrl.trim(), apiKey: apiKey.trim(), modelType: apiKind, selectedModels: models,
+        name: apiName.trim(),
+        displayName: apiDisplayName.trim() || undefined,
+        baseUrl: apiBaseUrl.trim(),
+        apiKey: apiKey.trim() || undefined,
+        modelType: apiKind,
+        selectedModels: models,
         requestStyle: apiKind === 'general' ? 'auto' : apiKind === 'chat' ? 'chat-completions' : apiKind === 'vectorize' || apiKind === 'layer' || apiKind === 'upscaler' ? 'chat-completions' : apiKind === 'video' ? 'images-generations' : 'images-generations',
         advancedParams: [...advancedParams.filter(p => p.key.trim()), ...(compatProfile !== 'auto' ? [{ key: 'compatProfile', value: compatProfile }] : [])],
         balanceUsername: balanceUsername.trim(), balancePassword: balancePassword.trim(),
       }),
     });
     if (!res.ok) { const data = await res.json().catch(() => ({ error: '保存失败' })); alert(data.error || '保存失败，请重试'); return; }
-    setApiName(''); setApiBaseUrl(''); setApiKey(''); setApiModel(''); setCompatProfile('auto');
-    setDiscoveredModels([]); setSelectedModels([]); setEditingProviderId(null);
-    setAdvancedParams([]); setShowAdvancedParams(false);
-    setBalanceUsername(''); setBalancePassword('');
+    resetApiForm();
     setShowApiDrawer(false);
     window.dispatchEvent(new Event('wujie-admin-apis-updated'));
     await refreshAdmin();
@@ -1092,7 +1266,8 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     if (!editingProviderId) return;
     const models = selectedModels.length ? selectedModels : apiModel.trim() ? [apiModel.trim()] : undefined;
     const updates: Record<string, unknown> = {};
-    if (apiName.trim()) updates.displayName = apiName.trim();
+    if (apiName.trim()) updates.name = apiName.trim();
+    if (apiDisplayName.trim()) updates.displayName = apiDisplayName.trim();
     if (apiBaseUrl.trim()) updates.baseUrl = apiBaseUrl.trim();
     if (apiKey.trim()) updates.apiKey = apiKey.trim();
     updates.modelType = apiKind;
@@ -1104,9 +1279,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     if (balancePassword.trim()) updates.balancePassword = balancePassword.trim();
     const res = await fetch('/api/admin/apis', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'update', providerId: editingProviderId, updates }) });
     if (!res.ok) { const data = await res.json().catch(() => ({ error: '更新失败' })); alert(data.error || '更新失败，请重试'); return; }
-    setEditingProviderId(null); setApiName(''); setApiBaseUrl(''); setApiKey(''); setApiModel(''); setCompatProfile('auto');
-    setDiscoveredModels([]); setSelectedModels([]); setAdvancedParams([]); setShowAdvancedParams(false);
-    setBalanceUsername(''); setBalancePassword('');
+    resetApiForm();
     setShowApiDrawer(false);
     window.dispatchEvent(new Event('wujie-admin-apis-updated'));
     await refreshAdmin();
@@ -2109,7 +2282,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               await refreshAdmin();
             }}
             providers={providers.map(p => ({
-              id: p.id, name: p.name, baseUrl: p.baseUrl, apiKey: p.apiKey,
+              id: p.id, name: p.name, displayName: p.displayName, baseUrl: p.baseUrl, apiKey: p.apiKey,
               modelType: p.modelType ?? 'general', isEnabled: p.isEnabled ?? true,
               balance: p.balance, selectedModels: p.selectedModels,
               discoveredModels: p.discoveredModels, advancedParams: p.advancedParams,
@@ -2171,7 +2344,8 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                     <input type="checkbox" checked={selectedProviderIds.has(p.id)} onChange={() => setSelectedProviderIds(prev => { const next = new Set(prev); if (next.has(p.id)) next.delete(p.id); else next.add(p.id); return next; })} className="mt-1 accent-[var(--accent-color,#d4af37)]" />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
-                        <span className={`font-semibold text-sm truncate ${textPrimary}`}>{p.name}</span>
+                        <span className={`font-semibold text-sm truncate ${textPrimary}`}>{p.displayName || p.name}</span>
+                        {p.displayName && p.name !== p.displayName && <span className={`text-[10px] ${textSecondary} truncate`}>({p.name})</span>}
                         <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${p.isEnabled !== false ? (isDark ? 'bg-emerald-500/15 text-emerald-400' : 'bg-emerald-100 text-emerald-700') : (isDark ? 'bg-red-500/15 text-red-400' : 'bg-red-100 text-red-700')}`}>{p.isEnabled !== false ? '启用' : '停用'}</span>
                       </div>
                       <div className={`text-[11px] ${textSecondary} mb-1`}>{apiKindLabels[p.modelType as ApiKind] || p.modelType || '通用'}</div>
@@ -2187,11 +2361,13 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                       )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-1.5 mt-3 pt-2 border-t border-white/5">
+                  <div className="flex items-center gap-1.5 mt-3 pt-2 border-t border-white/5 flex-wrap">
                     <button onClick={() => { toggleApiEnabled(p.id); }} className={`text-[10px] px-2 py-1 rounded-lg cursor-pointer ${p.isEnabled !== false ? (isDark ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20' : 'bg-red-50 text-red-600 hover:bg-red-100') : (isDark ? 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100')}`}>{p.isEnabled !== false ? '停用' : '启用'}</button>
                     <button onClick={() => { editApiProvider(p); }} className={`text-[10px] px-2 py-1 rounded-lg cursor-pointer ${editingProviderId === p.id ? (isDark ? 'bg-primary/20 text-primary' : 'bg-amber-100 text-amber-700') : (isDark ? 'bg-white/5 text-[#aaa] hover:bg-white/10' : 'bg-gray-100 text-gray-600 hover:bg-gray-200')}`}>编辑</button>
                     <button onClick={() => { void testApiConnection(p); }} disabled={testingProviderId === p.id} className={`text-[10px] px-2 py-1 rounded-lg cursor-pointer disabled:opacity-50 ${isDark ? 'bg-white/5 text-[#aaa] hover:bg-white/10' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>{testingProviderId === p.id ? '测试中...' : '测试'}</button>
-                    <button onClick={() => setConfirmDlg({ open: true, title: '删除API', message: `确定要删除 "${p.name}" 吗？`, variant: 'danger', onConfirm: () => deleteApiProvider(p.id), onCancel: () => setConfirmDlg(d => ({ ...d, open: false })) })} className="text-[10px] px-2 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 cursor-pointer ml-auto">删除</button>
+                    <button onClick={() => { void verifyProtocolForProvider(p); }} className={`text-[10px] px-2 py-1 rounded-lg cursor-pointer ${isDark ? 'bg-white/5 text-[#aaa] hover:bg-white/10' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>验证协议</button>
+                    <button onClick={() => { void queryBalanceForProvider(p); }} className={`text-[10px] px-2 py-1 rounded-lg cursor-pointer ${isDark ? 'bg-white/5 text-[#aaa] hover:bg-white/10' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>查询余额</button>
+                    <button onClick={() => setConfirmDlg({ open: true, title: '删除API', message: `确定要删除 "${p.displayName || p.name}" 吗？`, variant: 'danger', onConfirm: () => deleteApiProvider(p.id), onCancel: () => setConfirmDlg(d => ({ ...d, open: false })) })} className="text-[10px] px-2 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 cursor-pointer ml-auto">删除</button>
                   </div>
                   {/* 测试结果显示 */}
                   {testingProviderId === p.id && (
@@ -2221,89 +2397,158 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               </div>
             )}
 
-            {/* ── 内嵌API编辑/添加表单 ── */}
+            {/* ── 右侧抽屉: API编辑/添加表单 ── */}
             {showApiDrawer && (
-              <div className={`mt-4 p-4 rounded-xl border ${isDark ? 'bg-white/[0.03] border-primary/30' : 'bg-amber-50/50 border-amber-200'}`}>
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className={`text-sm font-semibold ${textPrimary}`}>{editingProviderId ? '编辑 API 提供商' : '添加新 API 提供商'}</h3>
-                  <button onClick={() => { resetApiForm(); setShowApiDrawer(false); setEditingProviderId(null); }} className={`p-1 rounded hover:bg-white/10 ${textSecondary}`}>
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div>
-                    <label className={`text-xs font-medium ${textSecondary} block mb-1`}>名称</label>
-                    <input type="text" placeholder="如：OpenAI、DeepSeek 等" value={apiName} onChange={e => setApiName(e.target.value)} className={inputClass} />
-                  </div>
-                  <div>
-                    <label className={`text-xs font-medium ${textSecondary} block mb-1`}>API 类型</label>
-                    <select className={inputClass} value={apiKind} onChange={e => setApiKind(e.target.value as ApiKind)}>
-                      {(Object.keys(apiKindLabels) as ApiKind[]).map(k => <option key={k} value={k}>{apiKindLabels[k]}</option>)}
-                    </select>
-                  </div>
-                  <div className="md:col-span-2">
-                    <label className={`text-xs font-medium ${textSecondary} block mb-1`}>API Base URL</label>
-                    <input type="text" placeholder="https://api.openai.com/v1" value={apiBaseUrl} onChange={e => setApiBaseUrl(e.target.value)} className={inputClass} />
-                  </div>
-                  <div className="md:col-span-2">
-                    <label className={`text-xs font-medium ${textSecondary} block mb-1`}>API Key</label>
-                    <input type="password" placeholder="sk-..." value={apiKey} onChange={e => setApiKey(e.target.value)} className={inputClass} />
-                  </div>
-                  <div>
-                    <label className={`text-xs font-medium ${textSecondary} block mb-1`}>兼容模式</label>
-                    <select className={inputClass} value={compatProfile} onChange={e => setCompatProfile(e.target.value as 'auto' | 'openai' | 'apimart' | 'custom')}>
-                      <option value="auto">自动推断</option>
-                      <option value="openai">OpenAI 标准</option>
-                      <option value="apimart">APIMart 代理</option>
-                      <option value="custom">自定义</option>
-                    </select>
-                  </div>
-                  <div className="flex items-end">
-                    <button onClick={() => { void handleDiscoverModels(); }} disabled={isTestingNew} className={`px-3 py-2 rounded-lg text-xs font-medium ${isDark ? 'bg-white/10 hover:bg-white/20 text-white' : 'bg-gray-200 hover:bg-gray-300 text-gray-800'} disabled:opacity-50 cursor-pointer`}>
-                      {isTestingNew ? '扫描中...' : '扫描模型'}
+              <>
+                {/* 遮罩层 */}
+                <div className="fixed inset-0 bg-black/60 z-[199] backdrop-blur-sm" onClick={() => { resetApiForm(); setShowApiDrawer(false); setEditingProviderId(null); }} />
+                {/* 抽屉面板 */}
+                <div className={`fixed right-0 top-0 bottom-0 w-[520px] max-w-[95vw] z-[200] ${isDark ? 'bg-[#1a1a1a] border-l border-white/10' : 'bg-white border-l border-gray-200'} flex flex-col shadow-2xl`}>
+                  {/* 抽屉头部 */}
+                  <div className={`flex items-center justify-between px-6 py-4 border-b ${isDark ? 'border-white/10' : 'border-gray-200'}`}>
+                    <h3 className={`text-base font-semibold ${textPrimary}`}>{editingProviderId ? '编辑 API 配置' : '添加新 API 配置'}</h3>
+                    <button onClick={() => { resetApiForm(); setShowApiDrawer(false); setEditingProviderId(null); }} className={`p-1.5 rounded-lg hover:bg-white/10 ${textSecondary}`}>
+                      <X className="w-5 h-5" />
                     </button>
                   </div>
-                </div>
-                {/* 测试结果显示 */}
-                {testNewResult && (
-                  <div className={`mt-3 p-3 rounded-lg text-xs ${testNewResult.success ? (isDark ? 'bg-emerald-500/10 text-emerald-300' : 'bg-emerald-50 text-emerald-700') : (isDark ? 'bg-red-500/10 text-red-300' : 'bg-red-50 text-red-700')}`}>
-                    <div className="flex items-center gap-1.5 mb-1">
-                      {testNewResult.success ? <CheckCircle className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
-                      <span className="font-medium">{testNewResult.success ? '连接成功' : '连接失败'}</span>
+                  {/* 抽屉内容 (可滚动) */}
+                  <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+                    <div>
+                      <label className={`text-xs font-medium ${textSecondary} block mb-1.5`}>配置名称 <span className="text-red-400">*</span></label>
+                      <input type="text" placeholder="例如：我的OpenAI" value={apiName} onChange={e => setApiName(e.target.value)} className={inputClass} />
                     </div>
-                    <p className="opacity-80">{testNewResult.message}</p>
-                    {testNewResult.success && discoveredModels.length > 0 && (
-                      <p className="mt-1 opacity-70">发现 {discoveredModels.length} 个模型，请在下方勾选启用</p>
+                    <div>
+                      <label className={`text-xs font-medium ${textSecondary} block mb-1.5`}>显示名称 (仅前端显示)</label>
+                      <input type="text" placeholder="例如：GPT-4o 高级版" value={apiDisplayName} onChange={e => setApiDisplayName(e.target.value)} className={inputClass} />
+                      <p className={`text-[10px] ${textSecondary} mt-1`}>用于在前端界面显示的友好名称，不影响后端调用</p>
+                    </div>
+                    <div>
+                      <label className={`text-xs font-medium ${textSecondary} block mb-1.5`}>API 类型 <span className="text-red-400">*</span></label>
+                      <select className={inputClass} value={apiKind} onChange={e => setApiKind(e.target.value as ApiKind)}>
+                        {(Object.keys(apiKindLabels) as ApiKind[]).map(k => <option key={k} value={k}>{apiKindLabels[k]}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className={`text-xs font-medium ${textSecondary} block mb-1.5`}>API Base URL <span className="text-red-400">*</span></label>
+                      <input type="text" placeholder="https://api.openai.com/v1" value={apiBaseUrl} onChange={e => setApiBaseUrl(e.target.value)} className={inputClass} />
+                    </div>
+                    <div>
+                      <label className={`text-xs font-medium ${textSecondary} block mb-1.5`}>API Key</label>
+                      <div className="relative">
+                        <input type={showApiKey ? 'text' : 'password'} placeholder="留空则不修改" value={apiKey} onChange={e => setApiKey(e.target.value)} className={`${inputClass} pr-16`} />
+                        <button type="button" onClick={() => setShowApiKey(v => !v)} className={`absolute right-2 top-1/2 -translate-y-1/2 text-[10px] px-2 py-1 rounded ${isDark ? 'bg-white/10 text-[#aaa]' : 'bg-gray-100 text-gray-500'}`}>
+                          {showApiKey ? '隐藏' : '显示'}
+                        </button>
+                      </div>
+                      <p className={`text-[10px] ${textSecondary} mt-1`}>{editingProviderId ? '留空表示不修改现有密钥' : '填写API密钥以启用模型扫描'}</p>
+                    </div>
+                    <div>
+                      <label className={`text-xs font-medium ${textSecondary} block mb-1.5`}>请求风格 (兼容模式)</label>
+                      <select className={inputClass} value={compatProfile} onChange={e => setCompatProfile(e.target.value as 'auto' | 'openai' | 'apimart' | 'custom')}>
+                        <option value="auto">自动推断</option>
+                        <option value="openai">OpenAI 标准 (/v1)</option>
+                        <option value="apimart">APIMart 代理</option>
+                        <option value="custom">自定义</option>
+                      </select>
+                      <p className={`text-[10px] ${textSecondary} mt-1`}>大多数情况下选择"自动推断"即可</p>
+                    </div>
+                    {/* 测试结果显示 */}
+                    {testNewResult && (
+                      <div className={`p-3 rounded-lg text-xs ${testNewResult.success ? (isDark ? 'bg-emerald-500/10 text-emerald-300' : 'bg-emerald-50 text-emerald-700') : (isDark ? 'bg-red-500/10 text-red-300' : 'bg-red-50 text-red-700')}`}>
+                        <div className="flex items-center gap-1.5 mb-1">
+                          {testNewResult.success ? <CheckCircle className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
+                          <span className="font-medium">{testNewResult.success ? '连接成功' : '连接失败'}</span>
+                        </div>
+                        <p className="opacity-80">{testNewResult.message}</p>
+                        {testNewResult.success && discoveredModels.length > 0 && (
+                          <p className="mt-1 opacity-70">发现 {discoveredModels.length} 个模型，请在下方勾选启用</p>
+                        )}
+                      </div>
+                    )}
+                    {/* 模型列表 */}
+                    {discoveredModels.length > 0 && (
+                      <div className={`p-3 rounded-lg ${isDark ? 'bg-white/[0.03]' : 'bg-gray-50'}`}>
+                        <div className="flex items-center justify-between mb-2">
+                          <span className={`text-xs font-medium ${textSecondary}`}>发现 {discoveredModels.length} 个模型</span>
+                          <div className="flex gap-1">
+                            <button onClick={() => setSelectedModels(discoveredModels.map(m => m.id))} className={`text-[10px] px-2 py-0.5 rounded ${isDark ? 'bg-white/10 text-[#ccc]' : 'bg-gray-200 text-gray-700'} cursor-pointer`}>全选</button>
+                            <button onClick={() => setSelectedModels([])} className={`text-[10px] px-2 py-0.5 rounded ${isDark ? 'bg-white/10 text-[#ccc]' : 'bg-gray-200 text-gray-700'} cursor-pointer`}>清空</button>
+                          </div>
+                        </div>
+                        <div className="max-h-48 overflow-y-auto">
+                          <div className="flex flex-wrap gap-1.5">
+                            {discoveredModels.map(m => (
+                              <label key={m.id} className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] cursor-pointer ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-white hover:bg-gray-100'} ${selectedModels.includes(m.id) ? (isDark ? 'ring-1 ring-primary/50' : 'ring-1 ring-amber-400') : ''}`}>
+                                <input type="checkbox" checked={selectedModels.includes(m.id)} onChange={() => { setSelectedModels(prev => prev.includes(m.id) ? prev.filter(x => x !== m.id) : [...prev, m.id]); }} className="accent-[var(--accent-color,#d4af37)]" />
+                                <span className={textSecondary}>{m.name || m.id}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    {/* 协议验证结果 */}
+                    {drawerVerifyResult && (
+                      <div className={`p-3 rounded-lg text-xs ${drawerVerifyResult.success ? (isDark ? 'bg-blue-500/10 text-blue-300' : 'bg-blue-50 text-blue-700') : (isDark ? 'bg-orange-500/10 text-orange-300' : 'bg-orange-50 text-orange-700')}`}>
+                        <div className="flex items-center gap-1.5 mb-2">
+                          {drawerVerifyResult.success ? <CheckCircle className="w-3.5 h-3.5" /> : <AlertCircle className="w-3.5 h-3.5" />}
+                          <span className="font-medium">协议验证结果</span>
+                        </div>
+                        {drawerVerifyResult.checks && (
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className={drawerVerifyResult.checks.models ? 'text-emerald-400' : 'text-red-400'}>{drawerVerifyResult.checks.models ? '✓' : '✗'}</span>
+                              <span>模型列表接口</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className={drawerVerifyResult.checks.imageGen ? 'text-emerald-400' : 'text-red-400'}>{drawerVerifyResult.checks.imageGen ? '✓' : '✗'}</span>
+                              <span>图像生成接口</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className={drawerVerifyResult.checks.chat ? 'text-emerald-400' : 'text-red-400'}>{drawerVerifyResult.checks.chat ? '✓' : '✗'}</span>
+                              <span>对话接口</span>
+                            </div>
+                          </div>
+                        )}
+                        {drawerVerifyResult.detected && <p className="mt-2 opacity-80">检测协议类型: {drawerVerifyResult.detected}</p>}
+                        {drawerVerifyResult.message && <p className="mt-1 opacity-80">{drawerVerifyResult.message}</p>}
+                      </div>
+                    )}
+                    {/* 余额查询结果 */}
+                    {drawerBalanceResult && (
+                      <div className={`p-3 rounded-lg text-xs ${drawerBalanceResult.success ? (isDark ? 'bg-purple-500/10 text-purple-300' : 'bg-purple-50 text-purple-700') : (isDark ? 'bg-red-500/10 text-red-300' : 'bg-red-50 text-red-700')}`}>
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <DollarSign className="w-3.5 h-3.5" />
+                          <span className="font-medium">余额信息</span>
+                        </div>
+                        <p className="opacity-90">{drawerBalanceResult.message}</p>
+                        {drawerBalanceResult.balance !== undefined && <p className="mt-1 font-semibold">余额: {drawerBalanceResult.balance} {drawerBalanceResult.currency || ''}</p>}
+                      </div>
                     )}
                   </div>
-                )}
-                {/* 模型列表 */}
-                {discoveredModels.length > 0 && (
-                  <div className={`mt-3 p-3 rounded-lg ${isDark ? 'bg-white/[0.03]' : 'bg-gray-50'}`}>
-                    <div className="flex items-center justify-between mb-2">
-                      <span className={`text-xs font-medium ${textSecondary}`}>发现 {discoveredModels.length} 个模型</span>
-                      <div className="flex gap-1">
-                        <button onClick={() => setSelectedModels(discoveredModels.map(m => m.id))} className={`text-[10px] px-2 py-0.5 rounded ${isDark ? 'bg-white/10 text-[#ccc]' : 'bg-gray-200 text-gray-700'} cursor-pointer`}>全选</button>
-                        <button onClick={() => setSelectedModels([])} className={`text-[10px] px-2 py-0.5 rounded ${isDark ? 'bg-white/10 text-[#ccc]' : 'bg-gray-200 text-gray-700'} cursor-pointer`}>清空</button>
-                      </div>
+                  {/* 抽屉底部按钮区 */}
+                  <div className={`px-6 py-4 border-t ${isDark ? 'border-white/10' : 'border-gray-200'} flex items-center justify-between gap-2`}>
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => { void handleDiscoverModels(); }} disabled={isDiscovering || !apiBaseUrl} className={`px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 ${isDark ? 'bg-white/10 hover:bg-white/20 text-white' : 'bg-gray-200 hover:bg-gray-300 text-gray-800'} disabled:opacity-50 cursor-pointer`}>
+                        <Zap className="w-3.5 h-3.5" />
+                        {isDiscovering ? '扫描中...' : '测试连接'}
+                      </button>
+                      <button onClick={() => { void handleDrawerVerifyProtocol(); }} disabled={isVerifyingDrawer || !apiBaseUrl} className={`px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 ${isDark ? 'bg-blue-500/10 hover:bg-blue-500/20 text-blue-400' : 'bg-blue-50 hover:bg-blue-100 text-blue-600'} disabled:opacity-50 cursor-pointer`}>
+                        <ShieldCheck className="w-3.5 h-3.5" />
+                        {isVerifyingDrawer ? '验证中...' : '验证协议'}
+                      </button>
+                      <button onClick={() => { void handleDrawerQueryBalance(); }} disabled={isQueryingBalanceDrawer || !apiBaseUrl} className={`px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 ${isDark ? 'bg-purple-500/10 hover:bg-purple-500/20 text-purple-400' : 'bg-purple-50 hover:bg-purple-100 text-purple-600'} disabled:opacity-50 cursor-pointer`}>
+                        <DollarSign className="w-3.5 h-3.5" />
+                        {isQueryingBalanceDrawer ? '查询中...' : '查询余额'}
+                      </button>
                     </div>
-                    <div className="max-h-40 overflow-y-auto">
-                      <div className="flex flex-wrap gap-1">
-                        {discoveredModels.map(m => (
-                          <label key={m.id} className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] cursor-pointer ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-white hover:bg-gray-100'} ${selectedModels.includes(m.id) ? (isDark ? 'ring-1 ring-primary/50' : 'ring-1 ring-amber-400') : ''}`}>
-                            <input type="checkbox" checked={selectedModels.includes(m.id)} onChange={() => { setSelectedModels(prev => prev.includes(m.id) ? prev.filter(x => x !== m.id) : [...prev, m.id]); }} className="accent-[var(--accent-color,#d4af37)]" />
-                            <span className={textSecondary}>{m.name || m.id}</span>
-                          </label>
-                        ))}
-                      </div>
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => { resetApiForm(); setShowApiDrawer(false); setEditingProviderId(null); }} className={`px-4 py-2 rounded-lg text-sm ${isDark ? 'bg-white/5 hover:bg-white/10 text-[#ccc]' : 'bg-gray-100 hover:bg-gray-200 text-gray-700'} cursor-pointer`}>取消</button>
+                      <button onClick={() => { if (editingProviderId) { void handleUpdateApi(); } else { void handleAddApi(); } }} disabled={!apiName || !apiBaseUrl} className={`px-5 py-2 rounded-lg text-sm font-medium ${accentBgClass} ${accentTextOnBgClass} disabled:opacity-50 cursor-pointer`}>{editingProviderId ? '保存修改' : '添加 API'}</button>
                     </div>
                   </div>
-                )}
-                <div className="flex items-center justify-end gap-2 mt-4">
-                  <button onClick={() => { resetApiForm(); setShowApiDrawer(false); setEditingProviderId(null); }} className={`px-4 py-2 rounded-lg text-sm ${isDark ? 'bg-white/5 hover:bg-white/10 text-[#ccc]' : 'bg-gray-100 hover:bg-gray-200 text-gray-700'} cursor-pointer`}>取消</button>
-                  <button onClick={() => { if (editingProviderId) { void handleUpdateApi(); } else { void handleAddApi(); } }} className={`px-4 py-2 rounded-lg text-sm font-medium ${accentBgClass} ${accentTextOnBgClass} cursor-pointer`}>{editingProviderId ? '保存修改' : '添加 API'}</button>
                 </div>
-              </div>
+              </>
             )}
           </div>
         )}

@@ -38,8 +38,27 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const action = body.action as string | undefined;
 
-    if (action === 'discover') {
-      const result = await discoverModelsForCredentials(body.baseUrl, body.apiKey, body.modelType || 'image');
+    if (action === 'discover' || action === 'test') {
+      // test action: use existing providerId to discover models
+      if (action === 'test' && body.providerId) {
+        const { getApiProvider } = await import('@/lib/server-api-config');
+        const existing = await getApiProvider(String(body.providerId));
+        if (existing) {
+          const result = await discoverModelsForCredentials(
+            existing.baseUrl,
+            existing.apiKey,
+            (existing.modelType || 'image') as any,
+          );
+          return NextResponse.json(result);
+        }
+        return NextResponse.json({ success: false, error: 'Provider not found' });
+      }
+      // discover action: use provided credentials
+      const result = await discoverModelsForCredentials(
+        String(body.baseUrl || ''),
+        String(body.apiKey || ''),
+        (body.modelType || 'image') as any,
+      );
       return NextResponse.json(result);
     }
 
@@ -49,9 +68,9 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === 'update') {
-      const updates = { ...(body.updates || {}) } as Partial<ApiProvider>;
+      const updates = { ...(body.updates || {}) } as Partial<ApiProvider> & { displayName?: string };
       if (!updates.apiKey) delete updates.apiKey;
-      const provider = await updateApiProvider(String(body.providerId || ''), updates);
+      const provider = await updateApiProvider(String(body.providerId || ''), updates as Partial<ApiProvider>);
       return NextResponse.json({ success: Boolean(provider), provider: provider ? sanitizeProvider(provider) : null });
     }
 
@@ -66,8 +85,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true, providers: providers.map(sanitizeProvider) });
     }
 
+    // Add new provider
     const provider = await addApiProvider({
       name: String(body.name || ''),
+      displayName: body.displayName ? String(body.displayName) : undefined,
       baseUrl: String(body.baseUrl || ''),
       apiKey: String(body.apiKey || ''),
       modelType: body.modelType || 'image',
