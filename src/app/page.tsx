@@ -3706,10 +3706,7 @@ function CanvasApp() {
               <div className={activePanel === 'chat' ? 'flex-1 overflow-hidden' : 'hidden'}>
                 <ChatPanel themeStyle={themeStyle} onAddToPrompt={handleAddToPrompt} onAddImages={handleAddImages} canvasImages={images} selectedCanvasImage={selectedImage} onChatModelChange={setCurrentChatModelInfo} chatInitialImage={chatInitialImage} onChatInitialImageConsumed={() => setChatInitialImage(null)} chatTabOpen={chatTabOpen} onChatTabOpenChange={setChatTabOpen} onNavigateToImage={(id: string) => setNavigateToImageId(id)} onGenerateImage={handleChatGenerateImage} />
               </div>
-              <div className={activePanel === 'video' ? 'flex-1 overflow-y-auto scroll-smooth' : 'hidden'} style={{
-                scrollbarWidth: 'thin',
-                scrollbarColor: themeStyle === 'monochrome' ? '#d1d5db transparent' : '#444 transparent'
-              }}>
+              <div className={activePanel === 'video' ? 'flex-1 overflow-hidden' : 'hidden'}>
                 <VideoGenerationPanel
                     onVideoGenerate={handleVideoGenerate}
                     onError={(error: string) => {

@@ -37,7 +37,7 @@ import type { CanvasGenGroup, GenGroupToolbar, GroupRefImage, GenGroupType, Refe
 import { createGroupRefImage, createGenGroup, generateGroupId, calculateConnectionPoints, aspectRatioToDimensions, calculateActualPixels, REFERENCE_CATEGORIES, REFERENCE_CATEGORY_LABELS, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS, MODEL_ASPECT_RATIOS, MODEL_QUALITIES, QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES, findModelConfig } from '@/lib/canvas-generation-group';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import type { PsdLayerItem } from '@/types/psdLayer';
-import { toStableImageUrl, awaitStableImageUrl, onPersistComplete, getCachedLocalUrl } from '@/lib/stable-image-url';
+import { toStableImageUrl, awaitStableImageUrl, onPersistComplete, getCachedLocalUrl, persistVideoUrlInBackground, persistRemoteUrlInBackground } from '@/lib/stable-image-url';
 import { taskEventsClient } from '@/lib/task-events-client';
 import { APP_VERSION_LABEL } from '@/config/app-meta';
 import OhMyPrompt from '@/components/oh-my-prompt';
@@ -838,6 +838,34 @@ export function InfiniteCanvas({
     });
     return unsubscribe;
   }, [onImagesChange]);
+
+  // ★ 自动持久化远程视频 URL：视频的第三方预签名链接通常1~24小时过期
+  // 检测画布上的远程视频 URL，触发后台持久化保存到本地服务器
+  const videoPersistAttemptedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const remoteVideos = images.filter(img =>
+      img.mediaType === 'video' &&
+      img.videoUrl &&
+      /^https?:\/\//i.test(img.videoUrl) &&
+      !videoPersistAttemptedRef.current.has(img.id)
+    );
+    if (remoteVideos.length === 0) return;
+
+    for (const img of remoteVideos) {
+      videoPersistAttemptedRef.current.add(img.id);
+    }
+
+    // 触发后台持久化（不阻塞渲染）
+    for (const img of remoteVideos) {
+      if (img.videoUrl) {
+        persistVideoUrlInBackground(img.videoUrl);
+      }
+      // 缩略图如果是远程URL也持久化
+      if (img.url && /^https?:\/\//i.test(img.url)) {
+        persistRemoteUrlInBackground(img.url, false);
+      }
+    }
+  }, [images]);
 
   // ★ 自动回填 originalWidth/originalHeight：当图片缺少真实尺寸时，异步加载并补全
   const sizeFillAttemptedRef = useRef<Set<string>>(new Set());

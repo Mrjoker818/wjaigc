@@ -40,7 +40,7 @@ export function onPersistComplete(listener: PersistCompleteListener): () => void
  * 在后台异步持久化远程 URL，不阻塞当前渲染
  * 完成后更新缓存并通知监听器
  */
-function persistRemoteUrlInBackground(imageUrl: string, forceVideo?: boolean): void {
+export function persistRemoteUrlInBackground(imageUrl: string, forceVideo?: boolean): void {
   // 已缓存或正在持久化，跳过
   if (persistedRemoteUrls.has(imageUrl) || persistingUrls.has(imageUrl)) return;
 
@@ -232,7 +232,8 @@ async function verifyLocalImageAccessible(imageUrl: string): Promise<boolean> {
   try {
     const resp = await fetch(imageUrl, { method: 'HEAD' });
     const contentType = resp.headers.get('content-type') || '';
-    return resp.ok && contentType.startsWith('image/');
+    // 接受图片和视频内容类型
+    return resp.ok && (contentType.startsWith('image/') || contentType.startsWith('video/'));
   } catch {
     return false;
   }
