@@ -86,11 +86,17 @@ export async function POST(request: NextRequest) {
     }
 
     // Add new provider
+    const name = String(body.name || '').trim();
+    const baseUrl = String(body.baseUrl || '').trim();
+    const apiKey = String(body.apiKey || '').trim();
+    if (!name || !baseUrl || !apiKey) {
+      return NextResponse.json({ success: false, error: '配置名称、BASE URL和API Key为必填项' }, { status: 400 });
+    }
     const provider = await addApiProvider({
-      name: String(body.name || ''),
-      displayName: body.displayName ? String(body.displayName) : undefined,
-      baseUrl: String(body.baseUrl || ''),
-      apiKey: String(body.apiKey || ''),
+      name,
+      displayName: body.displayName ? String(body.displayName).trim() : undefined,
+      baseUrl,
+      apiKey,
       modelType: body.modelType || 'image',
       requestStyle: body.requestStyle,
       selectedModels: Array.isArray(body.selectedModels) ? body.selectedModels : undefined,

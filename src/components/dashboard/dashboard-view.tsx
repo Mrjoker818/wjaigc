@@ -674,7 +674,11 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       const response = await fetch('/api/admin/apis', { cache: 'no-store', credentials: 'include' });
       if (response.ok) {
         const data = await response.json();
-        if (data.success) setProviders(data.providers || []);
+        if (data.success) {
+          // 过滤掉无效的空记录（名称或URL为空）
+          const validProviders = (data.providers || []).filter((p: AdminProvider) => p.name && p.baseUrl);
+          setProviders(validProviders);
+        }
         else setProviders([]);
       }
     } catch { setProviders([]); }
@@ -1225,7 +1229,8 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   };
 
   const handleAddApi = async () => {
-    if (!apiName.trim() || !apiBaseUrl.trim()) return;
+    if (!apiName.trim() || !apiBaseUrl.trim()) { alert('请填写配置名称和BASE URL'); return; }
+    if (!apiKey.trim()) { alert('请填写API Key'); return; }
     const models = selectedModels.length ? selectedModels : apiModel.trim() ? [apiModel.trim()] : [];
     const res = await fetch('/api/admin/apis', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
