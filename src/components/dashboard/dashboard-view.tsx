@@ -171,7 +171,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const [isTestingNew, setIsTestingNew] = useState(false);
   const [testNewResult, setTestNewResult] = useState<{ success: boolean; message: string; modelCount?: number; error?: string } | null>(null);
   // 抽屉内验证/余额结果
-  const [drawerVerifyResult, setDrawerVerifyResult] = useState<{ success: boolean; checks?: { models: boolean; imageGen: boolean; chat: boolean }; detected?: string; message?: string } | null>(null);
+  const [drawerVerifyResult, setDrawerVerifyResult] = useState<{ success: boolean; checks?: { models: boolean; imageGen: boolean; chat: boolean }; detected?: string; message?: string; tests?: Array<{ name: string; status: string; detail: string; endpoint?: string; latencyMs?: number }> } | null>(null);
   const [drawerBalanceResult, setDrawerBalanceResult] = useState<{ success: boolean; message: string; balance?: number; currency?: string } | null>(null);
   const [isVerifyingDrawer, setIsVerifyingDrawer] = useState(false);
   const [isQueryingBalanceDrawer, setIsQueryingBalanceDrawer] = useState(false);
@@ -818,11 +818,19 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
         }),
       });
       const data = await res.json();
+      // 后端返回 tests 数组，提取各端点状态
+      const tests: Array<{ name: string; status: string; detail: string }> = data.tests || [];
+      const checks = {
+        models: tests.find(t => t.name === '模型列表')?.status === 'pass',
+        imageGen: tests.find(t => t.name === '图片生成')?.status === 'pass',
+        chat: tests.find(t => t.name === '对话模型')?.status === 'pass',
+      };
       setDrawerVerifyResult({
         success: data.success !== false,
-        checks: data.checks || { models: false, imageGen: false, chat: false },
-        detected: data.detected || data.profile,
+        checks,
+        detected: data.profile?.id || data.detected,
         message: data.summary || data.message,
+        tests,
       });
     } catch (e: any) {
       setDrawerVerifyResult({ success: false, message: e?.message || '验证失败' });
@@ -2549,12 +2557,31 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
                         {/* 协议验证结果 */}
                         {drawerVerifyResult && (
-                          <div className={`mt-3 p-3 rounded-lg text-sm border ${drawerVerifyResult.success ? 'bg-blue-500/10 border-blue-500/20 text-blue-700 dark:text-blue-300' : 'bg-orange-500/10 border-orange-500/20 text-orange-700 dark:text-orange-300'}`}>
+                          <div className={`mt-3 p-3 rounded-lg text-sm border ${drawerVerifyResult.success ? 'bg-primary/5 border-primary/15 text-foreground' : 'bg-destructive/5 border-destructive/15 text-foreground'}`}>
                             <div className="flex items-center gap-2 mb-2">
-                              <ShieldCheck className="w-4 h-4" />
+                              <ShieldCheck className="w-4 h-4 text-primary" />
                               <span className="font-semibold">协议验证结果</span>
+                              <span className={`ml-auto text-[10px] px-2 py-0.5 rounded-full font-medium ${drawerVerifyResult.success ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : 'bg-destructive/15 text-destructive'}`}>
+                                {drawerVerifyResult.success ? '通过' : '未通过'}
+                              </span>
                             </div>
-                            {drawerVerifyResult.checks && (
+                            {drawerVerifyResult.tests && drawerVerifyResult.tests.length > 0 ? (
+                              <div className="space-y-1.5">
+                                {drawerVerifyResult.tests.map((t, i) => (
+                                  <div key={i} className="flex items-start gap-2 text-xs">
+                                    <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5 ${t.status === 'pass' ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : t.status === 'fail' ? 'bg-destructive/15 text-destructive' : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'}`}>
+                                      {t.status === 'pass' ? '✓' : t.status === 'fail' ? '✗' : '!'}
+                                    </span>
+                                    <div className="min-w-0">
+                                      <span className="font-medium">{t.name}</span>
+                                      <span className="text-muted-foreground ml-1">{t.endpoint}</span>
+                                      {t.detail && <p className="text-muted-foreground mt-0.5">{t.detail}</p>}
+                                      {t.latencyMs != null && <p className="text-muted-foreground/60 mt-0.5">耗时 {t.latencyMs}ms</p>}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : drawerVerifyResult.checks ? (
                               <div className="space-y-2">
                                 {[
                                   { key: 'models' as const, label: '模型列表接口 /models' },
@@ -2562,20 +2589,20 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                                   { key: 'chat' as const, label: '对话接口 /chat/completions' },
                                 ].map(item => (
                                   <div key={item.key} className="flex items-center gap-2 text-xs">
-                                    <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${drawerVerifyResult.checks![item.key] ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400' : 'bg-destructive/20 text-destructive'}`}>
+                                    <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${drawerVerifyResult.checks![item.key] ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : 'bg-destructive/15 text-destructive'}`}>
                                       {drawerVerifyResult.checks![item.key] ? '✓' : '✗'}
                                     </span>
                                     <span>{item.label}</span>
                                   </div>
                                 ))}
                               </div>
-                            )}
+                            ) : null}
                             {drawerVerifyResult.detected && (
-                              <p className="mt-2 pt-2 border-t border-current/10 text-xs">
+                              <p className="mt-2 pt-2 border-t border-border text-xs">
                                 检测协议: <span className="font-mono font-semibold">{drawerVerifyResult.detected}</span>
                               </p>
                             )}
-                            {drawerVerifyResult.message && <p className="mt-1 opacity-80 text-xs">{drawerVerifyResult.message}</p>}
+                            {drawerVerifyResult.message && <p className="mt-1 text-muted-foreground text-xs">{drawerVerifyResult.message}</p>}
                           </div>
                         )}
 
