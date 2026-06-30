@@ -1228,9 +1228,11 @@ export function InfiniteCanvas({
   // Brush mask drawing state
   const [brushDrawingAnnId, setBrushDrawingAnnId] = useState<string | null>(null);
   const [annotationBrushSize, setAnnotationBrushSize] = useState(20);
+  const [annotationBrushColor, setAnnotationBrushColor] = useState('#ef4444');
   const brushCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const brushCtxRef = useRef<CanvasRenderingContext2D | null>(null);
   const isBrushDrawingRef = useRef(false);
+  const brushScaleRef = useRef<{ x: number; y: number }>({ x: 1, y: 1 });
   const [isDraggingRegion, setIsDraggingRegion] = useState(false);
 
   // Upscale state
@@ -2395,10 +2397,14 @@ export function InfiniteCanvas({
           setEditingAnnotationId(newAnn.id);
           setBrushDrawingAnnId(newAnn.id);
 
-          // Initialize brush canvas overlay for this image
+          // Initialize brush canvas overlay for this image — use original dimensions
+          const overlayW = targetImg.originalWidth || targetImg.width;
+          const overlayH = targetImg.originalHeight || targetImg.height;
+          const scaleRatioX = overlayW / targetImg.width;
+          const scaleRatioY = overlayH / targetImg.height;
           const overlayCanvas = document.createElement('canvas');
-          overlayCanvas.width = targetImg.width;
-          overlayCanvas.height = targetImg.height;
+          overlayCanvas.width = overlayW;
+          overlayCanvas.height = overlayH;
           const ctx = overlayCanvas.getContext('2d');
           if (ctx) {
             // Black background = keep area
@@ -2408,19 +2414,22 @@ export function InfiniteCanvas({
           brushCanvasRef.current = overlayCanvas;
           brushCtxRef.current = ctx;
           isBrushDrawingRef.current = true;
+          // Store scale ratios for coordinate conversion
+          brushScaleRef.current = { x: scaleRatioX, y: scaleRatioY };
 
           // Draw first brush point
           if (ctx) {
-            const relX = canvasPos.x - targetImg.x;
-            const relY = canvasPos.y - targetImg.y;
+            const relX = (canvasPos.x - targetImg.x) * scaleRatioX;
+            const relY = (canvasPos.y - targetImg.y) * scaleRatioY;
+            const scaledBrushR = (annotationBrushSize / 2) * scaleRatioX;
             ctx.fillStyle = '#ffffff';
             ctx.beginPath();
-            ctx.arc(relX, relY, annotationBrushSize / 2, 0, Math.PI * 2);
+            ctx.arc(relX, relY, scaledBrushR, 0, Math.PI * 2);
             ctx.fill();
           }
         }
-      } else if (targetImageId) {
-        // Pin / Region mode: start potential region drag
+      } else if (annotationTool === 'region' || annotationTool === 'pin') {
+        // Pin / Region mode: start potential region drag (allow from any area)
         setAnnotationRegionStart({ cx: canvasPos.x, cy: canvasPos.y });
         setAnnotationRegionCurrent({ cx: canvasPos.x, cy: canvasPos.y });
         setIsDraggingRegion(false);
@@ -2525,11 +2534,13 @@ export function InfiniteCanvas({
         const ann = annotations.find(a => a.id === brushDrawingAnnId);
         const targetImg = ann?.targetImageId ? images.find(i => i.id === ann.targetImageId) : null;
         if (targetImg) {
-          const relX = canvasPos.x - targetImg.x;
-          const relY = canvasPos.y - targetImg.y;
+          const scaleRatio = brushScaleRef.current;
+          const relX = (canvasPos.x - targetImg.x) * scaleRatio.x;
+          const relY = (canvasPos.y - targetImg.y) * scaleRatio.y;
+          const scaledBrushR = (annotationBrushSize / 2) * scaleRatio.x;
           brushCtxRef.current.fillStyle = '#ffffff';
           brushCtxRef.current.beginPath();
-          brushCtxRef.current.arc(relX, relY, annotationBrushSize / 2, 0, Math.PI * 2);
+          brushCtxRef.current.arc(relX, relY, scaledBrushR, 0, Math.PI * 2);
           brushCtxRef.current.fill();
         }
         return;
@@ -2755,19 +2766,22 @@ export function InfiniteCanvas({
       setIsDraggingRegion(false);
       return;
     }
-    // Clean up annotation region state — handle click (no drag) as Pin creation
+    // Clean up annotation region state
     if (annotationRegionStart && annotationMode) {
-      // If not dragging region, treat as a simple click → create Pin + input
       if (!isDraggingRegion) {
-        const canvasPos = screenToCanvas(e.clientX, e.clientY);
-        const targetImageId = hitTestImage(canvasPos.x, canvasPos.y);
-        if (targetImageId) {
-          const newAnn = createAnnotation(canvasPos.x, canvasPos.y, '', targetImageId);
-          setAnnotations(prev => [...prev, newAnn]);
-          setEditingAnnotationId(newAnn.id);
-          setAnnotationInputText('');
-          setTimeout(() => annotationInputRef.current?.focus(), 50);
+        // No actual drag happened — only create Pin in 'pin' mode
+        if (annotationTool === 'pin') {
+          const canvasPos = screenToCanvas(e.clientX, e.clientY);
+          const targetImageId = hitTestImage(canvasPos.x, canvasPos.y);
+          if (targetImageId) {
+            const newAnn = createAnnotation(canvasPos.x, canvasPos.y, '', targetImageId);
+            setAnnotations(prev => [...prev, newAnn]);
+            setEditingAnnotationId(newAnn.id);
+            setAnnotationInputText('');
+            setTimeout(() => annotationInputRef.current?.focus(), 50);
+          }
         }
+        // In 'region' mode: click without drag = do nothing (user cancelled)
       }
       setAnnotationRegionStart(null);
       setAnnotationRegionCurrent(null);
@@ -3008,7 +3022,7 @@ export function InfiniteCanvas({
     }
 
     mouseDownOnImageRef.current = false;
-  }, [editMode, isPanning, isMiddlePanning, boxSelectStart, boxSelectEnd, dragTarget, dragOffset, images, selectedIds, zoom, viewOffset, onImagesChange, handleEditMouseUp, groupDragTarget, groupDragOffset, genGroupDragTarget, genGroupDragOffset, hexCubeDragTarget, hexCubeDragOffset, resizingImage, resizePreview, annotationMode, annotationRegionStart, annotationRegionCurrent, isDraggingRegion, brushDrawingAnnId, annotations, annotationBrushSize]);
+  }, [editMode, isPanning, isMiddlePanning, boxSelectStart, boxSelectEnd, dragTarget, dragOffset, images, selectedIds, zoom, viewOffset, onImagesChange, handleEditMouseUp, groupDragTarget, groupDragOffset, genGroupDragTarget, genGroupDragOffset, hexCubeDragTarget, hexCubeDragOffset, resizingImage, resizePreview, annotationMode, annotationTool, annotationRegionStart, annotationRegionCurrent, isDraggingRegion, brushDrawingAnnId, annotations, annotationBrushSize]);
 
   const handleMouseLeave = useCallback(() => {
     if (editMode !== 'none') {
@@ -11608,11 +11622,11 @@ export function InfiniteCanvas({
                   type="range"
                   min={5}
                   max={80}
-                  value={brushSize}
-                  onChange={(e) => setBrushSize(Number(e.target.value))}
+                  value={annotationBrushSize}
+                  onChange={(e) => setAnnotationBrushSize(Number(e.target.value))}
                   className="w-16 h-1 accent-current"
                 />
-                <span className={`text-[10px] w-5 text-right ${isMonochrome ? 'text-gray-500' : 'text-gold-muted/60'}`}>{brushSize}</span>
+                <span className={`text-[10px] w-5 text-right ${isMonochrome ? 'text-gray-500' : 'text-gold-muted/60'}`}>{annotationBrushSize}</span>
               </div>
             )}
             <div className={`w-px h-4 ${isMonochrome ? 'bg-gray-200' : 'bg-white/10'}`} />

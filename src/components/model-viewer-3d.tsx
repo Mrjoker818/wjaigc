@@ -18,7 +18,21 @@ interface EBState { hasError: boolean }
 class CanvasErrorBoundary extends Component<EBProps, EBState> {
   state: EBState = { hasError: false };
   static getDerivedStateFromError(): EBState { return { hasError: true }; }
-  componentDidCatch(err: Error) { this.props.onError(err.message); }
+  componentDidCatch(err: Error) {
+    let msg = err.message || String(err);
+    // Translate raw HTTP errors from Three.js loaders into user-friendly Chinese
+    if (/403|Forbidden/i.test(msg)) {
+      msg = '模型下载链接已过期（第三方云存储签名过期），请重新生成该 3D 模型，或使用下方"直接下载"按钮';
+    } else if (/404|Not Found/i.test(msg)) {
+      msg = '模型文件不存在（404），可能已被第三方服务器清理，请重新生成';
+    } else if (/Failed to fetch|NetworkError|ERR_FAILED/i.test(msg)) {
+      msg = '网络请求失败，请检查网络连接后重试';
+    } else if (msg.length > 200) {
+      // Truncate overly verbose errors to avoid dumping URLs
+      msg = '模型加载失败，请尝试重新生成';
+    }
+    this.props.onError(msg);
+  }
   render() {
     if (this.state.hasError) {
       return (
@@ -448,6 +462,7 @@ export default function ModelViewer3D({
   const [modelInfo, setModelInfo] = useState<ModelInfo | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [retryKey, setRetryKey] = useState(0);
   const model3DInfo = model3DInfoProp || modelInfoProp;
   const modelTaskId = String(model3DInfo?.modelTaskId || '');
   const [downloading, setDownloading] = useState(false);
@@ -503,12 +518,14 @@ export default function ModelViewer3D({
     setLoadError(null);
   }, []);
 
-  /* Try to get file size via proxy HEAD request */
+  /* Try to get file size via proxy & pre-flight check for expired URLs */
   useEffect(() => {
     setLoadError(null);
     setLoading(true);
+    let cancelled = false;
     fetch(proxiedUrl, { method: 'HEAD' })
       .then((res) => {
+        if (cancelled) return;
         if (res.ok) {
           const contentLength = res.headers.get('content-length');
           if (contentLength) {
@@ -516,9 +533,17 @@ export default function ModelViewer3D({
             const mb = (bytes / 1024 / 1024).toFixed(2);
             setModelInfo((prev) => (prev ? { ...prev, fileSize: `${mb} MB` } : prev));
           }
+        } else if (res.status === 403) {
+          setLoadError('模型下载链接已过期（第三方云存储签名过期），请重新生成该 3D 模型，或使用下方"直接下载"按钮');
+          setLoading(false);
+        } else if (res.status === 404) {
+          setLoadError('模型文件不存在（404），可能已被第三方服务器清理，请重新生成');
+          setLoading(false);
         }
+        // Other errors: let the Three.js loader attempt and show its own error
       })
-      .catch(() => { /* ignore */ });
+      .catch(() => { /* ignore — let useLoader attempt */ });
+    return () => { cancelled = true; };
   }, [proxiedUrl]);
 
   /* Keyboard escape */
@@ -970,6 +995,14 @@ export default function ModelViewer3D({
                   <Box size={28} className="text-[#d4af37]" />
                 </div>
                 <p className="text-[#aaa] text-sm max-w-[300px] text-center">{loadError}</p>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => { setLoadError(null); setLoading(true); setRetryKey(k => k + 1); }}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg border border-[#d4af37]/30 text-[#d4af37] text-xs font-medium hover:bg-[#d4af37]/10 transition-colors"
+                  >
+                    <RotateCcw size={14} />
+                    重试加载
+                  </button>
                 {downloadOptions.length > 0 && (
                   <button
                     onClick={() => {
@@ -983,6 +1016,7 @@ export default function ModelViewer3D({
                     {downloading ? '下载中...' : '直接下载 3D 模型文件'}
                   </button>
                 )}
+                </div>
                 {previewImageUrl && (
                   <img
                     src={previewImageUrl}
@@ -1004,7 +1038,7 @@ export default function ModelViewer3D({
                 >
                   <LightConfig preset={lightPreset} />
 
-                  <Suspense fallback={<Loader />}>
+                  <Suspense fallback={<Loader />} key={retryKey}>
                     <ModelRouter
                       url={proxiedUrl}
                       formatHint={currentModel.format}
