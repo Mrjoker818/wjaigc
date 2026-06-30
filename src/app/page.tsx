@@ -2423,8 +2423,8 @@ function CanvasApp() {
             if (rawVideoUrl) {
               // ★ 持久化远程URL到本地，防止过期后图片/视频消失
               const [stableThumbnail, stableVideo] = await Promise.all([
-                awaitStableImageUrl(rawThumbnailUrl),
-                awaitStableImageUrl(rawVideoUrl),
+                awaitStableImageUrl(rawThumbnailUrl, 30000, { isVideo: false }),
+                awaitStableImageUrl(rawVideoUrl, 120000, { isVideo: true }),
               ]);
               if (!isMountedRef.current) return; // 持久化期间组件可能卸载
               setImages(prev => prev.map(img =>

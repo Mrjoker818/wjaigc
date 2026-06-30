@@ -12714,20 +12714,44 @@ export function InfiniteCanvas({
                       const pollData = await pollRes.json();
                       if (pollData.status === 'completed' && pollData.imageUrl) {
                         clearInterval(pollInterval);
-                        onImagesChange(images.map((img: CanvasImage) =>
-                          img.id === frameId
-                            ? {
-                                ...img,
-                                url: pollData.videoThumbnailUrl || pollData.imageUrl,
-                                videoUrl: pollData.videoUrl || pollData.imageUrl,
-                                mediaType: 'video' as const,
-                                isProcessing: false,
-                                processingLabel: undefined,
-                                generatedFromImageId: sourceId,
-                                relationType: 'edit' as const,
-                              }
-                            : img
-                        ));
+                        const rawVideoUrl = pollData.videoUrl || pollData.imageUrl;
+                        const rawThumbUrl = pollData.videoThumbnailUrl || pollData.imageUrl;
+                        // ★ 持久化视频URL，防止第三方URL过期消失
+                        Promise.all([
+                          awaitStableImageUrl(rawThumbUrl, 30000, { isVideo: false }),
+                          awaitStableImageUrl(rawVideoUrl, 120000, { isVideo: true }),
+                        ]).then(([stableThumb, stableVideo]) => {
+                          onImagesChange(images.map((img: CanvasImage) =>
+                            img.id === frameId
+                              ? {
+                                  ...img,
+                                  url: stableThumb || '',
+                                  videoUrl: stableVideo,
+                                  mediaType: 'video' as const,
+                                  isProcessing: false,
+                                  processingLabel: undefined,
+                                  generatedFromImageId: sourceId,
+                                  relationType: 'edit' as const,
+                                }
+                              : img
+                          ));
+                        }).catch(() => {
+                          // 持久化失败兜底：直接用原始URL
+                          onImagesChange(images.map((img: CanvasImage) =>
+                            img.id === frameId
+                              ? {
+                                  ...img,
+                                  url: rawThumbUrl,
+                                  videoUrl: rawVideoUrl,
+                                  mediaType: 'video' as const,
+                                  isProcessing: false,
+                                  processingLabel: undefined,
+                                  generatedFromImageId: sourceId,
+                                  relationType: 'edit' as const,
+                                }
+                              : img
+                          ));
+                        });
                       } else if (pollData.status === 'failed' || pollData.status === 'cancelled') {
                         clearInterval(pollInterval);
                         toast.error(pollData.error || '视频编辑失败');
@@ -12789,20 +12813,44 @@ export function InfiniteCanvas({
                       const pollData = await pollRes.json();
                       if (pollData.status === 'completed' && pollData.imageUrl) {
                         clearInterval(pollInterval);
-                        onImagesChange(images.map((img: CanvasImage) =>
-                          img.id === frameId
-                            ? {
-                                ...img,
-                                url: pollData.videoThumbnailUrl || pollData.imageUrl,
-                                videoUrl: pollData.videoUrl || pollData.imageUrl,
-                                mediaType: 'video' as const,
-                                isProcessing: false,
-                                processingLabel: undefined,
-                                generatedFromImageId: sourceId,
-                                relationType: 'edit' as const,
-                              }
-                            : img
-                        ));
+                        const rawVideoUrl = pollData.videoUrl || pollData.imageUrl;
+                        const rawThumbUrl = pollData.videoThumbnailUrl || pollData.imageUrl;
+                        // ★ 持久化视频URL，防止第三方URL过期消失
+                        Promise.all([
+                          awaitStableImageUrl(rawThumbUrl, 30000, { isVideo: false }),
+                          awaitStableImageUrl(rawVideoUrl, 120000, { isVideo: true }),
+                        ]).then(([stableThumb, stableVideo]) => {
+                          onImagesChange(images.map((img: CanvasImage) =>
+                            img.id === frameId
+                              ? {
+                                  ...img,
+                                  url: stableThumb || '',
+                                  videoUrl: stableVideo,
+                                  mediaType: 'video' as const,
+                                  isProcessing: false,
+                                  processingLabel: undefined,
+                                  generatedFromImageId: sourceId,
+                                  relationType: 'edit' as const,
+                                }
+                              : img
+                          ));
+                        }).catch(() => {
+                          // 持久化失败兜底：直接用原始URL
+                          onImagesChange(images.map((img: CanvasImage) =>
+                            img.id === frameId
+                              ? {
+                                  ...img,
+                                  url: rawThumbUrl,
+                                  videoUrl: rawVideoUrl,
+                                  mediaType: 'video' as const,
+                                  isProcessing: false,
+                                  processingLabel: undefined,
+                                  generatedFromImageId: sourceId,
+                                  relationType: 'edit' as const,
+                                }
+                              : img
+                          ));
+                        });
                       } else if (pollData.status === 'failed' || pollData.status === 'cancelled') {
                         clearInterval(pollInterval);
                         toast.error(pollData.error || '视频延长失败');

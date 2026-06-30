@@ -85,14 +85,20 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const { imageUrl, userId, compress } = await request.json();
+    // 解析 JSON body，同时支持 mediaType 字段（视频/图片）
+    const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+    const imageUrl = typeof body.imageUrl === 'string' ? body.imageUrl : '';
+    const mediaType = typeof body.mediaType === 'string' ? body.mediaType : undefined;
+    const compress = body.compress === true;
 
-    if (!imageUrl || typeof imageUrl !== 'string') {
+    if (!imageUrl) {
       return NextResponse.json({ error: 'No imageUrl provided' }, { status: 400 });
     }
 
-    // ★ 是否启用后端压缩（默认不压缩，前端压缩优先）
-    const shouldCompress = compress === true;
+    // ★ 是否启用后端压缩（默认不压缩，前端压缩优先；视频永远不压缩）
+    const isVideo = mediaType === 'video'
+      || /\.(mp4|webm|mov|avi|mkv|m4v)(\?|$)/i.test(imageUrl);
+    const shouldCompress = compress && !isVideo;
 
     const isDev = process.env.COZE_PROJECT_ENV !== 'PROD';
     const timestamp = Date.now();
@@ -233,8 +239,33 @@ export async function POST(request: NextRequest) {
         }
         const contentType = response.headers.get('content-type') || 'image/png';
         let buffer: Buffer = Buffer.from(await response.arrayBuffer());
-        if (buffer.length > 80 * 1024 * 1024) { // 80MB for 4K images
-          return NextResponse.json({ error: 'Image too large (max 20MB)' }, { status: 400 });
+        const isLocalVideo = contentType.startsWith('video/') || isVideo;
+        if (buffer.length > (isLocalVideo ? 200 : 80) * 1024 * 1024) {
+          return NextResponse.json({ error: `${isLocalVideo ? 'Video' : 'Image'} too large (max ${isLocalVideo ? '200MB' : '80MB'})` }, { status: 400 });
+        }
+
+        // ★ 本地视频直接原样保存
+        if (isLocalVideo) {
+          const ctExt = contentType.split('/')[1]?.split(';')[0]?.trim().replace('quicktime', 'mov').replace('jpeg', 'jpg') || 'mp4';
+          const finalExt = ctExt === 'octet-stream' ? 'mp4' : ctExt;
+          const filename = `video-${timestamp}-${random}.${finalExt}`;
+          const filePath = path.join(uploadDir, filename);
+          await writeFile(filePath, buffer);
+          if (isDev) {
+            try { await copyFile(filePath, path.join(process.cwd(), 'public', 'uploads', filename)); } catch {}
+          }
+          let s3Key: string | null = null;
+          if (isS3Available()) {
+            try { s3Key = await uploadImageToS3(buffer, filename, contentType); } catch {}
+          }
+          return NextResponse.json({
+            success: true,
+            url: `${webPath}/${filename}`,
+            filename,
+            size: buffer.length,
+            s3Key,
+            mediaType: 'video',
+          });
         }
 
         // ★ 自动压缩：大图（>1MB）无透明像素的 PNG 自动转 JPEG，保留透明通道的用 PNG
@@ -302,28 +333,86 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 远程 HTTP(S) URL — 下载后保存（自动压缩超大图片）
+    // 远程 HTTP(S) URL — 下载后保存（视频原样保存；图片自动压缩）
     if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 120000); // ★ 2分钟超时（4K图片可能很大且下载慢）
+      // 视频文件较大，放宽超时到10分钟；图片保持2分钟
+      const fetchTimeout = isVideo ? 600000 : 120000;
+      const timeoutId = setTimeout(() => controller.abort(), fetchTimeout);
 
       try {
         const response = await fetch(imageUrl, { signal: controller.signal });
         clearTimeout(timeoutId);
 
         if (!response.ok) {
-          return NextResponse.json({ error: `Failed to download image: ${response.status}` }, { status: 400 });
+          return NextResponse.json({ error: `Failed to download ${isVideo ? 'video' : 'image'}: ${response.status}` }, { status: 400 });
         }
 
-        const contentType = response.headers.get('content-type') || 'image/png';
+        const rawContentType = response.headers.get('content-type') || (isVideo ? 'video/mp4' : 'image/png');
+        const contentType = isVideo && !rawContentType.startsWith('video/')
+          ? 'video/mp4'
+          : rawContentType;
         let buffer: Buffer = Buffer.from(await response.arrayBuffer());
 
+        // ★ 大小限制：视频 200MB / 图片 50MB
+        const MAX_BYTES = isVideo ? 200 * 1024 * 1024 : 50 * 1024 * 1024;
+        if (buffer.length > MAX_BYTES) {
+          return NextResponse.json({ error: `${isVideo ? 'Video' : 'Image'} too large (max ${isVideo ? '200MB' : '50MB'})` }, { status: 400 });
+        }
+
+        // ★ 扩展名推断：视频优先
+        let finalExt: string;
+        if (isVideo || contentType.startsWith('video/')) {
+          const ctExt = contentType.split('/')[1]?.split(';')[0]?.trim();
+          if (ctExt === 'quicktime') finalExt = 'mov';
+          else if (ctExt === 'x-m4v' || ctExt === 'm4v') finalExt = 'm4v';
+          else finalExt = ctExt || 'mp4';
+        } else {
+          finalExt = contentType.split('/')[1]?.replace('jpeg', 'jpg').replace('svg+xml', 'svg') || 'png';
+        }
+
+        // ★ 视频直接原样保存，不经过 sharp 压缩（sharp 不支持视频）
+        if (isVideo || contentType.startsWith('video/')) {
+          const filename = `video-${timestamp}-${random}.${finalExt}`;
+          const filePath = path.join(uploadDir, filename);
+          await writeFile(filePath, buffer);
+          // 开发环境额外在 public/uploads 创建副本
+          if (isDev) {
+            try {
+              await copyFile(filePath, path.join(process.cwd(), 'public', 'uploads', filename));
+            } catch { /* best effort */ }
+          }
+
+          // S3 backup（视频上传到S3）
+          let s3Key: string | null = null;
+          if (isS3Available()) {
+            try {
+              s3Key = await uploadImageToS3(buffer, filename, contentType);
+              if (s3Key) console.log(`[save-image] S3 backup video: ${s3Key} (${Math.round(buffer.length/1024/1024)}MB)`);
+            } catch (s3Err) {
+              console.warn('[save-image] S3 video backup failed:', s3Err);
+            }
+          }
+
+          await saveImageDataMapping(filename, imageUrl);
+
+          return NextResponse.json({
+            success: true,
+            url: `${webPath}/${filename}`,
+            sourceUrl: imageUrl,
+            filename,
+            size: buffer.length,
+            s3Key,
+            mediaType: 'video',
+          });
+        }
+
+        // ---- 以下是图片的压缩逻辑 ----
         if (buffer.length > 50 * 1024 * 1024) {
           return NextResponse.json({ error: 'Image too large (max 50MB)' }, { status: 400 });
         }
 
         // ★ 自动压缩：大图（>2MB）自动转 JPEG 缩小体积，保留透明通道的用 PNG
-        let finalExt = contentType.split('/')[1]?.replace('jpeg', 'jpg').replace('svg+xml', 'svg') || 'png';
         if (buffer.length > 2 * 1024 * 1024 && !finalExt.includes('svg') && !finalExt.includes('gif')) {
           try {
             const metadata = await sharp(buffer).metadata();
