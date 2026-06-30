@@ -3871,7 +3871,7 @@ function CanvasApp() {
       )}
 
       {/* Right Panel - with vertical collapse strip */}
-      <div className={`fixed top-0 right-0 bottom-0 z-30 flex transition-all duration-300 ease-in-out ${panelCollapsed ? '' : ''}`} style={{ width: panelCollapsed ? '20px' : (activePanel === 'chat' ? '480px' : '360px') }}>
+      <div className={`fixed top-0 right-0 bottom-0 z-30 flex transition-all duration-300 ease-in-out ${panelCollapsed ? '' : ''}`} style={{ width: panelCollapsed ? '20px' : '480px' }}>
         {/* Vertical collapse strip */}
         <button
           onClick={() => setPanelCollapsed(prev => !prev)}
@@ -3992,7 +3992,10 @@ function CanvasApp() {
               <div className={activePanel === 'chat' ? 'flex-1 overflow-hidden' : 'hidden'}>
                 <ChatPanel themeStyle={themeStyle} onAddToPrompt={handleAddToPrompt} onAddImages={handleAddImages} canvasImages={images} selectedCanvasImage={selectedImage} onChatModelChange={setCurrentChatModelInfo} chatInitialImage={chatInitialImage} onChatInitialImageConsumed={() => setChatInitialImage(null)} chatTabOpen={chatTabOpen} onChatTabOpenChange={setChatTabOpen} onNavigateToImage={(id: string) => setNavigateToImageId(id)} onGenerateImage={handleChatGenerateImage} />
               </div>
-              <div className={activePanel === 'video' ? 'flex-1 overflow-hidden' : 'hidden'}>
+              <div className={activePanel === 'video' ? 'flex-1 overflow-y-auto scroll-smooth' : 'hidden'} style={{
+                scrollbarWidth: 'thin',
+                scrollbarColor: themeStyle === 'monochrome' ? '#d1d5db transparent' : '#444 transparent'
+              }}>
                 <VideoGenerationPanel
                     onVideoGenerate={handleVideoGenerate}
                     onError={(error: string) => {

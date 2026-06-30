@@ -854,7 +854,7 @@ Rules:
   const sectionBgClass = isMonochrome ? 'bg-gray-50' : '';
 
   return (
-    <div className="flex flex-col h-full overflow-y-auto" style={{ background: panelBg, color: textColor }}>
+    <div className="flex flex-col min-h-full" style={{ background: panelBg, color: textColor }}>
       {/* === 模式切换 === */}
       <div className={`flex gap-1 p-3 pb-1 flex-nowrap ${isMonochrome ? 'bg-gray-100 rounded-lg mx-3 mt-3 p-1.5' : ''}`}>
         {modeOptions.map(opt => (
