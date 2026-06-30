@@ -301,11 +301,11 @@ function normalizeDiscoveredModels(val: unknown, providerId: string, modelType: 
         id: (rec.id as string) || '',
         name: (rec.name as string) || (rec.id as string) || '',
         providerId,
-        type: resolveType(rec.type),
-      } satisfies ModelInfo;
+        type: resolveType(rec.type) as ModelInfo['type'],
+      } as ModelInfo;
     }
     if (typeof m === 'string') {
-      return { id: m, name: m, providerId, type: resolveType(modelType) } satisfies ModelInfo;
+      return { id: m, name: m, providerId, type: resolveType(modelType) as ModelInfo['type'] } as ModelInfo;
     }
     return null;
   }).filter((m): m is ModelInfo => m !== null && m.id !== '');

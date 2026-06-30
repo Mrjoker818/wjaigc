@@ -42,7 +42,7 @@ export interface ModelInfo {
   name: string;
   displayName?: string;
   providerId: string;
-  type: 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler';
+  type: 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler' | 'general' | 'universal' | 'imageEdit';
   description?: string;
   contextWindow?: number;
   supportedAspectRatios?: string[];
