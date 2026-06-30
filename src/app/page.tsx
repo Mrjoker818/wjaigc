@@ -247,7 +247,7 @@ function CanvasApp() {
   // Alt+Click inline reference markers (displayed as numbered tags in the prompt textarea)
   const [altRefMarkers, setAltRefMarkers] = useState<Array<{id: string; url: string; number: number}>>([]);
   const [showPromptEquation, setShowPromptEquation] = useState(false);
-  const [announcement, setAnnouncement] = useState<{ text: string; type: string; id: string } | null>(null);
+  const [announcement, setAnnouncement] = useState<{ text: string; type: string; id: string; displayMode?: string } | null>(null);
   const [showAnnouncement, setShowAnnouncement] = useState(true);
   const dismissedAnnouncementsRef = useRef<Set<string>>(new Set());
 
@@ -304,11 +304,12 @@ function CanvasApp() {
         }
         const res = await fetch('/api/announcement', { cache: 'no-store' });
         if (res.ok) {
-          const data = await res.json() as { success: boolean; announcement?: { text: string; type: string; enabled: boolean } };
+          const data = await res.json() as { success: boolean; announcement?: { text: string; type: string; enabled: boolean; displayMode?: string } };
           if (data.success && data.announcement?.enabled && data.announcement.text?.trim()) {
-            const id = data.announcement.text.slice(0, 64);
+            const displayMode = data.announcement.displayMode || 'banner';
+            const id = `${displayMode}:${data.announcement.text.slice(0, 64)}`;
             if (!dismissedAnnouncementsRef.current.has(id)) {
-              setAnnouncement({ text: data.announcement.text, type: data.announcement.type || 'info', id });
+              setAnnouncement({ text: data.announcement.text, type: data.announcement.type || 'info', id, displayMode });
               setShowAnnouncement(true);
             }
           }
@@ -3308,8 +3309,8 @@ function CanvasApp() {
 
   return (
     <div className={`h-screen w-screen relative overflow-hidden ${themeStyle === 'monochrome' ? 'bg-gradient-to-br from-blue-50 via-white to-purple-50/30' : 'bg-[#0a0a0a]'}`}>
-      {/* System Announcement Banner */}
-      {announcement && showAnnouncement && (
+      {/* System Announcement - Banner mode (top bar) */}
+      {announcement && showAnnouncement && announcement.displayMode !== 'popup' && announcement.displayMode !== 'sidebar' && (
         <div className={`fixed top-0 left-0 right-0 z-[400] flex items-center justify-center gap-2 px-4 py-2 text-sm ${
           announcement.type === 'warning'
             ? 'bg-amber-500 text-amber-950'
@@ -3324,6 +3325,85 @@ function CanvasApp() {
           <button onClick={dismissAnnouncement} className="p-1 hover:opacity-70 transition-opacity flex-shrink-0">
             <X className="w-4 h-4" />
           </button>
+        </div>
+      )}
+      {/* System Announcement - Popup mode (center modal) */}
+      {announcement && showAnnouncement && announcement.displayMode === 'popup' && (
+        <div className="fixed inset-0 z-[500] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className={`max-w-md w-[90vw] mx-4 rounded-xl shadow-2xl ${
+            themeStyle === 'monochrome' ? 'bg-white border border-gray-200' : 'bg-[#1a1a1a] border border-[#333]'
+          }`}>
+            <div className={`flex items-center gap-3 px-5 py-4 border-b ${
+              themeStyle === 'monochrome' ? 'border-gray-100' : 'border-[#2a2a2a]'
+            }`}>
+              <div className={`p-2 rounded-lg ${
+                announcement.type === 'warning'
+                  ? 'bg-amber-100 text-amber-600'
+                  : announcement.type === 'danger'
+                    ? 'bg-red-100 text-red-600'
+                    : themeStyle === 'monochrome'
+                      ? 'bg-blue-100 text-blue-600'
+                      : 'bg-[#d4af37]/20 text-[#d4af37]'
+              }`}>
+                <Bell className="w-5 h-5" />
+              </div>
+              <h3 className={`font-semibold text-lg ${
+                themeStyle === 'monochrome' ? 'text-gray-900' : 'text-white'
+              }`}>系统公告</h3>
+              <button onClick={dismissAnnouncement} className={`ml-auto p-1.5 rounded-lg transition-colors ${
+                themeStyle === 'monochrome' ? 'hover:bg-gray-100 text-gray-400' : 'hover:bg-[#2a2a2a] text-gray-500'
+              }`}>
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="px-5 py-6">
+              <p className={`text-base leading-relaxed whitespace-pre-wrap ${
+                themeStyle === 'monochrome' ? 'text-gray-700' : 'text-gray-300'
+              }`}>{announcement.text}</p>
+            </div>
+            <div className={`flex justify-end gap-3 px-5 py-4 border-t ${
+              themeStyle === 'monochrome' ? 'border-gray-100' : 'border-[#2a2a2a]'
+            }`}>
+              <button onClick={dismissAnnouncement} className={`px-6 py-2 rounded-lg font-medium transition-colors ${
+                themeStyle === 'monochrome'
+                  ? 'bg-blue-600 text-white hover:bg-blue-700'
+                  : 'bg-[#d4af37] text-[#0a0a0a] hover:bg-[#c4a030]'
+              }`}>我知道了</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* System Announcement - Sidebar/Toast mode (right side notification) */}
+      {announcement && showAnnouncement && announcement.displayMode === 'sidebar' && (
+        <div className={`fixed top-20 right-4 z-[450] max-w-sm w-80 rounded-xl shadow-2xl animate-in slide-in-from-right duration-300 ${
+          themeStyle === 'monochrome' ? 'bg-white border border-gray-200' : 'bg-[#1a1a1a] border border-[#333]'
+        }`}>
+          <div className={`flex items-start gap-3 p-4`}>
+            <div className={`p-2 rounded-lg flex-shrink-0 ${
+              announcement.type === 'warning'
+                ? 'bg-amber-100 text-amber-600'
+                : announcement.type === 'danger'
+                  ? 'bg-red-100 text-red-600'
+                  : themeStyle === 'monochrome'
+                    ? 'bg-blue-100 text-blue-600'
+                    : 'bg-[#d4af37]/20 text-[#d4af37]'
+            }`}>
+              <Bell className="w-4 h-4" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className={`font-semibold text-sm mb-1 ${
+                themeStyle === 'monochrome' ? 'text-gray-900' : 'text-white'
+              }`}>系统通知</div>
+              <p className={`text-sm leading-relaxed whitespace-pre-wrap ${
+                themeStyle === 'monochrome' ? 'text-gray-600' : 'text-gray-400'
+              }`}>{announcement.text}</p>
+            </div>
+            <button onClick={dismissAnnouncement} className={`p-1 rounded flex-shrink-0 transition-colors ${
+              themeStyle === 'monochrome' ? 'hover:bg-gray-100 text-gray-400' : 'hover:bg-[#2a2a2a] text-gray-500'
+            }`}>
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       )}
       {/* ★ 模式切换确认对话框：有进行中生图任务时弹出 */}

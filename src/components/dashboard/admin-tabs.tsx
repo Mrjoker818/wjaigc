@@ -1343,7 +1343,8 @@ export default function AdminTabs(props: AdminTabsProps) {
                 <select value={s('announcementType')} onChange={e => { setSystemSettings(prev => ({ ...prev, announcementType: e.target.value })); setSettingsDirty(true); }}
                   className="w-44 bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors appearance-none cursor-pointer">
                   <option value="banner">顶部横幅</option>
-                  <option value="popup">弹窗通知</option>
+                  <option value="popup">弹窗模式</option>
+                  <option value="sidebar">侧边通知</option>
                 </select>
               </div>
               <div className="flex items-center justify-between">
