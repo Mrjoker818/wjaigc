@@ -1120,12 +1120,15 @@ export default function AdminTabs(props: AdminTabsProps) {
     );
 
     return (
-      <div className="space-y-0 pb-24">
+      <div className="space-y-0 pb-4 flex flex-col h-full">
         {/* 页面标题 */}
         <div className="px-6 pt-6 pb-2">
           <h1 className="text-2xl font-bold text-foreground">系统设置</h1>
           <p className="text-sm text-muted-foreground mt-1">管理平台全局配置，修改后请点击底部保存按钮生效</p>
         </div>
+
+        {/* 可滚动内容区域 */}
+        <div className="flex-1 overflow-y-auto px-2">
 
         {/* 基础设置 */}
         <div className="px-8 mt-6">
@@ -1380,8 +1383,10 @@ export default function AdminTabs(props: AdminTabsProps) {
           </div>
         </div>
 
-        {/* 底部固定保存栏 */}
-        <div className="fixed bottom-0 right-0 bg-card border-t border-border/50 px-8 py-4 z-50 flex items-center justify-between" style={{ left: '224px' }}>
+        </div>
+
+        {/* 底部保存栏（sticky在内容区底部，不遮挡整个页面） */}
+        <div className="sticky bottom-0 bg-card border-t border-border/50 px-6 py-3 z-10 flex items-center justify-between mt-2">
           <div className={`flex items-center gap-2 transition-opacity ${settingsDirty ? 'opacity-100' : 'opacity-0'}`}>
             <AlertCircle className="w-4 h-4 text-amber-400" />
             <span className="text-sm text-amber-400 font-medium">有未保存的更改</span>
