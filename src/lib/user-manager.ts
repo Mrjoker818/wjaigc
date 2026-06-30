@@ -212,10 +212,11 @@ export class UserManager {
               if (img.url && img.url.startsWith('/uploads/') && !img.url.startsWith('/api/')) {
                 img.url = `/api/serve-upload${img.url}`;
               }
-              // ★ 修复：blob: URL 跨会话不可用，清空并标记需要持久化
+              // ★ blob: URL 跨会话不可用，但不清空（清空会导致自动保存时 .filter(img => img.url) 误删图片数据）
+              // 保留原始 URL，浏览器渲染时 blob: URL 失效会显示为空白但不丢失元数据
               // data: URL 保留（当前会话可渲染），但标记为待持久化以便异步转存
               if (img.url && img.url.startsWith('blob:')) {
-                img.url = '';
+                // 不清空 URL，仅标记需要持久化
                 (img as unknown as Record<string, unknown>)._needsPersist = true;
               } else if (img.url && img.url.startsWith('data:')) {
                 // data: URL 在当前会话中可以正常渲染，保留但标记待持久化

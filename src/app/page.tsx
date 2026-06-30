@@ -205,6 +205,18 @@ function CanvasApp() {
             originalWidth: img.originalWidth || 512,
             originalHeight: img.originalHeight || 512,
             svgDataUrl: img.svgDataUrl || undefined,
+            // Video fields — must be preserved to avoid data loss on project load
+            videoUrl: img.videoUrl || undefined,
+            videoDuration: img.videoDuration || undefined,
+            videoThumbnailUrl: img.videoThumbnailUrl || undefined,
+            mediaType: img.mediaType || undefined,
+            isPlaying: img.isPlaying || false,
+            // Metadata fields — must be preserved for display
+            modelName: img.modelName || undefined,
+            apiProvider: img.apiProvider || undefined,
+            generatedFromImageId: img.generatedFromImageId || undefined,
+            relationType: img.relationType || undefined,
+            isProcessingPlaceholder: img.isProcessingPlaceholder || false,
           })) as CanvasImage[]);
         } else {
           setImages([]);
@@ -380,6 +392,16 @@ function CanvasApp() {
                     modelName: img.modelName || '',
                     apiProvider: img.apiProvider || '',
                     apiBaseUrl: img.apiBaseUrl || '',
+                    // Video fields — must be preserved to avoid data loss on project load
+                    videoUrl: img.videoUrl || undefined,
+                    videoDuration: img.videoDuration || undefined,
+                    videoThumbnailUrl: img.videoThumbnailUrl || undefined,
+                    mediaType: img.mediaType || undefined,
+                    isPlaying: img.isPlaying || false,
+                    svgDataUrl: img.svgDataUrl || undefined,
+                    generatedFromImageId: img.generatedFromImageId || undefined,
+                    relationType: img.relationType || undefined,
+                    isProcessingPlaceholder: img.isProcessingPlaceholder || false,
                   })) as CanvasImage[]);
                   // 恢复分组数据
                   const metaGroups = targetProject.metadata?.groups;
@@ -625,7 +647,7 @@ function CanvasApp() {
             videoDuration: img.videoDuration || undefined,
             videoThumbnailUrl: img.videoThumbnailUrl || '',
           }))
-          .filter(img => img.url) as PersistableCanvasImage[];
+          .filter(img => img.url || img.videoUrl || img.svgDataUrl) as PersistableCanvasImage[];
         const updatedMeta = {
           ...(currentProject.metadata || {}),
           groups: groupsRef.current,
