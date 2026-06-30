@@ -2098,7 +2098,8 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               balance: p.balance, selectedModels: p.selectedModels,
               discoveredModels: p.discoveredModels, advancedParams: p.advancedParams,
             })) as any}
-            onTabChange={(tab: string) => { /* Admin tabs handle their own sub-tab state internally */ }}
+            onTabChange={(tab: string) => { setActiveTab(tab as TabType); }}
+            onOpenApiManager={() => { setActiveTab('apis'); }}
           />
         )}
 
@@ -2695,6 +2696,103 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
           )}
 
       </main>
+
+      {/* ── API 配置抽屉（添加/编辑） ── */}
+      {showApiDrawer && (
+        <div className="fixed inset-0 z-[200] flex" onMouseDown={(e) => { if (e.target === e.currentTarget) setShowApiDrawer(false); }}>
+          <div className="flex-1 bg-black/50 backdrop-blur-sm" onClick={() => setShowApiDrawer(false)} />
+          <div className={`w-[480px] max-w-[90vw] h-full overflow-y-auto ${isDark ? 'bg-[#1a1a1a]' : 'bg-white'} shadow-2xl`}>
+            <div className={`sticky top-0 z-10 flex items-center justify-between px-5 py-4 border-b ${isDark ? 'border-[#333] bg-[#1a1a1a]' : 'border-gray-200 bg-white'}`}>
+              <h2 className={`text-base font-semibold ${textPrimary}`}>
+                {editingProviderId ? '编辑 API 配置' : '添加新 API'}
+              </h2>
+              <button onClick={() => setShowApiDrawer(false)} className={`p-1.5 rounded-lg ${isDark ? 'hover:bg-white/10 text-gray-400 hover:text-white' : 'hover:bg-gray-100 text-gray-500 hover:text-black'} transition-colors`}>
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              {/* 类型选择 */}
+              <div>
+                <label className={`block text-xs font-medium mb-2 ${isDark ? 'text-[#d4af37]' : 'text-amber-600'}`}>API 类型</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['image', 'chat', 'video'] as ApiKind[]).map((k) => (
+                    <button key={k} onClick={() => setApiKind(k)} className={`px-3 py-2 text-xs rounded-lg border transition-colors ${apiKind === k ? (isDark ? 'bg-[#d4af37] text-black border-[#d4af37]' : 'bg-amber-500 text-white border-amber-500') : (isDark ? 'border-[#333] text-gray-300 hover:border-[#d4af37]' : 'border-gray-300 text-gray-700 hover:border-amber-400')}`}>
+                      {apiKindLabels[k]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {/* 名称 */}
+              <div>
+                <label className={`block text-xs font-medium mb-1.5 ${isDark ? 'text-[#d4af37]' : 'text-amber-600'}`}>显示名称</label>
+                <input value={apiName} onChange={(e) => setApiName(e.target.value)} placeholder="例：我的 OpenAI" className={`w-full px-3 py-2 text-sm rounded-lg border ${isDark ? 'bg-[#0d0d0d] border-[#333] text-white placeholder:text-gray-600' : 'bg-gray-50 border-gray-300 text-black placeholder:text-gray-400'} focus:outline-none focus:ring-1 ${isDark ? 'focus:ring-[#d4af37]' : 'focus:ring-amber-500'}`} />
+              </div>
+              {/* Base URL */}
+              <div>
+                <label className={`block text-xs font-medium mb-1.5 ${isDark ? 'text-[#d4af37]' : 'text-amber-600'}`}>Base URL</label>
+                <input value={apiBaseUrl} onChange={(e) => setApiBaseUrl(e.target.value)} placeholder="https://api.openai.com/v1" className={`w-full px-3 py-2 text-sm rounded-lg border font-mono ${isDark ? 'bg-[#0d0d0d] border-[#333] text-white placeholder:text-gray-600' : 'bg-gray-50 border-gray-300 text-black placeholder:text-gray-400'} focus:outline-none focus:ring-1 ${isDark ? 'focus:ring-[#d4af37]' : 'focus:ring-amber-500'}`} />
+              </div>
+              {/* API Key */}
+              <div>
+                <label className={`block text-xs font-medium mb-1.5 ${isDark ? 'text-[#d4af37]' : 'text-amber-600'}`}>API Key</label>
+                <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-..." className={`w-full px-3 py-2 text-sm rounded-lg border font-mono ${isDark ? 'bg-[#0d0d0d] border-[#333] text-white placeholder:text-gray-600' : 'bg-gray-50 border-gray-300 text-black placeholder:text-gray-400'} focus:outline-none focus:ring-1 ${isDark ? 'focus:ring-[#d4af37]' : 'focus:ring-amber-500'}`} />
+              </div>
+              {/* 测试连接 */}
+              <button onClick={handleDiscoverModels} disabled={isDiscovering || !apiBaseUrl.trim() || !apiKey.trim()} className={`w-full px-4 py-2.5 text-sm rounded-lg ${isDark ? 'bg-[#d4af37] text-black hover:bg-[#c4a030]' : 'bg-amber-500 text-white hover:bg-amber-600'} disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium flex items-center justify-center gap-2`}>
+                {isDiscovering ? <><Loader2 className="w-4 h-4 animate-spin" />正在测试...</> : <><Zap className="w-4 h-4" />测试连接并发现模型</>}
+              </button>
+              {testNewResult && (
+                <div className={`p-3 rounded-lg text-xs ${testNewResult.success ? (isDark ? 'bg-green-900/30 border border-green-700 text-green-300' : 'bg-green-50 border border-green-200 text-green-700') : (isDark ? 'bg-red-900/30 border border-red-700 text-red-300' : 'bg-red-50 border border-red-200 text-red-700')}`}>
+                  {testNewResult.success ? `✅ ${testNewResult.message}${testNewResult.modelCount !== undefined ? `（${testNewResult.modelCount} 个模型）` : ''}` : `❌ ${testNewResult.message}`}
+                </div>
+              )}
+              {/* 模型选择 */}
+              {discoveredModels.length > 0 && (
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className={`text-xs font-medium ${isDark ? 'text-[#d4af37]' : 'text-amber-600'}`}>选择可用模型 ({discoveredModels.length} 个)</label>
+                    <div className="flex gap-1">
+                      <button onClick={() => setSelectedModels(discoveredModels.map(m => m.id))} className={`text-xs ${isDark ? 'text-[#d4af37]' : 'text-amber-600'} hover:underline`}>全选</button>
+                      <span className={isDark ? 'text-gray-600' : 'text-gray-300'}>|</span>
+                      <button onClick={() => setSelectedModels([])} className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'} hover:underline`}>清空</button>
+                    </div>
+                  </div>
+                  <input value={modelSearchQuery} onChange={(e) => setModelSearchQuery(e.target.value)} placeholder="搜索模型..." className={`w-full px-3 py-1.5 text-xs rounded-lg border mb-2 ${isDark ? 'bg-[#0d0d0d] border-[#333] text-white placeholder:text-gray-600' : 'bg-gray-50 border-gray-300 text-black placeholder:text-gray-400'}`} />
+                  <div className={`max-h-48 overflow-y-auto rounded-lg border ${isDark ? 'border-[#333]' : 'border-gray-200'}`}>
+                    {discoveredModels.filter(m => m.name.toLowerCase().includes(modelSearchQuery.toLowerCase()) || m.id.toLowerCase().includes(modelSearchQuery.toLowerCase())).map((m) => (
+                      <label key={m.id} className={`flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer ${isDark ? 'hover:bg-white/5' : 'hover:bg-gray-50'}`}>
+                        <input type="checkbox" checked={selectedModels.includes(m.id)} onChange={(e) => { if (e.target.checked) setSelectedModels([...selectedModels, m.id]); else setSelectedModels(selectedModels.filter(id => id !== m.id)); }} className="rounded accent-amber-500" />
+                        <span className={textPrimary}>{m.name || m.id}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <p className={`text-[10px] mt-1 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>已选 {selectedModels.length} 个模型</p>
+                </div>
+              )}
+              {/* 协议兼容 */}
+              <div>
+                <label className={`block text-xs font-medium mb-1.5 ${isDark ? 'text-[#d4af37]' : 'text-amber-600'}`}>协议兼容模式</label>
+                <select value={compatProfile} onChange={(e) => setCompatProfile(e.target.value)} className={`w-full px-3 py-2 text-sm rounded-lg border ${isDark ? 'bg-[#0d0d0d] border-[#333] text-white' : 'bg-gray-50 border-gray-300 text-black'} focus:outline-none`}>
+                  <option value="auto">自动识别 (推荐)</option>
+                  <option value="openai">OpenAI 标准</option>
+                  <option value="openai-async">OpenAI 异步</option>
+                  <option value="apimart">APImart 代理</option>
+                  <option value="custom">自定义</option>
+                </select>
+              </div>
+              {/* 操作按钮 */}
+              <div className="flex gap-2 pt-2">
+                <button onClick={() => setShowApiDrawer(false)} className={`flex-1 px-4 py-2.5 text-sm rounded-lg border ${isDark ? 'border-[#333] text-gray-300 hover:bg-white/5' : 'border-gray-300 text-gray-700 hover:bg-gray-50'} transition-colors`}>
+                  取消
+                </button>
+                <button onClick={editingProviderId ? handleUpdateApi : handleAddApi} disabled={!apiName.trim() || !apiBaseUrl.trim() || !apiKey.trim()} className={`flex-1 px-4 py-2.5 text-sm rounded-lg ${isDark ? 'bg-[#d4af37] text-black hover:bg-[#c4a030]' : 'bg-amber-500 text-white hover:bg-amber-600'} disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium`}>
+                  {editingProviderId ? '保存修改' : '添加 API'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <ConfirmDialog open={confirmDlg.open} title={confirmDlg.title} message={confirmDlg.message} variant={confirmDlg.variant} onConfirm={confirmDlg.onConfirm} onCancel={confirmDlg.onCancel} />
     </div>

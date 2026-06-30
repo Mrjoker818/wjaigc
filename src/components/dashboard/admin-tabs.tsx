@@ -48,11 +48,14 @@ interface AuditStats {
 }
 
 interface SystemSettings {
-  defaultImageModel?: string; defaultChatModel?: string;
-  maxConcurrentTasks?: number; imageMaxSizeMB?: number;
+  defaultImageModel?: string; defaultChatModel?: string; defaultVideoModel?: string;
+  maxConcurrentTasks?: number; imageMaxSizeMB?: number; imageMaxEdge?: number;
+  maxUploadMB?: number; maxVideoDuration?: number; storageQuotaMB?: number;
+  sessionTimeout?: number; passwordExpiryDays?: number;
   openRegistration?: boolean; apiRateLimiting?: boolean;
   videoGenerationEnabled?: boolean; threeDModelEnabled?: boolean;
-  announcement?: string;
+  announcementEnabled?: boolean; announcementType?: string;
+  announcementExpiry?: string; announcement?: string;
 }
 
 interface AdminTabsProps {
@@ -68,6 +71,7 @@ interface AdminTabsProps {
   onRechargeCredits: (userId: string, amount: number, description: string) => Promise<void>;
   providers: AdminProvider[];
   onTabChange?: (tab: string) => void;
+  onOpenApiManager?: () => void;
 }
 
 /* ── Mapping: prototype M3 class → shadcn class ── */
@@ -314,7 +318,7 @@ export default function AdminTabs(props: AdminTabsProps) {
     const handleTogglePeriod = (p: '7' | '30') => { setOverviewPeriod(p); loadDashboardStats(p); };
     const viewAllAlerts = () => { if (props.onTabChange) props.onTabChange('audit'); };
     const viewAllUsers = () => { if (props.onTabChange) props.onTabChange('users'); };
-    const viewProviders = () => { if (props.onTabChange) props.onTabChange('apis'); };
+    const viewProviders = () => { if (props.onOpenApiManager) props.onOpenApiManager(); };
 
     // Compute chart data from API or defaults
     const trendDates = s?.userTrend?.map(t => t.date) || [];
@@ -1224,15 +1228,22 @@ export default function AdminTabs(props: AdminTabsProps) {
               </div>
               <div className="flex items-center justify-between">
                 <div>
-                  <div className="text-sm font-medium text-foreground">图片最大尺寸</div>
-                  <div className="text-xs text-muted-foreground mt-0.5">上传图片允许的最大分辨率</div>
+                  <div className="text-sm font-medium text-foreground">图片最大分辨率</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">上传图片允许的最大边长度（像素）</div>
+                </div>
+                {numInput('imageMaxEdge', 'w-24', 'px')}
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium text-foreground">图片最大大小</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">单张图片文件的最大体积</div>
                 </div>
                 {numInput('imageMaxSizeMB', 'w-24', 'MB')}
               </div>
               <div className="flex items-center justify-between">
                 <div>
                   <div className="text-sm font-medium text-foreground">单文件上传限制</div>
-                  <div className="text-xs text-muted-foreground mt-0.5">单个图片或文件的最大上传大小</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">单个文件的最大上传大小</div>
                 </div>
                 {numInput('maxUploadMB', 'w-24', 'MB')}
               </div>

@@ -13,7 +13,7 @@ import { PromptEquation } from '@/components/prompt-equation';
 
 import { Toaster } from '@/components/ui/sonner';
 import { toast } from 'sonner';
-import { Image as ImageIcon, MessageSquare, Sparkles, GitBranch, CircleDot, ChevronLeft, ChevronRight, Film } from 'lucide-react';
+import { Image as ImageIcon, MessageSquare, Sparkles, GitBranch, CircleDot, ChevronLeft, ChevronRight, Film, X, Bell } from 'lucide-react';
 import NodeEditor from '@/components/node-editor';
 import WorkflowHub from '@/components/workflow-hub';
 import DashboardView from '@/components/dashboard/dashboard-view';
@@ -247,6 +247,9 @@ function CanvasApp() {
   // Alt+Click inline reference markers (displayed as numbered tags in the prompt textarea)
   const [altRefMarkers, setAltRefMarkers] = useState<Array<{id: string; url: string; number: number}>>([]);
   const [showPromptEquation, setShowPromptEquation] = useState(false);
+  const [announcement, setAnnouncement] = useState<{ text: string; type: string; id: string } | null>(null);
+  const [showAnnouncement, setShowAnnouncement] = useState(true);
+  const dismissedAnnouncementsRef = useRef<Set<string>>(new Set());
 
   // Language-based image editing state
   const [showImageEditor, setShowImageEditor] = useState(false);
@@ -290,6 +293,37 @@ function CanvasApp() {
   const [visionPromptEnabled, setVisionPromptEnabled] = useState(false);
   const [isVisionAnalyzing, setIsVisionAnalyzing] = useState(false);
   const [visionResult, setVisionResult] = useState<import('@/components/oh-my-prompt').VisionApiResultData | null>(null);
+
+  // Fetch system announcement
+  useEffect(() => {
+    const fetchAnnouncement = async () => {
+      try {
+        const dismissed = localStorage.getItem('dismissed_announcements');
+        if (dismissed) {
+          dismissedAnnouncementsRef.current = new Set(JSON.parse(dismissed));
+        }
+        const res = await fetch('/api/announcement', { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json() as { success: boolean; announcement?: { text: string; type: string; enabled: boolean } };
+          if (data.success && data.announcement?.enabled && data.announcement.text?.trim()) {
+            const id = data.announcement.text.slice(0, 64);
+            if (!dismissedAnnouncementsRef.current.has(id)) {
+              setAnnouncement({ text: data.announcement.text, type: data.announcement.type || 'info', id });
+              setShowAnnouncement(true);
+            }
+          }
+        }
+      } catch { /* ignore */ }
+    };
+    fetchAnnouncement();
+  }, []);
+
+  const dismissAnnouncement = useCallback(() => {
+    if (!announcement) return;
+    dismissedAnnouncementsRef.current.add(announcement.id);
+    localStorage.setItem('dismissed_announcements', JSON.stringify([...dismissedAnnouncementsRef.current]));
+    setShowAnnouncement(false);
+  }, [announcement]);
 
   // Initialize current user and admin UI state
   useEffect(() => {
@@ -3274,6 +3308,24 @@ function CanvasApp() {
 
   return (
     <div className={`h-screen w-screen relative overflow-hidden ${themeStyle === 'monochrome' ? 'bg-gradient-to-br from-blue-50 via-white to-purple-50/30' : 'bg-[#0a0a0a]'}`}>
+      {/* System Announcement Banner */}
+      {announcement && showAnnouncement && (
+        <div className={`fixed top-0 left-0 right-0 z-[400] flex items-center justify-center gap-2 px-4 py-2 text-sm ${
+          announcement.type === 'warning'
+            ? 'bg-amber-500 text-amber-950'
+            : announcement.type === 'danger'
+              ? 'bg-red-500 text-white'
+              : themeStyle === 'monochrome'
+                ? 'bg-blue-600 text-white'
+                : 'bg-[#d4af37] text-[#0a0a0a]'
+        }`}>
+          <Bell className="w-4 h-4 flex-shrink-0" />
+          <span className="flex-1 text-center">{announcement.text}</span>
+          <button onClick={dismissAnnouncement} className="p-1 hover:opacity-70 transition-opacity flex-shrink-0">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
       {/* ★ 模式切换确认对话框：有进行中生图任务时弹出 */}
       {pendingModeSwitch && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 backdrop-blur-sm">
