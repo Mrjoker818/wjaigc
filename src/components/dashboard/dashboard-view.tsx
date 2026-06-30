@@ -2320,80 +2320,80 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
             {/* ── Header with add button ── */}
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h1 className={`text-xl font-bold ${textPrimary}`}>API 管理</h1>
-                <p className={`text-sm ${textSecondary}`}>配置图像、对话、3D、矢量等模型接口</p>
+                <h1 className="text-xl font-bold text-foreground">API 管理</h1>
+                <p className="text-sm text-muted-foreground">配置图像、对话、3D、矢量等模型接口</p>
               </div>
               <div className="flex items-center gap-2">
-                <button onClick={() => void refreshBalances()} className={`text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer ${isDark ? 'bg-white/5 text-[#aaa] hover:bg-white/10' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}><Activity className="w-3.5 h-3.5" />刷新余额</button>
-                <button onClick={() => { void refreshAdmin(); }} className={`text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer ${isDark ? 'bg-white/5 text-[#aaa] hover:bg-white/10' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}><RefreshCw className="w-3.5 h-3.5" />刷新列表</button>
-                <button onClick={() => { resetApiForm(); setShowApiDrawer(true); }} className={`text-xs px-4 py-2 rounded-lg font-semibold flex items-center gap-1.5 cursor-pointer ${accentBgClass} ${accentTextOnBgClass}`}><Plus className="w-4 h-4" />添加 API</button>
+                <button onClick={() => void refreshBalances()} className="text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"><Activity className="w-3.5 h-3.5" />刷新余额</button>
+                <button onClick={() => { void refreshAdmin(); }} className="text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"><RefreshCw className="w-3.5 h-3.5" />刷新列表</button>
+                <button onClick={() => { resetApiForm(); setShowApiDrawer(true); }} className="text-xs px-4 py-2 rounded-lg font-semibold flex items-center gap-1.5 cursor-pointer bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"><Plus className="w-4 h-4" />添加 API</button>
               </div>
             </div>
 
             {/* ── Filter bar ── */}
-            <div className={`flex items-center gap-2 mb-3 p-2 rounded-xl ${isDark ? 'bg-white/[0.03] border border-white/5' : 'bg-gray-50 border border-gray-100'}`}>
-              <select className={`h-8 px-2.5 rounded-lg text-xs border ${isDark ? 'bg-white/5 border-white/10 text-[#ccc]' : 'bg-white border-gray-200 text-gray-800'}`} value={apiFilterType} onChange={e => setApiFilterType(e.target.value as ApiKind | 'all')}>
+            <div className="flex items-center gap-2 mb-3 p-2 rounded-xl bg-muted/50 border border-border">
+              <select className="h-8 px-2.5 rounded-lg text-xs bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer" value={apiFilterType} onChange={e => setApiFilterType(e.target.value as ApiKind | 'all')}>
                 <option value="all">全部类型</option>
                 {(Object.keys(apiKindLabels) as ApiKind[]).map(k => <option key={k} value={k}>{apiKindLabels[k]}</option>)}
               </select>
-              <select className={`h-8 px-2.5 rounded-lg text-xs border ${isDark ? 'bg-white/5 border-white/10 text-[#ccc]' : 'bg-white border-gray-200 text-gray-800'}`} value={apiFilterStatus} onChange={e => setApiFilterStatus(e.target.value as 'all' | 'enabled' | 'disabled')}>
+              <select className="h-8 px-2.5 rounded-lg text-xs bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer" value={apiFilterStatus} onChange={e => setApiFilterStatus(e.target.value as 'all' | 'enabled' | 'disabled')}>
                 <option value="all">全部状态</option>
                 <option value="enabled">已启用</option>
                 <option value="disabled">已停用</option>
               </select>
               <div className="relative flex-1">
-                <Search className={`w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 ${textSecondary}`} />
-                <input type="text" placeholder="搜索 API 名称或 URL..." value={apiSearchQuery} onChange={e => setApiSearchQuery(e.target.value)} className={`w-full h-8 pl-8 pr-3 rounded-lg text-xs border ${isDark ? 'bg-white/5 border-white/10 text-[#ccc] placeholder:text-white/20' : 'bg-white border-gray-200 text-gray-800 placeholder:text-gray-400'}`} />
+                <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <input type="text" placeholder="搜索 API 名称或 URL..." value={apiSearchQuery} onChange={e => setApiSearchQuery(e.target.value)} className="w-full h-8 pl-8 pr-3 rounded-lg text-xs bg-background border border-border text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30" />
               </div>
             </div>
 
             {/* ── Batch operations bar ── */}
             {selectedProviderIds.size > 0 && (
-              <div className={`flex items-center gap-2 mb-3 p-2 rounded-xl ${isDark ? 'bg-primary/10 border border-primary/20' : 'bg-amber-50 border border-amber-200'}`}>
-                <span className={`text-xs ${isDark ? 'text-primary' : 'text-amber-700'}`}>已选择 {selectedProviderIds.size} 个</span>
-                <button onClick={() => void handleBatchToggleApi(true)} className="text-xs px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 cursor-pointer">批量启用</button>
-                <button onClick={() => void handleBatchToggleApi(false)} className="text-xs px-2.5 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 cursor-pointer">批量停用</button>
-                <button onClick={() => setConfirmDlg({ open: true, title: '批量删除', message: `确定要删除选中的 ${selectedProviderIds.size} 个API吗？`, variant: 'danger', onConfirm: () => void handleBatchDeleteApi(), onCancel: () => setConfirmDlg(d => ({ ...d, open: false })) })} className="text-xs px-2.5 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 cursor-pointer">批量删除</button>
-                <button onClick={toggleSelectAllProviders} className="text-xs px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-[#ccc] cursor-pointer">全选/取消</button>
+              <div className="flex items-center gap-2 mb-3 p-2 rounded-xl bg-primary/10 border border-primary/20">
+                <span className="text-xs text-primary">已选择 {selectedProviderIds.size} 个</span>
+                <button onClick={() => void handleBatchToggleApi(true)} className="text-xs px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 cursor-pointer transition-colors">批量启用</button>
+                <button onClick={() => void handleBatchToggleApi(false)} className="text-xs px-2.5 py-1 rounded-lg bg-destructive/10 hover:bg-destructive/20 text-destructive cursor-pointer transition-colors">批量停用</button>
+                <button onClick={() => setConfirmDlg({ open: true, title: '批量删除', message: `确定要删除选中的 ${selectedProviderIds.size} 个API吗？`, variant: 'danger', onConfirm: () => void handleBatchDeleteApi(), onCancel: () => setConfirmDlg(d => ({ ...d, open: false })) })} className="text-xs px-2.5 py-1 rounded-lg bg-destructive/10 hover:bg-destructive/20 text-destructive cursor-pointer transition-colors">批量删除</button>
+                <button onClick={toggleSelectAllProviders} className="text-xs px-2.5 py-1 rounded-lg bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground cursor-pointer transition-colors">全选/取消</button>
               </div>
             )}
 
             {/* ── API Cards Grid ── */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {filteredProviders.map(p => (
-                <div key={p.id} className={`relative rounded-xl p-4 transition-all ${isDark ? 'bg-white/[0.03] border border-white/[0.06] hover:border-primary/30' : 'bg-white border border-gray-100 hover:border-amber-300'}`}>
+                <div key={p.id} className="relative rounded-xl p-4 transition-all bg-card border border-border hover:border-primary/30 cursor-default">
                   <div className="flex items-start gap-3">
-                    <input type="checkbox" checked={selectedProviderIds.has(p.id)} onChange={() => setSelectedProviderIds(prev => { const next = new Set(prev); if (next.has(p.id)) next.delete(p.id); else next.add(p.id); return next; })} className="mt-1 accent-[var(--accent-color,#d4af37)]" />
+                    <input type="checkbox" checked={selectedProviderIds.has(p.id)} onChange={() => setSelectedProviderIds(prev => { const next = new Set(prev); if (next.has(p.id)) next.delete(p.id); else next.add(p.id); return next; })} className="mt-1 accent-primary" />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
-                        <span className={`font-semibold text-sm truncate ${textPrimary}`}>{p.displayName || p.name}</span>
-                        {p.displayName && p.name !== p.displayName && <span className={`text-[10px] ${textSecondary} truncate`}>({p.name})</span>}
-                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${p.isEnabled !== false ? (isDark ? 'bg-emerald-500/15 text-emerald-400' : 'bg-emerald-100 text-emerald-700') : (isDark ? 'bg-red-500/15 text-red-400' : 'bg-red-100 text-red-700')}`}>{p.isEnabled !== false ? '启用' : '停用'}</span>
+                        <span className="font-semibold text-sm truncate text-foreground">{p.displayName || p.name}</span>
+                        {p.displayName && p.name !== p.displayName && <span className="text-[10px] text-muted-foreground truncate">({p.name})</span>}
+                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${p.isEnabled !== false ? 'bg-emerald-500/15 text-emerald-500' : 'bg-destructive/15 text-destructive'}`}>{p.isEnabled !== false ? '启用' : '停用'}</span>
                       </div>
-                      <div className={`text-[11px] ${textSecondary} mb-1`}>{apiKindLabels[p.modelType as ApiKind] || p.modelType || '通用'}</div>
-                      <div className={`text-[10px] ${textSecondary} truncate mb-2`}>{p.baseUrl}</div>
+                      <div className="text-[11px] text-muted-foreground mb-1">{apiKindLabels[p.modelType as ApiKind] || p.modelType || '通用'}</div>
+                      <div className="text-[10px] text-muted-foreground truncate mb-2">{p.baseUrl}</div>
                       {p.balance !== undefined && p.balance !== null && (
-                        <div className={`text-[10px] ${isDark ? 'text-primary/80' : 'text-amber-600'}`}>余额: ${typeof p.balance === 'number' ? (p.balance as number).toFixed(2) : String(p.balance)}</div>
+                        <div className="text-[10px] text-primary/80">余额: ${typeof p.balance === 'number' ? (p.balance as number).toFixed(2) : String(p.balance)}</div>
                       )}
                       {p.selectedModels && p.selectedModels.length > 0 && (
                         <div className="flex flex-wrap gap-1 mt-2">
-                          {p.selectedModels.slice(0, 3).map(m => <span key={m} className={`text-[9px] px-1.5 py-0.5 rounded ${isDark ? 'bg-white/5 text-white/50' : 'bg-gray-100 text-gray-500'}`}>{m}</span>)}
-                          {p.selectedModels.length > 3 && <span className={`text-[9px] px-1.5 py-0.5 rounded ${isDark ? 'bg-white/5 text-white/50' : 'bg-gray-100 text-gray-500'}`}>+{p.selectedModels.length - 3}</span>}
+                          {p.selectedModels.slice(0, 3).map(m => <span key={m} className="text-[9px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{m}</span>)}
+                          {p.selectedModels.length > 3 && <span className="text-[9px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">+{p.selectedModels.length - 3}</span>}
                         </div>
                       )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-1.5 mt-3 pt-2 border-t border-white/5 flex-wrap">
-                    <button onClick={() => { toggleApiEnabled(p.id); }} className={`text-[10px] px-2 py-1 rounded-lg cursor-pointer ${p.isEnabled !== false ? (isDark ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20' : 'bg-red-50 text-red-600 hover:bg-red-100') : (isDark ? 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100')}`}>{p.isEnabled !== false ? '停用' : '启用'}</button>
-                    <button onClick={() => { editApiProvider(p); }} className={`text-[10px] px-2 py-1 rounded-lg cursor-pointer ${editingProviderId === p.id ? (isDark ? 'bg-primary/20 text-primary' : 'bg-amber-100 text-amber-700') : (isDark ? 'bg-white/5 text-[#aaa] hover:bg-white/10' : 'bg-gray-100 text-gray-600 hover:bg-gray-200')}`}>编辑</button>
-                    <button onClick={() => { void testApiConnection(p); }} disabled={testingProviderId === p.id} className={`text-[10px] px-2 py-1 rounded-lg cursor-pointer disabled:opacity-50 ${isDark ? 'bg-white/5 text-[#aaa] hover:bg-white/10' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>{testingProviderId === p.id ? '测试中...' : '测试'}</button>
-                    <button onClick={() => { void verifyProtocolForProvider(p); }} className={`text-[10px] px-2 py-1 rounded-lg cursor-pointer ${isDark ? 'bg-white/5 text-[#aaa] hover:bg-white/10' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>验证协议</button>
-                    <button onClick={() => { void queryBalanceForProvider(p); }} className={`text-[10px] px-2 py-1 rounded-lg cursor-pointer ${isDark ? 'bg-white/5 text-[#aaa] hover:bg-white/10' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>查询余额</button>
-                    <button onClick={() => setConfirmDlg({ open: true, title: '删除API', message: `确定要删除 "${p.displayName || p.name}" 吗？`, variant: 'danger', onConfirm: () => deleteApiProvider(p.id), onCancel: () => setConfirmDlg(d => ({ ...d, open: false })) })} className="text-[10px] px-2 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 cursor-pointer ml-auto">删除</button>
+                  <div className="flex items-center gap-1.5 mt-3 pt-2 border-t border-border flex-wrap">
+                    <button onClick={() => { toggleApiEnabled(p.id); }} className={`text-[10px] px-2 py-1 rounded-lg cursor-pointer transition-colors ${p.isEnabled !== false ? 'bg-destructive/10 text-destructive hover:bg-destructive/20' : 'bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20'}`}>{p.isEnabled !== false ? '停用' : '启用'}</button>
+                    <button onClick={() => { editApiProvider(p); }} className={`text-[10px] px-2 py-1 rounded-lg cursor-pointer transition-colors ${editingProviderId === p.id ? 'bg-primary/20 text-primary' : 'bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/80'}`}>编辑</button>
+                    <button onClick={() => { void testApiConnection(p); }} disabled={testingProviderId === p.id} className="text-[10px] px-2 py-1 rounded-lg cursor-pointer disabled:opacity-50 bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors">{testingProviderId === p.id ? '测试中...' : '测试'}</button>
+                    <button onClick={() => { void verifyProtocolForProvider(p); }} className="text-[10px] px-2 py-1 rounded-lg cursor-pointer bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors">验证协议</button>
+                    <button onClick={() => { void queryBalanceForProvider(p); }} className="text-[10px] px-2 py-1 rounded-lg cursor-pointer bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors">查询余额</button>
+                    <button onClick={() => setConfirmDlg({ open: true, title: '删除API', message: `确定要删除 "${p.displayName || p.name}" 吗？`, variant: 'danger', onConfirm: () => deleteApiProvider(p.id), onCancel: () => setConfirmDlg(d => ({ ...d, open: false })) })} className="text-[10px] px-2 py-1 rounded-lg bg-destructive/10 hover:bg-destructive/20 text-destructive cursor-pointer ml-auto transition-colors">删除</button>
                   </div>
                   {/* 测试结果显示 */}
                   {testingProviderId === p.id && (
-                    <div className={`mt-2 p-2 rounded-lg text-[11px] ${isDark ? 'bg-blue-500/10 text-blue-300' : 'bg-blue-50 text-blue-600'}`}>
+                    <div className="mt-2 p-2 rounded-lg text-[11px] bg-primary/10 text-primary">
                       <div className="flex items-center gap-1.5">
                         <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
                         正在测试连接...
@@ -2401,7 +2401,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                     </div>
                   )}
                   {providerTestStatus[p.id] && testingProviderId !== p.id && (
-                    <div className={`mt-2 p-2 rounded-lg text-[11px] ${providerTestStatus[p.id].success ? (isDark ? 'bg-emerald-500/10 text-emerald-300' : 'bg-emerald-50 text-emerald-700') : (isDark ? 'bg-red-500/10 text-red-300' : 'bg-red-50 text-red-700')}`}>
+                    <div className={`mt-2 p-2 rounded-lg text-[11px] ${providerTestStatus[p.id].success ? 'bg-emerald-500/10 text-emerald-500' : 'bg-destructive/10 text-destructive'}`}>
                       <div className="flex items-center gap-1.5">
                         {providerTestStatus[p.id].success ? <CheckCircle2 className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
                         {providerTestStatus[p.id].message}
@@ -2412,7 +2412,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               ))}
             </div>
             {filteredProviders.length === 0 && (
-              <div className={`text-center py-12 ${textSecondary}`}>
+              <div className="text-center py-12 text-muted-foreground">
                 <Server className="w-10 h-10 mx-auto mb-3 opacity-30" />
                 <p className="text-sm">暂无API提供商</p>
                 <p className="text-xs mt-1">点击上方"添加 API"按钮添加</p>
@@ -2423,113 +2423,121 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
             {showApiDrawer && (
               <>
                 {/* 遮罩层 */}
-                <div className="fixed inset-0 bg-black/50 z-[199] backdrop-blur-[2px] transition-opacity" onClick={() => { if (!isSubmitting) { resetApiForm(); setShowApiDrawer(false); setEditingProviderId(null); } }} />
+                <div className="fixed inset-0 bg-black/40 z-[199] backdrop-blur-sm" onClick={() => { if (!isSubmitting) { resetApiForm(); setShowApiDrawer(false); setEditingProviderId(null); } }} />
                 {/* 抽屉面板 */}
-                <div className={`fixed right-0 top-0 bottom-0 w-[520px] max-w-[92vw] z-[200] ${isDark ? 'bg-[#1e1e1e] border-l border-white/5' : 'bg-white border-l border-gray-200'} flex flex-col shadow-2xl transition-transform`}>
+                <div className="fixed right-0 top-0 bottom-0 w-[520px] max-w-[92vw] z-[200] bg-card border-l border-border flex flex-col shadow-2xl">
                   {/* 抽屉头部 */}
-                  <div className={`flex items-center justify-between px-6 py-4 border-b ${isDark ? 'border-white/5 bg-[#1a1a1a]' : 'border-gray-100 bg-gray-50/50'}`}>
+                  <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/30">
                     <div className="flex items-center gap-3">
-                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isDark ? 'bg-[#d4af37]/20 text-[#d4af37]' : 'bg-amber-100 text-amber-600'}`}>
-                        {editingProviderId ? <Settings className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                      <div className="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
+                        {editingProviderId ? <Settings className="w-4.5 h-4.5" /> : <Plus className="w-4.5 h-4.5" />}
                       </div>
                       <div>
-                        <h3 className={`text-base font-semibold ${textPrimary}`}>{editingProviderId ? '编辑 API 配置' : '添加新 API 配置'}</h3>
-                        <p className={`text-xs ${textSecondary}`}>{editingProviderId ? '修改 API 提供商设置' : '配置新的 AI 模型服务'}</p>
+                        <h3 className="text-base font-semibold text-foreground">{editingProviderId ? '编辑 API 配置' : '添加新 API 配置'}</h3>
+                        <p className="text-xs text-muted-foreground mt-0.5">{editingProviderId ? '修改 API 提供商设置' : '配置新的 AI 模型服务'}</p>
                       </div>
                     </div>
-                    <button onClick={() => { if (!isSubmitting) { resetApiForm(); setShowApiDrawer(false); setEditingProviderId(null); } }} className={`p-2 rounded-lg transition-colors ${isDark ? 'hover:bg-white/10 text-gray-400' : 'hover:bg-gray-200 text-gray-500'}`}>
+                    <button onClick={() => { if (!isSubmitting) { resetApiForm(); setShowApiDrawer(false); setEditingProviderId(null); } }} className="p-2 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground cursor-pointer">
                       <X className="w-5 h-5" />
                     </button>
                   </div>
                   {/* 抽屉内容 (可滚动) */}
                   <div className="flex-1 overflow-y-auto">
-                    <div className="px-6 py-5 space-y-5">
-                      {/* 基础配置区域 */}
-                      <div className="space-y-4">
-                        <div className="flex items-center gap-2 mb-2">
-                          <div className={`w-1 h-4 rounded-full ${isDark ? 'bg-[#d4af37]' : 'bg-amber-500'}`} />
-                          <span className={`text-xs font-semibold uppercase tracking-wider ${textSecondary}`}>基础配置</span>
+                    <div className="px-6 py-5 space-y-6">
+
+                      {/* ===== 基础配置区域 ===== */}
+                      <div>
+                        <div className="flex items-center gap-2 mb-4">
+                          <div className="w-1 h-5 rounded-full bg-primary" />
+                          <span className="text-sm font-semibold text-foreground">基础配置</span>
                         </div>
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-4">
+                          {/* 配置名称 + 显示名称 */}
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label className="text-sm font-medium text-foreground mb-1.5 block">配置名称 <span className="text-destructive">*</span></label>
+                              <input type="text" placeholder="例如：我的OpenAI" value={apiName} onChange={e => setApiName(e.target.value)} className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
+                            </div>
+                            <div>
+                              <label className="text-sm font-medium text-foreground mb-1.5 block">显示名称</label>
+                              <input type="text" placeholder="前端展示别名" value={apiDisplayName} onChange={e => setApiDisplayName(e.target.value)} className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
+                            </div>
+                          </div>
+                          {/* API 类型 */}
                           <div>
-                            <label className={`text-xs font-medium ${textSecondary} block mb-1.5`}>配置名称 <span className="text-red-400">*</span></label>
-                            <input type="text" placeholder="例如：我的OpenAI" value={apiName} onChange={e => setApiName(e.target.value)} className={`${inputClass} text-sm`} />
+                            <label className="text-sm font-medium text-foreground mb-1.5 block">API 类型 <span className="text-destructive">*</span></label>
+                            <select className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors cursor-pointer" value={apiKind} onChange={e => setApiKind(e.target.value as ApiKind)}>
+                              {(Object.keys(apiKindLabels) as ApiKind[]).map(k => <option key={k} value={k}>{apiKindLabels[k]}</option>)}
+                            </select>
                           </div>
+                          {/* API Base URL */}
                           <div>
-                            <label className={`text-xs font-medium ${textSecondary} block mb-1.5`}>显示名称</label>
-                            <input type="text" placeholder="例如：GPT-4o 高级版" value={apiDisplayName} onChange={e => setApiDisplayName(e.target.value)} className={`${inputClass} text-sm`} />
+                            <label className="text-sm font-medium text-foreground mb-1.5 block">API Base URL <span className="text-destructive">*</span></label>
+                            <div className="relative">
+                              <Link2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                              <input type="text" placeholder="https://api.openai.com/v1" value={apiBaseUrl} onChange={e => setApiBaseUrl(e.target.value)} className="w-full h-10 pl-10 pr-3 rounded-lg bg-background border border-border text-sm text-foreground font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
+                            </div>
                           </div>
-                        </div>
-                        <div>
-                          <label className={`text-xs font-medium ${textSecondary} block mb-1.5`}>API 类型 <span className="text-red-400">*</span></label>
-                          <select className={`${inputClass} text-sm`} value={apiKind} onChange={e => setApiKind(e.target.value as ApiKind)}>
-                            {(Object.keys(apiKindLabels) as ApiKind[]).map(k => <option key={k} value={k}>{apiKindLabels[k]}</option>)}
-                          </select>
-                        </div>
-                        <div>
-                          <label className={`text-xs font-medium ${textSecondary} block mb-1.5`}>API Base URL <span className="text-red-400">*</span></label>
-                          <div className="relative">
-                            <Link2 className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${isDark ? 'text-gray-500' : 'text-gray-400'}`} />
-                            <input type="text" placeholder="https://api.openai.com/v1" value={apiBaseUrl} onChange={e => setApiBaseUrl(e.target.value)} className={`${inputClass} pl-10 text-sm font-mono`} />
+                          {/* API Key */}
+                          <div>
+                            <label className="text-sm font-medium text-foreground mb-1.5 block">API Key {!editingProviderId && <span className="text-destructive">*</span>}</label>
+                            <div className="relative">
+                              <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                              <input type={showApiKey ? 'text' : 'password'} placeholder={editingProviderId ? "留空则不修改现有密钥" : "sk-xxxxxxxxxxxxxxxxxxxxxxxx"} value={apiKey} onChange={e => setApiKey(e.target.value)} className="w-full h-10 pl-10 pr-12 rounded-lg bg-background border border-border text-sm text-foreground font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
+                              <button type="button" onClick={() => setShowApiKey(v => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-md hover:bg-muted transition-colors text-muted-foreground hover:text-foreground cursor-pointer">
+                                {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                              </button>
+                            </div>
                           </div>
-                        </div>
-                        <div>
-                          <label className={`text-xs font-medium ${textSecondary} block mb-1.5`}>API Key {!editingProviderId && <span className="text-red-400">*</span>}</label>
-                          <div className="relative">
-                            <Key className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${isDark ? 'text-gray-500' : 'text-gray-400'}`} />
-                            <input type={showApiKey ? 'text' : 'password'} placeholder={editingProviderId ? "留空则不修改现有密钥" : "sk-xxxxxxxxxxxxxxxxxxxxxxxx"} value={apiKey} onChange={e => setApiKey(e.target.value)} className={`${inputClass} pl-10 pr-20 text-sm font-mono`} />
-                            <button type="button" onClick={() => setShowApiKey(v => !v)} className={`absolute right-2 top-1/2 -translate-y-1/2 text-xs px-2.5 py-1 rounded-md transition-colors ${isDark ? 'bg-white/10 hover:bg-white/20 text-gray-300' : 'bg-gray-100 hover:bg-gray-200 text-gray-600'}`}>
-                              {showApiKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                            </button>
+                          {/* 请求风格 */}
+                          <div>
+                            <label className="text-sm font-medium text-foreground mb-1.5 block">请求风格</label>
+                            <select className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors cursor-pointer" value={compatProfile} onChange={e => setCompatProfile(e.target.value as 'auto' | 'openai' | 'apimart' | 'custom')}>
+                              <option value="auto">自动推断（推荐）</option>
+                              <option value="openai">OpenAI 标准格式</option>
+                              <option value="apimart">APIMart 代理格式</option>
+                              <option value="custom">自定义</option>
+                            </select>
+                            <p className="text-xs text-muted-foreground mt-1.5 flex items-center gap-1">
+                              <Info className="w-3.5 h-3.5 shrink-0" />
+                              大多数情况选择「自动推断」即可，程序会自动适配API格式
+                            </p>
                           </div>
-                        </div>
-                        <div>
-                          <label className={`text-xs font-medium ${textSecondary} block mb-1.5`}>请求风格 (兼容模式)</label>
-                          <select className={`${inputClass} text-sm`} value={compatProfile} onChange={e => setCompatProfile(e.target.value as 'auto' | 'openai' | 'apimart' | 'custom')}>
-                            <option value="auto">🤖 自动推断（推荐）</option>
-                            <option value="openai">🟢 OpenAI 标准 (/v1/...)</option>
-                            <option value="apimart">🔵 APIMart 代理格式</option>
-                            <option value="custom">⚙️ 自定义</option>
-                          </select>
-                          <p className={`text-[11px] ${textSecondary} mt-1.5 flex items-center gap-1`}>
-                            <Info className="w-3 h-3" />
-                            大多数情况下选择「自动推断」即可，程序会自动适配API格式
-                          </p>
                         </div>
                       </div>
 
-                      {/* 测试操作按钮组 */}
-                      <div className={`p-4 rounded-xl ${isDark ? 'bg-white/[0.02] border border-white/5' : 'bg-gray-50 border border-gray-100'}`}>
+                      {/* ===== 连接测试区域 ===== */}
+                      <div className="bg-muted/40 rounded-lg p-4 border border-border/50">
                         <div className="flex items-center gap-2 mb-3">
-                          <div className={`w-1 h-4 rounded-full ${isDark ? 'bg-blue-500' : 'bg-blue-500'}`} />
-                          <span className={`text-xs font-semibold uppercase tracking-wider ${textSecondary}`}>连接测试</span>
+                          <div className="w-1 h-5 rounded-full bg-blue-500" />
+                          <span className="text-sm font-semibold text-foreground">连接测试</span>
                         </div>
                         <div className="flex flex-wrap gap-2">
-                          <button onClick={() => { void handleDiscoverModels(); }} disabled={isDiscovering || !apiBaseUrl || (!editingProviderId && !apiKey)} className={`px-4 py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all ${isDark ? 'bg-[#d4af37] hover:bg-[#c4a030] text-black' : 'bg-amber-500 hover:bg-amber-600 text-white'} disabled:opacity-50 cursor-pointer`}>
-                            {isDiscovering ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
-                            {isDiscovering ? '扫描模型中...' : '测试连接'}
+                          <button onClick={() => { void handleDiscoverModels(); }} disabled={isDiscovering || !apiBaseUrl || (!editingProviderId && !apiKey)} className="px-4 py-2 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors flex items-center gap-1.5 disabled:opacity-50 cursor-pointer">
+                            {isDiscovering ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+                            {isDiscovering ? '扫描中...' : '测试连接'}
                           </button>
-                          <button onClick={() => { void handleDrawerVerifyProtocol(); }} disabled={isVerifyingDrawer || !apiBaseUrl} className={`px-4 py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors ${isDark ? 'bg-blue-500/15 hover:bg-blue-500/25 text-blue-400' : 'bg-blue-50 hover:bg-blue-100 text-blue-600'} disabled:opacity-50 cursor-pointer`}>
-                            {isVerifyingDrawer ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
+                          <button onClick={() => { void handleDrawerVerifyProtocol(); }} disabled={isVerifyingDrawer || !apiBaseUrl} className="px-4 py-2 rounded-md text-sm font-medium bg-muted text-muted-foreground border border-border hover:bg-muted/80 hover:text-foreground transition-colors flex items-center gap-1.5 disabled:opacity-50 cursor-pointer">
+                            {isVerifyingDrawer ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
                             {isVerifyingDrawer ? '验证中...' : '验证协议'}
                           </button>
-                          <button onClick={() => { void handleDrawerQueryBalance(); }} disabled={isQueryingBalanceDrawer || !apiBaseUrl} className={`px-4 py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors ${isDark ? 'bg-purple-500/15 hover:bg-purple-500/25 text-purple-400' : 'bg-purple-50 hover:bg-purple-100 text-purple-600'} disabled:opacity-50 cursor-pointer`}>
-                            {isQueryingBalanceDrawer ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <DollarSign className="w-3.5 h-3.5" />}
+                          <button onClick={() => { void handleDrawerQueryBalance(); }} disabled={isQueryingBalanceDrawer || !apiBaseUrl} className="px-4 py-2 rounded-md text-sm font-medium bg-muted text-muted-foreground border border-border hover:bg-muted/80 hover:text-foreground transition-colors flex items-center gap-1.5 disabled:opacity-50 cursor-pointer">
+                            {isQueryingBalanceDrawer ? <Loader2 className="w-4 h-4 animate-spin" /> : <DollarSign className="w-4 h-4" />}
                             {isQueryingBalanceDrawer ? '查询中...' : '查询余额'}
                           </button>
                         </div>
 
-                        {/* 测试结果 */}
+                        {/* 测试连接结果 */}
                         {testNewResult && (
-                          <div className={`mt-3 p-3 rounded-lg text-xs ${testNewResult.success ? (isDark ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-300' : 'bg-emerald-50 border border-emerald-200 text-emerald-700') : (isDark ? 'bg-red-500/10 border border-red-500/20 text-red-300' : 'bg-red-50 border border-red-200 text-red-700')}`}>
-                            <div className="flex items-center gap-1.5 mb-1">
+                          <div className={`mt-3 p-3 rounded-lg text-sm border ${testNewResult.success ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-300' : 'bg-destructive/10 border-destructive/20 text-destructive'}`}>
+                            <div className="flex items-center gap-2 mb-1">
                               {testNewResult.success ? <CheckCircle className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
                               <span className="font-semibold">{testNewResult.success ? '连接成功' : '连接失败'}</span>
                             </div>
-                            <p className="opacity-90 leading-relaxed">{testNewResult.message}</p>
+                            <p className="opacity-90 leading-relaxed text-xs">{testNewResult.message}</p>
                             {testNewResult.success && discoveredModels.length > 0 && (
-                              <p className="mt-2 flex items-center gap-1">
-                                <Sparkles className="w-3 h-3" />
+                              <p className="mt-2 flex items-center gap-1 text-xs">
+                                <Sparkles className="w-3.5 h-3.5" />
                                 发现 <span className="font-bold">{discoveredModels.length}</span> 个可用模型
                               </p>
                             )}
@@ -2538,52 +2546,46 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
                         {/* 协议验证结果 */}
                         {drawerVerifyResult && (
-                          <div className={`mt-3 p-3 rounded-lg text-xs ${drawerVerifyResult.success ? (isDark ? 'bg-blue-500/10 border border-blue-500/20 text-blue-300' : 'bg-blue-50 border border-blue-200 text-blue-700') : (isDark ? 'bg-orange-500/10 border border-orange-500/20 text-orange-300' : 'bg-orange-50 border border-orange-200 text-orange-700')}`}>
-                            <div className="flex items-center gap-1.5 mb-2">
+                          <div className={`mt-3 p-3 rounded-lg text-sm border ${drawerVerifyResult.success ? 'bg-blue-500/10 border-blue-500/20 text-blue-700 dark:text-blue-300' : 'bg-orange-500/10 border-orange-500/20 text-orange-700 dark:text-orange-300'}`}>
+                            <div className="flex items-center gap-2 mb-2">
                               <ShieldCheck className="w-4 h-4" />
                               <span className="font-semibold">协议验证结果</span>
                             </div>
                             {drawerVerifyResult.checks && (
-                              <div className="space-y-1.5">
-                                <div className="flex items-center gap-2">
-                                  <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] ${drawerVerifyResult.checks.models ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
-                                    {drawerVerifyResult.checks.models ? '✓' : '✗'}
-                                  </span>
-                                  <span>模型列表接口 /models</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] ${drawerVerifyResult.checks.imageGen ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
-                                    {drawerVerifyResult.checks.imageGen ? '✓' : '✗'}
-                                  </span>
-                                  <span>图像生成接口 /images/generations</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] ${drawerVerifyResult.checks.chat ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
-                                    {drawerVerifyResult.checks.chat ? '✓' : '✗'}
-                                  </span>
-                                  <span>对话接口 /chat/completions</span>
-                                </div>
+                              <div className="space-y-2">
+                                {[
+                                  { key: 'models' as const, label: '模型列表接口 /models' },
+                                  { key: 'imageGen' as const, label: '图像生成接口 /images/generations' },
+                                  { key: 'chat' as const, label: '对话接口 /chat/completions' },
+                                ].map(item => (
+                                  <div key={item.key} className="flex items-center gap-2 text-xs">
+                                    <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${drawerVerifyResult.checks![item.key] ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400' : 'bg-destructive/20 text-destructive'}`}>
+                                      {drawerVerifyResult.checks![item.key] ? '✓' : '✗'}
+                                    </span>
+                                    <span>{item.label}</span>
+                                  </div>
+                                ))}
                               </div>
                             )}
                             {drawerVerifyResult.detected && (
-                              <p className="mt-2 pt-2 border-t border-current/10">
+                              <p className="mt-2 pt-2 border-t border-current/10 text-xs">
                                 检测协议: <span className="font-mono font-semibold">{drawerVerifyResult.detected}</span>
                               </p>
                             )}
-                            {drawerVerifyResult.message && <p className="mt-1 opacity-80">{drawerVerifyResult.message}</p>}
+                            {drawerVerifyResult.message && <p className="mt-1 opacity-80 text-xs">{drawerVerifyResult.message}</p>}
                           </div>
                         )}
 
                         {/* 余额查询结果 */}
                         {drawerBalanceResult && (
-                          <div className={`mt-3 p-3 rounded-lg text-xs ${drawerBalanceResult.success ? (isDark ? 'bg-purple-500/10 border border-purple-500/20 text-purple-300' : 'bg-purple-50 border border-purple-200 text-purple-700') : (isDark ? 'bg-red-500/10 border border-red-500/20 text-red-300' : 'bg-red-50 border border-red-200 text-red-700')}`}>
-                            <div className="flex items-center gap-1.5 mb-1">
+                          <div className={`mt-3 p-3 rounded-lg text-sm border ${drawerBalanceResult.success ? 'bg-purple-500/10 border-purple-500/20 text-purple-700 dark:text-purple-300' : 'bg-destructive/10 border-destructive/20 text-destructive'}`}>
+                            <div className="flex items-center gap-2 mb-1">
                               <DollarSign className="w-4 h-4" />
                               <span className="font-semibold">余额信息</span>
                             </div>
-                            <p className="opacity-90">{drawerBalanceResult.message}</p>
+                            <p className="opacity-90 text-xs">{drawerBalanceResult.message}</p>
                             {drawerBalanceResult.balance !== undefined && (
-                              <p className="mt-2 text-lg font-bold">
+                              <p className="mt-2 text-xl font-bold">
                                 {drawerBalanceResult.currency || '¥'} {typeof drawerBalanceResult.balance === 'number' ? drawerBalanceResult.balance.toFixed(2) : drawerBalanceResult.balance}
                               </p>
                             )}
@@ -2591,50 +2593,50 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                         )}
                       </div>
 
-                      {/* 模型列表区域 */}
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
+                      {/* ===== 模型管理区域 ===== */}
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
                           <div className="flex items-center gap-2">
-                            <div className={`w-1 h-4 rounded-full ${isDark ? 'bg-emerald-500' : 'bg-emerald-500'}`} />
-                            <span className={`text-xs font-semibold uppercase tracking-wider ${textSecondary}`}>模型管理</span>
+                            <div className="w-1 h-5 rounded-full bg-emerald-500" />
+                            <span className="text-sm font-semibold text-foreground">模型管理</span>
                             {discoveredModels.length > 0 && (
-                              <span className={`text-xs px-2 py-0.5 rounded-full ${isDark ? 'bg-emerald-500/20 text-emerald-400' : 'bg-emerald-100 text-emerald-700'}`}>
-                                {selectedModels.length}/{discoveredModels.length} 已选
+                              <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium">
+                                {selectedModels.length}/{discoveredModels.length}
                               </span>
                             )}
                           </div>
                           <div className="flex items-center gap-1">
-                            <button onClick={() => setSelectedModels(discoveredModels.map(m => m.id))} disabled={discoveredModels.length === 0} className={`text-xs px-2 py-1 rounded ${isDark ? 'hover:bg-white/10 text-gray-400' : 'hover:bg-gray-100 text-gray-500'} disabled:opacity-30 cursor-pointer`}>全选</button>
-                            <button onClick={() => setSelectedModels([])} disabled={selectedModels.length === 0} className={`text-xs px-2 py-1 rounded ${isDark ? 'hover:bg-white/10 text-gray-400' : 'hover:bg-gray-100 text-gray-500'} disabled:opacity-30 cursor-pointer`}>清空</button>
-                            <button onClick={() => { setEditingModel(null); setModelFormName(''); setModelFormId(''); setModelFormContext(''); setShowModelDialog(true); }} className={`text-xs px-2 py-1 rounded flex items-center gap-1 ${isDark ? 'bg-[#d4af37]/20 text-[#d4af37] hover:bg-[#d4af37]/30' : 'bg-amber-100 text-amber-700 hover:bg-amber-200'} cursor-pointer`}>
+                            <button onClick={() => setSelectedModels(discoveredModels.map(m => m.id))} disabled={discoveredModels.length === 0} className="text-xs px-2.5 py-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-30 cursor-pointer transition-colors">全选</button>
+                            <button onClick={() => setSelectedModels([])} disabled={selectedModels.length === 0} className="text-xs px-2.5 py-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-30 cursor-pointer transition-colors">清空</button>
+                            <button onClick={() => { setEditingModel(null); setModelFormName(''); setModelFormId(''); setModelFormContext(''); setShowModelDialog(true); }} className="text-xs px-2.5 py-1 rounded-md bg-primary/10 text-primary hover:bg-primary/20 flex items-center gap-1 cursor-pointer transition-colors font-medium">
                               <Plus className="w-3 h-3" />手动添加
                             </button>
                           </div>
                         </div>
                         {discoveredModels.length === 0 ? (
-                          <div className={`p-8 rounded-xl text-center border-2 border-dashed ${isDark ? 'border-white/10 text-gray-500' : 'border-gray-200 text-gray-400'}`}>
+                          <div className="p-8 rounded-lg text-center border-2 border-dashed border-border text-muted-foreground">
                             <Bot className="w-10 h-10 mx-auto mb-2 opacity-40" />
-                            <p className="text-sm">尚未发现模型</p>
+                            <p className="text-sm font-medium">尚未发现模型</p>
                             <p className="text-xs mt-1">填写API信息后点击「测试连接」自动扫描，或点击「手动添加」</p>
                           </div>
                         ) : (
-                          <div className={`rounded-xl overflow-hidden border ${isDark ? 'border-white/5' : 'border-gray-200'}`}>
+                          <div className="rounded-lg overflow-hidden border border-border">
                             <div className="max-h-64 overflow-y-auto">
                               {discoveredModels.map((m, idx) => {
                                 const isSelected = selectedModels.includes(m.id);
                                 return (
-                                  <div key={m.id} className={`flex items-center gap-3 px-4 py-2.5 ${isDark ? (idx % 2 === 0 ? 'bg-white/[0.02]' : 'bg-transparent') : (idx % 2 === 0 ? 'bg-gray-50/50' : 'bg-transparent')} hover:bg-opacity-100 group`}>
-                                    <input type="checkbox" checked={isSelected} onChange={() => { setSelectedModels(prev => prev.includes(m.id) ? prev.filter(x => x !== m.id) : [...prev, m.id]); }} className="w-4 h-4 rounded accent-[#d4af37] cursor-pointer" />
+                                  <div key={m.id} className={`flex items-center gap-3 px-4 py-2.5 ${idx % 2 === 0 ? 'bg-muted/30' : ''} hover:bg-muted/60 transition-colors group`}>
+                                    <input type="checkbox" checked={isSelected} onChange={() => { setSelectedModels(prev => prev.includes(m.id) ? prev.filter(x => x !== m.id) : [...prev, m.id]); }} className="w-4 h-4 rounded accent-primary cursor-pointer" />
                                     <div className="flex-1 min-w-0">
-                                      <div className={`text-sm truncate ${isSelected ? textPrimary : textSecondary}`}>{m.name || m.id}</div>
-                                      <div className={`text-xs font-mono truncate ${isDark ? 'text-gray-600' : 'text-gray-400'}`}>{m.id}</div>
+                                      <div className={`text-sm truncate ${isSelected ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>{m.name || m.id}</div>
+                                      <div className="text-xs font-mono truncate text-muted-foreground/60">{m.id}</div>
                                     </div>
                                     {m.contextWindow && (
-                                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${isDark ? 'bg-blue-500/10 text-blue-400' : 'bg-blue-50 text-blue-600'}`}>
+                                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 font-medium shrink-0">
                                         {m.contextWindow >= 1000 ? `${(m.contextWindow / 1000).toFixed(0)}K` : m.contextWindow}
                                       </span>
                                     )}
-                                    <button onClick={() => { setEditingModel(m); setModelFormName(m.name || ''); setModelFormId(m.id); setModelFormContext(m.contextWindow ? String(m.contextWindow) : ''); setShowModelDialog(true); }} className={`p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity ${isDark ? 'hover:bg-white/10 text-gray-400' : 'hover:bg-gray-200 text-gray-500'} cursor-pointer`}>
+                                    <button onClick={() => { setEditingModel(m); setModelFormName(m.name || ''); setModelFormId(m.id); setModelFormContext(m.contextWindow ? String(m.contextWindow) : ''); setShowModelDialog(true); }} className="p-1.5 rounded-md opacity-0 group-hover:opacity-100 hover:bg-muted text-muted-foreground hover:text-foreground transition-all cursor-pointer">
                                       <Edit3 className="w-3.5 h-3.5" />
                                     </button>
                                   </div>
@@ -2647,13 +2649,13 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                     </div>
                   </div>
                   {/* 抽屉底部按钮区 */}
-                  <div className={`px-6 py-4 border-t ${isDark ? 'border-white/5 bg-[#1a1a1a]' : 'border-gray-100 bg-gray-50/50'} flex items-center justify-between gap-3`}>
-                    <p className={`text-xs ${textSecondary}`}>
+                  <div className="px-6 py-4 border-t border-border bg-muted/20 flex items-center justify-between gap-3">
+                    <p className="text-xs text-muted-foreground">
                       {editingProviderId ? '修改后点击保存' : '添加后需要勾选启用的模型'}
                     </p>
                     <div className="flex items-center gap-2">
-                      <button onClick={() => { if (!isSubmitting) { resetApiForm(); setShowApiDrawer(false); setEditingProviderId(null); } }} disabled={isSubmitting} className={`px-5 py-2 rounded-lg text-sm font-medium transition-colors ${isDark ? 'bg-white/5 hover:bg-white/10 text-gray-300' : 'bg-white hover:bg-gray-100 text-gray-700 border border-gray-200'} disabled:opacity-50 cursor-pointer`}>取消</button>
-                      <button onClick={() => { if (editingProviderId) { void handleUpdateApi(); } else { void handleAddApi(); } }} disabled={!apiName || !apiBaseUrl || isSubmitting} className={`px-6 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all ${isDark ? 'bg-[#d4af37] hover:bg-[#c4a030] text-black' : 'bg-amber-500 hover:bg-amber-600 text-white'} disabled:opacity-50 cursor-pointer`}>
+                      <button onClick={() => { if (!isSubmitting) { resetApiForm(); setShowApiDrawer(false); setEditingProviderId(null); } }} disabled={isSubmitting} className="px-5 py-2 rounded-md text-sm font-medium bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground transition-colors disabled:opacity-50 cursor-pointer">取消</button>
+                      <button onClick={() => { if (editingProviderId) { void handleUpdateApi(); } else { void handleAddApi(); } }} disabled={!apiName || !apiBaseUrl || isSubmitting} className="px-6 py-2 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 flex items-center gap-2 transition-colors disabled:opacity-50 cursor-pointer">
                         {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : (editingProviderId ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />)}
                         {isSubmitting ? '保存中...' : (editingProviderId ? '保存修改' : '添加 API')}
                       </button>
@@ -2664,30 +2666,30 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 {/* 子模型编辑/添加弹窗 */}
                 {showModelDialog && (
                   <>
-                    <div className="fixed inset-0 bg-black/60 z-[210]" onClick={() => setShowModelDialog(false)} />
-                    <div className={`fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[380px] z-[211] ${isDark ? 'bg-[#1a1a1a] border border-white/10' : 'bg-white border border-gray-200'} rounded-xl shadow-2xl`}>
-                      <div className={`flex items-center justify-between px-5 py-4 border-b ${isDark ? 'border-white/5' : 'border-gray-100'}`}>
-                        <h3 className={`text-sm font-semibold ${textPrimary}`}>{editingModel ? '编辑模型' : '添加新模型'}</h3>
-                        <button onClick={() => setShowModelDialog(false)} className={`p-1 rounded ${isDark ? 'hover:bg-white/10 text-gray-400' : 'hover:bg-gray-100 text-gray-500'} cursor-pointer`}>
+                    <div className="fixed inset-0 bg-black/50 z-[210]" onClick={() => setShowModelDialog(false)} />
+                    <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] z-[211] bg-card border border-border rounded-xl shadow-2xl">
+                      <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+                        <h3 className="text-sm font-semibold text-foreground">{editingModel ? '编辑模型' : '添加新模型'}</h3>
+                        <button onClick={() => setShowModelDialog(false)} className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer transition-colors">
                           <X className="w-4 h-4" />
                         </button>
                       </div>
                       <div className="px-5 py-4 space-y-4">
                         <div>
-                          <label className={`text-xs font-medium ${textSecondary} block mb-1.5`}>显示名称</label>
-                          <input type="text" placeholder="模型显示名称，如：GPT-4o" value={modelFormName} onChange={e => setModelFormName(e.target.value)} className={inputClass} />
+                          <label className="text-sm font-medium text-foreground mb-1.5 block">显示名称</label>
+                          <input type="text" placeholder="模型显示名称，如：GPT-4o" value={modelFormName} onChange={e => setModelFormName(e.target.value)} className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
                         </div>
                         <div>
-                          <label className={`text-xs font-medium ${textSecondary} block mb-1.5`}>模型 ID</label>
-                          <input type="text" placeholder="模型标识，如：gpt-4o-2024-08-06" value={modelFormId} onChange={e => setModelFormId(e.target.value)} className={`${inputClass} font-mono text-xs`} />
+                          <label className="text-sm font-medium text-foreground mb-1.5 block">模型 ID</label>
+                          <input type="text" placeholder="模型标识，如：gpt-4o-2024-08-06" value={modelFormId} onChange={e => setModelFormId(e.target.value)} className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
                         </div>
                         <div>
-                          <label className={`text-xs font-medium ${textSecondary} block mb-1.5`}>上下文窗口 (tokens)</label>
-                          <input type="number" placeholder="例如：128000" value={modelFormContext} onChange={e => setModelFormContext(e.target.value)} className={inputClass} />
+                          <label className="text-sm font-medium text-foreground mb-1.5 block">上下文窗口 (tokens)</label>
+                          <input type="number" placeholder="例如：128000" value={modelFormContext} onChange={e => setModelFormContext(e.target.value)} className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
                         </div>
                       </div>
-                      <div className={`px-5 py-3 border-t ${isDark ? 'border-white/5' : 'border-gray-100'} flex justify-end gap-2`}>
-                        <button onClick={() => setShowModelDialog(false)} className={`px-4 py-1.5 rounded-lg text-sm ${isDark ? 'bg-white/5 hover:bg-white/10 text-gray-300' : 'bg-gray-100 hover:bg-gray-200 text-gray-700'} cursor-pointer`}>取消</button>
+                      <div className="px-5 py-3 border-t border-border flex justify-end gap-2">
+                        <button onClick={() => setShowModelDialog(false)} className="px-4 py-2 rounded-md text-sm font-medium bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground transition-colors cursor-pointer">取消</button>
                         <button onClick={() => {
                           const newModel: ModelInfo = {
                             id: modelFormId.trim(),
@@ -2707,7 +2709,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                             }
                           }
                           setShowModelDialog(false);
-                        }} className={`px-4 py-1.5 rounded-lg text-sm font-medium ${isDark ? 'bg-[#d4af37] text-black hover:bg-[#c4a030]' : 'bg-amber-500 text-white hover:bg-amber-600'} cursor-pointer`}>
+                        }} className="px-4 py-2 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer">
                           {editingModel ? '保存' : '确认添加'}
                         </button>
                       </div>
