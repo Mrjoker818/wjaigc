@@ -70,7 +70,7 @@ export interface VideoGenerateParams {
   providerId?: string;          // 提供商ID
   apiKey?: string;              // API密钥
   baseUrl?: string;             // API基础URL
-  advancedParams?: Record<string, any>; // 提供商高级参数
+  advancedParams?: Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any -- 提供商高级参数
 }
 
 /** 摄像机控制参数 */
@@ -439,6 +439,7 @@ export function buildVideoSubmitRequest(
  */
 export function parseVideoSubmitResponse(
   profile: VideoCompatProfile,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   data: any,
 ): VideoTaskSubmitResult {
   switch (profile) {

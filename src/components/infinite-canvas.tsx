@@ -29,7 +29,7 @@ import {
   Scissors, Wand2, Expand, Layers, Paintbrush,
   Check, MousePointer2, BoxSelect, Upload, Eye, Sparkles,
   RotateCcw, Minus, Type, GitMerge, Wrench, ChevronRight,
-  Settings, Palette, Users, HelpCircle, Box as BoxIcon, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, MoreHorizontal, Brush, ShoppingBag, Scan, GripVertical, Building2, FileImage, Workflow, LayoutGrid, LayoutDashboard, ChevronsRight, ChevronsLeft, Boxes, MessageCircle, Play, Package, Store
+  Settings, Palette, Users, HelpCircle, Box as BoxIcon, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, MoreHorizontal, Brush, ShoppingBag, Scan, GripVertical, Building2, FileImage, Workflow, LayoutGrid, LayoutDashboard, ChevronsRight, ChevronsLeft, Boxes, MessageCircle, Play, Pause, Package, Store
 } from 'lucide-react';
 import type { CanvasAnnotation, AnnotationRegion, AnnotationTool } from '@/lib/canvas-annotation';
 import { createAnnotation, hitTestAnnotationTarget, buildAnnotationPrompt, mergeAnnotationsForImage, ANNOTATION_COLORS, ANNOTATION_COLORS_MONO, computeAnnotationRegion, BRUSH_COLOR_PALETTE } from '@/lib/canvas-annotation';
@@ -46,6 +46,7 @@ import dynamic from 'next/dynamic';
 const ModelViewer3D = dynamic(() => import('@/components/model-viewer-3d'), { ssr: false });
 const VideoPlayer = dynamic(() => import('@/components/video-player'), { ssr: false });
 const VideoEditPanel = dynamic(() => import('@/components/video-edit-panel').then(m => ({ default: m.VideoEditPanel })), { ssr: false });
+const VideoCompareDialog = dynamic(() => import('@/components/video-compare-dialog'), { ssr: false });
 
 const PsdLayerEditor = lazy(() => import('@/components/psd-editor/PsdLayerEditor'));
 const AgentEditor = lazy(() => import('@/components/agent-editor').then(m => ({ default: m.AgentEditor })));
@@ -1340,6 +1341,14 @@ export function InfiniteCanvas({
   // Video player state
   const [videoPlayerUrl, setVideoPlayerUrl] = useState('');
   const [videoPlayerVisible, setVideoPlayerVisible] = useState(false);
+  // Video compare dialog
+  const [compareVideos, setCompareVideos] = useState<{ a: { url: string; label?: string }; b: { url: string; label?: string } } | null>(null);
+  // Canvas inline video playback state
+  const [playingVideoId, setPlayingVideoId] = useState<string | null>(null);
+  const [inlineVideoProgress, setInlineVideoProgress] = useState<Record<string, number>>({});
+  const [inlineVideoDuration, setInlineVideoDuration] = useState<Record<string, number>>({});
+  const [inlineVideoPaused, setInlineVideoPaused] = useState<Record<string, boolean>>({});
+  const inlineVideoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
   const [showVideoEditPanel, setShowVideoEditPanel] = useState(false);
   const [videoEditTarget, setVideoEditTarget] = useState<CanvasImage | null>(null);
   const [videoEditTab, setVideoEditTab] = useState<'edit' | 'extend'>('edit');
@@ -1348,8 +1357,63 @@ export function InfiniteCanvas({
   const anyPanelOpen = showSvgTracePanel || showAgentEditor || showBrandEcommerce || showFontDesign || showBrandFactory || showSceneStudio || showBrandPackaging || showDisplay3D || showVideoEditPanel || showCanvasGenerator || showRefineEngine || showLogoSkill || showAiPsd || showStickerAssistant;
 
   // Video tools handler
-  const handleVideoTool = async (action: 'to-gif' | 'extract-cover' | 'compress', image: CanvasImage) => {
+  const handleVideoTool = async (action: 'to-gif' | 'extract-cover' | 'compress' | 'extract-frame', image: CanvasImage, timestamp?: number) => {
     if (!image.videoUrl) return;
+
+    // Client-side frame extraction using HTML5 Canvas
+    if (action === 'extract-cover' || action === 'extract-frame') {
+      try {
+        const video = document.createElement('video');
+        video.crossOrigin = 'anonymous';
+        video.src = image.videoUrl;
+        video.muted = true;
+        video.preload = 'auto';
+
+        await new Promise<void>((resolve, reject) => {
+          video.onloadeddata = () => resolve();
+          video.onerror = () => reject(new Error('视频加载失败'));
+          video.load();
+        });
+
+        const targetTime = timestamp ?? 0;
+        video.currentTime = Math.min(targetTime, video.duration - 0.1);
+
+        await new Promise<void>(resolve => {
+          video.onseeked = () => resolve();
+        });
+
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('Canvas context failed');
+        ctx.drawImage(video, 0, 0);
+
+        const dataUrl = canvas.toDataURL('image/png');
+        const label = timestamp !== undefined
+          ? `帧 @ ${Math.floor(timestamp)}s`
+          : '视频封面';
+
+        // Save frame as image and add to canvas
+        const saveRes = await fetch('/api/save-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dataUrl, filename: `frame-${Date.now()}.png` }),
+        });
+        const saveData = await saveRes.json();
+        const frameUrl = saveData.url || saveData.localPath || dataUrl;
+
+        onAddImages([frameUrl], undefined, {
+          modelName: 'frame-extract',
+          apiProvider: 'local',
+        });
+        toast.success(`已提取${label}`);
+      } catch (err) {
+        console.error('[frame-extract] error:', err);
+        toast.error('帧提取失败，视频可能存在跨域限制');
+      }
+      return;
+    }
     
     try {
       const response = await fetch('/api/video/tools', {
@@ -1361,8 +1425,6 @@ export function InfiniteCanvas({
           // GIF 参数
           fps: 10,
           width: 480,
-          // 封面提取参数
-          timestamp: 0,
           // 压缩参数
           quality: 0.7,
         }),
@@ -1371,7 +1433,6 @@ export function InfiniteCanvas({
       const result = await response.json();
       if (result.success) {
         console.log(`[video-tool] ${action} success:`, result.data);
-        // 实际实现中应该将结果添加到画布
       } else {
         console.error(`[video-tool] ${action} failed:`, result.error);
       }
@@ -7847,11 +7908,14 @@ export function InfiniteCanvas({
     ...(selectedImageData?.mediaType === 'video' && selectedImageData?.videoUrl ? [{ label: '播放视频', action: () => { setVideoPlayerUrl(selectedImageData.videoUrl!); setVideoPlayerVisible(true); } }] : []),
     ...(selectedImageData?.mediaType === 'video' && selectedImageData?.videoUrl ? [{ label: '视频编辑', action: () => { setVideoEditTarget(selectedImageData); setShowVideoEditPanel(true); } }] : []),
     ...(selectedImageData?.mediaType === 'video' && selectedImageData?.videoUrl ? [{ label: '视频延长', action: () => { setVideoEditTarget(selectedImageData); setShowVideoEditPanel(true); setVideoEditTab('extend'); } }] : []),
+    ...(selectedImageData?.mediaType === 'video' && selectedImageData?.videoUrl ? [{ label: '视频对比', action: () => { const img = selectedImageData; if (img?.videoUrl) setCompareVideos({ a: { url: img.videoUrl, label: img.prompt?.slice(0, 30) || '视频1' }, b: { url: img.videoUrl, label: '请选择第二个视频' } }); } }] : []),
+    ...(selectedImageData?.mediaType === 'video' && selectedImageData?.videoUrl ? [{ label: '提取帧生成视频', action: async () => { const img = selectedImageData; if (!img?.videoUrl) return; try { const video = document.createElement('video'); video.crossOrigin = 'anonymous'; video.src = img.videoUrl; video.muted = true; video.preload = 'auto'; await new Promise<void>((resolve, reject) => { video.onloadeddata = () => resolve(); video.onerror = () => reject(new Error('视频加载失败')); video.load(); }); video.currentTime = 0; await new Promise<void>(resolve => { video.onseeked = () => resolve(); }); const canvas = document.createElement('canvas'); canvas.width = video.videoWidth; canvas.height = video.videoHeight; const ctx = canvas.getContext('2d'); if (!ctx) throw new Error('Canvas context failed'); ctx.drawImage(video, 0, 0); const dataUrl = canvas.toDataURL('image/png'); const saveRes = await fetch('/api/save-image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataUrl, filename: `frame-for-video-${Date.now()}.png` }), }); const saveData = await saveRes.json(); const frameUrl = saveData.url || saveData.localPath || dataUrl; onAddImages([frameUrl], undefined, { modelName: 'frame-extract', apiProvider: 'local' }); toast.success('已提取帧到画布，选中后可在视频面板中图生视频'); } catch (err) { console.error('[extract-frame-video] error:', err); toast.error('帧提取失败'); } } }] : []),
     // 视频工具集
     ...(selectedImageData?.mediaType === 'video' && selectedImageData?.videoUrl ? [
       { label: '─'.repeat(15), action: () => {} }, // 分隔线
       { label: '转 GIF', action: () => { handleVideoTool('to-gif', selectedImageData); } },
       { label: '提取封面', action: () => { handleVideoTool('extract-cover', selectedImageData); } },
+      { label: '提取帧', action: () => { const t = prompt('输入提取时间点（秒）', '0'); if (t !== null) handleVideoTool('extract-frame', selectedImageData, parseFloat(t)); } },
       { label: '视频压缩', action: () => { handleVideoTool('compress', selectedImageData); } },
     ] : []),
     { label: '删除', shortcut: 'Delete', action: () => { const deletingIds = selectedIds; onImagesChange(images.filter(i => !deletingIds.has(i.id))); setSelectedIds(new Set()); selectImage(null); if (editImageId && deletingIds.has(editImageId)) { setEditImageId(null); setEditMode('none'); } } },
@@ -8615,33 +8679,150 @@ export function InfiniteCanvas({
                     }}
                   />
                 ) : null}
-                {/* Video play button overlay */}
+                {/* Video inline playback / play button overlay */}
                 {image.mediaType === 'video' && !image.isProcessingPlaceholder && (
-                  <div
-                    className="absolute inset-0 flex items-center justify-center z-20 cursor-pointer group/play"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (image.videoUrl) {
-                        setVideoPlayerUrl(image.videoUrl);
-                        setVideoPlayerVisible(true);
-                      }
-                    }}
-                  >
-                    <div className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-all duration-200 ${isMonochrome ? 'bg-black/60 hover:bg-black/80' : 'bg-black/60 hover:bg-gold/90'}`}>
-                      <Play className={`w-5 h-5 ml-0.5 ${isMonochrome ? 'text-white group-hover/play:text-white' : 'text-white group-hover/play:text-black'}`} fill="currentColor" />
-                    </div>
-                    {/* Video duration badge */}
-                    {image.videoDuration && (
-                      <div className={`absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded text-[10px] font-mono ${isMonochrome ? 'bg-black/70 text-white' : 'bg-black/70 text-white'}`}>
-                        {Math.floor(image.videoDuration / 60)}:{String(Math.floor(image.videoDuration % 60)).padStart(2, '0')}
+                  playingVideoId === image.id ? (
+                    /* ── Inline video playing state ── */
+                    <div className="absolute inset-0 z-20 flex flex-col bg-black">
+                      <video
+                        ref={(el) => { inlineVideoRefs.current[image.id] = el; }}
+                        src={image.videoUrl}
+                        className="w-full h-full object-contain cursor-pointer"
+                        autoPlay
+                        playsInline
+                        loop={false}
+                        onTimeUpdate={() => {
+                          const v = inlineVideoRefs.current[image.id];
+                          if (v) setInlineVideoProgress(prev => ({ ...prev, [image.id]: v.currentTime }));
+                        }}
+                        onDurationChange={() => {
+                          const v = inlineVideoRefs.current[image.id];
+                          if (v) setInlineVideoDuration(prev => ({ ...prev, [image.id]: v.duration }));
+                        }}
+                        onEnded={() => setPlayingVideoId(null)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const v = inlineVideoRefs.current[image.id];
+                          if (v) {
+                            if (v.paused) { v.play(); setInlineVideoPaused(prev => ({ ...prev, [image.id]: false })); }
+                            else { v.pause(); setInlineVideoPaused(prev => ({ ...prev, [image.id]: true })); }
+                          }
+                        }}
+                        onDoubleClick={(e) => {
+                          e.stopPropagation();
+                          if (image.videoUrl) {
+                            setVideoPlayerUrl(image.videoUrl);
+                            setVideoPlayerVisible(true);
+                          }
+                        }}
+                      />
+                      {/* Inline mini control bar */}
+                      <div className={`absolute bottom-0 left-0 right-0 flex items-center gap-1.5 px-2 py-1 ${isMonochrome ? 'bg-black/80' : 'bg-gradient-to-t from-black/90 via-black/60 to-transparent'}`}>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const v = inlineVideoRefs.current[image.id];
+                            if (v) {
+                              if (v.paused) { v.play(); setInlineVideoPaused(prev => ({ ...prev, [image.id]: false })); }
+                              else { v.pause(); setInlineVideoPaused(prev => ({ ...prev, [image.id]: true })); }
+                            }
+                          }}
+                          className="shrink-0 cursor-pointer"
+                        >
+                          {inlineVideoPaused[image.id] ? (
+                            <Play className="w-3.5 h-3.5 text-white" fill="white" />
+                          ) : (
+                            <Pause className="w-3.5 h-3.5 text-white" fill="white" />
+                          )}
+                        </button>
+                        {/* Progress bar */}
+                        <div
+                          className="flex-1 h-1 bg-white/20 rounded-full cursor-pointer relative group/progress"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+                            const v = inlineVideoRefs.current[image.id];
+                            const dur = inlineVideoDuration[image.id] || 0;
+                            if (v && dur > 0) { v.currentTime = ratio * dur; }
+                          }}
+                        >
+                          <div
+                            className={`h-full rounded-full transition-[width] duration-100 ${isMonochrome ? 'bg-white' : 'bg-gold'}`}
+                            style={{ width: `${((inlineVideoProgress[image.id] || 0) / (inlineVideoDuration[image.id] || 1)) * 100}%` }}
+                          />
+                        </div>
+                        {/* Time / Duration */}
+                        <span className="text-[9px] text-white/70 font-mono shrink-0">
+                          {Math.floor((inlineVideoProgress[image.id] || 0) / 60)}:{String(Math.floor((inlineVideoProgress[image.id] || 0) % 60)).padStart(2, '0')}/
+                          {Math.floor((inlineVideoDuration[image.id] || image.videoDuration || 0) / 60)}:{String(Math.floor((inlineVideoDuration[image.id] || image.videoDuration || 0) % 60)).padStart(2, '0')}
+                        </span>
+                        {/* Expand to fullscreen */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (image.videoUrl) {
+                              setVideoPlayerUrl(image.videoUrl);
+                              setVideoPlayerVisible(true);
+                            }
+                          }}
+                          className="shrink-0 cursor-pointer"
+                        >
+                          <Maximize2 className="w-3 h-3 text-white/70 hover:text-white" />
+                        </button>
+                        {/* Close inline playback */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const v = inlineVideoRefs.current[image.id];
+                            if (v) v.pause();
+                            setPlayingVideoId(null);
+                          }}
+                          className="shrink-0 cursor-pointer"
+                        >
+                          <X className="w-3 h-3 text-white/70 hover:text-white" />
+                        </button>
                       </div>
-                    )}
-                    {/* Video label */}
-                    <div className={`absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold ${isMonochrome ? 'bg-blue-500/90 text-white' : 'bg-gold/90 text-black'}`}
-                      style={{ fontSize: `${Math.max(9, 10 / zoom)}px` }}>
-                      VIDEO
+                      {/* Breathing border animation */}
+                      {!isMonochrome && (
+                        <div className="absolute inset-0 border-2 border-gold/40 rounded-sm pointer-events-none animate-pulse" />
+                      )}
                     </div>
-                  </div>
+                  ) : (
+                    /* ── Static thumbnail + play button ── */
+                    <div
+                      className="absolute inset-0 flex items-center justify-center z-20 cursor-pointer group/play"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (image.videoUrl) {
+                          setPlayingVideoId(image.id);
+                          setInlineVideoPaused(prev => ({ ...prev, [image.id]: false }));
+                        }
+                      }}
+                      onDoubleClick={(e) => {
+                        e.stopPropagation();
+                        if (image.videoUrl) {
+                          setVideoPlayerUrl(image.videoUrl);
+                          setVideoPlayerVisible(true);
+                        }
+                      }}
+                    >
+                      <div className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-all duration-200 ${isMonochrome ? 'bg-black/60 hover:bg-black/80' : 'bg-black/60 hover:bg-gold/90'}`}>
+                        <Play className={`w-5 h-5 ml-0.5 ${isMonochrome ? 'text-white group-hover/play:text-white' : 'text-white group-hover/play:text-black'}`} fill="currentColor" />
+                      </div>
+                      {/* Video duration badge */}
+                      {image.videoDuration && (
+                        <div className={`absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded text-[10px] font-mono ${isMonochrome ? 'bg-black/70 text-white' : 'bg-black/70 text-white'}`}>
+                          {Math.floor(image.videoDuration / 60)}:{String(Math.floor(image.videoDuration % 60)).padStart(2, '0')}
+                        </div>
+                      )}
+                      {/* Video label */}
+                      <div className={`absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold ${isMonochrome ? 'bg-blue-500/90 text-white' : 'bg-gold/90 text-black'}`}
+                        style={{ fontSize: `${Math.max(9, 10 / zoom)}px` }}>
+                        VIDEO
+                      </div>
+                    </div>
+                  )
                 )}
                 {/* 3D model badge - click to open 3D viewer */}
                 {image.threeDModelUrl && !image.isProcessingPlaceholder && (
@@ -12680,6 +12861,17 @@ export function InfiniteCanvas({
           <VideoPlayer
             videoUrl={videoPlayerUrl}
             onClose={() => { setVideoPlayerVisible(false); setVideoPlayerUrl(''); }}
+          />
+        )}
+
+        {/* ====== VIDEO COMPARE DIALOG ====== */}
+        {compareVideos && (
+          <VideoCompareDialog
+            videoA={compareVideos.a}
+            videoB={compareVideos.b}
+            open={!!compareVideos}
+            onClose={() => setCompareVideos(null)}
+            isGold={!isMonochrome}
           />
         )}
 

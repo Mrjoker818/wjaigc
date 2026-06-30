@@ -2268,7 +2268,269 @@ function CanvasApp() {
     seed?: number;
     negativePrompt?: string;
     multiShotScenes?: Array<{ id: string; prompt: string; duration: number; cameraControl?: { type: string; angle?: number; speed?: number } }>;
+    chainContinuity?: boolean;
+    useGlobalReferences?: boolean;
   }) => {
+    // ★ 链式多片段生成：当 chainContinuity=true 且有多个场景时，顺序生成每个片段
+    if (params.chainContinuity && params.multiShotScenes && params.multiShotScenes.length > 1) {
+      console.log(`[handleVideoGenerate] Chain mode: ${params.multiShotScenes.length} scenes`);
+      setActiveGenerationCount(prev => prev + 1);
+
+      // 辅助：从视频URL提取最后一帧
+      const extractLastFrame = async (videoUrl: string): Promise<string | null> => {
+        try {
+          const video = document.createElement('video');
+          video.crossOrigin = 'anonymous';
+          video.muted = true;
+          video.preload = 'auto';
+          video.src = videoUrl;
+          await new Promise<void>((resolve, reject) => {
+            video.onloadeddata = () => resolve();
+            video.onerror = () => reject(new Error('Video load failed'));
+            setTimeout(() => reject(new Error('Video load timeout')), 15000);
+          });
+          // 跳到最后一帧
+          video.currentTime = video.duration - 0.1;
+          await new Promise<void>((resolve, reject) => {
+            video.onseeked = () => resolve();
+            setTimeout(() => reject(new Error('Seek timeout')), 5000);
+          });
+          const canvas = document.createElement('canvas');
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return null;
+          ctx.drawImage(video, 0, 0);
+          return canvas.toDataURL('image/png');
+        } catch (e) {
+          console.warn('[extractLastFrame] Failed:', e);
+          return null;
+        }
+      };
+
+      // 辅助：保存 data URL 到服务器并获取本地路径
+      const saveFrameToServer = async (dataUrl: string): Promise<string | null> => {
+        try {
+          const resp = await fetch('/api/save-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageData: dataUrl }),
+          });
+          if (resp.ok) {
+            const data = await resp.json();
+            return data.url || null;
+          }
+        } catch (e) {
+          console.warn('[saveFrameToServer] Failed:', e);
+        }
+        return null;
+      };
+
+      // 顺序生成每个场景
+      const chainResults: Array<{ sceneIndex: number; videoUrl: string }> = [];
+      let prevVideoUrl: string | null = null;
+
+      for (let i = 0; i < params.multiShotScenes.length; i++) {
+        const scene = params.multiShotScenes[i];
+        const isFirstScene = i === 0;
+        const sceneLabel = `场景 ${i + 1}/${params.multiShotScenes.length}`;
+
+        // 链式首帧：非第一个场景使用上一个场景视频的最后一帧
+        let chainFirstFrame: string | undefined;
+        if (!isFirstScene && prevVideoUrl) {
+          const lastFrame = await extractLastFrame(prevVideoUrl);
+          if (lastFrame) {
+            const savedUrl = await saveFrameToServer(lastFrame);
+            chainFirstFrame = savedUrl || lastFrame;
+          }
+        }
+
+        // 构建场景请求
+        const sceneRequest: Record<string, unknown> = {
+          prompt: scene.prompt,
+          model: params.model,
+          imageUrl: chainFirstFrame || (isFirstScene ? (params.firstFrameUrl || params.imageUrl) : undefined),
+          lastFrameImageUrl: undefined,
+          referenceImages: params.useGlobalReferences ? params.referenceImages : undefined,
+          characterReferences: params.useGlobalReferences ? params.characterReferences : undefined,
+          mode: 'image2video-first',
+          aspectRatio: params.aspectRatio,
+          duration: scene.duration || params.duration,
+          quality: params.quality,
+          generateAudio: params.generateAudio,
+          providerId: params.providerId,
+          cameraControl: scene.cameraControl,
+          motionStrength: params.motionStrength,
+          seed: params.seed,
+          negativePrompt: params.negativePrompt,
+        };
+
+        // 创建占位符
+        const aspectRatio = params.aspectRatio || '16:9';
+        const [arW, arH] = aspectRatio.split(':').map(Number);
+        const arRatio = (arW || 16) / (arH || 9);
+        const phWidth = arRatio >= 1 ? 400 : Math.round(400 * arRatio);
+        const phHeight = arRatio >= 1 ? Math.round(400 / arRatio) : 400;
+        const phId = `vid-chain-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}`;
+
+        const canvasEl = document.querySelector('[data-canvas-viewport]') as HTMLElement | null;
+        const viewportWidth = canvasEl ? canvasEl.clientWidth : 1200;
+        const viewportHeight = canvasEl ? canvasEl.clientHeight : 800;
+        let viewOffsetX = 0, viewOffsetY = 0, currentZoom = 1;
+        const transformLayer = canvasEl?.querySelector('[style*="transform"]') as HTMLElement | null;
+        if (transformLayer) {
+          const match = transformLayer.style.transform?.match(/translate\(([^,]+)px,\s*([^)]+)px\)\s*scale\(([^)]+)\)/);
+          if (match) { viewOffsetX = parseFloat(match[1]); viewOffsetY = parseFloat(match[2]); currentZoom = parseFloat(match[3]); }
+        }
+        const offsetX = i * (phWidth + 60);
+        const canvasCenterX = (viewportWidth / 2 - viewOffsetX) / currentZoom + offsetX;
+        const canvasCenterY = (viewportHeight / 2 - viewOffsetY) / currentZoom;
+
+        setImages(prev => [...prev, {
+          id: phId,
+          url: '',
+          x: canvasCenterX - phWidth / 2,
+          y: canvasCenterY - phHeight / 2,
+          width: phWidth, height: phHeight,
+          originalWidth: phWidth * 2, originalHeight: phHeight * 2,
+          isProcessingPlaceholder: true,
+          processing: {
+            label: `${sceneLabel} · 视频生成中`,
+            status: 'submitting',
+            progress: 5,
+            startTime: Date.now(),
+          },
+          aspectRatio: params.aspectRatio,
+          model: params.model,
+          prompt: scene.prompt,
+          createdAt: Date.now(),
+          mediaType: 'video' as const,
+        }]);
+
+        try {
+          // 提交场景请求
+          const submitResp = await fetch('/api/video/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(sceneRequest),
+          });
+          const submitData = await submitResp.json();
+          if (!submitResp.ok || submitData.error) {
+            throw new Error(submitData.error || '场景提交失败');
+          }
+
+          const taskId = submitData.taskId;
+          setImages(prev => prev.map(img =>
+            img.id === phId ? {
+              ...img,
+              processing: { ...img.processing, status: 'processing' as const, progress: 10, taskId },
+            } as CanvasImage : img
+          ));
+
+          // 轮询场景结果
+          const sceneResult = await new Promise<{ videoUrl: string | null; error: string | null }>((resolve) => {
+            const maxPollTime = 10 * 60 * 1000;
+            const startTime = Date.now();
+            let attempts = 0;
+
+            const poll = async () => {
+              if (attempts > 200 || Date.now() - startTime > maxPollTime) {
+                resolve({ videoUrl: null, error: '超时' });
+                return;
+              }
+              const interval = attempts < 3 ? 1000 : attempts < 8 ? 1500 : attempts < 20 ? 2000 : 3000;
+              if (attempts > 0) await new Promise(r => setTimeout(r, interval));
+
+              try {
+                const pollResp = await fetch('/api/poll-task', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ taskId, model: params.model, providerId: params.providerId }),
+                });
+                const pollData = await pollResp.json();
+
+                if (pollData.status === 'completed') {
+                  const videoUrl = pollData.videoUrl || pollData.result?.videoUrl;
+                  resolve({ videoUrl: videoUrl || null, error: videoUrl ? null : '未获取到视频地址' });
+                } else if (pollData.status === 'failed') {
+                  resolve({ videoUrl: null, error: pollData.error || '生成失败' });
+                } else {
+                  const progress = pollData.progress || 0;
+                  setImages(prev => prev.map(img =>
+                    img.id === phId ? {
+                      ...img,
+                      processing: { ...img.processing, progress: Math.max(10, progress), status: 'processing' as const, label: `${sceneLabel} · ${pollData.label || '生成中'}` },
+                    } as CanvasImage : img
+                  ));
+                  attempts++;
+                  poll();
+                }
+              } catch {
+                attempts++;
+                poll();
+              }
+            };
+            poll();
+          });
+
+          if (sceneResult.videoUrl) {
+            // 持久化视频
+            let persistedUrl = sceneResult.videoUrl;
+            try {
+              const persistResp = await fetch('/api/save-image', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ imageUrl: sceneResult.videoUrl, isVideo: true }),
+              });
+              if (persistResp.ok) {
+                const persistData = await persistResp.json();
+                if (persistData.url) persistedUrl = persistData.url;
+              }
+            } catch { /* 持久化失败用原URL */ }
+
+            chainResults.push({ sceneIndex: i, videoUrl: persistedUrl });
+            prevVideoUrl = persistedUrl;
+
+            // 更新占位符为完成状态
+            setImages(prev => prev.map(img =>
+              img.id === phId ? {
+                ...img,
+                url: persistedUrl,
+                mediaType: 'video' as const,
+                videoUrl: persistedUrl,
+                originalWidth: 1920,
+                originalHeight: 1080,
+                isProcessingPlaceholder: false,
+                processing: undefined,
+                prompt: scene.prompt,
+                modelName: params.model,
+                apiProvider: params.providerId || undefined,
+              } as CanvasImage : img
+            ));
+
+            try { UserManagerCore.getInstance().recordUsage('video'); } catch {}
+          } else {
+            // 场景失败，移除占位符
+            setImages(prev => prev.filter(img => img.id !== phId));
+            toast.error(`${sceneLabel}生成失败`, { description: sceneResult.error || '未知错误', className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
+            // 链式生成：一个场景失败后停止后续场景
+            break;
+          }
+        } catch (err: unknown) {
+          const errorMsg = err instanceof Error ? err.message : '场景生成失败';
+          setImages(prev => prev.filter(img => img.id !== phId));
+          toast.error(`${sceneLabel}生成失败`, { description: errorMsg, className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
+          break;
+        }
+      }
+
+      setActiveGenerationCount(prev => Math.max(0, prev - 1));
+      if (chainResults.length > 0) {
+        toast.success(`链式生成完成`, { description: `成功生成 ${chainResults.length}/${params.multiShotScenes.length} 个场景`, className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
+      }
+      return; // 链式模式不走常规单视频生成逻辑
+    }
+
     setActiveGenerationCount(prev => prev + 1);
 
     const placeholderBaseSize = 400;
@@ -2343,6 +2605,8 @@ function CanvasApp() {
         seed: params.seed,
         negativePrompt: params.negativePrompt,
         multiShotScenes: params.multiShotScenes,
+        chainContinuity: params.chainContinuity,
+        useGlobalReferences: params.useGlobalReferences,
       };
 
       const res = await fetch(apiEndpoint, {

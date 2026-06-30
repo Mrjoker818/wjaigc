@@ -4,10 +4,42 @@ import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import {
   Play, Video, ImagePlus, Clock, Settings2,
   ChevronDown, Loader2, Sparkles, Volume2, VolumeX,
-  Upload, X, AlertCircle, Info, FastForward, Users, Plus, Paintbrush, Film
+  Upload, X, AlertCircle, Info, FastForward, Users, Plus, Paintbrush, Film, Palette,
+  History, RotateCcw, Languages
 } from 'lucide-react';
 import MotionBrushCanvas, { type MotionBrushResult, type MotionBrushCanvasHandle } from './motion-brush-canvas';
 import { inferVideoModelFeatures } from '@/lib/video-api';
+
+// === 生成历史 ===
+interface VideoHistoryEntry {
+  id: string;
+  timestamp: number;
+  prompt: string;
+  model: string;
+  mode: string;
+  aspectRatio: string;
+  duration: number;
+  thumbnailUrl?: string;
+  videoUrl?: string;
+  firstFrameUrl?: string;
+  lastFrameUrl?: string;
+}
+
+const VIDEO_HISTORY_KEY = 'wujie_video_gen_history';
+const MAX_HISTORY_ENTRIES = 30;
+
+function loadVideoHistory(): VideoHistoryEntry[] {
+  try {
+    const raw = localStorage.getItem(VIDEO_HISTORY_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function saveVideoHistory(entries: VideoHistoryEntry[]) {
+  try {
+    localStorage.setItem(VIDEO_HISTORY_KEY, JSON.stringify(entries.slice(0, MAX_HISTORY_ENTRIES)));
+  } catch { /* quota exceeded */ }
+}
 
 // === 视频模板库 ===
 interface VideoTemplate {
@@ -25,18 +57,27 @@ const VIDEO_TEMPLATES: VideoTemplate[] = [
   // 产品展示
   { id: 'product-rotate', name: '产品旋转展示', category: 'product', prompt: '一个产品在纯白背景上缓慢旋转，柔和的灯光，专业产品摄影风格', aspectRatio: '1:1', duration: 5, cameraControl: { type: 'orbit_right', intensity: 50 } },
   { id: 'product-zoom', name: '产品特写推进', category: 'product', prompt: '产品特写镜头缓慢推进，展示细节质感，电影级光影', aspectRatio: '16:9', duration: 5, cameraControl: { type: 'push_in', intensity: 30 } },
+  { id: 'product-unbox', name: '产品开箱', category: 'product', prompt: '产品开箱过程，精致的包装缓缓打开，高级质感，暖色灯光', aspectRatio: '16:9', duration: 6 },
+  { id: 'product-lifestyle', name: '生活场景植入', category: 'product', prompt: '产品在温馨生活场景中的使用画面，自然光，生活化氛围', aspectRatio: '16:9', duration: 5 },
   // 人物
   { id: 'character-portrait', name: '人物肖像', category: 'character', prompt: '一位优雅的人物肖像，柔和的背景光，电影级色彩', aspectRatio: '3:4', duration: 5 },
   { id: 'character-action', name: '人物动作', category: 'character', prompt: '人物做出流畅的动作，头发和衣服自然飘动，慢动作效果', aspectRatio: '16:9', duration: 5 },
+  { id: 'character-walk', name: '人物行走', category: 'character', prompt: '人物自信地走向镜头，风衣微微飘动，电影感构图', aspectRatio: '16:9', duration: 5, cameraControl: { type: 'push_in', intensity: 20 } },
+  { id: 'character-emotion', name: '表情特写', category: 'character', prompt: '人物面部表情特写，眼神细腻变化，柔和光晕，高级感', aspectRatio: '3:4', duration: 4 },
   // 风景
   { id: 'landscape-pan', name: '风景横摇', category: 'landscape', prompt: '壮丽的自然风景，山川河流，日出时分，金色阳光', aspectRatio: '21:9', duration: 8, cameraControl: { type: 'pan_right', intensity: 40 } },
   { id: 'landscape-aerial', name: '航拍视角', category: 'landscape', prompt: '航拍视角俯瞰大地，云层缭绕，壮观的自然景观', aspectRatio: '16:9', duration: 8, cameraControl: { type: 'push_in', intensity: 30 } },
+  { id: 'landscape-timelapse', name: '延时摄影', category: 'landscape', prompt: '日落延时摄影，天空色彩渐变，云朵流动，从白天到黄昏', aspectRatio: '16:9', duration: 6 },
+  { id: 'landscape-underwater', name: '水下世界', category: 'landscape', prompt: '水下世界，光线穿透水面，珊瑚和鱼群，宁静深蓝', aspectRatio: '16:9', duration: 5 },
   // 特效
   { id: 'effect-transition', name: '转场特效', category: 'effect', prompt: '粒子消散转场效果，从清晰到模糊，梦幻氛围', aspectRatio: '16:9', duration: 3 },
   { id: 'effect-slowmo', name: '慢动作', category: 'effect', prompt: '慢动作捕捉瞬间，水滴飞溅，时间凝固的感觉', aspectRatio: '16:9', duration: 5 },
+  { id: 'effect-smoke', name: '烟雾弥漫', category: 'effect', prompt: '烟雾缓缓升起，光影交错，神秘氛围，暗调画面', aspectRatio: '16:9', duration: 5 },
+  { id: 'effect-particles', name: '粒子飘散', category: 'effect', prompt: '金色粒子从中心向四周飘散，梦幻光效，唯美意境', aspectRatio: '1:1', duration: 4 },
   // 故事
   { id: 'story-opening', name: '故事开场', category: 'story', prompt: '电影开场镜头，从远景缓慢推进到主体，营造悬念氛围', aspectRatio: '2.35:1', duration: 8, cameraControl: { type: 'push_in', intensity: 20 } },
   { id: 'story-climax', name: '故事高潮', category: 'story', prompt: '紧张刺激的高潮场景，快速剪辑感，动态镜头', aspectRatio: '2.35:1', duration: 5, cameraControl: { type: 'tracking', intensity: 70 } },
+  { id: 'story-ending', name: '故事收尾', category: 'story', prompt: '电影结尾镜头，从主体缓缓拉远，留白余韵，夕阳余晖', aspectRatio: '2.35:1', duration: 8, cameraControl: { type: 'push_out', intensity: 20 } },
 ];
 
 // === 视频模型信息 ===
@@ -62,6 +103,25 @@ export interface VideoModelInfo {
     resolutions: string[];
   };
 }
+
+// === 参考图类型定义 ===
+export type ReferenceType = 'character-front' | 'character-side' | 'style' | 'scene' | 'first-frame' | 'last-frame';
+
+export interface TypedReference {
+  id: string;
+  url: string;
+  type: ReferenceType;
+  label?: string;
+}
+
+export const REFERENCE_TYPE_CONFIG: Record<ReferenceType, { label: string; icon: string; color: string; description: string }> = {
+  'character-front': { label: '角色正面', icon: 'User', color: '#f59e0b', description: '角色正面照，用于保持人物外貌一致' },
+  'character-side': { label: '角色侧面', icon: 'RotateCcw', color: '#f97316', description: '角色侧面/背面照，多角度约束' },
+  'style': { label: '风格参考', icon: 'Palette', color: '#a855f7', description: '画面风格、色调、艺术风格参考' },
+  'scene': { label: '场景参考', icon: 'Mountain', color: '#22c55e', description: '背景环境、场景氛围参考' },
+  'first-frame': { label: '首帧', icon: 'Play', color: '#3b82f6', description: '视频起始画面' },
+  'last-frame': { label: '尾帧', icon: 'Square', color: '#ef4444', description: '视频结束画面' },
+};
 
 // 视频模型注册表（与 video-api.ts 保持同步）
 const VIDEO_MODEL_REGISTRY: Record<string, VideoModelInfo> = {
@@ -274,6 +334,8 @@ export interface VideoGenerateParams {
   negativePrompt?: string; // 反向提示词
   // 多镜头叙事
   multiShotScenes?: Array<{ id: string; prompt: string; duration: number; cameraControl?: CameraControlParams }>;
+  chainContinuity?: boolean; // 链式连贯：前一段末帧→下一段首帧
+  useGlobalReferences?: boolean; // 全局参考图注入到所有片段
 }
 
 interface VideoGenerationPanelProps {
@@ -317,36 +379,72 @@ export default function VideoGenerationPanel({
   // === 状态 ===
   const [mode, setMode] = useState<'text2video' | 'image2video-first' | 'image2video-ref' | 'video-extend' | 'multi-shot'>('text2video');
   const [prompt, setPrompt] = useState('');
+  const [isEnhancing, setIsEnhancing] = useState(false);
+  const [isTranslating, setIsTranslating] = useState(false);
   const [model, setModel] = useState('');
   const [aspectRatio, setAspectRatio] = useState('16:9');
   const [duration, setDuration] = useState(5);
   const [quality, setQuality] = useState<'std' | 'pro'>('std');
   const [generateAudio, setGenerateAudio] = useState(false);
-  const [firstFrameUrl, setFirstFrameUrl] = useState<string>('');
-  const [lastFrameUrl, setLastFrameUrl] = useState<string>('');
-  const [referenceImages, setReferenceImages] = useState<string[]>([]);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [resolution, setResolution] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string>('');
   const [extendDuration, setExtendDuration] = useState(5);
 
+  // === 多参考图约束系统 ===
+  const [typedReferences, setTypedReferences] = useState<TypedReference[]>([]);
+  
+  // 兼容：从 typedReferences 中提取首帧/尾帧/参考图
+  const firstFrameUrl = typedReferences.find(r => r.type === 'first-frame')?.url || '';
+  const lastFrameUrl = typedReferences.find(r => r.type === 'last-frame')?.url || '';
+  const referenceImages = typedReferences.filter(r => r.type !== 'first-frame' && r.type !== 'last-frame' && r.type !== 'character-front' && r.type !== 'character-side').map(r => r.url);
+  const characterReferences = typedReferences.filter(r => r.type === 'character-front' || r.type === 'character-side').map(r => r.url);
+
+  // 添加/更新/删除参考图
+  const addTypedReference = (url: string, type: ReferenceType = 'style') => {
+    setTypedReferences(prev => [...prev, { id: `ref-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, url, type }]);
+  };
+  const updateRefType = (id: string, type: ReferenceType) => {
+    setTypedReferences(prev => prev.map(r => r.id === id ? { ...r, type } : r));
+  };
+  const removeTypedReference = (id: string) => {
+    setTypedReferences(prev => prev.filter(r => r.id !== id));
+  };
+  const setFirstFrame = (url: string) => {
+    setTypedReferences(prev => {
+      const without = prev.filter(r => r.type !== 'first-frame');
+      return url ? [...without, { id: `ref-first-${Date.now()}`, url, type: 'first-frame' as ReferenceType }] : without;
+    });
+  };
+  const setLastFrame = (url: string) => {
+    setTypedReferences(prev => {
+      const without = prev.filter(r => r.type !== 'last-frame');
+      return url ? [...without, { id: `ref-last-${Date.now()}`, url, type: 'last-frame' as ReferenceType }] : without;
+    });
+  };
+
   // === 多镜头叙事状态 ===
   const [multiShotScenes, setMultiShotScenes] = useState<Array<{ id: string; prompt: string; duration: number; cameraControl?: CameraControlParams }>>([
     { id: '1', prompt: '', duration: 5 },
   ]);
   const [showMultiShotPanel, setShowMultiShotPanel] = useState(false);
+  const [chainContinuity, setChainContinuity] = useState(true); // 链式连贯：前段尾帧→后段首帧
+  const [useGlobalReferences, setUseGlobalReferences] = useState(true); // 全局参考图注入
+  const [videoHistory, setVideoHistory] = useState<VideoHistoryEntry[]>(loadVideoHistory);
+  const [showHistory, setShowHistory] = useState(false);
+  const [templateFilter, setTemplateFilter] = useState<'all' | 'product' | 'character' | 'landscape' | 'effect' | 'story'>('all');
 
   // === 高级功能状态 ===
   const [cameraControl, setCameraControl] = useState<CameraControlParams | null>(null);
   const [motionBrush, setMotionBrush] = useState<MotionBrushParams | null>(null);
-  const [characterReferences, setCharacterReferences] = useState<string[]>([]);
   const [showCameraPanel, setShowCameraPanel] = useState(false);
   const [showCharacterPanel, setShowCharacterPanel] = useState(false);
   const [showMotionBrush, setShowMotionBrush] = useState(false);
   const [negativePrompt, setNegativePrompt] = useState('');
   const [seed, setSeed] = useState<number | undefined>(undefined);
   const [motionStrength, setMotionStrength] = useState(50);
+  const [batchCount, setBatchCount] = useState<1 | 2 | 4>(1); // 批量生成数量
 
   // 合并服务器模型与内置注册表
   const [videoModels, setVideoModels] = useState<{ id: string; name: string; providerId: string; providerName: string; region: 'cn' | 'global'; features: VideoModelInfo['features'] }[]>([]);
@@ -457,8 +555,8 @@ export default function VideoGenerationPanel({
 
   // 画布选中图片自动设为首帧
   useEffect(() => {
-    if (selectedImageUrl && (mode === 'image2video-first' || mode === 'image2video-ref')) {
-      setFirstFrameUrl(selectedImageUrl);
+    if (selectedImageUrl && mode === 'image2video-first') {
+      setFirstFrame(selectedImageUrl);
     }
   }, [selectedImageUrl, mode]);
 
@@ -475,7 +573,6 @@ export default function VideoGenerationPanel({
       if (!availableRatios.includes(aspectRatio)) setAspectRatio(availableRatios[0]);
       if (!availableDurations.includes(duration)) setDuration(availableDurations[0]);
       if (!currentFeatures.firstLastFrame && showLastFrame) setShowLastFrame(false);
-      if (!currentFeatures.multiReference && mode === 'image2video-ref') setMode('image2video-first');
       if (!currentFeatures.videoExtend && mode === 'video-extend') setMode('text2video');
       if (!currentFeatures.audio && generateAudio) setGenerateAudio(false);
     }
@@ -487,10 +584,7 @@ export default function VideoGenerationPanel({
     { value: 'text2video' as const, label: '文生视频', icon: <Video className="w-4 h-4" /> },
     { value: 'image2video-first' as const, label: '图生视频', icon: <ImagePlus className="w-4 h-4" /> },
   ];
-  // 首尾帧已合并到图生视频模式内，不再作为独立 Tab
-  if (currentFeatures?.multiReference) {
-    modeOptions.push({ value: 'image2video-ref' as const, label: '多参考图', icon: <ImagePlus className="w-4 h-4" /> });
-  }
+  // 首尾帧和多参考图已合并到图生视频模式内，不再作为独立 Tab
   if (currentFeatures?.videoExtend) {
     modeOptions.push({ value: 'video-extend' as const, label: '视频延长', icon: <FastForward className="w-4 h-4" /> });
   }
@@ -519,12 +613,80 @@ export default function VideoGenerationPanel({
     setMotionBrush(motionBrushParams);
   }, []);
 
+  // 提示词增强 - 调用 optimize-prompt API
+  const handleEnhancePrompt = useCallback(async () => {
+    if (!prompt.trim() || isEnhancing) return;
+    setIsEnhancing(true);
+    try {
+      const res = await fetch('/api/optimize-prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt,
+          mode: 'enhance',
+          systemPrompt: `You are a professional AI video prompt optimizer. Transform a simple user video description into a high quality video generation prompt.
+
+Rules:
+1. Preserve the user's original intent.
+2. Add concrete visual details: camera movement, lighting, color, motion, atmosphere, timing.
+3. Focus on video-specific elements: transitions, camera angles, movement direction, speed.
+4. Output bilingual keywords: first line in Chinese, second line in English.
+5. Do NOT include any thinking process, explanation, reasoning, or analysis.
+6. Do NOT include any formatting markers like 【】 or **.
+7. Each line should be a comma-separated list of keywords/phrases only.`,
+        }),
+      });
+      if (!res.ok) throw new Error('增强失败');
+      const data = await res.json();
+      if (data.optimized) {
+        setPrompt(data.optimized);
+      }
+    } catch (err) {
+      console.error('提示词增强失败:', err);
+    } finally {
+      setIsEnhancing(false);
+    }
+  }, [prompt, isEnhancing]);
+
+  // 中英翻译 - 调用 optimize-prompt API 的 translate 模式
+  const handleTranslatePrompt = useCallback(async () => {
+    if (!prompt.trim() || isTranslating) return;
+    setIsTranslating(true);
+    try {
+      const res = await fetch('/api/optimize-prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt,
+          mode: 'translate',
+          systemPrompt: `You are a professional translator specializing in AI video generation prompts. Translate the given text between Chinese and English.
+
+Rules:
+1. If the input is in Chinese, translate to English. If the input is in English, translate to Chinese.
+2. Preserve all visual, motion, and camera description details.
+3. Use natural, fluent language appropriate for video generation prompts.
+4. Do NOT add any extra creative details not present in the original.
+5. Output ONLY the translated text, no explanations or formatting.`,
+        }),
+      });
+      if (!res.ok) throw new Error('翻译失败');
+      const data = await res.json();
+      if (data.optimized) {
+        setPrompt(data.optimized);
+      }
+    } catch (err) {
+      console.error('提示词翻译失败:', err);
+    } finally {
+      setIsTranslating(false);
+    }
+  }, [prompt, isTranslating]);
+
   const handleGenerate = useCallback(async () => {
     if (!prompt.trim() && mode === 'text2video') {
       onError?.('请输入视频描述');
       return;
     }
-    if ((mode === 'image2video-first' || mode === 'image2video-ref') && !firstFrameUrl) {
+    if (mode === 'image2video-first' && !firstFrameUrl) {
       onError?.('请上传或选择首帧图片');
       return;
     }
@@ -556,9 +718,16 @@ export default function VideoGenerationPanel({
       ? multiShotScenes.filter(s => s.prompt.trim()).map((s, i) => `[镜头${i + 1}] ${s.prompt}`).join('\n')
       : prompt.trim();
 
+    // 批量生成：为每个副本生成不同的随机种子
+    const batchSeeds = Array.from({ length: batchCount }, (_, i) =>
+      seed !== undefined ? seed + i : Math.floor(Math.random() * 2147483647)
+    );
+
     try {
-      await onVideoGenerate({
-        prompt: finalPrompt,
+      // 批量并行提交
+      const generatePromises = batchSeeds.map((currentSeed) =>
+        onVideoGenerate({
+          prompt: finalPrompt,
         mode,
         model: pureModelId,
         providerId,
@@ -566,9 +735,9 @@ export default function VideoGenerationPanel({
         duration,
         quality,
         generateAudio,
-        firstFrameUrl: (mode !== 'text2video' && mode !== 'video-extend' && mode !== 'multi-shot') ? firstFrameUrl : undefined,
+        firstFrameUrl: (mode === 'image2video-first') ? firstFrameUrl : undefined,
         lastFrameUrl: (mode === 'image2video-first' && showLastFrame) ? lastFrameUrl : undefined,
-        referenceImages: (mode === 'image2video-ref') ? referenceImages : undefined,
+        referenceImages: referenceImages.length > 0 ? referenceImages : undefined,
         resolution,
         videoUrl: (mode === 'video-extend') ? videoUrl : undefined,
         extendDuration: (mode === 'video-extend') ? extendDuration : undefined,
@@ -577,17 +746,60 @@ export default function VideoGenerationPanel({
         motionBrush: motionBrush || undefined,
         characterReferences: characterReferences.length > 0 ? characterReferences : undefined,
         motionStrength: cameraControl ? motionStrength : undefined,
-        seed: seed || undefined,
+        seed: currentSeed,
         negativePrompt: negativePrompt.trim() || undefined,
         // 多镜头参数
         multiShotScenes: mode === 'multi-shot' ? multiShotScenes.filter(s => s.prompt.trim()) : undefined,
+        chainContinuity: mode === 'multi-shot' ? chainContinuity : undefined,
+        useGlobalReferences: mode === 'multi-shot' && useGlobalReferences ? true : undefined,
+      })
+    );
+
+    await Promise.allSettled(generatePromises);
+
+      // 记录到生成历史
+      const historyEntry: VideoHistoryEntry = {
+        id: `vh-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        timestamp: Date.now(),
+        prompt: finalPrompt,
+        model: pureModelId,
+        mode,
+        aspectRatio,
+        duration,
+        firstFrameUrl: (mode === 'image2video-first') ? firstFrameUrl : undefined,
+        lastFrameUrl: (mode === 'image2video-first' && showLastFrame) ? lastFrameUrl : undefined,
+      };
+      setVideoHistory(prev => {
+        const updated = [historyEntry, ...prev].slice(0, MAX_HISTORY_ENTRIES);
+        saveVideoHistory(updated);
+        return updated;
       });
     } catch (err) {
       onError?.(err instanceof Error ? err.message : '生成失败');
     } finally {
       setIsGenerating(false);
     }
-  }, [prompt, mode, model, aspectRatio, duration, quality, generateAudio, firstFrameUrl, lastFrameUrl, referenceImages, resolution, videoUrl, extendDuration, cameraControl, motionBrush, characterReferences, motionStrength, seed, negativePrompt, multiShotScenes, showLastFrame, onVideoGenerate, onError]);
+  }, [prompt, mode, model, aspectRatio, duration, quality, generateAudio, firstFrameUrl, lastFrameUrl, referenceImages, resolution, videoUrl, extendDuration, cameraControl, motionBrush, characterReferences, motionStrength, seed, negativePrompt, multiShotScenes, chainContinuity, useGlobalReferences, batchCount, showLastFrame, onVideoGenerate, onError]);
+
+  // 从历史记录复用参数
+  const reuseHistoryEntry = useCallback((entry: VideoHistoryEntry) => {
+    setPrompt(entry.prompt);
+    setAspectRatio(entry.aspectRatio);
+    setDuration(entry.duration);
+    if (entry.firstFrameUrl) {
+      setFirstFrame(entry.firstFrameUrl);
+    }
+    if (entry.lastFrameUrl) {
+      setLastFrame(entry.lastFrameUrl);
+      if (!showLastFrame) setShowLastFrame(true);
+    }
+  }, [showLastFrame]);
+
+  // 清空历史记录
+  const clearHistory = useCallback(() => {
+    setVideoHistory([]);
+    saveVideoHistory([]);
+  }, []);
 
   // 处理图片上传
   const handleImageUpload = useCallback((target: 'first' | 'last' | 'ref') => {
@@ -603,9 +815,9 @@ export default function VideoGenerationPanel({
         const res = await fetch('/api/save-image', { method: 'POST', body: formData });
         const data = await res.json();
         if (data.url) {
-          if (target === 'first') setFirstFrameUrl(data.url);
-          else if (target === 'last') setLastFrameUrl(data.url);
-          else setReferenceImages(prev => [...prev, data.url]);
+          if (target === 'first') setFirstFrame(data.url);
+          else if (target === 'last') setLastFrame(data.url);
+          else addTypedReference(data.url, 'style');
         }
       } catch {
         onError?.('图片上传失败');
@@ -670,9 +882,33 @@ export default function VideoGenerationPanel({
 
       {/* === 视频模板库 === */}
       <div className="px-3 pt-2">
-        <label className={labelClass}>快速模板</label>
-        <div className="flex gap-1.5 overflow-x-auto pb-1">
-          {VIDEO_TEMPLATES.map(template => (
+        <label className={labelClass}>风格预设</label>
+        {/* 分类标签 */}
+        <div className="flex gap-1 mb-1.5 overflow-x-auto">
+          {(['all', 'product', 'character', 'landscape', 'effect', 'story'] as const).map(cat => (
+            <button
+              key={cat}
+              onClick={() => {
+                const el = document.querySelector(`[data-template-cat="${cat}"]`);
+                if (el) el.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' });
+                else setTemplateFilter(cat);
+              }}
+              className={`flex-shrink-0 px-2 py-0.5 rounded text-[10px] transition-all cursor-pointer`}
+              style={{
+                background: templateFilter === cat ? (isGold ? 'rgba(212,175,55,0.15)' : 'rgba(59,130,246,0.15)') : 'transparent',
+                color: templateFilter === cat ? accentColor : subTextColor,
+                border: `1px solid ${templateFilter === cat ? borderColor : 'transparent'}`,
+              }}
+            >
+              {cat === 'all' ? '全部' : cat === 'product' ? '产品' : cat === 'character' ? '人物' : cat === 'landscape' ? '风景' : cat === 'effect' ? '特效' : '故事'}
+            </button>
+          ))}
+        </div>
+        {/* 模板网格 */}
+        <div className="grid grid-cols-2 gap-1.5 max-h-[160px] overflow-y-auto">
+          {VIDEO_TEMPLATES
+            .filter(t => templateFilter === 'all' || t.category === templateFilter)
+            .map(template => (
             <button
               key={template.id}
               onClick={() => {
@@ -681,10 +917,10 @@ export default function VideoGenerationPanel({
                 if (template.duration) setDuration(template.duration);
                 if (template.cameraControl) setCameraControl(template.cameraControl);
               }}
-              className={`flex-shrink-0 px-2.5 py-1.5 rounded-md text-[10px] border transition-all cursor-pointer ${
+              className={`text-left px-2.5 py-1.5 rounded-md text-[10px] border transition-all cursor-pointer hover:border-opacity-60 ${
                 isMonochrome
                   ? 'bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:text-blue-600'
-                  : hoverBorderColor
+                  : ''
               }`}
               style={isMonochrome ? {} : {
                 background: inputBg,
@@ -693,7 +929,8 @@ export default function VideoGenerationPanel({
               }}
               title={template.prompt}
             >
-              {template.name}
+              <div className="font-medium truncate" style={{ color: subTextColor }}>{template.name}</div>
+              <div className="truncate opacity-60 mt-0.5" style={{ fontSize: '9px' }}>{template.aspectRatio} · {template.duration}s</div>
             </button>
           ))}
         </div>
@@ -724,7 +961,47 @@ export default function VideoGenerationPanel({
 
       {/* === 视频描述 === */}
       <div className="px-3 pt-3">
-        <label className="text-xs text-gray-500 mb-1 block">视频描述</label>
+        <div className="flex items-center justify-between mb-1">
+          <label className="text-xs text-gray-500">视频描述</label>
+          <div className="flex gap-1">
+            <button
+              onClick={handleEnhancePrompt}
+              disabled={!prompt.trim() || isEnhancing}
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] transition-all disabled:opacity-30"
+              style={{
+                background: isGold ? 'rgba(212,175,55,0.1)' : 'rgba(59,130,246,0.1)',
+                color: accentColor,
+                border: `1px solid ${isGold ? 'rgba(212,175,55,0.2)' : 'rgba(59,130,246,0.2)'}`,
+              }}
+              title="AI增强提示词，添加细节描述"
+            >
+              {isEnhancing ? (
+                <span className="inline-block w-2.5 h-2.5 border-[1.5px] border-current border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <Sparkles className="w-2.5 h-2.5" />
+              )}
+              增强
+            </button>
+            <button
+              onClick={handleTranslatePrompt}
+              disabled={!prompt.trim() || isTranslating}
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] transition-all disabled:opacity-30"
+              style={{
+                background: isGold ? 'rgba(212,175,55,0.1)' : 'rgba(59,130,246,0.1)',
+                color: accentColor,
+                border: `1px solid ${isGold ? 'rgba(212,175,55,0.2)' : 'rgba(59,130,246,0.2)'}`,
+              }}
+              title="中英互译，视频模型对英文提示词效果更好"
+            >
+              {isTranslating ? (
+                <span className="inline-block w-2.5 h-2.5 border-[1.5px] border-current border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <Languages className="w-2.5 h-2.5" />
+              )}
+              翻译
+            </button>
+          </div>
+        </div>
         <textarea
           value={prompt}
           onChange={e => setPrompt(e.target.value)}
@@ -735,151 +1012,200 @@ export default function VideoGenerationPanel({
           onFocus={e => e.target.style.borderColor = accentColor}
           onBlur={e => e.target.style.borderColor = borderColor}
         />
+        <div className="text-[9px] mt-0.5" style={{ color: subTextColor }}>
+          提示：英文提示词通常效果更好，可点击"翻译"自动转换
+        </div>
       </div>
 
-      {/* === 图片上传区（图生视频模式时显示） === */}
+      {/* === 图生视频：首帧 + 尾帧 + 分类参考图 === */}
       {mode !== 'text2video' && mode !== 'video-extend' && mode !== 'multi-shot' && (
-        <div className="px-3 pt-3 space-y-2">
-          {mode === 'image2video-ref' ? (
-            // ===== 多参考图模式 =====
-            <div>
-              <label className="text-xs text-gray-500 mb-1 block">参考图（最多7张，AI 会综合参考所有图片）</label>
-              <div className="flex flex-wrap gap-2">
-                {referenceImages.map((url, idx) => (
-                  <div key={idx} className="relative group w-20 h-20">
-                    <img src={url} alt={`参考${idx+1}`} className="w-full h-full object-cover rounded-md" style={{ border: `1px solid ${borderColor}` }} />
-                    <button
-                      onClick={() => setReferenceImages(prev => prev.filter((_, i) => i !== idx))}
-                      className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-black/70 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                    >
-                      <X className="w-2.5 h-2.5 text-white" />
-                    </button>
-                  </div>
-                ))}
-                {referenceImages.length < 7 && (
-                  <button
-                    onClick={() => handleImageUpload('ref')}
-                    className="w-20 h-20 rounded-md flex flex-col items-center justify-center cursor-pointer transition-colors hover:opacity-80"
-                    style={{ background: inputBg, border: `1px dashed ${borderColor}` }}
-                  >
-                    <Upload className="w-5 h-5 text-gray-400" />
-                    <span className="text-[9px] text-gray-400 mt-0.5">添加</span>
-                  </button>
-                )}
+        <div className="px-3 pt-3 space-y-3">
+          {/* 首帧 - 大尺寸预览 */}
+          <div>
+            <label className="text-xs text-gray-500 mb-1.5 block flex items-center gap-1.5">
+              <ImagePlus className="w-3.5 h-3.5" style={{ color: accentColor }} />
+              首帧（起始画面）
+            </label>
+            {firstFrameUrl ? (
+              <div className="relative group aspect-video rounded-lg overflow-hidden" style={{ border: `2px solid ${accentColor}30` }}>
+                <img src={firstFrameUrl} alt="首帧" className="w-full h-full object-cover" />
+                <div className="absolute bottom-0 left-0 right-0 px-2 py-1 bg-gradient-to-t from-black/70 to-transparent">
+                  <span className="text-[10px] text-white/80">第 1 帧 · 起始</span>
+                </div>
+                <button
+                  onClick={() => setFirstFrame('')}
+                  className="absolute top-2 right-2 w-6 h-6 rounded-full bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5 text-white" />
+                </button>
               </div>
-            </div>
-          ) : (
-            // ===== 图生视频（首帧 + 可选尾帧）=====
-            <div className="space-y-3">
-              {/* 首帧 - 大尺寸预览 */}
-              <div>
-                <label className="text-xs text-gray-500 mb-1.5 block flex items-center gap-1.5">
-                  <ImagePlus className="w-3.5 h-3.5" style={{ color: accentColor }} />
-                  首帧（起始画面）
-                </label>
-                {firstFrameUrl ? (
-                  <div className="relative group aspect-video rounded-lg overflow-hidden" style={{ border: `2px solid ${accentColor}30` }}>
-                    <img src={firstFrameUrl} alt="首帧" className="w-full h-full object-cover" />
-                    <div className="absolute bottom-0 left-0 right-0 px-2 py-1 bg-gradient-to-t from-black/70 to-transparent">
-                      <span className="text-[10px] text-white/80">第 1 帧 · 起始</span>
+            ) : (
+              <button
+                onClick={() => handleImageUpload('first')}
+                className="w-full aspect-video rounded-lg flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors hover:opacity-80"
+                style={{ background: inputBg, border: `2px dashed ${borderColor}` }}
+              >
+                {selectedImageUrl ? (
+                  <div className="relative w-full h-full">
+                    <img src={selectedImageUrl} alt="画布图片" className="w-full h-full object-cover rounded-lg opacity-50" />
+                    <div className="absolute inset-0 flex flex-col items-center justify-center">
+                      <Upload className="w-7 h-7 text-white drop-shadow-lg" />
+                      <span className="text-sm text-white drop-shadow-lg mt-1">使用画布图片或上传新图</span>
                     </div>
-                    <button
-                      onClick={() => setFirstFrameUrl('')}
-                      className="absolute top-2 right-2 w-6 h-6 rounded-full bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                    >
-                      <X className="w-3.5 h-3.5 text-white" />
-                    </button>
                   </div>
                 ) : (
-                  <button
-                    onClick={() => handleImageUpload('first')}
-                    className="w-full aspect-video rounded-lg flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors hover:opacity-80"
-                    style={{ background: inputBg, border: `2px dashed ${borderColor}` }}
-                  >
-                    {selectedImageUrl ? (
-                      <div className="relative w-full h-full">
-                        <img src={selectedImageUrl} alt="画布图片" className="w-full h-full object-cover rounded-lg opacity-50" />
-                        <div className="absolute inset-0 flex flex-col items-center justify-center">
-                          <Upload className="w-7 h-7 text-white drop-shadow-lg" />
-                          <span className="text-sm text-white drop-shadow-lg mt-1">使用画布图片或上传新图</span>
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        <Upload className="w-8 h-8 text-gray-400" />
-                        <span className="text-sm text-gray-400">上传首帧图片</span>
-                        <span className="text-[10px] text-gray-500">AI 将从此画面开始生成视频</span>
-                      </>
-                    )}
-                  </button>
+                  <>
+                    <Upload className="w-8 h-8 text-gray-400" />
+                    <span className="text-sm text-gray-400">上传首帧图片</span>
+                    <span className="text-[10px] text-gray-500">AI 将从此画面开始生成视频</span>
+                  </>
                 )}
-              </div>
+              </button>
+            )}
+          </div>
 
-              {/* 尾帧开关 + 预览 */}
-              {currentFeatures?.firstLastFrame && (
-                <div>
-                  <button
-                    onClick={() => {
-                      const next = !showLastFrame;
-                      setShowLastFrame(next);
-                      if (!next) setLastFrameUrl('');
-                    }}
-                    className="flex items-center gap-2 text-xs cursor-pointer group/switch"
-                    style={{ color: showLastFrame ? accentColor : textColor }}
-                  >
-                    <div className="w-8 h-4 rounded-full relative transition-colors" style={{ background: showLastFrame ? accentColor : 'rgba(255,255,255,0.15)' }}>
-                      <div className="absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all shadow-sm" style={{ left: showLastFrame ? '17px' : '2px' }} />
+          {/* 尾帧开关 + 预览 */}
+          {currentFeatures?.firstLastFrame && (
+            <div>
+              <button
+                onClick={() => {
+                  const next = !showLastFrame;
+                  setShowLastFrame(next);
+                  if (!next) setLastFrame('');
+                }}
+                className="flex items-center gap-2 text-xs cursor-pointer group/switch"
+                style={{ color: showLastFrame ? accentColor : textColor }}
+              >
+                <div className="w-8 h-4 rounded-full relative transition-colors" style={{ background: showLastFrame ? accentColor : 'rgba(255,255,255,0.15)' }}>
+                  <div className="absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all shadow-sm" style={{ left: showLastFrame ? '17px' : '2px' }} />
+                </div>
+                <span className="group-hover/switch:underline">添加尾帧（结束画面）</span>
+              </button>
+
+              {showLastFrame && (
+                <div className="mt-2">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <div className="flex-1 h-px" style={{ background: `${accentColor}30` }} />
+                    <div className="flex items-center gap-1 shrink-0" style={{ color: accentColor }}>
+                      <FastForward className="w-3.5 h-3.5" />
+                      <span className="text-[10px]">AI 生成过渡动画</span>
                     </div>
-                    <span className="group-hover/switch:underline">添加尾帧（结束画面）</span>
-                  </button>
-
-                  {showLastFrame && (
-                    <div className="mt-2">
-                      <div className="flex items-center gap-2 mb-1.5">
-                        {/* 中间连接指示 */}
-                        <div className="flex-1 h-px" style={{ background: `${accentColor}30` }} />
-                        <div className="flex items-center gap-1 shrink-0" style={{ color: accentColor }}>
-                          <FastForward className="w-3.5 h-3.5" />
-                          <span className="text-[10px]">AI 生成过渡动画</span>
-                        </div>
-                        <div className="flex-1 h-px" style={{ background: `${accentColor}30` }} />
+                    <div className="flex-1 h-px" style={{ background: `${accentColor}30` }} />
+                  </div>
+                  {lastFrameUrl ? (
+                    <div className="relative group aspect-video rounded-lg overflow-hidden" style={{ border: `2px solid ${accentColor}30` }}>
+                      <img src={lastFrameUrl} alt="尾帧" className="w-full h-full object-cover" />
+                      <div className="absolute bottom-0 left-0 right-0 px-2 py-1 bg-gradient-to-t from-black/70 to-transparent">
+                        <span className="text-[10px] text-white/80">最终帧 · 结束</span>
                       </div>
-                      {lastFrameUrl ? (
-                        <div className="relative group aspect-video rounded-lg overflow-hidden" style={{ border: `2px solid ${accentColor}30` }}>
-                          <img src={lastFrameUrl} alt="尾帧" className="w-full h-full object-cover" />
-                          <div className="absolute bottom-0 left-0 right-0 px-2 py-1 bg-gradient-to-t from-black/70 to-transparent">
-                            <span className="text-[10px] text-white/80">最终帧 · 结束</span>
-                          </div>
-                          <button
-                            onClick={() => setLastFrameUrl('')}
-                            className="absolute top-2 right-2 w-6 h-6 rounded-full bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                          >
-                            <X className="w-3.5 h-3.5 text-white" />
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => handleImageUpload('last')}
-                          className="w-full aspect-video rounded-lg flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors hover:opacity-80"
-                          style={{ background: inputBg, border: `2px dashed ${borderColor}` }}
-                        >
-                          <Upload className="w-7 h-7 text-gray-400" />
-                          <span className="text-sm text-gray-400">上传尾帧图片</span>
-                          <span className="text-[10px] text-gray-500">视频将从首帧过渡到此画面</span>
-                        </button>
-                      )}
-                      {lastFrameUrl && (
-                        <p className="text-[10px] text-gray-500 mt-1.5 flex items-start gap-1">
-                          <Info className="w-3 h-3 shrink-0 mt-0.5" />
-                          AI 将生成从首帧到尾帧的平滑过渡动画
-                        </p>
-                      )}
+                      <button
+                        onClick={() => setLastFrame('')}
+                        className="absolute top-2 right-2 w-6 h-6 rounded-full bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5 text-white" />
+                      </button>
                     </div>
+                  ) : (
+                    <button
+                      onClick={() => handleImageUpload('last')}
+                      className="w-full aspect-video rounded-lg flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors hover:opacity-80"
+                      style={{ background: inputBg, border: `2px dashed ${borderColor}` }}
+                    >
+                      <Upload className="w-7 h-7 text-gray-400" />
+                      <span className="text-sm text-gray-400">上传尾帧图片</span>
+                      <span className="text-[10px] text-gray-500">视频将从首帧过渡到此画面</span>
+                    </button>
                   )}
                 </div>
               )}
             </div>
           )}
+
+          {/* === 分类参考图区域 === */}
+          <div style={{ borderTop: `1px solid ${borderColor}` }} className="pt-3">
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs text-gray-500 flex items-center gap-1.5">
+                <Palette className="w-3.5 h-3.5" style={{ color: accentColor }} />
+                参考图约束
+              </label>
+              {typedReferences.length > 0 && (
+                <span className="text-[10px] text-gray-500">{typedReferences.length}/7</span>
+              )}
+            </div>
+
+            {/* 已添加的参考图列表 */}
+            {typedReferences.length > 0 && (
+              <div className="space-y-2 mb-2">
+                {typedReferences.map((ref) => (
+                  <div key={ref.id} className="flex items-center gap-2 rounded-lg p-1.5 group" style={{ background: inputBg }}>
+                    <img src={ref.url} alt={ref.type} className="w-14 h-10 object-cover rounded shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      {/* 类型选择器 */}
+                      <div className="flex items-center gap-1 flex-wrap">
+                        {Object.entries(REFERENCE_TYPE_CONFIG)
+                          .filter(([key]) => key !== 'first-frame' && key !== 'last-frame')
+                          .map(([key, cfg]) => (
+                          <button
+                            key={key}
+                            onClick={() => updateRefType(ref.id, key as ReferenceType)}
+                            className="text-[9px] px-1.5 py-0.5 rounded-full cursor-pointer transition-colors"
+                            style={{
+                              background: ref.type === key ? `${cfg.color}30` : 'transparent',
+                              color: ref.type === key ? cfg.color : textColor,
+                              border: `1px solid ${ref.type === key ? cfg.color : borderColor}`
+                            }}
+                          >
+                            {cfg.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => removeTypedReference(ref.id)}
+                      className="w-5 h-5 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer shrink-0"
+                      style={{ background: 'rgba(255,255,255,0.1)' }}
+                    >
+                      <X className="w-3 h-3" style={{ color: textColor }} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* 添加参考图按钮 */}
+            {typedReferences.length < 7 && (
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleImageUpload('ref')}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg cursor-pointer transition-colors hover:opacity-80 text-xs"
+                  style={{ background: inputBg, border: `1px dashed ${borderColor}`, color: textColor }}
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>上传参考图</span>
+                </button>
+                {selectedImageUrl && (
+                  <button
+                    onClick={() => {
+                      addTypedReference(selectedImageUrl, 'character-front');
+                    }}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg cursor-pointer transition-colors hover:opacity-80 text-xs"
+                    style={{ background: `${accentColor}15`, border: `1px solid ${accentColor}30`, color: accentColor }}
+                  >
+                    <ImagePlus className="w-3.5 h-3.5" />
+                    <span>从画布选取</span>
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* 参考图类型说明 */}
+            {typedReferences.length === 0 && (
+              <p className="text-[10px] text-gray-500 mt-1.5 flex items-start gap-1">
+                <Info className="w-3 h-3 shrink-0 mt-0.5" />
+                添加角色/风格/场景参考图，帮助AI更好理解你的意图
+              </p>
+            )}
+          </div>
         </div>
       )}
 
@@ -1148,19 +1474,22 @@ export default function VideoGenerationPanel({
             <span className="flex items-center gap-2 text-xs min-w-0 overflow-hidden shrink">
               <Users className="w-4 h-4 shrink-0" style={{ color: characterReferences.length > 0 ? accentColor : subTextColor }} />
               <span className={sectionTitleClass}>角色一致性</span>
-              {characterReferences.length > 0 && <span className="text-[10px] opacity-60">({characterReferences.length}张参考图)</span>}
+              {characterReferences.length > 0 && <span className="text-[10px] opacity-60">({characterReferences.length}张)</span>}
             </span>
             <ChevronDown className={`w-3.5 h-3.5 text-gray-500 transition-transform ${showCharacterPanel ? 'rotate-180' : ''}`} />
           </button>
           {showCharacterPanel && (
             <div className="mt-2 p-2 rounded-md space-y-2" style={{ background: inputBg }}>
-              <p className="text-[10px] text-gray-500">上传角色参考图，AI将保持角色外观一致性</p>
+              <p className="text-[10px] text-gray-500">上传角色参考图，AI将保持角色外观一致性（也可在上方参考图区域添加）</p>
               <div className="flex flex-wrap gap-2">
-                {characterReferences.map((url, idx) => (
-                  <div key={idx} className="relative w-16 h-16 rounded overflow-hidden group">
-                    <img src={url} alt={`角色${idx + 1}`} className="w-full h-full object-cover" />
+                {typedReferences.filter(r => r.type === 'character-front' || r.type === 'character-side').map((ref) => (
+                  <div key={ref.id} className="relative w-16 h-16 rounded overflow-hidden group">
+                    <img src={ref.url} alt={ref.type} className="w-full h-full object-cover" />
+                    <span className="absolute bottom-0 left-0 right-0 text-[8px] text-center py-0.5 bg-black/60 text-white truncate">
+                      {REFERENCE_TYPE_CONFIG[ref.type]?.label || ref.type}
+                    </span>
                     <button
-                      onClick={() => setCharacterReferences(characterReferences.filter((_, i) => i !== idx))}
+                      onClick={() => removeTypedReference(ref.id)}
                       className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/60 text-white text-[10px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
                     >
                       ×
@@ -1176,12 +1505,13 @@ export default function VideoGenerationPanel({
                       input.onchange = async (e) => {
                         const file = (e.target as HTMLInputElement).files?.[0];
                         if (!file) return;
-                        const reader = new FileReader();
-                        reader.onload = (ev) => {
-                          const dataUrl = ev.target?.result as string;
-                          setCharacterReferences([...characterReferences, dataUrl]);
-                        };
-                        reader.readAsDataURL(file);
+                        try {
+                          const formData = new FormData();
+                          formData.append('file', file);
+                          const res = await fetch('/api/save-image', { method: 'POST', body: formData });
+                          const data = await res.json();
+                          if (data.url) addTypedReference(data.url, 'character-front');
+                        } catch {}
                       };
                       input.click();
                     }}
@@ -1195,7 +1525,11 @@ export default function VideoGenerationPanel({
               </div>
               {characterReferences.length > 0 && (
                 <button
-                  onClick={() => { setCharacterReferences([]); setShowCharacterPanel(false); }}
+                  onClick={() => {
+                    // 移除所有角色类型参考图
+                    setTypedReferences(prev => prev.filter(r => r.type !== 'character-front' && r.type !== 'character-side'));
+                    setShowCharacterPanel(false);
+                  }}
                   className={`text-[10px] ${subtleTextClass} ${isMonochrome ? 'hover:text-gray-600' : 'hover:text-gray-300'} cursor-pointer`}
                 >
                   清除角色参考
@@ -1273,69 +1607,130 @@ export default function VideoGenerationPanel({
       {mode === 'multi-shot' && (
         <div className="px-3 pt-2">
           <div className={`p-3 rounded-md border ${deepBorderClass}`} style={{ background: inputBg }}>
-            <div className="flex items-center gap-2 mb-3">
+            <div className="flex items-center gap-2 mb-2">
               <Film className="w-4 h-4 text-purple-400" />
               <span className={`text-xs ${sectionTitleClass}`}>多镜头叙事</span>
               <span className="text-[10px] text-gray-500">({multiShotScenes.length} 个镜头)</span>
             </div>
+
+            {/* 连贯性控制 */}
+            <div className="flex items-center gap-3 mb-3 pb-2" style={{ borderBottom: `1px solid ${borderColor}` }}>
+              <button
+                onClick={() => setChainContinuity(!chainContinuity)}
+                className="flex items-center gap-1.5 text-[10px] cursor-pointer"
+                style={{ color: chainContinuity ? accentColor : textColor }}
+              >
+                <div className="w-6 h-3 rounded-full relative transition-colors" style={{ background: chainContinuity ? accentColor : 'rgba(255,255,255,0.15)' }}>
+                  <div className="absolute top-0.5 w-2 h-2 rounded-full bg-white transition-all shadow-sm" style={{ left: chainContinuity ? '13px' : '2px' }} />
+                </div>
+                <span>链式连贯</span>
+              </button>
+              <button
+                onClick={() => setUseGlobalReferences(!useGlobalReferences)}
+                className="flex items-center gap-1.5 text-[10px] cursor-pointer"
+                style={{ color: useGlobalReferences ? accentColor : textColor }}
+              >
+                <div className="w-6 h-3 rounded-full relative transition-colors" style={{ background: useGlobalReferences ? accentColor : 'rgba(255,255,255,0.15)' }}>
+                  <div className="absolute top-0.5 w-2 h-2 rounded-full bg-white transition-all shadow-sm" style={{ left: useGlobalReferences ? '13px' : '2px' }} />
+                </div>
+                <span>全局参考图</span>
+              </button>
+              {chainContinuity && (
+                <span className="text-[9px] text-gray-500 flex items-center gap-0.5">
+                  <Info className="w-2.5 h-2.5" />
+                  前段尾帧自动作为后段首帧
+                </span>
+              )}
+            </div>
+
+            {/* 全局参考图提示 */}
+            {useGlobalReferences && typedReferences.length > 0 && (
+              <div className="mb-2 px-2 py-1 rounded text-[9px] flex items-center gap-1" style={{ background: `${accentColor}10`, color: accentColor }}>
+                <ImagePlus className="w-3 h-3" />
+                {typedReferences.length} 张参考图将应用到所有镜头
+              </div>
+            )}
             
-            <div className="space-y-2 max-h-60 overflow-y-auto">
+            <div className="space-y-1 max-h-60 overflow-y-auto">
               {multiShotScenes.map((scene, index) => (
-                <div key={scene.id} className={`p-2 rounded-md border ${subtleBorderClass}`} style={{ background: panelBg }}>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-[10px] text-purple-400">镜头 {index + 1}</span>
-                    {multiShotScenes.length > 1 && (
-                      <button
-                        onClick={() => setMultiShotScenes(multiShotScenes.filter(s => s.id !== scene.id))}
-                        className="text-gray-500 hover:text-red-400 transition-colors"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    )}
-                  </div>
-                  <textarea
-                    value={scene.prompt}
-                    onChange={(e) => {
-                      const newScenes = [...multiShotScenes];
-                      const idx = newScenes.findIndex(s => s.id === scene.id);
-                      if (idx >= 0) newScenes[idx] = { ...newScenes[idx], prompt: e.target.value };
-                      setMultiShotScenes(newScenes);
-                    }}
-                    placeholder={`描述镜头 ${index + 1} 的画面内容...`}
-                    className={`w-full px-2 py-1.5 rounded text-xs border resize-none h-16 ${
-                      isMonochrome
-                        ? 'bg-white border-gray-200 text-gray-900 placeholder-gray-400'
-                        : ''
-                    }`}
-                    style={isMonochrome ? {} : {
-                      background: panelBg,
-                      borderColor: '#374151',
-                      color: '#e5e7eb',
-                    }}
-                  />
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className="text-[10px] text-gray-500">时长:</span>
-                    <select
-                      value={scene.duration}
+                <div key={scene.id}>
+                  <div className={`p-2 rounded-md border ${subtleBorderClass}`} style={{ background: panelBg }}>
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] text-purple-400 font-medium">镜头 {index + 1}</span>
+                        {chainContinuity && index > 0 && (
+                          <span className="text-[8px] px-1 py-0.5 rounded" style={{ background: `${accentColor}15`, color: accentColor }}>
+                            接续前段
+                          </span>
+                        )}
+                      </div>
+                      {multiShotScenes.length > 1 && (
+                        <button
+                          onClick={() => setMultiShotScenes(multiShotScenes.filter(s => s.id !== scene.id))}
+                          className="text-gray-500 hover:text-red-400 transition-colors"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                    <textarea
+                      value={scene.prompt}
                       onChange={(e) => {
                         const newScenes = [...multiShotScenes];
                         const idx = newScenes.findIndex(s => s.id === scene.id);
-                        if (idx >= 0) newScenes[idx] = { ...newScenes[idx], duration: Number(e.target.value) };
+                        if (idx >= 0) newScenes[idx] = { ...newScenes[idx], prompt: e.target.value };
                         setMultiShotScenes(newScenes);
                       }}
-                      className={`px-1.5 py-0.5 rounded text-[10px] border ${
+                      placeholder={index === 0 
+                        ? '描述开场画面...' 
+                        : chainContinuity 
+                          ? '描述与上一镜头衔接的画面...' 
+                          : `描述镜头 ${index + 1} 的画面内容...`}
+                      className={`w-full px-2 py-1.5 rounded text-xs border resize-none h-14 ${
                         isMonochrome
-                          ? 'bg-white border-gray-200 text-gray-700'
+                          ? 'bg-white border-gray-200 text-gray-900 placeholder-gray-400'
                           : ''
                       }`}
-                      style={isMonochrome ? {} : { background: panelBg, borderColor: '#374151', color: '#e5e7eb' }}
-                    >
-                      <option value={3}>3s</option>
-                      <option value={5}>5s</option>
-                      <option value={8}>8s</option>
-                      <option value={10}>10s</option>
-                    </select>
+                      style={isMonochrome ? {} : {
+                        background: panelBg,
+                        borderColor: '#374151',
+                        color: '#e5e7eb',
+                      }}
+                    />
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="text-[10px] text-gray-500">时长:</span>
+                      <select
+                        value={scene.duration}
+                        onChange={(e) => {
+                          const newScenes = [...multiShotScenes];
+                          const idx = newScenes.findIndex(s => s.id === scene.id);
+                          if (idx >= 0) newScenes[idx] = { ...newScenes[idx], duration: Number(e.target.value) };
+                          setMultiShotScenes(newScenes);
+                        }}
+                        className={`px-1.5 py-0.5 rounded text-[10px] border ${
+                          isMonochrome
+                            ? 'bg-white border-gray-200 text-gray-700'
+                            : ''
+                        }`}
+                        style={isMonochrome ? {} : { background: panelBg, borderColor: '#374151', color: '#e5e7eb' }}
+                      >
+                        <option value={3}>3s</option>
+                        <option value={5}>5s</option>
+                        <option value={8}>8s</option>
+                        <option value={10}>10s</option>
+                      </select>
+                    </div>
                   </div>
+                  {/* 链式连接指示箭头 */}
+                  {chainContinuity && index < multiShotScenes.length - 1 && (
+                    <div className="flex justify-center py-0.5">
+                      <div className="flex flex-col items-center" style={{ color: accentColor }}>
+                        <div className="w-px h-2" style={{ background: `${accentColor}40` }} />
+                        <FastForward className="w-3 h-3" />
+                        <div className="w-px h-2" style={{ background: `${accentColor}40` }} />
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -1353,8 +1748,14 @@ export default function VideoGenerationPanel({
               添加镜头
             </button>
             
-            <div className="mt-2 text-[10px] text-gray-500">
-              总时长: {multiShotScenes.reduce((sum, s) => sum + s.duration, 0)}s
+            <div className="mt-2 flex items-center justify-between text-[10px] text-gray-500">
+              <span>总时长: {multiShotScenes.reduce((sum, s) => sum + s.duration, 0)}s</span>
+              {chainContinuity && multiShotScenes.length > 1 && (
+                <span className="flex items-center gap-0.5" style={{ color: accentColor }}>
+                  <FastForward className="w-2.5 h-2.5" />
+                  链式生成
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -1480,8 +1881,100 @@ export default function VideoGenerationPanel({
         </div>
       )}
 
+      {/* === 生成历史 === */}
+      {videoHistory.length > 0 && (
+        <div className="px-3 pt-3">
+          <button
+            onClick={() => setShowHistory(!showHistory)}
+            className="flex items-center gap-1.5 text-xs font-medium w-full cursor-pointer"
+            style={{ color: subTextColor }}
+          >
+            <History className="w-3.5 h-3.5" />
+            <span>生成历史 ({videoHistory.length})</span>
+            <ChevronDown className={`w-3.5 h-3.5 ml-auto transition-transform ${showHistory ? 'rotate-180' : ''}`} />
+          </button>
+          {showHistory && (
+            <div className="mt-2">
+              <div className="grid grid-cols-3 gap-1.5">
+                {videoHistory.slice(0, 12).map(entry => (
+                  <button
+                    key={entry.id}
+                    onClick={() => reuseHistoryEntry(entry)}
+                    className="group relative aspect-video rounded-md overflow-hidden cursor-pointer transition-all hover:ring-2 hover:ring-opacity-60"
+                    style={{
+                      background: '#1e1e1e',
+                    }}
+                    title={`${entry.prompt.slice(0, 50)}${entry.prompt.length > 50 ? '...' : ''}\n${entry.model} · ${entry.aspectRatio} · ${entry.duration}s`}
+                  >
+                    {/* 缩略图或占位符 */}
+                    {entry.thumbnailUrl || entry.firstFrameUrl ? (
+                      <img
+                        src={entry.thumbnailUrl || entry.firstFrameUrl}
+                        alt=""
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <Video className="w-4 h-4" style={{ color: subTextColor }} />
+                      </div>
+                    )}
+                    {/* 悬浮覆盖层 */}
+                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                      <RotateCcw className="w-4 h-4 text-white" />
+                    </div>
+                    {/* 模式标签 */}
+                    <div className="absolute bottom-0 left-0 right-0 px-1 py-0.5 text-white" style={{ background: 'rgba(0,0,0,0.7)', fontSize: '9px' }}>
+                      {entry.duration}s · {entry.aspectRatio}
+                    </div>
+                  </button>
+                ))}
+              </div>
+              {videoHistory.length > 3 && (
+                <button
+                  onClick={clearHistory}
+                  className="mt-1.5 text-xs w-full text-center cursor-pointer hover:underline"
+                  style={{ color: subTextColor }}
+                >
+                  清空历史
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* === 生成按钮 === */}
       <div className="px-3 pt-4 pb-3 mt-auto">
+        {/* 批量生成选择器 */}
+        <div className="flex items-center gap-2 mb-2.5">
+          <span className="text-xs shrink-0" style={{ color: subTextColor }}>批量生成</span>
+          <div className="flex gap-1">
+            {([1, 2, 4] as const).map(n => (
+              <button
+                key={n}
+                onClick={() => setBatchCount(n)}
+                className={`px-2.5 py-1 rounded text-xs font-medium transition-all cursor-pointer ${
+                  batchCount === n ? '' : ''
+                }`}
+                style={{
+                  background: batchCount === n
+                    ? (isGold ? 'rgba(212,175,55,0.2)' : 'rgba(59,130,246,0.2)')
+                    : (isMonochrome ? '#f3f4f6' : '#1e1e1e'),
+                  color: batchCount === n ? accentColor : subTextColor,
+                  border: `1px solid ${batchCount === n ? (isGold ? 'rgba(212,175,55,0.4)' : 'rgba(59,130,246,0.4)') : (isMonochrome ? '#e5e7eb' : '#333')}`,
+                }}
+              >
+                {n}x
+              </button>
+            ))}
+          </div>
+          {batchCount > 1 && (
+            <span className="text-[10px] ml-auto" style={{ color: subTextColor }}>
+              {batchCount}个不同种子
+            </span>
+          )}
+        </div>
         <button
           onClick={handleGenerate}
           disabled={isGenerating || !model || (!prompt.trim() && mode !== 'video-extend')}
