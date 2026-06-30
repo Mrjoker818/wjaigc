@@ -32,7 +32,7 @@ import {
   Settings, Palette, Users, HelpCircle, Box as BoxIcon, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, MoreHorizontal, Brush, ShoppingBag, Scan, GripVertical, Building2, FileImage, Workflow, LayoutGrid, LayoutDashboard, ChevronsRight, ChevronsLeft, Boxes, MessageCircle, Play, Package, Store
 } from 'lucide-react';
 import type { CanvasAnnotation, AnnotationRegion, AnnotationTool } from '@/lib/canvas-annotation';
-import { createAnnotation, hitTestAnnotationTarget, buildAnnotationPrompt, mergeAnnotationsForImage, ANNOTATION_COLORS, ANNOTATION_COLORS_MONO, computeAnnotationRegion } from '@/lib/canvas-annotation';
+import { createAnnotation, hitTestAnnotationTarget, buildAnnotationPrompt, mergeAnnotationsForImage, ANNOTATION_COLORS, ANNOTATION_COLORS_MONO, computeAnnotationRegion, BRUSH_COLOR_PALETTE } from '@/lib/canvas-annotation';
 import type { CanvasGenGroup, GenGroupToolbar, GroupRefImage, GenGroupType, ReferenceCategory, HexCubeGroup, HexCubeFaceData, CubeFace, ZoomLevel } from '@/lib/canvas-generation-group';
 import { createGroupRefImage, createGenGroup, generateGroupId, calculateConnectionPoints, aspectRatioToDimensions, calculateActualPixels, REFERENCE_CATEGORIES, REFERENCE_CATEGORY_LABELS, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS, MODEL_ASPECT_RATIOS, MODEL_QUALITIES, QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES, findModelConfig } from '@/lib/canvas-generation-group';
 import { getModelDisplayName } from '@/lib/model-name-map';
@@ -1233,6 +1233,8 @@ export function InfiniteCanvas({
   const brushCtxRef = useRef<CanvasRenderingContext2D | null>(null);
   const isBrushDrawingRef = useRef(false);
   const brushScaleRef = useRef<{ x: number; y: number }>({ x: 1, y: 1 });
+  const brushStrokesRef = useRef<{ x: number; y: number }[]>([]); // Screen-space points for live preview
+  const [brushStrokes, setBrushStrokes] = useState<{ x: number; y: number }[]>([]); // For re-render
   const [isDraggingRegion, setIsDraggingRegion] = useState(false);
 
   // Upscale state
@@ -2393,6 +2395,7 @@ export function InfiniteCanvas({
         const targetImg = images.find(i => i.id === targetImageId);
         if (targetImg) {
           const newAnn = createAnnotation(canvasPos.x, canvasPos.y, '', targetImageId, undefined);
+          newAnn.brushColor = annotationBrushColor;
           setAnnotations(prev => [...prev, newAnn]);
           setEditingAnnotationId(newAnn.id);
           setBrushDrawingAnnId(newAnn.id);
@@ -2416,6 +2419,9 @@ export function InfiniteCanvas({
           isBrushDrawingRef.current = true;
           // Store scale ratios for coordinate conversion
           brushScaleRef.current = { x: scaleRatioX, y: scaleRatioY };
+          // Start live preview stroke path
+          brushStrokesRef.current = [{ x: e.clientX, y: e.clientY }];
+          setBrushStrokes([{ x: e.clientX, y: e.clientY }]);
 
           // Draw first brush point
           if (ctx) {
@@ -2542,6 +2548,9 @@ export function InfiniteCanvas({
           brushCtxRef.current.beginPath();
           brushCtxRef.current.arc(relX, relY, scaledBrushR, 0, Math.PI * 2);
           brushCtxRef.current.fill();
+          // Add point for live preview
+          brushStrokesRef.current.push({ x: e.clientX, y: e.clientY });
+          setBrushStrokes([...brushStrokesRef.current]);
         }
         return;
       }
@@ -2726,6 +2735,8 @@ export function InfiniteCanvas({
       setBrushDrawingAnnId(null);
       brushCanvasRef.current = null;
       brushCtxRef.current = null;
+      brushStrokesRef.current = [];
+      setBrushStrokes([]);
       // Focus the annotation input
       setTimeout(() => annotationInputRef.current?.focus(), 50);
       return;
@@ -11294,7 +11305,10 @@ export function InfiniteCanvas({
                     const imgSw = hitImg.width * zoom;
                     const imgSh = hitImg.height * zoom;
                     return (
-                      <image href={ann.brushMaskDataUrl} x={imgSx} y={imgSy} width={imgSw} height={imgSh} opacity={0.35} />
+                      <g>
+                        <defs><mask id={`brush-mask-${ann.id}`}><image href={ann.brushMaskDataUrl} x={imgSx} y={imgSy} width={imgSw} height={imgSh} /></mask></defs>
+                        <rect x={imgSx} y={imgSy} width={imgSw} height={imgSh} fill={ann.brushColor || '#d4af37'} opacity={0.4} mask={`url(#brush-mask-${ann.id})`} />
+                      </g>
                     );
                   })()}
                   {/* Done checkmark */}
@@ -11312,6 +11326,13 @@ export function InfiniteCanvas({
               const h = Math.abs(annotationRegionCurrent.cy - annotationRegionStart.cy) * zoom;
               return (
                 <rect x={x1} y={y1} width={w} height={h} fill={isMonochrome ? 'rgba(59,130,246,0.1)' : 'rgba(212,175,55,0.1)'} stroke={isMonochrome ? '#3b82f6' : '#d4af37'} strokeWidth={1.5} strokeDasharray="6 3" rx={2} />
+              );
+            })()}
+            {/* Live brush stroke preview while drawing */}
+            {brushStrokes.length > 1 && (() => {
+              const pathD = brushStrokes.map((p, i) => i === 0 ? `M${p.x} ${p.y}` : `L${p.x} ${p.y}`).join(' ');
+              return (
+                <path d={pathD} fill="none" stroke={annotationBrushColor} strokeWidth={annotationBrushSize} strokeLinecap="round" strokeLinejoin="round" opacity={0.6} />
               );
             })()}
           </svg>
@@ -11627,6 +11648,22 @@ export function InfiniteCanvas({
                   className="w-16 h-1 accent-current"
                 />
                 <span className={`text-[10px] w-5 text-right ${isMonochrome ? 'text-gray-500' : 'text-gold-muted/60'}`}>{annotationBrushSize}</span>
+              </div>
+            )}
+            {/* Brush color picker (only in brush mode) */}
+            {annotationTool === 'brush' && (
+              <div className="flex items-center gap-1 ml-1">
+                <span className={`text-[10px] ${isMonochrome ? 'text-gray-400' : 'text-gold-muted/50'}`}>颜色</span>
+                <div className="flex items-center gap-1">
+                  {BRUSH_COLOR_PALETTE.map(c => (
+                    <button
+                      key={c}
+                      onClick={() => setAnnotationBrushColor(c)}
+                      className={`w-4 h-4 rounded-full border-2 transition-all ${annotationBrushColor === c ? 'border-white scale-110' : isMonochrome ? 'border-gray-300' : 'border-white/20'}`}
+                      style={{ backgroundColor: c }}
+                    />
+                  ))}
+                </div>
               </div>
             )}
             <div className={`w-px h-4 ${isMonochrome ? 'bg-gray-200' : 'bg-white/10'}`} />

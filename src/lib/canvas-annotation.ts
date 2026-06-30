@@ -38,6 +38,8 @@ export interface CanvasAnnotation {
   region?: AnnotationRegion;
   /** 可选：画笔蒙版（base64 data URL，与原图同尺寸，白色=修改区域，黑色=保留区域） */
   brushMaskDataUrl?: string;
+  /** 画笔颜色（用于视觉显示，不影响蒙版功能） */
+  brushColor?: string;
   /** 当前状态 */
   status: AnnotationStatus;
   /** AI回复（执行完成后） */
@@ -189,3 +191,15 @@ export const ANNOTATION_COLORS_MONO = {
   done: { bg: '#22c55e', border: '#16a34a', text: '#ffffff' },      // 绿色
   failed: { bg: '#ef4444', border: '#dc2626', text: '#ffffff' },    // 红色
 } as const;
+
+/** 画笔颜色调色板 */
+export const BRUSH_COLOR_PALETTE = [
+  '#d4af37', // 金色
+  '#ef4444', // 红色
+  '#3b82f6', // 蓝色
+  '#22c55e', // 绿色
+  '#f97316', // 橙色
+  '#8b5cf6', // 紫色
+  '#ec4899', // 粉色
+  '#ffffff', // 白色
+] as const;
