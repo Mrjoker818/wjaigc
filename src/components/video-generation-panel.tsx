@@ -7,6 +7,7 @@ import {
   Upload, X, AlertCircle, Info, FastForward, Users, Plus, Paintbrush, Film
 } from 'lucide-react';
 import MotionBrushCanvas, { type MotionBrushResult, type MotionBrushCanvasHandle } from './motion-brush-canvas';
+import { inferVideoModelFeatures } from '@/lib/video-api';
 
 // === 视频模板库 ===
 interface VideoTemplate {
@@ -352,6 +353,32 @@ export default function VideoGenerationPanel({
 
   // 自动从服务器加载视频模型（如果未通过 props 传入）
   useEffect(() => {
+    // 关键词推断模型能力（供未在注册表中硬编码的自定义模型使用）
+    const inferFallbackFeatures = (modelId: string): VideoModelInfo['features'] => {
+      const inferred = inferVideoModelFeatures(modelId);
+      if (inferred) {
+        return {
+          firstLastFrame: inferred.firstLastFrame,
+          multiReference: inferred.multiReference,
+          videoEdit: inferred.videoEdit,
+          videoExtend: inferred.videoExtend,
+          audio: inferred.audio,
+          cameraControl: inferred.cameraControl,
+          motionBrush: inferred.motionBrush,
+          characterConsistency: inferred.characterConsistency,
+          multiShot: inferred.multiShot,
+          maxDuration: inferred.maxDuration,
+          durations: inferred.durations,
+          aspectRatios: inferred.aspectRatios || inferred.ratios,
+          resolutions: inferred.resolutions,
+        };
+      }
+      return {
+        firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true,
+        audio: true, cameraControl: true, motionBrush: true, characterConsistency: false, multiShot: false,
+        maxDuration: 10, durations: [5, 10], aspectRatios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p'],
+      };
+    };
     if (serverVideoModels && serverVideoModels.length > 0) {
       const merged = serverVideoModels.map(sm => {
         const registry = VIDEO_MODEL_REGISTRY[sm.id];
@@ -361,11 +388,7 @@ export default function VideoGenerationPanel({
           providerId: sm.providerId,
           providerName: sm.providerName || registry?.provider || '',
           region: registry?.region || 'cn' as const,
-          features: registry?.features || {
-            firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false,
-            audio: false, maxDuration: 10, durations: [5, 10], aspectRatios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p'],
-            cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false,
-          },
+          features: registry?.features || inferFallbackFeatures(sm.id),
         };
       });
       setVideoModels(merged);
@@ -405,11 +428,7 @@ export default function VideoGenerationPanel({
               providerId: sm.providerId,
               providerName: sm.providerName || registry?.provider || '',
               region: registry?.region || 'cn' as const,
-              features: registry?.features || {
-                firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false,
-                audio: false, maxDuration: 10, aspectRatios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p'],
-                cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false,
-              },
+              features: registry?.features || inferFallbackFeatures(sm.id),
             };
           });
           setVideoModels(merged);
@@ -718,76 +737,102 @@ export default function VideoGenerationPanel({
       </div>
 
       {/* === 图片上传区（图生视频模式时显示） === */}
-      {mode !== 'text2video' && (
+      {mode !== 'text2video' && mode !== 'video-extend' && mode !== 'multi-shot' && (
         <div className="px-3 pt-3 space-y-2">
-          {/* 首帧 */}
-          <div>
-            <label className="text-xs text-gray-500 mb-1 block">首帧图片</label>
-            {firstFrameUrl ? (
-              <div className="relative group">
-                <img src={firstFrameUrl} alt="首帧" className="w-full h-24 object-cover rounded-md" style={{ border: `1px solid ${borderColor}` }} />
-                <button
-                  onClick={() => setFirstFrameUrl('')}
-                  className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                >
-                  <X className="w-3 h-3 text-white" />
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => handleImageUpload('first')}
-                className="w-full h-24 rounded-md flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors"
-                style={{ background: inputBg, border: `1px dashed ${borderColor}` }}
-              >
-                {selectedImageUrl ? (
-                  <>
-                    <img src={selectedImageUrl} alt="画布图片" className="w-full h-16 object-cover rounded opacity-50" />
-                    <span className="text-xs text-gray-500">点击使用画布图片</span>
-                  </>
-                ) : (
-                  <>
-                    <Upload className="w-5 h-5 text-gray-500" />
-                    <span className="text-xs text-gray-500">上传首帧图片</span>
-                  </>
-                )}
-              </button>
-            )}
-          </div>
-
-          {/* 尾帧（首尾帧模式时显示） */}
-          {mode === 'image2video-firstlast' && (
+          {mode === 'image2video-firstlast' ? (
+            // ===== 首尾帧双图并排布局 =====
             <div>
-              <label className="text-xs text-gray-500 mb-1 block">尾帧图片</label>
-              {lastFrameUrl ? (
-                <div className="relative group">
-                  <img src={lastFrameUrl} alt="尾帧" className="w-full h-24 object-cover rounded-md" style={{ border: `1px solid ${borderColor}` }} />
-                  <button
-                    onClick={() => setLastFrameUrl('')}
-                    className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                  >
-                    <X className="w-3 h-3 text-white" />
-                  </button>
+              <label className="text-xs text-gray-500 mb-2 flex items-center gap-1.5">
+                <Film className="w-3.5 h-3.5" style={{ color: accentColor }} />
+                首尾帧控制（视频从首帧平滑过渡到尾帧）
+              </label>
+              <div className="flex items-center gap-2">
+                {/* 首帧 */}
+                <div className="flex-1">
+                  <div className="text-[10px] text-gray-400 mb-1 flex items-center gap-1">
+                    <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[9px] font-bold" style={{ background: accentColor, color: '#000' }}>1</span>
+                    首帧（开始画面）
+                  </div>
+                  {firstFrameUrl ? (
+                    <div className="relative group aspect-video rounded-md overflow-hidden" style={{ border: `1px solid ${borderColor}` }}>
+                      <img src={firstFrameUrl} alt="首帧" className="w-full h-full object-cover" />
+                      <button
+                        onClick={() => setFirstFrameUrl('')}
+                        className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                      >
+                        <X className="w-3 h-3 text-white" />
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => handleImageUpload('first')}
+                      className="w-full aspect-video rounded-md flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors hover:opacity-80"
+                      style={{ background: inputBg, border: `1px dashed ${borderColor}` }}
+                    >
+                      {selectedImageUrl ? (
+                        <>
+                          <img src={selectedImageUrl} alt="画布图片" className="w-full h-full object-cover rounded opacity-40 absolute inset-0" />
+                          <Upload className="w-5 h-5 text-gray-400 relative z-10" />
+                          <span className="text-[10px] text-gray-400 relative z-10">点击使用画布图片或上传</span>
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="w-5 h-5 text-gray-400" />
+                          <span className="text-[10px] text-gray-400">上传首帧</span>
+                        </>
+                      )}
+                    </button>
+                  )}
                 </div>
-              ) : (
-                <button
-                  onClick={() => handleImageUpload('last')}
-                  className="w-full h-24 rounded-md flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors"
-                  style={{ background: inputBg, border: `1px dashed ${borderColor}` }}
-                >
-                  <Upload className="w-5 h-5 text-gray-500" />
-                  <span className="text-xs text-gray-500">上传尾帧图片</span>
-                </button>
-              )}
-            </div>
-          )}
 
-          {/* 多参考图 */}
-          {mode === 'image2video-ref' && (
+                {/* 中间箭头 */}
+                <div className="flex flex-col items-center shrink-0" style={{ color: accentColor }}>
+                  <div className="w-7 h-7 rounded-full flex items-center justify-center" style={{ background: isGold ? 'rgba(212,175,55,0.15)' : 'rgba(59,130,246,0.15)', border: `1px solid ${borderColor}` }}>
+                    <FastForward className="w-3.5 h-3.5" />
+                  </div>
+                  <span className="text-[9px] text-gray-500 mt-1">AI 生成</span>
+                </div>
+
+                {/* 尾帧 */}
+                <div className="flex-1">
+                  <div className="text-[10px] text-gray-400 mb-1 flex items-center gap-1">
+                    <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[9px] font-bold" style={{ background: accentColor, color: '#000' }}>2</span>
+                    尾帧（结束画面）
+                  </div>
+                  {lastFrameUrl ? (
+                    <div className="relative group aspect-video rounded-md overflow-hidden" style={{ border: `1px solid ${borderColor}` }}>
+                      <img src={lastFrameUrl} alt="尾帧" className="w-full h-full object-cover" />
+                      <button
+                        onClick={() => setLastFrameUrl('')}
+                        className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                      >
+                        <X className="w-3 h-3 text-white" />
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => handleImageUpload('last')}
+                      className="w-full aspect-video rounded-md flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors hover:opacity-80"
+                      style={{ background: inputBg, border: `1px dashed ${borderColor}` }}
+                    >
+                      <Upload className="w-5 h-5 text-gray-400" />
+                      <span className="text-[10px] text-gray-400">上传尾帧</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+              <p className="text-[10px] text-gray-500 mt-2 flex items-start gap-1">
+                <Info className="w-3 h-3 shrink-0 mt-0.5" />
+                上传开始和结束画面，AI 会自动补全中间的过渡动画，生成完整视频
+              </p>
+            </div>
+          ) : mode === 'image2video-ref' ? (
+            // ===== 多参考图模式 =====
             <div>
-              <label className="text-xs text-gray-500 mb-1 block">参考图（最多7张）</label>
+              <label className="text-xs text-gray-500 mb-1 block">参考图（最多7张，AI 会综合参考所有图片）</label>
               <div className="flex flex-wrap gap-2">
                 {referenceImages.map((url, idx) => (
-                  <div key={idx} className="relative group w-14 h-14">
+                  <div key={idx} className="relative group w-16 h-16">
                     <img src={url} alt={`参考${idx+1}`} className="w-full h-full object-cover rounded-md" style={{ border: `1px solid ${borderColor}` }} />
                     <button
                       onClick={() => setReferenceImages(prev => prev.filter((_, i) => i !== idx))}
@@ -800,13 +845,52 @@ export default function VideoGenerationPanel({
                 {referenceImages.length < 7 && (
                   <button
                     onClick={() => handleImageUpload('ref')}
-                    className="w-14 h-14 rounded-md flex items-center justify-center cursor-pointer transition-colors"
+                    className="w-16 h-16 rounded-md flex flex-col items-center justify-center cursor-pointer transition-colors hover:opacity-80"
                     style={{ background: inputBg, border: `1px dashed ${borderColor}` }}
                   >
-                    <Upload className="w-4 h-4 text-gray-500" />
+                    <Upload className="w-4 h-4 text-gray-400" />
+                    <span className="text-[9px] text-gray-400 mt-0.5">添加</span>
                   </button>
                 )}
               </div>
+            </div>
+          ) : (
+            // ===== 图生视频（仅首帧） =====
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block flex items-center gap-1">
+                <ImagePlus className="w-3.5 h-3.5" style={{ color: accentColor }} />
+                首帧图片（视频的起始画面）
+              </label>
+              {firstFrameUrl ? (
+                <div className="relative group aspect-video rounded-md overflow-hidden" style={{ border: `1px solid ${borderColor}` }}>
+                  <img src={firstFrameUrl} alt="首帧" className="w-full h-full object-cover" />
+                  <button
+                    onClick={() => setFirstFrameUrl('')}
+                    className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                  >
+                    <X className="w-3 h-3 text-white" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => handleImageUpload('first')}
+                  className="w-full aspect-video rounded-md flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors hover:opacity-80"
+                  style={{ background: inputBg, border: `1px dashed ${borderColor}` }}
+                >
+                  {selectedImageUrl ? (
+                    <>
+                      <img src={selectedImageUrl} alt="画布图片" className="w-full h-full object-cover rounded opacity-40 absolute inset-0" />
+                      <Upload className="w-5 h-5 text-gray-400 relative z-10" />
+                      <span className="text-xs text-gray-400 relative z-10">点击使用画布图片或上传</span>
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-6 h-6 text-gray-400" />
+                      <span className="text-xs text-gray-400">上传首帧图片，AI 将从此画面开始生成视频</span>
+                    </>
+                  )}
+                </button>
+              )}
             </div>
           )}
         </div>

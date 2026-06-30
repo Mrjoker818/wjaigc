@@ -29,6 +29,7 @@ export interface VideoModelFeatures {
   maxDuration: number;        // 最大时长(秒)
   durations: number[];        // 可选时长列表(秒)
   ratios: string[];           // 支持的画面比例
+  aspectRatios?: string[];    // 别名（部分前端组件使用 aspectRatios）
   resolutions: string[];      // 支持的分辨率
   region: 'cn' | 'global';   // 国内/海外
 }
@@ -263,56 +264,94 @@ export function getVideoModelInfo(modelId: string): VideoModelInfo | null {
   return inferVideoModelFromKeywords(modelId);
 }
 
+export function inferVideoModelFeatures(modelId: string): VideoModelInfo['features'] | null {
+  const info = inferVideoModelFromKeywords(modelId);
+  return info ? info.features : null;
+}
+
 function inferVideoModelFromKeywords(modelId: string): VideoModelInfo | null {
   const lower = modelId.toLowerCase();
   let profile: VideoCompatProfile = 'rest-generic';
   let region: 'cn' | 'global' = 'global';
+  let name = modelId;
 
-  if (lower.includes('kling') || lower.includes('dashscope') || lower.includes('qwen')) {
+  // ====== 家族特征推断 ======
+  // Kling (可灵): 完整首尾帧/多参考/延长/音效/运镜/运动笔刷
+  const isKling = lower.includes('kling') || lower.includes('dashscope') || lower.includes('wanx') || lower.includes('通义');
+  // Seedance/豆包: 完整特征
+  const isSeedance = lower.includes('seedance') || lower.includes('doubao') || lower.includes('volcengine') || lower.includes('ark') || lower.includes('豆包');
+  // Minimax/海螺
+  const isMinimax = lower.includes('minimax') || lower.includes('hailuo') || lower.includes('video-01') || lower.includes('海螺');
+  // Vidu
+  const isVidu = lower.includes('vidu');
+  // Sora / OpenAI
+  const isSora = lower.includes('sora') || (lower.includes('openai') && lower.includes('video'));
+  // Runway Gen-3/4
+  const isRunway = lower.includes('runway') || lower.includes('gen-3') || lower.includes('gen-4');
+  // Pika
+  const isPika = lower.includes('pika');
+  // Luma Ray
+  const isLuma = lower.includes('luma') || lower.includes('ray');
+  // Veo/Google
+  const isVeo = lower.includes('veo') || lower.includes('google');
+  // 海螺 miniomni/hailuo omni 等带音效
+  const hasAudio = isKling || isSeedance || isMinimax || isSora || isVeo;
+  // 现代主流视频模型普遍支持首尾帧/图生视频
+  const supportsFirstLast = isKling || isSeedance || isVidu || isRunway || isPika || isLuma || isSora || isVeo || isMinimax;
+  const supportsMultiRef = isKling || isSeedance || isMinimax;
+  const supportsExtend = isKling || isSeedance || isVidu || isLuma || isSora || isVeo || isRunway;
+  const supportsCamera = isKling || isSeedance || isVidu || isRunway || isPika || isLuma || isMinimax;
+  const supportsMotionBrush = isKling || isSeedance || isRunway || isPika || isLuma;
+  const supportsChar = isKling && (lower.includes('v3') && !lower.includes('fast')) || isSeedance || lower.includes('character') || lower.includes('omni');
+  const supportsMultiShot = isSeedance;
+
+  if (isKling) {
     profile = 'dashscope'; region = 'cn';
-  } else if (lower.includes('seedance') || lower.includes('doubao') || lower.includes('volcengine') || lower.includes('ark')) {
+    name = lower.includes('v3.5') || lower.includes('v3-5') ? '可灵 V3.5' : lower.includes('omni') ? '可灵 V3 Omni' : lower.includes('v3') ? '可灵 V3' : lower.includes('v2') ? '可灵 V2' : lower.includes('v2.6') ? '可灵 2.6' : '可灵';
+  } else if (isSeedance) {
     profile = 'volcengine-ark'; region = 'cn';
-  } else if (lower.includes('minimax') || lower.includes('hailuo') || lower.includes('video-01')) {
-    profile = 'minimax'; region = 'cn';
-  } else if (lower.includes('vidu')) {
-    profile = 'vidu'; region = 'cn';
-  } else if (lower.includes('sora') || lower.includes('openai')) {
-    profile = 'openai-video';
-  } else if (lower.includes('pika') || lower.includes('fal')) {
-    profile = 'fal-video';
-  } else if (lower.includes('runway') || lower.includes('gen-')) {
-    profile = 'rest-generic';
-  } else if (lower.includes('luma') || lower.includes('ray')) {
-    profile = 'rest-generic';
-  } else if (lower.includes('veo') || lower.includes('google')) {
-    profile = 'rest-generic';
+    name = lower.includes('3.0') ? 'Seedance 3.0' : lower.includes('2.3') ? 'Seedance 2.3' : lower.includes('2.0') ? 'Seedance 2.0' : lower.includes('1.0') ? 'Seedance 1.0 Pro' : 'Seedance';
+  } else if (isMinimax) {
+    profile = 'minimax'; region = 'cn'; name = '海螺 AI';
+  } else if (isVidu) {
+    profile = 'vidu'; region = 'cn'; name = lower.includes('q2') || lower.includes('2.0') ? 'Vidu Q2' : lower.includes('q1') ? 'Vidu Q1' : 'Vidu';
+  } else if (isSora) {
+    profile = 'openai-video'; name = 'Sora';
+  } else if (isPika || lower.includes('fal')) {
+    profile = 'fal-video'; name = isPika ? 'Pika' : name;
+  } else if (isRunway) {
+    profile = 'rest-generic'; name = lower.includes('gen-4') ? 'Runway Gen-4' : lower.includes('gen-3') ? 'Runway Gen-3' : 'Runway';
+  } else if (isLuma) {
+    profile = 'rest-generic'; name = 'Luma Ray';
+  } else if (isVeo) {
+    profile = 'rest-generic'; name = 'Veo';
   } else {
-    // Unknown model, default to rest-generic
-    if (lower.includes('ali') || lower.includes('baidu') || lower.includes('tencent')) {
+    if (lower.includes('ali') || lower.includes('baidu') || lower.includes('tencent') || lower.includes('cn')) {
       region = 'cn';
     }
   }
 
   return {
     profile,
-    name: modelId,
+    name,
     short: modelId,
-    provider: 'Unknown',
+    provider: name,
     features: {
-      firstLastFrame: false,
-      multiReference: false,
-      videoEdit: false,
-      videoExtend: false,
-      audio: false,
-      maxDuration: 10,
-      durations: [5, 10],
-      ratios: ['1:1', '4:3', '16:9', '9:16'],
+      firstLastFrame: supportsFirstLast,
+      multiReference: supportsMultiRef,
+      videoEdit: supportsFirstLast,
+      videoExtend: supportsExtend,
+      audio: hasAudio,
+      maxDuration: isSeedance && lower.includes('3.0') ? 15 : isKling && lower.includes('v3.5') ? 30 : isKling && lower.includes('omni') ? 30 : isKling && lower.includes('v3') ? 15 : 10,
+      durations: isKling && lower.includes('v3.5') || lower.includes('omni') ? [5, 10, 15, 30] : isKling && lower.includes('v3') ? [5, 10, 15] : isSeedance && lower.includes('3.0') ? [5, 10, 15] : [5, 10],
+      ratios: ['1:1', '4:3', '3:4', '16:9', '9:16'],
+      aspectRatios: ['1:1', '4:3', '3:4', '16:9', '9:16'],
       resolutions: ['720p', '1080p'],
       region,
-      cameraControl: false,
-      motionBrush: false,
-      characterConsistency: false,
-      multiShot: false,
+      cameraControl: supportsCamera,
+      motionBrush: supportsMotionBrush,
+      characterConsistency: supportsChar,
+      multiShot: supportsMultiShot,
     },
   };
 }
