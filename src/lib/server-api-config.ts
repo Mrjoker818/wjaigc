@@ -71,6 +71,7 @@ interface AddProviderInput {
   modelType: ApiKind;
   requestStyle?: 'chat-completions' | 'images-generations' | 'custom' | 'auto';
   selectedModels?: string[];
+  discoveredModels?: ModelInfo[];
   advancedParams?: Record<string, string>;
   isDefault?: boolean;
 }
@@ -621,8 +622,14 @@ export async function addApiProvider(input: AddProviderInput): Promise<ApiProvid
     sortOrder: 0, // will be set after unshift
   };
 
-  const discovery = await discoverModelsForCredentials(provider.baseUrl, provider.apiKey, input.modelType);
-  provider.discoveredModels = discovery.models.map(model => ({ ...model, providerId: id }));
+  // Use client-provided discoveredModels if available, otherwise auto-discover
+  let discovery: { success: boolean; models: ModelInfo[]; message: string; latencyMs: number } | null = null;
+  if (input.discoveredModels && input.discoveredModels.length > 0) {
+    provider.discoveredModels = input.discoveredModels.map(model => ({ ...model, providerId: id }));
+  } else {
+    discovery = await discoverModelsForCredentials(provider.baseUrl, provider.apiKey, input.modelType);
+    provider.discoveredModels = discovery.models.map(model => ({ ...model, providerId: id }));
+  }
 
   // Auto-select matching models for vectorize/layer types
   if (input.selectedModels && input.selectedModels.length > 0) {
@@ -649,7 +656,7 @@ export async function addApiProvider(input: AddProviderInput): Promise<ApiProvid
   }
 
   provider.selectedModel = provider.selectedModels[0];
-  provider.connectionStatus = discovery.success ? 'success' : 'failed';
+  provider.connectionStatus = discovery?.success ? 'success' : (input.discoveredModels?.length ? 'success' : 'untested');
   provider.lastTestedAt = Date.now();
   provider.balance = await refreshProviderBalance(provider);
 
@@ -678,11 +685,27 @@ export async function updateApiProvider(providerId: string, updates: Partial<Api
     updatedAt: Date.now(),
   };
 
-  if (updates.baseUrl || updates.apiKey) {
+  // 只在 baseUrl 或 apiKey 实际发生变化时才重新发现模型
+  const baseUrlChanged = updates.baseUrl && updates.baseUrl !== current.baseUrl;
+  const apiKeyChanged = updates.apiKey && updates.apiKey !== current.apiKey;
+  if (baseUrlChanged || apiKeyChanged) {
     const discovery = await discoverModelsForCredentials(next.baseUrl, next.apiKey, next.modelType || 'universal');
-    next.discoveredModels = discovery.models.map(model => ({ ...model, providerId: next.id }));
+    // 合并：保留用户手动修改的 displayName
+    const existingModelMap = new Map((current.discoveredModels || []).map(m => [m.id, m]));
+    next.discoveredModels = discovery.models.map(model => {
+      const existing = existingModelMap.get(model.id);
+      return {
+        ...model,
+        providerId: next.id,
+        // 如果用户手动修改过 displayName，保留用户的修改
+        displayName: existing?.displayName || model.displayName,
+      };
+    });
     next.connectionStatus = discovery.success ? 'success' : 'failed';
     next.lastTestedAt = Date.now();
+  } else if (updates.discoveredModels) {
+    // 没有重新发现模型，但前端发送了更新后的 discoveredModels（含用户修改的 displayName）
+    next.discoveredModels = updates.discoveredModels;
   }
 
   if (updates.isDefault) {
@@ -893,23 +916,26 @@ export async function getPublicModels(modelType?: ApiKind): Promise<ModelInfo[]>
           name: '', // will be resolved below
           providerId: provider.id,
           type: modelTypeForProvider(provider),
+          displayName: undefined,
         } satisfies ModelInfo))).map(model => {
-          // 优先使用第三方 API 供应商提供的模型名称，回退到本地映射
+          // 优先级：管理员手动设置的 displayName > 第三方 API 供应商名称 > 本地映射
+          const adminDisplayName = model.displayName || '';
           const providerName = (model as ModelInfo).name && (model as ModelInfo).name !== model.id ? (model as ModelInfo).name : '';
           const mappedName = getModelDisplayName(model.id);
-          const name = providerName || mappedName;
-          const apiDisplayName = providerName || mappedName; // 优先第三方供应商名称，回退到本地映射
-          return { ...model, providerId: provider.id, name, apiDisplayName };
+          const name = adminDisplayName || providerName || mappedName;
+          const apiDisplayName = providerName || mappedName; // 原始API名称（用于回退）
+          return { ...model, providerId: provider.id, name, apiDisplayName, displayName: adminDisplayName || undefined };
         });
       }
       // If no models explicitly selected, show all discovered models
       // (admin hasn't filtered yet, so all are available)
       return discovered.map(model => {
+          const adminDisplayName = model.displayName || '';
           const providerName = model.name && model.name !== model.id ? model.name : '';
           const mappedName = getModelDisplayName(model.id);
-          const name = providerName || mappedName;
+          const name = adminDisplayName || providerName || mappedName;
           const apiDisplayName = providerName || mappedName;
-          return { ...model, providerId: provider.id, name, apiDisplayName };
+          return { ...model, providerId: provider.id, name, apiDisplayName, displayName: adminDisplayName || undefined };
         });
     })
     // Filter by model-level type for non-general queries

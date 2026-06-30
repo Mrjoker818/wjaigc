@@ -100,6 +100,7 @@ export async function POST(request: NextRequest) {
       modelType: body.modelType || 'image',
       requestStyle: body.requestStyle,
       selectedModels: Array.isArray(body.selectedModels) ? body.selectedModels : undefined,
+      discoveredModels: Array.isArray(body.discoveredModels) ? body.discoveredModels : undefined,
       advancedParams: body.advancedParams,
       isDefault: Boolean(body.isDefault),
     });

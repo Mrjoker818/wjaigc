@@ -1251,6 +1251,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
           apiKey: apiKey.trim() || undefined,
           modelType: apiKind,
           selectedModels: models,
+          discoveredModels: discoveredModels.length > 0 ? discoveredModels : undefined,
           requestStyle: apiKind === 'general' ? 'auto' : apiKind === 'chat' ? 'chat-completions' : apiKind === 'vectorize' || apiKind === 'layer' || apiKind === 'upscaler' ? 'chat-completions' : apiKind === 'video' ? 'images-generations' : 'images-generations',
           advancedParams: [...advancedParams.filter(p => p.key.trim()), ...(compatProfile !== 'auto' ? [{ key: 'compatProfile', value: compatProfile }] : [])],
           balanceUsername: balanceUsername.trim(), balancePassword: balancePassword.trim(),
@@ -1293,6 +1294,8 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       if (apiKey.trim()) updates.apiKey = apiKey.trim();
       updates.modelType = apiKind;
       if (models) updates.selectedModels = models;
+      // 发送discoveredModels（包含用户手动编辑的displayName）
+      if (discoveredModels.length > 0) updates.discoveredModels = discoveredModels;
       const filteredParams = advancedParams.filter(p => p.key.trim());
       const paramsWithCompat = [...filteredParams.filter(p => p.key !== 'compatProfile'), ...(compatProfile !== 'auto' ? [{ key: 'compatProfile', value: compatProfile }] : [])];
       if (paramsWithCompat.length > 0) updates.advancedParams = paramsWithCompat;
@@ -2628,7 +2631,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                                   <div key={m.id} className={`flex items-center gap-3 px-4 py-2.5 ${idx % 2 === 0 ? 'bg-muted/30' : ''} hover:bg-muted/60 transition-colors group`}>
                                     <input type="checkbox" checked={isSelected} onChange={() => { setSelectedModels(prev => prev.includes(m.id) ? prev.filter(x => x !== m.id) : [...prev, m.id]); }} className="w-4 h-4 rounded accent-primary cursor-pointer" />
                                     <div className="flex-1 min-w-0">
-                                      <div className={`text-sm truncate ${isSelected ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>{m.name || m.id}</div>
+                                      <div className={`text-sm truncate ${isSelected ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>{m.displayName || m.name || m.id}</div>
                                       <div className="text-xs font-mono truncate text-muted-foreground/60">{m.id}</div>
                                     </div>
                                     {m.contextWindow && (
@@ -2636,7 +2639,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                                         {m.contextWindow >= 1000 ? `${(m.contextWindow / 1000).toFixed(0)}K` : m.contextWindow}
                                       </span>
                                     )}
-                                    <button onClick={() => { setEditingModel(m); setModelFormName(m.name || ''); setModelFormId(m.id); setModelFormContext(m.contextWindow ? String(m.contextWindow) : ''); setShowModelDialog(true); }} className="p-1.5 rounded-md opacity-0 group-hover:opacity-100 hover:bg-muted text-muted-foreground hover:text-foreground transition-all cursor-pointer">
+                                    <button onClick={() => { setEditingModel(m); setModelFormName(m.displayName || m.name || ''); setModelFormId(m.id); setModelFormContext(m.contextWindow ? String(m.contextWindow) : ''); setShowModelDialog(true); }} className="p-1.5 rounded-md opacity-0 group-hover:opacity-100 hover:bg-muted text-muted-foreground hover:text-foreground transition-all cursor-pointer">
                                       <Edit3 className="w-3.5 h-3.5" />
                                     </button>
                                   </div>
@@ -2691,9 +2694,15 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                       <div className="px-5 py-3 border-t border-border flex justify-end gap-2">
                         <button onClick={() => setShowModelDialog(false)} className="px-4 py-2 rounded-md text-sm font-medium bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground transition-colors cursor-pointer">取消</button>
                         <button onClick={() => {
+                          const displayNameValue = modelFormName.trim();
+                          const originalName = editingModel?.name || modelFormId.trim();
+                          // name: 保留原始API发现的名称；displayName: 用户手动设置的显示名称
+                          // 如果用户修改了显示名称（与原始name不同），则存入displayName；否则清除displayName
+                          const shouldSetDisplayName = displayNameValue && displayNameValue !== originalName;
                           const newModel: ModelInfo = {
                             id: modelFormId.trim(),
-                            name: modelFormName.trim() || modelFormId.trim(),
+                            name: originalName,
+                            displayName: shouldSetDisplayName ? displayNameValue : undefined,
                             contextWindow: modelFormContext ? parseInt(modelFormContext) : undefined,
                             providerId: editingProviderId || '',
                             type: apiKind
