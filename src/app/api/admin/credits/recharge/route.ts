@@ -32,14 +32,15 @@ export async function POST(request: NextRequest) {
     }
 
     // Upsert credits: create if not exists, update if exists
+    const creditId = `credit_${userId}`;
     await execSql(
-      `INSERT INTO wujie_credits (user_id, balance, total_recharged, total_used, created_at, updated_at)
-       VALUES ($1, $2, $2, 0, $3, $3)
+      `INSERT INTO wujie_credits (id, user_id, balance, total_recharged, total_used, created_at, updated_at)
+       VALUES ($1, $2, $3, $3, 0, $4, $4)
        ON CONFLICT (user_id) DO UPDATE
-       SET balance = wujie_credits.balance + $2,
-           total_recharged = wujie_credits.total_recharged + $2,
-           updated_at = $3`,
-      [userId, numericAmount, now]
+       SET balance = wujie_credits.balance + $3,
+           total_recharged = wujie_credits.total_recharged + $3,
+           updated_at = $4`,
+      [creditId, userId, numericAmount, now]
     );
 
     // Record transaction
