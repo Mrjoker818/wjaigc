@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { AdminRechargeOrders } from './admin-recharge-orders';
 import {
   Users, TrendingUp, Wallet, ShieldCheck, Activity, BarChart3, CreditCard,
   Settings2, Search, RefreshCw, Plus, ChevronRight, ChevronDown,
@@ -789,8 +790,9 @@ export default function AdminTabs(props: AdminTabsProps) {
   if (activeTab === 'credits') {
     // Get users with real credit data from the credits overview API
     const co = creditsOverview;
-    const creditTabs = ['user-credits', 'consumption', 'statistics', 'packages'];
-    const creditTabLabels: Record<string, string> = { 'user-credits': '用户积分', consumption: '消耗明细', statistics: '统计分析', packages: '套餐管理' };
+    const creditTabs = ['pending-orders', 'user-credits', 'consumption', 'statistics', 'packages'];
+    const creditTabLabels: Record<string, string> = { 'pending-orders': '充值订单', 'user-credits': '用户积分', consumption: '消耗明细', statistics: '统计分析', packages: '套餐管理' };
+
     // Use credit overview topUsers (real data from DB) filtered by search
     const creditUsers = (() => {
       let users = co?.topUsers ? [...co.topUsers] : [];
@@ -829,6 +831,9 @@ export default function AdminTabs(props: AdminTabsProps) {
             <button key={t} onClick={() => setCreditSubTab(t)} className={`text-sm font-medium pb-3 cursor-pointer bg-transparent border-none transition-colors ${creditSubTab === t ? 'text-primary border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground'}`}>{creditTabLabels[t]}</button>
           ))}
         </div>
+
+        {/* Tab 0: 充值订单审核 */}
+        {creditSubTab === 'pending-orders' && <AdminRechargeOrders />}
 
         {/* Tab 1: 用户积分 */}
         {creditSubTab === 'user-credits' && (

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, use } from 'react';
+import { useState, useEffect, use, useRef } from 'react';
 import QRCode from 'qrcode';
 import { RECHARGE_PACKAGES } from '@/lib/credits-constants';
 
@@ -14,6 +14,7 @@ interface OrderInfo {
   createdAt: number;
   expiresAt: number;
   isExpired: boolean;
+  rejectReason?: string;
 }
 
 interface RechargeData {
@@ -28,15 +29,16 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
   const [data, setData] = useState<RechargeData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [confirming, setConfirming] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [paid, setPaid] = useState(false);
   const [payResult, setPayResult] = useState<{ balance: number; amount: number } | null>(null);
   const [hasGoneToPay, setHasGoneToPay] = useState(false);
   const [payQrDataUrl, setPayQrDataUrl] = useState('');
+  const [submitted, setSubmitted] = useState(false); // waiting for admin approval
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     fetchOrderDetails();
-    // Check if user returned from payment
     try {
       const saved = sessionStorage.getItem(`recharge_pay_${orderId}`);
       if (saved === '1') setHasGoneToPay(true);
@@ -44,7 +46,42 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderId]);
 
-  // Generate QR code from payLink for fallback scanning
+  // Poll order status when submitted/waiting
+  useEffect(() => {
+    if (submitted && !paid && !pollTimerRef.current) {
+      pollTimerRef.current = setInterval(async () => {
+        try {
+          const res = await fetch(`/api/recharge/${orderId}`, { cache: 'no-store' });
+          const json = await res.json();
+          if (json.success) {
+            setData(json);
+            if (json.order?.paymentStatus === 'paid') {
+              setPaid(true);
+              setPayResult({ balance: json.balance || 0, amount: json.order.amount });
+              if (pollTimerRef.current) {
+                clearInterval(pollTimerRef.current);
+                pollTimerRef.current = null;
+              }
+            } else if (json.order?.paymentStatus === 'rejected') {
+              setSubmitted(false);
+              setError(`审核未通过：${json.order.rejectReason || '请重新支付或联系客服'}`);
+              if (pollTimerRef.current) {
+                clearInterval(pollTimerRef.current);
+                pollTimerRef.current = null;
+              }
+            }
+          }
+        } catch { /* ignore poll errors */ }
+      }, 5000);
+    }
+    return () => {
+      if (pollTimerRef.current) {
+        clearInterval(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+    };
+  }, [submitted, paid, orderId]);
+
   useEffect(() => {
     if (!data?.payLink) {
       setPayQrDataUrl('');
@@ -60,7 +97,7 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
 
   async function fetchOrderDetails() {
     try {
-      const res = await fetch(`/api/recharge/${orderId}`);
+      const res = await fetch(`/api/recharge/${orderId}`, { cache: 'no-store' });
       const json = await res.json();
       if (!json.success) {
         setError(json.error || '获取订单信息失败');
@@ -68,6 +105,10 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
         setData(json);
         if (json.order?.paymentStatus === 'paid') {
           setPaid(true);
+          setPayResult({ balance: json.balance || 0, amount: json.order.amount });
+        } else if (json.order?.paymentStatus === 'submitted') {
+          setSubmitted(true);
+          setHasGoneToPay(true);
         }
       }
     } catch {
@@ -77,33 +118,36 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
     }
   }
 
-  // Track that user clicked pay (called from <a> onClick)
   function handlePayClick() {
     try { sessionStorage.setItem(`recharge_pay_${orderId}`, '1'); } catch { /* ignore */ }
     setHasGoneToPay(true);
   }
 
-  // User confirms payment completed
-  async function handleConfirmPaid() {
-    if (confirming || paid) return;
-    setConfirming(true);
+  // User notifies admin: they paid, now waiting for verification
+  async function handleNotifyPaid() {
+    if (submitting || submitted || paid) return;
+    setSubmitting(true);
+    setError('');
     try {
-      const res = await fetch(`/api/recharge/${orderId}`, { method: 'POST' });
+      const res = await fetch(`/api/credits`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'confirm-paid', orderId }),
+      });
       const json = await res.json();
       if (json.success) {
-        setPaid(true);
-        setPayResult({ balance: json.balance, amount: json.amount });
+        setSubmitted(true);
+        setData(prev => prev ? { ...prev, order: { ...prev.order, paymentStatus: 'submitted' } } : prev);
       } else {
-        setError(json.error || '确认失败');
+        setError(json.error || '提交失败，请重试');
       }
     } catch {
       setError('网络错误，请重试');
     } finally {
-      setConfirming(false);
+      setSubmitting(false);
     }
   }
 
-  // Loading state
   if (loading) {
     return (
       <div className="min-h-screen bg-[#0d1117] flex items-center justify-center">
@@ -115,7 +159,6 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
     );
   }
 
-  // Error state (no data)
   if (error && !data) {
     return (
       <div className="min-h-screen bg-[#0d1117] flex items-center justify-center p-6">
@@ -139,7 +182,7 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
   const methodColor = isWechat ? '#07C160' : '#1677FF';
   const expiresDate = order.expiresAt > 0 ? new Date(order.expiresAt).toLocaleString('zh-CN') : '';
 
-  // Success state
+  // Success state (admin approved)
   if (paid) {
     return (
       <div className="min-h-screen bg-[#0d1117] flex items-center justify-center p-6">
@@ -151,7 +194,7 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
           </div>
           <h2 className="text-white text-xl font-bold mb-2">充值成功！</h2>
           <p className="text-[#d4af37] text-2xl font-bold mb-1">{payResult?.amount || order.amount} 积分</p>
-          <p className="text-white/50 text-sm mb-6">已到账，可在无界AI工作台查看余额</p>
+          <p className="text-white/50 text-sm mb-6">已审核通过并到账，可在无界AI工作台查看余额</p>
           <div className="bg-white/5 rounded-xl p-4 mb-4">
             <p className="text-white/40 text-xs mb-1">当前余额</p>
             <p className="text-white text-lg font-semibold">{payResult?.balance || '--'} 积分</p>
@@ -162,7 +205,69 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
     );
   }
 
-  // Expired state
+  // Waiting for admin approval state
+  if (submitted) {
+    return (
+      <div className="min-h-screen bg-[#0d1117] flex items-center justify-center p-6">
+        <div className="bg-[#1c2128] border border-[#30363d] rounded-2xl p-8 max-w-md w-full text-center">
+          <div className="w-16 h-16 bg-amber-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+            <div className="w-8 h-8 border-3 border-amber-400/30 border-t-amber-400 rounded-full animate-spin" />
+          </div>
+          <h2 className="text-white text-xl font-bold mb-2">等待审核</h2>
+          <p className="text-white/60 text-sm mb-6">
+            您的付款通知已提交，管理员将在确认收款后为您充值积分，通常1-10分钟内处理完成。
+            <br />请保持此页面打开，到账后将自动提示。
+          </p>
+          <div className="bg-white/5 rounded-xl p-4 mb-4 text-left">
+            <div className="flex justify-between text-sm mb-2">
+              <span className="text-white/40">订单金额</span>
+              <span className="text-white font-semibold">¥{order.priceCny.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between text-sm mb-2">
+              <span className="text-white/40">到账积分</span>
+              <span className="text-[#d4af37] font-semibold">{order.amount} 积分{order.bonus > 0 && ` (+${order.bonus}赠)`}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-white/40">支付方式</span>
+              <span className="text-white/80">{methodIcon} {methodLabel}</span>
+            </div>
+          </div>
+          <button
+            onClick={fetchOrderDetails}
+            className="w-full py-3 rounded-xl bg-white/10 text-white/70 text-sm hover:bg-white/15 transition-all"
+          >
+            刷新状态
+          </button>
+          <p className="text-white/25 text-xs mt-4">如有问题请联系客服处理</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Rejected state
+  if (order.paymentStatus === 'rejected') {
+    return (
+      <div className="min-h-screen bg-[#0d1117] flex items-center justify-center p-6">
+        <div className="bg-[#1c2128] border border-red-500/30 rounded-2xl p-8 max-w-md w-full text-center">
+          <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg className="w-8 h-8 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </div>
+          <h2 className="text-white text-xl font-bold mb-2">审核未通过</h2>
+          <p className="text-white/60 text-sm mb-6">{order.rejectReason || '未收到对应款项，请确认支付成功后重新提交'}</p>
+          <button
+            onClick={() => { setSubmitted(false); setHasGoneToPay(false); setError(''); }}
+            className="w-full py-3.5 rounded-xl text-base font-bold text-white transition-all hover:opacity-90"
+            style={{ backgroundColor: methodColor }}
+          >
+            重新支付
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (order.isExpired) {
     return (
       <div className="min-h-screen bg-[#0d1117] flex items-center justify-center p-6">
@@ -176,10 +281,8 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
     );
   }
 
-  // Error with data loaded
   const showError = error && data;
 
-  // Main recharge page
   return (
     <div className="min-h-screen bg-[#0d1117] flex items-center justify-center p-4">
       <div className="bg-[#1c2128] border border-[#30363d] rounded-2xl max-w-md w-full overflow-hidden">
@@ -193,7 +296,7 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
             </div>
             <div>
               <h1 className="text-white text-lg font-bold">无界AI 积分充值</h1>
-              <p className="text-white/40 text-xs">安全付款，即时到账</p>
+              <p className="text-white/40 text-xs">扫码转账，审核到账</p>
             </div>
           </div>
         </div>
@@ -228,14 +331,12 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
             </div>
           </div>
 
-          {/* Error message */}
           {showError && (
             <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 mb-4 text-center">
               <p className="text-red-400 text-sm">{error}</p>
             </div>
           )}
 
-          {/* Payment method icon + amount */}
           <div className="flex items-center justify-center gap-3 mb-5">
             <div
               className="w-12 h-12 rounded-2xl flex items-center justify-center"
@@ -249,10 +350,8 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
             </div>
           </div>
 
-          {/* ===== Main pay area ===== */}
           {!hasGoneToPay ? (
             <div className="space-y-4">
-              {/* Primary: 立即支付 — real <a> link so mobile browsers honor the protocol scheme */}
               {payLink ? (
                 <a
                   href={payLink}
@@ -268,7 +367,6 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
                 </div>
               )}
 
-              {/* Fallback: QR code image from payLink */}
               {payQrDataUrl && (
                 <div className="text-center">
                   <p className="text-white/30 text-xs mb-3">
@@ -292,7 +390,6 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
               )}
             </div>
           ) : (
-            /* User returned from payment — show confirm button */
             <div className="space-y-3">
               <a
                 href={payLink || '#'}
@@ -306,25 +403,31 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
                 重新支付 ¥{order.priceCny.toFixed(2)}
               </a>
               <button
-                onClick={handleConfirmPaid}
-                disabled={confirming}
+                onClick={handleNotifyPaid}
+                disabled={submitting}
                 className={`w-full py-3.5 rounded-xl text-base font-bold transition-all ${
-                  confirming
+                  submitting
                     ? 'bg-white/10 text-white/30 cursor-not-allowed'
-                    : 'bg-emerald-500 text-white hover:bg-emerald-400 active:scale-[0.98] shadow-lg shadow-emerald-500/20'
+                    : 'bg-amber-500 text-white hover:bg-amber-400 active:scale-[0.98] shadow-lg shadow-amber-500/20'
                 }`}
               >
-                {confirming ? (
+                {submitting ? (
                   <span className="flex items-center justify-center gap-2">
                     <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    确认中...
+                    提交中...
                   </span>
                 ) : (
                   '我已完成付款'
                 )}
               </button>
 
-              {/* QR fallback after returning from pay */}
+              <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3 text-center">
+                <p className="text-amber-300/80 text-xs">
+                  ⚠️ 点击后将通知管理员审核，确认收款后积分会自动到账。
+                  <br />请勿重复提交，恶意刷单将被封禁账号。
+                </p>
+              </div>
+
               {payQrDataUrl && (
                 <div className="text-center pt-2">
                   <p className="text-white/25 text-xs mb-2">
@@ -353,7 +456,7 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
 
           {hasGoneToPay && (
             <p className="text-white/25 text-xs text-center mt-3">
-              付款完成后点击"我已完成付款"，积分将自动到账
+              付款完成后点击"我已完成付款"，管理员审核通过后积分将到账
             </p>
           )}
 
@@ -364,7 +467,6 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
           )}
         </div>
 
-        {/* Footer */}
         <div className="px-6 py-4 border-t border-[#30363d] bg-white/[0.02]">
           <div className="flex items-center justify-between text-xs text-white/20">
             <span className="truncate max-w-[60%]">订单号：{orderId.slice(0, 24)}...</span>
