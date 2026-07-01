@@ -912,7 +912,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   }, []);
 
   // 卡片上的验证协议按钮
-  const [providerVerifyStatus, setProviderVerifyStatus] = useState<Record<string, { verifying: boolean; result?: { success: boolean; summary: string } }>>({});
+  const [providerVerifyStatus, setProviderVerifyStatus] = useState<Record<string, { verifying: boolean; result?: { success: boolean; summary: string; tests?: Array<{ name: string; status: string; detail: string; endpoint?: string; latencyMs?: number }> } }>>({});
   const verifyProtocolForProvider = useCallback(async (p: ApiProvider) => {
     setProviderVerifyStatus(prev => ({ ...prev, [p.id]: { verifying: true } }));
     setProviderTestStatus(prev => ({ ...prev, [p.id]: { testing: true, success: null, message: '正在验证协议...', modelCount: 0 } }));
@@ -932,7 +932,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
           modelCount: 0,
         }
       }));
-      setProviderVerifyStatus(prev => ({ ...prev, [p.id]: { verifying: false, result: { success: data.success !== false, summary: data.summary || '' } } }));
+      setProviderVerifyStatus(prev => ({ ...prev, [p.id]: { verifying: false, result: { success: data.success !== false, summary: data.summary || '', tests: data.tests || [] } } }));
     } catch (e: any) {
       setProviderTestStatus(prev => ({ ...prev, [p.id]: { testing: false, success: false, message: `验证失败: ${e.message}`, modelCount: 0 } }));
       setProviderVerifyStatus(prev => ({ ...prev, [p.id]: { verifying: false } }));
@@ -2411,7 +2411,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                       </div>
                     </div>
                   )}
-                  {providerTestStatus[p.id] && testingProviderId !== p.id && (
+                  {providerTestStatus[p.id] && testingProviderId !== p.id && !providerVerifyStatus[p.id]?.result?.tests?.length && (
                     <div className={`mt-2 p-2 rounded-lg text-[11px] ${providerTestStatus[p.id].success ? 'bg-emerald-500/10 text-emerald-500' : 'bg-destructive/10 text-destructive'}`}>
                       <div className="flex items-center gap-1.5">
                         {providerTestStatus[p.id].success ? <CheckCircle2 className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
@@ -2419,6 +2419,30 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                       </div>
                     </div>
                   )}
+                  {/* 协议验证详细结果 */}
+                  {(() => { const vr = providerVerifyStatus[p.id]?.result; return vr?.tests && vr.tests.length > 0 ? (
+                    <div className={`mt-2 p-2.5 rounded-lg text-[11px] border ${vr.success !== false ? 'bg-primary/5 border-primary/15' : 'bg-destructive/5 border-destructive/15'}`}>
+                      <div className="flex items-center gap-1.5 mb-1.5">
+                        <ShieldCheck className="w-3 h-3 text-primary" />
+                        <span className="font-medium">{vr.summary || '协议验证'}</span>
+                      </div>
+                      <div className="space-y-1">
+                        {vr.tests.map((t, i) => (
+                          <div key={i} className="flex items-start gap-1.5">
+                            <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold shrink-0 mt-0.5 ${t.status === 'pass' ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : t.status === 'fail' ? 'bg-destructive/15 text-destructive' : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'}`}>
+                              {t.status === 'pass' ? '✓' : t.status === 'fail' ? '✗' : '!'}
+                            </span>
+                            <div className="min-w-0">
+                              <span className="font-medium">{t.name}</span>
+                              {t.endpoint && <span className="text-muted-foreground ml-1">{t.endpoint}</span>}
+                              {t.detail && <p className="text-muted-foreground leading-snug">{t.detail}</p>}
+                              {t.latencyMs != null && <p className="text-muted-foreground/60">{t.latencyMs}ms</p>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null; })()}
                 </div>
               ))}
             </div>
