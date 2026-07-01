@@ -2477,9 +2477,27 @@ export function InfiniteCanvas({
     // ChatCanvas annotation mode: click=pin, drag=region/brush
     if (annotationMode && e.button === 0) {
       const canvasPos = screenToCanvas(e.clientX, e.clientY);
-      const targetImageId = hitTestImage(canvasPos.x, canvasPos.y);
+      // Brush mode: use selected image (preferred) or hit-test image
+      let targetImageId: string | null = null;
+      if (annotationTool === 'brush') {
+        // Prefer currently selected image
+        if (selectedIds.size === 1) {
+          targetImageId = Array.from(selectedIds)[0];
+        }
+        // Fallback to hit-test if no image selected
+        if (!targetImageId) {
+          targetImageId = hitTestImage(canvasPos.x, canvasPos.y);
+        }
+      } else {
+        targetImageId = hitTestImage(canvasPos.x, canvasPos.y);
+      }
 
-      if (annotationTool === 'brush' && targetImageId) {
+      if (annotationTool === 'brush') {
+        if (!targetImageId) {
+          // No target image for brush — show a brief toast and ignore
+          toast.error('请先选择一张图片，或在图片上开始画笔批注');
+          return;
+        }
         // Brush mode: create annotation + start drawing on canvas overlay
         const targetImg = images.find(i => i.id === targetImageId);
         if (targetImg) {
@@ -2508,14 +2526,20 @@ export function InfiniteCanvas({
           isBrushDrawingRef.current = true;
           // Store scale ratios for coordinate conversion
           brushScaleRef.current = { x: scaleRatioX, y: scaleRatioY };
-          // Start live preview stroke path
-          brushStrokesRef.current = [{ x: e.clientX, y: e.clientY }];
-          setBrushStrokes([{ x: e.clientX, y: e.clientY }]);
+          // Start live preview stroke path (clamped to image bounds)
+          const firstClampedX = Math.max(targetImg.x, Math.min(canvasPos.x, targetImg.x + targetImg.width));
+          const firstClampedY = Math.max(targetImg.y, Math.min(canvasPos.y, targetImg.y + targetImg.height));
+          const firstScreenX = firstClampedX * zoom + viewOffset.x;
+          const firstScreenY = firstClampedY * zoom + viewOffset.y;
+          brushStrokesRef.current = [{ x: firstScreenX, y: firstScreenY }];
+          setBrushStrokes([{ x: firstScreenX, y: firstScreenY }]);
 
-          // Draw first brush point
+          // Draw first brush point (clamped to image bounds)
           if (ctx) {
-            const relX = (canvasPos.x - targetImg.x) * scaleRatioX;
-            const relY = (canvasPos.y - targetImg.y) * scaleRatioY;
+            const clampedX = Math.max(targetImg.x, Math.min(canvasPos.x, targetImg.x + targetImg.width));
+            const clampedY = Math.max(targetImg.y, Math.min(canvasPos.y, targetImg.y + targetImg.height));
+            const relX = (clampedX - targetImg.x) * scaleRatioX;
+            const relY = (clampedY - targetImg.y) * scaleRatioY;
             const scaledBrushR = (annotationBrushSize / 2) * scaleRatioX;
             ctx.fillStyle = '#ffffff';
             ctx.beginPath();
@@ -2523,7 +2547,7 @@ export function InfiniteCanvas({
             ctx.fill();
           }
         }
-      } else if (annotationTool === 'region' || annotationTool === 'pin') {
+      } else if (annotationTool === 'region' || (annotationTool === 'pin')) {
         // Pin / Region mode: start potential region drag (allow from any area)
         setAnnotationRegionStart({ cx: canvasPos.x, cy: canvasPos.y });
         setAnnotationRegionCurrent({ cx: canvasPos.x, cy: canvasPos.y });
@@ -2624,21 +2648,26 @@ export function InfiniteCanvas({
     if (annotationMode && (annotationRegionStart || isBrushDrawingRef.current)) {
       const canvasPos = screenToCanvas(e.clientX, e.clientY);
 
-      // Brush drawing
+      // Brush drawing (clamped to image bounds)
       if (isBrushDrawingRef.current && brushDrawingAnnId && brushCtxRef.current) {
         const ann = annotations.find(a => a.id === brushDrawingAnnId);
         const targetImg = ann?.targetImageId ? images.find(i => i.id === ann.targetImageId) : null;
         if (targetImg) {
           const scaleRatio = brushScaleRef.current;
-          const relX = (canvasPos.x - targetImg.x) * scaleRatio.x;
-          const relY = (canvasPos.y - targetImg.y) * scaleRatio.y;
+          // Clamp canvas position to image bounds
+          const clampedX = Math.max(targetImg.x, Math.min(canvasPos.x, targetImg.x + targetImg.width));
+          const clampedY = Math.max(targetImg.y, Math.min(canvasPos.y, targetImg.y + targetImg.height));
+          const relX = (clampedX - targetImg.x) * scaleRatio.x;
+          const relY = (clampedY - targetImg.y) * scaleRatio.y;
           const scaledBrushR = (annotationBrushSize / 2) * scaleRatio.x;
           brushCtxRef.current.fillStyle = '#ffffff';
           brushCtxRef.current.beginPath();
           brushCtxRef.current.arc(relX, relY, scaledBrushR, 0, Math.PI * 2);
           brushCtxRef.current.fill();
-          // Add point for live preview
-          brushStrokesRef.current.push({ x: e.clientX, y: e.clientY });
+          // Add point for live preview (use clamped screen position)
+          const clampedScreenX = clampedX * zoom + viewOffset.x;
+          const clampedScreenY = clampedY * zoom + viewOffset.y;
+          brushStrokesRef.current.push({ x: clampedScreenX, y: clampedScreenY });
           setBrushStrokes([...brushStrokesRef.current]);
         }
         return;
@@ -11537,9 +11566,24 @@ export function InfiniteCanvas({
                 <rect x={x1} y={y1} width={w} height={h} fill={isMonochrome ? 'rgba(59,130,246,0.1)' : 'rgba(212,175,55,0.1)'} stroke={isMonochrome ? '#3b82f6' : '#d4af37'} strokeWidth={1.5} strokeDasharray="6 3" rx={2} />
               );
             })()}
-            {/* Live brush stroke preview while drawing */}
+            {/* Live brush stroke preview while drawing (clipped to target image) */}
             {brushStrokes.length > 1 && (() => {
+              const ann = brushDrawingAnnId ? annotations.find(a => a.id === brushDrawingAnnId) : null;
+              const targetImg = ann?.targetImageId ? images.find(i => i.id === ann.targetImageId) : null;
               const pathD = brushStrokes.map((p, i) => i === 0 ? `M${p.x} ${p.y}` : `L${p.x} ${p.y}`).join(' ');
+              const clipId = `brush-clip-${brushDrawingAnnId || 'live'}`;
+              if (targetImg) {
+                const imgSx = targetImg.x * zoom + viewOffset.x;
+                const imgSy = targetImg.y * zoom + viewOffset.y;
+                const imgSw = targetImg.width * zoom;
+                const imgSh = targetImg.height * zoom;
+                return (
+                  <g>
+                    <defs><clipPath id={clipId}><rect x={imgSx} y={imgSy} width={imgSw} height={imgSh} /></clipPath></defs>
+                    <path d={pathD} fill="none" stroke={annotationBrushColor} strokeWidth={annotationBrushSize} strokeLinecap="round" strokeLinejoin="round" opacity={0.6} clipPath={`url(#${clipId})`} />
+                  </g>
+                );
+              }
               return (
                 <path d={pathD} fill="none" stroke={annotationBrushColor} strokeWidth={annotationBrushSize} strokeLinecap="round" strokeLinejoin="round" opacity={0.6} />
               );
