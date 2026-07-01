@@ -5,7 +5,7 @@
 
 import { findProviderForModel } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
-import { calculateActualPixelsFromRatio } from '@/app/api/generate/route';
+import { calculateActualPixelsFromRatio } from './canvas-generation-group';
 
 /** 画质精修提示词 — 在放大后修复模糊、噪点、脏画面等问题 */
 export const QUALITY_ENHANCE_PROMPT = `## 核心修复目标

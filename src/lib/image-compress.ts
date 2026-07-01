@@ -132,6 +132,10 @@ function loadImage(source: string | File | Blob): Promise<HTMLImageElement> {
     const img = new Image();
     img.crossOrigin = 'anonymous';
 
+    // 先绑定 onload/onerror，再设置 src（防止缓存图片在绑定前触发load）
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('Failed to load image'));
+
     if (typeof source === 'string') {
       img.src = source;
     } else {
@@ -139,11 +143,7 @@ function loadImage(source: string | File | Blob): Promise<HTMLImageElement> {
       img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
       img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Failed to load image')); };
       img.src = url;
-      return;
     }
-
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error('Failed to load image'));
   });
 }
 

@@ -1571,6 +1571,8 @@ export function buildNodeExecutionRequest(
     case 'condition-if':
     case 'condition-switch':
     case 'loop-for':
+      return null;
+
     // ─── 视频后处理节点 ───
     case 'video-speed-change':
       return {

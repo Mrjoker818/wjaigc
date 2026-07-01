@@ -188,18 +188,22 @@ export async function dbDeleteStaleProviders(activeIdList: string[]): Promise<vo
 }
 
 export async function dbBatchUpdateProviderOrder(orders: Array<{ id: string; sortOrder: number }>): Promise<boolean> {
+  const pool = getPool();
+  const client = await pool.connect();
   try {
-    // 使用事务保证原子性，避免部分更新
-    await execSql('BEGIN');
+    // 使用单连接事务保证原子性，避免部分更新
+    await client.query('BEGIN');
     for (const { id, sortOrder } of orders) {
-      await execSql('UPDATE wujie_api_providers SET sort_order = $1, updated_at = $2 WHERE id = $3', [sortOrder, Date.now(), id]);
+      await client.query('UPDATE wujie_api_providers SET sort_order = $1, updated_at = $2 WHERE id = $3', [sortOrder, Date.now(), id]);
     }
-    await execSql('COMMIT');
+    await client.query('COMMIT');
     return true;
   } catch (e) {
-    try { await execSql('ROLLBACK'); } catch { /* ignore rollback error */ }
+    try { await client.query('ROLLBACK'); } catch { /* ignore rollback error */ }
     console.error('[db-storage] dbBatchUpdateProviderOrder error:', e);
     return false;
+  } finally {
+    client.release();
   }
 }
 

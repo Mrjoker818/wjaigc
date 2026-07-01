@@ -90,10 +90,6 @@ const MODEL_NAME_MAP: Array<{ pattern: string; entry: ModelNameEntry }> = [
   { pattern: 'ideogram-3', entry: { name: 'Ideogram 3', type: 'image', provider: 'Ideogram' } },
   { pattern: 'ideogram-2', entry: { name: 'Ideogram 2', type: 'image', provider: 'Ideogram' } },
   { pattern: 'ideogram', entry: { name: 'Ideogram', type: 'image', provider: 'Ideogram' } },
-  // Seedream (字节)
-  { pattern: 'seedream-4', entry: { name: 'Seedream 4', type: 'image', provider: 'ByteDance' } },
-  { pattern: 'seedream-3', entry: { name: 'Seedream 3', type: 'image', provider: 'ByteDance' } },
-  { pattern: 'seedream', entry: { name: 'Seedream', type: 'image', provider: 'ByteDance' } },
   // 混元图像
   { pattern: 'hunyuan-image', entry: { name: '混元图像', type: 'image', provider: 'Tencent' } },
   // 通义万相
@@ -111,10 +107,9 @@ const MODEL_NAME_MAP: Array<{ pattern: string; entry: ModelNameEntry }> = [
   { pattern: 'hidream', entry: { name: 'HiDream', type: 'image', provider: 'HiDream AI' } },
   // Grok Imagine
   { pattern: 'grok-imagine', entry: { name: 'Grok Imagine', type: 'image', provider: 'xAI' } },
-  // Sora
-  { pattern: 'sora-2-pro', entry: { name: 'Sora 2 Pro', type: 'image', provider: 'OpenAI' } },
-  { pattern: 'sora-2', entry: { name: 'Sora 2', type: 'image', provider: 'OpenAI' } },
-  { pattern: 'sora', entry: { name: 'Sora', type: 'image', provider: 'OpenAI' } },
+  // Sora (视频模型为主，sora-2/sora-2-pro为新版本)
+  { pattern: 'sora-2-pro', entry: { name: 'Sora 2 Pro', type: 'video', provider: 'OpenAI' } },
+  { pattern: 'sora-2', entry: { name: 'Sora 2', type: 'video', provider: 'OpenAI' } },
   // 通义万相 Image
   { pattern: 'qwen-image-2', entry: { name: '通义万相 2.0', type: 'image', provider: 'Alibaba' } },
   { pattern: 'qwen-image', entry: { name: '通义万相', type: 'image', provider: 'Alibaba' } },
@@ -122,15 +117,12 @@ const MODEL_NAME_MAP: Array<{ pattern: string; entry: ModelNameEntry }> = [
   { pattern: 'wan2.7-image-pro', entry: { name: '万相 2.7 Pro', type: 'image', provider: 'Alibaba' } },
   { pattern: 'wan2.7-image', entry: { name: '万相 2.7', type: 'image', provider: 'Alibaba' } },
   { pattern: 'wan2.7', entry: { name: '万相 2.7', type: 'image', provider: 'Alibaba' } },
-  // Seedance (字节)
-  { pattern: 'seedance', entry: { name: 'Seedance', type: 'image', provider: 'ByteDance' } },
+  // Seedance (字节视频)
+  { pattern: 'seedance', entry: { name: 'Seedance', type: 'video', provider: 'ByteDance' } },
   // Seedream (字节)
   { pattern: 'seedream-5', entry: { name: 'Seedream 5', type: 'image', provider: 'ByteDance' } },
-  { pattern: 'seedream-4', entry: { name: 'Seedream 4', type: 'image', provider: 'ByteDance' } },
-  { pattern: 'seedream-3', entry: { name: 'Seedream 3', type: 'image', provider: 'ByteDance' } },
-  { pattern: 'seedream', entry: { name: 'Seedream', type: 'image', provider: 'ByteDance' } },
   // Veo (Google视频)
-  { pattern: 'veo3.1', entry: { name: 'Veo 3.1', type: 'image', provider: 'Google' } },
+  { pattern: 'veo3.1', entry: { name: 'Veo 3.1', type: 'video', provider: 'Google' } },
   // Imagen 4
   { pattern: 'imagen-4', entry: { name: 'Imagen 4', type: 'image', provider: 'Google' } },
   // Z-Image

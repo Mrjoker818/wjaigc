@@ -10,8 +10,7 @@
  * 只在检测到 size 相关错误时才被调用，正常流程完全不受影响。
  */
 
-import { calculateActualPixels } from './canvas-generation-group';
-import { calculateActualPixelsFromRatio } from '@/app/api/generate/route';
+import { calculateActualPixels, calculateActualPixelsFromRatio } from './canvas-generation-group';
 import { getModelCapabilities, classifyModelFamily, type ModelFamily } from './model-capabilities';
 
 /** 向后兼容的旧模型族类型 */
