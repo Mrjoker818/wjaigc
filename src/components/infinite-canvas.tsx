@@ -29,7 +29,7 @@ import {
   Scissors, Wand2, Expand, Layers, Paintbrush,
   Check, MousePointer2, BoxSelect, Upload, Eye, Sparkles,
   RotateCcw, Minus, Type, GitMerge, Wrench, ChevronRight,
-  Settings, Palette, Users, HelpCircle, Box as BoxIcon, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, MoreHorizontal, Brush, ShoppingBag, Scan, GripVertical, Building2, FileImage, Workflow, LayoutGrid, LayoutDashboard, ChevronsRight, ChevronsLeft, Boxes, MessageCircle, Play, Pause, Package, Store
+  Settings, Palette, Users, HelpCircle, Box as BoxIcon, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, MoreHorizontal, Brush, ShoppingBag, Scan, GripVertical, Building2, FileImage, Workflow, LayoutGrid, LayoutDashboard, ChevronsRight, ChevronsLeft, Boxes, MessageCircle, Play, Pause, Package, Store, Globe, Volume2, Loader2
 } from 'lucide-react';
 import type { CanvasAnnotation, AnnotationRegion, AnnotationTool } from '@/lib/canvas-annotation';
 import { createAnnotation, hitTestAnnotationTarget, buildAnnotationPrompt, mergeAnnotationsForImage, ANNOTATION_COLORS, ANNOTATION_COLORS_MONO, computeAnnotationRegion, BRUSH_COLOR_PALETTE } from '@/lib/canvas-annotation';
@@ -417,8 +417,8 @@ interface InfiniteCanvasProps {
   onSendToChat?: (image: CanvasImage) => void;
 }
 
-type EditMode = 'none' | 'erase' | 'mask' | 'expand' | 'crop' | 'upscale';
-type ActiveTool = 'none' | 'upscale' | 'download' | 'multiAngle' | 'to3d';
+type EditMode = 'none' | 'erase' | 'mask' | 'expand' | 'crop' | 'upscale' | 'colorAdjust' | 'panorama';
+type ActiveTool = 'none' | 'upscale' | 'download' | 'multiAngle' | 'to3d' | 'colorAdjust' | 'panorama';
 type MultiAngleMode = 'image' | 'camera';
 type ThreeDBackend = 'api' | 'local';
 type ThreeDType = 'ip' | 'figure' | 'product' | 'character';
@@ -1101,6 +1101,20 @@ export function InfiniteCanvas({
   const [editPrompt, setEditPrompt] = useState('');
   const [expandRatio, setExpandRatio] = useState('原始比例');
   const [showExpandScaleMenu, setShowExpandScaleMenu] = useState(false);
+  // 参数调色状态
+  const [colorAdjustParams, setColorAdjustParams] = useState({ brightness: 0, contrast: 0, saturation: 0, temperature: 0, hue: 0 });
+  const [colorBrightness, setColorBrightness] = useState(0);
+  const [colorContrast, setColorContrast] = useState(0);
+  const [colorSaturation, setColorSaturation] = useState(0);
+  const [colorTemperature, setColorTemperature] = useState(0);
+  const [colorHue, setColorHue] = useState(0);
+  const [colorAdjustProcessing, setColorAdjustProcessing] = useState(false);
+  // 全景生成状态
+  const [panoramaPrompt, setPanoramaPrompt] = useState('360度全景室内环境，等距圆柱投影，无缝全景，HDR高质量');
+  const [isGeneratingPanorama, setIsGeneratingPanorama] = useState(false);
+  const [panoramaProcessing, setPanoramaProcessing] = useState(false);
+  // 视频抽帧状态
+  const [videoExtractMode, setVideoExtractMode] = useState<'uniform'|'fps'|'first_last'|'keyframes'>('uniform');
   // 即梦风格方向性扩展：上下左右独立 padding（像素值，基于原始图片尺寸）
   const [expandPadding, setExpandPadding] = useState({ top: 0, right: 0, bottom: 0, left: 0 });
   // 拖拽控制点状态
@@ -1178,7 +1192,7 @@ export function InfiniteCanvas({
     if (typeof window !== 'undefined') {
       try { const saved = localStorage.getItem('wujie_toolbar_order'); if (saved) return JSON.parse(saved); } catch {}
     }
-    return ['放大','移除背景','SVG智能描摹','擦除','蒙版','编辑元素','多角度','图转3D工厂','扩展','裁切','精修引擎','语言修图','Agent编排','下载'];
+    return ['放大','移除背景','SVG智能描摹','擦除','蒙版','调色','编辑元素','多角度','图转3D工厂','扩展','裁切','全景生成','精修引擎','语言修图','Agent编排','下载'];
   });
   const [toolbarHiddenItems, setToolbarHiddenItems] = useState<Set<string>>(() => {
     if (typeof window !== 'undefined') {
@@ -1352,9 +1366,49 @@ export function InfiniteCanvas({
   const [showVideoEditPanel, setShowVideoEditPanel] = useState(false);
   const [videoEditTarget, setVideoEditTarget] = useState<CanvasImage | null>(null);
   const [videoEditTab, setVideoEditTab] = useState<'edit' | 'extend'>('edit');
+  // AI视频配音
+  const [showVideoDubPanel, setShowVideoDubPanel] = useState(false);
+  const [videoDubTarget, setVideoDubTarget] = useState<CanvasImage | null>(null);
+  const [dubText, setDubText] = useState('');
+  const [dubVoice, setDubVoice] = useState('female-calm');
+  const [dubSpeed, setDubSpeed] = useState(1);
+  const [isDubbing, setIsDubbing] = useState(false);
+  const handleVideoDub = useCallback(async () => {
+    if (!videoDubTarget?.videoUrl || !dubText.trim()) { toast.error('请输入配音文本'); return; }
+    setIsDubbing(true);
+    const tid = toast.loading('正在生成配音并合成视频...');
+    try {
+      // 先调用TTS生成音频
+      const ttsRes = await fetch('/api/audio/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: dubText, voice: dubVoice, speed: dubSpeed }),
+      });
+      if (!ttsRes.ok) throw new Error('配音生成失败');
+      const ttsData = await ttsRes.json();
+      if (!ttsData.audioUrl) throw new Error('配音生成失败');
+      // 然后调用视频合成接口
+      const composeRes = await fetch('/api/video/tools', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'compose', videoUrl: videoDubTarget.videoUrl, audioUrl: ttsData.audioUrl, volume: 1.0 }),
+      });
+      if (!composeRes.ok) throw new Error('视频合成失败');
+      const composeData = await composeRes.json();
+      if (composeData.videoUrl) {
+        onAddImages([composeData.videoUrl]);
+        toast.success('配音视频已添加到画布', { id: tid });
+        setShowVideoDubPanel(false);
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '配音失败', { id: tid });
+    } finally {
+      setIsDubbing(false);
+    }
+  }, [videoDubTarget, dubText, dubVoice, dubSpeed, onAddImages]);
 
   // Whether any floating panel is open (used to auto-hide connections & image toolbar)
-  const anyPanelOpen = showSvgTracePanel || showAgentEditor || showBrandEcommerce || showFontDesign || showBrandFactory || showSceneStudio || showBrandPackaging || showDisplay3D || showVideoEditPanel || showCanvasGenerator || showRefineEngine || showLogoSkill || showAiPsd || showStickerAssistant;
+  const anyPanelOpen = showSvgTracePanel || showAgentEditor || showBrandEcommerce || showFontDesign || showBrandFactory || showSceneStudio || showBrandPackaging || showDisplay3D || showVideoEditPanel || showCanvasGenerator || showRefineEngine || showLogoSkill || showAiPsd || showStickerAssistant || showVideoDubPanel;
 
   // Video tools handler
   const handleVideoTool = async (action: 'to-gif' | 'extract-cover' | 'compress' | 'extract-frame', image: CanvasImage, timestamp?: number) => {
@@ -7061,6 +7115,126 @@ export function InfiniteCanvas({
     setMaskKeyword('');
   }, [selectedImageData]);
 
+  // 参数调色处理
+  const colorAdjustingRef = useRef(false);
+  const handleOpenColorAdjust = useCallback(() => {
+    const img = getActiveImageData();
+    if (!img) return;
+    setEditImageId(img.id);
+    setEditMode('colorAdjust');
+    setColorBrightness(0);
+    setColorContrast(0);
+    setColorSaturation(0);
+    setColorTemperature(0);
+    setColorHue(0);
+  }, [selectedImageData]);
+
+  const applyColorAdjust = useCallback(async () => {
+    if (colorAdjustingRef.current) return;
+    const img = getActiveImageData();
+    if (!img) return;
+    colorAdjustingRef.current = true;
+    setColorAdjustProcessing(true);
+    try {
+      const res = await fetch('/api/image/color-adjust', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageUrl: img.url,
+          brightness: colorBrightness,
+          contrast: colorContrast,
+          saturation: colorSaturation,
+          temperature: colorTemperature,
+          hue: colorHue,
+        }),
+      });
+      if (!res.ok) throw new Error('调色失败');
+      const blob = await res.blob();
+      const formData = new FormData();
+      formData.append('image', blob, 'color-adjusted.png');
+      const saveRes = await fetch('/api/save-image', { method: 'POST', body: formData });
+      const saveData = await saveRes.json();
+      if (saveData.url) {
+        onImagesChange(images.map(i => i.id === img.id ? { ...i, url: saveData.url } : i));
+        toast.success('调色完成');
+        setEditMode('none');
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '调色失败');
+    } finally {
+      colorAdjustingRef.current = false;
+      setColorAdjustProcessing(false);
+    }
+  }, [selectedImageData, colorBrightness, colorContrast, colorSaturation, colorTemperature, colorHue, images, onImagesChange]);
+
+  const handleConfirmColorAdjust = applyColorAdjust;
+
+  // 视频批量抽帧
+  const handleVideoExtractFrames = useCallback(async (img: CanvasImage, mode: string = 'uniform', count: number = 8) => {
+    if (!img.videoUrl) { toast.error('这不是视频文件'); return; }
+    const tid = toast.loading('正在从视频中提取帧...');
+    try {
+      const res = await fetch('/api/video/tools', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'extract_frames', videoUrl: img.videoUrl, mode, frameCount: count, fps: 1 }),
+      });
+      if (!res.ok) throw new Error('抽帧失败');
+      const data = await res.json();
+      if (data.frames && data.frames.length > 0) {
+        const frameUrls = data.frames.map((f: {url: string}) => f.url);
+        onAddImages(frameUrls);
+        toast.success(`成功提取 ${frameUrls.length} 帧`, { id: tid });
+      } else {
+        toast.error('未能提取到帧', { id: tid });
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '抽帧失败', { id: tid });
+    }
+  }, [onAddImages]);
+
+  // 720全景图生成（直接调用图像生成API）
+  const handleGeneratePanorama = useCallback(async (img?: CanvasImage) => {
+    const sourceImg = img || getActiveImageData();
+    if (!sourceImg) { toast.error('请先选择一张参考图'); return; }
+    setIsGeneratingPanorama(true);
+    const tid = toast.loading('正在生成720°全景图...');
+    try {
+      // 调用现有的图生图接口，用全景提示词
+      const prompt = panoramaPrompt + (sourceImg.prompt ? `, based on reference image style: ${sourceImg.prompt}` : '');
+      const modelInfo = getCurrentModel();
+      const res = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt,
+          aspectRatio: '2:1',  // 全景图2:1等距圆柱投影比例
+          imageUrl: sourceImg.url, // 作为参考图
+          model: modelInfo.model,
+          apiKey: 'server-managed',
+        }),
+      });
+      if (!res.ok) throw new Error('全景生成失败');
+      const data = await res.json();
+      if (data.taskId) {
+        // 创建占位框然后轮询结果
+        createProcessingFrameRightOf(sourceImg, '全景生成中', sourceImg.width * 2, sourceImg.width, '正在生成720度全景图...');
+        pollForResult(data.taskId, modelInfo.model, undefined, 'panorama');
+        toast.dismiss(tid);
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '全景生成失败', { id: tid });
+    } finally {
+      setIsGeneratingPanorama(false);
+    }
+  }, [selectedImageData, panoramaPrompt]);
+
+  // 全景查看器
+  const [panoramaViewerUrl, setPanoramaViewerUrl] = useState<string | null>(null);
+  const openPanoramaViewer = useCallback((img: CanvasImage) => {
+    setPanoramaViewerUrl(img.url);
+  }, []);
+
   // 5. MASK - floating window mode
   const handleOpenMask = useCallback(() => {
     const img = getActiveImageData();
@@ -7787,6 +7961,7 @@ export function InfiniteCanvas({
     { icon: <PenTool size={14} className={isMonochrome ? monoColors['SVG智能描摹'] : ''} />, label: 'SVG智能描摹', desc: '矢量描摹/压缩/缩略图', action: handleOpenSvgTrace },
     { icon: <Paintbrush size={14} className={isMonochrome ? monoColors['擦除'] : ''} />, label: '擦除', desc: '涂抹消除，自动无缝补全画面', action: handleOpenErase },
     { icon: <Wand2 size={14} className={isMonochrome ? monoColors['蒙版'] : ''} />, label: '蒙版', desc: '精准遮罩控制，只改露出的区域', action: handleOpenMask },
+    { icon: <Palette size={14} className={isMonochrome ? '' : 'text-pink-500'} />, label: '调色', desc: '亮度/对比度/饱和度/色温/色相参数调节', action: handleOpenColorAdjust },
     { icon: <Layers size={14} className={isMonochrome ? monoColors['编辑元素'] : ''} />, label: '编辑元素', desc: '按元素分层，独立编辑', action: handleEditElements },
     { icon: <RotateCcw size={14} className={isMonochrome ? monoColors['多角度'] : ''} />, label: '多角度', desc: '多视角生成', action: handleOpenMultiAngle },
     { icon: <BoxIcon size={14} className={isMonochrome ? monoColors['图转3D工厂'] : ''} />, label: '图转3D工厂', desc: '生成3D模型预览', action: handleOpen3D },
@@ -8020,6 +8195,9 @@ export function InfiniteCanvas({
       { label: '─'.repeat(15), action: () => {} }, // 分隔线
       { label: '转 GIF', action: () => { handleVideoTool('to-gif', selectedImageData); } },
       { label: '提取封面', action: () => { handleVideoTool('extract-cover', selectedImageData); } },
+      { label: '批量抽帧(均匀5帧)', action: () => { handleVideoExtractFrames(selectedImageData, 'uniform', 5); } },
+      { label: '批量抽帧(关键帧)', action: () => { handleVideoExtractFrames(selectedImageData, 'keyframes', 0); } },
+      { label: 'AI配音合成', action: () => { setVideoDubTarget(selectedImageData); setShowVideoDubPanel(true); } },
       { label: '提取帧', action: () => { const t = prompt('输入提取时间点（秒）', '0'); if (t !== null) handleVideoTool('extract-frame', selectedImageData, parseFloat(t)); } },
       { label: '视频压缩', action: () => { handleVideoTool('compress', selectedImageData); } },
     ] : []),
@@ -8028,6 +8206,7 @@ export function InfiniteCanvas({
     { label: '提取关键词', action: () => { const img = selectedImageData; if (img) onExtractKeywords(img); } },
     { label: '语言修图', action: () => { const img = selectedImageData; if (img) onEditImage?.(img); else onEditImage?.(null); } },
     { label: 'Agent编排', action: () => { const img = selectedImageData; if (img) { setAgentEditImage(img); setShowAgentEditor(true); } } },
+    ...(selectedImageData?.mediaType !== 'video' ? [{ label: '生成720全景图', action: () => { handleGeneratePanorama(selectedImageData ?? undefined); } }] : []),
     { label: '发送到聊天修改', action: () => { const img = selectedImageData; if (img && onSendToChat) onSendToChat(img); } },
     { label: '图片对比', action: () => { const img = selectedImageData; if (img) { setCompareImages({ left: img, right: null }); setCompareSelecting(true); } } },
     { label: '加入收藏夹', action: () => { const img = selectedImageData; if (img && onAddToFavorites) onAddToFavorites(img); } },
@@ -11001,6 +11180,106 @@ export function InfiniteCanvas({
           );
         })()}
 
+        {/* ====== COLOR ADJUST PANEL (参数调色) ====== */}
+        {editMode === 'colorAdjust' && (() => {
+          const editImg = images.find(i => i.id === editImageId);
+          if (!editImg) return null;
+          const isProcessing = colorAdjustProcessing;
+          return (
+            <div
+              className="fixed bg-[#1a1a1a] text-white rounded-2xl shadow-2xl overflow-hidden z-[65] border border-[#333] flex flex-col"
+              style={{ top: '120px', right: '40px', width: '360px' }}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between px-5 py-3 border-b border-[#333] bg-[#111]">
+                <div className="flex items-center gap-2">
+                  <Palette size={18} className="text-[#d4af37]" />
+                  <h3 className="font-semibold text-sm">参数调色</h3>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-[#888]">Esc 退出</span>
+                  <button onClick={exitEditMode} className="text-[#888] hover:text-white transition-colors">
+                    <X size={18} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-4 overflow-y-auto flex flex-col gap-4" style={{ maxHeight: '60vh' }}>
+                {/* 预览 */}
+                <div className="w-full aspect-video rounded-lg overflow-hidden bg-black/40 flex items-center justify-center border border-[#333]">
+                  <img src={editImg.url} alt="原图" className="max-w-full max-h-full object-contain" crossOrigin="anonymous" />
+                </div>
+
+                {/* 滑杆区域 */}
+                <div className="grid grid-cols-1 gap-3">
+                  {/* 亮度 */}
+                  <div className="flex flex-col gap-1">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-[#aaa]">亮度</span>
+                      <span className="text-xs text-[#d4af37] font-mono">{colorBrightness > 0 ? '+' : ''}{colorBrightness}</span>
+                    </div>
+                    <input type="range" min={-100} max={100} value={colorBrightness} onChange={e => setColorBrightness(Number(e.target.value))} className="w-full accent-[#d4af37]" />
+                  </div>
+                  {/* 对比度 */}
+                  <div className="flex flex-col gap-1">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-[#aaa]">对比度</span>
+                      <span className="text-xs text-[#d4af37] font-mono">{colorContrast > 0 ? '+' : ''}{colorContrast}</span>
+                    </div>
+                    <input type="range" min={-100} max={100} value={colorContrast} onChange={e => setColorContrast(Number(e.target.value))} className="w-full accent-[#d4af37]" />
+                  </div>
+                  {/* 饱和度 */}
+                  <div className="flex flex-col gap-1">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-[#aaa]">饱和度</span>
+                      <span className="text-xs text-[#d4af37] font-mono">{colorSaturation > 0 ? '+' : ''}{colorSaturation}</span>
+                    </div>
+                    <input type="range" min={-100} max={100} value={colorSaturation} onChange={e => setColorSaturation(Number(e.target.value))} className="w-full accent-[#d4af37]" />
+                  </div>
+                  {/* 色温 */}
+                  <div className="flex flex-col gap-1">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-[#aaa]">色温</span>
+                      <span className="text-xs text-[#d4af37] font-mono">{colorTemperature > 0 ? '+' : ''}{colorTemperature}</span>
+                    </div>
+                    <input type="range" min={-100} max={100} value={colorTemperature} onChange={e => setColorTemperature(Number(e.target.value))} className="w-full accent-[#d4af37]" />
+                  </div>
+                  {/* 色相 */}
+                  <div className="flex flex-col gap-1">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-[#aaa]">色相</span>
+                      <span className="text-xs text-[#d4af37] font-mono">{colorHue > 0 ? '+' : ''}{colorHue}</span>
+                    </div>
+                    <input type="range" min={-100} max={100} value={colorHue} onChange={e => setColorHue(Number(e.target.value))} className="w-full accent-[#d4af37]" />
+                  </div>
+                </div>
+
+                {/* 重置按钮 */}
+                <button
+                  onClick={() => { setColorBrightness(0); setColorContrast(0); setColorSaturation(0); setColorTemperature(0); setColorHue(0); }}
+                  className="text-xs text-[#888] hover:text-white py-1 transition-colors"
+                >
+                  ↺ 重置所有参数
+                </button>
+              </div>
+
+              <div className="p-4 border-t border-[#333] bg-[#111]">
+                <button
+                  onClick={handleConfirmColorAdjust}
+                  disabled={colorAdjustProcessing}
+                  className="w-full py-3 rounded-lg bg-[#d4af37] text-black font-semibold text-sm hover:bg-[#e5c048] transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {colorAdjustProcessing ? (
+                    <><Loader2 size={16} className="animate-spin" /> 调色处理中...</>
+                  ) : (
+                    '应用调色'
+                  )}
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+
         {/* ====== REMOVE BACKGROUND MODEL PICKER ====== */}
         {showRemoveBgPicker && (() => {
           const removeBgModels: Array<{ id: string; label: string; description: string; size: string; recommended?: boolean }> = [
@@ -12998,6 +13277,70 @@ export function InfiniteCanvas({
           />
         )}
 
+        {/* ====== 720° PANORAMA VIEWER ====== */}
+        {panoramaViewerUrl && (
+          <div className="fixed inset-0 z-[201] bg-black flex flex-col" onClick={(e) => { if (e.target === e.currentTarget) setPanoramaViewerUrl(null); }}>
+            <div className="flex items-center justify-between px-4 py-3 bg-[#111] border-b border-[#333]">
+              <div className="flex items-center gap-2">
+                <Globe size={18} className="text-[#d4af37]" />
+                <span className="text-sm font-medium">720° 全景浏览</span>
+                <span className="text-xs text-[#888] ml-2">拖拽旋转 · 滚轮缩放</span>
+              </div>
+              <button onClick={() => setPanoramaViewerUrl(null)} className="text-white/70 hover:text-white transition-colors">
+                <X size={20} />
+              </button>
+            </div>
+            <div 
+              className="flex-1 overflow-hidden cursor-grab active:cursor-grabbing relative select-none"
+              onWheel={(e) => {
+                const el = e.currentTarget.querySelector('.panorama-img') as HTMLElement | null;
+                if (el) {
+                  const current = parseFloat(el.dataset.scale || '1');
+                  const next = Math.max(0.5, Math.min(3, current - e.deltaY * 0.001));
+                  el.dataset.scale = String(next);
+                  el.style.transform = `scale(${next})`;
+                }
+              }}
+              onMouseDown={(e) => {
+                const el = e.currentTarget;
+                const img = el.querySelector('.panorama-img') as HTMLElement | null;
+                if (!img) return;
+                const startX = e.clientX;
+                const startY = e.clientY;
+                const startOffX = parseFloat(img.dataset.offsetX || '0');
+                const startOffY = parseFloat(img.dataset.offsetY || '0');
+                const onMove = (ev: MouseEvent) => {
+                  const dx = ev.clientX - startX;
+                  const dy = ev.clientY - startY;
+                  img.dataset.offsetX = String(startOffX + dx);
+                  img.dataset.offsetY = String(Math.max(-200, Math.min(200, startOffY + dy)));
+                  const s = parseFloat(img.dataset.scale || '1');
+                  img.style.transform = `scale(${s}) translate(${(startOffX + dx) / s}px, ${Math.max(-200, Math.min(200, startOffY + dy)) / s}px)`;
+                };
+                const onUp = () => {
+                  window.removeEventListener('mousemove', onMove);
+                  window.removeEventListener('mouseup', onUp);
+                };
+                window.addEventListener('mousemove', onMove);
+                window.addEventListener('mouseup', onUp);
+              }}
+            >
+              <img 
+                src={panoramaViewerUrl} 
+                alt="全景图" 
+                className="panorama-img absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 max-w-none h-full w-auto"
+                data-scale="1"
+                data-offset-x="0"
+                data-offset-y="0"
+                draggable={false}
+              />
+              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur text-white/80 text-xs px-4 py-2 rounded-full">
+                提示：左右拖拽水平环绕，上下拖拽垂直视角
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ====== VIDEO EDIT PANEL ====== */}
         {showVideoEditPanel && videoEditTarget && (
           <VideoEditPanel
@@ -13211,6 +13554,64 @@ export function InfiniteCanvas({
               setShowVideoEditPanel(false);
             }}
           />
+        )}
+
+        {/* ====== AI 视频配音面板 ====== */}
+        {showVideoDubPanel && videoDubTarget && (
+          <div className="fixed top-20 right-4 z-[85] w-[420px] bg-card rounded-xl shadow-xl border border-border overflow-hidden">
+            <div className="bg-primary/10 px-4 py-3 flex items-center justify-between border-b border-border">
+              <h3 className="font-semibold text-foreground flex items-center gap-2">
+                <Volume2 className="w-4 h-4 text-primary" />
+                AI 配音合成
+              </h3>
+              <button onClick={() => { setShowVideoDubPanel(false); setVideoDubTarget(null); }} className="text-muted-foreground hover:text-foreground">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-4 space-y-4">
+              <div className="aspect-video bg-black rounded-lg overflow-hidden relative">
+                {videoDubTarget.videoUrl ? (
+                  <video src={videoDubTarget.videoUrl} className="w-full h-full object-contain" controls muted />
+                ) : (
+                  <img src={videoDubTarget.url} className="w-full h-full object-contain" />
+                )}
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm text-muted-foreground">配音文本</label>
+                <textarea
+                  value={dubText}
+                  onChange={e => setDubText(e.target.value)}
+                  placeholder="输入要配音的文字内容..."
+                  className="w-full px-3 py-2 rounded-lg bg-muted border border-border text-sm resize-none h-24 focus:outline-none focus:ring-2 focus:ring-primary/30"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-sm text-muted-foreground">音色</label>
+                  <select value={dubVoice} onChange={e => setDubVoice(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg bg-muted border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/30">
+                    <option value="female-calm">女声-沉稳</option>
+                    <option value="female-sweet">女声-甜美</option>
+                    <option value="male-professional">男声-专业</option>
+                    <option value="male-energetic">男声-活力</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm text-muted-foreground">语速: {dubSpeed.toFixed(1)}x</label>
+                  <input type="range" min="0.5" max="2" step="0.1" value={dubSpeed}
+                    onChange={e => setDubSpeed(parseFloat(e.target.value))} className="w-full accent-primary" />
+                </div>
+              </div>
+              <button
+                onClick={handleVideoDub}
+                disabled={isDubbing || !dubText.trim()}
+                className="w-full py-2.5 rounded-lg bg-primary text-primary-foreground font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+              >
+                {isDubbing ? (<><Loader2 className="w-4 h-4 animate-spin" />合成中...</>) : (<><Volume2 className="w-4 h-4" />生成配音视频</>)}
+              </button>
+              <p className="text-xs text-muted-foreground text-center">系统自动生成AI语音并合成到视频中</p>
+            </div>
+          </div>
         )}
 
         {/* ====== AGENT EDITOR ====== */}
