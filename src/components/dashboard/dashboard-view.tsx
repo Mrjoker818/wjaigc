@@ -967,10 +967,14 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   }, []);
 
   const deleteApiProvider = useCallback(async (providerId: string) => {
-    await fetch('/api/admin/apis', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', providerId }) });
-    await refreshAdmin();
-    window.dispatchEvent(new Event('wujie-admin-apis-updated'));
-    setSelectedProviderIds(prev => { const next = new Set(prev); next.delete(providerId); return next; });
+    try {
+      await fetch('/api/admin/apis', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', providerId }) });
+      await refreshAdmin();
+      window.dispatchEvent(new Event('wujie-admin-apis-updated'));
+      setSelectedProviderIds(prev => { const next = new Set(prev); next.delete(providerId); return next; });
+    } finally {
+      setConfirmDlg(d => ({ ...d, open: false }));
+    }
   }, [refreshAdmin]);
 
   // ─── Admin: User management computed ───
