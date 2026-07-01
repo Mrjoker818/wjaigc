@@ -421,8 +421,15 @@ function callPythonScript(
   return new Promise((resolve, reject) => {
     const inputData = JSON.stringify(input);
 
+    // ★ 先创建空的输出收集变量，spawn后立即绑定监听
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+
     const proc = spawn(PYTHON_BIN, [scriptPath], {
       stdio: ['pipe', 'pipe', 'pipe'],
+      // ★ 创建独立进程组，超时可杀整个进程组（包括torch子进程）
+      detached: process.platform !== 'win32',
       env: {
         ...process.env,
         IOPAINT_MODELS_DIR: IOPAINT_MODELS_DIR,
@@ -430,26 +437,10 @@ function callPythonScript(
         U2NET_HOME: REMOVEBG_MODELS_DIR,  // rembg 模型缓存目录
         TORCH_HOME: IOPAINT_MODELS_DIR,  // torch hub cache: TORCH_HOME/checkpoints/
       },
-      // ★ 不使用 spawn 的 timeout 选项（某些 Node 版本行为不一致），
-      // 改用手动 setTimeout + proc.kill() 确保超时必杀
     });
 
-    let stdout = '';
-    let stderr = '';
-    let settled = false;
-
-    // ★ 手动超时保护
-    const timer = setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        proc.kill('SIGKILL');
-        resolve({
-          success: false,
-          error: `Python 脚本超时 (${Math.round(IOPAINT_TIMEOUT_MS / 1000)}s)`,
-        });
-      }
-    }, IOPAINT_TIMEOUT_MS);
-
+    // ★ 立即绑定stdio监听器（spawn返回后，子进程尚未开始执行Python脚本，
+    // 但event loop会在当前tick结束后才处理子进程IO，所以这里绑定是安全的）
     proc.stdout.on('data', (data: Buffer) => {
       stdout += data.toString();
     });
@@ -465,6 +456,27 @@ function callPythonScript(
         reject(new Error(`Python 脚本启动失败: ${err.message}`));
       }
     });
+
+    // ★ 手动超时保护 — 杀整个进程组避免孤儿进程
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        try {
+          if (process.platform === 'win32') {
+            proc.kill('SIGKILL');
+          } else {
+            // 杀掉整个进程组（负pid表示进程组），包括torch子进程
+            process.kill(-proc.pid!, 'SIGKILL');
+          }
+        } catch {
+          // 进程可能已退出
+        }
+        resolve({
+          success: false,
+          error: `Python 脚本超时 (${Math.round(IOPAINT_TIMEOUT_MS / 1000)}s)`,
+        });
+      }
+    }, IOPAINT_TIMEOUT_MS);
 
     proc.on('close', (code: number | null) => {
       if (settled) return; // 已被超时处理

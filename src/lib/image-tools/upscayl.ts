@@ -9,7 +9,7 @@ import fs from 'fs';
 import os from 'os';
 import { spawn } from 'child_process';
 import sharp from 'sharp';
-import { UPSCALE_DEFAULT_SCALE, UPSCALE_TIMEOUT_MS, UPSCALE_OUTPUT_DIR, UPSCALE_OUTPUT_URL_PREFIX } from './config';
+import { UPSCALE_DEFAULT_SCALE, UPSCALE_TIMEOUT_MS, UPSCALE_OUTPUT_DIR, UPSCALE_OUTPUT_URL_PREFIX, PYTHON_BIN } from './config';
 
 // ---- 目录配置 ----
 
@@ -39,8 +39,6 @@ function generateFilename(prefix: string, ext: string): string {
   const random = Math.random().toString(36).substring(2, 8);
   return `${prefix}-${timestamp}-${random}.${ext}`;
 }
-
-const PYTHON_BIN = process.env.PYTHON_BIN || 'python3';
 
 // ---- 类型定义 ----
 
@@ -91,22 +89,39 @@ export async function isOnnxUpscaleAvailable(): Promise<{
   // 检查 Python + onnxruntime 依赖
   try {
     const result = await new Promise<{ installed: boolean; version?: string }>((resolve) => {
+      let settled = false;
       const proc = spawn(PYTHON_BIN, ['-c', 'import onnxruntime; print(onnxruntime.__version__)'], {
         stdio: ['pipe', 'pipe', 'pipe'],
-        timeout: 10000,
       });
+      const timer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          try { proc.kill('SIGKILL'); } catch {}
+          resolve({ installed: false });
+        }
+      }, 10000);
       let stdout = '';
       let stderr = '';
       proc.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
       proc.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
       proc.on('close', (code: number | null) => {
-        if (code === 0 && stdout.trim()) {
-          resolve({ installed: true, version: stdout.trim() });
-        } else {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          if (code === 0 && stdout.trim()) {
+            resolve({ installed: true, version: stdout.trim() });
+          } else {
+            resolve({ installed: false });
+          }
+        }
+      });
+      proc.on('error', () => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
           resolve({ installed: false });
         }
       });
-      proc.on('error', () => resolve({ installed: false }));
     });
 
     if (!result.installed) {
@@ -192,6 +207,7 @@ async function callOnnxUpscale(
     const proc = spawn(PYTHON_BIN, [scriptPath], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, ONNX_MODELS_DIR: onnxModelsDir },
+      detached: true,
     });
 
     let stdout = '';
@@ -201,7 +217,7 @@ async function callOnnxUpscale(
     const timer = setTimeout(() => {
       if (!settled) {
         settled = true;
-        proc.kill('SIGKILL');
+        if (proc.pid) try { process.kill(-proc.pid, 'SIGKILL'); } catch {}
         resolve({ success: false, error: `ONNX 放大超时 (${Math.round(effectiveTimeout / 1000)}s)` });
       }
     }, effectiveTimeout);
