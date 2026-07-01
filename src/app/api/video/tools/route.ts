@@ -57,6 +57,13 @@ export async function POST(req: NextRequest) {
     const ffmpegAvailable = await checkFFmpeg();
     
     switch (action) {
+      case 'info': {
+        return NextResponse.json({
+          ffmpegAvailable,
+          supportedActions: ['extract-frames', 'trim', 'concat', 'add-audio', 'add-audio-to-video', 'thumbnail'],
+          supportedModes: ['fps', 'uniform', 'first_last', 'keyframes'],
+        });
+      }
       case 'extract-frames': {
         const { videoUrl, mode = 'uniform', count = 8, fps = 1 } = body;
         if (!videoUrl) return NextResponse.json({ error: '缺少videoUrl' }, { status: 400 });
