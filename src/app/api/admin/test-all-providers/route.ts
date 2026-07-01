@@ -24,9 +24,9 @@ interface TestResult {
 }
 
 async function testProvider(
-  provider: { id: string; name: string; displayName?: string; baseUrl: string; apiKey: string; modelType: string; selectedModels?: string[]; advancedParams?: any; requestStyle?: string }
+  provider: { id: string; name: string; displayName?: string; baseUrl?: string; apiKey?: string; modelType?: string; selectedModels?: string[]; advancedParams?: any; requestStyle?: string; isEnabled?: boolean }
 ): Promise<TestResult> {
-  const { id, name, baseUrl, apiKey, modelType, selectedModels = [], advancedParams, requestStyle } = provider;
+  const { id, name, baseUrl = '', apiKey = '', modelType = 'unknown', selectedModels = [], advancedParams, requestStyle } = provider;
   const displayName = provider.displayName || name;
   const tests: TestResult['tests'] = [];
 
@@ -242,8 +242,8 @@ export async function GET(request: NextRequest) {
         results.push({
           providerId: p.id,
           providerName: p.displayName || p.name,
-          modelType: p.modelType,
-          baseUrl: p.baseUrl,
+          modelType: p.modelType || 'unknown',
+          baseUrl: p.baseUrl || '',
           tests: [{ name: '测试执行', endpoint: '', status: 'fail', detail: `测试脚本异常: ${err instanceof Error ? err.message : String(err)}` }],
           overall: 'fail',
         });
