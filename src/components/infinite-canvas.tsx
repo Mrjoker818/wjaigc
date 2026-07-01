@@ -13107,7 +13107,7 @@ export function InfiniteCanvas({
                   onImagesChange(updated);
                 } else {
                   // 没有原图时，将结果作为新图片添加到画布
-                  onAddImages([stableUrl]);
+                  onAddImages([stableUrl], undefined, { modelName: 'Agent编辑', apiProvider: '' });
                 }
                 setShowAgentEditor(false);
                 setAgentEditImage(null);
