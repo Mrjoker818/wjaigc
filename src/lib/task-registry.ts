@@ -146,6 +146,12 @@ export function updateTaskProgress(
   const oldProgress = task.progress;
   Object.assign(task, { ...update, updatedAt: Date.now() });
 
+  // ★ 任务进入终态（completed/failed/cancelled）时，清理 cancelledTasks 中的记录
+  const TERMINAL_STATUSES: TaskStatus[] = ['completed', 'failed', 'cancelled'];
+  if (TERMINAL_STATUSES.includes(task.status)) {
+    cancelledTasks.delete(taskId);
+  }
+
   // 推断事件类型
   if (update.status === 'completed') {
     emitEvent('completed', task);
@@ -261,7 +267,6 @@ export function enqueueTask(taskId: string, userId: string, config?: Partial<Que
 export function dequeueNextTask(userId: string): string | null {
   const queue = userQueues.get(userId);
   if (!queue || queue.length === 0) {
-    userActiveCount.set(userId, Math.max(0, (userActiveCount.get(userId) || 1) - 1));
     return null;
   }
 
@@ -270,9 +275,12 @@ export function dequeueNextTask(userId: string): string | null {
   else userQueues.set(userId, queue);
 
   // 更新排队中所有任务的位置
-  queue.forEach((id, idx) => {
-    updateTaskProgress(id, { queuePosition: idx + 1 });
-  });
+  const updatedQueue = userQueues.get(userId);
+  if (updatedQueue) {
+    updatedQueue.forEach((id, idx) => {
+      updateTaskProgress(id, { queuePosition: idx + 1 });
+    });
+  }
 
   return nextTaskId;
 }

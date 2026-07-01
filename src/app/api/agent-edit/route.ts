@@ -5,7 +5,7 @@ import type { ApiProvider } from '@/lib/universal-api-types';
 import { fetchWithV1Retry, getInternalApiUrl } from '@/lib/api-helpers';
 import { optionalApiAuth } from '@/lib/api-auth';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
-import { calculateActualPixelsFromRatio } from '@/app/api/generate/route';
+import { calculateActualPixelsFromRatio } from '@/lib/canvas-generation-group';
 import { executeAgentLoop, getToolsForLLM, type AgentContext, type AgentResult } from '@/lib/agent-engine';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { translateApiError } from '@/lib/api-error-translate';
@@ -353,6 +353,114 @@ export async function POST(request: NextRequest) {
               if (svgData.success && svgData.svgDataUrl) {
                 finalImageUrl = svgData.previewUrl || finalImageUrl;
                 step.result = 'SVG描摹成功';
+              }
+            } else if (step.toolName === 'generate_image') {
+              // 调用图像生成 API
+              const task = localTaskStore.get(taskId);
+              if (task) localTaskStore.set(taskId, { ...task, label: '执行图像生成...' });
+              const genResp = await fetch(getInternalApiUrl('/api/generate'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  prompt: String(step.params.prompt || prompt),
+                  aspectRatio: step.params.size || '1:1',
+                  quality: 'high',
+                  model: imageModel,
+                  providerId: imageProviderId,
+                }),
+              });
+              const genData = await genResp.json() as Record<string, unknown>;
+              if (genData.success && genData.taskId) {
+                // 轮询等待结果
+                const genTaskId = String(genData.taskId);
+                for (let poll = 0; poll < 120; poll++) {
+                  if (isCancelled()) break;
+                  await new Promise(r => setTimeout(r, 2000));
+                  const pollResp = await fetch(getInternalApiUrl(`/api/poll-task?taskId=${genTaskId}`), { method: 'POST' });
+                  const pollData = await pollResp.json() as Record<string, unknown>;
+                  const status = String(pollData.status || '');
+                  if (status === 'completed' && pollData.imageUrl) {
+                    finalImageUrl = String(pollData.imageUrl);
+                    step.result = '图像生成成功';
+                    break;
+                  } else if (status === 'failed') {
+                    step.result = `图像生成失败: ${pollData.error || '未知错误'}`;
+                    step.success = false;
+                    break;
+                  }
+                }
+              }
+            } else if (step.toolName === 'generate_video') {
+              // 调用视频生成 API
+              const task = localTaskStore.get(taskId);
+              if (task) localTaskStore.set(taskId, { ...task, label: '执行视频生成...' });
+              const vGenResp = await fetch(getInternalApiUrl('/api/video/generate'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  prompt: String(step.params.prompt || prompt),
+                  mode: step.params.mode === 'image2video' ? 'image2video' : 'text2video',
+                  imageUrl: step.params.mode === 'image2video' ? finalImageUrl : undefined,
+                  aspectRatio: step.params.aspect_ratio || '16:9',
+                  duration: String(step.params.duration || '5'),
+                }),
+              });
+              const vGenData = await vGenResp.json() as Record<string, unknown>;
+              if (vGenData.success && vGenData.taskId) {
+                // 轮询等待结果
+                const vTaskId = String(vGenData.taskId);
+                for (let poll = 0; poll < 180; poll++) {
+                  if (isCancelled()) break;
+                  await new Promise(r => setTimeout(r, 2000));
+                  const pollResp = await fetch(getInternalApiUrl(`/api/poll-task?taskId=${vTaskId}`), { method: 'POST' });
+                  const pollData = await pollResp.json() as Record<string, unknown>;
+                  const status = String(pollData.status || '');
+                  if (status === 'completed') {
+                    const videoUrl = pollData.videoUrl || pollData.url;
+                    if (videoUrl) {
+                      step.result = '视频生成成功';
+                      // 视频不替换 finalImageUrl，保留图片，视频URL通过steps返回
+                      step.params.videoUrl = videoUrl;
+                    }
+                    break;
+                  } else if (status === 'failed') {
+                    step.result = `视频生成失败: ${pollData.error || '未知错误'}`;
+                    step.success = false;
+                    break;
+                  }
+                }
+              }
+            } else if (step.toolName === 'extend_video') {
+              // 调用视频延长 API
+              const task = localTaskStore.get(taskId);
+              if (task) localTaskStore.set(taskId, { ...task, label: '执行视频延长...' });
+              const vExtResp = await fetch(getInternalApiUrl('/api/video/extend'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  videoUrl: String(step.params.videoUrl || context.videoUrl || ''),
+                  prompt: String(step.params.prompt || ''),
+                  extendDuration: Number(step.params.duration || 5),
+                }),
+              });
+              const vExtData = await vExtResp.json() as Record<string, unknown>;
+              if (vExtData.success && vExtData.taskId) {
+                const exTaskId = String(vExtData.taskId);
+                for (let poll = 0; poll < 180; poll++) {
+                  if (isCancelled()) break;
+                  await new Promise(r => setTimeout(r, 2000));
+                  const pollResp = await fetch(getInternalApiUrl(`/api/poll-task?taskId=${exTaskId}`), { method: 'POST' });
+                  const pollData = await pollResp.json() as Record<string, unknown>;
+                  const status = String(pollData.status || '');
+                  if (status === 'completed') {
+                    step.result = '视频延长成功';
+                    break;
+                  } else if (status === 'failed') {
+                    step.result = `视频延长失败: ${pollData.error || '未知错误'}`;
+                    step.success = false;
+                    break;
+                  }
+                }
               }
             }
           } catch (err) {
