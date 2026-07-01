@@ -9,7 +9,9 @@ export async function register() {
     // 首次请求时会在对应 API 路由中自动完成初始化
     const dbInit = async () => {
       try {
-        const { migrateFileDataToDb, dbEnsureSortOrderColumn, detectAndRecoverOrphanedUsers } = await import('@/lib/db-storage');
+        const { migrateFileDataToDb, dbEnsureSortOrderColumn, detectAndRecoverOrphanedUsers, ensureCoreTables } = await import('@/lib/db-storage');
+        // 首先确保所有核心表存在（新部署时自动建表）
+        await ensureCoreTables();
         await migrateFileDataToDb();
         await dbEnsureSortOrderColumn();
         console.log('[instrumentation] DB migration check completed');

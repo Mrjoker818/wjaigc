@@ -42,6 +42,125 @@ interface DbApiProvider {
   balance_password?: string;
 }
 
+// ─── Core Tables Initialization (for new deployments) ─────────────────────────
+
+export async function ensureCoreTables(): Promise<void> {
+  try {
+    // 用户表
+    await execSql(`
+      CREATE TABLE IF NOT EXISTS wujie_users (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        password_hash TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'user',
+        status TEXT NOT NULL DEFAULT 'active',
+        api_permissions JSONB DEFAULT '{}',
+        storage_folder TEXT DEFAULT '',
+        email TEXT DEFAULT '',
+        credits INTEGER DEFAULT 0,
+        created_at BIGINT NOT NULL,
+        updated_at BIGINT NOT NULL
+      )
+    `);
+
+    // API提供商表
+    await execSql(`
+      CREATE TABLE IF NOT EXISTS wujie_api_providers (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        display_name TEXT DEFAULT '',
+        base_url TEXT NOT NULL,
+        api_key TEXT NOT NULL,
+        is_enabled BOOLEAN DEFAULT true,
+        type TEXT NOT NULL DEFAULT 'image',
+        model_type TEXT DEFAULT 'image',
+        request_style TEXT DEFAULT 'images-generations',
+        selected_models TEXT[] DEFAULT '{}',
+        advanced_params JSONB DEFAULT '{}',
+        is_default BOOLEAN DEFAULT false,
+        created_at BIGINT NOT NULL,
+        updated_at BIGINT NOT NULL,
+        connection_status TEXT DEFAULT 'unknown',
+        discovered_models JSONB DEFAULT '[]',
+        sort_order INTEGER DEFAULT 9999,
+        balance_username TEXT DEFAULT '',
+        balance_password TEXT DEFAULT ''
+      )
+    `);
+
+    // 用户数据表（项目/图片/工作流等）
+    await execSql(`
+      CREATE TABLE IF NOT EXISTS wujie_user_data (
+        user_id TEXT NOT NULL,
+        data_key TEXT NOT NULL,
+        data_value JSONB,
+        updated_at BIGINT NOT NULL,
+        PRIMARY KEY (user_id, data_key)
+      )
+    `);
+
+    // 系统设置表
+    await execSql(`
+      CREATE TABLE IF NOT EXISTS wujie_system_settings (
+        key TEXT PRIMARY KEY,
+        value JSONB,
+        updated_at BIGINT NOT NULL
+      )
+    `);
+
+    // 充值订单表
+    await execSql(`
+      CREATE TABLE IF NOT EXISTS wujie_recharge_orders (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        amount INTEGER NOT NULL,
+        price_cny NUMERIC(10,2) NOT NULL,
+        bonus INTEGER DEFAULT 0,
+        payment_method TEXT NOT NULL,
+        payment_status TEXT NOT NULL DEFAULT 'pending',
+        payment_note TEXT DEFAULT '',
+        transaction_id TEXT DEFAULT '',
+        created_at BIGINT NOT NULL,
+        updated_at BIGINT NOT NULL,
+        expires_at BIGINT,
+        submitted_at BIGINT,
+        paid_at BIGINT
+      )
+    `);
+    await execSql(`CREATE INDEX IF NOT EXISTS idx_recharge_orders_user ON wujie_recharge_orders(user_id)`);
+    await execSql(`CREATE INDEX IF NOT EXISTS idx_recharge_orders_status ON wujie_recharge_orders(payment_status)`);
+
+    // 品牌资产表
+    await execSql(`
+      CREATE TABLE IF NOT EXISTS wujie_brand_assets (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        brand_name TEXT DEFAULT '',
+        brand_colors JSONB DEFAULT '[]',
+        style_extra JSONB DEFAULT '{}',
+        scene_desc TEXT DEFAULT '',
+        reference_image_url TEXT DEFAULT '',
+        product_image_url TEXT DEFAULT '',
+        product_desc TEXT DEFAULT '',
+        main_text TEXT DEFAULT '',
+        secondary_text TEXT DEFAULT '',
+        accent_symbol TEXT DEFAULT '',
+        selected_model TEXT DEFAULT '',
+        is_default BOOLEAN DEFAULT false,
+        created_at BIGINT NOT NULL,
+        updated_at BIGINT NOT NULL
+      )
+    `);
+    await execSql(`CREATE INDEX IF NOT EXISTS idx_brand_assets_user ON wujie_brand_assets(user_id)`);
+
+    console.log('[db-storage] Core tables ensured');
+  } catch (e) {
+    console.error('[db-storage] ensureCoreTables error:', e);
+    throw e;
+  }
+}
+
 // ─── Users ───────────────────────────────────────────────────────────────────
 
 export async function dbGetUsers(): Promise<DbUser[]> {
