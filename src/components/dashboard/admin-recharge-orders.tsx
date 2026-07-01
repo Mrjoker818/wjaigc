@@ -72,8 +72,8 @@ export function AdminRechargeOrders() {
     }
   };
 
-  const handleReject = async (orderId: string, reason: string) => {
-    if (!reason) reason = prompt('请输入驳回原因') || '';
+  const handleReject = async (orderId: string, presetReason = '') => {
+    const reason = presetReason || prompt('请输入驳回原因（例如：未收到款项、金额不符等）') || '';
     if (!reason) return;
     setProcessingId(orderId);
     try {

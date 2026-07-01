@@ -222,14 +222,16 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { action, amount, description, userId: targetUserId, packageName, paymentMethod, orderId } = body as {
-      action: 'create-order' | 'query-order' | 'confirm-paid' | 'admin-confirm' | 'admin-reject' | 'reverse-order' | 'admin_adjust' | 'admin-recharge' | 'my-orders' | 'admin-all-orders';
+    const { action, amount, description, userId: targetUserId, packageName, paymentMethod, orderId, status, reason } = body as {
+      action: 'create-order' | 'query-order' | 'confirm-paid' | 'admin-confirm' | 'admin-confirm-paid' | 'admin-reject' | 'reverse-order' | 'admin_adjust' | 'admin-recharge' | 'my-orders' | 'admin-all-orders';
       amount?: number;
       description?: string;
       userId?: string;
       packageName?: string;
       paymentMethod?: 'alipay' | 'wechat';
       orderId?: string;
+      status?: string;
+      reason?: string;
     };
 
     const isAdmin = user.role === 'admin';
@@ -269,13 +271,14 @@ export async function POST(request: NextRequest) {
 
       // Create order in database
       const orderId = `order_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-      const expiresAt = Date.now() + 24 * 60 * 60 * 1000; // 24 hours expiry
+      const nowTs = Date.now();
+      const expiresAt = nowTs + 24 * 60 * 60 * 1000; // 24 hours expiry
 
       try {
         await execSql(
-          `INSERT INTO wujie_recharge_orders (id, user_id, amount, price_cny, bonus, payment_method, payment_status, expires_at)
-           VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7)`,
-          [orderId, user.id, rechargeAmount + bonusCredits, priceCny, bonusCredits, method, expiresAt]
+          `INSERT INTO wujie_recharge_orders (id, user_id, amount, price_cny, bonus, payment_method, payment_status, created_at, updated_at, expires_at)
+           VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8, $9)`,
+          [orderId, user.id, rechargeAmount + bonusCredits, priceCny, bonusCredits, method, nowTs, nowTs, expiresAt]
         );
       } catch (dbErr) {
         console.error('[credits] create order error:', dbErr);
@@ -311,23 +314,24 @@ export async function POST(request: NextRequest) {
         if (result.rows.length === 0) {
           return NextResponse.json({ success: false, error: '订单不存在' }, { status: 404 });
         }
-        const order = result.rows[0] as Record<string, unknown>;
+        const r = result.rows[0] as Record<string, unknown>;
         return NextResponse.json({
           success: true,
           order: {
-            id: order.id,
-            amount: order.amount,
-            priceCny: order.price_cny,
-            bonus: order.bonus,
-            paymentMethod: order.payment_method,
-            paymentStatus: order.payment_status,
-            createdAt: order.created_at,
-            expiresAt: order.expires_at,
+            orderId: r.id,
+            amount: Number(r.amount) || 0,
+            priceCny: Number(r.price_cny) || 0,
+            bonus: Number(r.bonus) || 0,
+            paymentMethod: r.payment_method,
+            paymentStatus: r.payment_status === 'failed' ? 'rejected' : r.payment_status,
+            rejectReason: r.admin_note || r.payment_note || null,
+            createdAt: Number(r.created_at) || 0,
+            paidAt: r.paid_at ? Number(r.paid_at) : undefined,
           },
         });
       } catch (dbErr) {
-        console.error('[credits] query order error:', dbErr);
-        return NextResponse.json({ success: false, error: '查询订单失败' }, { status: 500 });
+        console.error('[credits] query-order error:', dbErr);
+        return NextResponse.json({ success: false, error: '查询失败' }, { status: 500 });
       }
     }
 
@@ -375,7 +379,8 @@ export async function POST(request: NextRequest) {
     }
 
     // ===== Admin: Confirm an order (add credits) =====
-    if (action === 'admin-confirm' && isAdmin) {
+    // Alias: 'admin-confirm' or 'admin-confirm-paid'
+    if ((action === 'admin-confirm' || action === 'admin-confirm-paid') && isAdmin) {
       if (!orderId) {
         return NextResponse.json({ success: false, error: '缺少订单号' }, { status: 400 });
       }
@@ -424,11 +429,12 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: false, error: '缺少订单号' }, { status: 400 });
       }
       try {
+        const rejectReason = reason || '未收到对应款项';
         await execSql(
-          `UPDATE wujie_recharge_orders SET payment_status = 'failed', updated_at = $2 WHERE id = $1`,
-          [orderId, Date.now()]
+          `UPDATE wujie_recharge_orders SET payment_status = 'rejected', payment_note = $2, updated_at = $3 WHERE id = $1`,
+          [orderId, rejectReason, Date.now()]
         );
-        return NextResponse.json({ success: true, message: '订单已拒绝' });
+        return NextResponse.json({ success: true, message: '订单已驳回' });
       } catch (dbErr) {
         console.error('[credits] admin reject error:', dbErr);
         return NextResponse.json({ success: false, error: '操作失败' }, { status: 500 });
@@ -511,18 +517,41 @@ export async function POST(request: NextRequest) {
       const statusFilter = typeof status === 'string' ? status : '';
       try {
         let res;
-        if (statusFilter && ['pending', 'submitted', 'paid', 'rejected', 'cancelled'].includes(statusFilter)) {
+        const validStatuses = ['pending', 'submitted', 'paid', 'rejected', 'failed', 'cancelled', 'reversed'];
+        if (statusFilter && validStatuses.includes(statusFilter)) {
           res = await execSql(
-            'SELECT * FROM wujie_recharge_orders WHERE status = $1 ORDER BY created_at DESC LIMIT 100',
+            `SELECT o.*, u.name as username
+             FROM wujie_recharge_orders o
+             LEFT JOIN wujie_users u ON o.user_id = u.id
+             WHERE o.payment_status = $1
+             ORDER BY o.created_at DESC LIMIT 100`,
             [statusFilter]
           );
         } else {
           res = await execSql(
-            'SELECT * FROM wujie_recharge_orders ORDER BY created_at DESC LIMIT 100',
-            []
+            `SELECT o.*, u.name as username
+             FROM wujie_recharge_orders o
+             LEFT JOIN wujie_users u ON o.user_id = u.id
+             ORDER BY o.created_at DESC LIMIT 100`
           );
         }
-        return NextResponse.json({ success: true, orders: res?.rows || [] });
+        return NextResponse.json({
+          success: true,
+          orders: (res?.rows || []).map((r: Record<string, unknown>) => ({
+            orderId: r.id,
+            userId: r.user_id,
+            username: r.username || r.user_id,
+            amount: Number(r.price_cny) || 0,
+            credits: Number(r.amount) || 0,
+            priceCny: Number(r.price_cny) || 0,
+            bonus: Number(r.bonus) || 0,
+            paymentMethod: r.payment_method,
+            status: r.payment_status === 'failed' ? 'rejected' : r.payment_status,
+            createdAt: Number(r.created_at) || 0,
+            paidAt: r.paid_at ? Number(r.paid_at) : undefined,
+            remark: r.payment_note as string | null,
+          })),
+        });
       } catch (dbErr) {
         console.error('[credits] admin-all-orders error:', dbErr);
         return NextResponse.json({ success: false, error: '查询订单失败' }, { status: 500 });

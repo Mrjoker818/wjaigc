@@ -737,7 +737,6 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   }, [selectedProviderIds, refreshAdmin]);
 
   const handleBatchDeleteApi = useCallback(async () => {
-    if (!confirm(`确认删除选中的 ${selectedProviderIds.size} 个提供商？`)) return;
     setApiBatchLoading(true);
     try {
       const ids = Array.from(selectedProviderIds);
@@ -745,7 +744,10 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       window.dispatchEvent(new Event('wujie-admin-apis-updated'));
       await refreshAdmin();
       setSelectedProviderIds(new Set());
-    } finally { setApiBatchLoading(false); }
+    } finally {
+      setApiBatchLoading(false);
+      setConfirmDlg(d => ({ ...d, open: false }));
+    }
   }, [selectedProviderIds, refreshAdmin]);
 
   const handleBatchTestConnection = useCallback(async () => {

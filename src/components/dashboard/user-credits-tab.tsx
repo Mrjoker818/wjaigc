@@ -251,13 +251,11 @@ export default function UserCreditsTab({
       });
       const data = await res.json();
       if (data.success) {
-        onToast?.('确认付款成功！积分已到账');
-        setOrderInfo(null);
-        setShowRecharge(false);
-        setSelectedPackage(null);
+        onToast?.('已提交付款确认，请等待管理员审核（通常几分钟内到账）');
+        // 不关闭弹窗，让用户看到待审核状态，可点击查询状态
         loadCredits();
       } else {
-        onToast?.(data.error || '确认付款失败');
+        onToast?.(data.error || '提交失败');
       }
     } catch (err) {
       console.error('Confirm paid error:', err);
@@ -291,8 +289,13 @@ export default function UserCreditsTab({
           setShowRecharge(false);
           setSelectedPackage(null);
           loadCredits();
+        } else if (order?.paymentStatus === 'submitted' || order?.status === 'submitted') {
+          onToast?.('订单正在等待管理员审核，请耐心等待');
+        } else if (order?.paymentStatus === 'rejected' || order?.status === 'rejected') {
+          const reason = order?.rejectReason || order?.admin_note || '支付未确认';
+          onToast?.(`订单已被驳回：${reason}`);
         } else {
-          onToast?.('订单尚未确认，请在充值页面点击"我已完成付款"');
+          onToast?.('订单尚未提交，请在手机页面点击"我已完成付款"');
         }
       }
     } catch {
