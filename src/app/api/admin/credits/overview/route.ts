@@ -57,6 +57,7 @@ export async function GET(request: NextRequest) {
     ];
 
     const topUsers = (topUsersRes.rows as any[]).map(r => ({
+      userId: r.user_id,
       name: r.name || r.user_id,
       consumed: Number(r.total_used) || 0,
       totalConsumed: Number(r.total_used) || 0,
