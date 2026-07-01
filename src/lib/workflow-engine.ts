@@ -30,17 +30,20 @@ const SHARED_ASPECT_RATIOS = [
 // ==================== 节点类型 ====================
 
 export type NodeType =
-  | 'input-image' | 'input-text' | 'input-param'
+  | 'input-image' | 'input-text' | 'input-param' | 'input-video' | 'audio-input'
   | 'ai-generate' | 'ai-edit' | 'ai-retouch' | 'ai-upscale' | 'ai-removebg' | 'ai-vectorize' | 'ai-style-transfer' | 'ai-color-adjust' | 'ai-analyze'
-  | 'ai-font-design' | 'ai-refine-engine' | 'ai-brand-ecommerce' | 'ai-segment' | 'ai-multi-angle' | 'ai-3d-model'
+  | 'ai-font-design' | 'ai-refine-engine' | 'ai-brand-ecommerce' | 'ai-segment' | 'ai-multi-angle' | 'ai-3d-model' | 'ai-panorama'
   | 'ai-video-generate' | 'ai-video-i2v'
+  | 'ai-llm' | 'ai-audio'
   | 'video-speed-change' | 'video-filter' | 'video-concat' | 'video-trim'
+  | 'video-extract-frames' | 'video-compose'
+  | 'manual-color-adjust'
   | 'condition-if' | 'condition-switch' | 'loop-for' | 'loop-while' | 'loop-each' | 'parallel'
   | 'agent-auto' | 'agent-chat'
   | 'subgraph' | 'group' | 'storyboard-sequence'
-  | 'output-image' | 'output-save' | 'output-export' | 'output-image-group' | 'output-video';
+  | 'output-image' | 'output-save' | 'output-export' | 'output-image-group' | 'output-video' | 'output-audio';
 
-export type NodeCategory = 'input' | 'ai' | 'ai-video' | 'logic' | 'agent' | 'subgraph' | 'output';
+export type NodeCategory = 'input' | 'ai' | 'ai-video' | 'logic' | 'agent' | 'subgraph' | 'output' | 'video-tool' | 'tool';
 
 /** 节点分类 → 颜色映射 */
 export const NODE_TYPE_COLORS: Record<NodeCategory, string> = {
@@ -51,6 +54,8 @@ export const NODE_TYPE_COLORS: Record<NodeCategory, string> = {
   agent: '#f472b6',
   subgraph: '#06b6d4',
   output: '#2ea043',
+  'video-tool': '#ff4081',
+  'tool': '#00897b',
 };
 
 /** 节点分类 → 中文名 */
@@ -62,16 +67,21 @@ export const NODE_CATEGORY_LABELS: Record<NodeCategory, string> = {
   agent: 'Agent',
   subgraph: '子图/组合',
   output: '输出节点',
+  'video-tool': '视频工具',
+  'tool': '工具节点',
 };
 
 /** 获取节点所属分类 */
 export function getNodeCategory(type: NodeType): NodeCategory {
   if (type.startsWith('input-')) return 'input';
+  if (type === 'ai-video-generate' || type === 'ai-video-i2v') return 'ai-video';
   if (type.startsWith('ai-')) return 'ai';
   if (type.startsWith('condition-') || type.startsWith('loop-') || type === 'parallel') return 'logic';
   if (type.startsWith('agent-')) return 'agent';
   if (type === 'subgraph' || type === 'group') return 'subgraph';
   if (type.startsWith('output-')) return 'output';
+  if (['video-trim', 'video-concat', 'video-filter', 'video-speed-change', 'video-compose', 'video-extract-frames'].includes(type)) return 'video-tool';
+  if (['manual-color-adjust', 'ai-audio'].includes(type)) return 'tool';
   return 'ai';
 }
 
@@ -81,7 +91,7 @@ export function isImageGeneratingNode(type: NodeType): boolean {
     'ai-generate', 'ai-edit', 'ai-retouch', 'ai-upscale', 'ai-removebg',
     'ai-font-design', 'ai-refine-engine', 'ai-brand-ecommerce', 'ai-segment',
     'ai-multi-angle', 'ai-3d-model', 'ai-style-transfer', 'ai-color-adjust',
-    'ai-vectorize', 'storyboard-sequence',
+    'ai-vectorize', 'storyboard-sequence', 'ai-panorama', 'manual-color-adjust',
   ].includes(type);
 }
 
@@ -142,7 +152,16 @@ export const NODE_TYPE_LABELS: Record<NodeType, string> = {
   'video-filter': '视频滤镜',
   'video-concat': '视频拼接',
   'video-trim': '视频裁切',
+  'input-video': '视频输入',
+  'audio-input': '音频输入',
+  'video-extract-frames': '视频抽帧',
+  'video-compose': '视频合成',
   'output-video': '视频输出',
+  'output-audio': '音频输出',
+  'ai-audio': 'AI配音',
+  'ai-panorama': '720全景',
+  'manual-color-adjust': '参数调色',
+  'ai-llm': 'AI文案',
 };
 
 /** 节点类型 → 图标名 */
@@ -186,12 +205,21 @@ export const NODE_TYPE_ICONS: Record<NodeType, string> = {
   'video-filter': 'Filter',
   'video-concat': 'Link',
   'video-trim': 'Scissors',
+  'input-video': 'FileVideo',
+  'video-extract-frames': 'Film',
+  'video-compose': 'Clapperboard',
+  'audio-input': 'Music',
   'output-video': 'FileVideo',
+  'output-audio': 'AudioLines',
+  'ai-audio': 'Volume2',
+  'ai-panorama': 'Globe',
+  'manual-color-adjust': 'Palette',
+  'ai-llm': 'Brain',
 };
 
 // ==================== 端口类型 ====================
 
-export type PortType = 'image' | 'mask' | 'prompt' | 'condition' | 'any' | 'data' | 'video';
+export type PortType = 'image' | 'mask' | 'prompt' | 'condition' | 'any' | 'data' | 'video' | 'audio' | 'frames' | 'text';
 
 export const PORT_COLORS: Record<PortType, string> = {
   image: '#3b82f6',
@@ -201,17 +229,23 @@ export const PORT_COLORS: Record<PortType, string> = {
   any: '#7d8590',
   data: '#22d3ee',
   video: '#f97316',
+  audio: '#10b981',
+  frames: '#06b6d4',
+  text: '#60a5fa',
 };
 
 /** 端口类型兼容矩阵：哪些输出类型可以连到哪些输入类型 */
 export const PORT_COMPATIBILITY: Record<PortType, PortType[]> = {
   image: ['image', 'any'],
   mask: ['mask', 'any'],
-  prompt: ['prompt', 'any'],
+  prompt: ['prompt', 'any', 'text'],
   condition: ['condition', 'any'],
   any: ['any'],
   data: ['data', 'any', 'prompt', 'image'],
   video: ['video', 'any', 'image'],
+  audio: ['audio', 'any'],
+  frames: ['frames', 'any', 'image'],
+  text: ['text', 'prompt', 'any'],
 };
 
 /** 检查两个端口是否可以连线 */
@@ -289,13 +323,18 @@ export const NODE_TEMPLATES: { type: NodeType; category: NodeCategory; label: st
   { type: 'input-image', category: 'input', label: '图片输入', desc: '加载图片到工作流' },
   { type: 'input-text', category: 'input', label: '文本输入', desc: '提示词/描述文本' },
   { type: 'input-param', category: 'input', label: '参数输入', desc: '数值/选项参数' },
+  { type: 'input-video', category: 'input', label: '视频输入', desc: '上传视频或输入视频URL' },
+  { type: 'audio-input', category: 'input', label: '音频输入', desc: '上传音频文件或引用AI生成配音' },
+  { type: 'ai-llm', category: 'ai', label: 'AI文案策划', desc: 'LLM文本生成/文案策划/提示词优化' },
   { type: 'ai-generate', category: 'ai', label: '图像生成', desc: 'AI生成新图片' },
   { type: 'ai-edit', category: 'ai', label: '图像编辑', desc: '修图/擦除/扩展' },
   { type: 'ai-upscale', category: 'ai', label: '无损放大', desc: '超分辨率放大' },
   { type: 'ai-removebg', category: 'ai', label: '移除背景', desc: '智能抠图去背景' },
   { type: 'ai-vectorize', category: 'ai', label: '矢量化', desc: '位图转矢量图' },
   { type: 'ai-style-transfer', category: 'ai', label: '风格转换', desc: '图生图风格迁移' },
-  { type: 'ai-color-adjust', category: 'ai', label: '调色', desc: '亮度/对比度/饱和度' },
+  { type: 'ai-color-adjust', category: 'ai', label: 'AI调色', desc: 'AI智能调色重绘' },
+  { type: 'manual-color-adjust', category: 'ai', label: '参数调色', desc: '亮度/对比度/饱和度/色温即时调整' },
+  { type: 'ai-audio', category: 'ai', label: 'AI配音', desc: 'TTS语音合成/音频生成' },
   { type: 'ai-retouch', category: 'ai', label: 'AI修图', desc: '自然语言修图' },
   { type: 'ai-analyze', category: 'ai', label: 'AI分析', desc: '图像内容分析' },
   { type: 'ai-font-design', category: 'ai', label: '字境大师', desc: 'AI字体设计与生成' },
@@ -304,6 +343,7 @@ export const NODE_TEMPLATES: { type: NodeType; category: NodeCategory; label: st
   { type: 'ai-segment', category: 'ai', label: '元素分层', desc: '智能分层+PSD导出' },
   { type: 'ai-multi-angle', category: 'ai', label: '多角度生成', desc: '多视角旋转生成' },
   { type: 'ai-3d-model', category: 'ai', label: '3D模型', desc: '单图/多图转3D模型，支持文生3D' },
+  { type: 'ai-panorama', category: 'ai', label: '720全景', desc: '360度全景图生成，支持全景球预览' },
   { type: 'condition-if', category: 'logic', label: '条件分支', desc: 'If/Else 条件判断' },
   { type: 'condition-switch', category: 'logic', label: '开关分支', desc: '多路选择器' },
   { type: 'loop-for', category: 'logic', label: '循环', desc: '固定次数循环' },
@@ -322,6 +362,7 @@ export const NODE_TEMPLATES: { type: NodeType; category: NodeCategory; label: st
   { type: 'ai-video-generate', category: 'ai', label: '视频生成', desc: 'AI文生视频/图生视频' },
   { type: 'ai-video-i2v', category: 'ai', label: '图生视频', desc: '图片转视频（首帧/首尾帧/参考图）' },
   { type: 'output-video', category: 'output', label: '视频输出', desc: '输出视频结果' },
+  { type: 'output-audio', category: 'output', label: '音频输出', desc: '输出音频结果（TTS/配音/BGM）' },
   // 视频后处理节点
   { type: 'video-speed-change', category: 'ai-video', label: '视频变速', desc: '调整视频播放速度 (0.25x-4x)' },
   { type: 'video-filter', category: 'ai-video', label: '视频滤镜', desc: '应用视频滤镜效果 (电影/复古/赛博朋克等)' },
@@ -337,20 +378,40 @@ function createDefaultPorts(type: NodeType): NodePort[] {
   if (cat !== 'input') {
     if (type.startsWith('ai-')) {
       // AI节点都有图片输入和提示词输入
-      ports.push({ id: 'in-image', label: '图片', type: 'image', direction: 'in' });
-      ports.push({ id: 'in-prompt', label: '提示词', type: 'prompt', direction: 'in' });
+      if (type !== 'ai-llm' && type !== 'ai-audio') {
+        ports.push({ id: 'in-image', label: '图片', type: 'image', direction: 'in' });
+      }
+      if (type === 'ai-llm') {
+        ports.push({ id: 'in-prompt', label: '指令', type: 'prompt', direction: 'in' });
+        ports.push({ id: 'in-reference', label: '参考图', type: 'image', direction: 'in' });
+        ports.push({ id: 'in-text', label: '文本', type: 'prompt', direction: 'in' });
+      } else if (type === 'ai-audio') {
+        ports.push({ id: 'in-text', label: '文案', type: 'prompt', direction: 'in' });
+      } else {
+        ports.push({ id: 'in-prompt', label: '提示词', type: 'prompt', direction: 'in' });
+      }
       // 3D模型节点额外添加多图输入端口
       if (type === 'ai-3d-model') {
         ports.push({ id: 'in-image-multi', label: '多图', type: 'image', direction: 'in' });
       }
+    } else if (type === 'input-video') {
+      // input-video是source，不添加in端口
     } else if (type === 'video-speed-change' || type === 'video-filter' || type === 'video-trim') {
       // 视频后处理节点：视频输入
       ports.push({ id: 'in-video', label: '视频', type: 'video', direction: 'in' });
+    } else if (type === 'video-extract-frames') {
+      ports.push({ id: 'in-video', label: '视频', type: 'video', direction: 'in' });
+    } else if (type === 'video-compose') {
+      ports.push({ id: 'in-video', label: '视频', type: 'video', direction: 'in' });
+      ports.push({ id: 'in-audio', label: '音频', type: 'audio', direction: 'in' });
+      ports.push({ id: 'in-video-2', label: '视频2', type: 'video', direction: 'in' });
     } else if (type === 'video-concat') {
       // 视频拼接节点：多个视频输入
       ports.push({ id: 'in-video-1', label: '视频1', type: 'video', direction: 'in' });
       ports.push({ id: 'in-video-2', label: '视频2', type: 'video', direction: 'in' });
       ports.push({ id: 'in-video-3', label: '视频3', type: 'video', direction: 'in' });
+    } else if (type === 'manual-color-adjust') {
+      ports.push({ id: 'in-image', label: '图片', type: 'image', direction: 'in' });
     } else if (cat === 'logic') {
       ports.push({ id: 'in-data', label: '输入', type: 'any', direction: 'in' });
     } else if (cat === 'agent') {
@@ -359,6 +420,8 @@ function createDefaultPorts(type: NodeType): NodePort[] {
     } else if (cat === 'output') {
       if (type === 'output-video') {
         ports.push({ id: 'in-video', label: '视频', type: 'video', direction: 'in' });
+      } else if (type === 'output-audio') {
+        ports.push({ id: 'in-audio', label: '音频', type: 'audio', direction: 'in' });
       } else {
         ports.push({ id: 'in-image', label: '图片', type: 'image', direction: 'in' });
         if (type === 'output-image-group') {
@@ -374,6 +437,12 @@ function createDefaultPorts(type: NodeType): NodePort[] {
     if (cat === 'input') {
       if (type === 'input-image') {
         ports.push({ id: 'out-image', label: '图片', type: 'image', direction: 'out' });
+      } else if (type === 'input-video') {
+        ports.push({ id: 'out-video', label: '视频', type: 'video', direction: 'out' });
+        ports.push({ id: 'out-first-frame', label: '首帧', type: 'image', direction: 'out' });
+        ports.push({ id: 'out-thumbnail', label: '缩略图', type: 'image', direction: 'out' });
+      } else if (type === 'audio-input') {
+        ports.push({ id: 'out-audio', label: '音频', type: 'audio', direction: 'out' });
       } else {
         ports.push({ id: 'out-data', label: '数据', type: 'data', direction: 'out' });
         if (type === 'input-text') {
@@ -384,6 +453,12 @@ function createDefaultPorts(type: NodeType): NodePort[] {
       // 视频节点输出video端口
       if (type === 'ai-video-generate' || type === 'ai-video-i2v') {
         ports.push({ id: 'out-video', label: '视频', type: 'video', direction: 'out' });
+      } else if (type === 'ai-llm') {
+        ports.push({ id: 'out-text', label: '文案', type: 'prompt', direction: 'out' });
+      } else if (type === 'ai-audio') {
+        ports.push({ id: 'out-audio', label: '音频', type: 'audio', direction: 'out' });
+      } else if (type === 'ai-panorama') {
+        ports.push({ id: 'out-image', label: '全景图', type: 'image', direction: 'out' });
       } else if (type === 'ai-3d-model') {
         ports.push({ id: 'out-image', label: '缩略图', type: 'image', direction: 'out' });
         ports.push({ id: 'out-model', label: '3D模型', type: 'data', direction: 'out' });
@@ -399,7 +474,13 @@ function createDefaultPorts(type: NodeType): NodePort[] {
       if (type === 'ai-removebg') {
         ports.push({ id: 'out-mask', label: '蒙版', type: 'mask', direction: 'out' });
       }
-    } else if (type === 'video-speed-change' || type === 'video-filter' || type === 'video-trim' || type === 'video-concat') {
+    } else if (type === 'manual-color-adjust') {
+      ports.push({ id: 'out-image', label: '图片', type: 'image', direction: 'out' });
+    } else if (type === 'video-extract-frames') {
+      ports.push({ id: 'out-frames', label: '帧序列', type: 'frames', direction: 'out' });
+      ports.push({ id: 'out-first-frame', label: '首帧', type: 'image', direction: 'out' });
+      ports.push({ id: 'out-last-frame', label: '尾帧', type: 'image', direction: 'out' });
+    } else if (type === 'video-speed-change' || type === 'video-filter' || type === 'video-trim' || type === 'video-concat' || type === 'video-compose') {
       // 视频后处理节点输出视频
       ports.push({ id: 'out-video', label: '视频', type: 'video', direction: 'out' });
     } else if (type === 'condition-if') {
@@ -923,6 +1004,82 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
     fields.push({ key: 'startTime', label: '开始时间(秒)', type: 'number', min: 0, step: 0.1, defaultValue: 0 });
     fields.push({ key: 'endTime', label: '结束时间(秒)', type: 'number', min: 0, step: 0.1, defaultValue: 0 });
     fields.push({ key: 'duration', label: '裁切时长(秒)', type: 'number', min: 0, step: 0.1, defaultValue: 5 });
+  }
+
+  // ─── AI LLM文案节点 ───
+  if (type === 'ai-llm') {
+    fields.push({ key: 'model', label: 'LLM模型', type: 'model-select', modelFilter: 'chat' });
+    fields.push({ key: 'systemPrompt', label: '系统提示词', type: 'textarea', placeholder: '你是一个专业的文案策划专家...', defaultValue: '你是一个专业的AI创意策划文案专家，根据用户需求和参考图片，生成精准、富有创意的图像/视频生成提示词。' });
+    fields.push({ key: 'temperature', label: '创造性', type: 'slider', min: 0, max: 100, step: 5, defaultValue: 70 });
+    fields.push({ key: 'instruction', label: '额外指令', type: 'textarea', placeholder: '在此输入你的文案需求...' });
+  }
+
+  // ─── 视频输入节点 ───
+  if (type === 'input-video') {
+    fields.push({ key: 'source', label: '来源', type: 'select', options: [
+      { label: '上传视频', value: 'upload' }, { label: 'URL地址', value: 'url' }, { label: '画布选视频', value: 'canvas' }
+    ], defaultValue: 'upload' });
+    fields.push({ key: 'videoUrl', label: '视频URL', type: 'text', placeholder: '输入视频URL' });
+  }
+
+  // ─── AI音频节点 ───
+  if (type === 'ai-audio') {
+    fields.push({ key: 'text', label: '配音文案', type: 'textarea', placeholder: '输入需要合成语音的文案...' });
+    fields.push({ key: 'voice', label: '音色', type: 'select', options: [
+      { label: '晓晓(女,中文)', value: 'zh-CN-XiaoxiaoNeural' },
+      { label: '云希(男,中文)', value: 'zh-CN-YunxiNeural' },
+      { label: '云健(男,中文)', value: 'zh-CN-YunjianNeural' },
+      { label: '晓伊(女,中文)', value: 'zh-CN-XiaoyiNeural' },
+      { label: 'Aria(女,英文)', value: 'en-US-AriaNeural' },
+      { label: 'Guy(男,英文)', value: 'en-US-GuyNeural' },
+    ], defaultValue: 'zh-CN-XiaoxiaoNeural' });
+    fields.push({ key: 'speed', label: '语速', type: 'slider', min: 0.5, max: 2, step: 0.1, defaultValue: 1 });
+  }
+
+  // ─── 参数化调色节点 ───
+  if (type === 'manual-color-adjust') {
+    fields.push({ key: 'brightness', label: '亮度', type: 'slider', min: -100, max: 100, step: 5, defaultValue: 0 });
+    fields.push({ key: 'contrast', label: '对比度', type: 'slider', min: -100, max: 100, step: 5, defaultValue: 0 });
+    fields.push({ key: 'saturation', label: '饱和度', type: 'slider', min: -100, max: 100, step: 5, defaultValue: 0 });
+    fields.push({ key: 'temperature', label: '色温', type: 'slider', min: -100, max: 100, step: 5, defaultValue: 0 });
+    fields.push({ key: 'hue', label: '色相偏移', type: 'slider', min: -180, max: 180, step: 10, defaultValue: 0 });
+  }
+
+  // ─── 视频抽帧节点 ───
+  if (type === 'video-extract-frames') {
+    fields.push({ key: 'mode', label: '抽帧模式', type: 'select', options: [
+      { label: '每秒N帧', value: 'fps' },
+      { label: '均匀N帧', value: 'total_frames' },
+      { label: '关键帧', value: 'keyframes' },
+      { label: '首尾帧', value: 'first_last' }
+    ], defaultValue: 'total_frames' });
+    fields.push({ key: 'frameCount', label: '帧数', type: 'number', min: 2, max: 30, defaultValue: 6 });
+    fields.push({ key: 'fps', label: '每秒帧数', type: 'number', min: 0.5, max: 10, step: 0.5, defaultValue: 1 });
+  }
+
+  // ─── 视频合成节点 ───
+  if (type === 'video-compose') {
+    fields.push({ key: 'volume', label: '音频音量', type: 'slider', min: 0, max: 2, step: 0.1, defaultValue: 1 });
+    fields.push({ key: 'loopAudio', label: '循环音频', type: 'toggle', defaultValue: false });
+  }
+
+  // ─── 音频输出节点 ───
+  if (type === 'output-audio') {
+    fields.push({ key: 'filename', label: '文件名', type: 'text', defaultValue: 'audio' });
+    fields.push({ key: 'format', label: '输出格式', type: 'select', options: [
+      { label: 'WAV', value: 'wav' }, { label: 'MP3', value: 'mp3' }
+    ], defaultValue: 'wav' });
+  }
+
+  // ─── AI全景图节点 ───
+  if (type === 'ai-panorama') {
+    fields.push({ key: 'model', label: '生图模型', type: 'model-select', modelFilter: 'image' });
+    fields.push({ key: 'prompt', label: '场景描述', type: 'textarea', placeholder: '描述全景场景，如：海边日落、山顶星空...' });
+    fields.push({ key: 'viewType', label: '视角类型', type: 'select', options: [
+      { label: '360° 水平全景', value: '360' },
+      { label: '180° 广角', value: '180' },
+      { label: '小行星视角', value: 'tiny-planet' },
+    ], defaultValue: '360' });
   }
 
   // ─── 输出节点 ───
@@ -1628,6 +1785,132 @@ export function buildNodeExecutionRequest(
     case 'group':
       return null;
 
+    // ─── AI LLM 文案策划节点 ───
+    case 'ai-llm': {
+      const sysPrompt = (config as any).systemPrompt || '你是专业的创意文案策划师，请根据用户需求撰写高质量的创意文案。';
+      const userPrompt = (config as any).prompt || (config as any).text || '';
+      const refImage = (config as any).imageUrl || '';
+      const model = (config as any).model || '';
+      return {
+        endpoint: '/api/chat',
+        method: 'POST',
+        body: {
+          messages: [
+            { role: 'system', content: sysPrompt },
+            {
+              role: 'user',
+              content: refImage
+                ? [
+                    { type: 'text', text: userPrompt },
+                    { type: 'image_url', image_url: { url: refImage } }
+                  ]
+                : userPrompt
+            }
+          ],
+          model,
+          stream: false,
+        }
+      };
+    }
+
+    // ─── 参数化色彩调整节点（非AI重绘，纯参数） ───
+    case 'manual-color-adjust': {
+      const imageUrl = (config as any).imageUrl || '';
+      return {
+        endpoint: '/api/image/color-adjust',
+        method: 'POST',
+        body: {
+          imageUrl,
+          brightness: Number((config as any).brightness) || 0,
+          contrast: Number((config as any).contrast) || 0,
+          saturation: Number((config as any).saturation) || 0,
+          temperature: Number((config as any).temperature) || 0,
+          hue: Number((config as any).hue) || 0,
+        }
+      };
+    }
+
+    // ─── 音频生成节点（TTS） ───
+    case 'ai-audio': {
+      const text = (config as any).text || '';
+      return {
+        endpoint: '/api/audio/generate',
+        method: 'POST',
+        body: {
+          text,
+          voice: (config as any).voice || 'zh-CN-XiaoxiaoNeural',
+          speed: Number((config as any).speed) || 1.0,
+        }
+      };
+    }
+
+    // ─── 视频抽帧节点 ───
+    case 'video-extract-frames': {
+      const videoUrl = (config as any).videoUrl || '';
+      return {
+        endpoint: '/api/video/tools',
+        method: 'POST',
+        body: {
+          action: 'extract-frames',
+          videoUrl,
+          mode: (config as any).mode || 'uniform',
+          count: Number((config as any).count || (config as any).frameCount) || 8,
+          fps: Number((config as any).fps) || 1,
+        }
+      };
+    }
+
+    // ─── 视频合成节点（视频+音频/多视频拼接） ───
+    case 'video-compose': {
+      const videoUrl = (config as any).videoUrl || '';
+      const audioUrl = (config as any).audioUrl || '';
+      const videoUrls = (config as any).videoUrls || [];
+      return {
+        endpoint: '/api/video/tools',
+        method: 'POST',
+        body: {
+          action: audioUrl ? 'add-audio' : (videoUrls && videoUrls.length ? 'concat' : 'trim'),
+          videoUrl: videoUrls.length ? '' : videoUrl,
+          videoUrls: videoUrls.length ? videoUrls : undefined,
+          audioUrl,
+          volume: Number((config as any).volume) || 1.0,
+        }
+      };
+    }
+
+    // ─── 视频裁剪 ───
+    case 'video-trim': {
+      const videoUrl = (config as any).videoUrl || '';
+      return {
+        endpoint: '/api/video/tools',
+        method: 'POST',
+        body: {
+          action: 'trim',
+          videoUrl,
+          startTime: Number((config as any).startTime) || 0,
+          endTime: Number((config as any).endTime) || 0,
+          duration: Number((config as any).duration) || 5,
+        }
+      };
+    }
+
+    // ─── 720全景图节点 ───
+    case 'ai-panorama': {
+      const refImage = (config as any).imageUrl || '';
+      const prompt = (config as any).prompt || '360度全景环境图';
+      return {
+        endpoint: '/api/generate',
+        method: 'POST',
+        body: {
+          prompt: prompt + ', 360 degree panorama, equirectangular projection, spherical panorama, seamless',
+          model: (config as any).model || '',
+          aspectRatio: '2:1',
+          n: 1,
+          imageUrl: refImage || undefined,
+        }
+      };
+    }
+
     default:
       return null;
   }
@@ -1724,8 +2007,17 @@ export const AI_BUILD_PROMPT = `你是一个AI图像工作流设计助手。用�
 - ai-segment: 元素分层（导出PSD/SVG）
 - ai-multi-angle: 多角度生成（视角选择、角色一致性）
 - ai-3d-model: 3D模型生成
+- ai-panorama: 720全景图生成
+- ai-audio: AI音频/配音
+- ai-video-generate: AI视频生成
+- ai-video-i2v: AI图生视频
+- video-extract-frames: 视频抽帧
+- video-compose: 视频合成（音视频合并）
+- video-trim: 视频裁剪
 - agent-auto: Agent自动编排
 - output-image: 图片输出
+- output-image-group: 图片组输出
+- output-video: 视频输出
 - output-save: 保存
 - output-export: 导出（PNG/SVG/PSD）
 - condition-if: 条件分支
@@ -1803,6 +2095,12 @@ export function parseAIBuildResponse(response: string): { name: string; descript
       '3d-model': 'ai-3d-model', '3d': 'ai-3d-model',
       'text-input': 'input-text', 'prompt-input': 'input-text',
       'image-input': 'input-image', 'image-reference': 'input-image',
+      'video-input': 'input-video', 'video-reference': 'input-video',
+      'audio-input': 'audio-input', 'audio-source': 'audio-input',
+      'llm': 'ai-llm', 'text-generate': 'ai-llm', 'copywriting': 'ai-llm', 'planner': 'ai-llm',
+      'color-grade': 'manual-color-adjust', 'manual-color': 'manual-color-adjust',
+      'video-extract': 'video-extract-frames', 'extract-frames': 'video-extract-frames',
+      'video-combine': 'video-compose', 'video-merge': 'video-compose', 'composite-video': 'video-compose',
       'image-output': 'output-image', 'output': 'output-image',
       'video-generate': 'ai-video-generate', 'text-to-video': 'ai-video-generate',
       'video-i2v': 'ai-video-i2v', 'image-to-video': 'ai-video-i2v',
@@ -1834,8 +2132,16 @@ export function parseAIBuildResponse(response: string): { name: string; descript
   }
 }
 
-/** 从AI建图结果创建完整工作流 */
-export function createWorkflowFromAIResult(result: NonNullable<ReturnType<typeof parseAIBuildResponse>>): Workflow {
+/** 从AI建图结果创建完整工作流（含智能补全） */
+export function createWorkflowFromAIResult(
+  result: NonNullable<ReturnType<typeof parseAIBuildResponse>>,
+  context?: {
+    defaultImageModel?: string;
+    defaultVideoModel?: string;
+    defaultChatModel?: string;
+    referenceImages?: string[];
+  }
+): Workflow {
   const wf = createEmptyWorkflow(result.name);
   wf.description = result.description;
 
@@ -1845,12 +2151,73 @@ export function createWorkflowFromAIResult(result: NonNullable<ReturnType<typeof
   const START_X = 80;
   const START_Y = 80;
 
+  // ========== 智能补全1: 图片/视频节点>=2且无LLM节点时，自动补充文案策划节点 ==========
+  const aiNodeTypes = ['ai-generate','ai-video-generate','ai-video-i2v','ai-font-design','ai-brand-ecommerce','ai-segment','ai-multi-angle','ai-3d-model','ai-refine-engine','ai-retouch','ai-upscale','ai-removebg','ai-panorama','ai-audio'];
+  const mediaNodes = result.nodes.filter(n => aiNodeTypes.includes(n.type));
+  const hasLLM = result.nodes.some(n => n.type === 'ai-llm');
+  const llmNodeId = `llm-planner-${Date.now()}`;
+  const refImageNodes: Array<{id: string, url: string}> = [];
+
+  if (!hasLLM && mediaNodes.length >= 2) {
+    // 插入文案策划LLM节点
+    const llmNode = createWorkflowNode('ai-llm', 0, 0, '文案策划');
+    llmNode.id = llmNodeId;
+    llmNode.config = {
+      systemPrompt: '你是一位专业的AI创意文案策划师。根据用户需求，为下游的图像/视频生成节点撰写高质量、细节丰富的提示词，包含画面风格、构图、光影、色彩、主体细节等要素。请直接输出提示词内容，不要解释。',
+      temperature: 0.7,
+      model: context?.defaultChatModel || '',
+    };
+    result.nodes.unshift(llmNode);
+    // 补充连线: LLM → 所有图片/视频节点的 in-prompt
+    for (const mn of mediaNodes) {
+      const alreadyConnected = result.connections.some(c => c.toNodeId === mn.id && c.toPortId === 'in-prompt');
+      if (!alreadyConnected) {
+        result.connections.push(createConnection(llmNodeId, 'out-text', mn.id, 'in-prompt', 'text'));
+      }
+    }
+  }
+
+  // ========== 智能补全2: 参考图片自动创建 input-image 节点并连线 ==========
+  if (context?.referenceImages?.length) {
+    context.referenceImages.forEach((url, idx) => {
+      const imgId = `ref-img-${Date.now()}-${idx}`;
+      const imgNode = createWorkflowNode('input-image', 0, 0, `参考图${idx+1}`);
+      imgNode.id = imgId;
+      imgNode.config = { imageUrl: url };
+      refImageNodes.push({ id: imgId, url });
+      result.nodes.push(imgNode);
+      // 连线到所有需要图片输入的节点
+      for (const mn of result.nodes.filter(n => ['ai-generate','ai-video-i2v','ai-segment','ai-removebg','ai-upscale','ai-retouch','ai-multi-angle','ai-3d-model','ai-panorama','ai-refine-engine','ai-brand-ecommerce'].includes(n.type))) {
+        const alreadyConnected = result.connections.some(c => c.toNodeId === mn.id && c.toPortId === 'in-image');
+        if (!alreadyConnected) {
+          result.connections.push(createConnection(imgId, 'out-image', mn.id, 'in-image', 'image'));
+        }
+      }
+    });
+  }
+
   // 先创建所有节点
   for (let i = 0; i < result.nodes.length; i++) {
     const n = result.nodes[i];
     const node = createWorkflowNode(n.type as NodeType, START_X, START_Y + i * V_GAP, n.label);
     node.id = n.id; // 保持AI指定的ID，以便连线匹配
     node.config = { ...node.config, ...n.config };
+
+    // ========== 智能补全3: 缺省模型/参数自动填充 ==========
+    const imageNodes = ['ai-generate','ai-brand-ecommerce','ai-refine-engine','ai-removebg','ai-upscale','ai-retouch','ai-font-design','ai-segment','ai-multi-angle','ai-panorama'];
+    const videoNodes = ['ai-video-generate','ai-video-i2v'];
+    if (imageNodes.includes(n.type) && context?.defaultImageModel) {
+      if (!node.config.model || node.config.model === '') node.config.model = context.defaultImageModel;
+      if (!node.config.aspectRatio) node.config.aspectRatio = '1:1';
+      if (node.config.count === undefined || node.config.count === null) node.config.count = 1;
+    }
+    if (videoNodes.includes(n.type) && context?.defaultVideoModel) {
+      if (!node.config.model || node.config.model === '') node.config.model = context.defaultVideoModel;
+    }
+    if (n.type === 'ai-llm' && context?.defaultChatModel) {
+      if (!node.config.model || node.config.model === '') node.config.model = context.defaultChatModel;
+    }
+
     wf.nodes.push(node);
   }
 

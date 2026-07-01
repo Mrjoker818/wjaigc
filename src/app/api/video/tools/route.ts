@@ -1,270 +1,268 @@
 /**
- * 视频工具 API - 视频后处理工具集
+ * 视频工具统一API
  * POST /api/video/tools
- * 
- * 支持: 转GIF、抽帧、压缩、格式转换、封面提取
+ * 支持 action: extract-frames | concat | add-audio | trim | thumbnail
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { join } from 'path';
+import { writeFile, mkdir, readFile, unlink } from 'fs/promises';
+import { existsSync } from 'fs';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 
-export const maxDuration = 300; // 5 min timeout
+const execFileAsync = promisify(execFile);
 
-interface VideoToolsRequest {
-  action: 'to-gif' | 'extract-frames' | 'compress' | 'convert' | 'extract-cover' | 'speed' | 'filter' | 'concat' | 'trim';
-  videoUrl: string;
-  // GIF 参数
-  fps?: number;
-  width?: number;
-  startTime?: number;
-  endTime?: number;
-  // 抽帧参数
-  frameInterval?: number;
-  maxFrames?: number;
-  // 压缩参数
-  quality?: number;
-  targetSize?: number; // MB
-  // 格式转换参数
-  outputFormat?: 'mp4' | 'webm' | 'mov' | 'avi';
-  // 封面提取参数
-  timestamp?: number; // 秒
-  // 变速参数
-  speed?: number; // 0.25 - 4.0
-  // 滤镜参数
-  filter?: string; // cinematic | vintage | cyberpunk | warm | cool | bw | bright
-  // 拼接参数
-  videos?: string[]; // 视频 URL 数组
-  // 裁切参数
-  trimStart?: number; // 秒
-  trimEnd?: number; // 秒
+const UPLOAD_DIR = join(process.cwd(), 'public', 'uploads');
+async function ensureUploadDir() {
+  if (!existsSync(UPLOAD_DIR)) {
+    await mkdir(UPLOAD_DIR, { recursive: true });
+  }
 }
 
-export async function POST(request: NextRequest) {
+/** 将URL转为本地文件路径（下载远程URL） */
+async function urlToLocalPath(url: string): Promise<string> {
+  if (url.startsWith('http')) {
+    const resp = await fetch(url);
+    const buf = Buffer.from(await resp.arrayBuffer());
+    const ext = url.includes('.mp4') ? 'mp4' : url.includes('.webm') ? 'webm' : 'mp4';
+    const fname = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    const fpath = join(UPLOAD_DIR, fname);
+    await writeFile(fpath, buf);
+    return fpath;
+  }
+  // 本地路径
+  if (url.startsWith('/uploads/')) {
+    return join(process.cwd(), 'public', url);
+  }
+  return join(process.cwd(), 'public', url.replace(/^\//, ''));
+}
+
+/** 检查ffmpeg是否可用 */
+async function checkFFmpeg(): Promise<boolean> {
   try {
-    const body: VideoToolsRequest = await request.json();
-    const { action, videoUrl } = body;
+    await execFileAsync('ffmpeg', ['-version'], { timeout: 5000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
-    if (!videoUrl) {
-      return NextResponse.json(
-        { error: '缺少视频URL' },
-        { status: 400 }
-      );
-    }
-
-    // 根据 action 执行不同的视频处理
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { action } = body;
+    
+    await ensureUploadDir();
+    const ffmpegAvailable = await checkFFmpeg();
+    
     switch (action) {
-      case 'to-gif':
-        return await handleToGif(body);
-      case 'extract-frames':
-        return await handleExtractFrames(body);
-      case 'compress':
-        return await handleCompress(body);
-      case 'convert':
-        return await handleConvert(body);
-      case 'extract-cover':
-        return await handleExtractCover(body);
-      case 'speed':
-        return await handleSpeed(body);
-      case 'filter':
-        return await handleFilter(body);
-      case 'concat':
-        return await handleConcat(body);
-      case 'trim':
-        return await handleTrim(body);
+      case 'extract-frames': {
+        const { videoUrl, mode = 'uniform', count = 8, fps = 1 } = body;
+        if (!videoUrl) return NextResponse.json({ error: '缺少videoUrl' }, { status: 400 });
+        
+        if (!ffmpegAvailable) {
+          return NextResponse.json({
+            error: 'ffmpeg 不可用，视频抽帧功能需要服务器安装ffmpeg',
+            frames: [],
+            firstFrameUrl: null,
+            lastFrameUrl: null,
+          }, { status: 503 });
+        }
+        
+        const localVideo = await urlToLocalPath(videoUrl);
+        const frameDir = join(UPLOAD_DIR, `frames-${Date.now()}`);
+        await mkdir(frameDir, { recursive: true });
+        
+        const frames: { url: string; timestamp: number }[] = [];
+        let firstFrameUrl = '';
+        let lastFrameUrl = '';
+        
+        try {
+          if (mode === 'fps') {
+            // 每秒抽N帧
+            await execFileAsync('ffmpeg', [
+              '-i', localVideo, '-vf', `fps=${fps}`, '-q:v', '2',
+              join(frameDir, 'frame-%04d.jpg')
+            ], { timeout: 60000 });
+          } else if (mode === 'first_last') {
+            // 首尾帧
+            await execFileAsync('ffmpeg', ['-i', localVideo, '-vframes', '1', '-q:v', '2', join(frameDir, 'first.jpg')], { timeout: 30000 });
+            await execFileAsync('ffmpeg', ['-sseof', '-0.1', '-i', localVideo, '-vframes', '1', '-q:v', '2', join(frameDir, 'last.jpg')], { timeout: 30000 });
+          } else if (mode === 'uniform' || mode === 'total_frames') {
+            // 均匀抽N帧
+            const n = Math.max(2, Math.min(64, Number(count) || 8));
+            await execFileAsync('ffmpeg', [
+              '-i', localVideo, '-vf', `fps=1/${n}`, '-vframes', String(n), '-q:v', '2',
+              join(frameDir, 'frame-%04d.jpg')
+            ], { timeout: 60000 });
+          }
+          
+          // 读取生成的帧
+          const { readdir } = await import('fs/promises');
+          const files = (await readdir(frameDir)).filter(f => f.endsWith('.jpg')).sort();
+          for (let i = 0; i < files.length; i++) {
+            const f = files[i];
+            const urlPath = `/uploads/${frameDir.split('/').pop()}/${f}`;
+            frames.push({ url: urlPath, timestamp: i });
+            if (i === 0) firstFrameUrl = urlPath;
+            if (i === files.length - 1) lastFrameUrl = urlPath;
+          }
+        } finally {
+          // 清理临时视频文件（如果是下载的）
+          if (videoUrl.startsWith('http') && existsSync(localVideo)) {
+            await unlink(localVideo).catch(() => {});
+          }
+        }
+        
+        return NextResponse.json({
+          success: true,
+          frames,
+          firstFrameUrl,
+          lastFrameUrl,
+          totalFrames: frames.length,
+        });
+      }
+      
+      case 'add-audio': {
+        const { videoUrl, audioUrl, volume = 1.0 } = body;
+        if (!videoUrl || !audioUrl) return NextResponse.json({ error: '缺少videoUrl或audioUrl' }, { status: 400 });
+        
+        if (!ffmpegAvailable) {
+          return NextResponse.json({ error: 'ffmpeg不可用，无法合成音视频' }, { status: 503 });
+        }
+        
+        const localVideo = await urlToLocalPath(videoUrl);
+        const localAudio = await urlToLocalPath(audioUrl);
+        const outName = `av-${Date.now()}.mp4`;
+        const outPath = join(UPLOAD_DIR, outName);
+        
+        try {
+          await execFileAsync('ffmpeg', [
+            '-i', localVideo, '-i', localAudio,
+            '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k',
+            '-filter:a', `volume=${volume}`,
+            '-shortest', '-y', outPath
+          ], { timeout: 120000 });
+        } finally {
+          if (videoUrl.startsWith('http') && existsSync(localVideo)) await unlink(localVideo).catch(() => {});
+          if (audioUrl.startsWith('http') && existsSync(localAudio)) await unlink(localAudio).catch(() => {});
+        }
+        
+        return NextResponse.json({
+          success: true,
+          videoUrl: `/uploads/${outName}`,
+        });
+      }
+      
+      case 'concat': {
+        const { videoUrls } = body;
+        if (!Array.isArray(videoUrls) || videoUrls.length < 2) {
+          return NextResponse.json({ error: '需要videoUrls数组(至少2个)' }, { status: 400 });
+        }
+        
+        if (!ffmpegAvailable) {
+          return NextResponse.json({ error: 'ffmpeg不可用，无法拼接视频' }, { status: 503 });
+        }
+        
+        // 下载所有视频
+        const localPaths: string[] = [];
+        for (const url of videoUrls) {
+          localPaths.push(await urlToLocalPath(url));
+        }
+        
+        // 创建concat文件列表
+        const listPath = join(UPLOAD_DIR, `concat-${Date.now()}.txt`);
+        const listContent = localPaths.map(p => `file '${p}'`).join('\n');
+        await writeFile(listPath, listContent);
+        
+        const outName = `concat-${Date.now()}.mp4`;
+        const outPath = join(UPLOAD_DIR, outName);
+        
+        try {
+          await execFileAsync('ffmpeg', [
+            '-f', 'concat', '-safe', '0', '-i', listPath,
+            '-c', 'copy', '-y', outPath
+          ], { timeout: 180000 });
+        } finally {
+          await unlink(listPath).catch(() => {});
+          for (const p of localPaths) {
+            if (existsSync(p) && videoUrls[localPaths.indexOf(p)]?.startsWith('http')) {
+              await unlink(p).catch(() => {});
+            }
+          }
+        }
+        
+        return NextResponse.json({
+          success: true,
+          videoUrl: `/uploads/${outName}`,
+        });
+      }
+      
+      case 'trim': {
+        const { videoUrl, startTime = 0, endTime } = body;
+        if (!videoUrl) return NextResponse.json({ error: '缺少videoUrl' }, { status: 400 });
+        
+        if (!ffmpegAvailable) {
+          return NextResponse.json({ error: 'ffmpeg不可用' }, { status: 503 });
+        }
+        
+        const localVideo = await urlToLocalPath(videoUrl);
+        const outName = `trim-${Date.now()}.mp4`;
+        const outPath = join(UPLOAD_DIR, outName);
+        
+        try {
+          const args = ['-i', localVideo, '-ss', String(startTime)];
+          if (endTime && endTime > startTime) {
+            args.push('-t', String(endTime - startTime));
+          }
+          args.push('-c', 'copy', '-y', outPath);
+          await execFileAsync('ffmpeg', args, { timeout: 60000 });
+        } finally {
+          if (videoUrl.startsWith('http') && existsSync(localVideo)) await unlink(localVideo).catch(() => {});
+        }
+        
+        return NextResponse.json({
+          success: true,
+          videoUrl: `/uploads/${outName}`,
+        });
+      }
+      
+      case 'thumbnail': {
+        const { videoUrl, timestamp = 0 } = body;
+        if (!videoUrl) return NextResponse.json({ error: '缺少videoUrl' }, { status: 400 });
+        
+        if (!ffmpegAvailable) {
+          return NextResponse.json({ error: 'ffmpeg不可用' }, { status: 503 });
+        }
+        
+        const localVideo = await urlToLocalPath(videoUrl);
+        const outName = `thumb-${Date.now()}.jpg`;
+        const outPath = join(UPLOAD_DIR, outName);
+        
+        try {
+          await execFileAsync('ffmpeg', [
+            '-ss', String(timestamp), '-i', localVideo,
+            '-vframes', '1', '-q:v', '2', '-y', outPath
+          ], { timeout: 30000 });
+        } finally {
+          if (videoUrl.startsWith('http') && existsSync(localVideo)) await unlink(localVideo).catch(() => {});
+        }
+        
+        return NextResponse.json({
+          success: true,
+          thumbnailUrl: `/uploads/${outName}`,
+        });
+      }
+      
       default:
-        return NextResponse.json(
-          { error: `不支持的操作: ${action}` },
-          { status: 400 }
-        );
+        return NextResponse.json({ error: `不支持的action: ${action}` }, { status: 400 });
     }
   } catch (error) {
-    console.error('[video/tools] Error:', error);
+    console.error('[video/tools] error:', error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : '视频处理失败' },
       { status: 500 }
     );
   }
-}
-
-// 视频转 GIF
-async function handleToGif(params: VideoToolsRequest) {
-  const { videoUrl, fps = 10, width = 480, startTime, endTime } = params;
-  
-  // 使用 ffmpeg.wasm 在服务端处理（需要安装 ffmpeg）
-  // 这里返回一个模拟响应，实际实现需要调用 ffmpeg
-  return NextResponse.json({
-    success: true,
-    message: 'GIF 转换任务已提交',
-    data: {
-      videoUrl,
-      fps,
-      width,
-      startTime,
-      endTime,
-      // 实际实现中这里应该是生成的 GIF URL
-      gifUrl: null,
-      note: 'GIF 转换功能需要安装 ffmpeg，当前为模拟响应'
-    }
-  });
-}
-
-// 视频抽帧
-async function handleExtractFrames(params: VideoToolsRequest) {
-  const { videoUrl, frameInterval = 1, maxFrames = 10 } = params;
-  
-  return NextResponse.json({
-    success: true,
-    message: '抽帧任务已提交',
-    data: {
-      videoUrl,
-      frameInterval,
-      maxFrames,
-      frames: [],
-      note: '抽帧功能需要安装 ffmpeg，当前为模拟响应'
-    }
-  });
-}
-
-// 视频压缩
-async function handleCompress(params: VideoToolsRequest) {
-  const { videoUrl, quality = 0.7, targetSize } = params;
-  
-  return NextResponse.json({
-    success: true,
-    message: '压缩任务已提交',
-    data: {
-      videoUrl,
-      quality,
-      targetSize,
-      compressedUrl: null,
-      note: '压缩功能需要安装 ffmpeg，当前为模拟响应'
-    }
-  });
-}
-
-// 视频格式转换
-async function handleConvert(params: VideoToolsRequest) {
-  const { videoUrl, outputFormat = 'mp4' } = params;
-  
-  return NextResponse.json({
-    success: true,
-    message: '格式转换任务已提交',
-    data: {
-      videoUrl,
-      outputFormat,
-      convertedUrl: null,
-      note: '格式转换功能需要安装 ffmpeg，当前为模拟响应'
-    }
-  });
-}
-
-// 视频封面提取
-async function handleExtractCover(params: VideoToolsRequest) {
-  const { videoUrl, timestamp = 0 } = params;
-  
-  return NextResponse.json({
-    success: true,
-    message: '封面提取任务已提交',
-    data: {
-      videoUrl,
-      timestamp,
-      coverUrl: null,
-      note: '封面提取功能需要安装 ffmpeg，当前为模拟响应'
-    }
-  });
-}
-
-// 视频变速
-async function handleSpeed(params: VideoToolsRequest) {
-  const { videoUrl, speed = 1.0 } = params;
-  
-  if (speed < 0.25 || speed > 4.0) {
-    return NextResponse.json(
-      { error: '变速倍率需在 0.25 - 4.0 之间' },
-      { status: 400 }
-    );
-  }
-  
-  return NextResponse.json({
-    success: true,
-    message: '变速任务已提交',
-    data: {
-      videoUrl,
-      speed,
-      outputUrl: null,
-      note: '变速功能需要安装 ffmpeg，当前为模拟响应'
-    }
-  });
-}
-
-// 视频滤镜
-async function handleFilter(params: VideoToolsRequest) {
-  const { videoUrl, filter = 'cinematic' } = params;
-  
-  const supportedFilters = ['cinematic', 'vintage', 'cyberpunk', 'warm', 'cool', 'bw', 'bright'];
-  if (!supportedFilters.includes(filter || '')) {
-    return NextResponse.json(
-      { error: `不支持的滤镜: ${filter}，支持: ${supportedFilters.join(', ')}` },
-      { status: 400 }
-    );
-  }
-  
-  return NextResponse.json({
-    success: true,
-    message: '滤镜任务已提交',
-    data: {
-      videoUrl,
-      filter,
-      outputUrl: null,
-      note: '滤镜功能需要安装 ffmpeg，当前为模拟响应'
-    }
-  });
-}
-
-// 视频拼接
-async function handleConcat(params: VideoToolsRequest) {
-  const { videos = [], videoUrl } = params;
-  
-  // videoUrl 作为第一个视频，videos 数组作为后续视频
-  const allVideos = videoUrl ? [videoUrl, ...videos] : videos;
-  
-  if (allVideos.length < 2) {
-    return NextResponse.json(
-      { error: '拼接至少需要 2 个视频' },
-      { status: 400 }
-    );
-  }
-  
-  return NextResponse.json({
-    success: true,
-    message: '拼接任务已提交',
-    data: {
-      videos: allVideos,
-      outputUrl: null,
-      note: '拼接功能需要安装 ffmpeg，当前为模拟响应'
-    }
-  });
-}
-
-// 视频裁切
-async function handleTrim(params: VideoToolsRequest) {
-  const { videoUrl, trimStart = 0, trimEnd } = params;
-  
-  if (trimEnd !== undefined && trimEnd <= trimStart) {
-    return NextResponse.json(
-      { error: '结束时间必须大于开始时间' },
-      { status: 400 }
-    );
-  }
-  
-  return NextResponse.json({
-    success: true,
-    message: '裁切任务已提交',
-    data: {
-      videoUrl,
-      trimStart,
-      trimEnd,
-      outputUrl: null,
-      note: '裁切功能需要安装 ffmpeg，当前为模拟响应'
-    }
-  });
 }

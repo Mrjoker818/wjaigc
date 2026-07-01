@@ -7580,6 +7580,16 @@ export function InfiniteCanvas({
     return svgStr;
   }
 
+  // Auto-numbered filename helper: wujie_YYYYMMDD_NNN_name.ext
+  const generateSafeFilename = (baseName: string, ext: string, counter?: number) => {
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+    // Use session counter to avoid name collisions
+    const safeName = (baseName || 'image').replace(/[\\/:*?"<>|]/g, '_').substring(0, 40);
+    const seq = counter !== undefined ? String(counter).padStart(3, '0') : String(Math.floor(Math.random() * 900) + 100);
+    return `wujie_${dateStr}_${seq}_${safeName}.${ext}`;
+  };
+
   const handleDownloadImage = async (image: CanvasImage, format: string = 'png') => {
     try {
       if (format === '3d') {
@@ -7599,7 +7609,7 @@ export function InfiniteCanvas({
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `${image.prompt?.substring(0, 30) || 'model'}.${targetFormat}`;
+        a.download = generateSafeFilename(image.prompt || '3d-model', targetFormat);
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -7638,7 +7648,7 @@ export function InfiniteCanvas({
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `${image.prompt?.substring(0, 30) || 'vector'}.svg`;
+            a.download = generateSafeFilename(image.prompt || 'vector', 'svg');
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
@@ -7705,7 +7715,7 @@ export function InfiniteCanvas({
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `${image.prompt?.substring(0, 30) || 'image'}.png`;
+        a.download = generateSafeFilename(image.prompt || 'image', 'png');
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -7727,7 +7737,7 @@ export function InfiniteCanvas({
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `${image.prompt?.substring(0, 30) || 'image'}.png`;
+            a.download = generateSafeFilename(image.prompt || 'image', 'png');
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
@@ -7929,6 +7939,72 @@ export function InfiniteCanvas({
         const pos = posMap.get(i.id)!;
         return { ...i, x: pos.x, y: pos.y, width: pos.width, height: pos.height };
       }));
+    } },
+    { label: '网格排版', action: () => {
+      const selImgs = images.filter(i => selectedIds.has(i.id));
+      if (selImgs.length < 2) return;
+      const colsStr = prompt(`输入列数（当前${selImgs.length}张）`, String(Math.ceil(Math.sqrt(selImgs.length))));
+      if (!colsStr) return;
+      const cols = Math.max(1, Math.min(10, parseInt(colsStr) || 3));
+      const gap = 20;
+      // Determine cell size based on largest image
+      const cellW = Math.max(...selImgs.map(i => i.width));
+      const cellH = Math.max(...selImgs.map(i => i.height));
+      const startX = Math.min(...selImgs.map(i => i.x));
+      const startY = Math.min(...selImgs.map(i => i.y));
+      const posMap = new Map<string, { x: number; y: number }>();
+      selImgs.forEach((img, idx) => {
+        const row = Math.floor(idx / cols);
+        const col = idx % cols;
+        posMap.set(img.id, { x: startX + col * (cellW + gap), y: startY + row * (cellH + gap) });
+      });
+      applyImageChanges(images.map(i => {
+        if (!selectedIds.has(i.id) || !posMap.has(i.id)) return i;
+        const pos = posMap.get(i.id)!;
+        return { ...i, x: pos.x, y: pos.y };
+      }));
+      toast.success(`已按${cols}列网格排列`);
+    } },
+    { label: '批量下载 ZIP', action: async () => {
+      const selImgs = images.filter(i => selectedIds.has(i.id));
+      if (selImgs.length === 0) return;
+      toast.loading(`正在打包 ${selImgs.length} 张图片...`, { id: 'batch-download' });
+      try {
+        // Dynamically import JSZip
+        const JSZip = (await import('jszip')).default;
+        const zip = new JSZip();
+        // Download all images in parallel
+        const downloads = await Promise.all(selImgs.map(async (img, idx) => {
+          try {
+            const url = img.svgDataUrl || img.url;
+            const isSvg = !!img.svgDataUrl;
+            const resp = await fetch(url);
+            const blob = await resp.blob();
+            const ext = isSvg ? 'svg' : (url.toLowerCase().includes('.webp') ? 'webp' : 'png');
+            const name = `wujie_${String(idx + 1).padStart(3, '0')}_${(img.prompt || 'image').slice(0, 30).replace(/[\\/:*?"<>|]/g, '_')}.${ext}`;
+            return { name, blob };
+          } catch (e) {
+            return null;
+          }
+        }));
+        downloads.filter(Boolean).forEach(d => { if (d) zip.file(d.name, d.blob); });
+        const zipBlob = await zip.generateAsync({ type: 'blob' });
+        // Download zip
+        const zipUrl = URL.createObjectURL(zipBlob);
+        const a = document.createElement('a');
+        a.href = zipUrl;
+        const now = new Date();
+        const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+        a.download = `wujie_${dateStr}_${selImgs.length}images.zip`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(zipUrl);
+        toast.success(`已打包 ${downloads.filter(Boolean).length} 张图片`, { id: 'batch-download' });
+      } catch (err) {
+        console.error('[batch-download] failed:', err);
+        toast.error('打包失败，请重试', { id: 'batch-download' });
+      }
     } },
   ] : [
     { label: '复制', shortcut: 'Ctrl+C', action: () => { const img = selectedImageData; if (img) handleCopyImage(img); } },
@@ -8361,6 +8437,9 @@ export function InfiniteCanvas({
                 <button onClick={() => setShowHelpModal('updates')} className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-all border ${isMonochrome ? 'text-blue-600 border-blue-200 hover:text-blue-700 hover:border-blue-400' : 'text-gold-muted border-white/[0.14] hover:text-gold hover:border-gold/40'}`}>
                   <FileText size={14} /> 更新内容
                 </button>
+                <a href="/api/diagnostics/export" download className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-all border ${isMonochrome ? 'text-blue-600 border-blue-200 hover:text-blue-700 hover:border-blue-400' : 'text-gold-muted border-white/[0.14] hover:text-gold hover:border-gold/40'}`}>
+                  <Download size={14} /> 导出诊断
+                </a>
               </div>
             </div>
           </div>
