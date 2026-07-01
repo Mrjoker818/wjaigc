@@ -9,11 +9,12 @@ export async function register() {
     // 首次请求时会在对应 API 路由中自动完成初始化
     const dbInit = async () => {
       try {
-        const { migrateFileDataToDb, dbEnsureSortOrderColumn, detectAndRecoverOrphanedUsers, ensureCoreTables } = await import('@/lib/db-storage');
+        const { migrateFileDataToDb, dbEnsureSortOrderColumn, dbEnsureBalanceColumns, detectAndRecoverOrphanedUsers, ensureCoreTables } = await import('@/lib/db-storage');
         // 首先确保所有核心表存在（新部署时自动建表）
         await ensureCoreTables();
         await migrateFileDataToDb();
         await dbEnsureSortOrderColumn();
+        await dbEnsureBalanceColumns();
         console.log('[instrumentation] DB migration check completed');
 
         // 检测并恢复孤立用户（有项目数据但无账号记录的用户）

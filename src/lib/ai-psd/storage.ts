@@ -95,7 +95,7 @@ export async function ensureAiPsdTables(): Promise<void> {
     ] as const;
     for (const [col, type] of newCols) {
       try {
-        await execSql(`ALTER TABLE ai_psd_tasks ADD COLUMN ${col} ${type}`);
+        await execSql(`ALTER TABLE ai_psd_tasks ADD COLUMN IF NOT EXISTS ${col} ${type}`);
       } catch { /* column already exists, ignore */ }
     }
 

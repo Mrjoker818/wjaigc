@@ -334,6 +334,15 @@ export async function dbEnsureSortOrderColumn(): Promise<void> {
   }
 }
 
+export async function dbEnsureBalanceColumns(): Promise<void> {
+  try {
+    await execSql(`ALTER TABLE wujie_api_providers ADD COLUMN IF NOT EXISTS balance_username TEXT DEFAULT ''`);
+    await execSql(`ALTER TABLE wujie_api_providers ADD COLUMN IF NOT EXISTS balance_password TEXT DEFAULT ''`);
+  } catch {
+    // Columns may already exist
+  }
+}
+
 // ─── User Data (projects, images, etc.) ──────────────────────────────────────
 
 export async function dbGetUserData(userId: string, key: string): Promise<unknown> {
