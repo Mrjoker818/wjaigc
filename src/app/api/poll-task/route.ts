@@ -16,6 +16,7 @@ import { classifyApiError, type ClassifiedError, isCloudflareTimeoutError } from
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getRefineResult } from '@/app/api/refine-engine/route';
 import { getBrandResult } from '@/app/api/brand-ecommerce/route';
+import { getFontDesignResult } from '@/app/api/font-design/generate-image/route';
 import { enhanceViaAI } from '@/lib/quality-enhance';
 
 export const dynamic = 'force-dynamic';
@@ -795,7 +796,19 @@ export async function POST(request: NextRequest) {
     // ★ refine-engine/brand-ecommerce 兜底：如果 task-registry 中没有，
     // 但 globalThis 缓存中有结果，直接返回
     if (!registryTask) {
-      // 先检查 refine-engine 缓存
+      // 先检查 font-design 缓存
+      const fontDesignCached = getFontDesignResult(taskId);
+      if (fontDesignCached) {
+        console.log(`[poll-task] task-registry 未找到，从 globalThis 缓存返回 font-design 结果: ${taskId}`);
+        return NextResponse.json({
+          success: true,
+          status: 'completed',
+          progress: 100,
+          result: fontDesignCached,
+          directImageUrls: (fontDesignCached as Record<string, unknown>)?.directImageUrls as string[] | undefined,
+        }, { status: 200 });
+      }
+      // 再检查 refine-engine 缓存
       const refineCached = getRefineResult(taskId);
       if (refineCached) {
         console.log(`[poll-task] task-registry 未找到，从 globalThis 缓存返回 refine-engine 结果: ${taskId}`);
@@ -806,17 +819,6 @@ export async function POST(request: NextRequest) {
           result: refineCached,
           imageUrl: ((refineCached as unknown) as Record<string, unknown>)?.imageUrl as string | undefined,
           maskUrl: ((refineCached as unknown) as Record<string, unknown>)?.maskUrl as string | undefined,
-        }, { status: 200 });
-      }
-      // 再检查 brand-ecommerce 缓存
-      const brandCached = getBrandResult(taskId);
-      if (brandCached) {
-        console.log(`[poll-task] task-registry 未找到，从 globalThis 缓存返回 brand-ecommerce 结果: ${taskId}`);
-        return NextResponse.json({
-          success: true,
-          status: 'completed',
-          progress: 100,
-          result: brandCached,
         }, { status: 200 });
       }
       // 既不在 registry 也不在缓存，任务不存在或已过期
