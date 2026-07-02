@@ -225,15 +225,16 @@ export async function POST(request: NextRequest) {
     // ★ 判断是否为可重试错误（429限流/502网关/503服务不可用）
     const isRetryableError = (status: number, errText: string): boolean => {
       if (status === 429) return true; // 限流
+      if (status === 402) return true; // 余额不足，切换到其他提供商
       if (status === 502 || status === 503) return true; // 网关/服务不可用
-      if (/rate.?limit|quota|weekly.?limit|usage.?limit/i.test(errText)) return true;
+      if (/rate.?limit|quota|weekly.?limit|usage.?limit|insufficient.*balance|余额不足/i.test(errText)) return true;
       if (/no available compatible account/i.test(errText)) return true;
       return false;
     };
 
     // 使用 after() 确保响应返回后 IIFE 仍可运行
     after(async () => {
-      const MAX_PROVIDERS_TO_TRY = Math.min(providerCandidates.length, 4); // 最多尝试4个提供商
+      const MAX_PROVIDERS_TO_TRY = Math.min(providerCandidates.length, 6); // 最多尝试6个提供商
       let lastError = '';
 
       for (let pi = 0; pi < MAX_PROVIDERS_TO_TRY; pi++) {
@@ -367,32 +368,16 @@ export async function POST(request: NextRequest) {
           lastError = err instanceof Error ? err.message : '生成失败';
 
           if (isTimeout) {
-            console.info(`[font-design] ${pProviderName} timed out, trying /chat/completions fallback...`);
-            try {
-              const chatImageUrls = await tryChatCompletionsImageFallback({
-                baseUrl: pBaseUrl,
-                apiKey: pApiKey,
-                model: pModel,
-                prompt: finalPrompt,
-                size: ratioStr,
-                originalError: 'timeout',
-                requestIdPrefix: 'font-design-timeout',
-                skipChannelCheck: true,
-              });
-              if (chatImageUrls && chatImageUrls.length > 0) {
-                console.log(`[font-design] /chat/completions fallback succeeded after timeout via ${pProviderName}, got`, chatImageUrls.length, 'images');
-                const persistedUrls = await Promise.all(chatImageUrls.map(persistResultImage));
-                const timeoutCompletedResult = { directImageUrls: persistedUrls, prompt: finalPrompt, model: pModel };
-                updateTaskProgress(taskId, {
-                  status: 'completed', progress: 100,
-                  result: timeoutCompletedResult,
-                });
-                fontDesignResults.set(taskId, { status: 'completed' as const, result: timeoutCompletedResult, updatedAt: Date.now() });
-                return;
-              }
-            } catch (chatErr) {
-              console.warn(`[font-design] /chat/completions timeout fallback error via ${pProviderName}:`, chatErr);
+            // 超时说明该提供商网络不可达，跳过chat/completions fallback，直接尝试下一个提供商
+            console.info(`[font-design] ${pProviderName} timed out (network unreachable), skipping to next provider`);
+            lastError = `${pProviderName} 超时（网络不可达）`;
+            if (pi < MAX_PROVIDERS_TO_TRY - 1) {
+              continue; // 直接尝试下一个提供商
             }
+            // 最后一个提供商也超时，整体失败
+            updateTaskProgress(taskId, { status: 'failed', error: '所有提供商均超时不可达' });
+            fontDesignResults.set(taskId, { status: 'failed' as const, error: '所有提供商均超时不可达', updatedAt: Date.now() });
+            return;
           }
 
           // 超时或网络错误，尝试下一个提供商
