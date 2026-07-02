@@ -1969,7 +1969,7 @@ export function InfiniteCanvas({
               y: img.y + offset,
             }));
           if (dupImages.length > 0) {
-            onImagesChange([...images, ...dupImages]);
+            onImagesChange([...imagesRef.current, ...dupImages]);
             setSelectedIds(new Set(dupImages.map(d => d.id)));
             selectImage(dupImages[0].id);
           }
@@ -2219,7 +2219,7 @@ export function InfiniteCanvas({
       }
 
       if (newImages.length > 0) {
-        onImagesChange([...images, ...newImages]);
+        onImagesChange([...imagesRef.current, ...newImages]);
         setSelectedIds(new Set(newImages.map(img => img.id)));
       }
     };
@@ -5368,7 +5368,7 @@ export function InfiniteCanvas({
     if (showCanvasGenerator) {
       // Close: remove placeholder frame
       if (canvasGenFrameId) {
-        onImagesChange(images.filter(img => img.id !== canvasGenFrameId));
+        onImagesChange(imagesRef.current.filter(img => img.id !== canvasGenFrameId));
         setCanvasGenFrameId(null);
       }
       setShowCanvasGenerator(false);
@@ -5389,7 +5389,7 @@ export function InfiniteCanvas({
       isProcessingPlaceholder: true,
       processing: { label: '图像生成器', status: 'waiting', progress: 0, startTime: Date.now() },
     };
-    onImagesChange([...images, newFrame]);
+    onImagesChange([...imagesRef.current, newFrame]);
     setCanvasGenFrameId(frameId);
     setCanvasGenFramePos({ x: newFrame.x, y: newFrame.y });
     setShowCanvasGenerator(true);
@@ -5503,7 +5503,7 @@ export function InfiniteCanvas({
         }
         if (newImages.length > 0) {
           setTimeout(() => {
-            onImagesChange([...images, ...newImages]);
+            onImagesChange([...imagesRef.current, ...newImages]);
           }, 100);
         }
         setCanvasGenGenerating(false);
@@ -5865,7 +5865,7 @@ export function InfiniteCanvas({
               height: targetImg.height,
               prompt: annotation.text || prompt.replace(/^\[画布上下文[：:][^\]]*\]\s*/, ''),
             };
-            onImagesChange([...images, newImage]);
+            onImagesChange([...imagesRef.current, newImage]);
             setAnnotations(prev => prev.map(a =>
               a.id === annotation.id ? { ...a, status: 'done' as const, resultImageUrl: resultUrl, aiReply: '修改完成', chatExpanded: true } : a
             ));
@@ -6069,7 +6069,7 @@ export function InfiniteCanvas({
                 height: targetImage.height,
                 prompt: combinedPrompt,
               };
-              onImagesChange([...images, newImage]);
+              onImagesChange([...imagesRef.current, newImage]);
             }
             const aiReplyEntry = { role: 'assistant' as const, content: '已根据您的反馈完成修改' };
             setAnnotations(prev => prev.map(a =>
@@ -13496,7 +13496,7 @@ export function InfiniteCanvas({
                     processingLabel: '视频编辑中...',
                     prompt: params.prompt,
                   };
-                  onImagesChange([...images, frame]);
+                  onImagesChange([...imagesRef.current, frame]);
                   // 使用视频模型的model/providerId，而非图片模型的
                   const videoModel = params.model || '';
                   const videoProviderId = params.providerId || '';
@@ -13504,7 +13504,7 @@ export function InfiniteCanvas({
                   let videoEditPollCount = 0;
                   const pollInterval = setInterval(async () => {
                     videoEditPollCount++;
-                    if (videoEditPollCount >= 100) { clearInterval(pollInterval); toast.error('视频编辑超时'); onImagesChange(images.filter((img: CanvasImage) => img.id !== frameId)); return; }
+                    if (videoEditPollCount >= 100) { clearInterval(pollInterval); toast.error('视频编辑超时'); onImagesChange(imagesRef.current.filter((img: CanvasImage) => img.id !== frameId)); return; }
                     try {
                       const pollRes = await fetch('/api/poll-task', {
                         method: 'POST',
@@ -13555,7 +13555,7 @@ export function InfiniteCanvas({
                       } else if (pollData.status === 'failed' || pollData.status === 'cancelled') {
                         clearInterval(pollInterval);
                         toast.error(pollData.error || '视频编辑失败');
-                        onImagesChange(images.filter((img: CanvasImage) => img.id !== frameId));
+                        onImagesChange(imagesRef.current.filter((img: CanvasImage) => img.id !== frameId));
                       }
                     } catch { /* ignore poll errors */ }
                   }, 3000);
@@ -13597,13 +13597,13 @@ export function InfiniteCanvas({
                     processingLabel: '视频延长中...',
                     prompt: params.prompt,
                   };
-                  onImagesChange([...images, frame]);
+                  onImagesChange([...imagesRef.current, frame]);
                   const videoModel = params.model || '';
                   const videoProviderId = params.providerId || '';
                   let videoExtendPollCount = 0;
                   const pollInterval = setInterval(async () => {
                     videoExtendPollCount++;
-                    if (videoExtendPollCount >= 100) { clearInterval(pollInterval); toast.error('视频延长超时'); onImagesChange(images.filter((img: CanvasImage) => img.id !== frameId)); return; }
+                    if (videoExtendPollCount >= 100) { clearInterval(pollInterval); toast.error('视频延长超时'); onImagesChange(imagesRef.current.filter((img: CanvasImage) => img.id !== frameId)); return; }
                     try {
                       const pollRes = await fetch('/api/poll-task', {
                         method: 'POST',
@@ -13654,7 +13654,7 @@ export function InfiniteCanvas({
                       } else if (pollData.status === 'failed' || pollData.status === 'cancelled') {
                         clearInterval(pollInterval);
                         toast.error(pollData.error || '视频延长失败');
-                        onImagesChange(images.filter((img: CanvasImage) => img.id !== frameId));
+                        onImagesChange(imagesRef.current.filter((img: CanvasImage) => img.id !== frameId));
                       }
                     } catch { /* ignore poll errors */ }
                   }, 3000);

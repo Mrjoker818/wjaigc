@@ -5879,7 +5879,8 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                           setImageModelProviderId(m.providerId);
                           // 同步到localStorage，与图像生成面板共享（保留 quality/aspectRatio）
                           const modelId = m.id.split('::').pop() || m.id;
-                          const existing = JSON.parse(localStorage.getItem('wujie_selected_model') || '{}');
+                          let existing: Record<string, unknown> = {};
+                          try { existing = JSON.parse(localStorage.getItem('wujie_selected_model') || '{}'); } catch { existing = {}; }
                           localStorage.setItem('wujie_selected_model', JSON.stringify({
                             ...existing,
                             model: modelId,

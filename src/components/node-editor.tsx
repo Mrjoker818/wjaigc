@@ -939,7 +939,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
       // 从统一的提示词模板系统加载
       const templates = getPromptTemplates();
       // 同时兼容旧的提示词库数据
-      const oldSnippets: PromptSnippet[] = JSON.parse(localStorage.getItem('wujie-prompt-snippets') || '[]');
+      const oldSnippets: PromptSnippet[] = (() => { try { return JSON.parse(localStorage.getItem('wujie-prompt-snippets') || '[]'); } catch { return []; } })();
       // 合并：模板优先，旧数据补充
       const fromTemplates: PromptSnippet[] = templates.map(t => ({
         id: t.id,
@@ -1851,9 +1851,16 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
             });
           if (newLogs.length > 0) setExecLogs(prev => [...prev, ...newLogs]);
         }
-      } catch {
-        setExecStatus('failed');
-        return; // error, don't schedule next poll
+      } catch (err) {
+        // 临时网络错误不直接终止轮询，允许重试
+        console.error('[workflow-poll] Error polling workflow status:', err);
+        const delay = pollCount <= 5 ? 1000 : pollCount <= 15 ? 1500 : 2000;
+        if (pollCount >= 180) {
+          setExecStatus('failed');
+          return;
+        }
+        timerId = setTimeout(poll, delay);
+        return;
       }
       // ★ 动态间隔：前5次1秒，5-15次1.5秒，之后2秒
       const delay = pollCount <= 5 ? 1000 : pollCount <= 15 ? 1500 : 2000;
@@ -1897,7 +1904,9 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
   // ─── 根据图片实际尺寸调整节点大小 ───
   const resizeNodeForImageUrl = useCallback((nodeId: string, imageUrl: string) => {
     const img = new Image();
+    let cancelled = false;
     img.onload = () => {
+      if (cancelled) return;
       const imgW = img.naturalWidth;
       const imgH = img.naturalHeight;
       if (!imgW || !imgH) return;
@@ -1913,6 +1922,8 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
       }));
     };
     img.src = imageUrl;
+    // 返回清理函数，组件卸载时取消回调
+    return () => { cancelled = true; img.onload = null; };
   }, [setWf]);
 
   const updateNodeSize = useCallback((nodeId: string, width: number, height: number) => {
