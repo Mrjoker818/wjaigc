@@ -656,7 +656,12 @@ export class UserManager {
       this._serverSyncReady = true; // 标记服务器数据已加载，允许后续 syncToServer
       this.saveData();
       this.notifyProjectsChanged(); // 通知 UI 刷新
-      console.log('[Sync] loadProjectsFromServer: server=', serverProjects.length, 'local=', userData.projects.length);
+      // ★ 调试日志：帮助追踪数据恢复
+      const totalImages = userData.projects.reduce((sum, p) => sum + (p.canvasImages?.length || 0), 0);
+      console.log('[Sync] loadProjectsFromServer: server=', serverProjects.length, 'local=', userData.projects.length, 'totalImages=', totalImages);
+      for (const p of userData.projects) {
+        console.log('[Sync] project:', p.id, p.name, 'canvasImages:', p.canvasImages?.length || 0);
+      }
       return true;
     } catch (error) {
       console.error('[Sync] loadProjectsFromServer error:', error);
@@ -767,11 +772,9 @@ export class UserManager {
     if (!user || user.status === 'disabled') return null;
     if ((user.password || '') !== password) return null;
 
-    // ★ 数据隔离关键修复：登录时清除该用户本地的项目缓存，强制从服务器重新加载
-    // 这防止了 localStorage 中残留的跨用户项目数据泄露
-    if (this.multiUserData?.userData[user.id]) {
-      this.multiUserData.userData[user.id].projects = [];
-    }
+    // ★ 数据隔离：登录时不清空本地项目缓存，由 loadProjectsFromServer 负责合并/替换
+    // 如果 loadProjectsFromServer 失败，保留本地数据作为兜底
+    // 跨用户数据泄露由 loadProjectsFromServer 中的 userId 过滤逻辑防护
     // 取消待执行的同步定时器（来自上一个用户的）
     if (this.serverSyncTimer) {
       clearTimeout(this.serverSyncTimer);

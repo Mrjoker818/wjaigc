@@ -183,6 +183,8 @@ function CanvasApp() {
       const targetProject = projects.find((p: Project) => p.id === projectId);
       if (targetProject) {
         setCurrentProject(targetProject);
+        // ★ 调试日志：追踪项目加载
+        console.log('[page] loadProjectById:', targetProject.id, targetProject.name, 'canvasImages:', targetProject.canvasImages?.length || 0);
         if (targetProject.canvasImages && targetProject.canvasImages.length > 0) {
           setImages(targetProject.canvasImages.map(img => ({
             id: img.id,
@@ -927,6 +929,9 @@ function CanvasApp() {
                 ...(localOnlyImages as CanvasImage[]),
                 ...uniquePlaceholders,
               ]);
+              // ★ 调试日志：追踪图片恢复
+              console.log('[page] onProjectsChanged: setImages total=', enrichedImages.length + localOnlyImages.length + uniquePlaceholders.length,
+                'enriched=', enrichedImages.length, 'localOnly=', localOnlyImages.length, 'placeholders=', uniquePlaceholders.length);
             }
           }
         }
