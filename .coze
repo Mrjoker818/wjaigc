@@ -1,11 +1,17 @@
 [project]
-requires = ["nodejs-24"]
+requires = [ "nodejs-24" ]
 template = "nextjs"
+version = "legacy"
+appliedPatches = [
+  "nextjs/validate@0.0.20",
+  "nextjs/next-output-tracing-root@0.0.13"
+]
 
 [dev]
-build = ["bash", "scripts/build-with-python-check.sh"]
-run = ["pnpm", "run", "dev"]
+build = [ "bash", "scripts/build-with-python-check.sh" ]
+run = [ "pnpm", "run", "dev" ]
+validate = [ "bash", "./scripts/validate.sh" ]
 
 [deploy]
-build = ["pnpm", "run", "build"]
-run = ["pnpm", "run", "start"]
+build = [ "pnpm", "run", "build" ]
+run = [ "pnpm", "run", "start" ]
