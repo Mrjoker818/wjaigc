@@ -7141,23 +7141,24 @@ export function InfiniteCanvas({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           imageUrl: img.url,
-          brightness: colorBrightness,
-          contrast: colorContrast,
-          saturation: colorSaturation,
-          temperature: colorTemperature,
-          hue: colorHue,
+          params: {
+            brightness: colorBrightness,
+            contrast: colorContrast,
+            saturation: colorSaturation,
+            temperature: colorTemperature,
+            hue: colorHue,
+          }
         }),
       });
-      if (!res.ok) throw new Error('调色失败');
-      const blob = await res.blob();
-      const formData = new FormData();
-      formData.append('image', blob, 'color-adjusted.png');
-      const saveRes = await fetch('/api/save-image', { method: 'POST', body: formData });
-      const saveData = await saveRes.json();
-      if (saveData.url) {
-        onImagesChange(images.map(i => i.id === img.id ? { ...i, url: saveData.url } : i));
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || '调色失败');
+      if (data.url) {
+        // API直接返回可访问URL，直接替换图片
+        onImagesChange(images.map(i => i.id === img.id ? { ...i, url: data.url } : i));
         toast.success('调色完成');
         setEditMode('none');
+      } else {
+        throw new Error('返回结果为空');
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '调色失败');
@@ -11205,9 +11206,23 @@ export function InfiniteCanvas({
               </div>
 
               <div className="p-4 overflow-y-auto flex flex-col gap-4" style={{ maxHeight: '60vh' }}>
-                {/* 预览 */}
-                <div className="w-full aspect-video rounded-lg overflow-hidden bg-black/40 flex items-center justify-center border border-[#333]">
-                  <img src={editImg.url} alt="原图" className="max-w-full max-h-full object-contain" crossOrigin="anonymous" />
+                {/* 实时预览 - 使用CSS filter即时反馈 */}
+                <div className="w-full aspect-video rounded-lg overflow-hidden bg-black/40 flex items-center justify-center border border-[#333] relative">
+                  <img
+                    src={editImg.url}
+                    alt="预览"
+                    className="max-w-full max-h-full object-contain transition-all duration-100"
+                    crossOrigin="anonymous"
+                    style={{
+                      filter: `brightness(${1 + colorBrightness / 200}) contrast(${1 + colorContrast / 100}) saturate(${1 + colorSaturation / 100}) hue-rotate(${colorHue * 1.8}deg)${colorTemperature > 0 ? ` sepia(${colorTemperature / 200}) saturate(${1 + colorTemperature / 300})` : colorTemperature < 0 ? ` hue-rotate(${-colorTemperature * 0.5}deg) saturate(${1 - colorTemperature / 500})` : ''}`,
+                    }}
+                  />
+                  <div className="absolute bottom-2 left-2 text-[10px] text-white/70 bg-black/50 px-2 py-0.5 rounded">实时预览</div>
+                  {isProcessing && (
+                    <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                      <Loader2 className="animate-spin text-[#d4af37]" size={28} />
+                    </div>
+                  )}
                 </div>
 
                 {/* 滑杆区域 */}
@@ -15042,7 +15057,40 @@ export function InfiniteCanvas({
         );
       })()}
 
-      {/* Floating pill toolbar - semi-collapsed, expand on hover */}
+        {/* ── Left-bottom: Version + Diagnostics (always visible) ── */}
+        <div className="absolute bottom-5 left-5 z-50 flex items-center gap-2 pointer-events-auto">
+          <span className={`text-xs font-mono select-none ${isMonochrome ? 'text-gray-400' : 'text-gold-muted/60'}`}>
+            v3.6.0
+          </span>
+          <a
+            href="/api/diagnostics/export"
+            download
+            className={`flex items-center gap-1 px-2.5 py-1 text-xs rounded-full transition-all ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100 border border-gray-200' : 'text-gold-muted/70 hover:text-gold hover:bg-white/10 border border-white/10'}`}
+            title="导出诊断信息"
+          >
+            <Download size={12} /> 诊断
+          </a>
+        </div>
+
+        {/* ── Right-bottom: Help buttons (always visible) ── */}
+        <div className="absolute bottom-5 right-5 z-50 flex items-center gap-2 pointer-events-auto">
+          <button
+            onClick={() => setShowHelpModal('instructions')}
+            className={`flex items-center gap-1 px-2.5 py-1 text-xs rounded-full transition-all ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100 border border-gray-200' : 'text-gold-muted/70 hover:text-gold hover:bg-white/10 border border-white/10'}`}
+            title="操作说明"
+          >
+            <Info size={12} /> 说明
+          </button>
+          <button
+            onClick={() => setShowHelpModal('updates')}
+            className={`flex items-center gap-1 px-2.5 py-1 text-xs rounded-full transition-all ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100 border border-gray-200' : 'text-gold-muted/70 hover:text-gold hover:bg-white/10 border border-white/10'}`}
+            title="更新内容"
+          >
+            <FileText size={12} /> 更新
+          </button>
+        </div>
+
+        {/* Floating pill toolbar - semi-collapsed, expand on hover */}
       <div
         data-toolbar="bottom-toolbar"
         onMouseEnter={() => setBottomBarHovered(true)}
