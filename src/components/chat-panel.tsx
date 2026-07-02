@@ -61,6 +61,8 @@ interface ToolExecution {
   result?: string;        // 结果描述
   imageUrls?: string[];   // 生成的图片URL
   videoUrl?: string;      // 生成的视频URL
+  audioUrl?: string;      // 生成的音频URL
+  progress?: number;      // 进度百分比 0-100
   error?: string;         // 错误信息
 }
 
@@ -1437,6 +1439,8 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
   }, [model, onChatModelChange]);
   const [systemPrompt, setSystemPrompt] = useState('');
   const [isThinkingMode, setIsThinkingMode] = useState(false);
+  const [isAgentMode, setIsAgentMode] = useState(true); // 默认开启Agent模式，即梦体验
+  const [agentSteps, setAgentSteps] = useState<Array<{id: string; tool: string; status: 'pending'|'running'|'done'|'error'; result?: string; startTime?: number}>>([]);
   const [isLoading, setIsLoading] = useState(false);
   const thinkingStartTimeRef = useRef<number>(0);
   const [thinkingElapsed, setThinkingElapsed] = useState(0);
@@ -3755,26 +3759,47 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
           }))
         : undefined;
 
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        signal: controller.signal,
-        body: JSON.stringify({
-          model: actualModel,
-          messages: requestMessages,
-          stream: true,
-          enableTools: true,
-          agentTools: systemPromptObj?.tools,
-          agentId: systemPrompt,
-          providerId,
-          canvasSummary,
-          intentLevel,  // P2-9: 多级意图澄清
-          imageModel,  // 前端当前选择的图像模型
-          imageProviderId: imageModelProviderId,  // 前端当前选择的图像提供商ID
-        }),
-      });
+      // ====== Agent模式：对话即创作，自动调用所有工具 ======
+      let response: Response;
+      if (isAgentMode) {
+        // Agent模式：调用 /api/chat/agent 自动执行工具链
+        response = await fetch('/api/chat/agent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            message: trimmedInput + mentionContext,
+            imageUrls: allImageUrls,
+            imageModel,
+            imageProviderId: imageModelProviderId,
+            chatModel: actualModel,
+            providerId,
+            maxSteps: 8,
+          }),
+        });
+      } else {
+        // 普通对话模式
+        response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          signal: controller.signal,
+          body: JSON.stringify({
+            model: actualModel,
+            messages: requestMessages,
+            stream: true,
+            enableTools: true,
+            agentTools: systemPromptObj?.tools,
+            agentId: systemPrompt,
+            providerId,
+            canvasSummary,
+            intentLevel,  // P2-9: 多级意图澄清
+            imageModel,  // 前端当前选择的图像模型
+            imageProviderId: imageModelProviderId,  // 前端当前选择的图像提供商ID
+          }),
+        });
+      }
 
       if (!response.ok) {
         // 读取后端返回的实际错误消息
@@ -3840,13 +3865,16 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               try {
                 const parsed = JSON.parse(data);
 
-                // ====== 处理Agent工具调用事件（后端将 type 放在 JSON data 内，非 event: 行） ======
-                const toolName = parsed.toolName || parsed.tool_name;
-                if (parsed.type === 'tool_execution_start' && toolName) {
+                // ====== 处理Agent工具调用事件（兼容两种事件名格式） ======
+                const eventType = parsed.type || parsed.event || currentSSEEvent;
+                const toolName = parsed.toolName || parsed.tool_name || parsed.tool;
+                // Agent模式事件兼容：tool_start / step_start 都识别为工具开始
+                if ((eventType === 'tool_execution_start' || eventType === 'tool_start' || eventType === 'step_start') && toolName) {
+                  const toolLabel = parsed.label || parsed.stepName || `正在执行 ${toolName}...`;
                   const toolExec: ToolExecution = {
                     toolName,
                     status: 'running',
-                    label: parsed.label || `正在执行 ${toolName}...`,
+                    label: toolLabel,
                   };
                   toolExecutions.push(toolExec);
                   setMessages(prev => prev.map(msg =>
@@ -3854,10 +3882,30 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                       ? { ...msg, toolExecutions: [...toolExecutions] }
                       : msg
                   ));
+                  // 如果有进度信息，更新进度
+                  if (typeof parsed.progress === 'number') {
+                    const lastIdx = toolExecutions.length - 1;
+                    if (lastIdx >= 0) {
+                      toolExecutions[lastIdx].progress = parsed.progress;
+                    }
+                  }
                   continue;
                 }
 
-                if (parsed.type === 'tool_execution_result' && toolName) {
+                // Agent模式：文本增量内容
+                if (eventType === 'text' || eventType === 'content' || eventType === 'delta') {
+                  const delta = parsed.content || parsed.delta || parsed.text || '';
+                  assistantContent += delta;
+                  setMessages(prev => prev.map(msg =>
+                    msg.id === assistantMessageId
+                      ? { ...msg, content: assistantContent }
+                      : msg
+                  ));
+                  continue;
+                }
+
+                // Agent模式：工具完成
+                if ((eventType === 'tool_execution_result' || eventType === 'tool_complete' || eventType === 'step_complete') && toolName) {
                   // 更新对应工具的执行结果
                   const execIdx = toolExecutions.findIndex(e => e.toolName === toolName && e.status === 'running');
                   if (execIdx >= 0) {
@@ -4652,6 +4700,26 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               )}
             </button>
           </div>
+          {/* Agent模式开关 - 即梦式对话即创作 */}
+          {activeTab === 'chat' && (
+            <button
+              onClick={() => setIsAgentMode(!isAgentMode)}
+              className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-all ${
+                isAgentMode
+                  ? isGold
+                    ? 'bg-gradient-to-r from-gold/20 to-amber-500/20 text-gold border border-gold/30'
+                    : 'bg-gradient-to-r from-blue-500/10 to-purple-500/10 text-blue-600 border border-blue-200'
+                  : isGold
+                    ? 'text-gold-muted/50 hover:text-gold-muted border border-transparent hover:border-white/[0.08]'
+                    : 'text-gray-400 hover:text-gray-600 border border-transparent hover:border-gray-200'
+              }`}
+              title={isAgentMode ? 'Agent模式已开启：描述需求自动调用工具生成成品' : '点击开启Agent模式：自然语言自动生图/修图/配音'}
+            >
+              <Bot size={13} className={isAgentMode ? 'animate-pulse' : ''} />
+              Agent
+              {isAgentMode && <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />}
+            </button>
+          )}
           {activeTab === 'chat' && (
             <div className="flex items-center gap-0.5">
               <button
