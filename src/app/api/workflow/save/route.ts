@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getSessionUser as getAuthUser } from '@/lib/server-auth';
 
 /**
  * POST /api/workflow/save
@@ -12,11 +13,22 @@ import { NextRequest, NextResponse } from 'next/server';
  */
 export async function POST(request: NextRequest) {
   try {
+    // 认证检查：只有登录用户才能保存工作流
+    const user = await getAuthUser(request);
+    if (!user) {
+      return NextResponse.json({ error: '未登录，请先登录' }, { status: 401 });
+    }
+
     const body = await request.json();
     const { userId, workflow } = body;
 
     if (!userId || !workflow || !workflow.id) {
       return NextResponse.json({ error: '缺少必要参数' }, { status: 400 });
+    }
+
+    // 权限校验：只能保存自己的工作流
+    if (user.id !== userId) {
+      return NextResponse.json({ error: '无权操作其他用户的工作流' }, { status: 403 });
     }
 
     // 更新时间戳

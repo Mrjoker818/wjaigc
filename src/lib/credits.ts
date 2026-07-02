@@ -260,8 +260,10 @@ export async function consumeCredits(
     return { success: true, balance: newBalance, cost };
   } catch (e) {
     console.error('[credits] consumeCredits error:', e);
-    // If credits system fails, allow the operation to proceed
-    return { success: true, balance: 0, cost };
+    // If credits system fails, we cannot verify balance — reject the operation
+    // to prevent unauthorized free usage when the database is down.
+    // Admin can set MANDATORY_API_AUTH=false to bypass this in emergencies.
+    return { success: false, balance: 0, cost, message: '积分系统暂时不可用，请稍后重试' };
   }
 }
 
@@ -288,6 +290,64 @@ export async function checkCredits(
   } catch (e) {
     console.error('[credits] checkCredits error:', e);
     return { sufficient: true, balance: 0, cost };
+  }
+}
+
+/**
+ * Refund credits for a failed or cancelled operation.
+ * This is the counterpart to consumeCredits — should be called when:
+ * 1. The AI provider returns an error (generation failed)
+ * 2. The task is cancelled before completion
+ * 3. The result is empty/invalid
+ *
+ * Uses atomic SQL UPDATE to avoid race conditions.
+ */
+export async function refundCredits(
+  userId: string,
+  amount: number,
+  reason: string,
+  referenceId?: string
+): Promise<{ success: boolean; balance: number }> {
+  if (amount <= 0) return { success: true, balance: 0 };
+
+  try {
+    const { execSql } = await import('@/lib/db-client');
+    const now = Date.now();
+
+    // Atomic refund: UPDATE balance atomically
+    const refundResult = await execSql(
+      `UPDATE wujie_credits 
+       SET balance = balance + $1, 
+           total_used = GREATEST(total_used - $2, 0),
+           updated_at = $3 
+       WHERE user_id = $4 
+       RETURNING balance`,
+      [amount, amount, now, userId]
+    );
+
+    if (!refundResult || !refundResult.rows || refundResult.rows.length === 0) {
+      console.error('[credits] refundCredits: user not found', userId);
+      return { success: false, balance: 0 };
+    }
+
+    const newBalance = Number(refundResult.rows[0].balance);
+
+    // Record the refund transaction
+    try {
+      await dbRecordCreditTransaction(
+        userId,
+        amount,
+        'refund',
+        newBalance,
+        reason,
+        referenceId
+      );
+    } catch { /* history recording is non-critical */ }
+
+    return { success: true, balance: newBalance };
+  } catch (e) {
+    console.error('[credits] refundCredits error:', e);
+    return { success: false, balance: 0 };
   }
 }
 

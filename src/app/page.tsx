@@ -3737,6 +3737,7 @@ function CanvasApp() {
           images={images}
           onImagesChange={setImages}
           onUndo={handleUndo}
+          onRedo={handleRedo}
 
           selectedImage={selectedImage}
           onSelectImage={setSelectedImage}

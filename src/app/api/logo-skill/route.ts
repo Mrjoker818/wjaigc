@@ -16,7 +16,7 @@ import { findProviderForModel, findProviderForFeature, findProviderById } from '
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { resolveCompatProfile, adjustRequestForProfile, tryChatCompletionsImageFallback, isChannelUnavailableError, persistResultImage } from '@/lib/api-compatibility';
-import { calculateActualPixelsFromRatio } from '@/app/api/generate/route';
+import { calculateActualPixelsFromRatio } from '@/lib/calculate-pixels';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import { adaptBrandProjectToSanbaoInput, buildSanbaoInputFromUserInput } from '@/modules/brand-factory/logo-generator-core/sanbaoInputAdapter';
 import { buildDirectionSystemPrompt, buildDirectionUserMessage, parseDirectionResponse } from '@/modules/brand-factory/logo-generator-core/sanbaoPromptParser';

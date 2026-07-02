@@ -4,7 +4,7 @@ import { appendUserJsonl } from '@/lib/server-user-storage';
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
-import { consumeCredits } from '@/lib/credits';
+import { consumeCredits, refundCredits } from '@/lib/credits';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 
 export const maxDuration = 60;
@@ -42,6 +42,8 @@ function normalizeChatBaseUrl(baseUrl: string): string {
 }
 
 export async function POST(request: NextRequest) {
+  let deductedCredits = 0;
+  let sessionUser: any = null;
   try {
     const {
       prompt,
@@ -51,19 +53,22 @@ export async function POST(request: NextRequest) {
       systemPrompt: customSystemPrompt,
       userId: requestUserId,
     } = await request.json();
-    const sessionUser = await getSessionUser(request);
-    const userId = sessionUser?.id ?? requestUserId ?? "anonymous";
+    sessionUser = await getSessionUser(request);
+    // ★ 安全：已登录用户必须使用 session 中的 userId，忽略客户端传入值（防止伪造）
+    const userId = sessionUser?.id || "anonymous";
 
     if (!prompt) {
       return NextResponse.json({ error: '缺少必要参数：prompt' }, { status: 400 });
     }
 
     // 积分检查与扣除
+    deductedCredits = 0;
     if (sessionUser) {
       const creditResult = await consumeCredits(sessionUser.id, 'chat', undefined, undefined, model);
       if (!creditResult.success) {
         return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
       }
+      deductedCredits = creditResult.cost;
     }
 
     // Content safety check
@@ -180,6 +185,12 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error('Optimize prompt error:', error);
+    // 退款：提示词优化失败时退还积分
+    if (deductedCredits > 0 && sessionUser) {
+      try {
+        await refundCredits(sessionUser.id, deductedCredits, `提示词优化失败退款: ${(error instanceof Error ? error.message : 'Unknown').substring(0, 100)}`);
+      } catch (refundErr) { console.error('[optimize-prompt] Refund failed:', refundErr); }
+    }
     return NextResponse.json(
       { error: `优化失败: ${error instanceof Error ? error.message : '未知错误'}` },
       { status: 500 },

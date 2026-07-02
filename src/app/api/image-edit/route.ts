@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, findProviderById, findProviderForFeature, findAllProvidersForType, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
-import { optionalApiAuth } from '@/lib/api-auth';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { translateApiError } from '@/lib/api-error-translate';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, convertAspectRatioToSize, buildPollUrl, isEditsEndpointRejected, stripEditsOnlyFields, type ApiCompatProfile, type ImageEndpoint, buildGeminiChatImageRequest, parseGeminiChatImageResponse, resolveProfileForModel, isGeminiImageModel, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
@@ -20,7 +20,7 @@ import { LOCAL_AI_ENABLED } from '@/lib/image-tools/config';
 import { postProcessAIRemoveBG, postProcessLocalRemoveBG } from '@/lib/remove-bg-postprocess';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { fetchImageBuffer } from '@/lib/fetch-image-buffer';
-import { consumeCredits } from '@/lib/credits';
+import { consumeCredits, refundCredits } from '@/lib/credits';
 import { enhanceViaAI } from '@/lib/quality-enhance';
 
 const SUPPORTED_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
@@ -1627,10 +1627,14 @@ async function saveBufferToPublic(buffer: Buffer, filename: string): Promise<str
 }
 
 export async function POST(request: NextRequest) {
+  let deductedCredits = 0;
+  let sessionUser: any = null;
   try {
-    await optionalApiAuth(request);
+    const authResult = await requireApiAuthOrReject(request);
+    if (authResult) return authResult;
     const body: EditRequest = await request.json();
-    const sessionUser = await getSessionUser(request);
+    sessionUser = await getSessionUser(request);
+    deductedCredits = 0; // 跟踪已扣积分，用于失败退款
     const {
       action,
       imageUrl,
@@ -1690,6 +1694,7 @@ export async function POST(request: NextRequest) {
       if (!creditResult.success) {
         return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
       }
+      deductedCredits = creditResult.cost;
     }
 
     // 放大/擦除/蒙版 均使用管理员系统的 image 类型模型
@@ -3394,6 +3399,12 @@ export async function POST(request: NextRequest) {
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : String(error);
     console.error('Image edit error:', errMsg);
+    // 退款：异常失败时退还积分
+    if (deductedCredits > 0 && sessionUser) {
+      try {
+        await refundCredits(sessionUser.id, deductedCredits, `图像编辑异常退款: ${errMsg.substring(0, 100)}`);
+      } catch (refundErr) { console.error('[image-edit] Refund failed:', refundErr); }
+    }
     return NextResponse.json({ success: false, error: errMsg }, { status: 500 });
   }
 }

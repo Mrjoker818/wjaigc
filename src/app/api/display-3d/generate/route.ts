@@ -5,7 +5,7 @@ import { buildDisplay3DRenderPrompt } from '@/lib/display3d-prompts';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getSessionUser } from '@/lib/server-auth';
-import { calculateActualPixelsFromRatio } from '@/app/api/generate/route';
+import { calculateActualPixelsFromRatio } from '@/lib/calculate-pixels';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 
 export async function POST(request: NextRequest) {

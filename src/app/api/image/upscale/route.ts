@@ -6,9 +6,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { performOnnxUpscale } from '@/lib/image-tools/upscayl';
 import { IMAGE_MAX_SIZE_MB } from '@/lib/image-tools/config';
 import { getSessionUser } from '@/lib/server-auth';
-import { consumeCredits } from '@/lib/credits';
+import { consumeCredits, refundCredits } from '@/lib/credits';
 
 export async function POST(request: NextRequest) {
+  let deductedCredits = 0;
+  let sessionUser: any = null;
   try {
     const body = await request.json();
 
@@ -25,12 +27,14 @@ export async function POST(request: NextRequest) {
     const mode = upscaleMode === 'ai' ? 'ai' : 'cpu';
 
     // 积分检查与扣除
-    const sessionUser = await getSessionUser(request).catch(() => null);
+    sessionUser = await getSessionUser(request).catch(() => null);
+    deductedCredits = 0;
     if (sessionUser) {
       const creditResult = await consumeCredits(sessionUser.id, 'image_upscale');
       if (!creditResult.success) {
         return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
       }
+      deductedCredits = creditResult.cost;
     }
 
     // AI 放大模式: 委托给 /api/image-edit (action=upscale, upscaleMode=ai)
@@ -98,6 +102,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(result);
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
+    // 退款：放大失败时退还积分
+    if (deductedCredits > 0 && sessionUser) {
+      try {
+        await refundCredits(sessionUser.id, deductedCredits, `无损放大失败退款: ${msg.substring(0, 100)}`);
+      } catch (refundErr) { console.error('[image/upscale] Refund failed:', refundErr); }
+    }
     return NextResponse.json(
       { success: false, error: `放大请求处理失败: ${msg}` },
       { status: 500 },

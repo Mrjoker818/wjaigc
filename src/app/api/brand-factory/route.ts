@@ -14,12 +14,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, findProviderForFeature, findProviderById } from '@/lib/server-api-config';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
-import { optionalApiAuth } from '@/lib/api-auth';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, buildPollUrl, extractImageUrl, tryChatCompletionsImageFallback, isChannelUnavailableError, persistResultImage } from '@/lib/api-compatibility';
 import type { ApiCompatProfile } from '@/lib/api-compatibility';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import { dbGetUserData, dbSetUserData } from '@/lib/db-storage';
-import { calculateActualPixelsFromRatio } from '@/app/api/generate/route';
+import { calculateActualPixelsFromRatio } from '@/lib/calculate-pixels';
 
 // ─── 内存项目存储 ────────────────────────────────────────────────────
 const BRAND_PROJECTS_KEY = 'brand_factory_projects';
@@ -818,7 +818,7 @@ function buildChineseTitlePrompt(
 
 // ─── GET: 获取项目列表 ────────────────────────────────────────────────
 
-export async function GET() {
+export async function GET(_request: NextRequest) {
   try {
     const projects = await loadProjects();
     return NextResponse.json({ success: true, projects });
@@ -832,7 +832,8 @@ export async function GET() {
 // ─── POST: 操作 ──────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
-  await optionalApiAuth(request);
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult) return authResult;
   try {
     const body = await request.json();
     const action = body.action as string;

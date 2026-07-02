@@ -14,7 +14,7 @@ import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { parseAgentGenerateResult, parseEcommerceGenerateResult, type AgentTemplateCategory, type EcommerceConfig } from '@/lib/omp-agent-parsers';
 import { translateApiError } from '@/lib/api-error-translate';
 import { getSessionUser } from '@/lib/server-auth';
-import { consumeCredits } from '@/lib/credits';
+import { consumeCredits, refundCredits } from '@/lib/credits';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { getDesktopAuth, tokenFromHeader } from '@/lib/desktop-cloud';
 
@@ -231,9 +231,11 @@ function parseSSETextToJSON(text: string): Record<string, unknown> {
 // ─── API Route Handler ────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
+  let deductedCredits = 0;
+  let sessionUser: any = null;
   try {
     // 鉴权：要求 Web 登录态 或 桌面端 Token 二选一（P0 修复：防止未授权盗刷）
-    const sessionUser = await getSessionUser(request).catch(() => null);
+    sessionUser = await getSessionUser(request).catch(() => null);
     const desktopAuth = await getDesktopAuth(tokenFromHeader(
       request.headers.get('authorization'),
       request.headers.get('x-desktop-token') || ''
@@ -257,11 +259,13 @@ export async function POST(request: NextRequest) {
     }
 
     // 积分检查与扣除（桌面端无 sessionUser 时跳过积分，走桌面端配额）
+    deductedCredits = 0;
     if (sessionUser) {
       const creditResult = await consumeCredits(sessionUser.id, 'chat', undefined, undefined, model);
       if (!creditResult.success) {
         return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
       }
+      deductedCredits = creditResult.cost;
     }
 
     const category: AgentTemplateCategory = templateCategory || 'general';
@@ -405,6 +409,12 @@ export async function POST(request: NextRequest) {
     }
   } catch (error) {
     console.error('[omp-agent API] Error:', error);
+    // 退款：Agent生成失败时退还积分
+    if (deductedCredits > 0 && sessionUser) {
+      try {
+        await refundCredits(sessionUser.id, deductedCredits, `Agent生成失败退款: ${(error instanceof Error ? error.message : 'Unknown').substring(0, 100)}`);
+      } catch (refundErr) { console.error('[omp-agent] Refund failed:', refundErr); }
+    }
     return NextResponse.json(
       { success: false, error: error instanceof Error ? error.message : 'Agent 生成失败' },
       { status: 500 }

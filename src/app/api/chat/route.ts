@@ -3,9 +3,9 @@ import { appendUserJsonl } from '@/lib/server-user-storage';
 import { findProviderForModel, getApiProviders, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
-import { optionalApiAuth } from '@/lib/api-auth';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
-import { consumeCredits } from '@/lib/credits';
+import { consumeCredits, refundCredits } from '@/lib/credits';
 import { CHAT_TOOLS, executeToolCall, parseToolCallsFromStream, ToolCallResult } from '@/lib/chat-tools';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 
@@ -17,8 +17,11 @@ const MAX_AGENT_ITERATIONS = 8;
 const TOOL_EXECUTION_TIMEOUT = 120000;
 
 export async function POST(request: NextRequest) {
+  let deductedCredits = 0;
+  let sessionUser: any = null;
   try {
-    await optionalApiAuth(request);
+    const authResult = await requireApiAuthOrReject(request);
+    if (authResult) return authResult;
     const {
       model,
       messages,
@@ -41,8 +44,9 @@ export async function POST(request: NextRequest) {
       ? CHAT_TOOLS.filter(t => agentTools.includes(t.function.name))
       : CHAT_TOOLS;
     
-    const sessionUser = await getSessionUser(request);
+    sessionUser = await getSessionUser(request);
     const userId = sessionUser?.id ?? requestUserId ?? "anonymous";
+    deductedCredits = 0; // 跟踪已扣积分，用于失败退款
 
     // 参数验证
     if (!model || !messages) {
@@ -55,6 +59,7 @@ export async function POST(request: NextRequest) {
       if (!creditResult.success) {
         return NextResponse.json({ error: creditResult.message || '积分不足' }, { status: 402 });
       }
+      deductedCredits = creditResult.cost;
     }
 
     // Content safety check
@@ -325,6 +330,12 @@ export async function POST(request: NextRequest) {
 
   } catch (error) {
     console.error('Chat API error:', error);
+    // 退款：聊天请求完全失败时退还积分
+    if (deductedCredits > 0 && sessionUser) {
+      try {
+        await refundCredits(sessionUser.id, deductedCredits, `聊天请求失败退款`);
+      } catch (refundErr) { console.error('[chat] Refund failed:', refundErr); }
+    }
     return NextResponse.json(
       { error: `服务器错误: ${error instanceof Error ? error.message : '未知错误'}` },
       { status: 500 }

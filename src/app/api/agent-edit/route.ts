@@ -3,7 +3,7 @@ import { findProviderForFeature, findProviderById, findProviderForModel } from '
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import { fetchWithV1Retry, getInternalApiUrl } from '@/lib/api-helpers';
-import { optionalApiAuth } from '@/lib/api-auth';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
 import { calculateActualPixelsFromRatio } from '@/lib/canvas-generation-group';
 import { executeAgentLoop, getToolsForLLM, type AgentContext, type AgentResult } from '@/lib/agent-engine';
@@ -11,7 +11,7 @@ import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { translateApiError } from '@/lib/api-error-translate';
 import { isTaskCancelled as isRegistryCancelled } from '@/lib/task-registry';
 import { getSessionUser } from '@/lib/server-auth';
-import { consumeCredits } from '@/lib/credits';
+import { consumeCredits, refundCredits } from '@/lib/credits';
 export const runtime = 'nodejs';
 export const maxDuration = 600;
 
@@ -53,8 +53,11 @@ if (typeof setInterval !== 'undefined') {
  * }
  */
 export async function POST(request: NextRequest) {
+  let deductedCredits = 0;
+  let sessionUser: any = null;
   try {
-    await optionalApiAuth(request);
+    const authResult = await requireApiAuthOrReject(request);
+    if (authResult) return authResult;
 
     const body = await request.json();
     const { image, prompt, maskDataUrl, model, providerId, maxRounds, imagePrompt, imageModel, imageProviderId, quality, aspectRatio } = body;
@@ -87,12 +90,14 @@ export async function POST(request: NextRequest) {
     }
 
     // 积分检查与扣除
-    const sessionUser = await getSessionUser(request).catch(() => null);
+    sessionUser = await getSessionUser(request).catch(() => null);
+    deductedCredits = 0;
     if (sessionUser) {
       const creditResult = await consumeCredits(sessionUser.id, 'image_retouch', undefined, undefined, model);
       if (!creditResult.success) {
         return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
       }
+      deductedCredits = creditResult.cost;
     }
 
     // Content safety check
@@ -547,6 +552,12 @@ export async function POST(request: NextRequest) {
     });
   } catch (err) {
     console.error('[agent-edit] POST error:', err);
+    // 退款：Agent编排失败时退还积分
+    if (deductedCredits > 0 && sessionUser) {
+      try {
+        await refundCredits(sessionUser.id, deductedCredits, `Agent编排失败退款`);
+      } catch (refundErr) { console.error('[agent-edit] Refund failed:', refundErr); }
+    }
     return NextResponse.json(
       { success: false, error: '请求处理失败' },
       { status: 500 }

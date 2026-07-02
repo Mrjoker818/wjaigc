@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, getApiProviders, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
-import { consumeCredits } from '@/lib/credits';
+import { consumeCredits, refundCredits } from '@/lib/credits';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import fsSync from 'fs';
 import path from 'path';
@@ -818,17 +818,21 @@ async function tryExternalRequest(request: ImageTo3DRequest): Promise<{
 // ==================== Route Handler ====================
 
 export async function POST(request: NextRequest) {
+  let deductedCredits = 0;
+  let sessionUser: any = null;
   try {
     const body = await resolveServerProvider(await request.json() as ImageTo3DRequest);
     // Verify session (getSessionUser throws on unauthenticated)
-    const sessionUser = await getSessionUser(request);
+    sessionUser = await getSessionUser(request);
 
     // 积分检查与扣除
+    deductedCredits = 0;
     if (sessionUser) {
       const creditResult = await consumeCredits(sessionUser.id, '3d_model');
       if (!creditResult.success) {
         return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
       }
+      deductedCredits = creditResult.cost;
     }
 
     // Validate: text-to-3d needs prompt; single-image/multi-image needs imageUrl
@@ -909,6 +913,12 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error('[image-to-3d] Fatal error:', error);
+    // 退款：3D生成失败时退还积分
+    if (deductedCredits > 0 && sessionUser) {
+      try {
+        await refundCredits(sessionUser.id, deductedCredits, `3D模型生成失败退款: ${(error instanceof Error ? error.message : 'Unknown').substring(0, 100)}`);
+      } catch (refundErr) { console.error('[image-to-3d] Refund failed:', refundErr); }
+    }
     return NextResponse.json({
       success: false,
       error: error instanceof Error ? error.message : 'Image to 3D failed',

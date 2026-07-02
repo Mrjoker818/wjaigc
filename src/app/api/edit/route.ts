@@ -3,13 +3,13 @@ import sharp from 'sharp';
 import { findProviderForModel, findProviderById, normalizeApiBaseUrl, getApiProviders } from '@/lib/server-api-config';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
-import { optionalApiAuth } from '@/lib/api-auth';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { getSessionUser } from '@/lib/server-auth';
-import { consumeCredits } from '@/lib/credits';
+import { consumeCredits, refundCredits } from '@/lib/credits';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import { getEditTask, deleteEditTask, setEditTask, updateTaskStage, failEditTask } from '@/lib/edit-task-store';
-import { calculateActualPixelsFromRatio } from '@/app/api/generate/route';
+import { calculateActualPixelsFromRatio } from '@/lib/calculate-pixels';
 import type { EditTask } from '@/lib/edit-task-store';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
 import { translateApiError } from '@/lib/api-error-translate';
@@ -38,7 +38,8 @@ interface EditTaskResult {
 }
 
 // 重新导出供 poll-task 使用（保持兼容）
-export { getEditTask, deleteEditTask };
+// Re-exports removed - import directly from '@/lib/edit-task-store' instead
+// export { getEditTask, deleteEditTask };
 
 /** 本地便捷：失败任务 */
 function failTask(taskId: string, error: string, networkError = false) {
@@ -48,7 +49,7 @@ function failTask(taskId: string, error: string, networkError = false) {
 }
 
 // 支持编辑的模型列表（用于降级静态列表）
-export const EDITABLE_MODELS = [
+const EDITABLE_MODELS = [
   'gpt-image-2',
   'dall-e-3',
   'gemini-2.5-flash-image',
@@ -271,7 +272,10 @@ function extractAllImagesFromResponse(responseData: Record<string, unknown>, fal
 // POST: 执行语言修图
 // ============================================================
 export async function POST(request: NextRequest) {
-  await optionalApiAuth(request);
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult) return authResult;
+  let deductedCredits = 0;
+  let sessionUser: any = null;
   try {
     const {
       image,         // base64 data URL（客户端已转换）
@@ -320,7 +324,8 @@ export async function POST(request: NextRequest) {
     }
 
     // 积分检查与扣除
-    const sessionUser = await getSessionUser(request);
+    sessionUser = await getSessionUser(request);
+    deductedCredits = 0; // 跟踪已扣积分，用于失败退款
     // 积分扣除移到凭证验证之后（第345行之后）
 
     // ========== 1. 获取 API 凭证（与 /api/generate 一致） ==========
@@ -362,6 +367,7 @@ export async function POST(request: NextRequest) {
       if (!creditResult.success) {
         return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
       }
+      deductedCredits = creditResult.cost;
     }
 
     // ========== 1.5 创建异步任务（提交+轮询模式，避免CDN/FaaS代理超时） ==========
@@ -1492,6 +1498,12 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.error(`[edit] Task creation error: ${message}`);
+    // 退款：任务创建失败时退还积分
+    if (deductedCredits > 0 && sessionUser) {
+      try {
+        await refundCredits(sessionUser.id, deductedCredits, `语言修图任务创建失败退款: ${message.substring(0, 100)}`);
+      } catch (refundErr) { console.error('[edit] Refund failed:', refundErr); }
+    }
     return NextResponse.json({ success: false, error: `任务创建失败: ${message}` }, { status: 500 });
   }
 } // end POST
@@ -1546,7 +1558,7 @@ async function tryImagesGenerations(
 // ============================================================
 // GET: 获取支持的编辑模型列表（从管理员系统获取）
 // ============================================================
-export async function GET() {
+export async function GET(_request: NextRequest) {
   try {
     const { getApiProviders } = await import('@/lib/server-api-config');
     const providers = await getApiProviders();

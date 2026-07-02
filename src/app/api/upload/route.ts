@@ -1,8 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { existsSync } from 'fs';
+import { getSessionUser as getAuthUser } from '@/lib/server-auth';
 
 export async function POST(request: NextRequest) {
   try {
+    // 认证检查：只有登录用户才能上传文件
+    // 服务端内部调用（来自 localhost 的请求）自动放行
+    const isInternalCall = request.headers.get('x-internal-call') === 'true' 
+      || request.headers.get('host')?.startsWith('localhost')
+      || request.headers.get('host')?.startsWith('127.0.0.1');
+    if (!isInternalCall) {
+      const user = await getAuthUser(request);
+      if (!user) {
+        return NextResponse.json({ error: '未登录，请先登录' }, { status: 401 });
+      }
+    }
+
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
 

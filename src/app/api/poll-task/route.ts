@@ -84,7 +84,8 @@ export async function POST(request: NextRequest) {
     // 优先使用请求参数，因为 Next.js dev 模式下 task-registry 可能不共享
     const requestEngineStr = typeof requestEngine === 'string' ? requestEngine : '';
     const sessionUser = await getSessionUser(request);
-    const userId = sessionUser?.id ?? requestUserId ?? "anonymous";
+    // ★ 安全：已登录用户必须使用 session 中的 userId，忽略客户端传入值（防止伪造）
+    const userId = sessionUser?.id || "anonymous";
 
     // ★ 第一优先：检查任务是否已被取消，避免已取消任务继续远程轮询浪费资源
     if (taskId && isTaskCancelled(taskId)) {

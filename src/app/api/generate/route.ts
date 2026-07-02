@@ -5,7 +5,7 @@ import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { identifyImageSubject } from '@/lib/identify-subject';
 
-import { optionalApiAuth } from '@/lib/api-auth';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { translateApiError } from '@/lib/api-error-translate';
 import { classifyApiError, type ClassifiedError, isCloudflareTimeoutError, translateApiError as translateApiErrorV2 } from '@/lib/api-error-translator';
 import { detectInvalidSizeError, repairSize, classifyImageModelFamily } from '@/lib/size-auto-repair';
@@ -15,52 +15,10 @@ import { getModelCapabilities, filterRequestForModel, shouldUseResponsesAPI, typ
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { consumeCredits } from '@/lib/credits';
 
-import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, stripEditsOnlyFields, isEditsEndpointRejected, type ApiCompatProfile, resolveProfileForModel, isGeminiImageModel, isNanoBananaModel, buildGeminiChatImageRequest, parseGeminiChatImageResponse, tryChatCompletionsImageFallback, isChannelUnavailableError, getModelSpecificPixelSize } from '@/lib/api-compatibility';
+import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, stripEditsOnlyFields, isEditsEndpointRejected, type ApiCompatProfile, resolveProfileForModel, isGeminiImageModel, isNanoBananaModel, buildGeminiChatImageRequest, parseGeminiChatImageResponse, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
 import { registerTask, updateTaskProgress, isTaskCancelled, getTaskInfo } from '@/lib/task-registry';
 import { persistRemoteImage } from '@/lib/s3-storage';
-
-/**
- * ★ 根据 aspectRatio + quality 计算精确像素尺寸
- * 优先使用前端传递的 size 参数（像素格式），否则从比例+质量推算
- */
-export function calculateActualPixelsFromRatio(aspectRatio: string, quality?: string, modelId?: string): string | null {
-  // 直接使用 api-compatibility 中的模型像素表推算
-  if (!aspectRatio || !quality) return null;
-  try {
-    const pixelSize = getModelSpecificPixelSize(modelId || '', aspectRatio, quality);
-    if (pixelSize) {
-      const [w, h] = pixelSize.split('x').map(Number);
-      if (w > 0 && h > 0) return pixelSize;
-    }
-  } catch {
-    // fallback: 从比例推算基础尺寸
-  }
-
-  // Fallback: 从 aspectRatio 比例 + quality 推算
-  const ratioMatch = aspectRatio.match(/^(\d+):(\d+)$/);
-  if (!ratioMatch) return null;
-  const [, rw, rh] = ratioMatch.map(Number);
-  const ratio = rw / rh;
-
-  // 根据质量确定长边像素
-  // ★ 支持 '1K'/'2K'/'3K'/'4K' 和 'standard'/'hd'/'high' 等常见质量值
-  const qualityPixels: Record<string, number> = {
-    '1K': 1024, '2K': 2048, '3K': 3072, '4K': 4096,
-    'standard': 1024, 'std': 1024,     // standard → 1K (OpenAI 默认)
-    'hd': 1792, 'high': 1792,          // hd → 1792 (OpenAI DALL-E 3 hd 模式)
-    'low': 1024, 'medium': 1024, 'auto': 1024, // 通用质量兜底
-  };
-  const longEdge = qualityPixels[quality];
-  if (!longEdge) return null;
-
-  if (ratio >= 1) {
-    // 横向或正方形
-    return `${longEdge}x${Math.round(longEdge / ratio)}`;
-  } else {
-    // 纵向
-    return `${Math.round(longEdge * ratio)}x${longEdge}`;
-  }
-}
+import { calculateActualPixelsFromRatio } from '@/lib/calculate-pixels';
 
 // 直接模式（OpenAI兼容API返回图片需60-120秒）
 // 异步模式（返回task_id只需几秒）两者共存，取较大值
@@ -149,8 +107,11 @@ function inferModelConfig(modelId: string, profile: ApiCompatProfile, providerNa
 }
 
 export async function POST(request: NextRequest) {
-  await optionalApiAuth(request);
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult) return authResult;
   try {
+    let deductedCredits = 0;
+    let sessionUser: any = null;
     const body = await request.json();
     const {
       prompt,
@@ -171,6 +132,7 @@ export async function POST(request: NextRequest) {
       strength,
       providerId,
       submitOnly,
+      _skipCredits, // 内部标记：后台重试时跳过积分扣除（避免双重扣费）
     } = body;
     // 必填参数校验
     if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
@@ -204,7 +166,7 @@ export async function POST(request: NextRequest) {
       logSafetyWarning(prompt, safetyResult);
     }
 
-    const sessionUser = await getSessionUser(request);
+    sessionUser = await getSessionUser(request);
     const userId = sessionUser?.id ?? requestUserId ?? "anonymous";
 
     // ★ submitOnly 模式：立即注册任务并返回 taskId，后台执行实际生成
@@ -212,12 +174,16 @@ export async function POST(request: NextRequest) {
     if (submitOnly) {
       const asyncTaskId = `async-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       registerTask(asyncTaskId, 'generate-async', '生成图片', userId);
+      // 记录积分成本到任务信息中，用于取消时退款
+      if (deductedCredits > 0) {
+        updateTaskProgress(asyncTaskId, { creditCost: deductedCredits });
+      }
       updateTaskProgress(asyncTaskId, { status: 'processing', progress: 0, label: '准备中...' });
       console.log(`[generate] submitOnly mode: taskId=${asyncTaskId}, returning immediately`);
 
       // ★ 后台执行生成逻辑（fire-and-forget）
-      // 重新构造请求体，去掉 submitOnly 标志，然后调用自身
-      const backgroundBody = { ...body, submitOnly: false };
+      // 重新构造请求体，去掉 submitOnly 标志，添加 skipCredits（积分已在本次请求中扣除）
+      const backgroundBody = { ...body, submitOnly: false, _skipCredits: true };
       (async () => {
         try {
           const bgRes = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/generate`, {
@@ -230,6 +196,16 @@ export async function POST(request: NextRequest) {
 
           if (!bgData.success) {
             updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: bgData.error || '生成失败', label: '生成失败' });
+            // 退款：生成失败时退还已扣除的积分
+            if (deductedCredits > 0 && sessionUser) {
+              try {
+                const { refundCredits } = await import('@/lib/credits');
+                await refundCredits(sessionUser.id, deductedCredits, `图像生成失败退款 (taskId: ${asyncTaskId})`, asyncTaskId);
+                console.log(`[generate] Refunded ${deductedCredits} credits for failed task ${asyncTaskId}`);
+              } catch (refundErr) {
+                console.error('[generate] Refund failed:', refundErr);
+              }
+            }
             return;
           }
 
@@ -311,6 +287,13 @@ export async function POST(request: NextRequest) {
                     error: pollData.error || '生成失败',
                     label: '生成失败',
                   });
+                  // 退款：轮询检测到生成失败
+                  if (deductedCredits > 0 && sessionUser) {
+                    try {
+                      const { refundCredits } = await import('@/lib/credits');
+                      await refundCredits(sessionUser.id, deductedCredits, `图像生成失败退款 (taskId: ${asyncTaskId})`, asyncTaskId);
+                    } catch (refundErr) { console.error('[generate] Refund failed:', refundErr); }
+                  }
                   return;
                 }
 
@@ -328,15 +311,36 @@ export async function POST(request: NextRequest) {
             }
 
             updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: '生成超时', label: '生成超时' });
+            // 退款：生成超时
+            if (deductedCredits > 0 && sessionUser) {
+              try {
+                const { refundCredits } = await import('@/lib/credits');
+                await refundCredits(sessionUser.id, deductedCredits, `图像生成超时退款 (taskId: ${asyncTaskId})`, asyncTaskId);
+              } catch (refundErr) { console.error('[generate] Refund failed:', refundErr); }
+            }
             return;
           }
 
           // 无图片也无 taskIds — 失败
           updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: '未获得生成结果', label: '生成失败' });
+          // 退款：无生成结果
+          if (deductedCredits > 0 && sessionUser) {
+            try {
+              const { refundCredits } = await import('@/lib/credits');
+              await refundCredits(sessionUser.id, deductedCredits, `图像生成无结果退款 (taskId: ${asyncTaskId})`, asyncTaskId);
+            } catch (refundErr) { console.error('[generate] Refund failed:', refundErr); }
+          }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           console.error(`[generate] submitOnly background error for ${asyncTaskId}:`, msg);
           updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: msg, label: '生成失败' });
+          // 退款：异常失败
+          if (deductedCredits > 0 && sessionUser) {
+            try {
+              const { refundCredits } = await import('@/lib/credits');
+              await refundCredits(sessionUser.id, deductedCredits, `图像生成异常退款 (taskId: ${asyncTaskId})`, asyncTaskId);
+            } catch (refundErr) { console.error('[generate] Refund failed:', refundErr); }
+          }
         }
       })();
 
@@ -488,12 +492,15 @@ export async function POST(request: NextRequest) {
     }
 
     // 积分扣除（移到凭证验证之后，避免凭证无效时误扣积分）
-    if (sessionUser) {
+    // _skipCredits: 后台 submitOnly 重试时已扣过积分，跳过
+    deductedCredits = 0;
+    if (sessionUser && !_skipCredits) {
       const modelId = model || '';
       const creditResult = await consumeCredits(sessionUser.id, 'image_generate', undefined, undefined, modelId, { quality });
       if (!creditResult.success) {
         return NextResponse.json({ error: creditResult.message || '积分不足' }, { status: 402 });
       }
+      deductedCredits = creditResult.cost;
     }
 
     // 构建增强的 prompt

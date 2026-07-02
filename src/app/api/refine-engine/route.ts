@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, findProviderById, getPublicModels, getPublicApiProviders } from '@/lib/server-api-config';
 import type { ApiProvider } from '@/lib/universal-api-types';
-import { calculateActualPixelsFromRatio } from '@/app/api/generate/route';
+import { calculateActualPixelsFromRatio } from '@/lib/calculate-pixels';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, resolveProfileForModel, buildGeminiChatImageRequest, tryChatCompletionsImageFallback, parseGeminiChatImageResponse, isEditsEndpointRejected, stripEditsOnlyFields, isChannelUnavailableError } from '@/lib/api-compatibility';
 import { fetchWithV1Retry, getInternalApiUrl } from '@/lib/api-helpers';
 import { translateApiError } from '@/lib/api-error-translate';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
 import { getSessionUser } from '@/lib/server-auth';
-import { consumeCredits } from '@/lib/credits';
+import { consumeCredits, refundCredits } from '@/lib/credits';
 import { identifyImageSubject } from '@/lib/identify-subject';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 
@@ -867,6 +867,8 @@ async function handleApiResponse(
 
 // ─── POST: Generate refined image ───
 export async function POST(request: NextRequest) {
+  let deductedCredits = 0;
+  let sessionUser: any = null;
   try {
     const body = await request.json();
     const { action } = body;
@@ -924,12 +926,14 @@ export async function POST(request: NextRequest) {
       }
 
       // 积分检查与扣除
-      const sessionUser = await getSessionUser(request).catch(() => null);
+      deductedCredits = 0;
+      sessionUser = await getSessionUser(request).catch(() => null);
       if (sessionUser) {
         const creditResult = await consumeCredits(sessionUser.id, 'image_retouch', undefined, undefined, model);
         if (!creditResult.success) {
           return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
         }
+        deductedCredits = creditResult.cost;
       }
 
       if (!model) {
@@ -1026,7 +1030,13 @@ export async function POST(request: NextRequest) {
       } catch (procErr) {
         const errMsg = procErr instanceof Error ? procErr.message : String(procErr);
         console.error(`[refine-engine] submitRefineToApi FAILED taskId=${taskId}:`, errMsg);
-        updateTaskProgress(taskId, { status: 'failed', error: translateApiError(errMsg) });
+        updateTaskProgress(taskId, { status: 'failed', error: translateApiError(errMsg), creditCost: deductedCredits });
+        // 退款：精修失败时退还积分
+        if (deductedCredits > 0 && sessionUser) {
+          try {
+            await refundCredits(sessionUser.id, deductedCredits, `精修失败退款: ${errMsg.substring(0, 100)}`);
+          } catch (refundErr) { console.error('[refine-engine] Refund failed:', refundErr); }
+        }
         return NextResponse.json({
           success: false,
           taskId,
@@ -1038,6 +1048,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: '未知操作' }, { status: 400 });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
+    // 退款：精修失败时退还积分
+    if (deductedCredits > 0 && sessionUser) {
+      try {
+        await refundCredits(sessionUser.id, deductedCredits, `精修失败退款: ${message.substring(0, 100)}`);
+      } catch (refundErr) { console.error('[refine-engine] Refund failed:', refundErr); }
+    }
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

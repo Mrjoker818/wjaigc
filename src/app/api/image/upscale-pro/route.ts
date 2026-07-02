@@ -12,7 +12,7 @@ import { getSessionUser } from '@/lib/server-auth';
 
 // 允许最长5分钟（ONNX放大+AI精修可能较慢）
 export const maxDuration = 300;
-import { consumeCredits } from '@/lib/credits';
+import { consumeCredits, refundCredits } from '@/lib/credits';
 import { enhanceViaAI } from '@/lib/quality-enhance';
 import { UPSCALE_OUTPUT_DIR, UPSCALE_OUTPUT_URL_PREFIX } from '@/lib/image-tools/config';
 

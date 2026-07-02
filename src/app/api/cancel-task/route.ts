@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cancelTask, isTaskCancelled, getTaskInfo } from '@/lib/task-registry';
 import { cancelEditTask } from '@/lib/edit-task-store';
+import { getSessionUser as getAuthUser } from '@/lib/server-auth';
+import { refundCredits } from '@/lib/credits';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,6 +15,15 @@ export const dynamic = 'force-dynamic';
  */
 export async function POST(request: NextRequest) {
   try {
+    // 认证检查：只有登录用户才能取消任务
+    const user = await getAuthUser(request);
+    if (!user) {
+      return NextResponse.json(
+        { success: false, error: '未登录，请先登录' },
+        { status: 401 }
+      );
+    }
+
     const body = await request.json();
     const { taskId } = body;
 
@@ -25,6 +36,17 @@ export async function POST(request: NextRequest) {
 
     // 检查任务是否存在于注册中心
     const taskInfo = getTaskInfo(taskId);
+
+    // 权限检查：只有任务创建者或管理员可以取消
+    if (taskInfo?.userId && taskInfo.userId !== 'anonymous' && taskInfo.userId !== user.id) {
+      // 非管理员不能取消其他用户的任务
+      if (user.role !== 'admin') {
+        return NextResponse.json(
+          { success: false, error: '无权取消此任务' },
+          { status: 403 }
+        );
+      }
+    }
 
     // 即使注册中心没有记录，也尝试取消（可能任务在旧store中）
     // 过滤敏感字段
@@ -49,6 +71,21 @@ export async function POST(request: NextRequest) {
 
     // 同时取消 edit-task-store 中的任务
     cancelEditTask(taskId);
+
+    // ★ 退款：取消任务时退还已扣除的积分
+    if (taskInfo?.creditCost && taskInfo.creditCost > 0 && taskInfo.userId && taskInfo.userId !== 'anonymous') {
+      try {
+        await refundCredits(
+          taskInfo.userId,
+          taskInfo.creditCost,
+          `任务取消退款 (taskId: ${taskId}, type: ${taskInfo.type})`,
+          taskId
+        );
+        console.log(`[cancel-task] Refunded ${taskInfo.creditCost} credits for cancelled task ${taskId}`);
+      } catch (refundErr) {
+        console.error('[cancel-task] Refund failed:', refundErr);
+      }
+    }
 
     return NextResponse.json({
       success: true,

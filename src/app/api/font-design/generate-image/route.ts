@@ -6,7 +6,7 @@ import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile,
 import { registerTask, updateTaskProgress, isTaskCancelled, getTaskInfo } from '@/lib/task-registry';
 import { buildJimengPrompt, buildBlackOnWhitePrompt, buildTransparentLogoPrompt, FONT_STYLE_CATEGORIES, SCENE_MAP, STROKE_MAP, GRAPHIC_MAP, MATERIAL_MAP } from '../plan/route';
 import { getSessionUser } from '@/lib/server-auth';
-import { consumeCredits } from '@/lib/credits';
+import { consumeCredits, refundCredits } from '@/lib/credits';
 
 // ★ 字境大师任务结果独立存储（防HMR丢失task-registry状态）
 const fontDesignResults = new Map<string, {
@@ -103,6 +103,8 @@ function buildUserSettingsSuffix(params: {
 }
 
 export async function POST(request: NextRequest) {
+  let deductedCredits = 0;
+  let sessionUser: any = null;
   try {
     const body = await request.json();
     const {
@@ -135,12 +137,14 @@ export async function POST(request: NextRequest) {
     });
 
     // 积分检查与扣除
-    const sessionUser = await getSessionUser(request).catch(() => null);
+    deductedCredits = 0;
+    sessionUser = await getSessionUser(request).catch(() => null);
     if (sessionUser) {
       const creditResult = await consumeCredits(sessionUser.id, 'image_generate', undefined, undefined, modelStr);
       if (!creditResult.success) {
         return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
       }
+      deductedCredits = creditResult.cost;
     }
 
     let finalPrompt = '';
@@ -405,6 +409,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ taskId, prompt: finalPrompt, model: usedModel });
   } catch (error: unknown) {
     console.error('[font-design/generate-image] Error:', error);
+    // 退款：字体设计图片生成失败时退还积分
+    if (deductedCredits > 0 && sessionUser) {
+      try {
+        await refundCredits(sessionUser.id, deductedCredits, `字体设计生成失败退款: ${(error instanceof Error ? error.message : 'Unknown').substring(0, 100)}`);
+      } catch (refundErr) { console.error('[font-design/generate-image] Refund failed:', refundErr); }
+    }
     return NextResponse.json({ error: error instanceof Error ? error.message : '生成图片失败' }, { status: 500 });
   }
 }

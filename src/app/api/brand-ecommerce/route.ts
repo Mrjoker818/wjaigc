@@ -5,7 +5,7 @@ import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile,
 import { fetchWithV1Retry, getInternalApiUrl } from '@/lib/api-helpers';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
 import { getSessionUser } from '@/lib/server-auth';
-import { consumeCredits } from '@/lib/credits';
+import { consumeCredits, refundCredits } from '@/lib/credits';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import sharp from 'sharp';
 
@@ -487,6 +487,8 @@ function resolveDimensions(aspectRatio: string): { width: number; height: number
 // ─── POST Handler ──────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
+  let deductedCredits = 0;
+  let sessionUser: any = null;
   try {
     const body = await request.json();
     const { action } = body;
@@ -527,12 +529,14 @@ export async function POST(request: NextRequest) {
       }
 
       // 积分检查与扣除
-      const sessionUser = await getSessionUser(request).catch(() => null);
+      deductedCredits = 0;
+      sessionUser = await getSessionUser(request).catch(() => null);
       if (sessionUser) {
         const creditResult = await consumeCredits(sessionUser.id, 'image_generate', undefined, undefined, model);
         if (!creditResult.success) {
           return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
         }
+        deductedCredits = creditResult.cost;
       }
 
       const provider = await getImageProvider(model, providerId);
@@ -1107,6 +1111,12 @@ ${effectiveStyle ? `风格修饰: ${effectiveStyle}` : ''}
     return NextResponse.json({ error: '未知操作' }, { status: 400 });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : '服务器错误';
+    // 退款：品牌电商生成失败时退还积分
+    if (deductedCredits > 0 && sessionUser) {
+      try {
+        await refundCredits(sessionUser.id, deductedCredits, `品牌电商生成失败退款: ${msg.substring(0, 100)}`);
+      } catch (refundErr) { console.error('[brand-ecommerce] Refund failed:', refundErr); }
+    }
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

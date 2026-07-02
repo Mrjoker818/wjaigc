@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as fs from 'fs';
 import * as path from 'path';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 const SERVER_DATA_ROOT = process.env.SERVER_DATA_ROOT || '/space/wujie-data';
 
@@ -106,6 +107,10 @@ function saveToCache(cacheKey: string, ext: string, body: Buffer): void {
  * - Friendly Chinese error messages for 403/404 (expired/cleaned URLs)
  */
 export async function GET(request: NextRequest) {
+  // Require authentication to prevent abuse as open proxy
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult) return authResult;
+
   const url = request.nextUrl.searchParams.get('url');
 
   if (!url) {

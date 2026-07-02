@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, getApiProviders, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
-import { consumeCredits } from '@/lib/credits';
+import { consumeCredits, refundCredits } from '@/lib/credits';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 
 export const maxDuration = 60;
@@ -247,6 +247,8 @@ function buildChatEndpoint(baseUrl: string, _providerPreset?: string): string {
 }
 
 export async function POST(request: NextRequest) {
+  let deductedCredits = 0;
+  let sessionUser: any = null;
   try {
     const {
       imageUrl,
@@ -255,7 +257,7 @@ export async function POST(request: NextRequest) {
       providerPreset,
     } = await request.json();
 
-    const sessionUser = await getSessionUser(request);
+    sessionUser = await getSessionUser(request);
 
     if (!imageUrl) {
       return NextResponse.json({ error: '缺少图片URL' }, { status: 400 });
@@ -265,11 +267,13 @@ export async function POST(request: NextRequest) {
     const resolvedProviderId = providerId || (model?.includes('::') ? model.split('::')[0] : undefined);
 
     // 积分检查与扣除
+    deductedCredits = 0;
     if (sessionUser) {
       const creditResult = await consumeCredits(sessionUser.id, 'chat', undefined, undefined, resolvedModel);
       if (!creditResult.success) {
         return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
       }
+      deductedCredits = creditResult.cost;
     }
 
     // Resolve API key and base URL — use the user's selected chat model only (no VLM fallback)
@@ -507,6 +511,12 @@ export async function POST(request: NextRequest) {
     );
   } catch (error) {
     console.error('[vision-prompt] Error:', error);
+    // 退款：图片识词失败时退还积分
+    if (deductedCredits > 0 && sessionUser) {
+      try {
+        await refundCredits(sessionUser.id, deductedCredits, `图片识词失败退款: ${(error instanceof Error ? error.message : 'Unknown').substring(0, 100)}`);
+      } catch (refundErr) { console.error('[vision-prompt] Refund failed:', refundErr); }
+    }
     return NextResponse.json(
       { error: `图片分析失败: ${error instanceof Error ? error.message : '未知错误'}` },
       { status: 500 }

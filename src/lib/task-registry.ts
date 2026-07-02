@@ -29,6 +29,8 @@ export interface TaskInfo {
   error?: string;
   queuePosition?: number; // 排队位置（0=不在排队）
   partialResults?: unknown; // ★ 增量结果：部分已完成的子结果
+  creditCost?: number;    // 已扣除的积分（用于失败/取消时退款）
+  userId?: string;        // 任务所属用户ID（用于退款和SSE过滤）
   createdAt: number;
   updatedAt: number;
 }
@@ -83,6 +85,7 @@ export function registerTask(taskId: string, type: TaskType, label?: string, use
     status: 'pending',
     progress: 0,
     label: label || type,
+    userId: effectiveUserId,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
@@ -137,7 +140,7 @@ export function waitForQueueSlot(taskId: string, timeoutMs: number = 5 * 60 * 10
 /** 更新任务进度/状态 */
 export function updateTaskProgress(
   taskId: string,
-  update: Partial<Pick<TaskInfo, 'status' | 'progress' | 'label' | 'result' | 'error' | 'queuePosition' | 'partialResults'>>
+  update: Partial<Pick<TaskInfo, 'status' | 'progress' | 'label' | 'result' | 'error' | 'queuePosition' | 'partialResults' | 'creditCost'>>
 ): void {
   const task = taskRegistry.get(taskId);
   if (!task) return;
@@ -283,6 +286,16 @@ export function dequeueNextTask(userId: string): string | null {
   }
 
   return nextTaskId;
+}
+
+/**
+ * ★ 获取任务所属用户ID — 用于SSE事件过滤，确保用户数据隔离
+ */
+export function getTaskUserId(taskId: string): string | undefined {
+  // 优先从 TaskInfo 中读取 userId（新方案），回退到 taskUserMap（旧方案）
+  const task = taskRegistry.get(taskId);
+  if (task?.userId && task.userId !== 'anonymous') return task.userId;
+  return taskUserMap.get(taskId);
 }
 
 /**

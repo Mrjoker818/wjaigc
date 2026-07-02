@@ -3,7 +3,7 @@ import { findProviderForFeature, normalizeApiBaseUrl } from '@/lib/server-api-co
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import { getSessionUser } from '@/lib/server-auth';
-import { consumeCredits } from '@/lib/credits';
+import { consumeCredits, refundCredits } from '@/lib/credits';
 import { vectorizePipeline, type VectorizeEngine } from '@/lib/vectorize-pipeline';
 import fsSync from 'fs';
 import path from 'path';
@@ -748,6 +748,8 @@ function sanitizeSvgForAI(svg: string): string {
 }
 
 export async function POST(req: NextRequest) {
+  let deductedCredits = 0;
+  let sessionUser: any = null;
   try {
     const body = await req.json();
     const imageUrl = String(body.imageUrl || '');
@@ -759,12 +761,14 @@ export async function POST(req: NextRequest) {
     }
 
     // 积分检查与扣除
-    const sessionUser = await getSessionUser(req).catch(() => null);
+    deductedCredits = 0;
+    sessionUser = await getSessionUser(req).catch(() => null);
     if (sessionUser) {
       const creditResult = await consumeCredits(sessionUser.id, 'vectorize');
       if (!creditResult.success) {
         return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
       }
+      deductedCredits = creditResult.cost;
     }
 
     console.log('[vectorize] Request:', { imageUrl: imageUrl.substring(0, 100), layerId, mode });
@@ -926,6 +930,12 @@ export async function POST(req: NextRequest) {
     });
   } catch (error) {
     console.error('[vectorize] Fatal error:', error);
+    // 退款：矢量化失败时退还积分
+    if (deductedCredits > 0 && sessionUser) {
+      try {
+        await refundCredits(sessionUser.id, deductedCredits, `矢量化失败退款: ${(error instanceof Error ? error.message : 'Unknown').substring(0, 100)}`);
+      } catch (refundErr) { console.error('[vectorize] Refund failed:', refundErr); }
+    }
     return NextResponse.json({ success: false, error: error instanceof Error ? error.message : 'vectorize failed' }, { status: 500 });
   }
 }

@@ -9,7 +9,7 @@ import { getServerDataRoot, saveImageFile } from '@/lib/server-data-root';
 import { uploadImageToS3, isS3Available } from '@/lib/s3-storage';
 import { PYTHON_BIN } from '@/lib/image-tools/config';
 import { getSessionUser } from '@/lib/server-auth';
-import { consumeCredits } from '@/lib/credits';
+import { consumeCredits, refundCredits } from '@/lib/credits';
 import { optimize as runSvgoOptimize } from 'svgo';
 import { vectorizePipeline, type VectorizeEngine, type VectorizeQuality as PipelineQuality } from '@/lib/vectorize-pipeline';
 import { analyzeWithSharp } from '@/lib/vectorize-analyzer';
@@ -2001,6 +2001,8 @@ async function tryDesignVectorizeFallback(req: NextRequest, imageUrl: string, mo
 // ─── POST handler ──────────────────────────────────────
 
 export async function POST(req: NextRequest) {
+  let deductedCredits = 0;
+  let sessionUser: any = null;
   try {
     const body: TraceRequest = await req.json();
     const { imageUrl, mode = 'color' } = body;
@@ -2017,12 +2019,14 @@ export async function POST(req: NextRequest) {
     console.log(`[svg-trace] mode=${mode}, preset=${body.qualityPreset || 'balanced'}, imageUrl=${imageUrl.substring(0, 100)}`);
 
     // 积分检查与扣除
-    const sessionUser = await getSessionUser(req);
+    deductedCredits = 0;
+    sessionUser = await getSessionUser(req);
     if (sessionUser) {
       const creditResult = await consumeCredits(sessionUser.id, 'svg_trace');
       if (!creditResult.success) {
         return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
       }
+      deductedCredits = creditResult.cost;
     }
 
     // Pre-check tool availability for trace modes
@@ -2781,6 +2785,12 @@ export async function POST(req: NextRequest) {
     }
   } catch (error) {
     console.error('[svg-trace] Error:', error);
+    // 退款：SVG描摹失败时退还积分
+    if (deductedCredits > 0 && sessionUser) {
+      try {
+        await refundCredits(sessionUser.id, deductedCredits, `SVG描摹失败退款: ${(error instanceof Error ? error.message : 'Unknown').substring(0, 100)}`);
+      } catch (refundErr) { console.error('[svg-trace] Refund failed:', refundErr); }
+    }
     return NextResponse.json({
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',

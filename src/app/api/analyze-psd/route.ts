@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { LLMClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { getSessionUser } from '@/lib/server-auth';
-import { consumeCredits } from '@/lib/credits';
+import { consumeCredits, refundCredits } from '@/lib/credits';
 
 export const runtime = 'nodejs';
 
@@ -22,6 +22,8 @@ export const runtime = 'nodejs';
 export async function POST(request: NextRequest) {
   const auth = await requireApiAuthOrReject(request);
   if (auth instanceof NextResponse) return auth;
+  let deductedCredits = 0;
+  let sessionUser: any = null;
   try {
     const { image } = await request.json();
 
@@ -33,12 +35,14 @@ export async function POST(request: NextRequest) {
     }
 
     // 积分检查与扣除
-    const sessionUser = await getSessionUser(request).catch(() => null);
+    deductedCredits = 0;
+    sessionUser = await getSessionUser(request).catch(() => null);
     if (sessionUser) {
       const creditResult = await consumeCredits(sessionUser.id, 'segment');
       if (!creditResult.success) {
         return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
       }
+      deductedCredits = creditResult.cost;
     }
 
     const customHeaders = HeaderUtils.extractForwardHeaders(request.headers);
@@ -131,6 +135,12 @@ Analyze the image now and return ONLY the JSON.`;
     });
   } catch (error) {
     console.error('PSD layer analysis error:', error);
+    // 退款：PSD分析失败时退还积分
+    if (deductedCredits > 0 && sessionUser) {
+      try {
+        await refundCredits(sessionUser.id, deductedCredits, `PSD分析失败退款: ${(error instanceof Error ? error.message : 'Unknown').substring(0, 100)}`);
+      } catch (refundErr) { console.error('[analyze-psd] Refund failed:', refundErr); }
+    }
     return NextResponse.json(
       {
         success: false,

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { subscribeToTaskEvents, type TaskEvent } from '@/lib/task-registry';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,7 +9,7 @@ export const dynamic = 'force-dynamic';
  * 兼容处理：部分代理/CDN 可能将 GET SSE 请求转为 POST
  * 返回 JSON 提示使用 GET 连接 SSE，避免 405 错误
  */
-export async function POST() {
+export async function POST(_request: NextRequest) {
   return NextResponse.json({
     success: false,
     error: 'SSE endpoint requires GET method. Use EventSource or fetch with GET to connect.',
@@ -22,11 +23,16 @@ export async function POST() {
  *
  * 连接后实时推送任务创建、进度、完成、失败、取消等事件
  * 前端可用 EventSource 或 fetch + ReadableStream 消费
- *
- * 事件格式（SSE data 行）：
- *   { type: 'created'|'updated'|'completed'|'failed'|'cancelled'|'progress'|'queued', taskId: string, task: TaskInfo }
+ * 
+ * 安全：需要认证，且仅推送当前用户的任务事件（按 userId 过滤）
  */
 export async function GET(request: NextRequest) {
+  // ★ 认证检查：未登录用户不能连接SSE接收任务事件
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult) return authResult;
+  const currentUser = await import('@/lib/server-auth').then(m => m.getSessionUser(request));
+  const currentUserId = currentUser?.id || null;
+
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
@@ -41,9 +47,13 @@ export async function GET(request: NextRequest) {
       // 心跳变量提前声明，避免回调中引用未赋值变量
       let heartbeat: ReturnType<typeof setInterval> | undefined;
 
-      // 订阅任务事件
+      // 订阅任务事件（按用户过滤，仅推送当前用户的任务）
       const unsubscribe = subscribeToTaskEvents((event: TaskEvent) => {
         try {
+          // ★ 用户隔离：仅推送当前用户的任务事件，匿名用户不过滤（兼容旧行为）
+          if (currentUserId && event.task?.userId && event.task.userId !== currentUserId) {
+            return; // 跳过其他用户的事件
+          }
           controller.enqueue(
             encoder.encode(`data: ${JSON.stringify(event)}\n\n`)
           );

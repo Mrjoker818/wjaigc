@@ -20,11 +20,13 @@ import {
 } from '@/lib/video-api';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getSessionUser } from '@/lib/server-auth';
-import { consumeCredits } from '@/lib/credits';
+import { consumeCredits, refundCredits } from '@/lib/credits';
 
 export const maxDuration = 300; // 5 min timeout
 
 export async function POST(request: NextRequest) {
+  let deductedCredits = 0;
+  let sessionUser: any = null;
   try {
     // 积分扣除（按模型差异化扣分）
     const body = await request.json();
@@ -65,12 +67,14 @@ export async function POST(request: NextRequest) {
     const effectiveProviderId = providerId || extractedProviderId || '';
 
     // 积分扣除（登录用户才扣积分，按模型差异化扣分）
-    const sessionUser = await getSessionUser(request);
+    sessionUser = await getSessionUser(request);
+    deductedCredits = 0;
     if (sessionUser) {
       const creditResult = await consumeCredits(sessionUser.id, 'video_generate', undefined, undefined, model, { durationSeconds: Number(duration) });
       if (!creditResult.success) {
         return NextResponse.json({ error: creditResult.message || '积分不足' }, { status: 402 });
       }
+      deductedCredits = creditResult.cost;
     }
 
     // 1. 查找视频 API 提供商
@@ -344,6 +348,12 @@ export async function POST(request: NextRequest) {
     });
   } catch (err: any) {
     console.error('[video/generate] Error:', err);
+    // 退款：视频生成失败时退还积分
+    if (deductedCredits > 0 && sessionUser) {
+      try {
+        await refundCredits(sessionUser.id, deductedCredits, `视频生成失败退款: ${(err.message || '').substring(0, 100)}`);
+      } catch (refundErr) { console.error('[video/generate] Refund failed:', refundErr); }
+    }
     return NextResponse.json(
       { error: err.message || '视频生成请求失败' },
       { status: 500 },
@@ -355,6 +365,8 @@ export async function POST(request: NextRequest) {
  * GET /api/video/generate - 获取支持的视频模型列表信息
  */
 export async function GET() {
+  let deductedCredits = 0;
+  let sessionUser: any = null;
   try {
     return NextResponse.json({
       defaultRatios: ['1:1', '4:3', '16:9', '9:16', '21:9'],

@@ -378,6 +378,7 @@ interface InfiniteCanvasProps {
   onToggleHelp?: () => void;
   isPanelCollapsed?: boolean;
   onUndo?: () => void;
+  onRedo?: () => void;
   navigateToImageId?: string | null;
   onNavigateToImageComplete?: () => void;
   onGroupsChange?: (groups: ImageGroup[]) => void;
@@ -542,6 +543,7 @@ export function InfiniteCanvas({
   onToggleHelp,
   isPanelCollapsed = true,
   onUndo,
+  onRedo,
   navigateToImageId,
   onNavigateToImageComplete,
   onGroupsChange,
@@ -1915,11 +1917,13 @@ export function InfiniteCanvas({
         onUndo?.();
         return;
       }
-      // Ctrl+Shift+Z / Cmd+Shift+Z: Redo (prevent browser redo conflict)
+      // Ctrl+Shift+Z / Cmd+Shift+Z: Redo
       if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ' && e.shiftKey) {
         if (inputFocused) return;
         e.preventDefault();
-        // Redo not implemented in canvas yet, just prevent browser default
+        if (onRedo) {
+          onRedo();
+        }
         return;
       }
       // Ctrl + Plus: Zoom in

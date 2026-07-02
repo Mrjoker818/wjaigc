@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dbGetBrandAssets, dbGetBrandAsset, dbUpsertBrandAsset, dbDeleteBrandAsset, dbSetDefaultBrandAsset, type DbBrandAsset } from '@/lib/db-storage';
-import { optionalApiAuth } from '@/lib/api-auth';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
+import { getSessionUser } from '@/lib/server-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,14 +9,11 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = await optionalApiAuth(request);
+    const authResult = await requireApiAuthOrReject(request);
+    if (authResult) return authResult;
     const userId = request.nextUrl.searchParams.get('userId');
     if (!userId) {
       return NextResponse.json({ error: '缺少 userId 参数' }, { status: 400 });
-    }
-    // If authenticated, verify the requesting user matches the target userId
-    if (auth.authenticated && auth.userId && auth.userId !== userId && auth.userRole !== 'admin') {
-      return NextResponse.json({ error: '无权访问其他用户数据' }, { status: 403 });
     }
 
     const assets = await dbGetBrandAssets(userId);
@@ -30,19 +28,20 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const auth = await optionalApiAuth(request);
+    const authResult = await requireApiAuthOrReject(request);
+    if (authResult) return authResult;
+    const currentUser = await getSessionUser(request);
+    const authenticatedUserId = currentUser?.id;
     const body = await request.json();
-    const { action, userId } = body;
-    // If authenticated, verify the requesting user matches the target userId
-    if (auth.authenticated && auth.userId && userId && auth.userId !== userId && auth.userRole !== 'admin') {
-      return NextResponse.json({ error: '无权修改其他用户数据' }, { status: 403 });
-    }
+    const { action } = body;
 
     // ─── List assets ───
     if (action === 'list') {
       const { userId } = body;
-      if (!userId) return NextResponse.json({ error: '缺少 userId' }, { status: 400 });
-      const assets = await dbGetBrandAssets(userId);
+      // 使用认证用户ID，防止跨用户访问
+      const targetUserId = authenticatedUserId || userId;
+      if (!targetUserId) return NextResponse.json({ error: '缺少 userId' }, { status: 400 });
+      const assets = await dbGetBrandAssets(targetUserId);
       return NextResponse.json({ success: true, assets });
     }
 
@@ -57,7 +56,8 @@ export async function POST(request: NextRequest) {
 
     // ─── Save (upsert) asset ───
     if (action === 'save') {
-      const { id, userId, name, brandName, brandColors, styleExtra, sceneDesc, referenceImageUrl, productImageUrl, productDesc, mainText, secondaryText, accentSymbol, selectedModel, isDefault } = body;
+      const { id, name, brandName, brandColors, styleExtra, sceneDesc, referenceImageUrl, productImageUrl, productDesc, mainText, secondaryText, accentSymbol, selectedModel, isDefault } = body;
+      const userId = authenticatedUserId || body.userId;
       if (!userId) return NextResponse.json({ error: '缺少 userId' }, { status: 400 });
       if (!name?.trim()) return NextResponse.json({ error: '请输入品牌方案名称' }, { status: 400 });
 
@@ -97,6 +97,11 @@ export async function POST(request: NextRequest) {
     if (action === 'delete') {
       const { id } = body;
       if (!id) return NextResponse.json({ error: '缺少 id' }, { status: 400 });
+      if (!authenticatedUserId) return NextResponse.json({ error: '未登录' }, { status: 401 });
+      // Verify ownership: only the asset owner can delete
+      const existingAssets = await dbGetBrandAssets(authenticatedUserId);
+      const assetExists = existingAssets.some((a: { id: string }) => a.id === id);
+      if (!assetExists) return NextResponse.json({ error: '资产不存在或无权操作' }, { status: 403 });
       const ok = await dbDeleteBrandAsset(id);
       if (!ok) return NextResponse.json({ error: '删除失败' }, { status: 500 });
       return NextResponse.json({ success: true });
@@ -104,7 +109,8 @@ export async function POST(request: NextRequest) {
 
     // ─── Set default ───
     if (action === 'setDefault') {
-      const { userId, id } = body;
+      const { id } = body;
+      const userId = authenticatedUserId;
       if (!userId || !id) return NextResponse.json({ error: '缺少参数' }, { status: 400 });
       const ok = await dbSetDefaultBrandAsset(userId, id);
       if (!ok) return NextResponse.json({ error: '设置默认失败' }, { status: 500 });

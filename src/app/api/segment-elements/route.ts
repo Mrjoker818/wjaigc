@@ -3,7 +3,7 @@ import { findProviderForFeature, normalizeApiBaseUrl } from '@/lib/server-api-co
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import { getSessionUser } from '@/lib/server-auth';
-import { consumeCredits } from '@/lib/credits';
+import { consumeCredits, refundCredits } from '@/lib/credits';
 import fsSync from 'fs';
 import path from 'path';
 
@@ -95,6 +95,8 @@ async function resolveImageToBase64(imageUrl: string): Promise<string | null> {
 }
 
 export async function POST(request: NextRequest) {
+  let deductedCredits = 0;
+  let sessionUser: any = null;
   try {
     const body: SegmentRequest = await request.json();
     const { imageUrl, mode = 'auto' } = body;
@@ -104,12 +106,14 @@ export async function POST(request: NextRequest) {
     }
 
     // 积分检查与扣除
-    const sessionUser = await getSessionUser(request);
+    sessionUser = await getSessionUser(request);
+    deductedCredits = 0;
     if (sessionUser) {
       const creditResult = await consumeCredits(sessionUser.id, 'segment');
       if (!creditResult.success) {
         return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
       }
+      deductedCredits = creditResult.cost;
     }
 
     // 查找管理员配置的分层模型 API
@@ -258,6 +262,12 @@ export async function POST(request: NextRequest) {
     }, { status: 500 });
   } catch (error) {
     console.error('Segment elements error:', error);
+    // 退款：元素分层失败时退还积分
+    if (deductedCredits > 0 && sessionUser) {
+      try {
+        await refundCredits(sessionUser.id, deductedCredits, `元素分层失败退款`);
+      } catch (refundErr) { console.error('[segment-elements] Refund failed:', refundErr); }
+    }
     return NextResponse.json({
       success: false,
       error: error instanceof Error ? error.message : '编辑元素失败',

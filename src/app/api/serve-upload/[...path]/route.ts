@@ -13,6 +13,11 @@ export async function GET(
     const { path: pathParts } = await params;
     const filePath = pathParts.join('/');
     
+    // 安全检查：防止路径穿越攻击
+    if (filePath.includes('..') || filePath.includes('\0') || pathParts.some(p => p === '..')) {
+      return NextResponse.json({ error: 'Invalid path' }, { status: 400 });
+    }
+    
     const dataRoot = getServerDataRoot();
     const possibleDirs = [
       path.join(dataRoot, 'uploads'),
@@ -21,7 +26,11 @@ export async function GET(
     
     // 1. 尝试从本地文件系统读取
     for (const dir of possibleDirs) {
-      const fullPath = path.join(dir, filePath);
+      const fullPath = path.resolve(path.join(dir, filePath));
+      // 二次安全校验：解析后的绝对路径必须在允许的目录内
+      if (!fullPath.startsWith(path.resolve(dir))) {
+        continue;
+      }
       if (fs.existsSync(fullPath)) {
         const buffer = await fs.promises.readFile(fullPath);
         const ext = path.extname(filePath).toLowerCase();
