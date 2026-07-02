@@ -267,9 +267,9 @@ export async function POST(request: NextRequest) {
               continue;
             }
 
-            // ★ Try /chat/completions fallback for channel errors (最后一个提供商时)
-            if (isChannelUnavailableError(`${errText} ${response.status}`)) {
-              console.info(`[font-design] ${pProviderName} channel error, trying /chat/completions fallback...`);
+            // ★ Try /chat/completions fallback for 429/channel errors (在非最后一个提供商时也尝试，因为fallback可能走不同端点)
+            if (isChannelUnavailableError(`${errText} ${response.status}`) || response.status === 429) {
+              console.info(`[font-design] ${pProviderName} ${response.status === 429 ? 'rate limited' : 'channel error'}, trying /chat/completions fallback...`);
               try {
                 const chatImageUrls = await tryChatCompletionsImageFallback({
                   baseUrl: pBaseUrl,
@@ -295,10 +295,13 @@ export async function POST(request: NextRequest) {
               }
             }
 
-            // 最后一个提供商失败，或不可重试错误
-            if (pi < MAX_PROVIDERS_TO_TRY - 1 && !isRetryableError(response.status, errText)) {
-              continue; // 即使不可重试，也尝试下一个提供商
+            // 非最后一个提供商，继续尝试下一个
+            if (pi < MAX_PROVIDERS_TO_TRY - 1) {
+              console.info(`[font-design] Provider ${pProviderName} failed, trying next... (${pi+1}/${MAX_PROVIDERS_TO_TRY})`);
+              continue;
             }
+            // 所有提供商都失败了
+            console.error(`[font-design] All ${MAX_PROVIDERS_TO_TRY} providers failed. Last error:`, lastError);
             updateTaskProgress(taskId, { status: 'failed', error: lastError });
             return;
           }
