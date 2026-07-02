@@ -139,7 +139,7 @@ function saveToCache(cacheKey: string, ext: string, body: Buffer): void {
 export async function GET(request: NextRequest) {
   // Require authentication to prevent abuse as open proxy
   const authResult = await requireApiAuthOrReject(request);
-  if (authResult) return authResult;
+  if (authResult instanceof NextResponse) return authResult;
 
   const url = request.nextUrl.searchParams.get('url');
 

@@ -834,7 +834,7 @@ export async function GET(_request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const authResult = await requireApiAuthOrReject(request);
-  if (authResult) return authResult;
+  if (authResult instanceof NextResponse) return authResult;
   try {
     const body = await request.json();
     // 输入校验

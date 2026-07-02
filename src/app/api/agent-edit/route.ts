@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
   let sessionUser: any = null;
   try {
     const authResult = await requireApiAuthOrReject(request);
-    if (authResult) return authResult;
+    if (authResult instanceof NextResponse) return authResult;
 
     const body = await request.json();
     // 输入校验

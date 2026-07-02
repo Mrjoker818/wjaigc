@@ -1632,7 +1632,7 @@ export async function POST(request: NextRequest) {
   let sessionUser: any = null;
   try {
     const authResult = await requireApiAuthOrReject(request);
-    if (authResult) return authResult;
+    if (authResult instanceof NextResponse) return authResult;
     const body: EditRequest = await request.json();
     sessionUser = await getSessionUser(request);
     deductedCredits = 0; // 跟踪已扣积分，用于失败退款

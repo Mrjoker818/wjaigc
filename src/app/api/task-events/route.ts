@@ -29,7 +29,7 @@ export async function POST(_request: NextRequest) {
 export async function GET(request: NextRequest) {
   // ★ 认证检查：未登录用户不能连接SSE接收任务事件
   const authResult = await requireApiAuthOrReject(request);
-  if (authResult) return authResult;
+  if (authResult instanceof NextResponse) return authResult;
   const currentUser = await import('@/lib/server-auth').then(m => m.getSessionUser(request));
   const currentUserId = currentUser?.id || null;
 

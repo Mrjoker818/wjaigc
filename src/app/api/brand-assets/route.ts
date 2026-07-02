@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
   try {
     const authResult = await requireApiAuthOrReject(request);
-    if (authResult) return authResult;
+    if (authResult instanceof NextResponse) return authResult;
     const userId = request.nextUrl.searchParams.get('userId');
     if (!userId) {
       return NextResponse.json({ error: '缺少 userId 参数' }, { status: 400 });
@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const authResult = await requireApiAuthOrReject(request);
-    if (authResult) return authResult;
+    if (authResult instanceof NextResponse) return authResult;
     const currentUser = await getSessionUser(request);
     const authenticatedUserId = currentUser?.id;
     const body = await request.json();

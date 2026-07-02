@@ -274,7 +274,7 @@ function extractAllImagesFromResponse(responseData: Record<string, unknown>, fal
 // ============================================================
 export async function POST(request: NextRequest) {
   const authResult = await requireApiAuthOrReject(request);
-  if (authResult) return authResult;
+  if (authResult instanceof NextResponse) return authResult;
   let deductedCredits = 0;
   let sessionUser: any = null;
   try {

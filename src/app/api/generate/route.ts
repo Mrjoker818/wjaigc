@@ -109,7 +109,7 @@ function inferModelConfig(modelId: string, profile: ApiCompatProfile, providerNa
 
 export async function POST(request: NextRequest) {
   const authResult = await requireApiAuthOrReject(request);
-  if (authResult) return authResult;
+  if (authResult instanceof NextResponse) return authResult;
   try {
     let deductedCredits = 0;
     let sessionUser: any = null;
