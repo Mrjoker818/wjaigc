@@ -145,158 +145,239 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '缺少提示词或文字输入' }, { status: 400 });
     }
 
-    // 优先使用 providerId 精确匹配，避免多提供商同名模型路由错误
-    let provider = null;
+    // ★ 收集所有可用的提供商（支持多提供商自动切换，解决单提供商429/限流问题）
+    const { getApiProviders } = await import('@/lib/server-api-config');
+    const allProviders = await getApiProviders();
+    const enabledImageProviders = allProviders.filter(p => {
+      if (!p.isEnabled) return false;
+      const mt = p.modelType || '';
+      return mt === 'image' || mt === 'universal' || mt === 'general';
+    });
+
+    // 按 providerId 精确匹配优先 → 包含目标模型的提供商 → 任意 image 提供商
+    let providerCandidates: typeof enabledImageProviders = [];
     if (providerId) {
-      provider = await findProviderById(providerId as string);
-      if (provider) {
-        console.log(`[font-design/generate-image] 使用 providerId 精确匹配: ${provider.name} (${providerId})`);
+      const preferred = enabledImageProviders.find(p => p.id === providerId);
+      if (preferred) {
+        providerCandidates = [preferred, ...enabledImageProviders.filter(p => p.id !== providerId)];
       } else {
-        console.warn(`[font-design/generate-image] providerId="${providerId}" 未找到匹配提供商，回退到 findProviderForModel`);
+        console.warn(`[font-design/generate-image] providerId="${providerId}" 未找到匹配提供商`);
       }
     }
-    if (!provider) {
-      provider = modelStr ? await findProviderForModel(modelStr, 'image', providerId as string) : null;
+    if (providerCandidates.length === 0 && modelStr) {
+      const modelProviders = enabledImageProviders.filter(p =>
+        (p.selectedModels || []).some(m => m === pureModelStr || m === modelStr)
+      );
+      // preferredProviderId（非精确id格式）优先
+      if (providerId && typeof providerId === 'string' && !providerId.startsWith('api_')) {
+        const prefMatch = modelProviders.find(p => p.id === providerId);
+        if (prefMatch) {
+          providerCandidates = [prefMatch, ...modelProviders.filter(p => p.id !== providerId)];
+        } else {
+          providerCandidates = modelProviders;
+        }
+      } else {
+        providerCandidates = modelProviders;
+      }
     }
-    if (!provider) {
-      // Fallback: find any provider with image models
-      const { getApiProviders } = await import('@/lib/server-api-config');
-      const providers = await getApiProviders();
-      provider = providers.filter(p => p.isEnabled).find(p => {
-        const mt = p.modelType || '';
-        return mt === 'image' || mt === 'universal' || mt === 'general';
-      }) || null;
+    if (providerCandidates.length === 0) {
+      providerCandidates = enabledImageProviders;
     }
-    if (!provider) {
+    if (providerCandidates.length === 0) {
       return NextResponse.json({ error: '未找到可用的图像生成模型，请在管理员后台配置' }, { status: 400 });
     }
 
-    const usedModelRaw = pureModelStr || (provider.selectedModels?.[0] || '');
+    console.log(`[font-design/generate-image] ${providerCandidates.length} 个候选提供商: [${providerCandidates.map(p => `"${p.displayName || p.name}"`).join(', ')}]`);
+
+    const usedModelRaw = pureModelStr || (providerCandidates[0]?.selectedModels?.[0] || '');
     // ★ 规范化模型名（如 gpt-image-2-2k → gpt-image-2）
     const usedModelNorm = normalizeModelForApi(usedModelRaw);
     const usedModel = usedModelNorm.wasNormalized ? usedModelNorm.apiModelName : usedModelRaw;
     if (usedModelNorm.wasNormalized) {
       console.log(`[font-design/generate-image] Normalized model alias: "${usedModelRaw}" → "${usedModel}"`);
     }
-    const baseUrl = provider.baseUrl || '';
-    const apiKey = provider.apiKey || '';
-    const compatProfile = resolveCompatProfile(provider);
 
     const taskId = `font-design-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     registerTask(taskId, 'font-design', `字体设计: ${textStr || '生成图片'}`, sessionUser?.id);
     updateTaskProgress(taskId, { status: 'processing', progress: 0, label: '正在生成字体设计图片...' });
 
+    // ★ 判断是否为可重试错误（429限流/502网关/503服务不可用）
+    const isRetryableError = (status: number, errText: string): boolean => {
+      if (status === 429) return true; // 限流
+      if (status === 502 || status === 503) return true; // 网关/服务不可用
+      if (/rate.?limit|quota|weekly.?limit|usage.?limit/i.test(errText)) return true;
+      if (/no available compatible account/i.test(errText)) return true;
+      return false;
+    };
+
     // 使用 after() 确保响应返回后 IIFE 仍可运行
     after(async () => {
-      try {
-        const requestBody: Record<string, unknown> = {
-          model: usedModel,
-          prompt: finalPrompt,
-          n: numCount,
-          size: ratioStr,
-          aspectRatio: ratioStr,
-          quality: '2K',
-        };
+      const MAX_PROVIDERS_TO_TRY = Math.min(providerCandidates.length, 4); // 最多尝试4个提供商
+      let lastError = '';
 
-        const adjustedRequest = adjustRequestForProfile(requestBody, compatProfile);
-        const endpoint = adjustedRequest.endpoint || '/images/generations';
+      for (let pi = 0; pi < MAX_PROVIDERS_TO_TRY; pi++) {
+        const provider = providerCandidates[pi];
+        const pBaseUrl = provider.baseUrl || '';
+        const pApiKey = provider.apiKey || '';
+        const pCompatProfile = resolveCompatProfile(provider);
+        const pProviderName = provider.displayName || provider.name;
 
-        const response = await fetchWithV1Retry(baseUrl, endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify(adjustedRequest.body || requestBody),
-          signal: AbortSignal.timeout(120000),
-        });
+        // 每个提供商可能支持不同的模型名，重新计算
+        const pModelRaw = pureModelStr || (provider.selectedModels?.includes(usedModel) ? usedModel : provider.selectedModels?.[0]) || usedModel;
+        const pModelNorm = normalizeModelForApi(pModelRaw);
+        const pModel = pModelNorm.wasNormalized ? pModelNorm.apiModelName : pModelRaw;
 
-        if (!response.ok) {
-          const errText = await response.text().catch(() => '');
+        if (pi > 0) {
+          console.log(`[font-design/generate-image] 切换到第 ${pi + 1} 个提供商: ${pProviderName} (model=${pModel})`);
+          updateTaskProgress(taskId, { progress: 10 + pi * 10, label: `尝试提供商 ${pProviderName}...` });
+        }
 
-          // ★ Try /chat/completions fallback for channel errors
-          if (isChannelUnavailableError(`${errText} ${response.status}`)) {
-            console.info('[font-design] Channel error, trying /chat/completions fallback...');
+        try {
+          if (isTaskCancelled(taskId)) { updateTaskProgress(taskId, { status: 'cancelled' }); return; }
+
+          const requestBody: Record<string, unknown> = {
+            model: pModel,
+            prompt: finalPrompt,
+            n: numCount,
+            size: ratioStr,
+            aspectRatio: ratioStr,
+            quality: '2K',
+          };
+
+          const adjustedRequest = adjustRequestForProfile(requestBody, pCompatProfile);
+          const endpoint = adjustedRequest.endpoint || '/images/generations';
+
+          const response = await fetchWithV1Retry(pBaseUrl, endpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${pApiKey}`,
+            },
+            body: JSON.stringify(adjustedRequest.body || requestBody),
+            signal: AbortSignal.timeout(15000),
+          });
+
+          if (!response.ok) {
+            const errText = await response.text().catch(() => '');
+            lastError = `API错误 ${response.status}: ${errText.slice(0, 200)}`;
+
+            // ★ 可重试错误 → 切换到下一个提供商
+            if (isRetryableError(response.status, errText) && pi < MAX_PROVIDERS_TO_TRY - 1) {
+              console.warn(`[font-design/generate-image] 提供商 ${pProviderName} 返回 ${response.status}，尝试下一个提供商`);
+              continue;
+            }
+
+            // ★ Try /chat/completions fallback for channel errors (最后一个提供商时)
+            if (isChannelUnavailableError(`${errText} ${response.status}`)) {
+              console.info(`[font-design] ${pProviderName} channel error, trying /chat/completions fallback...`);
+              try {
+                const chatImageUrls = await tryChatCompletionsImageFallback({
+                  baseUrl: pBaseUrl,
+                  apiKey: pApiKey,
+                  model: pModel,
+                  prompt: finalPrompt,
+                  size: ratioStr,
+                  originalError: errText,
+                  requestIdPrefix: 'font-design',
+                  skipChannelCheck: true,
+                });
+                if (chatImageUrls && chatImageUrls.length > 0) {
+                  console.log(`[font-design] /chat/completions fallback succeeded via ${pProviderName}, got`, chatImageUrls.length, 'images');
+                  const persistedUrls = await Promise.all(chatImageUrls.map(persistResultImage));
+                  updateTaskProgress(taskId, {
+                    status: 'completed', progress: 100,
+                    result: { directImageUrls: persistedUrls, prompt: finalPrompt, model: pModel },
+                  });
+                  return;
+                }
+              } catch (chatErr) {
+                console.warn(`[font-design] /chat/completions fallback error via ${pProviderName}:`, chatErr);
+              }
+            }
+
+            // 最后一个提供商失败，或不可重试错误
+            if (pi < MAX_PROVIDERS_TO_TRY - 1 && !isRetryableError(response.status, errText)) {
+              continue; // 即使不可重试，也尝试下一个提供商
+            }
+            updateTaskProgress(taskId, { status: 'failed', error: lastError });
+            return;
+          }
+
+          const data = await response.json();
+          const parsed = parseResponseForProfile(data, pCompatProfile);
+
+          if (parsed.directImageUrls && parsed.directImageUrls.length > 0) {
+            // 持久化图片到本地
+            const persistedUrls = await Promise.all(parsed.directImageUrls.map(persistResultImage));
+            updateTaskProgress(taskId, {
+              status: 'completed', progress: 100,
+              result: { directImageUrls: persistedUrls, prompt: finalPrompt, model: pModel },
+            });
+          } else if (parsed.taskIds && parsed.taskIds.length > 0) {
+            updateTaskProgress(taskId, {
+              status: 'processing', progress: 30,
+              label: '图片生成中，等待远程API返回...',
+              result: {
+                remoteTaskId: parsed.taskIds[0],
+                apiBaseUrl: pBaseUrl, apiKey: pApiKey, usedModel: pModel, compatProfile: pCompatProfile, prompt: finalPrompt,
+              },
+            });
+          } else {
+            // API返回200但无有效结果，尝试下一个提供商
+            lastError = 'API未返回有效结果';
+            if (pi < MAX_PROVIDERS_TO_TRY - 1) {
+              console.warn(`[font-design/generate-image] 提供商 ${pProviderName} 返回空结果，尝试下一个`);
+              continue;
+            }
+            updateTaskProgress(taskId, { status: 'failed', error: lastError });
+          }
+          return; // 成功或最终失败，退出循环
+        } catch (err: unknown) {
+          const isTimeout = err instanceof Error && (err.name === 'AbortError' || /timeout|aborted/i.test(err.message));
+          lastError = err instanceof Error ? err.message : '生成失败';
+
+          if (isTimeout) {
+            console.info(`[font-design] ${pProviderName} timed out, trying /chat/completions fallback...`);
             try {
               const chatImageUrls = await tryChatCompletionsImageFallback({
-                baseUrl,
-                apiKey,
-                model: usedModel,
+                baseUrl: pBaseUrl,
+                apiKey: pApiKey,
+                model: pModel,
                 prompt: finalPrompt,
                 size: ratioStr,
-                originalError: errText,
-                requestIdPrefix: 'font-design',
+                originalError: 'timeout',
+                requestIdPrefix: 'font-design-timeout',
                 skipChannelCheck: true,
               });
               if (chatImageUrls && chatImageUrls.length > 0) {
-                console.log('[font-design] /chat/completions fallback succeeded, got', chatImageUrls.length, 'images');
+                console.log(`[font-design] /chat/completions fallback succeeded after timeout via ${pProviderName}, got`, chatImageUrls.length, 'images');
+                const persistedUrls = await Promise.all(chatImageUrls.map(persistResultImage));
                 updateTaskProgress(taskId, {
                   status: 'completed', progress: 100,
-                  result: { directImageUrls: chatImageUrls, prompt: finalPrompt, model: usedModel },
+                  result: { directImageUrls: persistedUrls, prompt: finalPrompt, model: pModel },
                 });
                 return;
               }
             } catch (chatErr) {
-              console.warn('[font-design] /chat/completions fallback error:', chatErr);
+              console.warn(`[font-design] /chat/completions timeout fallback error via ${pProviderName}:`, chatErr);
             }
           }
 
-          updateTaskProgress(taskId, { status: 'failed', error: `API错误 ${response.status}: ${errText.slice(0, 200)}` });
-          return;
-        }
+          // 超时或网络错误，尝试下一个提供商
+          if (pi < MAX_PROVIDERS_TO_TRY - 1) {
+            console.warn(`[font-design/generate-image] 提供商 ${pProviderName} 错误: ${lastError}，尝试下一个`);
+            continue;
+          }
 
-        const data = await response.json();
-        const parsed = parseResponseForProfile(data, compatProfile);
-
-        if (parsed.directImageUrls && parsed.directImageUrls.length > 0) {
-          updateTaskProgress(taskId, {
-            status: 'completed', progress: 100,
-            result: { directImageUrls: parsed.directImageUrls, prompt: finalPrompt, model: usedModel },
-          });
-        } else if (parsed.taskIds && parsed.taskIds.length > 0) {
-          updateTaskProgress(taskId, {
-            status: 'processing', progress: 30,
-            label: '图片生成中，等待远程API返回...',
-            result: {
-              remoteTaskId: parsed.taskIds[0],
-              apiBaseUrl: baseUrl, apiKey, usedModel, compatProfile, prompt: finalPrompt,
-            },
-          });
-        } else {
-          updateTaskProgress(taskId, { status: 'failed', error: 'API未返回有效结果' });
-        }
-      } catch (err: unknown) {
-        const isTimeout = err instanceof Error && (err.name === 'AbortError' || /timeout|aborted/i.test(err.message));
-        if (isTimeout) {
-          console.info('[font-design] Timed out, trying /chat/completions fallback...');
-          try {
-            const chatImageUrls = await tryChatCompletionsImageFallback({
-              baseUrl,
-              apiKey,
-              model: usedModel,
-              prompt: finalPrompt,
-              size: ratioStr,
-              originalError: 'timeout',
-              requestIdPrefix: 'font-design-timeout',
-              skipChannelCheck: true,
-            });
-            if (chatImageUrls && chatImageUrls.length > 0) {
-              console.log('[font-design] /chat/completions fallback succeeded after timeout, got', chatImageUrls.length, 'images');
-              const persistedUrls = await Promise.all(chatImageUrls.map(persistResultImage));
-              updateTaskProgress(taskId, {
-                status: 'completed', progress: 100,
-                result: { directImageUrls: persistedUrls, prompt: finalPrompt, model: usedModel },
-              });
-              return;
-            }
-          } catch (chatErr) {
-            console.warn('[font-design] /chat/completions timeout fallback error:', chatErr);
+          if (!isTaskCancelled(taskId)) {
+            updateTaskProgress(taskId, { status: 'failed', error: `所有提供商均失败，最后错误: ${lastError}` });
           }
         }
-        const msg = err instanceof Error ? err.message : '生成失败';
-        if (!isTaskCancelled(taskId)) {
-          updateTaskProgress(taskId, { status: 'failed', error: msg });
-        }
+      }
+
+      // 所有提供商都尝试过了
+      if (!isTaskCancelled(taskId)) {
+        updateTaskProgress(taskId, { status: 'failed', error: `所有 ${MAX_PROVIDERS_TO_TRY} 个提供商均失败: ${lastError}` });
       }
     });
 

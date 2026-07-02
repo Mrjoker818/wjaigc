@@ -154,6 +154,27 @@ export async function ensureCoreTables(): Promise<void> {
     `);
     await execSql(`CREATE INDEX IF NOT EXISTS idx_brand_assets_user ON wujie_brand_assets(user_id)`);
 
+    // ─── 安全迁移：给已有表补充缺失列 ────────────────────────────────
+    // CREATE TABLE IF NOT EXISTS 不会添加新列，需要单独 ALTER TABLE
+    const migrations: [string, string, string][] = [
+      ['wujie_users', 'credits', 'INTEGER DEFAULT 0'],
+      ['wujie_users', 'email', 'TEXT DEFAULT \'\''],
+      ['wujie_recharge_orders', 'bonus', 'INTEGER DEFAULT 0'],
+      ['wujie_recharge_orders', 'transaction_id', 'TEXT DEFAULT \'\''],
+      ['wujie_recharge_orders', 'expires_at', 'BIGINT'],
+      ['wujie_recharge_orders', 'submitted_at', 'BIGINT'],
+      ['wujie_recharge_orders', 'paid_at', 'BIGINT'],
+      ['wujie_api_providers', 'balance_username', 'TEXT DEFAULT \'\''],
+      ['wujie_api_providers', 'balance_password', 'TEXT DEFAULT \'\''],
+    ];
+    for (const [table, col, type] of migrations) {
+      try {
+        await execSql(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${col} ${type}`);
+      } catch {
+        // Column already exists or table doesn't exist — ignore
+      }
+    }
+
     console.log('[db-storage] Core tables ensured');
   } catch (e) {
     console.error('[db-storage] ensureCoreTables error:', e);

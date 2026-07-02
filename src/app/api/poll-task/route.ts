@@ -775,6 +775,23 @@ export async function POST(request: NextRequest) {
       // 远端异步任务（generate/mask/erase/outpaint/multi-angle/removebg/refine-engine/brand-ecommerce 等）：继续往下走，查询远端 API
     }
 
+    // ★ 多提供商重试中：任务仍在提交阶段（IIFE尚未完成），没有remoteTaskId
+    // 直接返回processing状态，不做远程轮询，避免用本地taskId去查第三方API导致404
+    if (registryTask && registryTask.status === 'processing') {
+      const regResult = (registryTask.result as Record<string, unknown>) || {};
+      const hasRemoteTaskId = !!regResult.remoteTaskId;
+      const hasDirectUrls = !!(regResult.directImageUrls as string[] | undefined)?.length;
+      if (!hasRemoteTaskId && !hasDirectUrls) {
+        // IIFE还在重试/提交中，尚未获得远程任务ID
+        return NextResponse.json({
+          success: true,
+          status: 'processing',
+          progress: registryTask.progress || 10,
+          label: registryTask.label || '正在提交生成任务...',
+        }, { status: 200 });
+      }
+    }
+
     // ★ refine-engine/brand-ecommerce 兜底：如果 task-registry 中没有，
     // 但 globalThis 缓存中有结果，直接返回
     if (!registryTask) {
