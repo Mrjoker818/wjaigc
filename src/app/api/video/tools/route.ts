@@ -86,23 +86,43 @@ export async function POST(req: NextRequest) {
         let lastFrameUrl = '';
         
         try {
+          // 获取视频时长
+          const { stdout: durationOut } = await execFileAsync('ffprobe', [
+            '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1',
+            localVideo
+          ], { timeout: 10000 });
+          const duration = parseFloat(durationOut.trim()) || 10;
+
           if (mode === 'fps') {
             // 每秒抽N帧
+            const fpsVal = Math.max(0.2, Math.min(10, Number(fps) || 1));
             await execFileAsync('ffmpeg', [
-              '-i', localVideo, '-vf', `fps=${fps}`, '-q:v', '2',
+              '-i', localVideo, '-vf', `fps=${fpsVal}`, '-q:v', '2',
               join(frameDir, 'frame-%04d.jpg')
-            ], { timeout: 60000 });
+            ], { timeout: 120000 });
           } else if (mode === 'first_last') {
             // 首尾帧
             await execFileAsync('ffmpeg', ['-i', localVideo, '-vframes', '1', '-q:v', '2', join(frameDir, 'first.jpg')], { timeout: 30000 });
             await execFileAsync('ffmpeg', ['-sseof', '-0.1', '-i', localVideo, '-vframes', '1', '-q:v', '2', join(frameDir, 'last.jpg')], { timeout: 30000 });
-          } else if (mode === 'uniform' || mode === 'total_frames') {
-            // 均匀抽N帧
-            const n = Math.max(2, Math.min(64, Number(count) || 8));
+          } else if (mode === 'keyframes') {
+            // 提取所有I帧（关键帧）
             await execFileAsync('ffmpeg', [
-              '-i', localVideo, '-vf', `fps=1/${n}`, '-vframes', String(n), '-q:v', '2',
+              '-i', localVideo,
+              '-vf', "select='eq(pict_type\\,PICT_TYPE_I)'",
+              '-vsync', 'vfr', '-q:v', '2',
               join(frameDir, 'frame-%04d.jpg')
-            ], { timeout: 60000 });
+            ], { timeout: 120000 });
+          } else {
+            // uniform: 均匀抽N帧 - 使用select filter按时间间隔选择
+            const n = Math.max(2, Math.min(32, Number(count) || 8));
+            const interval = duration / n;
+            const selectExpr = Array.from({length: n}, (_, i) => `lt(t,${(i+1)*interval - interval/2})*gt(t,${i*interval - interval/2})`).join('+');
+            await execFileAsync('ffmpeg', [
+              '-i', localVideo,
+              '-vf', `select='${selectExpr}'`,
+              '-vsync', 'vfr', '-q:v', '2',
+              join(frameDir, 'frame-%04d.jpg')
+            ], { timeout: 120000 });
           }
           
           // 读取生成的帧

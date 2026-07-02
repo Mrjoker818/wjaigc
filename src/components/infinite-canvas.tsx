@@ -29,7 +29,7 @@ import {
   Scissors, Wand2, Expand, Layers, Paintbrush,
   Check, MousePointer2, BoxSelect, Upload, Eye, Sparkles,
   RotateCcw, Minus, Type, GitMerge, Wrench, ChevronRight,
-  Settings, Palette, Users, HelpCircle, Box as BoxIcon, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, MoreHorizontal, Brush, ShoppingBag, Scan, GripVertical, Building2, FileImage, Workflow, LayoutGrid, LayoutDashboard, ChevronsRight, ChevronsLeft, Boxes, MessageCircle, Play, Pause, Package, Store, Globe, Volume2, Loader2
+  Settings, Palette, Users, HelpCircle, Box as BoxIcon, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, MoreHorizontal, Brush, ShoppingBag, Scan, GripVertical, Building2, FileImage, Workflow, LayoutGrid, LayoutDashboard, ChevronsRight, ChevronsLeft, Boxes, MessageCircle, Play, Pause, Package, Store, Globe, Volume2, Loader2, Film, Mic2, Music, FileVideo
 } from 'lucide-react';
 import type { CanvasAnnotation, AnnotationRegion, AnnotationTool } from '@/lib/canvas-annotation';
 import { createAnnotation, hitTestAnnotationTarget, buildAnnotationPrompt, mergeAnnotationsForImage, ANNOTATION_COLORS, ANNOTATION_COLORS_MONO, computeAnnotationRegion, BRUSH_COLOR_PALETTE } from '@/lib/canvas-annotation';
@@ -1115,6 +1115,9 @@ export function InfiniteCanvas({
   const [panoramaProcessing, setPanoramaProcessing] = useState(false);
   // 视频抽帧状态
   const [videoExtractMode, setVideoExtractMode] = useState<'uniform'|'fps'|'first_last'|'keyframes'>('uniform');
+  const [showVideoExtractPanel, setShowVideoExtractPanel] = useState(false);
+  const [videoExtractFrameCount, setVideoExtractFrameCount] = useState(12);
+  const [videoExtractProcessing, setVideoExtractProcessing] = useState(false);
   // 即梦风格方向性扩展：上下左右独立 padding（像素值，基于原始图片尺寸）
   const [expandPadding, setExpandPadding] = useState({ top: 0, right: 0, bottom: 0, left: 0 });
   // 拖拽控制点状态
@@ -1391,7 +1394,7 @@ export function InfiniteCanvas({
       const composeRes = await fetch('/api/video/tools', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'compose', videoUrl: videoDubTarget.videoUrl, audioUrl: ttsData.audioUrl, volume: 1.0 }),
+        body: JSON.stringify({ action: 'add-audio', videoUrl: videoDubTarget.videoUrl, audioUrl: ttsData.audioUrl, volume: 1.0 }),
       });
       if (!composeRes.ok) throw new Error('视频合成失败');
       const composeData = await composeRes.json();
@@ -7178,7 +7181,7 @@ export function InfiniteCanvas({
       const res = await fetch('/api/video/tools', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'extract_frames', videoUrl: img.videoUrl, mode, frameCount: count, fps: 1 }),
+        body: JSON.stringify({ action: 'extract-frames', videoUrl: img.videoUrl, mode, frameCount: count, fps: 1 }),
       });
       if (!res.ok) throw new Error('抽帧失败');
       const data = await res.json();
@@ -7971,6 +7974,9 @@ export function InfiniteCanvas({
     { icon: <Scan size={14} className={isMonochrome ? monoColors['精修引擎'] : ''} />, label: '精修引擎', desc: '产品精修：标准/专家模式，AI商业级修图', action: () => { const img = selectedImageData || selectedImage; setRefineEngineImageUrl(img?.url || ''); setShowRefineEngine(true); } },
     { icon: <Pencil size={14} className={isMonochrome ? monoColors['语言修图'] : ''} />, label: '语言修图', desc: '用自然语言描述修改图片', action: () => { if (selectedImage) onEditImage?.(selectedImage); else onEditImage?.(null); } },
     { icon: <Bot size={14} className={isMonochrome ? monoColors['Agent编排'] : ''} />, label: 'Agent编排', desc: '智能编排多工具编辑图片', action: () => { const img = selectedImageData || selectedImage; if (img) { setAgentEditImage(img); } else { setAgentEditImage(null); } setShowAgentEditor(true); } },
+    { icon: <Globe size={14} className={isMonochrome ? 'text-emerald-500' : 'text-emerald-400'} />, label: '全景生成', desc: '生成720°全景图', action: () => handleGeneratePanorama() },
+    { icon: <Film size={14} className={isMonochrome ? 'text-purple-500' : 'text-purple-400'} />, label: '视频抽帧', desc: '从视频中提取帧图片', action: () => { const img = selectedImageData; if (img?.mediaType === 'video') { setEditImageId(img.id); setVideoExtractFrameCount(12); setVideoExtractProcessing(false); setShowVideoExtractPanel(true); } else { toast.error('请先选中视频文件'); } } },
+    { icon: <Volume2 size={14} className={isMonochrome ? 'text-orange-500' : 'text-orange-400'} />, label: 'AI配音', desc: '为视频添加AI配音', action: () => { const img = selectedImageData; if (img?.mediaType === 'video') { setVideoDubTarget(img); setShowVideoDubPanel(true); } else toast.error('请先选中视频文件'); } },
     { icon: <Download size={14} className={isMonochrome ? monoColors['下载'] : ''} />, label: '下载', desc: 'PNG/SVG/PSD下载', action: handleOpenDownload },
   ];
 
@@ -13355,6 +13361,99 @@ export function InfiniteCanvas({
             </div>
           </div>
         )}
+
+        {/* ====== VIDEO EXTRACT FRAMES PANEL ====== */}
+        {showVideoExtractPanel && editImageId && (() => {
+          const img = images.find(i => i.id === editImageId);
+          if (!img) return null;
+          return (
+            <div className="fixed top-24 right-4 z-[65] w-80 bg-[#1a1a1a] rounded-xl shadow-2xl border border-[#333] overflow-hidden" data-popup="video-extract">
+              <div className="px-4 py-3 bg-[#111] border-b border-[#333] flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                  <Film size={16} className="text-[#d4af37]" />
+                  视频抽帧
+                </h3>
+                <button onClick={() => { setShowVideoExtractPanel(false); setEditMode('none'); setActiveTool('none'); }} className="text-white/60 hover:text-white">
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="p-4 space-y-4">
+                <div className="aspect-video bg-black rounded-lg overflow-hidden">
+                  {img.videoUrl ? (
+                    <video src={img.videoUrl} className="w-full h-full object-contain" controls muted />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-white/40 text-xs">请选择视频文件</div>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs text-white/60">抽帧模式</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { id: 'uniform', label: '均匀抽帧' },
+                      { id: 'fps', label: '每秒1帧' },
+                      { id: 'first_last', label: '首尾帧' },
+                      { id: 'keyframes', label: '关键帧' },
+                    ].map(mode => (
+                      <button
+                        key={mode.id}
+                        onClick={() => setVideoExtractMode(mode.id as any)}
+                        className={`px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
+                          videoExtractMode === mode.id ? 'bg-[#d4af37] text-black' : 'bg-[#2a2a2a] text-white/70 hover:bg-[#333]'
+                        }`}
+                      >{mode.label}</button>
+                    ))}
+                  </div>
+                </div>
+                {(videoExtractMode === 'uniform' || videoExtractMode === 'fps') && (
+                  <div className="space-y-1">
+                    <label className="text-xs text-white/60 flex justify-between">
+                      帧数: {videoExtractFrameCount}
+                    </label>
+                    <input type="range" min="4" max="30" value={videoExtractFrameCount}
+                      onChange={e => setVideoExtractFrameCount(Number(e.target.value))}
+                      className="w-full accent-[#d4af37]" />
+                  </div>
+                )}
+                <button
+                  disabled={videoExtractProcessing || !img.videoUrl}
+                  onClick={async () => {
+                    if (!img.videoUrl) return;
+                    setVideoExtractProcessing(true);
+                    try {
+                      const res = await fetch('/api/video/tools', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          action: 'extract-frames',
+                          videoUrl: img.videoUrl,
+                          mode: videoExtractMode,
+                          frameCount: videoExtractMode === 'uniform' ? videoExtractFrameCount : videoExtractMode === 'fps' ? 0 : 0,
+                          fps: videoExtractMode === 'fps' ? 1 : undefined,
+                        }),
+                      });
+                      const data = await res.json();
+                      if (data.frames?.length > 0) {
+                        onAddImages(data.frames.map((f: any) => f.url));
+                        toast.success(`成功提取 ${data.frames.length} 帧`);
+                        setShowVideoExtractPanel(false);
+                        setEditMode('none');
+                      } else {
+                        toast.error('未能提取到帧');
+                      }
+                    } catch (e) {
+                      toast.error(e instanceof Error ? e.message : '抽帧失败');
+                    } finally {
+                      setVideoExtractProcessing(false);
+                    }
+                  }}
+                  className="w-full py-2.5 rounded-lg bg-[#d4af37] text-black font-semibold text-sm hover:bg-[#e5c048] transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {videoExtractProcessing ? <><Loader2 size={16} className="animate-spin" /> 提取中...</> : '开始抽帧'}
+                </button>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* ====== VIDEO EDIT PANEL ====== */}
         {showVideoEditPanel && videoEditTarget && (

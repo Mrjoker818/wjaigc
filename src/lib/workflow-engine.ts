@@ -1049,12 +1049,12 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
   if (type === 'video-extract-frames') {
     fields.push({ key: 'mode', label: '抽帧模式', type: 'select', options: [
       { label: '每秒N帧', value: 'fps' },
-      { label: '均匀N帧', value: 'total_frames' },
+      { label: '均匀N帧', value: 'uniform' },
       { label: '关键帧', value: 'keyframes' },
       { label: '首尾帧', value: 'first_last' }
-    ], defaultValue: 'total_frames' });
-    fields.push({ key: 'frameCount', label: '帧数', type: 'number', min: 2, max: 30, defaultValue: 6 });
-    fields.push({ key: 'fps', label: '每秒帧数', type: 'number', min: 0.5, max: 10, step: 0.5, defaultValue: 1 });
+    ], defaultValue: 'uniform' });
+    fields.push({ key: 'count', label: '帧数', type: 'number', min: 2, max: 32, defaultValue: 8 });
+    fields.push({ key: 'fps', label: '每秒帧数', type: 'number', min: 0.2, max: 10, step: 0.1, defaultValue: 1 });
   }
 
   // ─── 视频合成节点 ───
@@ -1821,11 +1821,13 @@ export function buildNodeExecutionRequest(
         method: 'POST',
         body: {
           imageUrl,
-          brightness: Number((config as any).brightness) || 0,
-          contrast: Number((config as any).contrast) || 0,
-          saturation: Number((config as any).saturation) || 0,
-          temperature: Number((config as any).temperature) || 0,
-          hue: Number((config as any).hue) || 0,
+          params: {
+            brightness: Number((config as any).brightness) || 0,
+            contrast: Number((config as any).contrast) || 0,
+            saturation: Number((config as any).saturation) || 0,
+            temperature: Number((config as any).temperature) || 0,
+            hue: Number((config as any).hue) || 0,
+          }
         }
       };
     }
