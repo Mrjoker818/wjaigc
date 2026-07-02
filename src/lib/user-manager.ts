@@ -680,33 +680,37 @@ export class UserManager {
     }
 
     const isExistingUser = !!this.multiUserData.userData[nextUser.id];
+    const existingLocalProjects = isExistingUser
+      ? [...(this.multiUserData.userData[nextUser.id].projects || [])]
+      : [];
 
-    // ★ 数据隔离关键修复：清除该用户本地的项目缓存，强制从服务器重新加载
-    // 防止 localStorage 中残留的跨用户项目数据泄露
     if (!isExistingUser) {
       this.multiUserData.userData[nextUser.id] = {
         user: nextUser,
-        projects: [],
+        projects: existingLocalProjects,
         apiKeys: [],
         usageStats: [],
       };
     } else {
       this.multiUserData.userData[nextUser.id].user = nextUser;
-      // 清除旧的项目缓存，强制从服务器重新加载
-      this.multiUserData.userData[nextUser.id].projects = [];
+      // 保留本地项目数据作为兜底，等服务器加载后合并（loadProjectsFromServer会做merge）
+      // 不再无条件清空本地数据，防止服务器加载失败导致用户图片丢失
     }
 
     // 始终尝试从服务器加载项目数据（解决跨设备同步问题）
-    // ensureDefaultAdmin() 可能在 localStorage 中创建了空的用户条目，
-    // 导致上面的 isExistingUser 为 true 但项目实际为空
     this.currentUserId = nextUser.id;
-    // 取消旧用户的同步定时器，防止旧定时器将数据写入新用户
     if (this.serverSyncTimer) {
       clearTimeout(this.serverSyncTimer);
       this.serverSyncTimer = null;
     }
     this._serverSyncReady = false;
-    await this.loadProjectsFromServer();
+    const loadSuccess = await this.loadProjectsFromServer();
+
+    // 如果服务器加载失败但有本地数据，恢复本地项目防止用户看到空画布
+    if (!loadSuccess && existingLocalProjects.length > 0) {
+      this.multiUserData.userData[nextUser.id].projects = existingLocalProjects;
+      this.notifyProjectsChanged();
+    }
 
     this.saveData();
     void this.ensureServerFolder(nextUser.id);
