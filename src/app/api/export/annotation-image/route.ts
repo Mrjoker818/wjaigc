@@ -3,10 +3,19 @@ import { findProviderForModel } from '@/lib/server-api-config';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getSessionUser } from '@/lib/server-auth';
+import { validateApiInputs } from '@/lib/api-validator';
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
+    // 输入校验
+    const _validationError = validateApiInputs(body, {
+        imageUrl: 'imageUrl'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
     const {
       imageUrl = '',
       annotations = [],

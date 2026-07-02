@@ -15,6 +15,7 @@ export const maxDuration = 300;
 import { consumeCredits, refundCredits } from '@/lib/credits';
 import { enhanceViaAI } from '@/lib/quality-enhance';
 import { UPSCALE_OUTPUT_DIR, UPSCALE_OUTPUT_URL_PREFIX } from '@/lib/image-tools/config';
+import { validateApiInputs } from '@/lib/api-validator';
 
 /** 支持的无损放大模型 */
 type UpscaleProModel = 'Real-ESRGAN' | 'SeedVR2-Upscaler';
@@ -948,6 +949,14 @@ async function persistResult(remoteUrl: string): Promise<string> {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json() as UpscaleProRequest;
+    // 输入校验
+    const _validationError = validateApiInputs(body as unknown as Record<string, unknown>, {
+        imageUrl: 'imageUrl'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
     const {
       imageUrl,
       model = 'Real-ESRGAN',

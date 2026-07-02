@@ -6,6 +6,7 @@ import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { consumeCredits, refundCredits } from '@/lib/credits';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
+import { validateApiInputs } from '@/lib/api-validator';
 
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
@@ -53,6 +54,14 @@ export async function POST(request: NextRequest) {
       systemPrompt: customSystemPrompt,
       userId: requestUserId,
     } = await request.json();
+    // 输入校验
+    const _validationError = validateApiInputs({ prompt }, {
+        prompt: 'prompt'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
     sessionUser = await getSessionUser(request);
     // ★ 安全：已登录用户必须使用 session 中的 userId，忽略客户端传入值（防止伪造）
     const userId = sessionUser?.id || "anonymous";

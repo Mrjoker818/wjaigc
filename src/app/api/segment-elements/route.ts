@@ -6,6 +6,7 @@ import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits, refundCredits } from '@/lib/credits';
 import fsSync from 'fs';
 import path from 'path';
+import { validateApiInputs } from '@/lib/api-validator';
 
 /**
  * 编辑元素/分层 API - 根据图片元素进行智能分层
@@ -99,6 +100,14 @@ export async function POST(request: NextRequest) {
   let sessionUser: any = null;
   try {
     const body: SegmentRequest = await request.json();
+    // 输入校验
+    const _validationError = validateApiInputs(body as unknown as Record<string, unknown>, {
+        imageUrl: 'imageUrl'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
     const { imageUrl, mode = 'auto' } = body;
 
     if (!imageUrl) {

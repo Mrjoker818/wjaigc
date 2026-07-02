@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { validateApiInputs } from '@/lib/api-validator';
 import {
   buildJimengPrompt, buildBlackOnWhitePrompt, buildTransparentLogoPrompt,
   SCENE_MAP,
@@ -9,6 +10,14 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
+    // 输入校验
+    const _validationError = validateApiInputs(body, {
+        prompt: 'prompt'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
     const {
       text, scene, primaryStyleCategory, secondaryStyle,
       ratio = '横版16:9', color = '白色', background = '高级留白',

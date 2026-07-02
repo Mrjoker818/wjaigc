@@ -3,6 +3,7 @@ import { execFile } from 'child_process';
 import { writeFile, readFile, unlink } from 'fs/promises';
 import path from 'path';
 import os from 'os';
+import { validateApiInputs } from '@/lib/api-validator';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -16,6 +17,14 @@ interface ConvertRequest {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json() as ConvertRequest;
+    // 输入校验
+    const _validationError = validateApiInputs(body as unknown as Record<string, unknown>, {
+        imageUrl: 'optionalImageUrl'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
     const { svgContent, format, filename } = body;
 
     if (!svgContent || !format) {

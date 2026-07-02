@@ -1,11 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { calculateActualPixelsFromRatio } from '@/lib/calculate-pixels';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
+import { validateApiInputs } from '@/lib/api-validator';
 
 // POST: generate image from 3D scene
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
+    // 输入校验
+    const _validationError = validateApiInputs(body, {
+        prompt: 'optionalPrompt',
+        imageUrl: 'optionalImageUrl'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
     const { mode, prompt, negativePrompt, screenshotData, structureStrength, aspectRatio, imageCount, model, providerId } = body;
 
     // ★ 从 model 中提取纯 modelId（前端可能传 providerId::modelId 格式）

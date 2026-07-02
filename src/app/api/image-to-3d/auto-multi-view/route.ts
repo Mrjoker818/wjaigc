@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForFeature } from '@/lib/server-api-config';
+import { validateApiInputs } from '@/lib/api-validator';
 
 /**
  * Auto Multi-View to 3D API
@@ -19,6 +20,14 @@ import { findProviderForFeature } from '@/lib/server-api-config';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
+    // 输入校验
+    const _validationError = validateApiInputs(body, {
+        imageUrl: 'imageUrl'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
     const { prompt, threeDType, threeDQuality, threeDTexture, enablePBR, faceCount, threeDFormat, provider } = body;
 
     if (!prompt) {

@@ -8,6 +8,7 @@ import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits, refundCredits } from '@/lib/credits';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import sharp from 'sharp';
+import { validateApiInputs } from '@/lib/api-validator';
 
 export const dynamic = 'force-dynamic';
 
@@ -491,6 +492,15 @@ export async function POST(request: NextRequest) {
   let sessionUser: any = null;
   try {
     const body = await request.json();
+    // 输入校验
+    const _validationError = validateApiInputs(body, {
+        prompt: 'optionalPrompt',
+        imageUrl: 'optionalImageUrl'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
     const { action } = body;
 
     if (action === 'templates') {

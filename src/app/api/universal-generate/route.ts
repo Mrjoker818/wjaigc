@@ -5,6 +5,7 @@ import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile } from '@/lib/api-compatibility';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
+import { validateApiInputs } from '@/lib/api-validator';
 
 // 通用API生成路由 - 支持第三方OpenAI兼容API的图像生成
 // 当用户使用非 APIMart 管理的第三方模型时，图像生成请求会被路由到这里
@@ -27,6 +28,15 @@ interface UniversalGenerateRequest {
 export async function POST(request: NextRequest) {
   try {
     const body: UniversalGenerateRequest = await request.json();
+    // 输入校验
+    const _validationError = validateApiInputs(body as unknown as Record<string, unknown>, {
+        prompt: 'optionalPrompt',
+        imageUrl: 'optionalImageUrl'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
     const {
       prompt,
       model,

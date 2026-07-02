@@ -8,6 +8,7 @@ import { vectorizePipeline, type VectorizeEngine } from '@/lib/vectorize-pipelin
 import fsSync from 'fs';
 import path from 'path';
 import sharp from 'sharp';
+import { validateApiInputs } from '@/lib/api-validator';
 
 function escapeXml(value: string) {
   return value
@@ -752,6 +753,14 @@ export async function POST(req: NextRequest) {
   let sessionUser: any = null;
   try {
     const body = await req.json();
+    // 输入校验
+    const _validationError = validateApiInputs(typeof body !== 'undefined' ? body : {}, {
+      imageUrl: 'imageUrl'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
     const imageUrl = String(body.imageUrl || '');
     const layerId = String(body.layerId || 'layer');
     const mode = normalizeMode(body.mode);

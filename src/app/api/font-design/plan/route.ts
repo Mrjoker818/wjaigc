@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForFeature } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { validateApiInputs } from '@/lib/api-validator';
 
 export const maxDuration = 120;
 export const dynamic = 'force-dynamic';
@@ -412,6 +413,14 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
+    // 输入校验
+    const _validationError = validateApiInputs(body, {
+        prompt: 'optionalPrompt'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
     const {
       text = '', scene = 'KV主标题', primaryStyleCategory = 'smart-recommend',
       secondaryStyle = '', ratio = '1:1', color = '白色', background = '纯色背景',

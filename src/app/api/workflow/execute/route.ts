@@ -23,6 +23,7 @@ import {
 } from '@/lib/workflow-engine';
 import { findProviderForModel, findProviderForFeature, findProviderById } from '@/lib/server-api-config';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
+import { validateApiInputs } from '@/lib/api-validator';
 
 // 内存中的执行状态
 const executionCache = new Map<string, {
@@ -65,6 +66,14 @@ export async function POST(request: NextRequest) {
   await requireApiAuth(request);
   try {
     const body = await request.json();
+    // 输入校验
+    const _validationError = validateApiInputs(body, {
+        prompt: 'optionalPrompt'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
     const { action, executionId, nodes, connections } = body;
 
     // ─── 查询执行状态 ───

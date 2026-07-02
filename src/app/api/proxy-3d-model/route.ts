@@ -9,13 +9,43 @@ const SERVER_DATA_ROOT = process.env.SERVER_DATA_ROOT || '/space/wujie-data';
  * Validate URL to prevent SSRF attacks.
  * Blocks private/internal network addresses and non-HTTP protocols.
  */
+// 已知3D模型提供商域名白名单（仅允许这些域名的代理请求）
+const ALLOWED_3D_DOMAINS = [
+  // Meshy
+  'meshy.ai', 'client.meshy.ai', 'assets.meshy.ai',
+  // 腾讯云COS（混元3D等）
+  'cos.ap-guangzhou.myqcloud.com', 'cos.ap-beijing.myqcloud.com',
+  'cos.ap-shanghai.myqcloud.com', 'cos.ap-nanjing.myqcloud.com',
+  // Tripo / VAST AI
+  'tripo3d.ai', 'api.tripo3d.ai', 'assets.tripo3d.ai',
+  'vast.ai', 'assets.vast.ai',
+  // Rodin / Deemos
+  'rodin.deemos.com', 'api.deemos.com', 'assets.deemos.com',
+  // 通用云存储
+  'amazonaws.com', 's3.amazonaws.com', 's3.us-west-2.amazonaws.com',
+  'cloudfront.net',
+  'storage.googleapis.com',
+  'blob.core.windows.net',
+  'oss-cn-hangzhou.aliyuncs.com', 'oss-cn-beijing.aliyuncs.com',
+  'oss-cn-shanghai.aliyuncs.com', 'oss-cn-guangzhou.aliyuncs.com',
+  // 本平台域名（自身服务）
+  process.env.COZE_PROJECT_DOMAIN_DEFAULT?.replace(/^https?:\/\//, '') || '',
+].filter(Boolean);
+
 function isSafeUrl(url: URL): boolean {
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
   const hostname = url.hostname.toLowerCase();
+  // 私有IP检测
   if (/^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(hostname)) return false;
   if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') return false;
   if (/^(169\.254\.|fe80:)/.test(hostname)) return false;
   if (/^0\./.test(hostname)) return false;
+  // 域名白名单检测（子域名匹配）
+  const isAllowed = ALLOWED_3D_DOMAINS.some(domain => {
+    if (!domain) return false;
+    return hostname === domain || hostname.endsWith('.' + domain);
+  });
+  if (!isAllowed) return false;
   return true;
 }
 
@@ -125,7 +155,44 @@ export async function GET(request: NextRequest) {
   }
 
   if (!isSafeUrl(parsedUrl)) {
-    return NextResponse.json({ error: 'URL not allowed (internal/private addresses are blocked)' }, { status: 403 });
+    // 动态检查：管理员配置的3D API提供商base_url域名也允许
+    let dynamicAllowed = false;
+    try {
+      const { getApiProviders } = await import('@/lib/server-api-config');
+      const providers = await getApiProviders();
+      for (const p of providers) {
+        if (p.baseUrl) {
+          try {
+            const providerHost = new URL(p.baseUrl).hostname.toLowerCase();
+            if (parsedUrl.hostname === providerHost || parsedUrl.hostname.endsWith('.' + providerHost)) {
+              dynamicAllowed = true;
+              break;
+            }
+          } catch { /* ignore invalid baseUrl */ }
+        }
+      }
+    } catch { /* ignore config load error */ }
+    // 也检查图像提供商（图生3D可能返回图像提供商域名的URL）
+    if (!dynamicAllowed) {
+      try {
+        const { getApiProviders } = await import('@/lib/server-api-config');
+        const providers = await getApiProviders();
+        for (const p of providers) {
+          if (p.baseUrl) {
+            try {
+              const providerHost = new URL(p.baseUrl).hostname.toLowerCase();
+              if (parsedUrl.hostname === providerHost || parsedUrl.hostname.endsWith('.' + providerHost)) {
+                dynamicAllowed = true;
+                break;
+              }
+            } catch { /* ignore */ }
+          }
+        }
+      } catch { /* ignore */ }
+    }
+    if (!dynamicAllowed) {
+      return NextResponse.json({ error: 'URL域名不在允许列表中，如需代理此域名请联系管理员添加' }, { status: 403 });
+    }
   }
 
   // 1. Try local cache first (avoids expired presigned URL issues)

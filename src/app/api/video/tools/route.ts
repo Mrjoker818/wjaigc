@@ -10,6 +10,7 @@ import { writeFile, mkdir, readFile, unlink } from 'fs/promises';
 import { existsSync } from 'fs';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { validateApiInputs } from '@/lib/api-validator';
 
 const execFileAsync = promisify(execFile);
 
@@ -51,6 +52,14 @@ async function checkFFmpeg(): Promise<boolean> {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+    // 输入校验
+    const _validationError = validateApiInputs(typeof body !== 'undefined' ? body : {}, {
+      videoUrl: 'optionalVideoUrl'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
     const { action } = body;
     
     await ensureUploadDir();

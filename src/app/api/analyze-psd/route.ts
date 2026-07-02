@@ -3,6 +3,7 @@ import { LLMClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits, refundCredits } from '@/lib/credits';
+import { validateApiInputs } from '@/lib/api-validator';
 
 export const runtime = 'nodejs';
 
@@ -26,6 +27,17 @@ export async function POST(request: NextRequest) {
   let sessionUser: any = null;
   try {
     const { image } = await request.json();
+    // 输入校验
+    const _validationError = validateApiInputs({
+          image: image
+    }, {
+        image: 'optionalImageUrl',
+        model: 'model'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
 
     if (!image) {
       return NextResponse.json(

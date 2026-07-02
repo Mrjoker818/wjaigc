@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
+import { validateApiInputs } from '@/lib/api-validator';
 
 export const maxDuration = 120;
 
@@ -19,6 +20,14 @@ export async function POST(req: NextRequest) {
   if (auth instanceof NextResponse) return auth;
   try {
     const body = await req.json() as LayerSplitRequest;
+    // 输入校验
+    const _validationError = validateApiInputs(typeof body !== 'undefined' ? body : {}, {
+      imageUrl: 'imageUrl'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
     const imageUrl = String(body.imageUrl || '');
     if (!imageUrl) {
       return NextResponse.json({ success: false, error: '缺少 imageUrl' }, { status: 400 });

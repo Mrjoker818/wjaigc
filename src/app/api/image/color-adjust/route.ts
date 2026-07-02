@@ -3,6 +3,7 @@ import sharp from 'sharp';
 import { join } from 'path';
 import { writeFile, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
+import { validateApiInputs } from '@/lib/api-validator';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -30,6 +31,14 @@ function normalizeRange(value: number | undefined, min: number, max: number, def
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+    // 输入校验
+    const _validationError = validateApiInputs(typeof body !== 'undefined' ? body : {}, {
+      imageUrl: 'imageUrl'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
     const { imageUrl } = body;
     const params: ColorAdjustParams = body.params || body;
 

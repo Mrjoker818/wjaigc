@@ -7,12 +7,21 @@ import { performOnnxUpscale } from '@/lib/image-tools/upscayl';
 import { IMAGE_MAX_SIZE_MB } from '@/lib/image-tools/config';
 import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits, refundCredits } from '@/lib/credits';
+import { validateApiInputs } from '@/lib/api-validator';
 
 export async function POST(request: NextRequest) {
   let deductedCredits = 0;
   let sessionUser: any = null;
   try {
     const body = await request.json();
+    // 输入校验
+    const _validationError = validateApiInputs(body, {
+        imageUrl: 'imageUrl'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
 
     const { imageUrl, scale, outputFormat, compression, upscaleMode } = body;
 

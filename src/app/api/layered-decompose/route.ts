@@ -4,6 +4,7 @@ import fs from 'fs';
 import sharp from 'sharp';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { saveImageFile } from '@/lib/server-data-root';
+import { validateApiInputs } from '@/lib/api-validator';
 
 /**
  * Qwen-Image-Layered RGBA 图层分解 API
@@ -285,6 +286,14 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json() as DecomposeRequest;
+    // 输入校验
+    const _validationError = validateApiInputs(body as unknown as Record<string, unknown>, {
+        imageUrl: 'imageUrl'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
     const {
       imageUrl,
       layers: numLayers = 4,

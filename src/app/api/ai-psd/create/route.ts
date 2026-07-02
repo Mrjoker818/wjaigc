@@ -11,12 +11,21 @@ import { dbCreateTask, cleanupExpiredTasks } from '@/lib/ai-psd/storage';
 import type { AiPsdTask, GenerationMode, SceneType, StyleTag, ColorTone, LayerComplexity, OutputQuality, TextRenderMode } from '@/lib/ai-psd/types';
 
 import { requireApiAuthOrReject } from '@/lib/api-auth';
+import { validateApiInputs } from '@/lib/api-validator';
 
 export async function POST(request: NextRequest) {
   const authResult = await requireApiAuthOrReject(request);
   if (authResult instanceof NextResponse) return authResult;
   try {
     const body = await request.json();
+    // 输入校验
+    const _validationError = validateApiInputs(body, {
+        prompt: 'optionalPrompt'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
 
     // ─── 参数校验 ────────────────────────────────────────
     const {

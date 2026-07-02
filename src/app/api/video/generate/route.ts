@@ -21,6 +21,7 @@ import {
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits, refundCredits } from '@/lib/credits';
+import { validateApiInputs } from '@/lib/api-validator';
 
 export const maxDuration = 300; // 5 min timeout
 
@@ -30,6 +31,16 @@ export async function POST(request: NextRequest) {
   try {
     // 积分扣除（按模型差异化扣分）
     const body = await request.json();
+    // 输入校验
+    const _validationError = validateApiInputs(body, {
+        prompt: 'optionalPrompt',
+        imageUrl: 'optionalImageUrl',
+        videoUrl: 'optionalVideoUrl'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
     const {
       prompt,
       model,

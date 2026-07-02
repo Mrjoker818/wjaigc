@@ -5,6 +5,7 @@ import { consumeCredits, refundCredits } from '@/lib/credits';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import fsSync from 'fs';
 import path from 'path';
+import { validateApiInputs } from '@/lib/api-validator';
 
 /**
  * Image-to-3D API route
@@ -822,6 +823,14 @@ export async function POST(request: NextRequest) {
   let sessionUser: any = null;
   try {
     const body = await resolveServerProvider(await request.json() as ImageTo3DRequest);
+    // 输入校验
+    const _validationError = validateApiInputs(body as unknown as Record<string, unknown>, {
+        imageUrl: 'optionalImageUrl'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
     // Verify session (getSessionUser throws on unauthenticated)
     sessionUser = await getSessionUser(request);
 

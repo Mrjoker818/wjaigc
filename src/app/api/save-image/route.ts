@@ -7,6 +7,7 @@ import { uploadImageToS3, isS3Available } from '@/lib/s3-storage';
 import { saveImageDataMapping, getImageSourceUrl } from '@/lib/image-source-map';
 import { getSessionUser as getAuthUser } from '@/lib/server-auth';
 import sharp from 'sharp';
+import { validateApiInputs } from '@/lib/api-validator';
 
 /**
  * 将 base64 data URL 或远程图片 URL 保存到持久化目录，
@@ -103,6 +104,14 @@ export async function POST(request: NextRequest) {
 
     // 解析 JSON body，同时支持 mediaType 字段（视频/图片）
     const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+    // 输入校验
+    const _validationError = validateApiInputs(body, {
+        imageUrl: 'imageUrl'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
     const imageUrl = typeof body.imageUrl === 'string' ? body.imageUrl : '';
     const mediaType = typeof body.mediaType === 'string' ? body.mediaType : undefined;
     const compress = body.compress === true;

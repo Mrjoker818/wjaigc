@@ -6,6 +6,7 @@ import { registerTask, updateTaskProgress } from '@/lib/task-registry';
 import { dbListBrandKits, dbUpsertBrandKit, dbDeleteBrandKit } from '@/lib/db-storage';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
+import { validateApiInputs } from '@/lib/api-validator';
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -120,6 +121,15 @@ export async function POST(request: NextRequest) {
   if (auth instanceof NextResponse) return auth;
   try {
     const body = await request.json();
+    // 输入校验
+    const _validationError = validateApiInputs(body, {
+        prompt: 'optionalPrompt',
+        imageUrl: 'optionalImageUrl'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
     const { action } = body;
 
     switch (action) {

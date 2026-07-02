@@ -5,6 +5,7 @@ import path from 'path';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import { uploadImageToS3, isS3Available } from '@/lib/s3-storage';
 import { saveImageDataMapping } from '@/lib/image-source-map';
+import { validateApiInputs } from '@/lib/api-validator';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,6 +14,16 @@ const MAX_IMAGE_BYTES = 50 * 1024 * 1024; // 50MB — 4K PNG 可能 30MB+
 export async function POST(request: NextRequest) {
   try {
     const { imageUrl } = (await request.json()) as { imageUrl?: string };
+    // 输入校验
+    const _validationError = validateApiInputs({
+          imageUrl: imageUrl
+    }, {
+        imageUrl: 'imageUrl'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
 
     if (!imageUrl) {
       return NextResponse.json({ success: false, error: 'Missing imageUrl' }, { status: 400 });

@@ -13,6 +13,7 @@ import { consumeCredits, refundCredits } from '@/lib/credits';
 import { optimize as runSvgoOptimize } from 'svgo';
 import { vectorizePipeline, type VectorizeEngine, type VectorizeQuality as PipelineQuality } from '@/lib/vectorize-pipeline';
 import { analyzeWithSharp } from '@/lib/vectorize-analyzer';
+import { validateApiInputs } from '@/lib/api-validator';
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -2005,6 +2006,14 @@ export async function POST(req: NextRequest) {
   let sessionUser: any = null;
   try {
     const body: TraceRequest = await req.json();
+    // 输入校验
+    const _validationError = validateApiInputs(typeof body !== 'undefined' ? body as unknown as Record<string, unknown> : {}, {
+      imageUrl: 'imageUrl'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
     const { imageUrl, mode = 'color' } = body;
 
     if (!imageUrl) {

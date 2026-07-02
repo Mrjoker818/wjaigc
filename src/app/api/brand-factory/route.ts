@@ -20,6 +20,7 @@ import type { ApiCompatProfile } from '@/lib/api-compatibility';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import { dbGetUserData, dbSetUserData } from '@/lib/db-storage';
 import { calculateActualPixelsFromRatio } from '@/lib/calculate-pixels';
+import { validateApiInputs } from '@/lib/api-validator';
 
 // ─── 内存项目存储 ────────────────────────────────────────────────────
 const BRAND_PROJECTS_KEY = 'brand_factory_projects';
@@ -836,6 +837,15 @@ export async function POST(request: NextRequest) {
   if (authResult) return authResult;
   try {
     const body = await request.json();
+    // 输入校验
+    const _validationError = validateApiInputs(body, {
+        prompt: 'optionalPrompt',
+        imageUrl: 'optionalImageUrl'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
     const action = body.action as string;
     const imageModel = body.imageModel as string | undefined;
     const llmModel = body.llmModel as string | undefined;

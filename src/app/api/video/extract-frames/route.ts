@@ -5,6 +5,7 @@ import { writeFile, mkdir, readFile, unlink } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
+import { validateApiInputs } from '@/lib/api-validator';
 
 const execFileAsync = promisify(execFile);
 
@@ -21,6 +22,14 @@ type ExtractMode = 'fps' | 'keyframes' | 'uniform' | 'first-last';
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+    // 输入校验
+    const _validationError = validateApiInputs(typeof body !== 'undefined' ? body : {}, {
+      videoUrl: 'videoUrl'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
     const { videoUrl, mode = 'uniform', fps = 1, count = 6 } = body;
 
     if (!videoUrl) {

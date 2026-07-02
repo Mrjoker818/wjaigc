@@ -12,6 +12,7 @@ import { translateApiError } from '@/lib/api-error-translate';
 import { isTaskCancelled as isRegistryCancelled } from '@/lib/task-registry';
 import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits, refundCredits } from '@/lib/credits';
+import { validateApiInputs } from '@/lib/api-validator';
 export const runtime = 'nodejs';
 export const maxDuration = 600;
 
@@ -60,6 +61,15 @@ export async function POST(request: NextRequest) {
     if (authResult) return authResult;
 
     const body = await request.json();
+    // 输入校验
+    const _validationError = validateApiInputs(body, {
+        prompt: 'optionalPrompt',
+        imageUrl: 'optionalImageUrl'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
     const { image, prompt, maskDataUrl, model, providerId, maxRounds, imagePrompt, imageModel, imageProviderId, quality, aspectRatio } = body;
 
     // ★ 从 model 中提取纯 modelId（前端可能传 providerId::modelId 格式）

@@ -12,6 +12,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { join } from 'path';
 import { writeFile, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
+import { validateApiInputs } from '@/lib/api-validator';
 
 // 确保上传目录存在
 const UPLOAD_DIR = join(process.cwd(), 'public', 'uploads');
@@ -71,6 +72,14 @@ function generateToneWav(durationSec: number = 1.0, frequency: number = 440): Bu
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+    // 输入校验
+    const _validationError = validateApiInputs(typeof body !== 'undefined' ? body : {}, {
+      prompt: 'optionalPrompt'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
     const { text, voice = 'default', speed = 1.0 } = body;
     
     if (!text || typeof text !== 'string') {

@@ -17,6 +17,7 @@ import { getImageSourceUrl } from '@/lib/image-source-map';
 import { execSql } from '@/lib/db-client';
 import path from 'path';
 import fs from 'fs';
+import { validateApiInputs } from '@/lib/api-validator';
 
 interface MissingImage {
   filename: string;
@@ -170,6 +171,14 @@ export async function POST(request: NextRequest) {
     
     // Verify admin access
     const body = await request.json().catch(() => ({}));
+    // 输入校验
+    const _validationError = validateApiInputs(body, {
+        imageUrl: 'optionalImageUrl'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
     const adminKey = body.adminKey || searchParams.get('adminKey');
     
     // Simple admin verification (using environment variable or first admin user)

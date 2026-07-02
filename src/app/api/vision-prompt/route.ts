@@ -4,6 +4,7 @@ import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { consumeCredits, refundCredits } from '@/lib/credits';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
+import { validateApiInputs } from '@/lib/api-validator';
 
 export const maxDuration = 60;
 
@@ -256,6 +257,14 @@ export async function POST(request: NextRequest) {
       providerId,
       providerPreset,
     } = await request.json();
+    // 输入校验
+    const _validationError = validateApiInputs({ imageUrl }, {
+        imageUrl: 'imageUrl'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
 
     sessionUser = await getSessionUser(request);
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { dbGetBrandAssets, dbGetBrandAsset, dbUpsertBrandAsset, dbDeleteBrandAsset, dbSetDefaultBrandAsset, type DbBrandAsset } from '@/lib/db-storage';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { getSessionUser } from '@/lib/server-auth';
+import { validateApiInputs } from '@/lib/api-validator';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,6 +34,14 @@ export async function POST(request: NextRequest) {
     const currentUser = await getSessionUser(request);
     const authenticatedUserId = currentUser?.id;
     const body = await request.json();
+    // 输入校验
+    const _validationError = validateApiInputs(body, {
+        imageUrl: 'optionalImageUrl'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
     const { action } = body;
 
     // ─── List assets ───

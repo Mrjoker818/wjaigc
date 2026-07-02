@@ -11,6 +11,7 @@ import { findProviderForFeature, findProviderForModel, findProviderById } from '
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
 import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits, refundCredits } from '@/lib/credits';
+import { validateApiInputs } from '@/lib/api-validator';
 import {
   buildVideoExtendRequest,
   parseVideoSubmitResponse,
@@ -26,6 +27,15 @@ export async function POST(request: NextRequest) {
   let sessionUser: any = null;
   try {
     const body = await request.json();
+    // 输入校验
+    const _validationError = validateApiInputs(body, {
+        videoUrl: 'videoUrl',
+        prompt: 'optionalPrompt'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
     const {
       videoUrl,
       prompt,

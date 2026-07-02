@@ -7,6 +7,7 @@ import { registerTask, updateTaskProgress, isTaskCancelled, getTaskInfo } from '
 import { buildJimengPrompt, buildBlackOnWhitePrompt, buildTransparentLogoPrompt, FONT_STYLE_CATEGORIES, SCENE_MAP, STROKE_MAP, GRAPHIC_MAP, MATERIAL_MAP } from '../plan/route';
 import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits, refundCredits } from '@/lib/credits';
+import { validateApiInputs } from '@/lib/api-validator';
 
 // ★ 字境大师任务结果独立存储（防HMR丢失task-registry状态）
 const fontDesignResults = new Map<string, {
@@ -107,6 +108,14 @@ export async function POST(request: NextRequest) {
   let sessionUser: any = null;
   try {
     const body = await request.json();
+    // 输入校验
+    const _validationError = validateApiInputs(body, {
+        prompt: 'optionalPrompt'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
     const {
       prompt, model, ratio = '16:9', count = 1,
       text, scene, primaryStyleCategory, secondaryStyle,

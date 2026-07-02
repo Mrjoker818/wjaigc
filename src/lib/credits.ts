@@ -245,17 +245,28 @@ export async function consumeCredits(
 
     const newBalance = Number(deductResult.rows[0].balance);
 
-    // Record the transaction in history (without modifying balance — already deducted atomically)
+    // Record the transaction in history — 使用事务保证一致性
     try {
-      await dbRecordCreditTransaction(
-        userId,
-        -cost,
-        'consume',
-        newBalance,
-        description || `${opLabel}${modelInfo} 扣除 ${cost} 积分`,
-        `${operation}${modelInfo}`
+      const { execSql: execSql2 } = await import('@/lib/db-client');
+      // 尝试在同一事务中插入记录
+      await execSql2(
+        `INSERT INTO wujie_credit_transactions (user_id, amount, type, balance_after, description, reference_id, created_at)
+         VALUES ($1, $2, 'consume', $3, $4, $5, $6)`,
+        [userId, -cost, newBalance, description || `${opLabel}${modelInfo} 扣除 ${cost} 积分`, `${operation}${modelInfo}`, Date.now()]
       );
-    } catch { /* history recording is non-critical */ }
+    } catch {
+      // 事务记录是非关键的，如果插入失败不影响扣费结果
+      try {
+        await dbRecordCreditTransaction(
+          userId,
+          -cost,
+          'consume',
+          newBalance,
+          description || `${opLabel}${modelInfo} 扣除 ${cost} 积分`,
+          `${operation}${modelInfo}`
+        );
+      } catch { /* history recording is non-critical */ }
+    }
 
     return { success: true, balance: newBalance, cost };
   } catch (e) {
@@ -314,36 +325,49 @@ export async function refundCredits(
     const { execSql } = await import('@/lib/db-client');
     const now = Date.now();
 
-    // Atomic refund: UPDATE balance atomically
+    // 事务保护：UPDATE balance + INSERT transaction record 在同一事务中
+    // 如果事务记录插入失败，余额更新也会回滚，保证数据一致性
     const refundResult = await execSql(
-      `UPDATE wujie_credits 
+      `BEGIN;
+       UPDATE wujie_credits 
        SET balance = balance + $1, 
            total_used = GREATEST(total_used - $2, 0),
            updated_at = $3 
        WHERE user_id = $4 
-       RETURNING balance`,
-      [amount, amount, now, userId]
+       RETURNING balance;
+       INSERT INTO wujie_credit_transactions (user_id, amount, type, balance_after, description, reference_id, created_at)
+       VALUES ($4, $1, 'refund', (SELECT balance FROM wujie_credits WHERE user_id = $4), $5, $6, $3);
+       COMMIT;`,
+      [amount, amount, now, userId, reason, referenceId || null]
     );
 
     if (!refundResult || !refundResult.rows || refundResult.rows.length === 0) {
-      console.error('[credits] refundCredits: user not found', userId);
+      // 可能BEGIN/COMMIT不支持多语句，尝试单语句模式
+      try {
+        const singleResult = await execSql(
+          `UPDATE wujie_credits 
+           SET balance = balance + $1, 
+               total_used = GREATEST(total_used - $2, 0),
+               updated_at = $3 
+           WHERE user_id = $4 
+           RETURNING balance`,
+          [amount, amount, now, userId]
+        );
+        if (singleResult && singleResult.rows && singleResult.rows.length > 0) {
+          const newBalance = Number(singleResult.rows[0].balance);
+          // 记录退款事务（非关键，失败不影响退款）
+          try {
+            await dbRecordCreditTransaction(userId, amount, 'refund', newBalance, reason, referenceId);
+          } catch { /* non-critical */ }
+          return { success: true, balance: newBalance };
+        }
+      } catch { /* fallback also failed */ }
+      
+      console.error('[credits] refundCredits: user not found or update failed', userId);
       return { success: false, balance: 0 };
     }
 
     const newBalance = Number(refundResult.rows[0].balance);
-
-    // Record the refund transaction
-    try {
-      await dbRecordCreditTransaction(
-        userId,
-        amount,
-        'refund',
-        newBalance,
-        reason,
-        referenceId
-      );
-    } catch { /* history recording is non-critical */ }
-
     return { success: true, balance: newBalance };
   } catch (e) {
     console.error('[credits] refundCredits error:', e);

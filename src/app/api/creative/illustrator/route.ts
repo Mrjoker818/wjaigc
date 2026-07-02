@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { validateApiInputs } from '@/lib/api-validator';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 600;
@@ -53,6 +54,14 @@ export async function POST(request: NextRequest) {
     payload = text ? (JSON.parse(text) as CreativeRequest) : {};
   } catch {
     return NextResponse.json({ success: false, error: '请求体 JSON 解析失败。' }, { status: 400 });
+  }
+  // 输入校验
+  const _validationError = validateApiInputs(payload, {
+    prompt: 'optionalPrompt',
+    image: 'optionalImageUrl',
+  });
+  if (_validationError) {
+    return NextResponse.json({ success: false, error: _validationError }, { status: 400 });
   }
   const { imageUrl } = payload;
   const action: string = payload.action || 'generate_from_artboard';

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dbGetEcomTemplates, dbGetEcomTemplate, dbUpsertEcomTemplate, dbDeleteEcomTemplate, dbBatchUpdateEcomTemplateOrder, type DbEcomTemplate } from '@/lib/db-storage';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
+import { validateApiInputs } from '@/lib/api-validator';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,6 +37,14 @@ export async function POST(request: NextRequest) {
   if (auth instanceof NextResponse) return auth;
   try {
     const body = await request.json();
+    // 输入校验
+    const _validationError = validateApiInputs(body, {
+        prompt: 'optionalPrompt'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
     const { action } = body;
 
     // ─── List templates ───

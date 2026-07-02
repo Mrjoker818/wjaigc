@@ -10,6 +10,7 @@ import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits, refundCredits } from '@/lib/credits';
 import { identifyImageSubject } from '@/lib/identify-subject';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
+import { validateApiInputs } from '@/lib/api-validator';
 
 // ─── Persist result image to local server ───
 async function persistResultImage(imageUrl: string): Promise<string> {
@@ -871,6 +872,14 @@ export async function POST(request: NextRequest) {
   let sessionUser: any = null;
   try {
     const body = await request.json();
+    // 输入校验
+    const _validationError = validateApiInputs(body, {
+        imageUrl: 'imageUrl'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
     const { action } = body;
 
     if (action === 'presets') {

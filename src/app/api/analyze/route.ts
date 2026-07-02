@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { LLMClient, Config, HeaderUtils } from "coze-coding-dev-sdk";
 import { requireApiAuthOrReject } from '@/lib/api-auth';
+import { validateApiInputs } from '@/lib/api-validator';
 
 export const runtime = 'nodejs';
 
@@ -9,6 +10,9 @@ export async function POST(request: NextRequest) {
     const auth = await requireApiAuthOrReject(request);
     if (auth instanceof NextResponse) return auth;
     const { image, category } = await request.json();
+    // 输入校验（解构模式 - 可能需要手动检查字段是否匹配）
+    // schema: {'url': 'optionalImageUrl', 'prompt': 'optionalPrompt'}
+
     
     if (!image) {
       return NextResponse.json(

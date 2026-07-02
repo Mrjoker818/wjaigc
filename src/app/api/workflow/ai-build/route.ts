@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForFeature } from '@/lib/server-api-config';
 import { AI_BUILD_PROMPT, AI_BUILD_REFINE_PROMPT, parseAIBuildResponse, createWorkflowFromAIResult } from '@/lib/workflow-engine';
+import { validateApiInputs } from '@/lib/api-validator';
 
 /** 调用LLM获取响应 (复用SSE/JSON双模式解析) */
 async function callLLM(
@@ -65,6 +66,14 @@ async function callLLM(
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
+    // 输入校验
+    const _validationError = validateApiInputs(body, {
+        prompt: 'optionalPrompt'
+    });
+    if (_validationError) {
+      return NextResponse.json({ error: _validationError }, { status: 400 });
+    }
+
     const { description, model } = body as { description: string; model?: string };
 
     if (!description || typeof description !== 'string' || description.trim().length === 0) {
