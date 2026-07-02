@@ -519,9 +519,13 @@ async function handleAgentStream(
             // Send tool execution progress event
             controller.enqueue(encoder.encode(`data: ${JSON.stringify({
               type: 'tool_execution_start',
-              tool_name: toolName,
-              tool_call_id: toolCall.id,
-              tool_args: toolArgs,
+              toolName,
+              toolCallId: toolCall.id,
+              toolArgs,
+              label: toolName === 'generate_image' ? '正在生成图片...' :
+                     toolName === 'generate_video' ? '正在生成视频...' :
+                     toolName === 'analyze_image' ? '正在分析图片...' :
+                     `正在执行 ${toolName}...`,
               iteration,
             })}\n\n`));
 
@@ -549,9 +553,10 @@ async function handleAgentStream(
             // Send tool execution result event
             controller.enqueue(encoder.encode(`data: ${JSON.stringify({
               type: 'tool_execution_result',
-              tool_name: toolName,
-              tool_call_id: toolCall.id,
+              toolName,
+              toolCallId: toolCall.id,
               success: toolResult.success,
+              error: toolResult.error,
               imageUrls: toolResult.imageUrls || [],
               videoUrls: toolResult.videoUrls || [],
               taskIds: toolResult.taskIds || [],
@@ -570,7 +575,7 @@ async function handleAgentStream(
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({
             type: 'tool_execution_complete',
             iteration,
-            tools_executed: completedToolCalls.length,
+            toolsExecuted: completedToolCalls.length,
           })}\n\n`));
 
           // Continue the loop — LLM will now see the tool results and decide next action
