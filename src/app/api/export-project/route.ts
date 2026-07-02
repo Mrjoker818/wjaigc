@@ -168,9 +168,50 @@ async function createTarGz(scope: string): Promise<{ stream: Readable; fileCount
 
 /**
  * GET /api/export-project — Get export info/preview
- * POST /api/export-project — Download tar.gz
+ * GET /api/export-project?scope=with-assets — Download tar.gz directly (browser-friendly)
+ * POST /api/export-project — Download tar.gz (with JSON body)
  */
 export async function GET(request: NextRequest) {
+  const scope = request.nextUrl.searchParams.get('scope');
+
+  // If scope is specified, trigger download directly
+  if (scope) {
+    const validScopes = ['source', 'source-config', 'with-assets', 'full'];
+    if (!validScopes.includes(scope)) {
+      return NextResponse.json({ error: `Invalid scope. Use: ${validScopes.join(', ')}` }, { status: 400 });
+    }
+
+    try {
+      console.log(`[export-project] Starting export, scope=${scope}`);
+      const { stream, fileCount } = await createTarGz(scope);
+
+      const scopeLabels: Record<string, string> = {
+        'source': '无界AI-纯源码',
+        'source-config': '无界AI-源码+配置',
+        'with-assets': '无界AI-含静态资源',
+        'full': '无界AI-完整项目',
+      };
+
+      const filename = `${scopeLabels[scope] || 'project'}-${new Date().toISOString().slice(0, 10)}.tar.gz`;
+
+      return new NextResponse(stream as any, {
+        headers: {
+          'Content-Type': 'application/gzip',
+          'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
+          'X-Export-Scope': scope,
+          'X-Export-File-Count': String(fileCount),
+        },
+      });
+    } catch (error: any) {
+      console.error('[export-project] Export failed:', error);
+      return NextResponse.json(
+        { error: `Export failed: ${error.message}` },
+        { status: 500 }
+      );
+    }
+  }
+
+  // No scope — return info list
   const scopes = [
     {
       id: 'source',

@@ -452,6 +452,34 @@ export class UserManager {
       const currentUserId = this.currentUserId;
       // 严格用户隔离：仅保留当前用户的项目
       // - 有 userId 的项目必须匹配当前用户
+      // 字段名兼容：服务器/本地数据可能使用 'images'（旧字段名）或 'canvasImages'（新字段名）
+      // 统一归一化为 canvasImages
+      for (const p of serverProjects) {
+        if (!p.canvasImages && (p as any).images) {
+          p.canvasImages = (p as any).images;
+        }
+        // 确保canvasImages是数组
+        if (!Array.isArray(p.canvasImages)) {
+          p.canvasImages = [];
+        }
+      }
+      for (const p of userData.projects) {
+        if (!p.canvasImages && (p as any).images) {
+          p.canvasImages = (p as any).images;
+        }
+        if (!Array.isArray(p.canvasImages)) {
+          p.canvasImages = [];
+        }
+      }
+      for (const p of localProjectsFiltered) {
+        if (!p.canvasImages && (p as any).images) {
+          p.canvasImages = (p as any).images;
+        }
+        if (!Array.isArray(p.canvasImages)) {
+          p.canvasImages = [];
+        }
+      }
+
       // - 无 userId 的旧数据（历史遗留）补上当前用户ID后保留
       serverProjects = serverProjects.filter(p => {
         if (p.userId && p.userId !== currentUserId) return false;
