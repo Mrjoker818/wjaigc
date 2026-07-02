@@ -13,6 +13,7 @@ import { fetchWithSmartRetry } from '@/lib/smart-retry';
 import { streamResponsesApiSSE, buildResponsesApiPayload, extractImageUrlFromMarkdown, type ResponsesApiResult, type ResponsesApiSSEEvent } from '@/lib/responses-api-sse';
 import { getModelCapabilities, filterRequestForModel, shouldUseResponsesAPI, type ModelCapabilities, normalizeModelForApi } from '@/lib/model-capabilities';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
+import { validateImageUrl } from '@/lib/input-validation';
 import { consumeCredits } from '@/lib/credits';
 
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, stripEditsOnlyFields, isEditsEndpointRejected, type ApiCompatProfile, resolveProfileForModel, isGeminiImageModel, isNanoBananaModel, buildGeminiChatImageRequest, parseGeminiChatImageResponse, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
@@ -137,6 +138,19 @@ export async function POST(request: NextRequest) {
     // 必填参数校验
     if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
       return NextResponse.json({ success: false, error: '请输入创意描述（prompt）' }, { status: 400 });
+    }
+    // 尺寸校验
+    if (requestedPixelSize && !/^\d+x\d+$/.test(requestedPixelSize)) {
+      return NextResponse.json({ success: false, error: '尺寸格式无效，应为 宽x高（如 1024x1024）' }, { status: 400 });
+    }
+    // 参考图URL校验
+    if (referenceImages && Array.isArray(referenceImages)) {
+      for (const ref of referenceImages) {
+        const urlErr = validateImageUrl(typeof ref === 'string' ? ref : ref?.url);
+        if (urlErr) {
+          return NextResponse.json({ success: false, error: `参考图URL无效: ${urlErr}` }, { status: 400 });
+        }
+      }
     }
     // 防御性处理：确保 model 是字符串（前端可能误传对象）
     let model = typeof rawModel === 'string' ? rawModel : (rawModel as Record<string, unknown>)?.model as string || String(rawModel || '');

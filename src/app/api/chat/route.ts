@@ -52,6 +52,12 @@ export async function POST(request: NextRequest) {
     if (!model || !messages) {
       return NextResponse.json({ error: '缺少必要参数' }, { status: 400 });
     }
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return NextResponse.json({ error: '消息列表不能为空' }, { status: 400 });
+    }
+    if (messages.length > 100) {
+      return NextResponse.json({ error: '消息数量超出限制(最多100条)' }, { status: 400 });
+    }
 
     // 积分扣除（登录用户才扣积分，按模型差异化扣分）
     if (sessionUser) {

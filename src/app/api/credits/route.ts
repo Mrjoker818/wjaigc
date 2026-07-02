@@ -385,8 +385,9 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: false, error: '缺少订单号' }, { status: 400 });
       }
       try {
+        // Use SELECT FOR UPDATE to prevent concurrent admin-confirm race condition
         const result = await execSql(
-          'SELECT * FROM wujie_recharge_orders WHERE id = $1',
+          'SELECT * FROM wujie_recharge_orders WHERE id = $1 FOR UPDATE',
           [orderId]
         );
         if (result.rows.length === 0) {
@@ -409,12 +410,17 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ success: false, error: '积分到账失败' }, { status: 500 });
         }
 
-        // Update order status
+        // Update order status atomically with status check to prevent double-confirm
         const nowTs2 = Date.now();
-        await execSql(
-          `UPDATE wujie_recharge_orders SET payment_status = 'paid', paid_at = $2, updated_at = $3 WHERE id = $1`,
+        const updateResult = await execSql(
+          `UPDATE wujie_recharge_orders SET payment_status = 'paid', paid_at = $2, updated_at = $3 WHERE id = $1 AND payment_status != 'paid'`,
           [orderId, nowTs2, nowTs2]
         );
+        if ((updateResult.rowCount ?? 0) === 0) {
+          // Order was already confirmed by another admin concurrently, reverse the credit
+          await dbAdjustCredits(userId, -orderAmount, 'admin_adjust', `并发确认回退（订单${orderId}）`);
+          return NextResponse.json({ success: false, error: '订单已被其他管理员处理' }, { status: 409 });
+        }
 
         return NextResponse.json({ success: true, message: '订单已确认，积分已到账' });
       } catch (dbErr) {

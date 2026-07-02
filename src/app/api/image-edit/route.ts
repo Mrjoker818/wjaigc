@@ -21,6 +21,7 @@ import { postProcessAIRemoveBG, postProcessLocalRemoveBG } from '@/lib/remove-bg
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { fetchImageBuffer } from '@/lib/fetch-image-buffer';
 import { consumeCredits, refundCredits } from '@/lib/credits';
+import { validateImageUrl } from '@/lib/input-validation';
 import { enhanceViaAI } from '@/lib/quality-enhance';
 
 const SUPPORTED_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
@@ -1665,6 +1666,17 @@ export async function POST(request: NextRequest) {
       console.log(`[image-edit] Stripped provider prefix from model: "${rawModel}" → "${modelStr}" (providerId via field: "${providerId || 'none'}")`);
     }
     const effectiveProviderId = providerId || extractedProviderId || '';
+
+    // ★ 输入校验
+    if (!action || !['erase', 'mask', 'upscale', 'extend', 'removebg', 'inpaint', 'outpaint'].includes(action)) {
+      return NextResponse.json({ success: false, error: '缺少或无效的 action 参数' }, { status: 400 });
+    }
+    if (imageUrl) {
+      const urlError = validateImageUrl(imageUrl);
+      if (urlError) {
+        return NextResponse.json({ success: false, error: urlError }, { status: 400 });
+      }
+    }
 
     // ★ 模型别名规范化：将 gpt-image-2-2k → gpt-image-2 等别名映射为 API 可识别的基础模型名
     const normalized = normalizeModelForApi(modelStr);

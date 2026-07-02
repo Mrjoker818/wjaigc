@@ -1311,37 +1311,68 @@ export async function dbAdjustCredits(
   referenceId?: string
 ): Promise<{ success: boolean; balance: number; message?: string }> {
   try {
-    // Ensure credits row exists
+    // Ensure credits row exists first
     let credits = await dbGetCredits(userId);
     if (!credits) {
       credits = await dbInitCredits(userId);
       if (!credits) return { success: false, balance: 0, message: 'Failed to initialize credits' };
     }
 
-    const newBalance = credits.balance + amount;
-    if (newBalance < 0) {
-      return { success: false, balance: credits.balance, message: 'Insufficient credits' };
+    // Use atomic SQL to prevent race conditions (same pattern as consumeCredits)
+    // For negative amounts (deductions), check balance sufficiency
+    if (amount < 0) {
+      const checkResult = await execSql(
+        `UPDATE wujie_credits SET balance = balance + $1, updated_at = $2
+         WHERE user_id = $3 AND balance + $1 >= 0
+         RETURNING balance`,
+        [amount, Date.now(), userId]
+      );
+      if (checkResult.rows.length === 0) {
+        return { success: false, balance: (await dbGetCredits(userId))?.balance ?? 0, message: 'Insufficient credits' };
+      }
+      const newBalance = Number(checkResult.rows[0].balance);
+
+      // Update total_used
+      await execSql(
+        `UPDATE wujie_credits SET total_used = total_used + $1 WHERE user_id = $2`,
+        [Math.abs(amount), userId]
+      );
+
+      // Insert transaction record
+      const txId = `tx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      await execSql(
+        `INSERT INTO wujie_credit_transactions (id, user_id, type, amount, balance_after, description, reference_id, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [txId, userId, type, amount, newBalance, description || null, referenceId || null, Date.now()]
+      );
+
+      return { success: true, balance: newBalance };
     }
 
-    const now = Date.now();
-    // Update credits
-    await execSql(
-      `UPDATE wujie_credits SET balance = $1, total_recharged = total_recharged + $2, total_used = total_used + $3, updated_at = $4 WHERE user_id = $5`,
-      [
-        newBalance,
-        amount > 0 && (type === 'recharge' || type === 'admin_adjust') ? amount : 0,
-        amount < 0 && (type === 'consume' || type === 'admin_adjust') ? Math.abs(amount) : 0,
-        now,
-        userId,
-      ]
+    // For positive amounts (recharges/refunds), no balance check needed
+    const updateResult = await execSql(
+      `UPDATE wujie_credits SET balance = balance + $1, updated_at = $2 WHERE user_id = $3 RETURNING balance`,
+      [amount, Date.now(), userId]
     );
+    if (updateResult.rows.length === 0) {
+      return { success: false, balance: 0, message: 'Failed to update credits' };
+    }
+    const newBalance = Number(updateResult.rows[0].balance);
+
+    // Update total_recharged for positive admin/recharge adjustments
+    if (type === 'recharge' || (type === 'admin_adjust' && amount > 0)) {
+      await execSql(
+        `UPDATE wujie_credits SET total_recharged = total_recharged + $1 WHERE user_id = $2`,
+        [amount, userId]
+      );
+    }
 
     // Insert transaction record
     const txId = `tx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     await execSql(
       `INSERT INTO wujie_credit_transactions (id, user_id, type, amount, balance_after, description, reference_id, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [txId, userId, type, amount, newBalance, description || null, referenceId || null, now]
+      [txId, userId, type, amount, newBalance, description || null, referenceId || null, Date.now()]
     );
 
     return { success: true, balance: newBalance };

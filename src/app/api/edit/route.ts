@@ -7,6 +7,7 @@ import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits, refundCredits } from '@/lib/credits';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
+import { validateImageUrl, validatePrompt } from '@/lib/input-validation';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import { getEditTask, deleteEditTask, setEditTask, updateTaskStage, failEditTask } from '@/lib/edit-task-store';
 import { calculateActualPixelsFromRatio } from '@/lib/calculate-pixels';
@@ -295,8 +296,16 @@ export async function POST(request: NextRequest) {
     if (!image) {
       return NextResponse.json({ success: false, error: '请先添加图片' }, { status: 400 });
     }
+    const imageUrlError = validateImageUrl(image);
+    if (imageUrlError) {
+      return NextResponse.json({ success: false, error: imageUrlError }, { status: 400 });
+    }
     if (!prompt) {
       return NextResponse.json({ success: false, error: '请输入编辑指令' }, { status: 400 });
+    }
+    const promptError = validatePrompt(prompt);
+    if (promptError) {
+      return NextResponse.json({ success: false, error: promptError }, { status: 400 });
     }
 
     // ★ 从 model 中提取纯 modelId（前端可能传 providerId::modelId 格式）

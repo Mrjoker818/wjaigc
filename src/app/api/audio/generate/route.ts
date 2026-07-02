@@ -125,13 +125,14 @@ export async function POST(req: NextRequest) {
     const filename = `audio-${Date.now()}.wav`;
     await writeFile(join(UPLOAD_DIR, filename), wavBuffer);
     
+    // 占位音频不返回 success: true，避免前端误认为AI语音生成成功
     return NextResponse.json({
-      success: true,
+      success: false,
       audioUrl: `/uploads/${filename}`,
       duration: estDuration,
       text,
       source: 'local-tone',
-      note: '当前使用占位提示音，配置OPENAI_TTS_API_KEY后可用真实AI语音',
+      error: 'AI语音服务暂未配置，当前为占位提示音。请在管理后台配置TTS API密钥后使用真实AI语音。',
     });
   } catch (error) {
     console.error('[audio/generate] error:', error);
