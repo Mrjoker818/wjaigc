@@ -452,6 +452,18 @@ export class UserManager {
       const currentUserId = this.currentUserId;
       // 严格用户隔离：仅保留当前用户的项目
       // - 有 userId 的项目必须匹配当前用户
+      // - 无 userId 的旧数据（历史遗留）补上当前用户ID后保留
+      serverProjects = serverProjects.filter(p => {
+        if (p.userId && p.userId !== currentUserId) return false;
+        if (!p.userId) p.userId = currentUserId; // 历史数据补上 userId
+        return true;
+      });
+      const localProjectsFiltered = userData.projects.filter(p => {
+        if (p.userId && p.userId !== currentUserId) return false;
+        if (!p.userId) p.userId = currentUserId;
+        return true;
+      });
+
       // 字段名兼容：服务器/本地数据可能使用 'images'（旧字段名）或 'canvasImages'（新字段名）
       // 统一归一化为 canvasImages
       for (const p of serverProjects) {
@@ -479,18 +491,6 @@ export class UserManager {
           p.canvasImages = [];
         }
       }
-
-      // - 无 userId 的旧数据（历史遗留）补上当前用户ID后保留
-      serverProjects = serverProjects.filter(p => {
-        if (p.userId && p.userId !== currentUserId) return false;
-        if (!p.userId) p.userId = currentUserId; // 历史数据补上 userId
-        return true;
-      });
-      const localProjectsFiltered = userData.projects.filter(p => {
-        if (p.userId && p.userId !== currentUserId) return false;
-        if (!p.userId) p.userId = currentUserId;
-        return true;
-      });
 
       // 【数据隔离增强】跨用户ID冲突检测
       // 如果某个项目ID同时出现在其他用户的数据槽中，说明该数据已被污染
