@@ -139,7 +139,7 @@ export async function POST(request: NextRequest) {
             n: 1,
             size: '1024x1024',
           }),
-          signal: AbortSignal.timeout(15000),
+          signal: AbortSignal.timeout(60000), // 图片生成通常需要 20-60 秒
         });
         const latencyMs = Date.now() - start;
 
@@ -170,13 +170,17 @@ export async function POST(request: NextRequest) {
             detail: `端点可达 (${resp.status})，需配置正确模型名`,
             latencyMs,
           });
-        } else if (resp.status === 502 || resp.status === 503) {
-          // 网关错误/服务不可用 — 端点可达但后端暂时不可用（模型路由失败/过载）
+        } else if (resp.status === 500 || resp.status === 502 || resp.status === 503) {
+          // 500/502/503 — 端点可达但后端暂时不可用（内部错误/网关错误/过载）
+          let reason = '服务暂时不可用';
+          if (resp.status === 500) reason = '内部服务器错误，可能是模型路由失败或参数不支持';
+          else if (resp.status === 502) reason = '网关错误，后端服务未响应';
+          else if (resp.status === 503) reason = '服务过载或维护中';
           tests.push({
             name: '图片生成',
             endpoint,
             status: 'warn',
-            detail: `端点可达但后端不可用 (${resp.status})，可能是模型路由失败或服务过载`,
+            detail: `端点可达但后端异常 (${resp.status})：${reason}`,
             latencyMs,
           });
         } else if (resp.status === 429) {
