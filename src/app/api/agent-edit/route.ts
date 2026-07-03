@@ -13,6 +13,7 @@ import { isTaskCancelled as isRegistryCancelled } from '@/lib/task-registry';
 import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits, refundCredits } from '@/lib/credits';
 import { validateApiInputs } from '@/lib/api-validator';
+import { logOperation, logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
 export const runtime = 'nodejs';
 export const maxDuration = 600;
 
@@ -54,8 +55,11 @@ if (typeof setInterval !== 'undefined') {
  * }
  */
 export async function POST(request: NextRequest) {
+  const startTime = Date.now();
   let deductedCredits = 0;
   let sessionUser: any = null;
+  let selectedModel = '';
+  let providerId = '';
   try {
     const authResult = await requireApiAuthOrReject(request);
     if (authResult instanceof NextResponse) return authResult;
@@ -561,7 +565,16 @@ export async function POST(request: NextRequest) {
       mode: 'agent',
     });
   } catch (err) {
+    const durationMs = Date.now() - startTime;
     console.error('[agent-edit] POST error:', err);
+    logError(OP_ACTIONS.AGENT_EDIT, err, {
+      userId: sessionUser?.id || 'unknown',
+      userName: sessionUser?.name || 'unknown',
+      model: selectedModel,
+      providerId: providerId,
+      durationMs,
+      detail: `Agent编排编辑请求失败`,
+    });
     // 退款：Agent编排失败时退还积分
     if (deductedCredits > 0 && sessionUser) {
       try {

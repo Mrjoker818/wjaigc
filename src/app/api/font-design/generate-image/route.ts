@@ -8,6 +8,7 @@ import { buildJimengPrompt, buildBlackOnWhitePrompt, buildTransparentLogoPrompt,
 import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits, refundCredits } from '@/lib/credits';
 import { validateApiInputs } from '@/lib/api-validator';
+import { logOperation, logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
 
 // ★ 字境大师任务结果独立存储（防HMR丢失task-registry状态）
 const fontDesignResults = new Map<string, {
@@ -104,8 +105,11 @@ function buildUserSettingsSuffix(params: {
 }
 
 export async function POST(request: NextRequest) {
+  const startTime = Date.now();
   let deductedCredits = 0;
   let sessionUser: any = null;
+  let selectedModel = '';
+  let providerIdUsed = '';
   try {
     const body = await request.json();
     // 输入校验
@@ -417,7 +421,16 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ taskId, prompt: finalPrompt, model: usedModel });
   } catch (error: unknown) {
+    const durationMs = Date.now() - startTime;
     console.error('[font-design/generate-image] Error:', error);
+    logError(OP_ACTIONS.FONT_DESIGN_GENERATE, error, {
+      userId: sessionUser?.id || 'unknown',
+      userName: sessionUser?.name || 'unknown',
+      model: selectedModel,
+      providerId: providerIdUsed,
+      durationMs,
+      detail: `字体设计图片生成失败`,
+    });
     // 退款：字体设计图片生成失败时退还积分
     if (deductedCredits > 0 && sessionUser) {
       try {

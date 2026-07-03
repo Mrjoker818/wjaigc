@@ -6,6 +6,7 @@ import { getServerDataRoot } from '@/lib/server-data-root';
 import fsSync from 'fs';
 import path from 'path';
 import { validateApiInputs } from '@/lib/api-validator';
+import { logOperation, logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
 
 /**
  * Image-to-3D API route
@@ -819,8 +820,11 @@ async function tryExternalRequest(request: ImageTo3DRequest): Promise<{
 // ==================== Route Handler ====================
 
 export async function POST(request: NextRequest) {
+  const startTime = Date.now();
   let deductedCredits = 0;
   let sessionUser: any = null;
+  let finalModel = '';
+  let finalProviderId = '';
   try {
     const body = await resolveServerProvider(await request.json() as ImageTo3DRequest);
     // 输入校验
@@ -896,6 +900,18 @@ export async function POST(request: NextRequest) {
 
     const external = await tryExternalRequest(body);
     if (external?.assetUrl || external?.taskId) {
+      // 记录成功日志
+      logOperation({
+        userId: sessionUser?.id || 'anonymous',
+        userName: sessionUser?.name || '匿名用户',
+        action: OP_ACTIONS.MODEL_3D_GENERATE,
+        level: 'info',
+        detail: `3D转换成功: backend=${body.backend}`,
+        model: finalModel,
+        providerId: finalProviderId,
+        durationMs: Date.now() - startTime,
+        requestData: { backend: body.backend, taskId: external.taskId, hasAssetUrl: !!external.assetUrl },
+      });
       return NextResponse.json({
         success: true,
         backend: body.backend,
@@ -922,6 +938,15 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error('[image-to-3d] Fatal error:', error);
+    const durationMs = Date.now() - startTime;
+    logError(OP_ACTIONS.MODEL_3D_GENERATE, error, {
+      userId: sessionUser?.id || 'unknown',
+      userName: sessionUser?.name || 'unknown',
+      model: finalModel,
+      providerId: finalProviderId,
+      durationMs,
+      detail: `3D转换失败: provider=${finalProviderId}, model=${finalModel}`,
+    });
     // 退款：3D生成失败时退还积分
     if (deductedCredits > 0 && sessionUser) {
       try {

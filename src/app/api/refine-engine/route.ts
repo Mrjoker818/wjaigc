@@ -11,6 +11,7 @@ import { consumeCredits, refundCredits } from '@/lib/credits';
 import { identifyImageSubject } from '@/lib/identify-subject';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { validateApiInputs } from '@/lib/api-validator';
+import { logOperation, logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
 
 // ─── Persist result image to local server ───
 async function persistResultImage(imageUrl: string): Promise<string> {
@@ -868,8 +869,11 @@ async function handleApiResponse(
 
 // ─── POST: Generate refined image ───
 export async function POST(request: NextRequest) {
+  const startTime = Date.now();
   let deductedCredits = 0;
   let sessionUser: any = null;
+  let refineModel = '';
+  let refineProviderId = '';
   try {
     const body = await request.json();
     const { action } = body;
@@ -1031,6 +1035,18 @@ export async function POST(request: NextRequest) {
           },
         });
 
+        // 记录成功日志
+        logOperation({
+          action: OP_ACTIONS.IMAGE_REFINE,
+          userId: sessionUser?.id || 'unknown',
+          userName: sessionUser?.name || 'unknown',
+          level: 'info',
+          model: selectedModel,
+          providerId: provider.id,
+          durationMs: Date.now() - startTime,
+          detail: `精修引擎成功: provider=${provider.id}, model=${selectedModel}`,
+          requestData: { taskId, action: body.action },
+        });
         return NextResponse.json({
           success: true,
           taskId,
@@ -1059,6 +1075,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: '未知操作' }, { status: 400 });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
+    const durationMs = Date.now() - startTime;
+    logError(OP_ACTIONS.IMAGE_REFINE, err, {
+      userId: sessionUser?.id || 'unknown',
+      userName: sessionUser?.name || 'unknown',
+      model: refineModel,
+      providerId: refineProviderId,
+      durationMs,
+      detail: `精修引擎失败: provider=${refineProviderId}, model=${refineModel}`,
+    });
     // 退款：精修失败时退还积分
     if (deductedCredits > 0 && sessionUser) {
       try {

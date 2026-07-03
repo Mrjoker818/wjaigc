@@ -14,6 +14,7 @@ import { optimize as runSvgoOptimize } from 'svgo';
 import { vectorizePipeline, type VectorizeEngine, type VectorizeQuality as PipelineQuality } from '@/lib/vectorize-pipeline';
 import { analyzeWithSharp } from '@/lib/vectorize-analyzer';
 import { validateApiInputs } from '@/lib/api-validator';
+import { logOperation, logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -2002,8 +2003,10 @@ async function tryDesignVectorizeFallback(req: NextRequest, imageUrl: string, mo
 // ─── POST handler ──────────────────────────────────────
 
 export async function POST(req: NextRequest) {
+  const startTime = Date.now();
   let deductedCredits = 0;
   let sessionUser: any = null;
+  let selectedMode = '';
   try {
     const body: TraceRequest = await req.json();
     // 输入校验
@@ -2015,6 +2018,7 @@ export async function POST(req: NextRequest) {
     }
 
     const { imageUrl, mode = 'color' } = body;
+    selectedMode = mode;
 
     if (!imageUrl) {
       return NextResponse.json({ success: false, error: '缺少 imageUrl' }, { status: 400 });
@@ -2793,7 +2797,16 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ success: false, error: `不支持的模式: ${mode}` }, { status: 400 });
     }
   } catch (error) {
+    const durationMs = Date.now() - startTime;
     console.error('[svg-trace] Error:', error);
+    logError(OP_ACTIONS.IMAGE_SVG_TRACE, error, {
+      userId: sessionUser?.id || 'unknown',
+      userName: sessionUser?.name || 'unknown',
+      model: selectedMode,
+      providerId: 'local',
+      durationMs,
+      detail: `SVG智能描摹失败: ${selectedMode}模式`,
+    });
     // 退款：SVG描摹失败时退还积分
     if (deductedCredits > 0 && sessionUser) {
       try {

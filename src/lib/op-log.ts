@@ -63,6 +63,7 @@ export const OP_ACTIONS = {
   LANG_EDIT: 'lang_edit',
   AGENT_EDIT: 'agent_edit',
   FONT_DESIGN: 'font_design',
+  FONT_DESIGN_GENERATE: 'font_design_generate',
 
   // 品牌
   BRAND_FACTORY: 'brand_factory',

@@ -7,6 +7,7 @@ import { consumeCredits, refundCredits } from '@/lib/credits';
 import fsSync from 'fs';
 import path from 'path';
 import { validateApiInputs } from '@/lib/api-validator';
+import { logOperation, logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
 
 /**
  * 编辑元素/分层 API - 根据图片元素进行智能分层
@@ -96,8 +97,11 @@ async function resolveImageToBase64(imageUrl: string): Promise<string | null> {
 }
 
 export async function POST(request: NextRequest) {
+  const startTime = Date.now();
   let deductedCredits = 0;
   let sessionUser: any = null;
+  let selectedModel = '';
+  let providerIdUsed = '';
   try {
     const body: SegmentRequest = await request.json();
     // 输入校验
@@ -270,7 +274,16 @@ export async function POST(request: NextRequest) {
       error: '分层模型 API 调用失败。请检查 API 配置是否正确。',
     }, { status: 500 });
   } catch (error) {
+    const durationMs = Date.now() - startTime;
     console.error('Segment elements error:', error);
+    logError(OP_ACTIONS.IMAGE_SEGMENT, error, {
+      userId: sessionUser?.id || 'unknown',
+      userName: sessionUser?.name || 'unknown',
+      model: selectedModel,
+      providerId: providerIdUsed,
+      durationMs,
+      detail: `元素分层失败`,
+    });
     // 退款：元素分层失败时退还积分
     if (deductedCredits > 0 && sessionUser) {
       try {

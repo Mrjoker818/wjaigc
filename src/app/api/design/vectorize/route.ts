@@ -9,6 +9,7 @@ import fsSync from 'fs';
 import path from 'path';
 import sharp from 'sharp';
 import { validateApiInputs } from '@/lib/api-validator';
+import { logOperation, logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
 
 function escapeXml(value: string) {
   return value
@@ -749,8 +750,11 @@ function sanitizeSvgForAI(svg: string): string {
 }
 
 export async function POST(req: NextRequest) {
+  const startTime = Date.now();
   let deductedCredits = 0;
   let sessionUser: any = null;
+  let selectedMode = '';
+  let engineUsed = '';
   try {
     const body = await req.json();
     // 输入校验
@@ -764,6 +768,7 @@ export async function POST(req: NextRequest) {
     const imageUrl = String(body.imageUrl || '');
     const layerId = String(body.layerId || 'layer');
     const mode = normalizeMode(body.mode);
+    selectedMode = mode;
 
     if (!imageUrl) {
       return NextResponse.json({ success: false, error: '缺少 imageUrl' }, { status: 400 });
@@ -938,7 +943,16 @@ export async function POST(req: NextRequest) {
       warnings: ['当前结果保留原图像素，不会伪装成真实矢量路径。'],
     });
   } catch (error) {
+    const durationMs = Date.now() - startTime;
     console.error('[vectorize] Fatal error:', error);
+    logError(OP_ACTIONS.IMAGE_VECTORIZE, error, {
+      userId: sessionUser?.id || 'unknown',
+      userName: sessionUser?.name || 'unknown',
+      model: selectedMode,
+      providerId: engineUsed,
+      durationMs,
+      detail: `图片矢量化失败: mode=${selectedMode}`,
+    });
     // 退款：矢量化失败时退还积分
     if (deductedCredits > 0 && sessionUser) {
       try {

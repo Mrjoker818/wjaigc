@@ -651,7 +651,22 @@ UPSCALE_TIMEOUT_MS=300000
 - `db-storage.ts`: 扩展 `wujie_audit_log` 表（新增 level/error_message/stack_trace/request_data/response_status/duration_ms/model/provider_id/resolution_status 等列）
 
 ### 日志记录范围
-- **自动记录**: 图像生成(generate)、聊天(chat)、图片编辑(image-edit)、语言修图(edit)、视频生成(video/generate)、工作流执行(workflow/execute) 等关键 API 路由
+- **已集成日志的 API 路由（15个）**:
+  - `generate/route.ts` - 图像生成
+  - `chat/route.ts` - AI 聊天
+  - `image-edit/route.ts` - 图片编辑（擦除/蒙版/放大/扩展/去背景）
+  - `edit/route.ts` - 语言修图
+  - `video/generate/route.ts` - 视频生成
+  - `video/extend/route.ts` - 视频延长
+  - `workflow/execute/route.ts` - 工作流执行
+  - `image-to-3d/route.ts` - 图片转3D
+  - `refine-engine/route.ts` - 精修引擎
+  - `agent-edit/route.ts` - Agent编排编辑
+  - `font-design/generate-image/route.ts` - 字境大师图片生成
+  - `brand-ecommerce/route.ts` - 品牌电商图片生成
+  - `design/vectorize/route.ts` - 图片矢量化
+  - `svg-trace/route.ts` - SVG智能描摹
+  - `segment-elements/route.ts` - 元素分层
 - **记录内容**: 操作类型、用户ID、模型/提供商、请求参数(脱敏)、响应状态、耗时、错误信息/堆栈
 - **日志级别**: info(成功操作) / warn(超时/降级) / error(失败/异常)
 
@@ -770,9 +785,9 @@ UPSCALE_TIMEOUT_MS=300000
 
 **P0: 管理员操作日志系统 — 用户操作记录 + AI分析与智能修复**
 
-- 新增 `op-log.ts` 操作日志记录模块：提供 `logOpSuccess` / `logOpError` / `logOpWarn` 快捷函数
+- 新增 `op-log.ts` 操作日志记录模块：提供 `logOperation` / `logError` 函数 + `OP_ACTIONS` 常量（40+操作类型）
 - 扩展 `wujie_audit_log` 数据库表：新增 level/error_message/stack_trace/request_data/response_status/duration_ms/model/provider_id/resolution_status/resolution_detail/resolved_at/resolved_by 列
-- 关键 API 路由自动记录操作日志：generate / chat / image-edit / edit / video/generate / workflow/execute
+- **15个 API 路由集成日志记录**: generate / chat / image-edit / edit / video/generate / video/extend / workflow/execute / image-to-3d / refine-engine / agent-edit / font-design/generate-image / brand-ecommerce / design/vectorize / svg-trace / segment-elements
 - 新增 `/api/admin/op-log` 日志管理 API（GET 查询 + POST 操作：statistics/analyze/resolve/batch_delete/export）
 - AI 日志分析：调用管理员配置的 LLM 模型分析错误日志，给出根因分析和修复建议
 - 智能修复：根据错误类型自动执行修复脚本（重置配额/切换模型/调整参数等）

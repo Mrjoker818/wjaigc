@@ -9,6 +9,7 @@ import { consumeCredits, refundCredits } from '@/lib/credits';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import sharp from 'sharp';
 import { validateApiInputs } from '@/lib/api-validator';
+import { logOperation, logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -488,8 +489,11 @@ function resolveDimensions(aspectRatio: string): { width: number; height: number
 // ─── POST Handler ──────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
+  const startTime = Date.now();
   let deductedCredits = 0;
   let sessionUser: any = null;
+  let selectedModel = '';
+  let providerIdUsed = '';
   try {
     const body = await request.json();
     // 输入校验
@@ -1120,7 +1124,17 @@ ${effectiveStyle ? `风格修饰: ${effectiveStyle}` : ''}
 
     return NextResponse.json({ error: '未知操作' }, { status: 400 });
   } catch (err: unknown) {
+    const durationMs = Date.now() - startTime;
     const msg = err instanceof Error ? err.message : '服务器错误';
+    console.error('[brand-ecommerce] Error:', err);
+    logError(OP_ACTIONS.BRAND_ECOMMERCE, err, {
+      userId: sessionUser?.id || 'unknown',
+      userName: sessionUser?.name || 'unknown',
+      model: selectedModel,
+      providerId: providerIdUsed,
+      durationMs,
+      detail: `品牌电商图片生成失败: ${msg.substring(0, 100)}`,
+    });
     // 退款：品牌电商生成失败时退还积分
     if (deductedCredits > 0 && sessionUser) {
       try {

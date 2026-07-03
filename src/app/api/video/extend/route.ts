@@ -6,6 +6,7 @@
  * 异步提交 + 轮询模式，复用 task-registry
  */
 
+import { logOperation, logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
 import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForFeature, findProviderForModel, findProviderById } from '@/lib/server-api-config';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
@@ -23,8 +24,11 @@ import {
 export const maxDuration = 300; // 5 min timeout
 
 export async function POST(request: NextRequest) {
+  const startTime = Date.now();
   let deductedCredits = 0;
   let sessionUser: any = null;
+  let model = '';
+  let providerId = '';
   try {
     const body = await request.json();
     // 输入校验
@@ -287,7 +291,17 @@ export async function POST(request: NextRequest) {
       }
     })();
 
-    // 7. 立即返回任务ID
+    // 7. 立即返回任务ID（成功）
+    logOperation({
+      userId: sessionUser?.id || 'anonymous',
+      userName: sessionUser?.name || '匿名用户',
+      action: OP_ACTIONS.VIDEO_EXTEND,
+      level: 'info',
+      detail: `视频延长任务已提交: ${taskId}`,
+      model,
+      providerId,
+      durationMs: Date.now() - startTime,
+    });
     return NextResponse.json({
       taskId,
       status: 'queued',
@@ -299,6 +313,14 @@ export async function POST(request: NextRequest) {
     });
   } catch (err: any) {
     console.error('[video/extend] Error:', err);
+    // 操作日志记录错误
+    logError(OP_ACTIONS.VIDEO_EXTEND, err, {
+      userId: sessionUser?.id || 'anonymous',
+      userName: sessionUser?.name || '匿名用户',
+      model,
+      providerId,
+      durationMs: Date.now() - startTime,
+    });
     // 退款：视频延长失败时退还积分
     if (deductedCredits > 0 && sessionUser) {
       try {

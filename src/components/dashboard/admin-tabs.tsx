@@ -105,10 +105,14 @@ function getUserLastLogin(u: AdminUser): string { return u.last_login ? formatDa
 function getUserEmail(u: AdminUser): string { return u.email ?? '-'; }
 function getUserPermissions(u: AdminUser): Record<string, boolean> { return u.apiPermissions ?? {}; }
 
-function formatDateTime(iso: string): string {
-  if (!iso) return '-';
-  const d = new Date(iso);
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+function formatDateTime(ts: string | number): string {
+  if (!ts) return '-';
+  // created_at 存储为毫秒时间戳，需要正确处理
+  const numTs = typeof ts === 'string' ? (isNaN(Number(ts)) ? ts : Number(ts)) : ts;
+  const d = typeof numTs === 'number' ? new Date(numTs) : new Date(numTs);
+  if (isNaN(d.getTime())) return '-';
+  // 使用本地时区显示
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
 }
 
 /* ── Sub-components matching prototype exactly ── */
