@@ -8676,17 +8676,6 @@ export function InfiniteCanvas({
                 <p>左键选择 · 滚轮缩放 · 空格+拖动平移 · 右键菜单</p>
                 <p>底部工具栏：图像生成 · 图转3D工厂 · 修图 · Agent编排 · 字境大师 · 精修引擎 · 品牌电商</p>
               </div>
-              <div className="flex items-center justify-center gap-3 pointer-events-auto">
-                <button onClick={() => setShowHelpModal('instructions')} className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-all border ${isMonochrome ? 'text-blue-600 border-blue-200 hover:text-blue-700 hover:border-blue-400' : 'text-gold-muted border-white/[0.14] hover:text-gold hover:border-gold/40'}`}>
-                  <Info size={14} /> 操作说明
-                </button>
-                <button onClick={() => setShowHelpModal('updates')} className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-all border ${isMonochrome ? 'text-blue-600 border-blue-200 hover:text-blue-700 hover:border-blue-400' : 'text-gold-muted border-white/[0.14] hover:text-gold hover:border-gold/40'}`}>
-                  <FileText size={14} /> 更新内容
-                </button>
-                <a href="/api/diagnostics/export" download className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-all border ${isMonochrome ? 'text-blue-600 border-blue-200 hover:text-blue-700 hover:border-blue-400' : 'text-gold-muted border-white/[0.14] hover:text-gold hover:border-gold/40'}`}>
-                  <Download size={14} /> 导出诊断
-                </a>
-              </div>
             </div>
           </div>
         )}
@@ -15245,39 +15234,6 @@ export function InfiniteCanvas({
           </div>
         );
       })()}
-
-        {/* ── Left-bottom: Version + Diagnostics (always visible) ── */}
-        <div className="absolute bottom-5 left-5 z-50 flex items-center gap-2 pointer-events-auto">
-          <span className={`text-xs font-mono select-none ${isMonochrome ? 'text-gray-400' : 'text-gold-muted/60'}`}>
-            v3.6.0
-          </span>
-          <a
-            href="/api/diagnostics/export"
-            download
-            className={`flex items-center gap-1 px-2.5 py-1 text-xs rounded-full transition-all ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100 border border-gray-200' : 'text-gold-muted/70 hover:text-gold hover:bg-white/10 border border-white/10'}`}
-            title="导出诊断信息"
-          >
-            <Download size={12} /> 诊断
-          </a>
-        </div>
-
-        {/* ── Right-bottom: Help buttons (always visible) ── */}
-        <div className="absolute bottom-5 right-5 z-50 flex items-center gap-2 pointer-events-auto">
-          <button
-            onClick={() => setShowHelpModal('instructions')}
-            className={`flex items-center gap-1 px-2.5 py-1 text-xs rounded-full transition-all ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100 border border-gray-200' : 'text-gold-muted/70 hover:text-gold hover:bg-white/10 border border-white/10'}`}
-            title="操作说明"
-          >
-            <Info size={12} /> 说明
-          </button>
-          <button
-            onClick={() => setShowHelpModal('updates')}
-            className={`flex items-center gap-1 px-2.5 py-1 text-xs rounded-full transition-all ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100 border border-gray-200' : 'text-gold-muted/70 hover:text-gold hover:bg-white/10 border border-white/10'}`}
-            title="更新内容"
-          >
-            <FileText size={12} /> 更新
-          </button>
-        </div>
 
         {/* Floating pill toolbar - semi-collapsed, expand on hover */}
       <div
