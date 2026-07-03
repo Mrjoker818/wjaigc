@@ -296,7 +296,7 @@ export async function POST(request: NextRequest) {
     }
     const candidates: VisionCandidate[] = [];
 
-    const allProviders = (await getApiProviders()).filter(p => p.isEnabled);
+    const allProviders = (await getApiProviders()).filter(p => p.isEnabled && p.baseUrl && p.apiKey);
 
     if (resolvedProviderId) {
       // User specified a provider — use it directly

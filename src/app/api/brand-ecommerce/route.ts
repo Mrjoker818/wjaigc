@@ -982,7 +982,7 @@ export async function POST(request: NextRequest) {
       const models = await getPublicModels('image');
       const { getPublicApiProviders } = await import('@/lib/server-api-config');
       const providers = await getPublicApiProviders();
-      const imageProviders = providers.filter(p => p.isEnabled && (p.modelType === 'image' || p.modelType === 'universal' || p.modelType === 'general'));
+      const imageProviders = providers.filter(p => p.isEnabled && p.baseUrl && (p.modelType === 'image' || p.modelType === 'universal' || p.modelType === 'general'));
       return NextResponse.json({ success: true, models, providers: imageProviders });
     }
 
@@ -991,7 +991,7 @@ export async function POST(request: NextRequest) {
       const models = await getPublicModels('chat');
       const { getPublicApiProviders } = await import('@/lib/server-api-config');
       const providers = await getPublicApiProviders();
-      const chatProviders = providers.filter(p => p.isEnabled && (p.modelType === 'chat' || p.modelType === 'universal' || p.modelType === 'general'));
+      const chatProviders = providers.filter(p => p.isEnabled && p.baseUrl && (p.modelType === 'chat' || p.modelType === 'universal' || p.modelType === 'general'));
       return NextResponse.json({ success: true, models, providers: chatProviders });
     }
 

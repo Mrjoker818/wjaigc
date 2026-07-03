@@ -773,7 +773,7 @@ export async function refreshApiProvider(providerId: string): Promise<ApiProvide
 
 export async function findProviderForModel(modelId: string, modelType?: ApiKind, preferredProviderId?: string): Promise<ApiProvider | null> {
   const providers = await getApiProviders();
-  const enabled = providers.filter(provider => provider.isEnabled);
+  const enabled = providers.filter(provider => provider.isEnabled && provider.baseUrl && provider.apiKey);
   const isFlexibleType = !modelType || modelType === 'universal' || modelType === 'general';
   const matchesType = (p: ApiProvider) => isFlexibleType || p.modelType === modelType || p.modelType === 'universal' || p.modelType === 'general';
 
@@ -904,7 +904,7 @@ export async function getPublicModels(modelType?: ApiKind): Promise<ModelInfo[]>
   const isGeneralQuery = !modelType || modelType === 'universal' || modelType === 'general';
 
   return providers
-    .filter(provider => provider.isEnabled && (isGeneralQuery || provider.modelType === modelType || provider.modelType === 'universal' || provider.modelType === 'general' || (modelType === 'image' && provider.modelType === 'imageEdit')))
+    .filter(provider => provider.isEnabled && provider.baseUrl && provider.apiKey && (isGeneralQuery || provider.modelType === modelType || provider.modelType === 'universal' || provider.modelType === 'general' || (modelType === 'image' && provider.modelType === 'imageEdit')))
     .flatMap(provider => {
       const selected = new Set(provider.selectedModels || []);
       const discovered = provider.discoveredModels || [];

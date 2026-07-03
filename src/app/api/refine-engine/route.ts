@@ -910,7 +910,7 @@ export async function POST(request: NextRequest) {
     if (action === 'models') {
       const models = await getPublicModels('image');
       const providers = await getPublicApiProviders();
-      const imageProviders = providers.filter(p => p.isEnabled && (p.modelType === 'image' || p.modelType === 'universal' || p.modelType === 'general'));
+      const imageProviders = providers.filter(p => p.isEnabled && p.baseUrl && p.apiKey && (p.modelType === 'image' || p.modelType === 'universal' || p.modelType === 'general'));
       return NextResponse.json({ success: true, models, providers: imageProviders });
     }
 

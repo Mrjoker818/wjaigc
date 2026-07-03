@@ -118,11 +118,23 @@ export async function POST(request: NextRequest) {
       const start = Date.now();
       try {
         const endpoint = profile.defaultEndpoint === '/images/edits' ? '/images/edits' : '/images/generations';
+        // 使用提供商的真实模型名而非 'test-verify'，避免 API 网关找不到模型返回 503
+        const realModel = Array.isArray(body.selectedModels) && body.selectedModels.length > 0
+          ? body.selectedModels[0]
+          : (body.providerId ? undefined : 'test-verify');
+        // 如果有 providerId，从数据库读取该提供商的第一个 selected model
+        let testModel = realModel || 'test-verify';
+        if (!realModel && body.providerId) {
+          const provider = await getApiProvider(body.providerId);
+          if (provider?.selectedModels && provider.selectedModels.length > 0) {
+            testModel = provider.selectedModels[0];
+          }
+        }
         const resp = await fetchWithV1Retry(cleanBaseUrl, endpoint, {
           method: 'POST',
           headers,
           body: JSON.stringify({
-            model: 'test-verify',
+            model: testModel,
             prompt: 'test',
             n: 1,
             size: '1024x1024',
@@ -156,6 +168,15 @@ export async function POST(request: NextRequest) {
             endpoint,
             status: 'pass',
             detail: `端点可达 (${resp.status})，需配置正确模型名`,
+            latencyMs,
+          });
+        } else if (resp.status === 502 || resp.status === 503) {
+          // 网关错误/服务不可用 — 端点可达但后端暂时不可用（模型路由失败/过载）
+          tests.push({
+            name: '图片生成',
+            endpoint,
+            status: 'warn',
+            detail: `端点可达但后端不可用 (${resp.status})，可能是模型路由失败或服务过载`,
             latencyMs,
           });
         } else if (resp.status === 429) {
@@ -221,6 +242,7 @@ export async function POST(request: NextRequest) {
     {
       const start = Date.now();
       try {
+        // 对于 chat 端点，使用 'test-verify' 通常可以（400/422 表示端点可达）
         const resp = await fetchWithV1Retry(cleanBaseUrl, '/chat/completions', {
           method: 'POST',
           headers,

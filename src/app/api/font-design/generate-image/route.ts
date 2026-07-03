@@ -183,7 +183,7 @@ export async function POST(request: NextRequest) {
     const { getApiProviders } = await import('@/lib/server-api-config');
     const allProviders = await getApiProviders();
     const enabledImageProviders = allProviders.filter(p => {
-      if (!p.isEnabled) return false;
+      if (!p.isEnabled || !p.baseUrl || !p.apiKey) return false;
       const mt = p.modelType || '';
       return mt === 'image' || mt === 'universal' || mt === 'general';
     });
