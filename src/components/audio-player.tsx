@@ -196,13 +196,13 @@ export function AudioPlayer({
             {/* 播放/暂停按钮 */}
             <button
               onClick={togglePlay}
-              className="flex-shrink-0 w-10 h-10 rounded-full bg-primary flex items-center justify-center hover:bg-primary/80 transition-colors"
+              className="flex-shrink-0 min-w-[44px] min-h-[44px] w-11 h-11 rounded-full bg-primary flex items-center justify-center hover:bg-primary/80 transition-colors focus:outline-none focus:ring-2 focus:ring-primary/50"
               aria-label={isPlaying ? '暂停' : '播放'}
             >
               {isPlaying ? (
-                <Pause className="w-5 h-5 text-white" />
+                <Pause className="w-5 h-5 text-white" aria-hidden="true" />
               ) : (
-                <Play className="w-5 h-5 text-white ml-0.5" />
+                <Play className="w-5 h-5 text-white ml-0.5" aria-hidden="true" />
               )}
             </button>
 
@@ -214,10 +214,10 @@ export function AudioPlayer({
             {/* 重新播放 */}
             <button
               onClick={handleRestart}
-              className="flex-shrink-0 w-8 h-8 rounded-full bg-muted flex items-center justify-center hover:bg-muted/80 transition-colors"
+              className="flex-shrink-0 min-w-[44px] min-h-[44px] w-11 h-11 rounded-full bg-muted flex items-center justify-center hover:bg-muted/80 transition-colors focus:outline-none focus:ring-2 focus:ring-primary/50"
               aria-label="重新播放"
             >
-              <RotateCcw className="w-4 h-4 text-muted-foreground" />
+              <RotateCcw className="w-4 h-4 text-muted-foreground" aria-hidden="true" />
             </button>
           </div>
 
@@ -246,13 +246,13 @@ export function AudioPlayer({
             <div className="flex items-center gap-2">
               <button
                 onClick={toggleMute}
-                className="w-8 h-8 rounded-full bg-muted/50 flex items-center justify-center hover:bg-muted transition-colors"
+                className="min-w-[44px] min-h-[44px] w-11 h-11 rounded-full bg-muted/50 flex items-center justify-center hover:bg-muted transition-colors focus:outline-none focus:ring-2 focus:ring-primary/50"
                 aria-label={isMuted ? '取消静音' : '静音'}
               >
                 {isMuted ? (
-                  <VolumeX className="w-4 h-4 text-muted-foreground" />
+                  <VolumeX className="w-4 h-4 text-muted-foreground" aria-hidden="true" />
                 ) : (
-                  <Volume2 className="w-4 h-4 text-muted-foreground" />
+                  <Volume2 className="w-4 h-4 text-muted-foreground" aria-hidden="true" />
                 )}
               </button>
               <input
@@ -270,10 +270,10 @@ export function AudioPlayer({
             {/* 下载按钮 */}
             <button
               onClick={handleDownload}
-              className="w-8 h-8 rounded-full bg-muted/50 flex items-center justify-center hover:bg-muted transition-colors"
+              className="min-w-[44px] min-h-[44px] w-11 h-11 rounded-full bg-muted/50 flex items-center justify-center hover:bg-muted transition-colors focus:outline-none focus:ring-2 focus:ring-primary/50"
               aria-label="下载音频"
             >
-              <Download className="w-4 h-4 text-muted-foreground" />
+              <Download className="w-4 h-4 text-muted-foreground" aria-hidden="true" />
             </button>
           </div>
         </div>
@@ -283,10 +283,10 @@ export function AudioPlayer({
       {onClose && (
         <button
           onClick={onClose}
-          className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-muted flex items-center justify-center hover:bg-destructive transition-colors"
-          aria-label="关闭"
+          className="absolute -top-2 -right-2 min-w-[44px] min-h-[44px] w-11 h-11 rounded-full bg-muted flex items-center justify-center hover:bg-destructive transition-colors focus:outline-none focus:ring-2 focus:ring-destructive/50"
+          aria-label="关闭播放器"
         >
-          <span className="text-xs">×</span>
+          <span className="text-sm" aria-hidden="true">×</span>
         </button>
       )}
     </div>

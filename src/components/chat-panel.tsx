@@ -2,7 +2,8 @@
 
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Bot, Send, Sparkles, Copy, Check, Trash2, Loader2, Eye, EyeOff, Wand2, User, Upload, X, Image as ImageIcon, Languages, Settings, Plug, Plus, History, FolderOpen, MessageSquare, Bookmark, BookmarkCheck, Lightbulb, Zap, ArrowRight, Palette, Target, Sliders, Download, AlertCircle, LocateFixed, RotateCcw, FileText, Cpu, ChevronRight, AtSign } from 'lucide-react';
+import { Bot, Send, Sparkles, Copy, Check, Trash2, Loader2, Eye, EyeOff, Wand2, User, Upload, X, Image as ImageIcon, Languages, Settings, Plug, Plus, History, FolderOpen, MessageSquare, Bookmark, BookmarkCheck, Lightbulb, Zap, ArrowRight, Palette, Target, Sliders, Download, AlertCircle, LocateFixed, RotateCcw, FileText, Cpu, ChevronRight, AtSign, ThumbsUp, ThumbsDown } from 'lucide-react';
+import { toast } from 'sonner';
 import { UserManager } from '@/lib/user-manager';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -640,8 +641,9 @@ function createMarkdownComponents(isGold: boolean, onAddImage?: (url: string) =>
           />
           {onAddImage && (
             <button
+              aria-label="添加到画布"
               onClick={(e) => { e.stopPropagation(); onAddImage(imgSrc); }}
-              className="absolute bottom-2 right-2 opacity-0 group-hover/img:opacity-100 transition-opacity bg-black/60 text-white text-xs px-2 py-1 rounded flex items-center gap-1"
+              className="min-h-[44px] absolute bottom-2 right-2 opacity-0 group-hover/img:opacity-100 transition-opacity bg-black/60 text-white text-xs px-2 py-1 rounded flex items-center gap-1"
             >
               <Plus size={12} /> 添加到画布
             </button>
@@ -678,8 +680,9 @@ function createMarkdownComponents(isGold: boolean, onAddImage?: (url: string) =>
                   />
                   {onAddImage && (
                     <button
+                      aria-label="添加到画布"
                       onClick={(e) => { e.stopPropagation(); onAddImage(url); }}
-                      className="absolute bottom-2 right-2 opacity-0 group-hover/img:opacity-100 transition-opacity bg-black/60 text-white text-xs px-2 py-1 rounded flex items-center gap-1"
+                      className="min-h-[44px] absolute bottom-2 right-2 opacity-0 group-hover/img:opacity-100 transition-opacity bg-black/60 text-white text-xs px-2 py-1 rounded flex items-center gap-1"
                     >
                       <Plus size={12} /> 添加到画布
                     </button>
@@ -1238,7 +1241,7 @@ ${outputSpec || '1. 设计理念（200字内）\n2. 详细方案描述\n3. 材�
               {editingAgent ? '编辑智能体' : '新建智能体'}
             </span>
           </div>
-          <button onClick={onClose} className={`p-1 rounded-md transition-colors ${isGold ? 'hover:bg-white/[0.04] text-gold-muted' : 'hover:bg-gray-100 text-gray-400'}`}>
+          <button aria-label="关闭" onClick={onClose} className={`p-1 min-h-[44px] min-w-[44px] rounded-md transition-colors ${isGold ? 'hover:bg-white/[0.04] text-gold-muted' : 'hover:bg-gray-100 text-gray-400'}`}>
             <X size={16} />
           </button>
         </div>
@@ -4707,8 +4710,9 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
         <div className="px-4 pt-3 flex items-center justify-between">
           <div className={`relative flex items-center ${isGold ? 'bg-white/[0.04] p-0.5 rounded-lg' : 'bg-gray-100 p-0.5 rounded-lg'}`}>
             <button
+              aria-label="智能对话"
               onClick={() => setActiveTab('chat')}
-              className={`relative z-10 px-2.5 py-1 text-xs font-medium rounded-md transition-all flex items-center gap-1 whitespace-nowrap ${
+              className={`relative z-10 px-2.5 py-1 min-h-[36px] text-xs font-medium rounded-md transition-all flex items-center gap-1 whitespace-nowrap ${
                 activeTab === 'chat'
                   ? isGold
                     ? 'bg-gold/15 text-gold shadow-sm'
@@ -4722,8 +4726,9 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               智能对话
             </button>
             <button
+              aria-label="提示词大师"
               onClick={() => setActiveTab('optimizer')}
-              className={`relative z-10 px-2.5 py-1 text-xs font-medium rounded-md transition-all flex items-center gap-1 whitespace-nowrap ${
+              className={`relative z-10 px-2.5 py-1 min-h-[36px] text-xs font-medium rounded-md transition-all flex items-center gap-1 whitespace-nowrap ${
                 activeTab === 'optimizer'
                   ? isGold
                     ? 'bg-gold/15 text-gold shadow-sm'
@@ -4737,8 +4742,9 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               提示词大师
             </button>
             <button
+              aria-label="Skills技能库"
               onClick={() => setActiveTab('skills')}
-              className={`relative z-10 px-2.5 py-1 text-xs font-medium rounded-md transition-all flex items-center gap-1 whitespace-nowrap ${
+              className={`relative z-10 px-2.5 py-1 min-h-[36px] text-xs font-medium rounded-md transition-all flex items-center gap-1 whitespace-nowrap ${
                 activeTab === 'skills'
                   ? isGold
                     ? 'bg-gold/15 text-gold shadow-sm'
@@ -5568,9 +5574,39 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                     </div>
                   )}
                   <div className={`flex items-center gap-2 mt-0.5 px-1 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    {/* AI反馈按钮 - 仅对assistant消息显示 */}
+                    {message.role === 'assistant' && (
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => {
+                            // 记录正面反馈
+                            console.log(`Positive feedback for message ${message.id}`);
+                            toast.success('感谢您的正面反馈！');
+                          }}
+                          className={`text-xs ${themeClasses.textMuted} hover:text-green-500 transition-colors p-1.5 rounded hover:bg-green-500/10 min-h-[32px] min-w-[32px] flex items-center justify-center`}
+                          aria-label="好评"
+                          title="好评"
+                        >
+                          <ThumbsUp size={14} />
+                        </button>
+                        <button
+                          onClick={() => {
+                            // 记录负面反馈
+                            console.log(`Negative feedback for message ${message.id}`);
+                            toast.error('感谢您的反馈，我们会改进');
+                          }}
+                          className={`text-xs ${themeClasses.textMuted} hover:text-red-500 transition-colors p-1.5 rounded hover:bg-red-500/10 min-h-[32px] min-w-[32px] flex items-center justify-center`}
+                          aria-label="差评"
+                          title="差评"
+                        >
+                          <ThumbsDown size={14} />
+                        </button>
+                      </div>
+                    )}
                     <button
                       onClick={() => copyToClipboard(message.content, message.id)}
-                      className={`text-xs ${themeClasses.textMuted} hover:${themeClasses.text} transition-colors flex items-center gap-0.5`}
+                      className={`text-xs ${themeClasses.textMuted} hover:${themeClasses.text} transition-colors flex items-center gap-0.5 min-h-[32px] px-2`}
+                      aria-label="复制内容"
                     >
                       {copiedId === message.id ? <Check size={12} /> : <Copy size={12} />}
                       {copiedId === message.id ? '已复制' : '复制'}

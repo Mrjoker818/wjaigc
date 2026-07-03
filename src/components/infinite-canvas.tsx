@@ -8377,8 +8377,9 @@ export function InfiniteCanvas({
             <div className={ltDividerCls} />
             {/* Workspace / Dashboard */}
             <button
+              aria-label="工作台"
               onClick={onSwitchToDashboard}
-              className={ltExpandedBtnCls}
+              className={`min-h-[44px] ${ltExpandedBtnCls}`}
               title="工作台"
             >
               <LayoutDashboard className={`h-3.5 w-3.5 ${mIcon.layoutGrid}`} />
@@ -8386,10 +8387,11 @@ export function InfiniteCanvas({
             </button>
             {/* OMP Toggle */}
             <button
+              aria-label="Oh My Prompt - 提示词管理与图片识词"
               onClick={() => {
                 if (onToggleVisionPrompt) onToggleVisionPrompt();
               }}
-              className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              className={`min-h-[44px] flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all ${
                 ohMyPromptOpen
                   ? ltActiveBtnCls
                   : ltExpandedBtnCls
@@ -8404,8 +8406,9 @@ export function InfiniteCanvas({
             </button>
             {/* Ctrl+Click Reference Fusion Toggle */}
             <button
+              aria-label="Ctrl+Click 画布图片选择参考融合"
               onClick={() => setShowRefFusion(prev => !prev)}
-              className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              className={`min-h-[44px] flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all ${
                 showRefFusion
                   ? ltActiveBtnCls
                   : ltExpandedBtnCls
@@ -8424,8 +8427,9 @@ export function InfiniteCanvas({
             <div className={ltSectionTitleCls}>模式切换</div>
             {/* Settings */}
             <button
+              aria-label="设置"
               onClick={onToggleSettings}
-              className={ltExpandedBtnCls}
+              className={`min-h-[44px] ${ltExpandedBtnCls}`}
               title="设置"
             >
               <Settings className={`h-3.5 w-3.5 ${mIcon.settings}`} />
@@ -8433,8 +8437,9 @@ export function InfiniteCanvas({
             </button>
             {/* UI Theme Toggle */}
             <button
+              aria-label="UI 主题切换"
               onClick={onToggleTheme}
-              className={ltExpandedBtnCls}
+              className={`min-h-[44px] ${ltExpandedBtnCls}`}
               title="UI 主题切换"
             >
               {isMonochrome ? <Palette className={`h-3.5 w-3.5 ${mIcon.palette}`} /> : <Contrast className={`h-3.5 w-3.5 ${mIcon.contrast}`} />}
@@ -8442,8 +8447,9 @@ export function InfiniteCanvas({
             </button>
             {/* User Manager */}
             <button
+              aria-label="用户管理"
               onClick={onToggleUserManager}
-              className={ltExpandedBtnCls}
+              className={`min-h-[44px] ${ltExpandedBtnCls}`}
               title="用户管理"
             >
               <Users className={`h-3.5 w-3.5 ${mIcon.users}`} />
@@ -8451,8 +8457,9 @@ export function InfiniteCanvas({
             </button>
             {/* Project Data */}
             <button
+              aria-label="项目数据"
               onClick={onToggleProjectData}
-              className={ltExpandedBtnCls}
+              className={`min-h-[44px] ${ltExpandedBtnCls}`}
               title="项目数据"
             >
               <FolderOpen className={`h-3.5 w-3.5 ${mIcon.folder}`} />
@@ -8460,8 +8467,9 @@ export function InfiniteCanvas({
             </button>
             {isAdmin && (
               <button
+                aria-label="管理员系统"
                 onClick={onToggleAdminSystem}
-                className={ltAdminBtnCls}
+                className={`min-h-[44px] ${ltAdminBtnCls}`}
                 title="管理员系统"
               >
                 <Shield className={`h-3.5 w-3.5 ${mIcon.shield}`} />
@@ -8470,8 +8478,9 @@ export function InfiniteCanvas({
             )}
             {/* Favorites */}
             <button
+              aria-label="收藏夹"
               onClick={onToggleFavorites}
-              className={ltExpandedBtnCls}
+              className={`min-h-[44px] ${ltExpandedBtnCls}`}
               title="收藏夹"
             >
               <Heart className={`h-3.5 w-3.5 ${mIcon.heart}`} />
@@ -8479,8 +8488,9 @@ export function InfiniteCanvas({
             </button>
             {/* Prompt Templates */}
             <button
+              aria-label="提示词模板"
               onClick={onTogglePromptTemplate}
-              className={ltExpandedBtnCls}
+              className={`min-h-[44px] ${ltExpandedBtnCls}`}
               title="提示词模板"
             >
               <FileText className={`h-3.5 w-3.5 ${mIcon.fileText}`} />
@@ -8488,8 +8498,9 @@ export function InfiniteCanvas({
             </button>
             {/* Help */}
             <button
+              aria-label="使用说明"
               onClick={onToggleHelp}
-              className={ltExpandedBtnCls}
+              className={`min-h-[44px] ${ltExpandedBtnCls}`}
               title="使用说明"
             >
               <HelpCircle className={`h-3.5 w-3.5 ${mIcon.helpCircle}`} />
@@ -12089,7 +12100,7 @@ export function InfiniteCanvas({
                         onMouseEnter={() => setAnnAtHighlightIdx(i)}
                       >
                         <div className="w-8 h-8 rounded overflow-hidden shrink-0 border border-white/10">
-                          <img src={item.url} alt="" className="w-full h-full object-cover" />
+                          <img src={item.url} alt={item.label || '参考图片'} className="w-full h-full object-cover" />
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className={`text-xs font-medium truncate ${isMonochrome ? 'text-gray-800' : 'text-text-bright'}`}>{item.label}</div>
@@ -13736,7 +13747,7 @@ export function InfiniteCanvas({
                 {videoDubTarget.videoUrl ? (
                   <video src={videoDubTarget.videoUrl} className="w-full h-full object-contain" controls muted />
                 ) : (
-                  <img src={videoDubTarget.url} className="w-full h-full object-contain" />
+                  <img src={videoDubTarget.url} alt="视频配音目标图片" className="w-full h-full object-contain" />
                 )}
               </div>
               <div className="space-y-2">
@@ -14074,9 +14085,10 @@ export function InfiniteCanvas({
                       </svg>
                     </button>
                     <button
-                      className="p-1 rounded-md transition-colors"
+                      className="p-2 min-h-[44px] min-w-[44px] rounded-md transition-colors"
                       onClick={(e) => { e.stopPropagation(); deleteHexCubeGroup(hcg.id); }}
                       title="关闭"
+                      aria-label="关闭"
                       style={{ color: isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)' }}
                       onMouseEnter={e => (e.currentTarget.style.color = '#ef4444')}
                       onMouseLeave={e => (e.currentTarget.style.color = isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)')}
@@ -15040,7 +15052,8 @@ export function InfiniteCanvas({
               })()}
               <button
                 onClick={() => setCanvasGenMinimized(!canvasGenMinimized)}
-                className="p-1 rounded-md transition-colors"
+                className="p-2 min-h-[44px] min-w-[44px] rounded-md transition-colors"
+                aria-label="最小化"
                 style={{ color: isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)' }}
                 onMouseEnter={e => (e.currentTarget.style.color = isMonochrome ? '#000' : '#fff')}
                 onMouseLeave={e => (e.currentTarget.style.color = isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)')}
@@ -15049,7 +15062,8 @@ export function InfiniteCanvas({
               </button>
               <button
                 onClick={handleOpenCanvasGenerator}
-                className="p-1 rounded-md transition-colors"
+                className="p-2 min-h-[44px] min-w-[44px] rounded-md transition-colors"
+                aria-label="关闭"
                 style={{ color: isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)' }}
                 onMouseEnter={e => (e.currentTarget.style.color = isMonochrome ? '#000' : '#fff')}
                 onMouseLeave={e => (e.currentTarget.style.color = isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)')}
@@ -15274,7 +15288,8 @@ export function InfiniteCanvas({
       >
         {/* ── Center: Main function buttons (always visible) ── */}
         <button
-          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 ${isMonochrome ? `${mIcon.mousePointer} hover:text-gray-700 hover:bg-gray-100` : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
+          aria-label="选择工具"
+          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 min-w-[44px] min-h-[44px] ${isMonochrome ? `${mIcon.mousePointer} hover:text-gray-700 hover:bg-gray-100` : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
           title="选择工具"
         >
           <MousePointer2 className="h-4 w-4" />
@@ -15282,7 +15297,8 @@ export function InfiniteCanvas({
         </button>
 
         <button
-          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 ${
+          aria-label="抓手工具"
+          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 min-w-[44px] min-h-[44px] ${
             isPanning || isSpacePressed
               ? (isMonochrome ? 'text-blue-600 bg-blue-50 ring-1 ring-blue-500/30' : 'text-text-bright bg-white/15 ring-1 ring-gold/30')
               : (isMonochrome ? `text-gray-500 hover:text-gray-700 hover:bg-gray-100` : 'text-gold-muted hover:text-text-bright hover:bg-white/10')
@@ -15306,8 +15322,9 @@ export function InfiniteCanvas({
 
         <input ref={uploadFileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleCanvasImageUpload} />
         <button
+          aria-label="图片上传"
           onClick={() => uploadFileInputRef.current?.click()}
-          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
+          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 min-w-[44px] min-h-[44px] ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
           title="图片上传"
         >
           <Upload className={`h-4 w-4 ${mIcon.upload}`} />
@@ -15318,8 +15335,9 @@ export function InfiniteCanvas({
 
         {/* Image Generator - gold accent */}
         <button
+          aria-label="图像生成器"
           onClick={handleOpenCanvasGenerator}
-          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] shadow-lg relative group hover:scale-125 active:scale-90 ${showCanvasGenerator ? (isMonochrome ? 'bg-gradient-to-r from-blue-500 to-indigo-500 text-white ring-2 ring-blue-500/50' : 'bg-gradient-to-r from-gold to-gold-dark text-black ring-2 ring-gold/50') : (isMonochrome ? 'bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-400 hover:to-indigo-400 text-white' : 'bg-gradient-to-r from-gold to-gold-dark hover:from-gold-light hover:to-gold text-black')}`}
+          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] shadow-lg relative group hover:scale-125 active:scale-90 min-w-[44px] min-h-[44px] ${showCanvasGenerator ? (isMonochrome ? 'bg-gradient-to-r from-blue-500 to-indigo-500 text-white ring-2 ring-blue-500/50' : 'bg-gradient-to-r from-gold to-gold-dark text-black ring-2 ring-gold/50') : (isMonochrome ? 'bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-400 hover:to-indigo-400 text-white' : 'bg-gradient-to-r from-gold to-gold-dark hover:from-gold-light hover:to-gold text-black')}`}
           title="图像生成器"
         >
           <Sparkles className="h-4 w-4" />
@@ -15330,8 +15348,9 @@ export function InfiniteCanvas({
 
         {/* 图转3D工厂 - always visible */}
         <button
+          aria-label="图转3D工厂"
           onClick={() => handleOpen3D(true)}
-          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 ${show3DModal ? (isMonochrome ? 'text-indigo-600 bg-indigo-50 ring-2 ring-indigo-500/50' : 'text-text-bright bg-gold/20 ring-2 ring-gold/40') : (isMonochrome ? 'text-indigo-500 hover:text-indigo-600 hover:bg-indigo-50' : 'text-gold-muted hover:text-gold-light hover:bg-gold/10')}`}
+          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 min-w-[44px] min-h-[44px] ${show3DModal ? (isMonochrome ? 'text-indigo-600 bg-indigo-50 ring-2 ring-indigo-500/50' : 'text-text-bright bg-gold/20 ring-2 ring-gold/40') : (isMonochrome ? 'text-indigo-500 hover:text-indigo-600 hover:bg-indigo-50' : 'text-gold-muted hover:text-gold-light hover:bg-gold/10')}`}
           title="图转3D工厂"
         >
           <BoxIcon className={`h-4 w-4 ${isMonochrome ? 'text-indigo-500' : ''}`} />
@@ -15348,8 +15367,9 @@ export function InfiniteCanvas({
 
           {/* Language Edit */}
           <button
+            aria-label="语言修图"
             onClick={() => { onEditImage?.(null); }}
-            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
+            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 min-w-[44px] min-h-[44px] ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
             title="语言修图"
           >
             <Pencil className={`h-4 w-4 ${mIcon.pencil}`} />
@@ -15358,8 +15378,9 @@ export function InfiniteCanvas({
 
           {/* Agent Edit */}
           <button
+            aria-label="Agent编排"
             onClick={() => { setAgentEditImage(null); setShowAgentEditor(true); }}
-            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
+            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 min-w-[44px] min-h-[44px] ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
             title="Agent编排"
           >
             <Bot className={`h-4 w-4 ${mIcon.bot}`} />
