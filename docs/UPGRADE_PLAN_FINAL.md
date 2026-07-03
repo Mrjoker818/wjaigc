@@ -1,6 +1,6 @@
 # 无界AI升级计划（最终版）
 
-> 基于 Planning 技能方法论制定 | 方案A：渐进式升级 | 排除GPU依赖功能
+> 基于 Planning 技能方法论制定 | 方案A：渐进式升级 | 排除GPU依赖功能 | **画布+节点双模式统一升级**
 
 ---
 
@@ -29,6 +29,44 @@
 
 **结论**：无界AI核心能力完全依赖云端API，不依赖GPU。
 
+### 1.3 双模式架构分析
+
+无界AI有两种操作模式，需要统一升级：
+
+#### **画布模式（Canvas Mode）**
+
+| 组件 | 文件 | 功能 |
+|------|------|------|
+| InfiniteCanvas | `infinite-canvas.tsx` | 无限画布、图片拖拽/缩放/编辑 |
+| GenerationPanel | `generation-panel.tsx` | 图像生成控制面板 |
+| VideoGenerationPanel | `video-generation-panel.tsx` | 视频生成控制面板 |
+| ChatPanel | `chat-panel.tsx` | AI聊天、提示词优化、Skill模板 |
+| ImageEditor | `image-editor.tsx` | 语言修图、蒙版编辑 |
+| AgentEditor | `agent-editor.tsx` | Agent编排编辑 |
+
+**核心特点**：直观、所见即所得、适合快速创作
+
+#### **节点模式（Node Mode）**
+
+| 组件 | 文件 | 功能 |
+|------|------|------|
+| NodeEditor | `node-editor.tsx` | 工作流节点编辑器、DAG拓扑 |
+| WorkflowEngine | `workflow-engine.ts` | DAG执行引擎、节点类型定义 |
+| WorkflowExecute API | `api/workflow/execute/route.ts` | 工作流执行API |
+
+**已有30+节点类型**：
+
+| 类别 | 节点类型 | 状态 |
+|------|---------|------|
+| 输入 | input-text, input-image, audio-input | ✅ 已有 |
+| AI图像 | ai-generate, ai-remove-bg, ai-upscale, ai-retouch, ai-font-design, ai-refine-engine, ai-brand-ecommerce, ai-segment, ai-multi-angle, ai-3d-model | ✅ 已有 |
+| AI视频 | ai-video-generate, ai-video-i2v | ✅ 已有 |
+| AI音频 | ai-audio | ⚠️ 节点定义已有，API占位实现 |
+| 控制 | condition, loop, agent, storyboard-sequence | ✅ 已有 |
+| 输出 | output-image, output-export, output-image-group, output-video, output-audio | ✅ 已有 |
+
+**核心特点**：可编程、可复用、适合批量处理和复杂流程
+
 ---
 
 ## 二、竞品功能对比矩阵
@@ -48,490 +86,357 @@
 | **中文提示词理解** | ✅ 基础支持 | ❌ | ✅ **核心优势** | ✅ |
 | **Agent主动操作** | ⚠️ 被动建议 | ✅ Agentic Intelligence | ❌ | ❌ |
 | **品牌资产沉淀** | ⚠️ 基础版 | ✅ Brand World | ❌ | ❌ |
-| **预测性交互** | ⚠️ 部分实现 | ✅ | ❌ | ❌ |
 
-### 2.2 竞品核心差异化能力分析
+### 2.2 无界AI优势与差距
 
-#### Lovart核心优势（需对标）
+**优势（领先竞品）**：
+1. **工作流节点模式**：竞品均无此能力，是无界AI独特优势
+2. **无限画布+节点双模式**：两种模式互补，覆盖不同用户场景
+3. **3D生成**：4个云端提供商，竞品均无
+4. **模型数量**：30+图像+20+视频，覆盖最广
 
-| 能力 | 描述 | 无界AI差距 |
-|------|------|-----------|
-| **Agentic Intelligence** | AI像设计师一样系统思考，而非单次生成 | 现有AI是"助手"而非"队友" |
-| **Touch Edit** | 精准选择区域编辑，保留其他部分不变 | 现有蒙版编辑功能类似，但交互不够直观 |
-| **Style Consistency** | 跨迭代、格式、项目保持风格一致 | **完全缺失**，每次生成风格独立 |
-| **Text Edit** | 文字分层，可移动/重写而不破坏画面 | **完全缺失**，文字无法独立编辑 |
-| **Visual Insights** | 实时搜索设计参考，转为创意方向 | **完全缺失**，无参考搜索能力 |
-
-#### 即梦核心优势（需对标）
-
-| 能力 | 描述 | 无界AI差距 |
-|------|------|-----------|
-| **中文语义理解** | 更好的中文提示词理解能力 | 现有基础支持，但不如即梦专精 |
-| **首尾帧控制** | 精准控制视频首帧到尾帧 | ✅ 已支持 |
-| **智能画布** | 多图层编辑、精细化控制 | 无界画布更强，有DAG工作流 |
-| **创作同款** | 一键复用社区作品参数 | **缺失**，无社区系统 |
+**差距（需补齐）**：
+1. **风格一致性**：Lovart核心能力，跨项目保持风格统一
+2. **Agent主动操作**：AI从"建议者"升级为"执行者"
+3. **品牌资产沉淀**：系统性存储品牌DNA，跨项目复用
+4. **音频生成**：节点模式已有基础，画布模式需补充
 
 ---
 
-## 三、P0升级计划（方案A渐进式）
+## 三、P0升级计划（双模式统一升级）
 
-### 优先级排序原则
+### 3.0 升级原则：双模式统一
 
-1. **用户价值最大化**：直接影响用户体验的功能优先
-2. **实现难度适中**：选择可在1-2周完成的任务
-3. **云端API可行**：确保不依赖GPU
-4. **复用现有架构**：在现有组件基础上增强，而非新建
+每个P0功能升级需同时考虑两个模式：
+
+| 升级内容 | 画布模式影响 | 节点模式影响 |
+|---------|-------------|-------------|
+| ChatCanvas | chat-panel增强 | 新增ai-chat-canvas节点 |
+| 预测性交互 | chat-panel增强 | 节点助手增强 |
+| 风格一致性 | StyleDNA注入 | 节点Session绑定 |
+| 品牌资产 | @品牌引用 | 节点BrandDNA参数 |
+| 音频生成 | 新增面板 | 现有节点完善 |
+
+---
 
 ### P0-1: ChatCanvas对话画布（AI队友模式）
 
-#### 验收标准
-- [ ] 用户说"把这张图放大"，AI直接执行放大操作，结果添加到画布
-- [ ] 用户说"换成水彩风格"，AI调用图生图API并替换原图
-- [ ] 用户说"去掉背景"，AI调用去背景API并添加透明图到画布
-- [ ] AI执行操作后显示工具执行记录（ToolExecution）
-- [ ] 支持@图片引用 + 自然语言指令组合
+#### 目标
 
-#### 实施步骤（方案A：在chat-panel基础上增强）
+将AI从"被动建议者"升级为"主动画布操作者"，用户说"把这张图放大"，AI直接执行而非文字建议。
 
-**Task 1-1: 创建CanvasActionExecutor**
-```typescript
-// src/lib/canvas-action-executor.ts
-interface CanvasAction {
-  type: 'upscale' | 'remove_bg' | 'img2img' | 'extend' | 'edit';
-  targetImageId: string;
-  params: Record<string, unknown>;
-}
+#### 任务分解
 
-async function executeCanvasAction(action: CanvasAction): Promise<{
-  success: boolean;
-  resultImages?: string[];
-  error?: string;
-}> {
-  // 根据action.type调用对应API
-  // upscale → /api/image/upscale-pro
-  // remove_bg → /api/image-edit (action: removebg)
-  // img2img → /api/generate (图生图模式)
-  // extend → /api/image-edit (action: extend)
-  // edit → /api/edit
-}
-```
+| Task | 描述 | 验收标准 | 模式 |
+|------|------|---------|------|
+| **Task 1** | 创建CanvasActionExecutor | 能解析画布操作指令并执行 | 画布模式 |
+| **Task 2** | 扩展chat-panel handleSend | 支持操作指令识别与执行 | 画布模式 |
+| **Task 3** | 添加ai-chat-canvas节点 | 节点模式也能用对话驱动画布 | 节点模式 |
+| **Task 4** | 双模式状态同步 | 节点执行结果同步到画布 | 双模式 |
 
-**Task 1-2: 扩展chat-panel handleSend支持画布操作**
+#### 技术方案
 
-在`handleSend`函数中添加：
-```typescript
-// 解析用户消息中的画布操作意图
-const canvasAction = parseCanvasActionIntent(trimmedInput, imageAnchors);
-if (canvasAction) {
-  // 执行画布操作而非纯对话
-  const result = await executeCanvasAction(canvasAction);
-  // 将结果图片添加到画布（通过onAddImages回调）
-  if (result.resultImages) {
-    onAddImages?.(result.resultImages);
-  }
-  // 返回执行结果而非纯文字回复
-  assistantMessage.toolExecutions = [{
-    toolName: canvasAction.type,
-    status: 'completed',
-    resultImages: result.resultImages
-  }];
-}
-```
-
-**Task 1-3: 添加画布操作意图解析器**
+**画布模式（Task 1-2）**：
 
 ```typescript
-// src/lib/canvas-action-parser.ts
-const CANVAS_ACTION_PATTERNS = {
-  upscale: ['放大', 'upscale', '高清', '变清晰', '提升分辨率'],
-  remove_bg: ['去掉背景', '移除背景', '抠图', 'remove background', '透明背景'],
-  img2img: ['换成.*风格', '变成.*风格', '改.*风格', '风格换成', '变体'],
-  extend: ['扩展画面', '扩图', '延伸', 'extend', '扩大画布'],
-  edit: ['修改', '编辑', '改一下', '调整', '修图']
+// lib/canvas-action-executor.ts
+export const CANVAS_ACTIONS = {
+  upscale: { fn: 'submitUpscale', params: ['scale'] },
+  removeBg: { fn: 'submitRemoveBg', params: [] },
+  img2img: { fn: 'submitImg2img', params: ['prompt', 'strength'] },
+  edit: { fn: 'submitEdit', params: ['prompt'] },
+  extend: { fn: 'submitExtend', params: ['direction', 'scale'] },
+  move: { fn: 'moveImage', params: ['imageId', 'x', 'y'] },
+  delete: { fn: 'deleteImage', params: ['imageId'] },
 };
 
-function parseCanvasActionIntent(
-  input: string,
-  imageAnchors: ImageAnchor[]
-): CanvasAction | null {
-  // 匹配操作关键词 + 提取目标图片
-  // 返回结构化的CanvasAction对象
+export async function executeCanvasAction(
+  action: string,
+  imageId: string,
+  params: Record<string, any>,
+  onProgress?: (progress: number) => void
+): Promise<{ success: boolean; resultUrl?: string; error?: string }> {
+  // 根据action调用对应API并返回结果
 }
 ```
 
-**依赖**：无
+**节点模式（Task 3）**：
 
-**预估范围**：中（3-5文件：canvas-action-executor.ts, canvas-action-parser.ts, chat-panel.tsx, api路由复用）
+```typescript
+// workflow-engine.ts 新增节点定义
+{
+  type: 'ai-chat-canvas',
+  label: 'AI对话画布',
+  category: 'AI图像',
+  icon: 'MessageSquare',
+  fields: [
+    { key: 'prompt', type: 'textarea', label: '操作指令' },
+    { key: 'targetImage', type: 'image-input', label: '目标图片' },
+  ],
+  inputs: [{ key: 'image', type: 'image', label: '输入图片' }],
+  outputs: [{ key: 'result', type: 'image', label: '执行结果' }],
+}
+```
+
+#### 验证步骤
+
+- [ ] 用户说"放大这张图"，AI自动调用upscale API
+- [ ] 用户说"去掉背景"，AI自动调用removeBg API
+- [ ] 用户说"换成水彩风格"，AI自动调用img2img API
+- [ ] 节点模式中使用ai-chat-canvas节点实现同样效果
 
 ---
 
 ### P0-2: 预测性交互系统（意图分类+追问+建议）
 
-#### 验收标准
-- [ ] 极度模糊输入（<10字+无图）→ AI返回追问消息
-- [ ] 中等模糊输入 → 自动补全并执行
-- [ ] 复杂多步输入 → 拆解流程建议
-- [ ] 生成完成后显示"建议下一步"区域（至少3个建议）
-- [ ] 建议可点击，自动填充指令并执行
+#### 目标
 
-#### 实施步骤
+增强现有的`classifyIntentLevel`，实现模糊意图追问、完成后建议下一步。
 
-**Task 2-1: 增强classifyIntentLevel函数**
+#### 任务分解
 
-现有代码已有`classifyIntentLevel`，需增强：
+| Task | 描述 | 验收标准 | 模式 |
+|------|------|---------|------|
+| **Task 1** | 增强意图分类器 | 支持操作意图识别（不只是生成） | 画布模式 |
+| **Task 2** | 模糊追问模板 | 10种常见模糊场景追问模板 | 画布模式 |
+| **Task 3** | 完成后建议引擎 | 根据结果类型推荐后续操作 | 画布模式 |
+| **Task 4** | 节点助手增强 | 节点编辑时也能追问和建议 | 节点模式 |
 
-```typescript
-// src/lib/intent-classifier.ts
-interface IntentLevel {
-  level: 'extremely_fuzzy' | 'moderately_fuzzy' | 'clear' | 'complex_multi_step';
-  missingFields: string[]; // 缺失的信息字段
-  suggestedQuestions: string[]; // 追问问题列表
-  autoCompletions?: string[]; // 自动补全建议
-}
+#### 技术方案
 
-function classifyIntentLevel(
-  input: string,
-  hasImage: boolean
-): IntentLevel {
-  // <10字 + 无图 → extremely_fuzzy
-  // 有关键词但缺少参数 → moderately_fuzzy
-  // 明确指令 → clear
-  // 包含"和"/"然后"/"接着" → complex_multi_step
-}
-```
-
-**Task 2-2: 追问消息渲染（isClarifying消息类型）**
+**增强意图分类（Task 1）**：
 
 ```typescript
-// chat-panel.tsx 消息渲染
-{message.isClarifying && (
-  <ClarifyingMessage
-    questions={message.clarifyingQuestions}
-    onSelect={(answer) => {
-      // 用户回答后自动补全到输入框
-      setInput(prev => prev + ' ' + answer);
-    }}
-  />
-)}
+// chat-panel.tsx
+const INTENT_TYPES = {
+  generate: { keywords: ['生成', '创建', '画', '制作'], action: 'generate' },
+  edit: { keywords: ['修改', '换成', '改成', '调整'], action: 'edit' },
+  upscale: { keywords: ['放大', '高清', '提高分辨率'], action: 'upscale' },
+  removeBg: { keywords: ['去背景', '抠图', '透明'], action: 'removeBg' },
+  style: { keywords: ['风格', '换成', '改成'], action: 'img2img' },
+  info: { keywords: ['分析', '描述', '识别'], action: 'analyze' },
+};
 ```
 
-**Task 2-3: 建议下一步组件增强**
+**追问模板（Task 2）**：
 
-现有`suggestions`字段已实现，需增强：
-- 根据生成内容类型智能推荐（图生图/放大/去背景/视频延长等）
-- 添加快捷操作按钮（一键执行而非填充输入框）
+```typescript
+const CLARIFY_TEMPLATES = {
+  no_subject: '您想生成什么内容？比如人物、风景、产品？',
+  no_style: '您偏好什么风格？写实、插画、水彩、3D？',
+  no_size: '需要什么尺寸？头像、海报、横幅？',
+  no_reference: '有参考图片吗？可以@引用画布图片',
+  multi_conflict: '您提到了多种风格，请选择其一：{styles}',
+};
+```
 
-**依赖**：无
+#### 验证步骤
 
-**预估范围**：小（1-2文件：intent-classifier.ts, chat-panel.tsx增强）
+- [ ] 用户输入"生成一张图"，追问"生成什么内容？"
+- [ ] 用户输入"把这张图改一下"，追问"您想怎么修改？"
+- [ ] 生成完成后，显示"建议下一步：放大/去背景/图生图"
 
 ---
 
-### P0-3: 风格一致性系统（Style Consistency）
+### P0-3: 风格一致性系统（StyleDNA）
 
-#### 验收标准
-- [ ] 用户可设置"当前风格"（颜色/字体/调性描述）
-- [ ] 后续生成自动附加风格提示词
-- [ ] 同一会话内生成图片风格一致
-- [ ] 支持保存风格为模板，跨会话复用
+#### 目标
 
-#### 实施步骤
+Session级别的风格绑定，跨生成保持风格统一，对标Lovart Style Consistency。
 
-**Task 3-1: StyleDNA数据结构**
+#### 任务分解
+
+| Task | 描述 | 验收标准 | 模式 |
+|------|------|---------|------|
+| **Task 1** | StyleDNA数据结构 | 存储风格指纹（色彩/笔触/构图） | 基础设施 |
+| **Task 2** | Session绑定机制 | 当前Session绑定一个StyleDNA | 画布模式 |
+| **Task 3** | 自动注入提示词 | 生成时自动追加StyleDNA描述 | 画布模式 |
+| **Task 4** | 节点Session支持 | 工作流节点也能绑定StyleDNA | 节点模式 |
+
+#### 技术方案
+
+**StyleDNA数据结构（Task 1）**：
 
 ```typescript
-// src/types/style-dna.ts
+// types/style-dna.ts
 interface StyleDNA {
   id: string;
   name: string;
-  colors: string[]; // 主色/辅色
-  tone: string; // 调性描述（极简/华丽/复古等）
-  fontHint?: string; // 字体倾向
-  promptSuffix: string; // 附加到每次生成的提示词后缀
-  createdAt: number;
+  sourceImages: string[]; // 参考图片URL
+  extractedStyle: {
+    colorPalette: string[]; // 色彩方案
+    brushStyle: string; // 笔触风格
+    compositionPattern: string; // 构图模式
+    lightingType: string; // 光照类型
+  };
+  promptTemplate: string; // 自动生成的风格提示词
 }
 ```
 
-**Task 3-2: Session级别StyleDNA绑定**
+**自动注入（Task 3）**：
 
 ```typescript
-// chat-panel.tsx ChatSession扩展
-interface ChatSession {
-  // ...existing fields
-  styleDNA?: StyleDNA; // 当前会话绑定的风格
-}
-
-// handleSend中自动注入
-if (session.styleDNA) {
-  enhancedPrompt = `${userPrompt} ${session.styleDNA.promptSuffix}`;
+// 在/api/generate中
+if (sessionStyleDNA) {
+  const stylePrompt = `[style:${sessionStyleDNA.promptTemplate}]`;
+  body.prompt = stylePrompt + ' ' + body.prompt;
 }
 ```
 
-**Task 3-3: StyleDNA设置面板**
+#### 验证步骤
 
-在聊天面板顶部添加风格选择器：
-```tsx
-<StyleSelector
-  currentStyle={session.styleDNA}
-  onSetStyle={(style) => {
-    updateSession({ styleDNA: style });
-  }}
-  onSaveStyle={(style) => {
-    // 保存到localStorage/数据库
-  }}
-/>
-```
-
-**依赖**：无
-
-**预估范围**：中（3-5文件：types/style-dna.ts, chat-panel.tsx, components/style-selector.tsx）
+- [ ] 用户上传参考图，系统提取风格DNA
+- [ ] 后续生成自动追加风格提示词
+- [ ] 多次生成结果风格保持一致
 
 ---
 
 ### P0-4: 品牌资产系统性沉淀（BrandDNA）
 
-#### 验收标准
-- [ ] 用户可输入品牌描述（名称/行业/调性/色彩/字体/禁区）
-- [ ] @品牌引用自动注入BrandDNA到systemPrompt
-- [ ] 品牌资产持久化存储（localStorage + 数据库）
-- [ ] 品牌资产跨面板可用（聊天/生成/工作流）
+#### 目标
 
-#### 实施步骤
+系统性存储品牌DNA（色彩/字体/调性/禁区），@品牌引用自动注入systemPrompt。
 
-**Task 4-1: BrandDNA数据结构**
+#### 任务分解
+
+| Task | 描述 | 验收标准 | 模式 |
+|------|------|---------|------|
+| **Task 1** | BrandDNA数据结构 | 存储品牌规范 | 基础设施 |
+| **Task 2** | @品牌引用UI | 输入框@触发品牌列表 | 画布模式 |
+| **Task 3** | systemPrompt注入 | @品牌自动注入品牌规范 | 双模式 |
+| **Task 4** | 节点BrandDNA参数 | 节点支持选择品牌绑定 | 节点模式 |
+
+#### 技术方案
+
+**BrandDNA数据结构（Task 1）**：
 
 ```typescript
-// src/types/brand-dna.ts
+// types/brand-dna.ts
 interface BrandDNA {
   id: string;
   name: string;
-  industry: string;
-  tone: string; // 品牌调性
-  primaryColors: string[];
-  secondaryColors: string[];
-  fonts: { heading: string; body: string };
-  avoidKeywords: string[]; // 禁区关键词（不使用）
-  mustKeywords: string[]; // 必要关键词
-  logoGuidelines?: string;
-  createdAt: number;
-  updatedAt: number;
+  logoUrl?: string;
+  colorPalette: {
+    primary: string;
+    secondary: string[];
+    accent: string;
+  };
+  typography: {
+    primaryFont: string;
+    secondaryFont: string;
+    headingStyle: string;
+  };
+  tone: string; // 品牌调性描述
+  restrictions: string[]; // 禁区规则
 }
 ```
 
-**Task 4-2: 品牌工厂面板（BrandFactoryPanel）**
+---
 
-```tsx
-// src/components/brand-factory-panel.tsx
-<BrandFactoryPanel
-  onSave={(brand) => {
-    // 存储到localStorage + 数据库
-    // 更新@品牌引用列表
-  }}
-/>
-```
+### P0-5: 音频生成能力完善
 
-**Task 4-3: @品牌引用系统**
+#### 目标
+
+完善音频生成API（TTS），节点模式已有基础，画布模式新增音频面板。
+
+#### 任务分解
+
+| Task | 描述 | 验收标准 | 模式 |
+|------|------|---------|------|
+| **Task 1** | TTS API集成 | 调用云端TTS API（OpenAI/EdgeTTS） | API层 |
+| **Task 2** | 音频播放器组件 | 支持播放/暂停/进度控制 | 画布模式 |
+| **Task 3** | 画布音频卡片 | 音频在画布显示为卡片 | 画布模式 |
+| **Task 4** | 节点ai-audio完善 | 完善现有节点执行逻辑 | 节点模式 |
+
+#### 技术方案
+
+**TTS API集成（Task 1）**：
 
 ```typescript
-// chat-panel.tsx activeMentions扩展
-interface ActiveMention {
-  type: 'canvas-image' | 'brand' | 'model' | 'prompt';
-  id: string;
-  label: string;
-  data?: BrandDNA; // 品牌数据
-}
-
-// 发送时注入
-if (mention.type === 'brand' && mention.data) {
-  systemPrompt += `\n【品牌规范】\n${mention.data.tone}\n色彩：${mention.data.primaryColors.join(',')}`;
+// api/audio/generate/route.ts
+// 优先调用配置的TTS API，降级到本地占位音频
+if (process.env.OPENAI_TTS_API_KEY) {
+  // 调用OpenAI TTS API
+} else if (process.env.EDGETTS_ENDPOINT) {
+  // 调用EdgeTTS
+} else {
+  // 生成占位音频（已有实现）
 }
 ```
 
-**依赖**：P0-3 StyleDNA（可并行）
+---
 
-**预估范围**：中（3-5文件：types/brand-dna.ts, brand-factory-panel.tsx, chat-panel.tsx）
+## 四、实施路线
+
+### Week 1：基础+核心交互
+
+| 任务 | 预估时间 | 依赖 |
+|------|---------|------|
+| P0-2 Task 1-2：意图分类增强+追问模板 | 1天 | 无 |
+| P0-2 Task 3：完成后建议引擎 | 1天 | Task 1-2 |
+| P0-1 Task 1：CanvasActionExecutor | 2天 | 无 |
+
+### Week 2：核心能力+资产系统
+
+| 任务 | 预估时间 | 依赖 |
+|------|---------|------|
+| P0-1 Task 2-3：chat-panel扩展+节点 | 2天 | P0-1 Task 1 |
+| P0-3 Task 1-3：StyleDNA系统 | 2天 | 无 |
+| P0-4 Task 1-2：BrandDNA+@引用 | 1天 | 无 |
+
+### Week 3：完善+验证
+
+| 任务 | 预估时间 | 依赖 |
+|------|---------|------|
+| P0-3/4 Task 4：节点模式集成 | 2天 | P0-3/4 Task 1-3 |
+| P0-5 Task 1-4：音频生成完善 | 2天 | 无 |
+| 全量验证 | 1天 | 所有任务 |
 
 ---
 
-### P0-5: 音频生成能力（云端API）
+## 五、风险与缓解
 
-#### 验收标准
-- [ ] 支持音频生成API调用（管理员配置音频模型）
-- [ ] 音频播放器组件（播放/暂停/进度条）
-- [ ] 视频生成时可选同时生成音效
-- [ ] 音频文件添加到画布（音频卡片）
-
-#### 实施步骤
-
-**Task 5-1: 音频API协议层**
-
-```typescript
-// src/lib/audio-api.ts
-interface AudioGenerateParams {
-  prompt: string;
-  model: string; // suno/udio/elevenlabs等
-  duration?: number;
-  providerId?: string;
-}
-
-// 管理员后台新增音频模型类型
-```
-
-**Task 5-2: 音频生成面板**
-
-```tsx
-// src/components/audio-generation-panel.tsx
-<AudioGenerationPanel
-  onGenerate={(params) => {
-    // 调用 /api/audio/generate
-  }}
-  onAddToCanvas={(audioUrl) => {
-    // 添加音频卡片到画布
-  }}
-/>
-```
-
-**Task 5-3: 音频播放器**
-
-```tsx
-// src/components/audio-player.tsx
-<AudioPlayer
-  src={audioUrl}
-  onPlay={() => {}}
-  onEnded={() => {}}
-/>
-```
-
-**Task 5-4: CanvasImage扩展音频类型**
-
-```typescript
-// user-types.ts
-interface CanvasImage {
-  // ...existing
-  mediaType?: 'image' | 'video' | 'audio';
-  audioUrl?: string;
-  audioDuration?: number;
-}
-```
-
-**依赖**：无
-
-**预估范围**：中（4-6文件：audio-api.ts, audio-generation-panel.tsx, audio-player.tsx, api/audio/generate/route.ts）
-
----
-
-## 四、P1升级计划（次要优化）
-
-### P1-1: 中文提示词理解增强
-
-- 与LLM提供商合作优化中文语义解析
-- 添加中文提示词自动优化功能
-
-### P1-2: Skill模板系统增强（21预设→扩展）
-
-- 新增电商/品牌/分镜等专业Skill
-- Skill可引用BrandDNA
-
-### P1-3: 实时参考搜索（Visual Insights）
-
-- 集成图片搜索API（Bing/Google）
-- 搜索结果转为创意方向提示词
-
----
-
-## 五、实施路线（方案A）
-
-### 第1阶段：基础能力（1周）
-
-```
-Week 1:
-  ├─ Day 1-2: P0-2 预测性交互系统（已有基础，增强即可）
-  ├─ Day 3-4: P0-1 CanvasActionExecutor + 意图解析器
-  └─ Day 5: 检查点：AI可执行画布操作
-```
-
-### 检查点1：预测性交互 + 画布操作
-
-- [ ] 用户模糊输入得到追问
-- [ ] 用户说"放大这张图"，AI执行并添加结果到画布
-- [ ] lint/ts-check/测试通过
-
-### 第2阶段：风格系统（1周）
-
-```
-Week 2:
-  ├─ Day 1-3: P0-3 风格一致性系统
-  ├─ Day 4-5: P0-4 品牌资产沉淀（BrandDNA）
-  └─ Day 5: 检查点：风格/品牌可跨生成复用
-```
-
-### 检查点2：风格一致性 + 品牌沉淀
-
-- [ ] 设置风格后连续生成风格一致
-- [ ] @品牌引用自动注入品牌规范
-- [ ] 风格/品牌可保存复用
-
-### 第3阶段：音频能力（1周）
-
-```
-Week 3:
-  ├─ Day 1-2: 音频API协议层 + 管理员后台
-  ├─ Day 3-4: 音频生成面板 + 播放器
-  └─ Day 5: 检查点：音频可生成并添加到画布
-```
-
-### 检查点3：音频生成完整流程
-
-- [ ] 管理员可配置音频模型
-- [ ] 用户可生成音频并播放
-- [ ] 音频可添加到画布
-
----
-
-## 六、风险与缓解
-
-| 风险 | 影响 | 缓解策略 |
+| 集成 | 影响 | 缓解策略 |
 |------|------|----------|
-| CanvasActionExecutor API调用失败 | 高 | 多策略降级（API→本地→提示用户手动操作） |
-| 意图解析准确率低 | 中 | 规则+LLM双重解析，置信度阈值控制 |
-| 风格一致性效果不理想 | 中 | 提示词模板优化，用户可调整强度 |
-| 音频API提供商不稳定 | 中 | 多提供商配置，自动切换 |
+| TTS API不可用 | 中 | 多策略降级（OpenAI→EdgeTTS→本地占位） |
+| 风格提取不准确 | 中 | 用户可手动编辑StyleDNA描述 |
+| 双模式状态同步复杂 | 高 | 使用统一状态管理（page.tsx） |
+| CanvasAction覆盖不全 | 中 | 优先实现高频操作（放大/去背景/图生图） |
 
 ---
 
-## 七、不实施的功能（GPU依赖）
+## 六、验收检查点
 
-以下功能因无界服务器无GPU，暂时不实施：
+### 检查点1：Week 1结束
 
-| 功能 | 原因 | 替代方案 |
-|------|------|---------|
-| 本地实时渲染 | 需GPU | 云端API生成 |
-| 本地模型推理 | 需GPU | 云端API调用 |
-| 高性能视频转码 | 需GPU | 云端API处理 |
-| 实时3D渲染 | 需GPU | Three.js基础渲染（已有） |
-
----
-
-## 八、验收总清单
-
-### P0功能验收
-
-- [ ] **ChatCanvas**：用户说"放大这张图"，AI执行并添加结果
-- [ ] **预测性交互**：模糊输入得到追问，清晰输入直接执行
-- [ ] **风格一致性**：设置风格后连续生成风格一致
-- [ ] **品牌沉淀**：@品牌引用注入规范，跨面板可用
-- [ ] **音频生成**：可生成音频，播放器正常，可添加到画布
-
-### 技术验收
-
-- [ ] `pnpm lint` 通过
+- [ ] chat-panel能识别操作意图并追问
+- [ ] CanvasActionExecutor能执行放大/去背景
 - [ ] `pnpm ts-check` 通过
-- [ ] `pnpm build` 成功
-- [ ] 所有新增API路由冒烟测试通过
-- [ ] 单元测试覆盖率 ≥ 80%
+- [ ] `pnpm lint` 通过
+
+### 检查点2：Week 2结束
+
+- [ ] AI能主动执行画布操作
+- [ ] StyleDNA能提取风格并注入提示词
+- [ ] @品牌引用能注入systemPrompt
+- [ ] 核心API冒烟测试通过
+
+### 检查点3：Week 3结束
+
+- [ ] 节点模式所有P0功能可用
+- [ ] 音频生成完整可用
+- [ ] 双模式状态同步正常
+- [ ] 用户验收测试通过
 
 ---
 
-**报告生成时间**：2025-01-XX  
-**实施方案**：方案A（渐进式升级）  
-**GPU依赖**：无（完全云端API）
+## 七、总结
+
+本升级计划确保**画布模式**和**节点模式**同步升级，保持无界AI双模式互补的独特优势。所有功能依赖云端API，无需GPU。
+
+**关键成果**：
+1. AI从"建议者"升级为"队友"（ChatCanvas）
+2. 风格跨项目保持一致（StyleDNA）
+3. 品牌资产系统沉淀（BrandDNA）
+4. 音频生成完整可用（节点已有，画布新增）
+5. 双模式统一体验
