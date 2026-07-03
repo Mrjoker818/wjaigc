@@ -15347,8 +15347,9 @@ export function InfiniteCanvas({
 
           {/* Brand E-commerce */}
           <button
+            aria-label="品牌电商"
             onClick={() => setShowBrandEcommerce(true)}
-            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
+            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 min-w-[44px] min-h-[44px] ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
             title="品牌电商"
           >
             <ShoppingBag className={`h-4 w-4 ${mIcon.shoppingBag}`} />
@@ -15357,8 +15358,9 @@ export function InfiniteCanvas({
 
           {/* Refine Engine */}
           <button
+            aria-label="精修引擎"
             onClick={() => { setRefineEngineImageUrl(''); setShowRefineEngine(true); }}
-            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
+            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 min-w-[44px] min-h-[44px] ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
             title="精修引擎"
           >
             <Scan className={`h-4 w-4 ${mIcon.scan}`} />
@@ -15367,8 +15369,9 @@ export function InfiniteCanvas({
 
           {/* Font Design */}
           <button
+            aria-label="字境大师"
             onClick={() => setShowFontDesign(true)}
-            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-amber-600 hover:text-amber-500 hover:bg-amber-50' : 'text-gold hover:text-gold-light hover:bg-gold/10'}`}
+            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 min-w-[44px] min-h-[44px] ${isMonochrome ? 'text-amber-600 hover:text-amber-500 hover:bg-amber-50' : 'text-gold hover:text-gold-light hover:bg-gold/10'}`}
             title="字境大师"
           >
             <span className="text-sm font-bold leading-none">字</span>

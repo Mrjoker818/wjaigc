@@ -8,6 +8,8 @@ import { UserManager } from '@/lib/user-manager';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuLabel, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
+import { ChevronDown } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -5965,112 +5967,100 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               <Sliders size={12} />
               <span>Tune</span>
             </button>
-            <div className="relative">
-              <button
-                onClick={() => setShowQuickCommands(prev => !prev)}
-                className={`shrink-0 h-7 px-2.5 rounded-md flex items-center gap-1.5 text-[11px] transition-colors ${
-                  showQuickCommands
-                    ? isGold
-                      ? 'bg-gold/15 text-gold'
-                      : 'bg-blue-100 text-blue-600'
-                    : isGold
+            {/* 快捷指令 - DropdownMenu */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  className={`shrink-0 h-7 px-2.5 rounded-md flex items-center gap-1.5 text-[11px] transition-colors ${
+                    isGold
                       ? 'bg-white/[0.04] text-gold-muted/70 hover:text-gold hover:bg-white/[0.08]'
                       : 'bg-gray-50 text-gray-400 hover:text-gray-600 hover:bg-gray-100'
-                }`}
-                title="快捷指令"
+                  }`}
+                  title="快捷指令"
+                >
+                  <Zap size={12} />
+                  <span>指令</span>
+                  <ChevronDown size={10} className="opacity-50" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                side="top"
+                align="start"
+                className={`w-48 ${isGold ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-gray-200'}`}
               >
-                <Zap size={12} />
-                <span>指令</span>
-              </button>
-              {showQuickCommands && (
-                <div className={`absolute bottom-full left-0 mb-1 w-48 rounded-lg border shadow-lg z-50 overflow-hidden ${isGold ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-gray-200'}`}>
-                  <div className={`px-3 py-1.5 text-[10px] font-medium ${isGold ? 'text-gold-muted/60' : 'text-gray-400'}`}>
-                    快捷指令
+                <DropdownMenuLabel className={`text-[10px] ${isGold ? 'text-gold-muted/60' : 'text-gray-400'}`}>
+                  快捷指令
+                </DropdownMenuLabel>
+                {quickCommands.map((cmd, idx) => (
+                  <DropdownMenuItem
+                    key={idx}
+                    onClick={() => {
+                      setInput(prev => prev + cmd.prompt);
+                      textareaRef.current?.focus();
+                    }}
+                    className={`flex items-center gap-2.5 text-xs ${isGold ? 'text-white/80 hover:bg-white/5 focus:bg-white/5' : 'text-gray-700 hover:bg-gray-50 focus:bg-gray-50'}`}
+                  >
+                    <span>{cmd.icon}</span>
+                    <span>{cmd.label}</span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            {/* 图像模型选择器 - DropdownMenu */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  className={`shrink-0 h-7 px-2.5 rounded-md flex items-center gap-1.5 text-[11px] transition-colors ${
+                    isGold
+                      ? 'bg-white/[0.04] text-gold-muted/70 hover:text-gold hover:bg-white/[0.08]'
+                      : 'bg-gray-50 text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+                  }`}
+                  title="选择图像模型"
+                >
+                  <ImageIcon size={12} />
+                  <span className="max-w-[80px] truncate">{discoveredImageModels.find(m => m.id === imageModel)?.name || getModelDisplayName(imageModel.split('::').pop() || imageModel)}</span>
+                  <ChevronDown size={10} className="opacity-50" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                side="top"
+                align="end"
+                className={`w-64 max-h-80 overflow-y-auto ${isGold ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-gray-200'}`}
+              >
+                <DropdownMenuLabel className={`text-[10px] border-b ${isGold ? 'text-gold-muted/60 border-white/5' : 'text-gray-400 border-gray-100'}`}>
+                  选择图像模型
+                </DropdownMenuLabel>
+                {discoveredImageModels.length === 0 ? (
+                  <div className={`px-3 py-4 text-xs text-center ${isGold ? 'text-white/40' : 'text-gray-400'}`}>
+                    暂无可用模型
                   </div>
-                  {quickCommands.map((cmd, idx) => (
-                    <button
-                      key={idx}
+                ) : (
+                  discoveredImageModels.map((m) => (
+                    <DropdownMenuItem
+                      key={m.id}
                       onClick={() => {
-                        setInput(prev => prev + cmd.prompt);
-                        setShowQuickCommands(false);
-                        textareaRef.current?.focus();
+                        setImageModel(m.id);
+                        setImageModelProviderId(m.providerId);
+                        // 同步到localStorage，与图像生成面板共享（保留 quality/aspectRatio）
+                        const modelId = m.id.split('::').pop() || m.id;
+                        let existing: Record<string, unknown> = {};
+                        try { existing = JSON.parse(localStorage.getItem('wujie_selected_model') || '{}'); } catch { existing = {}; }
+                        localStorage.setItem('wujie_selected_model', JSON.stringify({
+                          ...existing,
+                          model: modelId,
+                          modelName: m.name,
+                          apiProvider: m.providerId,
+                        }));
                       }}
-                      className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs transition-colors ${isGold ? 'text-white/80 hover:bg-white/5' : 'text-gray-700 hover:bg-gray-50'}`}
+                      className={`flex items-center gap-2 text-xs ${imageModel === m.id ? (isGold ? 'bg-gold/15 text-gold' : 'bg-blue-50 text-blue-600') : ''} ${isGold ? 'text-white/80 hover:bg-white/5 focus:bg-white/5' : 'text-gray-700 hover:bg-gray-50 focus:bg-gray-50'}`}
                     >
-                      <span>{cmd.icon}</span>
-                      <span>{cmd.label}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            {/* 图像模型选择器 */}
-            <div className="relative">
-              <button
-                onClick={() => setShowImageModelSelector(prev => !prev)}
-                className={`shrink-0 h-7 px-2.5 rounded-md flex items-center gap-1.5 text-[11px] transition-colors ${
-                  showImageModelSelector
-                    ? isGold
-                      ? 'bg-gold/15 text-gold'
-                      : 'bg-blue-100 text-blue-600'
-                    : isGold
-                      ? 'bg-white/[0.04] text-gold-muted/70 hover:text-gold hover:bg-white/[0.08]'
-                      : 'bg-gray-50 text-gray-400 hover:text-gray-600 hover:bg-gray-100'
-                }`}
-                title="选择图像模型"
-              >
-                <ImageIcon size={12} />
-                <span className="max-w-[80px] truncate">{discoveredImageModels.find(m => m.id === imageModel)?.name || getModelDisplayName(imageModel.split('::').pop() || imageModel)}</span>
-              </button>
-              {showImageModelSelector && (
-                <div className={`absolute bottom-full right-0 mb-1 w-64 max-h-80 overflow-y-auto rounded-lg border shadow-lg z-50 ${isGold ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-gray-200'}`}>
-                  <div className={`px-3 py-2 text-[10px] font-medium border-b ${isGold ? 'text-gold-muted/60 border-white/5' : 'text-gray-400 border-gray-100'}`}>
-                    选择图像模型
-                  </div>
-                  {discoveredImageModels.length === 0 ? (
-                    <div className={`px-3 py-4 text-xs text-center ${isGold ? 'text-white/40' : 'text-gray-400'}`}>
-                      暂无可用模型
-                    </div>
-                  ) : (
-                    discoveredImageModels.map((m) => (
-                      <button
-                        key={m.id}
-                        onClick={() => {
-                          setImageModel(m.id);
-                          setImageModelProviderId(m.providerId);
-                          // 同步到localStorage，与图像生成面板共享（保留 quality/aspectRatio）
-                          const modelId = m.id.split('::').pop() || m.id;
-                          let existing: Record<string, unknown> = {};
-                          try { existing = JSON.parse(localStorage.getItem('wujie_selected_model') || '{}'); } catch { existing = {}; }
-                          localStorage.setItem('wujie_selected_model', JSON.stringify({
-                            ...existing,
-                            model: modelId,
-                            providerId: m.providerId,
-                          }));
-                          setShowImageModelSelector(false);
-                        }}
-                        className={`w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors ${
-                          imageModel === m.id
-                            ? isGold
-                              ? 'bg-gold/10 text-gold'
-                              : 'bg-blue-50 text-blue-600'
-                            : isGold
-                              ? 'text-white/80 hover:bg-white/5'
-                              : 'text-gray-700 hover:bg-gray-50'
-                        }`}
-                      >
-                        <ImageIcon size={12} className="shrink-0 opacity-50" />
-                        <div className="flex-1 min-w-0 text-left">
-                          <div className="truncate">{m.name}</div>
-                          {m.provider && <div className={`text-[10px] truncate ${isGold ? 'text-white/40' : 'text-gray-400'}`}>{m.provider}</div>}
-                        </div>
-                        {imageModel === m.id && <span className="text-gold">✓</span>}
-                      </button>
-                    ))
-                  )}
-                </div>
-              )}
-            </div>
+                      <ImageIcon size={14} className="opacity-60" />
+                      <span className="truncate">{m.name}</span>
+                    </DropdownMenuItem>
+                  ))
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
             <div className="flex-1" />
             <button
               onClick={() => handleSend()}
