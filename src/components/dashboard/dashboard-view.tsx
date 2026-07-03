@@ -915,9 +915,9 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
   // 卡片上的验证协议按钮
   const [providerVerifyStatus, setProviderVerifyStatus] = useState<Record<string, { verifying: boolean; result?: { success: boolean; summary: string; tests?: Array<{ name: string; status: string; detail: string; endpoint?: string; latencyMs?: number }> } }>>({});
+  const [expandedModelProviders, setExpandedModelProviders] = useState<Set<string>>(new Set());
   const verifyProtocolForProvider = useCallback(async (p: ApiProvider) => {
     setProviderVerifyStatus(prev => ({ ...prev, [p.id]: { verifying: true } }));
-    setProviderTestStatus(prev => ({ ...prev, [p.id]: { testing: true, success: null, message: '正在验证协议...', modelCount: 0 } }));
     try {
       const res = await fetch('/api/verify-protocol', {
         method: 'POST',
@@ -925,19 +925,9 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
         body: JSON.stringify({ providerId: p.id }),
       });
       const data = await res.json();
-      setProviderTestStatus(prev => ({
-        ...prev,
-        [p.id]: {
-          testing: false,
-          success: data.success !== false,
-          message: data.summary || (data.success !== false ? '协议验证通过' : '协议验证失败'),
-          modelCount: 0,
-        }
-      }));
       setProviderVerifyStatus(prev => ({ ...prev, [p.id]: { verifying: false, result: { success: data.success !== false, summary: data.summary || '', tests: data.tests || [] } } }));
     } catch (e: any) {
-      setProviderTestStatus(prev => ({ ...prev, [p.id]: { testing: false, success: false, message: `验证失败: ${e.message}`, modelCount: 0 } }));
-      setProviderVerifyStatus(prev => ({ ...prev, [p.id]: { verifying: false } }));
+      setProviderVerifyStatus(prev => ({ ...prev, [p.id]: { verifying: false, result: { success: false, summary: `验证失败: ${e.message}`, tests: [] } } }));
     }
   }, []);
 
@@ -945,7 +935,6 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const [providerBalanceStatus, setProviderBalanceStatus] = useState<Record<string, { loading: boolean; message?: string }>>({});
   const queryBalanceForProvider = useCallback(async (p: ApiProvider) => {
     setProviderBalanceStatus(prev => ({ ...prev, [p.id]: { loading: true } }));
-    setProviderTestStatus(prev => ({ ...prev, [p.id]: { testing: true, success: null, message: '正在查询余额...', modelCount: 0 } }));
     try {
       const res = await fetch('/api/admin/api-balance', {
         method: 'POST',
@@ -957,14 +946,9 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       const msg = balInfo
         ? (balInfo.error ? balInfo.error : `余额查询成功：${balInfo.balance ?? '未知'} ${balInfo.currency || ''}${balInfo.remainingQuota != null ? `，剩余额度 ${balInfo.remainingQuota}` : ''}`)
         : (data.error || '未找到余额信息');
-      setProviderTestStatus(prev => ({
-        ...prev,
-        [p.id]: { testing: false, success: !balInfo?.error, message: msg, modelCount: 0 }
-      }));
       setProviderBalanceStatus(prev => ({ ...prev, [p.id]: { loading: false, message: msg } }));
     } catch (e: any) {
-      setProviderTestStatus(prev => ({ ...prev, [p.id]: { testing: false, success: false, message: `查询失败: ${e.message}`, modelCount: 0 } }));
-      setProviderBalanceStatus(prev => ({ ...prev, [p.id]: { loading: false } }));
+      setProviderBalanceStatus(prev => ({ ...prev, [p.id]: { loading: false, message: `查询失败: ${e.message}` } }));
     }
   }, []);
 
@@ -1284,7 +1268,9 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     setApiName(provider.name);
     setApiDisplayName(provider.displayName || '');
     setApiBaseUrl(provider.baseUrl);
-    setApiKey('');
+    // 编辑时保留原API Key显示，避免用户二次输入；仅新增时清空
+    // 注意：apiKey在编辑时留空意味着"不修改现有密钥"，服务器端会保留原key
+    setApiKey(editingProviderId ? '' : '');
     setApiKind((provider.modelType || 'image') as ApiKind);
     const savedProfile = provider.advancedParams?.compatProfile || 'auto';
     setCompatProfile(['apimart', 'openai', 'openai-async', 'auto'].includes(savedProfile) ? savedProfile : 'auto');
@@ -1296,6 +1282,15 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     setBalancePassword((provider as unknown as Record<string, unknown>).balancePassword as string || '');
   };
 
+  const quickUpdateProvider = async (providerId: string, updates: Record<string, unknown>) => {
+    try {
+      const res = await fetch('/api/admin/apis', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'update', providerId, updates }) });
+      if (!res.ok) { const data = await res.json().catch(() => ({ error: '更新失败' })); alert(data.error || '更新失败'); return; }
+      window.dispatchEvent(new Event('wujie-admin-apis-updated'));
+      await refreshAdmin();
+    } catch { alert('网络错误，请重试'); }
+  };
+
   const handleUpdateApi = async () => {
     if (!editingProviderId || isSubmitting) return;
     setIsSubmitting(true);
@@ -1305,6 +1300,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       if (apiName.trim()) updates.name = apiName.trim();
       updates.displayName = apiDisplayName.trim() || undefined;
       if (apiBaseUrl.trim()) updates.baseUrl = apiBaseUrl.trim();
+      // 编辑模式下，空apiKey表示不修改现有密钥（服务器端保留原key）
       if (apiKey.trim()) updates.apiKey = apiKey.trim();
       updates.modelType = apiKind;
       if (models) updates.selectedModels = models;
@@ -2392,10 +2388,71 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                       {p.balance !== undefined && p.balance !== null && (
                         <div className="text-[10px] text-primary/80">余额: ${typeof p.balance === 'number' ? (p.balance as number).toFixed(2) : String(p.balance)}</div>
                       )}
-                      {p.selectedModels && p.selectedModels.length > 0 && (
-                        <div className="flex flex-wrap gap-1 mt-2">
-                          {p.selectedModels.slice(0, 3).map(m => <span key={m} className="text-[9px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{m}</span>)}
-                          {p.selectedModels.length > 3 && <span className="text-[9px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">+{p.selectedModels.length - 3}</span>}
+                      {(p.discoveredModels && p.discoveredModels.length > 0) && (
+                        <div className="mt-2">
+                          <button
+                            onClick={() => setExpandedModelProviders(prev => { const n = new Set(prev); n.has(p.id) ? n.delete(p.id) : n.add(p.id); return n; })}
+                            className="flex items-center gap-1 text-[10px] text-primary hover:text-primary/80 cursor-pointer transition-colors"
+                          >
+                            <ChevronDown className={`w-3 h-3 transition-transform ${expandedModelProviders.has(p.id) ? 'rotate-0' : '-rotate-90'}`} />
+                            展开模型 ({p.selectedModels?.length || 0}/{p.discoveredModels?.length || 0})
+                          </button>
+                          {expandedModelProviders.has(p.id) && (
+                            <div className="mt-1.5 space-y-1 max-h-60 overflow-y-auto pr-1">
+                              {(() => {
+                                const allModels = p.discoveredModels || [];
+                                const selectedSet = new Set(p.selectedModels || []);
+                                return allModels
+                                  .map(m => {
+                                    const isSelected = selectedSet.has(m.id);
+                                    const displayName = m.displayName || m.name || m.id;
+                                    return (
+                                      <div key={m.id} className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-muted/50 hover:bg-muted group">
+                                        <button
+                                          onClick={() => {
+                                            const newSelected = isSelected
+                                              ? p.selectedModels!.filter(s => s !== m.id)
+                                              : [...(p.selectedModels || []), m.id];
+                                            void quickUpdateProvider(p.id, { selectedModels: newSelected });
+                                          }}
+                                          className={`w-3.5 h-3.5 rounded flex items-center justify-center shrink-0 transition-colors ${isSelected ? 'bg-primary text-primary-foreground' : 'bg-muted-foreground/20 hover:bg-muted-foreground/40'}`}
+                                        >
+                                          {isSelected && <Check className="w-2.5 h-2.5" />}
+                                        </button>
+                                        <span className="text-[11px] text-foreground flex-1 truncate" title={displayName}>{displayName}</span>
+                                        <span className="text-[9px] text-muted-foreground truncate max-w-[100px]" title={m.id}>{m.id}</span>
+                                        <button
+                                          onClick={() => {
+                                            const newName = prompt('修改模型显示名称:', displayName);
+                                            if (newName !== null && newName.trim()) {
+                                              const newDiscovered = (p.discoveredModels || []).map(dm =>
+                                                dm.id === m.id ? { ...dm, displayName: newName.trim() } : dm
+                                              );
+                                              void quickUpdateProvider(p.id, { discoveredModels: newDiscovered });
+                                            }
+                                          }}
+                                          className="opacity-0 group-hover:opacity-100 w-4 h-4 flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-all cursor-pointer"
+                                          title="重命名"
+                                        >
+                                          <Pencil className="w-2.5 h-2.5" />
+                                        </button>
+                                        <button
+                                          onClick={() => {
+                                            const newDiscovered = (p.discoveredModels || []).filter(dm => dm.id !== m.id);
+                                            const newSelected = p.selectedModels!.filter(s => s !== m.id);
+                                            void quickUpdateProvider(p.id, { selectedModels: newSelected, discoveredModels: newDiscovered });
+                                          }}
+                                          className="opacity-0 group-hover:opacity-100 w-4 h-4 flex items-center justify-center rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all cursor-pointer"
+                                          title="删除"
+                                        >
+                                          <X className="w-2.5 h-2.5" />
+                                        </button>
+                                      </div>
+                                    );
+                                  });
+                              })()}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -2417,11 +2474,20 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                       </div>
                     </div>
                   )}
-                  {providerTestStatus[p.id] && testingProviderId !== p.id && !providerVerifyStatus[p.id]?.result?.tests?.length && (
+                  {providerTestStatus[p.id] && testingProviderId !== p.id && (
                     <div className={`mt-2 p-2 rounded-lg text-[11px] ${providerTestStatus[p.id].success ? 'bg-emerald-500/10 text-emerald-500' : 'bg-destructive/10 text-destructive'}`}>
                       <div className="flex items-center gap-1.5">
                         {providerTestStatus[p.id].success ? <CheckCircle2 className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
                         {providerTestStatus[p.id].message}
+                      </div>
+                    </div>
+                  )}
+                  {/* 协议验证加载中 */}
+                  {providerVerifyStatus[p.id]?.verifying && (
+                    <div className="mt-2 p-2 rounded-lg text-[11px] bg-primary/10 text-primary">
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                        正在验证协议...
                       </div>
                     </div>
                   )}
@@ -2449,6 +2515,20 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                       </div>
                     </div>
                   ) : null; })()}
+                  {/* 余额查询结果 */}
+                  {providerBalanceStatus[p.id]?.loading && (
+                    <div className="mt-2 p-2 rounded-lg text-[11px] bg-primary/10 text-primary">
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                        正在查询余额...
+                      </div>
+                    </div>
+                  )}
+                  {!providerBalanceStatus[p.id]?.loading && providerBalanceStatus[p.id]?.message && (
+                    <div className={`mt-2 p-2 rounded-lg text-[11px] ${providerBalanceStatus[p.id].message?.includes('成功') ? 'bg-emerald-500/10 text-emerald-500' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'}`}>
+                      {providerBalanceStatus[p.id].message}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -2524,7 +2604,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                             <label className="text-sm font-medium text-foreground mb-1.5 block">API Key {!editingProviderId && <span className="text-destructive">*</span>}</label>
                             <div className="relative">
                               <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                              <input type={showApiKey ? 'text' : 'password'} placeholder={editingProviderId ? "留空则不修改现有密钥" : "sk-xxxxxxxxxxxxxxxxxxxxxxxx"} value={apiKey} onChange={e => setApiKey(e.target.value)} className="w-full h-10 pl-10 pr-12 rounded-lg bg-background border border-border text-sm text-foreground font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
+                              <input type={showApiKey ? 'text' : 'password'} placeholder={editingProviderId ? "留空则保留原密钥不变" : "sk-xxxxxxxxxxxxxxxxxxxxxxxx"} value={apiKey} onChange={e => setApiKey(e.target.value)} className="w-full h-10 pl-10 pr-12 rounded-lg bg-background border border-border text-sm text-foreground font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
                               <button type="button" onClick={() => setShowApiKey(v => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-md hover:bg-muted transition-colors text-muted-foreground hover:text-foreground cursor-pointer">
                                 {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                               </button>

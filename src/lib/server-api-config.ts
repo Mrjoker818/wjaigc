@@ -298,11 +298,17 @@ function normalizeDiscoveredModels(val: unknown, providerId: string, modelType: 
   return arr.map((m: unknown) => {
     if (m && typeof m === 'object' && !Array.isArray(m)) {
       const rec = m as Record<string, unknown>;
+      const displayName = rec.displayName as string | undefined;
       return {
         id: (rec.id as string) || '',
         name: (rec.name as string) || (rec.id as string) || '',
+        ...(displayName ? { displayName } : {}),
         providerId,
         type: resolveType(rec.type) as ModelInfo['type'],
+        ...(rec.description ? { description: rec.description as string } : {}),
+        ...(rec.contextWindow ? { contextWindow: rec.contextWindow as number } : {}),
+        ...(rec.owned_by ? { owned_by: rec.owned_by as string } : {}),
+        ...(rec.capabilities ? { capabilities: rec.capabilities as string[] } : {}),
       } as ModelInfo;
     }
     if (typeof m === 'string') {
