@@ -4,6 +4,7 @@ import { findProviderForModel, normalizeApiBaseUrl, findAllProvidersForType, fin
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { identifyImageSubject } from '@/lib/identify-subject';
+import { logOperation, logError, startTimer, OP_ACTIONS, sanitizeRequestData } from '@/lib/op-log';
 
 import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { translateApiError } from '@/lib/api-error-translate';
@@ -108,6 +109,7 @@ function inferModelConfig(modelId: string, profile: ApiCompatProfile, providerNa
 }
 
 export async function POST(request: NextRequest) {
+  const opTimer = startTimer();
   const authResult = await requireApiAuthOrReject(request);
   if (authResult instanceof NextResponse) return authResult;
   try {
@@ -2015,6 +2017,13 @@ export async function POST(request: NextRequest) {
   } catch (apiError: unknown) {
     const errMsg = apiError instanceof Error ? apiError.message : String(apiError);
     console.error('Image generation API error:', errMsg);
+    
+    // 记录操作日志 - 生成失败
+    logError(OP_ACTIONS.IMAGE_GENERATE, apiError, {
+      userId: 'anonymous',
+      targetType: 'image',
+      durationMs: opTimer.end(),
+    });
     
     if (errMsg.includes('abort') || errMsg.includes('timeout')) {
       return NextResponse.json({

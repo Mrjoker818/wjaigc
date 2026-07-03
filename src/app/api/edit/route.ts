@@ -13,6 +13,7 @@ import { getEditTask, deleteEditTask, setEditTask, updateTaskStage, failEditTask
 import { calculateActualPixelsFromRatio } from '@/lib/calculate-pixels';
 import type { EditTask } from '@/lib/edit-task-store';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
+import { logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
 import { translateApiError } from '@/lib/api-error-translate';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, buildPollUrl, isEditsEndpointRejected, stripEditsOnlyFields, extractImageUrl } from '@/lib/api-compatibility';
 
@@ -273,6 +274,7 @@ function extractAllImagesFromResponse(responseData: Record<string, unknown>, fal
 // POST: 执行语言修图
 // ============================================================
 export async function POST(request: NextRequest) {
+  const opTimer = startTimer();
   const authResult = await requireApiAuthOrReject(request);
   if (authResult instanceof NextResponse) return authResult;
   let deductedCredits = 0;
@@ -1507,6 +1509,13 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.error(`[edit] Task creation error: ${message}`);
+    // 记录操作日志 - 语言修图失败
+    logError(OP_ACTIONS.LANG_EDIT, error, {
+      userId: sessionUser?.id || 'anonymous',
+      userName: sessionUser?.name,
+      targetType: 'image',
+      durationMs: opTimer.end(),
+    });
     // 退款：任务创建失败时退还积分
     if (deductedCredits > 0 && sessionUser) {
       try {

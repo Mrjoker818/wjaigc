@@ -21,11 +21,13 @@ import {
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits, refundCredits } from '@/lib/credits';
+import { logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
 import { validateApiInputs } from '@/lib/api-validator';
 
 export const maxDuration = 300; // 5 min timeout
 
 export async function POST(request: NextRequest) {
+  const opTimer = startTimer();
   let deductedCredits = 0;
   let sessionUser: any = null;
   try {
@@ -359,6 +361,13 @@ export async function POST(request: NextRequest) {
     });
   } catch (err: any) {
     console.error('[video/generate] Error:', err);
+    // 记录操作日志 - 视频生成失败
+    logError(OP_ACTIONS.VIDEO_GENERATE, err, {
+      userId: sessionUser?.id || 'anonymous',
+      userName: sessionUser?.name,
+      targetType: 'video',
+      durationMs: opTimer.end(),
+    });
     // 退款：视频生成失败时退还积分
     if (deductedCredits > 0 && sessionUser) {
       try {

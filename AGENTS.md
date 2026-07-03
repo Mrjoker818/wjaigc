@@ -64,7 +64,8 @@ src/
 │       │   ├── upscale-pro/route.ts # 无损放大Pro API (PearAPI+ONNX+AI精修, 多策略降级)
 │       │   └── inpaint/route.ts    # 涂抹消除/蒙版修图 API (IOPaint+LaMa)
 │       ├── admin/
-│       │   └── api-balance/route.ts   # API 余额与用量分析 API
+│       │   ├── api-balance/route.ts   # API 余额与用量分析 API
+│       │   └── op-log/route.ts        # 操作日志 API (查询/统计/AI分析/修复/批量删除/导出)
 │       └── design/
 │           └── vectorize/route.ts  # 矢量化 API (支持管理员配置的矢量模型 + PY_VECTORIZE_ENDPOINT)
 ├── components/
@@ -94,6 +95,7 @@ src/
 │   ├── api-helpers.ts              # API 辅助函数（fetchWithV1Retry 智能 /v1 重试）
 │   ├── psd-export.ts               # PSD 导出功能
 │   ├── svg-export.ts               # SVG 矢量化导出
+│   ├── op-log.ts                  # 操作日志记录模块（logOpSuccess/logOpError/logOpWarn快捷函数）
 │   ├── config.ts                   # 配置文件
 │   ├── api-compatibility.ts        # API 兼容层（通用多提供商适配，自动推断请求格式）
 │   ├── video-api.ts                # 视频API协议适配层（6种协议适配器, 20+视频模型注册表）
@@ -639,6 +641,37 @@ UPSCALE_TIMEOUT_MS=300000
 3. **用户输入**: 对所有用户输入进行验证和 sanitize
 4. **CORS**: 正确配置跨域策略
 
+## 操作日志系统 (op-log.ts + admin/op-log/route.ts)
+
+基于数据库的完整操作日志系统，自动记录用户操作和错误，提供 AI 分析与智能修复能力。
+
+### 核心架构
+- `op-log.ts`: 操作日志记录模块，提供 `logOpSuccess` / `logOpError` / `logOpWarn` 快捷函数
+- `admin/op-log/route.ts`: 日志管理 API（查询/统计/AI分析/修复/批量删除/导出）
+- `db-storage.ts`: 扩展 `wujie_audit_log` 表（新增 level/error_message/stack_trace/request_data/response_status/duration_ms/model/provider_id/resolution_status 等列）
+
+### 日志记录范围
+- **自动记录**: 图像生成(generate)、聊天(chat)、图片编辑(image-edit)、语言修图(edit)、视频生成(video/generate)、工作流执行(workflow/execute) 等关键 API 路由
+- **记录内容**: 操作类型、用户ID、模型/提供商、请求参数(脱敏)、响应状态、耗时、错误信息/堆栈
+- **日志级别**: info(成功操作) / warn(超时/降级) / error(失败/异常)
+
+### AI 分析与修复
+- **AI 分析**: 调用管理员配置的 LLM 模型分析错误日志，给出根因分析和修复建议
+- **智能修复**: 根据错误类型自动执行修复脚本（重置配额/切换模型/调整参数等）
+- **批量处理**: 支持批量标记已解决/忽略、批量删除
+
+### API 接口
+- GET `/api/admin/op-log` - 查询日志列表（支持 action/level/userId/startTime/endTime/resolutionStatus/search 筛选 + 分页）
+- POST `/api/admin/op-log` - 操作日志管理
+  - action: `statistics` - 获取统计概览
+  - action: `analyze` - AI 分析指定日志
+  - action: `resolve` - 标记日志已解决/忽略
+  - action: `batch_delete` - 批量删除日志
+  - action: `export` - 导出日志 CSV
+
+### 前端 UI (admin-tabs.tsx)
+- 管理员面板"操作日志"Tab：统计卡片(总操作/今日操作/错误数/未解决) + 筛选栏(操作类型/日志级别/用户ID) + 日志列表 + 详情展开(错误堆栈/请求参数/AI分析) + 解决操作(标记已解决/忽略/AI修复)
+
 ## 数据库持久化架构
 
 ### 概述
@@ -733,7 +766,21 @@ UPSCALE_TIMEOUT_MS=300000
 
 ## 更新日志
 
-### v3.6.0 (当前版本)
+### v3.7.0 (当前版本)
+
+**P0: 管理员操作日志系统 — 用户操作记录 + AI分析与智能修复**
+
+- 新增 `op-log.ts` 操作日志记录模块：提供 `logOpSuccess` / `logOpError` / `logOpWarn` 快捷函数
+- 扩展 `wujie_audit_log` 数据库表：新增 level/error_message/stack_trace/request_data/response_status/duration_ms/model/provider_id/resolution_status/resolution_detail/resolved_at/resolved_by 列
+- 关键 API 路由自动记录操作日志：generate / chat / image-edit / edit / video/generate / workflow/execute
+- 新增 `/api/admin/op-log` 日志管理 API（GET 查询 + POST 操作：statistics/analyze/resolve/batch_delete/export）
+- AI 日志分析：调用管理员配置的 LLM 模型分析错误日志，给出根因分析和修复建议
+- 智能修复：根据错误类型自动执行修复脚本（重置配额/切换模型/调整参数等）
+- 管理员面板"操作日志"Tab：统计卡片 + 筛选栏 + 日志列表 + 详情展开 + 解决操作 + AI分析
+- 日志级别分类：info(成功操作) / warn(超时/降级) / error(失败/异常)
+- 解决状态管理：none/pending/resolved/wontfix
+- 批量操作：批量标记已解决/忽略、批量删除
+- CSV 导出功能
 
 **P0: FHL API 兼容性修复 — Responses API + 私有IP回退**
 

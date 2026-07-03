@@ -7,6 +7,7 @@ import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { translateApiError } from '@/lib/api-error-translate';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, convertAspectRatioToSize, buildPollUrl, isEditsEndpointRejected, stripEditsOnlyFields, type ApiCompatProfile, type ImageEndpoint, buildGeminiChatImageRequest, parseGeminiChatImageResponse, resolveProfileForModel, isGeminiImageModel, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
 import { saveImageFile } from '@/lib/server-data-root';
+import { logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
 import sharp from 'sharp';
 import fsSync from 'fs';
 import fs from 'fs/promises';
@@ -1628,6 +1629,7 @@ async function saveBufferToPublic(buffer: Buffer, filename: string): Promise<str
 }
 
 export async function POST(request: NextRequest) {
+  const opTimer = startTimer();
   let deductedCredits = 0;
   let sessionUser: any = null;
   try {
@@ -3411,6 +3413,13 @@ export async function POST(request: NextRequest) {
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : String(error);
     console.error('Image edit error:', errMsg);
+    // 记录操作日志 - 图片编辑失败
+    logError(OP_ACTIONS.IMAGE_EDIT, error, {
+      userId: sessionUser?.id || 'anonymous',
+      userName: sessionUser?.name,
+      targetType: 'image',
+      durationMs: opTimer.end(),
+    });
     // 退款：异常失败时退还积分
     if (deductedCredits > 0 && sessionUser) {
       try {

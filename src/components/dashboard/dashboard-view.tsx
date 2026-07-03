@@ -1824,7 +1824,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 { key: 'overview' as TabType, label: '运营总览', icon: BarChart3, count: null },
                 { key: 'users' as TabType, label: '用户管理', icon: Users, count: adminUsers.length },
                 { key: 'credits' as TabType, label: '积分管理', icon: Wallet, count: null },
-                { key: 'audit' as TabType, label: '审计日志', icon: ShieldCheck, count: null },
+                { key: 'audit' as TabType, label: '操作日志', icon: ShieldCheck, count: null },
                 { key: 'apis' as TabType, label: 'API 管理', icon: Server, count: providers.length },
                 { key: 'desktop-admin' as TabType, label: '本地无界', icon: HardDrive, count: desktopAdminData.devices.length },
                 { key: 'connector-admin' as TabType, label: '插件连接器', icon: Plug, count: null },

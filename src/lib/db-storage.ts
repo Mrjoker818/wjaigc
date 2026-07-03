@@ -166,6 +166,19 @@ export async function ensureCoreTables(): Promise<void> {
       ['wujie_recharge_orders', 'paid_at', 'BIGINT'],
       ['wujie_api_providers', 'balance_username', 'TEXT DEFAULT \'\''],
       ['wujie_api_providers', 'balance_password', 'TEXT DEFAULT \'\''],
+      // 操作日志扩展列
+      ['wujie_audit_log', 'level', 'TEXT DEFAULT \'info\''],
+      ['wujie_audit_log', 'error_message', 'TEXT DEFAULT \'\''],
+      ['wujie_audit_log', 'stack_trace', 'TEXT DEFAULT \'\''],
+      ['wujie_audit_log', 'request_data', 'JSONB DEFAULT \'{}\''],
+      ['wujie_audit_log', 'response_status', 'INTEGER DEFAULT 0'],
+      ['wujie_audit_log', 'duration_ms', 'INTEGER DEFAULT 0'],
+      ['wujie_audit_log', 'model', 'TEXT DEFAULT \'\''],
+      ['wujie_audit_log', 'provider_id', 'TEXT DEFAULT \'\''],
+      ['wujie_audit_log', 'resolution_status', 'TEXT DEFAULT \'none\''],
+      ['wujie_audit_log', 'resolution_detail', 'TEXT DEFAULT \'\''],
+      ['wujie_audit_log', 'resolved_at', 'BIGINT'],
+      ['wujie_audit_log', 'resolved_by', 'TEXT DEFAULT \'\''],
     ];
     for (const [table, col, type] of migrations) {
       try {
@@ -174,6 +187,13 @@ export async function ensureCoreTables(): Promise<void> {
         // Column already exists or table doesn't exist — ignore
       }
     }
+
+    // 操作日志索引
+    try { await execSql(`CREATE INDEX IF NOT EXISTS idx_audit_level ON wujie_audit_log(level)`); } catch {}
+    try { await execSql(`CREATE INDEX IF NOT EXISTS idx_audit_action ON wujie_audit_log(action)`); } catch {}
+    try { await execSql(`CREATE INDEX IF NOT EXISTS idx_audit_created ON wujie_audit_log(created_at)`); } catch {}
+    try { await execSql(`CREATE INDEX IF NOT EXISTS idx_audit_user_id ON wujie_audit_log(user_id)`); } catch {}
+    try { await execSql(`CREATE INDEX IF NOT EXISTS idx_audit_resolution ON wujie_audit_log(resolution_status)`); } catch {}
 
     console.log('[db-storage] Core tables ensured');
   } catch (e) {
@@ -1471,7 +1491,7 @@ export async function dbGetUserTransactions(userId: string, limit: number = 100)
 
 // ─── Audit Log ────────────────────────────────────────────────────────────────
 
-interface DbAuditLog {
+export interface DbAuditLog {
   id: string;
   user_id: string;
   user_name: string | null;
@@ -1481,15 +1501,37 @@ interface DbAuditLog {
   detail: string | null;
   ip_address: string | null;
   created_at: number;
+  // 扩展字段（可选，向后兼容旧调用方）
+  level?: string; // 'info' | 'warn' | 'error' | 'critical'
+  error_message?: string | null;
+  stack_trace?: string | null;
+  request_data?: Record<string, unknown> | null;
+  response_status?: number;
+  duration_ms?: number;
+  model?: string | null;
+  provider_id?: string | null;
+  resolution_status?: string; // 'none' | 'analyzing' | 'fixing' | 'resolved' | 'wontfix'
+  resolution_detail?: string | null;
+  resolved_at?: number | null;
+  resolved_by?: string | null;
 }
 
 export async function dbAddAuditLog(entry: Omit<DbAuditLog, 'id'>): Promise<string> {
   try {
     const id = `audit_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     await execSql(
-      `INSERT INTO wujie_audit_log (id, user_id, user_name, action, target_type, target_id, detail, ip_address, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-      [id, entry.user_id, entry.user_name || null, entry.action, entry.target_type || null, entry.target_id || null, entry.detail || null, entry.ip_address || null, entry.created_at || Date.now()]
+      `INSERT INTO wujie_audit_log (id, user_id, user_name, action, target_type, target_id, detail, ip_address, created_at,
+        level, error_message, stack_trace, request_data, response_status, duration_ms, model, provider_id,
+        resolution_status, resolution_detail, resolved_at, resolved_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)`,
+      [id, entry.user_id, entry.user_name || null, entry.action, entry.target_type || null, entry.target_id || null,
+       entry.detail || null, entry.ip_address || null, entry.created_at || Date.now(),
+       entry.level || 'info', entry.error_message || null, entry.stack_trace || null,
+       entry.request_data ? JSON.stringify(entry.request_data) : null,
+       entry.response_status || 0, entry.duration_ms || 0,
+       entry.model || null, entry.provider_id || null,
+       entry.resolution_status || 'none', entry.resolution_detail || null,
+       entry.resolved_at || null, entry.resolved_by || null]
     );
     return id;
   } catch (e) {
@@ -1503,6 +1545,11 @@ export async function dbGetAuditLogs(options?: {
   userId?: string;
   startTime?: number;
   endTime?: number;
+  level?: string;
+  resolutionStatus?: string;
+  model?: string;
+  providerId?: string;
+  search?: string;
   limit?: number;
   offset?: number;
 }): Promise<{ logs: DbAuditLog[]; total: number }> {
@@ -1526,6 +1573,27 @@ export async function dbGetAuditLogs(options?: {
     if (options?.endTime) {
       conditions.push(`created_at <= $${paramIdx++}`);
       params.push(options.endTime);
+    }
+    if (options?.level) {
+      conditions.push(`level = $${paramIdx++}`);
+      params.push(options.level);
+    }
+    if (options?.resolutionStatus) {
+      conditions.push(`resolution_status = $${paramIdx++}`);
+      params.push(options.resolutionStatus);
+    }
+    if (options?.model) {
+      conditions.push(`model = $${paramIdx++}`);
+      params.push(options.model);
+    }
+    if (options?.providerId) {
+      conditions.push(`provider_id = $${paramIdx++}`);
+      params.push(options.providerId);
+    }
+    if (options?.search) {
+      conditions.push(`(detail ILIKE $${paramIdx} OR error_message ILIKE $${paramIdx} OR action ILIKE $${paramIdx} OR user_name ILIKE $${paramIdx})`);
+      params.push(`%${options.search}%`);
+      paramIdx++;
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -1553,16 +1621,24 @@ export async function dbGetAuditStats(): Promise<{
   todayActions: number;
   uniqueUsers: number;
   actionBreakdown: Record<string, number>;
+  levelBreakdown: Record<string, number>;
+  errorCount: number;
+  unresolvedErrorCount: number;
+  avgDurationMs: number;
 }> {
   try {
     const now = Date.now();
     const todayStart = now - (now % 86400000);
 
-    const [totalRes, todayRes, usersRes, breakdownRes] = await Promise.all([
+    const [totalRes, todayRes, usersRes, breakdownRes, levelRes, errorRes, unresolvedRes, avgDurRes] = await Promise.all([
       execSql('SELECT COUNT(*) as count FROM wujie_audit_log'),
       execSql('SELECT COUNT(*) as count FROM wujie_audit_log WHERE created_at >= $1', [todayStart]),
       execSql('SELECT COUNT(DISTINCT user_id) as count FROM wujie_audit_log'),
       execSql('SELECT action, COUNT(*) as count FROM wujie_audit_log GROUP BY action ORDER BY count DESC LIMIT 20'),
+      execSql('SELECT level, COUNT(*) as count FROM wujie_audit_log GROUP BY level'),
+      execSql('SELECT COUNT(*) as count FROM wujie_audit_log WHERE level IN ($1, $2)', ['error', 'critical']),
+      execSql('SELECT COUNT(*) as count FROM wujie_audit_log WHERE level IN ($1, $2) AND resolution_status = $3', ['error', 'critical', 'none']),
+      execSql('SELECT AVG(duration_ms) as avg FROM wujie_audit_log WHERE duration_ms > 0'),
     ]);
 
     const breakdown: Record<string, number> = {};
@@ -1570,15 +1646,74 @@ export async function dbGetAuditStats(): Promise<{
       breakdown[row.action] = row.count;
     }
 
+    const levelBreakdown: Record<string, number> = {};
+    for (const row of levelRes.rows as { level: string; count: number }[]) {
+      levelBreakdown[row.level] = row.count;
+    }
+
     return {
       totalActions: (totalRes.rows as { count: number }[])[0]?.count || 0,
       todayActions: (todayRes.rows as { count: number }[])[0]?.count || 0,
       uniqueUsers: (usersRes.rows as { count: number }[])[0]?.count || 0,
       actionBreakdown: breakdown,
+      levelBreakdown,
+      errorCount: (errorRes.rows as { count: number }[])[0]?.count || 0,
+      unresolvedErrorCount: (unresolvedRes.rows as { count: number }[])[0]?.count || 0,
+      avgDurationMs: Math.round((avgDurRes.rows as { avg: number }[])[0]?.avg || 0),
     };
   } catch (e) {
     console.error('[db-storage] dbGetAuditStats error:', e);
-    return { totalActions: 0, todayActions: 0, uniqueUsers: 0, actionBreakdown: {} };
+    return { totalActions: 0, todayActions: 0, uniqueUsers: 0, actionBreakdown: {}, levelBreakdown: {}, errorCount: 0, unresolvedErrorCount: 0, avgDurationMs: 0 };
+  }
+}
+
+/** 更新日志的解决状态 */
+export async function dbUpdateAuditLogResolution(
+  logId: string,
+  resolutionStatus: string,
+  resolutionDetail: string,
+  resolvedBy: string
+): Promise<boolean> {
+  try {
+    await execSql(
+      `UPDATE wujie_audit_log SET resolution_status = $1, resolution_detail = $2, resolved_by = $3, resolved_at = $4 WHERE id = $5`,
+      [resolutionStatus, resolutionDetail, resolvedBy, Date.now(), logId]
+    );
+    return true;
+  } catch (e) {
+    console.error('[db-storage] dbUpdateAuditLogResolution error:', e);
+    return false;
+  }
+}
+
+/** 批量标记日志解决状态 */
+export async function dbBatchUpdateResolution(
+  logIds: string[],
+  resolutionStatus: string,
+  resolutionDetail: string,
+  resolvedBy: string
+): Promise<number> {
+  try {
+    const result = await execSql(
+      `UPDATE wujie_audit_log SET resolution_status = $1, resolution_detail = $2, resolved_by = $3, resolved_at = $4 WHERE id = ANY($5)`,
+      [resolutionStatus, resolutionDetail, resolvedBy, Date.now(), logIds]
+    );
+    return (result as { rowCount?: number }).rowCount || 0;
+  } catch (e) {
+    console.error('[db-storage] dbBatchUpdateResolution error:', e);
+    return 0;
+  }
+}
+
+/** 清理指定天数前的旧日志 */
+export async function dbCleanOldAuditLogs(olderThanDays: number): Promise<number> {
+  try {
+    const cutoff = Date.now() - olderThanDays * 86400000;
+    const result = await execSql(`DELETE FROM wujie_audit_log WHERE created_at < $1`, [cutoff]);
+    return (result as { rowCount?: number }).rowCount || 0;
+  } catch (e) {
+    console.error('[db-storage] dbCleanOldAuditLogs error:', e);
+    return 0;
   }
 }
 

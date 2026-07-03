@@ -8,6 +8,7 @@ import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { consumeCredits, refundCredits } from '@/lib/credits';
 import { CHAT_TOOLS, executeToolCall, parseToolCallsFromStream, ToolCallResult } from '@/lib/chat-tools';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
+import { logOperation, logError, startTimer, OP_ACTIONS } from '@/lib/op-log';
 
 export const maxDuration = 120;
 
@@ -17,6 +18,7 @@ const MAX_AGENT_ITERATIONS = 8;
 const TOOL_EXECUTION_TIMEOUT = 120000;
 
 export async function POST(request: NextRequest) {
+  const opTimer = startTimer();
   let deductedCredits = 0;
   let sessionUser: any = null;
   try {
@@ -336,6 +338,13 @@ export async function POST(request: NextRequest) {
 
   } catch (error) {
     console.error('Chat API error:', error);
+    // 记录操作日志 - 聊天失败
+    logError(OP_ACTIONS.CHAT, error, {
+      userId: sessionUser?.id || 'anonymous',
+      userName: sessionUser?.name,
+      targetType: 'chat',
+      durationMs: opTimer.end(),
+    });
     // 退款：聊天请求完全失败时退还积分
     if (deductedCredits > 0 && sessionUser) {
       try {

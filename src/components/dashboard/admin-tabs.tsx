@@ -10,7 +10,7 @@ import {
   CircleDot, Server, Database, Bell, Lock, HardDrive, Cpu,
   SlidersHorizontal, Shield, Brain, Megaphone, Bold, Italic,
   Underline, Link2, List, AlertCircle, Download,
-  CheckCircle, Trash2, Info, Pencil
+  CheckCircle, CheckCircle2, Trash2, Info, Pencil, Wrench
 } from 'lucide-react';
 
 /* ── Types ── */
@@ -214,9 +214,13 @@ export default function AdminTabs(props: AdminTabsProps) {
   const [auditStats, setAuditStats] = useState<{ todayCount: number; weekCount: number; totalCount: number } | null>(null);
   const [auditLoading, setAuditLoading] = useState(false);
   const [auditFilterAction, setAuditFilterAction] = useState('all');
+  const [auditFilterLevel, setAuditFilterLevel] = useState('all');
+  const [auditFilterUserId, setAuditFilterUserId] = useState('');
   const [auditExpandedId, setAuditExpandedId] = useState<string | null>(null);
   const [auditPage, setAuditPage] = useState(1);
   const [auditTotal, setAuditTotal] = useState(0);
+  const [auditAiAnalysis, setAuditAiAnalysis] = useState<Record<string, string>>({});
+  const [auditAiLoading, setAuditAiLoading] = useState<string | null>(null);
 
   /* ── Settings state ── */
   const [systemSettings, setSystemSettings] = useState<Record<string, string>>({});
@@ -230,17 +234,19 @@ export default function AdminTabs(props: AdminTabsProps) {
     } catch {}
   }, []);
 
-  const loadAuditLogs = useCallback(async (page = 1, action = 'all') => {
+  const loadAuditLogs = useCallback(async (page = 1, action = 'all', level = 'all', userId = '') => {
     setAuditLoading(true);
     try {
       const params = new URLSearchParams({ page: String(page), limit: '20' });
       if (action !== 'all') params.set('action', action);
-      const res = await fetch(`/api/admin/audit?${params}`);
+      if (level !== 'all') params.set('level', level);
+      if (userId) params.set('userId', userId);
+      const res = await fetch(`/api/admin/op-log?${params}`);
       if (res.ok) {
         const data = await res.json();
         setAuditLogs(data.logs || []);
         setAuditTotal(data.total || 0);
-        setAuditStats(data.stats || { todayCount: 0, weekCount: 0, totalCount: 0 });
+        setAuditStats(data.stats || { todayCount: 0, weekCount: 0, totalCount: 0, errorCount: 0, warnCount: 0, unresolvedCount: 0 });
       }
     } catch {} finally { setAuditLoading(false); }
   }, []);
@@ -1011,87 +1017,260 @@ export default function AdminTabs(props: AdminTabsProps) {
   /* ── Render: Audit Tab ── */
   if (activeTab === 'audit') {
     const as = auditStats;
+    const actionLabels: Record<string, string> = {
+      user_create: '用户创建', user_delete: '用户删除', user_update: '用户更新',
+      api_create: 'API 配置', api_delete: 'API 删除', system_update: '系统设置',
+      image_generate: '图像生成', image_edit: '图片编辑', image_upscale: '图片放大',
+      image_remove_bg: '移除背景', image_erase: '擦除', image_mask: '蒙版修图',
+      image_outpaint: '扩展画面', lang_edit: '语言修图', video_generate: '视频生成',
+      video_extend: '视频延长', chat: 'AI 聊天', workflow_execute: '工作流执行',
+      image_to_3d: '图片转3D', svg_trace: 'SVG描摹', agent_edit: 'Agent编排',
+      segment_elements: '元素分层', font_design: '字境大师', vectorize: '矢量化',
+      optimize_prompt: '提示词优化', vision_prompt: '图片识词',
+    };
+    const actionColors: Record<string, string> = {
+      user_create: 'bg-green-500/15 text-green-500', user_delete: 'bg-destructive/15 text-destructive',
+      user_update: 'bg-blue-500/15 text-blue-500', api_create: 'bg-primary/15 text-primary',
+      api_delete: 'bg-destructive/15 text-destructive', system_update: 'bg-yellow-500/15 text-yellow-500',
+      image_generate: 'bg-primary/15 text-primary', image_edit: 'bg-blue-500/15 text-blue-500',
+      image_upscale: 'bg-cyan-500/15 text-cyan-500', image_remove_bg: 'bg-teal-500/15 text-teal-500',
+      lang_edit: 'bg-violet-500/15 text-violet-500', video_generate: 'bg-orange-500/15 text-orange-500',
+      chat: 'bg-indigo-500/15 text-indigo-500', workflow_execute: 'bg-pink-500/15 text-pink-500',
+    };
+    const levelIcons: Record<string, { icon: typeof AlertTriangle; color: string; label: string }> = {
+      error: { icon: AlertTriangle, color: 'text-destructive', label: '错误' },
+      warn: { icon: AlertTriangle, color: 'text-yellow-500', label: '警告' },
+      info: { icon: CheckCircle2, color: 'text-blue-500', label: '信息' },
+    };
+    const resolutionLabels: Record<string, { label: string; color: string }> = {
+      unresolved: { label: '未处理', color: 'bg-destructive/15 text-destructive' },
+      investigating: { label: '调查中', color: 'bg-yellow-500/15 text-yellow-500' },
+      resolved: { label: '已解决', color: 'bg-green-500/15 text-green-500' },
+      ignored: { label: '已忽略', color: 'bg-muted text-muted-foreground' },
+    };
+
+    const handleAiAnalyze = async (logId: string) => {
+      setAuditAiLoading(logId);
+      try {
+        const res = await fetch('/api/admin/op-log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'ai-analyze', logId }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setAuditAiAnalysis(prev => ({ ...prev, [logId]: data.analysis || '分析失败' }));
+        }
+      } catch { setAuditAiAnalysis(prev => ({ ...prev, [logId]: '分析请求失败' })); }
+      finally { setAuditAiLoading(null); }
+    };
+
+    const handleAiFix = async (logId: string) => {
+      setAuditAiLoading('fix-' + logId);
+      try {
+        const res = await fetch('/api/admin/op-log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'ai-fix', logId }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setAuditAiAnalysis(prev => ({ ...prev, [logId]: (prev[logId] || '') + '\n\n🔧 修复结果:\n' + (data.result || '修复完成') }));
+          loadAuditLogs(auditPage, auditFilterAction, auditFilterLevel, auditFilterUserId);
+        }
+      } catch { setAuditAiAnalysis(prev => ({ ...prev, [logId]: (prev[logId] || '') + '\n\n修复请求失败' })); }
+      finally { setAuditAiLoading(null); }
+    };
+
+    const handleResolution = async (logId: string, status: string) => {
+      try {
+        await fetch('/api/admin/op-log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'resolve', logId, resolutionStatus: status, resolutionDetail: `管理员标记为${resolutionLabels[status]?.label || status}` }),
+        });
+        loadAuditLogs(auditPage, auditFilterAction, auditFilterLevel, auditFilterUserId);
+      } catch {}
+    };
+
     return (
       <div className="space-y-4 px-6 pt-6 pb-8">
         {/* 页面标题 */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-bold text-foreground">审计日志</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">追踪平台所有操作的完整记录</p>
+            <h1 className="text-xl font-bold text-foreground">操作日志</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">追踪用户操作、错误记录与系统事件</p>
           </div>
+          <button onClick={() => loadAuditLogs(auditPage, auditFilterAction, auditFilterLevel, auditFilterUserId)} className="h-9 px-4 rounded-lg bg-primary/15 text-primary text-sm font-medium hover:bg-primary/25 transition-colors flex items-center gap-2">
+            <RefreshCw className={`w-4 h-4 ${auditLoading ? 'animate-spin' : ''}`} /> 刷新
+          </button>
         </div>
+
         {/* 摘要卡片 */}
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-3 lg:grid-cols-6 gap-3">
           <StatCard icon={ShieldCheck} label="今日操作" value={as ? formatNumber(as.todayCount) : '-'} colorClass="text-primary" iconBg="bg-primary/15" />
           <StatCard icon={Activity} label="本周操作" value={as ? formatNumber(as.weekCount) : '-'} colorClass="text-blue-500" iconBg="bg-blue-500/15" />
           <StatCard icon={Database} label="总记录" value={as ? formatNumber(as.totalCount) : '-'} colorClass="text-green-500" iconBg="bg-green-500/15" />
+          <StatCard icon={AlertTriangle} label="今日错误" value={as ? formatNumber((as as any).errorCount || 0) : '-'} colorClass="text-destructive" iconBg="bg-destructive/15" />
+          <StatCard icon={AlertTriangle} label="今日警告" value={as ? formatNumber((as as any).warnCount || 0) : '-'} colorClass="text-yellow-500" iconBg="bg-yellow-500/15" />
+          <StatCard icon={Wrench} label="未处理" value={as ? formatNumber((as as any).unresolvedCount || 0) : '-'} colorClass="text-orange-500" iconBg="bg-orange-500/15" />
         </div>
 
         {/* 筛选栏 */}
-        <div className="flex items-center gap-3">
-          <select value={auditFilterAction} onChange={e => { setAuditFilterAction(e.target.value); setAuditPage(1); loadAuditLogs(1, e.target.value); }} className="h-9 px-3 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30">
+        <div className="flex items-center gap-3 flex-wrap">
+          <select value={auditFilterAction} onChange={e => { setAuditFilterAction(e.target.value); setAuditPage(1); loadAuditLogs(1, e.target.value, auditFilterLevel, auditFilterUserId); }} className="h-9 px-3 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30">
             <option value="all">全部操作</option>
-            <option value="user_create">用户创建</option>
-            <option value="user_delete">用户删除</option>
-            <option value="user_update">用户更新</option>
-            <option value="api_create">API 配置</option>
-            <option value="api_delete">API 删除</option>
-            <option value="system_update">系统设置</option>
+            <optgroup label="管理员操作">
+              <option value="user_create">用户创建</option>
+              <option value="user_delete">用户删除</option>
+              <option value="user_update">用户更新</option>
+              <option value="api_create">API 配置</option>
+              <option value="api_delete">API 删除</option>
+              <option value="system_update">系统设置</option>
+            </optgroup>
+            <optgroup label="用户操作">
+              <option value="image_generate">图像生成</option>
+              <option value="image_edit">图片编辑</option>
+              <option value="image_upscale">图片放大</option>
+              <option value="image_remove_bg">移除背景</option>
+              <option value="lang_edit">语言修图</option>
+              <option value="video_generate">视频生成</option>
+              <option value="chat">AI 聊天</option>
+              <option value="workflow_execute">工作流执行</option>
+            </optgroup>
           </select>
+          <select value={auditFilterLevel} onChange={e => { setAuditFilterLevel(e.target.value); setAuditPage(1); loadAuditLogs(1, auditFilterAction, e.target.value, auditFilterUserId); }} className="h-9 px-3 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30">
+            <option value="all">全部级别</option>
+            <option value="error">错误</option>
+            <option value="warn">警告</option>
+            <option value="info">信息</option>
+          </select>
+          <input
+            type="text" placeholder="用户ID筛选" value={auditFilterUserId}
+            onChange={e => setAuditFilterUserId(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { setAuditPage(1); loadAuditLogs(1, auditFilterAction, auditFilterLevel, auditFilterUserId); } }}
+            className="h-9 px-3 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 w-36"
+          />
           <div className="flex-1" />
-          <button onClick={() => loadAuditLogs(auditPage, auditFilterAction)} className="h-9 px-3 rounded-lg bg-muted text-muted-foreground hover:text-foreground transition-colors"><RefreshCw className={`w-4 h-4 ${auditLoading ? 'animate-spin' : ''}`} /></button>
+          <button onClick={() => { setAuditFilterAction('all'); setAuditFilterLevel('all'); setAuditFilterUserId(''); setAuditPage(1); loadAuditLogs(1, 'all', 'all', ''); }} className="h-9 px-3 rounded-lg bg-muted text-muted-foreground hover:text-foreground transition-colors text-sm">重置筛选</button>
         </div>
 
         {/* 日志表格 */}
         <div className="bg-card rounded-lg shadow-card border border-border/50 overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-xs text-muted-foreground bg-muted/30">
-                <th className="text-left py-3 px-4 font-medium">时间</th>
-                <th className="text-left py-3 px-4 font-medium">操作者</th>
-                <th className="text-left py-3 px-4 font-medium">操作类型</th>
-                <th className="text-left py-3 px-4 font-medium">目标</th>
-                <th className="text-left py-3 px-4 font-medium">详情</th>
-              </tr>
-            </thead>
-            <tbody>
-              {auditLogs.map((log: Record<string, unknown>, i) => {
-                const action = String(log.action || '');
-                const isDanger = action.includes('delete');
-                const actionLabels: Record<string, string> = { user_create: '用户创建', user_delete: '用户删除', user_update: '用户更新', api_create: 'API 配置', api_delete: 'API 删除', system_update: '系统设置' };
-                const actionColors: Record<string, string> = { user_create: 'bg-green-500/15 text-green-500', user_delete: 'bg-destructive/15 text-destructive', user_update: 'bg-blue-500/15 text-blue-500', api_create: 'bg-primary/15 text-primary', api_delete: 'bg-destructive/15 text-destructive', system_update: 'bg-yellow-500/15 text-yellow-500' };
-                const logId = String(log.id || i);
-                const isExpanded = auditExpandedId === logId;
-                return (
-                  <React.Fragment key={logId}>
-                    <tr className={`border-b border-border/30 hover:bg-muted/30 transition-colors ${isDanger ? 'bg-destructive/5' : ''}`}>
-                      <td className="py-3 px-4 text-muted-foreground font-mono text-xs">{formatDateTime(String(log.createdAt || ''))}</td>
-                      <td className="py-3 px-4 text-foreground font-medium">{String(log.user_name || log.user_id || '-')}</td>
-                      <td className="py-3 px-4"><span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${actionColors[action] || 'bg-muted text-muted-foreground'}`}>{actionLabels[action] || action}</span></td>
-                      <td className="py-3 px-4 text-muted-foreground">{String(log.target_type || '')}{log.target_id ? ` #${log.target_id}` : ''}</td>
-                      <td className="py-3 px-4">
-                        {log.detail != null && <button onClick={() => setAuditExpandedId(isExpanded ? null : logId)} className="text-xs text-primary hover:underline inline-flex items-center gap-1">{isExpanded ? '收起' : '展开'} <ChevronDown className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`} /></button>}
-                      </td>
-                    </tr>
-                    {isExpanded && log.detail != null && (
-                      <tr className="bg-muted/20">
-                        <td colSpan={5} className="py-3 px-4"><pre className="text-xs text-muted-foreground whitespace-pre-wrap font-mono max-h-40 overflow-auto">{typeof log.detail === 'string' ? log.detail : JSON.stringify(log.detail, null, 2)}</pre></td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-xs text-muted-foreground bg-muted/30">
+                  <th className="text-left py-3 px-3 font-medium w-32">时间</th>
+                  <th className="text-left py-3 px-3 font-medium w-16">级别</th>
+                  <th className="text-left py-3 px-3 font-medium w-20">操作者</th>
+                  <th className="text-left py-3 px-3 font-medium w-24">操作类型</th>
+                  <th className="text-left py-3 px-3 font-medium">详情</th>
+                  <th className="text-left py-3 px-3 font-medium w-20">状态</th>
+                  <th className="text-left py-3 px-3 font-medium w-24">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {auditLogs.map((log: Record<string, unknown>, i) => {
+                  const action = String(log.action || '');
+                  const level = String(log.level || 'info');
+                  const logId = String(log.id || i);
+                  const isExpanded = auditExpandedId === logId;
+                  const isDanger = level === 'error';
+                  const li = levelIcons[level] || levelIcons.info;
+                  const LevelIcon = li.icon;
+                  const resStatus = String((log as any).resolutionStatus || 'unresolved');
+                  const resInfo = resolutionLabels[resStatus] || resolutionLabels.unresolved;
+                  return (
+                    <React.Fragment key={logId}>
+                      <tr className={`border-b border-border/30 hover:bg-muted/30 transition-colors ${isDanger ? 'bg-destructive/5' : ''}`}>
+                        <td className="py-2.5 px-3 text-muted-foreground font-mono text-xs">{formatDateTime(String(log.createdAt || (log as any).created_at || ''))}</td>
+                        <td className="py-2.5 px-3"><span className={`inline-flex items-center gap-1 text-xs font-medium ${li.color}`}><LevelIcon className="w-3 h-3" />{li.label}</span></td>
+                        <td className="py-2.5 px-3 text-foreground font-medium text-xs truncate max-w-20" title={String(log.user_name || log.user_id || '-')}>{String(log.user_name || log.user_id || '-')}</td>
+                        <td className="py-2.5 px-3"><span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${actionColors[action] || 'bg-muted text-muted-foreground'}`}>{actionLabels[action] || action}</span></td>
+                        <td className="py-2.5 px-3 text-muted-foreground text-xs truncate max-w-64" title={String((log as any).errorMessage || log.detail || '')}>{String((log as any).errorMessage || log.detail || '-')}</td>
+                        <td className="py-2.5 px-3"><span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${resInfo.color}`}>{resInfo.label}</span></td>
+                        <td className="py-2.5 px-3">
+                          <div className="flex items-center gap-1">
+                            <button onClick={() => setAuditExpandedId(isExpanded ? null : logId)} className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground" title="展开详情"><ChevronDown className={`w-3.5 h-3.5 transition-transform ${isExpanded ? 'rotate-180' : ''}`} /></button>
+                            {isDanger && <button onClick={() => handleAiAnalyze(logId)} disabled={auditAiLoading === logId} className="p-1 rounded hover:bg-primary/15 text-muted-foreground hover:text-primary" title="AI分析"><Brain className="w-3.5 h-3.5" /></button>}
+                            {isDanger && resStatus !== 'resolved' && <button onClick={() => handleAiFix(logId)} disabled={auditAiLoading === 'fix-' + logId} className="p-1 rounded hover:bg-green-500/15 text-muted-foreground hover:text-green-500" title="AI修复"><Wrench className="w-3.5 h-3.5" /></button>}
+                          </div>
+                        </td>
                       </tr>
-                    )}
-                  </React.Fragment>
-                );
-              })}
-            </tbody>
-          </table>
-          {auditLogs.length === 0 && <div className="text-center py-12 text-muted-foreground">暂无审计日志</div>}
+                      {isExpanded && (
+                        <tr className="bg-muted/20">
+                          <td colSpan={7} className="py-3 px-4">
+                            <div className="space-y-2">
+                              {/* 基础信息 */}
+                              <div className="grid grid-cols-2 gap-2 text-xs">
+                                <div><span className="text-muted-foreground">用户ID:</span> <span className="text-foreground font-mono">{String(log.user_id || '-')}</span></div>
+                                <div><span className="text-muted-foreground">目标:</span> <span className="text-foreground">{String(log.target_type || '')}{log.target_id ? ` #${log.target_id}` : ''}</span></div>
+                                {(log as any).errorMessage && <div className="col-span-2"><span className="text-muted-foreground">错误信息:</span> <span className="text-destructive font-mono">{String((log as any).errorMessage)}</span></div>}
+                                {(log as any).model && <div><span className="text-muted-foreground">模型:</span> <span className="text-foreground">{String((log as any).model)}</span></div>}
+                                {(log as any).providerId && <div><span className="text-muted-foreground">提供商:</span> <span className="text-foreground">{String((log as any).providerId)}</span></div>}
+                                {(log as any).duration && <div><span className="text-muted-foreground">耗时:</span> <span className="text-foreground">{Number((log as any).duration).toFixed(0)}ms</span></div>}
+                              </div>
+                              {/* 堆栈 */}
+                              {(log as any).stackTrace && (
+                                <details className="text-xs">
+                                  <summary className="text-muted-foreground cursor-pointer hover:text-foreground">堆栈跟踪</summary>
+                                  <pre className="text-destructive/80 whitespace-pre-wrap font-mono max-h-32 overflow-auto mt-1 p-2 bg-background rounded">{String((log as any).stackTrace)}</pre>
+                                </details>
+                              )}
+                              {/* 请求数据 */}
+                              {(log as any).requestData && (
+                                <details className="text-xs">
+                                  <summary className="text-muted-foreground cursor-pointer hover:text-foreground">请求数据</summary>
+                                  <pre className="text-muted-foreground whitespace-pre-wrap font-mono max-h-32 overflow-auto mt-1 p-2 bg-background rounded">{typeof (log as any).requestData === 'string' ? String((log as any).requestData) : JSON.stringify((log as any).requestData, null, 2)}</pre>
+                                </details>
+                              )}
+                              {/* 详情 */}
+                              {log.detail != null && (
+                                <details open className="text-xs">
+                                  <summary className="text-muted-foreground cursor-pointer hover:text-foreground">详情</summary>
+                                  <pre className="text-muted-foreground whitespace-pre-wrap font-mono max-h-32 overflow-auto mt-1 p-2 bg-background rounded">{typeof log.detail === 'string' ? log.detail : JSON.stringify(log.detail, null, 2)}</pre>
+                                </details>
+                              )}
+                              {/* AI分析结果 */}
+                              {auditAiAnalysis[logId] && (
+                                <div className="p-3 bg-primary/5 rounded-lg border border-primary/20">
+                                  <div className="flex items-center gap-1.5 text-xs font-medium text-primary mb-1"><Brain className="w-3.5 h-3.5" /> AI 分析</div>
+                                  <pre className="text-xs text-foreground whitespace-pre-wrap font-mono max-h-48 overflow-auto">{auditAiAnalysis[logId]}</pre>
+                                </div>
+                              )}
+                              {/* AI加载中 */}
+                              {auditAiLoading && (auditAiLoading === logId || auditAiLoading === 'fix-' + logId) && (
+                                <div className="flex items-center gap-2 text-xs text-primary"><RefreshCw className="w-3 h-3 animate-spin" /> {auditAiLoading.startsWith('fix-') ? 'AI修复中...' : 'AI分析中...'}</div>
+                              )}
+                              {/* 解决状态操作 */}
+                              {isDanger && (
+                                <div className="flex items-center gap-2 pt-1">
+                                  <span className="text-xs text-muted-foreground">处理状态:</span>
+                                  {Object.entries(resolutionLabels).map(([key, info]) => (
+                                    <button key={key} onClick={() => handleResolution(logId, key)} className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${resStatus === key ? info.color : 'bg-muted text-muted-foreground hover:text-foreground'}`}>{info.label}</button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {auditLogs.length === 0 && <div className="text-center py-12 text-muted-foreground">暂无操作日志</div>}
         </div>
 
         {/* 分页 */}
         {auditTotal > 20 && (
           <div className="flex items-center justify-center gap-2">
-            <button disabled={auditPage <= 1} onClick={() => { setAuditPage(p => p - 1); loadAuditLogs(auditPage - 1, auditFilterAction); }} className="h-8 px-3 rounded-lg bg-muted text-sm text-muted-foreground disabled:opacity-50 hover:text-foreground"><ChevronLeft className="w-4 h-4" /></button>
-            <span className="text-sm text-muted-foreground">第 {auditPage} 页</span>
-            <button disabled={auditPage * 20 >= auditTotal} onClick={() => { setAuditPage(p => p + 1); loadAuditLogs(auditPage + 1, auditFilterAction); }} className="h-8 px-3 rounded-lg bg-muted text-sm text-muted-foreground disabled:opacity-50 hover:text-foreground"><ChevronRight className="w-4 h-4" /></button>
+            <button disabled={auditPage <= 1} onClick={() => { const p = auditPage - 1; setAuditPage(p); loadAuditLogs(p, auditFilterAction, auditFilterLevel, auditFilterUserId); }} className="h-8 px-3 rounded-lg bg-muted text-sm text-muted-foreground disabled:opacity-50 hover:text-foreground"><ChevronLeft className="w-4 h-4" /></button>
+            <span className="text-sm text-muted-foreground">第 {auditPage} 页 (共 {Math.ceil(auditTotal / 20)} 页, {auditTotal} 条)</span>
+            <button disabled={auditPage * 20 >= auditTotal} onClick={() => { const p = auditPage + 1; setAuditPage(p); loadAuditLogs(p, auditFilterAction, auditFilterLevel, auditFilterUserId); }} className="h-8 px-3 rounded-lg bg-muted text-sm text-muted-foreground disabled:opacity-50 hover:text-foreground"><ChevronRight className="w-4 h-4" /></button>
           </div>
         )}
       </div>

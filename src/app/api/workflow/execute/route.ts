@@ -24,6 +24,7 @@ import {
 import { findProviderForModel, findProviderForFeature, findProviderById } from '@/lib/server-api-config';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { validateApiInputs } from '@/lib/api-validator';
+import { logError, OP_ACTIONS } from '@/lib/op-log';
 
 // 内存中的执行状态
 const executionCache = new Map<string, {
@@ -151,6 +152,7 @@ export async function POST(request: NextRequest) {
 
   } catch (error) {
     console.error('[Workflow] 请求处理失败:', error);
+    logError(OP_ACTIONS.WORKFLOW_EXECUTE, error, { targetType: 'workflow' });
     return NextResponse.json(
       { error: error instanceof Error ? error.message : '工作流执行失败' },
       { status: 500 }
