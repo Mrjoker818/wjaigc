@@ -915,7 +915,7 @@ export async function getPublicModels(modelType?: ApiKind): Promise<ModelInfo[]>
           id,
           name: '', // will be resolved below
           providerId: provider.id,
-          type: modelTypeForProvider(provider),
+          type: inferModelType(id, modelTypeForProvider(provider)),
           displayName: undefined,
         } satisfies ModelInfo))).map(model => {
           // 优先级：管理员手动设置的 displayName > 第三方 API 供应商名称 > 本地映射

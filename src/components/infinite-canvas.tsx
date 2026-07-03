@@ -1085,6 +1085,11 @@ export function InfiniteCanvas({
   const [canvasGenFramePos, setCanvasGenFramePos] = useState<{x: number, y: number}>({ x: 0, y: 0 });
   const canvasGenFrameWidth = 512;
   const canvasGenFrameHeight = 288; // 16:9 ratio
+  // 浮动面板拖拽状态
+  const [canvasGenPanelPos, setCanvasGenPanelPos] = useState({ x: 60, y: 60 });
+  const [canvasGenDragging, setCanvasGenDragging] = useState(false);
+  const [canvasGenDragOffset, setCanvasGenDragOffset] = useState({ x: 0, y: 0 });
+  const [canvasGenMinimized, setCanvasGenMinimized] = useState(false);
   const [visionHoverImage, setVisionHoverImage] = useState<CanvasImage | null>(null);
   const [showRefFusion, setShowRefFusion] = useState(false);
 
@@ -5378,24 +5383,12 @@ export function InfiniteCanvas({
       setShowCanvasGenerator(false);
       return;
     }
-    // Create a blank placeholder frame in the center of the canvas viewport
+    // Set initial panel position (right side of viewport)
     const container = canvasRef.current?.getBoundingClientRect();
-    const centerX = container ? (container.width / 2 - viewOffset.x) / zoom : 100;
-    const centerY = container ? (container.height / 2 - viewOffset.y) / zoom : 100;
-    const frameId = `gen-frame-${Date.now()}`;
-    const newFrame: CanvasImage = {
-      id: frameId,
-      url: '',
-      x: centerX - canvasGenFrameWidth / 2,
-      y: centerY - canvasGenFrameHeight / 2,
-      width: canvasGenFrameWidth,
-      height: canvasGenFrameHeight,
-      isProcessingPlaceholder: true,
-      processing: { label: '图像生成器', status: 'waiting', progress: 0, startTime: Date.now() },
-    };
-    onImagesChange([...imagesRef.current, newFrame]);
-    setCanvasGenFrameId(frameId);
-    setCanvasGenFramePos({ x: newFrame.x, y: newFrame.y });
+    const panelX = container ? Math.min(container.right - 440, window.innerWidth - 440) : window.innerWidth - 440;
+    const panelY = container ? container.top + 60 : 60;
+    setCanvasGenPanelPos({ x: Math.max(10, panelX), y: Math.max(10, panelY) });
+    setCanvasGenMinimized(false);
     setShowCanvasGenerator(true);
     setCanvasGenPrompt('');
     setCanvasGenNegativePrompt('');
@@ -5410,10 +5403,31 @@ export function InfiniteCanvas({
     if (!canvasGenPrompt.trim() || canvasGenGenerating) return;
     setCanvasGenGenerating(true);
 
-    // Update frame to processing state
-    if (canvasGenFrameId) {
+    // Create a processing frame on the canvas (if not already existing)
+    let currentFrameId = canvasGenFrameId;
+    if (!currentFrameId) {
+      const container = canvasRef.current?.getBoundingClientRect();
+      const centerX = container ? (container.width / 2 - viewOffset.x) / zoom : 100;
+      const centerY = container ? (container.height / 2 - viewOffset.y) / zoom : 100;
+      const frameId = `gen-frame-${Date.now()}`;
+      const newFrame: CanvasImage = {
+        id: frameId,
+        url: '',
+        x: centerX - canvasGenFrameWidth / 2,
+        y: centerY - canvasGenFrameHeight / 2,
+        width: canvasGenFrameWidth,
+        height: canvasGenFrameHeight,
+        isProcessingPlaceholder: true,
+        processing: { label: '生成中...', status: 'processing', progress: 10, startTime: Date.now() },
+      };
+      onImagesChange([...imagesRef.current, newFrame]);
+      setCanvasGenFrameId(frameId);
+      setCanvasGenFramePos({ x: newFrame.x, y: newFrame.y });
+      currentFrameId = frameId;
+    } else {
+      // Update existing frame to processing state
       onImagesChange(images.map(img => {
-        if (img.id === canvasGenFrameId) {
+        if (img.id === currentFrameId) {
           return { ...img, processing: { label: '生成中...', status: 'processing', progress: 10, startTime: img.processing?.startTime || Date.now() } };
         }
         return img;
@@ -5478,10 +5492,10 @@ export function InfiniteCanvas({
         // Replace the processing frame with the actual images
         const newImages: CanvasImage[] = [];
         for (let i = 0; i < savedUrls.length; i++) {
-          if (i === 0 && canvasGenFrameId) {
+          if (i === 0 && currentFrameId) {
             // Replace the placeholder frame with the first result
             onImagesChange(images.map(img => {
-              if (img.id === canvasGenFrameId) {
+              if (img.id === currentFrameId) {
                 return { ...img, url: savedUrls[i], isProcessingPlaceholder: false, processing: undefined, prompt: canvasGenPrompt,
                   modelName: data.modelName || (canvasGenModel?.includes('::') ? canvasGenModel.split('::')[1] : canvasGenModel),
                   apiProvider: data.providerName,
@@ -5566,10 +5580,10 @@ export function InfiniteCanvas({
               return null;
             }
             // Update progress
-            if (canvasGenFrameId) {
+            if (currentFrameId) {
               const progress = Math.min(90, 10 + (attempt / maxAttempts) * 80);
               onImagesChange(imagesRef.current.map(img => {
-                if (img.id === canvasGenFrameId) {
+                if (img.id === currentFrameId) {
                   return { ...img, processing: { label: '生成中...', status: 'processing', progress } };
                 }
                 return img;
@@ -5585,9 +5599,9 @@ export function InfiniteCanvas({
 
       if (validUrls.length > 0) {
         // Replace the placeholder frame with the first result
-        if (canvasGenFrameId) {
+        if (currentFrameId) {
           onImagesChange(imagesRef.current.map(img => {
-            if (img.id === canvasGenFrameId) {
+            if (img.id === currentFrameId) {
               return {
                 ...img,
                 url: validUrls[0],
@@ -5606,7 +5620,7 @@ export function InfiniteCanvas({
         }
         // If multiple results, add the rest as new images to the right
         if (validUrls.length > 1) {
-          const frameImg = imagesRef.current.find(img => img.id === canvasGenFrameId);
+          const frameImg = imagesRef.current.find(img => img.id === currentFrameId);
           const baseX = frameImg ? frameImg.x + frameImg.width + 20 : 100;
           const baseY = frameImg ? frameImg.y : 100;
           const additionalImages: CanvasImage[] = validUrls.slice(1).map((url, idx) => ({
@@ -5634,9 +5648,9 @@ export function InfiniteCanvas({
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : '生成失败';
       // Show error on frame
-      if (canvasGenFrameId) {
+      if (currentFrameId) {
         onImagesChange(imagesRef.current.map(img => {
-          if (img.id === canvasGenFrameId) {
+          if (img.id === currentFrameId) {
             return { ...img, processing: { label: errorMsg, status: 'failed', progress: 0 } };
           }
           return img;
@@ -5656,6 +5670,37 @@ export function InfiniteCanvas({
       }
     }
   }, [images, canvasGenFrameId, showCanvasGenerator]);
+
+  // 浮动面板拖拽处理
+  const handleCanvasGenDragStart = useCallback((e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    const header = target.closest('[data-panel-header]');
+    if (!header) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setCanvasGenDragging(true);
+    setCanvasGenDragOffset({ x: e.clientX - canvasGenPanelPos.x, y: e.clientY - canvasGenPanelPos.y });
+  }, [canvasGenPanelPos]);
+
+  useEffect(() => {
+    if (!canvasGenDragging) return;
+    const onMove = (e: MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setCanvasGenPanelPos({ x: e.clientX - canvasGenDragOffset.x, y: e.clientY - canvasGenDragOffset.y });
+    };
+    const onUp = (e: MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setCanvasGenDragging(false);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [canvasGenDragging, canvasGenDragOffset]);
 
   // ============ ChatCanvas 批注功能 ============
 
@@ -14951,211 +14996,238 @@ export function InfiniteCanvas({
       </div>
 
       {/* Canvas-Embedded Image Generator Panel */}
-      {showCanvasGenerator && canvasGenFrameId && (() => {
-        const frame = images.find(img => img.id === canvasGenFrameId);
-        if (!frame) return null;
-        const screenX = frame.x * zoom + viewOffset.x;
-        const screenY = frame.y * zoom + viewOffset.y + frame.height * zoom + 12;
+      {showCanvasGenerator && (() => {
         return (
           <div
-            className="absolute z-40"
-            style={{ left: screenX, top: screenY, width: Math.max(frame.width * zoom, 380) }}
-            data-floating-panel="canvas-generator"
-            onClick={(e) => e.stopPropagation()}
+            className="fixed z-[200]"
+            style={{
+              left: canvasGenPanelPos.x,
+              top: canvasGenPanelPos.y,
+              width: 420,
+              backgroundColor: isMonochrome ? '#fff' : '#1a1a1a',
+              border: canvasGenDragging
+                ? `2px solid ${isMonochrome ? '#2563eb' : '#d4af37'}`
+                : `1px solid ${isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.08)'}`,
+              boxShadow: canvasGenDragging
+                ? (isMonochrome ? '0 0 24px rgba(37,99,235,0.25), 0 25px 50px -12px rgba(0,0,0,0.25)' : '0 0 24px rgba(212,175,55,0.3), 0 25px 50px -12px rgba(0,0,0,0.5)')
+                : (isMonochrome ? '0 25px 50px -12px rgba(0,0,0,0.25)' : '0 25px 50px -12px rgba(0,0,0,0.5)'),
+              borderRadius: 16,
+              overflow: 'hidden',
+            }}
+            onMouseDown={e => e.stopPropagation()}
+            onPointerDown={e => e.stopPropagation()}
+            data-popup
           >
-            <div className={`rounded-2xl border shadow-2xl overflow-hidden ${
-              isMonochrome
-                ? 'bg-white border-gray-200'
-                : 'bg-gradient-to-b from-[#181818] to-[#111111] border-white/[0.14] shadow-[0_8px_32px_rgba(0,0,0,0.6)]'
-            }`}>
-              {/* Header */}
-              <div className={`flex items-center justify-between px-4 py-2.5 border-b ${
-                isMonochrome ? 'border-gray-100' : 'border-white/[0.14]'
-              }`}>
-                <div className="flex items-center gap-2.5">
-                  <div className={`w-6 h-6 rounded-lg flex items-center justify-center ${
-                    isMonochrome ? 'bg-blue-100' : 'bg-gold/15'
-                  }`}>
-                    <Sparkles size={13} className={isMonochrome ? 'text-blue-500' : 'text-gold'} />
-                  </div>
-                  <span className={`text-sm font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>图像生成器</span>
-                </div>
-                <button
-                  onClick={handleOpenCanvasGenerator}
-                  className={`p-1.5 rounded-lg transition-colors ${isMonochrome ? 'text-blue-400 hover:text-blue-600 hover:bg-blue-50' : 'text-gold-muted/50 hover:text-white hover:bg-[#2a2a2a]'}`}
-                >
-                  <X size={14} />
-                </button>
-              </div>
+            {/* Header - 可拖拽 */}
+            <div
+              data-panel-header
+              className={`flex items-center gap-2 px-3 py-2 cursor-move select-none shrink-0 ${canvasGenMinimized ? 'rounded-2xl' : ''}`}
+              style={{ borderBottom: canvasGenMinimized ? 'none' : `1px solid ${isMonochrome ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.08)'}` }}
+              onMouseDown={handleCanvasGenDragStart}
+            >
+              <GripVertical size={14} style={{ color: isMonochrome ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.3)' }} />
+              <Sparkles size={15} style={{ color: isMonochrome ? '#6b6b6b' : '#d4af37' }} />
+              <span className="text-base font-semibold flex-1" style={{ color: isMonochrome ? '#6b6b6b' : '#d4af37' }}>
+                图像生成器
+              </span>
+              {canvasGenModel && (() => {
+                const m = canvasGenModels.find(m => `${m.providerId}::${m.id}` === canvasGenModel);
+                return m ? (
+                  <span className="text-xs px-1.5 py-0.5 rounded" style={{ color: isMonochrome ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.5)', background: isMonochrome ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.06)' }}>
+                    {getModelDisplayName(m.id)}
+                  </span>
+                ) : null;
+              })()}
+              <button
+                onClick={() => setCanvasGenMinimized(!canvasGenMinimized)}
+                className="p-1 rounded-md transition-colors"
+                style={{ color: isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)' }}
+                onMouseEnter={e => (e.currentTarget.style.color = isMonochrome ? '#000' : '#fff')}
+                onMouseLeave={e => (e.currentTarget.style.color = isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)')}
+              >
+                <Minus size={14} />
+              </button>
+              <button
+                onClick={handleOpenCanvasGenerator}
+                className="p-1 rounded-md transition-colors"
+                style={{ color: isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)' }}
+                onMouseEnter={e => (e.currentTarget.style.color = isMonochrome ? '#000' : '#fff')}
+                onMouseLeave={e => (e.currentTarget.style.color = isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)')}
+              >
+                <X size={14} />
+              </button>
+            </div>
 
-              <div className="p-3.5 space-y-3">
-                {/* Model selector */}
-                <div className="flex items-center gap-2.5">
-                  <label className={`text-xs font-medium min-w-[42px] ${isMonochrome ? 'text-gray-500' : 'text-[#777]'}`}>模型</label>
-                  <select
-                    value={canvasGenModel}
-                    onChange={(e) => setCanvasGenModel(e.target.value)}
-                    className={`flex-1 text-xs rounded-lg px-3 py-2 border outline-none transition-colors ${
-                      isMonochrome
-                        ? 'bg-white border-gray-200 text-gray-900 focus:border-gray-400'
-                        : 'bg-[#0d0d0d] border-white/[0.12] text-text-bright focus:border-gold/40'
-                    }`}
-                  >
-                    {canvasGenModels.length === 0 && <option value="">暂无可用模型</option>}
-                    {canvasGenModels.map(m => {
-                      const compositeKey = `${m.providerId}::${m.id}`;
-                      return <option key={compositeKey} value={compositeKey}>{m.apiDisplayName || getModelDisplayName(m.id)}{m.providerName ? ` (${m.providerName})` : ''}</option>;
-                    })}
-                  </select>
-                </div>
-
-                {/* Aspect ratio + Quality */}
-                <div className="flex items-center gap-2.5">
-                  <label className={`text-xs font-medium min-w-[42px] ${isMonochrome ? 'text-gray-500' : 'text-[#777]'}`}>比例</label>
-                  <select
-                    value={canvasGenAspectRatio}
-                    onChange={(e) => setCanvasGenAspectRatio(e.target.value)}
-                    className={`flex-1 text-xs rounded-lg px-3 py-2 border outline-none transition-colors ${
-                      isMonochrome
-                        ? 'bg-white border-gray-200 text-gray-900 focus:border-gray-400'
-                        : 'bg-[#0d0d0d] border-white/[0.12] text-text-bright focus:border-gold/40'
-                    }`}
-                  >
-                    {['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'].map(r => (
-                      <option key={r} value={r}>{r}</option>
-                    ))}
-                  </select>
-                  <label className={`text-xs font-medium min-w-[36px] ${isMonochrome ? 'text-gray-500' : 'text-[#777]'}`}>质量</label>
-                  <select
-                    value={canvasGenQuality}
-                    onChange={(e) => setCanvasGenQuality(e.target.value)}
-                    className={`flex-1 text-xs rounded-lg px-3 py-2 border outline-none transition-colors ${
-                      isMonochrome
-                        ? 'bg-white border-gray-200 text-gray-900 focus:border-gray-400'
-                        : 'bg-[#0d0d0d] border-white/[0.12] text-text-bright focus:border-gold/40'
-                    }`}
-                  >
-                    <option value="standard">标准</option>
-                    <option value="hd">高清</option>
-                  </select>
-                </div>
-
-                {/* Count + Reference */}
-                <div className="flex items-center gap-2.5">
-                  <label className={`text-xs font-medium min-w-[42px] ${isMonochrome ? 'text-gray-500' : 'text-[#777]'}`}>数量</label>
-                  <div className="flex items-center gap-1.5">
-                    {[1, 2, 4].map(n => (
-                      <button
-                        key={n}
-                        onClick={() => setCanvasGenCount(n)}
-                        className={`w-8 h-7 text-xs rounded-lg transition-all font-medium ${
-                          canvasGenCount === n
-                            ? isMonochrome
-                              ? 'bg-blue-500 text-white shadow-md shadow-blue-500/20'
-                              : 'bg-gradient-to-b from-[#d4af37] to-[#b8860b] text-black shadow-md shadow-[#d4af37]/20'
-                            : isMonochrome
-                              ? 'bg-gray-100 text-gray-600 hover:bg-gray-200 border border-gray-200'
-                              : 'bg-[#252525] text-gold-muted hover:bg-[#333] border border-[#444]'
-                        }`}
-                      >
-                        {n}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="flex-1" />
-                  <button
-                    onClick={() => {
-                      const input = document.createElement('input');
-                      input.type = 'file';
-                      input.accept = 'image/*';
-                      input.onchange = async (e: Event) => {
-                        const file = (e.target as HTMLInputElement).files?.[0];
-                        if (!file) return;
-                        try {
-                          const formData = new FormData();
-                          formData.append('file', file);
-                          const upRes = await fetch('/api/upload', { method: 'POST', body: formData });
-                          if (upRes.ok) { const upData = await upRes.json(); setCanvasGenRefImages(prev => [...prev, upData.url]); }
-                        } catch { /* silent */ }
-                      };
-                      input.click();
-                    }}
-                    className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-colors border ${
-                      isMonochrome
-                        ? 'text-gray-500 hover:bg-gray-100 border-gray-200'
-                        : 'text-gold-muted hover:bg-[#333] hover:text-[#bbb] border-[#444]'
-                    }`}
-                  >
-                    <ImagePlus size={12} />
-                    <span>参考图</span>
-                    {canvasGenRefImages.length > 0 && <span className={isMonochrome ? "text-blue-500 font-medium" : "text-gold font-medium"}>({canvasGenRefImages.length})</span>}
-                  </button>
-                </div>
-
-                {/* Reference images thumbnails */}
-                {canvasGenRefImages.length > 0 && (
-                  <div className="flex gap-2 flex-wrap">
-                    {canvasGenRefImages.map((refUrl, idx) => (
-                      <div key={idx} className="relative group">
-                        <img src={refUrl} alt="" className={`w-9 h-9 rounded-lg object-cover border ${isMonochrome ? 'border-gray-200' : 'border-white/[0.12]'}`} />
-                        <button
-                          onClick={() => setCanvasGenRefImages(prev => prev.filter((_, i) => i !== idx))}
-                          className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity shadow-md"
-                        >
-                          <X size={8} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Prompt input */}
-                <textarea
-                  value={canvasGenPrompt}
-                  onChange={(e) => setCanvasGenPrompt(e.target.value)}
-                  placeholder="描述你想要生成的图像..."
-                  className={`w-full text-sm rounded-xl px-3.5 py-2.5 border outline-none resize-none h-[72px] leading-relaxed transition-colors ${
+            {/* Content */}
+            {!canvasGenMinimized && (
+            <div className="p-3.5 space-y-3 max-h-[calc(85vh-50px)] overflow-y-auto">
+              {/* Model selector */}
+              <div className="flex items-center gap-2.5">
+                <label className={`text-xs font-medium min-w-[42px] ${isMonochrome ? 'text-gray-500' : 'text-[#777]'}`}>模型</label>
+                <select
+                  value={canvasGenModel}
+                  onChange={(e) => setCanvasGenModel(e.target.value)}
+                  className={`flex-1 text-xs rounded-lg px-3 py-2 border outline-none transition-colors ${
                     isMonochrome
-                      ? 'bg-white border-gray-200 text-gray-900 placeholder:text-gray-300 focus:border-gray-400'
-                      : 'bg-[#0d0d0d] border-white/[0.12] text-text-bright placeholder:text-gold-muted/50 focus:border-gold/40'
-                  } focus:ring-1 ${isMonochrome ? 'focus:ring-blue-200' : 'focus:ring-gold/30/20'}`}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                      e.preventDefault();
-                      handleCanvasGenerate();
-                    }
-                  }}
-                />
-
-                {/* Generate button */}
-                <button
-                  onClick={handleCanvasGenerate}
-                  disabled={canvasGenGenerating || !canvasGenPrompt.trim()}
-                  className={`w-full py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
-                    canvasGenGenerating || !canvasGenPrompt.trim()
-                      ? isMonochrome
-                        ? 'bg-blue-200 text-blue-400 cursor-not-allowed'
-                        : 'bg-[#222]/80 text-gold-muted/50 cursor-not-allowed border border-white/[0.12]'
-                      : isMonochrome
-                        ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white hover:from-blue-600 hover:to-blue-700 shadow-lg shadow-blue-500/20 active:scale-[0.98]'
-                        : 'bg-gradient-to-r from-[#d4af37] to-[#b8860b] text-black hover:from-[#e0bc4a] hover:to-[#cd9b1d] shadow-lg shadow-[#d4af37]/20 active:scale-[0.98]'
+                      ? 'bg-white border-gray-200 text-gray-900 focus:border-gray-400'
+                      : 'bg-[#0d0d0d] border-white/[0.12] text-text-bright focus:border-gold/40'
                   }`}
                 >
-                  {canvasGenGenerating ? (
-                    <>
-                      <div className="w-3.5 h-3.5 border-2 border-[#555] border-t-transparent rounded-full animate-spin" />
-                      生成中...
-                    </>
-                  ) : (
-                    <>
-                      <Wand2 size={14} />
-                      生成
-                      <span className={`text-xs font-normal ${isMonochrome ? 'text-gray-500' : 'text-black/50'}`}>Ctrl+Enter</span>
-                    </>
-                  )}
+                  {canvasGenModels.length === 0 && <option value="">暂无可用模型</option>}
+                  {canvasGenModels.map(m => {
+                    const compositeKey = `${m.providerId}::${m.id}`;
+                    return <option key={compositeKey} value={compositeKey}>{m.apiDisplayName || getModelDisplayName(m.id)}{m.providerName ? ` (${m.providerName})` : ''}</option>;
+                  })}
+                </select>
+              </div>
+
+              {/* Aspect ratio + Quality */}
+              <div className="flex items-center gap-2.5">
+                <label className={`text-xs font-medium min-w-[42px] ${isMonochrome ? 'text-gray-500' : 'text-[#777]'}`}>比例</label>
+                <select
+                  value={canvasGenAspectRatio}
+                  onChange={(e) => setCanvasGenAspectRatio(e.target.value)}
+                  className={`flex-1 text-xs rounded-lg px-3 py-2 border outline-none transition-colors ${
+                    isMonochrome
+                      ? 'bg-white border-gray-200 text-gray-900 focus:border-gray-400'
+                      : 'bg-[#0d0d0d] border-white/[0.12] text-text-bright focus:border-gold/40'
+                  }`}
+                >
+                  {['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'].map(r => (
+                    <option key={r} value={r}>{r}</option>
+                  ))}
+                </select>
+                <label className={`text-xs font-medium min-w-[36px] ${isMonochrome ? 'text-gray-500' : 'text-[#777]'}`}>质量</label>
+                <select
+                  value={canvasGenQuality}
+                  onChange={(e) => setCanvasGenQuality(e.target.value)}
+                  className={`flex-1 text-xs rounded-lg px-3 py-2 border outline-none transition-colors ${
+                    isMonochrome
+                      ? 'bg-white border-gray-200 text-gray-900 focus:border-gray-400'
+                      : 'bg-[#0d0d0d] border-white/[0.12] text-text-bright focus:border-gold/40'
+                  }`}
+                >
+                  <option value="standard">标准</option>
+                  <option value="hd">高清</option>
+                </select>
+              </div>
+
+              {/* Count + Reference */}
+              <div className="flex items-center gap-2.5">
+                <label className={`text-xs font-medium min-w-[42px] ${isMonochrome ? 'text-gray-500' : 'text-[#777]'}`}>数量</label>
+                <div className="flex items-center gap-1.5">
+                  {[1, 2, 4].map(n => (
+                    <button
+                      key={n}
+                      onClick={() => setCanvasGenCount(n)}
+                      className={`w-8 h-7 text-xs rounded-lg transition-all font-medium ${
+                        canvasGenCount === n
+                          ? isMonochrome
+                            ? 'bg-blue-500 text-white shadow-md shadow-blue-500/20'
+                            : 'bg-gradient-to-b from-[#d4af37] to-[#b8860b] text-black shadow-md shadow-[#d4af37]/20'
+                          : isMonochrome
+                            ? 'bg-gray-100 text-gray-600 hover:bg-gray-200 border border-gray-200'
+                            : 'bg-[#252525] text-gold-muted hover:bg-[#333] border border-[#444]'
+                      }`}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex-1" />
+                <button
+                  onClick={() => {
+                    const input = document.createElement('input');
+                    input.type = 'file';
+                    input.accept = 'image/*';
+                    input.onchange = async (e: Event) => {
+                      const file = (e.target as HTMLInputElement).files?.[0];
+                      if (!file) return;
+                      try {
+                        const formData = new FormData();
+                        formData.append('file', file);
+                        const upRes = await fetch('/api/upload', { method: 'POST', body: formData });
+                        if (upRes.ok) { const upData = await upRes.json(); setCanvasGenRefImages(prev => [...prev, upData.url]); }
+                      } catch { /* silent */ }
+                    };
+                    input.click();
+                  }}
+                  className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-colors border ${
+                    isMonochrome
+                      ? 'text-gray-500 hover:bg-gray-100 border-gray-200'
+                      : 'text-gold-muted hover:bg-[#333] hover:text-[#bbb] border-[#444]'
+                  }`}
+                >
+                  <ImagePlus size={12} />
+                  <span>参考图</span>
+                  {canvasGenRefImages.length > 0 && <span className={isMonochrome ? "text-blue-500 font-medium" : "text-gold font-medium"}>({canvasGenRefImages.length})</span>}
                 </button>
               </div>
+
+              {/* Reference images thumbnails */}
+              {canvasGenRefImages.length > 0 && (
+                <div className="flex gap-2 flex-wrap">
+                  {canvasGenRefImages.map((refUrl, idx) => (
+                    <div key={idx} className="relative group">
+                      <img src={refUrl} alt="" className={`w-9 h-9 rounded-lg object-cover border ${isMonochrome ? 'border-gray-200' : 'border-white/[0.12]'}`} />
+                      <button
+                        onClick={() => setCanvasGenRefImages(prev => prev.filter((_, i) => i !== idx))}
+                        className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity shadow-md"
+                      >
+                        <X size={8} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Prompt input */}
+              <textarea
+                value={canvasGenPrompt}
+                onChange={(e) => setCanvasGenPrompt(e.target.value)}
+                placeholder="描述你想要生成的图像..."
+                className={`w-full text-sm rounded-xl px-3.5 py-2.5 border outline-none resize-none h-[72px] leading-relaxed transition-colors ${
+                  isMonochrome
+                    ? 'bg-white border-gray-200 text-gray-900 placeholder:text-gray-300 focus:border-gray-400'
+                    : 'bg-[#0d0d0d] border-white/[0.12] text-text-bright placeholder:text-gold-muted/50 focus:border-gold/40'
+                } focus:ring-1 ${isMonochrome ? 'focus:ring-blue-200' : 'focus:ring-gold/30/20'}`}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                    e.preventDefault();
+                    handleCanvasGenerate();
+                  }
+                }}
+              />
+
+              {/* Generate button */}
+              <button
+                onClick={handleCanvasGenerate}
+                disabled={canvasGenGenerating || !canvasGenPrompt.trim()}
+                className={`w-full py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
+                  canvasGenGenerating || !canvasGenPrompt.trim()
+                    ? isMonochrome
+                      ? 'bg-blue-200 text-blue-400 cursor-not-allowed'
+                      : 'bg-[#222]/80 text-gold-muted/50 cursor-not-allowed border border-white/[0.12]'
+                    : isMonochrome
+                      ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white hover:from-blue-600 hover:to-blue-700 shadow-lg shadow-blue-500/20 active:scale-[0.98]'
+                      : 'bg-gradient-to-r from-[#d4af37] to-[#b8860b] text-black hover:from-[#e0bc4a] hover:to-[#cd9b1d] shadow-lg shadow-[#d4af37]/20 active:scale-[0.98]'
+                }`}
+              >
+                {canvasGenGenerating ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-[#555] border-t-transparent rounded-full animate-spin" />
+                    生成中...
+                  </>
+                ) : (
+                  <>
+                    <Wand2 size={14} />
+                    生成
+                    <span className={`text-xs font-normal ${isMonochrome ? 'text-gray-500' : 'text-black/50'}`}>Ctrl+Enter</span>
+                  </>
+                )}
+              </button>
             </div>
+            )}
           </div>
         );
       })()}

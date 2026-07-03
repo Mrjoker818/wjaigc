@@ -16,15 +16,21 @@ export function validateImageUrl(url: unknown, fieldName = 'imageUrl'): string |
   if (trimmed.length === 0) {
     return `${fieldName} 不能为空白`;
   }
-  if (trimmed.length > 10000) {
-    return `${fieldName} 长度超出限制`;
-  }
   // 允许的格式
   const isHttp = trimmed.startsWith('http://') || trimmed.startsWith('https://');
   const isRelative = trimmed.startsWith('/uploads/') || trimmed.startsWith('/api/');
   const isDataUrl = trimmed.startsWith('data:image/');
   if (!isHttp && !isRelative && !isDataUrl) {
     return `${fieldName} 格式不合法，仅支持 http/https URL、/uploads/ 相对路径或 data:image/ base64`;
+  }
+  // base64 data URL 可达数百万字符（100KB图片≈133K字符），跳过长度限制
+  // HTTP/相对路径URL保留长度限制防止滥用
+  if (!isDataUrl && trimmed.length > 10000) {
+    return `${fieldName} 长度超出限制`;
+  }
+  // base64 data URL 单独限制：最大 20MB（约 27M 字符）
+  if (isDataUrl && trimmed.length > 27_000_000) {
+    return `${fieldName} 数据过大，请压缩后重试`;
   }
   // 拒绝 file:// 和 javascript: 协议
   if (trimmed.startsWith('file://') || trimmed.startsWith('javascript:')) {

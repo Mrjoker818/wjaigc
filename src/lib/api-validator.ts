@@ -28,12 +28,16 @@ export function validateImageUrl(url: unknown, fieldName = 'imageUrl'): Validate
   if (!url || typeof url !== 'string') return `${fieldName} 不能为空`;
   const t = url.trim();
   if (t.length === 0) return `${fieldName} 不能为空白`;
-  if (t.length > 10000) return `${fieldName} 长度超出限制`;
+  const isDataUrl = t.startsWith('data:image/');
   const ok = t.startsWith('http://') || t.startsWith('https://') ||
              t.startsWith('/uploads/') || t.startsWith('/api/') ||
-             t.startsWith('data:image/');
+             isDataUrl;
   if (!ok) return `${fieldName} 格式不合法`;
   if (t.startsWith('file://') || t.startsWith('javascript:')) return `${fieldName} 包含不安全的协议`;
+  // base64 data URL 跳过长度限制（可达数百万字符），单独限制 20MB
+  if (isDataUrl && t.length > 27_000_000) return `${fieldName} 数据过大，请压缩后重试`;
+  // HTTP/相对路径URL保留长度限制
+  if (!isDataUrl && t.length > 10000) return `${fieldName} 长度超出限制`;
   return null;
 }
 

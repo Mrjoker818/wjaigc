@@ -872,15 +872,17 @@ export async function POST(request: NextRequest) {
   let sessionUser: any = null;
   try {
     const body = await request.json();
-    // 输入校验
-    const _validationError = validateApiInputs(body, {
-        imageUrl: 'imageUrl'
-    });
-    if (_validationError) {
-      return NextResponse.json({ error: _validationError }, { status: 400 });
-    }
-
     const { action } = body;
+
+    // presets/models 操作不需要 imageUrl，跳过校验
+    if (action !== 'presets' && action !== 'models') {
+      const _validationError = validateApiInputs(body, {
+          imageUrl: 'imageUrl'
+      });
+      if (_validationError) {
+        return NextResponse.json({ error: _validationError }, { status: 400 });
+      }
+    }
 
     if (action === 'presets') {
       return NextResponse.json({
