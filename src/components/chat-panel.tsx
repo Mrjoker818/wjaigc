@@ -17,6 +17,10 @@ import type { ApiProvider } from '@/lib/universal-api-types';
 import type { CanvasImage } from '@/components/infinite-canvas';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import { getPromptTemplates, searchTemplates, type PromptTemplate } from '@/lib/prompt-templates';
+import { classifyIntent, ClassifiedIntent, IntentCategory } from '@/lib/intent-classifier';
+import { generateClarificationMessage, detectVagueScenarios, type ClarificationTemplate, type VagueScenario } from '@/lib/clarification-templates';
+import { generateSuggestions, type Suggestion, type SuggestionContext, type ContentCategory } from '@/lib/suggestion-engine';
+import { parseCanvasOperationIntent, extractCanvasActionFromAIResponse, type CanvasAction, type CanvasActionResult, type CanvasActionType } from '@/lib/canvas-action-executor';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
@@ -581,43 +585,13 @@ function parseSuggestions(content: string): { cleanedContent: string; suggestion
 
 // Helper: detect if user input is too vague
 /** P2-9: 多级意图澄清 - 评估用户输入的完整度 */
+
 type IntentLevel = 'extremely_vague' | 'moderately_vague' | 'clear';
 
+// 兼容旧版意图分类函数（内部调用新版）
 function classifyIntentLevel(text: string, hasImages: boolean): IntentLevel {
-  const trimmed = text.trim();
-
-  // 有图片附件时，意图通常更明确
-  if (hasImages) {
-    // 有图但无任何文字 → 中等模糊
-    if (trimmed.length === 0) return 'moderately_vague';
-    // 有图+简短指令 → 清晰（如"改成蓝色"、"生成视频"）
-    if (trimmed.length < 4) return 'moderately_vague';
-    return 'clear';
-  }
-
-  // 无图片场景
-
-  // 极度模糊：<8字符 或 纯触发词
-  if (trimmed.length < 8) return 'extremely_vague';
-  const triggerOnlyPatterns = /^(画一个|做一个|设计|生成|搞个|来个|帮我|创作|随便|帮我画)\s*$/;
-  if (triggerOnlyPatterns.test(trimmed)) return 'extremely_vague';
-  // 纯名词无细节
-  const nounOnlyPattern = /^(一个|一只|一副|一张)?[\u4e00-\u9fa5]{1,4}$/;
-  if (nounOnlyPattern.test(trimmed)) return 'extremely_vague';
-
-  // 中等模糊：有方向但缺关键信息
-  const moderatePatterns = [
-    // 有主题无风格："设计一个logo"、"画一个猫"（<20字且无修饰词）
-    /^(画|做|设计|生成|创建|制作|帮我)(一个|一只|一副|一张)?\S{1,10}$/,
-    // 有风格无主题："设计一个极简风的"、"生成赛博朋克风格的"
-    /^(设计|生成|创建|制作)\S*(风格|风|感觉|氛围)\S*$/,
-  ];
-  if (trimmed.length < 20 && moderatePatterns.some(p => p.test(trimmed))) {
-    return 'moderately_vague';
-  }
-
-  // 清晰：有足够的细节
-  return 'clear';
+  const result = classifyIntent(text, { hasImages });
+  return result.clarity;
 }
 
 /** P2-10: 智能体自动路由 - 基于关键词匹配推荐最佳智能体 */
@@ -3442,8 +3416,9 @@ IP角色设计规范：
 
     const trimmedInput = textToSend.trim();
 
-    // P2-9: 多级意图澄清 - 评估用户输入完整度
-    const intentLevel = classifyIntentLevel(trimmedInput, pendingImages.length > 0);
+    // P0-2: 增强意图分类 - 使用新版意图分类器
+    const intentResult = classifyIntent(trimmedInput, { hasImages: pendingImages.length > 0 || activeMentions.some(m => m.type === 'canvas-image') });
+    const intentLevel = intentResult.clarity;
 
     // 收集图片锚点（来自pendingImages、@图片引用）
     const imageAnchors: { imageId: string; imageUrl: string; imageName: string }[] = [];
@@ -3539,6 +3514,30 @@ ${agentRecipesList}
 - "换成扁平风格" → 图生图 | 请将这张图片转换为扁平化设计风格，保留主体构图
 - "放大到4K" → 放大 | 请将这张图片无损放大到4K分辨率
 - "做成视频" → 生成视频 | 请将这张图片生成为5秒的短视频，添加缓慢推镜效果
+
+【P0-1 ChatCanvas画布操作能力】
+你是无界AI的画布协作助手，不仅能提供设计建议，还能**直接执行画布操作**。
+
+当用户请求画布操作时（如"放大这张图"、"去掉背景"），你应该：
+1. 确认理解用户的操作意图
+2. 在回复中包含操作指令块，系统会自动执行
+3. 向用户展示操作结果
+
+可执行的操作：upscale(放大)、remove_bg(去背景)、img2img(图生图)、erase(擦除)、extend(扩展)、crop(裁切)、generate(生成)、filter(滤镜风格)
+
+操作指令格式（在回复末尾添加）：
+[CANVAS_ACTION]
+type: upscale
+target: selected
+params: scale=2
+[/CANVAS_ACTION]
+
+或JSON格式：
+~~~canvas-action
+{"type": "img2img", "target": "selected", "params": {"style": "watercolor"}}
+~~~
+
+注意：执行操作前先确认目标图片，用户说"这张"通常指选中的图片。
 每次给出2-3个建议，建议应与当前对话内容紧密相关，且预填充提示词应具体可执行。
 
 2. 如果你生成的图片有任何值得注意的设计特点，请简要说明。
@@ -3548,20 +3547,25 @@ ${agentRecipesList}
 示例：[AGENT_SUGGEST:creative-posters:创意海报]
 这会触发系统推荐用户切换到更合适的智能体。注意：仅当领域确实不匹配时才输出此标记，轻微偏移不需要。`;
 
-      // P2-9: 多级意图澄清 - 根据意图完整度注入不同指令
+      // P0-2: 增强意图处理 - 根据意图完整度和类别注入不同指令
       if (intentLevel === 'extremely_vague') {
+        // 使用追问模板库获取场景化追问
+        const vagueScenarios = detectVagueScenarios(trimmedInput);
+        const clarificationMessage = generateClarificationMessage(vagueScenarios, 3);
         enhancedSystemPrompt += `
 
 【重要：当前用户输入极度模糊】
 用户输入过短或仅有触发词，完全无法确定执行方向。请严格遵循以下规则：
 - **禁止调用任何工具**（不要生成图片/视频等）
 - 必须先追问澄清，帮助用户明确需求
-- 追问时给出2-3个具体选项帮助用户选择，降低回答门槛
+- 追问时给出2-3个具体选项帮助用户选择，降低回答门槛${clarificationMessage ? `
+- 推荐追问内容：
+${clarificationMessage}` : `
 - 追问格式示例：
   "我理解您想创作些什么！为了给出最好的结果，请补充一些细节：
   1. 关于主题：[选项A] / [选项B] / [选项C]
   2. 关于风格：[选项A] / [选项B] / [选项C]
-  3. 关于用途：[选项A] / [选项B] / [选项C]"
+  3. 关于用途：[选项A] / [选项B] / [选项C]"`}
 - 禁止回复"好的，我来帮你生成"，必须在追问后等用户回答`;
       } else if (intentLevel === 'moderately_vague') {
         enhancedSystemPrompt += `
@@ -3574,7 +3578,30 @@ ${agentRecipesList}
 - 优先执行而非追问，减少用户等待
 - 示例：用户说"设计一个logo"→ 自动选择现代简约风格+品牌色系+矢量风格，生成后说明"默认使用了简约风格，如需调整风格/配色请告知"`;
       }
-      // intentLevel === 'clear' → 不注入任何额外指令，直接执行
+
+      // P0-2: 意图类别处理 - 根据意图类别调整AI响应策略
+      // 先计算hasCanvasImages（变量需要在使用前定义）
+      const hasCanvasImages = pendingImages.length > 0 || activeMentions.some(m => m.type === 'canvas-image');
+      if (intentResult.category === 'operate' && !hasCanvasImages) {
+        // 操作意图但无选中图片
+        enhancedSystemPrompt += `
+
+【重要：当前需要操作对象】
+用户想要对画布图片进行操作，但当前没有选中或引用图片。请：
+- 询问用户想要操作哪张图片："请先选中或上传您想要操作的图片"
+- 或者建议用户先上传图片："您可以先上传图片，然后告诉我您想做什么调整"`;
+      } else if (intentResult.category === 'operate') {
+        // 有图片的操作意图
+        const opHints = intentResult.action ? `建议执行的操作: ${intentResult.action}` : '';
+        enhancedSystemPrompt += `
+
+【操作意图识别】
+用户想要对画布图片执行操作。${opHints}
+请根据用户指令选择合适的工具执行，如：
+- 放大/去背景/图生图 → 使用CanvasActionExecutor
+- 文字修改 → 使用语言修图工具
+- 扩展画面 → 使用扩展工具`;
+      }
 
       // P1-3: 品牌资产注入 - 如果有@品牌引用，注入BrandDNA到systemPrompt
       const brandMention = activeMentions.find(m => m.type === 'brand');
@@ -3605,8 +3632,8 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
           allRefImageList.push({ id: img.id, url: img.url, name: img.name });
         }
       });
-      const hasCanvasImages = allRefImageList.length > 0;
-      if (hasCanvasImages) {
+      // 使用前面已定义的hasCanvasImages变量
+      if (hasCanvasImages || allRefImageList.length > 0) {
         const imageDescriptions = allRefImageList.map((img, i) =>
           `图片#${i + 1}: ${img.name}`
         ).join('\n');
@@ -4367,9 +4394,11 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
 
                 if (resultUrls.length > 0) {
                   const uniqueResultUrls = [...new Set(resultUrls)];
+                  // 生成建议下一步
+                  const suggestions = generateSuggestions({ contentCategory: 'image_generated', modelName: imageModelInfo.model });
                   setMessages(prev => prev.map(msg => 
                     msg.id === assistantMessageId 
-                      ? { ...msg, generatedImages: uniqueResultUrls, isGeneratingImage: false, generateProgress: 100 }
+                      ? { ...msg, generatedImages: uniqueResultUrls, isGeneratingImage: false, generateProgress: 100, suggestions }
                       : msg
                   ));
                   if (onAddImages) {
@@ -4393,6 +4422,34 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
             })();
           }
         }
+      }
+
+      // ====== P0-1: ChatCanvas 画布操作解析与提示 ======
+      const canvasAction = extractCanvasActionFromAIResponse(assistantContent);
+      if (canvasAction && selectedCanvasImage) {
+        console.log('[ChatCanvas] 解析到画布操作指令:', canvasAction.type);
+        // 注：实际执行需要后续集成画布操作API
+        // 当前仅解析指令并在回复中提示用户
+        const actionLabel = {
+          upscale: '放大',
+          remove_bg: '去背景',
+          img2img: '图生图',
+          erase: '擦除',
+          extend: '扩展画面',
+          crop: '裁切',
+          generate: '生成新图',
+          filter: '滤镜风格',
+          move: '移动位置',
+          delete: '删除',
+          duplicate: '复制',
+          arrange: '排列',
+          color_adjust: '色彩调整',
+          add_text: '添加文字',
+          composite: '合成',
+        }[canvasAction.type] || canvasAction.type;
+        // 替换CANVAS_ACTION标签为可点击的提示
+        assistantContent = assistantContent.replace(/\[CANVAS_ACTION\][\s\S]*?\[\/CANVAS_ACTION\]/, 
+          `💡 **画布操作建议**: ${actionLabel} - 请在画布中选中图片后使用工具栏执行此操作`);
       }
 
       // 保存对话

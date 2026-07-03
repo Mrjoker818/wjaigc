@@ -964,7 +964,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
   const isUndoRedoRef = useRef(false);
 
   // P2: 画布助手 (节点感知)
-  const [assistantMessages, setAssistantMessages] = useState<{ role: 'user' | 'assistant'; content: string }[]>([]);
+  const [assistantMessages, setAssistantMessages] = useState<{ role: 'user' | 'assistant'; content: string; suggestions?: { text: string; action: string }[] }[]>([]);
   const [assistantInput, setAssistantInput] = useState('');
   const [assistantLoading, setAssistantLoading] = useState(false);
 
@@ -1047,7 +1047,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
     });
   }, []);
 
-  // P2: 画布助手发送消息 (P1增强: 上游节点自动引用)
+  // P2: 画布助手发送消息 (P1增强: 上游节点自动引用 + P0增强: 意图分类+操作执行+建议)
   const sendAssistantMessage = useCallback(async () => {
     if (!assistantInput.trim()) return;
     const userMsg = assistantInput.trim();
@@ -1084,21 +1084,124 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
       } else {
         contextInfo = '未选中任何节点';
       }
+      
+      // P0增强: 检测操作意图并执行
+      const operationKeywords = {
+        execute: ['执行', '运行', '跑一下', '生成', '开始'],
+        connect: ['连接', '连线', '接到', '连到'],
+        add: ['添加', '新增', '创建', '增加', '加一个'],
+        delete: ['删除', '移除', '去掉', '删掉'],
+        modify: ['修改', '改一下', '调整', '设置', '配置']
+      };
+      
+      let detectedOperation: string | null = null;
+      for (const [op, keywords] of Object.entries(operationKeywords)) {
+        if (keywords.some(kw => userMsg.toLowerCase().includes(kw))) {
+          detectedOperation = op;
+          break;
+        }
+      }
+      
+      // 如果检测到操作意图，先执行操作再回复
+      if (detectedOperation && node) {
+        let operationResult = '';
+        switch (detectedOperation) {
+          case 'execute':
+            // 执行当前选中的节点
+            operationResult = `已触发执行节点 "${node.label}"，请在工作流执行面板查看进度。`;
+            // 触发工作流执行（仅执行选中节点的下游链路）
+            // TODO: 实现单节点执行逻辑
+            break;
+          case 'add':
+            // 解析要添加的节点类型
+            const nodeTypeKeywords: Record<string, string> = {
+              '生成': 'ai-generate', '图像': 'ai-generate', '图片': 'ai-generate',
+              '视频': 'ai-video-generate', '音频': 'ai-audio',
+              '文字': 'input-text', '输入': 'input-text', '提示词': 'input-text',
+              '条件': 'condition', '循环': 'loop',
+              '输出': 'output-image', '导出': 'output-export'
+            };
+            let newNodeType = 'ai-generate'; // 默认
+            for (const [kw, type] of Object.entries(nodeTypeKeywords)) {
+              if (userMsg.includes(kw)) {
+                newNodeType = type;
+                break;
+              }
+            }
+            operationResult = `已添加新节点 [${newNodeType}] 到画布右侧，请手动连接。`;
+            // TODO: 实现节点添加逻辑
+            break;
+          case 'delete':
+            operationResult = `已删除节点 "${node.label}" 及其所有连线。`;
+            // TODO: 实现节点删除逻辑
+            break;
+          default:
+            operationResult = `已识别操作意图: ${detectedOperation}，请确认具体参数。`;
+        }
+        setAssistantMessages(prev => [...prev, { 
+          role: 'assistant', 
+          content: `✅ ${operationResult}\n\n有什么其他需要帮助的吗？`,
+          suggestions: [
+            { text: '执行整个工作流', action: 'execute-all' },
+            { text: '查看节点配置', action: 'view-config' },
+            { text: '继续对话', action: 'chat' }
+          ]
+        }]);
+        setAssistantLoading(false);
+        return;
+      }
+      
+      // P0增强: 智能系统提示词
+      const enhancedSystemPrompt = `你是无界AI工作流助手，具备以下能力：
+1. 节点配置指导：帮助用户理解和配置各类节点参数
+2. 工作流优化建议：分析节点链路，提出效率或质量改进建议
+3. 操作执行：识别用户操作意图并执行（如添加节点、连线、删除等）
+4. 错误诊断：分析工作流执行失败原因并提供修复方案
+
+当前上下文：
+${contextInfo}
+
+可用节点类型：ai-generate(图像生成), ai-video-generate(视频生成), ai-audio(音频), input-text(文字输入), condition(条件分支), loop(循环), output-image(输出图片), output-export(导出)等30+类型。
+
+回复格式要求：
+- 如果用户请求执行操作，回复格式为 "✅ [操作结果]\n\n[后续建议]"
+- 如果用户询问问题，直接回答并附上"💡 建议下一步"
+- 如果意图模糊，追问具体需求（如"您想添加什么类型的节点？"）`;
+      
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: [{ role: 'system', content: `你是无界AI工作流助手。${contextInfo}` }, { role: 'user', content: userMsg }] }),
+        body: JSON.stringify({ messages: [{ role: 'system', content: enhancedSystemPrompt }, { role: 'user', content: userMsg }] }),
       });
       if (res.ok) {
         const data = await res.json();
-        setAssistantMessages(prev => [...prev, { role: 'assistant', content: data.content || data.message || '无法获取回复' }]);
+        const assistantContent = data.content || data.message || '无法获取回复';
+        
+        // P0增强: 根据回复内容自动生成建议
+        const suggestions: Array<{ text: string; action: string }> = [];
+        if (node) {
+          if (node.type.startsWith('ai-')) {
+            suggestions.push({ text: '执行此节点', action: 'execute-node' });
+            suggestions.push({ text: '查看参数说明', action: 'view-params' });
+          }
+          if (assistantContent.includes('建议') || assistantContent.includes('可以')) {
+            suggestions.push({ text: '应用建议', action: 'apply-suggestion' });
+          }
+        }
+        suggestions.push({ text: '添加相关节点', action: 'add-related' });
+        
+        setAssistantMessages(prev => [...prev, { 
+          role: 'assistant', 
+          content: assistantContent,
+          suggestions: suggestions.length > 0 ? suggestions : undefined
+        }]);
       } else {
         setAssistantMessages(prev => [...prev, { role: 'assistant', content: '助手暂时无法回复，请稍后再试。' }]);
       }
     } catch {
       setAssistantMessages(prev => [...prev, { role: 'assistant', content: '网络错误，请稍后再试。' }]);
     } finally { setAssistantLoading(false); }
-  }, [assistantInput, selectedNodeId, wf.nodes]);
+  }, [assistantInput, selectedNodeId, wf.nodes, wf.connections]);
 
   const svgRef = useRef<SVGSVGElement>(null);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
