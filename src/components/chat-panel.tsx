@@ -4714,7 +4714,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
             <button
               aria-label="智能对话"
               onClick={() => setActiveTab('chat')}
-              className={`relative z-10 px-2.5 py-1 min-h-[36px] text-xs font-medium rounded-md transition-all flex items-center gap-1 whitespace-nowrap ${
+              className={`relative z-10 px-1.5 py-1 min-h-[32px] text-xs font-medium rounded-md transition-all flex items-center gap-1 whitespace-nowrap ${
                 activeTab === 'chat'
                   ? isGold
                     ? 'bg-gold/15 text-gold shadow-sm'
@@ -4730,7 +4730,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
             <button
               aria-label="提示词大师"
               onClick={() => setActiveTab('optimizer')}
-              className={`relative z-10 px-2.5 py-1 min-h-[36px] text-xs font-medium rounded-md transition-all flex items-center gap-1 whitespace-nowrap ${
+              className={`relative z-10 px-1.5 py-1 min-h-[32px] text-xs font-medium rounded-md transition-all flex items-center gap-1 whitespace-nowrap ${
                 activeTab === 'optimizer'
                   ? isGold
                     ? 'bg-gold/15 text-gold shadow-sm'
@@ -4746,7 +4746,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
             <button
               aria-label="Skills技能库"
               onClick={() => setActiveTab('skills')}
-              className={`relative z-10 px-2.5 py-1 min-h-[36px] text-xs font-medium rounded-md transition-all flex items-center gap-1 whitespace-nowrap ${
+              className={`relative z-10 px-1.5 py-1 min-h-[32px] text-xs font-medium rounded-md transition-all flex items-center gap-1 whitespace-nowrap ${
                 activeTab === 'skills'
                   ? isGold
                     ? 'bg-gold/15 text-gold shadow-sm'
@@ -5079,45 +5079,52 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               </div>
             </div>
 
-            <div className="grid grid-cols-4 gap-1">
-              {allAgents.map(agent => (
-                <button
-                  key={agent.id}
-                  onClick={() => setSystemPrompt(prev => prev === agent.id ? '' : agent.id)}
-                  className={`group relative flex flex-col items-center justify-center py-1.5 px-1 rounded-md transition-all duration-150 border ${
-                    systemPrompt === agent.id
-                      ? 'border-[var(--agent-color)] shadow-[0_0_8px_var(--agent-color-20)]'
-                      : `border-transparent ${isGold ? 'hover:bg-white/[0.06]' : 'hover:bg-[#f0f0f0]'}`
-                  } ${isGold ? 'bg-[#0d0d0d]' : 'bg-[#fafafa]'}`}
-                  style={{
-                    '--agent-color': agent.color,
-                    '--agent-color-20': agent.color + '33',
-                  } as React.CSSProperties}
-                >
-                  <span className="text-xs shrink-0">{agent.icon}</span>
-                  <span className={`text-xs font-medium leading-tight truncate w-full text-center mt-0.5 ${
-                    systemPrompt === agent.id 
-                      ? (isGold ? 'text-gold' : 'text-gray-900') 
-                      : (isGold ? 'text-gold-muted' : 'text-gold-muted/50')
-                  }`}>
-                    {agent.name}
-                  </span>
-                  {systemPrompt === agent.id && (
-                    <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-3 h-[2px] rounded-full" style={{ backgroundColor: agent.color }} />
-                  )}
-                </button>
-              ))}
-              {/* 新增智能体按钮 */}
-              <button
-                onClick={() => { setEditingAgent(null); setShowAgentBuilder(true); }}
-                className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-md transition-all duration-150 border border-dashed ${
-                  isGold ? 'border-white/[0.04] hover:border-gold/40 hover:bg-white/[0.06]' : 'border-gray-200 hover:border-gray-400 hover:bg-[#f0f0f0]'
-                }`}
-              >
-                <Plus size={11} className={isGold ? 'text-gold/50' : 'text-gray-400'} />
-                <span className={`text-xs font-medium mt-0.5 ${isGold ? 'text-gold-muted/50' : 'text-gray-400'}`}>新增</span>
-              </button>
-            </div>
+              {/* 智能体下拉选择器 */}
+              <div className="flex items-center gap-2 shrink-0">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-all border ${
+                        systemPrompt
+                          ? isGold
+                            ? 'border-gold/30 bg-gold/10 text-gold'
+                            : 'border-blue-200 bg-blue-50 text-blue-600'
+                          : isGold
+                            ? 'border-white/[0.08] text-gold-muted/70 hover:border-gold/20 hover:text-gold'
+                            : 'border-gray-200 text-gray-500 hover:border-gray-400 hover:text-gray-700'
+                      }`}
+                    >
+                      <Bot size={14} />
+                      {systemPrompt ? allAgents.find(a => a.id === systemPrompt)?.name || '智能体' : '智能体'}
+                      <ChevronDown size={14} className="ml-0.5 opacity-60" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-48 max-h-[280px] overflow-y-auto">
+                    {allAgents.map(agent => (
+                      <DropdownMenuItem
+                        key={agent.id}
+                        onClick={() => setSystemPrompt(prev => prev === agent.id ? '' : agent.id)}
+                        className={`flex items-center gap-2 cursor-pointer ${
+                          systemPrompt === agent.id ? 'bg-accent' : ''
+                        }`}
+                      >
+                        <span className="text-sm">{agent.icon}</span>
+                        <span className="flex-1">{agent.name}</span>
+                        {systemPrompt === agent.id && (
+                          <Check size={14} className="text-primary" />
+                        )}
+                      </DropdownMenuItem>
+                    ))}
+                    <DropdownMenuItem
+                      onClick={() => { setEditingAgent(null); setShowAgentBuilder(true); }}
+                      className="flex items-center gap-2 cursor-pointer text-muted-foreground"
+                    >
+                      <Plus size={14} />
+                      <span>新增智能体</span>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             {systemPrompt && (() => {
               const selectedAgent = allAgents.find(a => a.id === systemPrompt);
               if (!selectedAgent) return null;
