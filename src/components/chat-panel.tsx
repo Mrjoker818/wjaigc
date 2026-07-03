@@ -4765,26 +4765,6 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               )}
             </button>
           </div>
-          {/* Agent模式开关 - 即梦式对话即创作 */}
-          {activeTab === 'chat' && (
-            <button
-              onClick={() => setIsAgentMode(!isAgentMode)}
-              className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-all ${
-                isAgentMode
-                  ? isGold
-                    ? 'bg-gradient-to-r from-gold/20 to-amber-500/20 text-gold border border-gold/30'
-                    : 'bg-gradient-to-r from-blue-500/10 to-purple-500/10 text-blue-600 border border-blue-200'
-                  : isGold
-                    ? 'text-gold-muted/50 hover:text-gold-muted border border-transparent hover:border-white/[0.08]'
-                    : 'text-gray-400 hover:text-gray-600 border border-transparent hover:border-gray-200'
-              }`}
-              title={isAgentMode ? 'Agent模式已开启：描述需求自动调用工具生成成品' : '点击开启Agent模式：自然语言自动生图/修图/配音'}
-            >
-              <Bot size={13} className={isAgentMode ? 'animate-pulse' : ''} />
-              Agent
-              {isAgentMode && <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />}
-            </button>
-          )}
           {activeTab === 'chat' && (
             <div className="flex items-center gap-0.5">
               <button
@@ -5079,7 +5059,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               </div>
             </div>
 
-              {/* 智能体下拉选择器 */}
+              {/* 智能体下拉选择器 + Agent模式开关 */}
               <div className="flex items-center gap-2 shrink-0">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -5124,6 +5104,24 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
+                {/* Agent模式开关 - 放在智能体下拉按钮右侧 */}
+                <button
+                  onClick={() => setIsAgentMode(!isAgentMode)}
+                  className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-all ${
+                    isAgentMode
+                      ? isGold
+                        ? 'bg-gradient-to-r from-gold/20 to-amber-500/20 text-gold border border-gold/30'
+                        : 'bg-gradient-to-r from-blue-500/10 to-purple-500/10 text-blue-600 border border-blue-200'
+                      : isGold
+                        ? 'text-gold-muted/50 hover:text-gold-muted border border-transparent hover:border-white/[0.08]'
+                        : 'text-gray-400 hover:text-gray-600 border border-transparent hover:border-gray-200'
+                  }`}
+                  title={isAgentMode ? 'Agent模式已开启：描述需求自动调用工具生成成品' : '点击开启Agent模式：自然语言自动生图/修图/配音'}
+                >
+                  <Zap size={13} className={isAgentMode ? 'animate-pulse' : ''} />
+                  Agent
+                  {isAgentMode && <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />}
+                </button>
               </div>
             {systemPrompt && (() => {
               const selectedAgent = allAgents.find(a => a.id === systemPrompt);
@@ -5889,47 +5887,52 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               onChange={handleImageUpload}
               className="hidden"
             />
-            <div className="relative">
-              <button
-                onClick={() => {
-                  if (canvasImages && canvasImages.length > 0) {
-                    setShowImagePicker(prev => !prev);
-                  } else {
-                    fileInputRef.current?.click();
-                  }
-                }}
-                className={`shrink-0 h-7 px-2.5 rounded-md flex items-center gap-1.5 text-[11px] transition-colors ${
-                  showImagePicker
-                    ? isGold ? 'bg-gold/15 text-gold' : 'bg-blue-100 text-blue-600'
-                    : isGold
-                      ? 'bg-white/[0.04] text-gold-muted/70 hover:text-gold hover:bg-white/[0.08]'
-                      : 'bg-gray-50 text-gray-400 hover:text-gray-600 hover:bg-gray-100'
-                }`}
-                title="添加图片引用"
-              >
-                <ImageIcon size={12} />
-                <span>图片</span>
-              </button>
-              {/* @图片选择弹出框 - 从画布选择图片引用 */}
-              {showImagePicker && canvasImages && canvasImages.length > 0 && (
-                <div className={`absolute bottom-full left-0 mb-1 w-56 max-h-60 rounded-lg border shadow-lg z-50 overflow-hidden ${isGold ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-gray-200'}`}>
-                  <div className={`px-3 py-1.5 text-[10px] font-medium flex items-center justify-between ${isGold ? 'text-gold-muted/60' : 'text-gray-400'}`}>
+            {/* 图片按钮 - DropdownMenu */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  onClick={(e) => {
+                    if (!canvasImages || canvasImages.length === 0) {
+                      e.preventDefault();
+                      fileInputRef.current?.click();
+                    }
+                  }}
+                  className={`shrink-0 h-7 px-2.5 rounded-md flex items-center gap-1.5 text-[11px] transition-colors ${
+                    activeMentions.some(m => m.type === 'canvas-image')
+                      ? isGold ? 'bg-gold/15 text-gold' : 'bg-blue-100 text-blue-600'
+                      : isGold
+                        ? 'bg-white/[0.04] text-gold-muted/70 hover:text-gold hover:bg-white/[0.08]'
+                        : 'bg-gray-50 text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+                  }`}
+                  title="添加图片引用"
+                >
+                  <ImageIcon size={12} />
+                  <span>图片</span>
+                  {canvasImages && canvasImages.length > 0 && <ChevronDown size={10} />}
+                </button>
+              </DropdownMenuTrigger>
+              {canvasImages && canvasImages.length > 0 && (
+                <DropdownMenuContent
+                  side="top"
+                  align="start"
+                  className={`w-56 max-h-60 overflow-hidden ${isGold ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-gray-200'}`}
+                >
+                  <DropdownMenuLabel className={`text-[10px] font-medium flex items-center justify-between ${isGold ? 'text-gold-muted/60' : 'text-gray-400'}`}>
                     <span>@图片引用 (可多选)</span>
                     <button onClick={() => fileInputRef.current?.click()} className={`text-[10px] ${isGold ? 'text-gold/50 hover:text-gold' : 'text-blue-400 hover:text-blue-600'}`}>本地上传</button>
-                  </div>
+                  </DropdownMenuLabel>
                   <div className="overflow-y-auto max-h-48">
-                    {canvasImages.slice().reverse().map((img, idx) => {
+                    {canvasImages.slice().reverse().map((img) => {
                       const isAdded = activeMentions.some(m => m.type === 'canvas-image' && m.id === img.id);
                       return (
-                        <button
+                        <DropdownMenuItem
                           key={img.id}
-                          onClick={() => {
+                          onSelect={(e) => {
+                            e.preventDefault();
                             if (isAdded) {
-                              // 取消引用
                               setActiveMentions(prev => prev.filter(m => !(m.type === 'canvas-image' && m.id === img.id)));
                               setPendingImages(prev => prev.filter(p => p.id !== img.id));
                             } else {
-                              // 添加引用
                               setActiveMentions(prev => [...prev, {
                                 type: 'canvas-image',
                                 id: img.id,
@@ -5942,38 +5945,60 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                                 return [...prev, { id: img.id, url: img.url, name: img.prompt?.slice(0, 20) || '画布图片' }];
                               });
                             }
-                            textareaRef.current?.focus();
                           }}
-                          className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors ${isGold ? 'text-white/80 hover:bg-white/5' : 'text-gray-700 hover:bg-gray-50'} ${isAdded ? (isGold ? 'bg-gold/10' : 'bg-blue-50') : ''}`}
+                          className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs ${isGold ? 'text-white/80 focus:bg-white/5' : 'text-gray-700 focus:bg-gray-50'} ${isAdded ? (isGold ? 'bg-gold/10' : 'bg-blue-50') : ''}`}
                         >
                           <div className="w-7 h-7 rounded overflow-hidden shrink-0 border border-white/10">
                             <img src={img.url} alt="" className="w-full h-full object-cover" />
                           </div>
                           <span className="truncate flex-1 text-left">{img.prompt?.slice(0, 20) || '图片'}</span>
                           {isAdded && <span className={`text-[10px] ${isGold ? 'text-gold' : 'text-blue-500'}`}>已引用</span>}
-                        </button>
+                        </DropdownMenuItem>
                       );
                     })}
                   </div>
-                </div>
+                </DropdownMenuContent>
               )}
-            </div>
-            <button
-              onClick={() => setShowTunePanel(prev => !prev)}
-              className={`shrink-0 h-7 px-2.5 rounded-md flex items-center gap-1.5 text-[11px] transition-colors ${
-                showTunePanel
-                  ? isGold
-                    ? 'bg-gold/15 text-gold'
-                    : 'bg-blue-100 text-blue-600'
-                  : isGold
-                    ? 'bg-white/[0.04] text-gold-muted/70 hover:text-gold hover:bg-white/[0.08]'
-                    : 'bg-gray-50 text-gray-400 hover:text-gray-600 hover:bg-gray-100'
-              }`}
-              title="Tune 精细调节"
-            >
-              <Sliders size={12} />
-              <span>Tune</span>
-            </button>
+            </DropdownMenu>
+            {/* Tune按钮 - DropdownMenu */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  className={`shrink-0 h-7 px-2.5 rounded-md flex items-center gap-1.5 text-[11px] transition-colors ${
+                    showTunePanel
+                      ? isGold ? 'bg-gold/15 text-gold' : 'bg-blue-100 text-blue-600'
+                      : isGold
+                        ? 'bg-white/[0.04] text-gold-muted/70 hover:text-gold hover:bg-white/[0.08]'
+                        : 'bg-gray-50 text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+                  }`}
+                  title="Tune 精细调节"
+                >
+                  <Sliders size={12} />
+                  <span>Tune</span>
+                  <ChevronDown size={10} />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                side="top"
+                align="start"
+                className={`w-48 ${isGold ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-gray-200'}`}
+              >
+                <DropdownMenuItem
+                  onSelect={() => setShowTunePanel(true)}
+                  className={`text-xs ${isGold ? 'text-white/80 focus:bg-white/5' : 'text-gray-700 focus:bg-gray-50'}`}
+                >
+                  <Sliders size={12} className="mr-2" />
+                  打开调节面板
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => { setShowTunePanel(false); setTuneParams({ strength: 70, styleShift: 0, colorTone: 0, detailLevel: 50 }); }}
+                  className={`text-xs ${isGold ? 'text-white/80 focus:bg-white/5' : 'text-gray-700 focus:bg-gray-50'}`}
+                >
+                  <RotateCcw size={12} className="mr-2" />
+                  重置参数
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             {/* 快捷指令 - DropdownMenu */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
