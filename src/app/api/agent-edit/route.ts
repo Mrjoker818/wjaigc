@@ -337,7 +337,11 @@ export async function POST(request: NextRequest) {
               if (task) localTaskStore.set(taskId, { ...task, label: '执行无损放大...' });
               const upscaleResp = await fetch(getInternalApiUrl('/api/image/upscale'), {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                  'Content-Type': 'application/json',
+                  'x-internal-request': 'true',
+                  'x-internal-user-id': sessionUser?.id || 'system',
+                },
                 body: JSON.stringify({ imageUrl: finalImageUrl, scale: step.params.scale || '2', outputFormat: 'png' }),
               });
               const upscaleData = await upscaleResp.json();
@@ -351,7 +355,11 @@ export async function POST(request: NextRequest) {
               if (task) localTaskStore.set(taskId, { ...task, label: '执行移除背景...' });
               const rbResp = await fetch(getInternalApiUrl('/api/image-edit'), {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                  'Content-Type': 'application/json',
+                  'x-internal-request': 'true',
+                  'x-internal-user-id': sessionUser?.id || 'system',
+                },
                 body: JSON.stringify({ imageUrl: finalImageUrl, action: 'removebg' }),
               });
               const rbData = await rbResp.json();
@@ -365,7 +373,11 @@ export async function POST(request: NextRequest) {
               if (task) localTaskStore.set(taskId, { ...task, label: '执行SVG描摹...' });
               const svgResp = await fetch(getInternalApiUrl('/api/svg-trace'), {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                  'Content-Type': 'application/json',
+                  'x-internal-request': 'true',
+                  'x-internal-user-id': sessionUser?.id || 'system',
+                },
                 body: JSON.stringify({ imageUrl: finalImageUrl, mode: step.params.mode || 'color', quality: step.params.quality || 'balanced' }),
               });
               const svgData = await svgResp.json();
@@ -379,7 +391,11 @@ export async function POST(request: NextRequest) {
               if (task) localTaskStore.set(taskId, { ...task, label: '执行图像生成...' });
               const genResp = await fetch(getInternalApiUrl('/api/generate'), {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                  'Content-Type': 'application/json',
+                  'x-internal-request': 'true',
+                  'x-internal-user-id': sessionUser?.id || 'system',
+                },
                 body: JSON.stringify({
                   prompt: String(step.params.prompt || prompt),
                   aspectRatio: step.params.size || '1:1',
@@ -415,7 +431,11 @@ export async function POST(request: NextRequest) {
               if (task) localTaskStore.set(taskId, { ...task, label: '执行视频生成...' });
               const vGenResp = await fetch(getInternalApiUrl('/api/video/generate'), {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                  'Content-Type': 'application/json',
+                  'x-internal-request': 'true',
+                  'x-internal-user-id': sessionUser?.id || 'system',
+                },
                 body: JSON.stringify({
                   prompt: String(step.params.prompt || prompt),
                   mode: step.params.mode === 'image2video' ? 'image2video' : 'text2video',
@@ -455,7 +475,11 @@ export async function POST(request: NextRequest) {
               if (task) localTaskStore.set(taskId, { ...task, label: '执行视频延长...' });
               const vExtResp = await fetch(getInternalApiUrl('/api/video/extend'), {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                  'Content-Type': 'application/json',
+                  'x-internal-request': 'true',
+                  'x-internal-user-id': sessionUser?.id || 'system',
+                },
                 body: JSON.stringify({
                   videoUrl: String(step.params.videoUrl || context.videoUrl || ''),
                   prompt: String(step.params.prompt || ''),
@@ -501,7 +525,11 @@ export async function POST(request: NextRequest) {
           try {
             const saveResp = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/save-image`, {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: {
+                'Content-Type': 'application/json',
+                'x-internal-request': 'true',
+                'x-internal-user-id': sessionUser?.id || 'system',
+              },
               body: JSON.stringify({ imageData: finalImageUrl }),
             });
             if (saveResp.ok) {

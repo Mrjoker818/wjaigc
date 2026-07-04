@@ -204,7 +204,11 @@ export async function POST(request: NextRequest) {
         try {
           const bgRes = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/generate`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              'x-internal-request': 'true',
+              'x-internal-user-id': sessionUser?.userId || 'system',
+            },
             body: JSON.stringify(backgroundBody),
             signal: AbortSignal.timeout(600000), // 10分钟超时
           });
