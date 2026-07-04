@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import QRCode from 'qrcode';
 import {
   Coins, ArrowUpRight, ArrowDownRight, Gift, Clock,
   TrendingUp, Zap, History, RefreshCw, CreditCard,
@@ -63,9 +62,6 @@ export default function UserCreditsTab({
   const [confirming, setConfirming] = useState(false);
   const [orderQuerying, setOrderQuerying] = useState(false);
 
-  // 程序化生成的QR码data URL
-  const [qrDataUrl, setQrDataUrl] = useState<string>('');
-
   const loadCredits = useCallback(async () => {
     setLoading(true);
     try {
@@ -109,27 +105,6 @@ export default function UserCreditsTab({
   }, []);
 
   useEffect(() => { loadCredits(); loadPaymentStatus(); }, [loadCredits, loadPaymentStatus]);
-
-  // 当订单创建后，生成程序化QR码
-  useEffect(() => {
-    if (!orderInfo?.orderId) {
-      setQrDataUrl('');
-      return;
-    }
-    const domain = typeof window !== 'undefined'
-      ? (process.env.NEXT_PUBLIC_COZE_PROJECT_DOMAIN_DEFAULT || window.location.origin)
-      : '';
-    const rechargeUrl = `${domain}/recharge/${orderInfo.orderId}`;
-    QRCode.toDataURL(rechargeUrl, {
-      width: 240,
-      margin: 2,
-      color: { dark: '#000000', light: '#ffffff' },
-      errorCorrectionLevel: 'M',
-    }).then(setQrDataUrl).catch(err => {
-      console.error('QR generation error:', err);
-      setQrDataUrl('');
-    });
-  }, [orderInfo?.orderId]);
 
   const filteredTransactions = filter === 'all'
     ? transactions
@@ -378,7 +353,7 @@ export default function UserCreditsTab({
                 积分充值
               </h2>
               <button
-                onClick={() => { setShowRecharge(false); setOrderInfo(null); setSelectedPackage(null); setIsCustomAmount(false); setCustomAmount(0); setQrDataUrl(''); }}
+                onClick={() => { setShowRecharge(false); setOrderInfo(null); setSelectedPackage(null); setIsCustomAmount(false); setCustomAmount(0); }}
                 className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
               >
                 <X className="w-4 h-4" />
@@ -416,39 +391,50 @@ export default function UserCreditsTab({
                     </div>
                   </div>
 
-                  {/* QR码 - 主展示区 */}
-                  {qrDataUrl && (
-                    <div className="text-center">
-                      <div className="inline-block p-3 bg-white rounded-xl">
-                        <img
-                          src={qrDataUrl}
-                          alt="充值二维码"
-                          className="w-48 h-48 object-contain"
-                        />
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-3">
-                        打开{orderInfo.paymentMethod === 'wechat' ? '微信' : '支付宝'}扫一扫，扫描此二维码
-                      </p>
-                    </div>
-                  )}
-
-                  {/* 没有QR码时的提示 */}
-                  {!qrDataUrl && (
-                    <div className={`${cardBg} p-3 rounded-lg text-center`}>
-                      <p className="text-sm text-muted-foreground">二维码生成中，请稍候...</p>
-                    </div>
-                  )}
-
-                  {/* 备选：直接打开支付链接（手机端场景） */}
-                  {orderInfo.payLink && (
-                    <div className="text-center">
-                      <a
-                        href={orderInfo.payLink}
-                        className="text-xs text-muted-foreground hover:text-primary transition-colors underline underline-offset-2 inline-flex items-center gap-1"
+                  {/* 立即支付按钮 - 主支付方式（方案A：隐藏收款码，直接跳转支付链接） */}
+                  {orderInfo.payLink ? (
+                    <div className="space-y-3">
+                      {/* 支付按钮 */}
+                      <button
+                        onClick={handlePayNow}
+                        className={`w-full py-3.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 transition-all ${
+                          orderInfo.paymentMethod === 'wechat'
+                            ? 'bg-green-500 text-white hover:bg-green-600 shadow-lg shadow-green-500/20'
+                            : 'bg-blue-500 text-white hover:bg-blue-600 shadow-lg shadow-blue-500/20'
+                        }`}
                       >
-                        <Smartphone className="w-3 h-3" />
-                        在手机上？直接打开{orderInfo.paymentMethod === 'wechat' ? '微信' : '支付宝'}支付
-                      </a>
+                        {orderInfo.paymentMethod === 'wechat' ? (
+                          <svg viewBox="0 0 24 24" className="w-5 h-5" fill="currentColor">
+                            <path d="M8.691 2.188C3.891 2.188 0 5.476 0 9.53c0 2.212 1.17 4.203 3.002 5.55a.59.59 0 01.213.665l-.39 1.48c-.019.07-.048.141-.048.213 0 .163.13.295.29.295a.326.326 0 00.167-.054l1.903-1.114a.864.864 0 01.717-.098 10.16 10.16 0 002.837.403c.276 0 .543-.027.811-.05-.857-2.578.157-4.972 1.932-6.446 1.703-1.415 3.882-1.98 5.853-1.838-.576-3.583-4.196-6.348-8.596-6.348zM5.785 5.991c.642 0 1.162.529 1.162 1.18a1.17 1.17 0 01-1.162 1.178A1.17 1.17 0 014.623 7.17c0-.651.52-1.18 1.162-1.18zm5.813 0c.642 0 1.162.529 1.162 1.18a1.17 1.17 0 01-1.162 1.178 1.17 1.17 0 01-1.162-1.178c0-.651.52-1.18 1.162-1.18zm3.97 3.258c-2.031 0-3.898.767-5.309 1.944-1.66 1.386-2.622 3.277-2.622 5.343 0 1.56.564 3.023 1.538 4.234a.466.466 0 01.168.527l-.308 1.172c-.016.055-.037.11-.037.169 0 .13.104.234.231.234.057 0 .107-.019.155-.046l1.499-.881a.679.679 0 01.567-.078 8.064 8.064 0 002.418.369c4.156 0 7.53-2.915 7.53-6.498s-3.374-6.498-7.53-6.498v-.001zm-2.573 3.492c.509 0 .923.42.923.938a.93.93 0 01-.923.938.93.93 0 01-.923-.938c0-.518.414-.938.923-.938zm5.146 0c.509 0 .923.42.923.938a.93.93 0 01-.923.938.93.93 0 01-.923-.938c0-.518.414-.938.923-.938z"/>
+                          </svg>
+                        ) : (
+                          <svg viewBox="0 0 24 24" className="w-5 h-5" fill="currentColor">
+                            <path d="M21.422 15.358c-3.32-1.326-6.092-2.786-6.092-2.786s1.439-3.667 1.853-5.927H13.01V4.78h5.06V3.273h-5.06V.5h-2.494s-.073.003-.073.077V3.273H5.385v1.508h5.058v1.865H7.755v1.508h8.206c-.326 1.695-1.078 3.513-1.078 3.513s-3.858-1.732-6.592-2.18c-3.592-.594-6.291.802-6.47 3.286-.178 2.483 2.407 4.09 5.246 4.284 2.838.195 5.59-1.113 7.55-2.856 2.696 1.456 7.484 3.373 9.982 3.94.464-.867 1.657-3.063 1.657-3.063s-2.733-.59-4.834-1.48zm-12.84 2.275c-2.296-.157-3.71-1.463-3.588-2.838.123-1.375 1.843-2.352 4.139-2.195 2.06.141 4.332 1.103 5.698 2.053-1.63 1.402-3.953 3.137-6.249 2.98z"/>
+                          </svg>
+                        )}
+                        打开{orderInfo.paymentMethod === 'wechat' ? '微信' : '支付宝'}支付
+                      </button>
+                      
+                      {/* 使用提示 */}
+                      <div className={`${cardBg} p-3 text-center`}>
+                        <p className="text-xs text-muted-foreground">
+                          点击按钮后将跳转到{orderInfo.paymentMethod === 'wechat' ? '微信' : '支付宝'}收款页面
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          请在付款时备注您的用户名，方便管理员确认
+                        </p>
+                      </div>
+                      
+                      {/* PC端提示 */}
+                      <div className="text-center text-xs text-muted-foreground">
+                        <p>PC端用户：点击按钮后请用手机扫描浏览器显示的二维码</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className={`${cardBg} p-4 text-center`}>
+                      <AlertCircle className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
+                      <p className="text-sm text-muted-foreground">支付链接未配置</p>
+                      <p className="text-xs text-muted-foreground mt-1">请联系管理员配置{orderInfo.paymentMethod === 'wechat' ? '微信' : '支付宝'}支付链接</p>
                     </div>
                   )}
 
