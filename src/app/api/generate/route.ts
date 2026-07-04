@@ -284,19 +284,25 @@ export async function POST(request: NextRequest) {
                 const pollData = await pollRes.json();
 
                 if (pollData.status === 'completed' && pollData.success) {
+                  // ★ poll-task返回imageUrl在顶层，不在data里，需要显式提取
+                  const resultImageUrl = pollData.imageUrl || (pollData.data && pollData.data.imageUrl) || '';
                   updateTaskProgress(asyncTaskId, {
                     status: 'completed',
                     progress: 100,
                     label: '生成完成',
                     result: {
-                      ...(pollData.data || {}),
+                      imageUrl: resultImageUrl,
+                      maskUrl: pollData.maskUrl || '',
+                      modelName: pollData.modelName || bgData.modelName || '',
+                      providerName: pollData.providerName || bgData.providerName || '',
                       usedModel: bgData.model,
-                      modelName: bgData.modelName,
-                      providerName: bgData.providerName,
                       apiBaseUrl: bgData.apiBaseUrl,
                       providerId: bgData.providerId,
                     }
                   });
+                  // ★ 结果已通过updateTaskProgress设置到task-registry
+                  // poll-task会从registry读取并设置到completedTaskCache
+                  console.log(`[generate] submitOnly background completed for ${asyncTaskId}, imageUrl: ${resultImageUrl.substring(0, 80)}...`);
                   return;
                 }
 

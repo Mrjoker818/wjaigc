@@ -463,6 +463,11 @@ export async function POST(request: NextRequest) {
             taskResult = cached;
           }
         }
+        // ★ generate-async任务完成时，直接从registryTask.result获取结果
+        if (!taskResult && registryTask.type === 'generate-async' && registryTask.result) {
+          taskResult = registryTask.result;
+          console.log(`[poll-task] 从 task-registry 获取 generate-async 结果: ${taskId}`);
+        }
         // ★ 过滤敏感字段，防止 apiKey/apiBaseUrl 等泄露到前端
         const { apiKey: _ak, apiBaseUrl: _abu, advancedParams: _ap, ...safeResult } = (taskResult as Record<string, unknown>) || {};
         return NextResponse.json({
@@ -493,15 +498,6 @@ export async function POST(request: NextRequest) {
           status: 'cancelled',
           error: '任务已被取消',
           retryable: false,
-        }, { status: 200 });
-      }
-      // ★ generate-async（submitOnly）任务：后台IIFE处理中，直接返回registry状态
-      if (registryTask.type === 'generate-async') {
-        return NextResponse.json({
-          success: true,
-          status: registryTask.status,
-          progress: registryTask.progress,
-          label: registryTask.label,
         }, { status: 200 });
       }
       // ★ 视频任务轮询：使用 video-api 协议适配器
