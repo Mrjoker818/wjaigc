@@ -1727,6 +1727,19 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
     detailLevel: 50,
   });
   const [showTunePanel, setShowTunePanel] = useState(false);
+  const tunePanelRef = useRef<HTMLDivElement>(null);
+
+  // 点击空白处关闭Tune面板
+  useEffect(() => {
+    if (!showTunePanel) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (tunePanelRef.current && !tunePanelRef.current.contains(e.target as Node)) {
+        setShowTunePanel(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showTunePanel]);
 
   const updateTuneParam = useCallback((key: keyof TuneParams, value: number) => {
     setTuneParams(prev => ({ ...prev, [key]: value }));
@@ -5753,7 +5766,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
         <div className={`px-3 py-4 border-t ${themeClasses.border} shrink-0 ${isGold ? 'bg-[#0d0d0d]/90' : 'bg-white'}`}>
           {/* P2-1: Tune Mode Panel */}
           {showTunePanel && (
-            <div className={`mb-1.5 p-2 rounded-lg text-xs space-y-2 ${isGold ? 'bg-white/[0.03] border border-white/[0.06]' : 'bg-gray-50 border border-gray-200'}`}>
+            <div ref={tunePanelRef} className={`mb-1.5 p-2 rounded-lg text-xs space-y-2 ${isGold ? 'bg-white/[0.03] border border-white/[0.06]' : 'bg-gray-50 border border-gray-200'}`}>
               <div className="flex items-center justify-between">
                 <span className={`font-medium ${themeClasses.text}`}>Tune 精细调节</span>
                 <button onClick={() => setShowTunePanel(false)} className={`opacity-50 hover:opacity-100 ${themeClasses.textMuted}`}>
