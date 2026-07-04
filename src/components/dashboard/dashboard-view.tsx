@@ -3201,7 +3201,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                       value={paymentConfig.wechatPayLink || ''}
                       onChange={e => setPaymentConfig(prev => ({ ...prev, wechatPayLink: e.target.value }))}
                     />
-                    <p className={`text-[10px] ${textSecondary} mt-1`}>打开微信→收付款→二维码收款→右上角···→复制链接，粘贴到此处</p>
+                    <p className={`text-[10px] ${textSecondary} mt-1`}>⚠️ 微信个人收款码无复制链接功能。请保存收款码图片后上传，系统将自动解码提取支付链接</p>
                   </div>
                   <div>
                     <label className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>收款码图片URL（备用）</label>
@@ -3230,12 +3230,21 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                             setPaymentConfig(prev => ({ ...prev, wechatQrUrl: data.url }));
                             // 自动解码QR码提取支付链接
                             try {
-                              const { decodeQrFromUrlClient } = await import('@/lib/qr-decode-client');
+                              const { decodeQrFromUrlClient, isPaymentLink } = await import('@/lib/qr-decode-client');
                               const decoded = await decodeQrFromUrlClient(data.url);
-                              if (decoded) {
+                              if (decoded && isPaymentLink(decoded)) {
                                 setPaymentConfig(prev => ({ ...prev, wechatPayLink: decoded }));
+                                console.log('✅ 微信收款码解码成功:', decoded.substring(0, 30) + '...');
+                              } else if (decoded) {
+                                console.warn('⚠️ 解码成功但不是支付链接:', decoded.substring(0, 30));
+                                alert('解码成功，但检测到的不是微信支付链接。\n已解码内容: ' + decoded.substring(0, 50));
+                              } else {
+                                alert('⚠️ 无法识别收款码中的链接，请手动填写支付链接');
                               }
-                            } catch {}
+                            } catch (decodeErr) {
+                              console.error('解码失败:', decodeErr);
+                              alert('⚠️ 自动解码失败，请手动填写支付链接');
+                            }
                           } else {
                             alert('上传失败：' + (data.error || '未知错误'));
                           }
@@ -3273,7 +3282,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                       value={paymentConfig.alipayPayLink || ''}
                       onChange={e => setPaymentConfig(prev => ({ ...prev, alipayPayLink: e.target.value }))}
                     />
-                    <p className={`text-[10px] ${textSecondary} mt-1`}>打开支付宝→收付款→二维码收款→保存图片→识别链接，粘贴到此处</p>
+                    <p className={`text-[10px] ${textSecondary} mt-1`}>⚠️ 支付宝个人收款码无复制链接功能。请保存收款码图片后上传，系统将自动解码提取支付链接</p>
                   </div>
                   <div>
                     <label className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>收款码图片URL（备用）</label>
@@ -3302,12 +3311,21 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                             setPaymentConfig(prev => ({ ...prev, alipayQrUrl: data.url }));
                             // 自动解码QR码提取支付链接
                             try {
-                              const { decodeQrFromUrlClient } = await import('@/lib/qr-decode-client');
+                              const { decodeQrFromUrlClient, isPaymentLink } = await import('@/lib/qr-decode-client');
                               const decoded = await decodeQrFromUrlClient(data.url);
-                              if (decoded) {
+                              if (decoded && isPaymentLink(decoded)) {
                                 setPaymentConfig(prev => ({ ...prev, alipayPayLink: decoded }));
+                                console.log('✅ 支付宝收款码解码成功:', decoded.substring(0, 30) + '...');
+                              } else if (decoded) {
+                                console.warn('⚠️ 解码成功但不是支付链接:', decoded.substring(0, 30));
+                                alert('解码成功，但检测到的不是支付宝支付链接。\n已解码内容: ' + decoded.substring(0, 50));
+                              } else {
+                                alert('⚠️ 无法识别收款码中的链接，请手动填写支付链接');
                               }
-                            } catch {}
+                            } catch (decodeErr) {
+                              console.error('解码失败:', decodeErr);
+                              alert('⚠️ 自动解码失败，请手动填写支付链接');
+                            }
                           } else {
                             alert('上传失败：' + (data.error || '未知错误'));
                           }
