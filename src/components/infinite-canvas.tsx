@@ -8511,7 +8511,7 @@ export function InfiniteCanvas({
             {/* Node Mode */}
             <button
               onClick={onSwitchToNodeMode}
-              className={ltExpandedBtnCls}
+              className={`min-h-[44px] ${ltExpandedBtnCls}`}
               title="节点模式"
             >
               <Workflow className={`h-3.5 w-3.5 ${mIcon.workflow}`} />
@@ -8520,7 +8520,7 @@ export function InfiniteCanvas({
             {/* Workflow Hub */}
             <button
               onClick={onSwitchToWorkflowHub}
-              className={ltExpandedBtnCls}
+              className={`min-h-[44px] ${ltExpandedBtnCls}`}
               title="工作流中心"
             >
               <LayoutGrid className={`h-3.5 w-3.5 ${mIcon.layoutGrid}`} />
@@ -8531,7 +8531,7 @@ export function InfiniteCanvas({
             {/* Collapse button */}
             <button
               onClick={() => setLeftToolbarExpanded(false)}
-              className={ltExpandedBtnCls}
+              className={`min-h-[44px] ${ltExpandedBtnCls}`}
               title="收起工具栏"
             >
               <ChevronsLeft className={`h-3.5 w-3.5 ${mIcon.chevronsLeft}`} />
