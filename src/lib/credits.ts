@@ -248,11 +248,12 @@ export async function consumeCredits(
     // Record the transaction in history — 使用事务保证一致性
     try {
       const { execSql: execSql2 } = await import('@/lib/db-client');
+      const txId = 'ctx_' + Date.now() + '_' + Math.random().toString(36).substring(2, 10);
       // 尝试在同一事务中插入记录
       await execSql2(
-        `INSERT INTO wujie_credit_transactions (user_id, amount, type, balance_after, description, reference_id, created_at)
-         VALUES ($1, $2, 'consume', $3, $4, $5, $6)`,
-        [userId, -cost, newBalance, description || `${opLabel}${modelInfo} 扣除 ${cost} 积分`, `${operation}${modelInfo}`, Date.now()]
+        `INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at)
+         VALUES ($1, $2, $3, 'consume', $4, $5, $6, $7)`,
+        [txId, userId, -cost, newBalance, description || `${opLabel}${modelInfo} 扣除 ${cost} 积分`, `${operation}${modelInfo}`, Date.now()]
       );
     } catch {
       // 事务记录是非关键的，如果插入失败不影响扣费结果
@@ -324,6 +325,7 @@ export async function refundCredits(
   try {
     const { execSql } = await import('@/lib/db-client');
     const now = Date.now();
+    const refundTxId = 'ctx_' + now + '_' + Math.random().toString(36).substring(2, 10);
 
     // 事务保护：UPDATE balance + INSERT transaction record 在同一事务中
     // 如果事务记录插入失败，余额更新也会回滚，保证数据一致性
@@ -335,10 +337,10 @@ export async function refundCredits(
            updated_at = $3 
        WHERE user_id = $4 
        RETURNING balance;
-       INSERT INTO wujie_credit_transactions (user_id, amount, type, balance_after, description, reference_id, created_at)
-       VALUES ($4, $1, 'refund', (SELECT balance FROM wujie_credits WHERE user_id = $4), $5, $6, $3);
+       INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at)
+       VALUES ($7, $4, $1, 'refund', (SELECT balance FROM wujie_credits WHERE user_id = $4), $5, $6, $3);
        COMMIT;`,
-      [amount, amount, now, userId, reason, referenceId || null]
+      [amount, amount, now, userId, reason, referenceId || null, refundTxId]
     );
 
     if (!refundResult || !refundResult.rows || refundResult.rows.length === 0) {
