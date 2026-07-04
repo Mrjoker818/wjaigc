@@ -15263,7 +15263,7 @@ export function InfiniteCanvas({
 
         <button
           aria-label="抓手工具"
-          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 min-w-[44px] min-h-[44px] ${
+          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-110 active:scale-95 ${
             isPanning || isSpacePressed
               ? (isMonochrome ? 'text-blue-600 bg-blue-50 ring-1 ring-blue-500/30' : 'text-text-bright bg-white/15 ring-1 ring-gold/30')
               : (isMonochrome ? `text-gray-500 hover:text-gray-700 hover:bg-gray-100` : 'text-gold-muted hover:text-text-bright hover:bg-white/10')
@@ -15289,7 +15289,7 @@ export function InfiniteCanvas({
         <button
           aria-label="图片上传"
           onClick={() => uploadFileInputRef.current?.click()}
-          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 min-w-[44px] min-h-[44px] ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
+          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-110 active:scale-95 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
           title="图片上传"
         >
           <Upload className={`h-4 w-4 ${mIcon.upload}`} />
@@ -15302,7 +15302,7 @@ export function InfiniteCanvas({
         <button
           aria-label="图像生成器"
           onClick={handleOpenCanvasGenerator}
-          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] shadow-lg relative group hover:scale-125 active:scale-90 min-w-[44px] min-h-[44px] ${showCanvasGenerator ? (isMonochrome ? 'bg-gradient-to-r from-blue-500 to-indigo-500 text-white ring-2 ring-blue-500/50' : 'bg-gradient-to-r from-gold to-gold-dark text-black ring-2 ring-gold/50') : (isMonochrome ? 'bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-400 hover:to-indigo-400 text-white' : 'bg-gradient-to-r from-gold to-gold-dark hover:from-gold-light hover:to-gold text-black')}`}
+          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] shadow-lg relative group hover:scale-110 active:scale-95 ${showCanvasGenerator ? (isMonochrome ? 'bg-gradient-to-r from-blue-500 to-indigo-500 text-white ring-2 ring-blue-500/50' : 'bg-gradient-to-r from-gold to-gold-dark text-black ring-2 ring-gold/50') : (isMonochrome ? 'bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-400 hover:to-indigo-400 text-white' : 'bg-gradient-to-r from-gold to-gold-dark hover:from-gold-light hover:to-gold text-black')}`}
           title="图像生成器"
         >
           <Sparkles className="h-4 w-4" />
@@ -15310,17 +15310,6 @@ export function InfiniteCanvas({
         </button>
 
         <div className={`w-px h-5 mx-1.5 ${separatorCls}`} />
-
-        {/* 图转3D工厂 - always visible */}
-        <button
-          aria-label="图转3D工厂"
-          onClick={() => handleOpen3D(true)}
-          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 min-w-[44px] min-h-[44px] ${show3DModal ? (isMonochrome ? 'text-indigo-600 bg-indigo-50 ring-2 ring-indigo-500/50' : 'text-text-bright bg-gold/20 ring-2 ring-gold/40') : (isMonochrome ? 'text-indigo-500 hover:text-indigo-600 hover:bg-indigo-50' : 'text-gold-muted hover:text-gold-light hover:bg-gold/10')}`}
-          title="图转3D工厂"
-        >
-          <BoxIcon className={`h-4 w-4 ${isMonochrome ? 'text-indigo-500' : ''}`} />
-          <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">图转3D工厂</span>
-        </button>
 
         {/* ── Right: Feature buttons (collapsible) ── */}
         <div
@@ -15330,11 +15319,22 @@ export function InfiniteCanvas({
         >
           <div className={`w-px h-5 mr-1.5 ${separatorCls}`} />
 
+          {/* 图转3D工厂 - moved inside collapsible area */}
+          <button
+            aria-label="图转3D工厂"
+            onClick={() => handleOpen3D(true)}
+            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${show3DModal ? (isMonochrome ? 'text-indigo-600 bg-indigo-50 ring-2 ring-indigo-500/50' : 'text-text-bright bg-gold/20 ring-2 ring-gold/40') : (isMonochrome ? 'text-indigo-500 hover:text-indigo-600 hover:bg-indigo-50' : 'text-gold-muted hover:text-gold-light hover:bg-gold/10')}`}
+            title="图转3D工厂"
+          >
+            <BoxIcon className={`h-4 w-4 ${isMonochrome ? 'text-indigo-500' : ''}`} />
+            <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">图转3D工厂</span>
+          </button>
+
           {/* Language Edit */}
           <button
             aria-label="语言修图"
             onClick={() => { onEditImage?.(null); }}
-            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 min-w-[44px] min-h-[44px] ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
+            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
             title="语言修图"
           >
             <Pencil className={`h-4 w-4 ${mIcon.pencil}`} />
@@ -15345,7 +15345,7 @@ export function InfiniteCanvas({
           <button
             aria-label="Agent编排"
             onClick={() => { setAgentEditImage(null); setShowAgentEditor(true); }}
-            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 min-w-[44px] min-h-[44px] ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
+            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
             title="Agent编排"
           >
             <Bot className={`h-4 w-4 ${mIcon.bot}`} />
@@ -15358,7 +15358,7 @@ export function InfiniteCanvas({
           <button
             aria-label="品牌电商"
             onClick={() => setShowBrandEcommerce(true)}
-            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 min-w-[44px] min-h-[44px] ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
+            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
             title="品牌电商"
           >
             <ShoppingBag className={`h-4 w-4 ${mIcon.shoppingBag}`} />
@@ -15369,7 +15369,7 @@ export function InfiniteCanvas({
           <button
             aria-label="精修引擎"
             onClick={() => { setRefineEngineImageUrl(''); setShowRefineEngine(true); }}
-            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 min-w-[44px] min-h-[44px] ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
+            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
             title="精修引擎"
           >
             <Scan className={`h-4 w-4 ${mIcon.scan}`} />
@@ -15380,7 +15380,7 @@ export function InfiniteCanvas({
           <button
             aria-label="字境大师"
             onClick={() => setShowFontDesign(true)}
-            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 min-w-[44px] min-h-[44px] ${isMonochrome ? 'text-amber-600 hover:text-amber-500 hover:bg-amber-50' : 'text-gold hover:text-gold-light hover:bg-gold/10'}`}
+            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-amber-600 hover:text-amber-500 hover:bg-amber-50' : 'text-gold hover:text-gold-light hover:bg-gold/10'}`}
             title="字境大师"
           >
             <span className="text-sm font-bold leading-none">字</span>
@@ -15390,7 +15390,7 @@ export function InfiniteCanvas({
           {/* Brand Factory */}
           <button
             onClick={() => setShowBrandFactory(true)}
-            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
+            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
             title="品牌工厂"
           >
             <Building2 className={`h-4 w-4 ${mIcon.building}`} />
@@ -15400,7 +15400,7 @@ export function InfiniteCanvas({
           {/* Logo Generator Pro */}
           <button
             onClick={() => setShowLogoSkill(true)}
-            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-violet-600 hover:text-violet-500 hover:bg-violet-50' : 'text-gold hover:text-gold-light hover:bg-gold/10'}`}
+            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-violet-600 hover:text-violet-500 hover:bg-violet-50' : 'text-gold hover:text-gold-light hover:bg-gold/10'}`}
             title="Logo生成器 Pro"
           >
             <PenTool className="h-4 w-4" />
@@ -15410,7 +15410,7 @@ export function InfiniteCanvas({
           {/* 3D构图画布 Pro */}
           <button
             onClick={() => setShowSceneStudio(true)}
-            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
+            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
             title="3D构图画布 Pro"
           >
             <Boxes className={`h-4 w-4 ${mIcon.hexCube}`} />
@@ -15420,7 +15420,7 @@ export function InfiniteCanvas({
           {/* 品牌包装系统 Pro */}
           <button
             onClick={() => setShowBrandPackaging(true)}
-            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
+            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
             title="品牌包装系统 Pro"
           >
             <Package className="h-4 w-4" />
@@ -15430,7 +15430,7 @@ export function InfiniteCanvas({
           {/* 3D展陈系统 Pro */}
           <button
             onClick={() => setShowDisplay3D(true)}
-            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
+            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
             title="3D展陈系统 Pro"
           >
             <Store className="h-4 w-4" />
@@ -15440,7 +15440,7 @@ export function InfiniteCanvas({
           {/* AI PSD Generator */}
           <button
             onClick={() => setShowAiPsd(true)}
-            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
+            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
             title="AI PSD生成器"
           >
             <FileImage className={`h-4 w-4 ${mIcon.fileImage}`} />
@@ -15450,7 +15450,7 @@ export function InfiniteCanvas({
           {/* Sticker Assistant */}
           <button
             onClick={() => setShowStickerAssistant(true)}
-            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
+            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
             title="表情助手"
           >
             <svg className={`h-4 w-4 ${mIcon.heart}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -15467,7 +15467,7 @@ export function InfiniteCanvas({
           {/* HexCube */}
           <button
             onClick={handleCreateHexCube}
-            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
+            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
             title="六面体"
           >
             <svg className={`h-4 w-4 ${mIcon.hexCube}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
@@ -15481,7 +15481,7 @@ export function InfiniteCanvas({
           {/* ChatCanvas 批注模式 */}
           <button
             onClick={() => setAnnotationMode(prev => !prev)}
-            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 ${annotationMode ? (isMonochrome ? 'text-blue-500 bg-blue-50 ring-1 ring-blue-500/30' : 'text-gold bg-gold/20 ring-1 ring-gold/40') : (isMonochrome ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100' : 'text-gold-muted hover:text-gold-light hover:bg-gold/10')}`}
+            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${annotationMode ? (isMonochrome ? 'text-blue-500 bg-blue-50 ring-1 ring-blue-500/30' : 'text-gold bg-gold/20 ring-1 ring-gold/40') : (isMonochrome ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100' : 'text-gold-muted hover:text-gold-light hover:bg-gold/10')}`}
             title="ChatCanvas 批注 (C)"
           >
             <MessageCircle className="h-4 w-4" />
@@ -15495,7 +15495,7 @@ export function InfiniteCanvas({
         {/* Zoom controls */}
         <button
           onClick={() => { setZoom(z => Math.max(0.1, z / 1.2)); }}
-          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
+          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
           title="缩小画布"
         >
           <ZoomOut className={`h-3.5 w-3.5 ${mIcon.zoomOut}`} />
@@ -15508,7 +15508,7 @@ export function InfiniteCanvas({
 
         <button
           onClick={() => { setZoom(z => Math.min(5, z * 1.2)); }}
-          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
+          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
           title="放大画布"
         >
           <ZoomIn className={`h-3.5 w-3.5 ${mIcon.zoomIn}`} />
@@ -15520,7 +15520,7 @@ export function InfiniteCanvas({
         {/* Reset view */}
         <button
           onClick={() => { setZoom(1); setViewOffset({ x: 0, y: 0 }); }}
-          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
+          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
           title="重置视图"
         >
           <Maximize2 className="h-4 w-4" />
@@ -15530,7 +15530,7 @@ export function InfiniteCanvas({
         {/* Grid mode toggle */}
         <button
           onClick={() => setGridMode(prev => prev === 'dots' ? 'lines' : prev === 'lines' ? 'blank' : 'dots')}
-          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
+          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
           title={`网格: ${gridMode === 'dots' ? '点阵' : gridMode === 'lines' ? '线条' : '空白'}`}
         >
           <LayoutGrid className="h-4 w-4" />
@@ -15540,7 +15540,7 @@ export function InfiniteCanvas({
         {/* Connection lines toggle */}
         <button
           onClick={() => setShowConnections(prev => !prev)}
-          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 whitespace-nowrap shrink-0 ${showConnections ? (isMonochrome ? 'text-blue-500 bg-blue-50 ring-1 ring-blue-500/30' : 'text-gold bg-gold/20 ring-1 ring-gold/40') : (isMonochrome ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100' : 'text-gold-muted hover:text-gold-light hover:bg-gold/10')}`}
+          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${showConnections ? (isMonochrome ? 'text-blue-500 bg-blue-50 ring-1 ring-blue-500/30' : 'text-gold bg-gold/20 ring-1 ring-gold/40') : (isMonochrome ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100' : 'text-gold-muted hover:text-gold-light hover:bg-gold/10')}`}
           title={showConnections ? '隐藏连线' : '显示连线'}
         >
           <GitMerge className="h-4 w-4" />
