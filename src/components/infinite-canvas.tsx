@@ -5471,8 +5471,17 @@ export function InfiniteCanvas({
       const data = await res.json();
 
       // === 直接返回模式：API 直接返回图片 ===
-      if (data.success && data.mode === 'direct') {
-        const { imageUrls } = data;
+      // 支持两种格式：
+      // 1. { success: true, mode: 'direct', imageUrls: [...] }
+      // 2. { taskIds: [], directImageUrls: [...], usedModel, usedProviderId } (Responses API)
+      const directUrls: string[] = (data.success && data.mode === 'direct')
+        ? data.imageUrls
+        : (data.directImageUrls && data.directImageUrls.length > 0)
+          ? data.directImageUrls
+          : [];
+
+      if (directUrls.length > 0) {
+        const imageUrls = directUrls;
         // 并行持久化所有图片URL
         const savedUrls = await Promise.all(imageUrls.map(async (imageUrl: string) => {
           let savedUrl = imageUrl;
@@ -5497,8 +5506,8 @@ export function InfiniteCanvas({
             onImagesChange(images.map(img => {
               if (img.id === currentFrameId) {
                 return { ...img, url: savedUrls[i], isProcessingPlaceholder: false, processing: undefined, prompt: canvasGenPrompt,
-                  modelName: data.modelName || (canvasGenModel?.includes('::') ? canvasGenModel.split('::')[1] : canvasGenModel),
-                  apiProvider: data.providerName,
+                  modelName: data.usedModel || data.modelName || (canvasGenModel?.includes('::') ? canvasGenModel.split('::')[1] : canvasGenModel),
+                  apiProvider: data.usedProviderId || data.providerName,
                 };
               }
               return img;
@@ -5514,8 +5523,8 @@ export function InfiniteCanvas({
               width: 300,
               height: 300,
               prompt: canvasGenPrompt,
-              modelName: data.modelName || (canvasGenModel?.includes('::') ? canvasGenModel.split('::')[1] : canvasGenModel),
-              apiProvider: data.providerName,
+              modelName: data.usedModel || data.modelName || (canvasGenModel?.includes('::') ? canvasGenModel.split('::')[1] : canvasGenModel),
+              apiProvider: data.usedProviderId || data.providerName,
             });
           }
         }
