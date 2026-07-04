@@ -1082,6 +1082,8 @@ export function InfiniteCanvas({
     return map;
   }, [canvasGenModels]);
   const [canvasGenGenerating, setCanvasGenGenerating] = useState(false);
+  const [canvasGenPreviewUrl, setCanvasGenPreviewUrl] = useState<string | null>(null);
+  const [canvasGenProgress, setCanvasGenProgress] = useState(0);
   const [canvasGenFramePos, setCanvasGenFramePos] = useState<{x: number, y: number}>({ x: 0, y: 0 });
   const canvasGenFrameWidth = 512;
   const canvasGenFrameHeight = 288; // 16:9 ratio
@@ -5402,6 +5404,8 @@ export function InfiniteCanvas({
   const handleCanvasGenerate = useCallback(async () => {
     if (!canvasGenPrompt.trim() || canvasGenGenerating) return;
     setCanvasGenGenerating(true);
+    setCanvasGenPreviewUrl(null);
+    setCanvasGenProgress(0);
 
     // Create a processing frame on the canvas (if not already existing)
     let currentFrameId = canvasGenFrameId;
@@ -5534,7 +5538,12 @@ export function InfiniteCanvas({
           }, 100);
         }
         setCanvasGenGenerating(false);
-        setShowCanvasGenerator(false);
+        // 设置预览URL，保持面板打开让用户查看结果
+        if (savedUrls[0]) {
+          setCanvasGenPreviewUrl(savedUrls[0]);
+          setCanvasGenProgress(100);
+        }
+        // 不自动关闭面板，让用户查看结果
         return;
       }
 
@@ -5589,8 +5598,9 @@ export function InfiniteCanvas({
               return null;
             }
             // Update progress
+            const progress = Math.min(90, 10 + (attempt / maxAttempts) * 80);
+            setCanvasGenProgress(progress);
             if (currentFrameId) {
-              const progress = Math.min(90, 10 + (attempt / maxAttempts) * 80);
               onImagesChange(imagesRef.current.map(img => {
                 if (img.id === currentFrameId) {
                   return { ...img, processing: { label: '生成中...', status: 'processing', progress } };
@@ -5648,8 +5658,10 @@ export function InfiniteCanvas({
           } as CanvasImage));
           onImagesChange([...imagesRef.current, ...additionalImages]);
         }
-        // Close generator panel
-        setShowCanvasGenerator(false);
+        // 设置面板预览框的结果
+        setCanvasGenPreviewUrl(validUrls[0]);
+        setCanvasGenProgress(100);
+        // 不自动关闭面板，让用户查看结果并继续操作
         setCanvasGenFrameId(null);
       } else {
         throw new Error('生成超时或失败');
@@ -15087,6 +15099,70 @@ export function InfiniteCanvas({
             {/* Content */}
             {!canvasGenMinimized && (
             <div className="p-3.5 space-y-3 max-h-[calc(85vh-50px)] overflow-y-auto">
+              {/* Preview Frame - 根据画面比例显示预览框 */}
+              <div className="flex justify-center mb-3">
+                <div
+                  className="relative rounded-lg overflow-hidden flex items-center justify-center"
+                  style={{
+                    width: (() => {
+                      const ratioMap: Record<string, number> = { '1:1': 200, '16:9': 360, '9:16': 180, '4:3': 260, '3:4': 200, '3:2': 300, '2:3': 200, '21:9': 380, '9:21': 160 };
+                      return ratioMap[canvasGenAspectRatio] || 280;
+                    })(),
+                    height: (() => {
+                      const ratioMap: Record<string, number> = { '1:1': 200, '16:9': 200, '9:16': 360, '4:3': 200, '3:4': 260, '3:2': 200, '2:3': 300, '21:9': 160, '9:21': 380 };
+                      return ratioMap[canvasGenAspectRatio] || 200;
+                    })(),
+                    background: isMonochrome ? '#f5f5f5' : '#0d0d0d',
+                    border: `1px solid ${isMonochrome ? 'rgba(0,0,0,0.1)' : 'rgba(255,255,255,0.08)'}`,
+                  }}
+                >
+                  {/* 空白状态 - 显示比例标识 */}
+                  {!canvasGenGenerating && !canvasGenPreviewUrl && (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="text-center">
+                        <div className={`text-2xl font-light ${isMonochrome ? 'text-gray-300' : 'text-white/20'}`}>
+                          {canvasGenAspectRatio}
+                        </div>
+                        <div className={`mt-1 text-xs ${isMonochrome ? 'text-gray-400' : 'text-white/30'}`}>
+                          {(() => {
+                            const ratioMap: Record<string, string> = { '1:1': '方形', '16:9': '横屏', '9:16': '竖屏', '4:3': '传统横屏', '3:4': '传统竖屏', '3:2': '经典横屏', '2:3': '经典竖屏', '21:9': '超宽屏', '9:21': '超竖屏' };
+                            return ratioMap[canvasGenAspectRatio] || '自定义';
+                          })()}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {/* 生成中状态 - 显示进度 */}
+                  {canvasGenGenerating && (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="text-center">
+                        <div className="animate-spin mb-2">
+                          <Loader2 size={32} style={{ color: isMonochrome ? '#2563eb' : '#d4af37' }} />
+                        </div>
+                        <div className={`text-sm ${isMonochrome ? 'text-gray-600' : 'text-white/60'}`}>
+                          生成中...
+                        </div>
+                        {canvasGenProgress > 0 && (
+                          <div className="mt-2 w-40 h-1.5 rounded-full overflow-hidden" style={{ background: isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.1)' }}>
+                            <div
+                              className="h-full rounded-full transition-all duration-300"
+                              style={{ width: `${canvasGenProgress}%`, background: isMonochrome ? '#2563eb' : '#d4af37' }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {/* 生成完成 - 显示结果图片 */}
+                  {canvasGenPreviewUrl && !canvasGenGenerating && (
+                    <img
+                      src={canvasGenPreviewUrl}
+                      alt="生成结果"
+                      className="absolute inset-0 w-full h-full object-cover"
+                    />
+                  )}
+                </div>
+              </div>
               {/* Model selector */}
               <div className="flex items-center gap-2.5">
                 <label className={`text-xs font-medium min-w-[42px] ${isMonochrome ? 'text-gray-500' : 'text-[#777]'}`}>模型</label>
