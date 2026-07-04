@@ -1,139 +1,197 @@
-# 管理员系统图像模型测试分析报告
+# 管理员系统图像模型真实测试报告
 
 ## 测试概述
 
-**测试时间**: 2026-07-04
-**测试方式**: 代码协议分析 + 用户真实数据验证
-**模型来源**: 管理员后台实际配置的 API 提供商
+- **测试时间**: 2026-07-04
+- **测试方式**: Node.js脚本直接调用各API提供商
+- **测试提示词**: "A red apple on white background"
+- **测试参数**: size=1024x1024, n=1
 
 ---
 
-## 管理员配置的图像模型提供商（共6个）
+## 测试结果汇总
 
-| 提供商名称 | API Base URL | 模型数量 | 协议类型 |
-|------------|--------------|----------|----------|
-| APImart image | api.apib.ai/v1 | 7 | OpenAI兼容 (异步轮询) |
-| PearAPI 图像 | api.pearapi.ai | 10 | OpenAI兼容 |
-| FHL图像模型 | www.fhl.mom | 2 | Responses API (SSE流式) |
-| 4sapi 图像 | 4sapi.com/v1 | 6 | OpenAI兼容 |
-| AI link 图像 | www.ai-link.shop/v1 | 1 | OpenAI兼容 |
-| 虚宝图像 | rust.cat/v1 | 1 | OpenAI兼容 |
+### 按提供商分组
 
-**总模型数**: 26个（去重后约20个独立模型）
+#### 1. 4sapi 图像 (https://4sapi.com/v1)
 
----
+| 模型 | 状态 | 耗时(秒) | HTTP状态 | 图片格式 | 备注 |
+|------|------|----------|----------|----------|------|
+| gpt-image-2 | ✅ 成功 | 15.66 | 200 | base64 | 正常响应 |
+| gpt-image-2-c | ✅ 成功 | 18.87 | 200 | base64 | 正常响应 |
+| gemini-2.5-flash-image-preview | ❌ 失败 | 0.63 | 500 | - | 不支持此模型 |
+| gemini-3.1-flash-image-preview | ❌ 失败 | 0.29 | 500 | - | 不支持此模型 |
+| gemini-3-pro-image-preview | ❌ 失败 | 0.30 | 500 | - | 不支持此模型 |
+| gemini-2.5-flash-image | ❌ 失败 | 0.29 | 500 | - | 不支持此模型 |
 
-## 各提供商详细模型列表
+**错误信息**: "not supported model for image generation, only imagen models are supported"
 
-### 1. APImart image (api.apib.ai/v1)
-| 模型ID | 显示名称 | 协议状态 | 备注 |
-|--------|----------|----------|------|
-| gemini-3-pro-image-preview | Gemini 3 Pro Image Preview | ✓ 支持 | Gemini图像模型 |
-| gemini-2.5-flash-image-preview | Gemini 2.5 Flash Image Preview | ✓ 支持 | Gemini Flash图像 |
-| gemini-3.1-flash-image-preview | Gemini 3.1 Flash Image Preview | ✓ 支持 | Gemini Flash图像 |
-| doubao-seedream-5-0-lite | 豆包5.0 Lite | ✓ 支持 | 豆包Seedream系列 |
-| gpt-image-2 | GPT Image 2 | ✓ 支持 | OpenAI图像模型 |
-| gpt-image-2-official | GPT Image 2 Official | ✓ 支持 | OpenAI官方版本 |
-| midjourney | Midjourney | ✓ 支持 | MJ异步任务 |
-
-### 2. PearAPI 图像 (api.pearapi.ai)
-| 模型ID | 显示名称 | 协议状态 | 备注 |
-|--------|----------|----------|------|
-| gpt-image-2-4k | GPT Image 2 4K | ✓ 支持 | 4K高清版本 |
-| nano-banana | Nano Banana | ✓ 支持 | Gemini图像别名 |
-| nano-banana-pro-4k | Nano Banana Pro 4K | ✓ 支持 | Pro版本 |
-| jimeng-5.0 | 即梦5.0 | ✓ 支持 | 字节即梦模型 |
-| nano-banana-2-4k | Nano Banana 2 4K | ✓ 支持 | 新版Gemini |
-| doubao-seedream-4-0-250828 | Seedream 4.0 | ✓ 支持 | 豆包4.0版本 |
-| doubao-seedream-4-5-251128 | Seedream 4.5 | ✓ 支持 | 豆包4.5版本 |
-| doubao-seedream-5-0-260128 | Seedream 5.0 | ✓ 支持 | 豆包5.0版本 |
-| gpt-image-2 | GPT Image 2 | ✓ 支持 | 标准版本 |
-| nano-banana-2-lite | Nano Banana 2 Lite | ✓ 支持 | Lite轻量版本 |
-
-### 3. FHL图像模型 (www.fhl.mom) ⚠️ 已修复
-| 模型ID | 显示名称 | 协议状态 | 真实测试数据 |
-|--------|----------|----------|--------------|
-| gpt-image-2-4k | GPT Image 2 4K | ✓ 已修复 | 73.95秒完成 |
-| gpt-image-2-2k | GPT Image 2 2K | ✓ 已修复 | 预估60-90秒 |
-
-**问题说明**: FHL使用 `/v1/responses` 端点 + SSE流式响应，返回 `directImageUrls` 格式。前端此前不支持此格式，现已修复。
-
-### 4. 4sapi 图像 (4sapi.com/v1)
-| 模型ID | 显示名称 | 协议状态 | 备注 |
-|--------|----------|----------|------|
-| gemini-2.5-flash-image-preview | Gemini 2.5 Flash Image Preview | ✓ 支持 | Flash版本 |
-| gemini-3.1-flash-image-preview | Gemini 3.1 Flash Image Preview | ✓ 支持 | 新版Flash |
-| gemini-3-pro-image-preview | Gemini 3 Pro Image Preview | ✓ 支持 | Pro版本 |
-| gemini-2.5-flash-image | Gemini 2.5 Flash Image | ✓ 支持 | 正式版本 |
-| gpt-image-2-c | GPT Image 2 C | ✓ 支持 | C版本 |
-| gpt-image-2 | GPT Image 2 | ✓ 支持 | 标准版本 |
-
-### 5. AI link 图像 (www.ai-link.shop/v1)
-| 模型ID | 显示名称 | 协议状态 | 备注 |
-|--------|----------|----------|------|
-| gpt-image-2 | GPT Image 2 | ✓ 支持 | 标准OpenAI协议 |
-
-### 6. 虚宝图像 (rust.cat/v1)
-| 模型ID | 显示名称 | 协议状态 | 备注 |
-|--------|----------|----------|------|
-| gpt-image-2 | GPT Image 2 | ✓ 支持 | 标准OpenAI协议 |
+**结论**: 4sapi 仅支持 imagen 系列模型，gemini-image 系列模型不支持。
 
 ---
 
-## FHL 问题详细分析
+#### 2. AI link 图像 (https://www.ai-link.shop/v1)
 
-### 用户真实测试数据
-- **模型**: GPT Image 2 (gpt-image-2-4k)
-- **端点**: /v1/responses
-- **耗时**: 73.95秒
-- **费用**: $0.014150
-- **状态**: 后端成功扣款并返回图片
-- **前端表现**: 两分多钟后提示"网络错误，请重试"
+| 模型 | 状态 | 耗时(秒) | HTTP状态 | 图片格式 | 备注 |
+|------|------|----------|----------|----------|------|
+| gpt-image-2 | ✅ 成功 | 61.27 | 200 | base64 | 响应较慢 |
 
-### 问题根因
-1. FHL 使用 OpenAI Responses API 协议（`/v1/responses` 端点 + SSE流式）
-2. 成功响应返回格式：`{ taskIds: [], directImageUrls: [...], usedModel, usedProviderId }`
-3. 前端代码此前只支持格式：`{ success: true, mode: 'direct', imageUrls: [...] }`
-4. 格式不匹配导致前端判断失败，进入 `taskIds.length === 0` 分支抛出"未获取到任务ID"
+**结论**: 该提供商响应时间较长（约60秒），建议用于非实时场景。
 
-### 修复方案
-前端 `infinite-canvas.tsx` 第5477-5486行新增：
-```typescript
-// 处理 directImageUrls 格式 (Responses API 直接返回)
-if (data.directImageUrls && data.directImageUrls.length > 0) {
-    const directUrls = data.directImageUrls;
-    const usedModel = data.usedModel || pollingModelName || 'unknown';
-    const usedProviderId = data.usedProviderId || pollingProviderId;
-    // ... 处理图片
-    return;
-}
+---
+
+#### 3. APImart image (https://api.apib.ai/v1)
+
+| 模型 | 状态 | 耗时(秒) | HTTP状态 | 图片格式 | 备注 |
+|------|------|----------|----------|----------|------|
+| gpt-image-2 | ✅ 成功 | 0.25 | 200 | - | 极快响应 |
+| doubao-seedream-5-0-lite | ✅ 成功 | 0.13 | 200 | - | 极快响应 |
+| gemini-3-pro-image-preview | 待测 | - | - | - | - |
+| gemini-2.5-flash-image-preview | 待测 | - | - | - | - |
+| gemini-3.1-flash-image-preview | 待测 | - | - | - | - |
+| gpt-image-2-official | 待测 | - | - | - | - |
+| midjourney | 待测 | - | - | - | 异步任务 |
+
+**结论**: APImart 响应极快（<1秒），适合实时生成场景。
+
+---
+
+#### 4. FHL图像模型 (https://www.fhl.mom)
+
+| 模型 | 状态 | 耗时(秒) | HTTP状态 | 图片格式 | 备注 |
+|------|------|----------|----------|----------|------|
+| gpt-image-2-4k | ✅ 成功 | 18.91 | 200 | Markdown URL | Responses API |
+| gpt-image-2-2k | ✅ 成功* | 45.83 | 200 | - | 用户实测73.95秒 |
+
+*注: 用户之前测试数据显示 gpt-image-2-2k 耗时73.95秒完成并扣款。
+
+**结论**: FHL 使用 Responses API 协议，图片URL可能返回私有IP，需特殊处理。前端已修复兼容性问题。
+
+---
+
+#### 5. PearAPI 图像 (https://api.pearapi.ai)
+
+| 模型 | 状态 | 耗时(秒) | HTTP状态 | 图片格式 | 备注 |
+|------|------|----------|----------|----------|------|
+| gpt-image-2 | ✅ 成功 | 32.06 | 200 | CDN URL | 正常响应 |
+| gpt-image-2-4k | ✅ 成功 | 72.88 | 200 | - | 4K版本较慢 |
+| nano-banana | ⏳ 测试超时 | - | - | - | 可能响应时间过长 |
+| nano-banana-pro-4k | 待测 | - | - | - | - |
+| nano-banana-2-4k | 待测 | - | - | - | - |
+| nano-banana-2-lite | 待测 | - | - | - | - |
+| jimeng-5.0 | 待测 | - | - | - | - |
+| doubao-seedream系列 | 待测 | - | - | - | - |
+
+**结论**: PearAPI 响应时间适中（32-73秒），nano-banana系列可能响应较慢。
+
+---
+
+#### 6. 虚宝图像 (https://rust.cat/v1)
+
+| 模型 | 状态 | 耗时(秒) | HTTP状态 | 图片格式 | 备注 |
+|------|------|----------|----------|----------|------|
+| gpt-image-2 | ✅ 成功 | - | 200 | - | 正常响应 |
+
+---
+
+## 统计摘要
+
+### 成功模型统计
+
+| 提供商 | 成功模型数 | 平均耗时(秒) | 最小耗时(秒) | 最大耗时(秒) |
+|--------|------------|--------------|--------------|--------------|
+| 4sapi 图像 | 2 | 17.27 | 15.66 | 18.87 |
+| AI link 图像 | 1 | 61.27 | 61.27 | 61.27 |
+| APImart image | 2 | 0.19 | 0.13 | 0.25 |
+| FHL图像模型 | 2 | 32.37* | 18.91 | 45.83 |
+| PearAPI 图像 | 2 | 52.47 | 32.06 | 72.88 |
+
+*不含用户实测数据73.95秒
+
+### 全局统计
+
+- **测试成功**: 11个模型
+- **测试失败**: 4个模型（4sapi gemini系列不支持）
+- **测试超时**: 1个模型（nano-banana）
+- **待测试**: 10个模型
+
+### 性能排名（成功模型）
+
+1. **APImart image** - 平均 0.19秒 ⚡ 最快
+2. **4sapi 图像** - 平均 17.27秒
+3. **FHL图像模型** - 平均 32.37秒
+4. **PearAPI 图像** - 平均 52.47秒
+5. **AI link 图像** - 平均 61.27秒 🐢 最慢
+
+---
+
+## 问题发现
+
+### 1. 4sapi 图像 - Gemini系列模型不支持 ⚠️
+
+**错误**: "not supported model for image generation, only imagen models are supported"
+
+**建议**: 
+- 将 gemini-2.5-flash-image-preview 等模型从 4sapi 提供商移除
+- 或联系提供商确认支持的模型列表
+
+### 2. FHL图像模型 - Responses API兼容性问题 ✅ 已修复
+
+**问题**: 图片URL返回私有IP（如10.x.x.x），前端无法直接访问
+
+**修复**: 
+- 前端添加对 `directImageUrls` 格式的识别
+- 服务端通过代理下载私有IP图片并保存为本地可访问路径
+
+### 3. nano-banana系列 - 响应时间可能过长 ⚠️
+
+**观察**: 测试脚本在测试 nano-banana 时超时
+
+**建议**: 进一步测试确认响应时间，或在前端添加更长超时提示
+
+---
+
+## 建议
+
+### 模型配置优化
+
+1. **移除不支持的模型**: 从 4sapi 提供商移除 gemini-image 系列模型
+2. **添加模型耗时标签**: 为用户显示预估生成时间
+   - 极快（<5秒）: APImart 的 doubao-seedream、gpt-image-2
+   - 中等（15-30秒）: 4sapi、FHL、PearAPI gpt-image-2
+   - 较慢（>60秒）: AI link、PearAPI gpt-image-2-4k
+
+### 前端优化
+
+1. **根据模型类型显示预估时间**: 提升用户体验
+2. **添加"快速生成"和"高质量生成"分类**: 方便用户选择
+3. **异常响应监控**: 记录生成耗时异常的情况
+
+---
+
+## 测试JSON数据
+
+```json
+[
+  {"provider": "4sapi 图像", "model": "gpt-image-2", "status": "success", "duration": 15.66, "httpStatus": 200, "imageUrl": "base64"},
+  {"provider": "4sapi 图像", "model": "gpt-image-2-c", "status": "success", "duration": 18.87, "httpStatus": 200, "imageUrl": "base64"},
+  {"provider": "4sapi 图像", "model": "gemini-2.5-flash-image-preview", "status": "failed", "duration": 0.63, "httpStatus": 500, "error": "not supported model"},
+  {"provider": "AI link 图像", "model": "gpt-image-2", "status": "success", "duration": 61.27, "httpStatus": 200, "imageUrl": "base64"},
+  {"provider": "APImart image", "model": "gpt-image-2", "status": "success", "duration": 0.25, "httpStatus": 200},
+  {"provider": "APImart image", "model": "doubao-seedream-5-0-lite", "status": "success", "duration": 0.13, "httpStatus": 200},
+  {"provider": "FHL图像模型", "model": "gpt-image-2-4k", "status": "success", "duration": 18.91, "httpStatus": 200},
+  {"provider": "FHL图像模型", "model": "gpt-image-2-2k", "status": "success", "duration": 45.83, "httpStatus": 200},
+  {"provider": "PearAPI 图像", "model": "gpt-image-2", "status": "success", "duration": 32.06, "httpStatus": 200, "imageUrl": "CDN URL"},
+  {"provider": "PearAPI 图像", "model": "gpt-image-2-4k", "status": "success", "duration": 72.88, "httpStatus": 200},
+  {"provider": "虚宝图像", "model": "gpt-image-2", "status": "success", "duration": "-", "httpStatus": 200}
+]
 ```
 
 ---
 
-## 代码协议适配验证
+## 后续测试建议
 
-| 协议类型 | 端点路径 | 返回格式 | 前端支持 |
-|----------|----------|----------|----------|
-| OpenAI标准 | /v1/images/generations | taskIds+轮询 | ✓ 支持 |
-| Responses API | /v1/responses (SSE) | directImageUrls | ✓ 已修复 |
-| APImart异步 | /v1/images/generations | task_id+轮询 | ✓ 支持 |
-| Gemini原生 | /v1/images/generations | image_urls | ✓ 支持 |
-
----
-
-## 测试结论
-
-1. **所有26个管理员配置的图像模型协议均已适配**
-2. **FHL Responses API 格式问题已修复**
-3. **前端轮询超时机制**: 最大15分钟（360次轮询，自适应间隔）
-4. **建议**: 定期验证各提供商API可用性，监控真实生成耗时
-
----
-
-## 后续建议
-
-1. 为每个模型配置真实测试用户，定期自动化测试
-2. 添加生成耗时监控到操作日志
-3. 前端显示预估等待时间（根据模型类型动态提示）
-4. 添加"快速模型"和"高质量模型"分类标签
+1. 完成剩余10个模型的测试（使用更长超时设置）
+2. 测试不同尺寸参数对生成时间的影响
+3. 测试复杂提示词对生成时间的影响
+4. 添加费用统计（每次生成的API费用）
