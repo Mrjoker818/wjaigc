@@ -4840,23 +4840,6 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               >
                 <Trash2 size={14} />
               </button>
-              {messages.length >= 2 && (
-                <button
-                  onClick={() => {
-                    setSkillSaveName('');
-                    setSkillSaveDescription('');
-                    setSkillSaveCategory('custom');
-                    setShowSkillSaveDialog(true);
-                    setActiveTab('skills');
-                  }}
-                  className={`p-2 rounded-lg transition-colors ${
-                    isGold ? 'text-gold-muted hover:text-gold hover:bg-gold/10' : 'text-gray-400 hover:text-blue-500 hover:bg-blue-50'
-                  }`}
-                  title="保存为 Skill"
-                >
-                  <BookmarkCheck size={14} />
-                </button>
-              )}
             </div>
           )}
         </div>
@@ -4977,7 +4960,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
           <div className="flex items-center gap-2 flex-wrap">
             {/* LLM模型选择器 */}
             <Select value={model} onValueChange={setModel}>
-              <SelectTrigger className={`h-7 text-xs min-w-[100px] max-w-[140px] ${themeClasses.inputBg} ${themeClasses.border} ${themeClasses.text}`}>
+              <SelectTrigger className={`h-7 text-xs flex-1 min-w-[120px] ${themeClasses.inputBg} ${themeClasses.border} ${themeClasses.text}`}>
                 <SelectValue placeholder="选择模型" />
               </SelectTrigger>
               <SelectContent position="popper" side="bottom" sideOffset={4} className={themeClasses.bg}>
@@ -5125,26 +5108,8 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
             >
               <Plug size={12} />
             </button>
-
-            {/* 收起按钮 - 图形按钮放在最右侧 */}
-            <div className="flex-1" />
-            <button
-              onClick={() => setShowChatSettings(!showChatSettings)}
-              className={`shrink-0 p-1 rounded-md transition-all ${
-                showChatSettings
-                  ? isGold
-                    ? 'bg-gold/20 text-gold border border-gold/30'
-                    : 'bg-gray-200 text-gray-700 border border-gray-300'
-                  : isGold
-                    ? 'text-gold-muted/50 hover:text-gold-muted border border-transparent hover:border-white/[0.08]'
-                    : 'text-gray-400 hover:text-gray-600 border border-transparent hover:border-gray-200'
-              }`}
-              title={showChatSettings ? '收起配置' : '展开配置'}
-            >
-              {showChatSettings ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-            </button>
           </div>
-          {showChatSettings && systemPrompt && (() => {
+          {systemPrompt && (() => {
             const selectedAgent = allAgents.find(a => a.id === systemPrompt);
             if (!selectedAgent) return null;
             const isCustom = customAgents.some(a => a.id === selectedAgent.id);
@@ -6115,7 +6080,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
             <button
               onClick={() => handleSend()}
               disabled={!input.trim() || isLoading}
-              className={`shrink-0 h-7 px-3 rounded-md flex items-center gap-1.5 text-[11px] font-medium transition-all ${
+              className={`shrink-0 h-7 px-2 rounded-md flex items-center justify-center text-[11px] font-medium transition-all ${
                 !input.trim() || isLoading
                   ? isGold
                     ? 'bg-white/[0.03] text-white/20 cursor-not-allowed'
@@ -6124,10 +6089,10 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                     ? 'bg-gold text-black hover:opacity-90 shadow-md shadow-gold/20'
                     : 'bg-blue-500 text-white hover:bg-blue-600 shadow-md'
               }`}
+              title="发送"
             >
-              <Send size={12} />
-              <span>发送</span>
-              {isLoading && <Loader2 size={10} className="animate-spin ml-0.5" />}
+              <Send size={14} />
+              {isLoading && <Loader2 size={10} className="animate-spin ml-1" />}
             </button>
           </div>
 
