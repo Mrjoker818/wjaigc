@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuLabel, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -4972,254 +4972,259 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
           </div>
         )}
 
-        {/* Settings Bar - compact */}
+        {/* Settings Bar - 单行布局 */}
         <div className={`border-b ${themeClasses.border} shrink-0 px-3 py-2`}>
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-1.5">
-              <Settings size={12} className={themeClasses.textMuted} />
-              <span className={`text-xs font-medium ${themeClasses.textMuted} uppercase tracking-wider`}>对话配置</span>
-            </div>
-            <button
-              onClick={() => setShowChatSettings(!showChatSettings)}
-              className={`text-xs ${themeClasses.textMuted} hover:${themeClasses.text} transition-colors`}
-            >
-              {showChatSettings ? '收起' : '展开'}
-            </button>
-          </div>
-          {showChatSettings && (
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <Select value={model} onValueChange={setModel}>
-                <SelectTrigger className={`flex-1 h-7 text-xs ${themeClasses.inputBg} ${themeClasses.border} ${themeClasses.text}`}>
-                  <SelectValue placeholder="选择模型" />
-                </SelectTrigger>
-                <SelectContent position="popper" side="bottom" sideOffset={4} className={themeClasses.bg}>
-                  {(() => {
-                    // Group discovered server models by provider
-                    const grouped: Record<string, typeof discoveredChatModels> = {};
-                    discoveredChatModels.forEach(m => {
-                      const key = m.provider || '管理员配置';
-                      if (!grouped[key]) grouped[key] = [];
-                      grouped[key].push(m);
-                    });
-                    return Object.entries(grouped).map(([providerName, models]) => (
-                      <div key={providerName}>
-                        <div className={`px-2 py-0.5 text-xs font-semibold ${themeClasses.textMuted} border-t ${themeClasses.border} mt-1 pt-2`}>
-                          {providerName}
-                        </div>
-                        {models.map(m => (
-                          <SelectItem key={m.id} value={m.id} className={themeClasses.text}>
-                            <div className="flex flex-col w-full">
-                              <span className="font-medium text-xs">{m.name}</span>
-                              {m.description && <span className={`text-xs ${themeClasses.textMuted}`}>{m.description}</span>}
-                            </div>
-                          </SelectItem>
-                        ))}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* LLM模型选择器 */}
+            <Select value={model} onValueChange={setModel}>
+              <SelectTrigger className={`h-7 text-xs min-w-[100px] max-w-[140px] ${themeClasses.inputBg} ${themeClasses.border} ${themeClasses.text}`}>
+                <SelectValue placeholder="选择模型" />
+              </SelectTrigger>
+              <SelectContent position="popper" side="bottom" sideOffset={4} className={themeClasses.bg}>
+                {(() => {
+                  // Group discovered server models by provider
+                  const grouped: Record<string, typeof discoveredChatModels> = {};
+                  discoveredChatModels.forEach(m => {
+                    const key = m.provider || '管理员配置';
+                    if (!grouped[key]) grouped[key] = [];
+                    grouped[key].push(m);
+                  });
+                  return Object.entries(grouped).map(([providerName, models]) => (
+                    <div key={providerName}>
+                      <div className={`px-2 py-0.5 text-xs font-semibold ${themeClasses.textMuted} border-t ${themeClasses.border} mt-1 pt-2`}>
+                        {providerName}
                       </div>
-                    ));
-                  })()}
-                  {thirdPartyChatModels.length > 0 && (
-                    <>
-                      {(() => {
-                        // Group third-party chat models by provider name
-                        const grouped: Record<string, typeof thirdPartyChatModels> = {};
-                        thirdPartyChatModels.forEach(m => {
-                          const key = m.provider || '未知';
-                          if (!grouped[key]) grouped[key] = [];
-                          grouped[key].push(m);
-                        });
-                        return Object.entries(grouped).map(([providerName, models]) => (
-                          <div key={providerName}>
-                            <div className={`px-2 py-0.5 text-xs font-semibold ${themeClasses.textMuted} border-t ${themeClasses.border} mt-1 pt-2`}>
-                              {providerName}
-                            </div>
-                            {models.map(m => (
-                              <SelectItem key={m.id} value={m.id} className={themeClasses.text}>
-                                <div className="flex flex-col w-full">
-                                  <span className="font-medium text-xs">{m.name}</span>
-                                </div>
-                              </SelectItem>
-                            ))}
+                      {models.map(m => (
+                        <SelectItem key={m.id} value={m.id} className={themeClasses.text}>
+                          <div className="flex flex-col w-full">
+                            <span className="font-medium text-xs">{m.name}</span>
+                            {m.description && <span className={`text-xs ${themeClasses.textMuted}`}>{m.description}</span>}
                           </div>
-                        ));
-                      })()}
-                    </>
-                  )}
-                </SelectContent>
-              </Select>
-              <button
-                onClick={() => setShowThirdPartyDialog(true)}
-                className={`shrink-0 p-1 rounded-md border transition-all ${
-                  isGold
-                    ? 'border-gold/30 hover:border-gold/60 hover:bg-gold/10 text-gold/70 hover:text-gold'
-                    : 'border-gray-300 hover:border-gray-500 hover:bg-gray-100 text-gray-400 hover:text-gray-700'
-                }`}
-                title="第三方模型调用"
-              >
-                <Plug size={12} />
-              </button>
-              <div className="flex items-center gap-1 shrink-0">
-                <Switch
-                  id="thinking-mode"
-                  checked={isThinkingMode}
-                  onCheckedChange={setIsThinkingMode}
-                  className="scale-75 origin-center"
-                />
-                <Label htmlFor="thinking-mode" className={`text-xs ${themeClasses.textMuted} cursor-pointer select-none flex items-center gap-0.5`}>
-                  <Sparkles size={10} className={isThinkingMode ? (isGold ? 'text-gold' : 'text-gray-700') : (isGold ? 'text-gold-muted/50' : 'text-gray-400')} />
-                  思考
-                </Label>
-              </div>
+                        </SelectItem>
+                      ))}
+                    </div>
+                  ));
+                })()}
+                {thirdPartyChatModels.length > 0 && (
+                  <>
+                    {(() => {
+                      // Group third-party chat models by provider name
+                      const grouped: Record<string, typeof thirdPartyChatModels> = {};
+                      thirdPartyChatModels.forEach(m => {
+                        const key = m.provider || '未知';
+                        if (!grouped[key]) grouped[key] = [];
+                        grouped[key].push(m);
+                      });
+                      return Object.entries(grouped).map(([providerName, models]) => (
+                        <div key={providerName}>
+                          <div className={`px-2 py-0.5 text-xs font-semibold ${themeClasses.textMuted} border-t ${themeClasses.border} mt-1 pt-2`}>
+                            {providerName}
+                          </div>
+                          {models.map(m => (
+                            <SelectItem key={m.id} value={m.id} className={themeClasses.text}>
+                              <div className="flex flex-col w-full">
+                                <span className="font-medium text-xs">{m.name}</span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </div>
+                      ));
+                    })()}
+                  </>
+                )}
+              </SelectContent>
+            </Select>
+
+            {/* 智能体下拉选择器 */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-all border shrink-0 ${
+                    systemPrompt
+                      ? isGold
+                        ? 'border-gold/30 bg-gold/10 text-gold'
+                        : 'border-blue-200 bg-blue-50 text-blue-600'
+                      : isGold
+                        ? 'border-white/[0.08] text-gold-muted/70 hover:border-gold/20 hover:text-gold'
+                        : 'border-gray-200 text-gray-500 hover:border-gray-400 hover:text-gray-700'
+                  }`}
+                >
+                  <Bot size={14} />
+                  {systemPrompt ? allAgents.find(a => a.id === systemPrompt)?.name || '智能体' : '智能体'}
+                  <ChevronDown size={14} className="ml-0.5 opacity-60" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-48 max-h-[280px] overflow-y-auto">
+                {allAgents.map(agent => (
+                  <DropdownMenuItem
+                    key={agent.id}
+                    onClick={() => setSystemPrompt(prev => prev === agent.id ? '' : agent.id)}
+                    className={`flex items-center gap-2 cursor-pointer ${
+                      systemPrompt === agent.id ? 'bg-accent' : ''
+                    }`}
+                  >
+                    <span className="text-sm">{agent.icon}</span>
+                    <span className="flex-1">{agent.name}</span>
+                    {systemPrompt === agent.id && (
+                      <Check size={14} className="text-primary" />
+                    )}
+                  </DropdownMenuItem>
+                ))}
+                <DropdownMenuItem
+                  onClick={() => { setEditingAgent(null); setShowAgentBuilder(true); }}
+                  className="flex items-center gap-2 cursor-pointer text-muted-foreground"
+                >
+                  <Plus size={14} />
+                  <span>新增智能体</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* Agent模式开关 */}
+            <button
+              onClick={() => setIsAgentMode(!isAgentMode)}
+              className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-all shrink-0 ${
+                isAgentMode
+                  ? isGold
+                    ? 'bg-gradient-to-r from-gold/20 to-amber-500/20 text-gold border border-gold/30'
+                    : 'bg-gradient-to-r from-blue-500/10 to-purple-500/10 text-blue-600 border border-blue-200'
+                  : isGold
+                    ? 'text-gold-muted/50 hover:text-gold-muted border border-transparent hover:border-white/[0.08]'
+                    : 'text-gray-400 hover:text-gray-600 border border-transparent hover:border-gray-200'
+              }`}
+              title={isAgentMode ? 'Agent模式已开启：描述需求自动调用工具生成成品' : '点击开启Agent模式：自然语言自动生图/修图/配音'}
+            >
+              <Zap size={13} className={isAgentMode ? 'animate-pulse' : ''} />
+              Agent
+              {isAgentMode && <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />}
+            </button>
+
+            {/* 思考开启按钮 */}
+            <div className="flex items-center gap-1 shrink-0">
+              <Switch
+                id="thinking-mode"
+                checked={isThinkingMode}
+                onCheckedChange={setIsThinkingMode}
+                className="scale-75 origin-center"
+              />
+              <Label htmlFor="thinking-mode" className={`text-xs ${themeClasses.textMuted} cursor-pointer select-none flex items-center gap-0.5`}>
+                <Sparkles size={10} className={isThinkingMode ? (isGold ? 'text-gold' : 'text-gray-700') : (isGold ? 'text-gold-muted/50' : 'text-gray-400')} />
+                思考
+              </Label>
             </div>
 
-              {/* 智能体下拉选择器 + Agent模式开关 */}
-              <div className="flex items-center gap-2 shrink-0">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-all border ${
-                        systemPrompt
-                          ? isGold
-                            ? 'border-gold/30 bg-gold/10 text-gold'
-                            : 'border-blue-200 bg-blue-50 text-blue-600'
-                          : isGold
-                            ? 'border-white/[0.08] text-gold-muted/70 hover:border-gold/20 hover:text-gold'
-                            : 'border-gray-200 text-gray-500 hover:border-gray-400 hover:text-gray-700'
-                      }`}
-                    >
-                      <Bot size={14} />
-                      {systemPrompt ? allAgents.find(a => a.id === systemPrompt)?.name || '智能体' : '智能体'}
-                      <ChevronDown size={14} className="ml-0.5 opacity-60" />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-48 max-h-[280px] overflow-y-auto">
-                    {allAgents.map(agent => (
-                      <DropdownMenuItem
-                        key={agent.id}
-                        onClick={() => setSystemPrompt(prev => prev === agent.id ? '' : agent.id)}
-                        className={`flex items-center gap-2 cursor-pointer ${
-                          systemPrompt === agent.id ? 'bg-accent' : ''
-                        }`}
-                      >
-                        <span className="text-sm">{agent.icon}</span>
-                        <span className="flex-1">{agent.name}</span>
-                        {systemPrompt === agent.id && (
-                          <Check size={14} className="text-primary" />
-                        )}
-                      </DropdownMenuItem>
-                    ))}
-                    <DropdownMenuItem
-                      onClick={() => { setEditingAgent(null); setShowAgentBuilder(true); }}
-                      className="flex items-center gap-2 cursor-pointer text-muted-foreground"
-                    >
-                      <Plus size={14} />
-                      <span>新增智能体</span>
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                {/* Agent模式开关 - 放在智能体下拉按钮右侧 */}
-                <button
-                  onClick={() => setIsAgentMode(!isAgentMode)}
-                  className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-all ${
-                    isAgentMode
-                      ? isGold
-                        ? 'bg-gradient-to-r from-gold/20 to-amber-500/20 text-gold border border-gold/30'
-                        : 'bg-gradient-to-r from-blue-500/10 to-purple-500/10 text-blue-600 border border-blue-200'
-                      : isGold
-                        ? 'text-gold-muted/50 hover:text-gold-muted border border-transparent hover:border-white/[0.08]'
-                        : 'text-gray-400 hover:text-gray-600 border border-transparent hover:border-gray-200'
-                  }`}
-                  title={isAgentMode ? 'Agent模式已开启：描述需求自动调用工具生成成品' : '点击开启Agent模式：自然语言自动生图/修图/配音'}
-                >
-                  <Zap size={13} className={isAgentMode ? 'animate-pulse' : ''} />
-                  Agent
-                  {isAgentMode && <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />}
-                </button>
-              </div>
-            {systemPrompt && (() => {
-              const selectedAgent = allAgents.find(a => a.id === systemPrompt);
-              if (!selectedAgent) return null;
-              const isCustom = customAgents.some(a => a.id === selectedAgent.id);
-              return (
-                <div className={`flex items-center gap-1 px-1.5 py-1 rounded-md ${isGold ? 'bg-[#0d0d0d]' : 'bg-[#f5f5f5]'}`}>
-                  <div className="w-0.5 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: selectedAgent.color }} />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1">
-                      <span className={`text-xs font-medium ${isGold ? 'text-gold' : 'text-gray-900'}`}>{selectedAgent.name}</span>
-                      <span className={`text-xs ${isGold ? 'text-gold-muted' : 'text-gray-500'}`}>{selectedAgent.nameEn}</span>
-                    </div>
-                    {selectedAgent.tools && selectedAgent.tools.length > 0 && (
-                      <div className="flex items-center gap-0.5 mt-0.5 flex-wrap">
-                        {selectedAgent.tools.map(tool => {
-                          const toolMeta: Record<string, { label: string; icon: string }> = {
-                            generate_image: { label: '生图', icon: '🎨' },
-                            edit_image: { label: '修图', icon: '✏️' },
-                            remove_bg: { label: '去背景', icon: '✂️' },
-                            upscale: { label: '放大', icon: '🔍' },
-                            generate_video: { label: '视频', icon: '🎬' },
-                            img2video: { label: '图生视频', icon: '🎥' },
-                            analyze_image: { label: '分析', icon: '🔎' },
-                          };
-                          const meta = toolMeta[tool] || { label: tool, icon: '⚡' };
-                          return (
-                            <span key={tool} className={`inline-flex items-center gap-0.5 text-[10px] px-1 py-px rounded ${isGold ? 'bg-white/[0.06] text-gold-muted/70' : 'bg-gray-100 text-gray-500'}`}>
-                              {meta.icon} {meta.label}
-                            </span>
-                          );
-                        })}
-                      </div>
-                    )}
-                    {/* P2-13: Associated Skills */}
-                    {selectedAgent.skillIds && selectedAgent.skillIds.length > 0 && (
-                      <div className="flex items-center gap-0.5 mt-0.5 flex-wrap">
-                        <Bookmark size={8} className={isGold ? 'text-gold-muted/50' : 'text-gray-400'} />
-                        {selectedAgent.skillIds.map(sid => {
-                          const skill = chatSkills.find(s => s.id === sid);
-                          if (!skill) return null;
-                          return (
-                            <button
-                              key={sid}
-                              onClick={(e) => { e.stopPropagation(); handleUseSkill(skill); }}
-                              className={`inline-flex items-center gap-0.5 text-[10px] px-1 py-px rounded transition-colors ${isGold ? 'bg-gold/10 text-gold-muted hover:bg-gold/20' : 'bg-amber-50 text-amber-600 hover:bg-amber-100'}`}
-                              title={`使用 Skill: ${skill.name}`}
-                            >
-                              {skill.name}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
+            {/* 第三方模型配置按钮 */}
+            <button
+              onClick={() => setShowThirdPartyDialog(true)}
+              className={`shrink-0 p-1 rounded-md border transition-all ${
+                isGold
+                  ? 'border-gold/30 hover:border-gold/60 hover:bg-gold/10 text-gold/70 hover:text-gold'
+                  : 'border-gray-300 hover:border-gray-500 hover:bg-gray-100 text-gray-400 hover:text-gray-700'
+              }`}
+              title="第三方模型调用"
+            >
+              <Plug size={12} />
+            </button>
+
+            {/* 收起按钮 - 图形按钮放在最右侧 */}
+            <div className="flex-1" />
+            <button
+              onClick={() => setShowChatSettings(!showChatSettings)}
+              className={`shrink-0 p-1 rounded-md transition-all ${
+                showChatSettings
+                  ? isGold
+                    ? 'bg-gold/20 text-gold border border-gold/30'
+                    : 'bg-gray-200 text-gray-700 border border-gray-300'
+                  : isGold
+                    ? 'text-gold-muted/50 hover:text-gold-muted border border-transparent hover:border-white/[0.08]'
+                    : 'text-gray-400 hover:text-gray-600 border border-transparent hover:border-gray-200'
+              }`}
+              title={showChatSettings ? '收起配置' : '展开配置'}
+            >
+              {showChatSettings ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            </button>
+          </div>
+          {showChatSettings && systemPrompt && (() => {
+            const selectedAgent = allAgents.find(a => a.id === systemPrompt);
+            if (!selectedAgent) return null;
+            const isCustom = customAgents.some(a => a.id === selectedAgent.id);
+            return (
+              <div className={`flex items-center gap-1 px-1.5 py-1 rounded-md mt-1 ${isGold ? 'bg-[#0d0d0d]' : 'bg-[#f5f5f5]'}`}>
+                <div className="w-0.5 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: selectedAgent.color }} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1">
+                    <span className={`text-xs font-medium ${isGold ? 'text-gold' : 'text-gray-900'}`}>{selectedAgent.name}</span>
+                    <span className={`text-xs ${isGold ? 'text-gold-muted' : 'text-gray-500'}`}>{selectedAgent.nameEn}</span>
                   </div>
-                  {isCustom && (
-                    <div className="flex items-center gap-0.5 shrink-0">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setEditingAgent(selectedAgent); setShowAgentBuilder(true); }}
-                        className={`p-0.5 rounded transition-colors ${isGold ? 'hover:bg-[#333] text-gold-muted' : 'hover:bg-gray-200 text-gray-500'}`}
-                        title="编辑"
-                      >
-                        <Settings size={10} />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const updated = customAgents.filter(a => a.id !== selectedAgent.id);
-                          setCustomAgents(updated);
-                          localStorage.setItem('custom-agents', JSON.stringify(updated));
-                          setSystemPrompt('');
-                        }}
-                        className={`p-0.5 rounded transition-colors ${isGold ? 'hover:bg-[#333] text-gold-muted' : 'hover:bg-gray-200 text-gray-500'}`}
-                        title="删除"
-                      >
-                        <Trash2 size={10} />
-                      </button>
+                  {selectedAgent.tools && selectedAgent.tools.length > 0 && (
+                    <div className="flex items-center gap-0.5 mt-0.5 flex-wrap">
+                      {selectedAgent.tools.map(tool => {
+                        const toolMeta: Record<string, { label: string; icon: string }> = {
+                          generate_image: { label: '生图', icon: '🎨' },
+                          edit_image: { label: '修图', icon: '✏️' },
+                          remove_bg: { label: '去背景', icon: '✂️' },
+                          upscale: { label: '放大', icon: '🔍' },
+                          generate_video: { label: '视频', icon: '🎬' },
+                          img2video: { label: '图生视频', icon: '🎥' },
+                          analyze_image: { label: '分析', icon: '🔎' },
+                        };
+                        const meta = toolMeta[tool] || { label: tool, icon: '⚡' };
+                        return (
+                          <span key={tool} className={`inline-flex items-center gap-0.5 text-[10px] px-1 py-px rounded ${isGold ? 'bg-white/[0.06] text-gold-muted/70' : 'bg-gray-100 text-gray-500'}`}>
+                            {meta.icon} {meta.label}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {/* P2-13: Associated Skills */}
+                  {selectedAgent.skillIds && selectedAgent.skillIds.length > 0 && (
+                    <div className="flex items-center gap-0.5 mt-0.5 flex-wrap">
+                      <Bookmark size={8} className={isGold ? 'text-gold-muted/50' : 'text-gray-400'} />
+                      {selectedAgent.skillIds.map(sid => {
+                        const skill = chatSkills.find(s => s.id === sid);
+                        if (!skill) return null;
+                        return (
+                          <button
+                            key={sid}
+                            onClick={(e) => { e.stopPropagation(); handleUseSkill(skill); }}
+                            className={`inline-flex items-center gap-0.5 text-[10px] px-1 py-px rounded transition-colors ${isGold ? 'bg-gold/10 text-gold-muted hover:bg-gold/20' : 'bg-amber-50 text-amber-600 hover:bg-amber-100'}`}
+                            title={`使用 Skill: ${skill.name}`}
+                          >
+                            {skill.name}
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
-              );
-            })()}
-
-          </div>
-          )}
+                {isCustom && (
+                  <div className="flex items-center gap-0.5 shrink-0">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setEditingAgent(selectedAgent); setShowAgentBuilder(true); }}
+                      className={`p-0.5 rounded transition-colors ${isGold ? 'hover:bg-[#333] text-gold-muted' : 'hover:bg-gray-200 text-gray-500'}`}
+                      title="编辑"
+                    >
+                      <Settings size={10} />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const updated = customAgents.filter(a => a.id !== selectedAgent.id);
+                        setCustomAgents(updated);
+                        localStorage.setItem('custom-agents', JSON.stringify(updated));
+                        setSystemPrompt('');
+                      }}
+                      className={`p-0.5 rounded transition-colors ${isGold ? 'hover:bg-[#333] text-gold-muted' : 'hover:bg-gray-200 text-gray-500'}`}
+                      title="删除"
+                    >
+                      <Trash2 size={10} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
 
         {/* Agent identity badge when messages exist */}
