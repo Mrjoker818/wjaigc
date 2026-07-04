@@ -3347,7 +3347,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                       <div key={order.id} className={`flex items-center justify-between px-3 py-2.5 rounded-lg ${cardBg} border ${borderColor}`}>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
-                            <span className={`text-sm font-medium ${textPrimary}`}>¥{order.priceCny.toFixed(2)}</span>
+                            <span className={`text-sm font-medium ${textPrimary}`}>¥{(typeof order.priceCny === 'number' ? order.priceCny : Number(order.priceCny) || 0).toFixed(2)}</span>
                             <span className={`text-xs ${textSecondary}`}>({order.amount}积分)</span>
                             <span className={`text-[10px] px-1.5 py-0.5 rounded ${order.paymentMethod === 'wechat' ? 'bg-green-500/15 text-green-400' : 'bg-blue-500/15 text-blue-400'}`}>
                               {order.paymentMethod === 'wechat' ? '微信' : '支付宝'}
