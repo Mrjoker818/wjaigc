@@ -36,10 +36,12 @@ export async function POST(request: NextRequest) {
       intentLevel = undefined as string | undefined,  // P2-9: 意图完整度 (extremely_vague / moderately_vague / clear)
       imageModel = undefined as string | undefined,  // 前端当前选择的图像模型
       imageProviderId = undefined as string | undefined,  // 前端当前选择的图像提供商ID
+      isAgentMode = false,  // 是否是Agent模式（Agent模式下放宽意图检测，强制启用工具）
     } = await request.json();
     
     // P2-9: 极度模糊时强制禁用工具，确保LLM只追问不执行
-    const effectiveEnableTools = intentLevel === 'extremely_vague' ? false : enableTools;
+    // Agent模式例外：用户明确希望自动执行，放宽意图检测
+    const effectiveEnableTools = (intentLevel === 'extremely_vague' && !isAgentMode) ? false : enableTools;
     
     // Filter tools based on agent's allowed tools
     const availableTools = agentTools && agentTools.length > 0
@@ -162,7 +164,7 @@ export async function POST(request: NextRequest) {
     // 直到 LLM 返回纯文本（无 tool_calls）或达到最大循环次数
 
     if (effectiveEnableTools && stream) {
-      return handleAgentStream(fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, isThinkingModel, availableTools, imageModel, imageProviderId);
+      return handleAgentStream(fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, isThinkingModel, availableTools, imageModel, imageProviderId, isAgentMode);
     }
 
     // Non-stream or non-tool mode: original behavior
@@ -373,6 +375,7 @@ async function handleAgentStream(
   availableTools: typeof CHAT_TOOLS,
   imageModel?: string,
   imageProviderId?: string,
+  isAgentMode?: boolean,
 ): Promise<NextResponse> {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({

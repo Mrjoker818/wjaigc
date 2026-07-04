@@ -24,6 +24,13 @@ export async function optionalApiAuth(request: Request | NextRequest): Promise<{
   userId?: string;
   userRole?: string;
 }> {
+  // 内部服务请求（带x-internal-request头）直接放行
+  const isInternal = request.headers.get('x-internal-request') === 'true';
+  const internalUserId = request.headers.get('x-internal-user-id');
+  if (isInternal && internalUserId) {
+    return { authenticated: true, userId: internalUserId, userRole: 'user' };
+  }
+
   try {
     // getSessionUser expects NextRequest; cast is safe since we only access cookies
     const user = await getSessionUser(request as NextRequest);

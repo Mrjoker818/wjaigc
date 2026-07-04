@@ -3491,6 +3491,19 @@ IP角色设计规范：
         enhancedSystemPrompt = effectiveSystemPrompt;
       }
 
+      // ★ Agent模式：对话即创作，自动执行工具链，无需反复确认
+      if (isAgentMode) {
+        enhancedSystemPrompt += `
+
+【Agent 创作模式 - 重要执行规则】
+当前处于Agent自动创作模式。你是一个自主AI创作助手，核心规则：
+1. **立即行动**：用户提出需求后，直接调用工具执行，无需询问"是否需要生成"等确认问题
+2. **多步执行**：可以连续调用多个工具完成复杂任务（如：生成图片→放大→去背景→生成视频）
+3. **自动规划**：用户说"帮我做一套电商主图"，你应该自动规划生成多张不同角度/场景的图片
+4. **生成优先**：当用户意图是创作类（画图、做视频、修图），优先调用工具，不要只给文字建议
+5. **结果导向**：完成工具调用后，简短说明已完成的操作，引导用户继续指令`;
+      }
+
       // ★ Lovart 风格：Skill 上下文注入到 systemPrompt（不污染用户消息显示）
       if (activeSkill && messages.length === 0) {
         const paramParts = activeSkill.paramSlots
@@ -3569,7 +3582,8 @@ params: scale=2
 这会触发系统推荐用户切换到更合适的智能体。注意：仅当领域确实不匹配时才输出此标记，轻微偏移不需要。`;
 
       // P0-2: 增强意图处理 - 根据意图完整度和类别注入不同指令
-      if (intentLevel === 'extremely_vague') {
+      // Agent模式下放宽意图检测：即使用户输入简短也直接生成，不强制追问
+      if (intentLevel === 'extremely_vague' && !isAgentMode) {
         // 使用追问模板库获取场景化追问
         const vagueScenarios = detectVagueScenarios(trimmedInput);
         const clarificationMessage = generateClarificationMessage(vagueScenarios, 3);
@@ -3807,47 +3821,30 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
           }))
         : undefined;
 
-      // ====== Agent模式：对话即创作，自动调用所有工具 ======
-      let response: Response;
-      if (isAgentMode) {
-        // Agent模式：调用 /api/chat/agent 自动执行工具链
-        response = await fetch('/api/chat/agent', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: controller.signal,
-          body: JSON.stringify({
-            message: trimmedInput + mentionContext,
-            imageUrls: allImageUrls,
-            imageModel,
-            imageProviderId: imageModelProviderId,
-            chatModel: actualModel,
-            providerId,
-            maxSteps: 8,
-          }),
-        });
-      } else {
-        // 普通对话模式
-        response = await fetch('/api/chat', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          signal: controller.signal,
-          body: JSON.stringify({
-            model: actualModel,
-            messages: requestMessages,
-            stream: true,
-            enableTools: true,
-            agentTools: systemPromptObj?.tools,
-            agentId: systemPrompt,
-            providerId,
-            canvasSummary,
-            intentLevel,  // P2-9: 多级意图澄清
-            imageModel,  // 前端当前选择的图像模型
-            imageProviderId: imageModelProviderId,  // 前端当前选择的图像提供商ID
-          }),
-        });
-      }
+      // ====== Agent模式与普通模式统一使用 /api/chat ======
+      // 区别：Agent模式通过 systemPrompt 引导LLM更积极主动地使用工具（多步执行、自动规划）
+      // 普通模式也已开启 enableTools: true，支持单步工具调用
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: actualModel,
+          messages: requestMessages,
+          stream: true,
+          enableTools: true,
+          agentTools: isAgentMode ? undefined : systemPromptObj?.tools, // Agent模式启用所有工具
+          agentId: systemPrompt,
+          providerId,
+          canvasSummary,
+          intentLevel,  // P2-9: 多级意图澄清
+          imageModel,  // 前端当前选择的图像模型
+          imageProviderId: imageModelProviderId,  // 前端当前选择的图像提供商ID
+          isAgentMode,  // Agent模式标记：放宽意图检测，强制启用工具
+        }),
+      });
 
       if (!response.ok) {
         // 读取后端返回的实际错误消息
@@ -3913,16 +3910,61 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               try {
                 const parsed = JSON.parse(data);
 
-                // ====== 处理Agent工具调用事件（兼容两种事件名格式） ======
+                // ====== 处理Agent模式错误事件 ======
                 const eventType = parsed.type || parsed.event || currentSSEEvent;
                 const toolName = parsed.toolName || parsed.tool_name || parsed.tool;
-                // Agent模式事件兼容：tool_start / step_start 都识别为工具开始
-                if ((eventType === 'tool_execution_start' || eventType === 'tool_start' || eventType === 'step_start') && toolName) {
-                  const toolLabel = parsed.label || parsed.stepName || `正在执行 ${toolName}...`;
+                
+                if (eventType === 'error') {
+                  const errMsg = parsed.message || 'Agent执行失败';
+                  setMessages(prev => prev.map(msg =>
+                    msg.id === assistantMessageId
+                      ? { ...msg, content: (msg.content || '') + '\n❌ ' + errMsg, isGeneratingImage: false }
+                      : msg
+                  ));
+                  assistantContent += '\n❌ ' + errMsg;
+                  continue;
+                }
+
+                // ====== 处理Agent思考步骤（无toolName的step_start，如"理解需求中"） ======
+                if (eventType === 'step_start' && !toolName) {
+                  const stepLabel = parsed.label || parsed.stepName || '思考中...';
+                  const thinkingExec: ToolExecution = {
+                    toolName: 'thinking',
+                    status: 'running',
+                    label: stepLabel,
+                  };
+                  toolExecutions.push(thinkingExec);
+                  setMessages(prev => prev.map(msg =>
+                    msg.id === assistantMessageId
+                      ? { ...msg, toolExecutions: [...toolExecutions] }
+                      : msg
+                  ));
+                  continue;
+                }
+
+                // 思考步骤完成
+                if (eventType === 'step_complete' && !toolName) {
+                  const thinkingIdx = toolExecutions.findIndex(e => e.toolName === 'thinking' && e.status === 'running');
+                  if (thinkingIdx >= 0) {
+                    toolExecutions[thinkingIdx].status = 'completed';
+                    setMessages(prev => prev.map(msg =>
+                      msg.id === assistantMessageId
+                        ? { ...msg, toolExecutions: [...toolExecutions] }
+                        : msg
+                    ));
+                  }
+                  continue;
+                }
+
+                // ====== 处理Agent工具调用事件（兼容两种事件名格式） ======
+                // Agent模式事件兼容：tool_execution_start / tool_start 都识别为工具开始
+                if ((eventType === 'tool_execution_start' || eventType === 'tool_start') && toolName) {
+                  const toolLabel = parsed.label || `正在执行 ${toolName}...`;
                   const toolExec: ToolExecution = {
                     toolName,
                     status: 'running',
                     label: toolLabel,
+                    progress: 0,
                   };
                   toolExecutions.push(toolExec);
                   setMessages(prev => prev.map(msg =>
@@ -3930,36 +3972,46 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                       ? { ...msg, toolExecutions: [...toolExecutions] }
                       : msg
                   ));
-                  // 如果有进度信息，更新进度
-                  if (typeof parsed.progress === 'number') {
-                    const lastIdx = toolExecutions.length - 1;
-                    if (lastIdx >= 0) {
-                      toolExecutions[lastIdx].progress = parsed.progress;
-                    }
+                  continue;
+                }
+
+                // 工具进度更新
+                if (eventType === 'tool_progress' && toolName) {
+                  const execIdx = toolExecutions.findIndex(e => e.toolName === toolName && e.status === 'running');
+                  if (execIdx >= 0 && typeof parsed.progress === 'number') {
+                    toolExecutions[execIdx].progress = parsed.progress;
+                    setMessages(prev => prev.map(msg =>
+                      msg.id === assistantMessageId
+                        ? { ...msg, toolExecutions: [...toolExecutions] }
+                        : msg
+                    ));
                   }
                   continue;
                 }
 
                 // Agent模式：文本增量内容
-                if (eventType === 'text' || eventType === 'content' || eventType === 'delta') {
-                  const delta = parsed.content || parsed.delta || parsed.text || '';
-                  assistantContent += delta;
-                  setMessages(prev => prev.map(msg =>
-                    msg.id === assistantMessageId
-                      ? { ...msg, content: assistantContent }
-                      : msg
-                  ));
+                if (eventType === 'text' || eventType === 'content' || eventType === 'delta' || eventType === 'thinking' || eventType === 'message') {
+                  const delta = parsed.content || parsed.delta || parsed.text || parsed.message || '';
+                  if (delta) {
+                    assistantContent += delta;
+                    setMessages(prev => prev.map(msg =>
+                      msg.id === assistantMessageId
+                        ? { ...msg, content: assistantContent }
+                        : msg
+                    ));
+                  }
                   continue;
                 }
 
                 // Agent模式：工具完成
-                if ((eventType === 'tool_execution_result' || eventType === 'tool_complete' || eventType === 'step_complete') && toolName) {
+                if ((eventType === 'tool_execution_result' || eventType === 'tool_done' || eventType === 'tool_complete') && toolName) {
                   // 更新对应工具的执行结果
                   const execIdx = toolExecutions.findIndex(e => e.toolName === toolName && e.status === 'running');
                   if (execIdx >= 0) {
                     toolExecutions[execIdx] = {
                       ...toolExecutions[execIdx],
                       status: parsed.success ? 'completed' : 'failed',
+                      progress: parsed.success ? 100 : toolExecutions[execIdx].progress,
                       result: parsed.result,
                       imageUrls: parsed.imageUrls,
                       videoUrl: parsed.videoUrl,
@@ -3979,40 +4031,27 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                     toolGeneratedVideo = parsed.videoUrl;
                   }
                   // 收集异步任务ID（后端直接发送 {taskId, model, providerId, type} 对象数组）
-                  if (parsed.taskIds && parsed.taskIds.length > 0 && (!parsed.imageUrls || parsed.imageUrls.length === 0)) {
-                    toolPendingTaskIds.push(...parsed.taskIds);
+                  if (parsed.taskIds && parsed.taskIds.length > 0) {
+                    // 如果同时有imageUrls，直接使用imageUrls；否则添加到待轮询列表
+                    if (!parsed.imageUrls || parsed.imageUrls.length === 0) {
+                      toolPendingTaskIds.push(...parsed.taskIds);
+                    }
                   }
                   continue;
                 }
 
-                if (parsed.type === 'tool_execution_complete') {
-                  // 所有工具执行完成，将直接返回的图片添加到画布（去重，避免多次 iteration 重复添加）
-                  if (toolGeneratedImages.length > 0 && onAddImages) {
-                    const newImages = toolGeneratedImages.filter((url: string) => !addedImageUrls.has(url));
-                    if (newImages.length > 0) {
-                      newImages.forEach((url: string) => addedImageUrls.add(url));
-                      const imageModelInfo = getCurrentImageModelInfo(imageModel, imageModelProviderId);
-                      onAddImages(newImages, undefined, { modelName: imageModelInfo.model, apiProvider: providerDisplayName(imageModelInfo.providerId) });
-                    }
+                if (eventType === 'tool_execution_complete' || eventType === 'done') {
+                  // 所有工具执行完成，先更新最终消息内容
+                  if (parsed.message) {
+                    assistantContent += '\n\n' + parsed.message;
                   }
-                  // 更新消息中的生成图片（使用去重后的列表）
-                  if (addedImageUrls.size > 0) {
-                    const uniqueImages = Array.from(addedImageUrls);
-                    setMessages(prev => prev.map(msg =>
-                      msg.id === assistantMessageId
-                        ? { ...msg, generatedImages: uniqueImages, isGeneratingImage: false, generateProgress: 100 }
-                        : msg
-                    ));
+                  // 收集done事件中的图片/视频
+                  if (parsed.imageUrls && parsed.imageUrls.length > 0) {
+                    toolGeneratedImages.push(...parsed.imageUrls);
                   }
-                  // 异步任务轮询：当工具返回taskIds但没有imageUrls时，后台轮询等待结果
-                  if (toolPendingTaskIds.length > 0 && toolGeneratedImages.length === 0) {
-                    // 只设置生成中状态，轮询统一由流结束后的路径B处理，避免重复添加图片
-                    const imageModelInfo = getCurrentImageModelInfo(imageModel, imageModelProviderId);
-                    setMessages(prev => prev.map(msg =>
-                      msg.id === assistantMessageId
-                        ? { ...msg, isGeneratingImage: true, generateModelName: imageModelInfo.model || '图像生成', generateProviderId: imageModelInfo.providerId, generateProgress: 10, generateImageCount: toolPendingTaskIds.length }
-                        : msg
-                    ));
+                  if (parsed.videoUrls && parsed.videoUrls.length > 0) {
+                    // 视频URL处理
+                    toolGeneratedVideo = parsed.videoUrls[0];
                   }
                   currentSSEEvent = '';
                   continue;

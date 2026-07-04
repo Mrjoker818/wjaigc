@@ -323,7 +323,11 @@ async function executeGenerateImage(
     console.log(`[chat-tools] generate_image: calling ${generateUrl} with submitOnly`);
     const generateRes = await fetch(generateUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-internal-request': 'true',
+        'x-internal-user-id': context.userId,
+      },
       body: JSON.stringify({
         prompt: negativePrompt ? `${prompt} [negative: ${negativePrompt}]` : prompt,
         model,
@@ -407,7 +411,11 @@ async function executeEditImage(
     // 调用语言修图 API
     const res = await fetch(`http://localhost:${SERVER_PORT}/api/edit`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-internal-request': 'true',
+        'x-internal-user-id': context.userId,
+      },
       body: JSON.stringify({
         image: imageUrl,
         prompt,
@@ -478,7 +486,11 @@ async function executeImg2Img(
     // 调用 generate API 并传入参考图（submitOnly 模式，不阻塞等待生成完成）
     const res = await fetch(`http://localhost:${SERVER_PORT}/api/generate`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-internal-request': 'true',
+        'x-internal-user-id': context.userId,
+      },
       body: JSON.stringify({
         prompt: fullPrompt,
         model,
@@ -533,7 +545,11 @@ async function executeRemoveBg(
     console.log(`[chat-tool:edit_image] model=${context.imageModel || 'default'}, providerId=${context.imageProviderId || 'default'}`);
     const res = await fetch(`http://localhost:${SERVER_PORT}/api/image-edit`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-internal-request': 'true',
+        'x-internal-user-id': context.userId,
+      },
       body: JSON.stringify({
         action: 'removebg',
         imageUrl,
@@ -579,7 +595,11 @@ async function executeUpscale(
 
     const res = await fetch(`http://localhost:${SERVER_PORT}/api/image-edit`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-internal-request': 'true',
+        'x-internal-user-id': context.userId,
+      },
       body: JSON.stringify({
         action: 'upscale',
         imageUrl,
@@ -628,7 +648,11 @@ async function executeGenerateVideo(
 
     const res = await fetch(`http://localhost:${SERVER_PORT}/api/video/generate`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-internal-request': 'true',
+        'x-internal-user-id': context.userId,
+      },
       body: JSON.stringify({
         prompt,
         ...(imageUrl ? { imageUrl, mode: 'image-to-video' } : { mode: 'text-to-video' }),
@@ -741,7 +765,11 @@ async function executeExtendCanvas(
 
     const res = await fetch(`http://localhost:${SERVER_PORT}/api/image-edit`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-internal-request': 'true',
+        'x-internal-user-id': context.userId,
+      },
       body: JSON.stringify({
         action: 'extend',
         imageUrl,
