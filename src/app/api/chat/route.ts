@@ -387,13 +387,16 @@ async function handleAgentStream(
         while (iteration < MAX_AGENT_ITERATIONS) {
           iteration++;
           
+          // Agent模式强制调用工具，非Agent模式让LLM自行选择
+          const toolChoice = isAgentMode ? 'required' : 'auto';
+          
           const requestBody: Record<string, unknown> = {
             model: requestModel,
             messages: currentMessages,
             stream: true,
             temperature: 0.7,
             tools: availableTools,
-            tool_choice: 'auto',
+            tool_choice: toolChoice,
           };
 
           if (isThinkingModel) {
