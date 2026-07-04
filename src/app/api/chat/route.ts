@@ -246,7 +246,7 @@ export async function POST(request: NextRequest) {
       
       // Handle tool_calls in non-stream mode
       if (effectiveEnableTools && retryData.choices?.[0]?.message?.tool_calls) {
-        return handleNonStreamAgentLoop(retryData, fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, availableTools, imageModel, imageProviderId);
+        return handleNonStreamAgentLoop(retryData, fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, availableTools, imageModel, imageProviderId, isAgentMode);
       }
       
       await appendUserJsonl(userId, 'chat', { model, providerId, messageCount: messages.length, stream: false });
@@ -377,6 +377,7 @@ async function handleAgentStream(
   imageProviderId?: string,
   isAgentMode?: boolean,
 ): Promise<NextResponse> {
+  const agentModeEnabled = isAgentMode ?? false; // 捕获isAgentMode到局部变量
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
@@ -410,7 +411,7 @@ async function handleAgentStream(
               'Authorization': `Bearer ${chatApiKey}`,
             },
             body: JSON.stringify(requestBody),
-            signal: AbortSignal.timeout(120000),
+            signal: AbortSignal.timeout(agentModeEnabled ? 300000 : 120000), // Agent模式5分钟超时
           });
 
           if (!response.ok) {
@@ -437,7 +438,7 @@ async function handleAgentStream(
                   'Authorization': `Bearer ${chatApiKey}`,
                 },
                 body: JSON.stringify(fallbackBody),
-                signal: AbortSignal.timeout(120000),
+                signal: AbortSignal.timeout(agentModeEnabled ? 300000 : 120000), // Agent模式5分钟超时
               });
               if (fallbackResponse.ok && fallbackResponse.body) {
                 const reader = fallbackResponse.body.getReader();
@@ -651,7 +652,9 @@ async function handleNonStreamAgentLoop(
   availableTools: typeof CHAT_TOOLS,
   imgModel?: string,
   imgProviderId?: string,
+  isAgentMode?: boolean,
 ): Promise<NextResponse> {
+  const agentModeEnabled = isAgentMode ?? false;
   const currentMessages = [...fixedMessages];
   const allToolResults: Array<{ toolName: string; result: ToolCallResult }> = [];
   let iteration = 0;
@@ -713,7 +716,7 @@ async function handleNonStreamAgentLoop(
         'Authorization': `Bearer ${chatApiKey}`,
       },
       body: JSON.stringify(nextRequestBody),
-      signal: AbortSignal.timeout(120000),
+      signal: AbortSignal.timeout(agentModeEnabled ? 300000 : 120000), // Agent模式5分钟超时
     });
 
     if (!nextResponse.ok) break;
