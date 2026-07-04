@@ -15254,7 +15254,7 @@ export function InfiniteCanvas({
         {/* ── Center: Main function buttons (always visible) ── */}
         <button
           aria-label="选择工具"
-          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-125 active:scale-90 min-w-[44px] min-h-[44px] ${isMonochrome ? `${mIcon.mousePointer} hover:text-gray-700 hover:bg-gray-100` : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
+          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-110 active:scale-95 ${isMonochrome ? `${mIcon.mousePointer} hover:text-gray-700 hover:bg-gray-100` : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
           title="选择工具"
         >
           <MousePointer2 className="h-4 w-4" />
