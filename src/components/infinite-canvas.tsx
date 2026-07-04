@@ -8045,8 +8045,22 @@ export function InfiniteCanvas({
   for (const label of allActionLabels) {
     if (!fullOrder.includes(label)) fullOrder.push(label);
   }
+  // 根据媒体类型过滤可用工具
+  const getAvailableToolsByMediaType = (mediaType?: 'image' | 'video' | '3d'): string[] => {
+    const imageTools = ['放大', '移除背景', 'SVG智能描摹', '擦除', '蒙版', '调色', '编辑元素', '多角度', '图转3D工厂', '扩展', '裁切', '全景生成', '精修引擎', '语言修图', 'Agent编排', '下载'];
+    const videoTools = ['视频抽帧', 'AI配音', '下载'];
+    const model3DTools = ['下载'];
+    
+    if (mediaType === 'video') return videoTools;
+    if (mediaType === '3d') return model3DTools;
+    return imageTools; // 默认图片类型
+  };
+
+  const selectedMediaType = selectedImageData?.mediaType;
+  const availableTools = getAvailableToolsByMediaType(selectedMediaType);
+
   const visibleImageActions = fullOrder
-    .filter(label => !toolbarHiddenItems.has(label))
+    .filter(label => !toolbarHiddenItems.has(label) && availableTools.includes(label))
     .map(label => imageActions.find(a => a.label === label))
     .filter((a): a is typeof imageActions[number] => a !== undefined);
 
