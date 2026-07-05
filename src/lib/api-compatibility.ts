@@ -740,13 +740,13 @@ export function resolveProfileForModel(
 
   // IMPORTANT: If the model is a known OpenAI image model (gpt-image-*, dall-e-*),
   // it MUST use the standard OpenAI image API (/v1/images/generations or /v1/images/edits),
-  // NOT /chat/completions. Force the openai profile regardless of provider's compatProfile.
-  // BUT preserve the provider's sizeFormat AND use correct editEndpoint:
-  // - sizeFormat: 'aspect-ratio' providers like PearAPI need ratio format, not pixel format
-  // - editEndpoint: GPT-Image models support reference images via /images/generations with images[],
-  //                 most third-party APIs don't support /images/edits endpoint.
-  //                 DALL-E models don't support reference images (editEndpoint doesn't matter).
-  if (isOpenAIImageModel(modelId)) {
+  // NOT /chat/completions.
+  // HOWEVER: If the provider already has a specific profile (apimart, pearapi), DON'T override it!
+  // These providers have their own format requirements (e.g., APImart uses image_urls, not images[]).
+  // Only force the openai profile for 'auto' or undefined baseProfiles.
+  // For 'auto' profile, also preserve sizeFormat and use correct editEndpoint for GPT-Image models.
+  const providerSpecificProfiles = ['apimart', 'pearapi'];
+  if (isOpenAIImageModel(modelId) && !providerSpecificProfiles.includes(baseProfile.id)) {
     const openaiProfile = COMPAT_PROFILES['openai'];
     // GPT-Image models use /images/generations for reference images (images[]),
     // NOT /images/edits (which most third-party APIs don't support)
@@ -773,7 +773,8 @@ export function resolveProfileForModel(
   // These models ARE OpenAI-compatible on /images/generations with images[] for reference
   // Use /images/generations as editEndpoint (NOT /images/edits which third-party APIs don't support)
   // BUT preserve the provider's sizeFormat if it differs.
-  if (isNanoBananaModel(modelId)) {
+  // IMPORTANT: Skip this override if provider already has a specific profile (apimart, pearapi, etc.)
+  if (isNanoBananaModel(modelId) && !providerSpecificProfiles.includes(baseProfile.id)) {
     const openaiProfile = COMPAT_PROFILES['openai'];
     const needsSizeMerge = baseProfile.sizeFormat && baseProfile.sizeFormat !== openaiProfile.sizeFormat;
     if (needsSizeMerge) {

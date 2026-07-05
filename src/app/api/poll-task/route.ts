@@ -973,8 +973,8 @@ export async function POST(request: NextRequest) {
     if (statusResult) {
       const taskData0 = statusResult.data as Record<string, unknown> | undefined;
       const taskStatus0 = taskData0?.status as string | undefined;
-      const processingStatuses = ['processing', 'running', 'pending', 'in_progress', 'queued', 'submitted'];
-      const completedStatuses = ['completed', 'succeeded', 'success', 'done'];
+      const processingStatuses = ['processing', 'running', 'pending', 'in_progress', 'queued', 'submitted', 'PROCESSING', 'RUNNING', 'PENDING', 'IN_PROGRESS', 'QUEUED', 'SUBMITTED'];
+      const completedStatuses = ['completed', 'succeeded', 'success', 'done', 'SUCCEEDED', 'COMPLETED', 'SUCCESS', 'DONE'];
 
       if (processingStatuses.includes(taskStatus0 || '')) {
         for (let qp = 0; qp < MAX_QUICK_POLLS; qp++) {
@@ -983,7 +983,7 @@ export async function POST(request: NextRequest) {
           if (pollResult) {
             const td = pollResult.statusResult.data as Record<string, unknown> | undefined;
             const ts = td?.status as string | undefined;
-            if (completedStatuses.includes(ts || '') || ts === 'failed' || ts === 'cancelled') {
+            if (completedStatuses.includes(ts || '') || (ts?.toLowerCase() === 'failed') || (ts?.toLowerCase() === 'cancelled')) {
               statusResult = pollResult.statusResult;
               break;
             }
@@ -1006,8 +1006,8 @@ export async function POST(request: NextRequest) {
       if (taskResult?.status) taskStatus = taskResult.status as string;
     }
 
-    const completedStatuses = ['completed', 'succeeded', 'success', 'done'];
-    const normalizedStatus = completedStatuses.includes(taskStatus || '') ? 'completed' : taskStatus;
+    const completedStatuses = ['completed', 'succeeded', 'success', 'done', 'SUCCEEDED', 'COMPLETED', 'SUCCESS', 'DONE'];
+    const normalizedStatus = completedStatuses.includes(taskStatus || '') ? 'completed' : (taskStatus?.toLowerCase() || 'processing');
 
     // ★ 日志：每次轮询结果
     console.log(`[poll-task] taskId=${taskId} status=${taskStatus} → normalized=${normalizedStatus}, progress=${(taskData?.progress as number) || 0}`);
@@ -1422,7 +1422,7 @@ export async function POST(request: NextRequest) {
         (pollResult as Record<string, unknown>).errorCategory = classifiedNoImgErr.category;
         (pollResult as Record<string, unknown>).isCfTimeout = isCloudflareTimeoutError(errorDetail);
       }
-    } else if (taskStatus === 'failed') {
+    } else if (taskStatus?.toLowerCase() === 'failed') {
       const rawError = ((taskData?.error as Record<string, unknown>)?.message as string) || '图像生成任务失败';
       const classifiedErr = classifyApiError(rawError);
       const translatedError = classifiedErr.friendlyMessage + (classifiedErr.suggestion ? ' — ' + classifiedErr.suggestion : '');
@@ -1435,7 +1435,7 @@ export async function POST(request: NextRequest) {
       (pollResult as Record<string, unknown>).errorCategory = classifiedErr.category;
       (pollResult as Record<string, unknown>).isRetryable = classifiedErr.isRetryable;
       (pollResult as Record<string, unknown>).isCfTimeout = isCfTimeout;
-    } else if (taskStatus === 'cancelled') {
+    } else if (taskStatus?.toLowerCase() === 'cancelled') {
       pollResult.error = '任务已被取消';
       pollResult.success = false;
     }
