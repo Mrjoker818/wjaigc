@@ -1538,16 +1538,20 @@ export function adjustRequestForProfile(
   const shouldConvertImages = (hasImage || hasReferenceImages) && endpoint === '/images/generations';
   if (shouldConvertImages && (profile.id === 'openai' || profile.id === 'auto' || profile.id === 'pearapi')) {
     const imagesArray: Array<{ image_url: { url: string } }> = [];
+    const seenUrls = new Set<string>();
 
     // Primary: use the `image` field (base64 data URL from /images/edits preparation)
     if (body.image && typeof body.image === 'string') {
-      imagesArray.push({ image_url: { url: body.image as string } });
+      const url = body.image as string;
+      if (!seenUrls.has(url)) { seenUrls.add(url); imagesArray.push({ image_url: { url } }); }
     }
 
     // Also add any extra image_urls that aren't already the same as `image`
+    // ★ 关键修复：去重，避免参考图同时在image和image_urls[0]时被重复添加
     if (Array.isArray(body.image_urls)) {
       for (const url of body.image_urls as string[]) {
-        if (typeof url === 'string' && url !== body.image) {
+        if (typeof url === 'string' && !seenUrls.has(url)) {
+          seenUrls.add(url);
           imagesArray.push({ image_url: { url } });
         }
       }

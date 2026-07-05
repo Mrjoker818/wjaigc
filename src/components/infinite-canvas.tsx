@@ -4140,8 +4140,8 @@ export function InfiniteCanvas({
         // ★ 支持多 taskId 并行轮询（outputCount>1 时 API 可能返回多个 taskIds）
         const allTaskIds = data.taskIds as string[];
         const estimatedTime = data.estimatedTime || 30;
-        // 单任务最大10分钟，兼容需要2分钟以上的慢速API
-        const maxPollTime = Math.min(600, Math.max(180, estimatedTime * 4 + 120)) * 1000;
+        // 单任务最大15分钟，兼容慢速API如gpt-image-2 4K(可能需要7-10分钟)
+        const maxPollTime = Math.min(900, Math.max(300, estimatedTime * 5 + 300)) * 1000;
         const startTime = Date.now();
         let pollCount = 0;
 

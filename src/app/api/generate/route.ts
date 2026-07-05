@@ -24,7 +24,7 @@ import { calculateActualPixelsFromRatio } from '@/lib/calculate-pixels';
 
 // 直接模式（OpenAI兼容API返回图片需60-120秒）
 // 异步模式（返回task_id只需几秒）两者共存，取较大值
-export const maxDuration = 600; // 10分钟 - 部分API生图最久可达600s
+export const maxDuration = 900; // 15分钟 - 部分慢速API(如gpt-image-2 4K)生图可达7-10分钟
 export const dynamic = 'force-dynamic';
 
 // ---------------------------------------------------------------------------
@@ -116,6 +116,7 @@ export async function POST(request: NextRequest) {
     let deductedCredits = 0;
     let sessionUser: any = null;
     const body = await request.json();
+    // quality 需要在后续被模型别名的 resolutionTier 覆盖，所以单独用 let 声明
     const {
       prompt,
       aspectRatio = '1:1',
@@ -130,13 +131,14 @@ export async function POST(request: NextRequest) {
       stylePreset, 
       outputCount,
       model: rawModel = 'gemini-2.5-flash-image-preview',
-      quality = '1K',
       userId: requestUserId,
       strength,
       providerId,
       submitOnly,
       _skipCredits, // 内部标记：后台重试时跳过积分扣除（避免双重扣费）
     } = body;
+    // quality 默认值 '1K'，后续可能被模型别名 resolutionTier 覆盖
+    let quality: string = (body as any).quality || '1K';
     // 诊断日志：显示接收到的参考图参数
     console.log(`[generate] model=${rawModel}, providerId=${providerId}, referenceImages.length=${referenceImages?.length || 0}, referenceMode=${referenceMode}`);
     // 必填参数校验
@@ -173,6 +175,15 @@ export async function POST(request: NextRequest) {
     if (normalized.wasNormalized) {
       console.log(`[generate] 模型别名规范化: "${model}" → "${normalized.apiModelName}"`);
       model = normalized.apiModelName;
+    }
+
+    // ★ 关键修复：模型别名可能携带分辨率后缀（如 gpt-image-2-4k → resolutionTier='4K'），
+    // 需要覆盖默认 quality，否则会用 high/auto 导致分辨率只有1792而非4096
+    if (normalized.resolutionTier && ['1K', '2K', '4K'].includes(normalized.resolutionTier)) {
+      if (quality === '1K' || quality === 'high' || quality === 'auto' || quality === 'medium' || quality === 'low') {
+        console.log(`[generate] 模型别名分辨率覆盖: quality "${quality}" → "${normalized.resolutionTier}"`);
+        quality = normalized.resolutionTier;
+      }
     }
 
     // Content safety check
@@ -846,6 +857,53 @@ export async function POST(request: NextRequest) {
       const resolveImageToBase64 = async (imgUrl: string): Promise<string | null> => {
         if (imgUrl.startsWith('data:')) return imgUrl;
         try {
+          // ★ 关键修复：识别同域名的 /api/serve-upload/ URL，直接读取本地文件（避免通过公网域名fetch自己失败）
+          const localPathMatch = imgUrl.match(/\/api\/serve-upload\/(.+)$/);
+          if (localPathMatch) {
+            const fs = await import('fs/promises');
+            const path = await import('path');
+            const relativePath = localPathMatch[1];
+            const { getServerDataRoot } = await import('@/lib/server-data-root');
+            const dataRoot = getServerDataRoot();
+            const workspacePath = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
+            const publicDir = path.join(workspacePath, 'public');
+            // 尝试多个可能的本地路径
+            const candidates = [
+              path.join(dataRoot, 'uploads', relativePath.replace(/^uploads\//, '')),
+              path.join(dataRoot, relativePath),
+              path.join(publicDir, relativePath),
+              path.join(publicDir, 'uploads', relativePath.replace(/^uploads\//, '')),
+            ];
+            for (const candidate of candidates) {
+              try {
+                await fs.access(candidate);
+                const resolved = path.resolve(candidate);
+                if (resolved.startsWith(publicDir) || resolved.startsWith(dataRoot)) {
+                  const imgBuf = await fs.readFile(resolved);
+                  const ext = path.extname(resolved).toLowerCase();
+                  const mimeMap: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' };
+                  const mime = mimeMap[ext] || 'image/png';
+                  console.log('[generate] Resolved serve-upload image locally:', relativePath, '→', candidate, 'size:', imgBuf.length);
+                  return `data:${mime};base64,${imgBuf.toString('base64')}`;
+                }
+              } catch { /* try next */ }
+            }
+            // 如果本地文件找不到，回退到 localhost fetch
+            try {
+              const proto = process.env.NODE_ENV === 'production' ? 'https' : 'http';
+              const port = process.env.DEPLOY_RUN_PORT || 5000;
+              const localUrl = `${proto}://localhost:${port}/api/serve-upload/${relativePath}`;
+              const localResp = await fetch(localUrl, { signal: AbortSignal.timeout(8000) });
+              if (localResp.ok) {
+                const imgBuf = Buffer.from(await localResp.arrayBuffer());
+                const contentType = localResp.headers.get('content-type') || 'image/png';
+                console.log('[generate] Resolved serve-upload image via localhost:', relativePath, 'size:', imgBuf.length);
+                return `data:${contentType};base64,${imgBuf.toString('base64')}`;
+              }
+            } catch (e) {
+              console.warn('[generate] localhost fetch failed for', relativePath, (e as Error).message);
+            }
+          }
           if (imgUrl.startsWith('/api/serve-upload/') || imgUrl.startsWith('/uploads/')) {
             const fs = await import('fs/promises');
             const path = await import('path');
@@ -891,11 +949,24 @@ export async function POST(request: NextRequest) {
               return `data:${mime};base64,${imgBuf.toString('base64')}`;
             }
           } else if (imgUrl.startsWith('http')) {
-            const imgResp = await fetch(imgUrl, { signal: AbortSignal.timeout(8000) });
+            // ★ 关键修复：如果是我们自己的域名（COZE_PROJECT_DOMAIN_DEFAULT），用localhost代替避免公网回环失败
+            const domainBase = (process.env.COZE_PROJECT_DOMAIN_DEFAULT || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+            let fetchUrl = imgUrl;
+            if (domainBase && imgUrl.includes(domainBase)) {
+              const proto = process.env.NODE_ENV === 'production' ? 'http' : 'http';
+              const port = process.env.DEPLOY_RUN_PORT || 5000;
+              const urlPath = new URL(imgUrl).pathname + new URL(imgUrl).search;
+              fetchUrl = `${proto}://localhost:${port}${urlPath}`;
+              console.log('[generate] Rewriting self-domain URL to localhost:', imgUrl, '→', fetchUrl);
+            }
+            const imgResp = await fetch(fetchUrl, { signal: AbortSignal.timeout(15000) });
             if (imgResp.ok) {
               const imgBuf = Buffer.from(await imgResp.arrayBuffer());
               const contentType = imgResp.headers.get('content-type') || 'image/png';
+              console.log('[generate] Resolved http image to base64, size:', imgBuf.length, 'from:', fetchUrl.substring(0, 100));
               return `data:${contentType};base64,${imgBuf.toString('base64')}`;
+            } else {
+              console.warn('[generate] HTTP fetch failed for image:', fetchUrl, 'status:', imgResp.status);
             }
           }
         } catch (err) {
