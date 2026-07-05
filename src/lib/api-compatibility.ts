@@ -330,6 +330,17 @@ export function isOpenAIImageModel(modelId: string): boolean {
 }
 
 /**
+ * Check if a model ID is specifically a GPT-Image model (not DALL-E).
+ * GPT-Image models support reference images via images[] in /images/generations endpoint.
+ * DALL-E models do NOT support reference images (only text-to-image).
+ */
+export function isGPTImageModel(modelId: string): boolean {
+  if (!modelId) return false;
+  const lower = modelId.toLowerCase();
+  return lower.includes('gpt-image');
+}
+
+/**
  * Check if a model ID is a nano-banana variant (PearAPI's adapted Gemini models).
  * These models ARE OpenAI-compatible and use /images/generations directly.
  * They should NOT use the gemini-image profile.
@@ -730,32 +741,50 @@ export function resolveProfileForModel(
   // IMPORTANT: If the model is a known OpenAI image model (gpt-image-*, dall-e-*),
   // it MUST use the standard OpenAI image API (/v1/images/generations or /v1/images/edits),
   // NOT /chat/completions. Force the openai profile regardless of provider's compatProfile.
-  // BUT preserve the provider's sizeFormat if it differs from openai's default (pixel).
-  // This is critical for providers like PearAPI that expect aspect-ratio format.
+  // BUT preserve the provider's sizeFormat AND use correct editEndpoint:
+  // - sizeFormat: 'aspect-ratio' providers like PearAPI need ratio format, not pixel format
+  // - editEndpoint: GPT-Image models support reference images via /images/generations with images[],
+  //                 most third-party APIs don't support /images/edits endpoint.
+  //                 DALL-E models don't support reference images (editEndpoint doesn't matter).
   if (isOpenAIImageModel(modelId)) {
     const openaiProfile = COMPAT_PROFILES['openai'];
-    // If the base profile has a different sizeFormat (like 'aspect-ratio'), merge it
-    if (baseProfile.sizeFormat && baseProfile.sizeFormat !== openaiProfile.sizeFormat) {
+    // GPT-Image models use /images/generations for reference images (images[]),
+    // NOT /images/edits (which most third-party APIs don't support)
+    const correctEditEndpoint = isGPTImageModel(modelId)
+      ? '/images/generations'
+      : openaiProfile.editEndpoint;
+    const needsMerge = (baseProfile.sizeFormat && baseProfile.sizeFormat !== openaiProfile.sizeFormat) ||
+                       (correctEditEndpoint !== openaiProfile.editEndpoint);
+    if (needsMerge) {
       return {
         ...openaiProfile,
-        sizeFormat: baseProfile.sizeFormat,
+        sizeFormat: baseProfile.sizeFormat || openaiProfile.sizeFormat,
+        editEndpoint: correctEditEndpoint,
       };
+    }
+    // If no merge needed, still ensure correct editEndpoint for GPT-Image
+    if (isGPTImageModel(modelId) && openaiProfile.editEndpoint !== '/images/generations') {
+      return { ...openaiProfile, editEndpoint: '/images/generations' };
     }
     return openaiProfile;
   }
 
   // If this is a nano-banana model (PearAPI adapted), always use standard OpenAI profile
-  // These models ARE OpenAI-compatible on /images/generations
-  // BUT preserve the provider's sizeFormat if it differs from openai's default.
+  // These models ARE OpenAI-compatible on /images/generations with images[] for reference
+  // Use /images/generations as editEndpoint (NOT /images/edits which third-party APIs don't support)
+  // BUT preserve the provider's sizeFormat if it differs.
   if (isNanoBananaModel(modelId)) {
     const openaiProfile = COMPAT_PROFILES['openai'];
-    if (baseProfile.sizeFormat && baseProfile.sizeFormat !== openaiProfile.sizeFormat) {
+    const needsSizeMerge = baseProfile.sizeFormat && baseProfile.sizeFormat !== openaiProfile.sizeFormat;
+    if (needsSizeMerge) {
       return {
         ...openaiProfile,
-        sizeFormat: baseProfile.sizeFormat,
+        sizeFormat: baseProfile.sizeFormat || openaiProfile.sizeFormat,
+        editEndpoint: '/images/generations',
       };
     }
-    return openaiProfile;
+    // nano-banana models use /images/generations for reference images
+    return { ...openaiProfile, editEndpoint: '/images/generations' };
   }
 
   // If the user explicitly set a profile (including gemini-image), respect it
