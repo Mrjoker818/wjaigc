@@ -137,6 +137,8 @@ export async function POST(request: NextRequest) {
       submitOnly,
       _skipCredits, // 内部标记：后台重试时跳过积分扣除（避免双重扣费）
     } = body;
+    // 诊断日志：显示接收到的参考图参数
+    console.log(`[generate] model=${rawModel}, providerId=${providerId}, referenceImages.length=${referenceImages?.length || 0}, referenceMode=${referenceMode}`);
     // 必填参数校验
     if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
       return NextResponse.json({ success: false, error: '请输入创意描述（prompt）' }, { status: 400 });

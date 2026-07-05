@@ -4001,6 +4001,8 @@ export function InfiniteCanvas({
 
       let res: Response;
       try {
+        // 诊断日志：显示参考图参数
+        console.log(`[handleGroupGenerate] model=${model}, providerId=${providerId}, referenceImages.length=${referenceImages?.length || 0}, refImages.length=${group.refImages?.length || 0}`);
         res = await fetch('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
