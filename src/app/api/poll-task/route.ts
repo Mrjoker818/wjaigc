@@ -1025,11 +1025,19 @@ export async function POST(request: NextRequest) {
       // 提取图片URL - 通用格式兼容（多种 API 响应格式）
       let sourceImageUrl: string | null = null;
 
-      // ★ 日志：原始 taskData 结构
+      // ★ 日志：原始 taskData 结构（深度解析 APImart 响应）
       console.log(`[poll-task] taskId=${taskId} completed, taskData keys:`, Object.keys(taskData || {}));
       const taskResultLog = taskData?.result as Record<string, unknown> | undefined;
       if (taskResultLog) {
         console.log(`[poll-task] taskId=${taskId} taskData.result keys:`, Object.keys(taskResultLog));
+        const imagesLog = taskResultLog?.images as Array<Record<string, unknown>> | undefined;
+        if (imagesLog && imagesLog.length > 0) {
+          console.log(`[poll-task] taskId=${taskId} taskData.result.images[0] keys:`, Object.keys(imagesLog[0] || {}));
+          const firstImgUrl = imagesLog[0]?.url as string | undefined;
+          if (firstImgUrl) {
+            console.log(`[poll-task] taskId=${taskId} taskData.result.images[0].url prefix:`, firstImgUrl.substring(0, 100));
+          }
+        }
       }
 
       // 路径1: data.result.images[].url（APImart 格式）
