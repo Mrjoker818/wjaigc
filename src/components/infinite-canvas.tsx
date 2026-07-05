@@ -4181,9 +4181,18 @@ export function InfiniteCanvas({
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ taskId: tid, model, providerId, quickPoll: true }),
                 });
-                if (!pollRes.ok) return;
-                return { taskId: tid, data: await pollRes.json() };
-              } catch { return; }
+                // ★ 修复：即使 pollRes 不 ok 也解析响应，以便识别错误类型
+                const pollData = await pollRes.json().catch(() => ({})) as Record<string, unknown>;
+                if (!pollRes.ok) {
+                  // poll-task 返回错误（如找不到提供商），标记任务失败
+                  console.warn(`[pollForResult] taskId=${tid} poll-task error: ${pollRes.status}`, pollData);
+                  return { taskId: tid, data: { ...pollData, status: 'failed', error: pollData.error || `poll-task returned ${pollRes.status}` } };
+                }
+                return { taskId: tid, data: pollData };
+              } catch (err) {
+                console.warn(`[pollForResult] taskId=${tid} fetch error:`, err);
+                return;
+              }
             });
             const pollResults = (await Promise.all(pollPromises)).filter(Boolean) as Array<{ taskId: string; data: Record<string, unknown> }>;
 
@@ -4201,6 +4210,7 @@ export function InfiniteCanvas({
 
             // 处理已完成的任务
             for (const { taskId: tid, data: pollData } of pollResults) {
+              console.log(`[pollForResult] taskId=${tid} pollData.status=${pollData.status}, imageUrl=${pollData.imageUrl ? 'YES' : 'NO'}, results=${(pollData.results as string[])?.length || 0}`);
               if (['completed', 'succeeded', 'success', 'done'].includes(pollData.status as string)) {
                 const resultUrls: string[] = [];
                 if (pollData.results && Array.isArray(pollData.results) && pollData.results.length > 0) {
