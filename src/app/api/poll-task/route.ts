@@ -1025,8 +1025,16 @@ export async function POST(request: NextRequest) {
       // 提取图片URL - 通用格式兼容（多种 API 响应格式）
       let sourceImageUrl: string | null = null;
 
+      // ★ 日志：原始 taskData 结构
+      console.log(`[poll-task] taskId=${taskId} completed, taskData keys:`, Object.keys(taskData || {}));
+      const taskResultLog = taskData?.result as Record<string, unknown> | undefined;
+      if (taskResultLog) {
+        console.log(`[poll-task] taskId=${taskId} taskData.result keys:`, Object.keys(taskResultLog));
+      }
+
       // 路径1: data.result.images[].url（APImart 格式）
       const images = (taskData?.result as Record<string, unknown>)?.images as Array<Record<string, unknown>> | undefined;
+      console.log(`[poll-task] taskId=${taskId} path1: images array exists=${!!images}, length=${images?.length || 0}`);
       if (images && images.length > 0) {
         const firstImage = images[0];
         const rawUrl = firstImage.url || firstImage.image_url || firstImage.src;
@@ -1066,6 +1074,9 @@ export async function POST(request: NextRequest) {
           sourceImageUrl = Array.isArray(singleUrl) ? singleUrl[0] : singleUrl;
         }
       }
+
+      // ★ 日志：最终提取结果
+      console.log(`[poll-task] taskId=${taskId} sourceImageUrl extracted: ${sourceImageUrl ? 'YES' : 'NO'}`, sourceImageUrl ? sourceImageUrl.substring(0, 100) + '...' : '(null)');
 
       // ★ 持久化图片策略：
       // 同步持久化所有图片URL：
@@ -1439,6 +1450,9 @@ export async function POST(request: NextRequest) {
       pollResult.error = '任务已被取消';
       pollResult.success = false;
     }
+
+    // ★ 日志：返回给前端的最终结果
+    console.log(`[poll-task] taskId=${taskId} returning: status=${pollResult.status}, imageUrl=${pollResult.imageUrl ? 'YES' : 'NO'}, progress=${pollResult.progress}`);
 
     return NextResponse.json(pollResult);
 
