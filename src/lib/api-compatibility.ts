@@ -730,14 +730,32 @@ export function resolveProfileForModel(
   // IMPORTANT: If the model is a known OpenAI image model (gpt-image-*, dall-e-*),
   // it MUST use the standard OpenAI image API (/v1/images/generations or /v1/images/edits),
   // NOT /chat/completions. Force the openai profile regardless of provider's compatProfile.
+  // BUT preserve the provider's sizeFormat if it differs from openai's default (pixel).
+  // This is critical for providers like PearAPI that expect aspect-ratio format.
   if (isOpenAIImageModel(modelId)) {
-    return COMPAT_PROFILES['openai'];
+    const openaiProfile = COMPAT_PROFILES['openai'];
+    // If the base profile has a different sizeFormat (like 'aspect-ratio'), merge it
+    if (baseProfile.sizeFormat && baseProfile.sizeFormat !== openaiProfile.sizeFormat) {
+      return {
+        ...openaiProfile,
+        sizeFormat: baseProfile.sizeFormat,
+      };
+    }
+    return openaiProfile;
   }
 
   // If this is a nano-banana model (PearAPI adapted), always use standard OpenAI profile
   // These models ARE OpenAI-compatible on /images/generations
+  // BUT preserve the provider's sizeFormat if it differs from openai's default.
   if (isNanoBananaModel(modelId)) {
-    return COMPAT_PROFILES['openai'];
+    const openaiProfile = COMPAT_PROFILES['openai'];
+    if (baseProfile.sizeFormat && baseProfile.sizeFormat !== openaiProfile.sizeFormat) {
+      return {
+        ...openaiProfile,
+        sizeFormat: baseProfile.sizeFormat,
+      };
+    }
+    return openaiProfile;
   }
 
   // If the user explicitly set a profile (including gemini-image), respect it
