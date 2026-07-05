@@ -28,7 +28,7 @@ import {
   FileText, X, ChevronDown, ArrowUpFromLine, Eraser,
   Scissors, Wand2, Expand, Layers, Paintbrush,
   Check, MousePointer2, BoxSelect, Upload, Eye, Sparkles,
-  RotateCcw, Minus, Type, GitMerge, Wrench, ChevronRight,
+  RotateCcw, Minus, Type, GitMerge, GitBranch, Wrench, ChevronRight,
   Settings, Palette, Users, HelpCircle, Box as BoxIcon, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, MoreHorizontal, Brush, ShoppingBag, Scan, GripVertical, Building2, FileImage, Workflow, LayoutGrid, LayoutDashboard, ChevronsRight, ChevronsLeft, Boxes, MessageCircle, Play, Pause, Package, Store, Globe, Volume2, Loader2, Film, Mic2, Music, FileVideo
 } from 'lucide-react';
 import type { CanvasAnnotation, AnnotationRegion, AnnotationTool } from '@/lib/canvas-annotation';
@@ -63,6 +63,10 @@ const SceneStudioPanel = lazy(() => import('@/components/scene-studio-panel'));
 const StickerAssistantPanel = lazy(() => import('@/components/sticker-assistant-panel'));
 const BrandPackagingPanel = lazy(() => import('@/components/brand-packaging-panel'));
 const Display3DPanel = lazy(() => import('@/components/display3d-panel'));
+
+// P1: 图层面板 + 版本历史面板
+const LayerPanel = lazy(() => import('@/components/layer-panel').then(m => ({ default: m.LayerPanel })));
+const VersionHistoryPanel = lazy(() => import('@/components/version-history-panel').then(m => ({ default: m.VersionHistoryPanel })));
 
 /* ====== Multi-Angle Sphere Preview (Canvas 2D) ====== */
 function MultiAngleSpherePreview({
@@ -342,6 +346,15 @@ export interface CanvasImage {
   videoUrl?: string;
   videoDuration?: number;
   videoThumbnailUrl?: string;
+  // 图层面板扩展字段
+  /** 图层是否可见（默认true） */
+  visible?: boolean;
+  /** 图层是否锁定（默认false，锁定后不可移动/编辑） */
+  locked?: boolean;
+  /** 图层名称（用户自定义或自动生成） */
+  name?: string;
+  /** 图层堆叠顺序（默认0，数值越大越在上层） */
+  zIndex?: number;
 }
 
 interface InfiniteCanvasProps {
@@ -416,6 +429,8 @@ interface InfiniteCanvasProps {
   onSwitchToDashboard?: () => void;
   /** Send canvas image to chat panel for AI modification */
   onSendToChat?: (image: CanvasImage) => void;
+  /** 树状版本历史管理器（P1功能） */
+  versionHistoryManager?: import('@/lib/canvas-tree-history').TreeHistoryManager;
 }
 
 type EditMode = 'none' | 'erase' | 'mask' | 'expand' | 'crop' | 'upscale' | 'colorAdjust' | 'panorama';
@@ -564,6 +579,7 @@ export function InfiniteCanvas({
   onSendToChat,
   connections,
   onConnectionsChange,
+  versionHistoryManager,
 }: InfiniteCanvasProps) {
   const isMonochrome = themeStyle === 'monochrome';
 
@@ -634,6 +650,12 @@ export function InfiniteCanvas({
   const [showCompareDialog, setShowCompareDialog] = useState(false);
   const [compareImages, setCompareImages] = useState<{ left: CanvasImage | null; right: CanvasImage | null }>({ left: null, right: null });
   const [compareSelecting, setCompareSelecting] = useState(false); // selecting second image for compare
+
+  // Layer panel state (P1: 专业用户刚需)
+  const [showLayerPanel, setShowLayerPanel] = useState(false);
+
+  // Version history panel state (P1: 树状版本历史)
+  const [showVersionHistory, setShowVersionHistory] = useState(false);
 
   // View state
   const [viewOffset, setViewOffset] = useState({ x: initialViewState?.offsetX ?? 0, y: initialViewState?.offsetY ?? 0 });
@@ -15334,6 +15356,60 @@ export function InfiniteCanvas({
         );
       })()}
 
+      {/* 图层面板 */}
+      {showLayerPanel && (
+        <Suspense fallback={null}>
+          <LayerPanel
+            images={images}
+            selectedIds={Array.from(selectedIds)}
+            isMonochrome={isMonochrome}
+            onSelect={(ids) => setSelectedIds(new Set(ids))}
+            onReorder={(newImages) => onImagesChange(newImages)}
+            onToggleVisibility={(id) => {
+              onImagesChange(images.map(img => 
+                img.id === id ? { ...img, visible: !img.visible } : img
+              ));
+            }}
+            onToggleLock={(id) => {
+              onImagesChange(images.map(img => 
+                img.id === id ? { ...img, locked: !img.locked } : img
+              ));
+            }}
+            onRename={(id, name) => {
+              onImagesChange(images.map(img => 
+                img.id === id ? { ...img, name } : img
+              ));
+            }}
+            onDelete={(id) => {
+              onImagesChange(images.filter(img => img.id !== id));
+              setSelectedIds(prev => { const next = new Set(prev); next.delete(id); return next; });
+            }}
+            onClose={() => setShowLayerPanel(false)}
+          />
+        </Suspense>
+      )}
+
+      {/* 版本历史面板 */}
+      {showVersionHistory && versionHistoryManager && (
+        <Suspense fallback={null}>
+          <VersionHistoryPanel
+            manager={versionHistoryManager}
+            isMonochrome={isMonochrome}
+            onRestore={(nodeId) => {
+              const snapshot = versionHistoryManager?.getSnapshot(nodeId);
+              if (snapshot) {
+                onImagesChange(snapshot);
+                setSelectedIds(new Set());
+              }
+            }}
+            onCreateBranch={(nodeId) => {
+              versionHistoryManager?.setCurrentNodeId(nodeId);
+            }}
+            onClose={() => setShowVersionHistory(false)}
+          />
+        </Suspense>
+      )}
+
         {/* Floating pill toolbar - semi-collapsed, expand on hover */}
       <div
         data-toolbar="bottom-toolbar"
@@ -15635,6 +15711,26 @@ export function InfiniteCanvas({
         >
           <GitMerge className="h-4 w-4" />
           <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">{showConnections ? '隐藏连线' : '显示连线'}</span>
+        </button>
+
+        {/* 图层面板按钮 */}
+        <button
+          onClick={() => setShowLayerPanel(prev => !prev)}
+          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${showLayerPanel ? (isMonochrome ? 'text-blue-500 bg-blue-50 ring-1 ring-blue-500/30' : 'text-gold bg-gold/20 ring-1 ring-gold/40') : (isMonochrome ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100' : 'text-gold-muted hover:text-gold-light hover:bg-gold/10')}`}
+          title={showLayerPanel ? '关闭图层' : '打开图层'}
+        >
+          <Layers className="h-4 w-4" />
+          <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">{showLayerPanel ? '关闭图层' : '图层面板'}</span>
+        </button>
+
+        {/* 版本历史按钮 */}
+        <button
+          onClick={() => setShowVersionHistory(prev => !prev)}
+          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${showVersionHistory ? (isMonochrome ? 'text-blue-500 bg-blue-50 ring-1 ring-blue-500/30' : 'text-gold bg-gold/20 ring-1 ring-gold/40') : (isMonochrome ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100' : 'text-gold-muted hover:text-gold-light hover:bg-gold/10')}`}
+          title={showVersionHistory ? '关闭版本历史' : '版本历史'}
+        >
+          <GitBranch className="h-4 w-4" />
+          <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">{showVersionHistory ? '关闭历史' : '版本历史'}</span>
         </button>
 
         {/* Generating progress (always visible when active) */}

@@ -4,6 +4,7 @@ import { useState, useCallback, useRef, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { InfiniteCanvas, CanvasImage, ImageGroup } from '@/components/infinite-canvas';
 import { IncrementalHistoryManager } from '@/lib/canvas-incremental-history';
+import { TreeHistoryManager, type VersionNode } from '@/lib/canvas-tree-history';
 import { createAutoConnection, type ConnectionRelationType } from '@/lib/canvas-connections';
 import { GenerationPanel, GenerationParams, CtrlRefSelection } from '@/components/generation-panel';
 import VideoGenerationPanel, { VideoGenerateParams } from '@/components/video-generation-panel';
@@ -108,6 +109,11 @@ function CanvasApp() {
   // ★ 跳过历史记录标记：项目加载/服务器同步等非用户操作不记录 undo diff
   // 防止 Ctrl+Z 撤销到项目加载前的空画布状态
   const skipHistoryRef = useRef(false);
+
+  // ====== Tree History (Version History Panel) ======
+  // 树状版本历史，支持分支和任意节点回溯
+  const treeHistoryRef = useRef<TreeHistoryManager>(new TreeHistoryManager({ maxNodes: 50 }));
+  const [treeHistoryNodes, setTreeHistoryNodes] = useState<VersionNode[]>([]);
 
   // P2-1: 画布连线状态
   const [canvasConnections, setCanvasConnections] = useState<import('@/lib/canvas-connections').CanvasConnection[]>([]);
@@ -3830,6 +3836,7 @@ function CanvasApp() {
           }}
           connections={canvasConnections}
           onConnectionsChange={setCanvasConnections}
+          versionHistoryManager={treeHistoryRef.current}
         />
       </div>
 
