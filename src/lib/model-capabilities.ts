@@ -740,6 +740,41 @@ export function shouldUseResponsesAPI(modelId: string): boolean {
 }
 
 /**
+ * 判断模型+供应商是否应走 Responses API 路径
+ * 关键：只有 OpenAI 官方 API（api.openai.com）支持 /v1/responses 端点
+ * 第三方供应商（PearAPI/4sapi/虚宝/APImart等）只支持标准 Images API
+ * 
+ * @param modelId 模型ID（如 gpt-image-2）
+ * @param providerBaseUrl 供应商API base URL（如 https://api.openai.com/v1）
+ * @returns 是否应使用 Responses API 路径
+ */
+export function shouldUseResponsesAPIForProvider(modelId: string, providerBaseUrl: string): boolean {
+  // 先检查模型能力
+  const caps = getModelCapabilities(modelId);
+  if (!caps.supportsResponsesAPI) return false;
+  
+  // 环境变量开关
+  if (process.env.RESPONSES_API_ENABLED === 'false') return false;
+  
+  // ★ 关键：只有 OpenAI 官方 API 支持 /v1/responses 端点
+  // 第三方供应商（PearAPI/4sapi/虚宝/APImart等）只支持标准 Images API
+  // 判断依据：base URL 是否包含 "api.openai.com" 或 "openai.com"
+  const normalizedBaseUrl = (providerBaseUrl || '').toLowerCase().trim();
+  
+  // OpenAI 官方域名
+  const isOpenAIOfficial = 
+    normalizedBaseUrl.includes('api.openai.com') ||
+    normalizedBaseUrl.includes('openai.com');
+  
+  if (!isOpenAIOfficial) {
+    // 第三方供应商不支持 Responses API，返回 false
+    return false;
+  }
+  
+  return true;
+}
+
+/**
  * 判断模型是否应走 Gemini Chat 路由 (/chat/completions)
  */
 export function shouldUseGeminiChatRoute(modelId: string): boolean {

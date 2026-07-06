@@ -12,7 +12,7 @@ import { classifyApiError, type ClassifiedError, isCloudflareTimeoutError, trans
 import { detectInvalidSizeError, repairSize, classifyImageModelFamily } from '@/lib/size-auto-repair';
 import { fetchWithSmartRetry } from '@/lib/smart-retry';
 import { streamResponsesApiSSE, buildResponsesApiPayload, extractImageUrlFromMarkdown, type ResponsesApiResult, type ResponsesApiSSEEvent } from '@/lib/responses-api-sse';
-import { getModelCapabilities, filterRequestForModel, shouldUseResponsesAPI, type ModelCapabilities, normalizeModelForApi } from '@/lib/model-capabilities';
+import { getModelCapabilities, filterRequestForModel, shouldUseResponsesAPI, shouldUseResponsesAPIForProvider, type ModelCapabilities, normalizeModelForApi } from '@/lib/model-capabilities';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { validateImageUrl } from '@/lib/input-validation';
 import { consumeCredits } from '@/lib/credits';
@@ -1212,7 +1212,7 @@ export async function POST(request: NextRequest) {
       // 通过 Cloudflare 代理的中转站长时间推理容易 524/504 断连，
       // /v1/responses + SSE 心跳保活可避免此问题
       // 模型支持列表由 model-capabilities 注册表统一管理
-      const responsesApiEnabled = shouldUseResponsesAPI(currentModelConfig.modelId);
+      const responsesApiEnabled = shouldUseResponsesAPIForProvider(currentModelConfig.modelId, currentApiBaseUrl);
 
 
       if (responsesApiEnabled) {
