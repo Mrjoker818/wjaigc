@@ -1080,15 +1080,36 @@ export async function POST(request: NextRequest) {
       }
 
       // 路径3: data.output[].url（OpenAI images/generations 兼容格式）
+      // 也兼容 PearAPI 格式: data.output.data[].url / data.output.image_urls[]
       if (!sourceImageUrl) {
-        const output = taskData?.output as Array<Record<string, unknown>> | undefined;
-        if (output && Array.isArray(output) && output.length > 0) {
-          const rawUrl = output[0].url || output[0].image_url;
-          sourceImageUrl = Array.isArray(rawUrl) ? rawUrl[0] : (typeof rawUrl === 'string' ? rawUrl : null);
+        const output = taskData?.output as Record<string, unknown> | Array<Record<string, unknown>> | undefined;
+        if (output) {
+          if (Array.isArray(output) && output.length > 0) {
+            const rawUrl = output[0].url || output[0].image_url;
+            sourceImageUrl = Array.isArray(rawUrl) ? rawUrl[0] : (typeof rawUrl === 'string' ? rawUrl : null);
+          } else if (typeof output === 'object') {
+            // PearAPI: output.data[].url
+            const outputData = (output as Record<string, unknown>).data as Array<Record<string, unknown>> | undefined;
+            if (outputData && Array.isArray(outputData) && outputData.length > 0) {
+              const rawUrl = outputData[0].url || outputData[0].image_url || outputData[0].b64_json;
+              if (typeof rawUrl === 'string') sourceImageUrl = rawUrl;
+            }
+            // PearAPI: output.image_urls[]
+            if (!sourceImageUrl) {
+              const outputImageUrls = (output as Record<string, unknown>).image_urls as string[] | undefined;
+              if (Array.isArray(outputImageUrls) && outputImageUrls.length > 0) {
+                sourceImageUrl = outputImageUrls[0];
+              }
+            }
+            // 兜底: output.url
+            if (!sourceImageUrl && typeof (output as Record<string, unknown>).url === 'string') {
+              sourceImageUrl = (output as Record<string, unknown>).url as string;
+            }
+          }
         }
       }
 
-      // 路径4: data.data[].url（嵌套 data 数组格式）
+      // 路径4: data.data[].url（嵌套 data 数组格式 - 同步模式直返）
       if (!sourceImageUrl) {
         const nestedData = taskData?.data as Array<Record<string, unknown>> | undefined;
         if (nestedData && Array.isArray(nestedData) && nestedData.length > 0) {

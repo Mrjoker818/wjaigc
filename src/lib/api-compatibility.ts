@@ -141,7 +141,7 @@ export const PROFILE_OPENAI: ApiCompatProfile = {
  */
 export const PROFILE_PEARAPI: ApiCompatProfile = {
   id: 'pearapi',
-  label: 'PearAPI 兼容 (nano-banana / GPT-Image JSON)',
+  label: 'PearAPI 兼容 (JSON + /images/edits, 支持所有绘画模型 jimeng/gpt-image/grok等)',
   responseMode: 'polling',
   sizeFormat: 'aspect-ratio',
   defaultEndpoint: '/images/generations',
@@ -852,9 +852,10 @@ export function buildPollUrl(
     return null;
   }
   const path = profile.pollPathTemplate.replace('{taskId}', taskId);
-  // ★ 防止 base URL 末尾斜杠与 path 开头斜杠拼成双斜杠
+  // 与 fetchWithV1Retry 保持一致: 若 baseUrl 没有 /vN 版本前缀，自动加 /v1
   const cleanBase = apiBaseUrl.replace(/\/+$/, '');
-  return `${cleanBase}${path}`;
+  const baseWithVersion = /\/v\d+\/?$/.test(cleanBase) ? cleanBase : `${cleanBase}/v1`;
+  return `${baseWithVersion}${path}`;
 }
 
 /**
