@@ -197,11 +197,12 @@ export const MODEL_ASPECT_RATIOS: Record<string, string[]> = {
 
     // ===== Gemini 系列 =====
     // Gemini 图片生成: aspectRatio参数支持多种比例
-    'gemini-2.5-flash-preview-image-generation': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
-    'gemini-2.5-pro-preview-image-generation': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
-    'gemini-3-pro-image-preview': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
-    'gemini-3-flash-image-preview': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
-    'gemini-3.1-flash-image-preview': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
+    // 官方文档支持: 1:1, 4:3, 3:4, 16:9, 9:16, 3:2, 2:3, 5:4, 4:5, 21:9, 9:21
+    'gemini-2.5-flash-preview-image-generation': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '5:4', '4:5', '21:9', '9:21'],
+    'gemini-2.5-pro-preview-image-generation': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '5:4', '4:5', '21:9', '9:21'],
+    'gemini-3-pro-image-preview': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '5:4', '4:5', '21:9', '9:21'],
+    'gemini-3-flash-image-preview': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '5:4', '4:5', '21:9', '9:21'],
+    'gemini-3.1-flash-image-preview': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '5:4', '4:5', '21:9', '9:21'],
 
     // ===== Imagen 系列 =====
     // Imagen 4: aspectRatio 1:1, 3:4, 4:3, 9:16, 16:9
@@ -211,10 +212,12 @@ export const MODEL_ASPECT_RATIOS: Record<string, string[]> = {
 
     // ===== Flux 系列 =====
     // Flux 1.1 Pro: width/height自由(步长32, 范围256-2048) — 无质量参数
-    'flux-pro': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
-    'flux-1.1-pro': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
+    // 官方文档支持: 1:1, 4:3, 3:4, 16:9, 9:16, 3:2, 2:3, 21:9, 9:21
+    'flux-pro': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9', '9:21'],
+    'flux-1.1-pro': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9', '9:21'],
+    'flux-pro-ultra': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9', '9:21'],
+    'flux-pro-ultra-fast': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
     // Flux 1.1 Pro Ultra: aspect_ratio参数，4MP输出 — 无质量参数
-    'flux-pro-ultra': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
     'flux-1.1-pro-ultra': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
     // Flux 2: width/height自由 — 无质量参数
     'flux-2': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
@@ -239,7 +242,8 @@ export const MODEL_ASPECT_RATIOS: Record<string, string[]> = {
 
     // ===== Ideogram =====
     // Ideogram 3.0: aspect_ratio参数，支持广泛比例
-    'ideogram': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '3:1', '1:3'],
+    'ideogram': ['1:1', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '3:2', '2:3', '21:9', '9:21', '1:2', '2:1', '1:3', '3:1'],
+    'ideogram-3': ['1:1', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '3:2', '2:3', '21:9', '9:21', '1:2', '2:1', '1:3', '3:1'],
 
     // ===== HiDream =====
     'hidream': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
@@ -347,9 +351,9 @@ export const MODEL_QUALITIES: Record<string, string[]> = {
 
     // ===== Ideogram =====
     // 官方参数: aspect_ratio="1x1"|"16x9"|... + rendering_speed="TURBO"|"DEFAULT"|"QUALITY"
-    // 69种尺寸选择，分辨率由 aspect_ratio 决定
-    'ideogram': ['standard', 'quality'],
-    'ideogram-3': ['standard', 'quality'],
+    // 15种比例，69种尺寸选择，分辨率由 aspect_ratio 决定
+    'ideogram': ['turbo', 'default', 'quality'],
+    'ideogram-3': ['turbo', 'default', 'quality'],
 
     // ===== HiDream =====
     // 支持最大 2048x2048
@@ -424,6 +428,8 @@ export const QUALITY_LEVEL_DISPLAY_NAMES: Record<string, string> = {
     'standard': '标准',
     'hd': '高清增强',
     'quality': '高质量',
+    'turbo': '极速渲染',
+    'default': '默认速度',
 };
 
 /** 综合显示名称（兼容旧接口） */
