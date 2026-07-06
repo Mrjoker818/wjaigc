@@ -6,14 +6,22 @@
 
 | 模型ID | 画面比例 | 分辨率档位 | 质量参数 | 参数类型 | 备注 |
 |--------|---------|-----------|---------|---------|------|
+| doubao-seedream-5-0-lite | 1:1, 4:3, 3:4, 16:9, 9:16, 3:2, 2:3, 21:9 (8种) | **⚠️ 仅2K, 3K** | 无 | resolution | **官方不支持4K**！上限3072x3072 |
+| doubao-seedream-5-0 | 1:1, 4:3, 3:4, 16:9, 9:16, 3:2, 2:3, 21:9 (8种) | 2K, 4K | 无 | resolution | 2K直出+4K AI增强 |
 | doubao-seedream-4-5 | 1:1, 4:3, 3:4, 16:9, 9:16, 3:2, 2:3, 21:9 (8种) | 2K, 4K | 无 | resolution | 最小2K起步，不支持1K |
 | doubao-seedream-4 | 1:1, 4:3, 3:4, 16:9, 9:16, 3:2, 2:3, 21:9 (8种) | 1K, 2K, 4K | 无 | resolution | 完整分辨率档位 |
 | doubao-seedream-3 | 1:1, 4:3, 3:4, 16:9, 9:16, 3:2, 2:3, 21:9 (8种) | 1K, 2K | 无 | resolution | 最大2048x2048，不支持4K |
-| doubao-seedream-5-0-lite | 1:1, 4:3, 3:4, 16:9, 9:16, 3:2, 2:3, 21:9 (8种) | 2K, 3K | 无 | resolution | 仅支持2K和3K |
-| doubao-seedream-5-0 | 1:1, 4:3, 3:4, 16:9, 9:16, 3:2, 2:3, 21:9 (8种) | 2K, 4K | 无 | resolution | 2K直出+4K AI增强 |
-| doubao-seedance-4-5 | 1:1, 4:3, 3:4, 16:9, 9:16, 3:2, 2:3, 21:9 (8种) | 2K, 4K | 无 | resolution | 最小2560x1440起步 |
+| doubao-seedance-4-5 | 1:1, 4:3, 3:4, 16:9, 9:16, 3:2, 2:3, 21:9 (8种) | 2K, 4K | 无 | resolution | 视频图像生成，最小2560x1440 |
 
-**别名映射**：seedream-4-5, seedream-4, seedream-3, seedream-5-0-lite, seedream-5, seedance
+**别名映射**：seedream-5-0-lite, seedream-5, seedream-4-5, seedream-4, seedream-3, seedance
+
+**⚠️ 重要说明**：
+- 火山引擎官方API：`size` 参数支持档位值(如"2K")或像素值(如"2048x2048")
+- **doubao-seedream-5-0-lite 官方仅支持2K和3K，不支持4K**
+- 如果APIMart等第三方代理平台文档显示支持4K，可能是代理平台自己的参数适配，但实际请求火山引擎API时会：
+  - 自动降级到3K
+  - 或返回错误
+- **官方文档参考**：https://www.volcengine.com/docs/6791/1347773
 
 ---
 
