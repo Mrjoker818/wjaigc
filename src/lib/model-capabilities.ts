@@ -130,6 +130,8 @@ export interface ModelCapabilities {
   fixedSizesOnly: boolean;
   /** 固定尺寸列表 (仅 fixedSizesOnly=true 时有效) */
   allowedSizes: string[];
+  /** size 参数格式：'pixel' 使用像素格式 (如 "1024x1024")，'ratio' 使用宽高比格式 (如 "16:9") */
+  sizeFormat: 'pixel' | 'ratio';
 
   // --- 质量选项 ---
 
@@ -169,6 +171,7 @@ const CAPABILITY_TABLE: Record<ModelFamily, ModelCapabilities> = {
     maxAspectRatio: 3,
     fixedSizesOnly: false,
     allowedSizes: [],
+    sizeFormat: 'pixel',
     qualityOptions: ['auto', 'high', 'medium', 'low'],
     defaultQuality: 'auto',
     outputFormats: ['png', 'jpeg', 'webp'],
@@ -195,6 +198,7 @@ const CAPABILITY_TABLE: Record<ModelFamily, ModelCapabilities> = {
     maxAspectRatio: 1.75,
     fixedSizesOnly: true,
     allowedSizes: ['1024x1024', '1792x1024', '1024x1792'],
+    sizeFormat: 'pixel',
     qualityOptions: ['standard', 'hd'],
     defaultQuality: 'standard',
     outputFormats: ['png'],
@@ -221,6 +225,7 @@ const CAPABILITY_TABLE: Record<ModelFamily, ModelCapabilities> = {
     maxAspectRatio: 4,
     fixedSizesOnly: true,
     allowedSizes: ['256x256', '512x512', '1024x1024'],
+    sizeFormat: 'pixel',
     qualityOptions: ['standard'],
     defaultQuality: 'standard',
     outputFormats: ['png'],
@@ -247,6 +252,7 @@ const CAPABILITY_TABLE: Record<ModelFamily, ModelCapabilities> = {
     maxAspectRatio: 3,
     fixedSizesOnly: false,
     allowedSizes: [],
+    sizeFormat: 'pixel',
     qualityOptions: ['auto', 'low', 'medium', 'high'],
     defaultQuality: 'auto',
     outputFormats: ['png', 'jpeg'],
@@ -273,6 +279,7 @@ const CAPABILITY_TABLE: Record<ModelFamily, ModelCapabilities> = {
     maxAspectRatio: 3,
     fixedSizesOnly: false,
     allowedSizes: [],
+    sizeFormat: 'pixel',
     qualityOptions: ['standard'],
     defaultQuality: 'standard',
     outputFormats: ['png'],
@@ -299,6 +306,7 @@ const CAPABILITY_TABLE: Record<ModelFamily, ModelCapabilities> = {
     maxAspectRatio: 4,
     fixedSizesOnly: false,
     allowedSizes: [],
+    sizeFormat: 'pixel',
     qualityOptions: ['standard'],
     defaultQuality: 'standard',
     outputFormats: ['png'],
@@ -320,11 +328,12 @@ const CAPABILITY_TABLE: Record<ModelFamily, ModelCapabilities> = {
     supportsResponsesAPI: false,
     sizeAlignment: 0,
     minSide: 256,
-    maxSide: 2048,
-    maxPixels: 2048 * 2048,
+    maxSide: 2880, // MJ 最大边长约 2880 (8294400像素上限)
+    maxPixels: 8294400, // MJ 官方像素上限：总像素 ≤ 8294400
     maxAspectRatio: 3,
     fixedSizesOnly: false,
     allowedSizes: [],
+    sizeFormat: 'ratio', // ★ MJ API 使用宽高比格式 (如 "16:9")，而非像素格式 (如 "1024x1024")
     qualityOptions: ['standard'],
     defaultQuality: 'standard',
     outputFormats: ['png'],
@@ -351,6 +360,7 @@ const CAPABILITY_TABLE: Record<ModelFamily, ModelCapabilities> = {
     maxAspectRatio: 3,
     fixedSizesOnly: false,
     allowedSizes: [],
+    sizeFormat: 'pixel',
     qualityOptions: ['standard', 'hd'],
     defaultQuality: 'standard',
     outputFormats: ['png', 'jpeg'],
@@ -377,6 +387,7 @@ const CAPABILITY_TABLE: Record<ModelFamily, ModelCapabilities> = {
     maxAspectRatio: 3,
     fixedSizesOnly: false,
     allowedSizes: [],
+    sizeFormat: 'pixel',
     qualityOptions: ['standard', 'hd'],
     defaultQuality: 'standard',
     outputFormats: ['png', 'jpeg'],
@@ -403,6 +414,7 @@ const CAPABILITY_TABLE: Record<ModelFamily, ModelCapabilities> = {
     maxAspectRatio: 4,
     fixedSizesOnly: false,
     allowedSizes: [],
+    sizeFormat: 'pixel',
     qualityOptions: ['standard', 'hd'],
     defaultQuality: 'standard',
     outputFormats: ['png'],
@@ -429,6 +441,7 @@ const CAPABILITY_TABLE: Record<ModelFamily, ModelCapabilities> = {
     maxAspectRatio: 3,
     fixedSizesOnly: false,
     allowedSizes: [],
+    sizeFormat: 'pixel',
     qualityOptions: ['standard'],
     defaultQuality: 'standard',
     outputFormats: ['png'],
@@ -455,6 +468,7 @@ const CAPABILITY_TABLE: Record<ModelFamily, ModelCapabilities> = {
     maxAspectRatio: 3,
     fixedSizesOnly: false,
     allowedSizes: [],
+    sizeFormat: 'pixel',
     qualityOptions: ['standard', 'hd'],
     defaultQuality: 'standard',
     outputFormats: ['png'],
@@ -481,6 +495,7 @@ const CAPABILITY_TABLE: Record<ModelFamily, ModelCapabilities> = {
     maxAspectRatio: 3,
     fixedSizesOnly: false,
     allowedSizes: [],
+    sizeFormat: 'pixel',
     qualityOptions: ['standard', 'hd'],
     defaultQuality: 'standard',
     outputFormats: ['png'],
@@ -507,6 +522,7 @@ const CAPABILITY_TABLE: Record<ModelFamily, ModelCapabilities> = {
     maxAspectRatio: 3,
     fixedSizesOnly: false,
     allowedSizes: [],
+    sizeFormat: 'pixel',
     qualityOptions: ['standard', 'hd'],
     defaultQuality: 'standard',
     outputFormats: ['png'],
@@ -534,6 +550,7 @@ const CAPABILITY_TABLE: Record<ModelFamily, ModelCapabilities> = {
     maxAspectRatio: 4,
     fixedSizesOnly: false,
     allowedSizes: [],
+    sizeFormat: 'pixel',
     qualityOptions: ['standard'],
     defaultQuality: 'standard',
     outputFormats: ['png'],

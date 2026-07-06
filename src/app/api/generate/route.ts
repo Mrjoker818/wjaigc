@@ -796,14 +796,21 @@ export async function POST(request: NextRequest) {
       const calculatedPixelSize = calculateActualPixelsFromRatio(effectiveSize, quality, currentModelConfig.modelId);
       const pixelSize = calculatedPixelSize || requestedPixelSize;
 
+      // ★ 关键修复：根据 profile.sizeFormat 决定发送哪种格式
+      // - 'aspect-ratio' → 发送宽高比格式（如 "16:9"），APImart MJ/SD等模型需要
+      // - 'pixel' → 发送像素格式（如 "1024x1024"），OpenAI等模型需要
+      const finalSize = profile.sizeFormat === 'aspect-ratio' 
+        ? effectiveSize  // MJ等模型使用宽高比
+        : (pixelSize || effectiveSize);  // OpenAI等模型使用像素
+
       const requestBody: Record<string, unknown> = {
         model: currentModelConfig.modelId,
         prompt: enhancedPrompt,
         n: requestN,
-        size: pixelSize || effectiveSize,
+        size: finalSize,
       };
 
-      // 像素辅助字段
+      // 像素辅助字段（仅当有像素尺寸时添加）
       if (pixelSize) {
         requestBody.width = parseInt(pixelSize.split('x')[0]);
         requestBody.height = parseInt(pixelSize.split('x')[1]);
@@ -834,16 +841,11 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // 像素格式 size 优先级调整
-      if (pixelSize && profile.sizeFormat === 'pixel') {
-        requestBody.size = pixelSize;
-      }
-
       // ★ 基于模型能力的参数过滤：只发送模型实际支持的字段，避免 API 报错
       const filteredBody = filterRequestForModel(currentModelConfig.modelId, requestBody);
 
       // ★ 诊断日志：记录发送给 API 的关键分辨率参数，便于排查"用户设置4K但实际生成1K"问题
-      console.log(`[generate] Resolution params → model: ${currentModelConfig.modelId}, paramType: ${currentModelConfig.paramType}, quality: ${quality}, effectiveSize: ${effectiveSize}, pixelSize: ${pixelSize || 'null'}, requestBody.size: ${requestBody.size}, requestBody.resolution: ${requestBody.resolution || 'N/A'}, requestBody.width: ${requestBody.width || 'N/A'}, requestBody.height: ${requestBody.height || 'N/A'}, profile.sizeFormat: ${profile.sizeFormat}`);
+      console.log(`[generate] Resolution params → model: ${currentModelConfig.modelId}, paramType: ${currentModelConfig.paramType}, quality: ${quality}, effectiveSize: ${effectiveSize}, pixelSize: ${pixelSize || 'null'}, finalSize: ${finalSize}, profile.sizeFormat: ${profile.sizeFormat}, requestBody.size: ${requestBody.size}, requestBody.resolution: ${requestBody.resolution || 'N/A'}, requestBody.width: ${requestBody.width || 'N/A'}, requestBody.height: ${requestBody.height || 'N/A'}`);
 
       // 添加参考图片
       const hasRefImages = accessibleReferenceImages.length > 0 && currentModelConfig.supportsImageToImage;
