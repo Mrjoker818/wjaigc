@@ -14,6 +14,7 @@ export type VideoCompatProfile =
   | 'openai-video'    // OpenAI /v1/videos (Sora等)
   | 'fal-video'       // fal.ai托管 (Pika等)
   | 'apimart-video'   // APImart /api-b /v1/videos/generations (VEO3/Sora2等)
+  | 'pearapi-video'   // PearAPI /v1/videos/generations (gpt-image-2视频/可灵等通用格式)
   | 'rest-generic'    // 通用REST (Runway/Luma/Google等)
   | 'custom';         // 管理员自定义
 
@@ -406,6 +407,7 @@ export function resolveVideoCompatProfile(
     if (urlLower.includes('fal.run')) return 'fal-video';
     if (urlLower.includes('openai')) return 'openai-video';
     if (urlLower.includes('apib.ai') || urlLower.includes('apimart')) return 'apimart-video';
+    if (urlLower.includes('pearapi') || urlLower.includes('pearapi.ai')) return 'pearapi-video';
     // If baseUrl does NOT match any official API domain, it's a third-party proxy
     // → use rest-generic (OpenAI-compatible format) regardless of model name
     if (!urlLower.includes('volcengine') && !urlLower.includes('ark') &&
@@ -457,6 +459,8 @@ export function buildVideoSubmitRequest(
       return buildFalVideoSubmit(baseUrl, apiKey, params);
     case 'apimart-video':
       return buildApiMartVideoSubmit(baseUrl, apiKey, params);
+    case 'pearapi-video':
+      return buildPearApiVideoSubmit(baseUrl, apiKey, params);
     case 'rest-generic':
     default:
       return buildRestGenericSubmit(baseUrl, apiKey, params);
@@ -517,6 +521,26 @@ export function parseVideoSubmitResponse(
         status: 'submitted',
         estimatedTime: 240,
       };
+    }
+    case 'pearapi-video': {
+      // PearAPI async: {id, status:'queued', model}
+      if (data?.id && (data?.status === 'queued' || data?.status === 'running')) {
+        return {
+          taskId: data.id,
+          status: 'submitted',
+          estimatedTime: 240,
+        };
+      }
+      // PearAPI sync: {created, data:[{url}]}
+      const syncData = data?.data?.[0];
+      if (syncData?.url) {
+        return {
+          taskId: '',
+          status: 'succeeded',
+          videoUrl: syncData.url,
+        };
+      }
+      return { taskId: data?.id || '', status: 'submitted', estimatedTime: 240 };
     }
     case 'rest-generic':
     default: {
@@ -611,6 +635,12 @@ export function buildVideoPollRequest(
         headers: { 'Authorization': `Bearer ${apiKey}` },
         method: 'GET',
       };
+    case 'pearapi-video':
+      return {
+        url: `${cleanBaseUrl}/v1/videos/tasks/${taskId}`,
+        headers: { 'Authorization': `Bearer ${apiKey}` },
+        method: 'GET',
+      };
     case 'rest-generic':
     default: {
       // 支持自定义轮询端点（通过advancedParams.pollEndpoint指定）
@@ -668,6 +698,8 @@ export function parseVideoPollResponse(
       return parseFalVideoPoll(data);
     case 'apimart-video':
       return parseApiMartVideoPoll(data);
+    case 'pearapi-video':
+      return parsePearApiVideoPoll(data);
     case 'rest-generic':
     default:
       return parseRestGenericPoll(data);
@@ -1087,6 +1119,97 @@ function parseApiMartVideoPoll(data: any): VideoTaskPollResult {
   return { status: 'pending', progress: item?.progress ?? 10 };
 }
 
+/** Build PearAPI video submit request.
+ * POST /v1/videos/generations
+ * Body: {model, prompt, n, size, aspect_ratio, task_type:'async', image/images, duration}
+ * Async response: {id, status:'queued', model}
+ * Sync response: {created, data:[{url}]}
+ */
+function buildPearApiVideoSubmit(baseUrl: string, apiKey: string, params: VideoGenerateParams) {
+  const cleanBase = ensureBaseUrl(baseUrl);
+  const refImages: string[] = [];
+  if (params.imageUrl) refImages.push(params.imageUrl);
+  if (params.lastFrameImageUrl) refImages.push(params.lastFrameImageUrl);
+  if (params.referenceImages?.length) refImages.push(...params.referenceImages);
+
+  // Compute size from aspect ratio or default
+  const size = params.aspectRatio && params.aspectRatio.includes(':')
+    ? params.aspectRatio
+    : '16:9';
+
+  const body: Record<string, any> = {
+    model: params.model,
+    prompt: params.prompt,
+    n: 1,
+    size,
+    response_format: 'url',
+    task_type: 'async',
+    ...(params.aspectRatio ? { aspect_ratio: params.aspectRatio } : {}),
+    ...(params.duration ? { duration: params.duration } : {}),
+    ...(params.negativePrompt ? { negative_prompt: params.negativePrompt } : {}),
+    ...(params.seed !== undefined ? { seed: params.seed } : {}),
+  };
+
+  // Single image vs multiple (PearAPI style: same as images)
+  if (refImages.length === 1) {
+    body.image = refImages[0];
+  } else if (refImages.length > 1) {
+    body.images = refImages;
+  }
+
+  return {
+    url: `${cleanBase}/v1/videos/generations`,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
+    method: 'POST',
+  };
+}
+
+/** Parse PearAPI video poll response.
+ * GET /v1/videos/tasks/{id}
+ * Completed response: {status:'completed', output:{created, data:[{url}], video_urls:[...]}, progress, error:{message}}
+ */
+function parsePearApiVideoPoll(data: any): VideoTaskPollResult {
+  const status = (data?.status || '').toLowerCase();
+  const output = data?.output || data;
+
+  if (status === 'succeeded' || status === 'completed' || status === 'success' || status === 'done') {
+    const dataArr = output?.data || output?.video_urls || [];
+    let videoUrl: string | undefined;
+    if (Array.isArray(dataArr) && dataArr.length > 0) {
+      const first = dataArr[0];
+      videoUrl = typeof first === 'string' ? first : (first.url || first.video_url);
+    }
+    if (!videoUrl) videoUrl = output?.video_url || output?.url || data?.video_url;
+
+    return {
+      status: 'succeeded',
+      progress: 100,
+      videoUrl,
+      duration: output?.duration,
+      thumbnailUrl: output?.thumbnail_url || output?.cover_url,
+    };
+  }
+  if (status === 'failed' || status === 'error' || status === 'cancelled') {
+    return {
+      status: 'failed',
+      error: data?.error?.message || data?.message || output?.error?.message || 'Video generation failed',
+    };
+  }
+  if (status === 'running' || status === 'processing' || status === 'in_progress') {
+    const rawProgress = data?.progress ?? output?.progress;
+    const progress = rawProgress != null
+      ? (rawProgress > 1 ? rawProgress : Math.round(rawProgress * 100))
+      : 50;
+    return { status: 'running', progress };
+  }
+  // queued/pending
+  return { status: 'pending', progress: data?.progress ?? 5 };
+}
+
 /** Convert aspect ratio like "16:9" to approximate pixel size string "1920x1080" */
 export function ratioToSize(ratio: string): string {
   const ratioMap: Record<string, string> = {
@@ -1323,6 +1446,7 @@ export function buildVideoExtendRequest(
       return buildFalVideoExtend(baseUrl, apiKey, params);
     case 'minimax':
     case 'apimart-video':
+    case 'pearapi-video':
     case 'rest-generic':
     default:
       return buildRestGenericExtend(baseUrl, apiKey, params);
