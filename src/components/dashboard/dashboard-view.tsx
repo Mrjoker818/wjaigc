@@ -36,8 +36,8 @@ import JSZip from 'jszip';
 type TabType = 'projects' | 'templates' | 'assets' | 'stats' | 'credits' | 'settings' | 'users' | 'apis' | 'data' | 'ecom-templates' | 'payment-config' | 'audit' | 'overview' | 'desktop-admin' | 'connector-admin';
 type ProjectFilter = 'all' | 'recent' | 'starred';
 type AssetSubTab = 'images' | 'prompts' | 'brands';
-type ApiKind = 'general' | 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler' | 'universal';
-type UserPermissionKey = 'image' | 'chat' | 'threeD' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler';
+type ApiKind = 'general' | 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler' | 'universal' | 'audio';
+type UserPermissionKey = 'image' | 'chat' | 'threeD' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler' | 'audio';
 type AdminProvider = ApiProvider & { apiKeyPreview?: string };
 
 const apiKindLabels: Record<ApiKind, string> = {
@@ -51,6 +51,7 @@ const apiKindLabels: Record<ApiKind, string> = {
   vlm: 'VLM视觉模型',
   upscaler: '放大模型',
   universal: '通用模型',
+  audio: '音频/TTS模型',
 };
 
 const apiKindDescriptions: Record<ApiKind, string> = {
@@ -64,6 +65,7 @@ const apiKindDescriptions: Record<ApiKind, string> = {
   vlm: '视觉语言模型，支持图片理解和SVG生成，自动识别 qwen-vl/glm-4v/gemini-vision 等模型，对接到SVG矢量化功能',
   upscaler: '自动识别 SeedVR2/Real-ESRGAN 等放大模型，对接到无损放大Pro功能，支持 PearAPI / fal.ai 等提供商',
   universal: '通用模型，支持多种能力',
+  audio: '添加API后系统自动识别tts/speech/audio模型，对接到AI配音、视频音效和文生语音功能',
 };
 
 const userPermissionLabels: Record<UserPermissionKey, string> = {
@@ -75,6 +77,7 @@ const userPermissionLabels: Record<UserPermissionKey, string> = {
   video: '视频',
   vlm: 'VLM',
   upscaler: '放大',
+  audio: '音频',
 };
 
 interface DashboardViewProps {
@@ -1167,6 +1170,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       video: u.apiPermissions?.video ?? true,
       vlm: u.apiPermissions?.vlm ?? true,
       upscaler: u.apiPermissions?.upscaler ?? true,
+      audio: u.apiPermissions?.audio ?? true,
     };
     await fetch('/api/admin/users', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',

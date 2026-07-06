@@ -20,6 +20,7 @@ const defaultApiPermissions = () => ({
   layer: true,
   video: true,
   upscaler: true,
+  audio: true,
 });
 
 interface MultiUserData {

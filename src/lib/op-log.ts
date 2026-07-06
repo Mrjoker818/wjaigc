@@ -48,6 +48,10 @@ export const OP_ACTIONS = {
   // 视频操作
   VIDEO_GENERATE: 'video_generate',
   VIDEO_EXTEND: 'video_extend',
+
+  // 音频操作
+  AUDIO_GENERATE: 'audio_generate',
+  VIDEO_AUDIO_ADD: 'video_audio_add',
   VIDEO_EDIT: 'video_edit',
 
   // 3D操作

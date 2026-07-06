@@ -1,16 +1,18 @@
 // 第三方模型调用功能 - 类型定义
 
+export type ApiKind = 'image' | 'chat' | 'universal' | 'general' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'imageEdit' | 'upscaler' | 'audio';
+
 export interface ApiProvider {
   id: string;
   name: string;
   baseUrl: string;
   apiKey: string;
   isEnabled: boolean;
-  type: 'image' | 'chat' | 'universal' | 'general' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'imageEdit' | 'upscaler';
+  type: 'image' | 'chat' | 'universal' | 'general' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'imageEdit' | 'upscaler' | 'audio';
   createdAt: number;
   updatedAt: number;
   // 新增：模型类型区分
-  modelType?: 'image' | 'chat' | '3d' | 'universal' | 'general' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'imageEdit' | 'upscaler';
+  modelType?: 'image' | 'chat' | '3d' | 'universal' | 'general' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'imageEdit' | 'upscaler' | 'audio';
   // 新增：显示名称
   displayName?: string;
   // 新增：提供商预设ID
@@ -42,7 +44,7 @@ export interface ModelInfo {
   name: string;
   displayName?: string;
   providerId: string;
-  type: 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler' | 'general' | 'universal' | 'imageEdit';
+  type: 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler' | 'general' | 'universal' | 'imageEdit' | 'audio';
   description?: string;
   contextWindow?: number;
   supportedAspectRatios?: string[];

@@ -2,7 +2,8 @@ import 'server-only';
 
 import { mkdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
-import type { ApiBalanceInfo, ApiProvider, ModelInfo } from './universal-api-types';
+import type { ApiBalanceInfo, ApiProvider, ModelInfo, ApiKind } from './universal-api-types';
+export type { ApiProvider, ModelInfo, ApiBalanceInfo, ApiKind };
 import { fetchWithV1Retry, shouldSkipV1Retry } from './api-helpers';
 import { getModelDisplayName } from './model-name-map';
 import { getServerSystemDir } from './server-data-root';
@@ -21,8 +22,6 @@ const DISCOVERY_TIMEOUT_MS = 30000;
 export function normalizeApiBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, '');
 }
-
-export type ApiKind = 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'universal' | 'general' | 'vlm' | 'imageEdit' | 'upscaler';
 
 /**
  * Normalize advancedParams from DB storage format to Record<string, string>.
@@ -106,12 +105,13 @@ function normalizeBaseUrl(baseUrl: string): string {
   return trimmed;
 }
 
-function modelTypeForProvider(provider: ApiProvider): 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' {
+function modelTypeForProvider(provider: ApiProvider): 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'audio' {
   if (provider.modelType === 'chat') return 'chat';
   if (provider.modelType === '3d') return '3d';
   if (provider.modelType === 'vectorize') return 'vectorize';
   if (provider.modelType === 'layer') return 'layer';
   if (provider.modelType === 'video') return 'video';
+  if (provider.modelType === 'audio') return 'audio';
   // VLM type stays as 'vlm' for SVG vectorization pipeline
   if (provider.modelType === 'vlm') return 'vlm';
   // General/universal: default to 'chat' since most models are chat
@@ -122,11 +122,26 @@ function modelTypeForProvider(provider: ApiProvider): 'image' | 'chat' | '3d' | 
   return 'image';
 }
 
-function inferModelType(modelId: string, fallback: 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler'): 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler' {
+function inferModelType(modelId: string, fallback: 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler' | 'audio'): 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler' | 'audio' {
   const id = modelId.toLowerCase();
+  // 音频/TTS模型关键词匹配 — 必须靠前检查，避免被其他类型误判
+  if (
+    id.includes('tts') ||
+    id.includes('speech') ||
+    (id.includes('audio') && !id.includes('audio-output')) ||
+    id.includes('voice-generation') ||
+    id.includes('voice-gen') ||
+    id.includes('text-to-speech') ||
+    id.includes('fish-speech') ||
+    id.includes('cosyvoice') ||
+    id.includes('chat-tts') ||
+    id.includes('bark-') ||
+    id.includes('elevenlabs')
+  ) {
+    return 'audio';
+  }
   // 视频模型关键词匹配 — 必须在图像之前检查，避免视频模型被误判为图像
   if (
-    id.includes('video-generation') ||
     id.includes('video-generation') ||
     id.includes('kling-v3-video') ||
     id.includes('kling-v3-omni-video') ||
@@ -150,6 +165,17 @@ function inferModelType(modelId: string, fallback: 'image' | 'chat' | '3d' | 've
     if (id.includes('image')) return 'image';
     return 'video';
   }
+  // Embedding/rerank 模型 — 既不是 chat 也不是 image，归类为 chat（对话面板不显示）
+  // 但这些模型不应该出现在图像面板，所以先匹配它们并归入 chat
+  if (
+    id.includes('embed') ||
+    id.includes('rerank') ||
+    id.includes('retrieval') ||
+    id.includes('moderation') ||
+    id.includes('stt') ||
+    id.includes('whisper') ||
+    id.includes('transcrib')
+  ) return 'chat';
   // 矢量化模型关键词匹配
   if (id.includes('vectorize') || id.includes('vector') || id.includes('vtracer') || id.includes('starvector') || id.includes('svg-convert') || id.includes('svgconvert') || id.includes('recraft')) return 'vectorize';
   // VLM视觉语言模型关键词匹配
@@ -277,7 +303,7 @@ function normalizeSelectedModels(val: unknown): string[] {
 
 /** Normalize discovered_models from DB: handle JSON string or array */
 function normalizeDiscoveredModels(val: unknown, providerId: string, modelType: string): ModelInfo[] {
-  const validTypes = ['image', 'chat', '3d', 'vectorize', 'layer', 'video', 'vlm', 'upscaler'] as const;
+  const validTypes = ['image', 'chat', '3d', 'vectorize', 'layer', 'video', 'vlm', 'upscaler', 'audio'] as const;
   type ModelType = typeof validTypes[number];
   const resolveType = (t: unknown): ModelType => {
     if (typeof t === 'string' && validTypes.includes(t as ModelType)) return t as ModelType;
@@ -839,7 +865,7 @@ export async function findProviderById(providerId: string): Promise<ApiProvider 
 }
 
 /** 根据功能类型查找对应的 API 提供商（矢量化/分层/3D/聊天等） */
-export async function findProviderForFeature(feature: 'vectorize' | 'layer' | '3d' | 'imageEdit' | 'chat' | 'video' | 'vlm' | 'upscaler'): Promise<ApiProvider | null> {
+export async function findProviderForFeature(feature: 'vectorize' | 'layer' | '3d' | 'imageEdit' | 'chat' | 'video' | 'vlm' | 'upscaler' | 'audio'): Promise<ApiProvider | null> {
   const kindMap: Record<string, ApiKind> = {
     vectorize: 'vectorize',
     layer: 'layer',
@@ -849,6 +875,7 @@ export async function findProviderForFeature(feature: 'vectorize' | 'layer' | '3
     video: 'video',
     vlm: 'vlm',
     upscaler: 'upscaler',
+    audio: 'audio',
   };
   const kind = kindMap[feature];
   if (!kind) return null;
