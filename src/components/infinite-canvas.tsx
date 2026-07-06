@@ -15792,6 +15792,28 @@ export function InfiniteCanvas({
           </>
         )}
       </div>
+
+      {/* AI 引擎选择对话框 */}
+      <EngineSelectDialog
+        open={engineDialog !== null}
+        title={
+          engineDialog === 'upscale' ? '放大引擎选择' :
+          engineDialog === 'removebg' ? '去背景引擎选择' :
+          engineDialog === 'svg' ? 'SVG描摹引擎选择' :
+          '元素分层引擎选择'
+        }
+        subtitle="设置当前工具使用的处理引擎"
+        toolType={(engineDialog || 'upscale') as 'upscale' | 'removebg' | 'svg' | 'segment'}
+        onSelect={(eng: EditEngine) => {
+          if (engineDialog === 'upscale') setUpscaleEnginePref(eng);
+          else if (engineDialog === 'removebg') setRemoveBgEngine(eng);
+          else if (engineDialog === 'svg') setSvgTraceEngine(eng === 'local' ? 'vtracer' : eng === 'ai' ? 'vlm' : 'auto');
+          else if (engineDialog === 'segment') setSegmentEnginePref(eng);
+          setEngineDialog(null);
+          toast(`引擎已设置为：${eng === 'auto' ? '自动' : eng === 'ai' ? '云端AI' : '本地算法'}`);
+        }}
+        onClose={() => setEngineDialog(null)}
+      />
     </div>
   );
 }
