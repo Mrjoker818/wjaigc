@@ -26,6 +26,7 @@ export interface GenerationParams {
     model: string;
     providerId?: string;  // 服务端API提供商ID，从复合键 providerId::modelId 中拆解
     quality?: string;
+    resolution?: string; // GPT-Image系列分辨率档位参数（1K/2K/4K）
     apiKey?: string;
     estimatedTime?: number;
     universalBaseUrl?: string;
@@ -380,6 +381,7 @@ export function GenerationPanel(
     const MAX_REF_CATEGORIES = 2;
     const [aspectRatio, setAspectRatio] = useState("1:1");
     const [quality, setQuality] = useState("1K");
+    const [resolution, setResolution] = useState("2K"); // GPT-Image系列分辨率档位
     const [outputCount, setOutputCount] = useState(1);
     const [stylePreset, setStylePreset] = useState("auto");
     const [productCategory, setProductCategory] = useState("none");
@@ -558,6 +560,7 @@ export function GenerationPanel(
             stylePreset,
             outputCount,
             quality,
+            resolution: getModelParamType(pureModelId) === 'both' ? resolution : undefined, // GPT-Image系列分辨率档位
             model: pureModelId,
             providerId: compositeProviderId,
             referenceCategories: Object.fromEntries(
@@ -1667,18 +1670,27 @@ export function GenerationPanel(
                 {/* 输出参数：根据模型类型显示分辨率档位或质量级别 */}
                 {getSupportedQualities().length > 1 && (
                     <div className="space-y-1">
-                        <label className={stl}>{dot}{getModelParamType(model.includes('::') ? model.split('::').pop()! : model) === 'resolution' ? '输出分辨率' : '生成质量'}</label>
+                        <label className={stl}>{dot}{getModelParamType(model.includes('::') ? model.split('::').pop()! : model) === 'resolution' ? '输出分辨率' : getModelParamType(model.includes('::') ? model.split('::').pop()! : model) === 'both' ? '分辨率档位' : '生成质量'}</label>
                         <div className="grid grid-cols-4 gap-1.5">
                             {getSupportedQualities().map(q => (
                                 <button
                                     key={q}
-                                    onClick={() => setQuality(q)}
-                                    className={`${gridBtnBase} ${quality === q ? gridBtnOn : gridBtnOff}`}
+                                    onClick={() => {
+                                        const paramType = getModelParamType(model.includes('::') ? model.split('::').pop()! : model);
+                                        if (paramType === 'both') {
+                                            // GPT-Image系列：分辨率档位参数
+                                            setResolution(q);
+                                            setQuality('auto');
+                                        } else {
+                                            setQuality(q);
+                                        }
+                                    }}
+                                    className={`${gridBtnBase} ${(getModelParamType(model.includes('::') ? model.split('::').pop()! : model) === 'both' ? resolution : quality) === q ? gridBtnOn : gridBtnOff}`}
                                 >
                                     <div className="flex flex-col items-center leading-none">
                                         <span className="text-xs">
                                             {/* 分辨率档位显示 */}
-                                            {getModelParamType(model.includes('::') ? model.split('::').pop()! : model) === 'resolution'
+                                            {getModelParamType(model.includes('::') ? model.split('::').pop()! : model) === 'resolution' || getModelParamType(model.includes('::') ? model.split('::').pop()! : model) === 'both'
                                               ? (RESOLUTION_TIER_DISPLAY_NAMES[q] || q)
                                               : /* 质量级别显示 */
                                               (q === 'auto' ? '自动' : 
@@ -1691,6 +1703,31 @@ export function GenerationPanel(
                                                (QUALITY_LEVEL_DISPLAY_NAMES[q] || q))}
                                         </span>
                                         {/* 方案A：质量级别不再显示像素提示，像素由API根据比例和质量自动决定 */}
+                                    </div>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {/* GPT-Image系列：额外显示生成质量参数 */}
+                {getModelParamType(model.includes('::') ? model.split('::').pop()! : model) === 'both' && (
+                    <div className="space-y-1">
+                        <label className={stl}>{dot}生成质量</label>
+                        <div className="grid grid-cols-4 gap-1.5">
+                            {['auto', 'low', 'medium', 'high'].map(q => (
+                                <button
+                                    key={q}
+                                    onClick={() => setQuality(q)}
+                                    className={`${gridBtnBase} ${quality === q ? gridBtnOn : gridBtnOff}`}
+                                >
+                                    <div className="flex flex-col items-center leading-none">
+                                        <span className="text-xs">
+                                            {q === 'auto' ? '自动' : 
+                                             q === 'low' ? '快速' : 
+                                             q === 'medium' ? '中等' : 
+                                             q === 'high' ? '高清' : q}
+                                        </span>
                                     </div>
                                 </button>
                             ))}

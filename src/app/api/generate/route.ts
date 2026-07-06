@@ -131,9 +131,12 @@ export async function POST(request: NextRequest) {
       providerId,
       submitOnly,
       _skipCredits, // 内部标记：后台重试时跳过积分扣除（避免双重扣费）
+      resolution, // GPT-Image系列分辨率档位参数（1K/2K/4K）
     } = body;
     // quality 默认值 '1K'，后续可能被模型别名 resolutionTier 覆盖
     let quality: string = (body as any).quality || '1K';
+    // resolution 默认值 '2K'（仅GPT-Image系列使用）
+    const resolutionTier: string = resolution || '2K';
     // 诊断日志：显示接收到的参考图参数
     console.log(`[generate] model=${rawModel}, providerId=${providerId}, referenceImages.length=${referenceImages?.length || 0}, referenceMode=${referenceMode}`);
     // 必填参数校验
@@ -819,6 +822,12 @@ export async function POST(request: NextRequest) {
         } else if (currentModelConfig.paramType === 'resolution') {
           requestBody.resolution = quality;
           requestBody.quality = qualityMap[quality] || quality;
+        } else if (currentModelConfig.paramType === 'both') {
+          // GPT-Image系列同时支持resolution和quality两种参数
+          // resolution控制输出尺寸档位（1k/2k/4k），quality控制生成细节质量
+          // 前端传递独立的resolution参数和quality参数
+          requestBody.resolution = resolutionTier; // 使用前端传递的分辨率档位
+          requestBody.quality = qualityMap[quality] || quality; // 使用前端传递的质量级别
         } else {
           // paramType === 'none' — send both for maximum compatibility
           requestBody.quality = qualityMap[quality] || quality;

@@ -120,15 +120,15 @@ const VIDEO_MODEL_REGISTRY: Record<string, VideoModelInfo> = {
   // === 国内模型 ===
   'kling-v3-video-generation': {
     profile: 'dashscope', name: '可灵 V3 视频', short: 'Kling V3', provider: 'Kuaishou',
-    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, cameraControl: true, motionBrush: true, characterConsistency: false, multiShot: false, maxDuration: 15, durations: [5, 10, 15], ratios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p'], region: 'cn' },
+    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, cameraControl: true, motionBrush: true, characterConsistency: false, multiShot: false, maxDuration: 15, durations: [5, 10, 15], ratios: ['1:1','4:3','16:9','9:16'], resolutions: ['1K','2K'], region: 'cn' },
   },
   'kling-v3-omni-video-generation': {
     profile: 'dashscope', name: '可灵 V3 Omni 视频', short: 'Kling V3 Omni', provider: 'Kuaishou',
-    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, cameraControl: true, motionBrush: true, characterConsistency: true, multiShot: false, maxDuration: 30, durations: [5, 10, 15, 30], ratios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p'], region: 'cn' },
+    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, cameraControl: true, motionBrush: true, characterConsistency: true, multiShot: false, maxDuration: 30, durations: [5, 10, 15, 30], ratios: ['1:1','4:3','16:9','9:16'], resolutions: ['1K','2K','4K'], region: 'cn' },
   },
   'kling-v3-5-video-generation': {
     profile: 'dashscope', name: '可灵 V3.5 视频', short: 'Kling V3.5', provider: 'Kuaishou',
-    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, cameraControl: true, motionBrush: true, characterConsistency: true, multiShot: false, maxDuration: 30, durations: [5, 10, 15, 30], ratios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p','4K'], region: 'cn' },
+    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, cameraControl: true, motionBrush: true, characterConsistency: true, multiShot: false, maxDuration: 30, durations: [5, 10, 15, 30], ratios: ['1:1','4:3','16:9','9:16'], resolutions: ['1K','2K','4K'], region: 'cn' },
   },
   'doubao-seedance-3-0': {
     profile: 'volcengine-ark', name: 'Seedance 3.0', short: 'SD 3.0', provider: 'ByteDance',

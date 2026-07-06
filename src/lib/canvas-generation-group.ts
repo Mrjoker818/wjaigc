@@ -181,10 +181,14 @@ export const MODEL_ASPECT_RATIOS: Record<string, string[]> = {
     'doubao-seedance-4-5': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'],
     'seedance': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'],
 
-    // ===== GPT Image 系列 =====
-    // 官方: 1024x1024(1:1), 1536x1024(3:2), 1024x1536(2:3), 2048x1152(16:9), 1152x2048(9:16)
-    'gpt-image-2': ['1:1', '3:2', '2:3', '16:9', '9:16'],
-    'gpt-image-1': ['1:1', '3:2', '2:3', '16:9', '9:16'],
+    // ===== GPT Image 系列（APIMart/PearAPI官方文档）=====
+    // 官方支持15种比例 + auto自动选择，resolution参数控制分辨率档位（1k/2k/4k）
+    // 参考：https://docs.apimart.ai/cn/api-reference/images/gpt-image-2/generation
+    'gpt-image-2': ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'],
+    'gpt-image-1': ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'],
+    'gpt-image-1-mini': ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'],
+    'gpt-image-1.5': ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'],
+    'chatgpt-image-latest': ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'],
 
     // ===== DALL-E 3 =====
     // 官方: 1024x1024(1:1), 1792x1024(≈16:9), 1024x1792(≈9:16)
@@ -369,10 +373,12 @@ export const MODEL_QUALITIES: Record<string, string[]> = {
 // 将 MODEL_QUALITIES 中的参数按类型拆分，避免概念混淆
 
 /** 模型参数类型枚举 - 保持向后兼容的值命名 */
-export type ModelParamType = 'resolution' | 'quality' | 'none';
+export type ModelParamType = 'resolution' | 'quality' | 'both' | 'none';
 
 /** 分辨率档位型模型（参数值是"1K/2K/4K"，控制输出尺寸） */
 export const RESOLUTION_TIER_MODELS = [
+    // GPT-Image 系列（APIMart/PearAPI支持resolution参数）
+    'gpt-image-2', 'gpt-image-1', 'gpt-image-1-mini', 'gpt-image-1.5', 'chatgpt-image-latest',
     // Seedream 系列
     'doubao-seedream-4-5', 'seedream-4-5', 'doubao-seedream-4', 'seedream-4',
     'doubao-seedream-3', 'seedream-3', 'doubao-seedream-5-0-lite', 'seedream-5-0-lite',
@@ -447,16 +453,48 @@ export const RESOLUTION_TIER_TO_PIXELS: Record<string, number> = {
 export function getModelParamType(modelId: string): ModelParamType {
     const normalizedId = modelId.toLowerCase();
     
-    // 检查是否是分辨率档位型
-    for (const m of RESOLUTION_TIER_MODELS) {
-        if (normalizedId.includes(m.toLowerCase()) || m.toLowerCase().includes(normalizedId)) {
+    // 特殊处理：GPT-Image系列同时支持resolution和quality两种参数
+    // APIMart/PearAPI官方文档明确说明：resolution(1k/2k/4k) + quality(auto/low/medium/high)
+    const gptImageKeywords = ['gpt-image', 'chatgpt-image'];
+    for (const keyword of gptImageKeywords) {
+        if (normalizedId.includes(keyword)) {
+            return 'both';
+        }
+    }
+    
+    // 关键词匹配：分辨率档位型模型（仅支持resolution，不支持quality）
+    // 这些模型的参数值是"1K/2K/3K/4K"，直接控制输出分辨率
+    const resolutionKeywords = [
+        'seedream', 'seedance', 'kling', 'gemini-image', 'imagen', 
+        'nano-banana', 'hidream', 'flux-ultra'
+    ];
+    for (const keyword of resolutionKeywords) {
+        if (normalizedId.includes(keyword)) {
             return 'resolution';
         }
     }
     
-    // 检查是否是质量级别型
+    // 关键词匹配：质量级别型模型（仅支持quality，不支持resolution）
+    // 这些模型的参数值是"standard/hd/auto/low/medium/high"，控制细节增强
+    const qualityKeywords = [
+        'dall-e', 'ideogram', 'stable-diffusion', 
+        'sd-xl', 'sdxl', 'sd-3'
+    ];
+    for (const keyword of qualityKeywords) {
+        if (normalizedId.includes(keyword)) {
+            return 'quality';
+        }
+    }
+    
+    // 回退：检查精确匹配列表（兼容旧代码）
+    for (const m of RESOLUTION_TIER_MODELS) {
+        if (normalizedId === m.toLowerCase()) {
+            return 'resolution';
+        }
+    }
+    
     for (const m of QUALITY_LEVEL_MODELS) {
-        if (normalizedId.includes(m.toLowerCase()) || m.toLowerCase().includes(normalizedId)) {
+        if (normalizedId === m.toLowerCase()) {
             return 'quality';
         }
     }
