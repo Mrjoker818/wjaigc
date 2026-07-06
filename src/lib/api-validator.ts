@@ -302,11 +302,15 @@ export type FieldType = 'imageUrl' | 'optionalImageUrl' | 'videoUrl' | 'optional
   | 'prompt' | 'optionalPrompt' | 'model' | 'url' | 'optionalUrl' | 'string' | 'id';
 
 export function validateApiInputs(
-  body: Record<string, unknown>,
+  body: unknown,
   schema: Record<string, FieldType>
 ): string | null {
+  // 确保 body 是对象
+  if (!body || typeof body !== 'object') return '请求体必须是对象';
+  const bodyObj = body as Record<string, unknown>;
+  
   for (const [field, type] of Object.entries(schema)) {
-    const value = body[field];
+    const value = bodyObj[field];
     
     switch (type) {
       case 'imageUrl': {

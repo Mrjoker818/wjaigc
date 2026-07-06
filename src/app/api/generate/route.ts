@@ -1236,6 +1236,13 @@ export async function POST(request: NextRequest) {
             },
           );
 
+          // ★ FHL等中转站流式返回私有IP URL，非流式返回外部URL
+          // 直接使用非流式请求避免4层降级的60秒延迟
+          if (currentApiBaseUrl.includes('fhl.mom') || currentApiBaseUrl.includes('funai.works')) {
+            payload.stream = false;
+            console.log('[generate] Using non-stream mode for FHL-like provider to avoid private IP URL');
+          }
+
           const respRes = await fetchWithV1Retry(
             currentApiBaseUrl,
             '/v1/responses',

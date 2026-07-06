@@ -757,17 +757,19 @@ export function shouldUseResponsesAPIForProvider(modelId: string, providerBaseUr
   if (process.env.RESPONSES_API_ENABLED === 'false') return false;
   
   // ★ 关键：只有 OpenAI 官方 API 支持 /v1/responses 端点
-  // 第三方供应商（PearAPI/4sapi/虚宝/APImart等）只支持标准 Images API
-  // 判断依据：base URL 是否包含 "api.openai.com" 或 "openai.com"
+  // 判断依据：base URL 是否包含支持的域名
   const normalizedBaseUrl = (providerBaseUrl || '').toLowerCase().trim();
   
-  // OpenAI 官方域名
-  const isOpenAIOfficial = 
+  // 支持 Responses API 的供应商列表
+  // - OpenAI 官方（api.openai.com）
+  // - FHL（fhl.mom）- 使用 /v1/responses 端点，不支持标准 Images API
+  const supportsResponsesAPI = 
     normalizedBaseUrl.includes('api.openai.com') ||
-    normalizedBaseUrl.includes('openai.com');
+    normalizedBaseUrl.includes('openai.com') ||
+    normalizedBaseUrl.includes('fhl.mom');
   
-  if (!isOpenAIOfficial) {
-    // 第三方供应商不支持 Responses API，返回 false
+  if (!supportsResponsesAPI) {
+    // 其他供应商不支持 Responses API，使用标准 Images API
     return false;
   }
   

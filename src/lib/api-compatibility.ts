@@ -157,6 +157,25 @@ export const PROFILE_PEARAPI: ApiCompatProfile = {
 };
 
 /**
+ * 虚宝图像 - OpenAI兼容中转站
+ * - 使用宽高比格式 (如 "1:1", "16:9")
+ * - 直接返回图片URL/base64
+ * - 使用 /images/generations 和 /images/edits 端点
+ */
+export const PROFILE_RUSTCAT: ApiCompatProfile = {
+  id: 'rustcat',
+  label: '虚宝图像 (宽高比格式)',
+  responseMode: 'direct',
+  sizeFormat: 'aspect-ratio',
+  defaultEndpoint: '/images/generations',
+  editEndpoint: '/images/edits',
+  editEncoding: 'json-first',
+  supportsInputFidelity: false,
+  pollMode: 'none',
+  pollPathTemplate: '',
+};
+
+/**
  * OpenAI-compatible providers that use async task_id (some proxies).
  * - Requires pixel size format
  * - Returns task_id for polling
@@ -225,6 +244,7 @@ export const COMPAT_PROFILES: Record<string, ApiCompatProfile> = {
   [PROFILE_AUTO.id]: PROFILE_AUTO,
   [PROFILE_GEMINI_IMAGE.id]: PROFILE_GEMINI_IMAGE,
   [PROFILE_PEARAPI.id]: PROFILE_PEARAPI,
+  [PROFILE_RUSTCAT.id]: PROFILE_RUSTCAT,
 };
 
 // ---------------------------------------------------------------------------
@@ -243,7 +263,7 @@ const URL_PROFILE_RULES: Array<{ pattern: RegExp; profile: ApiCompatProfile }> =
   { pattern: /tokln\.com/i,               profile: PROFILE_OPENAI },   // token link: OpenAI-compatible direct response, pixel size format
   { pattern: /4sapi\.com/i,               profile: PROFILE_OPENAI },   // 4SAPI: 标准OpenAI兼容中转，参考官方文档替换api.openai.com即可
   { pattern: /302\.ai|302ai/i,            profile: PROFILE_OPENAI },   // 302.AI: 标准OpenAI兼容中转，替换api.openai.com为api.302.ai即可
-  { pattern: /rust\.cat/i,                profile: PROFILE_OPENAI },   // 虚宝图像: 标准OpenAI兼容，使用/v1/images/generations和/v1/images/edits
+  { pattern: /rust\.cat/i,                profile: PROFILE_RUSTCAT },  // 虚宝图像: 使用宽高比格式，直接返回图片
   { pattern: /fhl\.mom/i,                 profile: PROFILE_OPENAI },   // FHL图像: /images/generations返回502/503，自动降级到/chat/completions
 ];
 

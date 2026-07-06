@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { validateApiInputs } from '@/lib/api-validator';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 600;
@@ -54,7 +55,9 @@ async function forwardJson(request: NextRequest, path: string, body: Record<stri
 }
 
 export async function POST(request: NextRequest) {
-  let payload: any = {};
+  const auth = await requireApiAuthOrReject(request);
+  if (auth instanceof NextResponse) return auth;
+  let payload: CreativeRequest = {};
   try {
     const text = await request.text();
     payload = text ? (JSON.parse(text) as CreativeRequest) : {};
@@ -62,14 +65,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: '请求体 JSON 解析失败。' }, { status: 400 });
   }
   // 输入校验
-  const _validationError = validateApiInputs(payload, {
+  const _validationError = validateApiInputs(payload as Record<string, unknown>, {
     prompt: 'optionalPrompt',
     image: 'optionalImageUrl',
   });
   if (_validationError) {
     return NextResponse.json({ success: false, error: _validationError }, { status: 400 });
   }
-  const { imageUrl } = payload;
   const action: string = payload.action || 'generate_from_canvas';
   if (!action) {
     return NextResponse.json({ success: false, error: '缺少 action 参数。' }, { status: 400 });
