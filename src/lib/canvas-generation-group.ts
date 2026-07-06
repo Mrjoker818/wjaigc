@@ -365,7 +365,62 @@ export const MODEL_QUALITIES: Record<string, string[]> = {
     'nano-banana-pro-4k': ['1K', '2K', '4K'],
 };
 
-/** 质量档位到显示名称的映射 */
+// ===== 方案A：参数类型分离 =====
+// 将 MODEL_QUALITIES 中的参数按类型拆分，避免概念混淆
+
+/** 模型参数类型枚举 - 保持向后兼容的值命名 */
+export type ModelParamType = 'resolution' | 'quality' | 'none';
+
+/** 分辨率档位型模型（参数值是"1K/2K/4K"，控制输出尺寸） */
+export const RESOLUTION_TIER_MODELS = [
+    // Seedream 系列
+    'doubao-seedream-4-5', 'seedream-4-5', 'doubao-seedream-4', 'seedream-4',
+    'doubao-seedream-3', 'seedream-3', 'doubao-seedream-5-0-lite', 'seedream-5-0-lite',
+    'doubao-seedream-5-0', 'seedream-5', 'doubao-seedance-4-5', 'seedance',
+    // Gemini/Imagen 系列
+    'gemini-2.5-flash-image', 'gemini-2.5-pro-image', 'gemini-3-flash-image',
+    'gemini-3-pro-image', 'gemini-3.1-flash-image', 'gemini-3.1-flash-image-preview',
+    'imagen-3', 'imagen-4', 'imagen-4-ultra',
+    // Kling 系列
+    'kling-v3', 'kling-v3-omni', 'kling',
+    // HiDream
+    'hidream',
+    // PearAPI Nano Banana 系列
+    'nano-banana', 'nano-banana-2', 'nano-banana-2-4k', 'nano-banana-pro', 'nano-banana-pro-4k',
+] as const;
+
+/** 质量级别型模型（参数值是"standard/hd/auto/low/medium/high"，控制细节增强） */
+export const QUALITY_LEVEL_MODELS = [
+    // GPT-Image 系列
+    'gpt-image-2', 'gpt-image-1', 'gpt-image-2-c',
+    // DALL-E 3
+    'dall-e-3',
+    // Ideogram
+    'ideogram', 'ideogram-3',
+    // Stable Diffusion (非官方，部分代理支持)
+    'stable-diffusion', 'sd-xl', 'sdxl', 'sd-3',
+] as const;
+
+/** 分辨率档位到显示名称的映射 */
+export const RESOLUTION_TIER_DISPLAY_NAMES: Record<string, string> = {
+    '1K': '1K (1024档)',
+    '2K': '2K (2048档)',
+    '3K': '3K (3072档)',
+    '4K': '4K (4096档)',
+};
+
+/** 质量级别到显示名称的映射 */
+export const QUALITY_LEVEL_DISPLAY_NAMES: Record<string, string> = {
+    'auto': '自动',
+    'low': '低质量',
+    'medium': '中等质量',
+    'high': '高质量',
+    'standard': '标准',
+    'hd': '高清增强',
+    'quality': '高质量',
+};
+
+/** 综合显示名称（兼容旧接口） */
 export const QUALITY_DISPLAY_NAMES: Record<string, string> = {
     'auto': '自动',
     'low': '低',
@@ -379,6 +434,60 @@ export const QUALITY_DISPLAY_NAMES: Record<string, string> = {
     '3K': '3K',
     '4K': '4K',
 };
+
+/** 分辨率档位对应的像素长边（用于尺寸计算） */
+export const RESOLUTION_TIER_TO_PIXELS: Record<string, number> = {
+    '1K': 1024,
+    '2K': 2048,
+    '3K': 3072,
+    '4K': 4096,
+};
+
+/** 判断模型的参数类型 */
+export function getModelParamType(modelId: string): ModelParamType {
+    const normalizedId = modelId.toLowerCase();
+    
+    // 检查是否是分辨率档位型
+    for (const m of RESOLUTION_TIER_MODELS) {
+        if (normalizedId.includes(m.toLowerCase()) || m.toLowerCase().includes(normalizedId)) {
+            return 'resolution';
+        }
+    }
+    
+    // 检查是否是质量级别型
+    for (const m of QUALITY_LEVEL_MODELS) {
+        if (normalizedId.includes(m.toLowerCase()) || m.toLowerCase().includes(normalizedId)) {
+            return 'quality';
+        }
+    }
+    
+    return 'none';
+}
+
+/** 获取模型支持的分辨率档位选项 */
+export function getResolutionTierOptions(modelId: string): string[] {
+    return MODEL_QUALITIES[modelId] || [];
+}
+
+/** 获取模型支持的质量级别选项 */
+export function getQualityLevelOptions(modelId: string): string[] {
+    return MODEL_QUALITIES[modelId] || [];
+}
+
+/** 综合获取模型的"质量"选项（兼容旧接口） */
+export function getQualityOptions(modelId: string): string[] {
+    return MODEL_QUALITIES[modelId] || [];
+}
+
+/** 判断值是否是分辨率档位 */
+export function isResolutionTier(value: string): boolean {
+    return ['1K', '2K', '3K', '4K'].includes(value);
+}
+
+/** 判断值是否是质量级别 */
+export function isQualityLevel(value: string): boolean {
+    return ['auto', 'low', 'medium', 'high', 'standard', 'hd', 'quality'].includes(value);
+}
 
 /** 各模型质量/分辨率对应的实际像素尺寸 */
 export const QUALITY_TO_SIZE: Record<string, Record<string, string>> = {

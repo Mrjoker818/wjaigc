@@ -224,7 +224,7 @@ export async function eraseWithLama(
         width: outputMeta.width || imageWidth,
         height: outputMeta.height || imageHeight,
       },
-      engine: `iopaint-${validModel}`,
+      engine: `iopaint-cv2-telea`,
     };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);

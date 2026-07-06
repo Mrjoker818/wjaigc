@@ -21,6 +21,7 @@ import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile,
 import { registerTask, updateTaskProgress, isTaskCancelled, getTaskInfo } from '@/lib/task-registry';
 import { persistRemoteImage } from '@/lib/s3-storage';
 import { calculateActualPixelsFromRatio } from '@/lib/calculate-pixels';
+import { RESOLUTION_TIER_MODELS, QUALITY_LEVEL_MODELS, getModelParamType, ModelParamType } from '@/lib/canvas-generation-group';
 
 // 直接模式（OpenAI兼容API返回图片需60-120秒）
 // 异步模式（返回task_id只需几秒）两者共存，取较大值
@@ -38,8 +39,8 @@ export const dynamic = 'force-dynamic';
 interface ModelConfig {
   name: string;
   modelId: string;
-  // 参数类型: resolution=分辨率(1K/2K/4K), quality=质量(auto/low/medium/high), none=不支持
-  paramType: 'resolution' | 'quality' | 'none';
+  // 参数类型: resolution=分辨率档位(1K/2K/4K), quality=质量级别(auto/low/medium/high), none=不支持
+  paramType: ModelParamType;
   // 该模型支持的尺寸列表（空数组表示支持所有通用尺寸）
   supportedSizes: string[];
   // 是否支持图生图
@@ -62,16 +63,10 @@ const COMMON_SIZES = ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9']
 function inferModelConfig(modelId: string, profile: ApiCompatProfile, providerName?: string): ModelConfig {
   const id = (modelId || '').toLowerCase();
 
-  // 根据模型名称关键词推断参数类型
-  // 大多数现代图像模型都支持分辨率参数，默认使用 resolution
-  // 仅对明确使用 quality 参数的模型设置 quality，对极少数不支持任何参数的模型设置 none
-  let paramType: ModelConfig['paramType'] = 'resolution';
-  if (id.includes('gpt-image') || id.includes('dall-e')) {
-    // OpenAI 系列：使用 quality 参数 (standard/hd/auto/low/medium/high)
-    paramType = 'quality';
-  }
-  // 以下模型虽然也支持分辨率，但关键词匹配已覆盖，无需额外处理：
-  // gemini / seedream / doubao / flux / nano-banana — 均使用 resolution（默认值）
+  // ★ 使用核心配置中的模型列表判断参数类型（保持与 UI 一致）
+  // 核心改进：不再简单依赖关键词匹配，而是使用规范化的模型能力表
+  const paramTypeFromConfig = getModelParamType(modelId);
+  let paramType: ModelConfig['paramType'] = paramTypeFromConfig;
 
   // 根据模型名称推断是否支持图生图
   // 大多数现代图像模型都支持图生图，只有极少数纯文生图模型不支持

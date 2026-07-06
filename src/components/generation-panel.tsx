@@ -10,7 +10,7 @@ import { UserManager as UserManagerCore } from '@/lib/user-manager';
 import { ThirdPartyModelDialog } from '@/components/third-party-model-dialog';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import { getPromptTemplates, PromptTemplate, searchTemplates } from '@/lib/prompt-templates';
-import { MODEL_ASPECT_RATIOS as SHARED_MODEL_ASPECT_RATIOS, MODEL_QUALITIES as SHARED_MODEL_QUALITIES, QUALITY_DISPLAY_NAMES as SHARED_QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE as SHARED_QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS as SHARED_ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS as SHARED_DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES as SHARED_DEFAULT_QUALITIES, findModelConfig as sharedFindModelConfig, calculateActualPixels as sharedCalculateActualPixels } from '@/lib/canvas-generation-group';
+import { MODEL_ASPECT_RATIOS as SHARED_MODEL_ASPECT_RATIOS, MODEL_QUALITIES as SHARED_MODEL_QUALITIES, QUALITY_DISPLAY_NAMES as SHARED_QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE as SHARED_QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS as SHARED_ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS as SHARED_DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES as SHARED_DEFAULT_QUALITIES, findModelConfig as sharedFindModelConfig, calculateActualPixels as sharedCalculateActualPixels, ModelParamType, getModelParamType, RESOLUTION_TIER_DISPLAY_NAMES, QUALITY_LEVEL_DISPLAY_NAMES, RESOLUTION_TIER_MODELS, QUALITY_LEVEL_MODELS } from '@/lib/canvas-generation-group';
 
 export interface GenerationParams {
     prompt: string;
@@ -1664,10 +1664,10 @@ export function GenerationPanel(
                     </div>
                 </div>
 
-                {/* 图片质量 */}
+                {/* 输出参数：根据模型类型显示分辨率档位或质量级别 */}
                 {getSupportedQualities().length > 1 && (
                     <div className="space-y-1">
-                        <label className={stl}>{dot}图片质量</label>
+                        <label className={stl}>{dot}{getModelParamType(model.includes('::') ? model.split('::').pop()! : model) === 'resolution' ? '输出分辨率' : '生成质量'}</label>
                         <div className="grid grid-cols-4 gap-1.5">
                             {getSupportedQualities().map(q => (
                                 <button
@@ -1677,17 +1677,25 @@ export function GenerationPanel(
                                 >
                                     <div className="flex flex-col items-center leading-none">
                                         <span className="text-xs">
-                                            {q === 'auto' ? '自动' : 
-                                             q === 'low' ? '快速' : 
-                                             q === 'medium' ? '中等' : 
-                                             q === 'standard' ? '标准' : 
-                                             q === 'high' ? '高清' : 
-                                             q === 'hd' ? '高清' : 
-                                             q === 'ultra' ? '超清' : q}
+                                            {/* 分辨率档位显示 */}
+                                            {getModelParamType(model.includes('::') ? model.split('::').pop()! : model) === 'resolution'
+                                              ? (RESOLUTION_TIER_DISPLAY_NAMES[q] || q)
+                                              : /* 质量级别显示 */
+                                              (q === 'auto' ? '自动' : 
+                                               q === 'low' ? '快速' : 
+                                               q === 'medium' ? '中等' : 
+                                               q === 'standard' ? '标准' : 
+                                               q === 'high' ? '高清' : 
+                                               q === 'hd' ? '高清' : 
+                                               q === 'ultra' ? '超清' : 
+                                               (QUALITY_LEVEL_DISPLAY_NAMES[q] || q))}
                                         </span>
-                                        <span className="text-xs opacity-40 mt-0.5">
-                                            {getQualitySizeHint(q)}
-                                        </span>
+                                        {/* 仅质量级别显示像素提示，分辨率档位不显示 */}
+                                        {getModelParamType(model.includes('::') ? model.split('::').pop()! : model) === 'quality' && (
+                                          <span className="text-xs opacity-40 mt-0.5">
+                                              {getQualitySizeHint(q)}
+                                          </span>
+                                        )}
                                     </div>
                                 </button>
                             ))}
