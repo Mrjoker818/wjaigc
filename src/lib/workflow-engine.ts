@@ -11,21 +11,10 @@
  * - 节点自动布局
  */
 
-import { MODEL_QUALITIES, QUALITY_TO_SIZE, MODEL_ASPECT_RATIOS, calculateActualPixels } from './canvas-generation-group';
+import { MODEL_QUALITIES, QUALITY_TO_SIZE, MODEL_ASPECT_RATIOS, SHARED_ASPECT_RATIOS, calculateActualPixels } from './canvas-generation-group';
 
-/** 通用宽高比选项（用于节点字段定义） */
-const SHARED_ASPECT_RATIOS = [
-  { label: '1:1 (正方形)', value: '1:1' },
-  { label: '4:3 (横向)', value: '4:3' },
-  { label: '3:4 (纵向)', value: '3:4' },
-  { label: '16:9 (宽屏)', value: '16:9' },
-  { label: '9:16 (竖屏)', value: '9:16' },
-  { label: '3:2 (横向)', value: '3:2' },
-  { label: '2:3 (纵向)', value: '2:3' },
-  { label: '4:5 (纵向)', value: '4:5' },
-  { label: '5:4 (横向)', value: '5:4' },
-  { label: '21:9 (超宽)', value: '21:9' },
-];
+/** getModelParamType: 判断模型的参数类型（resolution/quality/both/none） */
+import { getModelParamType } from './canvas-generation-group';
 
 // ==================== 节点类型 ====================
 
@@ -1315,19 +1304,34 @@ export function buildNodeExecutionRequest(
     case 'ai-generate': {
       const aspectRatio = (config.aspectRatio as string) || '1:1';
       const quality = (config.quality as string) || '1K';
+      const resolution = (config.resolution as string) || '2K'; // GPT-Image分辨率档位
       const modelId = (config.model as string) || '';
+      const pureModelId = modelId.includes('::') ? modelId.split('::')[1] : modelId;
+      const paramType = getModelParamType(pureModelId);
+      
       // 使用模型专用像素映射计算实际尺寸
       const actualSize = calculateActualPixels(aspectRatio, quality, modelId);
       const body: Record<string, unknown> = {
         prompt: config.prompt || config.textContent || config.text || '',
         negativePrompt: config.negativePrompt || '',
         model: modelId,
-        quality,
         aspectRatio,
         size: actualSize || '1024x1024',
         outputCount: config.n || 1,
         seed: config.seed || -1,
       };
+      
+      // 根据参数类型传递正确的参数
+      if (paramType === 'resolution') {
+        body.resolution = quality; // 分辨率档位模型：quality字段存储分辨率值
+      } else if (paramType === 'quality') {
+        body.quality = quality; // 质量级别模型
+      } else if (paramType === 'both') {
+        body.resolution = resolution; // GPT-Image系列：分辨率档位
+        body.quality = quality; // 同时传递质量参数
+      }
+      // paramType === 'none' 时不传递额外参数
+      
       // 传递 providerId 以确保后端精确匹配用户选择的提供商
       if (config.providerId) body.providerId = config.providerId;
       // 图生图：当有图片输入时，添加参考图参数（与画布模式img2img一致）

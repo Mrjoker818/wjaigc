@@ -455,6 +455,32 @@ export const RESOLUTION_TIER_TO_PIXELS: Record<string, number> = {
     '4K': 4096,
 };
 
+/** 通用画面比例选项数组（合并所有模型支持的常见比例，用于节点编辑器等通用场景） */
+export const SHARED_ASPECT_RATIOS = [
+    { label: '自动选择', value: 'auto' },
+    { label: '1:1 (正方形)', value: '1:1' },
+    { label: '4:3 (横向)', value: '4:3' },
+    { label: '3:4 (竖向)', value: '3:4' },
+    { label: '16:9 (宽屏)', value: '16:9' },
+    { label: '9:16 (竖屏)', value: '9:16' },
+    { label: '3:2 (横向)', value: '3:2' },
+    { label: '2:3 (竖向)', value: '2:3' },
+    { label: '21:9 (超宽)', value: '21:9' },
+    { label: '9:21 (超竖)', value: '9:21' },
+    { label: '5:4 (横向)', value: '5:4' },
+    { label: '4:5 (竖向)', value: '4:5' },
+    { label: '2:1 (横向)', value: '2:1' },
+    { label: '1:2 (竖向)', value: '1:2' },
+    { label: '3:1 (横向)', value: '3:1' },
+    { label: '1:3 (竖向)', value: '1:3' },
+    { label: '3:5 (横向)', value: '3:5' },
+    { label: '5:3 (竖向)', value: '5:3' },
+    { label: '4:7 (横向)', value: '4:7' },
+    { label: '7:4 (竖向)', value: '7:4' },
+    { label: '4:9 (横向)', value: '4:9' },
+    { label: '9:4 (竖向)', value: '9:4' },
+];
+
 /** 判断模型的参数类型 */
 export function getModelParamType(modelId: string): ModelParamType {
     const normalizedId = modelId.toLowerCase();
