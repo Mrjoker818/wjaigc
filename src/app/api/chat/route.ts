@@ -319,16 +319,65 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: apiErrMsg }, { status: response.status });
     }
 
-    // Stream: forward directly
+    // Stream: forward directly (with APImart-style wrapper unwrapping)
     if (stream && response.body) {
       await appendUserJsonl(userId, 'chat', { model, providerId, messageCount: messages.length, stream: true });
-      return new NextResponse(response.body, {
+      const { readable, writable } = new TransformStream();
+      const reader = response.body.getReader();
+      const writer = writable.getWriter();
+      const decoder = new TextDecoder();
+      const encoder = new TextEncoder();
+      let sseBuffer = '';
+      // Unwrap SSE data: lines if {"code":200,"data":{...}} with no choices, re-emit data.data
+      (async () => {
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            const chunk = decoder.decode(value, { stream: true });
+            sseBuffer += chunk;
+            const lines = sseBuffer.split('\n');
+            if (!chunk.endsWith('\n')) sseBuffer = lines.pop() || ''; else sseBuffer = '';
+            for (const line of lines) {
+              let outLine = line;
+              if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+                try {
+                  const parsed = JSON.parse(line.slice(6));
+                  if (parsed && typeof parsed === 'object' && 'code' in parsed && 'data' in parsed && parsed.data && !parsed.choices) {
+                    outLine = 'data: ' + JSON.stringify(parsed.data);
+                  }
+                } catch { /* not JSON, passthrough */ }
+              }
+              await writer.write(encoder.encode(outLine + '\n'));
+            }
+          }
+          if (sseBuffer) {
+            let outLine = sseBuffer;
+            if (sseBuffer.startsWith('data: ') && sseBuffer !== 'data: [DONE]') {
+              try {
+                const parsed = JSON.parse(sseBuffer.slice(6));
+                if (parsed && typeof parsed === 'object' && 'code' in parsed && 'data' in parsed && parsed.data && !parsed.choices) {
+                  outLine = 'data: ' + JSON.stringify(parsed.data);
+                }
+              } catch { /* passthrough */ }
+            }
+            await writer.write(encoder.encode(outLine));
+          }
+        } finally {
+          await writer.close();
+        }
+      })();
+      return new NextResponse(readable, {
         headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
       });
     }
 
     // Non-stream
-    const data = await response.json();
+    const rawData = await response.json();
+    // Unwrap APImart-style wrapper: {code:200, data:{...OpenAI格式}}
+    const data = (rawData && typeof rawData === 'object' && 'code' in rawData && 'data' in rawData && rawData.data && !rawData.choices)
+      ? rawData.data
+      : rawData;
     
     // Handle tool_calls in non-stream mode
     if (effectiveEnableTools && data.choices?.[0]?.message?.tool_calls) {

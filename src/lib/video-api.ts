@@ -13,6 +13,7 @@ export type VideoCompatProfile =
   | 'vidu'            // Vidu自有协议
   | 'openai-video'    // OpenAI /v1/videos (Sora等)
   | 'fal-video'       // fal.ai托管 (Pika等)
+  | 'apimart-video'   // APImart /api-b /v1/videos/generations (VEO3/Sora2等)
   | 'rest-generic'    // 通用REST (Runway/Luma/Google等)
   | 'custom';         // 管理员自定义
 
@@ -245,6 +246,31 @@ const VIDEO_MODEL_REGISTRY: Record<string, VideoModelInfo> = {
     profile: 'rest-generic', name: 'Google Veo 2', short: 'Veo 2', provider: 'Google',
     features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 8, durations: [4, 8], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'], region: 'global' },
   },
+  // ==== APImart 视频模型 ====
+  'veo3.1-fast': {
+    profile: 'apimart-video', name: 'Veo 3.1 Fast (APImart)', short: 'Veo3.1F', provider: 'Google/APImart',
+    features: { firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false, audio: true, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 8, durations: [8], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'], region: 'global' },
+  },
+  'veo3.1-quality': {
+    profile: 'apimart-video', name: 'Veo 3.1 Quality (APImart)', short: 'Veo3.1Q', provider: 'Google/APImart',
+    features: { firstLastFrame: false, multiReference: true, videoEdit: false, videoExtend: false, audio: true, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 8, durations: [8], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p','4K'], region: 'global' },
+  },
+  'veo3.1-lite': {
+    profile: 'apimart-video', name: 'Veo 3.1 Lite (APImart)', short: 'Veo3.1L', provider: 'Google/APImart',
+    features: { firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false, audio: true, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 8, durations: [8], ratios: ['16:9','9:16','1:1'], resolutions: ['720p'], region: 'global' },
+  },
+  'sora-2': {
+    profile: 'apimart-video', name: 'Sora 2 (APImart)', short: 'Sora2', provider: 'OpenAI/APImart',
+    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: true, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 20, durations: [5,10,15,20], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'], region: 'global' },
+  },
+  'minimax-hailuo-02': {
+    profile: 'apimart-video', name: 'MiniMax Hailuo 02 (APImart)', short: 'Hailuo02', provider: 'MiniMax/APImart',
+    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: true, cameraControl: true, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5,10], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'], region: 'global' },
+  },
+  'wan2.5-video': {
+    profile: 'apimart-video', name: 'Wan2.5 Video (APImart)', short: 'Wan2.5V', provider: 'Wan/APImart',
+    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 8, durations: [5,8], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'], region: 'global' },
+  },
 };
 
 /**
@@ -379,6 +405,7 @@ export function resolveVideoCompatProfile(
     if (urlLower.includes('vidu')) return 'vidu';
     if (urlLower.includes('fal.run')) return 'fal-video';
     if (urlLower.includes('openai')) return 'openai-video';
+    if (urlLower.includes('apib.ai') || urlLower.includes('apimart')) return 'apimart-video';
     // If baseUrl does NOT match any official API domain, it's a third-party proxy
     // → use rest-generic (OpenAI-compatible format) regardless of model name
     if (!urlLower.includes('volcengine') && !urlLower.includes('ark') &&
@@ -428,6 +455,8 @@ export function buildVideoSubmitRequest(
       return buildOpenAIVideoSubmit(baseUrl, apiKey, params);
     case 'fal-video':
       return buildFalVideoSubmit(baseUrl, apiKey, params);
+    case 'apimart-video':
+      return buildApiMartVideoSubmit(baseUrl, apiKey, params);
     case 'rest-generic':
     default:
       return buildRestGenericSubmit(baseUrl, apiKey, params);
@@ -479,6 +508,16 @@ export function parseVideoSubmitResponse(
         status: 'submitted',
         estimatedTime: 90,
       };
+    case 'apimart-video': {
+      // APImart: {code:200, data:[{status:"submitted", task_id:"xxx"}]}
+      const items = data?.data;
+      const item = Array.isArray(items) ? items[0] : items;
+      return {
+        taskId: item?.task_id || item?.id || data?.task_id || '',
+        status: 'submitted',
+        estimatedTime: 240,
+      };
+    }
     case 'rest-generic':
     default: {
       // 检查是否同步返回结果（第三方API可能直接返回视频URL）
@@ -566,6 +605,12 @@ export function buildVideoPollRequest(
         headers: { 'Authorization': `Key ${apiKey}` },
         method: 'GET',
       };
+    case 'apimart-video':
+      return {
+        url: `${cleanBaseUrl}/v1/tasks/${taskId}`,
+        headers: { 'Authorization': `Bearer ${apiKey}` },
+        method: 'GET',
+      };
     case 'rest-generic':
     default: {
       // 支持自定义轮询端点（通过advancedParams.pollEndpoint指定）
@@ -621,6 +666,8 @@ export function parseVideoPollResponse(
       return parseOpenAIVideoPoll(data);
     case 'fal-video':
       return parseFalVideoPoll(data);
+    case 'apimart-video':
+      return parseApiMartVideoPoll(data);
     case 'rest-generic':
     default:
       return parseRestGenericPoll(data);
@@ -954,6 +1001,92 @@ function buildRestGenericSubmit(baseUrl: string, apiKey: string, params: VideoGe
   };
 }
 
+/** APImart videos/generations submit (per docs.apib.ai).
+ * POST /v1/videos/generations
+ * Fields: model, prompt, n(optional), aspect_ratio, duration, image_urls[], negative_prompt,
+ *         resolution(720p/1080p/4k), generation_type(frame=文生视频/reference=图生视频), seed
+ * Response: {code:200, data:[{status:"submitted", task_id}]}
+ */
+function buildApiMartVideoSubmit(baseUrl: string, apiKey: string, params: VideoGenerateParams) {
+  const cleanBase = ensureBaseUrl(baseUrl);
+  const imageUrls: string[] = [];
+  if (params.imageUrl) imageUrls.push(params.imageUrl);
+  if (params.lastFrameImageUrl) imageUrls.push(params.lastFrameImageUrl);
+  if (params.referenceImages?.length) imageUrls.push(...params.referenceImages);
+
+  // Map resolution: duration/quality → 720p/1080p/4k (default 1080p)
+  let resolution = '1080p';
+  if (params.mode === 'pro') resolution = '4k';
+  const advRes = params.advancedParams?.resolution;
+  if (advRes) resolution = advRes;
+
+  const body: Record<string, any> = {
+    model: params.model,
+    prompt: params.prompt,
+    n: 1,
+    generation_type: imageUrls.length > 0 ? 'reference' : 'frame',
+    ...(imageUrls.length > 0 ? { image_urls: imageUrls } : {}),
+    ...(params.aspectRatio ? { aspect_ratio: params.aspectRatio } : {}),
+    ...(params.duration ? { duration: params.duration } : {}),
+    resolution,
+    ...(params.negativePrompt ? { negative_prompt: params.negativePrompt } : {}),
+    ...(params.seed !== undefined ? { seed: params.seed } : {}),
+  };
+
+  return {
+    url: `${cleanBase}/v1/videos/generations`,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
+    method: 'POST',
+  };
+}
+
+/** Parse APImart video poll response.
+ * GET /v1/tasks/{id}
+ * Response: {code:200, data:{id, status, progress(0-100), result:{videos:[{url:[...URLs]}]}, error:{code,message}}}
+ */
+function parseApiMartVideoPoll(data: any): VideoTaskPollResult {
+  const inner = data?.data;
+  const item = Array.isArray(inner) ? inner[0] : inner;
+  const status = (item?.status || data?.status || '').toLowerCase();
+
+  if (status === 'succeeded' || status === 'completed' || status === 'success' || status === 'done') {
+    const result = item?.result || item?.results || item?.output || {};
+    const videos = result?.videos || result?.video_results || [];
+    let videoUrl: string | undefined;
+    if (Array.isArray(videos) && videos.length > 0) {
+      const v = videos[0];
+      videoUrl = Array.isArray(v.url) ? v.url[0] : (v.url || v.video_url);
+    }
+    if (!videoUrl) videoUrl = result?.video_url || result?.url || item?.video_url;
+    return {
+      status: 'succeeded',
+      progress: 100,
+      videoUrl,
+      duration: result?.duration,
+      thumbnailUrl: result?.thumbnail_url || result?.cover_url,
+    };
+  }
+  if (status === 'failed' || status === 'error' || status === 'cancelled') {
+    return {
+      status: 'failed',
+      error: item?.error?.message || item?.fail_reason || data?.error?.message || data?.message || 'Video generation failed',
+    };
+  }
+  if (status === 'running' || status === 'processing' || status === 'in_progress') {
+    const rawProgress = item?.progress ?? data?.progress;
+    const progress = rawProgress != null
+      ? (rawProgress > 1 ? rawProgress : Math.round(rawProgress * 100))
+      : 50;
+    return { status: 'running', progress };
+  }
+  // pending/queued/submitted
+  return { status: 'pending', progress: item?.progress ?? 10 };
+}
+
 /** Convert aspect ratio like "16:9" to approximate pixel size string "1920x1080" */
 export function ratioToSize(ratio: string): string {
   const ratioMap: Record<string, string> = {
@@ -1189,6 +1322,7 @@ export function buildVideoExtendRequest(
     case 'fal-video':
       return buildFalVideoExtend(baseUrl, apiKey, params);
     case 'minimax':
+    case 'apimart-video':
     case 'rest-generic':
     default:
       return buildRestGenericExtend(baseUrl, apiKey, params);
