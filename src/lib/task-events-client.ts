@@ -38,7 +38,17 @@ class TaskEventsClient {
 
     try {
       const base = this.getBaseUrl();
-      this.eventSource = new EventSource(`${base}/api/task-events`);
+      // 从 localStorage 获取当前用户 ID，用于 EventSource 认证（无法携带 header）
+      let userId = '';
+      try {
+        userId = localStorage.getItem('unbounded_ai_current_user') || '';
+      } catch {
+        // localStorage 可能不可用
+      }
+      const url = userId 
+        ? `${base}/api/task-events?userId=${encodeURIComponent(userId)}`
+        : `${base}/api/task-events`;
+      this.eventSource = new EventSource(url);
 
       this.eventSource.onopen = () => {
         this.connected = true;
