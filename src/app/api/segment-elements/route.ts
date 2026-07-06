@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import sharp from 'sharp';
 import { findProviderForFeature, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getServerDataRoot } from '@/lib/server-data-root';
@@ -21,6 +22,7 @@ interface SegmentRequest {
   imageUrl: string;
   mode?: 'auto' | 'semantic' | 'instance' | 'panoptic';
   model?: string;
+  engine?: 'auto' | 'ai' | 'local';
 }
 
 /**
@@ -96,6 +98,26 @@ async function resolveImageToBase64(imageUrl: string): Promise<string | null> {
   }
 }
 
+async function resolveImageBuffer(imageUrl: string): Promise<Buffer | null> {
+  try {
+    if (imageUrl.startsWith('data:')) {
+      const match = imageUrl.match(/^data:[^;]+;base64,(.+)$/);
+      return match ? Buffer.from(match[1], 'base64') : null;
+    }
+    if (imageUrl.startsWith('blob:')) return null;
+    let url = imageUrl;
+    if (imageUrl.startsWith('/')) {
+      url = `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${imageUrl}`;
+    }
+    const resp = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    if (!resp.ok) return null;
+    return Buffer.from(await resp.arrayBuffer());
+  } catch (err) {
+    console.warn('[segment] Could not resolve image buffer:', err instanceof Error ? err.message : String(err));
+    return null;
+  }
+}
+
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
   let deductedCredits = 0;
@@ -112,11 +134,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: _validationError }, { status: 400 });
     }
 
-    const { imageUrl, mode = 'auto' } = body;
+    const { imageUrl, mode = 'auto', engine } = body;
 
     if (!imageUrl) {
       return NextResponse.json({ success: false, error: '缺少 imageUrl' }, { status: 400 });
     }
+
+    // engine 参数：auto/ai/local（默认auto）
+    const engineMode: 'auto' | 'ai' | 'local' =
+      engine === 'local' || engine === 'ai' ? engine : 'auto';
 
     // 积分检查与扣除
     sessionUser = await getSessionUser(request);
@@ -130,13 +156,15 @@ export async function POST(request: NextRequest) {
     }
 
     // 查找管理员配置的分层模型 API
-    const layerProvider = await findProviderForFeature('layer');
-    if (!layerProvider) {
+    const layerProvider = engineMode !== 'local' ? await findProviderForFeature('layer') : null;
+    if (engineMode === 'ai' && !layerProvider) {
       return NextResponse.json({
         success: false,
-        error: '未配置图片分层模型 API。请在管理员系统中添加图片分层模型 API。',
+        error: '未配置图片分层模型 API。请在管理员系统中添加图片分层模型 API，或切换到自动/本地模式。',
       }, { status: 400 });
     }
+
+    if (layerProvider) {
 
     const baseUrl = normalizeApiBaseUrl(layerProvider.baseUrl.replace(/\/+$/, ''));
     const selectedModels = layerProvider.selectedModels || [];
@@ -217,6 +245,7 @@ export async function POST(request: NextRequest) {
               model: modelId,
               providerId: layerProvider.id,
               rawContent: content,
+              engine: 'ai',
             });
           }
         }
@@ -227,6 +256,7 @@ export async function POST(request: NextRequest) {
           model: modelId,
           providerId: layerProvider.id,
           message: '模型返回了空结果',
+          engine: 'ai',
         });
       }
 
@@ -263,15 +293,107 @@ export async function POST(request: NextRequest) {
           layers: data.layers || data.segments || [],
           model: modelId,
           providerId: layerProvider.id,
+          engine: 'ai',
         });
       }
     } catch (e) {
       console.warn('[segment] /segment endpoint failed:', e instanceof Error ? e.message : String(e));
     }
 
+    // AI模式且AI路径全部失败：直接返回错误，不降级
+    if (engineMode === 'ai') {
+      return NextResponse.json({
+        success: false,
+        error: 'AI 元素分层失败，已配置的模型均不可用。请检查API密钥或切换到自动/本地模式。',
+      }, { status: 502 });
+    }
+    } // end if (layerProvider)
+
+    // ─── 本地连通域分层兜底（不依赖任何API） ───
+    try {
+      const sourceBuffer = await resolveImageBuffer(imageUrl);
+      if (sourceBuffer && sourceBuffer.length > 0) {
+        const { data, info } = await sharp(sourceBuffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+        const w = info.width, h = info.height;
+        const visited = new Uint8Array(w * h);
+        const localLayers: Array<{ id: number; name: string; bbox: [number, number, number, number]; pixelCount: number; dominantColor?: [number, number, number] }> = [];
+        const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+        for (let sy = 0; sy < h; sy++) {
+          for (let sx = 0; sx < w; sx++) {
+            const si = (sy * w + sx);
+            if (visited[si]) continue;
+            const sIdx = si * 4;
+            const a = data[sIdx + 3];
+            if (a < 30) { visited[si] = 1; continue; }
+            // BFS连通域
+            const queue: [number, number][] = [[sx, sy]];
+            visited[si] = 1;
+            let minX = sx, maxX = sx, minY = sy, maxY = sy;
+            let cnt = 0;
+            let rSum = 0, gSum = 0, bSum = 0;
+            while (queue.length) {
+              const [cx, cy] = queue.shift()!;
+              const cIdx = (cy * w + cx) * 4;
+              cnt++;
+              rSum += data[cIdx]; gSum += data[cIdx+1]; bSum += data[cIdx+2];
+              if (cx < minX) minX = cx;
+              if (cx > maxX) maxX = cx;
+              if (cy < minY) minY = cy;
+              if (cy > maxY) maxY = cy;
+              for (const [dx, dy] of dirs) {
+                const nx = cx + dx, ny = cy + dy;
+                if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+                const ni = ny * w + nx;
+                if (visited[ni]) continue;
+                const nIdx = ni * 4;
+                if (data[nIdx+3] < 30) { visited[ni] = 1; continue; }
+                // 颜色差阈值判断
+                const dr = data[cIdx] - data[nIdx];
+                const dg = data[cIdx+1] - data[nIdx+1];
+                const db = data[cIdx+2] - data[nIdx+2];
+                if (dr*dr + dg*dg + db*db < 3200) { // ~颜色差 < 56
+                  visited[ni] = 1;
+                  queue.push([nx, ny]);
+                }
+              }
+            }
+            // 过滤噪声点（<0.1%总面积）
+            if (cnt < (w * h) * 0.001) continue;
+            localLayers.push({
+              id: localLayers.length + 1,
+              name: `元素 ${localLayers.length + 1}`,
+              bbox: [minX, minY, maxX, maxY],
+              pixelCount: cnt,
+              dominantColor: [Math.round(rSum/cnt), Math.round(gSum/cnt), Math.round(bSum/cnt)],
+            });
+          }
+        }
+        // 按面积排序，取前10个
+        localLayers.sort((a, b) => b.pixelCount - a.pixelCount);
+        const topLayers = localLayers.slice(0, 10).map((l, i) => ({
+          id: i + 1,
+          name: i === 0 ? '主体/背景' : `元素 ${i + 1}`,
+          type: 'local',
+          bbox: { x: l.bbox[0], y: l.bbox[1], w: l.bbox[2] - l.bbox[0] + 1, h: l.bbox[3] - l.bbox[1] + 1 },
+          pixelCount: l.pixelCount,
+          dominantColor: l.dominantColor ? `rgb(${l.dominantColor[0]},${l.dominantColor[1]},${l.dominantColor[2]})` : undefined,
+        }));
+        return NextResponse.json({
+          success: true,
+          layers: topLayers,
+          model: 'local-connected-component',
+          providerId: 'local',
+          engine: 'local',
+          warning: layerProvider ? 'AI分层失败，已使用本地连通域分层' : undefined,
+        });
+      }
+    } catch (localErr) {
+      console.warn('[segment] local fallback failed:', localErr instanceof Error ? localErr.message : String(localErr));
+    }
+
     return NextResponse.json({
       success: false,
-      error: '分层模型 API 调用失败。请检查 API 配置是否正确。',
+      error: '元素分层失败：AI模型不可用，且本地兜底分层失败。',
     }, { status: 500 });
   } catch (error) {
     const durationMs = Date.now() - startTime;

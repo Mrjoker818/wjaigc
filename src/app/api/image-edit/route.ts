@@ -513,6 +513,7 @@ interface EditRequest {
   upscaleMode?: 'cpu' | 'ai'; // 放大模式: CPU本地 / AI云端
   outputFormat?: 'png' | 'jpg' | 'webp'; // 输出格式
   compression?: number; // 压缩质量 (0-100)
+  engine?: 'auto' | 'ai' | 'local' | 'cpu'; // 引擎选择: 智能自动/云端AI/本地算法
 }
 
 // Helper: submit a task to the images/generations API and return taskId or directUrl
@@ -1657,6 +1658,7 @@ export async function POST(request: NextRequest) {
       originalPrompt = '',
       model: rawModel = 'gemini-2.5-flash-image-preview',
       providerId,
+      engine: enginePref = 'auto',
     } = body;
 
     // 防御性处理：确保 model 是字符串（前端可能误传对象）
@@ -1668,9 +1670,10 @@ export async function POST(request: NextRequest) {
       console.log(`[image-edit] Stripped provider prefix from model: "${rawModel}" → "${modelStr}" (providerId via field: "${providerId || 'none'}")`);
     }
     const effectiveProviderId = providerId || extractedProviderId || '';
+    const engineMode = (enginePref === 'ai' || enginePref === 'local' || enginePref === 'cpu') ? enginePref : 'auto';
 
     // ★ 输入校验
-    if (!action || !['erase', 'mask', 'upscale', 'extend', 'removebg', 'inpaint', 'outpaint'].includes(action)) {
+    if (!action || !['erase', 'mask', 'upscale', 'extend', 'removebg', 'inpaint', 'outpaint', 'remove_background'].includes(action)) {
       return NextResponse.json({ success: false, error: '缺少或无效的 action 参数' }, { status: 400 });
     }
     if (imageUrl) {
@@ -2154,7 +2157,11 @@ export async function POST(request: NextRequest) {
       const origH = body.originalHeight || 512;
       const targetW = targetWidth || origW * scaleVal;
       const targetH = targetHeight || origH * scaleVal;
-      const upscaleMode: 'auto' | 'ai' | 'cpu' = (body.upscaleMode as 'auto' | 'ai' | 'cpu') || 'auto';
+      // engine 参数统一覆盖 upscaleMode：auto/ai/local(→cpu)
+      const upscaleMode: 'auto' | 'ai' | 'cpu' =
+        engineMode === 'ai' ? 'ai'
+        : engineMode === 'local' || engineMode === 'cpu' ? 'cpu'
+        : (body.upscaleMode as 'auto' | 'ai' | 'cpu') || 'auto';
 
       // 本地CPU放大的内部实现（复用原逻辑）
       const runLocalCpuUpscale = async () => {
@@ -2502,6 +2509,7 @@ export async function POST(request: NextRequest) {
       ].join(', ');
 
       let aiSuccess = false;
+      if (engineMode !== 'local') {
       try {
         console.log(`[remove_background] Trying AI path first (${candidateModels.length} models available: ${candidateModels.slice(0,3).map(c=>c.model).join(', ')}...)`);
         const submitResult = await autoTrySubmitImageTask(candidateModels, (m) => ({
@@ -2564,7 +2572,17 @@ export async function POST(request: NextRequest) {
       } catch (bgErr) {
         console.warn('[remove_background] AI remove background failed, falling back to local IOPaint:', bgErr instanceof Error ? bgErr.message : bgErr);
       }
-      
+      } // end if (engineMode !== 'local')
+
+      // engineMode==='ai' 且 AI路径失败：直接返回错误，不降级
+      if (engineMode === 'ai' && !aiSuccess) {
+        logError(OP_ACTIONS.IMAGE_EDIT, new Error(`action:${action} engine:ai 所有AI模型失败`), {
+          userId: sessionUser?.id,
+          model: '',
+        });
+        return NextResponse.json({ error: 'AI 移除背景失败，已配置的模型均不可用。请检查API密钥或切换到本地/自动模式。' }, { status: 502 });
+      }
+
       // ─── AI路径全部失败 → 降级到本地IOPaint RemoveBG ───
       // 本地模型（BiRefNet/u2net/silueta）生成黑白蒙版 → 应用到原图 → 真正透明PNG
       if (LOCAL_AI_ENABLED && !aiSuccess) {

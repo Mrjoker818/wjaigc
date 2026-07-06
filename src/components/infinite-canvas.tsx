@@ -52,6 +52,7 @@ const PsdLayerEditor = lazy(() => import('@/components/psd-editor/PsdLayerEditor
 const AgentEditor = lazy(() => import('@/components/agent-editor').then(m => ({ default: m.AgentEditor })));
 import { computeSnapGuides, findBestSnapOffset, type SnapGuide } from '@/lib/canvas-snap-guides';
 import { type CanvasConnection, type ConnectionRelationType, createAutoConnection, createEditConnection, createImg2ImgConnection, computeConnectionEndpoints, buildConnectionPath, buildArrowHead, RELATION_TYPE_CONFIG, removeConnectionsForImage, getConnectionsForImage } from '@/lib/canvas-connections';
+import { EngineSelectDialog, type EditEngine } from '@/components/engine-select-dialog';
 const BrandEcommercePanel = lazy(() => import('@/components/brand-ecommerce-panel').then(m => ({ default: m.BrandEcommercePanel })));
 const RefineEnginePanel = lazy(() => import('@/components/refine-engine-panel'));
 const FontDesignPanel = lazy(() => import('@/components/font-design-panel'));
@@ -1322,6 +1323,15 @@ export function InfiniteCanvas({
   const [upscalePreset, setUpscalePreset] = useState<'2k' | '4k' | '8k'>('2k');
   const [showUpscalePresetMenu, setShowUpscalePresetMenu] = useState(false);
   const [upscaleMode, setUpscaleMode] = useState<'lossless' | 'ai'>('lossless'); // 无损放大 / AI放大
+  // Engine preference for tools: auto/ai/local (persisted in localStorage)
+  const getEnginePref = (key: string): 'auto' | 'ai' | 'local' => {
+    try { const v = localStorage.getItem(`wujie_engine_${key}`); if (v === 'ai' || v === 'local' || v === 'auto') return v; } catch {}
+    return 'auto';
+  };
+  const [removeBgEngine, setRemoveBgEngine] = useState<'auto' | 'ai' | 'local'>(() => getEnginePref('removebg'));
+  const [upscaleEnginePref, setUpscaleEnginePref] = useState<'auto' | 'ai' | 'local'>(() => getEnginePref('upscale'));
+  const [segmentEnginePref, setSegmentEnginePref] = useState<'auto' | 'ai' | 'local'>(() => getEnginePref('segment'));
+  const [engineDialog, setEngineDialog] = useState<null | 'upscale' | 'removebg' | 'svg' | 'segment'>(null);
   // Actual pixel dimensions of the image being upscaled (loaded from DOM)
   const [upscaleActualW, setUpscaleActualW] = useState(0);
   const [upscaleActualH, setUpscaleActualH] = useState(0);
@@ -6273,26 +6283,23 @@ export function InfiniteCanvas({
     exitEditMode();
     try {
       const modelInfo = getCurrentModel();
-      updateProcessingFrame(placeholderId, { progress: 8, status: upscaleMode === 'lossless' ? '正在提交到云端无损放大...' : '正在提交到 AI 模型...' });
+      // Determine actual engine for upscale from preference
+      const actualEngine: 'auto'|'ai'|'local'|'cpu' = upscaleEnginePref === 'local' ? 'cpu' : (upscaleEnginePref === 'ai' ? 'ai' : 'auto');
+      updateProcessingFrame(placeholderId, { progress: 8, status: actualEngine === 'cpu' ? '正在使用本地 Real-ESRGAN 放大...' : actualEngine === 'ai' ? '正在提交到 AI 模型...' : '正在选择最优放大引擎...' });
       // ★ 放大操作可能耗时较长（如108s），设置5分钟超时与后端直接模式600s对齐
       const upscaleController = new AbortController();
       const upscaleTimeout = setTimeout(() => upscaleController.abort(), 600000); // 10分钟超时，匹配后端maxDuration
       let res: Response;
       try {
-        if (upscaleMode === 'lossless') {
-          // ★ 无损放大：调用 PearAPI /api/photo-enhancer (Real-ESRGAN / SeedVR2)
-          res = await fetch('/api/image/upscale-pro', {
+        if (actualEngine === 'cpu') {
+          // 本地 upscayl：调用 /api/image/upscale (upscayl-node)
+          res = await fetch('/api/image/upscale', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               imageUrl: img.url,
-              model: upMultiplier > 2 ? 'SeedVR2-Upscaler' : 'Real-ESRGAN',
-              face: false,
-              scale: upMultiplier >= 4 ? 4 : 2,
-              targetScale: upMultiplier, // 告知后端用户实际期望的最终倍率（用于8×链式放大）
-              originalWidth: origW,
-              originalHeight: origH,
-              enhanceModel: modelInfo.model, // 精修使用用户当前选择的图像模型
+              scale: upMultiplier,
+              model: upscaylSelectedModel,
             }),
             signal: upscaleController.signal,
           });
@@ -6312,7 +6319,8 @@ export function InfiniteCanvas({
               scale: upMultiplier,
               originalWidth: origW,
               originalHeight: origH,
-              upscaleMode, // "lossless" 或 "ai"
+              upscaleMode: actualEngine === 'ai' ? 'ai' : 'auto',
+              engine: actualEngine,
             }),
             signal: upscaleController.signal,
           });
@@ -6464,8 +6472,17 @@ export function InfiniteCanvas({
     setActiveTool('none');
   }, [selectedImageData, upscalePreset, upscaleMode, upscaleActualW, upscaleActualH, getApiKey, getCurrentModel, pollForResult, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, awaitStableImageUrl, getUpscaleTargetDimensions]);
 
+  // Engine selection helper: if pref saved, run directly; else open dialog
+  const triggerWithEngine = useCallback((tool: 'upscale'|'removebg'|'svg'|'segment', doExecute: (engine: 'auto'|'ai'|'local') => void) => {
+    const pref = getEnginePref(tool);
+    // First time (localStorage empty → default 'auto' is returned, which is valid, run directly)
+    // Always run with the saved pref directly (auto is smart default)
+    doExecute(pref);
+  }, []);
+
   // 1b. Upscale trigger - opens floating control bar
   const handleOpenUpscale = useCallback(() => {
+    triggerWithEngine('upscale', () => {
     const img = getActiveImageData();
     if (!img) return;
     setEditImageId(img.id);
@@ -6496,7 +6513,8 @@ export function InfiniteCanvas({
       else setUpscalePreset('2k');
     };
     imgEl.src = img.url;
-  }, [selectedImageData]);
+    });
+  }, [selectedImageData, triggerWithEngine]);
 
   // 2. REMOVE BACKGROUND - auto, result to the right
   const handleRemoveBackground = useCallback(async () => {
@@ -6523,6 +6541,7 @@ export function InfiniteCanvas({
           model: modelInfo.model,
           providerId: modelInfo.providerId || getCurrentProviderId(),
           removeBgModel: removeBgModelId,
+          engine: removeBgEngine,
         }),
       });
 
@@ -15743,6 +15762,18 @@ export function InfiniteCanvas({
         >
           <GitBranch className="h-4 w-4" />
           <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">{showVersionHistory ? '关闭历史' : '版本历史'}</span>
+        </button>
+
+        <div className={`w-px h-5 mx-1 ${separatorCls} shrink-0`} />
+
+        {/* AI 引擎选择 */}
+        <button
+          onClick={() => setEngineDialog('upscale')}
+          className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
+          title="AI 引擎设置 (放大/去背景/SVG/分层)"
+        >
+          <Settings className="h-4 w-4" />
+          <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">AI引擎设置</span>
         </button>
 
         {/* Generating progress (always visible when active) */}
