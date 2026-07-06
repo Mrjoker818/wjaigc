@@ -1635,7 +1635,7 @@ export function GenerationPanel(
                                 key={ratio}
                                 onClick={() => setAspectRatio(ratio)}
                                 className={`${gridBtnBase} ${aspectRatio === ratio ? gridBtnOn : gridBtnOff}`}
-                                title={getModelSize(ratio)}
+
                             >
                                 <div className="flex flex-col items-center leading-none gap-0.5">
                                     <div
@@ -1657,7 +1657,7 @@ export function GenerationPanel(
                                       }}
                                     />
                                     <span className="text-xs">{ratio}</span>
-                                    <span className="text-[9px] opacity-35">{getModelSize(ratio)}</span>
+                                    {/* 方案A：画面比例不再显示像素尺寸，像素由API根据模型类型和质量参数决定 */}
                                 </div>
                             </button>
                         ))}
@@ -1690,12 +1690,7 @@ export function GenerationPanel(
                                                q === 'ultra' ? '超清' : 
                                                (QUALITY_LEVEL_DISPLAY_NAMES[q] || q))}
                                         </span>
-                                        {/* 仅质量级别显示像素提示，分辨率档位不显示 */}
-                                        {getModelParamType(model.includes('::') ? model.split('::').pop()! : model) === 'quality' && (
-                                          <span className="text-xs opacity-40 mt-0.5">
-                                              {getQualitySizeHint(q)}
-                                          </span>
-                                        )}
+                                        {/* 方案A：质量级别不再显示像素提示，像素由API根据比例和质量自动决定 */}
                                     </div>
                                 </button>
                             ))}
