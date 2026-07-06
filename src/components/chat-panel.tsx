@@ -6092,29 +6092,45 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                     暂无可用模型
                   </div>
                 ) : (
-                  discoveredImageModels.map((m) => (
-                    <DropdownMenuItem
-                      key={m.id}
-                      onClick={() => {
-                        setImageModel(m.id);
-                        setImageModelProviderId(m.providerId);
-                        // 同步到localStorage，与图像生成面板共享（保留 quality/aspectRatio）
-                        const modelId = m.id.split('::').pop() || m.id;
-                        let existing: Record<string, unknown> = {};
-                        try { existing = JSON.parse(localStorage.getItem('wujie_selected_model') || '{}'); } catch { existing = {}; }
-                        localStorage.setItem('wujie_selected_model', JSON.stringify({
-                          ...existing,
-                          model: modelId,
-                          modelName: m.name,
-                          apiProvider: m.providerId,
-                        }));
-                      }}
-                      className={`flex items-center gap-2 text-xs ${imageModel === m.id ? (isGold ? 'bg-gold/15 text-gold' : 'bg-blue-50 text-blue-600') : ''} ${isGold ? 'text-white/80 hover:bg-white/5 focus:bg-white/5' : 'text-gray-700 hover:bg-gray-50 focus:bg-gray-50'}`}
-                    >
-                      <ImageIcon size={14} className="opacity-60" />
-                      <span className="truncate">{m.name}</span>
-                    </DropdownMenuItem>
-                  ))
+                  (() => {
+                    // ★ 按供应商分组显示图像模型
+                    const grouped: Record<string, typeof discoveredImageModels> = {};
+                    discoveredImageModels.forEach(m => {
+                      const key = m.provider || '管理员配置';
+                      if (!grouped[key]) grouped[key] = [];
+                      grouped[key].push(m);
+                    });
+                    return Object.entries(grouped).map(([providerName, models]) => (
+                      <div key={providerName}>
+                        <div className={`px-3 py-1.5 text-[10px] font-semibold ${isGold ? 'text-gold-muted/60' : 'text-gray-400'} border-t ${isGold ? 'border-white/5' : 'border-gray-100'} mt-1`}>
+                          {providerName}
+                        </div>
+                        {models.map((m) => (
+                          <DropdownMenuItem
+                            key={m.id}
+                            onClick={() => {
+                              setImageModel(m.id);
+                              setImageModelProviderId(m.providerId);
+                              // 同步到localStorage，与图像生成面板共享（保留 quality/aspectRatio）
+                              const modelId = m.id.split('::').pop() || m.id;
+                              let existing: Record<string, unknown> = {};
+                              try { existing = JSON.parse(localStorage.getItem('wujie_selected_model') || '{}'); } catch { existing = {}; }
+                              localStorage.setItem('wujie_selected_model', JSON.stringify({
+                                ...existing,
+                                model: modelId,
+                                modelName: m.name,
+                                apiProvider: m.providerId,
+                              }));
+                            }}
+                            className={`flex items-center gap-2 text-xs ${imageModel === m.id ? (isGold ? 'bg-gold/15 text-gold' : 'bg-blue-50 text-blue-600') : ''} ${isGold ? 'text-white/80 hover:bg-white/5 focus:bg-white/5' : 'text-gray-700 hover:bg-gray-50 focus:bg-gray-50'}`}
+                          >
+                            <ImageIcon size={14} className="opacity-60" />
+                            <span className="truncate">{m.name}</span>
+                          </DropdownMenuItem>
+                        ))}
+                      </div>
+                    ));
+                  })()
                 )}
               </DropdownMenuContent>
             </DropdownMenu>
