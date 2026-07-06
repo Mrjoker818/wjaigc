@@ -24,18 +24,37 @@ export async function getRequestUser(request: Request | NextRequest): Promise<{
   source: 'cookie' | 'desktop-token' | 'internal';
 } | null> {
   // 1. Internal service request (x-internal-request header) - highest priority
+  // Trust the userId passed in header without database verification (internal service-to-service call)
   const isInternal = request.headers.get('x-internal-request') === 'true';
   const internalUserId = request.headers.get('x-internal-user-id');
+  const internalUserRoleRaw = request.headers.get('x-internal-user-role') || 'user';
+  const internalUserRole: 'user' | 'admin' = internalUserRoleRaw === 'admin' ? 'admin' : 'user';
   if (isInternal && internalUserId) {
-    // Fetch user from database to get full User object
-    try {
-      const user = await getSessionUser(request as NextRequest);
-      if (user && user.id === internalUserId) {
-        return { user, source: 'internal' };
-      }
-    } catch {
-      // Continue with other auth methods
-    }
+    // Directly return authenticated user from internal header (no DB lookup needed)
+    return {
+      user: {
+        id: internalUserId,
+        name: 'internal-user',
+        role: internalUserRole,
+        status: 'active',
+        apiPermissions: {
+          image: true,
+          chat: true,
+          threeD: true,
+          imageEdit: true,
+          vectorize: true,
+          vlm: true,
+          layer: true,
+          video: true,
+          upscaler: true,
+          removebg: true,
+          audio: true,
+        },
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+      source: 'internal',
+    };
   }
 
   // 2. Session cookie
