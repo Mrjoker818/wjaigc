@@ -241,6 +241,7 @@ const URL_PROFILE_RULES: Array<{ pattern: RegExp; profile: ApiCompatProfile }> =
   { pattern: /api\.openai\.com/i,         profile: PROFILE_OPENAI },
   { pattern: /pearapi\.ai/i,              profile: PROFILE_PEARAPI },  // PearAPI: nano-banana models use aspect-ratio format
   { pattern: /tokln\.com/i,               profile: PROFILE_OPENAI },   // token link: OpenAI-compatible direct response, pixel size format
+  { pattern: /4sapi\.com/i,               profile: PROFILE_OPENAI },   // 4SAPI: 标准OpenAI兼容中转，参考官方文档替换api.openai.com即可
 ];
 
 // ---------------------------------------------------------------------------
