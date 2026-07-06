@@ -582,7 +582,7 @@ export async function migrateFileDataToDb(): Promise<void> {
             password_hash: user.passwordHash || user.password_hash || '',
             role: user.role || 'user',
             status: user.status || 'active',
-            api_permissions: user.apiPermissions || user.api_permissions || { image: true, chat: true, threeD: true, imageEdit: true, vectorize: true, layer: true, upscaler: true },
+            api_permissions: user.apiPermissions || user.api_permissions || { image: true, chat: true, threeD: true, imageEdit: true, vectorize: true, layer: true, upscaler: true, removebg: true, audio: true },
             storage_folder: user.storageFolder || user.storage_folder || `data/users/${user.id}`,
             created_at: user.createdAt || user.created_at || Date.now(),
             updated_at: user.updatedAt || user.updated_at || Date.now(),

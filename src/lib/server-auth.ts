@@ -72,6 +72,7 @@ function defaultApiPermissions() {
     layer: true,
     video: true,
     upscaler: true,
+    removebg: true,
     audio: true,
   };
 }

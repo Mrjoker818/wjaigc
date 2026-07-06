@@ -105,13 +105,15 @@ function normalizeBaseUrl(baseUrl: string): string {
   return trimmed;
 }
 
-function modelTypeForProvider(provider: ApiProvider): 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'audio' {
+function modelTypeForProvider(provider: ApiProvider): 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler' | 'removebg' | 'audio' {
   if (provider.modelType === 'chat') return 'chat';
   if (provider.modelType === '3d') return '3d';
   if (provider.modelType === 'vectorize') return 'vectorize';
   if (provider.modelType === 'layer') return 'layer';
   if (provider.modelType === 'video') return 'video';
   if (provider.modelType === 'audio') return 'audio';
+  if (provider.modelType === 'upscaler') return 'upscaler';
+  if (provider.modelType === 'removebg') return 'removebg';
   // VLM type stays as 'vlm' for SVG vectorization pipeline
   if (provider.modelType === 'vlm') return 'vlm';
   // General/universal: default to 'chat' since most models are chat
@@ -122,7 +124,7 @@ function modelTypeForProvider(provider: ApiProvider): 'image' | 'chat' | '3d' | 
   return 'image';
 }
 
-function inferModelType(modelId: string, fallback: 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler' | 'audio'): 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler' | 'audio' {
+function inferModelType(modelId: string, fallback: 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler' | 'removebg' | 'audio'): 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler' | 'removebg' | 'audio' {
   const id = modelId.toLowerCase();
   // 音频/TTS模型关键词匹配 — 必须靠前检查，避免被其他类型误判
   if (
@@ -200,6 +202,14 @@ function inferModelType(modelId: string, fallback: 'image' | 'chat' | '3d' | 've
     id.includes('remacri') || id.includes('ultramix') ||
     id.includes('4x-anime') || id.includes('4x-ultrasharp')
   ) return 'upscaler';
+  // 去背景模型关键词匹配
+  if (
+    id.includes('removebg') || id.includes('remove-bg') || id.includes('rmbg') ||
+    id.includes('birefnet') || id.includes('u2net') || id.includes('isnet') ||
+    id.includes('background-remover') || id.includes('cutout') ||
+    id.includes('matting') || id.includes('background-remove') ||
+    id.includes('remove-background') || id.includes('transparent-bg')
+  ) return 'removebg';
   // 分层模型关键词匹配
   if (id.includes('qwen-image-layered') || id.includes('layer') || id.includes('segment') || id.includes('sam') || id.includes('detection') || id.includes('yolo')) return 'layer';
   // 3D模型关键词匹配
@@ -303,7 +313,7 @@ function normalizeSelectedModels(val: unknown): string[] {
 
 /** Normalize discovered_models from DB: handle JSON string or array */
 function normalizeDiscoveredModels(val: unknown, providerId: string, modelType: string): ModelInfo[] {
-  const validTypes = ['image', 'chat', '3d', 'vectorize', 'layer', 'video', 'vlm', 'upscaler', 'audio'] as const;
+  const validTypes = ['image', 'chat', '3d', 'vectorize', 'layer', 'video', 'vlm', 'upscaler', 'removebg', 'audio'] as const;
   type ModelType = typeof validTypes[number];
   const resolveType = (t: unknown): ModelType => {
     if (typeof t === 'string' && validTypes.includes(t as ModelType)) return t as ModelType;
@@ -533,12 +543,13 @@ export async function discoverModelsForCredentials(
     const models = rawModels
       .map((m: Record<string, unknown>) => formatModel(m, probeProvider))
       .filter((m: ModelInfo) => m.id && (
-        // For general/universal/vectorize/layer/upscaler: show all models (admin picks what they need)
+        // For general/universal/vectorize/layer/upscaler/removebg: show all models (admin picks what they need)
         modelType === 'universal' ||
         modelType === 'general' ||
         modelType === 'vectorize' ||
         modelType === 'layer' ||
         modelType === 'upscaler' ||
+        modelType === 'removebg' ||
         // For image/chat/3d: also show other types so admin can pick cross-type models
         m.type === modelType
       ));
@@ -682,6 +693,23 @@ export async function addApiProvider(input: AddProviderInput): Promise<ApiProvid
       m.id.toLowerCase().includes('segment') ||
       m.id.toLowerCase().includes('sam')
     );
+    provider.selectedModels = matched.length > 0 ? matched.map(m => m.id) : provider.discoveredModels.map(model => model.id);
+  } else if (input.modelType === 'upscaler') {
+    const matched = provider.discoveredModels.filter(m => {
+      const mid = m.id.toLowerCase();
+      return mid.includes('upscaler') || mid.includes('upscale') ||
+        mid.includes('real-esrgan') || mid.includes('realesrgan') ||
+        mid.includes('seedvr') || mid.includes('swinir') ||
+        mid.includes('gfpgan') || mid.includes('esrgan');
+    });
+    provider.selectedModels = matched.length > 0 ? matched.map(m => m.id) : provider.discoveredModels.map(model => model.id);
+  } else if (input.modelType === 'removebg') {
+    const matched = provider.discoveredModels.filter(m => {
+      const mid = m.id.toLowerCase();
+      return mid.includes('removebg') || mid.includes('remove-bg') || mid.includes('rmbg') ||
+        mid.includes('birefnet') || mid.includes('u2net') || mid.includes('isnet') ||
+        mid.includes('background') || mid.includes('matting');
+    });
     provider.selectedModels = matched.length > 0 ? matched.map(m => m.id) : provider.discoveredModels.map(model => model.id);
   } else {
     provider.selectedModels = input.selectedModels?.length ? input.selectedModels : provider.discoveredModels.map(model => model.id);
@@ -865,16 +893,18 @@ export async function findProviderById(providerId: string): Promise<ApiProvider 
 }
 
 /** 根据功能类型查找对应的 API 提供商（矢量化/分层/3D/聊天等） */
-export async function findProviderForFeature(feature: 'vectorize' | 'layer' | '3d' | 'imageEdit' | 'chat' | 'video' | 'vlm' | 'upscaler' | 'audio'): Promise<ApiProvider | null> {
+export async function findProviderForFeature(feature: 'vectorize' | 'layer' | '3d' | 'imageEdit' | 'chat' | 'video' | 'vlm' | 'upscaler' | 'removebg' | 'audio' | 'image'): Promise<ApiProvider | null> {
   const kindMap: Record<string, ApiKind> = {
     vectorize: 'vectorize',
     layer: 'layer',
     '3d': '3d',
     imageEdit: 'image',
+    image: 'image',
     chat: 'chat',
     video: 'video',
     vlm: 'vlm',
     upscaler: 'upscaler',
+    removebg: 'removebg',
     audio: 'audio',
   };
   const kind = kindMap[feature];

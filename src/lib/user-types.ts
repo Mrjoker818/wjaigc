@@ -16,6 +16,7 @@ export interface User {
     layer: boolean;
     video: boolean;
     upscaler: boolean;
+    removebg: boolean;
     audio: boolean;
   };
   storageFolder?: string;

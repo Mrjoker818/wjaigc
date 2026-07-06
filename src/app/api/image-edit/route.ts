@@ -7,7 +7,7 @@ import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { translateApiError } from '@/lib/api-error-translate';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, convertAspectRatioToSize, buildPollUrl, isEditsEndpointRejected, stripEditsOnlyFields, type ApiCompatProfile, type ImageEndpoint, buildGeminiChatImageRequest, parseGeminiChatImageResponse, resolveProfileForModel, isGeminiImageModel, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
 import { saveImageFile } from '@/lib/server-data-root';
-import { logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
+import { logError, logOperation, OP_ACTIONS, startTimer } from '@/lib/op-log';
 import sharp from 'sharp';
 import fsSync from 'fs';
 import fs from 'fs/promises';
@@ -484,7 +484,7 @@ async function compositeAIResultToOriginal(
 export const maxDuration = 600; // 10分钟 - token link等API生图最久可达600s
 export const dynamic = 'force-dynamic';
 
-type EditAction = 'inpaint' | 'outpaint' | 'remove_background' | 'upscale' | 'multi_angle';
+type EditAction = 'inpaint' | 'outpaint' | 'remove_background' | 'removebg' | 'upscale' | 'multi_angle';
 
 interface EditRequest {
   action: EditAction;
@@ -1767,7 +1767,46 @@ export async function POST(request: NextRequest) {
         }
       }
     }
-    
+
+    // 2.5 功能专用模型优先插入到候选列表首位（按action类型）:
+    //   removebg: 优先使用管理员配置的 removebg 类型专用模型
+    //   upscale: 优先使用管理员配置的 upscaler 类型专用模型
+    if ((action as string) === 'removebg' || action === 'upscale') {
+      const specialType = (action as string) === 'removebg' ? 'removebg' : 'upscaler';
+      const { isRemoveBgModel, isUpscalerModel } = await import('@/lib/model-capabilities');
+      const specialProviders = await findAllProvidersForType(specialType as any);
+      const specialModels: typeof candidateModels = [];
+      for (const entry of specialProviders) {
+        for (const m of entry.models) {
+          if (!triedModels.has(m)) {
+            specialModels.push({
+              model: m,
+              apiKey: entry.provider.apiKey,
+              apiBaseUrl: normalizeApiBaseUrl(entry.provider.baseUrl),
+              source: `admin-special-${specialType}`,
+              advancedParams: entry.provider.advancedParams,
+            });
+            triedModels.add(m);
+          }
+        }
+      }
+      // 对于 removebg/upscale 操作，在通用 image 模型中也检查是否为专用模型（关键词匹配）
+      // 将通用image模型里匹配的专用模型也移到前面
+      const isSpecialModel = (action as string) === 'removebg' ? isRemoveBgModel : isUpscalerModel;
+      const matchedFromImage: typeof candidateModels = [];
+      const restGeneral: typeof candidateModels = [];
+      for (const c of candidateModels) {
+        if (isSpecialModel(c.model)) {
+          matchedFromImage.push(c);
+        } else {
+          restGeneral.push(c);
+        }
+      }
+      // 重新组装：专用provider模型 → image中匹配的专用模型 → 其他通用image模型
+      candidateModels.length = 0;
+      candidateModels.push(...specialModels, ...matchedFromImage, ...restGeneral);
+    }
+
     // 3. 环境变量兜底
     const envApiKey = process.env.APIMART_API_KEY || '';
     const envApiBaseUrl = normalizeApiBaseUrl(process.env.APIMART_BASE_URL || '');
@@ -2094,15 +2133,20 @@ export async function POST(request: NextRequest) {
 
     if (action === 'upscale') {
       // ============================================================
-      // 超清放大 (Upscale)
+      // 超清放大 (Upscale) — 云端API优先 + 本地upscayl保底
+      //
+      // 执行优先级 (P0改造后):
+      //   1. 管理员配置的 upscaler 专用模型 (如 seedvr2-upscaler / real-esrgan)
+      //      已在上方candidateModels中排到首位，走/images/edits + image参考图
+      //   2. 通用image模型 (通过更大size参数 + 低strength忠实放大)
+      //      走/images/generations + image参考图, AI智能补细节
+      //   3. 本地upscayl-ncnn / Real-ESRGAN (cpu模式，像素级忠实)
+      //      云端不可用时自动降级
       //
       // 用户可选模式:
-      //   "cpu" → ONNX CPU 分块放大 — Real-ESRGAN fp16, 纯 CPU 推理
-      //           像素级忠实，细节增强，真正的超分辨率放大
-      //           降级: ONNX不可用时使用 sharp Lanczos3 插值放大
-      //
-      //   "ai"  → AI 整图放大 — images/generations + 适当 strength
-      //           AI 智能补细节，适合创意放大
+      //   "auto" → 自动按优先级尝试（默认）
+      //   "ai"   → 仅AI放大（云端API）
+      //   "cpu"  → 仅本地CPU放大（不调云端）
       // ============================================================
 
       const scaleVal = body.scale || 2;
@@ -2110,10 +2154,10 @@ export async function POST(request: NextRequest) {
       const origH = body.originalHeight || 512;
       const targetW = targetWidth || origW * scaleVal;
       const targetH = targetHeight || origH * scaleVal;
-      const upscaleMode = body.upscaleMode || 'cpu'; // "cpu" | "ai"
+      const upscaleMode: 'auto' | 'ai' | 'cpu' = (body.upscaleMode as 'auto' | 'ai' | 'cpu') || 'auto';
 
-      // ---- CPU 放大模式: ONNX → sharp 降级链 ----
-      if (upscaleMode === 'cpu') {
+      // 本地CPU放大的内部实现（复用原逻辑）
+      const runLocalCpuUpscale = async () => {
         try {
           const { performUpscaleAuto } = await import('@/lib/image-tools/upscayl');
           const result = await performUpscaleAuto({
@@ -2124,13 +2168,12 @@ export async function POST(request: NextRequest) {
           });
 
           if (result.success && result.imageUrl) {
-            // CPU 超分辨率输出可能需要精确调整到目标尺寸
             const cpuOutputW = result.outputSize?.width || targetW;
             const cpuOutputH = result.outputSize?.height || targetH;
 
             if (cpuOutputW !== targetW || cpuOutputH !== targetH) {
-              const { fetchImageBuffer } = await import('@/lib/fetch-image-buffer');
-              const cpuBuf = await fetchImageBuffer(result.imageUrl);
+              const { fetchImageBuffer: fetchBuf } = await import('@/lib/fetch-image-buffer');
+              const cpuBuf = await fetchBuf(result.imageUrl);
               const resizedBuf = await sharp(cpuBuf)
                 .resize(targetW, targetH, { kernel: 'lanczos3' })
                 .png({ quality: 95 })
@@ -2138,7 +2181,7 @@ export async function POST(request: NextRequest) {
 
               const timestamp = Date.now();
               const randomSuffix = Math.random().toString(36).substring(2, 8);
-              const filename = `upscale_${timestamp}_${randomSuffix}.png`;
+              const filename = `upscale_cpu_${timestamp}_${randomSuffix}.png`;
               const savedPath = await saveBufferToPublic(resizedBuf, filename);
               const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
               const domainBase = domain.startsWith('http') ? domain.replace(/\/+$/, '') : `https://${domain.replace(/\/+$/, '')}`;
@@ -2149,7 +2192,7 @@ export async function POST(request: NextRequest) {
                 success: true,
                 imageUrl: finalUrl,
                 action,
-                engine: result.engine || 'cpu-auto',
+                engine: 'cpu-auto-resized',
                 usedModel: result.model || 'realesrgan',
                 scale: scaleVal,
                 originalSize: result.originalSize || { width: origW, height: origH },
@@ -2172,107 +2215,106 @@ export async function POST(request: NextRequest) {
               outputHeight: result.outputSize?.height || targetH,
             });
           }
-
-          // performUpscaleAuto 全部失败
-          return NextResponse.json({ success: false, error: `CPU放大失败: ${result.error || '未知错误'}` }, { status: 500 });
+          return null;
         } catch (cpuError) {
           console.log(`[image-edit] upscale: CPU error:`, cpuError instanceof Error ? cpuError.message : cpuError);
-          return NextResponse.json({ success: false, error: `CPU放大失败: ${cpuError instanceof Error ? cpuError.message : '未知错误'}` }, { status: 500 });
+          return null;
         }
+      };
+
+      // ---- 用户强制CPU模式: 仅本地upscayl ----
+      if (upscaleMode === 'cpu') {
+        const cpuRes = await runLocalCpuUpscale();
+        if (cpuRes) return cpuRes;
+        return NextResponse.json({ success: false, error: 'CPU本地放大失败，请检查upscayl模型是否已下载' }, { status: 500 });
       }
 
-      // ---- AI 放大模式 ----
+      // ---- AI放大路径 (auto/ai模式) ----
+      // candidateModels已在上方重排序：upscaler专用模型优先 → 通用image模型
+      // 专用upscaler模型走/images/edits端点(参考图编辑)，通用image模型走/images/generations
+      console.log(`[image-edit] upscale: AI-first mode, target: ${targetW}x${targetH}, candidates: ${candidateModels.slice(0,3).map(c=>c.model).join(', ')}...`);
 
-      console.log(`[image-edit] upscale: using AI whole-image upscale, target: ${targetW}x${targetH}`);
-
-      // AI 放大策略: 请求最大可用尺寸以获得最多细节，最后用 sharp 精确调整到目标尺寸
-      // 优先使用 2K/3K 尺寸档位（如 2048x2048），AI 输出越大细节越丰富
+      // AI放大策略: 请求最大可用尺寸以获得最多细节，最后用sharp精确调整到目标尺寸
       const effectiveSize = (() => {
-        // 优先选择大于等于目标尺寸的最大尺寸档位
         const ar = aspectRatio || `${origW}:${origH}`;
         const closest = findClosestAspectRatio(ar);
-        // 如果目标尺寸较小（如 1024x1024），仍使用至少 1024 档位
-        // 如果目标尺寸较大（如 2048x2048），使用 2K/3K 档位
-        const maxDim = Math.max(targetW, targetH);
-        if (maxDim > 1536) return closest; // 已经是大尺寸，直接使用
-        // 对于小目标，仍请求较大输出以获得更多细节
         return closest;
       })();
 
-      // Step 1: 获取参考图（直接传原图给模型）
+      // 获取参考图
       const imageBase64ForVision = await resolveImageToBase64(imageUrl);
       const descSnippet = prompt || '';
 
-      // Step 2: 构建整图放大 prompt — 忠实还原优先 + 适度细节增强
-      const upscalePrompt = [
-        `High-fidelity upscale. CRITICAL: 1) This is a RESIZE operation, NOT creative generation. 2) Preserve EXACT content: identity, expression, facial geometry, eye/lip shape, composition, colors, lighting — ZERO alteration. 3) SHARPEN existing edges and details — do NOT invent new texture. 4) REMOVE all noise, compression artifacts, JPEG blocks, grain, speckles, color splotches. 5) Background must be pixel-identical — no new objects, no color shifts, no position drift. 6) Do NOT add skin pores, hair strands, or fabric threads that don't exist in the original. 7) Output should look like the same image captured at higher resolution, not a re-interpretation. Clean, sharp, faithful, noise-free, artifact-free.`,
-        descSnippet ? `Original content: ${descSnippet.substring(0, 300)}.` : '',
-      ].filter(Boolean).join(' ');
+      // 判断是否有专用upscaler模型 → 不同prompt策略
+      const hasSpecialUpscaler = candidateModels.some(c => {
+        const id = c.model.toLowerCase();
+        return id.includes('upscaler') || id.includes('upscale') || id.includes('real-esrgan') || id.includes('esrgan') || id.includes('seedvr') || id.includes('seed-vr');
+      });
+
+      // 专用upscaler模型: 极简单prompt（这些模型专门做超分，复杂prompt反而干扰）
+      const upscalerPrompt = hasSpecialUpscaler
+        ? 'Upscale this image to higher resolution, preserve all details, sharp, clean, high quality.'
+        : [
+            `High-fidelity upscale. CRITICAL: 1) This is a RESIZE operation, NOT creative generation. 2) Preserve EXACT content: identity, expression, facial geometry, eye/lip shape, composition, colors, lighting — ZERO alteration. 3) SHARPEN existing edges and details — do NOT invent new texture. 4) REMOVE all noise, compression artifacts, JPEG blocks, grain, speckles, color splotches. 5) Background must be pixel-identical — no new objects, no color shifts, no position drift. 6) Do NOT add skin pores, hair strands, or fabric threads that don't exist in the original. 7) Output should look like the same image captured at higher resolution, not a re-interpretation. Clean, sharp, faithful, noise-free, artifact-free.`,
+            descSnippet ? `Original content: ${descSnippet.substring(0, 300)}.` : '',
+          ].filter(Boolean).join(' ');
 
       const negativePrompt = '(worst quality, low quality, normal quality:2), blurry, pixelated, jpeg artifacts, painting, oil painting, illustration, cartoon, anime, over-smoothed, plastic skin, waxy, airbrushed, soft focus, smoothed, gaussian blur, changed content, new elements, different colors, altered composition, deformed, watermark, text, makeup change, flat, cartoonish, drawn, sketch, CG, 3d render, unnatural, noise, grain, speckle, color splotch, compression block, ringing, halo, chromatic aberration, moire, added texture, fake skin pores, fake hair strands, invented details, painted over, retouched, HDR, oversaturated, shifted, misaligned, moved, position change, content drift, creative interpretation, style change';
 
-      // Step 3: 提交整图 AI 放大（仅使用用户指定的模型，不自动尝试其他模型）
-      // strength 0.25: 低创作自由度，优先忠实还原
-      // 0.40+ 会导致明显杂点和色斑（AI "创造" 不存在的纹理）
-      // 0.15 以下细节增强不足
-      // 配合 input_fidelity: 'high' 和严格负面提示词，确保零偏移
-      const specifiedModel = modelStr || '';
-      const specifiedProviderId = providerId || '';
-      console.log(`[image-edit] AI upscale: using specified model=${specifiedModel}, providerId=${specifiedProviderId}`);
+      // 分离候选: 专用upscaler模型走/images/edits(参考图编辑)，通用模型走/images/generations
+      const { isUpscalerModel } = await import('@/lib/model-capabilities');
+      const specialUpscalerCandidates = candidateModels.filter(c => isUpscalerModel(c.model));
+      const generalImageCandidates = candidateModels.filter(c => !isUpscalerModel(c.model));
 
-      // 构建仅包含用户指定模型的候选列表，确保不会自动回退到其他模型
-      let aiUpscaleCandidates: typeof candidateModels = [];
-      if (specifiedProviderId) {
-        const specifiedProvider = await findProviderById(specifiedProviderId);
-        if (specifiedProvider) {
-          const provModels = (specifiedProvider.selectedModels || specifiedProvider.discoveredModels || []) as string[];
-          if (specifiedModel && provModels.includes(specifiedModel)) {
-            aiUpscaleCandidates.push({
-              model: specifiedModel,
-              apiKey: specifiedProvider.apiKey,
-              apiBaseUrl: specifiedProvider.baseUrl,
-              source: `用户指定: ${specifiedProvider.name}`,
-              advancedParams: specifiedProvider.advancedParams as Record<string, string> | undefined,
-            });
-          } else if (!specifiedModel) {
-            // 没指定模型，用该提供商的第一个模型
-            const firstModel = provModels[0] || '';
-            if (firstModel) {
-              aiUpscaleCandidates.push({
-                model: firstModel,
-                apiKey: specifiedProvider.apiKey,
-                apiBaseUrl: specifiedProvider.baseUrl,
-                source: `用户指定提供商: ${specifiedProvider.name}`,
-                advancedParams: specifiedProvider.advancedParams as Record<string, string> | undefined,
-              });
-            }
-          }
+      let aiResult: any = null;
+      let aiError: Error | null = null;
+
+      // Step A: 先用专用upscaler模型尝试（如果有）
+      if (specialUpscalerCandidates.length > 0) {
+        try {
+          console.log(`[image-edit] upscale: trying ${specialUpscalerCandidates.length} dedicated upscaler models first`);
+          // 专用超分模型走 /images/edits 端点（参考图编辑模式，参数更简单）
+          aiResult = await autoTrySubmitImageTask(specialUpscalerCandidates, (m: string) => ({
+            model: m,
+            prompt: upscalerPrompt,
+            n: 1,
+            size: effectiveSize,
+            image: imageBase64ForVision,
+            image_urls: [imageBase64ForVision],
+          }), '专用模型放大', '/images/edits');
+        } catch (err) {
+          console.warn('[image-edit] upscale: dedicated upscaler models failed:', err instanceof Error ? err.message : err);
+          aiError = err instanceof Error ? err : new Error(String(err));
         }
       }
-      // 如果指定模型候选为空，使用全局候选列表（兼容旧调用方式）
-      if (aiUpscaleCandidates.length === 0) {
-        aiUpscaleCandidates = candidateModels;
+
+      // Step B: 专用模型失败或不存在时，用通用image模型放大
+      if (!aiResult && generalImageCandidates.length > 0) {
+        try {
+          console.log(`[image-edit] upscale: trying ${generalImageCandidates.length} general image models for upscale`);
+          aiResult = await autoTrySubmitImageTask(generalImageCandidates, (m: string) => ({
+            model: m,
+            prompt: upscalerPrompt,
+            size: effectiveSize,
+            n: 1,
+            image: imageBase64ForVision,
+            image_urls: [imageBase64ForVision],
+            strength: hasSpecialUpscaler ? 0.6 : 0.25,
+            input_fidelity: 'high',
+            negative_prompt: negativePrompt,
+          }), 'AI放大', '/images/generations');
+        } catch (err) {
+          console.warn('[image-edit] upscale: general image models failed:', err instanceof Error ? err.message : err);
+          if (!aiError) aiError = err instanceof Error ? err : new Error(String(err));
+        }
       }
 
-      const result = await autoTrySubmitImageTask(aiUpscaleCandidates, (m: string) => ({
-        model: m,
-        prompt: upscalePrompt,
-        size: effectiveSize,
-        n: 1,
-        image: imageBase64ForVision,
-        image_urls: [imageBase64ForVision],
-        strength: 0.25,
-        input_fidelity: 'high',
-        negative_prompt: negativePrompt,
-      }), 'AI放大', '/images/generations');
-
-      // ★ AI 模型按自身预设尺寸输出，不受 size 参数精确控制
-      // 优化策略:
-      //   AI 输出 >= 目标: sharp 缩小到目标 (下采样保留细节)
-      //   AI 输出 < 目标: 先保存 AI 输出 (已增强细节)，再用 ONNX Real-ESRGAN 放大到目标
-      const resizeAiResultToTarget = async (aiImageUrl: string): Promise<{ url: string; actualW: number; actualH: number }> => {
-        let aiW = targetW;
-        let aiH = targetH;
+      // Step C: 处理AI放大结果
+      if (aiResult) {
+        // AI结果尺寸后处理函数（原逻辑保留）
+        const resizeAiResultToTarget = async (aiImageUrl: string): Promise<{ url: string; actualW: number; actualH: number }> => {
+          let aiW = targetW;
+          let aiH = targetH;
         try {
           // 下载 AI 生成的图片
           const aiBuffer = await fetchImageBuffer(aiImageUrl);
@@ -2353,9 +2395,9 @@ export async function POST(request: NextRequest) {
         }
       };
 
-      if (result.directUrl) {
-        const resized = await resizeAiResultToTarget(result.directUrl);
-        
+      if (aiResult?.directUrl) {
+        const resized = await resizeAiResultToTarget(aiResult.directUrl);
+
         // AI 画质精修（带关键词约束，仅修复画质不改变内容）
         let finalUrl = resized.url;
         let enhanced = false;
@@ -2371,13 +2413,13 @@ export async function POST(request: NextRequest) {
         } catch (enhanceErr) {
           console.warn('[image-edit] AI enhance error:', enhanceErr instanceof Error ? enhanceErr.message : enhanceErr);
         }
-        
+
         return NextResponse.json({
           success: true,
           imageUrl: finalUrl,
           action,
           engine: 'ai-upscale-hq',
-          usedModel: result.usedModel,
+          usedModel: aiResult.usedModel,
           enhanced,
           originalSize: { width: origW, height: origH },
           outputSize: { width: resized.actualW, height: resized.actualH },
@@ -2389,49 +2431,145 @@ export async function POST(request: NextRequest) {
       // ★ 注册异步放大任务到 task-registry，确保 poll-task 能正确查询第三方 API
       // 异步任务完成后，前端 pollForResult 拿到 URL 时需要 resize
       // 通过在 task result 中标记 _needsResize + targetW/targetH，让 poll-task 完成后触发 resize
-      if (result.taskId) {
-        const regTaskId = registerTask(result.taskId, 'upscale', 'AI放大', sessionUser?.id);
+      if (aiResult?.taskId) {
+        const regTaskId = registerTask(aiResult.taskId, 'upscale', 'AI放大', sessionUser?.id);
         updateTaskProgress(regTaskId.taskId, {
           status: 'processing',
           progress: 12,
           label: 'AI模型放大中...',
           result: {
-            apiBaseUrl: result.apiBaseUrl,
-            apiKey: result.apiKey,
-            advancedParams: result.advancedParams,
-            usedModel: result.usedModel,
+            apiBaseUrl: aiResult.apiBaseUrl,
+            apiKey: aiResult.apiKey,
+            advancedParams: aiResult.advancedParams,
+            usedModel: aiResult.usedModel,
             originalSize: { width: origW, height: origH },
             outputSize: { width: targetW, height: targetH },
-            _needsResize: true, // poll-task 完成后会自动应用锐化，不再二次放大
-            _model: modelStr, // 用户选择的模型，供 poll-task 精修时使用
+            _needsResize: true,
+            _model: modelStr,
           },
         });
       }
 
       return NextResponse.json({
         success: true,
-        taskId: result.taskId,
+        taskId: aiResult?.taskId,
         action,
         engine: 'ai-upscale',
-        prompt: upscalePrompt,
-        usedModel: result.usedModel,
+        prompt: upscalerPrompt,
+        usedModel: aiResult?.usedModel,
         originalSize: { width: origW, height: origH },
         outputSize: { width: targetW, height: targetH },
       });
     }
 
+    // AI放大全部失败时，auto模式下自动降级到本地CPU放大
+    if (upscaleMode === 'auto' && !aiResult && aiError) {
+      console.log('[image-edit] upscale: All AI models failed, falling back to local CPU upscayl');
+      const cpuRes = await runLocalCpuUpscale();
+      if (cpuRes) return cpuRes;
+    }
 
-    if (action === 'remove_background') {
+    // ai模式强制AI失败或auto模式CPU也失败 → 返回错误
+    return NextResponse.json({
+      success: false,
+      error: upscaleMode === 'ai'
+        ? `AI放大失败: ${aiError?.message || '所有AI模型均不可用，请检查API配置或切换到本地CPU模式'}`
+        : '所有放大方式均失败，请检查API配置和本地upscayl模型',
+    }, { status: 500 });
+    }
+
+    if (action === 'removebg' || action === 'remove_background') {
+      const normalizedAction = 'remove_background';
       const bgSize = aspectRatio ? findClosestAspectRatio(aspectRatio) : '1:1';
       const imageBase64ForBg = await resolveImageToBase64(imageUrl).catch(() => null);
       
-      // ─── 优先路径1：本地 rembg 去背景（推荐） ───
-      // 本地模型（ISNet/u2net/silueta/u2netp）生成黑白蒙版 → 应用到原图 → 真正透明PNG
-      // AI 路径虽然主体识别好，但 AI 输出的"透明背景"实际上是棋盘格像素（不是真alpha=0），
-      // 后处理也难以完美提取蒙版，所以本地模型蒙版法是更可靠的透明PNG方案
-      if (LOCAL_AI_ENABLED) {
+      // ─── 云端API优先路径1：专用removebg模型 + 通用image模型 ───
+      // 支持background:'transparent'参数的AI模型（GPT-Image/Flux等），直接返回透明PNG
+      // candidateModels已经在上方被重新排序：专用模型优先，通用模型在后
+      const removeBgPrompt = [
+        'Remove the background from this image.',
+        'Preserve: All foreground subjects exactly as-is — every pixel of the main subject(s), including edges, colors, textures, details, proportions, and pose.',
+        'Change only: The background becomes fully transparent (alpha = 0).',
+        'Do not: Redraw, repaint, stylize, or modify the subject in any way. Do not add white fill, gray fill, checkerboard pattern, shadow, reflection, border, frame, text, watermark, vignette, or any new background.',
+        'Output a PNG image with a real transparent alpha channel.',
+      ].join(' ');
+
+      const removeBgNegativePrompt = [
+        'white background', 'gray background', 'solid color background', 'checkerboard',
+        'new background', 'shadow', 'reflection', 'border', 'frame', 'watermark', 'text',
+        'changed subject', 'distorted edges', 'halo', 'white fringe', 'repainted subject',
+        'stylized subject', 'redrawn subject', 'low quality', 'blurry', 'artifact',
+      ].join(', ');
+
+      let aiSuccess = false;
+      try {
+        console.log(`[remove_background] Trying AI path first (${candidateModels.length} models available: ${candidateModels.slice(0,3).map(c=>c.model).join(', ')}...)`);
+        const submitResult = await autoTrySubmitImageTask(candidateModels, (m) => ({
+          model: m,
+          prompt: removeBgPrompt,
+          negative_prompt: removeBgNegativePrompt,
+          size: bgSize,
+          n: 1,
+          image: imageBase64ForBg || undefined,
+          image_urls: [imageBase64ForBg || imageUrl],
+          response_format: 'url',
+          background: 'transparent',
+          output_format: 'png',
+          input_fidelity: 'high',
+        }), '移除背景');
+        const aiUsedModel = submitResult.usedModel;
+        
+        if (submitResult.directUrl) {
+          // 同步模式：后处理提取蒙版→应用到原图→真正透明PNG
+          try {
+            const aiResult = await postProcessAIRemoveBG(submitResult.directUrl, imageUrl);
+            if (aiResult) {
+              aiSuccess = true;
+              logOperation({
+                action: OP_ACTIONS.IMAGE_EDIT,
+                userId: sessionUser?.id,
+                level: 'info',
+                model: aiUsedModel || '',
+                detail: `engine:ai-background-remove action:${action}`,
+              });
+              return NextResponse.json({ success: true, imageUrl: aiResult.imageUrl, maskUrl: aiResult.maskUrl || '', action, usedModel: aiUsedModel || '', engine: 'ai-background-remove' });
+            }
+            console.warn('[remove_background] AI post-processing returned null, not using raw AI result with checkerboard');
+          } catch (postErr) {
+            console.warn('[remove_background] AI post-processing failed (sync):', postErr instanceof Error ? postErr.message : postErr);
+          }
+        }
+        
+        if (submitResult.taskId) {
+          // 异步模式：返回 taskId 给前端轮询，poll-task 会做后处理
+          console.log(`[remove_background] AI returned taskId=${submitResult.taskId}, returning to frontend for polling`);
+          const rbUsedCandidate = candidateModels.find(c => c.model === aiUsedModel) || candidateModels[0];
+          aiSuccess = true;
+          registerTask(submitResult.taskId, 'generate', 'AI 移除背景', sessionUser?.id);
+          updateTaskProgress(submitResult.taskId, {
+            status: 'processing',
+            progress: 10,
+            label: 'AI 正在识别主体并移除背景...',
+            result: { engine: 'ai-background-remove', usedModel: aiUsedModel, originalImageUrl: imageUrl, apiBaseUrl: rbUsedCandidate?.apiBaseUrl, apiKey: rbUsedCandidate?.apiKey, advancedParams: rbUsedCandidate?.advancedParams },
+          });
+          return NextResponse.json({
+            success: true,
+            taskId: submitResult.taskId,
+            action,
+            engine: 'ai-background-remove',
+            usedModel: aiUsedModel,
+            prompt: removeBgPrompt,
+          });
+        }
+      } catch (bgErr) {
+        console.warn('[remove_background] AI remove background failed, falling back to local IOPaint:', bgErr instanceof Error ? bgErr.message : bgErr);
+      }
+      
+      // ─── AI路径全部失败 → 降级到本地IOPaint RemoveBG ───
+      // 本地模型（BiRefNet/u2net/silueta）生成黑白蒙版 → 应用到原图 → 真正透明PNG
+      if (LOCAL_AI_ENABLED && !aiSuccess) {
         try {
-          console.log(`[remove_background] Trying local IOPaint RemoveBG first...`);
+          console.log(`[remove_background] Trying local IOPaint RemoveBG as fallback...`);
           const sourceBuffer = await fetchImageBuffer(imageUrl);
           
           const validRemoveBgModels: readonly string[] = REMOVEBG_MODELS.map(m => m.id);
@@ -2451,7 +2589,7 @@ export async function POST(request: NextRequest) {
           ]);
           
           if (maskResult && maskResult.success && maskResult.rgbaBase64) {
-            console.log(`[remove_background] RGBA result generated (model: ${maskResult.model}), saving...`);
+            console.log(`[remove_background] Local RGBA result generated (model: ${maskResult.model}), saving...`);
             const removeBgResult = await postProcessLocalRemoveBG(maskResult.rgbaBase64, maskResult.maskBase64);
             if (removeBgResult) {
               console.log(`[remove_background] Local RemoveBG succeeded: ${removeBgResult.imageUrl}, mask: ${removeBgResult.maskUrl || 'N/A'}`);
@@ -2463,85 +2601,13 @@ export async function POST(request: NextRequest) {
                 engine: 'local-removebg',
               });
             }
-            console.log(`[remove_background] postProcessLocalRemoveBG failed, falling back to AI path`);
+            console.log(`[remove_background] postProcessLocalRemoveBG failed, falling back to simple edge detection`);
           } else {
-            console.log(`[remove_background] Mask generation ${maskResult ? 'succeeded but no rgbaBase64' : 'failed/timed out'}, falling back to AI path`);
+            console.log(`[remove_background] Mask generation ${maskResult ? 'succeeded but no rgbaBase64' : 'failed/timed out'}, falling back to simple edge detection`);
           }
         } catch (rmbgErr) {
           console.warn(`[remove_background] IOPaint RemoveBG error:`, rmbgErr instanceof Error ? rmbgErr.message : rmbgErr);
         }
-      }
-
-      // ─── 优先路径2：AI 模型去背景（本地不可用时降级） ───
-      // AI 生成模型（GPT-4o/Gemini）返回的结果通常含棋盘格/白底（非真透明alpha），
-      // 需要后处理提取蒙版再应用到原图
-      const removeBgPrompt = [
-        'Remove the background from this image.',
-        'Preserve: All foreground subjects exactly as-is — every pixel of the main subject(s), including edges, colors, textures, details, proportions, and pose.',
-        'Change only: The background becomes fully transparent (alpha = 0).',
-        'Do not: Redraw, repaint, stylize, or modify the subject in any way. Do not add white fill, gray fill, checkerboard pattern, shadow, reflection, border, frame, text, watermark, vignette, or any new background.',
-        'Output a PNG image with a real transparent alpha channel.',
-      ].join(' ');
-
-      const removeBgNegativePrompt = [
-        'white background', 'gray background', 'solid color background', 'checkerboard',
-        'new background', 'shadow', 'reflection', 'border', 'frame', 'watermark', 'text',
-        'changed subject', 'distorted edges', 'halo', 'white fringe', 'repainted subject',
-        'stylized subject', 'redrawn subject', 'low quality', 'blurry', 'artifact',
-      ].join(', ');
-
-      try {
-        const result = await autoTrySubmitImageTask(candidateModels, (m) => ({
-          model: m,
-          prompt: removeBgPrompt,
-          negative_prompt: removeBgNegativePrompt,
-          size: bgSize,
-          n: 1,
-          image: imageBase64ForBg || undefined,
-          image_urls: [imageBase64ForBg || imageUrl],
-          response_format: 'url',
-          background: 'transparent',
-          output_format: 'png',
-          input_fidelity: 'high',
-        }), '移除背景');
-        
-        if (result.directUrl) {
-          // 同步模式：后处理提取蒙版→应用到原图→真正透明PNG
-          try {
-            const aiResult = await postProcessAIRemoveBG(result.directUrl, imageUrl);
-            if (aiResult) {
-              return NextResponse.json({ success: true, imageUrl: aiResult.imageUrl, maskUrl: aiResult.maskUrl || '', action, usedModel: result.usedModel, engine: 'ai-background-remove' });
-            }
-            // postProcessAIRemoveBG 返回 null，不用原始 AI 结果（含棋盘格）
-            console.warn('[remove_background] AI post-processing returned null, not using raw AI result with checkerboard');
-          } catch (postErr) {
-            console.warn('[remove_background] AI post-processing failed (sync):', postErr instanceof Error ? postErr.message : postErr);
-          }
-          // AI 后处理失败，继续往下走降级路径
-        }
-        
-        if (result.taskId) {
-          // 异步模式：返回 taskId 给前端轮询，poll-task 会做后处理
-          console.log(`[remove_background] AI returned taskId=${result.taskId}, returning to frontend for polling`);
-          const rbUsedCandidate = candidateModels.find(c => c.model === result.usedModel) || candidateModels[0];
-          registerTask(result.taskId, 'generate', 'AI 移除背景', sessionUser?.id);
-          updateTaskProgress(result.taskId, {
-            status: 'processing',
-            progress: 10,
-            label: 'AI 正在识别主体并移除背景...',
-            result: { engine: 'ai-background-remove', usedModel: result.usedModel, originalImageUrl: imageUrl, apiBaseUrl: rbUsedCandidate?.apiBaseUrl, apiKey: rbUsedCandidate?.apiKey, advancedParams: rbUsedCandidate?.advancedParams },
-          });
-          return NextResponse.json({
-            success: true,
-            taskId: result.taskId,
-            action,
-            engine: 'ai-background-remove',
-            usedModel: result.usedModel,
-            prompt: removeBgPrompt,
-          });
-        }
-      } catch (bgErr) {
-        console.warn('[remove_background] AI remove failed, using local background-alpha fallback:', bgErr instanceof Error ? bgErr.message : bgErr);
       }
 
       // ─── 所有路径均失败 → 本地透明化兜底（秒级完成） ───
@@ -3429,3 +3495,4 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: errMsg }, { status: 500 });
   }
 }
+

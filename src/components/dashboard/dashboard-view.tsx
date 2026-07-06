@@ -36,8 +36,8 @@ import JSZip from 'jszip';
 type TabType = 'projects' | 'templates' | 'assets' | 'stats' | 'credits' | 'settings' | 'users' | 'apis' | 'data' | 'ecom-templates' | 'payment-config' | 'audit' | 'overview' | 'desktop-admin' | 'connector-admin';
 type ProjectFilter = 'all' | 'recent' | 'starred';
 type AssetSubTab = 'images' | 'prompts' | 'brands';
-type ApiKind = 'general' | 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler' | 'universal' | 'audio';
-type UserPermissionKey = 'image' | 'chat' | 'threeD' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler' | 'audio';
+type ApiKind = 'general' | 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler' | 'removebg' | 'universal' | 'audio';
+type UserPermissionKey = 'image' | 'chat' | 'threeD' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler' | 'removebg' | 'audio';
 type AdminProvider = ApiProvider & { apiKeyPreview?: string };
 
 const apiKindLabels: Record<ApiKind, string> = {
@@ -50,6 +50,7 @@ const apiKindLabels: Record<ApiKind, string> = {
   video: '视频模型',
   vlm: 'VLM视觉模型',
   upscaler: '放大模型',
+  removebg: '去背景模型',
   universal: '通用模型',
   audio: '音频/TTS模型',
 };
@@ -64,6 +65,7 @@ const apiKindDescriptions: Record<ApiKind, string> = {
   video: '添加API后系统自动识别视频模型（可灵/Seedance/海螺/Vidu/Runway/Pika/Sora等），对接到文生视频和图生视频功能',
   vlm: '视觉语言模型，支持图片理解和SVG生成，自动识别 qwen-vl/glm-4v/gemini-vision 等模型，对接到SVG矢量化功能',
   upscaler: '自动识别 SeedVR2/Real-ESRGAN 等放大模型，对接到无损放大Pro功能，支持 PearAPI / fal.ai 等提供商',
+  removebg: '自动识别 BiRefNet/U2Net/ISNet/RMBG 等去背景模型，一键抠图输出透明PNG',
   universal: '通用模型，支持多种能力',
   audio: '添加API后系统自动识别tts/speech/audio模型，对接到AI配音、视频音效和文生语音功能',
 };
@@ -77,6 +79,7 @@ const userPermissionLabels: Record<UserPermissionKey, string> = {
   video: '视频',
   vlm: 'VLM',
   upscaler: '放大',
+  removebg: '抠图',
   audio: '音频',
 };
 
@@ -1170,6 +1173,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       video: u.apiPermissions?.video ?? true,
       vlm: u.apiPermissions?.vlm ?? true,
       upscaler: u.apiPermissions?.upscaler ?? true,
+      removebg: u.apiPermissions?.removebg ?? true,
       audio: u.apiPermissions?.audio ?? true,
     };
     await fetch('/api/admin/users', {
@@ -1226,6 +1230,9 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       } else if (apiKind === 'upscaler') {
         const uModels = models.filter((m: ModelInfo) => { const id = m.id.toLowerCase(); return id.includes('upscale') || id.includes('seedvr') || id.includes('esrgan') || id.includes('realesrgan') || id.includes('swinir') || id.includes('hat'); });
         setSelectedModels(uModels.length > 0 ? uModels.map((m: ModelInfo) => m.id) : []);
+      } else if (apiKind === 'removebg') {
+        const rModels = models.filter((m: ModelInfo) => { const id = m.id.toLowerCase(); return id.includes('removebg') || id.includes('rmbg') || id.includes('birefnet') || id.includes('u2net') || id.includes('isnet') || id.includes('background') || id.includes('matting'); });
+        setSelectedModels(rModels.length > 0 ? rModels.map((m: ModelInfo) => m.id) : []);
       } else if (selectedModels.length === 0 && models.length > 0) {
         // Auto-select all models on first discover
         setSelectedModels(models.map((m: ModelInfo) => m.id));
@@ -1254,7 +1261,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
           modelType: apiKind,
           selectedModels: models,
           discoveredModels: discoveredModels.length > 0 ? discoveredModels : undefined,
-          requestStyle: apiKind === 'general' ? 'auto' : apiKind === 'chat' ? 'chat-completions' : apiKind === 'vectorize' || apiKind === 'layer' || apiKind === 'upscaler' ? 'chat-completions' : apiKind === 'video' ? 'images-generations' : 'images-generations',
+          requestStyle: apiKind === 'general' ? 'auto' : apiKind === 'chat' ? 'chat-completions' : apiKind === 'vectorize' || apiKind === 'layer' || apiKind === 'upscaler' || apiKind === 'removebg' ? 'images-generations' : apiKind === 'video' ? 'images-generations' : 'images-generations',
           advancedParams: [...advancedParams.filter(p => p.key.trim()), ...(compatProfile !== 'auto' ? [{ key: 'compatProfile', value: compatProfile }] : [])],
           balanceUsername: balanceUsername.trim(), balancePassword: balancePassword.trim(),
         }),
@@ -1342,7 +1349,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       advancedParams.forEach(p => { if (p.key.trim()) advParams[p.key.trim()] = p.value; });
       const response = await fetch('/api/test-provider-connection', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-        body: JSON.stringify({ baseUrl: apiBaseUrl, apiKey, requestStyle: apiKind === 'chat' ? 'chat-completions' : apiKind === 'vectorize' || apiKind === 'layer' || apiKind === 'upscaler' ? 'chat-completions' : apiKind === 'video' ? 'images-generations' : 'images-generations', advancedParams: advParams }),
+        body: JSON.stringify({ baseUrl: apiBaseUrl, apiKey, requestStyle: apiKind === 'chat' ? 'chat-completions' : apiKind === 'vectorize' || apiKind === 'layer' ? 'chat-completions' : 'images-generations', advancedParams: advParams }),
       });
       if (!response.ok) throw new Error(`测试连接失败: HTTP ${response.status}`);
       const data = await response.json();
@@ -1786,7 +1793,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                     { key: 'image', label: '图像', icon: '🎨' }, { key: 'chat', label: '对话', icon: '💬' },
                     { key: 'threeD', label: '3D', icon: '🧊' },
                     { key: 'vectorize', label: '矢量', icon: '📐' }, { key: 'layer', label: '分层', icon: '🗂️' },
-                    { key: 'upscaler', label: '放大', icon: '🔍' }, { key: 'video', label: '视频', icon: '🎬' },
+                    { key: 'upscaler', label: '放大', icon: '🔍' }, { key: 'removebg', label: '抠图', icon: '✂️' }, { key: 'video', label: '视频', icon: '🎬' }, { key: 'audio', label: '音频', icon: '🔊' },
                   ].map(perm => {
                     const enabled = user.apiPermissions?.[perm.key as keyof typeof user.apiPermissions] ?? false;
                     return (<span key={perm.key} className={`text-[10px] px-1.5 py-0.5 rounded-md flex items-center gap-1 ${enabled ? `${accentBgLight} ${accentClass}` : isDark ? 'bg-white/5 text-gray-600' : 'bg-gray-100 text-gray-300'}`}><span>{perm.icon}</span><span>{perm.label}</span></span>);
@@ -2311,6 +2318,8 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 vectorize: user.apiPermissions?.vectorize ?? true, layer: user.apiPermissions?.layer ?? true,
                 video: user.apiPermissions?.video ?? true, vlm: user.apiPermissions?.vlm ?? true,
                 upscaler: user.apiPermissions?.upscaler ?? true,
+                removebg: user.apiPermissions?.removebg ?? true,
+                audio: user.apiPermissions?.audio ?? true,
               };
               current[key] = !current[key];
               await fetch('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ action: 'update', userId: user.id, updates: { apiPermissions: current } }) });

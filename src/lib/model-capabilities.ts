@@ -780,3 +780,56 @@ export function normalizeModelForApi(modelId: string): NormalizedModelInfo {
     qualityTier: null, // pro/max/lite不再剥离，质量等级由模型自身决定
   };
 }
+
+// ======================== 专用功能模型检测 ========================
+
+/** 判断模型是否为专用放大模型（而非通用图像模型） */
+export function isUpscalerModel(modelId: string): boolean {
+  const id = modelId.toLowerCase();
+  return (
+    id.includes('seedvr') || id.includes('seed-vr') ||
+    id.includes('upscaler') || id.includes('upscale') ||
+    id.includes('real-esrgan') || id.includes('realesrgan') ||
+    id.includes('swinir') || id.includes('scunet') ||
+    (id.includes('hat') && id.includes('super')) ||
+    id.includes('gfpgan') || id.includes('codeformer') ||
+    id.includes('remacri') || id.includes('ultramix') ||
+    id.includes('4x-anime') || id.includes('4x-ultrasharp') ||
+    id.includes('esrgan')
+  );
+}
+
+/** 判断模型是否为专用去背景模型 */
+export function isRemoveBgModel(modelId: string): boolean {
+  const id = modelId.toLowerCase();
+  return (
+    id.includes('removebg') || id.includes('remove-bg') || id.includes('rmbg') ||
+    id.includes('birefnet') || id.includes('u2net') || id.includes('isnet') ||
+    id.includes('background-remover') || id.includes('cutout') ||
+    id.includes('matting') || id.includes('background-remove') ||
+    id.includes('remove-background') || id.includes('transparent-bg') ||
+    id.includes('dis-background') || id.includes('bg-remover')
+  );
+}
+
+/** 判断模型是否为专用矢量化模型 */
+export function isVectorizeModel(modelId: string): boolean {
+  const id = modelId.toLowerCase();
+  return (
+    id.includes('vectorize') || id.includes('vector') ||
+    id.includes('vtracer') || id.includes('starvector') ||
+    id.includes('svg-convert') || id.includes('svgconvert') ||
+    id.includes('recraft') || id.includes('potrace')
+  );
+}
+
+/** 判断模型是否为专用分层/分割模型 */
+export function isLayerModel(modelId: string): boolean {
+  const id = modelId.toLowerCase();
+  return (
+    id.includes('qwen-image-layered') || id.includes('layered') ||
+    id.includes('segment') || id.includes('sam') ||
+    id.includes('detection') || id.includes('yolo') ||
+    id.includes('mask2former') || id.includes('segformer')
+  );
+}
