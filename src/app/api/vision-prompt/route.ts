@@ -478,7 +478,12 @@ export async function POST(request: NextRequest) {
         } else {
           try {
             const raw = await response.json() as Record<string, unknown>;
-            data = (raw.Response ? raw.Response : raw) as Record<string, unknown>;
+            // 解包 APImart 风格 {code:200, data:{...}} 响应
+            let unwrapped = raw;
+            if (raw.code === 200 && raw.data && typeof raw.data === 'object' && !Array.isArray(raw.data)) {
+              unwrapped = raw.data as Record<string, unknown>;
+            }
+            data = (unwrapped.Response ? unwrapped.Response : unwrapped) as Record<string, unknown>;
           } catch {
             lastError = '解析API响应失败';
             lastStatus = 502;

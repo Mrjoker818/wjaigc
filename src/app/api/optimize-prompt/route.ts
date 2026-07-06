@@ -172,7 +172,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const data = await response.json();
+    let data = await response.json();
+    // 解包 APImart 风格 {code:200, data:{...}} 响应
+    if (data.code === 200 && data.data && typeof data.data === 'object' && !Array.isArray(data.data)) {
+      data = data.data;
+    }
     const optimizedText = data.choices?.[0]?.message?.content || '';
 
     if (!optimizedText.trim()) {
