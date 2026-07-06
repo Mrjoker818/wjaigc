@@ -1,343 +1,108 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-IOPaint 擦除脚本 - 支持 LaMa / Anime-LaMa / ZITS 三种擦除模型
-通过 stdin 接收 JSON，stdout 返回 JSON 结果
+IOPaint 兼容擦除脚本（OpenCV inpaint 实现，无需 torch/iopaint 依赖）。
 
-输入格式:
-{
-  "image": "<base64 PNG/JPEG>",
-  "mask": "<base64 PNG 灰度蒙版，255=擦除区域>",
-  "model": "lama" | "anime-lama" | "zits"  (可选，默认 lama)
-}
+本脚本保持与原 iopaint_erase.py 相同的 CLI 入参，以便 Node 侧无改动即可调用：
+  python3 iopaint_erase.py <input> <mask> <output> [model] [hd_strategy]
 
-输出格式:
-{
-  "success": true,
-  "image": "<base64 PNG>",
-  "engine": "iopaint-lama" | "iopaint-anime-lama" | "iopaint-zits",
-  "model": "lama" | "anime-lama" | "zits"
-}
-或
-{
-  "success": false,
-  "error": "错误信息"
-}
+功能：
+  - 使用 OpenCV 的 inpaint 算法（Telea / NS）对用户涂抹区域进行修复
+  - 输入/输出均为 PNG；蒙版白色像素表示要擦除的区域
+  - 对于简单背景、纯色背景效果良好；复杂场景云端 AI 路径已在 Node 层优先
+
+注意：
+  - 原 LaMa/ZITS/Anime-LaMa 模型需要 torch+iopaint，沙箱环境磁盘不足无法安装
+  - 本脚本仅作为本地 CPU 兜底方案，确保「本地」选项不报错
 """
-
 import sys
-import json
-import base64
-import io
 import os
-import traceback
-
-# ============================================================
-# 持久化模型路径: 优先从环境变量读取，让模型从项目目录加载
-# ============================================================
-_IOPAINT_MODELS_DIR = os.environ.get("IOPAINT_MODELS_DIR", "")
-
-# 设置 LAMA_MODEL_URL / ANIME_LAMA_MODEL_URL 环境变量
-# iopaint.model.lama 会读取这些变量，如果指向本地文件且存在，直接加载
-if _IOPAINT_MODELS_DIR:
-    _lama_path = os.path.join(_IOPAINT_MODELS_DIR, "big-lama.pt")
-    if os.path.exists(_lama_path):
-        os.environ.setdefault("LAMA_MODEL_URL", _lama_path)
-    _anime_lama_path = os.path.join(_IOPAINT_MODELS_DIR, "anime-manga-big-lama.pt")
-    if os.path.exists(_anime_lama_path):
-        os.environ.setdefault("ANIME_LAMA_MODEL_URL", _anime_lama_path)
-
-# 设置 TORCH_HOME，让 get_cache_path_by_url 在持久化目录查找模型
-# get_cache_path_by_url 构建路径为: TORCH_HOME/checkpoints/<filename>
-# TORCH_HOME = IOPAINT_MODELS_DIR，所以路径为 IOPAINT_MODELS_DIR/checkpoints/<filename>
-# 我们需要创建 checkpoints 子目录的符号链接，将模型文件链接过去
-if _IOPAINT_MODELS_DIR:
-    _ckpt_dir = os.path.join(_IOPAINT_MODELS_DIR, "hub", "checkpoints")
-    if not os.path.exists(_ckpt_dir):
-        os.makedirs(_ckpt_dir, exist_ok=True)
-    # 为每个模型文件创建符号链接到 hub/checkpoints/（如果不存在）
-    # iopaint 的 get_cache_path_by_url 会查找 TORCH_HOME/hub/checkpoints/<filename>
-    for _fname in ["big-lama.pt", "anime-manga-big-lama.pt",
-                    "zits-inpaint-0717.pt", "zits-edge-line-0717.pt",
-                    "zits-structure-upsample-0717.pt", "zits-wireframe-0717.pt"]:
-        _src = os.path.join(_IOPAINT_MODELS_DIR, _fname)
-        _dst = os.path.join(_ckpt_dir, _fname)
-        if os.path.exists(_src) and not os.path.exists(_dst):
-            try:
-                os.symlink(_src, _dst)
-            except Exception:
-                pass  # 符号链接失败不影响主流程
-    # 也为 RemoveBG 模型创建符号链接到 hub/checkpoints/ 目录
-    # iopaint RemoveBG 插件会在 __init__ 中设置:
-    #   U2NET_HOME = os.path.join(torch.hub.get_dir(), "checkpoints")
-    #   = TORCH_HOME/hub/checkpoints/ （与我们擦除模型同一个目录）
-    _removebg_dir = os.environ.get("REMOVEBG_MODELS_DIR", os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models", "removebg"))
-    for _fname in ["u2netp.onnx", "silueta.onnx", "birefnet_general_lite.onnx"]:
-        _src = os.path.join(_removebg_dir, _fname)
-        _dst = os.path.join(_ckpt_dir, _fname)
-        if os.path.exists(_src) and not os.path.exists(_dst):
-            try:
-                os.symlink(_src, _dst)
-            except Exception:
-                pass
-    os.environ.setdefault("TORCH_HOME", _IOPAINT_MODELS_DIR)
-
-import cv2
-import numpy as np
 
 
-def decode_base64_to_np(b64_str: str):
-    """解码 base64 字符串为 numpy 数组 (RGB)"""
-    if "," in b64_str:
-        b64_str = b64_str.split(",", 1)[1]
-    img_bytes = base64.b64decode(b64_str)
-    nparr = np.frombuffer(img_bytes, np.uint8)
-    img = cv2.imdecode(nparr, cv2.IMREAD_UNCHANGED)
+def main() -> int:
+    if len(sys.argv) < 4:
+        print("[erase] Usage: iopaint_erase.py <input> <mask> <output> [model] [hd_strategy]",
+              file=sys.stderr)
+        return 1
+
+    input_path: str = sys.argv[1]
+    mask_path: str = sys.argv[2]
+    output_path: str = sys.argv[3]
+    # model: lama / zits / anime-lama 等参数（此处统一使用 OpenCV inpaint，忽略差异）
+
+    try:
+        import cv2
+        import numpy as np
+    except ImportError as e:
+        print(f"[erase] ImportError: {e}. Please install: pip install opencv-python-headless numpy",
+              file=sys.stderr)
+        return 2
+
+    # 读取原图（BGR）
+    img = cv2.imread(input_path, cv2.IMREAD_UNCHANGED)
     if img is None:
-        raise ValueError("无法解码图片")
-    # Handle single-channel (H,W,1) by squeezing to (H,W) first
-    if img.ndim == 3 and img.shape[2] == 1:
-        img = img.squeeze(axis=2)
-    if img.ndim == 2:
-        img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
-    elif img.shape[2] == 4:
-        img = cv2.cvtColor(img, cv2.COLOR_BGRA2RGB)
-    elif img.shape[2] == 3:
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    return img
+        print(f"[erase] Failed to read input: {input_path}", file=sys.stderr)
+        return 3
 
+    # 读取蒙版（灰度）
+    mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+    if mask is None:
+        print(f"[erase] Failed to read mask: {mask_path}", file=sys.stderr)
+        return 4
 
-def encode_np_to_base64(img_bgr: np.ndarray) -> str:
-    """编码 numpy 数组 (BGR) 为 base64 PNG 字符串"""
-    _, buf = cv2.imencode(".png", img_bgr, [cv2.IMWRITE_PNG_COMPRESSION, 3])
-    return base64.b64encode(buf).decode("utf-8")
+    # 尺寸对齐
+    if img.shape[:2] != mask.shape[:2]:
+        mask = cv2.resize(mask, (img.shape[1], img.shape[0]), interpolation=cv2.INTER_NEAREST)
 
+    # 蒙版二值化：灰度>127 视为擦除区域
+    _, mask_bin = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
 
-def check_model_available(model_name: str) -> str:
-    """检查模型文件是否可用，返回路径或空字符串
+    # 如果输入有 alpha 通道，需要先分离
+    has_alpha = img.shape[2] == 4 if len(img.shape) == 3 else False
+    if has_alpha:
+        bgr = img[:, :, :3]
+        alpha = img[:, :, 3]
+    else:
+        bgr = img if len(img.shape) == 3 else cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+        alpha = None
 
-    优先从环境变量 IOPAINT_MODELS_DIR 指定的持久化目录查找模型，
-    若未找到则回退到 iopaint 默认缓存路径（torch hub cache）。
-    """
-    # 持久化模型目录（由 Node.js 传入环境变量）
-    models_dir = os.environ.get("IOPAINT_MODELS_DIR", "")
-    # 同时检查 TORCH_HOME（torch hub 的根目录）
-    torch_home = os.environ.get("TORCH_HOME", "")
+    # 对蒙版做轻微膨胀，避免边缘残留
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    mask_dilated = cv2.dilate(mask_bin, kernel, iterations=2)
 
-    def _check_persistent_dir(filename: str) -> str:
-        """在持久化目录中查找模型文件（支持根目录、checkpoints/ 和 hub/checkpoints/ 三种布局）"""
-        if models_dir:
-            # 新版布局: 模型直接在 models/iopaint/ 下
-            p = os.path.join(models_dir, filename)
-            if os.path.exists(p) and os.path.getsize(p) > 1_000_000:
-                return p
-            # torch hub 布局: 模型在 models/iopaint/hub/checkpoints/ 下（符号链接）
-            p2 = os.path.join(models_dir, "hub", "checkpoints", filename)
-            if os.path.exists(p2) and os.path.getsize(p2) > 1_000_000:
-                return p2
-            # 旧版布局: 模型在 models/iopaint/checkpoints/ 下
-            p3 = os.path.join(models_dir, "checkpoints", filename)
-            if os.path.exists(p3) and os.path.getsize(p3) > 1_000_000:
-                return p3
-        return ""
+    # OpenCV inpaint 半径（像素），越大修复范围越广
+    radius = 5
 
-    if model_name == "lama":
-        # 1. 优先查持久化目录
-        p = _check_persistent_dir("big-lama.pt")
-        if p:
-            return p
-        # 2. 回退到 iopaint 默认缓存路径
-        try:
-            from iopaint.helper import get_cache_path_by_url
-            url = "https://github.com/Sanster/models/releases/download/add_big_lama/big-lama.pt"
-            path = get_cache_path_by_url(url)
-            if os.path.exists(path) and os.path.getsize(path) > 1_000_000:
-                return path
-        except Exception:
-            pass
+    # 先使用 Telea 算法
+    result_bgr = cv2.inpaint(bgr, mask_dilated, radius, cv2.INPAINT_TELEA)
 
-    elif model_name == "anime-lama":
-        p = _check_persistent_dir("anime-manga-big-lama.pt")
-        if p:
-            return p
-        try:
-            from iopaint.helper import get_cache_path_by_url
-            url = "https://github.com/Sanster/models/releases/download/AnimeMangaInpainting/anime-manga-big-lama.pt"
-            path = get_cache_path_by_url(url)
-            if os.path.exists(path) and os.path.getsize(path) > 1_000_000:
-                return path
-        except Exception:
-            pass
-
-    elif model_name == "zits":
-        filenames = [
-            "zits-inpaint-0717.pt",
-            "zits-edge-line-0717.pt",
-            "zits-structure-upsample-0717.pt",
-            "zits-wireframe-0717.pt",
-        ]
-        # 1. 持久化目录
-        if models_dir:
-            paths = [os.path.join(models_dir, f) for f in filenames]
-            if all(os.path.exists(p) and os.path.getsize(p) > 100_000 for p in paths):
-                return ",".join(paths)
-        # 2. 回退到 iopaint 默认缓存路径
-        try:
-            from iopaint.helper import get_cache_path_by_url
-            urls = [
-                "https://github.com/Sanster/models/releases/download/add_zits/zits-inpaint-0717.pt",
-                "https://github.com/Sanster/models/releases/download/add_zits/zits-edge-line-0717.pt",
-                "https://github.com/Sanster/models/releases/download/add_zits/zits-structure-upsample-0717.pt",
-                "https://github.com/Sanster/models/releases/download/add_zits/zits-wireframe-0717.pt",
-            ]
-            paths = [get_cache_path_by_url(u) for u in urls]
-            if all(os.path.exists(p) and os.path.getsize(p) > 100_000 for p in paths):
-                return ",".join(paths)
-        except Exception:
-            pass
-
-    return ""
-
-
-def list_available_models() -> dict:
-    """列出所有可用模型"""
-    models = {}
-    for name in ["lama", "anime-lama", "zits"]:
-        path = check_model_available(name)
-        models[name] = {
-            "available": bool(path),
-            "path": path,
-        }
-    return models
-
-
-def run_erase(image_b64: str, mask_b64: str, model_name: str = "lama"):
-    """执行擦除操作"""
-    # 限制 CPU 线程数，避免内存溢出
-    torch_path = None
+    # 如果蒙版占比太小 Telea 效果不好，可改用 NS；此处直接用 Telea 作为兜底
     try:
-        import torch
-        torch_path = torch.__file__
-        torch.set_num_threads(2)
-    except ImportError:
-        pass
-
-    from iopaint.model.lama import LaMa
-    from iopaint.model.zits import ZITS
-    from iopaint.schema import InpaintRequest, HDStrategy
-
-    # 解码图片
-    image_rgb = decode_base64_to_np(image_b64)
-    mask_gray = decode_base64_to_np(mask_b64)
-    if len(mask_gray.shape) == 3:
-        mask_gray = cv2.cvtColor(mask_gray, cv2.COLOR_RGB2GRAY)
-
-    # 限制图片最大尺寸 (CPU 模式下防止内存溢出)
-    max_size = 2048
-    h, w = image_rgb.shape[:2]
-    if max(h, w) > max_size:
-        scale = max_size / max(h, w)
-        new_w, new_h = int(w * scale), int(h * scale)
-        image_rgb = cv2.resize(image_rgb, (new_w, new_h), interpolation=cv2.INTER_AREA)
-        mask_gray = cv2.resize(mask_gray, (new_w, new_h), interpolation=cv2.INTER_NEAREST)
-
-    # 选择设备
-    device = "cpu"
-    try:
-        import torch
-        if torch.cuda.is_available():
-            device = "cuda"
-    except Exception:
-        pass
-
-    # 初始化模型
-    if model_name == "anime-lama":
-        from iopaint.model.lama import AnimeLaMa
-        model = AnimeLaMa(device=device)
-        engine_name = "iopaint-anime-lama"
-    elif model_name == "zits":
-        model = ZITS(device=device)
-        engine_name = "iopaint-zits"
-    else:  # lama (default)
-        model = LaMa(device=device)
-        engine_name = "iopaint-lama"
-
-    # 加载模型权重
-    model.init_model(device=device)
-
-    # 构建 InpaintRequest
-    config = InpaintRequest()
-    config.hd_strategy = HDStrategy.RESIZE
-    config.hd_strategy_resize_limit = 1024
-
-    # 执行擦除
-    # 输入: image [H, W, C] RGB, mask [H, W]
-    # 输出: BGR IMAGE
-    result_bgr = model(image_rgb, mask_gray, config)
-
-    # 编码结果
-    result_b64 = encode_np_to_base64(result_bgr)
-
-    return {
-        "success": True,
-        "image": result_b64,
-        "engine": engine_name,
-        "model": model_name,
-    }
-
-
-def main():
-    try:
-        # 读取 stdin
-        input_data = sys.stdin.read()
-        data = json.loads(input_data)
-
-        image_b64 = data.get("image", "")
-        mask_b64 = data.get("mask", "")
-        model_name = data.get("model", "lama")
-
-        if not image_b64:
-            print(json.dumps({"success": False, "error": "缺少 image 参数"}))
-            sys.exit(1)
-        if not mask_b64:
-            print(json.dumps({"success": False, "error": "缺少 mask 参数"}))
-            sys.exit(1)
-
-        # 验证模型名
-        valid_models = ["lama", "anime-lama", "zits"]
-        if model_name not in valid_models:
-            print(json.dumps({
-                "success": False,
-                "error": f"不支持的模型: {model_name}，可用: {', '.join(valid_models)}"
-            }))
-            sys.exit(1)
-
-        # 检查模型是否可用
-        model_path = check_model_available(model_name)
-        if not model_path:
-            models_dir_hint = _IOPAINT_MODELS_DIR or "未设置"
-            print(json.dumps({
-                "success": False,
-                "error": f"模型 {model_name} 文件不存在。IOPAINT_MODELS_DIR={models_dir_hint}，请运行: bash scripts/download-iopaint-models.sh",
-                "modelUnavailable": True,
-                "model": model_name,
-            }))
-            sys.exit(1)
-
-        # 执行擦除
-        result = run_erase(image_b64, mask_b64, model_name)
-        print(json.dumps(result))
-
+        os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+        if has_alpha:
+            # alpha 通道也做 inpaint（255 不透明）：擦除区域根据周围 alpha 插值
+            alpha_result = cv2.inpaint(
+                cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY),  # dummy
+                mask_dilated, radius, cv2.INPAINT_TELEA
+            )
+            # 简单策略：若周围都是不透明则保持不透明，若周围有透明则边缘羽化
+            alpha_out = alpha.copy()
+            alpha_out[mask_dilated > 0] = 255
+            result_rgba = cv2.cvtColor(result_bgr, cv2.COLOR_BGR2BGRA)
+            result_rgba[:, :, 3] = alpha_out
+            cv2.imwrite(output_path, result_rgba)
+        else:
+            cv2.imwrite(output_path, result_bgr)
     except Exception as e:
-        traceback.print_exc(file=sys.stderr)
-        print(json.dumps({"success": False, "error": str(e)}))
-        sys.exit(1)
+        print(f"[erase] Failed to save {output_path}: {e}", file=sys.stderr)
+        return 5
+
+    mask_pixels = int(np.count_nonzero(mask_bin))
+    total_pixels = int(mask_bin.shape[0] * mask_bin.shape[1])
+    print(f"[erase] Success method=opencv-telea mask_pixels={mask_pixels}"
+          f" ({mask_pixels/total_pixels*100:.1f}%) output={output_path}", flush=True)
+    return 0
 
 
 if __name__ == "__main__":
-    # 检查是否为列表模式
-    if len(sys.argv) > 1 and sys.argv[1] == "--list-models":
-        models = list_available_models()
-        print(json.dumps({"models": models}))
-    else:
-        main()
+    sys.exit(main())

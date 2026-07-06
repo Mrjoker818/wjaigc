@@ -90,19 +90,17 @@ async function checkPythonEnv(mode: 'erase' | 'removebg' = 'erase'): Promise<boo
       _pythonEnvAvailable = true;
       console.log(`[IOPaint] Python environment check passed for RemoveBG (${pythonBin} + rembg available)`);
     } else {
-      // 擦除模式：先检查 torch，再尝试 iopaint；如果 iopaint 不可用，检查脚本文件是否存在（脚本可独立运行）
-      execSync(`${pythonBin} -c "import torch"`, { stdio: 'ignore', timeout: 10000 });
+      // 擦除模式：基于 OpenCV cv2.inpaint 实现，无需 torch/iopaint 重量级依赖
       try {
-        execSync(`${pythonBin} -c "import iopaint"`, { stdio: 'ignore', timeout: 10000 });
+        execSync(`${pythonBin} -c "import cv2; import numpy; from PIL import Image"`, { stdio: 'ignore', timeout: 10000 });
       } catch {
-        // iopaint 未安装但脚本文件存在，仍然可用（脚本会动态加载模型）
         if (!fs.existsSync(ERASE_SCRIPT)) {
-          throw new Error('iopaint not installed and erase script not found');
+          throw new Error('opencv/cv2 not installed and erase script not found');
         }
-        console.log('[IOPaint] iopaint package not installed, but erase script exists - will try direct execution');
+        console.log('[IOPaint] cv2 not installed, but erase script exists - will try direct execution');
       }
       _pythonEnvAvailable = true;
-      console.log(`[IOPaint] Python environment check passed for erase (${pythonBin} + torch available)`);
+      console.log(`[IOPaint] Python environment check passed for erase (${pythonBin} + cv2/opencv available, using OpenCV inpaint)`);
     }
   } catch (e) {
     _pythonEnvAvailable = false;
@@ -169,14 +167,7 @@ export async function eraseWithLama(
   if (!pythonAvailable) {
     return {
       success: false,
-      error: 'Python 环境不可用（缺少 python3/torch/iopaint），无法使用本地 LaMa 擦除，请使用 AI 模型',
-    };
-  }
-
-  if (!isLamaModelAvailable()) {
-    return {
-      success: false,
-      error: 'LaMa 模型文件不存在或无效，请运行 bash scripts/download-iopaint-models.sh 下载',
+      error: 'Python 环境不可用（缺少 python3/cv2/numpy/PIL），无法使用本地擦除，请使用 AI 模型',
     };
   }
 
@@ -201,18 +192,17 @@ export async function eraseWithLama(
     const imageBase64 = `data:image/png;base64,${imageBuffer.toString('base64')}`;
     const maskBase64 = `data:image/png;base64,${normalizedMask.toString('base64')}`;
 
-    // 调用 Python 脚本（传递 model 参数）
-    const validModel = ERASE_MODELS.find(m => m.id === eraseModel) ? eraseModel : 'lama';
+    // 调用 Python 脚本（基于 OpenCV inpaint，所有模型都使用同一算法）
     const result = await callPythonScript(ERASE_SCRIPT, {
       image: imageBase64,
       mask: maskBase64,
-      model: validModel,
+      model: 'cv2-telea',
     });
 
     if (!result.success || !result.image) {
       return {
         success: false,
-        error: result.error || 'LaMa 擦除失败',
+        error: result.error || 'OpenCV 擦除失败',
       };
     }
 
