@@ -1012,20 +1012,44 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // 压缩参考图：大于1MB的base64图片用sharp压缩到最大1536px + JPEG q90
+      // 压缩参考图：大于800KB的base64图片用sharp压缩到最大1280px + JPEG q85（避免base64过大导致第三方API超时）
       const requestImageStr = requestBody.image as string | undefined;
-      if (requestImageStr && requestImageStr.startsWith('data:') && requestImageStr.length > 1_000_000) {
+      if (requestImageStr && requestImageStr.startsWith('data:') && requestImageStr.length > 800_000) {
         try {
           const sharp = (await import('sharp')).default;
           const base64Data = requestImageStr.split(',')[1];
           const imgBuf = Buffer.from(base64Data, 'base64');
           const compressed = await sharp(imgBuf)
-            .resize(1536, 1536, { fit: 'inside', withoutEnlargement: true })
-            .jpeg({ quality: 90 })
+            .resize(1280, 1280, { fit: 'inside', withoutEnlargement: true })
+            .jpeg({ quality: 85 })
             .toBuffer();
           requestBody.image = `data:image/jpeg;base64,${compressed.toString('base64')}`;
         } catch (compressErr) {
           console.warn('Reference image compression failed:', compressErr);
+        }
+      }
+      // 同步压缩image_urls数组中的其他参考图
+      if (Array.isArray(requestBody.image_urls) && requestBody.image_urls.length > 1) {
+        for (let i = 1; i < requestBody.image_urls.length; i++) {
+          const urlItem = requestBody.image_urls[i];
+          const urlStr = typeof urlItem === 'string' ? urlItem : (urlItem as { url?: string })?.url;
+          if (urlStr && urlStr.startsWith('data:') && urlStr.length > 800_000) {
+            try {
+              const sharp = (await import('sharp')).default;
+              const base64Data = urlStr.split(',')[1];
+              const imgBuf = Buffer.from(base64Data, 'base64');
+              const compressed = await sharp(imgBuf)
+                .resize(1280, 1280, { fit: 'inside', withoutEnlargement: true })
+                .jpeg({ quality: 85 })
+                .toBuffer();
+              const newUrl = `data:image/jpeg;base64,${compressed.toString('base64')}`;
+              if (typeof urlItem === 'string') {
+                requestBody.image_urls[i] = newUrl;
+              } else {
+                (urlItem as { url: string }).url = newUrl;
+              }
+            } catch {}
+          }
         }
       }
 

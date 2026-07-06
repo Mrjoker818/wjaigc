@@ -25,7 +25,7 @@
 // ---------------------------------------------------------------------------
 
 /** Response mode returned by the API */
-export type ResponseMode = 'polling' | 'direct';
+export type ResponseMode = 'polling' | 'direct' | 'async-task';
 
 /** Size format accepted by the API */
 export type SizeFormat = 'aspect-ratio' | 'pixel';
@@ -70,11 +70,12 @@ export interface ApiCompatProfile {
 
   /**
    * Polling configuration for async providers.
-   * - 'path': Poll via GET /tasks/{taskId} (APImart style)
+   * - 'path': Poll via GET on pollPathTemplate (APImart /tasks/{id} style)
    * - 'images-id': Poll via GET /images/{taskId} (some OpenAI proxies)
+   * - 'pearapi-task': Poll via GET pollPathTemplate, response contains {status, data:[{url}]} (PearAPI /images/tasks/{id})
    * - 'none': No polling needed (direct response only)
    */
-  pollMode: 'path' | 'images-id' | 'none';
+  pollMode: 'path' | 'images-id' | 'pearapi-task' | 'none';
 
   /**
    * The URL path template for polling task status.
@@ -82,6 +83,9 @@ export interface ApiCompatProfile {
    * Example: '/tasks/{taskId}?language=zh'
    */
   pollPathTemplate: string;
+
+  /** HTTP method for polling (default: GET) */
+  pollMethod?: 'GET' | 'POST';
 }
 
 // ---------------------------------------------------------------------------
@@ -137,15 +141,16 @@ export const PROFILE_OPENAI: ApiCompatProfile = {
  */
 export const PROFILE_PEARAPI: ApiCompatProfile = {
   id: 'pearapi',
-  label: 'PearAPI 兼容 (比例格式)',
-  responseMode: 'direct',
+  label: 'PearAPI 兼容 (nano-banana / GPT-Image JSON)',
+  responseMode: 'polling',
   sizeFormat: 'aspect-ratio',
   defaultEndpoint: '/images/generations',
-  editEndpoint: '/images/generations',
+  editEndpoint: '/images/edits',
   editEncoding: 'json-first',
   supportsInputFidelity: false,
-  pollMode: 'none',
-  pollPathTemplate: '',
+  pollMode: 'pearapi-task',
+  pollPathTemplate: '/images/tasks/{taskId}',
+  pollMethod: 'GET',
 };
 
 /**
@@ -1528,47 +1533,67 @@ export function adjustRequestForProfile(
     delete body.input_fidelity;
   }
 
-  // --- Convert image/image_urls to OpenAI images[] array format ---
-  // OpenAI's GPT Image models require the `images` array format:
-  //   images: [{ image_url: { url: "data:image/jpeg;base64,..." } }]
-  // Older format (image / image_urls) is not accepted by these models on /images/generations.
-  // ★ IMPORTANT: Only convert to images[] for /images/generations endpoint.
-  // /images/edits requires the `image` field (multipart or JSON) and does NOT support images[].
-  // Converting image→images[] for /images/edits would cause "image is required" errors.
-  const shouldConvertImages = (hasImage || hasReferenceImages) && endpoint === '/images/generations';
-  if (shouldConvertImages && (profile.id === 'openai' || profile.id === 'auto' || profile.id === 'pearapi')) {
+  // --- 参考图格式适配 ---
+  // OpenAI GPT-Image: images: [{image_url:{url}}]（嵌套对象格式，用于 /images/generations）
+  // PearAPI: image (string) 单张 / images (string[]) 多张（扁平字符串数组，用于 /images/edits 和 /images/generations）
+  // APImart: image_urls (string[])（扁平字符串数组）
+  const shouldConvertToNestedImages = (hasImage || hasReferenceImages) && endpoint === '/images/generations'
+    && (profile.id === 'openai' || profile.id === 'auto');
+
+  if (shouldConvertToNestedImages) {
+    // OpenAI 嵌套格式
     const imagesArray: Array<{ image_url: { url: string } }> = [];
     const seenUrls = new Set<string>();
-
-    // Primary: use the `image` field (base64 data URL from /images/edits preparation)
     if (body.image && typeof body.image === 'string') {
       const url = body.image as string;
       if (!seenUrls.has(url)) { seenUrls.add(url); imagesArray.push({ image_url: { url } }); }
     }
-
-    // Also add any extra image_urls that aren't already the same as `image`
-    // ★ 关键修复：去重，避免参考图同时在image和image_urls[0]时被重复添加
     if (Array.isArray(body.image_urls)) {
       for (const url of body.image_urls as string[]) {
         if (typeof url === 'string' && !seenUrls.has(url)) {
-          seenUrls.add(url);
-          imagesArray.push({ image_url: { url } });
+          seenUrls.add(url); imagesArray.push({ image_url: { url } });
         }
       }
     }
-
     if (imagesArray.length > 0) {
       body.images = imagesArray;
-      // Remove old format fields to avoid confusing the API
       delete body.image;
       delete body.image_urls;
     }
+  } else if (profile.id === 'pearapi' && (hasImage || hasReferenceImages)) {
+    // PearAPI 扁平格式：image (string) + images (string[])
+    const flatImages: string[] = [];
+    const seenUrls = new Set<string>();
+    if (body.image && typeof body.image === 'string') {
+      const url = body.image as string;
+      if (!seenUrls.has(url)) { seenUrls.add(url); flatImages.push(url); }
+    }
+    if (Array.isArray(body.image_urls)) {
+      for (const url of body.image_urls as string[]) {
+        if (typeof url === 'string' && !seenUrls.has(url)) {
+          seenUrls.add(url); flatImages.push(url);
+        }
+      }
+    }
+    if (flatImages.length > 0) {
+      // 第一张放 image，其余放 images 数组
+      body.image = flatImages[0];
+      if (flatImages.length > 1) {
+        body.images = flatImages;  // PearAPI 也接受 images 数组包含全部（含第一张）
+      }
+      delete body.image_urls;
+    }
+    // PearAPI 专用字段：n（生成数量）、task_type（异步模式）
+    if (body.image_count !== undefined) {
+      body.n = body.image_count;
+      delete body.image_count;
+    }
+    // 默认使用 async 模式避免 10 分钟超时（长任务走异步+轮询）
+    body.task_type = 'async';
+  } else if (profile.id === 'apimart' && hasReferenceImages) {
+    // APImart: 保持 image_urls 扁平数组格式
+    // 不转换为嵌套 images[]
   }
-
-  // For apimart profile with reference images, keep image_urls as-is
-  // (apimart accepts image_urls in its native format)
-  // For other profiles that have image_urls but no images conversion,
-  // also pass image_urls through as-is — the API provider may or may not support it.
 
   return { body, endpoint };
 }
@@ -1694,9 +1719,17 @@ export function parseResponseForProfile(
   // 2) task_id / id 在顶层（如某些 OpenAI 兼容: { task_id: "xxx" } 或 { id: "xxx" }）
   if (apiResponse.task_id && typeof apiResponse.task_id === 'string') {
     taskIds.push(apiResponse.task_id as string);
-  } else if (apiResponse.id && typeof apiResponse.id === 'string' && !apiResponse.task_id && !apiResponse.data) {
-    // 仅当没有 data 和 task_id 时，才将 id 作为 taskId（避免误解析 data 数组中的 id）
-    taskIds.push(apiResponse.id as string);
+  } else if (apiResponse.id && typeof apiResponse.id === 'string' && !apiResponse.task_id) {
+    // PearAPI async: { id, status: 'queued', model } — 有 id 无 data[].url 无 data[].b64_json 时视为taskId
+    // 标准OpenAI direct: { created, data: [{url}] } — 此时 data 已在第1步解析过
+    const hasDirectData = Array.isArray(apiResponse.data) && (apiResponse.data as unknown[]).some(item => {
+      if (typeof item !== 'object' || item === null) return false;
+      const it = item as Record<string, unknown>;
+      return (it.url && typeof it.url === 'string') || (it.b64_json && typeof it.b64_json === 'string');
+    });
+    if (!hasDirectData) {
+      taskIds.push(apiResponse.id as string);
+    }
   }
 
   // 3) 更多非标准响应格式兜底提取

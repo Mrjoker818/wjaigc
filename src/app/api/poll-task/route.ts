@@ -208,17 +208,41 @@ export async function POST(request: NextRequest) {
             
             console.info(`[poll-task] remote poll data: taskStatus=${taskStatus}, unwrapDepth=${unwrapDepth}, hasImages=${!!taskData.images}, hasResults=${!!taskData.results}, hasOutput=${!!taskData.output}, hasImageUrls=${!!taskData.image_urls}, pollDataKeys=${Object.keys(pollData).join(',')}, taskDataKeys=${Object.keys(taskData).join(',')}`);
 
-            if (taskStatus === 'succeeded' || taskStatus === 'completed' || taskStatus === 'success') {
+            if (taskStatus === 'succeeded' || taskStatus === 'completed' || taskStatus === 'success' || taskStatus === 'done') {
               // 远程任务完成，提取图片
               const images: Array<{ url: string }> = [];
-              
-              // 尝试多种数据字段名提取图片列表
-              const dataItems = taskData.images || taskData.results || taskData.output || taskData.image_urls || taskData.image_urls_list || taskData.generated_images;
-              if (Array.isArray(dataItems)) {
-                for (const item of dataItems) {
-                  const url = item.url || item.image_url || item.image_url_optimized || item;
-                  if (typeof url === 'string' && (url.startsWith('http') || url.startsWith('/'))) {
-                    images.push({ url: url.startsWith('/') ? `${apiBaseUrl}${url}` : url });
+
+              // ★ PearAPI 格式: { status: 'succeeded', data: [{ url: "..." }] } (顶层 data 数组)
+              if (Array.isArray(taskData.data)) {
+                for (const item of taskData.data as unknown[]) {
+                  if (item && typeof item === 'object') {
+                    const obj = item as Record<string, unknown>;
+                    const url = obj.url || obj.image_url || obj.b64_json;
+                    if (typeof url === 'string') {
+                      if (url.startsWith('http') || url.startsWith('/')) {
+                        images.push({ url: url.startsWith('/') ? `${apiBaseUrl}${url}` : url });
+                      } else if (/^[A-Za-z0-9+/=]+$/.test(url)) {
+                        images.push({ url: `data:image/png;base64,${url}` });
+                      }
+                    }
+                  } else if (typeof item === 'string') {
+                    const s = item as string;
+                    if (s.startsWith('http') || s.startsWith('/')) {
+                      images.push({ url: s.startsWith('/') ? `${apiBaseUrl}${s}` : s });
+                    }
+                  }
+                }
+              }
+
+              // 尝试多种数据字段名提取图片列表 (仅当上面没取到时)
+              if (images.length === 0) {
+                const dataItems = taskData.images || taskData.results || taskData.output || taskData.image_urls || taskData.image_urls_list || taskData.generated_images;
+                if (Array.isArray(dataItems)) {
+                  for (const item of dataItems) {
+                    const url = item.url || item.image_url || item.image_url_optimized || item;
+                    if (typeof url === 'string' && (url.startsWith('http') || url.startsWith('/'))) {
+                      images.push({ url: url.startsWith('/') ? `${apiBaseUrl}${url}` : url });
+                    }
                   }
                 }
               }
