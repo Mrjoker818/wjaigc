@@ -34,14 +34,16 @@ export async function GET(request: NextRequest) {
   
   const url = new URL(request.url);
   const urlToken = url.searchParams.get('token');
+  const urlUserId = url.searchParams.get('userId');  // ★ 前端传递userId参数（EventSource无法携带header）
   
   let userId: string | null = null;
   
-  // 方式1：URL token认证（优先）
+  // 方式1：URL参数认证（优先，EventSource无法携带header）
+  // 支持两种参数名：token 或 userId（兼容不同调用方）
   if (urlToken) {
-    // 验证token有效性（简化实现：直接使用token作为userId，适用于内部生成的临时token）
-    // 生产环境应该验证token签名或从数据库查找
     userId = urlToken;
+  } else if (urlUserId) {
+    userId = urlUserId;
   } else {
     // 方式2+3：标准认证（cookie或内部请求头）
     const authResult = await requireApiAuthOrReject(request);
