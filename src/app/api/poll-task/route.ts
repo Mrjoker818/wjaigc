@@ -192,8 +192,8 @@ export async function POST(request: NextRequest) {
             let unwrapDepth = 0;
             while (taskData.data && typeof taskData.data === 'object' && !Array.isArray(taskData.data) && unwrapDepth < 3) {
               const innerData = taskData.data as Record<string, unknown>;
-              // 只有当内层有 status/images/results 等任务字段时才解包
-              if (innerData.status || innerData.images || innerData.results || innerData.output || innerData.image_urls || innerData.image_urls_list || innerData.generated_images || innerData.url || innerData.image_url) {
+              // 只有当内层有 status/images/results/result 等任务字段时才解包
+              if (innerData.status || innerData.images || innerData.results || innerData.result || innerData.output || innerData.image_urls || innerData.image_urls_list || innerData.generated_images || innerData.url || innerData.image_url) {
                 taskData = innerData;
                 unwrapDepth++;
               } else if (innerData.data && typeof innerData.data === 'object') {
@@ -261,21 +261,43 @@ export async function POST(request: NextRequest) {
                 const resultImages = resultObj.images || resultObj.results || resultObj.output || resultObj.image_urls || resultObj.generated_images;
                 if (Array.isArray(resultImages)) {
                   for (const item of resultImages) {
-                    const url = item.url || item.image_url || item.image_url_optimized || item;
+                    // ★ APImart 格式: images:[{url:[...], expires_at}] — url字段是数组
+                    let url: unknown;
+                    if (item && typeof item === 'object') {
+                      const obj = item as Record<string, unknown>;
+                      if (Array.isArray(obj.url) && obj.url.length > 0) {
+                        url = obj.url[0];
+                      } else {
+                        url = obj.url || obj.image_url || obj.image_url_optimized || obj;
+                      }
+                    } else {
+                      url = item;
+                    }
                     if (typeof url === 'string' && (url.startsWith('http') || url.startsWith('/'))) {
                       images.push({ url: url.startsWith('/') ? `${apiBaseUrl}${url}` : url });
                     }
                   }
                 }
               }
-              // 从嵌套的 data.data 提取 (APImart双层嵌套格式: {code, data: {code, data: {images...}}})
+              // ★ APImart result.images[].url 是数组格式: result:{images:[{url:["https://..."]}]}
+              // 从嵌套的 data.data 提取
               if (images.length === 0 && taskData.data && typeof taskData.data === 'object') {
                 const innerData = taskData.data as Record<string, unknown>;
                 console.info(`[poll-task] edit remote trying nested taskData.data, keys=${Object.keys(innerData).join(',')}`);
                 const innerImages = innerData.images || innerData.results || innerData.output || innerData.image_urls || innerData.generated_images;
                 if (Array.isArray(innerImages)) {
                   for (const item of innerImages) {
-                    const url = item.url || item.image_url || item.image_url_optimized || item;
+                    let url: unknown;
+                    if (item && typeof item === 'object') {
+                      const obj = item as Record<string, unknown>;
+                      if (Array.isArray(obj.url) && obj.url.length > 0) {
+                        url = obj.url[0];
+                      } else {
+                        url = obj.url || obj.image_url || obj.image_url_optimized || obj;
+                      }
+                    } else {
+                      url = item;
+                    }
                     if (typeof url === 'string' && (url.startsWith('http') || url.startsWith('/'))) {
                       images.push({ url: url.startsWith('/') ? `${apiBaseUrl}${url}` : url });
                     }
@@ -289,10 +311,20 @@ export async function POST(request: NextRequest) {
                   }
                 }
               }
-              // 从 data.images 提取 (APImart格式)
+              // 从 data.images 提取 (APImart格式: {code, data:{result:{images:[{url:["..."]}]}}})
               if (images.length === 0 && pollData.images && Array.isArray(pollData.images)) {
                 for (const item of pollData.images) {
-                  const url = item.url || item.image_url || item;
+                  let url: unknown;
+                  if (item && typeof item === 'object') {
+                    const obj = item as Record<string, unknown>;
+                    if (Array.isArray(obj.url) && obj.url.length > 0) {
+                      url = obj.url[0];
+                    } else {
+                      url = obj.url || obj.image_url || obj.image_url_optimized || obj;
+                    }
+                  } else {
+                    url = item;
+                  }
                   if (typeof url === 'string' && (url.startsWith('http') || url.startsWith('/'))) {
                     images.push({ url: url.startsWith('/') ? `${apiBaseUrl}${url}` : url });
                   }

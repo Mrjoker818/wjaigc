@@ -101,14 +101,17 @@ export interface ApiCompatProfile {
  */
 export const PROFILE_APIMART: ApiCompatProfile = {
   id: 'apimart',
-  label: '异步轮询 (宽高比)',
+  label: 'APImart 异步轮询 (宽高比/分辨率档位)',
   responseMode: 'polling',
   sizeFormat: 'aspect-ratio',
+  // APImart官方文档：文生图和图生图统一走 /v1/images/generations，传 image_urls 自动进入编辑模式
   defaultEndpoint: '/images/generations',
-  editEndpoint: '/images/generations',
+  editEndpoint: '/images/generations',  // 无独立 edits 端点，image_urls 自动触发编辑模式
   editEncoding: 'json-first',
   supportsInputFidelity: false,
   pollMode: 'path',
+  pollMethod: 'GET',
+  // APImart官方: GET /v1/tasks/{task_id}?language=zh（buildPollUrl自动加/v1前缀，这里写相对baseUrl的路径）
   pollPathTemplate: '/tasks/{taskId}?language=zh',
 };
 
@@ -1591,9 +1594,34 @@ export function adjustRequestForProfile(
     }
     // 默认使用 async 模式避免 10 分钟超时（长任务走异步+轮询）
     body.task_type = 'async';
-  } else if (profile.id === 'apimart' && hasReferenceImages) {
-    // APImart: 保持 image_urls 扁平数组格式
-    // 不转换为嵌套 images[]
+  } else if (profile.id === 'apimart') {
+    // APImart: 统一使用 image_urls (string[]) 扁平数组格式（官方文档）
+    // 文生图和图生图均走 /v1/images/generations，有 image_urls 自动进入图像编辑模式
+    const imgUrls: string[] = [];
+    const seenUrls = new Set<string>();
+    if (body.image && typeof body.image === 'string') {
+      const url = body.image as string;
+      if (!seenUrls.has(url)) { seenUrls.add(url); imgUrls.push(url); }
+    }
+    if (Array.isArray(body.image_urls)) {
+      for (const url of body.image_urls as string[]) {
+        if (typeof url === 'string' && !seenUrls.has(url)) {
+          seenUrls.add(url); imgUrls.push(url);
+        }
+      }
+    }
+    if (imgUrls.length > 0) {
+      body.image_urls = imgUrls;
+    } else {
+      delete body.image_urls;
+    }
+    delete body.image;
+    delete body.images;
+    // 数量字段 n
+    if (body.image_count !== undefined) {
+      body.n = body.image_count;
+      delete body.image_count;
+    }
   }
 
   return { body, endpoint };
@@ -1708,13 +1736,41 @@ export function parseResponseForProfile(
       directImageUrls.push(`data:image/png;base64,${dataObj.b64_json}`);
     }
     // 嵌套 images 数组（部分 API: { data: { images: [{ url: "..." }] } }）
+    // APImart 格式: result.images[].url 是 string[]（URL数组）
     const images = dataObj.images as Array<Record<string, unknown>> | undefined;
     if (images && Array.isArray(images)) {
       for (const img of images) {
-        if (img.url && typeof img.url === 'string') directImageUrls.push(img.url);
+        if (img.url) {
+          if (typeof img.url === 'string') directImageUrls.push(img.url);
+          else if (Array.isArray(img.url)) {
+            // APImart: { url: [ "https://..." ] }
+            for (const u of img.url) {
+              if (typeof u === 'string') directImageUrls.push(u);
+            }
+          }
+        }
         if (img.b64_json && typeof img.b64_json === 'string' && /^[A-Za-z0-9+/=]+$/.test(img.b64_json)) directImageUrls.push(`data:image/png;base64,${img.b64_json}`);
+        if (img.image_url && typeof img.image_url === 'string') directImageUrls.push(img.image_url);
       }
     }
+    // APImart result 对象: { data: { result: { images: [{ url: [...] }] } } }
+    if (dataObj.result && typeof dataObj.result === 'object') {
+      const r = dataObj.result as Record<string, unknown>;
+      const rImages = r.images as Array<Record<string, unknown>> | undefined;
+      if (rImages && Array.isArray(rImages)) {
+        for (const img of rImages) {
+          if (img.url) {
+            if (typeof img.url === 'string') directImageUrls.push(img.url);
+            else if (Array.isArray(img.url)) {
+              for (const u of img.url) { if (typeof u === 'string') directImageUrls.push(u); }
+            }
+          }
+          if (img.b64_json && typeof img.b64_json === 'string') directImageUrls.push(`data:image/png;base64,${img.b64_json}`);
+        }
+      }
+    }
+    // APImart 提交响应: { code: 'success', data: [{ task_id: 'xxx', status: 'processing' }] }
+    // 此时 data 是外层对象，数组在 data.data 中；外层数组处理在前面的 data isArray 分支
   }
 
   // 2) task_id / id 在顶层（如某些 OpenAI 兼容: { task_id: "xxx" } 或 { id: "xxx" }）
