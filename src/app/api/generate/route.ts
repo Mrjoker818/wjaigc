@@ -351,7 +351,9 @@ export async function POST(request: NextRequest) {
 
           // 如果有异步 taskIds，后台轮询直到完成
           const bgTaskIds: string[] = bgData.taskIds || [];
+          console.log(`[generate] submitOnly bgTaskIds check: bgTaskIds.length=${bgTaskIds.length}, bgTaskIds=${JSON.stringify(bgTaskIds)}`);
           if (bgTaskIds.length > 0) {
+            console.log(`[generate] submitOnly entering bgPoll loop for asyncTaskId=${asyncTaskId}, bgTaskId=${bgTaskIds[0]}`);
             updateTaskProgress(asyncTaskId, {
               status: 'processing',
               progress: 10,
@@ -919,10 +921,18 @@ export async function POST(request: NextRequest) {
           'standard': 'auto', 'high': 'high', 'auto': 'auto',
           'low': 'low', 'medium': 'medium',
         };
+        // ★ resolution参数映射：APImart等提供商期望 '1k/2k/4k' 格式，而非 'high/medium/low'
+        const resolutionMap: Record<string, string> = {
+          'high': '2k', 'medium': '1k', 'low': '1k', 'auto': '2k',
+          '4K': '4k', '2K': '2k', '1K': '1k', 'ultra': '4k', 'hd': '4k',
+          'standard': '1k',
+        };
+
         if (currentModelConfig.paramType === 'quality') {
           requestBody.quality = qualityMap[quality] || quality;
         } else if (currentModelConfig.paramType === 'resolution') {
-          requestBody.resolution = quality;
+          // ★ 关键修复：将 quality 参数转换为 API 期望的 resolution 格式
+          requestBody.resolution = resolutionMap[quality] || '2k';
           requestBody.quality = qualityMap[quality] || quality;
         } else if (currentModelConfig.paramType === 'both') {
           // GPT-Image系列同时支持resolution和quality两种参数
