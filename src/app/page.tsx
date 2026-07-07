@@ -1091,10 +1091,11 @@ function CanvasApp() {
 
       let response: Response;
       try {
+        // ★ submitOnly模式：后端立即返回taskId，前端轮询等待结果
         response = await fetch(apiEndpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...params, userId: currentUserRef.current?.id }),
+          body: JSON.stringify({ ...params, userId: currentUserRef.current?.id, submitOnly: true }),
           signal: submitController.signal,
         });
       } finally {

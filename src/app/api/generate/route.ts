@@ -198,6 +198,80 @@ export async function POST(request: NextRequest) {
     sessionUser = await getSessionUser(request);
     const userId = sessionUser?.id ?? requestUserId ?? "anonymous";
 
+    // ★ 解析参考图片 URL（转换为 API 可访问的格式）
+    // 必须在 submitOnly 检查之前完成，否则后台请求无法获得可访问的参考图 URL
+    // 优化：并行处理所有参考图，加速提交
+    const accessibleReferenceImages: string[] = [];
+    if (referenceImages && Array.isArray(referenceImages)) {
+      // 确保域名不重复包含协议：COZE_PROJECT_DOMAIN_DEFAULT 可能已含 https://
+      const rawDomain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
+      const domainBase = rawDomain.replace(/\/+$/, ''); // 去掉尾部斜杠
+
+      const resolveImage = async (rawImg: unknown): Promise<string | null> => {
+        const img = typeof rawImg === 'string' ? rawImg : (rawImg as { url?: string })?.url || String(rawImg);
+        if (!img || typeof img !== 'string' || !img.trim()) return null;
+
+        // 1. 相对路径 → 公网 URL 或 base64
+        if (img.startsWith('/')) {
+          if (domainBase) {
+            // 确保不重复添加协议
+            const base = domainBase.startsWith('http') ? domainBase : `https://${domainBase}`;
+            return `${base}${img}`;
+          }
+          try {
+            const proto = process.env.NODE_ENV === 'production' ? 'https' : 'http';
+            const port = process.env.DEPLOY_RUN_PORT || 5000;
+            const resp = await fetch(`${proto}://localhost:${port}${img}`, { signal: AbortSignal.timeout(5000) });
+            const buf = Buffer.from(await resp.arrayBuffer());
+            return `data:image/png;base64,${buf.toString('base64')}`;
+          } catch { /* fallback below */ }
+        }
+        
+        // 2. data: URL — 小于 2MB 直接传递（避免不必要的 save-image 网络往返）
+        //    大于 2MB 才 save-image（防止请求体过大导致 413）
+        if (img.startsWith('data:')) {
+          if (img.length <= 2_000_000) {
+            return img; // 直接传递，速度快
+          }
+          try {
+            const saveResp = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/save-image`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ imageData: img }),
+            });
+            if (saveResp.ok) {
+              const saveData = await saveResp.json();
+              if (saveData.url) {
+                if (domainBase) {
+                  const base = domainBase.startsWith('http') ? domainBase : `https://${domainBase}`;
+                  return `${base}${saveData.url}`;
+                }
+                return saveData.url;
+              }
+            }
+          } catch { /* S3 not available */ }
+        }
+
+        // 3. 外部 URL 直接传递
+        if (img.startsWith('http')) return img;
+
+        // 4. 兜底 — 确保 URL 有协议前缀且不重复
+        if (domainBase) {
+          const base = domainBase.startsWith('http') ? domainBase : `https://${domainBase}`;
+          const path = img.startsWith('/') ? img : `/${img}`;
+          return `${base}${path}`;
+        }
+        return img;
+      };
+      
+      // 并行处理所有参考图（而非串行）
+      const results = await Promise.all(referenceImages.map((ri: unknown) => resolveImage(ri)));
+      for (const url of results) {
+        if (url) accessibleReferenceImages.push(url);
+      }
+      console.log(`[generate] 解析参考图完成: ${referenceImages.length} 张输入 → ${accessibleReferenceImages.length} 张可访问`);
+    }
+
     // ★ submitOnly 模式：立即注册任务并返回 taskId，后台执行实际生成
     // 解决 chat-tools 调用 /api/generate 时因第三方 API 响应慢（2-11分钟）导致 120s 超时的问题
     if (submitOnly) {
@@ -212,7 +286,14 @@ export async function POST(request: NextRequest) {
 
       // ★ 后台执行生成逻辑（fire-and-forget）
       // 重新构造请求体，去掉 submitOnly 标志，添加 skipCredits（积分已在本次请求中扣除）
-      const backgroundBody = { ...body, submitOnly: false, _skipCredits: true };
+      // ★ 关键修复：使用解析后的 accessibleReferenceImages 替换原始 referenceImages
+      const backgroundBody = {
+        ...body,
+        submitOnly: false,
+        _skipCredits: true,
+        // 使用解析后的可访问参考图 URL（而非原始相对路径或不可访问 URL）
+        referenceImages: accessibleReferenceImages.length > 0 ? accessibleReferenceImages : undefined,
+      };
       (async () => {
         try {
           const bgRes = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/generate`, {
@@ -394,78 +475,6 @@ export async function POST(request: NextRequest) {
         estimatedTime: 90,
         submitOnly: true,
       });
-    }
-
-    // 解析参考图片 URL（转换为 API 可访问的格式）
-    // 优化：并行处理所有参考图，加速提交
-    const accessibleReferenceImages: string[] = [];
-    if (referenceImages && Array.isArray(referenceImages)) {
-      // 确保域名不重复包含协议：COZE_PROJECT_DOMAIN_DEFAULT 可能已含 https://
-      const rawDomain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
-      const domainBase = rawDomain.replace(/\/+$/, ''); // 去掉尾部斜杠
-
-      const resolveImage = async (rawImg: unknown): Promise<string | null> => {
-        const img = typeof rawImg === 'string' ? rawImg : (rawImg as { url?: string })?.url || String(rawImg);
-        if (!img || typeof img !== 'string' || !img.trim()) return null;
-
-        // 1. 相对路径 → 公网 URL 或 base64
-        if (img.startsWith('/')) {
-          if (domainBase) {
-            // 确保不重复添加协议
-            const base = domainBase.startsWith('http') ? domainBase : `https://${domainBase}`;
-            return `${base}${img}`;
-          }
-          try {
-            const proto = process.env.NODE_ENV === 'production' ? 'https' : 'http';
-            const port = process.env.DEPLOY_RUN_PORT || 5000;
-            const resp = await fetch(`${proto}://localhost:${port}${img}`, { signal: AbortSignal.timeout(5000) });
-            const buf = Buffer.from(await resp.arrayBuffer());
-            return `data:image/png;base64,${buf.toString('base64')}`;
-          } catch { /* fallback below */ }
-        }
-        
-        // 2. data: URL — 小于 2MB 直接传递（避免不必要的 save-image 网络往返）
-        //    大于 2MB 才 save-image（防止请求体过大导致 413）
-        if (img.startsWith('data:')) {
-          if (img.length <= 2_000_000) {
-            return img; // 直接传递，速度快
-          }
-          try {
-            const saveResp = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/save-image`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ imageData: img }),
-            });
-            if (saveResp.ok) {
-              const saveData = await saveResp.json();
-              if (saveData.url) {
-                if (domainBase) {
-                  const base = domainBase.startsWith('http') ? domainBase : `https://${domainBase}`;
-                  return `${base}${saveData.url}`;
-                }
-                return saveData.url;
-              }
-            }
-          } catch { /* S3 not available */ }
-        }
-
-        // 3. 外部 URL 直接传递
-        if (img.startsWith('http')) return img;
-
-        // 4. 兜底 — 确保 URL 有协议前缀且不重复
-        if (domainBase) {
-          const base = domainBase.startsWith('http') ? domainBase : `https://${domainBase}`;
-          const path = img.startsWith('/') ? img : `/${img}`;
-          return `${base}${path}`;
-        }
-        return img;
-      };
-      
-      // 并行处理所有参考图（而非串行）
-      const results = await Promise.all(referenceImages.map((ri: unknown) => resolveImage(ri)));
-      for (const url of results) {
-        if (url) accessibleReferenceImages.push(url);
-      }
     }
 
     // 获取所有可用的 image 类型 API 提供商和模型
