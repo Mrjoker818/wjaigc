@@ -256,7 +256,7 @@ export class UserManager {
       this.multiUserData.users.unshift(admin);
       this.multiUserData.userData[admin.id] = {
         user: admin,
-        projects: [],
+        projects: this.createDemoProjects(),
         apiKeys: [],
         usageStats: [],
       };
@@ -972,9 +972,58 @@ export class UserManager {
     return project;
   }
 
+  private createDemoProjects(): Project[] {
+    const now = Date.now();
+    const sampleImages = [
+      {
+        id: 'demo-1',
+        url: 'https://images.unsplash.com/photo-1682687220742-aba13b6e50ba?w=800&q=80',
+        prompt: '美丽的山景，日落时分',
+        x: 100, y: 100, width: 400, height: 300,
+        createdAt: now - 60000,
+        mediaType: 'image' as const,
+      },
+      {
+        id: 'demo-2',
+        url: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800&q=80',
+        prompt: '阿尔卑斯山脉，雪峰',
+        x: 550, y: 200, width: 400, height: 267,
+        createdAt: now - 30000,
+        mediaType: 'image' as const,
+      },
+    ];
+    return [
+      {
+        id: 'demo-project',
+        userId: this.currentUserId || 'demo',
+        name: '示例项目',
+        canvasImages: sampleImages as any,
+        createdAt: now,
+        updatedAt: now,
+        settings: {},
+        metadata: { groups: [] },
+      },
+      {
+        id: 'empty-canvas',
+        userId: this.currentUserId || 'demo',
+        name: '空画布',
+        canvasImages: [],
+        createdAt: now,
+        updatedAt: now,
+        settings: {},
+        metadata: { groups: [] },
+      },
+    ];
+  }
+
   getProjects(): Project[] {
     const userData = this.getCurrentUserData();
-    return userData?.projects || [];
+    const projects = userData?.projects || [];
+    // 如果用户项目为空，返回默认示例项目
+    if (projects.length === 0) {
+      return this.createDemoProjects();
+    }
+    return projects;
   }
 
   getProject(projectId: string): Project | null {
