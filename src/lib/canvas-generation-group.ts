@@ -186,6 +186,7 @@ export const MODEL_ASPECT_RATIOS: Record<string, string[]> = {
     // 官方支持15种比例 + auto自动选择，resolution参数控制分辨率档位（1k/2k/4k）
     // 参考：https://docs.apimart.ai/cn/api-reference/images/gpt-image-2/generation
     'gpt-image-2': ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'],
+    'gpt-image-2-official': ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'],
     'gpt-image-1': ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'],
     'gpt-image-1-mini': ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'],
     'gpt-image-1.5': ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'],
@@ -303,6 +304,7 @@ export const MODEL_QUALITIES: Record<string, string[]> = {
     // ===== GPT Image 系列 =====
     // 官方: quality="auto"|"low"|"medium"|"high"
     'gpt-image-2': ['auto', 'low', 'medium', 'high'],
+    'gpt-image-2-official': ['auto', 'low', 'medium', 'high'],
     'gpt-image-1': ['auto', 'low', 'medium', 'high'],
 
     // ===== DALL-E 3 =====
@@ -383,7 +385,7 @@ export type ModelParamType = 'resolution' | 'quality' | 'both' | 'none';
 /** 分辨率档位型模型（参数值是"1K/2K/4K"，控制输出尺寸） */
 export const RESOLUTION_TIER_MODELS = [
     // GPT-Image 系列（APIMart/PearAPI支持resolution参数）
-    'gpt-image-2', 'gpt-image-1', 'gpt-image-1-mini', 'gpt-image-1.5', 'chatgpt-image-latest',
+    'gpt-image-2', 'gpt-image-2-official', 'gpt-image-1', 'gpt-image-1-mini', 'gpt-image-1.5', 'chatgpt-image-latest',
     // Seedream 系列
     'doubao-seedream-4-5', 'seedream-4-5', 'doubao-seedream-4', 'seedream-4',
     'doubao-seedream-3', 'seedream-3', 'doubao-seedream-5-0-lite', 'seedream-5-0-lite',
@@ -403,7 +405,7 @@ export const RESOLUTION_TIER_MODELS = [
 /** 质量级别型模型（参数值是"standard/hd/auto/low/medium/high"，控制细节增强） */
 export const QUALITY_LEVEL_MODELS = [
     // GPT-Image 系列
-    'gpt-image-2', 'gpt-image-1', 'gpt-image-2-c',
+    'gpt-image-2', 'gpt-image-2-official', 'gpt-image-1', 'gpt-image-2-c',
     // DALL-E 3
     'dall-e-3',
     // Ideogram
