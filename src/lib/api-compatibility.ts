@@ -86,6 +86,9 @@ export interface ApiCompatProfile {
 
   /** HTTP method for polling (default: GET) */
   pollMethod?: 'GET' | 'POST';
+
+  /** Extra body parameters to inject into requests for this profile */
+  extraBodyParams?: Record<string, unknown>;
 }
 
 // ---------------------------------------------------------------------------
@@ -144,16 +147,17 @@ export const PROFILE_OPENAI: ApiCompatProfile = {
  */
 export const PROFILE_PEARAPI: ApiCompatProfile = {
   id: 'pearapi',
-  label: 'PearAPI 兼容 (JSON + /images/edits, 支持所有绘画模型 jimeng/gpt-image/grok等)',
-  responseMode: 'polling',
+  label: 'PearAPI 兼容 (JSON + /images/edits, 同步返回, 支持所有绘画模型 jimeng/gpt-image/grok等)',
+  responseMode: 'direct',
   sizeFormat: 'aspect-ratio',
   defaultEndpoint: '/images/generations',
   editEndpoint: '/images/edits',
   editEncoding: 'json-first',
   supportsInputFidelity: false,
-  pollMode: 'pearapi-task',
-  pollPathTemplate: '/images/tasks/{taskId}',
+  pollMode: 'none',
+  pollPathTemplate: '',
   pollMethod: 'GET',
+  extraBodyParams: { task_type: 'sync', response_format: 'url' },
 };
 
 /**
@@ -1663,7 +1667,7 @@ export function adjustRequestForProfile(
       delete body.image;
       delete body.image_urls;
     }
-  } else if (profile.id === 'pearapi' && (hasImage || hasReferenceImages)) {
+  } else if (profile.id === 'pearapi' || profile.id === 'pearapi-task') {
     // PearAPI 扁平格式：image (string) + images (string[])
     const flatImages: string[] = [];
     const seenUrls = new Set<string>();
@@ -1686,13 +1690,13 @@ export function adjustRequestForProfile(
       }
       delete body.image_urls;
     }
-    // PearAPI 专用字段：n（生成数量）、task_type（异步模式）
+    // PearAPI专用字段：数量 n、返回URL格式、强制同步模式（避免轮询找不到端点）
     if (body.image_count !== undefined) {
       body.n = body.image_count;
       delete body.image_count;
     }
-    // 默认使用 async 模式避免 10 分钟超时（长任务走异步+轮询）
-    body.task_type = 'async';
+    body.response_format = 'url';
+    body.task_type = 'sync';
   } else if (profile.id === 'apimart') {
     // APImart: 统一使用 image_urls (string[]) 扁平数组格式（官方文档）
     // 文生图和图生图均走 /v1/images/generations，有 image_urls 自动进入图像编辑模式
