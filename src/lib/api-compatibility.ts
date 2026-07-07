@@ -310,7 +310,8 @@ export function resolveGeminiImageSize(
   }
 
   // If it's a ratio format like "3:4", convert to pixels based on quality
-  const qualityLevel = quality || '1K';
+  // 统一使用大写格式，避免大小写不匹配导致的fallback问题
+  const qualityLevel = (quality || '1K').toUpperCase();
   const ratioToPixels: Record<string, Record<string, string>> = {
     '1:1':  { '1K': '1024x1024', '2K': '2048x2048', '4K': '4096x4096' },
     '4:3':  { '1K': '1024x768',  '2K': '2048x1536', '4K': '4096x3072' },

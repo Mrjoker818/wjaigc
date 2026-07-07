@@ -25,13 +25,15 @@ export function calculateActualPixelsFromRatio(aspectRatio: string, quality?: st
 
   // 根据质量确定长边像素
   // ★ 支持 '1K'/'2K'/'3K'/'4K' 和 'standard'/'hd'/'high' 等常见质量值
+  // 统一使用大写格式进行匹配，避免大小写不匹配问题
+  const qualityUpper = quality.toUpperCase();
   const qualityPixels: Record<string, number> = {
-    '1K': 1024, '2K': 2048, '3K': 3072, '4K': 4096,
-    'standard': 1024, 'std': 1024,     // standard → 1K (OpenAI 默认)
-    'hd': 1792, 'high': 1792,          // hd → 1792 (OpenAI DALL-E 3 hd 模式)
-    'low': 1024, 'medium': 1024, 'auto': 1024, // 通用质量兜底
+    '1K': 1024, '2K': 2048, '3K': 3072, '4K': 4096, '8K': 8192,
+    'STANDARD': 1024, 'STD': 1024,     // standard → 1K (OpenAI 默认)
+    'HD': 1792, 'HIGH': 1792,          // hd → 1792 (OpenAI DALL-E 3 hd 模式)
+    'LOW': 1024, 'MEDIUM': 1024, 'AUTO': 1024, // 通用质量兜底
   };
-  const longEdge = qualityPixels[quality];
+  const longEdge = qualityPixels[qualityUpper];
   if (!longEdge) return null;
 
   if (ratio >= 1) {
