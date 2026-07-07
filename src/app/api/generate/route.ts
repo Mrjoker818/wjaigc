@@ -312,9 +312,11 @@ export async function POST(request: NextRequest) {
             body: JSON.stringify(backgroundBody),
             signal: AbortSignal.timeout(600000), // 10分钟超时
           });
+          console.log(`[generate] submitOnly bgRes status: ${bgRes.status}, ok: ${bgRes.ok}`);
           const bgData = await bgRes.json();
+          console.log(`[generate] submitOnly bgData keys: ${Object.keys(bgData).join(',')}, success: ${bgData.success}, taskIds: ${bgData.taskIds?.length || 0}`);
 
-          if (!bgData.success) {
+          if (!bgRes.ok || !bgData.success) {
             updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: bgData.error || '生成失败', label: '生成失败' });
             // 退款：生成失败时退还已扣除的积分
             if (deductedCredits > 0 && sessionUser) {
