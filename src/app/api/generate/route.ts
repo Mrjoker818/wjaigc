@@ -377,35 +377,44 @@ export async function POST(request: NextRequest) {
                 });
                 const pollData = await pollRes.json();
 
-                if (pollData.status === 'completed' && pollData.success) {
-                  // ★ poll-task返回imageUrl可能在多个位置：顶层、result对象、data对象
-                  // 需要检查所有可能的位置提取imageUrl
-                  const resultImageUrl = pollData.imageUrl 
-                    || (pollData.result && (pollData.result as Record<string, unknown>)?.imageUrl) 
-                    || (pollData.data && pollData.data.imageUrl) 
-                    || '';
-                  console.log(`[generate] submitOnly bgPoll extracted imageUrl: ${(resultImageUrl as string).substring(0, 100)}...`);
+                // ★ 先提取imageUrl（从多个位置），再判断完成状态
+                // poll-task返回imageUrl可能在多个位置：顶层、result对象、data对象、url字段
+                const resultImageUrl = (pollData.imageUrl as string | undefined)
+                  || ((pollData.result as Record<string, unknown> | undefined)?.imageUrl as string | undefined)
+                  || ((pollData.data as Record<string, unknown> | undefined)?.imageUrl as string | undefined)
+                  || (pollData.url as string | undefined)
+                  || ((pollData.result as Record<string, unknown> | undefined)?.url as string | undefined)
+                  || '';
+
+                // ★ 完成判断：completed + (success不为false 或 有imageUrl)
+                // 修复：poll-task可能只返回status:'completed'+imageUrl，不一定带success:true
+                if (pollData.status === 'completed' && (pollData.success !== false || !!resultImageUrl)) {
+                  console.log(`[generate] submitOnly bgPoll extracted imageUrl: ${resultImageUrl.substring(0, 100)}...`);
+                  
+                  // ★ 如果completed但没有imageUrl，warn并继续轮询（不标记completed）
                   if (!resultImageUrl) {
                     console.warn(`[generate] submitOnly bgPoll completed but no imageUrl found! pollData keys:`, Object.keys(pollData));
+                    // 继续轮询，不return
+                  } else {
+                    updateTaskProgress(asyncTaskId, {
+                      status: 'completed',
+                      progress: 100,
+                      label: '生成完成',
+                      result: {
+                        imageUrl: resultImageUrl,
+                        maskUrl: pollData.maskUrl || '',
+                        modelName: pollData.modelName || bgData.modelName || '',
+                        providerName: pollData.providerName || bgData.providerName || '',
+                        usedModel: bgData.model,
+                        apiBaseUrl: bgData.apiBaseUrl,
+                        providerId: bgData.providerId,
+                      }
+                    });
+                    // ★ 结果已通过updateTaskProgress设置到task-registry
+                    // poll-task会从registry读取并设置到completedTaskCache
+                    console.log(`[generate] submitOnly background completed for ${asyncTaskId}, imageUrl: ${resultImageUrl.substring(0, 80)}...`);
+                    return;
                   }
-                  updateTaskProgress(asyncTaskId, {
-                    status: 'completed',
-                    progress: 100,
-                    label: '生成完成',
-                    result: {
-                      imageUrl: resultImageUrl,
-                      maskUrl: pollData.maskUrl || '',
-                      modelName: pollData.modelName || bgData.modelName || '',
-                      providerName: pollData.providerName || bgData.providerName || '',
-                      usedModel: bgData.model,
-                      apiBaseUrl: bgData.apiBaseUrl,
-                      providerId: bgData.providerId,
-                    }
-                  });
-                  // ★ 结果已通过updateTaskProgress设置到task-registry
-                  // poll-task会从registry读取并设置到completedTaskCache
-                  console.log(`[generate] submitOnly background completed for ${asyncTaskId}, imageUrl: ${String(resultImageUrl).substring(0, 80)}...`);
-                  return;
                 }
 
                 if (pollData.status === 'failed') {
