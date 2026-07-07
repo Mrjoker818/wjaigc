@@ -1358,8 +1358,9 @@ function CanvasApp() {
                 continue;
               }
 
-              if (pollData.status === 'completed' && pollData.imageUrl) {
-                const rawImageUrl = pollData.imageUrl as string;
+              const completedImageUrl = (pollData.imageUrl || pollData.result?.imageUrl || (pollData.result?.image as Record<string, unknown>)?.url || (pollData.result?.images as Array<Record<string, unknown>>)?.[0]?.url) as string | undefined;
+              if (pollData.status === 'completed' && completedImageUrl) {
+                const rawImageUrl = completedImageUrl;
                 completedImages.push({
                   id: `${Date.now()}-${taskIdx}`,
                   url: rawImageUrl,
@@ -2168,8 +2169,9 @@ function CanvasApp() {
                 break;
               }
 
-              if (pollData.status === 'completed' && pollData.imageUrl) {
-                const imageUrl = pollData.imageUrl as string;
+              const completedImageUrl2 = (pollData.imageUrl || pollData.result?.imageUrl || (pollData.result?.image as Record<string, unknown>)?.url || (pollData.result?.images as Array<Record<string, unknown>>)?.[0]?.url) as string | undefined;
+              if (pollData.status === 'completed' && completedImageUrl2) {
+                const imageUrl = completedImageUrl2;
                 completedImages.push({
                   id: `${Date.now()}-${taskIdx}`,
                   url: imageUrl,

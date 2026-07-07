@@ -763,8 +763,8 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
             });
             const pollData = await pollRes.json();
             if (pollData.status === 'success' || pollData.status === 'completed') {
-              const url = pollData.result?.imageUrl || pollData.result?.url || pollData.imageUrl;
-              if (url) { setKvImageUrl(url); break; }
+              const url = pollData.imageUrl || pollData.result?.url || pollData.result?.imageUrl || (pollData.result?.image as Record<string, unknown>)?.url || (pollData.result?.images as Array<Record<string, unknown>>)?.[0]?.url;
+              if (url && typeof url === 'string') { setKvImageUrl(url); break; }
             } else if (pollData.status === 'failed') {
               break;
             }

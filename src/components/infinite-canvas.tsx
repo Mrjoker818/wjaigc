@@ -20,6 +20,38 @@ function findClosestStandardRatio(w: number, h: number): string {
   return best;
 }
 
+/** 统一解析轮询API返回的图片URL（兼容多种返回格式） */
+function extractPollImageUrl(pollData: unknown): string | null {
+  if (!pollData || typeof pollData !== 'object') return null;
+  const d = pollData as Record<string, unknown>;
+  // 直接字段
+  if (typeof d.imageUrl === 'string' && d.imageUrl) return d.imageUrl;
+  if (typeof d.url === 'string' && d.url) return d.url;
+  // result 嵌套
+  const r = d.result as Record<string, unknown> | undefined;
+  if (r) {
+    if (typeof r.imageUrl === 'string' && r.imageUrl) return r.imageUrl;
+    if (typeof r.url === 'string' && r.url) return r.url;
+    // result.image.url
+    const img = r.image as Record<string, unknown> | undefined;
+    if (img && typeof img.url === 'string' && img.url) return img.url as string;
+    // result.images[0].url
+    const imgs = r.images as Array<Record<string, unknown>> | undefined;
+    if (Array.isArray(imgs) && imgs.length > 0 && typeof imgs[0]?.url === 'string') return imgs[0].url as string;
+  }
+  return null;
+}
+
+/** 统一解析轮询API返回的蒙版图URL */
+function extractPollMaskUrl(pollData: unknown): string | null {
+  if (!pollData || typeof pollData !== 'object') return null;
+  const d = pollData as Record<string, unknown>;
+  if (typeof d.maskUrl === 'string' && d.maskUrl) return d.maskUrl;
+  const r = d.result as Record<string, unknown> | undefined;
+  if (r && typeof r.maskUrl === 'string' && r.maskUrl) return r.maskUrl as string;
+  return null;
+}
+
 import React, { useState, useRef, useEffect, useCallback, useMemo, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -4223,13 +4255,31 @@ export function InfiniteCanvas({
 
             // 处理已完成的任务
             for (const { taskId: tid, data: pollData } of pollResults) {
-              console.log(`[pollForResult] taskId=${tid} pollData.status=${pollData.status}, imageUrl=${pollData.imageUrl ? 'YES' : 'NO'}, results=${(pollData.results as string[])?.length || 0}`);
+              const pollResult = pollData as unknown as Record<string, unknown>;
+              const pollResultData = pollResult.result as Record<string, unknown> | undefined;
+              // ★ 兼容多种返回格式
+              const singleResultUrl = (pollResult.imageUrl as string)
+                || (pollResultData?.url as string)
+                || (pollResultData?.imageUrl as string)
+                || ((pollResultData?.image as Record<string, unknown>)?.url as string)
+                || ((pollResultData?.images as Array<Record<string, unknown>>)?.[0]?.url as string);
+              const resultUrlsFromArray: string[] = [];
+              if (Array.isArray(pollResultData?.images)) {
+                for (const img of (pollResultData?.images as Array<Record<string, unknown>>)) {
+                  if (img?.url) resultUrlsFromArray.push(img.url as string);
+                }
+              }
+              console.log(`[pollForResult] taskId=${tid} pollData.status=${pollData.status}, imageUrl=${singleResultUrl ? 'YES' : 'NO'}, results=${resultUrlsFromArray.length || 0}`);
               if (['completed', 'succeeded', 'success', 'done'].includes(pollData.status as string)) {
                 const resultUrls: string[] = [];
-                if (pollData.results && Array.isArray(pollData.results) && pollData.results.length > 0) {
-                  resultUrls.push(...(pollData.results as string[]));
-                } else if (pollData.imageUrl) {
-                  resultUrls.push(pollData.imageUrl as string);
+                if (pollResult.results && Array.isArray(pollResult.results) && pollResult.results.length > 0) {
+                  resultUrls.push(...(pollResult.results as string[]));
+                }
+                if (resultUrlsFromArray.length > 0) {
+                  resultUrls.push(...resultUrlsFromArray);
+                }
+                if (singleResultUrl) {
+                  resultUrls.push(singleResultUrl as string);
                 }
                 if (resultUrls.length > 0) {
                   completedResults.set(tid, resultUrls);
@@ -5636,11 +5686,21 @@ export function InfiniteCanvas({
             });
             if (!pollRes.ok) continue;
             const pollData = await pollRes.json();
-            if (pollData.status === 'completed' && pollData.imageUrl) {
+            // ★ 兼容多种返回格式：
+            // 1. 顶层 imageUrl (completedTaskCache路径)
+            // 2. result.image.url (异步轮询路径)
+            // 3. result.images[0].url (多图返回路径)
+            // 4. result.url (本地任务路径)
+            const resultUrl = pollData.imageUrl 
+              || pollData.result?.url 
+              || pollData.result?.imageUrl 
+              || (pollData.result?.image as Record<string, unknown>)?.url 
+              || (pollData.result?.images as Array<Record<string, unknown>>)?.[0]?.url;
+            if (pollData.status === 'completed' && resultUrl) {
               lastPollData = pollData;
-              return pollData.imageUrl;
+              return resultUrl as string;
             }
-            if (pollData.status === 'failed') {
+            if (pollData.status === 'failed' || pollData.status === 'cancelled') {
               return null;
             }
             // Update progress
@@ -5964,10 +6024,16 @@ export function InfiniteCanvas({
             }
             continue;
           }
-          // 1. result.url / result.imageUrl (local editTask or remote poll)
-          // 2. imageUrl (top-level, completedTaskCache)
-          // 3. result.image.url (images/generations format)
-          const resultUrl = pollData.result?.url || pollData.result?.imageUrl || pollData.imageUrl || (pollData.result?.image as Record<string,unknown>)?.url;
+          // ★ 兼容多种返回格式：
+          // 1. 顶层 imageUrl (completedTaskCache路径)
+          // 2. result.image.url (异步轮询路径)
+          // 3. result.images[0].url (多图返回路径)
+          // 4. result.url (本地任务路径)
+          const resultUrl = pollData.imageUrl 
+            || pollData.result?.url 
+            || pollData.result?.imageUrl 
+            || (pollData.result?.image as Record<string, unknown>)?.url 
+            || (pollData.result?.images as Array<Record<string, unknown>>)?.[0]?.url;
           if (pollData.status === 'completed' && resultUrl) {
             completed = true;
             // 添加结果图片到原图右侧（不覆盖原图，方便对比）
@@ -6170,7 +6236,16 @@ export function InfiniteCanvas({
           });
           if (!pollRes.ok) { completed = true; break; }
           const pollData = await pollRes.json();
-          const newImageUrl = pollData.result?.url || pollData.result?.imageUrl || pollData.imageUrl || (pollData.result?.image as Record<string,unknown>)?.url;
+          // ★ 兼容多种返回格式：
+          // 1. 顶层 imageUrl (completedTaskCache路径)
+          // 2. result.image.url (异步轮询路径)
+          // 3. result.images[0].url (多图返回路径)
+          // 4. result.url (本地任务路径)
+          const newImageUrl = pollData.imageUrl 
+            || pollData.result?.url 
+            || pollData.result?.imageUrl 
+            || (pollData.result?.image as Record<string, unknown>)?.url 
+            || (pollData.result?.images as Array<Record<string, unknown>>)?.[0]?.url;
           if (pollData.status === 'completed' && newImageUrl) {
             // Add result image next to original (instead of replacing)
             const targetImage = images.find(img => img.id === ann.targetImageId);
@@ -6618,10 +6693,16 @@ export function InfiniteCanvas({
               });
               if (!res.ok) throw new Error(`HTTP ${res.status}`);
               const pollData = await res.json();
-              if (pollData.status === 'completed' && pollData.imageUrl) {
-                return { imageUrl: pollData.imageUrl as string, maskUrl: (pollData.maskUrl || pollData.result?.maskUrl || '') as string };
+              // ★ 兼容多种返回格式
+              const resultUrl = pollData.imageUrl 
+                || pollData.result?.url 
+                || pollData.result?.imageUrl 
+                || (pollData.result?.image as Record<string, unknown>)?.url 
+                || (pollData.result?.images as Array<Record<string, unknown>>)?.[0]?.url;
+              if (pollData.status === 'completed' && resultUrl) {
+                return { imageUrl: resultUrl as string, maskUrl: (pollData.maskUrl || pollData.result?.maskUrl || '') as string };
               }
-              if (pollData.status === 'failed' || pollData.status === 'error' || pollData.retryable === false) return null;
+              if (pollData.status === 'failed' || pollData.status === 'error' || pollData.status === 'cancelled' || pollData.retryable === false) return null;
             } catch { /* continue */ }
           }
           return null;
@@ -13652,10 +13733,11 @@ export function InfiniteCanvas({
                         body: JSON.stringify({ taskId: data.taskId, model: videoModel, providerId: videoProviderId }),
                       });
                       const pollData = await pollRes.json();
-                      if (pollData.status === 'completed' && pollData.imageUrl) {
+                      const resultUrl = pollData.imageUrl || pollData.result?.url || pollData.result?.imageUrl || (pollData.result?.image as Record<string, unknown>)?.url || (pollData.result?.images as Array<Record<string, unknown>>)?.[0]?.url;
+                      if (pollData.status === 'completed' && resultUrl) {
                         clearInterval(pollInterval);
-                        const rawVideoUrl = pollData.videoUrl || pollData.imageUrl;
-                        const rawThumbUrl = pollData.videoThumbnailUrl || pollData.imageUrl;
+                        const rawVideoUrl = pollData.videoUrl || resultUrl;
+                        const rawThumbUrl = pollData.videoThumbnailUrl || resultUrl;
                         // ★ 持久化视频URL，防止第三方URL过期消失
                         Promise.all([
                           awaitStableImageUrl(rawThumbUrl, 30000, { isVideo: false }),
@@ -13751,10 +13833,11 @@ export function InfiniteCanvas({
                         body: JSON.stringify({ taskId: data.taskId, model: videoModel, providerId: videoProviderId }),
                       });
                       const pollData = await pollRes.json();
-                      if (pollData.status === 'completed' && pollData.imageUrl) {
+                      const resultUrl = pollData.imageUrl || pollData.result?.url || pollData.result?.imageUrl || (pollData.result?.image as Record<string, unknown>)?.url || (pollData.result?.images as Array<Record<string, unknown>>)?.[0]?.url;
+                      if (pollData.status === 'completed' && resultUrl) {
                         clearInterval(pollInterval);
-                        const rawVideoUrl = pollData.videoUrl || pollData.imageUrl;
-                        const rawThumbUrl = pollData.videoThumbnailUrl || pollData.imageUrl;
+                        const rawVideoUrl = pollData.videoUrl || resultUrl;
+                        const rawThumbUrl = pollData.videoThumbnailUrl || resultUrl;
                         // ★ 持久化视频URL，防止第三方URL过期消失
                         Promise.all([
                           awaitStableImageUrl(rawThumbUrl, 30000, { isVideo: false }),
