@@ -1668,17 +1668,22 @@ export function GenerationPanel(
                 </div>
 
                 {/* 输出参数：根据模型类型显示分辨率档位或质量级别 */}
-                {getSupportedQualities().length > 1 && (
+                {/* ★ 关键修复：paramType === 'both' 时显示分辨率档位（1K/2K/4K），而非质量级别 */}
+                {(getModelParamType(model.includes('::') ? model.split('::').pop()! : model) === 'both' 
+                  ? ['1K', '2K', '4K'] 
+                  : getSupportedQualities()).length > 1 && (
                     <div className="space-y-1">
                         <label className={stl}>{dot}{getModelParamType(model.includes('::') ? model.split('::').pop()! : model) === 'resolution' ? '输出分辨率' : getModelParamType(model.includes('::') ? model.split('::').pop()! : model) === 'both' ? '分辨率档位' : '生成质量'}</label>
                         <div className="grid grid-cols-4 gap-1.5">
-                            {getSupportedQualities().map(q => (
+                            {(getModelParamType(model.includes('::') ? model.split('::').pop()! : model) === 'both' 
+                              ? ['1K', '2K', '4K'] 
+                              : getSupportedQualities()).map(q => (
                                 <button
                                     key={q}
                                     onClick={() => {
                                         const paramType = getModelParamType(model.includes('::') ? model.split('::').pop()! : model);
                                         if (paramType === 'both') {
-                                            // GPT-Image系列：分辨率档位参数
+                                            // GPT-Image系列：设置分辨率档位（1K/2K/4K），而非质量级别
                                             setResolution(q);
                                             setQuality('auto');
                                         } else {
