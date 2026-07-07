@@ -2315,13 +2315,24 @@ export async function POST(request: NextRequest) {
       // Step A: 先用专用upscaler模型尝试（如果有）
       // 注意: 专用upscaler模型API通常限制最大边长2048，需要先放大到2048边长
       // 如果原图已超过2048，直接跳过专用模型，使用通用模型
+      // 同时检查API是否支持/images/edits端点（404表示不支持）
       const maxUpscalerEdge = 2048;
       const origMaxEdge = Math.max(origW, origH);
-      const shouldUseDedicatedUpscaler = specialUpscalerCandidates.length > 0 && origMaxEdge <= maxUpscalerEdge;
+      // 检查专用模型是否来自支持/images/edits的提供商（排除PearAPI等不支持此端点的）
+      const supportedUpscalerCandidates = specialUpscalerCandidates.filter(c => {
+        // PearAPI不支持/images/edits端点，直接排除
+        const baseUrl = c.apiBaseUrl || '';
+        if (baseUrl.includes('pearapi.ai') || baseUrl.includes('pearapi')) {
+          console.log(`[image-edit] upscale: skipping ${c.model} from PearAPI (does not support /images/edits endpoint)`);
+          return false;
+        }
+        return true;
+      });
+      const shouldUseDedicatedUpscaler = supportedUpscalerCandidates.length > 0 && origMaxEdge <= maxUpscalerEdge;
       
       if (shouldUseDedicatedUpscaler) {
         try {
-          console.log(`[image-edit] upscale: trying ${specialUpscalerCandidates.length} dedicated upscaler models first`);
+          console.log(`[image-edit] upscale: trying ${supportedUpscalerCandidates.length} dedicated upscaler models first`);
           
           // 原图不超过2048，直接放大2倍（不超过2048）
           const upscalerScale = Math.min(2, Math.floor(maxUpscalerEdge / origMaxEdge));
@@ -2336,7 +2347,7 @@ export async function POST(request: NextRequest) {
           console.log(`[image-edit] upscale: dedicated upscaler target size: ${upscalerSize} (limited to max edge 2048)`);
           
           // 专用超分模型走 /images/edits 端点（参考图编辑模式，参数更简单）
-          aiResult = await autoTrySubmitImageTask(specialUpscalerCandidates, (m: string) => ({
+          aiResult = await autoTrySubmitImageTask(supportedUpscalerCandidates, (m: string) => ({
             model: m,
             prompt: upscalerPrompt,
             n: 1,
@@ -2352,11 +2363,19 @@ export async function POST(request: NextRequest) {
             // 这里先返回2048结果，后续可添加二次放大逻辑
           }
         } catch (err) {
-          console.warn('[image-edit] upscale: dedicated upscaler models failed:', err instanceof Error ? err.message : err);
-          aiError = err instanceof Error ? err : new Error(String(err));
+          // 检测404错误：API不支持/images/edits端点，直接跳过
+          const errMsg = err instanceof Error ? err.message : String(err);
+          if (errMsg.includes('404') || errMsg.includes('Not Found')) {
+            console.warn('[image-edit] upscale: dedicated upscaler API endpoint not found (404), skipping to general models');
+          } else {
+            console.warn('[image-edit] upscale: dedicated upscaler models failed:', errMsg);
+            aiError = err instanceof Error ? err : new Error(errMsg);
+          }
         }
       } else if (specialUpscalerCandidates.length > 0 && origMaxEdge > maxUpscalerEdge) {
         console.log(`[image-edit] upscale: original image ${origW}x${origH} exceeds 2048 limit, skipping dedicated upscaler models`);
+      } else if (supportedUpscalerCandidates.length === 0 && specialUpscalerCandidates.length > 0) {
+        console.log(`[image-edit] upscale: all dedicated upscaler models filtered (API does not support /images/edits endpoint), using general models`);
       }
 
       // Step B: 专用模型失败或不存在时，用通用image模型放大
