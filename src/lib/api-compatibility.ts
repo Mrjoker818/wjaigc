@@ -1537,10 +1537,11 @@ export function adjustRequestForProfile(
   // If /images/edits is rejected by the provider at runtime, callers auto-fallback to /images/generations.
   // forceGenerationsEndpoint: when true, skip /images/edits and go directly to /images/generations
   // (useful when the provider's /images/edits is unavailable or times out)
+  // ★ 参考图模式(hasReferenceImages)也应使用editEndpoint(/images/edits)，确保参考图功能生效
   let endpoint: ImageEndpoint;
   if (forceGenerationsEndpoint) {
     endpoint = '/images/generations';
-  } else if (hasImage || isEditEndpoint) {
+  } else if (hasImage || isEditEndpoint || hasReferenceImages) {
     endpoint = profile.editEndpoint;
   } else {
     endpoint = profile.defaultEndpoint;
