@@ -147,13 +147,19 @@ export async function POST(request: NextRequest) {
     if (requestedPixelSize && !/^\d+x\d+$/.test(requestedPixelSize)) {
       return NextResponse.json({ success: false, error: '尺寸格式无效，应为 宽x高（如 1024x1024）' }, { status: 400 });
     }
-    // 参考图URL校验
+    // 参考图URL校验（过滤空字符串元素，避免前端删除后残留空元素）
     if (referenceImages && Array.isArray(referenceImages)) {
-      for (const ref of referenceImages) {
+      const validRefs = referenceImages.filter(r => r && (typeof r === 'string' ? r.trim() !== '' : r?.url?.trim() !== ''));
+      for (const ref of validRefs) {
         const urlErr = validateImageUrl(typeof ref === 'string' ? ref : ref?.url);
         if (urlErr) {
           return NextResponse.json({ success: false, error: `参考图URL无效: ${urlErr}` }, { status: 400 });
         }
+      }
+      // 更新referenceImages为有效元素（供后续逻辑使用）
+      if (validRefs.length !== referenceImages.length) {
+        console.log(`[generate] 过滤空参考图元素: ${referenceImages.length} → ${validRefs.length}`);
+        // 直接修改body中的referenceImages（已在第197行解析）
       }
     }
     // 防御性处理：确保 model 是字符串（前端可能误传对象）
@@ -364,6 +370,8 @@ export async function POST(request: NextRequest) {
             const bgPollProviderId = bgData.providerId || effectiveProviderId;
             let bgPollAttempts = 0;
             const bgMaxPollAttempts = 120;
+            let htmlResponseRetryCount = 0; // HTML响应重试计数
+            const maxHtmlResponseRetries = 5; // HTML响应最大重试次数
 
             while (bgPollAttempts < bgMaxPollAttempts) {
               bgPollAttempts++;
@@ -375,93 +383,129 @@ export async function POST(request: NextRequest) {
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ taskId: bgTaskIds[0], model: bgPollModel, providerId: bgPollProviderId }),
                 });
-                const pollData = await pollRes.json();
 
-                // ★ 先提取imageUrl（从多个位置），再判断完成状态
-                // poll-task返回imageUrl可能在多个位置：顶层、result对象、data对象、url字段、数组格式
-                // 辅助函数：从数组中提取第一个url
-                const extractFirstUrlFromArray = (arr: unknown): string | undefined => {
-                  if (!arr || !Array.isArray(arr) || arr.length === 0) return undefined;
-                  const first = arr[0] as Record<string, unknown> | undefined;
-                  if (!first) return undefined;
-                  const rawUrl = first.url || first.image_url || first.b64_json;
-                  return typeof rawUrl === 'string' ? rawUrl : undefined;
-                };
-
-                const resultObj = pollData.result as Record<string, unknown> | undefined;
-                const dataObj = pollData.data as Record<string, unknown> | undefined;
-                const outputObj = pollData.output as Array<Record<string, unknown>> | undefined;
-
-                const resultImageUrl = (pollData.imageUrl as string | undefined)
-                  // 单图格式
-                  || (resultObj?.imageUrl as string | undefined)
-                  || (dataObj?.imageUrl as string | undefined)
-                  || (pollData.url as string | undefined)
-                  || (resultObj?.url as string | undefined)
-                  // 数组格式（第三方API可能返回images/data/output数组）
-                  || extractFirstUrlFromArray(pollData.images)
-                  || extractFirstUrlFromArray(dataObj as unknown as Array<Record<string, unknown>>)
-                  || extractFirstUrlFromArray(resultObj?.images)
-                  || extractFirstUrlFromArray(resultObj?.data as unknown as Array<Record<string, unknown>>)
-                  || extractFirstUrlFromArray(outputObj)
-                  || extractFirstUrlFromArray(resultObj?.output)
-                  || '';
-
-                // ★ 完成判断：completed + (success不为false 或 有imageUrl)
-                // 修复：poll-task可能只返回status:'completed'+imageUrl，不一定带success:true
-                if (pollData.status === 'completed' && (pollData.success !== false || !!resultImageUrl)) {
-                  console.log(`[generate] submitOnly bgPoll extracted imageUrl: ${resultImageUrl.substring(0, 100)}...`);
-                  
-                  // ★ 如果completed但没有imageUrl，warn并继续轮询（不标记completed）
-                  if (!resultImageUrl) {
-                    console.warn(`[generate] submitOnly bgPoll completed but no imageUrl found! pollData keys:`, Object.keys(pollData));
-                    // 继续轮询，不return
-                  } else {
+                // ★ HTML响应检测：第三方API返回502/503时可能返回HTML错误页面而非JSON
+                const contentType = pollRes.headers.get('content-type') || '';
+                const responseText = await pollRes.text();
+                if (contentType.includes('text/html') || responseText.trim().startsWith('<!DOCTYPE') || responseText.trim().startsWith('<html')) {
+                  htmlResponseRetryCount++;
+                  console.warn(`[generate] submitOnly poll received HTML response (attempt ${htmlResponseRetryCount}/${maxHtmlResponseRetries}), likely 502/503 from upstream API. TaskId: ${bgTaskIds[0]}`);
+                  if (htmlResponseRetryCount > maxHtmlResponseRetries) {
                     updateTaskProgress(asyncTaskId, {
-                      status: 'completed',
-                      progress: 100,
-                      label: '生成完成',
-                      result: {
-                        imageUrl: resultImageUrl,
-                        maskUrl: pollData.maskUrl || '',
-                        modelName: pollData.modelName || bgData.modelName || '',
-                        providerName: pollData.providerName || bgData.providerName || '',
-                        usedModel: bgData.model,
-                        apiBaseUrl: bgData.apiBaseUrl,
-                        providerId: bgData.providerId,
-                      }
+                      status: 'failed',
+                      progress: 0,
+                      error: '上游API服务暂时不可用，请稍后重试',
+                      label: '服务暂时不可用',
                     });
-                    // ★ 结果已通过updateTaskProgress设置到task-registry
-                    // poll-task会从registry读取并设置到completedTaskCache
-                    console.log(`[generate] submitOnly background completed for ${asyncTaskId}, imageUrl: ${resultImageUrl.substring(0, 80)}...`);
+                    // 退款
+                    if (deductedCredits > 0 && sessionUser) {
+                      try {
+                        const { refundCredits } = await import('@/lib/credits');
+                        await refundCredits(sessionUser.id, deductedCredits, `图像生成服务不可用退款 (taskId: ${asyncTaskId})`, asyncTaskId);
+                      } catch (refundErr) { console.error('[generate] Refund failed:', refundErr); }
+                    }
                     return;
                   }
+                  // 继续轮询，等待服务恢复
+                  continue;
                 }
 
-                if (pollData.status === 'failed') {
-                  updateTaskProgress(asyncTaskId, {
-                    status: 'failed',
-                    progress: 0,
-                    error: pollData.error || '生成失败',
-                    label: '生成失败',
-                  });
-                  // 退款：轮询检测到生成失败
-                  if (deductedCredits > 0 && sessionUser) {
-                    try {
-                      const { refundCredits } = await import('@/lib/credits');
-                      await refundCredits(sessionUser.id, deductedCredits, `图像生成失败退款 (taskId: ${asyncTaskId})`, asyncTaskId);
-                    } catch (refundErr) { console.error('[generate] Refund failed:', refundErr); }
+                // 正常JSON解析并处理
+                try {
+                  const pollData = JSON.parse(responseText) as Record<string, unknown>;
+
+                  // ★ 先提取imageUrl（从多个位置），再判断完成状态
+                  // poll-task返回imageUrl可能在多个位置：顶层、result对象、data对象、url字段、数组格式
+                  // 辅助函数：从数组中提取第一个url
+                  const extractFirstUrlFromArray = (arr: unknown): string | undefined => {
+                    if (!arr || !Array.isArray(arr) || arr.length === 0) return undefined;
+                    const first = arr[0] as Record<string, unknown> | undefined;
+                    if (!first) return undefined;
+                    const rawUrl = first.url || first.image_url || first.b64_json;
+                    return typeof rawUrl === 'string' ? rawUrl : undefined;
+                  };
+
+                  const resultObj = pollData.result as Record<string, unknown> | undefined;
+                  const dataObj = pollData.data as Record<string, unknown> | undefined;
+                  const outputObj = pollData.output as Array<Record<string, unknown>> | undefined;
+
+                  const resultImageUrl = (pollData.imageUrl as string | undefined)
+                    // 单图格式
+                    || (resultObj?.imageUrl as string | undefined)
+                    || (dataObj?.imageUrl as string | undefined)
+                    || (pollData.url as string | undefined)
+                    || (resultObj?.url as string | undefined)
+                    // 数组格式（第三方API可能返回images/data/output数组）
+                    || extractFirstUrlFromArray(pollData.images)
+                    || extractFirstUrlFromArray(dataObj as unknown as Array<Record<string, unknown>>)
+                    || extractFirstUrlFromArray(resultObj?.images)
+                    || extractFirstUrlFromArray(resultObj?.data as unknown as Array<Record<string, unknown>>)
+                    || extractFirstUrlFromArray(outputObj)
+                    || extractFirstUrlFromArray(resultObj?.output)
+                    || '';
+
+                  // ★ 完成判断：completed + (success不为false 或 有imageUrl)
+                  // 修复：poll-task可能只返回status:'completed'+imageUrl，不一定带success:true
+                  if (pollData.status === 'completed' && (pollData.success !== false || !!resultImageUrl)) {
+                    console.log(`[generate] submitOnly bgPoll extracted imageUrl: ${resultImageUrl.substring(0, 100)}...`);
+                    
+                    // ★ 如果completed但没有imageUrl，warn并继续轮询（不标记completed）
+                    if (!resultImageUrl) {
+                      console.warn(`[generate] submitOnly bgPoll completed but no imageUrl found! pollData keys:`, Object.keys(pollData));
+                      // 继续轮询，不return
+                    } else {
+                      updateTaskProgress(asyncTaskId, {
+                        status: 'completed',
+                        progress: 100,
+                        label: '生成完成',
+                        result: {
+                          imageUrl: resultImageUrl,
+                          maskUrl: pollData.maskUrl || '',
+                          modelName: pollData.modelName || bgData.modelName || '',
+                          providerName: pollData.providerName || bgData.providerName || '',
+                          usedModel: bgData.model,
+                          apiBaseUrl: bgData.apiBaseUrl,
+                          providerId: bgData.providerId,
+                        }
+                      });
+                      // ★ 结果已通过updateTaskProgress设置到task-registry
+                      // poll-task会从registry读取并设置到completedTaskCache
+                      console.log(`[generate] submitOnly background completed for ${asyncTaskId}, imageUrl: ${resultImageUrl.substring(0, 80)}...`);
+                      return;
+                    }
                   }
-                  return;
-                }
 
-                if (pollData.progress) {
-                  const mappedProgress = 10 + Math.round(pollData.progress * 0.9);
-                  updateTaskProgress(asyncTaskId, { progress: mappedProgress, label: pollData.label || '生成中...' });
-                }
+                  if (pollData.status === 'failed') {
+                    const errorMsg = (pollData.error as string | undefined) || '生成失败';
+                    updateTaskProgress(asyncTaskId, {
+                      status: 'failed',
+                      progress: 0,
+                      error: errorMsg,
+                      label: '生成失败',
+                    });
+                    // 退款：轮询检测到生成失败
+                    if (deductedCredits > 0 && sessionUser) {
+                      try {
+                        const { refundCredits } = await import('@/lib/credits');
+                        await refundCredits(sessionUser.id, deductedCredits, `图像生成失败退款 (taskId: ${asyncTaskId})`, asyncTaskId);
+                      } catch (refundErr) { console.error('[generate] Refund failed:', refundErr); }
+                    }
+                    return;
+                  }
 
-                if (isTaskCancelled(asyncTaskId)) {
-                  return;
+                  const progressValue = pollData.progress as number | undefined;
+                  if (progressValue) {
+                    const mappedProgress = 10 + Math.round(progressValue * 0.9);
+                    const labelValue = (pollData.label as string | undefined) || '生成中...';
+                    updateTaskProgress(asyncTaskId, { progress: mappedProgress, label: labelValue });
+                  }
+
+                  if (isTaskCancelled(asyncTaskId)) {
+                    return;
+                  }
+                } catch (parseErr) {
+                  console.error(`[generate] submitOnly JSON parse error for ${asyncTaskId}:`, parseErr, 'responseText:', responseText.substring(0, 200));
+                  throw parseErr;
                 }
               } catch (pollErr) {
                 console.error(`[generate] submitOnly poll error for ${asyncTaskId}:`, pollErr);

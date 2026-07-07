@@ -710,21 +710,21 @@ export function GenerationPanel(
         fileInputRef.current?.click();
     };
 
-    // 移除上传的图片
+    // 移除上传的图片（真正删除数组元素，而非设空字符串）
     const removeReferenceImage = (index: number) => {
-        setReferenceImages(prev => {
-            const newImages = [...prev];
-            newImages[index] = '';
-            return newImages;
-        });
-        setReferenceDescriptions(prev => {
-            const newDesc = [...prev];
-            if (index < newDesc.length) newDesc[index] = '';
-            return newDesc;
-        });
+        setReferenceImages(prev => prev.filter((_, i) => i !== index));
+        setReferenceDescriptions(prev => prev.filter((_, i) => i !== index));
         setReferenceSelectedCategories(prev => {
-            const next = { ...prev };
-            delete next[index];
+            const next: Record<number, Set<string>> = {};
+            // 重新映射索引：删除index后，后面的元素索引前移
+            Object.keys(prev).forEach(k => {
+                const keyNum = parseInt(k, 10);
+                if (keyNum < index) {
+                    next[keyNum] = prev[keyNum];
+                } else if (keyNum > index) {
+                    next[keyNum - 1] = prev[keyNum];
+                }
+            });
             return next;
         });
     };
