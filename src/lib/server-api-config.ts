@@ -697,12 +697,19 @@ export async function addApiProvider(input: AddProviderInput): Promise<ApiProvid
   } else if (input.modelType === 'upscaler') {
     const matched = provider.discoveredModels.filter(m => {
       const mid = m.id.toLowerCase();
-      return mid.includes('upscaler') || mid.includes('upscale') ||
+      // 通用放大关键词
+      const isUpscaler = mid.includes('upscaler') || mid.includes('upscale') ||
         mid.includes('real-esrgan') || mid.includes('realesrgan') ||
         mid.includes('seedvr') || mid.includes('swinir') ||
         mid.includes('gfpgan') || mid.includes('esrgan');
+      // 302.AI专用放大模型（super-upscale-v2 / upscale-v6 / upscale-v5）
+      const is302Upscale = mid.includes('super-upscale') ||
+        mid.includes('upscale-v6') || mid.includes('upscale-v5') ||
+        mid.includes('302-upscale') || mid.includes('302-super');
+      return isUpscaler || is302Upscale;
     });
-    provider.selectedModels = matched.length > 0 ? matched.map(m => m.id) : provider.discoveredModels.map(model => model.id);
+    // upscaler类型：只勾选匹配的模型，不要fallback到全部模型（避免勾选大量无关模型）
+    provider.selectedModels = matched.length > 0 ? matched.map(m => m.id) : [];
   } else if (input.modelType === 'removebg') {
     const matched = provider.discoveredModels.filter(m => {
       const mid = m.id.toLowerCase();
