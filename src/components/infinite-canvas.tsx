@@ -4183,8 +4183,8 @@ export function InfiniteCanvas({
         // ★ 支持多 taskId 并行轮询（outputCount>1 时 API 可能返回多个 taskIds）
         const allTaskIds = data.taskIds as string[];
         const estimatedTime = data.estimatedTime || 30;
-        // 单任务最大15分钟，兼容慢速API如gpt-image-2 4K(可能需要7-10分钟)
-        const maxPollTime = Math.min(900, Math.max(300, estimatedTime * 5 + 300)) * 1000;
+        // 单任务最大25分钟（1500秒），兼容慢速API如apimart(可能需要10-20分钟)、gpt-image-2 4K(7-10分钟)
+        const maxPollTime = Math.min(1500, Math.max(600, estimatedTime * 8 + 600)) * 1000;
         const startTime = Date.now();
         let pollCount = 0;
 
@@ -5996,7 +5996,7 @@ export function InfiniteCanvas({
 
       // 轮询任务结果
       const taskId = submitData.taskId;
-      const maxPollTime = 600000; // 10分钟
+      const maxPollTime = 1500000; // 25分钟
       const pollStart = Date.now();
       let completed = false;
 
@@ -6225,7 +6225,7 @@ export function InfiniteCanvas({
         // Poll for result
         let completed = false;
         let pollAttempts = 0;
-        const maxPollAttempts = 150; // ~5 minutes
+        const maxPollAttempts = 750; // ~25 minutes
         while (!completed && pollAttempts < maxPollAttempts) {
           pollAttempts++;
           await new Promise(r => setTimeout(r, 2000));
@@ -15380,7 +15380,24 @@ export function InfiniteCanvas({
                 <label className={`text-xs font-medium min-w-[42px] ${isMonochrome ? 'text-gray-500' : 'text-[#777]'}`}>模型</label>
                 <select
                   value={canvasGenModel}
-                  onChange={(e) => setCanvasGenModel(e.target.value)}
+                  onChange={(e) => {
+                    const newModelKey = e.target.value;
+                    const newModelId = newModelKey ? newModelKey.split('::').pop() || '' : '';
+                    setCanvasGenModel(newModelKey);
+                    if (newModelId) {
+                      // 模型切换时重置参数为新模型支持的默认值
+                      const newSupportedRatios = findModelConfig(MODEL_ASPECT_RATIOS, newModelId) || DEFAULT_ASPECT_RATIOS;
+                      const newSupportedQualities = findModelConfig(MODEL_QUALITIES, newModelId) || DEFAULT_QUALITIES;
+                      // 优先保留当前值，如果当前值不被支持则使用第一个可用值
+                      if (!newSupportedRatios.includes(canvasGenAspectRatio)) {
+                        const defaultRatio = newSupportedRatios.includes('1:1') ? '1:1' : newSupportedRatios[0];
+                        setCanvasGenAspectRatio(defaultRatio);
+                      }
+                      if (!newSupportedQualities.includes(canvasGenQuality)) {
+                        setCanvasGenQuality(newSupportedQualities[0]);
+                      }
+                    }
+                  }}
                   className={`flex-1 text-xs rounded-lg px-3 py-2 border outline-none transition-colors ${
                     isMonochrome
                       ? 'bg-white border-gray-200 text-gray-900 focus:border-gray-400'
@@ -15395,36 +15412,78 @@ export function InfiniteCanvas({
                 </select>
               </div>
 
-              {/* Aspect ratio + Quality */}
-              <div className="flex items-center gap-2.5">
-                <label className={`text-xs font-medium min-w-[42px] ${isMonochrome ? 'text-gray-500' : 'text-[#777]'}`}>比例</label>
-                <select
-                  value={canvasGenAspectRatio}
-                  onChange={(e) => setCanvasGenAspectRatio(e.target.value)}
-                  className={`flex-1 text-xs rounded-lg px-3 py-2 border outline-none transition-colors ${
-                    isMonochrome
-                      ? 'bg-white border-gray-200 text-gray-900 focus:border-gray-400'
-                      : 'bg-[#0d0d0d] border-white/[0.12] text-text-bright focus:border-gold/40'
-                  }`}
-                >
-                  {['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'].map(r => (
-                    <option key={r} value={r}>{r}</option>
-                  ))}
-                </select>
-                <label className={`text-xs font-medium min-w-[36px] ${isMonochrome ? 'text-gray-500' : 'text-[#777]'}`}>质量</label>
-                <select
-                  value={canvasGenQuality}
-                  onChange={(e) => setCanvasGenQuality(e.target.value)}
-                  className={`flex-1 text-xs rounded-lg px-3 py-2 border outline-none transition-colors ${
-                    isMonochrome
-                      ? 'bg-white border-gray-200 text-gray-900 focus:border-gray-400'
-                      : 'bg-[#0d0d0d] border-white/[0.12] text-text-bright focus:border-gold/40'
-                  }`}
-                >
-                  <option value="standard">标准</option>
-                  <option value="hd">高清</option>
-                </select>
-              </div>
+              {/* 图像比例 + 分辨率/质量 - 根据模型动态显示 */}
+              {(() => {
+                // 解析当前选中的模型ID
+                const modelId = canvasGenModel ? canvasGenModel.split('::').pop() || '' : '';
+                const paramType = modelId ? getModelParamType(modelId) : 'quality';
+                const modelRatios = modelId ? (findModelConfig(MODEL_ASPECT_RATIOS, modelId) || DEFAULT_ASPECT_RATIOS) : DEFAULT_ASPECT_RATIOS;
+                const modelQualities = modelId ? (findModelConfig(MODEL_QUALITIES, modelId) || DEFAULT_QUALITIES) : DEFAULT_QUALITIES;
+                const isResolutionParam = paramType === 'resolution';
+                const isQualityParam = paramType === 'quality';
+                return (
+                <div className="flex items-center gap-2.5">
+                  <label className={`text-xs font-medium min-w-[42px] ${isMonochrome ? 'text-gray-500' : 'text-[#777]'}`}>图像比例</label>
+                  <select
+                    value={canvasGenAspectRatio}
+                    onChange={(e) => {
+                      const newAr = e.target.value;
+                      setCanvasGenAspectRatio(newAr);
+                      // 根据新比例和当前质量计算实际尺寸
+                      const newSize = calculateActualPixels(newAr, canvasGenQuality, modelId);
+                      // 可用于预览框尺寸调整等
+                    }}
+                    className={`flex-1 text-xs rounded-lg px-3 py-2 border outline-none transition-colors ${
+                      isMonochrome
+                        ? 'bg-white border-gray-200 text-gray-900 focus:border-gray-400'
+                        : 'bg-[#0d0d0d] border-white/[0.12] text-text-bright focus:border-gold/40'
+                    }`}
+                  >
+                    {modelRatios.map(r => {
+                      const px = calculateActualPixels(r, canvasGenQuality, modelId);
+                      return <option key={r} value={r}>{r} ({px})</option>;
+                    })}
+                  </select>
+                  {isResolutionParam && (
+                    <>
+                      <label className={`text-xs font-medium min-w-[36px] ${isMonochrome ? 'text-gray-500' : 'text-[#777]'}`}>分辨率</label>
+                      <select
+                        value={canvasGenQuality}
+                        onChange={(e) => {
+                          const newQ = e.target.value;
+                          setCanvasGenQuality(newQ);
+                        }}
+                        className={`flex-1 text-xs rounded-lg px-3 py-2 border outline-none transition-colors ${
+                          isMonochrome
+                            ? 'bg-white border-gray-200 text-gray-900 focus:border-gray-400'
+                            : 'bg-[#0d0d0d] border-white/[0.12] text-text-bright focus:border-gold/40'
+                        }`}
+                      >
+                        {modelQualities.map(q => <option key={q} value={q}>{q}</option>)}
+                      </select>
+                    </>
+                  )}
+                  {isQualityParam && (
+                    <>
+                      <label className={`text-xs font-medium min-w-[36px] ${isMonochrome ? 'text-gray-500' : 'text-[#777]'}`}>图片质量</label>
+                      <select
+                        value={canvasGenQuality}
+                        onChange={(e) => {
+                          const newQ = e.target.value;
+                          setCanvasGenQuality(newQ);
+                        }}
+                        className={`flex-1 text-xs rounded-lg px-3 py-2 border outline-none transition-colors ${
+                          isMonochrome
+                            ? 'bg-white border-gray-200 text-gray-900 focus:border-gray-400'
+                            : 'bg-[#0d0d0d] border-white/[0.12] text-text-bright focus:border-gold/40'
+                        }`}
+                      >
+                        {modelQualities.map(q => <option key={q} value={q}>{QUALITY_DISPLAY_NAMES[q] || q}</option>)}
+                      </select>
+                    </>
+                  )}
+                </div>);
+              })()}
 
               {/* Count + Reference */}
               <div className="flex items-center gap-2.5">

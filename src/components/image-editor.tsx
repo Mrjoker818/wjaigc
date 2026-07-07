@@ -1254,7 +1254,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
       let collectedLlmInstruction = '';
       let collectedEditRegions: Array<{ label: string; bounds: { x: number; y: number; width: number; height: number } }> = [];
       const completedTasks = new Set<string>();
-      const maxPollTime = 600000; // ★ 10分钟超时（与后端 EDIT_GLOBAL_TIMEOUT_MS 对齐）
+      const maxPollTime = 1500000; // ★ 25分钟超时（兼容慢速API）
       const pollStart = Date.now();
       let pollCount = 0;
 

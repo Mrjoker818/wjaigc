@@ -2465,12 +2465,12 @@ function CanvasApp() {
 
           // 轮询场景结果
           const sceneResult = await new Promise<{ videoUrl: string | null; error: string | null }>((resolve) => {
-            const maxPollTime = 10 * 60 * 1000;
+            const maxPollTime = 25 * 60 * 1000;
             const startTime = Date.now();
             let attempts = 0;
 
             const poll = async () => {
-              if (attempts > 200 || Date.now() - startTime > maxPollTime) {
+              if (attempts > 500 || Date.now() - startTime > maxPollTime) {
                 resolve({ videoUrl: null, error: '超时' });
                 return;
               }

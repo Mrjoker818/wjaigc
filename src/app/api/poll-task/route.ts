@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 
-export const maxDuration = 600; // 10分钟 - 支持长时间轮询慢速API（含语言修图等长任务）
+export const maxDuration = 1800; // 30分钟 - 支持长时间轮询慢速API（apimart等需要260s+任务）
 
 import { appendUserJsonl } from '@/lib/server-user-storage';
 import { findProviderForModel, findProviderById, normalizeApiBaseUrl } from '@/lib/server-api-config';

@@ -742,7 +742,7 @@ Return ONLY the JSON array, no markdown or explanation.`;
 
 function parseAspectRatio(ratio: string, model?: string, quality?: string): string {
   // Try model-specific pixel sizes first (respects user's quality/resolution setting)
-  const pixelSize = getModelSpecificPixelSize(model || '', ratio, quality || '1K');
+  const pixelSize = getModelSpecificPixelSize(ratio, quality || '1K', model || '');
   if (pixelSize) return pixelSize;
   // Fallback: calculate from ratio with 4K baseline
   const [w, h] = ratio.split(':').map(Number);

@@ -481,7 +481,7 @@ async function compositeAIResultToOriginal(
 }
 
 // 图像编辑 API - 支持放大、擦除、蒙版修复、扩图、移除背景
-export const maxDuration = 600; // 10分钟 - token link等API生图最久可达600s
+export const maxDuration = 1800; // 30分钟 - token link等慢速API生图可达260s+
 export const dynamic = 'force-dynamic';
 
 type EditAction = 'inpaint' | 'outpaint' | 'remove_background' | 'removebg' | 'upscale' | 'multi_angle';

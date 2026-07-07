@@ -909,7 +909,7 @@ export function calculateActualPixelsFromRatio(aspectRatio: string, quality?: st
   // 直接使用 api-compatibility 中的模型像素表推算
   if (!aspectRatio || !quality) return null;
   try {
-    const pixelSize = getModelSpecificPixelSize(modelId || '', aspectRatio, quality);
+    const pixelSize = getModelSpecificPixelSize(aspectRatio, quality || 'standard', modelId || '');
     if (pixelSize) {
       const [w, h] = pixelSize.split('x').map(Number);
       if (w > 0 && h > 0) return pixelSize;

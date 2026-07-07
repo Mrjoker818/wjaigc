@@ -25,7 +25,7 @@ import { RESOLUTION_TIER_MODELS, QUALITY_LEVEL_MODELS, getModelParamType, ModelP
 
 // 直接模式（OpenAI兼容API返回图片需60-120秒）
 // 异步模式（返回task_id只需几秒）两者共存，取较大值
-export const maxDuration = 900; // 15分钟 - 部分慢速API(如gpt-image-2 4K)生图可达7-10分钟
+export const maxDuration = 1800; // 30分钟 - 支持apimart等慢速API出图260s+
 export const dynamic = 'force-dynamic';
 
 // ---------------------------------------------------------------------------
