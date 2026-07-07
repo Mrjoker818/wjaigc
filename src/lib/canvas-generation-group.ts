@@ -45,7 +45,8 @@ export interface GenGroupToolbar {
   providerName?: string;   // 提供商显示名称
   aspectRatio: string;     // 如 "1:1"
   size: string;            // 如 "1024x1024"
-  quality: string;
+  quality: string;         // 图片质量 (如 'auto/low/medium/high' 或 '1K/2K/4K')
+  resolution?: string;     // 分辨率档位 (如 '1K/2K/4K')，用于 paramType='both' 的模型
   outputCount: number;     // 1-4 (also referred to as 'n')
   n?: number;              // alias for outputCount
   prompt: string;

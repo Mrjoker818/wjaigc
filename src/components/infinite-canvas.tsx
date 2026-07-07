@@ -66,7 +66,7 @@ import {
 import type { CanvasAnnotation, AnnotationRegion, AnnotationTool } from '@/lib/canvas-annotation';
 import { createAnnotation, hitTestAnnotationTarget, buildAnnotationPrompt, mergeAnnotationsForImage, ANNOTATION_COLORS, ANNOTATION_COLORS_MONO, computeAnnotationRegion, BRUSH_COLOR_PALETTE } from '@/lib/canvas-annotation';
 import type { CanvasGenGroup, GenGroupToolbar, GroupRefImage, GenGroupType, ReferenceCategory, HexCubeGroup, HexCubeFaceData, CubeFace, ZoomLevel } from '@/lib/canvas-generation-group';
-import { createGroupRefImage, createGenGroup, generateGroupId, calculateConnectionPoints, aspectRatioToDimensions, calculateActualPixels, REFERENCE_CATEGORIES, REFERENCE_CATEGORY_LABELS, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS, MODEL_ASPECT_RATIOS, MODEL_QUALITIES, QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES, findModelConfig } from '@/lib/canvas-generation-group';
+import { createGroupRefImage, createGenGroup, generateGroupId, calculateConnectionPoints, aspectRatioToDimensions, calculateActualPixels, REFERENCE_CATEGORIES, REFERENCE_CATEGORY_LABELS, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS, MODEL_ASPECT_RATIOS, MODEL_QUALITIES, QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES, findModelConfig, getModelParamType } from '@/lib/canvas-generation-group';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import type { PsdLayerItem } from '@/types/psdLayer';
 import { toStableImageUrl, awaitStableImageUrl, onPersistComplete, getCachedLocalUrl, persistVideoUrlInBackground, persistRemoteUrlInBackground } from '@/lib/stable-image-url';
@@ -10382,42 +10382,72 @@ export function InfiniteCanvas({
                       )}
                     </div>
 
-                    {/* Row 2: Aspect ratio + Quality + Count */}
+                    {/* Row 2: Aspect ratio + Resolution + Quality + Count */}
                     {(() => {
                       const supportedRatios = findModelConfig(MODEL_ASPECT_RATIOS, group.toolbar.model) || DEFAULT_ASPECT_RATIOS;
                       const supportedQualities = findModelConfig(MODEL_QUALITIES, group.toolbar.model) || DEFAULT_QUALITIES;
+                      const paramType = getModelParamType(group.toolbar.model);
+                      // paramType='both' 的模型：supportedQualities 是分辨率档位(1K/2K/4K)，需要额外显示图片质量选项
+                      // paramType='resolution' 的模型：supportedQualities 是分辨率档位(1K/2K/4K)
+                      // paramType='quality' 的模型：supportedQualities 是图片质量(auto/low/medium/high)
+                      const isBoth = paramType === 'both';
+                      const resolutionOptions = isBoth ? ['1K', '2K', '4K'] : supportedQualities;
+                      const qualityOptions = ['auto', 'low', 'medium', 'high'];
+                      // 分辨率档位使用 resolution 参数，图片质量使用 quality 参数
+                      const currentResolution = group.toolbar.resolution || '2K';
+                      const currentQuality = group.toolbar.quality || 'auto';
                       return (
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {/* 图像比例 */}
                       <select
-                        className={`flex-1 text-[13px] px-2.5 py-1.5 rounded-lg border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-800' : 'bg-white/5 border-white/[0.14] text-text-bright'}`}
+                        className={`text-[13px] px-2.5 py-1.5 rounded-lg border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-800' : 'bg-white/5 border-white/[0.14] text-text-bright'}`}
                         value={group.toolbar.aspectRatio}
                         onChange={(e) => {
                           const newAr = e.target.value;
-                          const newSize = calculateActualPixels(newAr, group.toolbar.quality, group.toolbar.model);
+                          const newSize = calculateActualPixels(newAr, currentResolution, group.toolbar.model);
                           setGenGroups(prev => prev.map(g =>
                             g.id === group.id ? { ...g, toolbar: { ...g.toolbar, aspectRatio: newAr, size: newSize } } : g
                           ));
                         }}
                       >
                         {supportedRatios.map(r => (
-                          <option key={r} value={r} className={isMonochrome ? 'bg-white text-gray-700' : 'bg-[#1a1d26] text-text-bright'}>{r} ({calculateActualPixels(r, group.toolbar.quality, group.toolbar.model)})</option>
+                          <option key={r} value={r} className={isMonochrome ? 'bg-white text-gray-700' : 'bg-[#1a1d26] text-text-bright'}>{r}</option>
                         ))}
                       </select>
+                      {/* 分辨率档位 */}
                       <select
                         className={`text-[13px] px-2.5 py-1.5 rounded-lg border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-800' : 'bg-white/5 border-white/[0.14] text-text-bright'}`}
-                        value={group.toolbar.quality}
+                        value={isBoth ? currentResolution : group.toolbar.quality}
                         onChange={(e) => {
-                          const newQ = e.target.value;
-                          const newSize = calculateActualPixels(group.toolbar.aspectRatio, newQ, group.toolbar.model);
+                          const newRes = e.target.value;
+                          const newSize = calculateActualPixels(group.toolbar.aspectRatio, newRes, group.toolbar.model);
                           setGenGroups(prev => prev.map(g =>
-                            g.id === group.id ? { ...g, toolbar: { ...g.toolbar, quality: newQ, size: newSize } } : g
+                            g.id === group.id ? { ...g, toolbar: { ...g.toolbar, resolution: newRes, quality: isBoth ? currentQuality : newRes, size: newSize } } : g
                           ));
                         }}
                       >
-                        {supportedQualities.map(q => (
-                          <option key={q} value={q} className={isMonochrome ? 'bg-white text-gray-700' : 'bg-[#1a1d26] text-text-bright'}>{QUALITY_DISPLAY_NAMES[q] || q} ({calculateActualPixels(group.toolbar.aspectRatio, q, group.toolbar.model)})</option>
+                        {resolutionOptions.map(r => (
+                          <option key={r} value={r} className={isMonochrome ? 'bg-white text-gray-700' : 'bg-[#1a1d26] text-text-bright'}>{r}</option>
                         ))}
                       </select>
+                      {/* 图片质量（仅 paramType='both' 的模型显示） */}
+                      {isBoth && (
+                      <select
+                        className={`text-[13px] px-2.5 py-1.5 rounded-lg border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-800' : 'bg-white/5 border-white/[0.14] text-text-bright'}`}
+                        value={currentQuality}
+                        onChange={(e) => {
+                          const newQ = e.target.value;
+                          setGenGroups(prev => prev.map(g =>
+                            g.id === group.id ? { ...g, toolbar: { ...g.toolbar, quality: newQ } } : g
+                          ));
+                        }}
+                      >
+                        {qualityOptions.map(q => (
+                          <option key={q} value={q} className={isMonochrome ? 'bg-white text-gray-700' : 'bg-[#1a1d26] text-text-bright'}>{q}</option>
+                        ))}
+                      </select>
+                      )}
+                      {/* 出图数量 */}
                       <select
                         className={`text-[13px] px-2.5 py-1.5 rounded-lg border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-800' : 'bg-white/5 border-white/[0.14] text-text-bright'}`}
                         value={group.toolbar.outputCount || group.toolbar.n || 1}
