@@ -2153,8 +2153,27 @@ export async function POST(request: NextRequest) {
       // ============================================================
 
       const scaleVal = body.scale || 2;
-      const origW = body.originalWidth || 512;
-      const origH = body.originalHeight || 512;
+      let origW = body.originalWidth || 512;
+      let origH = body.originalHeight || 512;
+      
+      // ★ 尝试从图片URL获取真实尺寸（前端可能传递的是画布显示尺寸而非真实像素尺寸）
+      if (imageUrl && (origW < 512 || origH < 512 || origW === 512)) {
+        try {
+          const sharp = (await import('sharp')).default;
+          const response = await fetch(imageUrl);
+          const arrayBuffer = await response.arrayBuffer();
+          const imageBuffer = Buffer.from(arrayBuffer);
+          const metadata = await sharp(imageBuffer).metadata();
+          if (metadata.width && metadata.height) {
+            console.log(`[image-edit] upscale: loaded real image size from URL: ${metadata.width}x${metadata.height} (frontend passed: ${origW}x${origH})`);
+            origW = metadata.width;
+            origH = metadata.height;
+          }
+        } catch (e) {
+          console.warn('[image-edit] upscale: failed to load image metadata from URL:', e);
+        }
+      }
+      
       const targetW = targetWidth || origW * scaleVal;
       const targetH = targetHeight || origH * scaleVal;
       // engine 参数统一覆盖 upscaleMode：auto/ai/local(→cpu)
