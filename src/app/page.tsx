@@ -3288,6 +3288,19 @@ function CanvasApp() {
     }
   }, [currentChatModelInfo]);
 
+  // 右键提取关键词 - 打开oh-my-prompt识词面板并显示进度
+  const handleCanvasExtractKeywords = useCallback((image: { id: string; url: string }) => {
+    // 打开oh-my-prompt面板并自动触发识词
+    setOhMyPromptOpen(true);
+    setVisionPromptEnabled(true);
+    // 显示提取中提示
+    toast.loading('正在识别图片关键词...', {
+      className: themeStyle === 'monochrome' ? 'bg-white border-blue-500 text-gray-900' : 'bg-[#141414] border-[#d4af37] text-white',
+    });
+    // 调用识词API
+    handleVisionPrompt(image.url);
+  }, [handleVisionPrompt, themeStyle]);
+
   const handleAddToPrompt = useCallback((optimizedPrompt: string) => {
     setExternalPrompt(optimizedPrompt);
     setActivePanel('generate');
@@ -3358,10 +3371,6 @@ function CanvasApp() {
   const handleCanvasGenerateVariation = useCallback((image: CanvasImage) => {
     setExternalReferenceImage({ url: image.url, description: image.prompt || '' });
   }, []);
-
-  const handleCanvasExtractKeywords = useCallback((image: CanvasImage) => {
-    handleExtractKeywords({ id: image.id, url: image.url });
-  }, [handleExtractKeywords]);
 
   const handleCanvasFusion = useCallback((images: CanvasImage[]) => {
     handleFusion({
@@ -3812,7 +3821,7 @@ function CanvasApp() {
           onCloseOhMyPrompt={() => { setOhMyPromptOpen(false); setVisionPromptEnabled(false); }}
           onToggleOhMyPrompt={() => setOhMyPromptOpen(prev => !prev)}
           onInsertPrompt={(prompt: string) => setExternalPrompt(prompt)}
-          ohMyPromptThemeStyle={themeStyle}
+          ohMyPromptThemeStyle={themeStyle === 'monochrome' ? 'default' : 'gold'}
           isVisionAnalyzing={isVisionAnalyzing}
           visionResult={visionResult}
           onToggleSettings={() => setPanelCollapsed(prev => !prev)}

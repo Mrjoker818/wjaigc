@@ -412,9 +412,11 @@ interface InfiniteCanvasProps {
   onCloseOhMyPrompt?: () => void;
   onToggleOhMyPrompt?: () => void;
   onInsertPrompt?: (prompt: string) => void;
-  ohMyPromptThemeStyle?: string;
+  ohMyPromptThemeStyle?: 'gold' | 'default';
   isVisionAnalyzing?: boolean;
   visionResult?: import('@/components/oh-my-prompt').VisionApiResultData | null;
+  ompActiveTab?: 'vision' | 'agent';
+  ompVisionImageUrl?: string | null;
   onToggleSettings?: () => void;
   onToggleTheme?: () => void;
   onToggleUserManager?: () => void;
@@ -582,6 +584,8 @@ export function InfiniteCanvas({
   ohMyPromptThemeStyle = 'gold',
   isVisionAnalyzing = false,
   visionResult = null,
+  ompActiveTab = 'agent',
+  ompVisionImageUrl = null,
   onToggleSettings,
   onToggleTheme,
   onToggleUserManager,
@@ -8793,6 +8797,8 @@ export function InfiniteCanvas({
             visionResult={visionResult}
             themeStyle={ohMyPromptThemeStyle}
             floating={true}
+            defaultActiveTab={ompActiveTab}
+            autoAnalyzeImageUrl={ompVisionImageUrl}
           />
         )}
 
