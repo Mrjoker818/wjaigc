@@ -1063,7 +1063,7 @@ export async function POST(request: NextRequest) {
     }
 
     const completedStatuses = ['completed', 'succeeded', 'success', 'done', 'SUCCEEDED', 'COMPLETED', 'SUCCESS', 'DONE'];
-    const normalizedStatus = completedStatuses.includes(taskStatus || '') ? 'completed' : (taskStatus?.toLowerCase() || 'processing');
+    let normalizedStatus = completedStatuses.includes(taskStatus || '') ? 'completed' : (taskStatus?.toLowerCase() || 'processing');
 
     // ★ 日志：每次轮询结果
     console.log(`[poll-task] taskId=${taskId} status=${taskStatus} → normalized=${normalizedStatus}, progress=${(taskData?.progress as number) || 0}`);
@@ -1164,6 +1164,13 @@ export async function POST(request: NextRequest) {
       // ★ 日志：最终提取结果
       const safeSourceImageUrl = typeof sourceImageUrl === 'string' ? sourceImageUrl : (sourceImageUrl ? JSON.stringify(sourceImageUrl).substring(0, 100) : '(null)');
       console.log(`[poll-task] taskId=${taskId} sourceImageUrl extracted: ${sourceImageUrl ? 'YES' : 'NO'}`, safeSourceImageUrl.substring(0, 100) + (typeof sourceImageUrl === 'string' ? '...' : ''));
+
+      // ★ 关键修复：如果提取到了imageUrl，即使status字段不存在或不匹配，也强制设置为completed
+      // 因为：图片URL已经存在 = 任务已完成！这是很多第三方API的返回格式（直接返回图片URL，没有status字段）
+      if (sourceImageUrl && normalizedStatus !== 'completed') {
+        normalizedStatus = 'completed';
+        console.log(`[poll-task] taskId=${taskId} imageUrl存在，强制设置为completed状态`);
+      }
 
       // ★ 持久化图片策略：
       // 同步持久化所有图片URL：
