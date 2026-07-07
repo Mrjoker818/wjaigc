@@ -847,6 +847,19 @@ function parseApiOutput(nodeType: NodeType, data: Record<string, unknown>): Reco
     const result = data.result as Record<string, unknown>;
     if (result.imageUrl && !output.imageUrl) output.imageUrl = result.imageUrl;
     if (result.url && !output.imageUrl) output.imageUrl = result.url;
+    // GPT Image格式: result.image.url
+    if (result.image && typeof result.image === 'object' && !output.imageUrl) {
+      const img = result.image as Record<string, unknown>;
+      if (typeof img.url === 'string') output.imageUrl = img.url;
+    }
+    // images数组格式: result.images[0].url
+    if (Array.isArray(result.images) && !output.imageUrl) {
+      const firstImg = result.images[0] as Record<string, unknown>;
+      if (firstImg && typeof firstImg.url === 'string') output.imageUrl = firstImg.url;
+      if (firstImg && typeof firstImg.b64_json === 'string') {
+        output.imageUrl = `data:image/png;base64,${firstImg.b64_json}`;
+      }
+    }
   }
 
   // 多图URL (taskIds对应多个结果)
@@ -864,6 +877,24 @@ function parseApiOutput(nodeType: NodeType, data: Record<string, unknown>): Reco
     const result = data.result as Record<string, unknown>;
     if (Array.isArray(result.imageUrls)) {
       for (const u of result.imageUrls as string[]) allImageUrls.push(u);
+    }
+    // images数组: result.images[].url
+    if (Array.isArray(result.images)) {
+      for (const item of result.images as Record<string, unknown>[]) {
+        if (typeof item.url === 'string') allImageUrls.push(item.url);
+        if (typeof item.b64_json === 'string') {
+          allImageUrls.push(`data:image/png;base64,${item.b64_json}`);
+        }
+      }
+    }
+  }
+  // 根级images数组
+  if (Array.isArray(data.images)) {
+    for (const item of data.images as Record<string, unknown>[]) {
+      if (typeof item.url === 'string') allImageUrls.push(item.url);
+      if (typeof item.b64_json === 'string') {
+        allImageUrls.push(`data:image/png;base64,${item.b64_json}`);
+      }
     }
   }
   if (allImageUrls.length > 0) output.imageUrls = allImageUrls;
