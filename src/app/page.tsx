@@ -2878,21 +2878,62 @@ function CanvasApp() {
         }),
       });
 
-      // API调用中 - 30%
       const data = await response.json();
 
-      if (data.success && data.images) {
-        const newImageUrls: string[] = data.images.map((img: { id: string; url: string; prompt: string }) => img.url);
+      if (!data.success || !data.taskIds || data.taskIds.length === 0) {
+        toast.error('融合失败', {
+          description: data.error || '提交任务失败',
+          className: 'bg-[#141414] border border-red-900 text-white',
+        });
+        setActiveGenerationCount(prev => Math.max(0, prev - 1));
+        return;
+      }
 
+      const newImageUrls: string[] = [];
+
+      for (let i = 0; i < data.taskIds.length; i++) {
+        const taskId = data.taskIds[i];
+        let pollAttempts = 0;
+        const maxAttempts = 180;
+
+        while (pollAttempts < maxAttempts) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          pollAttempts++;
+
+          try {
+            const pollRes = await fetch('/api/poll-task', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ taskId, model: fusionModel, providerId: fusionProviderId }),
+            });
+            const pollData = await pollRes.json();
+
+            if (pollData.status === 'completed') {
+              const resultUrl = pollData.imageUrl || pollData.result?.url || pollData.result?.imageUrl || pollData.result?.image?.url || (pollData.result?.images && pollData.result.images[0]?.url) || (pollData.images && pollData.images[0]?.url);
+              if (resultUrl) {
+                newImageUrls.push(resultUrl);
+              }
+              break;
+            } else if (pollData.status === 'failed') {
+              console.error('融合任务失败:', pollData.error);
+              break;
+            }
+          } catch (pollErr) {
+            console.error('轮询错误:', pollErr);
+          }
+        }
+      }
+
+      if (newImageUrls.length > 0) {
         await handleAddImages(newImageUrls);
-        
+
         toast.success('融合成功', {
-          description: `已生成 ${data.images.length} 张融合图片`,
+          description: `已生成 ${newImageUrls.length} 张融合图片`,
           className: themeStyle === 'monochrome' ? 'bg-white border-blue-500 text-gray-900' : 'bg-[#141414] border-[#d4af37] text-white',
         });
       } else {
         toast.error('融合失败', {
-          description: data.error || '未知错误',
+          description: '生成超时或失败，请重试',
           className: 'bg-[#141414] border border-red-900 text-white',
         });
       }
