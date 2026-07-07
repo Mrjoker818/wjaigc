@@ -5,7 +5,7 @@ import {
   Play, Video, ImagePlus, Clock, Settings2,
   ChevronDown, Loader2, Sparkles, Volume2, VolumeX,
   Upload, X, AlertCircle, Info, FastForward, Users, Plus, Paintbrush, Film, Palette,
-  History, RotateCcw, Languages
+  History, RotateCcw, Languages, Minimize2, Maximize2, ChevronRight, CheckCircle2
 } from 'lucide-react';
 import MotionBrushCanvas, { type MotionBrushResult, type MotionBrushCanvasHandle } from './motion-brush-canvas';
 import { inferVideoModelFeatures } from '@/lib/video-api';
@@ -391,6 +391,9 @@ export default function VideoGenerationPanel({
   const [isGenerating, setIsGenerating] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string>('');
   const [extendDuration, setExtendDuration] = useState(5);
+  const [panelMinimized, setPanelMinimized] = useState(false);
+  const [genProgress, setGenProgress] = useState(0);
+  const [genStage, setGenStage] = useState('');
 
   // === 多参考图约束系统 ===
   const [typedReferences, setTypedReferences] = useState<TypedReference[]>([]);
@@ -708,6 +711,23 @@ Rules:
     }
 
     setIsGenerating(true);
+    setPanelMinimized(true);
+    setGenProgress(5);
+    setGenStage('准备提交...');
+    const progressTimer = setInterval(() => {
+      setGenProgress(prev => {
+        if (prev < 25) return prev + 2;
+        if (prev < 60) return prev + 0.8;
+        if (prev < 90) return prev + 0.3;
+        return prev;
+      });
+      setGenStage(prev => {
+        if (prev === '准备提交...') return '排队中...';
+        if (prev === '排队中...' && genProgress > 20) return '渲染中...';
+        if (prev === '渲染中...' && genProgress > 70) return '合成音视频...';
+        return prev;
+      });
+    }, 800);
 
     // 提取 providerId（如果 model 是复合键）
     const pureModelId = model.includes('::') ? model.split('::').pop()! : model;
@@ -755,7 +775,15 @@ Rules:
       })
     );
 
-    await Promise.allSettled(generatePromises);
+      await Promise.allSettled(generatePromises);
+      clearInterval(progressTimer);
+      setGenProgress(100);
+      setGenStage('完成');
+      setTimeout(() => {
+        setIsGenerating(false);
+        setGenProgress(0);
+        setGenStage('');
+      }, 1200);
 
       // 记录到生成历史
       const historyEntry: VideoHistoryEntry = {
@@ -775,9 +803,13 @@ Rules:
         return updated;
       });
     } catch (err) {
+      clearInterval(progressTimer);
+      setGenProgress(0);
+      setGenStage('');
+      setIsGenerating(false);
       onError?.(err instanceof Error ? err.message : '生成失败');
     } finally {
-      setIsGenerating(false);
+      // setIsGenerating 已在成功路径延迟调用
     }
   }, [prompt, mode, model, aspectRatio, duration, quality, generateAudio, firstFrameUrl, lastFrameUrl, referenceImages, resolution, videoUrl, extendDuration, cameraControl, motionBrush, characterReferences, motionStrength, seed, negativePrompt, multiShotScenes, chainContinuity, useGlobalReferences, batchCount, showLastFrame, onVideoGenerate, onError]);
 
@@ -855,8 +887,65 @@ Rules:
 
   return (
     <div className="flex flex-col min-h-full" style={{ background: panelBg, color: textColor }}>
+      {/* 最小化时显示紧凑进度条 */}
+      {panelMinimized && isGenerating ? (
+        <div className="p-3 flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin" style={{ color: accentColor }} />
+              <span className="text-sm font-medium">{genStage}</span>
+            </div>
+            <button
+              onClick={() => setPanelMinimized(false)}
+              className="p-1.5 rounded-md hover:bg-white/10 transition-colors cursor-pointer"
+              title="展开面板"
+            >
+              <Maximize2 className="w-4 h-4" style={{ color: subTextColor }} />
+            </button>
+          </div>
+          <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: isMonochrome ? '#e5e7eb' : '#333' }}>
+            <div
+              className="h-full rounded-full transition-all duration-500"
+              style={{
+                width: `${genProgress}%`,
+                background: isGold ? 'linear-gradient(90deg, #d4af37, #f0d060)' : 'linear-gradient(90deg, #3b82f6, #60a5fa)',
+              }}
+            />
+          </div>
+          <p className="text-xs" style={{ color: subTextColor }}>视频生成中，你可以继续使用画布...</p>
+        </div>
+      ) : panelMinimized ? (
+        <button
+          onClick={() => setPanelMinimized(false)}
+          className="m-3 p-2.5 rounded-lg flex items-center justify-center gap-2 text-sm font-medium transition-all cursor-pointer hover:opacity-80"
+          style={{
+            background: isGold ? 'rgba(212,175,55,0.1)' : 'rgba(59,130,246,0.1)',
+            border: `1px solid ${isGold ? 'rgba(212,175,55,0.3)' : 'rgba(59,130,246,0.3)'}`,
+            color: accentColor,
+          }}
+        >
+          <Maximize2 className="w-4 h-4" />
+          展开视频生成面板
+        </button>
+      ) : (
+      <>
+      {/* 顶部标题栏 + 最小化按钮 */}
+      <div className="flex items-center justify-between px-3 pt-3 pb-1">
+        <div className="flex items-center gap-2">
+          <Film className="w-4 h-4" style={{ color: accentColor }} />
+          <span className="text-sm font-semibold">视频生成</span>
+        </div>
+        <button
+          onClick={() => setPanelMinimized(true)}
+          className="p-1.5 rounded-md hover:bg-white/10 transition-colors cursor-pointer"
+          title="最小化面板"
+        >
+          <Minimize2 className="w-4 h-4" style={{ color: subTextColor }} />
+        </button>
+      </div>
+
       {/* === 模式切换 === */}
-      <div className={`flex gap-1 p-3 pb-1 flex-nowrap ${isMonochrome ? 'bg-gray-100 rounded-lg mx-3 mt-3 p-1.5' : ''}`}>
+      <div className={`flex gap-1 px-3 pb-1 flex-nowrap ${isMonochrome ? 'bg-gray-100 rounded-lg mx-3 mt-1 p-1.5' : ''}`}>
         {modeOptions.map(opt => (
           <button
             key={opt.value}
@@ -1012,7 +1101,30 @@ Rules:
           onFocus={e => e.target.style.borderColor = accentColor}
           onBlur={e => e.target.style.borderColor = borderColor}
         />
-        <div className="text-[9px] mt-0.5" style={{ color: subTextColor }}>
+        {/* 快捷场景预设 */}
+        <div className="flex flex-wrap gap-1.5 mt-2">
+          {[
+            { label: '产品展示', text: '产品360度旋转展示，柔和光影，商业广告质感' },
+            { label: '人物行走', text: '人物自然行走，镜头跟随，电影感运镜' },
+            { label: '风景推镜', text: '壮丽自然风光，镜头缓慢推进，云雾流动' },
+            { label: '慢动作', text: '水滴飞溅慢动作，极致细节，高速摄影质感' },
+            { label: '夜景霓虹', text: '赛博朋克城市夜景，霓虹灯光，雨后湿润路面反光' },
+          ].map(preset => (
+            <button
+              key={preset.label}
+              onClick={() => setPrompt(preset.text)}
+              className="px-2 py-0.5 rounded text-[10px] transition-colors hover:opacity-80"
+              style={{
+                background: isGold ? 'rgba(212,175,55,0.08)' : 'rgba(59,130,246,0.08)',
+                color: accentColor,
+                border: `1px solid ${isGold ? 'rgba(212,175,55,0.2)' : 'rgba(59,130,246,0.2)'}`,
+              }}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+        <div className="text-[9px] mt-1" style={{ color: subTextColor }}>
           提示：英文提示词通常效果更好，可点击"翻译"自动转换
         </div>
       </div>
@@ -1978,7 +2090,7 @@ Rules:
         <button
           onClick={handleGenerate}
           disabled={isGenerating || !model || (!prompt.trim() && mode !== 'video-extend')}
-          className="w-full py-2.5 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          className={`w-full ${isGenerating ? 'py-3' : 'py-2.5'} rounded-lg text-sm font-medium flex flex-col items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed`}
           style={{
             background: isGold
               ? (isGenerating ? 'rgba(212,175,55,0.3)' : 'linear-gradient(135deg, #d4af37, #b8962e)')
@@ -1988,10 +2100,21 @@ Rules:
           }}
         >
           {isGenerating ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" />
-              提交中...
-            </>
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>{genStage || '处理中...'}</span>
+              </div>
+              <div className="w-full h-1 rounded-full overflow-hidden" style={{ background: isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.15)' }}>
+                <div
+                  className="h-full rounded-full transition-all duration-500"
+                  style={{
+                    width: `${genProgress}%`,
+                    background: isGold ? 'linear-gradient(90deg, #d4af37, #f0d060)' : 'linear-gradient(90deg, #3b82f6, #60a5fa)',
+                  }}
+                />
+              </div>
+            </div>
           ) : (
             <>
               <Sparkles className="w-4 h-4" />
@@ -2000,6 +2123,8 @@ Rules:
           )}
         </button>
       </div>
+      </>
+      )}
     </div>
   );
 }
