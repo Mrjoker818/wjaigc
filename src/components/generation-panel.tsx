@@ -1629,9 +1629,9 @@ export function GenerationPanel(
                     </div>
                 )}
 
-                {/* 画面比例 */}
+                {/* 图像比例 */}
                 <div className="space-y-1">
-                    <label className={stl}>{dot}画面比例</label>
+                    <label className={stl}>{dot}图像比例</label>
                     <div className="grid grid-cols-5 gap-1.5">
                         {getSupportedAspectRatios().map(ratio => (
                             <button
@@ -1673,7 +1673,7 @@ export function GenerationPanel(
                   ? ['1K', '2K', '4K'] 
                   : getSupportedQualities()).length > 1 && (
                     <div className="space-y-1">
-                        <label className={stl}>{dot}{getModelParamType(model.includes('::') ? model.split('::').pop()! : model) === 'resolution' ? '输出分辨率' : getModelParamType(model.includes('::') ? model.split('::').pop()! : model) === 'both' ? '分辨率档位' : '生成质量'}</label>
+                        <label className={stl}>{dot}{getModelParamType(model.includes('::') ? model.split('::').pop()! : model) === 'quality' ? '图片质量' : '分辨率'}</label>
                         <div className="grid grid-cols-4 gap-1.5">
                             {(getModelParamType(model.includes('::') ? model.split('::').pop()! : model) === 'both' 
                               ? ['1K', '2K', '4K'] 

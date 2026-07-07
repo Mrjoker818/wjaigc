@@ -151,7 +151,8 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
         const modelData = await modelResp.json();
         if (modelData.success) {
           const imageModels: ImageModel[] = (modelData.models || []).map((m: Record<string, unknown>) => {
-            const provider = (modelData.providers || []).find((p: Record<string, unknown>) => p.id === m.providerId);
+            // 使用 String() 转换确保类型匹配（provider.id 可能是数字，model.providerId 可能是字符串）
+            const provider = (modelData.providers || []).find((p: Record<string, unknown>) => String(p.id) === String(m.providerId));
             return {
               id: m.id as string,
               name: (m.name as string) || (m.id as string),
