@@ -14548,7 +14548,7 @@ export function InfiniteCanvas({
                           </div>
                         )}
                       </div>
-                      {/* 比例 */}
+                      {/* 图像比例 */}
                       {(() => {
                         const hcgRatios = findModelConfig(MODEL_ASPECT_RATIOS, hcg.toolbar.model) || DEFAULT_ASPECT_RATIOS;
                         const hcgQualities = findModelConfig(MODEL_QUALITIES, hcg.toolbar.model) || DEFAULT_QUALITIES;
@@ -14565,7 +14565,7 @@ export function InfiniteCanvas({
                       >
                         {hcgRatios.map(r => <option key={r} value={r}>{r} ({calculateActualPixels(r, hcg.toolbar.quality, hcg.toolbar.model)})</option>)}
                       </select>
-                      {/* 质量 */}
+                      {/* 图片质量 */}
                       <select
                         className="px-2 py-1.5 rounded-lg text-xs"
                         style={{ background: isMonochrome ? '#f3f4f6' : 'rgba(255,255,255,0.08)', color: isMonochrome ? '#374151' : '#ccc', border: `1px solid ${isMonochrome ? '#d1d5db' : 'rgba(255,255,255,0.10)'}` }}
