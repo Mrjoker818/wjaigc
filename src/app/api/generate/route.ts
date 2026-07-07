@@ -378,8 +378,16 @@ export async function POST(request: NextRequest) {
                 const pollData = await pollRes.json();
 
                 if (pollData.status === 'completed' && pollData.success) {
-                  // ★ poll-task返回imageUrl在顶层，不在data里，需要显式提取
-                  const resultImageUrl = pollData.imageUrl || (pollData.data && pollData.data.imageUrl) || '';
+                  // ★ poll-task返回imageUrl可能在多个位置：顶层、result对象、data对象
+                  // 需要检查所有可能的位置提取imageUrl
+                  const resultImageUrl = pollData.imageUrl 
+                    || (pollData.result && (pollData.result as Record<string, unknown>)?.imageUrl) 
+                    || (pollData.data && pollData.data.imageUrl) 
+                    || '';
+                  console.log(`[generate] submitOnly bgPoll extracted imageUrl: ${(resultImageUrl as string).substring(0, 100)}...`);
+                  if (!resultImageUrl) {
+                    console.warn(`[generate] submitOnly bgPoll completed but no imageUrl found! pollData keys:`, Object.keys(pollData));
+                  }
                   updateTaskProgress(asyncTaskId, {
                     status: 'completed',
                     progress: 100,
@@ -396,7 +404,7 @@ export async function POST(request: NextRequest) {
                   });
                   // ★ 结果已通过updateTaskProgress设置到task-registry
                   // poll-task会从registry读取并设置到completedTaskCache
-                  console.log(`[generate] submitOnly background completed for ${asyncTaskId}, imageUrl: ${resultImageUrl.substring(0, 80)}...`);
+                  console.log(`[generate] submitOnly background completed for ${asyncTaskId}, imageUrl: ${String(resultImageUrl).substring(0, 80)}...`);
                   return;
                 }
 
