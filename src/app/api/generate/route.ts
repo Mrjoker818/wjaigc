@@ -378,12 +378,33 @@ export async function POST(request: NextRequest) {
                 const pollData = await pollRes.json();
 
                 // ★ 先提取imageUrl（从多个位置），再判断完成状态
-                // poll-task返回imageUrl可能在多个位置：顶层、result对象、data对象、url字段
+                // poll-task返回imageUrl可能在多个位置：顶层、result对象、data对象、url字段、数组格式
+                // 辅助函数：从数组中提取第一个url
+                const extractFirstUrlFromArray = (arr: unknown): string | undefined => {
+                  if (!arr || !Array.isArray(arr) || arr.length === 0) return undefined;
+                  const first = arr[0] as Record<string, unknown> | undefined;
+                  if (!first) return undefined;
+                  const rawUrl = first.url || first.image_url || first.b64_json;
+                  return typeof rawUrl === 'string' ? rawUrl : undefined;
+                };
+
+                const resultObj = pollData.result as Record<string, unknown> | undefined;
+                const dataObj = pollData.data as Record<string, unknown> | undefined;
+                const outputObj = pollData.output as Array<Record<string, unknown>> | undefined;
+
                 const resultImageUrl = (pollData.imageUrl as string | undefined)
-                  || ((pollData.result as Record<string, unknown> | undefined)?.imageUrl as string | undefined)
-                  || ((pollData.data as Record<string, unknown> | undefined)?.imageUrl as string | undefined)
+                  // 单图格式
+                  || (resultObj?.imageUrl as string | undefined)
+                  || (dataObj?.imageUrl as string | undefined)
                   || (pollData.url as string | undefined)
-                  || ((pollData.result as Record<string, unknown> | undefined)?.url as string | undefined)
+                  || (resultObj?.url as string | undefined)
+                  // 数组格式（第三方API可能返回images/data/output数组）
+                  || extractFirstUrlFromArray(pollData.images)
+                  || extractFirstUrlFromArray(dataObj as unknown as Array<Record<string, unknown>>)
+                  || extractFirstUrlFromArray(resultObj?.images)
+                  || extractFirstUrlFromArray(resultObj?.data as unknown as Array<Record<string, unknown>>)
+                  || extractFirstUrlFromArray(outputObj)
+                  || extractFirstUrlFromArray(resultObj?.output)
                   || '';
 
                 // ★ 完成判断：completed + (success不为false 或 有imageUrl)
