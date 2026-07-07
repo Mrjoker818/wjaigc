@@ -797,7 +797,7 @@ export function shouldUseGeminiChatRoute(modelId: string): boolean {
  * 注意：-pro / -max / -lite 是模型名称固有部分（如 qwen-vl-max, gemini-3.1-pro），
  * 不应剥离。只有管理员手动添加的分辨率后缀（如 gpt-image-2-2k）才需要。
  */
-const QUALITY_SUFFIX_RE = /-(2k|4k|8k|hd|uhd)$/i;
+const QUALITY_SUFFIX_RE = /[-\s](2k|4k|8k|hd|uhd)$/i;
 
 export interface NormalizedModelInfo {
   /** API 可识别的基础模型名（如 gpt-image-2） */
