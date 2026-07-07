@@ -1367,7 +1367,11 @@ export async function POST(request: NextRequest) {
                 }
               }
               // 尝试3: 如果私有 IP URL 不可达，用 /chat/completions 获取外部 URL
-              if (!isUrlAccessible) {
+              // ★ 注意：FHL、AI link、虚宝三个提供商明确不使用 /chat/completions
+              const baseUrlLower = currentApiBaseUrl.toLowerCase();
+              const providersDisablingChatRetry = ['fhl.mom', 'ai-link.shop', 'rust.cat'];
+              const shouldSkipChatRetry = providersDisablingChatRetry.some(p => baseUrlLower.includes(p));
+              if (!isUrlAccessible && !shouldSkipChatRetry) {
                 console.log('[generate] Private IP URL not accessible, retrying via /chat/completions for external URL...');
                 try {
                   const chatResult = await tryChatCompletionsImageFallback({
@@ -1387,6 +1391,8 @@ export async function POST(request: NextRequest) {
                 } catch (chatErr) {
                   console.log('[generate] /chat/completions retry failed:', (chatErr as Error).message?.substring(0, 100));
                 }
+              } else if (!isUrlAccessible && shouldSkipChatRetry) {
+                console.log(`[generate] Provider "${baseUrlLower}" disables /chat/completions, skipping chat retry for private IP URL`);
               }
               // 尝试4: 非流式 Responses API 重试 (部分中转站 stream:true 返回私有 IP，stream:false 返回外部 URL)
               if (!isUrlAccessible) {
@@ -1495,8 +1501,7 @@ export async function POST(request: NextRequest) {
 
           // 5xx 服务器错误处理
           // ★ 重要：对 5xx 错误先尝试 /chat/completions 兜底，再决定是否回退候选模型
-          // 某些 API 代理（如 FHL、AI link）仅通过 /chat/completions 支持 gpt-image-2 等模型，
-          // /images/generations 端点会返回 502/503，但 /chat/completions 能正常生图
+          // 注意：FHL、AI link、虚宝三个提供商明确不使用 /chat/completions，仅使用 /images/generations 和 /images/edits
           if (resp.status >= 500 && resp.status !== 501) {
             const combinedForCheck = `${errorMsg} ${errorText}`;
             const isChannelError = isChannelUnavailableError(combinedForCheck);
@@ -1505,9 +1510,14 @@ export async function POST(request: NextRequest) {
             // "No available compatible accounts" — 中转服务渠道完全不可用
             const isNoCompatibleAccount = combinedForCheck.includes('no available compatible account') || combinedForCheck.includes('No available compatible');
 
-            const shouldTryChatFallback = isChannelError || isCloudflareDown || isNoCompatibleAccount || resp.status >= 502;
+            // ★ 检查是否是明确禁用 chat/completions 的提供商（FHL、AI link、虚宝）
+            const currentBaseUrlLower = currentApiBaseUrl.toLowerCase();
+            const providersDisablingChatFallback = ['fhl.mom', 'ai-link.shop', 'rust.cat'];
+            const isProviderDisablingChatFallback = providersDisablingChatFallback.some(p => currentBaseUrlLower.includes(p));
 
-            // ★ 先尝试 /chat/completions 兜底生图
+            const shouldTryChatFallback = !isProviderDisablingChatFallback && (isChannelError || isCloudflareDown || isNoCompatibleAccount || resp.status >= 502);
+
+            // ★ 先尝试 /chat/completions 兜底生图（排除禁用的提供商）
             if (shouldTryChatFallback) {
               console.info(`[generate] ${resp.status} error detected (${isChannelError ? 'channel' : isCloudflareDown ? 'cloudflare' : isNoCompatibleAccount ? 'no-compatible-account' : '5xx'}), trying /chat/completions fallback for model "${currentModelConfig.modelId}"...`);
               try {
@@ -1535,6 +1545,8 @@ export async function POST(request: NextRequest) {
               } catch (chatErr) {
                 console.warn('[generate] /chat/completions fallback error:', chatErr);
               }
+            } else if (isProviderDisablingChatFallback) {
+              console.info(`[generate] Provider "${currentBaseUrlLower}" disables /chat/completions fallback, skipping for ${resp.status} error`);
             }
 
             // /chat/completions 兜底也失败 → 标记为可重试（触发候选模型回退）
@@ -1761,8 +1773,12 @@ export async function POST(request: NextRequest) {
               );
             } catch (fallbackFetchErr: unknown) {
               // /images/generations timed out → try /chat/completions immediately
+              // ★ 注意：FHL、AI link、虚宝三个提供商明确不使用 /chat/completions
               const isTimeout = fallbackFetchErr instanceof Error && (fallbackFetchErr.name === 'AbortError' || /timeout|aborted/i.test(fallbackFetchErr.message));
-              if (isTimeout) {
+              const baseUrlLower = currentApiBaseUrl.toLowerCase();
+              const providersDisablingChatTimeoutFallback = ['fhl.mom', 'ai-link.shop', 'rust.cat'];
+              const shouldSkipChatTimeoutFallback = providersDisablingChatTimeoutFallback.some(p => baseUrlLower.includes(p));
+              if (isTimeout && !shouldSkipChatTimeoutFallback) {
                 console.info('[generate] /images/generations timed out, trying /chat/completions fallback...');
                 try {
                   const chatImageUrls = await tryChatCompletionsImageFallback({
@@ -1789,6 +1805,11 @@ export async function POST(request: NextRequest) {
                 } catch (chatErr) {
                   console.warn('[generate] /chat/completions fallback error (after generations timeout):', chatErr);
                 }
+                const retryErr = new Error(`生成请求超时，请稍后重试或更换模型`);
+                (retryErr as Error & { retryable?: boolean }).retryable = true;
+                throw retryErr;
+              } else if (isTimeout && shouldSkipChatTimeoutFallback) {
+                console.info(`[generate] Provider "${baseUrlLower}" disables /chat/completions, skipping chat fallback after timeout`);
                 const retryErr = new Error(`生成请求超时，请稍后重试或更换模型`);
                 (retryErr as Error & { retryable?: boolean }).retryable = true;
                 throw retryErr;
