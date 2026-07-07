@@ -1202,18 +1202,93 @@ async function submit302aiUpscaleTask(
 }
 
 /**
- * 检测是否为302.AI放大模型
- * 关键词: 302-super-upscale, super-upscale-v2, 302-upscale
+ * 302.AI Upscale-V6 普通放大 API 适配器
+ * 端点: /302/submit/upscale-v6
+ * 文档: https://302ai.apifox.cn/373009524e0
+ * 特点: 普通放大，无AI想象，价格更便宜（0.05 PTC/次）
  */
-function is302aiUpscaleModel(model: string): boolean {
+async function submit302aiUpscaleV6Task(
+  baseUrl: string,
+  apiKey: string,
+  imageUrl: string,
+  upscaleFactor: number = 4, // 1-4
+): Promise<{ directUrl?: string; width?: number; height?: number; usedModel?: string }> {
+  const endpoint = '/302/submit/upscale-v6';
+  const url = `${baseUrl.replace(/\/+$/, '')}${endpoint}`;
+  
+  // upscale_factor 范围: 1-4
+  const factor = Math.min(4, Math.max(1, upscaleFactor));
+  
+  const requestBody = {
+    image_url: imageUrl,
+    upscale_factor: factor,
+  };
+  
+  console.log(`[image-edit] 302.AI upscale-v6: POST ${url}, factor=${factor}`);
+  
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(requestBody),
+  });
+  
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`302.AI upscale-v6 failed: ${response.status} - ${errorText}`);
+  }
+  
+  const result = await response.json();
+  console.log(`[image-edit] 302.AI upscale-v6 response keys:`, Object.keys(result));
+  
+  // 响应格式: { image: { url, content_type, file_size, width, height }, seed }
+  if (result.image && result.image.url) {
+    return {
+      directUrl: result.image.url,
+      width: result.image.width,
+      height: result.image.height,
+      usedModel: '302-upscale-v6',
+    };
+  }
+  
+  throw new Error('302.AI upscale-v6 response missing image.url');
+}
+
+/**
+ * 检测是否为302.AI超级放大模型（AI想象放大）
+ * 关键词: 302-super-upscale, super-upscale-v2
+ */
+function is302aiSuperUpscaleModel(model: string): boolean {
   const lowerModel = model.toLowerCase();
   return (
     lowerModel.includes('302-super-upscale') ||
     lowerModel.includes('super-upscale-v2') ||
-    lowerModel.includes('302-upscale') ||
     lowerModel === 'super-upscale' ||
     lowerModel === 'super-upscale-v2'
   );
+}
+
+/**
+ * 检测是否为302.AI普通放大模型（Upscale-V6）
+ * 关键词: 302-upscale, upscale-v6, upscale-v5
+ */
+function is302aiUpscaleV6Model(model: string): boolean {
+  const lowerModel = model.toLowerCase();
+  return (
+    lowerModel.includes('upscale-v6') ||
+    lowerModel.includes('upscale-v5') ||
+    lowerModel.includes('302-upscale') ||
+    (lowerModel.includes('upscale') && !lowerModel.includes('super'))
+  );
+}
+
+/**
+ * 检测是否为302.AI放大模型（包含超级放大和普通放大）
+ */
+function is302aiUpscaleModel(model: string): boolean {
+  return is302aiSuperUpscaleModel(model) || is302aiUpscaleV6Model(model);
 }
 
 /**
@@ -2408,23 +2483,37 @@ export async function POST(request: NextRequest) {
         console.log(`[image-edit] upscale: detected ${aiUpscaler302Candidates.length} 302.AI upscale models`);
         for (const c of aiUpscaler302Candidates) {
           try {
-            // 计算放大倍数（302.AI支持1-10倍，但建议2-4倍）
+            // 计算放大倍数
             const calcScale = Math.min(Math.max(scaleVal, 2), 4);
             console.log(`[image-edit] upscale: trying 302.AI endpoint for ${c.model}, scale=${calcScale}`);
             
-            const aiResult302 = await submit302aiUpscaleTask(
-              c.apiBaseUrl,
-              c.apiKey,
-              imageUrl, // 302.AI接受URL，不需要base64
-              calcScale,
-              0.2, // creativity: 保守值，避免过度创意
-              2,   // detail: 中等细节增强
-              0.1, // shape_preservation: 高保形
-              ' high quality, highly detailed, high resolution, sharp',
-              negativePrompt,
-            );
+            let aiResult302: { directUrl?: string; width?: number; height?: number; usedModel?: string } | null = null;
             
-            if (aiResult302.directUrl) {
+            // 根据模型类型选择不同的适配器
+            if (is302aiSuperUpscaleModel(c.model)) {
+              // Super-Upscale-V2: AI想象放大，支持高级参数
+              aiResult302 = await submit302aiUpscaleTask(
+                c.apiBaseUrl,
+                c.apiKey,
+                imageUrl,
+                calcScale,
+                0.2, // creativity: 保守值，避免过度创意
+                2,   // detail: 中等细节增强
+                0.1, // shape_preservation: 高保形
+                ' high quality, highly detailed, high resolution, sharp',
+                negativePrompt,
+              );
+            } else if (is302aiUpscaleV6Model(c.model)) {
+              // Upscale-V6: 普通放大，无AI想象，价格更便宜
+              aiResult302 = await submit302aiUpscaleV6Task(
+                c.apiBaseUrl,
+                c.apiKey,
+                imageUrl,
+                calcScale, // upscale_factor: 1-4
+              );
+            }
+            
+            if (aiResult302 && aiResult302.directUrl) {
               aiResult = {
                 directUrl: aiResult302.directUrl,
                 width: aiResult302.width,
