@@ -4278,6 +4278,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                     aspectRatio,
                     quality,
                     outputCount: 1,
+                    submitOnly: true,
                     ...(referenceImages.length > 0 ? { referenceImages } : {}),
                   }),
                 });
@@ -4398,7 +4399,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
                     prompt: optimizedPrompt, model: imageModelInfo.model, providerId: imageModelInfo.providerId,
-                    aspectRatio, quality, outputCount,
+                    aspectRatio, quality, outputCount, submitOnly: true,
                     ...(referenceImages.length > 0 ? { referenceImages } : {}),
                   }),
                 });

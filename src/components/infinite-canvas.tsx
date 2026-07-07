@@ -4026,6 +4026,7 @@ export function InfiniteCanvas({
           outputCount: toolbar.outputCount,
           referenceImages,
           referenceMode: group.type === 'fusion' ? 'fusion' : 'reference',
+          submitOnly: true,
           ...(calculatedStrength != null && calculatedStrength > 0 ? { strength: calculatedStrength } : {}),
           ...(groupRefMetaRef.current.referenceDescriptions?.some(d => d.trim()) ? { referenceDescriptions: succeededIndices.map(i => groupRefMetaRef.current.referenceDescriptions?.[i] || '').filter(d => d.trim()) } : {}),
           ...(groupRefMetaRef.current.referenceCategories ? { referenceCategories: Object.fromEntries(succeededIndices.map((origIdx, newIdx) => [String(newIdx), groupRefMetaRef.current.referenceCategories?.[String(origIdx)] || []]).filter(([,v]) => v.length > 0)) } : {}),
@@ -5503,6 +5504,7 @@ export function InfiniteCanvas({
             aspectRatio: canvasGenAspectRatio,
             quality: canvasGenQuality,
             n: canvasGenCount,
+            submitOnly: true,  // 异步提交模式：立即返回taskId，前端轮询
             referenceImages: canvasGenRefImages.length > 0 ? canvasGenRefImages : undefined,
           }),
           signal: canvasGenController.signal,
@@ -7339,6 +7341,7 @@ export function InfiniteCanvas({
           imageUrl: sourceImg.url, // 作为参考图
           model: modelInfo.model,
           apiKey: 'server-managed',
+          submitOnly: true,
         }),
       });
       if (!res.ok) throw new Error('全景生成失败');
@@ -14581,6 +14584,7 @@ export function InfiniteCanvas({
                                   quality: hcg.toolbar.quality,
                                   n: hcg.toolbar.outputCount,
                                   referenceImageUrls: hcg.faces.filter(f => f.imageUrl).map(f => f.imageUrl!),
+                                  submitOnly: true,
                                 }),
                                 signal: hexCubeController.signal,
                               });

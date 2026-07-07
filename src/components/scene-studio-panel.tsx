@@ -1790,6 +1790,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
             strength: strengthInfo?.value || 60,
             model: currentImageModel.model,
             providerId: currentImageModel.providerId,
+            submitOnly: true,
           }),
         });
 

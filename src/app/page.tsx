@@ -2090,7 +2090,7 @@ function CanvasApp() {
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...params, userId: currentUserRef.current?.id }),      });
+        body: JSON.stringify({ ...params, userId: currentUserRef.current?.id, submitOnly: true }),      });
 
       const data = await response.json();
 
@@ -2871,6 +2871,7 @@ function CanvasApp() {
           aspectRatio: params.aspectRatio,
           stylePreset: 'auto',
           outputCount: params.count,
+          submitOnly: true,
           userId: currentUser?.id,
         }),
       });
