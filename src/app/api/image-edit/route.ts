@@ -1137,6 +1137,93 @@ async function describeImageWithVision(
 }
 
 /**
+ * 302.AI 超级放大 API 适配器
+ * 端点: /302/submit/super-upscale-v2
+ * 文档: https://302ai.apifox.cn/205808838e0
+ */
+async function submit302aiUpscaleTask(
+  baseUrl: string,
+  apiKey: string,
+  imageUrl: string,
+  scale: number = 3,
+  creativity: number = 0.2,
+  detail: number = 2,
+  shapePreservation: number = 0.1,
+  promptSuffix: string = ' high quality, highly detailed, high resolution, sharp',
+  negativePrompt: string = 'blurry, low resolution, bad, ugly, low quality, pixelated, interpolated, compression artifacts, noisey, grainy',
+): Promise<{ directUrl?: string; width?: number; height?: number; usedModel?: string }> {
+  const endpoint = '/302/submit/super-upscale-v2';
+  const url = `${baseUrl.replace(/\/+$/, '')}${endpoint}`;
+  
+  const requestBody = {
+    model_type: 'SDXL',
+    image_url: imageUrl,
+    scale,
+    creativity,
+    detail,
+    shape_preservation: shapePreservation,
+    prompt_suffix: promptSuffix,
+    negative_prompt: negativePrompt,
+    guidance_scale: 7.5,
+    num_inference_steps: 20,
+    override_size_limits: true,
+  };
+  
+  console.log(`[image-edit] 302.AI upscale: POST ${url}, scale=${scale}`);
+  
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(requestBody),
+  });
+  
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`302.AI upscale failed: ${response.status} - ${errorText}`);
+  }
+  
+  const result = await response.json();
+  console.log(`[image-edit] 302.AI upscale response keys:`, Object.keys(result));
+  
+  // 响应格式: { image: { url, content_type, file_size, width, height }, seed }
+  if (result.image && result.image.url) {
+    return {
+      directUrl: result.image.url,
+      width: result.image.width,
+      height: result.image.height,
+      usedModel: '302-super-upscale-v2',
+    };
+  }
+  
+  throw new Error('302.AI upscale response missing image.url');
+}
+
+/**
+ * 检测是否为302.AI放大模型
+ * 关键词: 302-super-upscale, super-upscale-v2, 302-upscale
+ */
+function is302aiUpscaleModel(model: string): boolean {
+  const lowerModel = model.toLowerCase();
+  return (
+    lowerModel.includes('302-super-upscale') ||
+    lowerModel.includes('super-upscale-v2') ||
+    lowerModel.includes('302-upscale') ||
+    lowerModel === 'super-upscale' ||
+    lowerModel === 'super-upscale-v2'
+  );
+}
+
+/**
+ * 检测API baseUrl是否为302.AI
+ */
+function is302aiBaseUrl(baseUrl: string): boolean {
+  return baseUrl.includes('api.302.ai') || baseUrl.includes('302.ai');
+}
+
+/**
  * 自动尝试提交图像任务 - 遍历候选模型直到成功
  * 遇到 ModelCapabilityError 时自动切换下一个候选模型
  */
@@ -2312,14 +2399,62 @@ export async function POST(request: NextRequest) {
       let aiResult: any = null;
       let aiError: Error | null = null;
 
-      // Step A: 先用专用upscaler模型尝试（如果有）
+      // Step 0: 302.AI 专用放大端点（如果有302.AI放大模型）
+      const aiUpscaler302Candidates = specialUpscalerCandidates.filter(c => 
+        is302aiUpscaleModel(c.model) || is302aiBaseUrl(c.apiBaseUrl)
+      );
+      
+      if (aiUpscaler302Candidates.length > 0) {
+        console.log(`[image-edit] upscale: detected ${aiUpscaler302Candidates.length} 302.AI upscale models`);
+        for (const c of aiUpscaler302Candidates) {
+          try {
+            // 计算放大倍数（302.AI支持1-10倍，但建议2-4倍）
+            const calcScale = Math.min(Math.max(scaleVal, 2), 4);
+            console.log(`[image-edit] upscale: trying 302.AI endpoint for ${c.model}, scale=${calcScale}`);
+            
+            const aiResult302 = await submit302aiUpscaleTask(
+              c.apiBaseUrl,
+              c.apiKey,
+              imageUrl, // 302.AI接受URL，不需要base64
+              calcScale,
+              0.2, // creativity: 保守值，避免过度创意
+              2,   // detail: 中等细节增强
+              0.1, // shape_preservation: 高保形
+              ' high quality, highly detailed, high resolution, sharp',
+              negativePrompt,
+            );
+            
+            if (aiResult302.directUrl) {
+              aiResult = {
+                directUrl: aiResult302.directUrl,
+                width: aiResult302.width,
+                height: aiResult302.height,
+                usedModel: aiResult302.usedModel || c.model,
+              };
+              console.log(`[image-edit] upscale: 302.AI success, output ${aiResult302.width}x${aiResult302.height}`);
+              break; // 成功后跳出
+            }
+          } catch (err) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            console.warn(`[image-edit] upscale: 302.AI model ${c.model} failed: ${errMsg}`);
+            if (!aiError) aiError = err instanceof Error ? err : new Error(errMsg);
+          }
+        }
+      }
+
+      // Step A: 先用专用upscaler模型尝试（如果有，且302.AI未成功）
       // 注意: 专用upscaler模型API通常限制最大边长2048，需要先放大到2048边长
       // 如果原图已超过2048，直接跳过专用模型，使用通用模型
       // 同时检查API是否支持/images/edits端点（404表示不支持）
       const maxUpscalerEdge = 2048;
       const origMaxEdge = Math.max(origW, origH);
       // 检查专用模型是否来自支持/images/edits的提供商（排除PearAPI等不支持此端点的）
+      // 同时排除302.AI模型（已在上一步处理）
       const supportedUpscalerCandidates = specialUpscalerCandidates.filter(c => {
+        // 302.AI模型已在上一步处理，跳过
+        if (is302aiUpscaleModel(c.model) || is302aiBaseUrl(c.apiBaseUrl)) {
+          return false;
+        }
         // PearAPI不支持/images/edits端点，直接排除
         const baseUrl = c.apiBaseUrl || '';
         if (baseUrl.includes('pearapi.ai') || baseUrl.includes('pearapi')) {
@@ -2328,7 +2463,7 @@ export async function POST(request: NextRequest) {
         }
         return true;
       });
-      const shouldUseDedicatedUpscaler = supportedUpscalerCandidates.length > 0 && origMaxEdge <= maxUpscalerEdge;
+      const shouldUseDedicatedUpscaler = !aiResult && supportedUpscalerCandidates.length > 0 && origMaxEdge <= maxUpscalerEdge;
       
       if (shouldUseDedicatedUpscaler) {
         try {

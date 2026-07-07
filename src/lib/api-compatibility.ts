@@ -31,7 +31,7 @@ export type ResponseMode = 'polling' | 'direct' | 'async-task';
 export type SizeFormat = 'aspect-ratio' | 'pixel';
 
 /** Which endpoint to use for image generation */
-export type ImageEndpoint = '/images/generations' | '/images/edits' | '/chat/completions';
+export type ImageEndpoint = '/images/generations' | '/images/edits' | '/chat/completions' | '/302/submit/super-upscale-v2';
 
 /** How to encode /images/edits requests */
 export type EditEncoding = 'json-first' | 'multipart-only';
@@ -236,6 +236,27 @@ export const PROFILE_GEMINI_IMAGE: ApiCompatProfile = {
   pollPathTemplate: '',
 };
 
+/**
+ * 302.AI Super Upscale V2 — 专门的AI放大端点
+ * - 端点: /302/submit/super-upscale-v2
+ * - 请求格式: JSON (model_type, image_url, scale, creativity, detail, etc.)
+ * - 响应格式: 直接返回 JSON { image: { url, width, height, ... }, seed }
+ * - 无轮询，直接返回放大后的图片URL
+ * - 平均耗时10-30秒
+ */
+export const PROFILE_302AI_UPSCALE: ApiCompatProfile = {
+  id: '302ai-upscale',
+  label: '302.AI 超级放大V2 (直接返回)',
+  responseMode: 'direct',
+  sizeFormat: 'pixel',  // 放大不需要尺寸格式，scale参数控制倍数
+  defaultEndpoint: '/302/submit/super-upscale-v2',  // 专用放大端点
+  editEndpoint: '/302/submit/super-upscale-v2',     // 放大专用
+  editEncoding: 'json-first',
+  supportsInputFidelity: false,
+  pollMode: 'none',
+  pollPathTemplate: '',
+};
+
 /** Map of all built-in profiles by id */
 export const COMPAT_PROFILES: Record<string, ApiCompatProfile> = {
   [PROFILE_APIMART.id]: PROFILE_APIMART,
@@ -245,6 +266,7 @@ export const COMPAT_PROFILES: Record<string, ApiCompatProfile> = {
   [PROFILE_GEMINI_IMAGE.id]: PROFILE_GEMINI_IMAGE,
   [PROFILE_PEARAPI.id]: PROFILE_PEARAPI,
   [PROFILE_RUSTCAT.id]: PROFILE_RUSTCAT,
+  [PROFILE_302AI_UPSCALE.id]: PROFILE_302AI_UPSCALE,
 };
 
 // ---------------------------------------------------------------------------
