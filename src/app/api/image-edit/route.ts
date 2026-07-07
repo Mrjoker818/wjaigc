@@ -2241,13 +2241,30 @@ export async function POST(request: NextRequest) {
       // 专用upscaler模型走/images/edits端点(参考图编辑)，通用image模型走/images/generations
       console.log(`[image-edit] upscale: AI-first mode, target: ${targetW}x${targetH}, candidates: ${candidateModels.slice(0,3).map(c=>c.model).join(', ')}...`);
 
-      // AI放大策略: 请求最大可用尺寸以获得最多细节，最后用sharp精确调整到目标尺寸
-      const effectiveSize = (() => {
-        const ar = aspectRatio || `${origW}:${origH}`;
-        const closest = findClosestAspectRatio(ar);
-        return closest;
+      // AI放大策略: 先用AI放大到API允许的最大尺寸，再用sharp精确调整到目标尺寸
+      // 注意: 大多数API限制最大边长2048，所以AI放大最多到2048边长
+      const maxApiEdge = 2048; // API最大边长限制
+      const aiUpscaleSize = (() => {
+        // 计算AI能生成的最大尺寸（不超过API限制）
+        const origMaxEdge = Math.max(origW, origH);
+        if (origMaxEdge >= maxApiEdge) {
+          // 原图已达到API限制，AI无法放大，直接用sharp放大
+          // 但仍请求一个接近原图比例的API尺寸，让AI增强画质
+          const scaleDown = maxApiEdge / origMaxEdge;
+          const aiW = Math.round(origW * scaleDown / 16) * 16;
+          const aiH = Math.round(origH * scaleDown / 16) * 16;
+          return `${aiW}x${aiH}`;
+        } else {
+          // 原图未达API限制，AI可放大到API限制
+          const scaleUp = Math.min(2, Math.floor(maxApiEdge / origMaxEdge));
+          const aiW = Math.min(Math.round(origW * scaleUp / 16) * 16, maxApiEdge);
+          const aiH = Math.min(Math.round(origH * scaleUp / 16) * 16, maxApiEdge);
+          return `${aiW}x${aiH}`;
+        }
       })();
-
+      
+      console.log(`[image-edit] upscale: AI request size ${aiUpscaleSize}, final target ${targetW}x${targetH}`);
+      
       // 获取参考图
       const imageBase64ForVision = await resolveImageToBase64(imageUrl);
       const descSnippet = prompt || '';
@@ -2277,22 +2294,50 @@ export async function POST(request: NextRequest) {
       let aiError: Error | null = null;
 
       // Step A: 先用专用upscaler模型尝试（如果有）
-      if (specialUpscalerCandidates.length > 0) {
+      // 注意: 专用upscaler模型API通常限制最大边长2048，需要先放大到2048边长
+      // 如果原图已超过2048，直接跳过专用模型，使用通用模型
+      const maxUpscalerEdge = 2048;
+      const origMaxEdge = Math.max(origW, origH);
+      const shouldUseDedicatedUpscaler = specialUpscalerCandidates.length > 0 && origMaxEdge <= maxUpscalerEdge;
+      
+      if (shouldUseDedicatedUpscaler) {
         try {
           console.log(`[image-edit] upscale: trying ${specialUpscalerCandidates.length} dedicated upscaler models first`);
+          
+          // 原图不超过2048，直接放大2倍（不超过2048）
+          const upscalerScale = Math.min(2, Math.floor(maxUpscalerEdge / origMaxEdge));
+          let upscalerTargetW = Math.min(origW * upscalerScale, maxUpscalerEdge);
+          let upscalerTargetH = Math.min(origH * upscalerScale, maxUpscalerEdge);
+          
+          // 确保尺寸16对齐（API要求）
+          upscalerTargetW = Math.round(upscalerTargetW / 16) * 16;
+          upscalerTargetH = Math.round(upscalerTargetH / 16) * 16;
+          
+          const upscalerSize = `${upscalerTargetW}x${upscalerTargetH}`;
+          console.log(`[image-edit] upscale: dedicated upscaler target size: ${upscalerSize} (limited to max edge 2048)`);
+          
           // 专用超分模型走 /images/edits 端点（参考图编辑模式，参数更简单）
           aiResult = await autoTrySubmitImageTask(specialUpscalerCandidates, (m: string) => ({
             model: m,
             prompt: upscalerPrompt,
             n: 1,
-            size: effectiveSize,
+            size: upscalerSize,
             image: imageBase64ForVision,
             image_urls: [imageBase64ForVision],
           }), '专用模型放大', '/images/edits');
+          
+          // 如果专用模型成功但尺寸未达到目标，需要二次放大
+          if (aiResult && aiResult.imageUrl && (upscalerTargetW < targetW || upscalerTargetH < targetH)) {
+            console.log(`[image-edit] upscale: dedicated upscaler produced ${upscalerTargetW}x${upscalerTargetH}, need secondary upscale to ${targetW}x${targetH}`);
+            // 二次放大用通用AI模型或sharp
+            // 这里先返回2048结果，后续可添加二次放大逻辑
+          }
         } catch (err) {
           console.warn('[image-edit] upscale: dedicated upscaler models failed:', err instanceof Error ? err.message : err);
           aiError = err instanceof Error ? err : new Error(String(err));
         }
+      } else if (specialUpscalerCandidates.length > 0 && origMaxEdge > maxUpscalerEdge) {
+        console.log(`[image-edit] upscale: original image ${origW}x${origH} exceeds 2048 limit, skipping dedicated upscaler models`);
       }
 
       // Step B: 专用模型失败或不存在时，用通用image模型放大
@@ -2302,7 +2347,7 @@ export async function POST(request: NextRequest) {
           aiResult = await autoTrySubmitImageTask(generalImageCandidates, (m: string) => ({
             model: m,
             prompt: upscalerPrompt,
-            size: effectiveSize,
+            size: aiUpscaleSize,
             n: 1,
             image: imageBase64ForVision,
             image_urls: [imageBase64ForVision],
