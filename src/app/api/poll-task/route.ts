@@ -1089,7 +1089,8 @@ export async function POST(request: NextRequest) {
         const imagesLog = taskResultLog?.images as Array<Record<string, unknown>> | undefined;
         if (imagesLog && imagesLog.length > 0) {
           console.log(`[poll-task] taskId=${taskId} taskData.result.images[0] keys:`, Object.keys(imagesLog[0] || {}));
-          const firstImgUrl = imagesLog[0]?.url as string | undefined;
+          const firstImgUrlRaw = imagesLog[0]?.url;
+          const firstImgUrl = typeof firstImgUrlRaw === 'string' ? firstImgUrlRaw : (typeof firstImgUrlRaw === 'object' ? JSON.stringify(firstImgUrlRaw).substring(0, 100) : undefined);
           if (firstImgUrl) {
             console.log(`[poll-task] taskId=${taskId} taskData.result.images[0].url prefix:`, firstImgUrl.substring(0, 100));
           }
@@ -1161,7 +1162,8 @@ export async function POST(request: NextRequest) {
       }
 
       // ★ 日志：最终提取结果
-      console.log(`[poll-task] taskId=${taskId} sourceImageUrl extracted: ${sourceImageUrl ? 'YES' : 'NO'}`, sourceImageUrl ? sourceImageUrl.substring(0, 100) + '...' : '(null)');
+      const safeSourceImageUrl = typeof sourceImageUrl === 'string' ? sourceImageUrl : (sourceImageUrl ? JSON.stringify(sourceImageUrl).substring(0, 100) : '(null)');
+      console.log(`[poll-task] taskId=${taskId} sourceImageUrl extracted: ${sourceImageUrl ? 'YES' : 'NO'}`, safeSourceImageUrl.substring(0, 100) + (typeof sourceImageUrl === 'string' ? '...' : ''));
 
       // ★ 持久化图片策略：
       // 同步持久化所有图片URL：
@@ -1195,7 +1197,7 @@ export async function POST(request: NextRequest) {
               if (fs.existsSync(filePath)) {
                 const buf = fs.readFileSync(filePath);
                 const meta = await sharp(buf).metadata();
-                console.log(`[poll-task] Persisted image dimensions: ${meta.width}x${meta.height}, source: ${sourceImageUrl.substring(0, 80)}...`);
+                console.log(`[poll-task] Persisted image dimensions: ${meta.width}x${meta.height}, source: ${typeof sourceImageUrl === 'string' ? sourceImageUrl.substring(0, 80) : '(non-string)'}...`);
               }
             } catch (dimErr) {
               // 尺寸检测失败不影响主流程
