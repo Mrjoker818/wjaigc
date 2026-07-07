@@ -170,6 +170,17 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [modelSearchQuery, setModelSearchQuery] = useState('');
   const [advancedParams, setAdvancedParams] = useState<Array<{ key: string; value: string }>>([]);
+  
+  // 模型搜索筛选计算
+  const filteredModels = useMemo(() => {
+    if (!modelSearchQuery.trim()) return discoveredModels;
+    const query = modelSearchQuery.toLowerCase();
+    return discoveredModels.filter(m => 
+      (m.displayName || m.name || m.id).toLowerCase().includes(query) ||
+      m.id.toLowerCase().includes(query)
+    );
+  }, [discoveredModels, modelSearchQuery]);
+  
   const [showAdvancedParams, setShowAdvancedParams] = useState(false);
   const [editingProviderId, setEditingProviderId] = useState<string | null>(null);
   const [testingProviderId, setTestingProviderId] = useState<string | null>(null);
@@ -2766,16 +2777,50 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                             </button>
                           </div>
                         </div>
+                        {/* 模型搜索框 */}
+                        {discoveredModels.length > 0 && (
+                          <div className="mb-3">
+                            <div className="relative">
+                              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                              <input
+                                type="text"
+                                placeholder="搜索模型名称或ID..."
+                                value={modelSearchQuery}
+                                onChange={(e) => setModelSearchQuery(e.target.value)}
+                                className="w-full pl-9 pr-3 py-2 rounded-lg bg-muted/50 border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50 transition-all"
+                              />
+                              {modelSearchQuery && (
+                                <button
+                                  onClick={() => setModelSearchQuery('')}
+                                  className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                            {modelSearchQuery && (
+                              <p className="text-xs text-muted-foreground mt-1.5">
+                                筛选结果: {filteredModels.length} 个模型匹配 "{modelSearchQuery}"
+                              </p>
+                            )}
+                          </div>
+                        )}
                         {discoveredModels.length === 0 ? (
                           <div className="p-8 rounded-lg text-center border-2 border-dashed border-border text-muted-foreground">
                             <Bot className="w-10 h-10 mx-auto mb-2 opacity-40" />
                             <p className="text-sm font-medium">尚未发现模型</p>
                             <p className="text-xs mt-1">填写API信息后点击「测试连接」自动扫描，或点击「手动添加」</p>
                           </div>
+                        ) : filteredModels.length === 0 ? (
+                          <div className="p-6 rounded-lg text-center border border-border text-muted-foreground">
+                            <Search className="w-8 h-8 mx-auto mb-2 opacity-40" />
+                            <p className="text-sm font-medium">未找到匹配的模型</p>
+                            <p className="text-xs mt-1">尝试其他关键词或清空搜索</p>
+                          </div>
                         ) : (
                           <div className="rounded-lg overflow-hidden border border-border">
                             <div className="max-h-64 overflow-y-auto">
-                              {discoveredModels.map((m, idx) => {
+                              {filteredModels.map((m, idx) => {
                                 const isSelected = selectedModels.includes(m.id);
                                 return (
                                   <div key={m.id} className={`flex items-center gap-3 px-4 py-2.5 ${idx % 2 === 0 ? 'bg-muted/30' : ''} hover:bg-muted/60 transition-colors group`}>
