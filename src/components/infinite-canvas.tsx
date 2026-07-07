@@ -14582,32 +14582,74 @@ export function InfiniteCanvas({
                       {(() => {
                         const hcgRatios = findModelConfig(MODEL_ASPECT_RATIOS, hcg.toolbar.model) || DEFAULT_ASPECT_RATIOS;
                         const hcgQualities = findModelConfig(MODEL_QUALITIES, hcg.toolbar.model) || DEFAULT_QUALITIES;
+                        const paramType = getModelParamType(hcg.toolbar.model);
+                        // 根据paramType判断显示什么参数
+                        // resolution: 分辨率档位 (1K/2K/4K)
+                        // quality: 图片质量档位
+                        // both: 同时显示分辨率和质量
+                        const isResolutionParam = paramType === 'resolution';
+                        const isQualityParam = paramType === 'quality';
+                        const isBothParams = paramType === 'both';
+                        // resolution类型: 显示分辨率档位
+                        // quality类型: 显示质量档位
+                        // both类型: 需要分别显示分辨率和质量（暂无此类模型）
                         return (<>
-                      <select
-                        className="px-2 py-1.5 rounded-lg text-xs"
-                        style={{ background: isMonochrome ? '#f3f4f6' : 'rgba(255,255,255,0.08)', color: isMonochrome ? '#374151' : '#ccc', border: `1px solid ${isMonochrome ? '#d1d5db' : 'rgba(255,255,255,0.10)'}` }}
-                        value={hcg.toolbar.aspectRatio}
-                        onChange={(e) => {
-                          const newAr = e.target.value;
-                          const newSize = calculateActualPixels(newAr, hcg.toolbar.quality, hcg.toolbar.model);
-                          setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, aspectRatio: newAr, size: newSize } } : g));
-                        }}
-                      >
-                        {hcgRatios.map(r => <option key={r} value={r}>{r} ({calculateActualPixels(r, hcg.toolbar.quality, hcg.toolbar.model)})</option>)}
-                      </select>
-                      {/* 图片质量 */}
-                      <select
-                        className="px-2 py-1.5 rounded-lg text-xs"
-                        style={{ background: isMonochrome ? '#f3f4f6' : 'rgba(255,255,255,0.08)', color: isMonochrome ? '#374151' : '#ccc', border: `1px solid ${isMonochrome ? '#d1d5db' : 'rgba(255,255,255,0.10)'}` }}
-                        value={hcg.toolbar.quality}
-                        onChange={(e) => {
-                          const newQ = e.target.value;
-                          const newSize = calculateActualPixels(hcg.toolbar.aspectRatio, newQ, hcg.toolbar.model);
-                          setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, quality: newQ, size: newSize } } : g));
-                        }}
-                      >
-                        {hcgQualities.map(q => <option key={q} value={q}>{QUALITY_DISPLAY_NAMES[q] || q} ({calculateActualPixels(hcg.toolbar.aspectRatio, q, hcg.toolbar.model)})</option>)}
-                      </select>
+                      {/* 图像比例 */}
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] font-medium" style={{ color: isMonochrome ? '#6b7280' : '#888' }}>图像比例</span>
+                        <select
+                          className="px-2 py-1.5 rounded-lg text-xs"
+                          style={{ background: isMonochrome ? '#f3f4f6' : 'rgba(255,255,255,0.08)', color: isMonochrome ? '#374151' : '#ccc', border: `1px solid ${isMonochrome ? '#d1d5db' : 'rgba(255,255,255,0.10)'}` }}
+                          value={hcg.toolbar.aspectRatio}
+                          onChange={(e) => {
+                            const newAr = e.target.value;
+                            const newSize = calculateActualPixels(newAr, hcg.toolbar.quality, hcg.toolbar.model);
+                            setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, aspectRatio: newAr, size: newSize } } : g));
+                          }}
+                        >
+                          {hcgRatios.map(r => <option key={r} value={r}>{r} ({calculateActualPixels(r, hcg.toolbar.quality, hcg.toolbar.model)})</option>)}
+                        </select>
+                      </div>
+                      {/* 分辨率 或 图片质量 */}
+                      {isResolutionParam && (
+                        <div className="flex items-center gap-1">
+                          <span className="text-[10px] font-medium" style={{ color: isMonochrome ? '#6b7280' : '#888' }}>分辨率</span>
+                          <select
+                            className="px-2 py-1.5 rounded-lg text-xs"
+                            style={{ background: isMonochrome ? '#f3f4f6' : 'rgba(255,255,255,0.08)', color: isMonochrome ? '#374151' : '#ccc', border: `1px solid ${isMonochrome ? '#d1d5db' : 'rgba(255,255,255,0.10)'}` }}
+                            value={hcg.toolbar.quality}
+                            onChange={(e) => {
+                              const newQ = e.target.value;
+                              const newSize = calculateActualPixels(hcg.toolbar.aspectRatio, newQ, hcg.toolbar.model);
+                              setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, quality: newQ, size: newSize } } : g));
+                            }}
+                          >
+                            {hcgQualities.map(q => <option key={q} value={q}>{q}</option>)}
+                          </select>
+                        </div>
+                      )}
+                      {isQualityParam && (
+                        <div className="flex items-center gap-1">
+                          <span className="text-[10px] font-medium" style={{ color: isMonochrome ? '#6b7280' : '#888' }}>图片质量</span>
+                          <select
+                            className="px-2 py-1.5 rounded-lg text-xs"
+                            style={{ background: isMonochrome ? '#f3f4f6' : 'rgba(255,255,255,0.08)', color: isMonochrome ? '#374151' : '#ccc', border: `1px solid ${isMonochrome ? '#d1d5db' : 'rgba(255,255,255,0.10)'}` }}
+                            value={hcg.toolbar.quality}
+                            onChange={(e) => {
+                              const newQ = e.target.value;
+                              const newSize = calculateActualPixels(hcg.toolbar.aspectRatio, newQ, hcg.toolbar.model);
+                              setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, quality: newQ, size: newSize } } : g));
+                            }}
+                          >
+                            {hcgQualities.map(q => <option key={q} value={q}>{QUALITY_DISPLAY_NAMES[q] || q}</option>)}
+                          </select>
+                        </div>
+                      )}
+                      {isBothParams && (
+                        <>
+                          {/* 同时显示分辨率和质量（目前暂无此类模型，预留结构） */}
+                        </>
+                      )}
                       </>);
                       })()}
                       {/* 数量 */}
