@@ -175,12 +175,14 @@ export async function POST(request: NextRequest) {
       model = normalized.apiModelName;
     }
 
-    // ★ 关键修复：模型别名可能携带分辨率后缀（如 gpt-image-2-4k → resolutionTier='4K'），
+    // ★ 关键修复：模型别名可能携带分辨率后缀（如 gpt-image-2-4k → resolutionTier='4k'），
     // 需要覆盖默认 quality，否则会用 high/auto 导致分辨率只有1792而非4096
-    if (normalized.resolutionTier && ['1K', '2K', '4K'].includes(normalized.resolutionTier)) {
-      if (quality === '1K' || quality === 'high' || quality === 'auto' || quality === 'medium' || quality === 'low') {
-        console.log(`[generate] 模型别名分辨率覆盖: quality "${quality}" → "${normalized.resolutionTier}"`);
-        quality = normalized.resolutionTier;
+    // 注意：resolutionTier是normalizeModelForApi返回的小写值（如'4k'），需要统一大小写比较
+    const tierUpper = normalized.resolutionTier?.toUpperCase();
+    if (tierUpper && ['1K', '2K', '4K', '8K'].includes(tierUpper)) {
+      if (quality.toUpperCase() === '1K' || quality === 'high' || quality === 'auto' || quality === 'medium' || quality === 'low') {
+        console.log(`[generate] 模型别名分辨率覆盖: quality "${quality}" → "${tierUpper}"`);
+        quality = tierUpper;
       }
     }
 
