@@ -538,6 +538,63 @@ export function getModelParamType(modelId: string): ModelParamType {
 }
 
 /**
+ * 合并参数选项：确保 MODEL_QUALITIES 中的选项与 getModelParamType 的类型一致。
+ * 当 MODEL_QUALITIES 只有质量值但模型家族应同时支持分辨率时，补充分辨率档位。
+ * 当 MODEL_QUALITIES 只有分辨率值但模型家族应同时支持质量时，补充质量档位。
+ */
+function mergeParamOptions(modelId: string, desiredType: ModelParamType, existingOpts: string[]): {
+    type: ModelParamType; options: string[]; defaultOption: string;
+} {
+    const id = modelId.toLowerCase();
+    const opts = [...existingOpts];
+    let type = desiredType;
+    
+    const hasResInOpts = opts.some(o => isResolutionTier(o));
+    const hasQualityInOpts = opts.some(o => isQualityLevel(o));
+    
+    // 需要分辨率但没有 → 补充
+    if ((desiredType === 'both' || desiredType === 'resolution') && !hasResInOpts) {
+        if (id.includes('-4k') || /4k-omni/i.test(id)) {
+            opts.unshift('1K', '2K', '4K');
+        } else if (id.includes('-3k')) {
+            opts.unshift('1K', '2K', '3K');
+        } else if (id.includes('-2k')) {
+            opts.unshift('1K', '2K');
+        } else {
+            // GPT家族默认全分辨率
+            if (id.includes('gpt-image') || id.includes('chatgpt-image')) {
+                opts.unshift('1K', '2K', '4K');
+            } else {
+                opts.unshift('1K', '2K');
+            }
+        }
+    }
+    
+    // 需要质量但没有 → 补充
+    if ((desiredType === 'both' || desiredType === 'quality') && !hasQualityInOpts) {
+        const qualityOpts = ['auto', 'low', 'medium', 'high'];
+        for (const q of qualityOpts) {
+            if (!opts.includes(q)) opts.push(q);
+        }
+    }
+    
+    // 如果 desiredType 是 'none' 但从 opts 可以推断 → 用推断值
+    if (desiredType === 'none') {
+        const isAllRes = opts.every(o => isResolutionTier(o));
+        const isAllQ = opts.every(o => isQualityLevel(o));
+        type = isAllRes ? 'resolution' : (isAllQ ? 'quality' : 'both');
+    }
+    
+    // 默认值
+    let def = opts[opts.length - 1] || opts[0];
+    if (id.includes('-4k') || /4k-omni/i.test(id)) def = '4K';
+    else if (id.includes('-3k')) def = '3K';
+    else if (id.includes('-2k')) def = '2K';
+    
+    return { type, options: opts, defaultOption: def };
+}
+
+/**
  * 通用模型参数能力推断（动态+兜底）：
  * 1. 优先匹配 MODEL_QUALITIES 中明确定义的模型
  * 2. 未命中时根据模型名后缀/关键词智能推断：
@@ -556,21 +613,56 @@ export function inferModelParamCapability(modelId: string): { type: ModelParamTy
 
     // 1. 优先查MODEL_QUALITIES
     if (MODEL_QUALITIES[modelId]) {
-        const opts = MODEL_QUALITIES[modelId];
+        const opts = [...MODEL_QUALITIES[modelId]]; // copy to avoid mutation
         const type = getModelParamType(modelId);
-        return { type, options: opts, defaultOption: opts[opts.length - 1] || opts[0] };
+        // ★ 关键修复：MODEL_QUALITIES 中的选项可能不完整（如 gpt-image-2 只有质量值但 type=both），
+        // 需要根据 getModelParamType 的结果补充缺失的档位选项
+        return mergeParamOptions(modelId, type, opts);
     }
     // 模糊匹配（MODEL_QUALITIES中可能存在前缀匹配，如nano-banana-pro-4k-xxx）
     for (const key of Object.keys(MODEL_QUALITIES)) {
         if (id === key.toLowerCase() || id.startsWith(key.toLowerCase() + '-') || id.endsWith('-' + key.toLowerCase())) {
-            const opts = MODEL_QUALITIES[key];
+            const opts = [...MODEL_QUALITIES[key]]; // copy to avoid mutation
             // 根据options内容判断type
             const isAllRes = opts.every(o => isResolutionTier(o));
             const isAllQ = opts.every(o => isQualityLevel(o));
-            const t: ModelParamType = isAllRes ? 'resolution' : (isAllQ ? 'quality' : 'both');
-            // 如果模型名带4k，默认选4k；带2k默认选2k；否则最高档位
+            let t: ModelParamType = isAllRes ? 'resolution' : (isAllQ ? 'quality' : 'both');
+            
+            // ★ 关键修复：检查模型名中的分辨率后缀和模型家族，
+            // 如果模糊匹配遗漏了分辨率/质量档位，需要升级type并补充选项
+            const hasResSuffix = /(?:^|[-\s])[234]k(?:[-\s]|$)/.test(id) || /4k-omni/i.test(id);
+            const gptFamily = id.includes('gpt-image') || id.includes('chatgpt-image');
+            const bananaFamily = id.includes('banana') || id.includes('nano-banana') || id.includes('gemini') || id.includes('imagen');
+            
+            // 质量型匹配 + 分辨率后缀 → 升级为 both，补充分辨率档位
+            if (hasResSuffix && t === 'quality') {
+                t = 'both';
+                if (id.includes('-4k') || /4k-omni/i.test(id)) {
+                    opts.unshift('1K', '2K', '4K');
+                } else if (id.includes('-3k')) {
+                    opts.unshift('1K', '2K', '3K');
+                } else if (id.includes('-2k')) {
+                    opts.unshift('1K', '2K');
+                }
+            }
+            // GPT/Banana家族仅有分辨率选项但应同时有质量 → 升级为 both，补充质量档位
+            if ((gptFamily || bananaFamily) && t === 'resolution') {
+                t = 'both';
+                // 补充质量档位（去重）
+                const qualityOpts = ['auto', 'low', 'medium', 'high'];
+                for (const q of qualityOpts) {
+                    if (!opts.includes(q)) opts.push(q);
+                }
+            }
+            // GPT家族仅有质量选项但应同时有分辨率 → 升级为 both，补充分辨率档位
+            if (gptFamily && t === 'quality' && !hasResSuffix) {
+                t = 'both';
+                opts.unshift('1K', '2K', '4K');
+            }
+            
+            // 默认值
             let def = opts[opts.length - 1];
-            if (id.includes('-4k') || id.includes('4k-omni')) def = '4K';
+            if (id.includes('-4k') || /4k-omni/i.test(id)) def = '4K';
             else if (id.includes('-2k')) def = '2K';
             return { type: t, options: opts, defaultOption: def };
         }
