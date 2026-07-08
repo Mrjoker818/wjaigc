@@ -4156,6 +4156,7 @@ function CanvasApp() {
           ref={videoPanelRef}
           floating
           onVideoGenerate={handleVideoGenerate as any}
+          onAddImages={(urls: string[]) => handleAddImages(urls)}
           onClose={() => setShowVideoPanel(false)}
           onError={(error: string) => {
             toast.error('视频生成失败', {
