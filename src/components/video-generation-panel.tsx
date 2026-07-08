@@ -1340,6 +1340,7 @@ Rules:
         )}
 
         {panelMinimized ? null : (
+        <>
         <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
         {/* 非浮动模式简易头部 */}
         {!floating && (
@@ -1381,7 +1382,8 @@ Rules:
         </div>
 
         {/* 主体滚动区 —— 两列布局：左340px 风格模板与模型 / 右列 提示词与参数 */}
-        <div className="flex-1 flex gap-0 min-h-0 overflow-hidden">
+        <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+        <div className="flex gap-0 min-h-0">
           {/* ============ 左列：风格模板 + 模型选择（340px） ============ */}
           <div
             className="flex-shrink-0 overflow-y-auto overflow-x-hidden px-4 py-4 scrollbar-thin flex flex-col gap-4"
@@ -1459,6 +1461,7 @@ Rules:
             </div>
 
             {/* 视频模板库（按类别分组） */}
+            <div className="space-y-2.5">
             {(['product', 'character', 'landscape', 'effect', 'story'] as const).map(cat => {
               const catTemplates = VIDEO_TEMPLATES.filter(t => t.category === cat);
               const catLabel = { product: '📦 产品展示', character: '👤 人物', landscape: '🏞 风景', effect: '✨ 特效', story: '🎞 故事叙事' }[cat];
@@ -1491,10 +1494,12 @@ Rules:
                 </div>
               );
             })}
+            </div>
           </div>
 
-          {/* ============ 右列：提示词 + 参数 + 生成按钮（flex-1 自适应） ============ */}
-          <div className="flex-1 flex flex-col px-5 pt-4 pb-4 overflow-y-auto overflow-x-hidden min-w-0 scrollbar-thin" style={{ scrollbarWidth: 'thin' }}>
+          {/* ============ 右列：提示词 + 参数（flex-1 自适应，内部纵向分为滚动区 + 底部按钮） ============ */}
+          <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+            <div className="flex-1 overflow-y-auto overflow-x-hidden px-5 pt-4 pb-2 scrollbar-thin min-h-0" style={{ scrollbarWidth: 'thin' }}>
             {/* ======== 视频描述区 ======== */}
             <div className="flex flex-col gap-3 min-w-0">
               <div>
@@ -2432,43 +2437,10 @@ Rules:
               </div>
             </CollapsibleSection>
 
-            {/* 生成按钮 */}
-            <button
-              onClick={handleGenerate}
-              disabled={isGenerating || !model || (!prompt.trim() && mode !== 'video-extend')}
-              className={`w-full ${isGenerating ? 'py-3' : 'py-3'} rounded-xl text-sm font-semibold flex flex-col items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed mt-auto`}
-              style={{
-                background: isGold
-                  ? (isGenerating ? 'rgba(212,175,55,0.3)' : 'linear-gradient(135deg, #d4af37, #b8962e)')
-                  : (isGenerating ? 'rgba(59,130,246,0.3)' : 'linear-gradient(135deg, #3b82f6, #2563eb)'),
-                color: '#fff',
-                boxShadow: isGenerating ? 'none' : `0 4px 12px ${isGold ? 'rgba(212,175,55,0.35)' : 'rgba(59,130,246,0.35)'}`,
-              }}
-            >
-              {isGenerating ? (
-                <div className="flex flex-col gap-2 w-full px-4">
-                  <div className="flex items-center justify-center gap-2">
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>{genStage || '处理中...'}</span>
-                  </div>
-                  <div className="w-full h-1 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.2)' }}>
-                    <div
-                      className="h-full rounded-full transition-all duration-500"
-                      style={{ width: `${genProgress}%`, background: 'rgba(255,255,255,0.9)' }}
-                    />
-                  </div>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <Sparkles className="w-4 h-4" />
-                  {mode === 'video-extend' ? '延长视频' : mode === 'multi-shot' ? `生成${multiShotScenes.length}镜头视频` : `生成视频${batchCount > 1 ? ` (${batchCount}个)` : ''}`}
-                </div>
-              )}
-            </button>
-
+            {/* 生成按钮放在右列底部操作栏（独立于滚动区），此处不再渲染 */}
             {/* 历史记录 */}
             {videoHistory.length > 0 && (
-              <div>
+              <div className="mt-3">
                 <button onClick={() => setShowHistory(!showHistory)} className="flex items-center gap-1.5 text-xs font-medium w-full py-1 cursor-pointer" style={{ color: subTextColor }}>
                   <History className="w-3.5 h-3.5" />
                   <span>生成历史 ({videoHistory.length})</span>
@@ -2491,14 +2463,62 @@ Rules:
                 )}
               </div>
             )}
-            </div>
-          </div>
-          {/* ============ 右列结束 ============ */}
+              </div>{/* 右列滚动区结束 */}
+          </div>{/* 右列容器结束 */}
+        </div>{/* 两列 flex 行结束 */}
+        </div>{/* 滚动区结束 */}
+        {/* 底部固定操作区（避免滚动区内被挤压折叠，统一在面板最下方） */}
+        <div className="shrink-0 px-4 pt-3 pb-4 border-t" style={{ borderColor, background: isMonochrome ? '#fff' : 'rgba(10,10,10,0.6)' }}>
+          {!isExtending && mode !== 'multi-shot' && (
+            <button
+              onClick={handleGenerate}
+              disabled={isGenerating}
+              className="w-full py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{
+                background: isGenerating ? (isGold ? 'rgba(212,175,55,0.6)' : 'rgba(59,130,246,0.6)') : accentColor,
+                color: '#fff',
+                boxShadow: isGenerating ? 'none' : `0 4px 14px ${isGold ? 'rgba(212,175,55,0.4)' : 'rgba(59,130,246,0.4)'}`,
+              }}
+            >
+              {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+              {isGenerating ? '生成中...' : '生成视频'}
+            </button>
+          )}
+          {mode === 'multi-shot' && (
+            <button
+              onClick={handleGenerateAllShots}
+              disabled={isGeneratingAllShots || isGenerating}
+              className="w-full py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{
+                background: isGeneratingAllShots ? (isGold ? 'rgba(212,175,55,0.6)' : 'rgba(59,130,246,0.6)') : accentColor,
+                color: '#fff',
+                boxShadow: isGeneratingAllShots ? 'none' : `0 4px 14px ${isGold ? 'rgba(212,175,55,0.4)' : 'rgba(59,130,246,0.4)'}`,
+              }}
+            >
+              {isGeneratingAllShots ? <Loader2 className="w-4 h-4 animate-spin" /> : <Film className="w-4 h-4" />}
+              {isGeneratingAllShots ? '连续生成中（尾帧→首帧串联）...' : `生成全部 ${shotPlans.length} 个镜头`}
+            </button>
+          )}
+          {isExtending && (
+            <button
+              onClick={handleSubmitExtend}
+              disabled={isExtending || !model || !extendVideoUrl}
+              className="w-full py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{
+                background: isExtending ? (isGold ? 'rgba(212,175,55,0.6)' : 'rgba(59,130,246,0.6)') : accentColor,
+                color: '#fff',
+                boxShadow: isExtending ? 'none' : `0 4px 14px ${isGold ? 'rgba(212,175,55,0.4)' : 'rgba(59,130,246,0.4)'}`,
+              }}
+            >
+              {isExtending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+              {isExtending ? '延长中...' : '延长视频'}
+            </button>
+          )}
         </div>
-        {/* 两列 flex 行结束 */}
-        </div>
-      )}
-    </div>
+        </div>{/* flex-1 col 容器结束 */}
+        </>
+        )}
+    </div>{/* panelRef 容器结束 */}
   );
 });
 
