@@ -2206,28 +2206,19 @@ export async function POST(request: NextRequest) {
     // ★ 统一使用 polling 模式返回，避免直接模式导致前端 fetch 长时间等待超时
     // 即使是直接返回的图片 URL，也注册到 task-registry 并返回 taskIds，
     // 让前端通过 poll-task 获取结果，确保请求快速响应
+    // ★ 关键优化：persistRemoteImage 不阻塞响应，在后台异步执行
     if (directImageUrls.length > 0) {
-      const persistedUrls: string[] = [];
-      for (const rawUrl of directImageUrls) {
-        try {
-          const persisted = await persistRemoteImage(rawUrl);
-          persistedUrls.push(persisted || rawUrl);
-        } catch (e) {
-          console.warn('[generate] 持久化直接图片失败，使用原始URL:', e);
-          persistedUrls.push(rawUrl);
-        }
-      }
-      // 为每个直接返回的图片创建一个 taskId 并注册到 task-registry
-      for (let i = 0; i < persistedUrls.length; i++) {
+      for (let i = 0; i < directImageUrls.length; i++) {
+        const rawUrl = directImageUrls[i];
         const directTid = `direct-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}`;
         taskIds.push(directTid);
         registerTask(directTid, 'generate', '生成图片', userId);
-        // 直接标记为已完成，结果存储在 task-registry 中
+        // 先用原始 URL 标记为已完成，确保前端能立即获取到结果
         updateTaskProgress(directTid, {
           status: 'completed',
           progress: 100,
           result: {
-            imageUrl: persistedUrls[i],
+            imageUrl: rawUrl,
             usedModel: usedModelId,
             modelName: usedModelName,
             providerName: usedProviderName,
@@ -2236,6 +2227,23 @@ export async function POST(request: NextRequest) {
             providerId: usedProviderId,
             advancedParams: provider?.advancedParams,
           }
+        });
+        // 后台异步持久化：不阻塞响应，完成后更新 task 结果为持久化 URL
+        const tid = directTid;
+        const providerInfo = {
+          usedModel: usedModelId, modelName: usedModelName, providerName: usedProviderName,
+          apiBaseUrl: usedApiBaseUrl, apiKey: provider?.apiKey || serverApiKey,
+          providerId: usedProviderId, advancedParams: provider?.advancedParams,
+        };
+        persistRemoteImage(rawUrl).then(persistedUrl => {
+          if (persistedUrl && persistedUrl !== rawUrl) {
+            updateTaskProgress(tid, {
+              status: 'completed', progress: 100,
+              result: { imageUrl: persistedUrl, ...providerInfo }
+            });
+          }
+        }).catch(e => {
+          console.warn('[generate] 后台持久化失败（使用原始URL）:', e?.message || e);
         });
       }
     }
