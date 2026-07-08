@@ -1,10 +1,11 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
+import * as React from 'react';
 import {
   Play, Video, ImagePlus, Clock, Settings2,
   ChevronDown, Loader2, Sparkles, Volume2, VolumeX,
-  Upload, X, AlertCircle, Info, FastForward, Users, Plus, Paintbrush, Film, Palette,
+  Upload, X, AlertCircle, Info, FastForward, Users, Plus, Paintbrush, Film, Palette, Images,
   History, RotateCcw, Languages, GripVertical, Minus, Maximize2, ChevronRight, CheckCircle2
 } from 'lucide-react';
 import MotionBrushCanvas, { type MotionBrushResult, type MotionBrushCanvasHandle } from './motion-brush-canvas';
@@ -929,7 +930,7 @@ Rules:
   const borderActiveClass = isMonochrome ? 'border-blue-500' : isGold ? 'border-amber-500/50' : 'border-blue-500/50';
   const borderInactiveClass = isMonochrome ? 'border-gray-200' : 'border-gray-700';
   // Additional theme-aware classes for labels, text, borders
-  const labelClass = isMonochrome ? 'text-xs text-gray-500' : 'text-xs text-gray-500';
+  const labelClass = 'text-[11px] font-semibold block mb-2 ' + (isMonochrome ? 'text-gray-500' : 'text-gray-400');
   const sectionTitleClass = isMonochrome ? 'text-xs font-semibold text-blue-500 whitespace-nowrap truncate' : 'text-xs font-semibold text-gray-300 whitespace-nowrap truncate';
   const subtleTextClass = isMonochrome ? 'text-gray-400' : 'text-gray-500';
   const subtleBorderClass = isMonochrome ? 'border-gray-200' : 'border-gray-600';
@@ -954,1253 +955,860 @@ Rules:
   } : {};
 
   return (
-    <div ref={panelRef} className={floatingWrapperClass} style={{ background: !floating ? panelBg : undefined, color: textColor, ...floatingStyle } as React.CSSProperties} data-floating-panel="video">
-      {/* 浮动模式：顶部统一标题栏（参考字境大师/展陈系统样式） */}
+    <div
+      ref={panelRef}
+      className={floatingWrapperClass}
+      style={{ background: !floating ? panelBg : undefined, color: textColor, ...floatingStyle } as React.CSSProperties}
+      data-floating-panel="video"
+    >
+      {/* 浮动模式标题栏 */}
       {floating && (
         <div
-          className={`flex items-center gap-2 px-4 py-2.5 cursor-move select-none flex-shrink-0 border-b ${
-            isMonochrome ? 'bg-gray-50 border-gray-200' : 'bg-gradient-to-b from-[#161616] to-[#0f0f0f] border-white/[0.06]'
-          }`}
+          className={`flex items-center gap-2.5 px-5 py-3 cursor-move select-none flex-shrink-0 ${isMonochrome ? 'bg-[#f9fafb]' : 'bg-gradient-to-b from-[#161616] to-[#0f0f0f]'}`}
+          style={{ borderBottom: `1px solid ${isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.06)'}` }}
           onMouseDown={handleDragStart}
         >
-          <GripVertical size={16} className={isMonochrome ? 'text-gray-400' : 'text-gray-500'} />
+          <GripVertical size={16} style={{ color: isMonochrome ? '#9ca3af' : '#6b7280' }} className="shrink-0" />
           <div
-            className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+            className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 shadow-sm"
             style={{ background: `linear-gradient(135deg, ${accentColor}, ${isMonochrome ? '#2563eb' : '#8b7225'})`, color: isMonochrome ? '#ffffff' : '#0a0a0a' }}
           >
             <Film className="w-4 h-4" />
           </div>
           <div className="flex-1 min-w-0">
-            <h1 className="text-sm font-semibold" style={{ color: textColor }}>视频生成器</h1>
-            <p className="text-[11px] mt-0.5" style={{ color: subTextColor }}>文生视频 / 图生视频 / 首尾帧 / 多镜头 / 视频延长</p>
+            <h1 className="text-[15px] font-semibold leading-tight" style={{ color: textColor }}>视频生成器</h1>
+            <p className="text-[11px] mt-0.5 leading-tight" style={{ color: subTextColor }}>文生视频 · 图生视频 · 首尾帧 · 多镜头 · 视频延长</p>
           </div>
           <div className="flex items-center gap-1.5">
             {isGenerating && (
-              <button
-                onClick={(e) => { e.stopPropagation(); setPanelMinimized(!panelMinimized); }}
-                className="px-2 py-1 rounded-md text-xs flex items-center gap-1 transition-colors"
-                style={{ background: isMonochrome ? '#3b82f6' : accentColor, color: isMonochrome ? '#fff' : '#0a0a0a' }}
-                title={panelMinimized ? '展开' : '最小化'}
+              <div
+                className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium flex items-center gap-1.5 shadow-sm"
+                style={{ background: accentColor, color: isMonochrome ? '#fff' : '#0a0a0a' }}
               >
-                <div className="w-2 h-2 rounded-full bg-white/80 animate-pulse" />
-                生成中{genProgress > 0 ? ` ${genProgress}%` : ''}
-              </button>
+                <div className="w-2 h-2 rounded-full bg-white/90 animate-pulse" />
+                生成中{genProgress > 0 ? ` ${Math.round(genProgress)}%` : ''}
+              </div>
             )}
             <button
               onClick={(e) => { e.stopPropagation(); setPanelMinimized(!panelMinimized); }}
-              className="p-1.5 rounded-lg transition-colors"
+              className="p-2 rounded-lg transition-all duration-200 hover:scale-105"
               style={{ color: subTextColor, border: `1px solid ${isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.1)'}` }}
               onMouseEnter={e => { e.currentTarget.style.borderColor = accentColor; e.currentTarget.style.color = accentColor; }}
               onMouseLeave={e => { e.currentTarget.style.borderColor = isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.1)'; e.currentTarget.style.color = subTextColor; }}
-              title={panelMinimized ? '展开' : '最小化'}
+              title={panelMinimized ? '展开面板' : '最小化'}
             >
-              {panelMinimized ? <Maximize2 size={14} /> : <Minus size={14} />}
+              {panelMinimized ? <Maximize2 size={15} /> : <Minus size={15} />}
             </button>
             <button
               onClick={(e) => { e.stopPropagation(); onClose?.(); }}
-              className="p-1.5 rounded-lg transition-colors"
+              className="p-2 rounded-lg transition-all duration-200 hover:scale-105"
               style={{ color: subTextColor, border: `1px solid ${isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.1)'}` }}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(255,60,60,0.3)'; e.currentTarget.style.color = '#ff5555'; }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(255,80,80,0.4)'; e.currentTarget.style.color = '#ff5555'; }}
               onMouseLeave={e => { e.currentTarget.style.borderColor = isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.1)'; e.currentTarget.style.color = subTextColor; }}
               title="关闭"
             >
-              <X size={14} />
+              <X size={15} />
             </button>
           </div>
         </div>
       )}
-      <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
-      {!floating && (
-        <div className="px-4 pt-4 pb-2 flex items-center justify-between flex-shrink-0">
-          <h2 className="text-lg font-bold" style={{ color: textColor }}>视频生成</h2>
-          {onClose && (
-            <button onClick={onClose} className="p-1 rounded-md" style={{ color: subTextColor }}>
-              <X className="w-5 h-5" />
-            </button>
-          )}
-        </div>
-      )}
-      {/* === 模式切换 === */}
-      <div className={`flex gap-1 px-3 pb-1 flex-nowrap ${isMonochrome ? 'bg-gray-100 rounded-lg mx-3 mt-1 p-1.5' : ''}`}>
-        {modeOptions.map(opt => (
-          <button
-            key={opt.value}
-            onClick={() => setMode(opt.value)}
-            className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer whitespace-nowrap ${
-              isMonochrome
-                ? mode === opt.value
-                  ? 'bg-white text-gray-900 shadow-sm'
-                  : 'text-gray-400 hover:text-gray-600'
-                : ''
-            }`}
-            style={isMonochrome ? {} : {
-              background: mode === opt.value ? (isGold ? 'rgba(212,175,55,0.15)' : 'rgba(59,130,246,0.15)') : 'transparent',
-              color: mode === opt.value ? accentColor : subTextColor,
-              border: `1px solid ${mode === opt.value ? borderColor : 'transparent'}`,
-            }}
-          >
-            {opt.icon}
-            {opt.label}
-          </button>
-        ))}
-      </div>
 
-      {/* === 视频模板库 === */}
-      <div className="px-3 pt-2">
-        <label className={labelClass}>风格预设</label>
-        {/* 分类标签 */}
-        <div className="flex gap-1 mb-1.5 overflow-x-auto">
-          {(['all', 'product', 'character', 'landscape', 'effect', 'story'] as const).map(cat => (
-            <button
-              key={cat}
-              onClick={() => {
-                const el = document.querySelector(`[data-template-cat="${cat}"]`);
-                if (el) el.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' });
-                else setTemplateFilter(cat);
-              }}
-              className={`flex-shrink-0 px-2 py-0.5 rounded text-[10px] transition-all cursor-pointer`}
-              style={{
-                background: templateFilter === cat ? (isGold ? 'rgba(212,175,55,0.15)' : 'rgba(59,130,246,0.15)') : 'transparent',
-                color: templateFilter === cat ? accentColor : subTextColor,
-                border: `1px solid ${templateFilter === cat ? borderColor : 'transparent'}`,
-              }}
-            >
-              {cat === 'all' ? '全部' : cat === 'product' ? '产品' : cat === 'character' ? '人物' : cat === 'landscape' ? '风景' : cat === 'effect' ? '特效' : '故事'}
-            </button>
-          ))}
-        </div>
-        {/* 模板网格 */}
-        <div className="grid grid-cols-2 gap-1.5 max-h-[160px] overflow-y-auto">
-          {VIDEO_TEMPLATES
-            .filter(t => templateFilter === 'all' || t.category === templateFilter)
-            .map(template => (
-            <button
-              key={template.id}
-              onClick={() => {
-                setPrompt(template.prompt);
-                if (template.aspectRatio) setAspectRatio(template.aspectRatio);
-                if (template.duration) setDuration(template.duration);
-                if (template.cameraControl) setCameraControl(template.cameraControl);
-              }}
-              className={`text-left px-2.5 py-1.5 rounded-md text-[10px] border transition-all cursor-pointer hover:border-opacity-60 ${
-                isMonochrome
-                  ? 'bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:text-blue-600'
-                  : ''
-              }`}
-              style={isMonochrome ? {} : {
-                background: inputBg,
-                borderColor: borderColor,
-                color: '#9ca3af',
-              }}
-              title={template.prompt}
-            >
-              <div className="font-medium truncate" style={{ color: subTextColor }}>{template.name}</div>
-              <div className="truncate opacity-60 mt-0.5" style={{ fontSize: '9px' }}>{template.aspectRatio} · {template.duration}s</div>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* === 视频模型选择 === */}
-      <div className="px-3 pt-2">
-        <label className="text-xs text-gray-500 mb-1 block">视频模型</label>
-        <div className="relative">
-          <select
-            value={model}
-            onChange={e => setModel(e.target.value)}
-            className="w-full px-3 py-2 rounded-md text-sm appearance-none cursor-pointer"
-            style={{ background: inputBg, color: textColor, border: `1px solid ${borderColor}` }}
-          >
-            {videoModels.length === 0 && (
-              <option value="">请在管理员后台添加视频模型</option>
-            )}
-            {videoModels.map(m => (
-              <option key={m.id} value={m.id}>
-                {m.name} {m.region === 'cn' ? '🇨🇳' : '🌍'} - {m.providerName || m.providerId}
-              </option>
-            ))}
-          </select>
-          <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
-        </div>
-      </div>
-
-      {/* === 视频描述 === */}
-      <div className="px-3 pt-3">
-        <div className="flex items-center justify-between mb-1">
-          <label className="text-xs text-gray-500">视频描述</label>
-          <div className="flex gap-1">
-            <button
-              onClick={handleEnhancePrompt}
-              disabled={!prompt.trim() || isEnhancing}
-              className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] transition-all disabled:opacity-30"
-              style={{
-                background: isGold ? 'rgba(212,175,55,0.1)' : 'rgba(59,130,246,0.1)',
-                color: accentColor,
-                border: `1px solid ${isGold ? 'rgba(212,175,55,0.2)' : 'rgba(59,130,246,0.2)'}`,
-              }}
-              title="AI增强提示词，添加细节描述"
-            >
-              {isEnhancing ? (
-                <span className="inline-block w-2.5 h-2.5 border-[1.5px] border-current border-t-transparent rounded-full animate-spin" />
-              ) : (
-                <Sparkles className="w-2.5 h-2.5" />
-              )}
-              增强
-            </button>
-            <button
-              onClick={handleTranslatePrompt}
-              disabled={!prompt.trim() || isTranslating}
-              className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] transition-all disabled:opacity-30"
-              style={{
-                background: isGold ? 'rgba(212,175,55,0.1)' : 'rgba(59,130,246,0.1)',
-                color: accentColor,
-                border: `1px solid ${isGold ? 'rgba(212,175,55,0.2)' : 'rgba(59,130,246,0.2)'}`,
-              }}
-              title="中英互译，视频模型对英文提示词效果更好"
-            >
-              {isTranslating ? (
-                <span className="inline-block w-2.5 h-2.5 border-[1.5px] border-current border-t-transparent rounded-full animate-spin" />
-              ) : (
-                <Languages className="w-2.5 h-2.5" />
-              )}
-              翻译
-            </button>
-          </div>
-        </div>
-        <textarea
-          value={prompt}
-          onChange={e => setPrompt(e.target.value)}
-          placeholder="描述你想生成的视频画面..."
-          rows={3}
-          className="w-full px-3 py-2 rounded-md text-sm resize-y min-h-[60px]"
-          style={{ background: inputBg, color: textColor, border: `1px solid ${borderColor}`, outline: 'none' }}
-          onFocus={e => e.target.style.borderColor = accentColor}
-          onBlur={e => e.target.style.borderColor = borderColor}
-        />
-        {/* 快捷场景预设 */}
-        <div className="flex flex-wrap gap-1.5 mt-2">
-          {[
-            { label: '产品展示', text: '产品360度旋转展示，柔和光影，商业广告质感' },
-            { label: '人物行走', text: '人物自然行走，镜头跟随，电影感运镜' },
-            { label: '风景推镜', text: '壮丽自然风光，镜头缓慢推进，云雾流动' },
-            { label: '慢动作', text: '水滴飞溅慢动作，极致细节，高速摄影质感' },
-            { label: '夜景霓虹', text: '赛博朋克城市夜景，霓虹灯光，雨后湿润路面反光' },
-          ].map(preset => (
-            <button
-              key={preset.label}
-              onClick={() => setPrompt(preset.text)}
-              className="px-2 py-0.5 rounded text-[10px] transition-colors hover:opacity-80"
-              style={{
-                background: isGold ? 'rgba(212,175,55,0.08)' : 'rgba(59,130,246,0.08)',
-                color: accentColor,
-                border: `1px solid ${isGold ? 'rgba(212,175,55,0.2)' : 'rgba(59,130,246,0.2)'}`,
-              }}
-            >
-              {preset.label}
-            </button>
-          ))}
-        </div>
-        <div className="text-[9px] mt-1" style={{ color: subTextColor }}>
-          提示：英文提示词通常效果更好，可点击"翻译"自动转换
-        </div>
-      </div>
-
-      {/* === 图生视频：首帧 + 尾帧 + 分类参考图 === */}
-      {mode !== 'text2video' && mode !== 'video-extend' && mode !== 'multi-shot' && (
-        <div className="px-3 pt-3 space-y-3">
-          {/* 首帧 - 大尺寸预览 */}
-          <div>
-            <label className="text-xs text-gray-500 mb-1.5 block flex items-center gap-1.5">
-              <ImagePlus className="w-3.5 h-3.5" style={{ color: accentColor }} />
-              首帧（起始画面）
-            </label>
-            {firstFrameUrl ? (
-              <div className="relative group aspect-video rounded-lg overflow-hidden" style={{ border: `2px solid ${accentColor}30` }}>
-                <img src={firstFrameUrl} alt="首帧" className="w-full h-full object-cover" />
-                <div className="absolute bottom-0 left-0 right-0 px-2 py-1 bg-gradient-to-t from-black/70 to-transparent">
-                  <span className="text-[10px] text-white/80">第 1 帧 · 起始</span>
-                </div>
-                <button
-                  onClick={() => setFirstFrame('')}
-                  className="absolute top-2 right-2 w-6 h-6 rounded-full bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                >
-                  <X className="w-3.5 h-3.5 text-white" />
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => handleImageUpload('first')}
-                className="w-full aspect-video rounded-lg flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors hover:opacity-80"
-                style={{ background: inputBg, border: `2px dashed ${borderColor}` }}
-              >
-                {selectedImageUrl ? (
-                  <div className="relative w-full h-full">
-                    <img src={selectedImageUrl} alt="画布图片" className="w-full h-full object-cover rounded-lg opacity-50" />
-                    <div className="absolute inset-0 flex flex-col items-center justify-center">
-                      <Upload className="w-7 h-7 text-white drop-shadow-lg" />
-                      <span className="text-sm text-white drop-shadow-lg mt-1">使用画布图片或上传新图</span>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <Upload className="w-8 h-8 text-gray-400" />
-                    <span className="text-sm text-gray-400">上传首帧图片</span>
-                    <span className="text-[10px] text-gray-500">AI 将从此画面开始生成视频</span>
-                  </>
-                )}
+      {panelMinimized ? null : (
+      <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+        {/* 非浮动模式简易头部 */}
+        {!floating && (
+          <div className="px-5 pt-4 pb-2 flex items-center justify-between flex-shrink-0">
+            <h2 className="text-lg font-bold" style={{ color: textColor }}>视频生成</h2>
+            {onClose && (
+              <button onClick={onClose} className="p-1.5 rounded-md hover:bg-black/5 transition-colors" style={{ color: subTextColor }}>
+                <X className="w-5 h-5" />
               </button>
             )}
           </div>
+        )}
 
-          {/* 尾帧开关 + 预览 */}
-          {currentFeatures?.firstLastFrame && (
-            <div>
+        {/* 模式切换 */}
+        <div className={`flex gap-1.5 px-5 py-1 flex-shrink-0 ${isMonochrome ? 'bg-gray-100 rounded-xl mx-5 mt-3 p-1.5' : 'mx-5 mt-3'}`}>
+          {modeOptions.map(opt => {
+            const active = mode === opt.value;
+            return (
               <button
-                onClick={() => {
-                  const next = !showLastFrame;
-                  setShowLastFrame(next);
-                  if (!next) setLastFrame('');
+                key={opt.value}
+                onClick={() => setMode(opt.value)}
+                className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap"
+                style={isMonochrome ? {
+                  background: active ? '#2563eb' : '#fff',
+                  color: active ? '#fff' : '#6b7280',
+                  boxShadow: active ? '0 2px 8px rgba(37,99,235,0.25)' : 'none',
+                } : {
+                  background: active ? accentColor : 'rgba(255,255,255,0.03)',
+                  color: active ? (isGold ? '#0a0a0a' : '#fff') : subTextColor,
+                  border: `1px solid ${active ? accentColor : 'rgba(255,255,255,0.08)'}`,
+                  boxShadow: active ? `0 2px 8px ${accentColor}40` : 'none',
                 }}
-                className="flex items-center gap-2 text-xs cursor-pointer group/switch"
-                style={{ color: showLastFrame ? accentColor : textColor }}
               >
-                <div className="w-8 h-4 rounded-full relative transition-colors" style={{ background: showLastFrame ? accentColor : 'rgba(255,255,255,0.15)' }}>
-                  <div className="absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all shadow-sm" style={{ left: showLastFrame ? '17px' : '2px' }} />
-                </div>
-                <span className="group-hover/switch:underline">添加尾帧（结束画面）</span>
+                {opt.icon}
+                {opt.label}
               </button>
+            );
+          })}
+        </div>
 
-              {showLastFrame && (
-                <div className="mt-2">
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <div className="flex-1 h-px" style={{ background: `${accentColor}30` }} />
-                    <div className="flex items-center gap-1 shrink-0" style={{ color: accentColor }}>
-                      <FastForward className="w-3.5 h-3.5" />
-                      <span className="text-[10px]">AI 生成过渡动画</span>
-                    </div>
-                    <div className="flex-1 h-px" style={{ background: `${accentColor}30` }} />
+        {/* 主体滚动区 - 两列布局 */}
+        <div className="flex-1 grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-x-5 gap-y-0 px-5 pt-4 overflow-y-auto min-h-0">
+          {/* ======== 左列：风格预设 + 模型 ======== */}
+          <div className="flex flex-col gap-4 pb-4">
+            {/* 风格预设 */}
+            <div>
+              <label className={labelClass}>视频风格模板</label>
+              <div className="flex gap-1 mb-2 overflow-x-auto pb-0.5">
+                {[
+                  { id: 'all', label: '全部' },
+                  { id: 'product', label: '产品' },
+                  { id: 'character', label: '人物' },
+                  { id: 'landscape', label: '风景' },
+                  { id: 'effect', label: '特效' },
+                  { id: 'story', label: '故事' },
+                ].map(cat => (
+                  <button
+                    key={cat.id}
+                    onClick={() => setTemplateFilter(cat.id as any)}
+                    className="px-2.5 py-1 rounded-md text-[11px] font-medium transition-all shrink-0 cursor-pointer"
+                    style={{
+                      background: templateFilter === cat.id ? (isGold ? `${accentColor}25` : `${accentColor}20`) : isMonochrome ? '#f3f4f6' : 'rgba(255,255,255,0.04)',
+                      color: templateFilter === cat.id ? accentColor : subTextColor,
+                      border: `1px solid ${templateFilter === cat.id ? accentColor : 'transparent'}`,
+                    }}
+                  >
+                    {cat.label}
+                  </button>
+                ))}
+              </div>
+              <div className="grid grid-cols-2 gap-2 max-h-[260px] overflow-y-auto pr-1">
+                {VIDEO_TEMPLATES.filter(t => templateFilter === 'all' || t.category === templateFilter).map(template => (
+                  <button
+                    key={template.id}
+                    onClick={() => {
+                      setPrompt(template.prompt);
+                      if (template.aspectRatio && availableRatios.includes(template.aspectRatio)) setAspectRatio(template.aspectRatio);
+                      if (template.duration && availableDurations.includes(template.duration)) setDuration(template.duration);
+                      if (template.cameraControl) setCameraControl(template.cameraControl);
+                    }}
+                    className="text-left p-2.5 rounded-lg transition-all cursor-pointer hover:-translate-y-0.5 hover:shadow-md"
+                    style={{
+                      background: inputBg,
+                      border: `1px solid ${borderColor}`,
+                    }}
+                    title={template.prompt}
+                  >
+                    <div className="font-semibold truncate text-[12px]" style={{ color: isMonochrome ? '#1f2937' : '#e5e7eb' }}>{template.name}</div>
+                    <div className="truncate opacity-70 mt-1 text-[10px]" style={{ color: subTextColor }}>{template.aspectRatio} · {template.duration}s</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 模型选择 */}
+            <div>
+              <label className="text-[11px] font-semibold mb-2 block" style={{ color: subTextColor }}>视频模型</label>
+              <div className="relative">
+                <select
+                  value={model}
+                  onChange={e => setModel(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-lg text-[13px] appearance-none cursor-pointer font-medium focus:outline-none transition-colors"
+                  style={{ background: inputBg, color: textColor, border: `1px solid ${borderColor}` }}
+                >
+                  {videoModels.length === 0 && <option value="">请在管理员后台添加视频模型</option>}
+                  {videoModels.map(m => (
+                    <option key={m.id} value={m.id}>{m.name} {m.region === 'cn' ? '🇨🇳' : '🌍'} - {m.providerName || m.providerId}</option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none" style={{ color: subTextColor }} />
+              </div>
+              {currentModel && (
+                <div className="mt-2 flex items-start gap-1.5 p-2 rounded-md text-[11px] leading-relaxed" style={{ background: isGold ? 'rgba(212,175,55,0.05)' : isMonochrome ? 'rgba(107,114,128,0.05)' : 'rgba(59,130,246,0.05)', border: `1px solid ${isGold ? 'rgba(212,175,55,0.1)' : isMonochrome ? 'rgba(107,114,128,0.15)' : 'rgba(59,130,246,0.1)'}` }}>
+                  <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: accentColor }} />
+                  <div style={{ color: subTextColor }}>
+                    <span style={{ color: accentColor, fontWeight: 600 }}>{currentModel.name}</span>
+                    {' · '}最长 {currentFeatures?.maxDuration || 10}秒 · 支持{currentFeatures?.audio ? '音效' : ''}{currentFeatures?.firstLastFrame ? ' · 首尾帧' : ''}
                   </div>
-                  {lastFrameUrl ? (
-                    <div className="relative group aspect-video rounded-lg overflow-hidden" style={{ border: `2px solid ${accentColor}30` }}>
-                      <img src={lastFrameUrl} alt="尾帧" className="w-full h-full object-cover" />
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ======== 右列：描述 + 参数 + 生成 ======== */}
+          <div className="flex flex-col gap-4 pb-4 min-w-0">
+            {/* 视频描述 */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-[11px] font-semibold" style={{ color: subTextColor }}>视频描述</label>
+                <div className="flex gap-1.5">
+                  <button
+                    onClick={handleEnhancePrompt}
+                    disabled={!prompt.trim() || isEnhancing}
+                    className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-all disabled:opacity-30 cursor-pointer"
+                    style={{ background: isGold ? 'rgba(212,175,55,0.12)' : 'rgba(59,130,246,0.12)', color: accentColor }}
+                  >
+                    {isEnhancing ? <span className="inline-block w-2.5 h-2.5 border-[1.5px] border-current border-t-transparent rounded-full animate-spin" /> : <Sparkles className="w-2.5 h-2.5" />}
+                    AI增强
+                  </button>
+                  <button
+                    onClick={handleTranslatePrompt}
+                    disabled={!prompt.trim() || isTranslating}
+                    className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-all disabled:opacity-30 cursor-pointer"
+                    style={{ background: isGold ? 'rgba(212,175,55,0.12)' : 'rgba(59,130,246,0.12)', color: accentColor }}
+                  >
+                    {isTranslating ? <span className="inline-block w-2.5 h-2.5 border-[1.5px] border-current border-t-transparent rounded-full animate-spin" /> : <Languages className="w-2.5 h-2.5" />}
+                    中英翻译
+                  </button>
+                </div>
+              </div>
+              <textarea
+                value={prompt}
+                onChange={e => setPrompt(e.target.value)}
+                placeholder={mode === 'video-extend' ? '描述希望延长的内容方向，如：继续向前推进、保持人物动作...' : '描述你想生成的视频画面，如：一位女性在海边漫步，夕阳西下，金色的阳光洒在海面上...'}
+                rows={4}
+                className="w-full px-3.5 py-2.5 rounded-lg text-[13px] resize-none focus:outline-none transition-colors leading-relaxed"
+                style={{
+                  background: inputBg,
+                  color: textColor,
+                  border: `1px solid ${borderColor}`,
+                }}
+                onFocus={e => { e.currentTarget.style.borderColor = accentColor; }}
+                onBlur={e => { e.currentTarget.style.borderColor = borderColor; }}
+              />
+              {/* 快捷标签 */}
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {['电影感', '慢动作', '微距特写', '航拍', ' cinematic lighting', '4K'].map(tag => (
+                  <button
+                    key={tag}
+                    onClick={() => setPrompt(prev => prev ? `${prev}, ${tag}` : tag)}
+                    className="px-2 py-0.5 rounded text-[10px] transition-all cursor-pointer"
+                    style={{ background: isMonochrome ? '#f3f4f6' : 'rgba(255,255,255,0.05)', color: subTextColor }}
+                  >
+                    + {tag}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 图生视频：首帧/尾帧上传 */}
+            {mode === 'image2video-first' && (
+              <div className="p-3 rounded-lg space-y-3" style={{ background: isMonochrome ? '#f9fafb' : 'rgba(255,255,255,0.02)', border: `1px solid ${borderColor}` }}>
+                <div>
+                  <label className="text-[11px] font-semibold mb-1.5 flex items-center gap-1" style={{ color: subTextColor }}>
+                    <ImagePlus className="w-3.5 h-3.5" style={{ color: accentColor }} />首帧图片（起始画面）
+                  </label>
+                  {firstFrameUrl ? (
+                    <div className="relative group aspect-video rounded-lg overflow-hidden" style={{ border: `2px solid ${accentColor}40` }}>
+                      <img src={firstFrameUrl} alt="首帧" className="w-full h-full object-cover" />
                       <div className="absolute bottom-0 left-0 right-0 px-2 py-1 bg-gradient-to-t from-black/70 to-transparent">
-                        <span className="text-[10px] text-white/80">最终帧 · 结束</span>
+                        <span className="text-white text-[10px]">首帧已设置</span>
                       </div>
-                      <button
-                        onClick={() => setLastFrame('')}
-                        className="absolute top-2 right-2 w-6 h-6 rounded-full bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                      >
-                        <X className="w-3.5 h-3.5 text-white" />
-                      </button>
+                      <button onClick={() => setFirstFrame('')} className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/60 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 cursor-pointer">×</button>
                     </div>
                   ) : (
                     <button
-                      onClick={() => handleImageUpload('last')}
-                      className="w-full aspect-video rounded-lg flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors hover:opacity-80"
-                      style={{ background: inputBg, border: `2px dashed ${borderColor}` }}
+                      onClick={() => handleImageUpload('first')}
+                      className="w-full aspect-video rounded-lg flex flex-col items-center justify-center gap-1 transition-all cursor-pointer border-2 border-dashed hover:scale-[1.01]"
+                      style={{ borderColor: borderColor, background: inputBg }}
                     >
-                      <Upload className="w-7 h-7 text-gray-400" />
-                      <span className="text-sm text-gray-400">上传尾帧图片</span>
-                      <span className="text-[10px] text-gray-500">视频将从首帧过渡到此画面</span>
+                      <Upload className="w-6 h-6" style={{ color: subTextColor }} />
+                      <span className="text-xs" style={{ color: subTextColor }}>上传首帧图片</span>
+                      {selectedImageUrl && <span className="text-[10px]" style={{ color: accentColor }}>已自动填充画布选中图片</span>}
                     </button>
                   )}
                 </div>
-              )}
-            </div>
-          )}
-
-          {/* === 分类参考图区域 === */}
-          <div style={{ borderTop: `1px solid ${borderColor}` }} className="pt-3">
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-xs text-gray-500 flex items-center gap-1.5">
-                <Palette className="w-3.5 h-3.5" style={{ color: accentColor }} />
-                参考图约束
-              </label>
-              {typedReferences.length > 0 && (
-                <span className="text-[10px] text-gray-500">{typedReferences.length}/7</span>
-              )}
-            </div>
-
-            {/* 已添加的参考图列表 */}
-            {typedReferences.length > 0 && (
-              <div className="space-y-2 mb-2">
-                {typedReferences.map((ref) => (
-                  <div key={ref.id} className="flex items-center gap-2 rounded-lg p-1.5 group" style={{ background: inputBg }}>
-                    <img src={ref.url} alt={ref.type} className="w-14 h-10 object-cover rounded shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      {/* 类型选择器 */}
-                      <div className="flex items-center gap-1 flex-wrap">
-                        {Object.entries(REFERENCE_TYPE_CONFIG)
-                          .filter(([key]) => key !== 'first-frame' && key !== 'last-frame')
-                          .map(([key, cfg]) => (
+                {currentFeatures?.firstLastFrame && (
+                  <div>
+                    <button
+                      onClick={() => setShowLastFrame(!showLastFrame)}
+                      className="flex items-center gap-2 text-xs cursor-pointer transition-colors"
+                      style={{ color: showLastFrame ? accentColor : subTextColor }}
+                    >
+                      <div className="w-8 h-4 rounded-full relative transition-colors" style={{ background: showLastFrame ? accentColor : 'rgba(255,255,255,0.15)' }}>
+                        <div className="absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all shadow-sm" style={{ left: showLastFrame ? '18px' : '2px' }} />
+                      </div>
+                      添加尾帧（视频结束画面）
+                    </button>
+                    {showLastFrame && (
+                      <div className="mt-2">
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <div className="flex-1 h-px" style={{ background: `${accentColor}30` }} />
+                          <span className="flex items-center gap-1 text-[10px] shrink-0" style={{ color: accentColor }}>
+                            <FastForward className="w-3 h-3" />尾帧
+                          </span>
+                          <div className="flex-1 h-px" style={{ background: `${accentColor}30` }} />
+                        </div>
+                        {lastFrameUrl ? (
+                          <div className="relative group aspect-video rounded-lg overflow-hidden" style={{ border: `2px solid ${accentColor}40` }}>
+                            <img src={lastFrameUrl} alt="尾帧" className="w-full h-full object-cover" />
+                            <div className="absolute bottom-0 left-0 right-0 px-2 py-1 bg-gradient-to-t from-black/70 to-transparent">
+                              <span className="text-white text-[10px]">尾帧已设置</span>
+                            </div>
+                            <button onClick={() => setLastFrame('')} className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/60 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 cursor-pointer">×</button>
+                          </div>
+                        ) : (
                           <button
-                            key={key}
-                            onClick={() => updateRefType(ref.id, key as ReferenceType)}
-                            className="text-[9px] px-1.5 py-0.5 rounded-full cursor-pointer transition-colors"
-                            style={{
-                              background: ref.type === key ? `${cfg.color}30` : 'transparent',
-                              color: ref.type === key ? cfg.color : textColor,
-                              border: `1px solid ${ref.type === key ? cfg.color : borderColor}`
-                            }}
+                            onClick={() => handleImageUpload('last')}
+                            className="w-full aspect-video rounded-lg flex flex-col items-center justify-center gap-1 transition-all cursor-pointer border-2 border-dashed hover:scale-[1.01]"
+                            style={{ borderColor: borderColor, background: inputBg }}
                           >
-                            {cfg.label}
+                            <Upload className="w-6 h-6" style={{ color: subTextColor }} />
+                            <span className="text-xs" style={{ color: subTextColor }}>上传尾帧图片</span>
                           </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {/* 多参考图 */}
+                {currentFeatures?.multiReference && (
+                  <div style={{ borderTop: `1px solid ${borderColor}` }} className="pt-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[11px] font-semibold flex items-center gap-1" style={{ color: subTextColor }}>
+                        <Images className="w-3.5 h-3.5" />风格/场景参考图
+                      </span>
+                      <button onClick={() => handleImageUpload('ref')} className="text-[10px] px-2 py-0.5 rounded transition-colors cursor-pointer" style={{ color: accentColor, background: isGold ? 'rgba(212,175,55,0.1)' : 'rgba(59,130,246,0.1)' }}>+ 添加</button>
+                    </div>
+                    {referenceImages.length > 0 ? (
+                      <div className="space-y-1.5 mb-2">
+                        {typedReferences.filter(r => r.type !== 'first-frame' && r.type !== 'last-frame' && r.type !== 'character-front' && r.type !== 'character-side').map(ref => (
+                          <div key={ref.id} className="flex items-center gap-2 rounded-lg p-1.5 group" style={{ background: inputBg }}>
+                            <img src={ref.url} alt="ref" className="w-10 h-10 rounded object-cover" />
+                            <select
+                              value={ref.type}
+                              onChange={e => updateRefType(ref.id, e.target.value as ReferenceType)}
+                              className="flex-1 text-[11px] px-2 py-1 rounded cursor-pointer"
+                              style={{ background: isMonochrome ? '#fff' : '#1a1a1a', color: textColor, border: `1px solid ${borderColor}` }}
+                            >
+                              <option value="style">风格参考</option>
+                              <option value="scene">场景参考</option>
+                            </select>
+                            <button onClick={() => removeTypedReference(ref.id)} className="opacity-0 group-hover:opacity-100 text-red-400 w-6 h-6 rounded flex items-center justify-center cursor-pointer">×</button>
+                          </div>
                         ))}
                       </div>
+                    ) : (
+                      <p className="text-[10px]" style={{ color: subTextColor }}>添加参考图可帮助AI更好理解画面风格和场景</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 视频延长模式：源视频 */}
+            {mode === 'video-extend' && (
+              <div className="p-3 rounded-lg space-y-3" style={{ background: isMonochrome ? '#f9fafb' : 'rgba(255,255,255,0.02)', border: `1px solid ${borderColor}` }}>
+                <div>
+                  <label className={labelClass}>源视频</label>
+                  {videoUrl ? (
+                    <div className="relative group flex items-center gap-2 p-2.5 rounded-md" style={{ background: inputBg, border: `1px solid ${borderColor}` }}>
+                      <Video className="w-5 h-5 shrink-0" style={{ color: accentColor }} />
+                      <span className="text-xs truncate flex-1" style={{ color: subTextColor }}>{videoUrl.length > 60 ? videoUrl.substring(0, 60) + '...' : videoUrl}</span>
+                      <button onClick={() => setVideoUrl('')} className="opacity-0 group-hover:opacity-100 w-6 h-6 rounded-full flex items-center justify-center text-red-400 cursor-pointer">×</button>
                     </div>
-                    <button
-                      onClick={() => removeTypedReference(ref.id)}
-                      className="w-5 h-5 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer shrink-0"
-                      style={{ background: 'rgba(255,255,255,0.1)' }}
-                    >
-                      <X className="w-3 h-3" style={{ color: textColor }} />
-                    </button>
+                  ) : (
+                    <>
+                      <input
+                        type="text"
+                        value={videoUrl}
+                        onChange={e => setVideoUrl(e.target.value)}
+                        placeholder="输入视频URL（画布选中视频会自动填充）"
+                        className="w-full px-3 py-2 rounded-md text-xs focus:outline-none"
+                        style={{ background: inputBg, color: textColor, border: `1px solid ${borderColor}` }}
+                      />
+                      <div className="flex gap-2 mt-2">
+                        <button onClick={() => handleImageUpload('first')} className="flex-1 py-2 rounded-md text-xs flex items-center justify-center gap-1 transition-colors cursor-pointer" style={{ background: inputBg, color: subTextColor, border: `1px dashed ${borderColor}` }}>
+                          <Upload className="w-3 h-3" />上传视频
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+                <div>
+                  <label className={labelClass}>延长时长</label>
+                  <div className="flex gap-1.5">
+                    {[3, 5, 8, 10].filter(d => availableDurations.includes(d as any)).map(d => (
+                      <button
+                        key={d}
+                        onClick={() => setExtendDuration(d)}
+                        className="flex-1 px-3 py-2 rounded-md text-xs font-medium transition-all cursor-pointer"
+                        style={{
+                          background: extendDuration === d ? accentColor : inputBg,
+                          color: extendDuration === d ? (isGold ? '#0a0a0a' : '#fff') : subTextColor,
+                          border: `1px solid ${extendDuration === d ? accentColor : borderColor}`,
+                          boxShadow: extendDuration === d ? `0 2px 8px ${accentColor}30` : 'none',
+                        }}
+                      >{d}秒</button>
+                    ))}
                   </div>
-                ))}
-              </div>
-            )}
-
-            {/* 添加参考图按钮 */}
-            {typedReferences.length < 7 && (
-              <div className="flex gap-2">
-                <button
-                  onClick={() => handleImageUpload('ref')}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg cursor-pointer transition-colors hover:opacity-80 text-xs"
-                  style={{ background: inputBg, border: `1px dashed ${borderColor}`, color: textColor }}
-                >
-                  <Upload className="w-3.5 h-3.5" />
-                  <span>上传参考图</span>
-                </button>
-                {selectedImageUrl && (
-                  <button
-                    onClick={() => {
-                      addTypedReference(selectedImageUrl, 'character-front');
-                    }}
-                    className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg cursor-pointer transition-colors hover:opacity-80 text-xs"
-                    style={{ background: `${accentColor}15`, border: `1px solid ${accentColor}30`, color: accentColor }}
-                  >
-                    <ImagePlus className="w-3.5 h-3.5" />
-                    <span>从画布选取</span>
-                  </button>
-                )}
-              </div>
-            )}
-
-            {/* 参考图类型说明 */}
-            {typedReferences.length === 0 && (
-              <p className="text-[10px] text-gray-500 mt-1.5 flex items-start gap-1">
-                <Info className="w-3 h-3 shrink-0 mt-0.5" />
-                添加角色/风格/场景参考图，帮助AI更好理解你的意图
-              </p>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* === 视频延长区（视频延长模式时显示） === */}
-      {mode === 'video-extend' && (
-        <div className="px-3 pt-3 space-y-3">
-          {/* 源视频 */}
-          <div>
-            <label className="text-xs text-gray-500 mb-1 block">源视频</label>
-            {videoUrl ? (
-              <div className="relative group flex items-center gap-2 p-2 rounded-md" style={{ background: inputBg, border: `1px solid ${borderColor}` }}>
-                <Video className="w-5 h-5 shrink-0" style={{ color: accentColor }} />
-                <span className="text-xs text-gray-400 truncate flex-1">{videoUrl.length > 60 ? videoUrl.substring(0, 60) + '...' : videoUrl}</span>
-                <button
-                  onClick={() => setVideoUrl('')}
-                  className="w-5 h-5 rounded-full bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer shrink-0"
-                >
-                  <X className="w-3 h-3 text-white" />
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {selectedVideoUrl && (
-                  <button
-                    onClick={() => setVideoUrl(selectedVideoUrl)}
-                    className="w-full py-2 rounded-md flex items-center justify-center gap-2 cursor-pointer transition-colors text-xs"
-                    style={{ background: isGold ? 'rgba(212,175,55,0.1)' : isMonochrome ? 'rgba(59,130,246,0.08)' : 'rgba(59,130,246,0.1)', border: `1px solid ${borderColor}`, color: accentColor }}
-                  >
-                    <FastForward className="w-3.5 h-3.5" />
-                    使用画布选中的视频
-                  </button>
-                )}
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    placeholder="输入视频URL..."
-                    value={videoUrl}
-                    onChange={(e) => setVideoUrl(e.target.value)}
-                    className="flex-1 px-3 py-2 rounded-md text-xs"
-                    style={{ background: inputBg, color: textColor, border: `1px solid ${borderColor}`, outline: 'none' }}
-                  />
                 </div>
               </div>
             )}
-          </div>
 
-          {/* 延长时长 */}
-          <div>
-            <label className="text-xs text-gray-500 mb-1 block">延长时长</label>
-            <div className="flex gap-1.5">
-              {[4, 5, 8, 10].filter(d => d <= (currentFeatures?.maxDuration || 10)).map(d => (
-                <button
-                  key={d}
-                  onClick={() => setExtendDuration(d)}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-md text-xs transition-all cursor-pointer"
-                  style={{
-                    background: extendDuration === d ? (isGold ? 'rgba(212,175,55,0.15)' : isMonochrome ? 'rgba(59,130,246,0.1)' : 'rgba(59,130,246,0.15)') : inputBg,
-                    color: extendDuration === d ? accentColor : subTextColor,
-                    border: `1px solid ${extendDuration === d ? borderColor : 'transparent'}`,
-                  }}
-                >
-                  <Clock className="w-3 h-3" />
-                  +{d}秒
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* 延长提示 */}
-          <div className="flex items-start gap-1.5 p-2 rounded-md" style={{ background: isGold ? 'rgba(212,175,55,0.05)' : 'rgba(59,130,246,0.05)', border: `1px solid ${isGold ? 'rgba(212,175,55,0.1)' : 'rgba(59,130,246,0.1)'}` }}>
-            <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: accentColor }} />
-            <span className="text-xs text-gray-500">视频延长将在源视频末尾追加新内容，保持画面连贯性。可在描述中指定延长内容的方向。</span>
-          </div>
-        </div>
-      )}
-
-      {/* === 画面比例 === */}
-      <div className="px-3 pt-3">
-        <label className={labelClass}>画面比例</label>
-        <div className="flex flex-wrap gap-1.5">
-          {availableRatios.map(r => (
-            <button
-              key={r}
-              onClick={() => setAspectRatio(r)}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs transition-all cursor-pointer border ${
-                isMonochrome
-                  ? aspectRatio === r
-                    ? 'bg-blue-500 text-white border-blue-500 shadow-sm shadow-blue-200'
-                    : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:text-blue-600'
-                  : ''
-              }`}
-              style={isMonochrome ? {} : {
-                background: aspectRatio === r ? (isGold ? 'rgba(212,175,55,0.15)' : 'rgba(59,130,246,0.15)') : inputBg,
-                color: aspectRatio === r ? accentColor : subTextColor,
-                border: `1px solid ${aspectRatio === r ? borderColor : 'transparent'}`,
-              }}
-            >
-              <RatioPreview ratio={r} />
-              {r}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* === 视频时长 === */}
-      <div className="px-3 pt-3">
-        <label className={labelClass}>视频时长</label>
-        <div className="flex gap-1.5">
-          {availableDurations.map(d => (
-            <button
-              key={d}
-              onClick={() => setDuration(d)}
-              className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-xs transition-all cursor-pointer border ${
-                isMonochrome
-                  ? duration === d
-                    ? 'bg-blue-500 text-white border-blue-500 shadow-sm shadow-blue-200'
-                    : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:text-blue-600'
-                  : ''
-              }`}
-              style={isMonochrome ? {} : {
-                background: duration === d ? (isGold ? 'rgba(212,175,55,0.15)' : 'rgba(59,130,246,0.15)') : inputBg,
-                color: duration === d ? accentColor : subTextColor,
-                border: `1px solid ${duration === d ? borderColor : 'transparent'}`,
-              }}
-            >
-              <Clock className="w-3 h-3" />
-              {d}秒
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* === 生成质量 === */}
-      <div className="px-3 pt-3">
-        <label className={labelClass}>生成质量</label>
-        <div className="flex gap-1.5">
-          {(['std', 'pro'] as const).map(q => (
-            <button
-              key={q}
-              onClick={() => setQuality(q)}
-              className={`px-3 py-1.5 rounded-md text-xs transition-all cursor-pointer border ${
-                isMonochrome
-                  ? quality === q
-                    ? 'bg-blue-500 text-white border-blue-500 shadow-sm shadow-blue-200'
-                    : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:text-blue-600'
-                  : ''
-              }`}
-              style={isMonochrome ? {} : {
-                background: quality === q ? (isGold ? 'rgba(212,175,55,0.15)' : 'rgba(59,130,246,0.15)') : inputBg,
-                color: quality === q ? accentColor : subTextColor,
-                border: `1px solid ${quality === q ? borderColor : 'transparent'}`,
-              }}
-            >
-              {q === 'std' ? '标准' : '高品质'}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* === 音效开关 === */}
-      {(
-        <div className="px-3 pt-3">
-          <button
-            onClick={() => setGenerateAudio(!generateAudio)}
-            className="flex items-center gap-2 text-xs cursor-pointer"
-            style={{ color: generateAudio ? accentColor : subTextColor }}
-          >
-            {generateAudio ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
-            {generateAudio ? '生成音效（已开启）' : '生成音效（已关闭）'}
-          </button>
-        </div>
-      )}
-
-      {/* === 摄像机控制 === */}
-      {mode !== 'video-extend' && (
-        <div className="px-3 pt-3 pb-2">
-          <button
-            onClick={() => setShowCameraPanel(!showCameraPanel)}
-            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-md border transition-colors ${
-              showCameraPanel ? borderActiveClass : `${borderInactiveClass} ${hoverBorderColorLight}`
-            }`}
-            style={{ background: inputBg }}
-          >
-            <span className="flex items-center gap-2 text-xs min-w-0 overflow-hidden shrink">
-              <Video className="w-4 h-4 shrink-0" style={{ color: cameraControl ? accentColor : subTextColor }} />
-              <span className={sectionTitleClass}>摄像机控制</span>
-              {cameraControl && <span className="text-[10px] opacity-60">({cameraControl.type.replace('_', ' ')})</span>}
-            </span>
-            <ChevronDown className={`w-3.5 h-3.5 text-gray-500 transition-transform ${showCameraPanel ? 'rotate-180' : ''}`} />
-          </button>
-          {showCameraPanel && (
-            <div className="mt-2 p-2 rounded-md space-y-2" style={{ background: inputBg }}>
-              <div className="grid grid-cols-4 gap-1.5">
-                {[
-                  { type: 'push_in', label: '推进', icon: '→' },
-                  { type: 'push_out', label: '拉出', icon: '←' },
-                  { type: 'pan_left', label: '左摇', icon: '◀' },
-                  { type: 'pan_right', label: '右摇', icon: '▶' },
-                  { type: 'tilt_up', label: '上仰', icon: '▲' },
-                  { type: 'tilt_down', label: '下俯', icon: '▼' },
-                  { type: 'orbit_left', label: '左环绕', icon: '↺' },
-                  { type: 'orbit_right', label: '右环绕', icon: '↻' },
-                  { type: 'zoom_in', label: '放大', icon: '⊕' },
-                  { type: 'zoom_out', label: '缩小', icon: '⊖' },
-                  { type: 'tracking', label: '跟踪', icon: '◎' },
-                  { type: 'static', label: '静止', icon: '□' },
-                ].map(cam => (
-                  <button
-                    key={cam.type}
-                    onClick={() => setCameraControl(cameraControl?.type === cam.type ? null : { type: cam.type as CameraControlParams['type'], intensity: 50 })}
-                    className={`flex flex-col items-center gap-0.5 px-1.5 py-1.5 rounded text-[10px] transition-all cursor-pointer border ${
-                      isMonochrome
-                        ? cameraControl?.type === cam.type
-                          ? 'bg-blue-500 text-white border-blue-500 shadow-sm shadow-blue-200'
-                          : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:text-blue-600'
-                        : ''
-                    }`}
-                    style={isMonochrome ? {} : {
-                      background: cameraControl?.type === cam.type ? (isGold ? 'rgba(212,175,55,0.2)' : 'rgba(59,130,246,0.2)') : '#2a2a2a',
-                      color: cameraControl?.type === cam.type ? accentColor : subTextColor,
-                      border: `1px solid ${cameraControl?.type === cam.type ? borderColor : 'transparent'}`,
-                    }}
-                  >
-                    <span className="text-sm">{cam.icon}</span>
-                    <span>{cam.label}</span>
-                  </button>
-                ))}
-              </div>
-              {cameraControl && cameraControl.type !== 'static' && (
-                <div className="space-y-1">
-                  <label className="text-[10px] text-gray-500">运动强度: {motionStrength}%</label>
-                  <input
-                    type="range"
-                    min="10"
-                    max="100"
-                    value={motionStrength}
-                    onChange={(e) => setMotionStrength(Number(e.target.value))}
-                    className="w-full h-1 rounded-lg appearance-none cursor-pointer"
-                    style={{ background: `linear-gradient(to right, ${accentColor} ${motionStrength}%, ${isMonochrome ? '#ddd' : '#333'} ${motionStrength}%)` }}
-                  />
-                </div>
-              )}
-              {cameraControl && (
-                <button
-                  onClick={() => { setCameraControl(null); setShowCameraPanel(false); }}
-                  className={`text-[10px] ${subtleTextClass} ${isMonochrome ? 'hover:text-gray-600' : 'hover:text-gray-300'} cursor-pointer`}
-                >
-                  清除摄像机控制
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* === 角色一致性 === */}
-      {mode !== 'video-extend' && (
-        <div className="px-3 pt-3 pb-2">
-          <button
-            onClick={() => setShowCharacterPanel(!showCharacterPanel)}
-            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-md border transition-colors ${
-              showCharacterPanel ? borderActiveClass : `${borderInactiveClass} ${hoverBorderColorLight}`
-            }`}
-            style={{ background: inputBg }}
-          >
-            <span className="flex items-center gap-2 text-xs min-w-0 overflow-hidden shrink">
-              <Users className="w-4 h-4 shrink-0" style={{ color: characterReferences.length > 0 ? accentColor : subTextColor }} />
-              <span className={sectionTitleClass}>角色一致性</span>
-              {characterReferences.length > 0 && <span className="text-[10px] opacity-60">({characterReferences.length}张)</span>}
-            </span>
-            <ChevronDown className={`w-3.5 h-3.5 text-gray-500 transition-transform ${showCharacterPanel ? 'rotate-180' : ''}`} />
-          </button>
-          {showCharacterPanel && (
-            <div className="mt-2 p-2 rounded-md space-y-2" style={{ background: inputBg }}>
-              <p className="text-[10px] text-gray-500">上传角色参考图，AI将保持角色外观一致性（也可在上方参考图区域添加）</p>
-              <div className="flex flex-wrap gap-2">
-                {typedReferences.filter(r => r.type === 'character-front' || r.type === 'character-side').map((ref) => (
-                  <div key={ref.id} className="relative w-16 h-16 rounded overflow-hidden group">
-                    <img src={ref.url} alt={ref.type} className="w-full h-full object-cover" />
-                    <span className="absolute bottom-0 left-0 right-0 text-[8px] text-center py-0.5 bg-black/60 text-white truncate">
-                      {REFERENCE_TYPE_CONFIG[ref.type]?.label || ref.type}
-                    </span>
+            {/* 参数三行网格：比例 / 时长 / 质量 */}
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className={labelClass}>画面比例</label>
+                <div className="flex flex-wrap gap-1">
+                  {availableRatios.map(r => (
                     <button
-                      onClick={() => removeTypedReference(ref.id)}
-                      className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/60 text-white text-[10px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                      key={r}
+                      onClick={() => setAspectRatio(r)}
+                      className="flex items-center gap-1 px-2 py-1.5 rounded-md text-[11px] font-medium transition-all cursor-pointer"
+                      style={{
+                        background: aspectRatio === r ? (isGold ? 'rgba(212,175,55,0.18)' : 'rgba(59,130,246,0.18)') : inputBg,
+                        color: aspectRatio === r ? accentColor : subTextColor,
+                        border: `1px solid ${aspectRatio === r ? accentColor : borderColor}`,
+                      }}
                     >
-                      ×
+                      <RatioPreview ratio={r} />
+                      {r}
                     </button>
-                  </div>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className={labelClass}>视频时长</label>
+                <div className="flex gap-1">
+                  {availableDurations.map(d => (
+                    <button
+                      key={d}
+                      onClick={() => setDuration(d)}
+                      className="flex-1 px-2 py-1.5 rounded-md text-[11px] font-medium transition-all cursor-pointer"
+                      style={{
+                        background: duration === d ? (isGold ? 'rgba(212,175,55,0.18)' : 'rgba(59,130,246,0.18)') : inputBg,
+                        color: duration === d ? accentColor : subTextColor,
+                        border: `1px solid ${duration === d ? accentColor : borderColor}`,
+                      }}
+                    >
+                      <Clock className="w-3 h-3 inline mr-0.5" />{d}s
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className={labelClass}>生成质量</label>
+                <div className="flex gap-1">
+                  {(['std', 'pro'] as const).map(q => (
+                    <button
+                      key={q}
+                      onClick={() => setQuality(q)}
+                      className="flex-1 px-2 py-1.5 rounded-md text-[11px] font-medium transition-all cursor-pointer"
+                      style={{
+                        background: quality === q ? (isGold ? 'rgba(212,175,55,0.18)' : 'rgba(59,130,246,0.18)') : inputBg,
+                        color: quality === q ? accentColor : subTextColor,
+                        border: `1px solid ${quality === q ? accentColor : borderColor}`,
+                      }}
+                    >{q === 'std' ? '标准' : '高清'}</button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* 生成数量 */}
+            <div>
+              <label className={labelClass}>生成数量</label>
+              <div className="flex items-center gap-2">
+                {([1, 2, 4] as const).map(n => (
+                  <button
+                    key={n}
+                    onClick={() => setBatchCount(n)}
+                    className="w-12 h-9 rounded-md text-xs font-semibold transition-all cursor-pointer"
+                    style={{
+                      background: batchCount === n ? accentColor : inputBg,
+                      color: batchCount === n ? (isGold ? '#0a0a0a' : '#fff') : subTextColor,
+                      border: `1px solid ${batchCount === n ? accentColor : borderColor}`,
+                      boxShadow: batchCount === n ? `0 2px 8px ${accentColor}30` : 'none',
+                    }}
+                  >{n}x</button>
                 ))}
-                {characterReferences.length < 5 && (
+                {batchCount > 1 && <span className="text-[10px] ml-auto" style={{ color: subTextColor }}>生成 {batchCount} 个视频（不同种子）</span>}
+              </div>
+            </div>
+
+            {/* 音效开关 */}
+            {currentFeatures?.audio && (
+              <button
+                onClick={() => setGenerateAudio(!generateAudio)}
+                className="flex items-center gap-2 text-xs cursor-pointer py-1 transition-colors"
+                style={{ color: generateAudio ? accentColor : subTextColor }}
+              >
+                {generateAudio ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+                {generateAudio ? '音效已开启（视频自带声音）' : '开启音效'}
+              </button>
+            )}
+
+            {/* 高级折叠区：摄像机/角色/运动笔刷/多镜头/高级设置 */}
+            {mode !== 'video-extend' && (
+              <CollapsibleSection
+                title="摄像机控制"
+                icon={<Video className="w-4 h-4" />}
+                iconColor={cameraControl ? accentColor : subTextColor}
+                badge={cameraControl ? cameraControl.type.replace('_', ' ') : undefined}
+                defaultOpen={false}
+                isMonochrome={isMonochrome}
+                accentColor={accentColor}
+                inputBg={inputBg}
+                borderColor={borderColor}
+                subTextColor={subTextColor}
+                textColor={textColor}
+              >
+                <div className="grid grid-cols-4 gap-1.5">
+                  {[
+                    { type: 'push_in', label: '推进', icon: '→' },
+                    { type: 'push_out', label: '拉出', icon: '←' },
+                    { type: 'pan_left', label: '左摇', icon: '◀' },
+                    { type: 'pan_right', label: '右摇', icon: '▶' },
+                    { type: 'tilt_up', label: '上仰', icon: '▲' },
+                    { type: 'tilt_down', label: '下俯', icon: '▼' },
+                    { type: 'orbit_left', label: '左环绕', icon: '↺' },
+                    { type: 'orbit_right', label: '右环绕', icon: '↻' },
+                    { type: 'zoom_in', label: '放大', icon: '⊕' },
+                    { type: 'zoom_out', label: '缩小', icon: '⊖' },
+                    { type: 'tracking', label: '跟踪', icon: '◎' },
+                    { type: 'static', label: '静止', icon: '□' },
+                  ].map(cam => {
+                    const active = cameraControl?.type === cam.type;
+                    return (
+                      <button
+                        key={cam.type}
+                        onClick={() => setCameraControl(active ? null : { type: cam.type as CameraControlParams['type'], intensity: 50 })}
+                        className="flex flex-col items-center gap-0.5 px-1 py-1.5 rounded-md text-[10px] font-medium transition-all cursor-pointer"
+                        style={{
+                          background: active ? accentColor : inputBg,
+                          color: active ? (isGold ? '#0a0a0a' : '#fff') : subTextColor,
+                          border: `1px solid ${active ? accentColor : borderColor}`,
+                        }}
+                      >
+                        <span className="text-sm">{cam.icon}</span>
+                        <span>{cam.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {cameraControl && cameraControl.type !== 'static' && (
+                  <div className="mt-3 space-y-1">
+                    <label className="text-[10px] flex justify-between" style={{ color: subTextColor }}>
+                      <span>运动强度</span><span>{motionStrength}%</span>
+                    </label>
+                    <input
+                      type="range" min={10} max={100} value={motionStrength}
+                      onChange={e => setMotionStrength(Number(e.target.value))}
+                      className="w-full h-1 rounded-lg appearance-none cursor-pointer"
+                      style={{ background: `linear-gradient(to right, ${accentColor} ${motionStrength}%, ${isMonochrome ? '#ddd' : '#333'} ${motionStrength}%)` }}
+                    />
+                  </div>
+                )}
+                {cameraControl && (
+                  <button onClick={() => { setCameraControl(null); }} className="text-[10px] mt-2 cursor-pointer" style={{ color: subTextColor }}>清除摄像机控制</button>
+                )}
+              </CollapsibleSection>
+            )}
+
+            {mode !== 'video-extend' && (
+              <CollapsibleSection
+                title="角色一致性"
+                icon={<Users className="w-4 h-4" />}
+                iconColor={characterReferences.length > 0 ? accentColor : subTextColor}
+                badge={characterReferences.length > 0 ? `${characterReferences.length}张` : undefined}
+                defaultOpen={false}
+                isMonochrome={isMonochrome}
+                accentColor={accentColor}
+                inputBg={inputBg}
+                borderColor={borderColor}
+                subTextColor={subTextColor}
+                textColor={textColor}
+              >
+                <p className="text-[10px] mb-2" style={{ color: subTextColor }}>上传角色正面/侧面照，AI将保持角色外观一致</p>
+                <div className="flex flex-wrap gap-2">
+                  {typedReferences.filter(r => r.type === 'character-front' || r.type === 'character-side').map(ref => (
+                    <div key={ref.id} className="relative w-16 h-16 rounded-md overflow-hidden group">
+                      <img src={ref.url} alt={ref.type} className="w-full h-full object-cover" />
+                      <span className="absolute bottom-0 left-0 right-0 text-[8px] text-center py-0.5 bg-black/60 text-white truncate">{REFERENCE_TYPE_CONFIG[ref.type]?.label}</span>
+                      <button onClick={() => removeTypedReference(ref.id)} className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/60 text-white text-[10px] flex items-center justify-center opacity-0 group-hover:opacity-100 cursor-pointer">×</button>
+                    </div>
+                  ))}
                   <button
                     onClick={() => {
-                      const input = document.createElement('input');
-                      input.type = 'file';
-                      input.accept = 'image/*';
+                      const input = document.createElement('input'); input.type = 'file'; input.accept = 'image/*';
                       input.onchange = async (e) => {
-                        const file = (e.target as HTMLInputElement).files?.[0];
-                        if (!file) return;
-                        try {
-                          const formData = new FormData();
-                          formData.append('file', file);
-                          const res = await fetch('/api/save-image', { method: 'POST', body: formData });
-                          const data = await res.json();
-                          if (data.url) addTypedReference(data.url, 'character-front');
-                        } catch {}
+                        const file = (e.target as HTMLInputElement).files?.[0]; if (!file) return;
+                        const fd = new FormData(); fd.append('file', file);
+                        const res = await fetch('/api/save-image', { method: 'POST', body: fd });
+                        const data = await res.json(); if (data.url) addTypedReference(data.url, 'character-front');
                       };
                       input.click();
                     }}
-                    className="w-16 h-16 rounded border border-dashed flex flex-col items-center justify-center gap-0.5 cursor-pointer hover:border-gray-500 transition-colors"
+                    className="w-16 h-16 rounded-md border-2 border-dashed flex flex-col items-center justify-center gap-0.5 cursor-pointer transition-colors hover:scale-105"
                     style={{ borderColor: borderColor }}
                   >
                     <Plus className="w-4 h-4" style={{ color: accentColor }} />
-                    <span className="text-[9px] text-gray-500">添加</span>
-                  </button>
-                )}
-              </div>
-              {characterReferences.length > 0 && (
-                <button
-                  onClick={() => {
-                    // 移除所有角色类型参考图
-                    setTypedReferences(prev => prev.filter(r => r.type !== 'character-front' && r.type !== 'character-side'));
-                    setShowCharacterPanel(false);
-                  }}
-                  className={`text-[10px] ${subtleTextClass} ${isMonochrome ? 'hover:text-gray-600' : 'hover:text-gray-300'} cursor-pointer`}
-                >
-                  清除角色参考
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* === 运动笔刷 === */}
-      {mode === 'image2video-first' && firstFrameUrl && (
-        <div className="px-3 pt-3 pb-2">
-          <button
-            onClick={() => setShowMotionBrush(!showMotionBrush)}
-            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-md border transition-colors ${
-              showMotionBrush ? borderActiveClass : `${borderInactiveClass} ${hoverBorderColorLight}`
-            }`}
-            style={{ background: inputBg }}
-          >
-            <span className="flex items-center gap-2 text-xs min-w-0 overflow-hidden shrink">
-              <Paintbrush className="w-4 h-4 shrink-0" style={{ color: motionBrush ? accentColor : subTextColor }} />
-              <span className={sectionTitleClass}>运动笔刷</span>
-              {motionBrush && (
-                <span className="text-[10px] opacity-60">
-                  ({motionBrush.trajectories.length} 轨迹)
-                </span>
-              )}
-            </span>
-            <ChevronDown className={`w-3.5 h-3.5 text-gray-500 transition-transform ${showMotionBrush ? 'rotate-180' : ''}`} />
-          </button>
-          
-          {showMotionBrush && (
-            <div className="mt-2 p-3 rounded-md border" style={{ background: inputBg, borderColor }}>
-              <div className="flex items-center gap-2 mb-2">
-                <Paintbrush className={`w-4 h-4 ${accentTextClass}`} />
-                <span className={`text-xs ${sectionTitleClass}`}>在图片上涂抹区域并绘制运动轨迹</span>
-              </div>
-              
-              <MotionBrushCanvas
-                ref={motionBrushRef}
-                imageUrl={firstFrameUrl}
-                onExport={handleMotionBrushExport}
-                onClose={() => setShowMotionBrush(false)}
-              />
-              
-              {motionBrush && motionBrush.trajectories.length > 0 && (
-                <div className="mt-2 space-y-2">
-                  <div className="text-[10px] text-gray-500">
-                    已绘制 {motionBrush.trajectories.length} 条运动轨迹
-                  </div>
-                  <button
-                    onClick={() => {
-                      setMotionBrush(null);
-                      setShowMotionBrush(false);
-                    }}
-                    className={`w-full py-1.5 rounded-md border ${subtleBorderClass} text-[11px] text-gray-400 hover:border-red-500/50 hover:text-red-400 transition-colors`}
-                  >
-                    清除运动笔刷
+                    <span className="text-[9px]" style={{ color: subTextColor }}>添加</span>
                   </button>
                 </div>
-              )}
-              
-              <div className="mt-2 text-[10px] text-gray-500 space-y-0.5">
-                <div>• 左键涂抹：标记运动区域</div>
-                <div>• 右键绘制：定义运动方向</div>
-                <div>• 滚轮调整：画笔大小</div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* === 多镜头叙事 === */}
-      {mode === 'multi-shot' && (
-        <div className="px-3 pt-2">
-          <div className={`p-3 rounded-md border ${deepBorderClass}`} style={{ background: inputBg }}>
-            <div className="flex items-center gap-2 mb-2">
-              <Film className="w-4 h-4 text-purple-400" />
-              <span className={`text-xs ${sectionTitleClass}`}>多镜头叙事</span>
-              <span className="text-[10px] text-gray-500">({multiShotScenes.length} 个镜头)</span>
-            </div>
-
-            {/* 连贯性控制 */}
-            <div className="flex items-center gap-3 mb-3 pb-2" style={{ borderBottom: `1px solid ${borderColor}` }}>
-              <button
-                onClick={() => setChainContinuity(!chainContinuity)}
-                className="flex items-center gap-1.5 text-[10px] cursor-pointer"
-                style={{ color: chainContinuity ? accentColor : textColor }}
-              >
-                <div className="w-6 h-3 rounded-full relative transition-colors" style={{ background: chainContinuity ? accentColor : 'rgba(255,255,255,0.15)' }}>
-                  <div className="absolute top-0.5 w-2 h-2 rounded-full bg-white transition-all shadow-sm" style={{ left: chainContinuity ? '13px' : '2px' }} />
-                </div>
-                <span>链式连贯</span>
-              </button>
-              <button
-                onClick={() => setUseGlobalReferences(!useGlobalReferences)}
-                className="flex items-center gap-1.5 text-[10px] cursor-pointer"
-                style={{ color: useGlobalReferences ? accentColor : textColor }}
-              >
-                <div className="w-6 h-3 rounded-full relative transition-colors" style={{ background: useGlobalReferences ? accentColor : 'rgba(255,255,255,0.15)' }}>
-                  <div className="absolute top-0.5 w-2 h-2 rounded-full bg-white transition-all shadow-sm" style={{ left: useGlobalReferences ? '13px' : '2px' }} />
-                </div>
-                <span>全局参考图</span>
-              </button>
-              {chainContinuity && (
-                <span className="text-[9px] text-gray-500 flex items-center gap-0.5">
-                  <Info className="w-2.5 h-2.5" />
-                  前段尾帧自动作为后段首帧
-                </span>
-              )}
-            </div>
-
-            {/* 全局参考图提示 */}
-            {useGlobalReferences && typedReferences.length > 0 && (
-              <div className="mb-2 px-2 py-1 rounded text-[9px] flex items-center gap-1" style={{ background: `${accentColor}10`, color: accentColor }}>
-                <ImagePlus className="w-3 h-3" />
-                {typedReferences.length} 张参考图将应用到所有镜头
-              </div>
+              </CollapsibleSection>
             )}
-            
-            <div className="space-y-1 max-h-60 overflow-y-auto">
-              {multiShotScenes.map((scene, index) => (
-                <div key={scene.id}>
-                  <div className={`p-2 rounded-md border ${subtleBorderClass}`} style={{ background: panelBg }}>
-                    <div className="flex items-center justify-between mb-1">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[10px] text-purple-400 font-medium">镜头 {index + 1}</span>
-                        {chainContinuity && index > 0 && (
-                          <span className="text-[8px] px-1 py-0.5 rounded" style={{ background: `${accentColor}15`, color: accentColor }}>
-                            接续前段
-                          </span>
-                        )}
+
+            {mode === 'image2video-first' && firstFrameUrl && currentFeatures?.motionBrush && (
+              <CollapsibleSection
+                title="运动笔刷"
+                icon={<Paintbrush className="w-4 h-4" />}
+                iconColor={motionBrush ? accentColor : subTextColor}
+                badge={motionBrush ? `${motionBrush.trajectories.length}轨迹` : undefined}
+                defaultOpen={false}
+                isMonochrome={isMonochrome}
+                accentColor={accentColor}
+                inputBg={inputBg}
+                borderColor={borderColor}
+                subTextColor={subTextColor}
+                textColor={textColor}
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <Paintbrush className="w-4 h-4" style={{ color: accentColor }} />
+                  <span className="text-xs" style={{ color: textColor }}>在图片上涂抹区域并绘制运动方向</span>
+                </div>
+                <MotionBrushCanvas
+                  ref={motionBrushRef}
+                  imageUrl={firstFrameUrl}
+                  onExport={handleMotionBrushExport}
+                  onClose={() => setShowMotionBrush(false)}
+                />
+                <div className="mt-2 text-[10px] space-y-0.5" style={{ color: subTextColor }}>
+                  <div>• 左键涂抹：标记运动区域</div>
+                  <div>• 右键绘制：定义运动方向箭头</div>
+                  <div>• 滚轮：调整画笔大小</div>
+                </div>
+              </CollapsibleSection>
+            )}
+
+            {mode === 'multi-shot' && (
+              <CollapsibleSection
+                title="多镜头叙事"
+                icon={<Film className="w-4 h-4" />}
+                iconColor="#a855f7"
+                badge={`${multiShotScenes.length}镜头`}
+                defaultOpen={true}
+                isMonochrome={isMonochrome}
+                accentColor={accentColor}
+                inputBg={inputBg}
+                borderColor={borderColor}
+                subTextColor={subTextColor}
+                textColor={textColor}
+              >
+                <div className="flex items-center gap-3 mb-3 pb-2" style={{ borderBottom: `1px solid ${borderColor}` }}>
+                  <ToggleBtn active={chainContinuity} onClick={() => setChainContinuity(!chainContinuity)} accent={accentColor} sub={subTextColor} mono={isMonochrome}>链式连贯</ToggleBtn>
+                  <ToggleBtn active={useGlobalReferences} onClick={() => setUseGlobalReferences(!useGlobalReferences)} accent={accentColor} sub={subTextColor} mono={isMonochrome}>全局参考图</ToggleBtn>
+                </div>
+                <div className="space-y-1.5 max-h-52 overflow-y-auto">
+                  {multiShotScenes.map((scene, idx) => (
+                    <div key={scene.id}>
+                      <div className="p-2 rounded-md" style={{ background: panelBg, border: `1px solid ${borderColor}` }}>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-[10px] font-semibold" style={{ color: '#a855f7' }}>镜头 {idx + 1}</span>
+                          {multiShotScenes.length > 1 && (
+                            <button onClick={() => setMultiShotScenes(multiShotScenes.filter(s => s.id !== scene.id))} className="cursor-pointer" style={{ color: subTextColor }}>
+                              <X className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                        <textarea
+                          value={scene.prompt}
+                          onChange={e => {
+                            const copy = [...multiShotScenes]; const i = copy.findIndex(s => s.id === scene.id);
+                            if (i >= 0) copy[i] = { ...copy[i], prompt: e.target.value };
+                            setMultiShotScenes(copy);
+                          }}
+                          placeholder={idx === 0 ? '描述开场画面...' : '描述下一镜头...'}
+                          rows={2}
+                          className="w-full px-2 py-1.5 rounded text-[11px] resize-none focus:outline-none"
+                          style={{ background: inputBg, color: textColor, border: `1px solid ${borderColor}` }}
+                        />
                       </div>
-                      {multiShotScenes.length > 1 && (
-                        <button
-                          onClick={() => setMultiShotScenes(multiShotScenes.filter(s => s.id !== scene.id))}
-                          className="text-gray-500 hover:text-red-400 transition-colors"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
+                      {chainContinuity && idx < multiShotScenes.length - 1 && (
+                        <div className="flex justify-center py-0.5"><FastForward className="w-3 h-3" style={{ color: accentColor }} /></div>
                       )}
                     </div>
-                    <textarea
-                      value={scene.prompt}
-                      onChange={(e) => {
-                        const newScenes = [...multiShotScenes];
-                        const idx = newScenes.findIndex(s => s.id === scene.id);
-                        if (idx >= 0) newScenes[idx] = { ...newScenes[idx], prompt: e.target.value };
-                        setMultiShotScenes(newScenes);
-                      }}
-                      placeholder={index === 0 
-                        ? '描述开场画面...' 
-                        : chainContinuity 
-                          ? '描述与上一镜头衔接的画面...' 
-                          : `描述镜头 ${index + 1} 的画面内容...`}
-                      className={`w-full px-2 py-1.5 rounded text-xs border resize-none h-14 ${
-                        isMonochrome
-                          ? 'bg-white border-gray-200 text-gray-900 placeholder-gray-400'
-                          : ''
-                      }`}
-                      style={isMonochrome ? {} : {
-                        background: panelBg,
-                        borderColor: '#374151',
-                        color: '#e5e7eb',
-                      }}
-                    />
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className="text-[10px] text-gray-500">时长:</span>
-                      <select
-                        value={scene.duration}
-                        onChange={(e) => {
-                          const newScenes = [...multiShotScenes];
-                          const idx = newScenes.findIndex(s => s.id === scene.id);
-                          if (idx >= 0) newScenes[idx] = { ...newScenes[idx], duration: Number(e.target.value) };
-                          setMultiShotScenes(newScenes);
-                        }}
-                        className={`px-1.5 py-0.5 rounded text-[10px] border ${
-                          isMonochrome
-                            ? 'bg-white border-gray-200 text-gray-700'
-                            : ''
-                        }`}
-                        style={isMonochrome ? {} : { background: panelBg, borderColor: '#374151', color: '#e5e7eb' }}
-                      >
-                        <option value={3}>3s</option>
-                        <option value={5}>5s</option>
-                        <option value={8}>8s</option>
-                        <option value={10}>10s</option>
-                      </select>
-                    </div>
-                  </div>
-                  {/* 链式连接指示箭头 */}
-                  {chainContinuity && index < multiShotScenes.length - 1 && (
-                    <div className="flex justify-center py-0.5">
-                      <div className="flex flex-col items-center" style={{ color: accentColor }}>
-                        <div className="w-px h-2" style={{ background: `${accentColor}40` }} />
-                        <FastForward className="w-3 h-3" />
-                        <div className="w-px h-2" style={{ background: `${accentColor}40` }} />
-                      </div>
-                    </div>
-                  )}
+                  ))}
                 </div>
-              ))}
-            </div>
-            
-            <button
-              onClick={() => {
-                setMultiShotScenes([
-                  ...multiShotScenes,
-                  { id: Date.now().toString(), prompt: '', duration: 5 },
-                ]);
-              }}
-              className={`w-full mt-2 py-1.5 rounded-md border border-dashed ${subtleBorderClass} text-[11px] text-gray-400 hover:border-purple-500/50 hover:text-purple-400 transition-colors flex items-center justify-center gap-1`}
-            >
-              <Plus className="w-3 h-3" />
-              添加镜头
-            </button>
-            
-            <div className="mt-2 flex items-center justify-between text-[10px] text-gray-500">
-              <span>总时长: {multiShotScenes.reduce((sum, s) => sum + s.duration, 0)}s</span>
-              {chainContinuity && multiShotScenes.length > 1 && (
-                <span className="flex items-center gap-0.5" style={{ color: accentColor }}>
-                  <FastForward className="w-2.5 h-2.5" />
-                  链式生成
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* === 高级设置 === */}
-      <div className="px-3 pt-3">
-        <button
-          onClick={() => setShowAdvanced(!showAdvanced)}
-          className={`flex items-center gap-1.5 text-xs ${subtleTextClass} ${isMonochrome ? 'hover:text-gray-600' : 'hover:text-gray-300'} transition-colors cursor-pointer`}
-        >
-          <Settings2 className="w-3.5 h-3.5" />
-          高级设置
-          <ChevronDown className={`w-3 h-3 transition-transform ${showAdvanced ? 'rotate-180' : ''}`} />
-        </button>
-        {showAdvanced && (
-          <div className="mt-2 space-y-2 p-2 rounded-md" style={{ background: inputBg }}>
-            {/* 分辨率选择 */}
-            <div>
-              <label className="text-xs text-gray-500 mb-1 block">分辨率</label>
-              <div className="flex gap-1.5">
-                {availableResolutions.map(r => (
-                  <button
-                    key={r}
-                    onClick={() => setResolution(r)}
-                    className={`px-2.5 py-1 rounded-md text-xs transition-all cursor-pointer border ${
-                      isMonochrome
-                        ? resolution === r
-                          ? 'bg-blue-500 text-white border-blue-500 shadow-sm shadow-blue-200'
-                          : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:text-blue-600'
-                        : ''
-                    }`}
-                    style={isMonochrome ? {} : {
-                      background: resolution === r ? (isGold ? 'rgba(212,175,55,0.15)' : 'rgba(59,130,246,0.15)') : '#2a2a2a',
-                      color: resolution === r ? accentColor : subTextColor,
-                      border: `1px solid ${resolution === r ? borderColor : 'transparent'}`,
-                    }}
-                  >
-                    {r}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {/* 反向提示词 */}
-            <div>
-              <label className="text-xs text-gray-500 mb-1 block">反向提示词（可选）</label>
-              <textarea
-                value={negativePrompt}
-                onChange={e => setNegativePrompt(e.target.value)}
-                placeholder="描述你不想出现的内容，如：模糊、变形、低质量..."
-                rows={2}
-                className={`w-full rounded-md px-2.5 py-1.5 text-xs resize-none focus:outline-none focus:ring-1 ${
-                  isMonochrome
-                    ? 'bg-gray-50 border border-gray-200 text-gray-800 placeholder:text-gray-400 focus:ring-blue-300'
-                    : ''
-                }`}
-                style={isMonochrome ? {} : {
-                  background: '#1e1e1e',
-                  color: '#e5e5e5',
-                  border: '1px solid #333',
-                }}
-              />
-            </div>
-            {/* 随机种子 */}
-            <div className="flex items-center gap-2">
-              <label className="text-xs text-gray-500 shrink-0">随机种子</label>
-              <input
-                type="number"
-                value={seed ?? ''}
-                onChange={e => {
-                  const v = e.target.value;
-                  setSeed(v ? parseInt(v, 10) : undefined);
-                }}
-                placeholder="随机"
-                className={`flex-1 rounded-md px-2.5 py-1 text-xs focus:outline-none focus:ring-1 ${
-                  isMonochrome
-                    ? 'bg-gray-50 border border-gray-200 text-gray-800 placeholder:text-gray-400 focus:ring-blue-300'
-                    : ''
-                }`}
-                style={isMonochrome ? {} : {
-                  background: '#1e1e1e',
-                  color: '#e5e5e5',
-                  border: '1px solid #333',
-                }}
-              />
-              <button
-                onClick={() => setSeed(Math.floor(Math.random() * 2147483647))}
-                className={`text-xs px-2 py-1 rounded-md transition-colors cursor-pointer ${
-                  isMonochrome
-                    ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                    : ''
-                }`}
-                style={isMonochrome ? {} : { background: '#2a2a2a', color: subTextColor }}
-                title="随机生成种子"
-              >
-                🎲
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* === 模型能力提示 === */}
-      {currentModel && (
-        <div className="px-3 pt-3">
-          <div className="flex items-start gap-1.5 p-2 rounded-md" style={{ background: isGold ? 'rgba(212,175,55,0.05)' : isMonochrome ? 'rgba(107,114,128,0.05)' : 'rgba(59,130,246,0.05)', border: `1px solid ${isGold ? 'rgba(212,175,55,0.1)' : isMonochrome ? 'rgba(107,114,128,0.15)' : 'rgba(59,130,246,0.1)'}` }}>
-            <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: accentColor }} />
-            <div className="text-xs text-gray-500 leading-relaxed">
-              <span style={{ color: accentColor }}>{currentModel.name}</span>
-              {' · '}支持
-              {currentFeatures?.firstLastFrame && ' 首尾帧'}
-              {currentFeatures?.multiReference && ' 多参考图'}
-              {currentFeatures?.videoEdit && ' 视频编辑'}
-              {currentFeatures?.videoExtend && ' 延长'}
-              {currentFeatures?.audio && ' 音效'}
-              {' 摄像机控制'}
-              {' 运动笔刷'}
-              {' 角色一致性'}
-              {' 多镜头叙事'}
-              {' · '}最长 {currentFeatures?.maxDuration || 10}秒
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* === 生成历史 === */}
-      {videoHistory.length > 0 && (
-        <div className="px-3 pt-3">
-          <button
-            onClick={() => setShowHistory(!showHistory)}
-            className="flex items-center gap-1.5 text-xs font-medium w-full cursor-pointer"
-            style={{ color: subTextColor }}
-          >
-            <History className="w-3.5 h-3.5" />
-            <span>生成历史 ({videoHistory.length})</span>
-            <ChevronDown className={`w-3.5 h-3.5 ml-auto transition-transform ${showHistory ? 'rotate-180' : ''}`} />
-          </button>
-          {showHistory && (
-            <div className="mt-2">
-              <div className="grid grid-cols-3 gap-1.5">
-                {videoHistory.slice(0, 12).map(entry => (
-                  <button
-                    key={entry.id}
-                    onClick={() => reuseHistoryEntry(entry)}
-                    className="group relative aspect-video rounded-md overflow-hidden cursor-pointer transition-all hover:ring-2 hover:ring-opacity-60"
-                    style={{
-                      background: '#1e1e1e',
-                    }}
-                    title={`${entry.prompt.slice(0, 50)}${entry.prompt.length > 50 ? '...' : ''}\n${entry.model} · ${entry.aspectRatio} · ${entry.duration}s`}
-                  >
-                    {/* 缩略图或占位符 */}
-                    {entry.thumbnailUrl || entry.firstFrameUrl ? (
-                      <img
-                        src={entry.thumbnailUrl || entry.firstFrameUrl}
-                        alt=""
-                        className="w-full h-full object-cover"
-                        loading="lazy"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        <Video className="w-4 h-4" style={{ color: subTextColor }} />
-                      </div>
-                    )}
-                    {/* 悬浮覆盖层 */}
-                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                      <RotateCcw className="w-4 h-4 text-white" />
-                    </div>
-                    {/* 模式标签 */}
-                    <div className="absolute bottom-0 left-0 right-0 px-1 py-0.5 text-white" style={{ background: 'rgba(0,0,0,0.7)', fontSize: '9px' }}>
-                      {entry.duration}s · {entry.aspectRatio}
-                    </div>
-                  </button>
-                ))}
-              </div>
-              {videoHistory.length > 3 && (
                 <button
-                  onClick={clearHistory}
-                  className="mt-1.5 text-xs w-full text-center cursor-pointer hover:underline"
-                  style={{ color: subTextColor }}
+                  onClick={() => setMultiShotScenes([...multiShotScenes, { id: Date.now().toString(), prompt: '', duration: 5 }])}
+                  className="w-full mt-2 py-1.5 rounded-md border-2 border-dashed text-[11px] flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                  style={{ borderColor: borderColor, color: subTextColor }}
                 >
-                  清空历史
+                  <Plus className="w-3 h-3" />添加镜头
                 </button>
-              )}
-            </div>
-          )}
-        </div>
-      )}
+              </CollapsibleSection>
+            )}
 
-      {/* === 生成按钮 === */}
-      <div className="px-3 pt-4 pb-3 mt-auto">
-        {/* 批量生成选择器 */}
-        <div className="flex items-center gap-2 mb-2.5">
-          <span className="text-xs shrink-0" style={{ color: subTextColor }}>批量生成</span>
-          <div className="flex gap-1">
-            {([1, 2, 4] as const).map(n => (
-              <button
-                key={n}
-                onClick={() => setBatchCount(n)}
-                className={`px-2.5 py-1 rounded text-xs font-medium transition-all cursor-pointer ${
-                  batchCount === n ? '' : ''
-                }`}
-                style={{
-                  background: batchCount === n
-                    ? (isGold ? 'rgba(212,175,55,0.2)' : 'rgba(59,130,246,0.2)')
-                    : (isMonochrome ? '#f3f4f6' : '#1e1e1e'),
-                  color: batchCount === n ? accentColor : subTextColor,
-                  border: `1px solid ${batchCount === n ? (isGold ? 'rgba(212,175,55,0.4)' : 'rgba(59,130,246,0.4)') : (isMonochrome ? '#e5e7eb' : '#333')}`,
-                }}
-              >
-                {n}x
-              </button>
-            ))}
+            {/* 高级设置 */}
+            <CollapsibleSection
+              title="高级设置"
+              icon={<Settings2 className="w-4 h-4" />}
+              defaultOpen={false}
+              isMonochrome={isMonochrome}
+              accentColor={accentColor}
+              inputBg={inputBg}
+              borderColor={borderColor}
+              subTextColor={subTextColor}
+              textColor={textColor}
+            >
+              <div className="space-y-3">
+                <div>
+                  <label className={labelClass}>分辨率</label>
+                  <div className="flex gap-1.5 flex-wrap">
+                    {availableResolutions.map(r => (
+                      <button
+                        key={r}
+                        onClick={() => setResolution(r)}
+                        className="px-2.5 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer"
+                        style={{
+                          background: resolution === r ? accentColor : inputBg,
+                          color: resolution === r ? (isGold ? '#0a0a0a' : '#fff') : subTextColor,
+                          border: `1px solid ${resolution === r ? accentColor : borderColor}`,
+                        }}
+                      >{r}</button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className={labelClass}>反向提示词（可选）</label>
+                  <textarea
+                    value={negativePrompt}
+                    onChange={e => setNegativePrompt(e.target.value)}
+                    placeholder="模糊、变形、低质量、水印..."
+                    rows={2}
+                    className="w-full rounded-md px-2.5 py-1.5 text-[11px] resize-none focus:outline-none"
+                    style={{ background: inputBg, color: textColor, border: `1px solid ${borderColor}` }}
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-[11px] shrink-0 font-medium" style={{ color: subTextColor }}>随机种子</label>
+                  <input
+                    type="number"
+                    value={seed ?? ''}
+                    onChange={e => { const v = e.target.value; setSeed(v ? parseInt(v, 10) : undefined); }}
+                    placeholder="随机"
+                    className="flex-1 rounded-md px-2.5 py-1.5 text-[11px] focus:outline-none"
+                    style={{ background: inputBg, color: textColor, border: `1px solid ${borderColor}` }}
+                  />
+                  <button onClick={() => setSeed(Math.floor(Math.random() * 2147483647))} className="px-2.5 py-1.5 rounded-md text-sm cursor-pointer" style={{ background: inputBg, color: subTextColor, border: `1px solid ${borderColor}` }}>🎲</button>
+                </div>
+              </div>
+            </CollapsibleSection>
+
+            {/* 生成按钮 */}
+            <button
+              onClick={handleGenerate}
+              disabled={isGenerating || !model || (!prompt.trim() && mode !== 'video-extend')}
+              className={`w-full ${isGenerating ? 'py-3' : 'py-3'} rounded-xl text-sm font-semibold flex flex-col items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed mt-auto`}
+              style={{
+                background: isGold
+                  ? (isGenerating ? 'rgba(212,175,55,0.3)' : 'linear-gradient(135deg, #d4af37, #b8962e)')
+                  : (isGenerating ? 'rgba(59,130,246,0.3)' : 'linear-gradient(135deg, #3b82f6, #2563eb)'),
+                color: '#fff',
+                boxShadow: isGenerating ? 'none' : `0 4px 12px ${isGold ? 'rgba(212,175,55,0.35)' : 'rgba(59,130,246,0.35)'}`,
+              }}
+            >
+              {isGenerating ? (
+                <div className="flex flex-col gap-2 w-full px-4">
+                  <div className="flex items-center justify-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>{genStage || '处理中...'}</span>
+                  </div>
+                  <div className="w-full h-1 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.2)' }}>
+                    <div
+                      className="h-full rounded-full transition-all duration-500"
+                      style={{ width: `${genProgress}%`, background: 'rgba(255,255,255,0.9)' }}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4" />
+                  {mode === 'video-extend' ? '延长视频' : mode === 'multi-shot' ? `生成${multiShotScenes.length}镜头视频` : `生成视频${batchCount > 1 ? ` (${batchCount}个)` : ''}`}
+                </div>
+              )}
+            </button>
+
+            {/* 历史记录 */}
+            {videoHistory.length > 0 && (
+              <div>
+                <button onClick={() => setShowHistory(!showHistory)} className="flex items-center gap-1.5 text-xs font-medium w-full py-1 cursor-pointer" style={{ color: subTextColor }}>
+                  <History className="w-3.5 h-3.5" />
+                  <span>生成历史 ({videoHistory.length})</span>
+                  <ChevronDown className={`w-3.5 h-3.5 ml-auto transition-transform ${showHistory ? 'rotate-180' : ''}`} />
+                </button>
+                {showHistory && (
+                  <div className="mt-2 grid grid-cols-4 gap-1.5">
+                    {videoHistory.slice(0, 8).map(entry => (
+                      <button key={entry.id} onClick={() => reuseHistoryEntry(entry)} className="aspect-video rounded overflow-hidden relative group cursor-pointer" style={{ border: `1px solid ${borderColor}` }}>
+                        {entry.thumbnailUrl ? (
+                          <img src={entry.thumbnailUrl} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center" style={{ background: inputBg }}>
+                            <Video className="w-5 h-5" style={{ color: subTextColor }} />
+                          </div>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
-          {batchCount > 1 && (
-            <span className="text-[10px] ml-auto" style={{ color: subTextColor }}>
-              {batchCount}个不同种子
-            </span>
-          )}
         </div>
-        <button
-          onClick={handleGenerate}
-          disabled={isGenerating || !model || (!prompt.trim() && mode !== 'video-extend')}
-          className={`w-full ${isGenerating ? 'py-3' : 'py-2.5'} rounded-lg text-sm font-medium flex flex-col items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed`}
-          style={{
-            background: isGold
-              ? (isGenerating ? 'rgba(212,175,55,0.3)' : 'linear-gradient(135deg, #d4af37, #b8962e)')
-              : (isGenerating ? 'rgba(59,130,246,0.3)' : 'linear-gradient(135deg, #3b82f6, #2563eb)'),
-            color: '#fff',
-            boxShadow: isGenerating ? 'none' : `0 2px 8px ${isGold ? 'rgba(212,175,55,0.3)' : 'rgba(59,130,246,0.3)'}`,
-          }}
-        >
-          {isGenerating ? (
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center justify-center gap-2">
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>{genStage || '处理中...'}</span>
-              </div>
-              <div className="w-full h-1 rounded-full overflow-hidden" style={{ background: isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.15)' }}>
-                <div
-                  className="h-full rounded-full transition-all duration-500"
-                  style={{
-                    width: `${genProgress}%`,
-                    background: isGold ? 'linear-gradient(90deg, #d4af37, #f0d060)' : 'linear-gradient(90deg, #3b82f6, #60a5fa)',
-                  }}
-                />
-              </div>
-            </div>
-          ) : (
-            <>
-              <Sparkles className="w-4 h-4" />
-              生成视频
-            </>
-          )}
-        </button>
       </div>
-      </div>
+      )}
     </div>
+  );
+}
+
+// 可折叠区块（内联组件，保持简洁）
+function CollapsibleSection({ title, icon, iconColor, badge, defaultOpen = false, isMonochrome, accentColor, inputBg, borderColor, subTextColor, textColor, children }: {
+  title: string;
+  icon?: React.ReactNode;
+  iconColor?: string;
+  badge?: string;
+  defaultOpen?: boolean;
+  isMonochrome: boolean;
+  accentColor: string;
+  inputBg: string;
+  borderColor: string;
+  subTextColor: string;
+  textColor: string;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = React.useState(defaultOpen);
+  return (
+    <div className="rounded-lg overflow-hidden" style={{ border: `1px solid ${borderColor}`, background: isMonochrome ? '#fafafa' : 'rgba(255,255,255,0.02)' }}>
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center gap-2 px-3.5 py-2.5 text-left transition-colors cursor-pointer hover:opacity-90"
+        style={{ background: open ? (isMonochrome ? '#f3f4f6' : 'rgba(255,255,255,0.04)') : 'transparent' }}
+      >
+        {icon && <span className="shrink-0" style={{ color: iconColor || subTextColor }}>{icon}</span>}
+        <span className="text-xs font-semibold flex-1" style={{ color: textColor }}>{title}</span>
+        {badge && <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: `${accentColor}20`, color: accentColor }}>{badge}</span>}
+        <ChevronDown className={`w-3.5 h-3.5 transition-transform shrink-0 ${open ? 'rotate-180' : ''}`} style={{ color: subTextColor }} />
+      </button>
+      {open && <div className="px-3.5 pb-3.5 pt-0">{children}</div>}
+    </div>
+  );
+}
+
+function ToggleBtn({ active, onClick, accent, sub, mono, children }: {
+  active: boolean; onClick: () => void; accent: string; sub: string; mono: boolean; children: React.ReactNode;
+}) {
+  return (
+    <button onClick={onClick} className="flex items-center gap-1.5 text-[10px] font-medium cursor-pointer" style={{ color: active ? accent : sub }}>
+      <div className="w-7 h-3.5 rounded-full relative transition-colors" style={{ background: active ? accent : (mono ? '#d1d5db' : 'rgba(255,255,255,0.15)') }}>
+        <div className="absolute top-0.5 w-2.5 h-2.5 rounded-full bg-white transition-all shadow-sm" style={{ left: active ? '16px' : '2px' }} />
+      </div>
+      <span>{children}</span>
+    </button>
   );
 }
 
