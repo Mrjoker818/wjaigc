@@ -501,7 +501,12 @@ export function GenerationPanel(
 
     // 获取当前模型支持的质量
     const getSupportedQualities = useCallback(() => {
-        return findModelConfig(MODEL_QUALITIES, pureModelId) || SHARED_DEFAULT_QUALITIES;
+        const paramType = getModelParamType(pureModelId);
+        if (paramType === 'quality') {
+            return getQualityLevelOptions(pureModelId);
+        }
+        // 'resolution' or 'both': return resolution tier options
+        return getResolutionTierOptions(pureModelId);
     }, [pureModelId]);
 
     // 尺寸映射 — 使用 calculateActualPixels 综合考虑模型+比例+质量
@@ -1097,30 +1102,30 @@ export function GenerationPanel(
                             } catch {}
                             // Extract pure modelId for ratio/quality lookup
                             const newPureModelId = compositeKey.includes('::') ? compositeKey.split('::').pop()! : compositeKey;
+                            // 动态获取模型支持的画面比例列表
                             const supportedRatios = sharedFindModelConfig(SHARED_MODEL_ASPECT_RATIOS, newPureModelId) || SHARED_DEFAULT_ASPECT_RATIOS;
-                            // 始终重置到新模型的第一个比例
                             setAspectRatio(supportedRatios[0]);
-                            const supportedQualities = sharedFindModelConfig(SHARED_MODEL_QUALITIES, newPureModelId) || SHARED_DEFAULT_QUALITIES;
-                            // 根据模型后缀智能选择默认分辨率/质量（-4k默认4K，-2k默认2K，-hd默认high，其他默认第一个）
-                            const mlower = newPureModelId.toLowerCase();
+                            // 动态获取模型支持的分辨率/质量选项
                             const paramType = getModelParamType(newPureModelId);
-                            let defaultQuality = supportedQualities[0];
-                            let defaultResolution = '1K';
-                            if (/-4k(?:-omni)?$/.test(mlower)) {
-                                defaultResolution = '4K';
-                                defaultQuality = paramType === 'both' ? 'auto' : 'high';
-                            } else if (/-2k$/.test(mlower)) {
-                                defaultResolution = '2K';
-                                defaultQuality = paramType === 'both' ? 'auto' : 'high';
-                            } else if (/-hd$|[-_]high$/.test(mlower)) {
+                            const resolutionTiers = getResolutionTierOptions(newPureModelId);
+                            const qualityLevels = getQualityLevelOptions(newPureModelId);
+                            const mlower = newPureModelId.toLowerCase();
+                            // 按后缀推断默认分辨率
+                            let defaultResolution = resolutionTiers[0] || '1K';
+                            if (/-4k(?:-omni)?$/.test(mlower)) defaultResolution = '4K';
+                            else if (/-2k$/.test(mlower)) defaultResolution = '2K';
+                            // 按后缀推断默认质量
+                            let defaultQuality = qualityLevels[0] || 'auto';
+                            if (/-4k(?:-omni)?$/.test(mlower) || /-2k$/.test(mlower) || /-hd$|[-_]high$/.test(mlower)) {
                                 defaultQuality = 'high';
                             }
+                            // 根据 paramType 设置对应 state
                             if (paramType === 'both' || paramType === 'resolution') {
-                                const tiers = getResolutionTierOptions(newPureModelId);
-                                if (tiers.includes(defaultResolution)) setResolution(defaultResolution);
-                                else setResolution(tiers[0] || '1K');
+                                setResolution(resolutionTiers.includes(defaultResolution) ? defaultResolution : resolutionTiers[0] || '1K');
                             }
-                            setQuality(defaultQuality);
+                            if (paramType === 'both' || paramType === 'quality') {
+                                setQuality(qualityLevels.includes(defaultQuality) ? defaultQuality : qualityLevels[0] || 'auto');
+                            }
                         }}
                         className={`${inputStl} appearance-none cursor-pointer`}
                     >
@@ -1722,77 +1727,78 @@ export function GenerationPanel(
                 </div>
 
                 {/* 输出参数：根据模型类型显示分辨率档位或质量级别 */}
-                {/* ★ 关键修复：paramType === 'both' 时显示分辨率档位（1K/2K/4K），而非质量级别 */}
-                {(getModelParamType(model.includes('::') ? model.split('::').pop()! : model) === 'both' 
-                  ? ['1K', '2K', '4K'] 
-                  : getSupportedQualities()).length > 1 && (
-                    <div className="space-y-1">
-                        <label className={stl}>{dot}{getModelParamType(model.includes('::') ? model.split('::').pop()! : model) === 'quality' ? '图片质量' : '分辨率'}</label>
-                        <div className="grid grid-cols-4 gap-1.5">
-                            {(getModelParamType(model.includes('::') ? model.split('::').pop()! : model) === 'both' 
-                              ? ['1K', '2K', '4K'] 
-                              : getSupportedQualities()).map(q => (
-                                <button
-                                    key={q}
-                                    onClick={() => {
-                                        const paramType = getModelParamType(model.includes('::') ? model.split('::').pop()! : model);
-                                        if (paramType === 'both') {
-                                            // GPT-Image系列：设置分辨率档位（1K/2K/4K），而非质量级别
-                                            setResolution(q);
-                                            setQuality('auto');
-                                        } else {
-                                            setQuality(q);
-                                        }
-                                    }}
-                                    className={`${gridBtnBase} ${(getModelParamType(model.includes('::') ? model.split('::').pop()! : model) === 'both' ? resolution : quality) === q ? gridBtnOn : gridBtnOff}`}
-                                >
-                                    <div className="flex flex-col items-center leading-none">
-                                        <span className="text-xs">
-                                            {/* 分辨率档位显示 */}
-                                            {getModelParamType(model.includes('::') ? model.split('::').pop()! : model) === 'resolution' || getModelParamType(model.includes('::') ? model.split('::').pop()! : model) === 'both'
-                                              ? (RESOLUTION_TIER_DISPLAY_NAMES[q] || q)
-                                              : /* 质量级别显示 */
-                                              (q === 'auto' ? '自动' : 
-                                               q === 'low' ? '快速' : 
-                                               q === 'medium' ? '中等' : 
-                                               q === 'standard' ? '标准' : 
-                                               q === 'high' ? '高清' : 
-                                               q === 'hd' ? '高清' : 
-                                               q === 'ultra' ? '超清' : 
-                                               (QUALITY_LEVEL_DISPLAY_NAMES[q] || q))}
-                                        </span>
-                                        {/* 方案A：质量级别不再显示像素提示，像素由API根据比例和质量自动决定 */}
-                                    </div>
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-                )}
+                {/* ★ 关键修复：paramType === 'both' 时显示分辨率档位 + 生成质量两个独立行 */}
+                {(() => {
+                    const pureModelId = model.includes('::') ? model.split('::').pop()! : model;
+                    const paramType = getModelParamType(pureModelId);
+                    const resolutionTiers = getResolutionTierOptions(pureModelId);
+                    const qualityLevels = getQualityLevelOptions(pureModelId);
+                    const showResolutions = resolutionTiers.length > 1;
+                    const showQuality = qualityLevels.length > 1;
 
-                {/* GPT-Image系列：额外显示生成质量参数 */}
-                {getModelParamType(model.includes('::') ? model.split('::').pop()! : model) === 'both' && (
-                    <div className="space-y-1">
-                        <label className={stl}>{dot}生成质量</label>
-                        <div className="grid grid-cols-4 gap-1.5">
-                            {['auto', 'low', 'medium', 'high'].map(q => (
-                                <button
-                                    key={q}
-                                    onClick={() => setQuality(q)}
-                                    className={`${gridBtnBase} ${quality === q ? gridBtnOn : gridBtnOff}`}
-                                >
-                                    <div className="flex flex-col items-center leading-none">
-                                        <span className="text-xs">
-                                            {q === 'auto' ? '自动' : 
-                                             q === 'low' ? '快速' : 
-                                             q === 'medium' ? '中等' : 
-                                             q === 'high' ? '高清' : q}
-                                        </span>
+                    if (!showResolutions && !showQuality) return null;
+
+                    return (
+                        <>
+                            {/* 分辨率档位行（both/resolution 类型显示） */}
+                            {(paramType === 'both' || paramType === 'resolution') && showResolutions && (
+                                <div className="space-y-1">
+                                    <label className={stl}>{dot}分辨率</label>
+                                    <div className="grid grid-cols-4 gap-1.5">
+                                        {resolutionTiers.map(q => (
+                                            <button
+                                                key={q}
+                                                onClick={() => {
+                                                    if (paramType === 'both') {
+                                                        setResolution(q);
+                                                    } else {
+                                                        setQuality(q);
+                                                    }
+                                                }}
+                                                className={`${gridBtnBase} ${(paramType === 'both' ? resolution : quality) === q ? gridBtnOn : gridBtnOff}`}
+                                            >
+                                                <div className="flex flex-col items-center leading-none">
+                                                    <span className="text-xs">
+                                                        {RESOLUTION_TIER_DISPLAY_NAMES[q] || q}
+                                                    </span>
+                                                </div>
+                                            </button>
+                                        ))}
                                     </div>
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-                )}
+                                </div>
+                            )}
+
+                            {/* 质量级别行（both/quality 类型显示） */}
+                            {(paramType === 'both' || paramType === 'quality') && showQuality && (
+                                <div className="space-y-1">
+                                    <label className={stl}>{dot}{paramType === 'both' ? '生成质量' : '图片质量'}</label>
+                                    <div className="grid grid-cols-4 gap-1.5">
+                                        {qualityLevels.map(q => (
+                                            <button
+                                                key={q}
+                                                onClick={() => setQuality(q)}
+                                                className={`${gridBtnBase} ${quality === q ? gridBtnOn : gridBtnOff}`}
+                                            >
+                                                <div className="flex flex-col items-center leading-none">
+                                                    <span className="text-xs">
+                                                        {q === 'auto' ? '自动' : 
+                                                         q === 'low' ? '快速' : 
+                                                         q === 'medium' ? '中等' : 
+                                                         q === 'standard' ? '标准' : 
+                                                         q === 'high' ? '高清' : 
+                                                         q === 'hd' ? '高清' : 
+                                                         q === 'ultra' ? '超清' : 
+                                                         (QUALITY_LEVEL_DISPLAY_NAMES[q] || q)}
+                                                    </span>
+                                                </div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </>
+                    );
+                })()}
 
                 {/* 生图数量 */}
                 <div className="space-y-1">
