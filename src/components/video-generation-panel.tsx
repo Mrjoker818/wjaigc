@@ -1163,9 +1163,9 @@ Rules:
     left: panelPosition ? `${panelPosition.x}px` : '50%',
     top: panelPosition ? `${panelPosition.y}px` : '50%',
     transform: panelPosition ? 'none' : 'translate(-50%, -50%)',
-    maxHeight: '86vh',
-    width: 'min(920px, 94vw)',
-    minWidth: '720px',
+    maxHeight: '88vh',
+    width: 'min(1180px, 94vw)',
+    minWidth: '960px',
   } : {};
 
   return (
@@ -1268,13 +1268,68 @@ Rules:
           })}
         </div>
 
-        {/* 主体滚动区 - 单列宽布局 */}
-        <div className="flex-1 flex flex-col px-5 pt-4 overflow-y-auto overflow-x-hidden min-h-0 scrollbar-thin" style={{ scrollbarWidth: 'thin' }}>
-          {/* ======== 顶部控制条：模型 + 导演风格，单行紧凑布局 ======== */}
-          <div className="grid grid-cols-[1fr_auto] gap-3 mb-4 flex-shrink-0">
-            {/* 模型选择 */}
+        {/* 主体滚动区 —— 两列布局：左340px 风格模板与模型 / 右列 提示词与参数 */}
+        <div className="flex-1 flex gap-0 min-h-0 overflow-hidden">
+          {/* ============ 左列：风格模板 + 模型选择（340px） ============ */}
+          <div
+            className="flex-shrink-0 overflow-y-auto overflow-x-hidden px-4 py-4 scrollbar-thin flex flex-col gap-4"
+            style={{ width: 340, borderRight: `1px solid ${isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.06)'}`, scrollbarWidth: 'thin' }}
+          >
+            {/* 导演风格选择 */}
             <div>
-              <label className="text-[11px] font-semibold mb-1.5 block" style={{ color: subTextColor }}>视频模型</label>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-[11px] font-semibold flex items-center gap-1.5" style={{ color: subTextColor }}>
+                  <Clapperboard className="w-3.5 h-3.5" style={{ color: accentColor }} />导演风格
+                </label>
+                <button
+                  onClick={() => setUseDirector(!useDirector)}
+                  className="px-2 py-0.5 rounded text-[10px] font-semibold cursor-pointer transition-all"
+                  style={{
+                    background: useDirector ? `linear-gradient(135deg, ${accentColor}, ${isGold ? '#8b7225' : '#1d4ed8'})` : isMonochrome ? '#f3f4f6' : 'rgba(255,255,255,0.05)',
+                    color: useDirector ? '#0a0a0a' : subTextColor,
+                    border: useDirector ? 'none' : `1px solid ${borderColor}`,
+                    boxShadow: useDirector ? `0 2px 6px ${accentColor}40` : 'none',
+                  }}
+                  title="导演增强：自动补充运镜/光线/表演/氛围"
+                >
+                  {useDirector ? '已开启' : '关闭'}
+                </button>
+              </div>
+              <div className="grid grid-cols-3 gap-1.5">
+                {([
+                  { v: 'cinematic', label: '🎬 电影感', desc: '景别/运镜/光影' },
+                  { v: 'documentary', label: '📹 纪录片', desc: '纪实/手持/自然光' },
+                  { v: 'commercial', label: '📺 广告片', desc: '高光/特写/节奏' },
+                  { v: 'music-video', label: '🎵 MV', desc: '节奏/光影/色彩' },
+                  { v: 'anime', label: '🎨 动漫', desc: '风格化/夸张/张力' },
+                  { v: 'minimal', label: '◻️ 极简', desc: '留白/克制/长镜头' },
+                ] as Array<{ v: DirectorStyle; label: string; desc: string }>).map(s => {
+                  const active = useDirector && directorStyle === s.v;
+                  return (
+                    <button
+                      key={s.v}
+                      onClick={() => { setDirectorStyle(s.v); if (!useDirector) setUseDirector(true); }}
+                      className="flex flex-col items-center gap-0.5 px-1 py-1.5 rounded-md text-[10px] font-medium transition-all cursor-pointer"
+                      style={{
+                        background: active ? accentColor : isMonochrome ? '#f9fafb' : 'rgba(255,255,255,0.03)',
+                        color: active ? (isGold ? '#0a0a0a' : '#fff') : subTextColor,
+                        border: `1px solid ${active ? accentColor : borderColor}`,
+                        boxShadow: active ? `0 2px 6px ${accentColor}40` : 'none',
+                      }}
+                    >
+                      <span className="text-sm leading-none">{s.label.split(' ')[0]}</span>
+                      <span className="leading-tight text-center">{s.label.split(' ')[1]}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 视频模型 */}
+            <div>
+              <label className="text-[11px] font-semibold mb-1.5 block flex items-center gap-1.5" style={{ color: subTextColor }}>
+                <Video className="w-3.5 h-3.5" style={{ color: accentColor }} />视频模型
+              </label>
               <div className="relative">
                 <select
                   value={model}
@@ -1290,51 +1345,64 @@ Rules:
                 <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none" style={{ color: subTextColor }} />
               </div>
             </div>
-            {/* 导演风格 */}
-            <div className="w-[180px]">
-              <label className="text-[11px] font-semibold mb-1.5 block" style={{ color: subTextColor }}>
-                导演风格 {useDirector && <span className="ml-1" style={{ color: accentColor }}>●</span>}
-              </label>
-              <div className="relative">
-                <select
-                  value={directorStyle}
-                  onChange={e => setDirectorStyle(e.target.value as DirectorStyle)}
-                  disabled={!useDirector}
-                  className="w-full px-3 py-2 pr-8 rounded-lg text-[12px] appearance-none cursor-pointer font-medium focus:outline-none transition-colors truncate disabled:opacity-50"
-                  style={{ background: inputBg, color: textColor, border: `1px solid ${useDirector ? accentColor + '60' : borderColor}` }}
-                >
-                  <option value="cinematic">🎬 电影感</option>
-                  <option value="documentary">📹 纪录片</option>
-                  <option value="commercial">📺 广告片</option>
-                  <option value="music-video">🎵 MV</option>
-                  <option value="anime">🎨 动漫</option>
-                  <option value="minimal">◻️ 极简</option>
-                </select>
-                <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none" style={{ color: subTextColor }} />
-              </div>
-            </div>
+
+            {/* 视频模板库（按类别分组） */}
+            {(['product', 'character', 'landscape', 'effect', 'story'] as const).map(cat => {
+              const catTemplates = VIDEO_TEMPLATES.filter(t => t.category === cat);
+              const catLabel = { product: '📦 产品展示', character: '👤 人物', landscape: '🏞 风景', effect: '✨ 特效', story: '🎞 故事叙事' }[cat];
+              return (
+                <div key={cat}>
+                  <label className="text-[11px] font-semibold mb-1.5 block" style={{ color: subTextColor }}>{catLabel}</label>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {catTemplates.map(t => (
+                      <button
+                        key={t.id}
+                        onClick={() => {
+                          setPrompt(prev => prev ? `${prev}, ${t.prompt}` : t.prompt);
+                          if (t.aspectRatio) setAspectRatio(t.aspectRatio);
+                          if (t.duration && availableDurations.includes(t.duration as any)) setDuration(t.duration);
+                          if (t.cameraControl) setCameraControl({ ...t.cameraControl, intensity: t.cameraControl.intensity || 50 });
+                        }}
+                        className="px-2 py-1.5 rounded-md text-[10.5px] text-left transition-all cursor-pointer hover:scale-[1.02] leading-tight"
+                        style={{
+                          background: isMonochrome ? '#f9fafb' : 'rgba(255,255,255,0.03)',
+                          color: subTextColor,
+                          border: `1px solid ${borderColor}`,
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.borderColor = accentColor + '80'; e.currentTarget.style.color = textColor as string; }}
+                        onMouseLeave={e => { e.currentTarget.style.borderColor = borderColor as string; e.currentTarget.style.color = subTextColor as string; }}
+                      >
+                        {t.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
           </div>
 
-          {/* ======== 视频描述区 ======== */}
-          <div className="flex flex-col gap-4 pb-4 min-w-0">
-            {/* 视频描述 */}
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="text-[11px] font-semibold flex items-center gap-1.5" style={{ color: subTextColor }}>
-                  视频描述
-                  <span
-                    className="px-1.5 py-0.5 rounded text-[9px] font-bold cursor-pointer transition-all select-none"
-                    style={{
-                      background: useDirector ? 'linear-gradient(135deg,#d4af37,#b8962e)' : isMonochrome ? '#f3f4f6' : 'rgba(255,255,255,0.05)',
-                      color: useDirector ? '#0a0a0a' : subTextColor,
-                      border: useDirector ? 'none' : `1px solid ${borderColor}`,
-                      boxShadow: useDirector ? '0 2px 6px rgba(212,175,55,0.3)' : 'none',
-                    }}
-                    onClick={() => setUseDirector(!useDirector)}
-                    title="导演增强：自动补充运镜/光线/表演/氛围"
-                  >🎬 导演{useDirector ? '✓' : ''}</span>
-                </label>
-              </div>
+          {/* ============ 右列：提示词 + 参数 + 生成按钮（flex-1 自适应） ============ */}
+          <div className="flex-1 flex flex-col px-5 pt-4 pb-4 overflow-y-auto overflow-x-hidden min-w-0 scrollbar-thin" style={{ scrollbarWidth: 'thin' }}>
+            {/* ======== 视频描述区 ======== */}
+            <div className="flex flex-col gap-3 min-w-0">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-[11px] font-semibold flex items-center gap-1.5" style={{ color: subTextColor }}>
+                    视频描述
+                    {useDirector && (
+                      <span
+                        className="px-1.5 py-0.5 rounded text-[9px] font-bold flex items-center gap-1"
+                        style={{
+                          background: `linear-gradient(135deg, ${accentColor}, ${isGold ? '#8b7225' : '#1d4ed8'})`,
+                          color: '#0a0a0a',
+                          boxShadow: `0 2px 6px ${accentColor}30`,
+                        }}
+                      >
+                        <Clapperboard className="w-2.5 h-2.5" />导演模式
+                      </span>
+                    )}
+                  </label>
+                </div>
               <textarea
                 value={prompt}
                 onChange={e => setPrompt(e.target.value)}
@@ -2306,8 +2374,11 @@ Rules:
                 )}
               </div>
             )}
+            </div>
           </div>
+          {/* ============ 右列结束 ============ */}
         </div>
+        {/* 两列 flex 行结束 */}
       </div>
       )}
     </div>
