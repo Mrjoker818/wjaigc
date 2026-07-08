@@ -80,13 +80,21 @@ export interface VideoCharacter {
   role?: string; // 角色定位：主角/配角/反派...
   age?: string;
   gender?: string;
+  ethnicity?: string;
+  style?: string;
   appearance: string; // 外貌关键词
   costume?: string; // 服装
   expression?: string; // 默认表情
-  frontPrompt: string; // 正面定妆照提示词（英文逗号分隔）
+  frontPrompt?: string; // 正面定妆照提示词（英文逗号分隔）
   sidePrompt?: string; // 侧面定妆照提示词
-  frontUrl?: string; // 生成后的正面图 URL
-  sideUrl?: string; // 生成后的侧面图 URL
+  imageUrlFront?: string; // 生成后的正面图 URL（兼容 frontUrl）
+  imageUrlSide?: string; // 生成后的侧面图 URL（兼容 sideUrl）
+  /** @deprecated 使用 imageUrlFront */
+  frontUrl?: string;
+  /** @deprecated 使用 imageUrlSide */
+  sideUrl?: string;
+  /** 运行时状态 */
+  status?: 'generating' | 'completed' | 'failed';
   generating?: boolean;
   error?: string;
 }
@@ -94,14 +102,21 @@ export interface VideoCharacter {
 export interface VideoScene {
   id: string;
   shotId?: string; // 关联到哪个镜头（一个场景可对应一镜）
+  /** @deprecated */
+  forShotIds?: Array<string | number>;
   name: string; // 场景名，如"咖啡馆内景日"
-  location: string;
+  description?: string; // 场景详细描述
+  location?: string;
   timeOfDay?: string;
-  lighting: string;
+  weather?: string;
+  lighting?: string;
   mood?: string;
+  colorPalette?: string;
   keyProps?: string; // 关键道具
-  scenePrompt: string; // 场景氛围图提示词（英文逗号分隔）
+  scenePrompt?: string; // 场景氛围图提示词（英文逗号分隔）
   imageUrl?: string; // 生成后的场景图 URL
+  /** 运行时状态 */
+  status?: 'generating' | 'completed' | 'failed';
   generating?: boolean;
   error?: string;
 }
@@ -380,17 +395,22 @@ export function parseShotPlanScenes(text: string, shots: VideoShotPlan[]): Video
       });
     });
   }
-  return parsed.map((s: any, i: number) => ({
-    id: String(s.id ?? `scene-${Date.now()}-${i}`),
-    name: String(s.name ?? `场景${i + 1}`).slice(0, 30),
-    location: String(s.location ?? ''),
-    timeOfDay: String(s.timeOfDay ?? ''),
-    mood: String(s.mood ?? ''),
-    visualPrompt: String(s.visualPrompt ?? buildSceneVisualPrompt(s)),
-    imageUrl: '',
-    forShotIds: Array.isArray(s.forShotIds) ? s.forShotIds.map((x: any) => String(x)) : (s.shotIndex != null ? [String(s.shotIndex)] : []),
-    generateStatus: 'pending' as const,
-  }));
+  return parsed.map((s: any, i: number) => {
+    const visualPrompt = String(s.visualPrompt ?? buildSceneVisualPrompt(s));
+    return {
+      id: String(s.id ?? `scene-${Date.now()}-${i}`),
+      name: String(s.name ?? `场景${i + 1}`).slice(0, 30),
+      location: String(s.location ?? ''),
+      timeOfDay: String(s.timeOfDay ?? ''),
+      mood: String(s.mood ?? ''),
+      lighting: String(s.lighting ?? ''),
+      scenePrompt: String(s.scenePrompt ?? visualPrompt),
+      visualPrompt,
+      imageUrl: '',
+      forShotIds: Array.isArray(s.forShotIds) ? s.forShotIds.map((x: any) => String(x)) : (s.shotIndex != null ? [String(s.shotIndex)] : []),
+      generateStatus: 'pending' as const,
+    };
+  });
 }
 
 function buildCharVisualPrompt(c: any): string {

@@ -7,20 +7,19 @@ import {
   ChevronDown, ChevronUp, Loader2, Sparkles, Volume2, VolumeX,
   Upload, X, AlertCircle, Info, FastForward, Users, Plus, Paintbrush, Film, Palette, Images,
   History, RotateCcw, Languages, GripVertical, Minus, Maximize2, ChevronRight, CheckCircle2,
-  Clapperboard, SlidersHorizontal
+  Clapperboard, SlidersHorizontal, Mountain, ImageIcon, User, RefreshCw
 } from 'lucide-react';
 import MotionBrushCanvas, { type MotionBrushResult, type MotionBrushCanvasHandle } from './motion-brush-canvas';
 import { inferVideoModelFeatures, VIDEO_MODEL_REGISTRY, type MotionBrushParams, type CameraControlParams, type VideoGenerateParams as VideoApiGenerateParams } from '@/lib/video-api';
 import {
-  buildNextShotFirstFramePrompt,
-  buildShotPlanSystemPrompt,
-  buildShotPlanUserMessage,
-  parseShotPlanResponse,
   buildContinuationPrompt,
+  parseShotPlanCharacters,
+  parseShotPlanScenes,
 } from '@/lib/video-director/continuity';
 import type {
   VideoShotPlan,
-  ShotPlanInput,
+  VideoCharacter,
+  VideoScene,
 } from '@/lib/video-director/continuity';
 import type { DirectorStyle, VideoReferenceBinding } from '@/lib/video-director/prompt-compiler';
 
@@ -216,6 +215,8 @@ interface VideoGenerationPanelProps {
   /** 多镜头任务完成回调：把视频结果回填到 shotPlan */
   onShotVideoCompleted?: (shotId: string, result: { videoUrl: string; thumbnailUrl?: string }) => void;
   onError?: (error: string) => void;
+  /** 画布添加图片（用于把制片资产加入画布） */
+  onAddImages?: (imageUrls: string[]) => void;
   themeStyle?: 'gold' | 'monochrome';
   /** 当前画布选中的图片URL，自动用作图生视频首帧 */
   selectedImageUrl?: string | null;
@@ -261,6 +262,8 @@ export interface ShotVideoResult {
 
 const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerationPanelProps>(function VideoGenerationPanel({
   onVideoGenerate,
+  onShotVideoCompleted,
+  onAddImages,
   onError,
   themeStyle = 'gold',
   selectedImageUrl,
@@ -333,7 +336,17 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
 
   // === 多参考图约束系统 ===
   const [typedReferences, setTypedReferences] = useState<TypedReference[]>([]);
-  
+  const typedReferencesRef = useRef<TypedReference[]>([]);
+  useEffect(() => { typedReferencesRef.current = typedReferences; }, [typedReferences]);
+
+  // 角色/场景资产（AI 制片流水线）—— 直接使用后端解析的 VideoCharacter/VideoScene 结构
+  const [productionCharacters, setProductionCharacters] = useState<VideoCharacter[]>([]);
+  const [productionScenes, setProductionScenes] = useState<VideoScene[]>([]);
+  const [isGeneratingAssets, setIsGeneratingAssets] = useState(false);
+  const [isBuildingProduction, setIsBuildingProduction] = useState(false);
+  const [isGeneratingCharacters, setIsGeneratingCharacters] = useState(false);
+  const [isGeneratingScenes, setIsGeneratingScenes] = useState(false);
+  const [autoInjectAssets, setAutoInjectAssets] = useState(true);
   // 兼容：从 typedReferences 中提取首帧/尾帧/参考图
   const firstFrameUrl = typedReferences.find(r => r.type === 'first-frame')?.url || '';
   const lastFrameUrl = typedReferences.find(r => r.type === 'last-frame')?.url || '';
@@ -371,7 +384,7 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
   const [chainContinuity, setChainContinuity] = useState(true); // 链式连贯：前段尾帧→后段首帧
   const [useGlobalReferences, setUseGlobalReferences] = useState(true);
   const [tailFrameRelay, setTailFrameRelay] = useState(true); // 尾帧接力开关（默认开启）
-  const [autoDiagnoseOnFail, setAutoDiagnoseOnFail] = useState(true); // 失败自动诊断 // 全局参考图注入
+  const [autoDiagnoseOnFail, setAutoDiagnoseOnFail] = useState(true); // 失败自动诊断
   const [videoHistory, setVideoHistory] = useState<VideoHistoryEntry[]>(loadVideoHistory);
   const [showHistory, setShowHistory] = useState(false);
   const [templateFilter, setTemplateFilter] = useState<'all' | 'product' | 'character' | 'landscape' | 'effect' | 'story'>('all');
@@ -868,10 +881,27 @@ Rules:
     setCurrentGeneratingShotId(shotId);
     setShotPlans(prev => prev.map(s => s.id === shotId ? { ...s, status: 'generating' as const, error: undefined } : s));
     try {
-      // 查找上一个已完成镜头：优先使用服务端 ffmpeg 抽取的尾帧，其次用缩略图
       const shotIdx = shotPlans.findIndex(s => s.id === shotId);
-      let firstFrameForThis: string | undefined = firstFrameUrl || undefined;
-      if (shotIdx > 0 && tailFrameRelay) {
+      // 场景图优先作为首帧（AI 制片流水线预先为该镜头生成的氛围图），仅当用户没手动设置首帧时生效
+      let sceneFrameUrl: string | undefined;
+      const matchedScene = productionScenes.find(s => {
+        if (s.shotId === shotId) return true;
+        const forIds = (s as any).forShotIds;
+        if (Array.isArray(forIds) && (forIds.includes(shotId) || (shotIdx >= 0 && forIds.includes(shotIdx)))) return true;
+        return false;
+      });
+      if (matchedScene?.imageUrl && !firstFrameUrl) {
+        sceneFrameUrl = matchedScene.imageUrl;
+      } else {
+        // 兼容：从 typedReferences 里找标记为 'scene' 的参考图
+        const sceneRefs = typedReferences.filter(r => r.type === 'scene').map(r => r.url);
+        if (sceneRefs.length > 0 && !firstFrameUrl) {
+          sceneFrameUrl = sceneRefs[shotIdx] || sceneRefs[0];
+        }
+      }
+      // 查找上一个已完成镜头：优先使用服务端 ffmpeg 抽取的尾帧，其次用缩略图
+      let firstFrameForThis: string | undefined = firstFrameUrl || sceneFrameUrl || undefined;
+      if (shotIdx > 0 && tailFrameRelay && !firstFrameUrl && !sceneFrameUrl) {
         const prev = shotPlans[shotIdx - 1];
         if (prev?.videoUrl) {
           // 调用后端抽帧 API（ffmpeg 抽最后一帧，比前端 video 元素更稳定）
@@ -948,8 +978,14 @@ Rules:
           resolution,
           cameraControl: camControl as CameraControlParams | undefined,
           motionBrush: motionBrush || undefined,
-          characterReferences: typedReferences.filter(r => r.type === 'character-front' || r.type === 'character-side').map(r => r.url),
-          referenceImages: typedReferences.filter(r => !r.type.startsWith('character-') && r.type !== 'first-frame' && r.type !== 'last-frame').map(r => r.url),
+          characterReferences: [
+            ...productionCharacters.flatMap(c => [c.imageUrlFront || c.frontUrl, c.imageUrlSide || c.sideUrl].filter(Boolean) as string[]),
+            ...typedReferences.filter(r => r.type === 'character-front' || r.type === 'character-side').map(r => r.url),
+          ],
+          referenceImages: [
+            ...(productionScenes.map(s => s.imageUrl).filter(Boolean) as string[]),
+            ...typedReferences.filter(r => !r.type.startsWith('character-') && r.type !== 'first-frame' && r.type !== 'last-frame' && r.type !== 'scene').map(r => r.url),
+          ],
           motionStrength: camControl ? motionStrength : undefined,
           seed,
           negativePrompt: negativePrompt.trim() || undefined,
@@ -991,15 +1027,262 @@ Rules:
   // === 批量生成所有镜头（串行，自动串联尾帧→首帧，使用后端链式 API 实现连续性）===
   const [isGeneratingAllShots, setIsGeneratingAllShots] = useState(false);
   const [isExtending, setIsExtending] = useState(false);
+  // === AI 制片流水线：角色卡 & 场景图（state 声明在文件前部统一管理） ===
+  // 调用图像生成 API 生成单张图片（使用后端默认图像模型）
+  const generateSingleImage = useCallback(async (imgPrompt: string, size?: string): Promise<string> => {
+    const body: Record<string, any> = { prompt: imgPrompt, n: 1 };
+    if (size) body.size = size;
+    else body.size = '1024x1024';
+    const resp = await fetch('/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error || '图像生成失败');
+    }
+    const data = await resp.json();
+    if (data.taskId) {
+      const taskId = data.taskId;
+      const deadline = Date.now() + 300000;
+      while (Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 2500));
+        const pollResp = await fetch('/api/poll-task', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ taskId }),
+        });
+        if (!pollResp.ok) continue;
+        const pollData = await pollResp.json();
+        if (pollData.status === 'completed') {
+          const url = pollData.imageUrl || pollData.result?.imageUrl || pollData.url || '';
+          if (url) return url;
+          throw new Error('图像生成未返回 URL');
+        }
+        if (pollData.status === 'failed') throw new Error(pollData.error || '图像生成失败');
+      }
+      throw new Error('图像生成超时');
+    }
+    const url = data.imageUrl || data.url || '';
+    if (!url) throw new Error('图像生成未返回 URL');
+    return url;
+  }, []);
+
+  // 持久化远端图片到本地，避免临时 URL 过期
+  const persistImageUrl = useCallback(async (url: string): Promise<string> => {
+    if (!url || url.startsWith('/') || url.startsWith('data:')) return url;
+    try {
+      const r = await fetch('/api/save-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl: url, mediaType: 'image' }),
+      });
+      if (r.ok) {
+        const d = await r.json();
+        if (d.url) return d.url;
+      }
+    } catch { /* ignore */ }
+    return url;
+  }, []);
+
+  // 生成单个角色的正/侧面定妆照
+  const generateCharacterImage = useCallback(async (charId: string, view: 'front'|'side') => {
+    const char = productionCharacters.find(c => c.id === charId);
+    if (!char) return;
+    setProductionCharacters(prev => prev.map(c => c.id === charId ? { ...c, status: 'generating' as const, error: undefined } : c));
+    try {
+      const viewDesc = view === 'front'
+        ? 'front view, facing camera, bust portrait, centered, pure white background, frontal eye-level angle'
+        : '3/4 side view, bust portrait, pure white background, side angle, cinematic lighting';
+      const basePrompt = char.frontPrompt || char.appearance || '';
+      const detailBits = [
+        char.name ? `${char.name},` : '',
+        char.age ? `${char.age},` : '',
+        char.gender ? `${char.gender},` : '',
+        char.costume ? `wearing ${char.costume},` : '',
+      ].filter(Boolean).join(' ');
+      const imgPrompt = `character design reference sheet, ${detailBits} ${basePrompt}, ${viewDesc}, studio lighting, high detail, photorealistic portrait, white background, no text, no watermark, sharp focus`;
+      const rawUrl = await generateSingleImage(imgPrompt, '1024x1536');
+      const url = await persistImageUrl(rawUrl);
+      setProductionCharacters(prev => prev.map(c => c.id === charId ? {
+        ...c,
+        imageUrlFront: view === 'front' ? url : c.imageUrlFront,
+        imageUrlSide: view === 'side' ? url : c.imageUrlSide,
+        status: undefined,
+        error: undefined,
+      } : c));
+      if (autoInjectAssets) {
+        addTypedReference(url, view === 'front' ? 'character-front' : 'character-side');
+      }
+    } catch (err: any) {
+      setProductionCharacters(prev => prev.map(c => c.id === charId ? { ...c, status: 'failed' as const, error: err?.message || '生成失败' } : c));
+    }
+  }, [productionCharacters, generateSingleImage, persistImageUrl, autoInjectAssets, addTypedReference]);
+
+  // 生成单个场景氛围图
+  const generateSceneImage = useCallback(async (sceneId: string) => {
+    const scene = productionScenes.find(s => s.id === sceneId);
+    if (!scene) return;
+    setProductionScenes(prev => prev.map(s => s.id === sceneId ? { ...s, status: 'generating' as const, error: undefined } : s));
+    try {
+      const shot = shotPlans.find(sh => sh.id === scene.shotId);
+      const ratio = shot?.aspectRatio || aspectRatio || '16:9';
+      const size = ratio === '16:9' || ratio === '21:9' ? '1792x1024' : ratio === '9:16' ? '1024x1792' : '1024x1024';
+      const base = scene.scenePrompt || scene.description || scene.location || scene.name;
+      const envBits = [
+        scene.timeOfDay ? `${scene.timeOfDay},` : '',
+        scene.weather ? `${scene.weather},` : '',
+        scene.lighting ? `${scene.lighting} lighting,` : '',
+        scene.mood ? `${scene.mood} mood,` : '',
+        scene.colorPalette ? `${scene.colorPalette} tones,` : '',
+      ].filter(Boolean).join(' ');
+      const imgPrompt = `cinematic establishing shot, ${scene.name}, ${base}, ${envBits} ${directorStyle} style, wide angle, atmospheric, movie still, high detail, photorealistic environment, no text, no watermark, sharp focus`;
+      const rawUrl = await generateSingleImage(imgPrompt, size);
+      const url = await persistImageUrl(rawUrl);
+      setProductionScenes(prev => prev.map(s => s.id === sceneId ? { ...s, imageUrl: url, status: undefined, error: undefined } : s));
+      if (autoInjectAssets) {
+        addTypedReference(url, 'scene');
+      }
+    } catch (err: any) {
+      setProductionScenes(prev => prev.map(s => s.id === sceneId ? { ...s, status: 'failed' as const, error: err?.message || '生成失败' } : s));
+    }
+  }, [productionScenes, shotPlans, aspectRatio, directorStyle, generateSingleImage, persistImageUrl, autoInjectAssets, addTypedReference]);
+
+  const handleGenerateProductionAssets = useCallback(async () => {
+    if ((productionCharacters.length === 0 && productionScenes.length === 0) || isGeneratingAssets) return;
+    setIsGeneratingAssets(true);
+    const generatedUrls: string[] = [];
+    try {
+      // 并发生成所有角色正/侧面定妆照
+      const charTasks: Promise<void>[] = [];
+      for (const c of productionCharacters) {
+        if (!c.imageUrlFront) charTasks.push(generateCharacterImage(c.id, 'front').then(() => {}).catch(() => {}));
+      }
+      for (const c of productionCharacters) {
+        if (!c.imageUrlSide) charTasks.push(generateCharacterImage(c.id, 'side').then(() => {}).catch(() => {}));
+      }
+      await Promise.allSettled(charTasks);
+      // 并发生成所有场景氛围图
+      const sceneTasks: Promise<void>[] = [];
+      for (const s of productionScenes) {
+        if (!s.imageUrl) sceneTasks.push(generateSceneImage(s.id).then(() => {}).catch(() => {}));
+      }
+      await Promise.allSettled(sceneTasks);
+      // 收集成功的URL，加到画布
+      productionCharacters.forEach(c => {
+        if (c.imageUrlFront) generatedUrls.push(c.imageUrlFront);
+        if (c.imageUrlSide) generatedUrls.push(c.imageUrlSide);
+      });
+      productionScenes.forEach(s => {
+        if (s.imageUrl) generatedUrls.push(s.imageUrl);
+      });
+      if (generatedUrls.length > 0 && onAddImages) {
+        try { onAddImages(generatedUrls); } catch {}
+      }
+    } finally {
+      setIsGeneratingAssets(false);
+    }
+  }, [productionCharacters, productionScenes, isGeneratingAssets, generateCharacterImage, generateSceneImage, onAddImages]);
+
+  const buildProductionFromShots = useCallback((chars?: VideoCharacter[], scenes?: VideoScene[]) => {
+    // 若后端直接返回了 characters/scenes 则直接用
+    if (chars && chars.length > 0) {
+      setProductionCharacters(chars.map(c => ({
+        ...c,
+        imageUrlFront: c.imageUrlFront || c.frontUrl || '',
+        imageUrlSide: c.imageUrlSide || c.sideUrl || '',
+        status: undefined,
+        error: undefined,
+      })));
+    } else if (prompt.trim()) {
+      setProductionCharacters([{
+        id: `char-protagonist-${Date.now()}`,
+        name: '主角',
+        appearance: prompt.slice(0, 80),
+        role: '主角',
+        frontPrompt: `${prompt.slice(0, 80)}, character design reference sheet, front view, neutral pose, white background, studio lighting, high detail`,
+        sidePrompt: `${prompt.slice(0, 80)}, character design reference sheet, side view, neutral pose, white background, studio lighting, high detail`,
+        imageUrlFront: '',
+        imageUrlSide: '',
+        status: undefined,
+        error: undefined,
+      }]);
+    } else {
+      setProductionCharacters([]);
+    }
+    if (scenes && scenes.length > 0) {
+      const idToIdx = new Map<string, number>();
+      shotPlans.forEach((s, idx) => idToIdx.set(s.id, idx));
+      setProductionScenes(scenes.map((s, i) => {
+        let shotId = s.shotId;
+        const forShotIds = (s as any).forShotIds;
+        if (!shotId && Array.isArray(forShotIds)) {
+          const sid = forShotIds[0];
+          if (typeof sid === 'number' && shotPlans[sid]) shotId = shotPlans[sid].id;
+          else if (typeof sid === 'string' && idToIdx.has(sid)) shotId = sid;
+        }
+        if (!shotId && shotPlans[i]) shotId = shotPlans[i].id;
+        else if (!shotId && shotPlans.length > 0) shotId = shotPlans[0].id;
+        return {
+          ...s,
+          shotId,
+          location: s.location || s.description?.slice(0, 40) || s.name,
+          lighting: s.lighting || 'natural lighting',
+          scenePrompt: s.scenePrompt || `${s.description || s.location || s.name}, cinematic establishing shot, wide angle, atmospheric, high detail, movie still`,
+          imageUrl: s.imageUrl || '',
+          status: undefined,
+          error: undefined,
+        };
+      }));
+    } else {
+      setProductionScenes(shotPlans.map(shot => ({
+        id: `scene-${shot.id}`,
+        shotId: shot.id,
+        name: shot.title || `镜头${shot.index + 1}场景`,
+        description: shot.setting || shot.prompt.slice(0, 60),
+        location: shot.setting || shot.prompt.slice(0, 40),
+        timeOfDay: shot.lighting || '',
+        lighting: shot.lighting || 'natural lighting',
+        scenePrompt: `${shot.prompt} ${shot.setting || ''}, cinematic establishing shot, wide angle, atmospheric, high detail, movie still`,
+        imageUrl: '',
+        status: undefined,
+        error: undefined,
+      })));
+    }
+  }, [shotPlans, prompt]);
+
+  // AI 一键制片：从分镜→角色+场景定妆照
+  const runAIPipeline = useCallback(async () => {
+    if (productionCharacters.length === 0 && productionScenes.length === 0) {
+      onError?.('请先进行 AI 分镜规划');
+      return;
+    }
+    setIsGeneratingAssets(true);
+    try {
+      await handleGenerateProductionAssets();
+    } finally {
+      setIsGeneratingAssets(false);
+    }
+  }, [productionCharacters, productionScenes, handleGenerateProductionAssets, onError]);
+
   const handleGenerateAllShots = async () => {
     if (!model || shotPlans.length === 0) return;
     setIsGeneratingAllShots(true);
     try {
       const pureModelId = model.includes('::') ? model.split('::').pop()! : model;
       const providerId = model.includes('::') ? model.split('::')[0] : undefined;
-      const charRefs = typedReferences.filter(r => r.type.startsWith('character-')).map(r => r.url);
-      const otherRefs = typedReferences.filter(r => !r.type.startsWith('character-') && r.type !== 'first-frame' && r.type !== 'last-frame').map(r => r.url);
+      const _charRefs = typedReferences.filter(r => r.type.startsWith('character-')).map(r => r.url);
+      const _otherRefs = typedReferences.filter(r => !r.type.startsWith('character-') && r.type !== 'first-frame' && r.type !== 'last-frame').map(r => r.url);
 
+      // 自动生成角色/场景资产（若尚未生成）
+      if (autoInjectAssets && (productionCharacters.length > 0 || productionScenes.length > 0)) {
+        const hasAllCharFront = productionCharacters.every(c => !!(c.imageUrlFront || c.frontUrl));
+        const hasAllScene = productionScenes.every(s => !!s.imageUrl);
+        if (!hasAllCharFront || !hasAllScene) {
+          try { await handleGenerateProductionAssets(); } catch {}
+        }
+      }
       // 前端串行链式执行：逐个镜头生成，每完成一个自动抽尾帧作为下一镜头首帧
       // 这种方式比后端链式更灵活，支持进度实时展示与单镜头失败重试
       for (let i = 0; i < shotPlans.length; i++) {
@@ -2079,6 +2362,116 @@ Rules:
                     <ToggleBtn active={useGlobalReferences} onClick={() => setUseGlobalReferences(!useGlobalReferences)} accent={accentColor} sub={subTextColor} mono={isMonochrome}>全局参考图</ToggleBtn>
                   </div>
                 </div>
+
+                {/* === AI 制片流水线：角色卡 + 场景氛围图 === */}
+                {shotPlans.length > 0 && (productionCharacters.length > 0 || productionScenes.length > 0) && (
+                  <div className="mb-3 p-2.5 rounded-lg border" style={{ borderColor: borderColor, background: isMonochrome ? 'rgba(0,0,0,0.15)' : 'rgba(168,85,247,0.05)' }}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <Sparkles className="w-3.5 h-3.5" style={{ color: '#a855f7' }} />
+                      <span className="text-[11px] font-semibold" style={{ color: textColor }}>AI 一键制片</span>
+                      <span className="text-[9px]" style={{ color: subTextColor }}>
+                        {productionCharacters.length}角色 / {productionScenes.length}场景
+                      </span>
+                      <ToggleBtn active={autoInjectAssets} onClick={() => setAutoInjectAssets(!autoInjectAssets)} accent="#a855f7" sub={subTextColor} mono={isMonochrome}>自动注入</ToggleBtn>
+                      <button
+                        onClick={handleGenerateProductionAssets}
+                        disabled={isGeneratingAssets}
+                        className="ml-auto px-2 py-0.5 rounded text-[9px] font-semibold cursor-pointer disabled:opacity-40 flex items-center gap-1"
+                        style={{ background: 'linear-gradient(135deg,#a855f7,#7c3aed)', color: '#fff' }}
+                      >
+                        {isGeneratingAssets ? (<><span className="inline-block w-2 h-2 border-[1.5px] border-white border-t-transparent rounded-full animate-spin" />生成资产中...</>) : <>✨ 生成全部资产</>}
+                      </button>
+                    </div>
+
+                    {/* 角色卡区 */}
+                    {productionCharacters.length > 0 && (
+                      <div className="mb-2">
+                        <div className="flex items-center gap-1.5 mb-1.5">
+                          <Users className="w-3 h-3" style={{ color: '#ec4899' }} />
+                          <span className="text-[10px] font-medium" style={{ color: subTextColor }}>角色定妆照</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {productionCharacters.map(char => {
+                            const frontUrl = char.imageUrlFront || char.frontUrl;
+                            const sideUrl = char.imageUrlSide || char.sideUrl;
+                            const isGenerating = char.status === 'generating' || char.generating;
+                            const isFailed = char.status === 'failed' || !!char.error;
+                            return (
+                              <div key={char.id} className="p-1.5 rounded-md" style={{ background: inputBg, border: `1px solid ${borderColor}` }}>
+                                <div className="text-[10px] font-semibold truncate mb-1" style={{ color: textColor }} title={char.appearance}>
+                                  {char.appearance.slice(0, 14)}{char.appearance.length > 14 ? '…' : ''}
+                                </div>
+                                <div className="grid grid-cols-2 gap-1">
+                                  <div className="aspect-square rounded overflow-hidden relative flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.3)' }}>
+                                    {frontUrl ? <img src={frontUrl} alt="正面" className="w-full h-full object-cover" /> :
+                                      isGenerating ? <span className="inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" style={{ color: '#ec4899' }} /> :
+                                      isFailed ? <RefreshCw className="w-3 h-3 text-red-400" /> :
+                                      <User className="w-4 h-4 opacity-30" />}
+                                    <span className="absolute bottom-0 left-0 right-0 text-[8px] text-center py-0.5 bg-black/60 text-white/80">正面</span>
+                                  </div>
+                                  <div className="aspect-square rounded overflow-hidden relative flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.3)' }}>
+                                    {sideUrl ? <img src={sideUrl} alt="侧面" className="w-full h-full object-cover" /> :
+                                      isGenerating ? <span className="inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" style={{ color: '#ec4899' }} /> :
+                                      isFailed ? <RefreshCw className="w-3 h-3 text-red-400" /> :
+                                      <User className="w-4 h-4 opacity-30" />}
+                                    <span className="absolute bottom-0 left-0 right-0 text-[8px] text-center py-0.5 bg-black/60 text-white/80">侧面</span>
+                                  </div>
+                                </div>
+                                {char.error && <div className="text-[9px] text-red-400 mt-1 truncate" title={char.error}>{char.error}</div>}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 场景氛围图区 */}
+                    {productionScenes.length > 0 && (
+                      <div>
+                        <div className="flex items-center gap-1.5 mb-1.5">
+                          <Mountain className="w-3 h-3" style={{ color: '#10b981' }} />
+                          <span className="text-[10px] font-medium" style={{ color: subTextColor }}>场景氛围图</span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-1.5">
+                          {productionScenes.map(scene => {
+                            const shotIdx = (scene as any).forShotIds && (scene as any).forShotIds.length > 0 ? (scene as any).forShotIds[0] : undefined;
+                            const shotForScene = typeof shotIdx === 'number' ? shotPlans[shotIdx] : (scene.shotId ? shotPlans.find(s => s.id === scene.shotId || s.sceneId === scene.id) : undefined);
+                            const sceneDesc = scene.description || scene.location || scene.name;
+                            const isGen = scene.status === 'generating' || scene.generating;
+                            const isFail = scene.status === 'failed' || !!scene.error;
+                            return (
+                              <div key={scene.id} className="rounded-md overflow-hidden relative" style={{ background: inputBg, border: `1px solid ${borderColor}` }}>
+                                <div className="aspect-video relative flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.3)' }}>
+                                  {scene.imageUrl ? <img src={scene.imageUrl} alt={sceneDesc} className="w-full h-full object-cover" /> :
+                                    isGen ? <span className="inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" style={{ color: '#10b981' }} /> :
+                                    isFail ? <RefreshCw className="w-4 h-4 text-red-400" /> :
+                                    <ImageIcon className="w-5 h-5 opacity-30" />}
+                                </div>
+                                <div className="p-1">
+                                  <div className="text-[9px] font-medium truncate" style={{ color: textColor }} title={sceneDesc}>
+                                    {sceneDesc.slice(0, 12)}{sceneDesc.length > 12 ? '…' : ''}
+                                  </div>
+                                  {shotForScene && <div className="text-[8px]" style={{ color: subTextColor }}>镜头 {shotPlans.indexOf(shotForScene) + 1}</div>}
+                                  {scene.error && <div className="text-[8px] text-red-400 truncate">{scene.error}</div>}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {(productionCharacters.some(c => c.imageUrlFront || c.frontUrl) || productionScenes.some(s => s.imageUrl)) && (
+                      <div className="mt-2 pt-2" style={{ borderTop: `1px dashed ${borderColor}` }}>
+                        <div className="text-[9px] flex items-start gap-1" style={{ color: subTextColor }}>
+                          <CheckCircle2 className="w-3 h-3 mt-0.5 shrink-0" style={{ color: '#10b981' }} />
+                          <span>定妆照/场景图生成完成后会自动作为角色参考/镜头首帧注入，多镜头生成时人物与场景保持一致。</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {shotPlans.length > 0 ? (
                   <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
                     {shotPlans.map((shot, idx) => {
