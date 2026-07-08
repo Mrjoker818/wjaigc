@@ -1846,10 +1846,14 @@ export async function POST(request: NextRequest) {
     }
 
     // ★ 模型别名规范化：将 gpt-image-2-2k → gpt-image-2 等别名映射为 API 可识别的基础模型名
+    // 注意：先保留原始模型名用于 provider 查找（避免带后缀的模型找不到 provider），
+    // API 调用时根据 provider 协议决定是否使用规范化名称。
+    const lookupModel = modelStr; // 保留原始名用于 findProviderForModel
     const normalized = normalizeModelForApi(modelStr);
+    let apiModelStr = modelStr; // 实际发往API的模型名
     if (normalized.wasNormalized) {
-      console.log(`[image-edit] 模型别名规范化: "${modelStr}" → "${normalized.apiModelName}"`);
-      modelStr = normalized.apiModelName;
+      console.log(`[image-edit] 模型别名规范化: "${modelStr}" → apiModelName="${normalized.apiModelName}", quality="${normalized.qualityTier || 'n/a'}", resolution="${normalized.resolutionTier || 'n/a'}"`);
+      apiModelStr = normalized.apiModelName;
     }
 
     // Content safety check (for actions that accept prompt input)
@@ -1893,28 +1897,29 @@ export async function POST(request: NextRequest) {
       const specifiedProvider = await findProviderById(effectiveProviderId);
       if (specifiedProvider) {
         candidateModels.push({
-          model: modelStr,
+          model: lookupModel,
           apiKey: specifiedProvider.apiKey,
           apiBaseUrl: normalizeApiBaseUrl(specifiedProvider.baseUrl),
           source: 'specified-provider',
           advancedParams: specifiedProvider.advancedParams,
         });
-        triedModels.add(modelStr);
+        triedModels.add(lookupModel);
       }
     }
     
     // 1. 前端指定的模型（如果匹配到 provider，优先使用 providerId）
-    const preferredProvider = await findProviderForModel(modelStr, 'image', effectiveProviderId || undefined)
-      || await findProviderForModel(modelStr, 'universal');
+    // 使用 lookupModel（原始名）匹配，PearAPI 的 gpt-image-2-4k 等后缀是独立模型
+    const preferredProvider = await findProviderForModel(lookupModel, 'image', effectiveProviderId || undefined)
+      || await findProviderForModel(lookupModel, 'universal');
     if (preferredProvider) {
       candidateModels.push({
-        model: modelStr,
+        model: lookupModel,
         apiKey: preferredProvider.apiKey,
         apiBaseUrl: normalizeApiBaseUrl(preferredProvider.baseUrl),
         source: 'preferred',
         advancedParams: preferredProvider.advancedParams,
       });
-      triedModels.add(modelStr);
+      triedModels.add(lookupModel);
     }
     
     // 2. 管理员配置的所有 image 类型 provider 的模型

@@ -318,12 +318,18 @@ export async function POST(request: NextRequest) {
       console.log(`[edit] Stripped provider prefix from model: "${model}" → "${pureModel}"`);
     }
 
-    // ★ 规范化模型名（如 gpt-image-2-2k → gpt-image-2）
+    // ★ 规范化模型名：剥离别名（如 -4k/-2k/-1k/-official），不改变模型名，
+    // 但额外参数（quality/resolution）由其他路径传入，确保API模型名保留用户原始选择
     const modelNorm = normalizeModelForApi(pureModel);
-    if (modelNorm.wasNormalized) {
-      console.log(`[edit] Normalized model alias: "${pureModel}" → "${modelNorm.apiModelName}"`);
+    // 注意：对于 PearAPI 等要求使用独立模型名（gpt-image-2-4k）的平台，
+    // 不应该剥离 -4k 后缀；只有当提供商把 -4k 视为别名（实际模型是 gpt-image-2 + quality=4k）时才剥离。
+    // 默认行为：保持原模型名不变，由各 API 协议层决定是否需要调整
+    if (modelNorm.wasNormalized && modelNorm.strippedSuffix === 'official') {
+      // 仅剥离 -official 这种纯渠道后缀
+      console.log(`[edit] Stripped -official channel suffix: "${pureModel}" → "${modelNorm.apiModelName}"`);
       pureModel = modelNorm.apiModelName;
     }
+    const apiModelName = pureModel; // API实际调用用原始模型名（保留-4k/-2k等后缀）
 
     // Content safety check
     const safetyResult = checkPromptSafety(prompt);

@@ -174,8 +174,10 @@ export async function POST(request: NextRequest) {
     // 如果 providerId 字段为空但从 model 中提取到了，自动回填
     const effectiveProviderId = providerId || extractedProviderId || '';
 
-    // ★ 模型别名规范化：将 gpt-image-2-2k → gpt-image-2 等别名映射为 API 可识别的基础模型名
-    const normalized = normalizeModelForApi(model);
+    // ★ 模型别名规范化：先基于前端传入的 modelId 做初步规范化，等找到 provider 后会用 provider.selectedModels 做精确匹配
+    // 保留原始 modelId 用于精确匹配
+    const rawModelId = model;
+    let normalized = normalizeModelForApi(model);
     if (normalized.wasNormalized) {
       console.log(`[generate] 模型别名规范化: "${model}" → "${normalized.apiModelName}"`);
       model = normalized.apiModelName;
@@ -576,6 +578,33 @@ export async function POST(request: NextRequest) {
     
     // 解析兼容性档案 - 决定 API 调用方式
     const initialProfile = resolveCompatProfile(provider);
+    
+    // ★ 二次精确规范化：使用 provider.selectedModels 列表做精确匹配
+    // 关键修复：PearAPI 有独立的 gpt-image-2/gpt-image-2-2k/gpt-image-2-4k 模型，不能统一替换成 gpt-image-2
+    // 只有当 provider 模型列表中不存在 exact 模型时，才使用别名映射
+    const providerModels = Array.isArray(provider?.selectedModels) ? provider.selectedModels : [];
+    if (rawModelId && providerModels.length > 0) {
+      const exactMatch = providerModels.some(m => {
+        const mLower = String(m).toLowerCase().trim();
+        return mLower === rawModelId.toLowerCase();
+      });
+      if (exactMatch) {
+        // 精确存在：使用原始模型名，不做别名剥离
+        console.log(`[generate] 模型精确匹配成功: "${rawModelId}" 在提供商模型列表中，保留原名`);
+        model = rawModelId;
+        // 同时从 model 名中提取分辨率档位（gpt-image-2-4k → 4k）
+        const tierMatch = rawModelId.match(/-(1k|2k|4k|8k)$/i);
+        if (tierMatch) {
+          normalized.resolutionTier = tierMatch[1].toLowerCase();
+        }
+      } else {
+        // 精确不存在：使用初步规范化结果（剥离后缀）
+        if (normalized.wasNormalized) {
+          console.log(`[generate] 提供商模型列表中无 "${rawModelId}"，使用规范化名: "${model}"`);
+        }
+      }
+    }
+    
     let modelConfig = inferModelConfig(model, initialProfile, provider?.displayName);
 
     // 构建备选模型列表（排除当前模型，优先管理员配置的模型）

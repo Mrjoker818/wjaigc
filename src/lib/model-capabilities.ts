@@ -802,36 +802,117 @@ const QUALITY_SUFFIX_RE = /[-\s](2k|4k|8k|hd|uhd)$/i;
 export interface NormalizedModelInfo {
   /** API 可识别的基础模型名（如 gpt-image-2） */
   apiModelName: string;
+  /** 原始（未规范化）模型名 */
+  originalModel: string;
   /** 是否经过了别名规范化（原名 != API 名） */
   wasNormalized: boolean;
   /** 从后缀推断的分辨率等级（如 '2k', '4k', 'hd'），无后缀时为 null */
   resolutionTier: string | null;
   /** 从后缀推断的质量等级（如 'lite', 'pro', 'max'），无后缀时为 null */
   qualityTier: string | null;
+  /** 被剥离掉的后缀（如 '-4k', '-2k'），用于判断是否需要保留原名 */
+  strippedSuffix: string | null;
+  /** 该提供商模型列表中是否同时包含基础名和带后缀的变体（如同时有 gpt-image-2 与 gpt-image-2-4k） */
+  providerHasSuffixVariant: boolean;
 }
 
-export function normalizeModelForApi(modelId: string): NormalizedModelInfo {
+export interface NormalizeModelOptions {
+  /**
+   * 该提供商的所有模型ID列表。若传入，normalizeModelForApi 会检查：
+   * - 若 providerModelList 同时包含基础名（gpt-image-2）和带后缀名（gpt-image-2-4k），
+   *   则按 OpenAI 惯例剥离后缀（官方渠道用法：基础模型 + quality/resolution参数）。
+   * - 若 providerModelList 只包含带后缀名、没有基础名，则视为独立模型（如 PearAPI），
+   *   保留完整模型名，仅从后缀提取 resolutionTier 作为档位信息。
+   */
+  providerModelList?: string[] | Set<string>;
+  /**
+   * 强制保留后缀（直接透传原始模型名），仅从后缀提取档位信息。
+   * 用于明确知道该提供商需要完整模型名的场景。
+   */
+  preserveSuffix?: boolean;
+}
+
+function hasModel(list: string[] | Set<string> | undefined, name: string): boolean {
+  if (!list) return false;
+  if (list instanceof Set) return list.has(name);
+  return list.includes(name);
+}
+
+export function normalizeModelForApi(modelId: string, opts?: NormalizeModelOptions): NormalizedModelInfo {
   if (!modelId) {
-    return { apiModelName: modelId, wasNormalized: false, resolutionTier: null, qualityTier: null };
+    return { apiModelName: modelId, originalModel: modelId, wasNormalized: false, resolutionTier: null, qualityTier: null, strippedSuffix: null, providerHasSuffixVariant: false };
   }
 
   const match = QUALITY_SUFFIX_RE.exec(modelId);
   if (!match) {
-    return { apiModelName: modelId, wasNormalized: false, resolutionTier: null, qualityTier: null };
+    return { apiModelName: modelId, originalModel: modelId, wasNormalized: false, resolutionTier: null, qualityTier: null, strippedSuffix: null, providerHasSuffixVariant: false };
   }
 
   const suffix = match[1].toLowerCase();
-  const apiModelName = modelId.slice(0, match.index);
-  // Resolution suffixes only (2k/4k/8k/hd/uhd); pro/max/lite are part of model name
   const isResolution = ['2k', '4k', '8k', 'hd', 'uhd'].includes(suffix);
+  const baseModelName = modelId.slice(0, match.index);
 
-  console.log(`[normalizeModelForApi] 模型别名规范化: "${modelId}" → "${apiModelName}" (suffix: ${suffix})`);
+  // 场景1：强制保留后缀（如PearAPI这类模型名必须带-4k/-2k后缀）
+  if (opts?.preserveSuffix) {
+    console.log(`[normalizeModelForApi] 强制保留后缀: "${modelId}" (preserveSuffix=true), suffix=${suffix}`);
+    return {
+      apiModelName: modelId,
+      originalModel: modelId,
+      wasNormalized: false,
+      resolutionTier: isResolution ? suffix : null,
+      qualityTier: null,
+      strippedSuffix: null,
+      providerHasSuffixVariant: false,
+    };
+  }
 
+  // 场景2：提供商模型列表可用 - 智能判断
+  let providerHasSuffixVariant = false;
+  if (opts?.providerModelList) {
+    const list = opts.providerModelList;
+    const fullInList = hasModel(list, modelId);
+    const baseInList = hasModel(list, baseModelName);
+    providerHasSuffixVariant = fullInList;
+
+    if (fullInList && !baseInList) {
+      // 带后缀的模型在列表里，但基础名不在 → 这是独立模型，保留原名
+      console.log(`[normalizeModelForApi] 独立模型(保留后缀): "${modelId}" (基础名"${baseModelName}"不在提供商模型列表中)`);
+      return {
+        apiModelName: modelId,
+        originalModel: modelId,
+        wasNormalized: false,
+        resolutionTier: isResolution ? suffix : null,
+        qualityTier: null,
+        strippedSuffix: suffix,
+        providerHasSuffixVariant: true,
+      };
+    }
+    if (fullInList && baseInList) {
+      // 两种名同时存在 → 按提供商规范使用带后缀的原名，让后端明确选择该变体
+      console.log(`[normalizeModelForApi] 提供商同时列出基础名与后缀变体，保留原名: "${modelId}"`);
+      return {
+        apiModelName: modelId,
+        originalModel: modelId,
+        wasNormalized: false,
+        resolutionTier: isResolution ? suffix : null,
+        qualityTier: null,
+        strippedSuffix: suffix,
+        providerHasSuffixVariant: true,
+      };
+    }
+    // 否则：基础名在列表里（或都不在）→ 按惯例剥离后缀
+  }
+
+  // 场景3：默认（OpenAI/Apimart/4sAPI惯例）：剥离后缀，用基础模型名 + quality/resolution传档位
+  console.log(`[normalizeModelForApi] 模型别名规范化: "${modelId}" → "${baseModelName}" (suffix: ${suffix})`);
   return {
-    apiModelName,
+    apiModelName: baseModelName,
+    originalModel: modelId,
     wasNormalized: true,
     resolutionTier: isResolution ? suffix : null,
-    qualityTier: null, // pro/max/lite不再剥离，质量等级由模型自身决定
+    qualityTier: null,
+    strippedSuffix: suffix,
+    providerHasSuffixVariant,
   };
 }
 
