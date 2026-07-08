@@ -1,0 +1,38 @@
+{
+  "name": "program-repair-auditor",
+  "displayName": "Program Repair Auditor",
+  "version": "1.0.0",
+  "description": "Whole-program software inspection, systematic root-cause debugging, controlled repair, and evidence-based completion verification.",
+  "triggers": [
+    "make this project work",
+    "fix all bugs",
+    "repair failing tests",
+    "debug build failure",
+    "fix CI",
+    "end-to-end project check",
+    "verify the program works",
+    "full-program testing and repair"
+  ],
+  "entry": "SKILL.md",
+  "language": "en",
+  "portable": true,
+  "requirements": {
+    "tools": [
+      "shell",
+      "filesystem",
+      "version-control-read",
+      "test-runner-or-project-scripts"
+    ],
+    "optionalTools": [
+      "browser-automation",
+      "network-access",
+      "package-manager"
+    ]
+  },
+  "coreRules": [
+    "No fixes without root-cause investigation first.",
+    "No completion claims without fresh verification evidence.",
+    "Preserve unrelated user changes and existing project conventions.",
+    "Report exact commands, flows, failures, blockers, and residual risks."
+  ]
+}

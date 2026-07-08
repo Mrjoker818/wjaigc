@@ -388,6 +388,15 @@ export class UserManager {
           userId: p.userId || currentUserId, // 仅对无 userId 的历史数据补充当前用户ID
         }));
 
+      // ★ 数据保护：本地项目总数大于0且服务器项目总数大于0时，防止空数据覆盖
+      // 如果准备上传的所有项目图片数总和为0，但内存中存在有图项目，判定为异常状态，放弃同步
+      const localTotalImgs = projectsPayload.reduce((sum, p) => sum + (p.canvasImages?.length || 0), 0);
+      const memTotalImgs = userData.projects.reduce((sum, p) => sum + (p.canvasImages?.length || 0), 0);
+      if (memTotalImgs > 0 && localTotalImgs === 0) {
+        console.warn('[Sync] syncToServer: BLOCKED — payload has 0 images but memory has', memTotalImgs, 'images. Aborting to prevent data loss.');
+        return;
+      }
+
       const syncRes = await fetch('/api/user-data/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

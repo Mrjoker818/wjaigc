@@ -601,12 +601,16 @@ export default function VideoGenerationPanel({
     }
   }, [selectedImageUrl, mode]);
 
-  // 画布选中视频自动设为延长源
+  // 画布选中视频自动切到延长模式并设为源
   useEffect(() => {
-    if (selectedVideoUrl && mode === 'video-extend') {
-      setVideoUrl(selectedVideoUrl);
+    if (selectedVideoUrl) {
+      if (currentFeatures?.videoExtend) {
+        setMode('video-extend');
+        setVideoUrl(selectedVideoUrl);
+      }
     }
-  }, [selectedVideoUrl, mode]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedVideoUrl]);
 
   // 切换模型时重置不支持的参数
   useEffect(() => {

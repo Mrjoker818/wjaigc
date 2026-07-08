@@ -441,8 +441,14 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       if (diff < 86400000) return `${Math.floor(diff / 3600000)} 小时前`;
       return `${Math.floor(diff / 86400000)} 天前`;
     }
+    // 智能排序：有图片的项目优先，然后按更新时间倒序，空项目沉底
     return [...projects]
-      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+      .sort((a, b) => {
+        const aImgs = (a.canvasImages || []).length;
+        const bImgs = (b.canvasImages || []).length;
+        if ((aImgs > 0) !== (bImgs > 0)) return aImgs > 0 ? -1 : 1;
+        return (b.updatedAt || 0) - (a.updatedAt || 0);
+      })
       .slice(0, 4)
       .map(p => ({
         id: p.id,
@@ -455,7 +461,17 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const filteredProjects = useMemo(() => {
     let list = [...projects];
     if (searchQuery) list = list.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()));
-    if (projectFilter === 'recent') list = list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 8);
+    // 智能排序：有图项目优先，空项目沉底
+    list = list.sort((a, b) => {
+      const aImgs = (a.canvasImages || []).length;
+      const bImgs = (b.canvasImages || []).length;
+      if ((aImgs > 0) !== (bImgs > 0)) return aImgs > 0 ? -1 : 1;
+      if (projectFilter === 'recent') {
+        return (b.updatedAt || 0) - (a.updatedAt || 0);
+      }
+      return (b.updatedAt || 0) - (a.updatedAt || 0);
+    });
+    if (projectFilter === 'recent') list = list.slice(0, 8);
     if (projectFilter === 'starred') list = list.filter(p => starredIds.has(p.id));
     return list;
   }, [projects, searchQuery, projectFilter, starredIds]);
