@@ -1,4 +1,0 @@
-interface:
-  display_name: "Program Repair Auditor"
-  short_description: "Whole-program repair and verification workflow."
-  default_prompt: "Use this skill to inspect a software project as a whole product, reproduce failures, identify root causes, make controlled repairs, and verify completion with fresh evidence."

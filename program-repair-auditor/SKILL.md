@@ -1,119 +1,111 @@
 ---
 name: program-repair-auditor
-description: Whole-program software inspection, debugging, repair, and verification workflow. Use when an agent is asked to make a project work, fix bugs, repair failing tests/builds/CI, diagnose runtime or integration failures, perform end-to-end project checks, or confirm that code changes are truly complete. Combines full-program assessment, systematic root-cause debugging, controlled repair, and fresh evidence-based verification before completion claims.
+description: Whole-program software inspection, debugging, repair, and verification workflow. Use when an agent is asked to make a project work, fix bugs, repair failing tests/builds/CI, diagnose runtime or integration failures, perform end-to-end project checks, or confirm that code changes are truly complete.
 ---
 
 # Program Repair Auditor
 
-Use this skill to treat a repository as a working product, not as isolated files. Move from broad discovery to reproducible failures, root-cause diagnosis, controlled fixes, and fresh verification evidence.
+全程序软件检查、系统根因调试、受控修复和基于证据的完成验证工作流。
 
-## Non-Negotiable Rules
+## 何时使用
 
-1. No fixes without root-cause investigation first.
-2. No completion claims without fresh verification evidence.
-3. Do not hide failures by skipping checks, weakening assertions, suppressing errors, or deleting tests.
-4. Preserve unrelated user changes and existing project conventions.
-5. Prefer the project's own package manager, scripts, test framework, and architecture.
+- 用户要求让整个项目正常运行
+- 需要修复所有 bug 或失败测试
+- CI/构建失败需要调试
+- 运行时或集成失败需要诊断
+- 需要端到端项目检查
+- 需要验证代码更改是否真正完成
 
-## Workflow
+## 不可协商规则
 
-### 1. Establish Scope
+1. **先诊断再修复**：没有根因调查就不能修复。
+2. **证据为证**：没有新的验证证据就不能声称完成。
+3. **不隐藏失败**：不通过跳过检查、削弱断言、抑制错误或删除测试来掩盖失败。
+4. **保留无关变更**：保留不相关的用户更改和现有项目惯例。
+5. **优先项目规范**：优先使用项目自己的包管理器、脚本、测试框架和架构。
 
-Inspect the repository before editing:
+## 工作流程
 
-- Read project instructions, README files, manifests, lockfiles, entry points, configuration, routes, tests, and current VCS state.
-- Infer primary user journeys from docs, commands, tests, routes, UI, APIs, and scripts.
-- Define "working" as observable acceptance criteria: install/build succeeds, configured checks pass, primary flows work, and known limitations are documented.
-- State material assumptions when the repo does not define them.
+### 1. 确定范围
 
-Do not introduce new frameworks, package managers, or broad abstractions unless the existing system clearly requires them.
+在编辑之前检查仓库：
 
-### 2. Build a Baseline
+- 阅读项目说明、README、manifests、lockfiles、入口点、配置、路由、测试和当前 VCS 状态
+- 从文档、命令、测试、路由、UI、API 和脚本推断主要用户旅程
+- 将"正常工作"定义为可观察的验收标准：安装/构建成功、配置检查通过、主要流程工作、已知限制已记录
+- 当仓库未定义时说明材料假设
 
-Run the cheapest broad checks first, then deepen:
+不要引入新框架、包管理器或广泛抽象，除非现有系统明确需要。
 
-1. Verify dependencies and environment prerequisites without exposing secrets.
-2. Run configured formatting, lint, static analysis, and type checks.
-3. Run unit and integration tests.
-4. Build or package the full program.
-5. Start the application when relevant and exercise primary flows.
-6. Capture exact failing commands, logs, stack traces, affected flows, and determinism.
+### 2. 建立基线
 
-If configured checks are absent or weak, create focused checks around important behavior and reproduced defects. Avoid low-value tests written only to increase test count.
+先运行最便宜的广泛检查，然后深入：
 
-### 3. Diagnose Before Editing
+1. 验证依赖和环境先决条件（不暴露密钥）
+2. 运行配置的格式化、lint、静态分析和类型检查
+3. 运行单元和集成测试
+4. 构建或打包完整程序
+5. 启动应用程序（相关时）并执行主要流程
+6. 捕获精确的失败命令、日志、堆栈跟踪、受影响流程和确定性
 
-For every failure, complete root-cause investigation before proposing or applying a fix:
+如果配置检查缺失或薄弱，围绕重要行为创建有针对性的检查。避免仅为增加测试计数而写的低价值测试。
 
-- Read the full error output, stack trace, codes, line numbers, and warnings.
-- Reproduce consistently with the smallest reliable command or interaction.
-- Check recent changes, diffs, dependency changes, config changes, and environment differences.
-- Trace data flow backward from symptom to source. Find where the bad value, state, timing, or assumption originates.
-- In multi-component systems, add temporary diagnostic instrumentation at component boundaries to prove where the failure appears.
-- Compare broken code with similar working examples in the same codebase.
-- Form one concrete hypothesis: "I think X is the root cause because Y."
-- Identify evidence that would disprove the hypothesis.
+### 3. 编辑前诊断
 
-If a failure is not reproducible, gather more evidence rather than guessing. If three fix attempts fail and each reveals new coupling or shared-state problems, stop and question the architecture before attempting another patch.
+对于每个失败，在提议或应用修复之前完成根因调查：
 
-### 4. Repair in Controlled Slices
+- 阅读完整的错误输出、堆栈跟踪、代码、行号和警告
+- 用最小的可靠命令或交互一致复现
+- 检查最近的更改、diff、依赖更改、配置更改和环境差异
+- 从症状向后追踪数据流。找到坏值、状态、时间或假设的来源
+- 在多组件系统中，在组件边界添加临时诊断仪器以证明失败出现的位置
+- 将损坏代码与同一代码库中类似的工作示例比较
+- 形成一个具体假设："我认为 X 是根因，因为 Y"
+- 识别能证伪假设的证据
 
-Make the smallest coherent fix at the correct abstraction boundary:
+如果失败不可复现，收集更多证据而非猜测。如果三次修复尝试失败且每次揭示新的耦合或共享状态问题，停止并在尝试另一个补丁前质疑架构。
 
-- Add or strengthen a failing regression test when practical.
-- Change one root cause at a time.
-- Preserve public behavior unless the user requested a behavior change.
-- Cover relevant empty states, invalid input, cleanup, concurrency, platform differences, and error paths.
-- Avoid unrelated refactors while the baseline is unstable.
-- After each repair slice, rerun the narrow reproduction before broader checks.
+### 4. 受控切片修复
 
-If one failure masks another, repeat the baseline-diagnose-repair loop until no in-scope failure remains or an external blocker is proven.
+在正确的抽象边界做出最小连贯修复：
 
-### 5. Verify With a Widening Ladder
+- 当实用时添加或加强失败的回归测试
+- 每次更改一个根因
+- 除非用户请求行为更改，保留公共行为
+- 涵盖相关的空状态、无效输入、清理、并发、平台差异和错误路径
+- 当基线不稳定时避免不相关的重构
+- 在每个修复切片后，在更广泛检查前重跑狭窄复现
 
-Before claiming success, run fresh verification in the current session:
+如果一个失败掩盖另一个，重复基线-诊断-修复循环，直到范围内没有失败残留或外部阻塞被证明。
 
-1. Exact reproduction or regression test for the original symptom.
-2. Tests for touched modules and direct dependents.
-3. Full configured test suite when feasible.
-4. Lint, type check, and build/package checks.
-5. Runtime smoke test.
-6. End-to-end primary user journeys, including at least one meaningful failure path when relevant.
+### 5. 用扩大阶梯验证
 
-Read the full output and exit codes. A previous run, partial run, passing lint, or "looks correct" is not enough.
+在声称成功前，在当前会话中运行新的验证：
 
-### 6. Inspect the Final State
+1. 原始症状的精确复现或回归测试
+2. 触摸模块及其直接依赖的测试
+3. 完整配置测试套件（可行时）
+4. Lint、类型检查和构建/打包检查
+5. 运行时冒烟测试
+6. 端到端主要用户旅程（相关时包括至少一个有意义的失败路径）
 
-Before final reporting or handoff:
+阅读完整输出和退出代码。之前的运行、部分运行、通过 lint 或"看起来正确"是不够的。
 
-- Review the diff for accidental changes, debug output, hard-coded secrets, disabled checks, brittle waits, and weakened assertions.
-- Confirm no unrelated user changes were overwritten.
-- Confirm generated files, snapshots, and lockfiles are intentional.
-- Document any command that could not run, why it could not run, and the residual risk.
+### 6. 检查最终状态
 
-## Completion Report
+在最终报告或交接前：
 
-Lead with the actual outcome, then report evidence:
+- 检查 diff 以发现意外更改、调试输出、硬编码密钥、禁用检查、脆弱等待和削弱断言
+- 确认不相关的用户更改未被覆盖
+- 确认生成文件、快照和 lockfiles 是有意的
+- 记录任何无法运行的命令、原因及残留风险
 
-- Root causes found.
-- Fixes made.
-- Tests added or strengthened.
-- Verification commands and flows that passed.
-- Checks that failed or could not run.
-- Remaining limitations, blockers, or risks.
+## 完成报告
 
-Never say the work is complete unless the verification evidence supports that exact claim.
+以实际结果为首，然后报告证据：
 
-## Red Flags
-
-Stop and return to diagnosis if the agent is about to say or think:
-
-- "This should work."
-- "It is probably fixed."
-- "Just try this quick change."
-- "Skip the test for now."
-- "The build should pass because lint passed."
-- "The previous agent said it succeeded."
-- "One more patch" after multiple unproven attempts.
-
-Evidence comes before confidence.
+- 发现的根因
+- 做出的修复
+- 添加或加强的测试
+- 新验证结果（命令、流程、日志）
+- 残留风险或后续建议
