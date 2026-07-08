@@ -4,6 +4,8 @@ import {
   buildShotPlanSystemPrompt,
   buildShotPlanUserMessage,
   parseShotPlanResponse,
+  parseShotPlanCharacters,
+  parseShotPlanScenes,
   initShotFromPlan,
   type VideoShotPlan,
   type DirectorStyle,
@@ -110,6 +112,18 @@ export async function POST(req: NextRequest) {
                 aspectRatio: s.aspectRatio || aspectRatio,
                 status: 'planned',
               }));
+              // 解析 LLM 返回的 characters / scenes
+              const parsedCharacters = parseShotPlanCharacters(text);
+              const parsedScenes = parseShotPlanScenes(text, shots);
+              (globalThis as any).__lastShotPlanCharacters = parsedCharacters;
+              (globalThis as any).__lastShotPlanScenes = parsedScenes;
+              return NextResponse.json({
+                success: true,
+                shots,
+                characters: parsedCharacters,
+                scenes: parsedScenes,
+                totalDuration: shots.reduce((a, s) => a + (s.duration || 3), 0),
+              });
             }
           }
         }

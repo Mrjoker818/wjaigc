@@ -40,6 +40,8 @@ export interface VideoShotPlan {
   aspectRatio: string;
   references: RefBinding[];
   continuityNotes: string[];
+  /** 该镜头的拍摄环境/场景描述（供场景图生成使用） */
+  setting?: string;
   // 运行时结果字段
   videoUrl?: string;
   thumbnailUrl?: string;
@@ -50,6 +52,9 @@ export interface VideoShotPlan {
   error?: string;
   diagnosis?: Array<{ label?: string; title?: string; description?: string; patch?: Record<string, unknown>; promptAppend?: string; negativeAppend?: string }> | null;
   retakeCount?: number;
+  // 制片流水线引用（指向本镜头出现的角色和主场景）
+  characterIds?: string[]; // ShotCharacter.id[]
+  sceneId?: string; // ShotScene.id
   // 上一镜头结尾观察到的状态（用于续写）
   endState?: ShotContinuityState;
 }
@@ -69,6 +74,38 @@ export interface ShotContinuityState {
 // 兼容前端运动笔刷轨迹类型（使用 video-api 的 MotionTrajectory）
 export type BrushTrajectory = MotionTrajectory;
 
+export interface VideoCharacter {
+  id: string;
+  name: string;
+  role?: string; // 角色定位：主角/配角/反派...
+  age?: string;
+  gender?: string;
+  appearance: string; // 外貌关键词
+  costume?: string; // 服装
+  expression?: string; // 默认表情
+  frontPrompt: string; // 正面定妆照提示词（英文逗号分隔）
+  sidePrompt?: string; // 侧面定妆照提示词
+  frontUrl?: string; // 生成后的正面图 URL
+  sideUrl?: string; // 生成后的侧面图 URL
+  generating?: boolean;
+  error?: string;
+}
+
+export interface VideoScene {
+  id: string;
+  shotId?: string; // 关联到哪个镜头（一个场景可对应一镜）
+  name: string; // 场景名，如"咖啡馆内景日"
+  location: string;
+  timeOfDay?: string;
+  lighting: string;
+  mood?: string;
+  keyProps?: string; // 关键道具
+  scenePrompt: string; // 场景氛围图提示词（英文逗号分隔）
+  imageUrl?: string; // 生成后的场景图 URL
+  generating?: boolean;
+  error?: string;
+}
+
 export interface ShotPlanInput {
   storyIdea: string;
   shotCount?: number; // 默认 3-5
@@ -78,6 +115,7 @@ export interface ShotPlanInput {
   characters?: string;
   setting?: string;
   model?: string;
+  withAssets?: boolean; // 是否额外生成 characters[] + scenes[] 设计稿
 }
 
 // === 多镜头续写状态工具 ===
@@ -173,8 +211,40 @@ export function buildShotPlanSystemPrompt(style: DirectorStyle = 'cinematic'): s
 5. 整体风格：${styleDesc}
 6. **严格输出 JSON**，不要任何解释文字，不要 markdown 代码块包裹，只输出 JSON 对象。
 
+7. 必须同时从故事中提取「角色资产」和「场景资产」，用于后续 AI 自动生成角色定妆照和场景氛围图：
+   - characters[]：故事中出现的**有名有姓或有明确外形特征**的人物/角色，每个包含：
+     * id：简短英文标识（如 hero/girl/oldman），仅用英文+数字+下划线
+     * name：角色名或身份（如"穿风衣的男人"/"红衣少女"）
+     * appearancePrompt：用于 AI 图像生成的人物外观英文+中文提示词（详细描述发型/脸型/年龄/服装/配色/气质，50-100字，适合生成正面定妆照，不要写表情动作）
+     * keywords：3-5 个外观关键词标签
+   - scenes[]：故事涉及的**不同物理场景**（合并相似场景，比如"咖啡馆室内"出现多次只算一个），每个包含：
+     * id：简短英文标识（如 street_night/cafe_interior/beach_sunset）
+     * name：场景名（6字以内）
+     * environmentPrompt：用于 AI 图像生成的场景氛围提示词（描述地点/时间/天气/光线/色调/氛围，50-100字，不要出现人物）
+     * mood：整体氛围关键词（2-4字）
+     * lightingHint：光源与色温提示
+   若故事没有明确人物（纯风景/空镜），characters 返回 []；若故事只有一个场景，scenes 也只返回一个。
+   characters/scenes 中的 id 必须与镜头里出现的角色/场景对应。
+
 输出 JSON 结构：
 {
+  "characters": [
+    {
+      "id": string,
+      "name": string,
+      "appearancePrompt": string,
+      "keywords": string[]
+    }
+  ],
+  "scenes": [
+    {
+      "id": string,
+      "name": string,
+      "environmentPrompt": string,
+      "mood": string,
+      "lightingHint": string
+    }
+  ],
   "shots": [
     {
       "title": string,
@@ -187,7 +257,9 @@ export function buildShotPlanSystemPrompt(style: DirectorStyle = 'cinematic'): s
       "prompt": string,
       "duration": number,
       "aspectRatio": string,
-      "continuityNotes": string[]
+      "continuityNotes": string[],
+      "characterIds": string[],
+      "sceneId": string
     }
   ]
 }`;
@@ -241,6 +313,94 @@ export function parseShotPlanResponse(text: string, defaultDuration = 5, default
   } catch {
     return [];
   }
+}
+
+/** 从分镜 LLM 响应中解析角色列表 */
+export function parseShotPlanCharacters(text: string): VideoCharacter[] {
+  let cleaned = text.trim();
+  const fenceMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenceMatch) cleaned = fenceMatch[1].trim();
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start < 0 || end < 0) return [];
+  try {
+    const obj = JSON.parse(cleaned.slice(start, end + 1));
+    const arr = Array.isArray(obj.characters) ? obj.characters : [];
+    return arr.map((c: any, i: number) => ({
+      id: `char-${Date.now()}-${i}`,
+      name: String(c.name ?? `角色${i + 1}`).slice(0, 20),
+      appearance: String(c.appearance ?? ''),
+      costume: String(c.costume ?? ''),
+      age: String(c.age ?? ''),
+      gender: String(c.gender ?? ''),
+      style: String(c.style ?? ''),
+      visualPrompt: String(c.visualPrompt ?? buildCharVisualPrompt(c)),
+      frontImageUrl: '',
+      sideImageUrl: '',
+      generateStatus: 'pending' as const,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+/** 从分镜 LLM 响应中解析场景列表 */
+export function parseShotPlanScenes(text: string, shots: VideoShotPlan[]): VideoScene[] {
+  let cleaned = text.trim();
+  const fenceMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenceMatch) cleaned = fenceMatch[1].trim();
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  let parsed: any[] = [];
+  if (start >= 0 && end >= 0) {
+    try {
+      const obj = JSON.parse(cleaned.slice(start, end + 1));
+      if (Array.isArray(obj.scenes)) parsed = obj.scenes;
+    } catch {
+      parsed = [];
+    }
+  }
+  // 合并：若 LLM 没返回 scenes，则根据 shots 自动派生
+  if (parsed.length === 0 && shots.length > 0) {
+    const seen = new Set<string>();
+    shots.forEach((s, i) => {
+      const key = (s.lighting || s.setting || s.prompt).slice(0, 20);
+      if (seen.has(key)) return;
+      seen.add(key);
+      parsed.push({
+        id: `scene-${Date.now()}-${i}`,
+        name: s.title || `场景${i + 1}`,
+        location: s.setting || '',
+        timeOfDay: s.lighting || '',
+        mood: '',
+        visualPrompt: s.prompt,
+        imageUrl: '',
+        forShotIds: [s.id],
+        generateStatus: 'pending',
+      });
+    });
+  }
+  return parsed.map((s: any, i: number) => ({
+    id: String(s.id ?? `scene-${Date.now()}-${i}`),
+    name: String(s.name ?? `场景${i + 1}`).slice(0, 30),
+    location: String(s.location ?? ''),
+    timeOfDay: String(s.timeOfDay ?? ''),
+    mood: String(s.mood ?? ''),
+    visualPrompt: String(s.visualPrompt ?? buildSceneVisualPrompt(s)),
+    imageUrl: '',
+    forShotIds: Array.isArray(s.forShotIds) ? s.forShotIds.map((x: any) => String(x)) : (s.shotIndex != null ? [String(s.shotIndex)] : []),
+    generateStatus: 'pending' as const,
+  }));
+}
+
+function buildCharVisualPrompt(c: any): string {
+  const parts = [c.age, c.gender, c.appearance, c.costume, c.style].filter(Boolean);
+  return parts.join('，') + '，高清人物定妆照，纯白/纯色背景，正面平视，电影感打光，半身像';
+}
+
+function buildSceneVisualPrompt(s: any): string {
+  const parts = [s.location, s.timeOfDay, s.mood].filter(Boolean);
+  return parts.join('，') + '，空镜场景氛围图，广角，电影感构图，高细节';
 }
 
 // === 连续性账本与尾帧续写（保留骨架，供后续扩展） ===
