@@ -19,6 +19,7 @@ import {
   type VideoCompatProfile,
 } from '@/lib/video-api';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { buildDirectorPrompt, type VideoDirectorMode } from '@/lib/video-director';
 import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits, refundCredits } from '@/lib/credits';
 import { logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
@@ -61,6 +62,9 @@ export async function POST(request: NextRequest) {
       motionBrush,
       characterReferences,
       motionStrength,
+      useDirector,
+      directorMode,
+      directorIntent,
     } = body;
 
     if (!prompt || !model) {
@@ -202,8 +206,63 @@ export async function POST(request: NextRequest) {
     ]);
 
     // 4. 构建请求参数
+    // 4.1 如果启用导演增强，在服务端本地"增强"提示词（拼合导演风格/参考/负向等，不依赖额外 LLM 调用，避免失败）
+    let finalPrompt = prompt;
+    let finalNegativePrompt = negativePrompt;
+    if (useDirector !== false) { // 默认启用
+      try {
+        const refs: Array<{ id: string; url: string; role: any; weight?: number }> = [];
+        if (resolvedImageUrl) refs.push({ id: 'first', url: resolvedImageUrl, role: 'first-frame' });
+        if (resolvedLastFrameUrl) refs.push({ id: 'last', url: resolvedLastFrameUrl, role: 'last-frame' });
+        (resolvedRefs || []).forEach((u: string, i: number) => refs.push({ id: `ref${i}`, url: u, role: 'style' }));
+        (characterReferences || []).forEach((u: string, i: number) => refs.push({ id: `char${i}`, url: u, role: 'identity' }));
+        const compiledMode: VideoDirectorMode = imageUrl
+          ? (lastFrameImageUrl ? 'image2video-firstlast' : 'image2video-first')
+          : 'text2video';
+        const directorMsg = buildDirectorPrompt({
+          userPrompt: prompt,
+          mode: compiledMode,
+          modelId: pureModel,
+          model: pureModel,
+          style: directorMode || 'cinematic',
+          aspectRatio,
+          duration,
+          firstFrameNote: resolvedImageUrl ? '首帧图片由用户提供' : undefined,
+          lastFrameNote: resolvedLastFrameUrl ? '尾帧图片由用户提供' : undefined,
+          imageUrl: resolvedImageUrl,
+          lastFrameUrl: resolvedLastFrameUrl,
+          references: refs,
+          audio: generateAudio,
+          camera: cameraControl?.type,
+          includeNegative: true,
+          verbosity: 'standard',
+        });
+        // 本地增强：在原始 prompt 前拼接导演指导段，供视频模型参考
+        const guidance: string[] = [];
+        if (cameraControl?.type) {
+          const camLabel: Record<string, string> = {
+            push_in: '缓慢推进', push_out: '缓慢拉出', pan_left: '左摇', pan_right: '右摇',
+            tilt_up: '上仰', tilt_down: '下俯', orbit_left: '左环绕', orbit_right: '右环绕',
+            zoom_in: '放大', zoom_out: '缩小', tracking: '跟拍', static: '静止机位',
+            crane_up: '摇臂升起', crane_down: '摇臂降下', handheld: '手持', dolly: '滑轨平移',
+          };
+          guidance.push(`运镜：${camLabel[cameraControl.type] || cameraControl.type}，强度${cameraControl.intensity || 50}%`);
+        }
+        if (directorIntent) guidance.push(`镜头意图：${directorIntent}`);
+        if (guidance.length) {
+          finalPrompt = `【导演指导】${guidance.join('；')}。\n${prompt}`;
+        }
+        // negative 保持原样，模型不支持时适配器会过滤
+        finalNegativePrompt = negativePrompt;
+        // user 消息可用于调试日志
+        console.log(`[video/generate] Director user-message length=${directorMsg.user.length}, mode=${compiledMode}`);
+      } catch (e) {
+        console.warn('[video/generate] Director compile failed, falling back to raw prompt:', e);
+      }
+    }
+
     const videoParams: VideoGenerateParams = {
-      prompt,
+      prompt: finalPrompt,
       model: pureModel,
       imageUrl: resolvedImageUrl,
       lastFrameImageUrl: resolvedLastFrameUrl,
@@ -212,7 +271,7 @@ export async function POST(request: NextRequest) {
       duration,
       mode,
       generateAudio,
-      negativePrompt,
+      negativePrompt: finalNegativePrompt,
       seed,
       apiKey,
       baseUrl,

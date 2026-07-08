@@ -2309,6 +2309,12 @@ function CanvasApp() {
     multiShotScenes?: Array<{ id: string; prompt: string; duration: number; cameraControl?: { type: string; angle?: number; speed?: number } }>;
     chainContinuity?: boolean;
     useGlobalReferences?: boolean;
+    // 导演增强
+    useDirector?: boolean;
+    directorStyle?: string;
+    compiledPrompt?: string;
+    compiledNegative?: string;
+    shotPlan?: any[];
   }) => {
     // ★ 链式多片段生成：当 chainContinuity=true 且有多个场景时，顺序生成每个片段
     if (params.chainContinuity && params.multiShotScenes && params.multiShotScenes.length > 1) {
@@ -2402,6 +2408,8 @@ function CanvasApp() {
           motionStrength: params.motionStrength,
           seed: params.seed,
           negativePrompt: params.negativePrompt,
+          useDirector: params.useDirector,
+          directorStyle: params.directorStyle,
         };
 
         // 创建占位符
@@ -2624,8 +2632,10 @@ function CanvasApp() {
         extendDuration: params.extendDuration || params.duration,
         generateAudio: params.generateAudio,
         providerId: params.providerId,
+        useDirector: params.useDirector,
+        directorStyle: params.directorStyle,
       } : {
-        prompt: params.prompt,
+        prompt: params.compiledPrompt || params.prompt,
         model: params.model,
         imageUrl: params.firstFrameUrl || params.imageUrl,
         lastFrameImageUrl: params.lastFrameUrl,
@@ -2642,10 +2652,12 @@ function CanvasApp() {
         characterReferences: params.characterReferences,
         motionStrength: params.motionStrength,
         seed: params.seed,
-        negativePrompt: params.negativePrompt,
+        negativePrompt: params.compiledNegative || params.negativePrompt,
         multiShotScenes: params.multiShotScenes,
         chainContinuity: params.chainContinuity,
         useGlobalReferences: params.useGlobalReferences,
+        useDirector: params.useDirector,
+        directorStyle: params.directorStyle,
       };
 
       const res = await fetch(apiEndpoint, {

@@ -20,6 +20,7 @@ import {
   getVideoModelInfo,
   type VideoGenerateParams,
 } from '@/lib/video-api';
+import { buildDirectorPrompt } from '@/lib/video-director';
 
 export const maxDuration = 300; // 5 min timeout
 
@@ -132,9 +133,30 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 4. 构建请求参数
+    // 4. 构建请求参数（接入导演级提示词：本地增强，不依赖额外 LLM 调用）
+    const rawPrompt = prompt || '请延续视频内容和画面，保持角色和场景一致';
+    let finalPrompt = rawPrompt;
+    try {
+      const directorMsg = buildDirectorPrompt({
+        userPrompt: rawPrompt,
+        mode: 'extend',
+        modelId: pureModel || '',
+        model: pureModel || '',
+        duration: extendDuration,
+        audio: generateAudio,
+        style: 'cinematic',
+        includeNegative: true,
+        verbosity: 'standard',
+      });
+      // 本地增强：在 prompt 前拼"保持尾帧一致"指导
+      finalPrompt = `【续写指导】从上一片段尾帧自然延续，保持角色外观、场景、光线、运动方向一致；避免突然跳切。\n${rawPrompt}`;
+      console.log(`[video/extend] Director user-message length=${directorMsg.user.length}`);
+    } catch (e) {
+      console.warn('[video/extend] Director compile failed, using raw prompt:', e);
+    }
+
     const videoParams: VideoGenerateParams = {
-      prompt: prompt || '请延长视频',
+      prompt: finalPrompt,
       model: pureModel,
       videoUrl: resolvedVideoUrl,
       action: 'extend',

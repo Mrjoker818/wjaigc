@@ -781,7 +781,31 @@ UPSCALE_TIMEOUT_MS=300000
 
 ## 更新日志
 
-### v3.7.0 (当前版本)
+### v3.8.0 (当前版本)
+
+**P0: 视频导演系统 (Video Director) — 导演级提示词编排 + AI分镜 + 失败诊断**
+
+- 新增 `src/lib/video-director/` 导演核心模块（参考 seedance-2.0 MIT 协议的提示词系统）：
+  - `prompt-compiler.ts`：导演提示词编译器，支持 6 种导演风格（cinematic/documentary/commercial/music-video/anime/minimal），输出结构化镜头语言（景别/运镜/光线/表演/声音）+ 统一负向提示词
+  - `continuity.ts`：结构化分镜计划（VideoShotPlan）+ 连续性账本（ContinuityLedger）+ 尾帧续写提示词构造
+  - `retake-diagnosis.ts`：失败诊断引擎（10类失败模式：人物变形/角色不一致/动作不符/运镜错误/首尾帧不连贯/参考图污染/风格跑偏/时长不足/镜头过乱/文字水印），输出单变量重试建议
+  - `model-capabilities.ts`：视频模型导演能力档案（按模型家族裁剪首尾帧/多参考图/音效/最大时长等参数）
+  - `reference-binding.ts`：参考资产语义绑定（角色/场景/风格/构图/运动/光线/摄像机/声音/首帧/尾帧 10 类角色）
+- 新增 3 个导演 API 端点：
+  - `POST /api/video/director/prompt`：导演增强（调用管理员配置的 chat 模型将自然语言想法编译为专业导演提示词）
+  - `POST /api/video/director/shot-plan`：AI分镜（将故事拆分为 3-8 个结构化镜头，含景别/运镜/光线/声音/连续性备注）
+  - `POST /api/video/director/diagnose`：失败诊断（返回结构化问题与单变量重试建议）
+- 生成/延长路由集成导演增强：`/api/video/generate` 与 `/api/video/extend` 支持 `useDirector` + `directorStyle` 参数，开启后自动调用导演编译器增强 prompt/negative
+- 视频生成面板（video-generation-panel.tsx）升级：
+  - 浮动窗口两列布局（左 340px 风格模板与模型，右列提示词与参数）
+  - 导演风格选择器（6 种风格按钮）
+  - "AI 导演增强"按钮：调用 /api/video/director/prompt 生成专业提示词
+  - "AI 分镜"按钮：多镜头叙事模式下调用 /api/video/director/shot-plan 自动拆分镜头
+  - 结构化镜头卡片：展示景别/运镜/光线/声音标签，支持单独生成/删除/生成所有镜头
+  - 参考图语义角色标签（角色/场景/风格/构图/首帧/尾帧等）
+- 参考 dramaclaw 的数据模型与工作流思路（Elastic License 仅借鉴流程，未搬代码）
+
+### v3.7.0
 
 **P0: 管理员操作日志系统 — 用户操作记录 + AI分析与智能修复**
 

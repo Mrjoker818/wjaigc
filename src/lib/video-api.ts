@@ -116,7 +116,7 @@ export interface VideoTaskPollResult {
 
 // ==================== Model Registry ====================
 
-const VIDEO_MODEL_REGISTRY: Record<string, VideoModelInfo> = {
+export const VIDEO_MODEL_REGISTRY: Record<string, VideoModelInfo> = {
   // === 国内模型 ===
   'kling-v3-video-generation': {
     profile: 'dashscope', name: '可灵 V3 视频', short: 'Kling V3', provider: 'Kuaishou',
