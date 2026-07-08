@@ -499,9 +499,11 @@ export function getModelParamType(modelId: string): ModelParamType {
     
     // 关键词匹配：分辨率档位型模型（仅支持resolution，不支持quality）
     // 这些模型的参数值是"1K/2K/3K/4K"，直接控制输出分辨率
+    // 注：所有后缀带-2k/-4k/-hd的未知模型自动进入resolution模式（由下面自动检测兜底）
     const resolutionKeywords = [
         'seedream', 'seedance', 'kling', 'gemini-image', 'imagen', 
-        'nano-banana', 'hidream', 'flux-ultra'
+        'nano-banana', 'nanobanana', 'nano_banana', 'banana', 'gemini-2.5-flash-image', 'gemini-3-pro-image', 'gemini-3.1-flash-image',
+        'hidream', 'flux-ultra'
     ];
     for (const keyword of resolutionKeywords) {
         if (normalizedId.includes(keyword)) {
@@ -534,22 +536,127 @@ export function getModelParamType(modelId: string): ModelParamType {
         }
     }
     
+    // 🔧 通用后缀兜底：任何模型名带-4k/-2k/-1k/-hd/-v2-4k等分辨率档位后缀 → 都按resolution模型处理
+    // 例如 nanobanana-4k, custom-gpt-image-2-4k, anymodel-2k 等
+    if (/(?:^|[-_])[1234]k(?:[-_]|$)/i.test(modelId) || /(?:^|[-_])hd(?:[-_]|$)/i.test(modelId)) {
+        // 进一步判断：如果模型名同时含 image / gpt / banana / imagen / gemini 等图像关键词，则认为既支持resolution又支持quality
+        const bothKeywords = ['gpt-image', 'chatgpt-image', 'dall-e', 'gemini', 'banana', 'imagen'];
+        for (const kw of bothKeywords) {
+            if (normalizedId.includes(kw)) return 'both';
+        }
+        return 'resolution';
+    }
+    
     return 'none';
 }
 
-/** 获取模型支持的分辨率档位选项 */
-export function getResolutionTierOptions(modelId: string): string[] {
-    return MODEL_QUALITIES[modelId] || [];
+/**
+ * 通用模型参数能力推断（动态+兜底）：
+ * 1. 优先匹配 MODEL_QUALITIES 中明确定义的模型
+ * 2. 未命中时根据模型名后缀/关键词智能推断：
+ *    - 含 -4k/4k/4k-omni → resolution档位: ['1K','2K','4K']
+ *    - 含 -2k/-3k/hd/omni 等 → resolution档位推断
+ *    - 含 banana/gemini/imagen/seedream/kling → resolution档位
+ *    - 含 ideogram → 速度档位 (turbo/default/quality)
+ *    - 含 gpt-image/dall-e → quality档位 (auto/low/medium/high 或 standard/hd)
+ *    - 含 sd/flux/midjourney → quality档位
+ *    - 其他 → 无档位
+ * 返回：{ type: 'resolution'|'quality'|'both'|'none', options: string[], defaultOption: string }
+ */
+export function inferModelParamCapability(modelId: string): { type: ModelParamType; options: string[]; defaultOption: string } {
+    const id = (modelId || '').toLowerCase();
+    if (!id) return { type: 'none', options: [], defaultOption: '' };
+
+    // 1. 优先查MODEL_QUALITIES
+    if (MODEL_QUALITIES[modelId]) {
+        const opts = MODEL_QUALITIES[modelId];
+        const type = getModelParamType(modelId);
+        return { type, options: opts, defaultOption: opts[opts.length - 1] || opts[0] };
+    }
+    // 模糊匹配（MODEL_QUALITIES中可能存在前缀匹配，如nano-banana-pro-4k-xxx）
+    for (const key of Object.keys(MODEL_QUALITIES)) {
+        if (id === key.toLowerCase() || id.startsWith(key.toLowerCase() + '-') || id.endsWith('-' + key.toLowerCase())) {
+            const opts = MODEL_QUALITIES[key];
+            // 根据options内容判断type
+            const isAllRes = opts.every(o => isResolutionTier(o));
+            const isAllQ = opts.every(o => isQualityLevel(o));
+            const t: ModelParamType = isAllRes ? 'resolution' : (isAllQ ? 'quality' : 'both');
+            // 如果模型名带4k，默认选4k；带2k默认选2k；否则最高档位
+            let def = opts[opts.length - 1];
+            if (id.includes('-4k') || id.includes('4k-omni')) def = '4K';
+            else if (id.includes('-2k')) def = '2K';
+            return { type: t, options: opts, defaultOption: def };
+        }
+    }
+
+    // 2. 基于模型名后缀/关键词智能推断
+    // 2.1 分辨率档位模型（1K/2K/4K）
+    const is4k = /(?:^|[-\s])4k(?:[-\s]|$)|-4k-omni|4k-omni/.test(id);
+    const is3k = /(?:^|[-\s])3k(?:[-\s]|$)/.test(id);
+    const is2k = /(?:^|[-\s])2k(?:[-\s]|$)/.test(id) || id.includes('omni');
+    const is1kOnly = /(?:^|[-\s])(?:1k|lite|mini)(?:[-\s]|$)/.test(id);
+    // 品牌特征：这些模型通常使用resolution档位
+    const resBrands = ['banana', 'gemini', 'imagen', 'seedream', 'seedance', 'kling', 'nano-banana'];
+    const isResBrand = resBrands.some(b => id.includes(b));
+    // 2.2 质量档位模型
+    const isGpt = id.includes('gpt-image');
+    const isDalle = id.includes('dall-e');
+    const isSd = /(?:^|[-\s])(?:sd|stable-diffusion|sdxl|sd-3)(?:[-\s]|$)/.test(id);
+    const isIdeogram = id.includes('ideogram');
+    const isMidj = id.includes('midjourney') || id.includes('mj-');
+    // 2.3 Flux不使用档位
+
+    if (is4k) {
+        return { type: 'resolution', options: ['1K', '2K', '4K'], defaultOption: '4K' };
+    }
+    if (is3k) {
+        return { type: 'resolution', options: ['1K', '2K', '3K'], defaultOption: '3K' };
+    }
+    if (is2k) {
+        return { type: 'resolution', options: ['1K', '2K', '4K'], defaultOption: '2K' };
+    }
+    if (isResBrand || is1kOnly) {
+        return { type: 'resolution', options: ['1K', '2K'], defaultOption: is1kOnly ? '1K' : '2K' };
+    }
+    if (isGpt) {
+        // gpt-image-2-official 或其他gpt变体走quality档位
+        return { type: 'quality', options: ['auto', 'low', 'medium', 'high'], defaultOption: 'auto' };
+    }
+    if (isDalle) {
+        return { type: 'quality', options: ['standard', 'hd'], defaultOption: 'standard' };
+    }
+    if (isIdeogram) {
+        return { type: 'quality', options: ['turbo', 'default', 'quality'], defaultOption: 'default' };
+    }
+    if (isSd || isMidj) {
+        return { type: 'quality', options: ['standard', 'hd'], defaultOption: 'standard' };
+    }
+
+    return { type: 'none', options: [], defaultOption: '' };
 }
 
-/** 获取模型支持的质量级别选项 */
+/** 获取模型支持的分辨率档位选项（智能兜底） */
+export function getResolutionTierOptions(modelId: string): string[] {
+    const cap = inferModelParamCapability(modelId);
+    if (cap.type === 'resolution' || cap.type === 'both') return cap.options.filter(isResolutionTier);
+    return [];
+}
+
+/** 获取模型支持的质量级别选项（智能兜底） */
 export function getQualityLevelOptions(modelId: string): string[] {
-    return MODEL_QUALITIES[modelId] || [];
+    const cap = inferModelParamCapability(modelId);
+    if (cap.type === 'quality' || cap.type === 'both') return cap.options.filter(o => !isResolutionTier(o));
+    return [];
 }
 
 /** 综合获取模型的"质量"选项（兼容旧接口） */
 export function getQualityOptions(modelId: string): string[] {
-    return MODEL_QUALITIES[modelId] || [];
+    return inferModelParamCapability(modelId).options;
+}
+
+/** 获取模型默认档位值（模型名带4k时默认4K） */
+export function getDefaultParamValue(modelId: string): string {
+    return inferModelParamCapability(modelId).defaultOption;
 }
 
 /** 判断值是否是分辨率档位 */

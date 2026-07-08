@@ -249,7 +249,9 @@ function RatioPreview({ ratio, className = '' }: { ratio: string; className?: st
 
 export interface VideoGenerationPanelHandle {
   /** 通知某个镜头/任务的视频已生成完成（shotId 优先匹配镜头，否则按 taskId 兜底） */
-  notifyShotVideoGenerated: (shotId: string, videoUrl: string, thumbnailUrl?: string) => void;
+  notifyShotVideoGenerated: (payload: { shotId?: string; taskId?: string; videoUrl: string; thumbnailUrl?: string }) => void;
+  /** 通知某个镜头/任务失败 */
+  notifyShotVideoFailed: (payload: { shotId?: string; taskId?: string; error: string }) => void;
 }
 
 export interface ShotVideoResult {
@@ -413,22 +415,32 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          originalPrompt: shot.prompt,
-          error: shot.error,
-          model: currentModel?.name || model,
+          prompt: shot.prompt,
+          issue: shot.error,
+          model: (currentModel?.id || model),
+          aspectRatio,
+          duration,
+          videoUrl: shot.videoUrl,
+          shot: { id: shot.id, title: shot.title },
         }),
       });
       const data = await resp.json();
-      if (data.diagnosis && Array.isArray(data.diagnosis.retakeSuggestions)) {
-        const suggestions = data.diagnosis.retakeSuggestions.map((s: { label: string; patch?: Record<string, unknown>; promptAppend?: string; negativeAppend?: string; description?: string }) => ({
-          title: data.diagnosis.title,
-          description: s.description || data.diagnosis.description,
+      if (!resp.ok || data.error) throw new Error(data.error || '诊断失败');
+      const diag = data.diagnosis || {};
+      if (Array.isArray(diag.retakeSuggestions)) {
+        const suggestions = (diag.retakeSuggestions as Array<{label: string; description?: string; patch?: Record<string, unknown>; promptAppend?: string; negativeAppend?: string}>).map((s) => ({
+          title: diag.title || '重拍建议',
+          description: s.description || diag.description,
           label: s.label,
           patch: { ...(s.patch || {}), promptAppend: s.promptAppend, negativeAppend: s.negativeAppend },
         }));
         setShotPlans(prev => prev.map(s => s.id === shot.id ? { ...s, diagnosis: suggestions } : s));
+        setDiagnoseOpen(shot.id);
       }
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+      console.error('诊断失败:', e);
+      onError?.(e instanceof Error ? e.message : '诊断失败');
+    }
   };
 
   // 合并服务器模型与内置注册表
@@ -441,16 +453,19 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
   // === shot 任务等待队列：taskId -> {resolve,reject,timer} ===
   // 暴露给父组件：完成回填 + 等待某 shot 任务
   useImperativeHandle(ref, () => ({
-    notifyShotVideoGenerated: (shotOrTaskId: string, videoUrl: string, thumbnailUrl?: string) => {
-      // 1) 先按 shotId 找 resolver（串行流水线场景，resolver 以 shotId 为 key）
-      let resolver = shotTaskResolversRef.current.get(shotOrTaskId);
-      // 2) 同步更新 shotPlans 状态（回填视频URL/缩略图/状态），兼容 shotId / taskId 两种匹配
+    notifyShotVideoGenerated: (payload: { shotId?: string; taskId?: string; videoUrl: string; thumbnailUrl?: string }) => {
+      const { shotId, taskId, videoUrl, thumbnailUrl } = payload;
+      const key = shotId || taskId;
+      if (!key) return;
+      // 1) 先按 key 找 resolver
+      let resolver = shotTaskResolversRef.current.get(key);
+      // 2) 同步更新 shotPlans 状态
       setShotPlans(prev => {
         let hit = false;
         const next = prev.map(s => {
-          if (s.id === shotOrTaskId || s.taskId === shotOrTaskId) {
+          if (s.id === key || s.taskId === key) {
             hit = true;
-            if (!resolver) resolver = shotTaskResolversRef.current.get(s.id) || shotTaskResolversRef.current.get(s.taskId || '');
+            if (!resolver) resolver = shotTaskResolversRef.current.get(s.id) || (s.taskId ? shotTaskResolversRef.current.get(s.taskId) : undefined);
             return { ...s, status: 'completed' as const, videoUrl, thumbnailUrl: thumbnailUrl || s.thumbnailUrl, error: undefined, diagnosisOpen: false };
           }
           return s;
@@ -460,16 +475,19 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
       });
       if (resolver) {
         clearTimeout(resolver.timer);
-        shotTaskResolversRef.current.delete(shotOrTaskId);
+        shotTaskResolversRef.current.delete(key);
         resolver.resolve({ videoUrl, thumbnailUrl: thumbnailUrl || '' });
       }
     },
-    notifyShotVideoFailed: (shotOrTaskId: string, errMsg: string) => {
-      const resolver = shotTaskResolversRef.current.get(shotOrTaskId);
-      setShotPlans(prev => prev.map(s => (s.id === shotOrTaskId || s.taskId === shotOrTaskId) ? { ...s, status: 'failed' as const, error: errMsg } : s));
+    notifyShotVideoFailed: (payload: { shotId?: string; taskId?: string; error: string }) => {
+      const { shotId, taskId, error: errMsg } = payload;
+      const key = shotId || taskId;
+      if (!key) return;
+      const resolver = shotTaskResolversRef.current.get(key);
+      setShotPlans(prev => prev.map(s => (s.id === key || s.taskId === key) ? { ...s, status: 'failed' as const, error: errMsg } : s));
       if (resolver) {
         clearTimeout(resolver.timer);
-        shotTaskResolversRef.current.delete(shotOrTaskId);
+        shotTaskResolversRef.current.delete(key);
         resolver.reject(new Error(errMsg));
       }
     },
@@ -707,198 +725,141 @@ Rules:
     setIsDirectorEnhancing(true);
     setGenStage('导演增强中...');
     try {
-      // 收集当前参考图类型
-      const refRoles: Record<string, string[]> = {};
-      typedReferences.forEach(r => {
-        if (!refRoles[r.type]) refRoles[r.type] = [];
-        refRoles[r.type].push(r.url);
-      });
+      // 收集当前参考图列表（扁平 URL 数组）与角色绑定
+      const refList = typedReferences.map(r => r.url);
       const res = await fetch('/api/video/director/prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          userInput: prompt,
+          userIdea: prompt,
           mode,
-          model: currentModel?.name || model,
+          modelId: currentModel?.id || model,
           aspectRatio,
           duration,
-          intensity: directorEnhanceIntensity,
-          referenceRoles: Object.keys(refRoles).length > 0 ? refRoles : undefined,
-          firstFrameUrl: firstFrameUrl || undefined,
+          style: directorStyle,
+          verbosity: directorEnhanceIntensity,
+          references: refList.length > 0 ? refList : undefined,
+          imageUrl: firstFrameUrl || undefined,
           lastFrameUrl: lastFrameUrl || undefined,
+          audio: generateAudio || undefined,
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || '导演增强失败');
-      if (data.enhancedPrompt) {
-        setPrompt(data.enhancedPrompt);
-        if (data.negativePrompt) setNegativePrompt(data.negativePrompt);
+      if (!res.ok || !data.success) throw new Error(data.error || '导演增强失败');
+      const compiled = data.compiled || {};
+      const compiledPrompt = typeof compiled.prompt === 'string' ? compiled.prompt : '';
+      const compiledNegative = typeof compiled.negativePrompt === 'string' ? compiled.negativePrompt : '';
+      if (compiledPrompt) {
+        setPrompt(compiledPrompt);
+        if (compiledNegative) setNegativePrompt(compiledNegative);
         setDirectorResult({
-          prompt: data.enhancedPrompt,
-          negativePrompt: data.negativePrompt,
-          analysis: data.analysis || {},
+          prompt: compiledPrompt,
+          negativePrompt: compiledNegative,
+          analysis: compiled.contract || {},
         });
         setGenStage('');
+      } else {
+        throw new Error('导演增强返回空结果');
       }
     } catch (err) {
       console.error('导演增强失败:', err);
       setGenStage('');
+      onError?.(err instanceof Error ? err.message : '导演增强失败');
     } finally {
       setIsDirectorEnhancing(false);
     }
-  }, [prompt, isDirectorEnhancing, mode, model, currentModel, aspectRatio, duration, directorEnhanceIntensity, typedReferences, firstFrameUrl, lastFrameUrl]);
+  }, [prompt, isDirectorEnhancing, mode, model, currentModel, aspectRatio, duration, directorEnhanceIntensity, directorStyle, typedReferences, firstFrameUrl, lastFrameUrl, generateAudio, onError]);
 
   // === AI 分镜规划（P2）：梗概 → 结构化镜头列表 ===
   const handlePlanShots = useCallback(async () => {
     if (!prompt.trim() || isPlanningShots) return;
     setIsPlanningShots(true);
     setGenStage('AI 规划分镜中...');
+    const targetShotCount = Math.min(8, Math.max(2, Math.ceil(duration / 4)));
     try {
-      const res = await fetch('/api/video/director/shot-plan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          concept: prompt,
-          totalDuration: duration,
-          aspectRatio,
-          model: currentModel?.name || model,
-          maxShots: Math.min(6, Math.max(2, Math.ceil(duration / 4))),
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || '分镜规划失败');
-      if (data.shots && Array.isArray(data.shots)) {
-        // 若返回镜头数过少（<2），自动二次追问重生成一次
-        let finalShots = data.shots;
-        if (finalShots.length < 2) {
-          try {
-            const retryRes = await fetch('/api/video/director/shot-plan', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                concept: prompt + '，请至少拆分为3个镜头，每个镜头明确景别、运镜、光线、声音和连续性备注',
-                totalDuration: duration,
-                aspectRatio,
-                model: currentModel?.name || model,
-                maxShots: Math.min(6, Math.max(3, Math.ceil(duration / 4))),
-              }),
-            });
-            const retryData = await retryRes.json();
-            if (retryData.shots && Array.isArray(retryData.shots) && retryData.shots.length >= 2) {
-              finalShots = retryData.shots;
-            }
-          } catch { /* 忽略二次追问失败，沿用首次结果 */ }
-        }
-        const plans: VideoShotPlan[] = finalShots.map((s: any, idx: number) => ({
-          id: s.id || `shot-${Date.now()}-${idx}`,
-          index: idx,
-          title: s.title || `镜头 ${idx + 1}`,
-          purpose: s.purpose || '',
-          shotSize: s.shotSize || s.shot_size || '中景',
-          cameraMove: s.cameraMove || s.cameraMotion || s.camera_movement || s.camera || '',
-          cameraMotion: s.cameraMotion || s.cameraMove || s.camera_movement || s.camera || '',
-          actionBeat: s.actionBeat || s.action_beat || '',
-          lighting: s.lighting || '',
-          audioCues: s.audioCues || s.audio_cues || s.sound || '',
-          prompt: s.prompt || '',
-          directedPrompt: s.directedPrompt || s.compiledPrompt || undefined,
-          duration: Number(s.duration) || Math.max(3, Math.round(duration / Math.max(finalShots.length, 1))),
-          aspectRatio: s.aspectRatio || aspectRatio,
-          references: Array.isArray(s.references) ? s.references : [],
-          continuityNotes: Array.isArray(s.continuityNotes)
-            ? s.continuityNotes
-            : Array.isArray(s.continuity_notes)
-              ? s.continuity_notes
-              : [],
-          camera: undefined,
-          motion: null,
-          firstFrameFromPrev: idx > 0,
-          firstFrameUrl: idx === 0 ? (firstFrameUrl || undefined) : undefined,
-          lastFrameUrl: undefined,
-          status: 'planned',
-          diagnosis: null,
-          retakeCount: 0,
-          error: undefined,
-          videoUrl: undefined,
-          thumbnailUrl: undefined,
-        }));
-        setShotPlans(plans);
-        shotPlansRef.current = plans;
-        setShotPlanOpen(true);
-        setMode('multi-shot');
-        setGenStage('');
-        // 二次校验：AI 若返回的镜头数少于 2，自动补充分镜重试（单次）
-        if (plans.length < 2) {
-          try {
-            setGenStage('补充镜头规划中…');
-            const reRes = await fetch('/api/video/director/shot-plan', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                storyIdea: prompt,
-                totalDuration: duration as number,
-                aspectRatio: aspectRatio as string,
-                style: useDirector ? directorStyle : 'cinematic',
-                shotCount: Math.max(3, Math.ceil((duration as number) / 4)),
-                minShots: 3,
-              } as unknown as ShotPlanInput),
-            });
-            if (reRes.ok) {
-              const reData = await reRes.json();
-              if (reData.success && Array.isArray(reData.shots) && reData.shots.length >= 2) {
-                const rePlans: VideoShotPlan[] = (reData.shots as Array<Record<string, unknown>>).map((s: Record<string, unknown>, idx: number) => ({
-                  id: `shot-${Date.now()}-${idx}`,
-                  index: idx,
-                  title: (s.title as string) || `镜头 ${idx + 1}`,
-                  purpose: (s.purpose as string) || '',
-                  prompt: (s.prompt as string) || (s.description as string) || '',
-                  shotSize: (s.shotSize as string) || (s.shot_size as string) || '',
-                  cameraMove: (s.cameraMove as string) || (s.camera_move as string) || (s.cameraMotion as string) || (s.camera_motion as string) || '',
-                  cameraMotion: (s.cameraMotion as string) || (s.cameraMove as string) || '',
-                  actionBeat: (s.actionBeat as string) || (s.action_beat as string) || '',
-                  lighting: (s.lighting as string) || '',
-                  audioCues: (s.audioCues as string) || (s.audio_cues as string) || (s.sound as string) || '',
-                  references: Array.isArray(s.references) ? (s.references as VideoReferenceBinding[]) : [],
-                  continuityNotes: Array.isArray(s.continuityNotes)
-                    ? s.continuityNotes as string[]
-                    : Array.isArray(s.continuity_notes)
-                      ? s.continuity_notes as string[]
-                      : [],
-                  duration: typeof s.duration === 'number' ? s.duration : Math.ceil((duration as number) / Math.max(reData.shots.length, 3)),
-                  aspectRatio: aspectRatio as string,
-                  firstFrameFromPrev: idx > 0,
-                  firstFrameUrl: idx === 0 ? (firstFrameUrl || undefined) : undefined,
-                  lastFrameUrl: undefined,
-                  status: 'planned',
-                  diagnosis: null,
-                  retakeCount: 0,
-                  error: undefined,
-                  videoUrl: undefined,
-                  thumbnailUrl: undefined,
-                  directedPrompt: undefined,
-                  endState: undefined,
-                  endFrameDescription: undefined,
-                  motion: null,
-                }));
-                setShotPlans(rePlans);
-                shotPlansRef.current = rePlans;
-              }
-            }
-          } catch (e) {
-            console.warn('补充分镜失败，保留原结果', e);
-          }
-        }
+      // 统一调用一次，字段名对齐后端 storyIdea/duration/shotCount/style
+      let shotsRaw: any[] | null = null;
+      // 第一次调用：期望 shotCount 个镜头
+      const makeCall = async (extraPrompt = '', forcedMin?: number) => {
+        const res = await fetch('/api/video/director/shot-plan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            storyIdea: prompt + extraPrompt,
+            duration,
+            aspectRatio,
+            model: (currentModel?.id || model),
+            style: directorStyle,
+            shotCount: forcedMin || targetShotCount,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.error || '分镜规划失败');
+        return Array.isArray(data.shots) ? data.shots : null;
+      };
+
+      shotsRaw = await makeCall('');
+      // 镜头数过少时追加约束再试一次
+      if (!shotsRaw || shotsRaw.length < 2) {
+        try {
+          shotsRaw = await makeCall('。请至少拆分为3个镜头，每个镜头明确景别、运镜、光线、声音和连续性备注。', Math.max(targetShotCount, 3));
+        } catch { /* 重试失败沿用首次结果 */ }
       }
+      if (!shotsRaw || shotsRaw.length < 1) throw new Error('分镜规划失败：返回为空');
+
+      const normalizeShot = (s: any, idx: number): VideoShotPlan => ({
+        id: s.id || `shot-${Date.now()}-${idx}`,
+        index: idx,
+        title: s.title || `镜头 ${idx + 1}`,
+        purpose: s.purpose || '',
+        shotSize: s.shotSize || s.shot_size || '中景',
+        cameraMove: s.cameraMove || s.cameraMotion || s.camera_movement || s.camera_move || s.camera || '',
+        cameraMotion: s.cameraMotion || s.cameraMove || s.camera_movement || s.camera_move || s.camera || '',
+        actionBeat: s.actionBeat || s.action_beat || s.description || '',
+        lighting: s.lighting || '',
+        audioCues: s.audioCues || s.audio_cues || s.sound || '',
+        prompt: s.prompt || s.directedPrompt || s.compiledPrompt || '',
+        directedPrompt: s.directedPrompt || s.compiledPrompt || undefined,
+        duration: Number(s.duration) || Math.max(3, Math.round(duration / Math.max(shotsRaw!.length, 1))),
+        aspectRatio: s.aspectRatio || aspectRatio,
+        references: Array.isArray(s.references) ? s.references as VideoReferenceBinding[] : [],
+        continuityNotes: Array.isArray(s.continuityNotes)
+          ? s.continuityNotes as string[]
+          : Array.isArray(s.continuity_notes)
+            ? s.continuity_notes as string[]
+            : [],
+        camera: undefined,
+        motion: null,
+        firstFrameFromPrev: idx > 0,
+        firstFrameUrl: idx === 0 ? (firstFrameUrl || undefined) : undefined,
+        lastFrameUrl: undefined,
+        status: 'planned' as const,
+        diagnosis: null,
+        retakeCount: 0,
+        error: undefined,
+        videoUrl: undefined,
+        thumbnailUrl: undefined,
+      });
+      const plans = shotsRaw.map(normalizeShot);
+      setShotPlans(plans);
+      shotPlansRef.current = plans;
+      setShotPlanOpen(true);
+      setMode('multi-shot');
+      setGenStage('');
     } catch (err) {
       console.error('分镜规划失败:', err);
       setGenStage('');
+      onError?.(err instanceof Error ? err.message : '分镜规划失败');
     } finally {
       setIsPlanningShots(false);
     }
-  }, [prompt, isPlanningShots, duration, aspectRatio, model, currentModel, mode]);
+  }, [prompt, isPlanningShots, duration, aspectRatio, model, currentModel, directorStyle, firstFrameUrl, onError]);
 
   // === 单独生成一个镜头（使用 onVideoGenerate 直接提交；自动用上一镜头抽尾帧作为首帧）===
   const handleGenerateSingleShot = async (shotId: string) => {
+    // 重拍前清理诊断标记，允许重拍失败后再次自动诊断
+    autoDiagnoseFiredRef.current.delete(shotId);
+    setDiagnoseOpen(null);
     const shot = shotPlans.find(s => s.id === shotId);
     if (!shot || !model) return;
     setCurrentGeneratingShotId(shotId);
@@ -919,7 +880,18 @@ Rules:
             });
             const data = await resp.json();
             if (resp.ok && data.imageUrl) {
-              firstFrameForThis = data.imageUrl;
+              // 持久化到本地存储，避免远端临时 URL 过期
+              try {
+                const persist = await fetch('/api/save-image', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ imageUrl: data.imageUrl, mediaType: 'image' }),
+                });
+                const persistData = await persist.json();
+                firstFrameForThis = (persist.ok && persistData.url) ? persistData.url : data.imageUrl;
+              } catch {
+                firstFrameForThis = data.imageUrl;
+              }
             } else if (prev.thumbnailUrl) {
               firstFrameForThis = prev.thumbnailUrl;
             }
@@ -932,7 +904,20 @@ Rules:
       }
       const pureModelId = model.includes('::') ? model.split('::').pop()! : model;
       const providerId = model.includes('::') ? model.split('::')[0] : undefined;
-      const camControl = shot.cameraMove ? { type: (cameraControl?.type || 'static'), intensity: motionStrength } : cameraControl || undefined;
+      // 把 shot.cameraMove 文本规范化为 cameraControl.type 枚举
+      const normalizeCameraType = (move: string): string => {
+        const m = move.toLowerCase();
+        if (/push|zoom in|close|推近|特写/.test(m)) return 'zoom_in';
+        if (/pull|zoom out|拉远/.test(m)) return 'zoom_out';
+        if (/pan|横移|左移|右移/.test(m)) return 'pan';
+        if (/tilt|仰拍|俯拍|上下移/.test(m)) return 'tilt';
+        if (/tracking|follow|跟拍/.test(m)) return 'tracking';
+        if (/static|固定|静止/.test(m)) return 'static';
+        return (cameraControl?.type || 'static');
+      };
+      const camControl = shot.cameraMove
+        ? { type: normalizeCameraType(shot.cameraMove), intensity: motionStrength }
+        : (cameraControl || undefined);
       // 连续性提示：用上一镜头结果构造续接 prompt，帮助模型衔接动作与场景
       const prevShot = shotIdx > 0 ? shotPlans[shotIdx - 1] : undefined;
       const shotPrompt = prevShot && prevShot.status === 'completed' && prevShot.videoUrl
@@ -958,9 +943,9 @@ Rules:
           firstFrameUrl: firstFrameForThis,
           lastFrameUrl: shotIdx === shotPlans.length - 1 ? (lastFrameUrl || undefined) : undefined,
           resolution,
-          cameraControl: camControl,
+          cameraControl: camControl as CameraControlParams | undefined,
           motionBrush: motionBrush || undefined,
-          characterReferences: typedReferences.filter(r => r.type.startsWith('character-')).map(r => r.url),
+          characterReferences: typedReferences.filter(r => r.type === 'character-front' || r.type === 'character-side').map(r => r.url),
           referenceImages: typedReferences.filter(r => !r.type.startsWith('character-') && r.type !== 'first-frame' && r.type !== 'last-frame').map(r => r.url),
           motionStrength: camControl ? motionStrength : undefined,
           seed,
@@ -970,7 +955,12 @@ Rules:
           shotId,
         });
       } catch (submitErr: any) {
-        shotTaskResolversRef.current.delete(shotId);
+        const resolver = shotTaskResolversRef.current.get(shotId);
+        if (resolver) {
+          if (resolver.timer) clearTimeout(resolver.timer);
+          resolver.reject(submitErr instanceof Error ? submitErr : new Error(submitErr?.message || '提交失败'));
+          shotTaskResolversRef.current.delete(shotId);
+        }
         throw submitErr;
       }
 
@@ -1226,26 +1216,38 @@ Rules:
     saveVideoHistory([]);
   }, []);
 
-  // 处理图片上传
-  const handleImageUpload = useCallback((target: 'first' | 'last' | 'ref') => {
+  // 处理图片上传（支持视频延长模式上传视频）
+  const handleImageUpload = useCallback((target: 'first' | 'last' | 'ref' | 'video') => {
+    const isVideoTarget = target === 'video';
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = 'image/*';
+    input.accept = isVideoTarget ? 'video/*' : 'image/*';
     input.onchange = async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (!file) return;
+      // 文件大小校验（图片 20MB，视频 200MB）
+      const maxSize = isVideoTarget ? 200 * 1024 * 1024 : 20 * 1024 * 1024;
+      if (file.size > maxSize) {
+        onError?.(isVideoTarget ? '视频文件过大（最大 200MB）' : '图片文件过大（最大 20MB）');
+        return;
+      }
       try {
         const formData = new FormData();
         formData.append('file', file);
         const res = await fetch('/api/save-image', { method: 'POST', body: formData });
-        const data = await res.json();
-        if (data.url) {
-          if (target === 'first') setFirstFrame(data.url);
-          else if (target === 'last') setLastFrame(data.url);
-          else addTypedReference(data.url, 'style');
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || '上传失败');
         }
-      } catch {
-        onError?.('图片上传失败');
+        const data = await res.json();
+        if (!data.url) throw new Error('上传失败：未返回 URL');
+        if (target === 'first') setFirstFrame(data.url);
+        else if (target === 'last') setLastFrame(data.url);
+        else if (target === 'video') {
+          setVideoUrl(data.url);
+        } else addTypedReference(data.url, 'style');
+      } catch (err) {
+        onError?.(err instanceof Error ? err.message : (isVideoTarget ? '视频上传失败' : '图片上传失败'));
       }
     };
     input.click();
@@ -1763,7 +1765,7 @@ Rules:
                         style={{ background: inputBg, color: textColor, border: `1px solid ${borderColor}` }}
                       />
                       <div className="flex gap-2 mt-2">
-                        <button onClick={() => handleImageUpload('first')} className="flex-1 py-2 rounded-md text-xs flex items-center justify-center gap-1 transition-colors cursor-pointer" style={{ background: inputBg, color: subTextColor, border: `1px dashed ${borderColor}` }}>
+                        <button onClick={() => handleImageUpload('video')} className="flex-1 py-2 rounded-md text-xs flex items-center justify-center gap-1 transition-colors cursor-pointer" style={{ background: inputBg, color: subTextColor, border: `1px dashed ${borderColor}` }}>
                           <Upload className="w-3 h-3" />上传视频
                         </button>
                       </div>
@@ -1981,9 +1983,17 @@ Rules:
                           const input = document.createElement('input'); input.type = 'file'; input.accept = 'image/*';
                           input.onchange = async (e) => {
                             const file = (e.target as HTMLInputElement).files?.[0]; if (!file) return;
-                            const fd = new FormData(); fd.append('file', file);
-                            const res = await fetch('/api/save-image', { method: 'POST', body: fd });
-                            const data = await res.json(); if (data.url) addTypedReference(data.url, charType as 'character-front' | 'character-side');
+                            if (file.size > 20 * 1024 * 1024) { onError?.('图片文件过大（最大 20MB）'); return; }
+                            try {
+                              const fd = new FormData(); fd.append('file', file);
+                              const res = await fetch('/api/save-image', { method: 'POST', body: fd });
+                              if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error || '上传失败'); }
+                              const data = await res.json();
+                              if (data?.url) addTypedReference(data.url, charType as 'character-front' | 'character-side');
+                              else throw new Error('上传失败：未返回 URL');
+                            } catch (err) {
+                              onError?.(err instanceof Error ? err.message : '图片上传失败');
+                            }
                           };
                           input.click();
                         }}

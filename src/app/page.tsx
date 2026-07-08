@@ -2654,7 +2654,11 @@ function CanvasApp() {
         generateAudio: params.generateAudio,
         providerId: params.providerId,
         useDirector: params.useDirector,
-        directorStyle: params.directorStyle,
+        directorStyle: params.directorStyle || params.directorMode,
+        negativePrompt: params.compiledNegative || params.negativePrompt,
+        cameraControl: params.cameraControl,
+        seed: params.seed,
+        directorIntent: params.directorIntent,
       } : {
         prompt: params.compiledPrompt || params.prompt,
         model: params.model,
@@ -2678,7 +2682,8 @@ function CanvasApp() {
         chainContinuity: params.chainContinuity,
         useGlobalReferences: params.useGlobalReferences,
         useDirector: params.useDirector,
-        directorStyle: params.directorStyle,
+        directorMode: params.directorStyle || params.directorMode,
+        directorIntent: params.directorIntent,
         shotId: params.shotId,
         _vgenReqId: phId,
       };
@@ -2790,7 +2795,11 @@ function CanvasApp() {
               try {
                 const shotId = (params as any).shotId;
                 if (shotId && videoPanelRef.current?.notifyShotVideoGenerated) {
-                  videoPanelRef.current.notifyShotVideoGenerated(shotId, stableVideo || rawVideoUrl, stableThumbnail || rawThumbnailUrl || undefined);
+                  videoPanelRef.current.notifyShotVideoGenerated({
+                    shotId,
+                    videoUrl: stableVideo || rawVideoUrl,
+                    thumbnailUrl: stableThumbnail || rawThumbnailUrl || undefined,
+                  });
                 }
               } catch {}
             } else {
@@ -2802,6 +2811,13 @@ function CanvasApp() {
             setImages(prev => prev.filter(img => img.id !== phId));
             toast.error('视频生成失败', { description: pollData.error || '未知错误', className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
             setActiveGenerationCount(prev => Math.max(0, prev - 1));
+            // 通知视频面板：shot 失败（解开 waitForShotTask 的等待）
+            try {
+              const shotId = (params as any).shotId;
+              if (shotId && videoPanelRef.current?.notifyShotVideoFailed) {
+                videoPanelRef.current.notifyShotVideoFailed({ shotId, error: pollData.error || '视频生成失败' });
+              }
+            } catch {}
           } else {
             // 更新进度，继续轮询
             const progress = pollData.progress || 0;

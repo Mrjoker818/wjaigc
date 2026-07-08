@@ -10,7 +10,7 @@ import { UserManager as UserManagerCore } from '@/lib/user-manager';
 import { ThirdPartyModelDialog } from '@/components/third-party-model-dialog';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import { getPromptTemplates, PromptTemplate, searchTemplates } from '@/lib/prompt-templates';
-import { MODEL_ASPECT_RATIOS as SHARED_MODEL_ASPECT_RATIOS, MODEL_QUALITIES as SHARED_MODEL_QUALITIES, QUALITY_DISPLAY_NAMES as SHARED_QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE as SHARED_QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS as SHARED_ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS as SHARED_DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES as SHARED_DEFAULT_QUALITIES, findModelConfig as sharedFindModelConfig, calculateActualPixels as sharedCalculateActualPixels, ModelParamType, getModelParamType, RESOLUTION_TIER_DISPLAY_NAMES, QUALITY_LEVEL_DISPLAY_NAMES, RESOLUTION_TIER_MODELS, QUALITY_LEVEL_MODELS } from '@/lib/canvas-generation-group';
+import { MODEL_ASPECT_RATIOS as SHARED_MODEL_ASPECT_RATIOS, MODEL_QUALITIES as SHARED_MODEL_QUALITIES, QUALITY_DISPLAY_NAMES as SHARED_QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE as SHARED_QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS as SHARED_ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS as SHARED_DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES as SHARED_DEFAULT_QUALITIES, findModelConfig as sharedFindModelConfig, calculateActualPixels as sharedCalculateActualPixels, ModelParamType, getModelParamType, getResolutionTierOptions, RESOLUTION_TIER_DISPLAY_NAMES, QUALITY_LEVEL_DISPLAY_NAMES, RESOLUTION_TIER_MODELS, QUALITY_LEVEL_MODELS } from '@/lib/canvas-generation-group';
 
 export interface GenerationParams {
     prompt: string;
@@ -1065,8 +1065,26 @@ export function GenerationPanel(
                             // 始终重置到新模型的第一个比例
                             setAspectRatio(supportedRatios[0]);
                             const supportedQualities = sharedFindModelConfig(SHARED_MODEL_QUALITIES, newPureModelId) || SHARED_DEFAULT_QUALITIES;
-                            // 始终重置到新模型的第一个质量
-                            setQuality(supportedQualities[0]);
+                            // 根据模型后缀智能选择默认分辨率/质量（-4k默认4K，-2k默认2K，-hd默认high，其他默认第一个）
+                            const mlower = newPureModelId.toLowerCase();
+                            const paramType = getModelParamType(newPureModelId);
+                            let defaultQuality = supportedQualities[0];
+                            let defaultResolution = '1K';
+                            if (/-4k(?:-omni)?$/.test(mlower)) {
+                                defaultResolution = '4K';
+                                defaultQuality = paramType === 'both' ? 'auto' : 'high';
+                            } else if (/-2k$/.test(mlower)) {
+                                defaultResolution = '2K';
+                                defaultQuality = paramType === 'both' ? 'auto' : 'high';
+                            } else if (/-hd$|[-_]high$/.test(mlower)) {
+                                defaultQuality = 'high';
+                            }
+                            if (paramType === 'both' || paramType === 'resolution') {
+                                const tiers = getResolutionTierOptions(newPureModelId);
+                                if (tiers.includes(defaultResolution)) setResolution(defaultResolution);
+                                else setResolution(tiers[0] || '1K');
+                            }
+                            setQuality(defaultQuality);
                         }}
                         className={`${inputStl} appearance-none cursor-pointer`}
                     >

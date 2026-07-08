@@ -15396,14 +15396,20 @@ export function InfiniteCanvas({
                     if (newModelId) {
                       // 模型切换时重置参数为新模型支持的默认值
                       const newSupportedRatios = findModelConfig(MODEL_ASPECT_RATIOS, newModelId) || DEFAULT_ASPECT_RATIOS;
-                      const newSupportedQualities = findModelConfig(MODEL_QUALITIES, newModelId) || DEFAULT_QUALITIES;
-                      // 优先保留当前值，如果当前值不被支持则使用第一个可用值
+                      const newSupportedQualities = getResolutionTierOptions(newModelId);
+                      // 根据模型名后缀自动选择默认分辨率（-4k默认4K，-2k默认2K/高，否则1K/标准）
+                      let defaultQuality = newSupportedQualities[0] || '1k';
+                      const lower = newModelId.toLowerCase();
+                      if (lower.includes('-4k') && newSupportedQualities.includes('4k')) defaultQuality = '4k';
+                      else if (lower.includes('-2k') && newSupportedQualities.includes('2k')) defaultQuality = '2k';
+                      else if ((lower.includes('-hd') || lower.includes('high')) && newSupportedQualities.includes('high')) defaultQuality = 'high';
+                      // 优先保留当前值，如果当前值不被支持则使用推导的默认值
                       if (!newSupportedRatios.includes(canvasGenAspectRatio)) {
                         const defaultRatio = newSupportedRatios.includes('1:1') ? '1:1' : newSupportedRatios[0];
                         setCanvasGenAspectRatio(defaultRatio);
                       }
                       if (!newSupportedQualities.includes(canvasGenQuality)) {
-                        setCanvasGenQuality(newSupportedQualities[0]);
+                        setCanvasGenQuality(defaultQuality);
                       }
                     }
                   }}
