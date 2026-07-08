@@ -1023,7 +1023,22 @@ export class UserManager {
     if (projects.length === 0) {
       return this.createDemoProjects();
     }
-    return projects;
+    // 智能排序：优先展示有图片的项目，其次按更新时间倒序
+    // 避免空项目（如"测试项目"）排在最前面导致用户以为数据丢失
+    return [...projects].sort((a, b) => {
+      const aHasImgs = (a.canvasImages?.length || 0) > 0;
+      const bHasImgs = (b.canvasImages?.length || 0) > 0;
+      if (aHasImgs !== bHasImgs) return aHasImgs ? -1 : 1;
+      return (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0);
+    });
+  }
+
+  /** 获取默认应该选中的项目ID（优先选有图片的最新项目） */
+  getDefaultProjectId(): string | null {
+    const projects = this.getProjects();
+    if (projects.length === 0) return null;
+    // getProjects 已按"有图优先 + 时间倒序"排好，取第一个
+    return projects[0].id;
   }
 
   getProject(projectId: string): Project | null {

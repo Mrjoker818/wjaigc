@@ -5,7 +5,7 @@ import {
   Play, Video, ImagePlus, Clock, Settings2,
   ChevronDown, Loader2, Sparkles, Volume2, VolumeX,
   Upload, X, AlertCircle, Info, FastForward, Users, Plus, Paintbrush, Film, Palette,
-  History, RotateCcw, Languages, Minimize2, Maximize2, ChevronRight, CheckCircle2
+  History, RotateCcw, Languages, GripVertical, Minus, Maximize2, ChevronRight, CheckCircle2
 } from 'lucide-react';
 import MotionBrushCanvas, { type MotionBrushResult, type MotionBrushCanvasHandle } from './motion-brush-canvas';
 import { inferVideoModelFeatures } from '@/lib/video-api';
@@ -400,6 +400,38 @@ export default function VideoGenerationPanel({
   const [panelMinimized, setPanelMinimized] = useState(false);
   const [genProgress, setGenProgress] = useState(0);
   const [genStage, setGenStage] = useState('');
+  const [panelPosition, setPanelPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const panelRef = useRef<HTMLDivElement>(null);
+  const dragStartRef = useRef<{ x: number; y: number; panelX: number; panelY: number } | null>(null);
+
+  // 拖拽处理
+  const handleDragStart = useCallback((e: React.MouseEvent) => {
+    if (!floating || !panelRef.current) return;
+    e.preventDefault();
+    const rect = panelRef.current.getBoundingClientRect();
+    dragStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      panelX: rect.left,
+      panelY: rect.top,
+    };
+    const handleMouseMove = (me: MouseEvent) => {
+      if (!dragStartRef.current) return;
+      const dx = me.clientX - dragStartRef.current.x;
+      const dy = me.clientY - dragStartRef.current.y;
+      setPanelPosition({
+        x: dragStartRef.current.panelX + dx,
+        y: dragStartRef.current.panelY + dy,
+      });
+    };
+    const handleMouseUp = () => {
+      dragStartRef.current = null;
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  }, [floating]);
 
   // === 多参考图约束系统 ===
   const [typedReferences, setTypedReferences] = useState<TypedReference[]>([]);
@@ -891,23 +923,51 @@ Rules:
   const cardBgClass = isMonochrome ? 'bg-gray-50/50' : '';
   const sectionBgClass = isMonochrome ? 'bg-gray-50' : '';
 
-  // 浮动面板样式
+  // 浮动面板样式（横向布局）
   const floatingWrapperClass = floating
-    ? `fixed bottom-24 right-6 z-50 w-[420px] max-h-[70vh] flex flex-col rounded-2xl shadow-2xl overflow-hidden ${
+    ? `fixed z-50 w-[820px] max-w-[92vw] flex rounded-2xl shadow-2xl overflow-hidden ${
         isMonochrome ? 'bg-white border border-gray-200' : 'bg-[#141418] border border-white/[0.08]'
       }`
     : 'flex flex-col min-h-full';
 
+  const floatingStyle = floating ? {
+    left: panelPosition.x || undefined,
+    top: panelPosition.y || undefined,
+    right: panelPosition.x ? undefined : 24,
+    bottom: panelPosition.y ? undefined : 96,
+    maxHeight: '78vh',
+  } : {};
+
   return (
-    <div className={floatingWrapperClass} style={{ background: !floating ? panelBg : undefined, color: textColor }} data-floating-panel="video">
-      {/* 浮动模式下显示完整标题栏 */}
+    <div ref={panelRef} className={floatingWrapperClass} style={{ background: !floating ? panelBg : undefined, color: textColor, ...floatingStyle } as React.CSSProperties} data-floating-panel="video">
+      {/* 浮动模式下显示完整标题栏 + 拖拽手柄 */}
       {floating && (
-        <div className={`flex items-center justify-between px-4 py-3 flex-shrink-0 border-b ${
-          isMonochrome ? 'border-gray-200 bg-gray-50' : 'border-white/[0.06]'
+        <div
+          className={`flex items-center justify-between px-3 py-2.5 flex-shrink-0 cursor-move select-none border-r ${
+            isMonochrome ? 'border-gray-200 bg-gray-50' : 'border-white/[0.06] bg-black/20'
+          }`}
+          onMouseDown={handleDragStart}
+          style={{ width: panelMinimized ? 'auto' : 56 }}
+        >
+          <div className="flex flex-col items-center gap-1.5 w-full">
+            <GripVertical className={`w-4 h-4 flex-shrink-0 ${isMonochrome ? 'text-gray-400' : 'text-gray-500'}`} />
+            <Film className="w-5 h-5 flex-shrink-0" style={{ color: accentColor }} />
+            {!panelMinimized && (
+              <span className="text-xs font-medium writing-vertical" style={{ writingMode: 'vertical-rl', letterSpacing: '0.1em' }}>视频生成</span>
+            )}
+          </div>
+        </div>
+      )}
+      {/* 内容区域 */}
+      <div className="flex-1 flex flex-col min-w-0">
+      {/* 浮动模式工具栏 */}
+      {floating && (
+        <div className={`flex items-center justify-between px-3 py-2 flex-shrink-0 border-b ${
+          isMonochrome ? 'border-gray-200' : 'border-white/[0.06]'
         }`}>
           <div className="flex items-center gap-2">
-            <Film className="w-5 h-5" style={{ color: accentColor }} />
-            <span className="text-base font-semibold">视频生成</span>
+            {panelMinimized && <Film className="w-4 h-4" style={{ color: accentColor }} />}
+            <span className={`font-semibold ${panelMinimized ? 'text-sm' : 'text-base'}`}>视频生成</span>
           </div>
           <div className="flex items-center gap-1">
             {isGenerating && (
@@ -918,7 +978,18 @@ Rules:
                 }`}
                 title={panelMinimized ? '展开面板' : '最小化'}
               >
-                {panelMinimized ? <Maximize2 className="w-4 h-4" /> : <Minimize2 className="w-4 h-4" />}
+                {panelMinimized ? <Maximize2 className="w-4 h-4" /> : <Minus className="w-4 h-4" />}
+              </button>
+            )}
+            {!isGenerating && (
+              <button
+                onClick={() => setPanelMinimized(!panelMinimized)}
+                className={`p-1.5 rounded-md transition-colors cursor-pointer ${
+                  isMonochrome ? 'hover:bg-gray-200 text-gray-500' : 'hover:bg-white/10 text-gray-400'
+                }`}
+                title={panelMinimized ? '展开面板' : '最小化'}
+              >
+                {panelMinimized ? <Maximize2 className="w-4 h-4" /> : <Minus className="w-4 h-4" />}
               </button>
             )}
             <button
@@ -942,7 +1013,7 @@ Rules:
           style={{ color: subTextColor }}
           title="最小化面板"
         >
-          <Minimize2 className="w-4 h-4" />
+          <Minus className="w-4 h-4" />
         </button>
       </div>
       )}
@@ -1008,7 +1079,7 @@ Rules:
           style={{ color: subTextColor }}
           title="最小化面板"
         >
-          <Minimize2 className="w-4 h-4" />
+          <Minus className="w-4 h-4" />
         </button>
       </div>
 
@@ -2194,6 +2265,7 @@ Rules:
       </>
       )}
       </div>{/* 关闭scroll容器 */}
+      </div>{/* 关闭内容区域容器 */}
     </div>
   );
 }
