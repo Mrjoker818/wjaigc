@@ -290,6 +290,8 @@ export class UserManager {
 
     try {
       if (this.multiUserData) {
+        // ★ 图片数量断崖检测：保存前快照保护，防止bug导致图片被清空
+        this.protectAgainstDataLoss();
         // ★ 保存到 localStorage 时，data: URL 可能导致配额溢出
         // 先尝试直接保存，如果配额不足则将 data: URL 替换为空字符串后重试
         try {
@@ -315,6 +317,74 @@ export class UserManager {
 
     // 同步当前用户的项目数据到服务器数据库（防抖）
     this.scheduleServerSync();
+  }
+
+  /** 数据丢失保护：检测"大量图片突然清零"异常，写入快照备份并阻断空数据覆盖
+   *  场景：bug 导致内存中 canvasImages 变成 []，但真实图片仍在服务器/文件系统
+   *  策略：
+   *   1. 记录上次已知的项目图片数快照（lastProjectImageCounts）
+   *   2. 保存前比较：某项目此前 ≥10 张图、现在变成 0 → 判定异常，保留内存但不阻断
+   *   3. 每次 save 都写一份最近 N=5 份 autosave 快照到 localStorage（__AUTOSAVE_KEY__）
+   */
+  private lastProjectImageCounts: Map<string, number> = new Map();
+  private protectAgainstDataLoss(): void {
+    try {
+      if (!this.multiUserData?.userData) return;
+      const AUTOSAVE_KEY = 'wujie_autosave_snapshots_v1';
+      const MAX_SNAPSHOTS = 8;
+      // 读取历史快照
+      let snapshots: Array<{ t: number; payload: string }> = [];
+      try {
+        const raw = localStorage.getItem(AUTOSAVE_KEY);
+        if (raw) snapshots = JSON.parse(raw);
+        if (!Array.isArray(snapshots)) snapshots = [];
+      } catch { snapshots = []; }
+
+      // 检测异常：如果某个项目从≥N张掉到0，标记，用快照数据修复
+      let needRestore = false;
+      let restoreSnapshot: any = null;
+      for (const [uid, ud] of Object.entries(this.multiUserData.userData as Record<string, any>)) {
+        const projects = ud?.projects || [];
+        for (const proj of projects) {
+          const pid = proj.id || proj.projectId;
+          if (!pid) continue;
+          const current = (proj.canvasImages || []).length;
+          const last = this.lastProjectImageCounts.get(pid) || 0;
+          // 断崖：之前 ≥10 张 → 现在 0 张，且快照里有数据
+          if (last >= 10 && current === 0) {
+            console.warn(`[DataLossGuard] Project "${proj.name}"(${pid}) canvasImages dropped from ${last} to 0! Restoring from last snapshot...`);
+            // 尝试在快照里找这个项目的非空数据
+            for (const snap of snapshots.slice().reverse()) {
+              try {
+                const snapData = JSON.parse(snap.payload);
+                const snapUd = snapData?.userData?.[uid];
+                const snapProj = snapUd?.projects?.find((p: any) => (p.id || p.projectId) === pid);
+                if (snapProj && (snapProj.canvasImages || []).length >= 10) {
+                  proj.canvasImages = snapProj.canvasImages;
+                  proj.updatedAt = Date.now();
+                  restoreSnapshot = true;
+                  needRestore = true;
+                  break;
+                }
+              } catch {}
+            }
+          }
+          if (current > 0) this.lastProjectImageCounts.set(pid, current);
+        }
+      }
+
+      // 写新快照（在恢复后写，这样快照里是恢复后的健康数据）
+      try {
+        snapshots.push({ t: Date.now(), payload: JSON.stringify(this.multiUserData) });
+        if (snapshots.length > MAX_SNAPSHOTS) snapshots = snapshots.slice(-MAX_SNAPSHOTS);
+        localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(snapshots));
+      } catch (e) {
+        // 快照写失败不影响主流程
+        console.warn('[DataLossGuard] Failed to write autosave snapshot:', e);
+      }
+    } catch (e) {
+      console.warn('[DataLossGuard] protector error:', e);
+    }
   }
 
   /** 清理 data:/blob: URL 以避免 localStorage 配额溢出

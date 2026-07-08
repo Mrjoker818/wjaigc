@@ -400,9 +400,20 @@ export default function VideoGenerationPanel({
   const [panelMinimized, setPanelMinimized] = useState(false);
   const [genProgress, setGenProgress] = useState(0);
   const [genStage, setGenStage] = useState('');
-  const [panelPosition, setPanelPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [panelPosition, setPanelPosition] = useState<{ x: number; y: number } | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const dragStartRef = useRef<{ x: number; y: number; panelX: number; panelY: number } | null>(null);
+
+  // 初始居中定位
+  useEffect(() => {
+    if (floating && panelPosition === null && panelRef.current) {
+      const rect = panelRef.current.getBoundingClientRect();
+      setPanelPosition({
+        x: (window.innerWidth - rect.width) / 2,
+        y: (window.innerHeight - rect.height) / 2,
+      });
+    }
+  }, [floating, panelPosition]);
 
   // 拖拽处理
   const handleDragStart = useCallback((e: React.MouseEvent) => {
@@ -935,158 +946,80 @@ Rules:
     : 'flex flex-col min-h-full';
 
   const floatingStyle = floating ? {
-    left: panelPosition.x || undefined,
-    top: panelPosition.y || undefined,
-    right: panelPosition.x ? undefined : 24,
-    bottom: panelPosition.y ? undefined : 96,
-    maxHeight: '78vh',
+    left: panelPosition ? `${panelPosition.x}px` : '50%',
+    top: panelPosition ? `${panelPosition.y}px` : '50%',
+    transform: panelPosition ? 'none' : 'translate(-50%, -50%)',
+    maxHeight: '82vh',
+    width: 'min(880px, 94vw)',
   } : {};
 
   return (
     <div ref={panelRef} className={floatingWrapperClass} style={{ background: !floating ? panelBg : undefined, color: textColor, ...floatingStyle } as React.CSSProperties} data-floating-panel="video">
-      {/* 浮动模式下显示完整标题栏 + 拖拽手柄 */}
+      {/* 浮动模式：顶部统一标题栏（参考字境大师/展陈系统样式） */}
       {floating && (
         <div
-          className={`flex items-center justify-between px-3 py-2.5 flex-shrink-0 cursor-move select-none border-r ${
-            isMonochrome ? 'border-gray-200 bg-gray-50' : 'border-white/[0.06] bg-black/20'
+          className={`flex items-center gap-2 px-4 py-2.5 cursor-move select-none flex-shrink-0 border-b ${
+            isMonochrome ? 'bg-gray-50 border-gray-200' : 'bg-gradient-to-b from-[#161616] to-[#0f0f0f] border-white/[0.06]'
           }`}
           onMouseDown={handleDragStart}
-          style={{ width: panelMinimized ? 'auto' : 56 }}
         >
-          <div className="flex flex-col items-center gap-1.5 w-full">
-            <GripVertical className={`w-4 h-4 flex-shrink-0 ${isMonochrome ? 'text-gray-400' : 'text-gray-500'}`} />
-            <Film className="w-5 h-5 flex-shrink-0" style={{ color: accentColor }} />
-            {!panelMinimized && (
-              <span className="text-xs font-medium writing-vertical" style={{ writingMode: 'vertical-rl', letterSpacing: '0.1em' }}>视频生成</span>
-            )}
+          <GripVertical size={16} className={isMonochrome ? 'text-gray-400' : 'text-gray-500'} />
+          <div
+            className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+            style={{ background: `linear-gradient(135deg, ${accentColor}, ${isMonochrome ? '#2563eb' : '#8b7225'})`, color: isMonochrome ? '#ffffff' : '#0a0a0a' }}
+          >
+            <Film className="w-4 h-4" />
           </div>
-        </div>
-      )}
-      {/* 内容区域 */}
-      <div className="flex-1 flex flex-col min-w-0">
-      {/* 浮动模式工具栏 */}
-      {floating && (
-        <div className={`flex items-center justify-between px-3 py-2 flex-shrink-0 border-b ${
-          isMonochrome ? 'border-gray-200' : 'border-white/[0.06]'
-        }`}>
-          <div className="flex items-center gap-2">
-            {panelMinimized && <Film className="w-4 h-4" style={{ color: accentColor }} />}
-            <span className={`font-semibold ${panelMinimized ? 'text-sm' : 'text-base'}`}>视频生成</span>
+          <div className="flex-1 min-w-0">
+            <h1 className="text-sm font-semibold" style={{ color: textColor }}>视频生成器</h1>
+            <p className="text-[11px] mt-0.5" style={{ color: subTextColor }}>文生视频 / 图生视频 / 首尾帧 / 多镜头 / 视频延长</p>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1.5">
             {isGenerating && (
               <button
-                onClick={() => setPanelMinimized(!panelMinimized)}
-                className={`p-1.5 rounded-md transition-colors cursor-pointer ${
-                  isMonochrome ? 'hover:bg-gray-200 text-gray-500' : 'hover:bg-white/10 text-gray-400'
-                }`}
-                title={panelMinimized ? '展开面板' : '最小化'}
+                onClick={(e) => { e.stopPropagation(); setPanelMinimized(!panelMinimized); }}
+                className="px-2 py-1 rounded-md text-xs flex items-center gap-1 transition-colors"
+                style={{ background: isMonochrome ? '#3b82f6' : accentColor, color: isMonochrome ? '#fff' : '#0a0a0a' }}
+                title={panelMinimized ? '展开' : '最小化'}
               >
-                {panelMinimized ? <Maximize2 className="w-4 h-4" /> : <Minus className="w-4 h-4" />}
-              </button>
-            )}
-            {!isGenerating && (
-              <button
-                onClick={() => setPanelMinimized(!panelMinimized)}
-                className={`p-1.5 rounded-md transition-colors cursor-pointer ${
-                  isMonochrome ? 'hover:bg-gray-200 text-gray-500' : 'hover:bg-white/10 text-gray-400'
-                }`}
-                title={panelMinimized ? '展开面板' : '最小化'}
-              >
-                {panelMinimized ? <Maximize2 className="w-4 h-4" /> : <Minus className="w-4 h-4" />}
+                <div className="w-2 h-2 rounded-full bg-white/80 animate-pulse" />
+                生成中{genProgress > 0 ? ` ${genProgress}%` : ''}
               </button>
             )}
             <button
-              onClick={onClose}
-              className={`p-1.5 rounded-md transition-colors cursor-pointer ${
-                isMonochrome ? 'hover:bg-gray-200 text-gray-500' : 'hover:bg-white/10 text-gray-400'
-              }`}
-              title="关闭面板"
+              onClick={(e) => { e.stopPropagation(); setPanelMinimized(!panelMinimized); }}
+              className="p-1.5 rounded-lg transition-colors"
+              style={{ color: subTextColor, border: `1px solid ${isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.1)'}` }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = accentColor; e.currentTarget.style.color = accentColor; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.1)'; e.currentTarget.style.color = subTextColor; }}
+              title={panelMinimized ? '展开' : '最小化'}
             >
-              <X className="w-4 h-4" />
+              {panelMinimized ? <Maximize2 size={14} /> : <Minus size={14} />}
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); onClose?.(); }}
+              className="p-1.5 rounded-lg transition-colors"
+              style={{ color: subTextColor, border: `1px solid ${isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.1)'}` }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(255,60,60,0.3)'; e.currentTarget.style.color = '#ff5555'; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.1)'; e.currentTarget.style.color = subTextColor; }}
+              title="关闭"
+            >
+              <X size={14} />
             </button>
           </div>
         </div>
       )}
-      {/* 非浮动模式下的工具栏 */}
+      <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
       {!floating && (
-      <div className="flex items-center justify-end px-3 pt-2 pb-1 flex-shrink-0">
-        <button
-          onClick={() => setPanelMinimized(true)}
-          className="p-1.5 rounded-md transition-colors cursor-pointer hover:opacity-70"
-          style={{ color: subTextColor }}
-          title="最小化面板"
-        >
-          <Minus className="w-4 h-4" />
-        </button>
-      </div>
-      )}
-      <div className={`flex-1 overflow-y-auto ${floating ? '' : 'scroll-smooth'}`} style={floating ? {} : { scrollbarWidth: 'thin', scrollbarColor: isMonochrome ? '#d1d5db transparent' : '#444 transparent' }}>
-      {/* 最小化时显示紧凑进度条 */}
-      {panelMinimized && isGenerating ? (
-        <div className="p-3 flex flex-col gap-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin" style={{ color: accentColor }} />
-              <span className="text-sm font-medium">{genStage}</span>
-            </div>
-            {floating ? (
-              <button
-                onClick={() => setPanelMinimized(false)}
-                className="p-1.5 rounded-md transition-colors cursor-pointer hover:opacity-70"
-                style={{ color: subTextColor }}
-                title="展开面板"
-              >
-                <Maximize2 className="w-4 h-4" />
-              </button>
-            ) : (
-              <button
-                onClick={() => setPanelMinimized(false)}
-                className="p-1.5 rounded-md hover:bg-white/10 transition-colors cursor-pointer"
-                title="展开面板"
-              >
-                <Maximize2 className="w-4 h-4" style={{ color: subTextColor }} />
-              </button>
-            )}
-          </div>
-          <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: isMonochrome ? '#e5e7eb' : '#333' }}>
-            <div
-              className="h-full rounded-full transition-all duration-500"
-              style={{
-                width: `${genProgress}%`,
-                background: isGold ? 'linear-gradient(90deg, #d4af37, #f0d060)' : 'linear-gradient(90deg, #3b82f6, #60a5fa)',
-              }}
-            />
-          </div>
-          <p className="text-xs" style={{ color: subTextColor }}>视频生成中，你可以继续使用画布...</p>
+        <div className="px-4 pt-4 pb-2 flex items-center justify-between flex-shrink-0">
+          <h2 className="text-lg font-bold" style={{ color: textColor }}>视频生成</h2>
+          {onClose && (
+            <button onClick={onClose} className="p-1 rounded-md" style={{ color: subTextColor }}>
+              <X className="w-5 h-5" />
+            </button>
+          )}
         </div>
-      ) : panelMinimized ? (
-        <button
-          onClick={() => setPanelMinimized(false)}
-          className="m-3 p-2.5 rounded-lg flex items-center justify-center gap-2 text-sm font-medium transition-all cursor-pointer hover:opacity-80"
-          style={{
-            background: isGold ? 'rgba(212,175,55,0.1)' : 'rgba(59,130,246,0.1)',
-            border: `1px solid ${isGold ? 'rgba(212,175,55,0.3)' : 'rgba(59,130,246,0.3)'}`,
-            color: accentColor,
-          }}
-        >
-          <Maximize2 className="w-4 h-4" />
-          展开视频生成面板
-        </button>
-      ) : (
-      <>
-      {/* 顶部工具栏 - 仅保留最小化按钮，标题由外部Tab显示 */}
-      <div className="flex items-center justify-end px-3 pt-2 pb-1">
-        <button
-          onClick={() => setPanelMinimized(true)}
-          className="p-1.5 rounded-md transition-colors cursor-pointer hover:opacity-70"
-          style={{ color: subTextColor }}
-          title="最小化面板"
-        >
-          <Minus className="w-4 h-4" />
-        </button>
-      </div>
-
+      )}
       {/* === 模式切换 === */}
       <div className={`flex gap-1 px-3 pb-1 flex-nowrap ${isMonochrome ? 'bg-gray-100 rounded-lg mx-3 mt-1 p-1.5' : ''}`}>
         {modeOptions.map(opt => (
@@ -2266,10 +2199,7 @@ Rules:
           )}
         </button>
       </div>
-      </>
-      )}
-      </div>{/* 关闭scroll容器 */}
-      </div>{/* 关闭内容区域容器 */}
+      </div>
     </div>
   );
 }
