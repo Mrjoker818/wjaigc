@@ -806,6 +806,7 @@ UPSCALE_TIMEOUT_MS=300000
   - 参考图语义角色标签（角色/场景/风格/构图/首帧/尾帧等）
 - 参考 dramaclaw 的数据模型与工作流思路（Elastic License 仅借鉴流程，未搬代码）
 - P3 尾帧续写闭环：新增 `/api/video/extract-frame`（ffmpeg 抽帧 API，支持 first/last/at/N-grid 四种模式），前端"生成所有镜头"走串行流水线：上一镜头视频轮询完成→调抽帧 API 拿尾帧 URL→自动作为下一镜头 firstFrameUrl 传入，并用 `buildContinuationPrompt` 构造含前序尾帧描述的连续性提示词；UI 实时回写每个镜头的 status(generating/completed/failed) 和 thumbnailUrl；默认开启"尾帧接力"开关
+- P2 结构化分镜面板细化：镜头卡片支持标题/propose/prompt 内联编辑、上移下移、重拍诊断(调用 /api/video/director/diagnose 返回单变量重试建议→一键应用重生成)、删除、生成中/完成/失败状态徽标和缩略图；结构化字段(景别/运镜/光线/声音)配专属图标 chip 展示；AI 分镜返回 <2 镜头自动二次追问重生成确保有叙事价值；镜头失败自动展开诊断面板
 
 ### v3.7.0
 

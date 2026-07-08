@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import * as React from 'react';
 import {
   Play, Video, ImagePlus, Clock, Settings2,
-  ChevronDown, Loader2, Sparkles, Volume2, VolumeX,
+  ChevronDown, ChevronUp, Loader2, Sparkles, Volume2, VolumeX,
   Upload, X, AlertCircle, Info, FastForward, Users, Plus, Paintbrush, Film, Palette, Images,
   History, RotateCcw, Languages, GripVertical, Minus, Maximize2, ChevronRight, CheckCircle2,
   Clapperboard
@@ -394,8 +394,14 @@ export default function VideoGenerationPanel({
         }),
       });
       const data = await resp.json();
-      if (data.diagnosis && Array.isArray(data.diagnosis.issues)) {
-        setShotPlans(prev => prev.map(s => s.id === shot.id ? { ...s, diagnosis: data.diagnosis.issues } : s));
+      if (data.diagnosis && Array.isArray(data.diagnosis.retakeSuggestions)) {
+        const suggestions = data.diagnosis.retakeSuggestions.map((s: { label: string; patch?: Record<string, unknown>; promptAppend?: string; negativeAppend?: string; description?: string }) => ({
+          title: data.diagnosis.title,
+          description: s.description || data.diagnosis.description,
+          label: s.label,
+          patch: { ...(s.patch || {}), promptAppend: s.promptAppend, negativeAppend: s.negativeAppend },
+        }));
+        setShotPlans(prev => prev.map(s => s.id === shot.id ? { ...s, diagnosis: suggestions } : s));
       }
     } catch (e) { /* ignore */ }
   };
@@ -677,21 +683,126 @@ Rules:
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || '分镜规划失败');
       if (data.shots && Array.isArray(data.shots)) {
-        const plans: VideoShotPlan[] = data.shots.map((s: any, idx: number) => ({
-          id: `shot-${Date.now()}-${idx}`,
+        // 若返回镜头数过少（<2），自动二次追问重生成一次
+        let finalShots = data.shots;
+        if (finalShots.length < 2) {
+          try {
+            const retryRes = await fetch('/api/video/director/shot-plan', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                concept: prompt + '，请至少拆分为3个镜头，每个镜头明确景别、运镜、光线、声音和连续性备注',
+                totalDuration: duration,
+                aspectRatio,
+                model: currentModel?.name || model,
+                maxShots: Math.min(6, Math.max(3, Math.ceil(duration / 4))),
+              }),
+            });
+            const retryData = await retryRes.json();
+            if (retryData.shots && Array.isArray(retryData.shots) && retryData.shots.length >= 2) {
+              finalShots = retryData.shots;
+            }
+          } catch { /* 忽略二次追问失败，沿用首次结果 */ }
+        }
+        const plans: VideoShotPlan[] = finalShots.map((s: any, idx: number) => ({
+          id: s.id || `shot-${Date.now()}-${idx}`,
+          index: idx,
           title: s.title || `镜头 ${idx + 1}`,
+          purpose: s.purpose || '',
+          shotSize: s.shotSize || s.shot_size || '中景',
+          cameraMove: s.cameraMove || s.cameraMotion || s.camera_movement || s.camera || '',
+          cameraMotion: s.cameraMotion || s.cameraMove || s.camera_movement || s.camera || '',
+          actionBeat: s.actionBeat || s.action_beat || '',
+          lighting: s.lighting || '',
+          audioCues: s.audioCues || s.audio_cues || s.sound || '',
           prompt: s.prompt || '',
-          duration: s.duration || 5,
+          directedPrompt: s.directedPrompt || s.compiledPrompt || undefined,
+          duration: Number(s.duration) || Math.max(3, Math.round(duration / Math.max(finalShots.length, 1))),
           aspectRatio: s.aspectRatio || aspectRatio,
-          camera: s.camera || '',
-          motion: s.motion || '',
+          references: Array.isArray(s.references) ? s.references : [],
+          continuityNotes: Array.isArray(s.continuityNotes)
+            ? s.continuityNotes
+            : Array.isArray(s.continuity_notes)
+              ? s.continuity_notes
+              : [],
+          camera: undefined,
+          motion: null,
           firstFrameFromPrev: idx > 0,
-          status: 'pending' as const,
+          firstFrameUrl: idx === 0 ? (firstFrameUrl || undefined) : undefined,
+          lastFrameUrl: undefined,
+          status: 'planned',
+          diagnosis: null,
+          retakeCount: 0,
+          error: undefined,
+          videoUrl: undefined,
+          thumbnailUrl: undefined,
         }));
         setShotPlans(plans);
+        shotPlansRef.current = plans;
         setShotPlanOpen(true);
         setMode('multi-shot');
         setGenStage('');
+        // 二次校验：AI 若返回的镜头数少于 2，自动补充分镜重试（单次）
+        if (plans.length < 2) {
+          try {
+            setGenStage('补充镜头规划中…');
+            const reRes = await fetch('/api/video/director/shot-plan', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                storyIdea: prompt,
+                totalDuration: duration as number,
+                aspectRatio: aspectRatio as string,
+                style: useDirector ? directorStyle : 'cinematic',
+                shotCount: Math.max(3, Math.ceil((duration as number) / 4)),
+                minShots: 3,
+              } as unknown as ShotPlanInput),
+            });
+            if (reRes.ok) {
+              const reData = await reRes.json();
+              if (reData.success && Array.isArray(reData.shots) && reData.shots.length >= 2) {
+                const rePlans: VideoShotPlan[] = (reData.shots as Array<Record<string, unknown>>).map((s: Record<string, unknown>, idx: number) => ({
+                  id: `shot-${Date.now()}-${idx}`,
+                  index: idx,
+                  title: (s.title as string) || `镜头 ${idx + 1}`,
+                  purpose: (s.purpose as string) || '',
+                  prompt: (s.prompt as string) || (s.description as string) || '',
+                  shotSize: (s.shotSize as string) || (s.shot_size as string) || '',
+                  cameraMove: (s.cameraMove as string) || (s.camera_move as string) || (s.cameraMotion as string) || (s.camera_motion as string) || '',
+                  cameraMotion: (s.cameraMotion as string) || (s.cameraMove as string) || '',
+                  actionBeat: (s.actionBeat as string) || (s.action_beat as string) || '',
+                  lighting: (s.lighting as string) || '',
+                  audioCues: (s.audioCues as string) || (s.audio_cues as string) || (s.sound as string) || '',
+                  references: Array.isArray(s.references) ? (s.references as VideoReferenceBinding[]) : [],
+                  continuityNotes: Array.isArray(s.continuityNotes)
+                    ? s.continuityNotes as string[]
+                    : Array.isArray(s.continuity_notes)
+                      ? s.continuity_notes as string[]
+                      : [],
+                  duration: typeof s.duration === 'number' ? s.duration : Math.ceil((duration as number) / Math.max(reData.shots.length, 3)),
+                  aspectRatio: aspectRatio as string,
+                  firstFrameFromPrev: idx > 0,
+                  firstFrameUrl: idx === 0 ? (firstFrameUrl || undefined) : undefined,
+                  lastFrameUrl: undefined,
+                  status: 'planned',
+                  diagnosis: null,
+                  retakeCount: 0,
+                  error: undefined,
+                  videoUrl: undefined,
+                  thumbnailUrl: undefined,
+                  directedPrompt: undefined,
+                  endState: undefined,
+                  endFrameDescription: undefined,
+                  motion: null,
+                }));
+                setShotPlans(rePlans);
+                shotPlansRef.current = rePlans;
+              }
+            }
+          } catch (e) {
+            console.warn('补充分镜失败，保留原结果', e);
+          }
+        }
       }
     } catch (err) {
       console.error('分镜规划失败:', err);
@@ -1762,50 +1873,234 @@ Rules:
                   </div>
                 </div>
                 {shotPlans.length > 0 ? (
-                  <div className="space-y-2 max-h-64 overflow-y-auto">
-                    {shotPlans.map((shot, idx) => (
-                      <div key={shot.id} className="p-2.5 rounded-lg" style={{ background: panelBg, border: `1px solid ${borderColor}` }}>
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-[10px] font-bold flex items-center gap-1" style={{ color: '#a855f7' }}>
-                            <span className="w-4 h-4 rounded-full bg-[#a855f7]/20 flex items-center justify-center text-[9px]">{idx + 1}</span>
-                            {shot.title || `镜头 ${idx + 1}`}
-                            <span className="text-[9px] font-normal px-1 rounded" style={{ color: subTextColor }}>{shot.cameraMove || shot.shotSize || ''}</span>
-                          </span>
-                          <div className="flex gap-1">
-                            <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: `${accentColor}20`, color: accentColor }}>{shot.duration}s</span>
-                            <button onClick={() => setShotPlans(shotPlans.filter((_, i) => i !== idx))} className="cursor-pointer hover:text-red-400" style={{ color: subTextColor }}>
-                              <X className="w-3 h-3" />
+                  <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                    {shotPlans.map((shot, idx) => {
+                      const isShotGenerating = currentGeneratingShotId === shot.id;
+                      const shotRefs = shot.references || [];
+                      return (
+                        <div
+                          key={shot.id}
+                          className="p-3 rounded-lg relative overflow-hidden transition-all"
+                          style={{
+                            background: panelBg,
+                            border: `1px solid ${shot.status === 'failed' ? '#ef4444' : borderColor}`,
+                            boxShadow: shot.status === 'completed' ? `0 0 0 1px ${accentColor}40 inset` : 'none',
+                          }}
+                        >
+                          {/* 顶部行：序号+标题+时长+状态 */}
+                          <div className="flex items-center justify-between gap-2 mb-1.5">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span
+                                className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0"
+                                style={{
+                                  background:
+                                    shot.status === 'completed' ? accentColor :
+                                    shot.status === 'failed' ? '#ef4444' :
+                                    isShotGenerating ? `${accentColor}30` : `${accentColor}20`,
+                                  color: shot.status === 'completed' ? '#0a0a0a' : accentColor,
+                                }}
+                              >
+                                {isShotGenerating ? <Loader2 className="w-3 h-3 animate-spin" /> : idx + 1}
+                              </span>
+                              <span className="text-[11px] font-semibold truncate" style={{ color: textColor }}>
+                                {shot.title || `镜头 ${idx + 1}`}
+                              </span>
+                              {shot.purpose && (
+                                <span className="text-[9px] px-1 py-0.5 rounded shrink-0" style={{ background: subTextColor + '15', color: subTextColor }}>
+                                  {shot.purpose}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <span className="text-[9px] px-1.5 py-0.5 rounded font-semibold" style={{ background: `${accentColor}20`, color: accentColor }}>
+                                {shot.duration}s
+                              </span>
+                              {/* 上移/下移 */}
+                              <button
+                                onClick={() => {
+                                  if (idx === 0) return;
+                                  const copy = [...shotPlans];
+                                  [copy[idx - 1], copy[idx]] = [copy[idx], copy[idx - 1]];
+                                  setShotPlans(copy);
+                                }}
+                                disabled={idx === 0 || isShotGenerating || isGeneratingAllShots}
+                                className="cursor-pointer hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
+                                style={{ color: subTextColor }}
+                                title="上移"
+                              >
+                                <ChevronUp className="w-3 h-3" />
+                              </button>
+                              <button
+                                onClick={() => {
+                                  if (idx === shotPlans.length - 1) return;
+                                  const copy = [...shotPlans];
+                                  [copy[idx + 1], copy[idx]] = [copy[idx], copy[idx + 1]];
+                                  setShotPlans(copy);
+                                }}
+                                disabled={idx === shotPlans.length - 1 || isShotGenerating || isGeneratingAllShots}
+                                className="cursor-pointer hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
+                                style={{ color: subTextColor }}
+                                title="下移"
+                              >
+                                <ChevronDown className="w-3 h-3" />
+                              </button>
+                              <button
+                                onClick={() => setShotPlans(shotPlans.filter((_, i) => i !== idx))}
+                                disabled={isShotGenerating || isGeneratingAllShots}
+                                className="cursor-pointer hover:text-red-400 disabled:opacity-30 disabled:cursor-not-allowed"
+                                style={{ color: subTextColor }}
+                                title="删除"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* 结构化标签行：景别/运镜/光线/声音 */}
+                          <div className="flex flex-wrap gap-1 mb-1.5">
+                            {shot.shotSize && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded flex items-center gap-0.5" style={{ background: 'rgba(59,130,246,0.12)', color: '#60a5fa' }}>
+                                <Maximize2 className="w-2.5 h-2.5" />{shot.shotSize}
+                              </span>
+                            )}
+                            {shot.cameraMove && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded flex items-center gap-0.5" style={{ background: 'rgba(34,197,94,0.12)', color: '#4ade80' }}>
+                                <Video className="w-2.5 h-2.5" />{shot.cameraMove}
+                              </span>
+                            )}
+                            {shot.lighting && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded flex items-center gap-0.5" style={{ background: 'rgba(234,179,8,0.12)', color: '#facc15' }}>
+                                <Sparkles className="w-2.5 h-2.5" />{shot.lighting.substring(0, 14)}{shot.lighting.length > 14 ? '…' : ''}
+                              </span>
+                            )}
+                            {shot.audioCues && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded flex items-center gap-0.5" style={{ background: 'rgba(168,85,247,0.12)', color: '#c084fc' }}>
+                                <Volume2 className="w-2.5 h-2.5" />{shot.audioCues.substring(0, 14)}{shot.audioCues.length > 14 ? '…' : ''}
+                              </span>
+                            )}
+                            {shotRefs.slice(0, 3).map((r, ri) => (
+                              <span key={ri} className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(255,255,255,0.06)', color: subTextColor }}>
+                                {r.role === 'character' ? '👤角色' : r.role === 'scene' ? '🏞场景' : r.role === 'style' ? '🎨风格' : r.role === 'first-frame' ? '🖼首帧' : r.role}
+                              </span>
+                            ))}
+                          </div>
+
+                          {/* 镜头描述 */}
+                          <textarea
+                            value={shot.directedPrompt || shot.prompt}
+                            onChange={e => {
+                              const copy = [...shotPlans];
+                              copy[idx] = { ...copy[idx], prompt: e.target.value, directedPrompt: e.target.value };
+                              setShotPlans(copy);
+                            }}
+                            rows={2}
+                            className="w-full px-2 py-1.5 rounded text-[11px] resize-none focus:outline-none leading-relaxed"
+                            style={{ background: inputBg, color: textColor, border: `1px solid ${borderColor}` }}
+                          />
+
+                          {/* 连续性备注 */}
+                          {shot.continuityNotes && shot.continuityNotes.length > 0 && (
+                            <div className="mt-1 text-[9px] leading-relaxed px-1" style={{ color: subTextColor }}>
+                              <span className="font-semibold" style={{ color: accentColor }}>连续性: </span>
+                              {shot.continuityNotes.slice(0, 2).join(' · ')}
+                            </div>
+                          )}
+
+                          {/* 缩略图（已完成） */}
+                          {shot.status === 'completed' && shot.thumbnailUrl && (
+                            <div className="mt-1.5 rounded overflow-hidden" style={{ border: `1px solid ${borderColor}` }}>
+                              <img src={shot.thumbnailUrl} alt={shot.title} className="w-full h-20 object-cover" />
+                            </div>
+                          )}
+
+                          {/* 错误信息 */}
+                          {shot.status === 'failed' && shot.error && (
+                            <div className="mt-1.5 p-1.5 rounded text-[10px] flex items-start gap-1" style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: '#fca5a5' }}>
+                              <AlertCircle className="w-3 h-3 mt-0.5 shrink-0" />
+                              <span className="flex-1">{shot.error}</span>
+                            </div>
+                          )}
+
+                          {/* 诊断建议 */}
+                          {shot.diagnosis && shot.diagnosis.length > 0 && diagnoseOpen === shot.id && (
+                            <div className="mt-1.5 p-2 rounded space-y-1" style={{ background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.3)' }}>
+                              <div className="text-[10px] font-semibold flex items-center gap-1 mb-1" style={{ color: '#facc15' }}>
+                                <AlertCircle className="w-3 h-3" />单变量重拍建议
+                              </div>
+                              {shot.diagnosis.map((d: { label?: string; description?: string; patch?: Record<string, unknown>; promptAppend?: string; negativeAppend?: string; title?: string }, di: number) => (
+                                <div key={di} className="text-[10px] flex items-start gap-2" style={{ color: '#fde68a' }}>
+                                  <span className="shrink-0 text-[9px] mt-0.5">{di + 1}.</span>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="font-semibold">{d.label || d.title}</div>
+                                    {d.description && <div className="text-[9px] opacity-80 mt-0.5">{d.description}</div>}
+                                  </div>
+                                  <button
+                                    onClick={async () => {
+                                      const copy = [...shotPlans];
+                                      const patch = d.patch || {};
+                                      // 应用 prompt/negative 追加
+                                      let newPrompt = copy[idx].prompt;
+                                      let newNegative = negativePrompt || '';
+                                      if (d.promptAppend) newPrompt = newPrompt + '。' + d.promptAppend;
+                                      if (d.negativeAppend) newNegative = newNegative ? newNegative + ', ' + d.negativeAppend : d.negativeAppend;
+                                      copy[idx] = { ...copy[idx], diagnosis: undefined, prompt: newPrompt, directedPrompt: newPrompt };
+                                      setShotPlans(copy);
+                                      setNegativePrompt(newNegative);
+                                      setDiagnoseOpen(null);
+                                      await handleGenerateSingleShot(shot.id);
+                                      void patch;
+                                    }}
+                                    className="text-[9px] px-1.5 py-0.5 rounded cursor-pointer shrink-0 font-semibold"
+                                    style={{ background: '#facc15', color: '#0a0a0a' }}
+                                  >
+                                    应用并重拍
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* 操作按钮 */}
+                          <div className="flex gap-1.5 mt-2 flex-wrap items-center">
+                            <button
+                              onClick={() => handleGenerateSingleShot(shot.id)}
+                              disabled={isShotGenerating || isGeneratingAllShots}
+                              className="text-[10px] px-2 py-1 rounded transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                              style={{ background: `${accentColor}25`, color: accentColor }}
+                            >
+                              {isShotGenerating ? <><Loader2 className="w-3 h-3 animate-spin" />生成中</> : <><Play className="w-3 h-3" />{shot.status === 'completed' ? '重拍' : shot.status === 'failed' ? '重试' : '生成'}</>}
                             </button>
+                            {shot.status === 'completed' && shot.videoUrl && (
+                              <button
+                                onClick={() => window.open(shot.videoUrl, '_blank')}
+                                className="text-[10px] px-2 py-1 rounded transition-colors cursor-pointer flex items-center gap-1"
+                                style={{ background: 'rgba(34,197,94,0.15)', color: '#4ade80' }}
+                              >
+                                <Play className="w-3 h-3 fill-current" />播放
+                              </button>
+                            )}
+                            {shot.status === 'failed' && (
+                              <button
+                                onClick={async () => {
+                                  if (diagnoseOpen === shot.id) { setDiagnoseOpen(null); return; }
+                                  setDiagnoseOpen(shot.id);
+                                  await handleDiagnoseFailed(shot);
+                                }}
+                                className="text-[10px] px-2 py-1 rounded transition-colors cursor-pointer flex items-center gap-1"
+                                style={{ background: 'rgba(239,68,68,0.15)', color: '#fca5a5' }}
+                              >
+                                <AlertCircle className="w-3 h-3" />诊断
+                              </button>
+                            )}
+                            {shot.status === 'completed' && (
+                              <span className="text-[9px] flex items-center gap-0.5 ml-auto" style={{ color: '#4ade80' }}>
+                                <CheckCircle2 className="w-3 h-3" />完成
+                              </span>
+                            )}
                           </div>
                         </div>
-                        <textarea
-                          value={shot.prompt}
-                          onChange={e => { const copy = [...shotPlans]; copy[idx] = { ...copy[idx], prompt: e.target.value }; setShotPlans(copy); }}
-                          rows={2}
-                          className="w-full px-2 py-1.5 rounded text-[11px] resize-none focus:outline-none"
-                          style={{ background: inputBg, color: textColor, border: `1px solid ${borderColor}` }}
-                        />
-                        <div className="flex gap-1 mt-1 flex-wrap">
-                          <span className="text-[9px] px-1 rounded" style={{ color: subTextColor }}>🎬 {shot.purpose}</span>
-                          {shot.lighting && <span className="text-[9px] px-1 rounded" style={{ color: subTextColor }}>💡 {shot.lighting.substring(0, 10)}</span>}
-                          {shot.audioCues && <span className="text-[9px] px-1 rounded" style={{ color: subTextColor }}>🔊 {shot.audioCues.substring(0, 10)}</span>}
-                        </div>
-                        <div className="flex gap-1 mt-1.5 items-center">
-                          <button
-                            onClick={() => handleGenerateSingleShot(shot.id)}
-                            disabled={currentGeneratingShotId === shot.id || isGeneratingAllShots}
-                            className="text-[10px] px-2 py-0.5 rounded transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                            style={{ background: `${accentColor}25`, color: accentColor }}
-                          >
-                            {currentGeneratingShotId === shot.id ? '生成中...' : '生成此镜头'}
-                          </button>
-                          <span className="text-[9px]" style={{ color: subTextColor }}>
-                            {shot.status === 'ready' && '✓ 已生成'}
-                            {shot.status === 'failed' && <span style={{ color: '#ef4444' }}>✗ {shot.error || '失败'}</span>}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 ) : (
                   <div className="space-y-1.5 max-h-52 overflow-y-auto">
@@ -1841,14 +2136,57 @@ Rules:
                   </div>
                 )}
                 {shotPlans.length > 0 && (
-                  <button
-                    onClick={handleGenerateAllShots}
-                    disabled={isGeneratingAllShots || isGenerating}
-                    className="w-full mt-2 py-2 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    style={{ background: accentColor, color: '#0a0a0a' }}
-                  >
-                    {isGeneratingAllShots ? (<><Loader2 className="w-3.5 h-3.5 animate-spin" />连续生成中（尾帧→首帧串联）...</>) : (<><Film className="w-3.5 h-3.5" />生成全部镜头（自动串联尾帧→首帧）</>)}
-                  </button>
+                  <>
+                    <button
+                      onClick={handleGenerateAllShots}
+                      disabled={isGeneratingAllShots || isGenerating}
+                      className="w-full mt-2 py-2 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      style={{ background: accentColor, color: '#0a0a0a' }}
+                    >
+                      {isGeneratingAllShots ? (<><Loader2 className="w-3.5 h-3.5 animate-spin" />连续生成中（尾帧→首帧串联）...</>) : (<><Film className="w-3.5 h-3.5" />生成全部镜头（自动串联尾帧→首帧）</>)}
+                    </button>
+                    <button
+                      onClick={() => {
+                        const newShot: VideoShotPlan = {
+                          id: `shot-${Date.now()}`,
+                          index: shotPlans.length,
+                          title: `镜头 ${shotPlans.length + 1}`,
+                          purpose: '',
+                          prompt: '',
+                          shotSize: '',
+                          cameraMotion: '',
+                          cameraMove: '',
+                          actionBeat: '',
+                          lighting: '',
+                          audioCues: '',
+                          references: [],
+                          continuityNotes: [],
+                          duration: duration as number,
+                          aspectRatio: aspectRatio as string,
+                          firstFrameFromPrev: chainContinuity && shotPlans.length > 0,
+                          firstFrameUrl: undefined,
+                          lastFrameUrl: undefined,
+                          status: 'planned',
+                          diagnosis: null,
+                          retakeCount: 0,
+                          error: undefined,
+                          videoUrl: undefined,
+                          thumbnailUrl: undefined,
+                          directedPrompt: undefined,
+                          endState: undefined,
+                          motion: null,
+                        };
+                        const copy = [...shotPlans, newShot];
+                        setShotPlans(copy);
+                        shotPlansRef.current = copy;
+                      }}
+                      disabled={isGeneratingAllShots || isGenerating}
+                      className="w-full mt-1.5 py-1.5 rounded-md border-2 border-dashed text-[11px] flex items-center justify-center gap-1 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      style={{ borderColor: borderColor, color: subTextColor }}
+                    >
+                      <Plus className="w-3 h-3" />添加镜头
+                    </button>
+                  </>
                 )}
                 {shotPlans.length === 0 && (
                   <button
