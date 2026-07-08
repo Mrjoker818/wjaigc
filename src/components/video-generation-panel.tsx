@@ -1164,8 +1164,8 @@ Rules:
     top: panelPosition ? `${panelPosition.y}px` : '50%',
     transform: panelPosition ? 'none' : 'translate(-50%, -50%)',
     maxHeight: '86vh',
-    width: 'min(1200px, 96vw)',
-    minWidth: '960px',
+    width: 'min(920px, 94vw)',
+    minWidth: '720px',
   } : {};
 
   return (
@@ -1268,90 +1268,54 @@ Rules:
           })}
         </div>
 
-        {/* 主体滚动区 - 两列布局 */}
-        <div className="flex-1 grid grid-cols-1 xl:grid-cols-[340px_1fr] gap-x-6 gap-y-0 px-5 pt-4 overflow-y-auto overflow-x-hidden min-h-0 scrollbar-thin" style={{ scrollbarWidth: 'thin' }}>
-          {/* ======== 左列：导演风格 + 模型 ======== */}
-          <div className="flex flex-col gap-4 pb-4 min-w-0">
-            {/* 风格预设 */}
-            <div>
-              <label className={labelClass}>视频风格模板</label>
-              <div className="flex gap-1 mb-2 overflow-x-auto pb-0.5">
-                {[
-                  { id: 'all', label: '全部' },
-                  { id: 'product', label: '产品' },
-                  { id: 'character', label: '人物' },
-                  { id: 'landscape', label: '风景' },
-                  { id: 'effect', label: '特效' },
-                  { id: 'story', label: '故事' },
-                ].map(cat => (
-                  <button
-                    key={cat.id}
-                    onClick={() => setTemplateFilter(cat.id as any)}
-                    className="px-2.5 py-1 rounded-md text-[11px] font-medium transition-all shrink-0 cursor-pointer"
-                    style={{
-                      background: templateFilter === cat.id ? (isGold ? `${accentColor}25` : `${accentColor}20`) : isMonochrome ? '#f3f4f6' : 'rgba(255,255,255,0.04)',
-                      color: templateFilter === cat.id ? accentColor : subTextColor,
-                      border: `1px solid ${templateFilter === cat.id ? accentColor : 'transparent'}`,
-                    }}
-                  >
-                    {cat.label}
-                  </button>
-                ))}
-              </div>
-              <div className="grid grid-cols-1 gap-1.5 max-h-[200px] overflow-y-auto pr-0.5 scrollbar-thin" style={{ scrollbarWidth: 'thin' }}>
-                {VIDEO_TEMPLATES.filter(t => templateFilter === 'all' || t.category === templateFilter).map(template => (
-                  <button
-                    key={template.id}
-                    onClick={() => {
-                      setPrompt(template.prompt);
-                      if (template.aspectRatio && availableRatios.includes(template.aspectRatio)) setAspectRatio(template.aspectRatio);
-                      if (template.duration && availableDurations.includes(template.duration)) setDuration(template.duration);
-                      if (template.cameraControl) setCameraControl(template.cameraControl);
-                    }}
-                    className="text-left px-3 py-2 rounded-lg transition-all cursor-pointer hover:-translate-y-0.5 hover:shadow-md"
-                    style={{
-                      background: inputBg,
-                      border: `1px solid ${borderColor}`,
-                    }}
-                    title={template.prompt}
-                  >
-                    <div className="font-medium truncate text-[12px] leading-tight" style={{ color: isMonochrome ? '#1f2937' : '#e5e7eb' }}>{template.name}</div>
-                    <div className="truncate opacity-70 mt-0.5 text-[10px]" style={{ color: subTextColor }}>{template.aspectRatio} · {template.duration}s</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
+        {/* 主体滚动区 - 单列宽布局 */}
+        <div className="flex-1 flex flex-col px-5 pt-4 overflow-y-auto overflow-x-hidden min-h-0 scrollbar-thin" style={{ scrollbarWidth: 'thin' }}>
+          {/* ======== 顶部控制条：模型 + 导演风格，单行紧凑布局 ======== */}
+          <div className="grid grid-cols-[1fr_auto] gap-3 mb-4 flex-shrink-0">
             {/* 模型选择 */}
             <div>
-              <label className="text-[11px] font-semibold mb-2 block" style={{ color: subTextColor }}>视频模型</label>
+              <label className="text-[11px] font-semibold mb-1.5 block" style={{ color: subTextColor }}>视频模型</label>
               <div className="relative">
                 <select
                   value={model}
                   onChange={e => setModel(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-lg text-[13px] appearance-none cursor-pointer font-medium focus:outline-none transition-colors"
+                  className="w-full px-3 py-2 pr-8 rounded-lg text-[12px] appearance-none cursor-pointer font-medium focus:outline-none transition-colors truncate"
                   style={{ background: inputBg, color: textColor, border: `1px solid ${borderColor}` }}
                 >
                   {videoModels.length === 0 && <option value="">请在管理员后台添加视频模型</option>}
                   {videoModels.map(m => (
-                    <option key={m.id} value={m.id}>{m.name} {m.region === 'cn' ? '🇨🇳' : '🌍'} - {m.providerName || m.providerId}</option>
+                    <option key={m.id} value={m.id}>{m.name} {m.region === 'cn' ? '🇨🇳' : '🌍'}</option>
                   ))}
                 </select>
-                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none" style={{ color: subTextColor }} />
+                <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none" style={{ color: subTextColor }} />
               </div>
-              {currentModel && (
-                <div className="mt-2 flex items-start gap-1.5 p-2 rounded-md text-[11px] leading-relaxed" style={{ background: isGold ? 'rgba(212,175,55,0.05)' : isMonochrome ? 'rgba(107,114,128,0.05)' : 'rgba(59,130,246,0.05)', border: `1px solid ${isGold ? 'rgba(212,175,55,0.1)' : isMonochrome ? 'rgba(107,114,128,0.15)' : 'rgba(59,130,246,0.1)'}` }}>
-                  <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: accentColor }} />
-                  <div style={{ color: subTextColor }}>
-                    <span style={{ color: accentColor, fontWeight: 600 }}>{currentModel.name}</span>
-                    {' · '}最长 {currentFeatures?.maxDuration || 10}秒 · 支持{currentFeatures?.audio ? '音效' : ''}{currentFeatures?.firstLastFrame ? ' · 首尾帧' : ''}
-                  </div>
-                </div>
-              )}
+            </div>
+            {/* 导演风格 */}
+            <div className="w-[180px]">
+              <label className="text-[11px] font-semibold mb-1.5 block" style={{ color: subTextColor }}>
+                导演风格 {useDirector && <span className="ml-1" style={{ color: accentColor }}>●</span>}
+              </label>
+              <div className="relative">
+                <select
+                  value={directorStyle}
+                  onChange={e => setDirectorStyle(e.target.value as DirectorStyle)}
+                  disabled={!useDirector}
+                  className="w-full px-3 py-2 pr-8 rounded-lg text-[12px] appearance-none cursor-pointer font-medium focus:outline-none transition-colors truncate disabled:opacity-50"
+                  style={{ background: inputBg, color: textColor, border: `1px solid ${useDirector ? accentColor + '60' : borderColor}` }}
+                >
+                  <option value="cinematic">🎬 电影感</option>
+                  <option value="documentary">📹 纪录片</option>
+                  <option value="commercial">📺 广告片</option>
+                  <option value="music-video">🎵 MV</option>
+                  <option value="anime">🎨 动漫</option>
+                  <option value="minimal">◻️ 极简</option>
+                </select>
+                <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none" style={{ color: subTextColor }} />
+              </div>
             </div>
           </div>
 
-          {/* ======== 右列：描述 + 参数 + 生成 ======== */}
+          {/* ======== 视频描述区 ======== */}
           <div className="flex flex-col gap-4 pb-4 min-w-0">
             {/* 视频描述 */}
             <div>
@@ -1371,32 +1335,6 @@ Rules:
                   >🎬 导演{useDirector ? '✓' : ''}</span>
                 </label>
                 <div className="flex gap-1.5 items-center">
-                  {useDirector && (
-                    <select
-                      value={directorStyle}
-                      onChange={e => setDirectorStyle(e.target.value as any)}
-                      className="px-2 py-1 rounded text-[10px] cursor-pointer appearance-none pr-5 bg-no-repeat"
-                      style={{
-                        background: isGold ? 'rgba(212,175,55,0.1)' : 'rgba(59,130,246,0.1)',
-                        color: accentColor,
-                        border: `1px solid ${isGold ? 'rgba(212,175,55,0.3)' : 'rgba(59,130,246,0.3)'}`,
-                        backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 24 24' fill='none' stroke='%23d4af37' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E")`,
-                        backgroundPosition: 'right 4px center',
-                        backgroundSize: '8px',
-                      }}
-                    >
-                      <option value="cinematic">🎬 电影叙事</option>
-                      <option value="product">📦 产品展示</option>
-                      <option value="music-video">🎵 MV风格</option>
-                      <option value="documentary">📹 纪实</option>
-                      <option value="anime">🎌 动漫</option>
-                      <option value="horror">👻 悬疑</option>
-                      <option value="action">💥 动作</option>
-                      <option value="comedy">😄 喜剧</option>
-                      <option value="fashion">👗 时尚</option>
-                      <option value="sci-fi">🚀 科幻</option>
-                    </select>
-                  )}
                   <button
                     onClick={handleTranslatePrompt}
                     disabled={!prompt.trim() || isTranslating}
