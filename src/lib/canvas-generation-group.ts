@@ -488,63 +488,50 @@ export const SHARED_ASPECT_RATIOS = [
 export function getModelParamType(modelId: string): ModelParamType {
     const normalizedId = modelId.toLowerCase();
     
-    // 特殊处理：GPT-Image系列同时支持resolution和quality两种参数
+    // GPT-Image系列始终支持 both（resolution + quality）
     // APIMart/PearAPI官方文档明确说明：resolution(1k/2k/4k) + quality(auto/low/medium/high)
     const gptImageKeywords = ['gpt-image', 'chatgpt-image'];
     for (const keyword of gptImageKeywords) {
-        if (normalizedId.includes(keyword)) {
-            return 'both';
-        }
+        if (normalizedId.includes(keyword)) return 'both';
     }
     
-    // 关键词匹配：分辨率档位型模型（仅支持resolution，不支持quality）
-    // 这些模型的参数值是"1K/2K/3K/4K"，直接控制输出分辨率
-    // 注：所有后缀带-2k/-4k/-hd的未知模型自动进入resolution模式（由下面自动检测兜底）
+    // 🔧 后缀优先检测（必须在关键词之前！否则 banana-4k 会被关键词误判为 resolution）
+    const hasResolutionSuffix = /(?:^|[-_])[1234]k(?:[-_]|$)/i.test(modelId) || /(?:^|[-_])hd(?:[-_]|$)/i.test(modelId);
+    if (hasResolutionSuffix) {
+        // 图像模型带后缀 → both（nanobanana-4k, gemini-3-pro-image-4k, imagen-4k 等）
+        const bothKeywords = ['gpt-image', 'chatgpt-image', 'dall-e', 'gemini', 'banana', 'imagen', 'image'];
+        for (const kw of bothKeywords) {
+            if (normalizedId.includes(kw)) return 'both';
+        }
+        // 纯分辨率模型带后缀（如 hidream-4k）→ resolution
+        return 'resolution';
+    }
+    
+    // 不带后缀：分辨率档位型模型
     const resolutionKeywords = [
         'seedream', 'seedance', 'kling', 'gemini-image', 'imagen', 
         'nano-banana', 'nanobanana', 'nano_banana', 'banana', 'gemini-2.5-flash-image', 'gemini-3-pro-image', 'gemini-3.1-flash-image',
         'hidream', 'flux-ultra'
     ];
     for (const keyword of resolutionKeywords) {
-        if (normalizedId.includes(keyword)) {
-            return 'resolution';
-        }
+        if (normalizedId.includes(keyword)) return 'resolution';
     }
     
-    // 关键词匹配：质量级别型模型（仅支持quality，不支持resolution）
-    // 这些模型的参数值是"standard/hd/auto/low/medium/high"，控制细节增强
+    // 不带后缀：质量级别型模型
     const qualityKeywords = [
         'dall-e', 'ideogram', 'stable-diffusion', 
         'sd-xl', 'sdxl', 'sd-3'
     ];
     for (const keyword of qualityKeywords) {
-        if (normalizedId.includes(keyword)) {
-            return 'quality';
-        }
+        if (normalizedId.includes(keyword)) return 'quality';
     }
     
     // 回退：检查精确匹配列表（兼容旧代码）
     for (const m of RESOLUTION_TIER_MODELS) {
-        if (normalizedId === m.toLowerCase()) {
-            return 'resolution';
-        }
+        if (normalizedId === m.toLowerCase()) return 'resolution';
     }
-    
     for (const m of QUALITY_LEVEL_MODELS) {
-        if (normalizedId === m.toLowerCase()) {
-            return 'quality';
-        }
-    }
-    
-    // 🔧 通用后缀兜底：任何模型名带-4k/-2k/-1k/-hd/-v2-4k等分辨率档位后缀 → 都按resolution模型处理
-    // 例如 nanobanana-4k, custom-gpt-image-2-4k, anymodel-2k 等
-    if (/(?:^|[-_])[1234]k(?:[-_]|$)/i.test(modelId) || /(?:^|[-_])hd(?:[-_]|$)/i.test(modelId)) {
-        // 进一步判断：如果模型名同时含 image / gpt / banana / imagen / gemini 等图像关键词，则认为既支持resolution又支持quality
-        const bothKeywords = ['gpt-image', 'chatgpt-image', 'dall-e', 'gemini', 'banana', 'imagen'];
-        for (const kw of bothKeywords) {
-            if (normalizedId.includes(kw)) return 'both';
-        }
-        return 'resolution';
+        if (normalizedId === m.toLowerCase()) return 'quality';
     }
     
     return 'none';
@@ -606,21 +593,34 @@ export function inferModelParamCapability(modelId: string): { type: ModelParamTy
     const isMidj = id.includes('midjourney') || id.includes('mj-');
     // 2.3 Flux不使用档位
 
+    // 后缀优先：-4k/-3k/-2k 决定分辨率档位上限
+    // GPT/banana/gemini/DALL-E/Ideogram/SD/Midjourney 家族同时需要质量档位 → type:'both'
+    const needsQuality = isGpt || isDalle || isIdeogram || isSd || isMidj ||
+        id.includes('banana') || id.includes('gemini') || id.includes('imagen') || id.includes('nano-banana');
+
     if (is4k) {
-        return { type: 'resolution', options: ['1K', '2K', '4K'], defaultOption: '4K' };
+        // -4k 模型：分辨率全支持 1K-4K + 质量档位
+        return needsQuality
+            ? { type: 'both', options: ['1K', '2K', '4K', 'auto', 'low', 'medium', 'high'], defaultOption: '4K' }
+            : { type: 'resolution', options: ['1K', '2K', '4K'], defaultOption: '4K' };
     }
     if (is3k) {
-        return { type: 'resolution', options: ['1K', '2K', '3K'], defaultOption: '3K' };
+        return needsQuality
+            ? { type: 'both', options: ['1K', '2K', '3K', 'auto', 'low', 'medium', 'high'], defaultOption: '3K' }
+            : { type: 'resolution', options: ['1K', '2K', '3K'], defaultOption: '3K' };
     }
     if (is2k) {
-        return { type: 'resolution', options: ['1K', '2K', '4K'], defaultOption: '2K' };
+        // -2k 上限 2K，不支持 4K
+        return needsQuality
+            ? { type: 'both', options: ['1K', '2K', 'auto', 'low', 'medium', 'high'], defaultOption: '2K' }
+            : { type: 'resolution', options: ['1K', '2K'], defaultOption: '2K' };
     }
     if (isResBrand || is1kOnly) {
         return { type: 'resolution', options: ['1K', '2K'], defaultOption: is1kOnly ? '1K' : '2K' };
     }
     if (isGpt) {
-        // gpt-image-2-official 或其他gpt变体走quality档位
-        return { type: 'quality', options: ['auto', 'low', 'medium', 'high'], defaultOption: 'auto' };
+        // GPT Image 家族：同时支持分辨率档位(1K-4K) + 质量档位
+        return { type: 'both', options: ['1K', '2K', '4K', 'auto', 'low', 'medium', 'high'], defaultOption: '2K' };
     }
     if (isDalle) {
         return { type: 'quality', options: ['standard', 'hd'], defaultOption: 'standard' };
