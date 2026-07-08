@@ -1154,7 +1154,7 @@ Rules:
 
   // 浮动面板样式（横向布局）
   const floatingWrapperClass = floating
-    ? `fixed z-50 w-[820px] max-w-[92vw] flex rounded-2xl shadow-2xl overflow-hidden ${
+    ? `fixed z-50 flex rounded-2xl shadow-2xl overflow-hidden ${
         isMonochrome ? 'bg-white border border-gray-200' : 'bg-[#141418] border border-white/[0.08]'
       }`
     : 'flex flex-col min-h-full';
@@ -1163,8 +1163,9 @@ Rules:
     left: panelPosition ? `${panelPosition.x}px` : '50%',
     top: panelPosition ? `${panelPosition.y}px` : '50%',
     transform: panelPosition ? 'none' : 'translate(-50%, -50%)',
-    maxHeight: '82vh',
-    width: 'min(880px, 94vw)',
+    maxHeight: '86vh',
+    width: 'min(1200px, 96vw)',
+    minWidth: '960px',
   } : {};
 
   return (
@@ -1268,9 +1269,9 @@ Rules:
         </div>
 
         {/* 主体滚动区 - 两列布局 */}
-        <div className="flex-1 grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-x-5 gap-y-0 px-5 pt-4 overflow-y-auto min-h-0">
-          {/* ======== 左列：风格预设 + 模型 ======== */}
-          <div className="flex flex-col gap-4 pb-4">
+        <div className="flex-1 grid grid-cols-1 xl:grid-cols-[340px_1fr] gap-x-6 gap-y-0 px-5 pt-4 overflow-y-auto overflow-x-hidden min-h-0 scrollbar-thin" style={{ scrollbarWidth: 'thin' }}>
+          {/* ======== 左列：导演风格 + 模型 ======== */}
+          <div className="flex flex-col gap-4 pb-4 min-w-0">
             {/* 风格预设 */}
             <div>
               <label className={labelClass}>视频风格模板</label>
@@ -1297,7 +1298,7 @@ Rules:
                   </button>
                 ))}
               </div>
-              <div className="grid grid-cols-2 gap-2 max-h-[260px] overflow-y-auto pr-1">
+              <div className="grid grid-cols-1 gap-1.5 max-h-[200px] overflow-y-auto pr-0.5 scrollbar-thin" style={{ scrollbarWidth: 'thin' }}>
                 {VIDEO_TEMPLATES.filter(t => templateFilter === 'all' || t.category === templateFilter).map(template => (
                   <button
                     key={template.id}
@@ -1307,15 +1308,15 @@ Rules:
                       if (template.duration && availableDurations.includes(template.duration)) setDuration(template.duration);
                       if (template.cameraControl) setCameraControl(template.cameraControl);
                     }}
-                    className="text-left p-2.5 rounded-lg transition-all cursor-pointer hover:-translate-y-0.5 hover:shadow-md"
+                    className="text-left px-3 py-2 rounded-lg transition-all cursor-pointer hover:-translate-y-0.5 hover:shadow-md"
                     style={{
                       background: inputBg,
                       border: `1px solid ${borderColor}`,
                     }}
                     title={template.prompt}
                   >
-                    <div className="font-semibold truncate text-[12px]" style={{ color: isMonochrome ? '#1f2937' : '#e5e7eb' }}>{template.name}</div>
-                    <div className="truncate opacity-70 mt-1 text-[10px]" style={{ color: subTextColor }}>{template.aspectRatio} · {template.duration}s</div>
+                    <div className="font-medium truncate text-[12px] leading-tight" style={{ color: isMonochrome ? '#1f2937' : '#e5e7eb' }}>{template.name}</div>
+                    <div className="truncate opacity-70 mt-0.5 text-[10px]" style={{ color: subTextColor }}>{template.aspectRatio} · {template.duration}s</div>
                   </button>
                 ))}
               </div>
@@ -1602,16 +1603,16 @@ Rules:
               </div>
             )}
 
-            {/* 参数三行网格：比例 / 时长 / 质量 */}
-            <div className="grid grid-cols-3 gap-3">
+            {/* 参数三行堆叠：比例 / 时长 / 质量 —— 每行独占避免文字挤压 */}
+            <div className="space-y-3">
               <div>
                 <label className={labelClass}>画面比例</label>
-                <div className="flex flex-wrap gap-1">
+                <div className="flex flex-wrap gap-1.5">
                   {availableRatios.map(r => (
                     <button
                       key={r}
                       onClick={() => setAspectRatio(r)}
-                      className="flex items-center gap-1 px-2 py-1.5 rounded-md text-[11px] font-medium transition-all cursor-pointer"
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] font-medium transition-all cursor-pointer whitespace-nowrap"
                       style={{
                         background: aspectRatio === r ? (isGold ? 'rgba(212,175,55,0.18)' : 'rgba(59,130,246,0.18)') : inputBg,
                         color: aspectRatio === r ? accentColor : subTextColor,
@@ -1626,37 +1627,37 @@ Rules:
               </div>
               <div>
                 <label className={labelClass}>视频时长</label>
-                <div className="flex gap-1">
+                <div className="flex gap-1.5">
                   {availableDurations.map(d => (
                     <button
                       key={d}
                       onClick={() => setDuration(d)}
-                      className="flex-1 px-2 py-1.5 rounded-md text-[11px] font-medium transition-all cursor-pointer"
+                      className="flex-1 px-2 py-1.5 rounded-md text-[11px] font-medium transition-all cursor-pointer whitespace-nowrap"
                       style={{
                         background: duration === d ? (isGold ? 'rgba(212,175,55,0.18)' : 'rgba(59,130,246,0.18)') : inputBg,
                         color: duration === d ? accentColor : subTextColor,
                         border: `1px solid ${duration === d ? accentColor : borderColor}`,
                       }}
                     >
-                      <Clock className="w-3 h-3 inline mr-0.5" />{d}s
+                      <Clock className="w-3 h-3 inline mr-0.5" />{d}秒
                     </button>
                   ))}
                 </div>
               </div>
               <div>
                 <label className={labelClass}>生成质量</label>
-                <div className="flex gap-1">
+                <div className="flex gap-1.5">
                   {(['std', 'pro'] as const).map(q => (
                     <button
                       key={q}
                       onClick={() => setQuality(q)}
-                      className="flex-1 px-2 py-1.5 rounded-md text-[11px] font-medium transition-all cursor-pointer"
+                      className="flex-1 px-2 py-1.5 rounded-md text-[11px] font-medium transition-all cursor-pointer whitespace-nowrap"
                       style={{
                         background: quality === q ? (isGold ? 'rgba(212,175,55,0.18)' : 'rgba(59,130,246,0.18)') : inputBg,
                         color: quality === q ? accentColor : subTextColor,
                         border: `1px solid ${quality === q ? accentColor : borderColor}`,
                       }}
-                    >{q === 'std' ? '标准' : '高清'}</button>
+                    >{q === 'std' ? '标准' : '高清 Pro'}</button>
                   ))}
                 </div>
               </div>
