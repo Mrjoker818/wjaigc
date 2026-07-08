@@ -275,6 +275,9 @@ function CanvasApp() {
   const [showImageEditor, setShowImageEditor] = useState(false);
   const [editingImage, setEditingImage] = useState<CanvasImage | null>(null);
 
+  // Floating video panel state
+  const [showVideoPanel, setShowVideoPanel] = useState(false);
+
   // Chat panel integration states
   const [chatInitialImage, setChatInitialImage] = useState<CanvasImage | null>(null);
   const [chatTabOpen, setChatTabOpen] = useState(false);
@@ -3891,6 +3894,7 @@ function CanvasApp() {
           connections={canvasConnections}
           onConnectionsChange={setCanvasConnections}
           versionHistoryManager={treeHistoryRef.current}
+          onOpenVideoPanel={() => setShowVideoPanel(true)}
         />
       </div>
 
@@ -4002,20 +4006,7 @@ function CanvasApp() {
                 <span className={`absolute bottom-0 left-2 right-2 h-[2px] rounded-full ${themeStyle === 'monochrome' ? 'bg-blue-500' : 'bg-gold shadow-[0_0_6px_rgba(200,164,92,0.5)]'}`} />
               )}
             </button>
-            <button
-              onClick={() => { setActivePanel('video'); setChatTabOpen(false); }}
-              className={`flex-1 py-2 px-3 flex items-center justify-center gap-1.5 transition-all text-sm relative ${
-                activePanel === 'video'
-                  ? themeStyle === 'monochrome' ? 'text-blue-600 font-semibold' : 'text-gold font-semibold'
-                  : themeStyle === 'monochrome' ? 'text-gray-500 hover:text-gray-800 hover:bg-gray-50' : 'text-gold-muted hover:text-text-bright hover:bg-white/5'
-              }`}
-            >
-              <Film size={15} />
-              <span className="text-sm">视频生成</span>
-              {activePanel === 'video' && (
-                <span className={`absolute bottom-0 left-2 right-2 h-[2px] rounded-full ${themeStyle === 'monochrome' ? 'bg-blue-500' : 'bg-gold shadow-[0_0_6px_rgba(200,164,92,0.5)]'}`} />
-              )}
-            </button>
+            {/* Video generation is now a floating panel accessible from bottom toolbar */}
           </div>
           <div className={`h-px ${themeStyle === 'monochrome' ? 'bg-gray-200' : 'bg-gradient-to-r from-transparent via-gold/15 to-transparent'}`} />
 
@@ -4059,25 +4050,6 @@ function CanvasApp() {
               <div className={activePanel === 'chat' ? 'flex-1 overflow-hidden' : 'hidden'}>
                 <ChatPanel themeStyle={themeStyle} onAddToPrompt={handleAddToPrompt} onAddImages={handleAddImages} canvasImages={images} selectedCanvasImage={selectedImage} onChatModelChange={setCurrentChatModelInfo} chatInitialImage={chatInitialImage} onChatInitialImageConsumed={() => setChatInitialImage(null)} chatTabOpen={chatTabOpen} onChatTabOpenChange={setChatTabOpen} onNavigateToImage={(id: string) => setNavigateToImageId(id)} onGenerateImage={handleChatGenerateImage} />
               </div>
-              <div className={activePanel === 'video' ? 'flex-1 overflow-y-auto scroll-smooth' : 'hidden'} style={{
-                scrollbarWidth: 'thin',
-                scrollbarColor: themeStyle === 'monochrome' ? '#d1d5db transparent' : '#444 transparent'
-              }}>
-                <VideoGenerationPanel
-                    onVideoGenerate={handleVideoGenerate}
-                    onError={(error: string) => {
-                      toast.error('视频生成失败', {
-                        description: error,
-                        className: themeStyle === 'monochrome' 
-                          ? 'bg-white border border-gray-200 text-gray-900' 
-                          : 'bg-[#141414] border-[#2a2a2a] text-white',
-                      });
-                    }}
-                    themeStyle={themeStyle}
-                    selectedImageUrl={selectedImage?.mediaType !== 'video' ? selectedImage?.url : undefined}
-                    selectedVideoUrl={selectedImage?.mediaType === 'video' ? selectedImage?.videoUrl : undefined}
-                  />
-              </div>
 
             {/* 固定在底部的开始生成按钮 */}
             {activePanel === 'generate' && (
@@ -4118,6 +4090,26 @@ function CanvasApp() {
         themeStyle={themeStyle}
         onEditImage={(img) => { setPreviewImage(null); handleEditImage(img); }}
       />
+
+      {/* Floating Video Generation Panel */}
+      {showVideoPanel && (
+        <VideoGenerationPanel
+          floating
+          onVideoGenerate={handleVideoGenerate}
+          onClose={() => setShowVideoPanel(false)}
+          onError={(error: string) => {
+            toast.error('视频生成失败', {
+              description: error,
+              className: themeStyle === 'monochrome' 
+                ? 'bg-white border border-gray-200 text-gray-900' 
+                : 'bg-[#141414] border-[#2a2a2a] text-white',
+            });
+          }}
+          themeStyle={themeStyle}
+          selectedImageUrl={selectedImage?.mediaType !== 'video' ? selectedImage?.url : undefined}
+          selectedVideoUrl={selectedImage?.mediaType === 'video' ? selectedImage?.videoUrl : undefined}
+        />
+      )}
 
       {/* Toast */}
       <Toaster 

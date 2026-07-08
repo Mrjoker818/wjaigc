@@ -466,6 +466,8 @@ interface InfiniteCanvasProps {
   onSendToChat?: (image: CanvasImage) => void;
   /** 树状版本历史管理器（P1功能） */
   versionHistoryManager?: import('@/lib/canvas-tree-history').TreeHistoryManager;
+  /** Open floating video generation panel */
+  onOpenVideoPanel?: () => void;
 }
 
 type EditMode = 'none' | 'erase' | 'mask' | 'expand' | 'crop' | 'upscale' | 'colorAdjust' | 'panorama';
@@ -617,6 +619,7 @@ export function InfiniteCanvas({
   connections,
   onConnectionsChange,
   versionHistoryManager,
+  onOpenVideoPanel,
 }: InfiniteCanvasProps) {
   const isMonochrome = themeStyle === 'monochrome';
 
@@ -15771,6 +15774,17 @@ export function InfiniteCanvas({
           >
             <Bot className={`h-4 w-4 ${mIcon.bot}`} />
             <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">Agent</span>
+          </button>
+
+          {/* Video Generation - Floating Panel */}
+          <button
+            aria-label="视频生成"
+            onClick={() => onOpenVideoPanel?.()}
+            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-blue-500 hover:text-blue-600 hover:bg-blue-50' : 'text-blue-400 hover:text-blue-300 hover:bg-blue-500/10'}`}
+            title="视频生成"
+          >
+            <Film className="h-4 w-4" />
+            <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">视频生成</span>
           </button>
 
           <div className={`w-px h-5 mx-1 ${separatorCls} shrink-0`} />

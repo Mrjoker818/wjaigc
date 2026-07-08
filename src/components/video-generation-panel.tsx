@@ -348,6 +348,10 @@ interface VideoGenerationPanelProps {
   selectedVideoUrl?: string | null;
   /** 从 /api/models?type=video 加载的服务器端视频模型列表 */
   serverVideoModels?: { id: string; name: string; providerId: string; providerName: string }[];
+  /** 是否以浮动弹窗模式显示 */
+  floating?: boolean;
+  /** 关闭浮动面板 */
+  onClose?: () => void;
 }
 
 // 比例图形预览组件
@@ -375,6 +379,8 @@ export default function VideoGenerationPanel({
   selectedImageUrl,
   selectedVideoUrl,
   serverVideoModels,
+  floating = false,
+  onClose,
 }: VideoGenerationPanelProps) {
   // === 状态 ===
   const [mode, setMode] = useState<'text2video' | 'image2video-first' | 'image2video-ref' | 'video-extend' | 'multi-shot'>('text2video');
@@ -885,8 +891,62 @@ Rules:
   const cardBgClass = isMonochrome ? 'bg-gray-50/50' : '';
   const sectionBgClass = isMonochrome ? 'bg-gray-50' : '';
 
+  // 浮动面板样式
+  const floatingWrapperClass = floating
+    ? `fixed bottom-24 right-6 z-50 w-[420px] max-h-[70vh] flex flex-col rounded-2xl shadow-2xl overflow-hidden ${
+        isMonochrome ? 'bg-white border border-gray-200' : 'bg-[#141418] border border-white/[0.08]'
+      }`
+    : 'flex flex-col min-h-full';
+
   return (
-    <div className="flex flex-col min-h-full" style={{ background: panelBg, color: textColor }}>
+    <div className={floatingWrapperClass} style={{ background: !floating ? panelBg : undefined, color: textColor }} data-floating-panel="video">
+      {/* 浮动模式下显示完整标题栏 */}
+      {floating && (
+        <div className={`flex items-center justify-between px-4 py-3 flex-shrink-0 border-b ${
+          isMonochrome ? 'border-gray-200 bg-gray-50' : 'border-white/[0.06]'
+        }`}>
+          <div className="flex items-center gap-2">
+            <Film className="w-5 h-5" style={{ color: accentColor }} />
+            <span className="text-base font-semibold">视频生成</span>
+          </div>
+          <div className="flex items-center gap-1">
+            {isGenerating && (
+              <button
+                onClick={() => setPanelMinimized(!panelMinimized)}
+                className={`p-1.5 rounded-md transition-colors cursor-pointer ${
+                  isMonochrome ? 'hover:bg-gray-200 text-gray-500' : 'hover:bg-white/10 text-gray-400'
+                }`}
+                title={panelMinimized ? '展开面板' : '最小化'}
+              >
+                {panelMinimized ? <Maximize2 className="w-4 h-4" /> : <Minimize2 className="w-4 h-4" />}
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className={`p-1.5 rounded-md transition-colors cursor-pointer ${
+                isMonochrome ? 'hover:bg-gray-200 text-gray-500' : 'hover:bg-white/10 text-gray-400'
+              }`}
+              title="关闭面板"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+      {/* 非浮动模式下的工具栏 */}
+      {!floating && (
+      <div className="flex items-center justify-end px-3 pt-2 pb-1 flex-shrink-0">
+        <button
+          onClick={() => setPanelMinimized(true)}
+          className="p-1.5 rounded-md transition-colors cursor-pointer hover:opacity-70"
+          style={{ color: subTextColor }}
+          title="最小化面板"
+        >
+          <Minimize2 className="w-4 h-4" />
+        </button>
+      </div>
+      )}
+      <div className={`flex-1 overflow-y-auto ${floating ? '' : 'scroll-smooth'}`} style={floating ? {} : { scrollbarWidth: 'thin', scrollbarColor: isMonochrome ? '#d1d5db transparent' : '#444 transparent' }}>
       {/* 最小化时显示紧凑进度条 */}
       {panelMinimized && isGenerating ? (
         <div className="p-3 flex flex-col gap-2">
@@ -895,13 +955,24 @@ Rules:
               <Loader2 className="w-4 h-4 animate-spin" style={{ color: accentColor }} />
               <span className="text-sm font-medium">{genStage}</span>
             </div>
-            <button
-              onClick={() => setPanelMinimized(false)}
-              className="p-1.5 rounded-md hover:bg-white/10 transition-colors cursor-pointer"
-              title="展开面板"
-            >
-              <Maximize2 className="w-4 h-4" style={{ color: subTextColor }} />
-            </button>
+            {floating ? (
+              <button
+                onClick={() => setPanelMinimized(false)}
+                className="p-1.5 rounded-md transition-colors cursor-pointer hover:opacity-70"
+                style={{ color: subTextColor }}
+                title="展开面板"
+              >
+                <Maximize2 className="w-4 h-4" />
+              </button>
+            ) : (
+              <button
+                onClick={() => setPanelMinimized(false)}
+                className="p-1.5 rounded-md hover:bg-white/10 transition-colors cursor-pointer"
+                title="展开面板"
+              >
+                <Maximize2 className="w-4 h-4" style={{ color: subTextColor }} />
+              </button>
+            )}
           </div>
           <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: isMonochrome ? '#e5e7eb' : '#333' }}>
             <div
@@ -929,18 +1000,15 @@ Rules:
         </button>
       ) : (
       <>
-      {/* 顶部标题栏 + 最小化按钮 */}
-      <div className="flex items-center justify-between px-3 pt-3 pb-1">
-        <div className="flex items-center gap-2">
-          <Film className="w-4 h-4" style={{ color: accentColor }} />
-          <span className="text-sm font-semibold">视频生成</span>
-        </div>
+      {/* 顶部工具栏 - 仅保留最小化按钮，标题由外部Tab显示 */}
+      <div className="flex items-center justify-end px-3 pt-2 pb-1">
         <button
           onClick={() => setPanelMinimized(true)}
-          className="p-1.5 rounded-md hover:bg-white/10 transition-colors cursor-pointer"
+          className="p-1.5 rounded-md transition-colors cursor-pointer hover:opacity-70"
+          style={{ color: subTextColor }}
           title="最小化面板"
         >
-          <Minimize2 className="w-4 h-4" style={{ color: subTextColor }} />
+          <Minimize2 className="w-4 h-4" />
         </button>
       </div>
 
@@ -2125,6 +2193,7 @@ Rules:
       </div>
       </>
       )}
+      </div>{/* 关闭scroll容器 */}
     </div>
   );
 }
