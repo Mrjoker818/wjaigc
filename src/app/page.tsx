@@ -2321,8 +2321,23 @@ function CanvasApp() {
       console.log(`[handleVideoGenerate] Chain mode: ${params.multiShotScenes.length} scenes`);
       setActiveGenerationCount(prev => prev + 1);
 
-      // 辅助：从视频URL提取最后一帧
+      // 辅助：从视频URL提取最后一帧（优先使用后端 ffmpeg 抽帧 API，降级用前端 video 元素）
       const extractLastFrame = async (videoUrl: string): Promise<string | null> => {
+        // 1) 优先后端 ffmpeg（稳定、无跨域、画质好）
+        try {
+          const resp = await fetch('/api/video/extract-frame', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ videoUrl, frame: 'last' }),
+          });
+          if (resp.ok) {
+            const data = await resp.json();
+            if (data.imageUrl) return data.imageUrl;
+          }
+        } catch (e) {
+          console.warn('[extractLastFrame] backend ffmpeg failed:', e);
+        }
+        // 2) 降级：前端 video 元素 canvas 截帧
         try {
           const video = document.createElement('video');
           video.crossOrigin = 'anonymous';
@@ -2334,8 +2349,7 @@ function CanvasApp() {
             video.onerror = () => reject(new Error('Video load failed'));
             setTimeout(() => reject(new Error('Video load timeout')), 15000);
           });
-          // 跳到最后一帧
-          video.currentTime = video.duration - 0.1;
+          video.currentTime = Math.max(0, video.duration - 0.1);
           await new Promise<void>((resolve, reject) => {
             video.onseeked = () => resolve();
             setTimeout(() => reject(new Error('Seek timeout')), 5000);
@@ -2346,9 +2360,9 @@ function CanvasApp() {
           const ctx = canvas.getContext('2d');
           if (!ctx) return null;
           ctx.drawImage(video, 0, 0);
-          return canvas.toDataURL('image/png');
+          return canvas.toDataURL('image/jpeg', 0.92);
         } catch (e) {
-          console.warn('[extractLastFrame] Failed:', e);
+          console.warn('[extractLastFrame] frontend fallback failed:', e);
           return null;
         }
       };

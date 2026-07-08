@@ -27,8 +27,9 @@ src/
 │       ├── serve-upload/[filename]/route.ts  # 上传文件服务 API（生产环境）
 │       ├── chat/route.ts           # AI 聊天 API
 │       ├── video/
-│       │   ├── generate/route.ts   # 视频生成 API (文生视频/图生视频/首尾帧, 异步提交+轮询)
-│       │   └── extend/route.ts     # 视频延长 API (基于可灵/Seedance等, 异步提交+轮询)
+│       │   ├── generate/route.ts   # 视频生成 API (文生视频/图生视频/首尾帧, 异步提交+轮询, 支持导演增强+尾帧续写)
+│       │   ├── extend/route.ts     # 视频延长 API (基于可灵/Seedance等, 异步提交+轮询, 支持导演增强)
+│       │   └── extract-frame/route.ts # 视频抽帧 API (首帧/尾帧/指定秒/最后N帧拼图, ffmpeg, 支撑多镜头连续性)
 │       ├── optimize-prompt/route.ts # 提示词优化 API
 │       ├── analyze-psd/route.ts    # AI 视觉分析图片结构 API
 │       ├── vision-prompt/route.ts  # 图片识词 API (SSE流+JSON双模式)
@@ -804,6 +805,7 @@ UPSCALE_TIMEOUT_MS=300000
   - 结构化镜头卡片：展示景别/运镜/光线/声音标签，支持单独生成/删除/生成所有镜头
   - 参考图语义角色标签（角色/场景/风格/构图/首帧/尾帧等）
 - 参考 dramaclaw 的数据模型与工作流思路（Elastic License 仅借鉴流程，未搬代码）
+- P3 尾帧续写闭环：新增 `/api/video/extract-frame`（ffmpeg 抽帧 API，支持 first/last/at/N-grid 四种模式），前端"生成所有镜头"走串行流水线：上一镜头视频轮询完成→调抽帧 API 拿尾帧 URL→自动作为下一镜头 firstFrameUrl 传入，并用 `buildContinuationPrompt` 构造含前序尾帧描述的连续性提示词；UI 实时回写每个镜头的 status(generating/completed/failed) 和 thumbnailUrl；默认开启"尾帧接力"开关
 
 ### v3.7.0
 

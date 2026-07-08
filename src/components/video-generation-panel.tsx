@@ -16,6 +16,7 @@ import {
   buildShotPlanSystemPrompt,
   buildShotPlanUserMessage,
   parseShotPlanResponse,
+  buildContinuationPrompt,
 } from '@/lib/video-director/continuity';
 import type {
   VideoShotPlan,
@@ -402,6 +403,10 @@ export default function VideoGenerationPanel({
   // 合并服务器模型与内置注册表
   const [videoModels, setVideoModels] = useState<{ id: string; name: string; providerId: string; providerName: string; region: 'cn' | 'global'; features: VideoModelInfo['features'] }[]>([]);
 
+  // ref 保持最新 shotPlans，供异步循环读取不被闭包冻结
+  const shotPlansRef = useRef<VideoShotPlan[]>(shotPlans);
+  useEffect(() => { shotPlansRef.current = shotPlans; }, [shotPlans]);
+
   // 自动从服务器加载视频模型（如果未通过 props 传入）
   useEffect(() => {
     // 关键词推断模型能力（供未在注册表中硬编码的自定义模型使用）
@@ -696,27 +701,49 @@ Rules:
     }
   }, [prompt, isPlanningShots, duration, aspectRatio, model, currentModel, mode]);
 
-  // === 单独生成一个镜头（使用 onVideoGenerate 直接提交）===
+  // === 单独生成一个镜头（使用 onVideoGenerate 直接提交；自动用上一镜头抽尾帧作为首帧）===
   const handleGenerateSingleShot = async (shotId: string) => {
     const shot = shotPlans.find(s => s.id === shotId);
     if (!shot || !model) return;
     setCurrentGeneratingShotId(shotId);
-    setShotPlans(prev => prev.map(s => s.id === shotId ? { ...s, status: 'generating' } : s));
+    setShotPlans(prev => prev.map(s => s.id === shotId ? { ...s, status: 'generating' as const, error: undefined } : s));
     try {
-      // 查找上一个已完成镜头的缩略图作为首帧近似
+      // 查找上一个已完成镜头：优先使用服务端 ffmpeg 抽取的尾帧，其次用缩略图
       const shotIdx = shotPlans.findIndex(s => s.id === shotId);
       let firstFrameForThis: string | undefined = firstFrameUrl || undefined;
-      if (shotIdx > 0 && shot.firstFrameFromPrev) {
+      if (shotIdx > 0 && shot.firstFrameFromPrev !== false) {
         const prev = shotPlans[shotIdx - 1];
-        if (prev && prev.thumbnailUrl) firstFrameForThis = prev.thumbnailUrl;
-        else if (prev && prev.videoUrl) firstFrameForThis = prev.videoUrl;
+        if (prev?.videoUrl) {
+          // 调用后端抽帧 API（ffmpeg 抽最后一帧，比前端 video 元素更稳定）
+          try {
+            const resp = await fetch('/api/video/extract-frame', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ videoUrl: prev.videoUrl, frame: 'last' }),
+            });
+            const data = await resp.json();
+            if (resp.ok && data.imageUrl) {
+              firstFrameForThis = data.imageUrl;
+            } else if (prev.thumbnailUrl) {
+              firstFrameForThis = prev.thumbnailUrl;
+            }
+          } catch {
+            if (prev.thumbnailUrl) firstFrameForThis = prev.thumbnailUrl;
+          }
+        } else if (prev?.thumbnailUrl) {
+          firstFrameForThis = prev.thumbnailUrl;
+        }
       }
       const pureModelId = model.includes('::') ? model.split('::').pop()! : model;
       const providerId = model.includes('::') ? model.split('::')[0] : undefined;
-      const camControl = shot.cameraMotion ? { type: (cameraControl?.type || 'push_in'), intensity: motionStrength } : cameraControl || undefined;
-      // 复用 onVideoGenerate 提交（传 useDirector: true 启用后端导演编译）
+      const camControl = shot.cameraMove ? { type: (cameraControl?.type || 'static'), intensity: motionStrength } : cameraControl || undefined;
+      // 连续性提示：用上一镜头结果构造续接 prompt，帮助模型衔接动作与场景
+      const prevShot = shotIdx > 0 ? shotPlans[shotIdx - 1] : undefined;
+      const shotPrompt = prevShot && prevShot.status === 'ready'
+        ? buildContinuationPrompt(prevShot, shot.directedPrompt || shot.prompt)
+        : (shot.directedPrompt || shot.prompt);
       await onVideoGenerate({
-        prompt: shot.directedPrompt || shot.prompt,
+        prompt: shotPrompt,
         mode: firstFrameForThis ? 'image2video-first' : 'text2video',
         model: pureModelId,
         providerId,
@@ -737,20 +764,39 @@ Rules:
         useDirector: true,
         directorStyle,
       });
-      // 注意：onVideoGenerate 已经处理了 canvas 添加，这里将该镜头标记为 ready 并保存视频URL
-      setShotPlans(prev => prev.map(s => s.id === shotId ? { ...s, status: 'ready' } : s));
+      setShotPlans(prev => prev.map(s => s.id === shotId ? { ...s, status: 'ready' as const } : s));
     } catch (err: any) {
-      setShotPlans(prev => prev.map(s => s.id === shotId ? { ...s, status: 'failed', error: err?.message || '生成失败' } : s));
+      setShotPlans(prev => prev.map(s => s.id === shotId ? { ...s, status: 'failed' as const, error: err?.message || '生成失败' } : s));
     } finally {
       setCurrentGeneratingShotId(null);
     }
   };
 
-  // === 批量生成所有镜头（串行）===
+  // === 批量生成所有镜头（串行，自动串联尾帧→首帧，使用后端链式 API 实现连续性）===
+  const [isGeneratingAllShots, setIsGeneratingAllShots] = useState(false);
   const handleGenerateAllShots = async () => {
-    for (const shot of shotPlans) {
-      if (shot.status === 'ready' || shot.status === 'accepted') continue;
-      await handleGenerateSingleShot(shot.id);
+    if (!model || shotPlans.length === 0) return;
+    setIsGeneratingAllShots(true);
+    try {
+      const pureModelId = model.includes('::') ? model.split('::').pop()! : model;
+      const providerId = model.includes('::') ? model.split('::')[0] : undefined;
+      const charRefs = typedReferences.filter(r => r.type.startsWith('character-')).map(r => r.url);
+      const otherRefs = typedReferences.filter(r => !r.type.startsWith('character-') && r.type !== 'first-frame' && r.type !== 'last-frame').map(r => r.url);
+
+      // 前端串行链式执行：逐个镜头生成，每完成一个自动抽尾帧作为下一镜头首帧
+      // 这种方式比后端链式更灵活，支持进度实时展示与单镜头失败重试
+      for (let i = 0; i < shotPlans.length; i++) {
+        const shot = shotPlans[i];
+        await handleGenerateSingleShot(shot.id);
+        // 若用户已中断或该镜头失败则终止链
+        const latest = shotPlansRef.current.find(s => s.id === shot.id);
+        if (!latest || latest.status === 'failed') break;
+      }
+    } catch (err: any) {
+      console.error('[shot-plan] 批量生成失败', err);
+    } finally {
+      setIsGeneratingAllShots(false);
+      setCurrentGeneratingShotId(null);
     }
   };
 
@@ -1744,6 +1790,20 @@ Rules:
                           {shot.lighting && <span className="text-[9px] px-1 rounded" style={{ color: subTextColor }}>💡 {shot.lighting.substring(0, 10)}</span>}
                           {shot.audioCues && <span className="text-[9px] px-1 rounded" style={{ color: subTextColor }}>🔊 {shot.audioCues.substring(0, 10)}</span>}
                         </div>
+                        <div className="flex gap-1 mt-1.5 items-center">
+                          <button
+                            onClick={() => handleGenerateSingleShot(shot.id)}
+                            disabled={currentGeneratingShotId === shot.id || isGeneratingAllShots}
+                            className="text-[10px] px-2 py-0.5 rounded transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                            style={{ background: `${accentColor}25`, color: accentColor }}
+                          >
+                            {currentGeneratingShotId === shot.id ? '生成中...' : '生成此镜头'}
+                          </button>
+                          <span className="text-[9px]" style={{ color: subTextColor }}>
+                            {shot.status === 'ready' && '✓ 已生成'}
+                            {shot.status === 'failed' && <span style={{ color: '#ef4444' }}>✗ {shot.error || '失败'}</span>}
+                          </span>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -1779,6 +1839,16 @@ Rules:
                       </div>
                     ))}
                   </div>
+                )}
+                {shotPlans.length > 0 && (
+                  <button
+                    onClick={handleGenerateAllShots}
+                    disabled={isGeneratingAllShots || isGenerating}
+                    className="w-full mt-2 py-2 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    style={{ background: accentColor, color: '#0a0a0a' }}
+                  >
+                    {isGeneratingAllShots ? (<><Loader2 className="w-3.5 h-3.5 animate-spin" />连续生成中（尾帧→首帧串联）...</>) : (<><Film className="w-3.5 h-3.5" />生成全部镜头（自动串联尾帧→首帧）</>)}
+                  </button>
                 )}
                 {shotPlans.length === 0 && (
                   <button
