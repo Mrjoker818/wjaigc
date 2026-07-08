@@ -546,7 +546,10 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
     };
     if (serverVideoModels && serverVideoModels.length > 0) {
       const merged = serverVideoModels.map(sm => {
-        const registry: any = VIDEO_MODEL_REGISTRY[sm.id as keyof typeof VIDEO_MODEL_REGISTRY];
+        const registry = VIDEO_MODEL_REGISTRY[sm.id as keyof typeof VIDEO_MODEL_REGISTRY] as unknown as {
+          name?: string; features?: string[]; maxDuration?: number; supportedRatios?: string[];
+          maxBatch?: number; audio?: boolean; provider?: string; region?: 'cn' | 'global';
+        } | undefined;
         return {
           id: sm.id,
           name: sm.name || registry?.name || sm.id,

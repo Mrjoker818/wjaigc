@@ -66,7 +66,7 @@ import {
 import type { CanvasAnnotation, AnnotationRegion, AnnotationTool } from '@/lib/canvas-annotation';
 import { createAnnotation, hitTestAnnotationTarget, buildAnnotationPrompt, mergeAnnotationsForImage, ANNOTATION_COLORS, ANNOTATION_COLORS_MONO, computeAnnotationRegion, BRUSH_COLOR_PALETTE } from '@/lib/canvas-annotation';
 import type { CanvasGenGroup, GenGroupToolbar, GroupRefImage, GenGroupType, ReferenceCategory, HexCubeGroup, HexCubeFaceData, CubeFace, ZoomLevel } from '@/lib/canvas-generation-group';
-import { createGroupRefImage, createGenGroup, generateGroupId, calculateConnectionPoints, aspectRatioToDimensions, calculateActualPixels, REFERENCE_CATEGORIES, REFERENCE_CATEGORY_LABELS, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS, MODEL_ASPECT_RATIOS, MODEL_QUALITIES, QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES, findModelConfig, getModelParamType } from '@/lib/canvas-generation-group';
+import { createGroupRefImage, createGenGroup, generateGroupId, calculateConnectionPoints, aspectRatioToDimensions, calculateActualPixels, REFERENCE_CATEGORIES, REFERENCE_CATEGORY_LABELS, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS, MODEL_ASPECT_RATIOS, MODEL_QUALITIES, QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES, findModelConfig, getModelParamType, getResolutionTierOptions, getQualityLevelOptions } from '@/lib/canvas-generation-group';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import type { PsdLayerItem } from '@/types/psdLayer';
 import { toStableImageUrl, awaitStableImageUrl, onPersistComplete, getCachedLocalUrl, persistVideoUrlInBackground, persistRemoteUrlInBackground } from '@/lib/stable-image-url';
@@ -3566,7 +3566,7 @@ export function InfiniteCanvas({
     const { model: currentModel, providerId: currentProviderId } = getCurrentModel();
     // 根据当前模型获取支持的参数
     const initSupportedRatios = findModelConfig(MODEL_ASPECT_RATIOS, currentModel) || DEFAULT_ASPECT_RATIOS;
-    const initSupportedQualities = findModelConfig(MODEL_QUALITIES, currentModel) || DEFAULT_QUALITIES;
+    const initSupportedQualities = getResolutionTierOptions(currentModel);
     const initAspectRatio = initSupportedRatios.includes('1:1') ? '1:1' : initSupportedRatios[0];
     const initQuality = initSupportedQualities[0] || '1K';
     const initSize = calculateActualPixels(initAspectRatio, initQuality, currentModel);
@@ -10372,7 +10372,7 @@ export function InfiniteCanvas({
                                   e.stopPropagation();
                                   // 获取新模型支持的参数，重置质量和比例
                                   const newSupportedRatios = findModelConfig(MODEL_ASPECT_RATIOS, m.id) || DEFAULT_ASPECT_RATIOS;
-                                  const newSupportedQualities = findModelConfig(MODEL_QUALITIES, m.id) || DEFAULT_QUALITIES;
+                                  const newSupportedQualities = getResolutionTierOptions(m.id);
                                   const newAspectRatio = newSupportedRatios.includes('1:1') ? '1:1' : newSupportedRatios[0];
                                   const newQuality = newSupportedQualities[0];
                                   const newSize = calculateActualPixels(newAspectRatio, newQuality, m.id);
@@ -10394,7 +10394,7 @@ export function InfiniteCanvas({
                     {/* Row 2: Aspect ratio + Resolution + Quality + Count */}
                     {(() => {
                       const supportedRatios = findModelConfig(MODEL_ASPECT_RATIOS, group.toolbar.model) || DEFAULT_ASPECT_RATIOS;
-                      const supportedQualities = findModelConfig(MODEL_QUALITIES, group.toolbar.model) || DEFAULT_QUALITIES;
+                      const supportedQualities = getResolutionTierOptions(group.toolbar.model);
                       const paramType = getModelParamType(group.toolbar.model);
                       // paramType='both' 的模型：supportedQualities 是分辨率档位(1K/2K/4K)，需要额外显示图片质量选项
                       // paramType='resolution' 的模型：supportedQualities 是分辨率档位(1K/2K/4K)
@@ -14570,7 +14570,7 @@ export function InfiniteCanvas({
                                 onClick={() => {
                                   // 获取新模型支持的参数，重置质量和比例
                                   const newSupportedRatios = findModelConfig(MODEL_ASPECT_RATIOS, m.id) || DEFAULT_ASPECT_RATIOS;
-                                  const newSupportedQualities = findModelConfig(MODEL_QUALITIES, m.id) || DEFAULT_QUALITIES;
+                                  const newSupportedQualities = getResolutionTierOptions(m.id);
                                   const newAspectRatio = newSupportedRatios.includes('1:1') ? '1:1' : newSupportedRatios[0];
                                   const newQuality = newSupportedQualities[0];
                                   const newSize = calculateActualPixels(newAspectRatio, newQuality, m.id);
@@ -14590,7 +14590,7 @@ export function InfiniteCanvas({
                       {/* 图像比例 */}
                       {(() => {
                         const hcgRatios = findModelConfig(MODEL_ASPECT_RATIOS, hcg.toolbar.model) || DEFAULT_ASPECT_RATIOS;
-                        const hcgQualities = findModelConfig(MODEL_QUALITIES, hcg.toolbar.model) || DEFAULT_QUALITIES;
+                        const hcgQualities = getResolutionTierOptions(hcg.toolbar.model);
                         const paramType = getModelParamType(hcg.toolbar.model);
                         // 根据paramType判断显示什么参数
                         // resolution: 分辨率档位 (1K/2K/4K)
@@ -15433,7 +15433,7 @@ export function InfiniteCanvas({
                 const modelId = canvasGenModel ? canvasGenModel.split('::').pop() || '' : '';
                 const paramType = modelId ? getModelParamType(modelId) : 'quality';
                 const modelRatios = modelId ? (findModelConfig(MODEL_ASPECT_RATIOS, modelId) || DEFAULT_ASPECT_RATIOS) : DEFAULT_ASPECT_RATIOS;
-                const modelQualities = modelId ? (findModelConfig(MODEL_QUALITIES, modelId) || DEFAULT_QUALITIES) : DEFAULT_QUALITIES;
+                const modelQualities = modelId ? (getResolutionTierOptions(modelId)) : DEFAULT_QUALITIES;
                 const isResolutionParam = paramType === 'resolution';
                 const isQualityParam = paramType === 'quality';
                 return (
