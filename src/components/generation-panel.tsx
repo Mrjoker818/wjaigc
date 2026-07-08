@@ -10,7 +10,7 @@ import { UserManager as UserManagerCore } from '@/lib/user-manager';
 import { ThirdPartyModelDialog } from '@/components/third-party-model-dialog';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import { getPromptTemplates, PromptTemplate, searchTemplates } from '@/lib/prompt-templates';
-import { MODEL_ASPECT_RATIOS as SHARED_MODEL_ASPECT_RATIOS, MODEL_QUALITIES as SHARED_MODEL_QUALITIES, QUALITY_DISPLAY_NAMES as SHARED_QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE as SHARED_QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS as SHARED_ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS as SHARED_DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES as SHARED_DEFAULT_QUALITIES, findModelConfig as sharedFindModelConfig, calculateActualPixels as sharedCalculateActualPixels, ModelParamType, getModelParamType, getResolutionTierOptions, RESOLUTION_TIER_DISPLAY_NAMES, QUALITY_LEVEL_DISPLAY_NAMES, RESOLUTION_TIER_MODELS, QUALITY_LEVEL_MODELS } from '@/lib/canvas-generation-group';
+import { MODEL_ASPECT_RATIOS as SHARED_MODEL_ASPECT_RATIOS, MODEL_QUALITIES as SHARED_MODEL_QUALITIES, QUALITY_DISPLAY_NAMES as SHARED_QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE as SHARED_QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS as SHARED_ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS as SHARED_DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES as SHARED_DEFAULT_QUALITIES, findModelConfig as sharedFindModelConfig, calculateActualPixels as sharedCalculateActualPixels, ModelParamType, getModelParamType, getResolutionTierOptions, getQualityLevelOptions, getDefaultParamValue, RESOLUTION_TIER_DISPLAY_NAMES, QUALITY_LEVEL_DISPLAY_NAMES, RESOLUTION_TIER_MODELS, QUALITY_LEVEL_MODELS } from '@/lib/canvas-generation-group';
 
 export interface GenerationParams {
     prompt: string;
@@ -408,6 +408,42 @@ export function GenerationPanel(
             setUniversalApiManager(UniversalApiManager.getInstance());
         }
     }, []);
+
+    // 模型切换时自动重置分辨率/质量/比例默认值（后缀驱动动态识别）
+    useEffect(() => {
+        if (!model) return;
+        const pureModelId = model.includes('::') ? model.split('::').pop()! : model;
+        if (!pureModelId) return;
+
+        const lower = pureModelId.toLowerCase();
+        const paramType = getModelParamType(pureModelId);
+        const resolutionTiers = getResolutionTierOptions(pureModelId);
+        const qualityLevels = getQualityLevelOptions(pureModelId);
+
+        // 分辨率默认值：优先按后缀推断
+        let defaultResolution = resolutionTiers[0] || '2K';
+        if (lower.includes('-4k') || lower.includes('-4k-omni')) {
+            if (resolutionTiers.includes('4K')) defaultResolution = '4K';
+        } else if (lower.includes('-2k') || lower.includes('-2k-omni') || lower.includes('-hd')) {
+            if (resolutionTiers.includes('2K')) defaultResolution = '2K';
+        }
+        setResolution(defaultResolution);
+
+        // 质量默认值：优先按后缀推断
+        let defaultQuality = qualityLevels[0] || 'auto';
+        if (lower.includes('-4k') || lower.includes('-2k')) {
+            defaultQuality = qualityLevels.includes('high') ? 'high' : defaultQuality;
+        } else if (lower.includes('-hd') || lower.includes('-high')) {
+            defaultQuality = qualityLevels.includes('high') ? 'high' : defaultQuality;
+        }
+        setQuality(defaultQuality);
+
+        // 画面比例：重置为新模型支持的首个比例
+        const supportedRatios = sharedFindModelConfig(SHARED_MODEL_ASPECT_RATIOS, pureModelId) || SHARED_DEFAULT_ASPECT_RATIOS;
+        if (supportedRatios.length > 0 && !supportedRatios.includes(aspectRatio)) {
+            setAspectRatio(supportedRatios[0]);
+        }
+    }, [model]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Load initial model selection from localStorage
     const [pendingModelMigration, setPendingModelMigration] = useState<string | null>(null);
