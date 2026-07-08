@@ -7,7 +7,7 @@ import {
   ChevronDown, ChevronUp, Loader2, Sparkles, Volume2, VolumeX,
   Upload, X, AlertCircle, Info, FastForward, Users, Plus, Paintbrush, Film, Palette, Images,
   History, RotateCcw, Languages, GripVertical, Minus, Maximize2, ChevronRight, CheckCircle2,
-  Clapperboard
+  Clapperboard, SlidersHorizontal
 } from 'lucide-react';
 import MotionBrushCanvas, { type MotionBrushResult, type MotionBrushCanvasHandle } from './motion-brush-canvas';
 import { inferVideoModelFeatures, VIDEO_MODEL_REGISTRY, type MotionBrushParams, type CameraControlParams, type VideoGenerateParams as VideoApiGenerateParams } from '@/lib/video-api';
@@ -1334,24 +1334,13 @@ Rules:
                     title="导演增强：自动补充运镜/光线/表演/氛围"
                   >🎬 导演{useDirector ? '✓' : ''}</span>
                 </label>
-                <div className="flex gap-1.5 items-center">
-                  <button
-                    onClick={handleTranslatePrompt}
-                    disabled={!prompt.trim() || isTranslating}
-                    className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-all disabled:opacity-30 cursor-pointer"
-                    style={{ background: isMonochrome ? 'rgba(107,114,128,0.1)' : 'rgba(255,255,255,0.05)', color: subTextColor }}
-                  >
-                    {isTranslating ? <span className="inline-block w-2.5 h-2.5 border-[1.5px] border-current border-t-transparent rounded-full animate-spin" /> : <Languages className="w-2.5 h-2.5" />}
-                    中英
-                  </button>
-                </div>
               </div>
               <textarea
                 value={prompt}
                 onChange={e => setPrompt(e.target.value)}
                 placeholder={mode === 'video-extend' ? '描述希望延长的内容方向，如：继续向前推进、保持人物动作...' : useDirector ? '输入创意/剧本/想法，导演会自动补充运镜/光线/表演/氛围...' : '描述你想生成的视频画面，如：一位女性在海边漫步，夕阳西下，金色的阳光洒在海面上...'}
                 rows={4}
-                className="w-full px-3.5 py-2.5 rounded-lg text-[13px] resize-none focus:outline-none transition-colors leading-relaxed"
+                className="w-full px-3.5 py-2.5 rounded-lg text-[13px] resize-none focus:outline-none transition-colors leading-relaxed mt-2"
                 style={{
                   background: inputBg,
                   color: textColor,
@@ -1361,15 +1350,77 @@ Rules:
                 onFocus={e => { e.currentTarget.style.borderColor = accentColor; }}
                 onBlur={e => { e.currentTarget.style.borderColor = useDirector ? (isGold ? 'rgba(212,175,55,0.4)' : 'rgba(59,130,246,0.4)') : borderColor; }}
               />
+              {/* AI 增强工具栏 */}
+              <div className="flex flex-wrap gap-2 mt-2 items-center">
+                <button
+                  onClick={handleDirectorEnhance}
+                  disabled={!prompt.trim() || isDirectorEnhancing}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-semibold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  style={{
+                    background: isDirectorEnhancing ? `${accentColor}40` : `linear-gradient(135deg, ${accentColor}, ${isGold ? '#8b7225' : '#1d4ed8'})`,
+                    color: '#fff',
+                    boxShadow: isDirectorEnhancing ? 'none' : `0 2px 8px ${accentColor}40`,
+                  }}
+                >
+                  {isDirectorEnhancing ? (
+                    <><span className="inline-block w-3 h-3 border-[1.5px] border-white border-t-transparent rounded-full animate-spin" />导演增强中...</>
+                  ) : (
+                    <><Sparkles className="w-3 h-3" />AI 导演增强</>
+                  )}
+                </button>
+                {useDirector && directorResult && (
+                  <span className="text-[10px] px-2 py-1 rounded-md flex items-center gap-1" style={{ background: `${accentColor}15`, color: accentColor }}>
+                    <CheckCircle2 className="w-3 h-3" />提示词已增强
+                  </span>
+                )}
+                <button
+                  onClick={handleTranslatePrompt}
+                  disabled={!prompt.trim() || isTranslating}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] font-medium transition-all disabled:opacity-40 cursor-pointer"
+                  style={{ background: isMonochrome ? '#f3f4f6' : 'rgba(255,255,255,0.05)', color: subTextColor, border: `1px solid ${borderColor}` }}
+                >
+                  {isTranslating ? <span className="inline-block w-2.5 h-2.5 border-[1.5px] border-current border-t-transparent rounded-full animate-spin" /> : <Languages className="w-3 h-3" />}
+                  中英翻译
+                </button>
+                <button
+                  onClick={() => {
+                    setNegativePrompt(negativePrompt || '模糊，低质量，变形，畸形，水印，文字，过曝，暗部死黑');
+                  }}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] font-medium transition-all cursor-pointer"
+                  style={{ background: isMonochrome ? '#f3f4f6' : 'rgba(255,255,255,0.05)', color: subTextColor, border: `1px solid ${borderColor}` }}
+                >
+                  <SlidersHorizontal className="w-3 h-3" />反向提示词
+                </button>
+                {useDirector && (
+                  <button
+                    onClick={handlePlanShots}
+                    disabled={!prompt.trim() || isPlanningShots}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-semibold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                    style={{
+                      background: isPlanningShots ? 'rgba(255,255,255,0.08)' : isMonochrome ? '#1f2937' : 'rgba(212,175,55,0.15)',
+                      color: isPlanningShots ? subTextColor : accentColor,
+                      border: `1px solid ${accentColor}40`,
+                    }}
+                  >
+                    {isPlanningShots ? (
+                      <><span className="inline-block w-3 h-3 border-[1.5px] border-current border-t-transparent rounded-full animate-spin" />AI 分镜规划中...</>
+                    ) : (
+                      <><Film className="w-3 h-3" />AI 分镜</>
+                    )}
+                  </button>
+                )}
+              </div>
+
               {useDirector && prompt.trim() && (
-                <div className="mt-1.5 flex items-center gap-1.5 text-[10px]" style={{ color: accentColor }}>
-                  <Clapperboard className="w-3 h-3" />
-                  <span>导演模式已开启：生成时自动编排镜头景别/运镜/光影/表演/声音</span>
+                <div className="mt-2 flex items-center gap-1.5 text-[10px] px-2.5 py-1.5 rounded-md" style={{ background: `${accentColor}0d`, color: accentColor, border: `1px solid ${accentColor}30` }}>
+                  <Clapperboard className="w-3 h-3 shrink-0" />
+                  <span>导演模式：生成时自动编排镜头景别/运镜/光影/表演/声音</span>
                 </div>
               )}
+
               {/* 快捷标签 */}
               <div className="flex flex-wrap gap-1.5 mt-2">
-                {['电影感', '慢动作', '微距特写', '航拍', ' cinematic lighting', '4K'].map(tag => (
+                {['电影感', '慢动作', '微距特写', '航拍', 'cinematic lighting', '4K'].map(tag => (
                   <button
                     key={tag}
                     onClick={() => setPrompt(prev => prev ? `${prev}, ${tag}` : tag)}
