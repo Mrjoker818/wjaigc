@@ -174,14 +174,11 @@ export async function POST(request: NextRequest) {
     // 如果 providerId 字段为空但从 model 中提取到了，自动回填
     const effectiveProviderId = providerId || extractedProviderId || '';
 
-    // ★ 模型别名规范化：先基于前端传入的 modelId 做初步规范化，等找到 provider 后会用 provider.selectedModels 做精确匹配
-    // 保留原始 modelId 用于精确匹配
+    // ★ 模型别名规范化：延迟到找到 provider 后再做精确匹配；初始仅推断 quality/resolution 后缀
+    // 保留原始 modelId 用于 provider 匹配和精确比对
     const rawModelId = model;
-    let normalized = normalizeModelForApi(model);
-    if (normalized.wasNormalized) {
-      console.log(`[generate] 模型别名规范化: "${model}" → "${normalized.apiModelName}"`);
-      model = normalized.apiModelName;
-    }
+    // 初次调用仅提取 quality/resolution 等信息，不剥离后缀（传空 providerModels 防止误剥离）
+    let normalized = normalizeModelForApi(model, { providerModels: [] });
 
     // ★ 关键修复：模型别名可能携带分辨率后缀（如 gpt-image-2-4k → resolutionTier='4k'），
     // 需要覆盖默认 quality，否则会用 high/auto 导致分辨率只有1792而非4096
@@ -583,26 +580,10 @@ export async function POST(request: NextRequest) {
     // 关键修复：PearAPI 有独立的 gpt-image-2/gpt-image-2-2k/gpt-image-2-4k 模型，不能统一替换成 gpt-image-2
     // 只有当 provider 模型列表中不存在 exact 模型时，才使用别名映射
     const providerModels = Array.isArray(provider?.selectedModels) ? provider.selectedModels : [];
-    if (rawModelId && providerModels.length > 0) {
-      const exactMatch = providerModels.some(m => {
-        const mLower = String(m).toLowerCase().trim();
-        return mLower === rawModelId.toLowerCase();
-      });
-      if (exactMatch) {
-        // 精确存在：使用原始模型名，不做别名剥离
-        console.log(`[generate] 模型精确匹配成功: "${rawModelId}" 在提供商模型列表中，保留原名`);
-        model = rawModelId;
-        // 同时从 model 名中提取分辨率档位（gpt-image-2-4k → 4k）
-        const tierMatch = rawModelId.match(/-(1k|2k|4k|8k)$/i);
-        if (tierMatch) {
-          normalized.resolutionTier = tierMatch[1].toLowerCase();
-        }
-      } else {
-        // 精确不存在：使用初步规范化结果（剥离后缀）
-        if (normalized.wasNormalized) {
-          console.log(`[generate] 提供商模型列表中无 "${rawModelId}"，使用规范化名: "${model}"`);
-        }
-      }
+    normalized = normalizeModelForApi(rawModelId, { providerModels });
+    model = normalized.apiModelName;
+    if (normalized.wasNormalized) {
+      console.log(`[generate] 模型规范化: "${rawModelId}" → "${model}" (在提供商列表中精确匹配: ${providerModels.some(m => String(m).toLowerCase() === rawModelId.toLowerCase()) ? '是' : '否'})`);
     }
     
     let modelConfig = inferModelConfig(model, initialProfile, provider?.displayName);

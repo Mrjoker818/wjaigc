@@ -918,15 +918,29 @@ export function buildPollUrl(
  * Returns the first found image URL, or null if none found.
  */
 export function extractImageUrl(pollData: Record<string, unknown>): string | null {
+  // Helper: unwrap a url field that may be string or string[] (Apimart returns url as array)
+  const unwrapUrl = (val: unknown): string | null => {
+    if (typeof val === 'string' && val) return val;
+    if (Array.isArray(val)) {
+      for (const item of val) {
+        if (typeof item === 'string' && item) return item;
+      }
+    }
+    return null;
+  };
+
   // Path 1: data.result.images[0].url / .image_url / .src
   const result = pollData?.result as Record<string, unknown> | undefined;
   if (result) {
     const images = result.images as Array<Record<string, unknown>> | undefined;
     if (images?.length) {
       const first = images[0];
-      const url = first?.url || first?.image_url || first?.src;
-      if (typeof url === 'string' && url) return url;
+      const url = unwrapUrl(first?.url) || unwrapUrl(first?.image_url) || unwrapUrl(first?.src);
+      if (url) return url;
     }
+    // Path 1b: data.result.url / data.result.image_url (single result url)
+    const resultUrl = unwrapUrl(result.url) || unwrapUrl(result.image_url);
+    if (resultUrl) return resultUrl;
     // Path 2: data.result.b64_json
     if (result.b64_json && typeof result.b64_json === 'string') {
       return `data:image/png;base64,${result.b64_json}`;
@@ -935,16 +949,27 @@ export function extractImageUrl(pollData: Record<string, unknown>): string | nul
   // Path 3: data.output[0].url / .image_url
   const output = pollData?.output as Array<Record<string, unknown>> | undefined;
   if (output?.length) {
-    const url = output[0]?.url || output[0]?.image_url;
-    if (typeof url === 'string' && url) return url;
+    const url = unwrapUrl(output[0]?.url) || unwrapUrl(output[0]?.image_url);
+    if (url) return url;
   }
   // Path 4: data.data[0].url / .image_url / .b64_json
-  const nestedData = pollData?.data as Array<Record<string, unknown>> | undefined;
+  const nestedData = pollData?.data;
   if (Array.isArray(nestedData) && nestedData.length) {
-    const rawUrl = nestedData[0]?.url || nestedData[0]?.image_url;
-    if (typeof rawUrl === 'string' && rawUrl) {
+    const rawUrl = unwrapUrl(nestedData[0]?.url) || unwrapUrl(nestedData[0]?.image_url);
+    if (rawUrl) {
       if (rawUrl.startsWith('data:') || rawUrl.startsWith('http')) return rawUrl;
       return `data:image/png;base64,${rawUrl}`;
+    }
+    // data[0].result.images[0].url (Apimart nested result)
+    const nestedResult = nestedData[0]?.result as Record<string, unknown> | undefined;
+    if (nestedResult) {
+      const nImages = nestedResult.images as Array<Record<string, unknown>> | undefined;
+      if (nImages?.length) {
+        const nUrl = unwrapUrl(nImages[0]?.url) || unwrapUrl(nImages[0]?.image_url) || unwrapUrl(nImages[0]?.src);
+        if (nUrl) return nUrl;
+      }
+      const nResUrl = unwrapUrl(nestedResult.url) || unwrapUrl(nestedResult.image_url);
+      if (nResUrl) return nResUrl;
     }
     // b64_json 需要校验是否为合法 base64，避免 API 错误信息被误判为图片数据
     const b64 = nestedData[0]?.b64_json;
@@ -953,13 +978,21 @@ export function extractImageUrl(pollData: Record<string, unknown>): string | nul
     }
   }
   // Path 5: data.image_url / data.url (single image format)
-  const singleUrl = pollData?.image_url || pollData?.url;
-  if (typeof singleUrl === 'string' && singleUrl) return singleUrl;
+  const singleUrl = unwrapUrl(pollData?.image_url) || unwrapUrl(pollData?.url);
+  if (singleUrl) return singleUrl;
   // Extra: data.data.image_url / data.data.url (nested single)
   if (nestedData && !Array.isArray(nestedData)) {
     const dataObj = nestedData as Record<string, unknown>;
-    const nestedUrl = dataObj?.image_url || dataObj?.url;
-    if (typeof nestedUrl === 'string' && nestedUrl) return nestedUrl;
+    const nestedUrl = unwrapUrl(dataObj?.image_url) || unwrapUrl(dataObj?.url);
+    if (nestedUrl) return nestedUrl;
+    const nestedResult2 = dataObj?.result as Record<string, unknown> | undefined;
+    if (nestedResult2) {
+      const nImages = nestedResult2.images as Array<Record<string, unknown>> | undefined;
+      if (nImages?.length) {
+        const nUrl = unwrapUrl(nImages[0]?.url) || unwrapUrl(nImages[0]?.image_url) || unwrapUrl(nImages[0]?.src);
+        if (nUrl) return nUrl;
+      }
+    }
   }
   return null;
 }

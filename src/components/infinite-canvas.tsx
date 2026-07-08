@@ -66,7 +66,7 @@ import {
 import type { CanvasAnnotation, AnnotationRegion, AnnotationTool } from '@/lib/canvas-annotation';
 import { createAnnotation, hitTestAnnotationTarget, buildAnnotationPrompt, mergeAnnotationsForImage, ANNOTATION_COLORS, ANNOTATION_COLORS_MONO, computeAnnotationRegion, BRUSH_COLOR_PALETTE } from '@/lib/canvas-annotation';
 import type { CanvasGenGroup, GenGroupToolbar, GroupRefImage, GenGroupType, ReferenceCategory, HexCubeGroup, HexCubeFaceData, CubeFace, ZoomLevel } from '@/lib/canvas-generation-group';
-import { createGroupRefImage, createGenGroup, generateGroupId, calculateConnectionPoints, aspectRatioToDimensions, calculateActualPixels, REFERENCE_CATEGORIES, REFERENCE_CATEGORY_LABELS, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS, MODEL_ASPECT_RATIOS, MODEL_QUALITIES, QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES, findModelConfig, getModelParamType, getResolutionTierOptions, getQualityLevelOptions } from '@/lib/canvas-generation-group';
+import { createGroupRefImage, createGenGroup, generateGroupId, calculateConnectionPoints, aspectRatioToDimensions, calculateActualPixels, REFERENCE_CATEGORIES, REFERENCE_CATEGORY_LABELS, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS, MODEL_ASPECT_RATIOS, MODEL_QUALITIES, QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES, findModelConfig, getModelParamType, getResolutionTierOptions, getQualityLevelOptions, RESOLUTION_TIER_DISPLAY_NAMES, QUALITY_LEVEL_DISPLAY_NAMES } from '@/lib/canvas-generation-group';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import type { PsdLayerItem } from '@/types/psdLayer';
 import { toStableImageUrl, awaitStableImageUrl, onPersistComplete, getCachedLocalUrl, persistVideoUrlInBackground, persistRemoteUrlInBackground } from '@/lib/stable-image-url';
@@ -1122,7 +1122,8 @@ export function InfiniteCanvas({
   const [canvasGenNegativePrompt, setCanvasGenNegativePrompt] = useState('');
   const [canvasGenModel, setCanvasGenModel] = useState('');
   const [canvasGenAspectRatio, setCanvasGenAspectRatio] = useState('16:9');
-  const [canvasGenQuality, setCanvasGenQuality] = useState('standard');
+  const [canvasGenResolution, setCanvasGenResolution] = useState('2K'); // 分辨率档位（1K/2K/4K）
+  const [canvasGenQuality, setCanvasGenQuality] = useState('auto'); // 质量级别（auto/low/medium/high/standard）
   const [canvasGenCount, setCanvasGenCount] = useState(1);
   const [canvasGenRefImages, setCanvasGenRefImages] = useState<string[]>([]);
   const [canvasGenModels, setCanvasGenModels] = useState<{id: string, providerId: string, providerName: string, apiDisplayName?: string}[]>([]);
@@ -3589,7 +3590,8 @@ export function InfiniteCanvas({
         providerId: currentProviderId,
         aspectRatio: initAspectRatio,
         size: initSize,
-        quality: initQuality,
+        resolution: initQuality,
+        quality: 'auto',
         outputCount: 1,
         n: 1,
         prompt: '',
@@ -4061,7 +4063,8 @@ export function InfiniteCanvas({
             model,
             providerId,
             aspectRatio: toolbar.aspectRatio,
-            quality: toolbar.quality,
+            resolution: toolbar.resolution || '2K',
+            quality: toolbar.quality || 'auto',
           outputCount: toolbar.outputCount,
           referenceImages,
           referenceMode: group.type === 'fusion' ? 'fusion' : 'reference',
@@ -5559,6 +5562,7 @@ export function InfiniteCanvas({
             model: canvasGenPureModel,
             providerId: canvasGenProviderId,
             aspectRatio: canvasGenAspectRatio,
+            resolution: canvasGenResolution,
             quality: canvasGenQuality,
             n: canvasGenCount,
             submitOnly: true,  // 异步提交模式：立即返回taskId，前端轮询
@@ -5793,7 +5797,7 @@ export function InfiniteCanvas({
     } finally {
       setCanvasGenGenerating(false);
     }
-  }, [canvasGenPrompt, canvasGenNegativePrompt, canvasGenModel, canvasGenAspectRatio, canvasGenQuality, canvasGenCount, canvasGenRefImages, canvasGenGenerating, canvasGenFrameId, images, onImagesChange]);
+  }, [canvasGenPrompt, canvasGenNegativePrompt, canvasGenModel, canvasGenAspectRatio, canvasGenResolution, canvasGenQuality, canvasGenCount, canvasGenRefImages, canvasGenGenerating, canvasGenFrameId, images, onImagesChange]);
 
   // Update frame position when images change
   useEffect(() => {
@@ -10372,12 +10376,14 @@ export function InfiniteCanvas({
                                   e.stopPropagation();
                                   // 获取新模型支持的参数，重置质量和比例
                                   const newSupportedRatios = findModelConfig(MODEL_ASPECT_RATIOS, m.id) || DEFAULT_ASPECT_RATIOS;
-                                  const newSupportedQualities = getResolutionTierOptions(m.id);
+                                  const newResolutions = getResolutionTierOptions(m.id);
+                                  const newQualityLevels = getQualityLevelOptions(m.id);
                                   const newAspectRatio = newSupportedRatios.includes('1:1') ? '1:1' : newSupportedRatios[0];
-                                  const newQuality = newSupportedQualities[0];
-                                  const newSize = calculateActualPixels(newAspectRatio, newQuality, m.id);
+                                  const newResolution = newResolutions[0] || '2K';
+                                  const newQualityLevel = newQualityLevels[0] || 'auto';
+                                  const newSize = calculateActualPixels(newAspectRatio, newResolution, m.id);
                                   setGenGroups(prev => prev.map(g =>
-                                    g.id === group.id ? { ...g, toolbar: { ...g.toolbar, model: m.id, providerId: m.providerId, providerName: m.providerName, aspectRatio: newAspectRatio, quality: newQuality, size: newSize } } : g
+                                    g.id === group.id ? { ...g, toolbar: { ...g.toolbar, model: m.id, providerId: m.providerId, providerName: m.providerName, aspectRatio: newAspectRatio, resolution: newResolution, quality: newQualityLevel, size: newSize } } : g
                                   ));
                                   setOpenModelDropdownGroupId(null);
                                 }}
@@ -10394,17 +10400,13 @@ export function InfiniteCanvas({
                     {/* Row 2: Aspect ratio + Resolution + Quality + Count */}
                     {(() => {
                       const supportedRatios = findModelConfig(MODEL_ASPECT_RATIOS, group.toolbar.model) || DEFAULT_ASPECT_RATIOS;
-                      const supportedQualities = getResolutionTierOptions(group.toolbar.model);
+                      const supportedResolutions = getResolutionTierOptions(group.toolbar.model);
+                      const supportedQualityLevels = getQualityLevelOptions(group.toolbar.model);
                       const paramType = getModelParamType(group.toolbar.model);
-                      // paramType='both' 的模型：supportedQualities 是分辨率档位(1K/2K/4K)，需要额外显示图片质量选项
-                      // paramType='resolution' 的模型：supportedQualities 是分辨率档位(1K/2K/4K)
-                      // paramType='quality' 的模型：supportedQualities 是图片质量(auto/low/medium/high)
-                      const isBoth = paramType === 'both';
-                      const resolutionOptions = isBoth ? ['1K', '2K', '4K'] : supportedQualities;
-                      const qualityOptions = ['auto', 'low', 'medium', 'high'];
-                      // 分辨率档位使用 resolution 参数，图片质量使用 quality 参数
-                      const currentResolution = group.toolbar.resolution || '2K';
-                      const currentQuality = group.toolbar.quality || 'auto';
+                      const showResolution = paramType === 'resolution' || paramType === 'both';
+                      const showQuality = paramType === 'quality' || paramType === 'both';
+                      const currentResolution = group.toolbar.resolution || supportedResolutions[0] || '2K';
+                      const currentQuality = group.toolbar.quality || supportedQualityLevels[0] || 'auto';
                       return (
                     <div className="flex items-center gap-2 flex-wrap">
                       {/* 图像比例 */}
@@ -10420,27 +10422,29 @@ export function InfiniteCanvas({
                         }}
                       >
                         {supportedRatios.map(r => (
-                          <option key={r} value={r} className={isMonochrome ? 'bg-white text-gray-700' : 'bg-[#1a1d26] text-text-bright'}>{r}</option>
+                          <option key={r} value={r} className={isMonochrome ? 'bg-white text-gray-700' : 'bg-[#1a1d26] text-text-bright'}>{r} ({calculateActualPixels(r, currentResolution, group.toolbar.model)})</option>
                         ))}
                       </select>
                       {/* 分辨率档位 */}
+                      {showResolution && (
                       <select
                         className={`text-[13px] px-2.5 py-1.5 rounded-lg border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-800' : 'bg-white/5 border-white/[0.14] text-text-bright'}`}
-                        value={isBoth ? currentResolution : group.toolbar.quality}
+                        value={currentResolution}
                         onChange={(e) => {
                           const newRes = e.target.value;
                           const newSize = calculateActualPixels(group.toolbar.aspectRatio, newRes, group.toolbar.model);
                           setGenGroups(prev => prev.map(g =>
-                            g.id === group.id ? { ...g, toolbar: { ...g.toolbar, resolution: newRes, quality: isBoth ? currentQuality : newRes, size: newSize } } : g
+                            g.id === group.id ? { ...g, toolbar: { ...g.toolbar, resolution: newRes, size: newSize } } : g
                           ));
                         }}
                       >
-                        {resolutionOptions.map(r => (
-                          <option key={r} value={r} className={isMonochrome ? 'bg-white text-gray-700' : 'bg-[#1a1d26] text-text-bright'}>{r}</option>
+                        {supportedResolutions.map(r => (
+                          <option key={r} value={r} className={isMonochrome ? 'bg-white text-gray-700' : 'bg-[#1a1d26] text-text-bright'}>{RESOLUTION_TIER_DISPLAY_NAMES[r] || r}</option>
                         ))}
                       </select>
-                      {/* 图片质量（仅 paramType='both' 的模型显示） */}
-                      {isBoth && (
+                      )}
+                      {/* 图片质量 */}
+                      {showQuality && (
                       <select
                         className={`text-[13px] px-2.5 py-1.5 rounded-lg border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-800' : 'bg-white/5 border-white/[0.14] text-text-bright'}`}
                         value={currentQuality}
@@ -10451,8 +10455,8 @@ export function InfiniteCanvas({
                           ));
                         }}
                       >
-                        {qualityOptions.map(q => (
-                          <option key={q} value={q} className={isMonochrome ? 'bg-white text-gray-700' : 'bg-[#1a1d26] text-text-bright'}>{q}</option>
+                        {supportedQualityLevels.map(q => (
+                          <option key={q} value={q} className={isMonochrome ? 'bg-white text-gray-700' : 'bg-[#1a1d26] text-text-bright'}>{QUALITY_LEVEL_DISPLAY_NAMES[q] || q}</option>
                         ))}
                       </select>
                       )}
@@ -14570,11 +14574,13 @@ export function InfiniteCanvas({
                                 onClick={() => {
                                   // 获取新模型支持的参数，重置质量和比例
                                   const newSupportedRatios = findModelConfig(MODEL_ASPECT_RATIOS, m.id) || DEFAULT_ASPECT_RATIOS;
-                                  const newSupportedQualities = getResolutionTierOptions(m.id);
+                                  const newResolutions = getResolutionTierOptions(m.id);
+                                  const newQualityLevels = getQualityLevelOptions(m.id);
                                   const newAspectRatio = newSupportedRatios.includes('1:1') ? '1:1' : newSupportedRatios[0];
-                                  const newQuality = newSupportedQualities[0];
-                                  const newSize = calculateActualPixels(newAspectRatio, newQuality, m.id);
-                                  setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, model: m.id, providerId: m.providerId, providerName: m.providerName, aspectRatio: newAspectRatio, quality: newQuality, size: newSize } } : g));
+                                  const newResolution = newResolutions[0] || '2K';
+                                  const newQuality = newQualityLevels[0] || 'auto';
+                                  const newSize = calculateActualPixels(newAspectRatio, newResolution, m.id);
+                                  setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, model: m.id, providerId: m.providerId, providerName: m.providerName, aspectRatio: newAspectRatio, resolution: newResolution, quality: newQuality, size: newSize } } : g));
                                   setOpenModelDropdownGroupId(null);
                                 }}
                               >
@@ -14587,77 +14593,63 @@ export function InfiniteCanvas({
                           </div>
                         )}
                       </div>
-                      {/* 图像比例 */}
+                      {/* 图像比例 + 分辨率/质量 */}
                       {(() => {
                         const hcgRatios = findModelConfig(MODEL_ASPECT_RATIOS, hcg.toolbar.model) || DEFAULT_ASPECT_RATIOS;
-                        const hcgQualities = getResolutionTierOptions(hcg.toolbar.model);
+                        const hcgResolutions = getResolutionTierOptions(hcg.toolbar.model);
+                        const hcgQualityLevels = getQualityLevelOptions(hcg.toolbar.model);
                         const paramType = getModelParamType(hcg.toolbar.model);
-                        // 根据paramType判断显示什么参数
-                        // resolution: 分辨率档位 (1K/2K/4K)
-                        // quality: 图片质量档位
-                        // both: 同时显示分辨率和质量
-                        const isResolutionParam = paramType === 'resolution';
-                        const isQualityParam = paramType === 'quality';
-                        const isBothParams = paramType === 'both';
-                        // resolution类型: 显示分辨率档位
-                        // quality类型: 显示质量档位
-                        // both类型: 需要分别显示分辨率和质量（暂无此类模型）
+                        const curResolution = hcg.toolbar.resolution || hcgResolutions[0] || '2K';
+                        const curQuality = hcg.toolbar.quality || hcgQualityLevels[0] || 'auto';
                         return (<>
                       {/* 图像比例 */}
                       <div className="flex items-center gap-1">
-                        <span className="text-[10px] font-medium" style={{ color: isMonochrome ? '#6b7280' : '#888' }}>图像比例</span>
+                        <span className="text-[10px] font-medium" style={{ color: isMonochrome ? '#6b7280' : '#888' }}>比例</span>
                         <select
                           className="px-2 py-1.5 rounded-lg text-xs"
                           style={{ background: isMonochrome ? '#f3f4f6' : 'rgba(255,255,255,0.08)', color: isMonochrome ? '#374151' : '#ccc', border: `1px solid ${isMonochrome ? '#d1d5db' : 'rgba(255,255,255,0.10)'}` }}
                           value={hcg.toolbar.aspectRatio}
                           onChange={(e) => {
                             const newAr = e.target.value;
-                            const newSize = calculateActualPixels(newAr, hcg.toolbar.quality, hcg.toolbar.model);
+                            const newSize = calculateActualPixels(newAr, curResolution, hcg.toolbar.model);
                             setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, aspectRatio: newAr, size: newSize } } : g));
                           }}
                         >
-                          {hcgRatios.map(r => <option key={r} value={r}>{r} ({calculateActualPixels(r, hcg.toolbar.quality, hcg.toolbar.model)})</option>)}
+                          {hcgRatios.map(r => <option key={r} value={r}>{r} ({calculateActualPixels(r, curResolution, hcg.toolbar.model)})</option>)}
                         </select>
                       </div>
-                      {/* 分辨率 或 图片质量 */}
-                      {isResolutionParam && (
+                      {(paramType === 'both' || paramType === 'resolution') && (
                         <div className="flex items-center gap-1">
                           <span className="text-[10px] font-medium" style={{ color: isMonochrome ? '#6b7280' : '#888' }}>分辨率</span>
                           <select
                             className="px-2 py-1.5 rounded-lg text-xs"
                             style={{ background: isMonochrome ? '#f3f4f6' : 'rgba(255,255,255,0.08)', color: isMonochrome ? '#374151' : '#ccc', border: `1px solid ${isMonochrome ? '#d1d5db' : 'rgba(255,255,255,0.10)'}` }}
-                            value={hcg.toolbar.quality}
+                            value={curResolution}
                             onChange={(e) => {
-                              const newQ = e.target.value;
-                              const newSize = calculateActualPixels(hcg.toolbar.aspectRatio, newQ, hcg.toolbar.model);
-                              setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, quality: newQ, size: newSize } } : g));
+                              const newRes = e.target.value;
+                              const newSize = calculateActualPixels(hcg.toolbar.aspectRatio, newRes, hcg.toolbar.model);
+                              setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, resolution: newRes, size: newSize } } : g));
                             }}
                           >
-                            {hcgQualities.map(q => <option key={q} value={q}>{q}</option>)}
+                            {hcgResolutions.map(q => <option key={q} value={q}>{RESOLUTION_TIER_DISPLAY_NAMES[q] || q}</option>)}
                           </select>
                         </div>
                       )}
-                      {isQualityParam && (
+                      {(paramType === 'both' || paramType === 'quality') && (
                         <div className="flex items-center gap-1">
-                          <span className="text-[10px] font-medium" style={{ color: isMonochrome ? '#6b7280' : '#888' }}>图片质量</span>
+                          <span className="text-[10px] font-medium" style={{ color: isMonochrome ? '#6b7280' : '#888' }}>质量</span>
                           <select
                             className="px-2 py-1.5 rounded-lg text-xs"
                             style={{ background: isMonochrome ? '#f3f4f6' : 'rgba(255,255,255,0.08)', color: isMonochrome ? '#374151' : '#ccc', border: `1px solid ${isMonochrome ? '#d1d5db' : 'rgba(255,255,255,0.10)'}` }}
-                            value={hcg.toolbar.quality}
+                            value={curQuality}
                             onChange={(e) => {
                               const newQ = e.target.value;
-                              const newSize = calculateActualPixels(hcg.toolbar.aspectRatio, newQ, hcg.toolbar.model);
-                              setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, quality: newQ, size: newSize } } : g));
+                              setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, quality: newQ } } : g));
                             }}
                           >
-                            {hcgQualities.map(q => <option key={q} value={q}>{QUALITY_DISPLAY_NAMES[q] || q}</option>)}
+                            {hcgQualityLevels.map(q => <option key={q} value={q}>{QUALITY_LEVEL_DISPLAY_NAMES[q] || QUALITY_DISPLAY_NAMES[q] || q}</option>)}
                           </select>
                         </div>
-                      )}
-                      {isBothParams && (
-                        <>
-                          {/* 同时显示分辨率和质量（目前暂无此类模型，预留结构） */}
-                        </>
                       )}
                       </>);
                       })()}
@@ -14745,7 +14737,8 @@ export function InfiniteCanvas({
                                   model: hcg.toolbar.model,
                                   providerId: hcg.toolbar.providerId,
                                   aspectRatio: hcg.toolbar.aspectRatio,
-                                  quality: hcg.toolbar.quality,
+                                  resolution: hcg.toolbar.resolution || '2K',
+                                  quality: hcg.toolbar.quality || 'auto',
                                   n: hcg.toolbar.outputCount,
                                   referenceImageUrls: hcg.faces.filter(f => f.imageUrl).map(f => f.imageUrl!),
                                   submitOnly: true,
@@ -15396,19 +15389,28 @@ export function InfiniteCanvas({
                     if (newModelId) {
                       // 模型切换时重置参数为新模型支持的默认值
                       const newSupportedRatios = findModelConfig(MODEL_ASPECT_RATIOS, newModelId) || DEFAULT_ASPECT_RATIOS;
-                      const newSupportedQualities = getResolutionTierOptions(newModelId);
-                      // 根据模型名后缀自动选择默认分辨率（-4k默认4K，-2k默认2K/高，否则1K/标准）
-                      let defaultQuality = newSupportedQualities[0] || '1k';
+                      const newResolutionTiers = getResolutionTierOptions(newModelId);
+                      const newQualityLevels = getQualityLevelOptions(newModelId);
+                      // 根据模型名后缀自动选择默认分辨率/质量
                       const lower = newModelId.toLowerCase();
-                      if (lower.includes('-4k') && newSupportedQualities.includes('4k')) defaultQuality = '4k';
-                      else if (lower.includes('-2k') && newSupportedQualities.includes('2k')) defaultQuality = '2k';
-                      else if ((lower.includes('-hd') || lower.includes('high')) && newSupportedQualities.includes('high')) defaultQuality = 'high';
+                      let defaultResolution = newResolutionTiers[0] || '2K';
+                      let defaultQuality = newQualityLevels[0] || 'auto';
+                      if (lower.includes('-4k') && newResolutionTiers.includes('4K')) defaultResolution = '4K';
+                      else if (lower.includes('-2k') && newResolutionTiers.includes('2K')) defaultResolution = '2K';
+                      if (lower.includes('-hd') || lower.includes('-high')) {
+                        if (newQualityLevels.includes('high')) defaultQuality = 'high';
+                      } else if (lower.includes('-4k') || lower.includes('-2k')) {
+                        defaultQuality = newQualityLevels.includes('high') ? 'high' : defaultQuality;
+                      }
                       // 优先保留当前值，如果当前值不被支持则使用推导的默认值
                       if (!newSupportedRatios.includes(canvasGenAspectRatio)) {
                         const defaultRatio = newSupportedRatios.includes('1:1') ? '1:1' : newSupportedRatios[0];
                         setCanvasGenAspectRatio(defaultRatio);
                       }
-                      if (!newSupportedQualities.includes(canvasGenQuality)) {
+                      if (!newResolutionTiers.includes(canvasGenResolution)) {
+                        setCanvasGenResolution(defaultResolution);
+                      }
+                      if (!newQualityLevels.includes(canvasGenQuality)) {
                         setCanvasGenQuality(defaultQuality);
                       }
                     }
@@ -15431,69 +15433,59 @@ export function InfiniteCanvas({
               {(() => {
                 // 解析当前选中的模型ID
                 const modelId = canvasGenModel ? canvasGenModel.split('::').pop() || '' : '';
-                const paramType = modelId ? getModelParamType(modelId) : 'quality';
+                const paramType = modelId ? getModelParamType(modelId) : 'both';
                 const modelRatios = modelId ? (findModelConfig(MODEL_ASPECT_RATIOS, modelId) || DEFAULT_ASPECT_RATIOS) : DEFAULT_ASPECT_RATIOS;
-                const modelQualities = modelId ? (getResolutionTierOptions(modelId)) : DEFAULT_QUALITIES;
-                const isResolutionParam = paramType === 'resolution';
-                const isQualityParam = paramType === 'quality';
+                const modelResolutions = modelId ? getResolutionTierOptions(modelId) : ['1K', '2K', '4K'];
+                const modelQualities = modelId ? getQualityLevelOptions(modelId) : ['auto', 'low', 'medium', 'high'];
                 return (
-                <div className="flex items-center gap-2.5">
+                <div className="flex items-center gap-2.5 flex-wrap">
                   <label className={`text-xs font-medium min-w-[42px] ${isMonochrome ? 'text-gray-500' : 'text-[#777]'}`}>图像比例</label>
                   <select
                     value={canvasGenAspectRatio}
                     onChange={(e) => {
                       const newAr = e.target.value;
                       setCanvasGenAspectRatio(newAr);
-                      // 根据新比例和当前质量计算实际尺寸
-                      const newSize = calculateActualPixels(newAr, canvasGenQuality, modelId);
-                      // 可用于预览框尺寸调整等
                     }}
-                    className={`flex-1 text-xs rounded-lg px-3 py-2 border outline-none transition-colors ${
+                    className={`text-xs rounded-lg px-3 py-2 border outline-none transition-colors w-[110px] ${
                       isMonochrome
                         ? 'bg-white border-gray-200 text-gray-900 focus:border-gray-400'
                         : 'bg-[#0d0d0d] border-white/[0.12] text-text-bright focus:border-gold/40'
                     }`}
                   >
                     {modelRatios.map(r => {
-                      const px = calculateActualPixels(r, canvasGenQuality, modelId);
+                      const px = calculateActualPixels(r, canvasGenResolution, modelId);
                       return <option key={r} value={r}>{r} ({px})</option>;
                     })}
                   </select>
-                  {isResolutionParam && (
+                  {(paramType === 'both' || paramType === 'resolution') && (
                     <>
-                      <label className={`text-xs font-medium min-w-[36px] ${isMonochrome ? 'text-gray-500' : 'text-[#777]'}`}>分辨率</label>
+                      <label className={`text-xs font-medium min-w-[30px] ${isMonochrome ? 'text-gray-500' : 'text-[#777]'}`}>分辨率</label>
                       <select
-                        value={canvasGenQuality}
-                        onChange={(e) => {
-                          const newQ = e.target.value;
-                          setCanvasGenQuality(newQ);
-                        }}
-                        className={`flex-1 text-xs rounded-lg px-3 py-2 border outline-none transition-colors ${
+                        value={canvasGenResolution}
+                        onChange={(e) => setCanvasGenResolution(e.target.value)}
+                        className={`text-xs rounded-lg px-3 py-2 border outline-none transition-colors w-[90px] ${
                           isMonochrome
                             ? 'bg-white border-gray-200 text-gray-900 focus:border-gray-400'
                             : 'bg-[#0d0d0d] border-white/[0.12] text-text-bright focus:border-gold/40'
                         }`}
                       >
-                        {modelQualities.map(q => <option key={q} value={q}>{q}</option>)}
+                        {modelResolutions.map(r => <option key={r} value={r}>{RESOLUTION_TIER_DISPLAY_NAMES[r] || r}</option>)}
                       </select>
                     </>
                   )}
-                  {isQualityParam && (
+                  {(paramType === 'both' || paramType === 'quality') && (
                     <>
-                      <label className={`text-xs font-medium min-w-[36px] ${isMonochrome ? 'text-gray-500' : 'text-[#777]'}`}>图片质量</label>
+                      <label className={`text-xs font-medium min-w-[30px] ${isMonochrome ? 'text-gray-500' : 'text-[#777]'}`}>质量</label>
                       <select
                         value={canvasGenQuality}
-                        onChange={(e) => {
-                          const newQ = e.target.value;
-                          setCanvasGenQuality(newQ);
-                        }}
-                        className={`flex-1 text-xs rounded-lg px-3 py-2 border outline-none transition-colors ${
+                        onChange={(e) => setCanvasGenQuality(e.target.value)}
+                        className={`text-xs rounded-lg px-3 py-2 border outline-none transition-colors w-[90px] ${
                           isMonochrome
                             ? 'bg-white border-gray-200 text-gray-900 focus:border-gray-400'
                             : 'bg-[#0d0d0d] border-white/[0.12] text-text-bright focus:border-gold/40'
                         }`}
                       >
-                        {modelQualities.map(q => <option key={q} value={q}>{QUALITY_DISPLAY_NAMES[q] || q}</option>)}
+                        {modelQualities.map(q => <option key={q} value={q}>{QUALITY_LEVEL_DISPLAY_NAMES[q] || QUALITY_DISPLAY_NAMES[q] || q}</option>)}
                       </select>
                     </>
                   )}

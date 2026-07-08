@@ -1208,7 +1208,9 @@ export interface HexCubeToolbar {
   providerId: string;         // API提供商ID
   providerName: string;       // 提供商名称
   aspectRatio: string;        // 比例
-  quality: string;            // 质量
+  resolution: string;         // 分辨率档位 (1K/2K/4K)
+  quality: string;            // 图片质量 (auto/low/standard/high/max)
+  size: string;               // 生成尺寸
   outputCount: number;        // 出图数量
   prompt: string;             // 提示词
 }
@@ -1256,7 +1258,9 @@ export function createHexCubeGroup(position: { x: number; y: number }): HexCubeG
       providerId: '',
       providerName: '',
       aspectRatio: '1:1',
-      quality: 'standard',
+      quality: 'auto',
+      resolution: '2K',
+      size: '1024x1024',
       outputCount: 1,
       prompt: '',
     },

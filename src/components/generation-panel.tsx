@@ -380,7 +380,7 @@ export function GenerationPanel(
     // Reference panel: max 2 categories per image
     const MAX_REF_CATEGORIES = 2;
     const [aspectRatio, setAspectRatio] = useState("1:1");
-    const [quality, setQuality] = useState("1K");
+    const [quality, setQuality] = useState("auto");
     const [resolution, setResolution] = useState("2K"); // GPT-Image系列分辨率档位
     const [outputCount, setOutputCount] = useState(1);
     const [stylePreset, setStylePreset] = useState("auto");

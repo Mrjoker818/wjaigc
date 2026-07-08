@@ -1845,16 +1845,11 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // ★ 模型别名规范化：将 gpt-image-2-2k → gpt-image-2 等别名映射为 API 可识别的基础模型名
-    // 注意：先保留原始模型名用于 provider 查找（避免带后缀的模型找不到 provider），
-    // API 调用时根据 provider 协议决定是否使用规范化名称。
-    const lookupModel = modelStr; // 保留原始名用于 findProviderForModel
-    const normalized = normalizeModelForApi(modelStr);
-    let apiModelStr = modelStr; // 实际发往API的模型名
-    if (normalized.wasNormalized) {
-      console.log(`[image-edit] 模型别名规范化: "${modelStr}" → apiModelName="${normalized.apiModelName}", quality="${normalized.qualityTier || 'n/a'}", resolution="${normalized.resolutionTier || 'n/a'}"`);
-      apiModelStr = normalized.apiModelName;
-    }
+    // ★ 模型别名规范化：延迟到选定 provider 后再做精确匹配，避免误剥离 PearAPI 的 -4k/-2k 后缀
+    const lookupModel = modelStr;
+    // 初始仅做 quality/resolution 后缀推断（不剥离别名）
+    let normalized = normalizeModelForApi(modelStr, { providerModels: [] });
+    let apiModelStr = modelStr;
 
     // Content safety check (for actions that accept prompt input)
     if (prompt && typeof prompt === 'string') {

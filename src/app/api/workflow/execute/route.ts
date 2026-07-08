@@ -271,12 +271,19 @@ async function executeWorkflow(
           }
         } else {
           node.config.providerId = existingProviderId;
-          // ★ 规范化模型名别名
-          const wfModelNorm = normalizeModelForApi(pureModelId);
-          node.config.model = wfModelNorm.wasNormalized ? wfModelNorm.apiModelName : pureModelId;
-          if (wfModelNorm.wasNormalized) {
-            console.log(`[workflow-execute] Normalized model alias: "${pureModelId}" → "${wfModelNorm.apiModelName}"`);
+          // ★ 规范化模型名别名（使用provider的模型列表精确匹配，避免误剥离-4k/-2k后缀）
+          let wfProviderModels: string[] = [];
+          try {
+            const wfProvider = await findProviderById(existingProviderId);
+            wfProviderModels = wfProvider?.selectedModels || [];
+          } catch {}
+          const wfModelNorm = normalizeModelForApi(pureModelId, { providerModels: wfProviderModels });
+          let wfApiModelName = pureModelId;
+          if (wfModelNorm.wasNormalized && !wfProviderModels.includes(pureModelId)) {
+            wfApiModelName = wfModelNorm.apiModelName;
+            console.log(`[workflow-execute] Normalized model alias: "${pureModelId}" → "${wfApiModelName}" (provider does not have exact model)`);
           }
+          node.config.model = wfApiModelName;
         }
       }
 

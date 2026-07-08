@@ -318,18 +318,29 @@ export async function POST(request: NextRequest) {
       console.log(`[edit] Stripped provider prefix from model: "${model}" → "${pureModel}"`);
     }
 
-    // ★ 规范化模型名：剥离别名（如 -4k/-2k/-1k/-official），不改变模型名，
-    // 但额外参数（quality/resolution）由其他路径传入，确保API模型名保留用户原始选择
-    const modelNorm = normalizeModelForApi(pureModel);
-    // 注意：对于 PearAPI 等要求使用独立模型名（gpt-image-2-4k）的平台，
-    // 不应该剥离 -4k 后缀；只有当提供商把 -4k 视为别名（实际模型是 gpt-image-2 + quality=4k）时才剥离。
-    // 默认行为：保持原模型名不变，由各 API 协议层决定是否需要调整
-    if (modelNorm.wasNormalized && modelNorm.strippedSuffix === 'official') {
-      // 仅剥离 -official 这种纯渠道后缀
-      console.log(`[edit] Stripped -official channel suffix: "${pureModel}" → "${modelNorm.apiModelName}"`);
-      pureModel = modelNorm.apiModelName;
+    // ========== 0.5 预获取 provider 用于模型后缀精确匹配 ==========
+    let previewProvider: ApiProvider | null = null;
+    if (extractedProviderId || providerId) {
+      try {
+        previewProvider = await findProviderById(extractedProviderId || providerId);
+      } catch {}
     }
-    const apiModelName = pureModel; // API实际调用用原始模型名（保留-4k/-2k等后缀）
+    // 候选API模型名初始为pureModel，provider精确匹配后保留原始名（如PearAPI的gpt-image-2-4k）
+    const providerModelsForNorm = previewProvider?.selectedModels || [];
+
+    // ★ 规范化模型名：使用 providerModels 精确匹配判断是否需要剥离 -4k/-2k 后缀
+    const modelNorm = normalizeModelForApi(pureModel, { providerModels: providerModelsForNorm });
+    let apiModelName = pureModel;
+    if (modelNorm.wasNormalized) {
+      // 如果提供商模型列表中包含原始名，则保持原始名（不剥离后缀）
+      if (!providerModelsForNorm.includes(pureModel)) {
+        // 提供商没有该精确模型名时，使用归一化后的 API 模型名
+        apiModelName = modelNorm.apiModelName;
+        console.log(`[edit] Normalized model name: "${pureModel}" → "${apiModelName}" (stripped suffix: ${modelNorm.strippedSuffix || 'unknown'})`);
+      } else {
+        console.log(`[edit] Provider has exact model "${pureModel}", keeping original name (not stripping suffix)`);
+      }
+    }
 
     // Content safety check
     const safetyResult = checkPromptSafety(prompt);
@@ -841,7 +852,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
     try {
         const FormData = (await import('form-data')).default;
         const form = new FormData();
-        form.append('model', pureModel);
+        form.append('model', apiModelName);
         form.append('image', imageBuffer, { filename: 'image.png', contentType: mimeType });
         form.append('prompt', editInstruction);
 
@@ -1024,12 +1035,12 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
 
         // 构建 images/generations 请求体（image_urls 在此放入，兼容层才能正确转换）
         const genRequestBody: Record<string, unknown> = {
-          model: pureModel,
+          model: apiModelName,
           prompt: editInstruction,
           // 根据质量参数动态计算默认尺寸
           ...((() => {
-            const ps = calculateActualPixelsFromRatio('1:1', quality || '1K', pureModel);
-            return { size: size || ps || '1024x1024', quality: quality || '1K' };
+            const ps = calculateActualPixelsFromRatio('1:1', quality || 'auto', modelNorm.apiModelName);
+            return { size: size || ps || '1024x1024', quality: quality || 'auto' };
           })()),
           n: Math.min(count, 4),
           image_urls: imageUrls,
@@ -1167,7 +1178,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
                 taskId: remoteTaskId,
                 apiBaseUrl: effectiveBaseUrl,
                 providerId: providerId || '',
-                model: pureModel,                prompt: effectivePrompt,
+                model: apiModelName,                prompt: effectivePrompt,
                 allTaskIds: parsed.taskIds,
                 compatProfile: effectiveCompatProfile,
               },
@@ -1253,12 +1264,12 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
     const outputSize = (() => {
       if (size && /^\d+x\d+$/.test(size)) return size; // 已经是像素格式
       const ratio = size || '1:1';
-      return calculateActualPixelsFromRatio(ratio, quality || '1K', pureModel) || '1024x1024';
+      return calculateActualPixelsFromRatio(ratio, quality || 'auto', modelNorm.apiModelName) || '1024x1024';
     })();
 
 // 构建 chat/completions 请求体
     const chatRequestBody: Record<string, unknown> = {
-      model: pureModel,
+      model: apiModelName,
       messages: [{
         role: 'user',
         content: contentParts,
@@ -1323,13 +1334,13 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
         // 400 可能是模型不支持图片输入，尝试降级到 /images/generations
         if (isImageEditModel(pureModel)) {
           try {
-            const genUrl = await tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, pureModel, effectivePrompt, size, quality, 1);
+            const genUrl = await tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, apiModelName, effectivePrompt, size, quality, 1);
             if (genUrl) {
               const images: Array<{ url: string; revisedPrompt: string }> = [{ url: genUrl, revisedPrompt: effectivePrompt }];
               // count > 1 时额外并行生成
               if (count > 1) {
                 const extraPromises = Array.from({ length: count - 1 }, () =>
-                  tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, pureModel, effectivePrompt, size, quality, 1)
+                  tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, apiModelName, effectivePrompt, size, quality, 1)
                     .then(url => url ? { url, revisedPrompt: effectivePrompt } : null)
                     .catch(() => null)
                 );
@@ -1397,7 +1408,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
       try {
         console.info(`[edit] taskId=${taskId} chat/completions未返回图片, 尝试images/generations降级`);
         const fallbackStart = Date.now();
-        const genUrl = await tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, model, effectivePrompt, size, quality, 1);
+        const genUrl = await tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, apiModelName, effectivePrompt, size, quality, 1);
         if (genUrl) resultImageUrl = genUrl;
         console.info(`[edit] taskId=${taskId} images/generations降级: ${genUrl ? '成功' : '失败'}, 耗时=${Date.now() - fallbackStart}ms`);
       } catch { /* 忽略 */ }
@@ -1434,7 +1445,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
                 'Content-Type': 'application/json',
               },
               body: JSON.stringify({
-                model: pureModel,                messages: [{ role: 'user', content: contentParts }],
+                model: apiModelName,                messages: [{ role: 'user', content: contentParts }],
                 max_tokens: 4096,
                 stream: false,
                 ...(outputSize ? { size: outputSize } : {}),
@@ -1456,7 +1467,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
             return null;
           } else {
             // OpenAI 模型：使用 images/generations
-            const genUrl = await tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, pureModel, effectivePrompt, size, quality, 1);
+            const genUrl = await tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, apiModelName, effectivePrompt, size, quality, 1);
             return genUrl ? { url: genUrl, revisedPrompt: effectivePrompt } : null;
           }
         } catch { return null; }

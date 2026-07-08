@@ -797,7 +797,7 @@ export function shouldUseGeminiChatRoute(modelId: string): boolean {
  * 注意：-pro / -max / -lite 是模型名称固有部分（如 qwen-vl-max, gemini-3.1-pro），
  * 不应剥离。只有管理员手动添加的分辨率后缀（如 gpt-image-2-2k）才需要。
  */
-const QUALITY_SUFFIX_RE = /[-\s](2k|4k|8k|hd|uhd)$/i;
+const QUALITY_SUFFIX_RE = /[-\s](1k|2k|4k|8k|hd|uhd)$/i;
 
 export interface NormalizedModelInfo {
   /** API 可识别的基础模型名（如 gpt-image-2） */
@@ -824,6 +824,8 @@ export interface NormalizeModelOptions {
    * - 若 providerModelList 只包含带后缀名、没有基础名，则视为独立模型（如 PearAPI），
    *   保留完整模型名，仅从后缀提取 resolutionTier 作为档位信息。
    */
+  providerModels?: string[] | Set<string>;
+  /** @deprecated Use providerModels */
   providerModelList?: string[] | Set<string>;
   /**
    * 强制保留后缀（直接透传原始模型名），仅从后缀提取档位信息。
@@ -838,18 +840,26 @@ function hasModel(list: string[] | Set<string> | undefined, name: string): boole
   return list.includes(name);
 }
 
+function resolveProviderList(opts?: NormalizeModelOptions): string[] | Set<string> | undefined {
+  return opts?.providerModels || opts?.providerModelList;
+}
+
 export function normalizeModelForApi(modelId: string, opts?: NormalizeModelOptions): NormalizedModelInfo {
   if (!modelId) {
     return { apiModelName: modelId, originalModel: modelId, wasNormalized: false, resolutionTier: null, qualityTier: null, strippedSuffix: null, providerHasSuffixVariant: false };
   }
 
-  const match = QUALITY_SUFFIX_RE.exec(modelId);
+  // ★ 双重正则：
+  // - 分辨率后缀 (2k/4k/8k/hd/uhd) → 影响 resolutionTier，可能需要被剥离
+  // - 质量后缀 (pro/max/lite/mini/standard) → 影响 qualityTier，是模型名固有部分不剥离
+  const resMatch = QUALITY_SUFFIX_RE.exec(modelId);
+  const match = resMatch; // 保留别名用于向后兼容
   if (!match) {
     return { apiModelName: modelId, originalModel: modelId, wasNormalized: false, resolutionTier: null, qualityTier: null, strippedSuffix: null, providerHasSuffixVariant: false };
   }
 
   const suffix = match[1].toLowerCase();
-  const isResolution = ['2k', '4k', '8k', 'hd', 'uhd'].includes(suffix);
+  const isResolution = ['1k', '2k', '4k', '8k', 'hd', 'uhd'].includes(suffix);
   const baseModelName = modelId.slice(0, match.index);
 
   // 场景1：强制保留后缀（如PearAPI这类模型名必须带-4k/-2k后缀）
@@ -868,8 +878,8 @@ export function normalizeModelForApi(modelId: string, opts?: NormalizeModelOptio
 
   // 场景2：提供商模型列表可用 - 智能判断
   let providerHasSuffixVariant = false;
-  if (opts?.providerModelList) {
-    const list = opts.providerModelList;
+  const list = resolveProviderList(opts);
+  if (list) {
     const fullInList = hasModel(list, modelId);
     const baseInList = hasModel(list, baseModelName);
     providerHasSuffixVariant = fullInList;
