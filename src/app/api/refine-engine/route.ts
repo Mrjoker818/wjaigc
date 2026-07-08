@@ -914,7 +914,8 @@ export async function POST(request: NextRequest) {
     if (action === 'models') {
       const models = await getPublicModels('image');
       const providers = await getPublicApiProviders();
-      const imageProviders = providers.filter(p => p.isEnabled && p.baseUrl && p.apiKey && (p.modelType === 'image' || p.modelType === 'universal' || p.modelType === 'general'));
+      // sanitize 后 apiKey 会被置为 ''，这里不要用 p.apiKey 做存在性判断
+      const imageProviders = providers.filter(p => p.isEnabled && p.baseUrl && (p.modelType === 'image' || p.modelType === 'universal' || p.modelType === 'general' || (p.modelType as string) === 'imageEdit'));
       return NextResponse.json({ success: true, models, providers: imageProviders });
     }
 
