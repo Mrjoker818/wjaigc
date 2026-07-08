@@ -9,7 +9,7 @@ import type { VideoReferenceBinding as RefBinding } from './prompt-compiler';
 import type { FailureDiagnosis } from './retake-diagnosis';
 
 // 镜头状态
-export type ShotStatus = 'planned' | 'generating' | 'completed' | 'ready' | 'failed' | 'accepted';
+export type ShotStatus = 'planned' | 'submitted' | 'generating' | 'completed' | 'ready' | 'failed' | 'accepted' | 'diagnosing';
 
 // 参考素材绑定（图、视频、音频）—— 复用 prompt-compiler 中的 VideoReferenceBinding
 export type { RefBinding as VideoReferenceBinding };
@@ -46,6 +46,7 @@ export interface VideoShotPlan {
   resultVideoUrl?: string;
   resultThumbnailUrl?: string;
   status: ShotStatus;
+  taskId?: string; // 当前/最近一次提交的视频任务ID，用于完成回填
   error?: string;
   diagnosis?: Array<{ label?: string; title?: string; description?: string; patch?: Record<string, unknown>; promptAppend?: string; negativeAppend?: string }> | null;
   retakeCount?: number;

@@ -7,7 +7,7 @@ import { IncrementalHistoryManager } from '@/lib/canvas-incremental-history';
 import { TreeHistoryManager, type VersionNode } from '@/lib/canvas-tree-history';
 import { createAutoConnection, type ConnectionRelationType } from '@/lib/canvas-connections';
 import { GenerationPanel, GenerationParams, CtrlRefSelection } from '@/components/generation-panel';
-import VideoGenerationPanel, { VideoGenerateParams } from '@/components/video-generation-panel';
+import VideoGenerationPanel, { VideoGenerateParams, type VideoGenerationPanelHandle } from '@/components/video-generation-panel';
 import { ImagePreview } from '@/components/image-preview';
 import { ChatPanel } from '@/components/chat-panel';
 import { PromptEquation } from '@/components/prompt-equation';
@@ -474,6 +474,8 @@ function CanvasApp() {
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
   const currentProjectRef = useRef(currentProject);
   currentProjectRef.current = currentProject;
+  const videoPanelRef = useRef<VideoGenerationPanelHandle>(null);
+  const shotTaskIdMapRef = useRef<Map<string, string>>(new Map());
   const groupsRef = useRef<ImageGroupData[]>([]);
 
   const stabilizeCanvasImages = useCallback((items: Array<{ id: string; url: string }>) => {
@@ -2315,6 +2317,11 @@ function CanvasApp() {
     compiledPrompt?: string;
     compiledNegative?: string;
     shotPlan?: any[];
+    shotId?: string;
+    shotIndex?: number;
+    directorMode?: boolean;
+    directorIntent?: string;
+    _vgenReqId?: string;
   }) => {
     // ★ 链式多片段生成：当 chainContinuity=true 且有多个场景时，顺序生成每个片段
     if (params.chainContinuity && params.multiShotScenes && params.multiShotScenes.length > 1) {
@@ -2672,6 +2679,8 @@ function CanvasApp() {
         useGlobalReferences: params.useGlobalReferences,
         useDirector: params.useDirector,
         directorStyle: params.directorStyle,
+        shotId: params.shotId,
+        _vgenReqId: phId,
       };
 
       const res = await fetch(apiEndpoint, {
@@ -2685,6 +2694,9 @@ function CanvasApp() {
       }
 
       const taskId = data.taskId;
+      if (params.shotId && taskId) {
+        shotTaskIdMapRef.current.set(params.shotId, taskId);
+      }
       setImages(prev => prev.map(img =>
         img.id === phId ? {
           ...img,
@@ -2772,13 +2784,18 @@ function CanvasApp() {
                   apiProvider: params.providerId || undefined,
                 } as CanvasImage : img
               ));
+              // Track video usage
+              try { UserManagerCore.getInstance().recordUsage('video'); } catch {}
+              // 通知视频面板回填镜头结果（用于多镜头尾帧接力串行流水线）
+              try {
+                const shotId = (params as any).shotId;
+                if (shotId && videoPanelRef.current?.notifyShotVideoGenerated) {
+                  videoPanelRef.current.notifyShotVideoGenerated(shotId, stableVideo || rawVideoUrl, stableThumbnail || rawThumbnailUrl || undefined);
+                }
+              } catch {}
             } else {
               setImages(prev => prev.filter(img => img.id !== phId));
               toast.error('视频生成失败', { description: '未获取到视频地址', className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
-            }
-            // Track video usage
-            if (pollData.status === 'completed') {
-              try { UserManagerCore.getInstance().recordUsage('video'); } catch {}
             }
             setActiveGenerationCount(prev => Math.max(0, prev - 1));
           } else if (pollData.status === 'failed') {
@@ -4120,8 +4137,9 @@ function CanvasApp() {
       {/* Floating Video Generation Panel */}
       {showVideoPanel && (
         <VideoGenerationPanel
+          ref={videoPanelRef}
           floating
-          onVideoGenerate={handleVideoGenerate}
+          onVideoGenerate={handleVideoGenerate as any}
           onClose={() => setShowVideoPanel(false)}
           onError={(error: string) => {
             toast.error('视频生成失败', {

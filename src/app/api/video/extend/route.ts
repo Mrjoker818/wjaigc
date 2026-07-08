@@ -20,7 +20,7 @@ import {
   getVideoModelInfo,
   type VideoGenerateParams,
 } from '@/lib/video-api';
-import { buildDirectorPrompt } from '@/lib/video-director';
+import { buildDirectorPrompt, type DirectorStyle } from '@/lib/video-director';
 
 export const maxDuration = 300; // 5 min timeout
 
@@ -43,11 +43,17 @@ export async function POST(request: NextRequest) {
 
     const {
       videoUrl,
-      prompt,
+      prompt: rawPrompt = '',
       model,
       extendDuration = 5,
       generateAudio = false,
       providerId,
+      useDirector = true,
+      directorStyle,
+      directorMode,
+      negativePrompt,
+      cameraControl,
+      seed,
     } = body;
 
     if (!videoUrl || !model) {
@@ -133,30 +139,53 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 4. 构建请求参数（接入导演级提示词：本地增强，不依赖额外 LLM 调用）
-    const rawPrompt = prompt || '请延续视频内容和画面，保持角色和场景一致';
-    let finalPrompt = rawPrompt;
-    try {
-      const directorMsg = buildDirectorPrompt({
-        userPrompt: rawPrompt,
-        mode: 'extend',
-        modelId: pureModel || '',
-        model: pureModel || '',
-        duration: extendDuration,
-        audio: generateAudio,
-        style: 'cinematic',
-        includeNegative: true,
-        verbosity: 'standard',
-      });
-      // 本地增强：在 prompt 前拼"保持尾帧一致"指导
-      finalPrompt = `【续写指导】从上一片段尾帧自然延续，保持角色外观、场景、光线、运动方向一致；避免突然跳切。\n${rawPrompt}`;
-      console.log(`[video/extend] Director user-message length=${directorMsg.user.length}`);
-    } catch (e) {
-      console.warn('[video/extend] Director compile failed, using raw prompt:', e);
+    // 4. 构建请求参数（接入导演级提示词：本地规则增强，不依赖额外 LLM 调用）
+    const safePrompt = rawPrompt && rawPrompt.trim() ? rawPrompt : '请延续视频内容和画面，保持角色和场景一致';
+    let finalPrompt = safePrompt;
+    let finalNegativePrompt = negativePrompt || '';
+    const resolvedStyle = directorStyle || directorMode || 'cinematic';
+    if (useDirector !== false) {
+      try {
+        const directorMsg = buildDirectorPrompt({
+          userPrompt: safePrompt,
+          mode: 'extend',
+          modelId: pureModel,
+          model: pureModel,
+          duration: extendDuration,
+          audio: generateAudio,
+          style: resolvedStyle as DirectorStyle,
+          camera: typeof cameraControl === 'string' ? cameraControl : cameraControl?.type,
+          includeNegative: true,
+          verbosity: 'standard',
+        });
+        const guidance: string[] = ['从上一片段尾帧自然延续，保持角色外观、场景、光线、运动方向一致；避免突然跳切'];
+        if (cameraControl && typeof cameraControl !== 'string' && cameraControl.type) {
+          const camLabel: Record<string, string> = {
+            push_in: '缓慢推进', push_out: '缓慢拉出', pan_left: '左摇', pan_right: '右摇',
+            tilt_up: '上仰', tilt_down: '下俯', orbit_left: '左环绕', orbit_right: '右环绕',
+            zoom_in: '放大', zoom_out: '缩小', tracking: '跟拍', static: '静止机位',
+          };
+          guidance.push(`运镜：${camLabel[cameraControl.type] || cameraControl.type}`);
+        }
+        const directorSection = directorMsg.user || '';
+        finalPrompt = [
+          directorSection ? `【导演编排】\n${directorSection}` : '',
+          `【续写指导】${guidance.join('；')}。`,
+          `【内容要求】${safePrompt}`,
+        ].filter(Boolean).join('\n\n');
+        if (!finalNegativePrompt) {
+          finalNegativePrompt = 'blurry, distorted face, morphing identity, watermark, subtitle, text overlay, jitter, glitch, frame skip';
+        }
+        console.log(`[video/extend] Director enhance applied, style=${resolvedStyle}, promptLen=${finalPrompt.length}`);
+      } catch (e) {
+        console.warn('[video/extend] Director compile failed, using raw prompt:', e);
+      }
     }
 
     const videoParams: VideoGenerateParams = {
       prompt: finalPrompt,
+      negativePrompt: finalNegativePrompt || undefined,
+      seed: typeof seed === 'number' ? seed : undefined,
       model: pureModel,
       videoUrl: resolvedVideoUrl,
       action: 'extend',

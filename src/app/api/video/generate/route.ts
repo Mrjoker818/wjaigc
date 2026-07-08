@@ -65,6 +65,7 @@ export async function POST(request: NextRequest) {
       useDirector,
       directorMode,
       directorIntent,
+      shotId,
     } = body;
 
     if (!prompt || !model) {
@@ -237,7 +238,7 @@ export async function POST(request: NextRequest) {
           includeNegative: true,
           verbosity: 'standard',
         });
-        // 本地增强：在原始 prompt 前拼接导演指导段，供视频模型参考
+        // 真正把导演编译器输出拼入 prompt（directorMsg.user 是结构化指导段）
         const guidance: string[] = [];
         if (cameraControl?.type) {
           const camLabel: Record<string, string> = {
@@ -249,13 +250,15 @@ export async function POST(request: NextRequest) {
           guidance.push(`运镜：${camLabel[cameraControl.type] || cameraControl.type}，强度${cameraControl.intensity || 50}%`);
         }
         if (directorIntent) guidance.push(`镜头意图：${directorIntent}`);
-        if (guidance.length) {
-          finalPrompt = `【导演指导】${guidance.join('；')}。\n${prompt}`;
-        }
-        // negative 保持原样，模型不支持时适配器会过滤
+        const directorSection = directorMsg.user || '';
+        finalPrompt = [
+          directorSection ? `【导演编排】\n${directorSection}` : '',
+          guidance.length ? `【导演指导】${guidance.join('；')}。` : '',
+          `【画面描述】${prompt}`,
+        ].filter(Boolean).join('\n\n');
+        // negative 保持原样，模型不支持时适配器会过滤（LLM 增强时由 directorResult.negative 提供，此处本地编译不覆盖）
         finalNegativePrompt = negativePrompt;
-        // user 消息可用于调试日志
-        console.log(`[video/generate] Director user-message length=${directorMsg.user.length}, mode=${compiledMode}`);
+        console.log(`[video/generate] Director user-message length=${directorMsg.user.length}, mode=${compiledMode}, finalPrompt length=${finalPrompt.length}`);
       } catch (e) {
         console.warn('[video/generate] Director compile failed, falling back to raw prompt:', e);
       }
@@ -411,6 +414,7 @@ export async function POST(request: NextRequest) {
     // 7. 立即返回任务ID
     return NextResponse.json({
       taskId,
+      shotId: shotId || null,
       status: 'queued',
       message: '视频生成任务已提交',
       modelInfo: modelInfo ? {

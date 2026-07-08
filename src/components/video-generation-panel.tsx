@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
+import { useState, useEffect, useCallback, useRef, forwardRef, useImperativeHandle, type ReactNode } from 'react';
 import * as React from 'react';
 import {
   Play, Video, ImagePlus, Clock, Settings2,
@@ -198,6 +198,11 @@ export interface VideoGenerateParams extends Omit<VideoApiGenerateParams, 'mode'
   multiShotScenes?: Array<{ id: string; prompt: string; duration: number; cameraControl?: CameraControlParams }>;
   chainContinuity?: boolean;
   useGlobalReferences?: boolean;
+  // 多镜头/导演参数
+  shotId?: string;
+  shotIndex?: number;
+  _vgenReqId?: string;
+  directorMode?: boolean;
   // 导演增强
   useDirector?: boolean;
   directorStyle?: DirectorStyle;
@@ -207,7 +212,9 @@ export interface VideoGenerateParams extends Omit<VideoApiGenerateParams, 'mode'
   shotPlan?: VideoShotPlan[];
 }
 interface VideoGenerationPanelProps {
-  onVideoGenerate: (params: VideoGenerateParams) => void;
+  onVideoGenerate: (params: VideoGenerateParams) => Promise<{ taskId?: string }> | { taskId?: string } | void;
+  /** 多镜头任务完成回调：把视频结果回填到 shotPlan */
+  onShotVideoCompleted?: (shotId: string, result: { videoUrl: string; thumbnailUrl?: string }) => void;
   onError?: (error: string) => void;
   themeStyle?: 'gold' | 'monochrome';
   /** 当前画布选中的图片URL，自动用作图生视频首帧 */
@@ -240,7 +247,17 @@ function RatioPreview({ ratio, className = '' }: { ratio: string; className?: st
   );
 }
 
-export default function VideoGenerationPanel({
+export interface VideoGenerationPanelHandle {
+  /** 通知某个镜头/任务的视频已生成完成（shotId 优先匹配镜头，否则按 taskId 兜底） */
+  notifyShotVideoGenerated: (shotId: string, videoUrl: string, thumbnailUrl?: string) => void;
+}
+
+export interface ShotVideoResult {
+  videoUrl: string;
+  thumbnailUrl?: string;
+}
+
+const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerationPanelProps>(function VideoGenerationPanel({
   onVideoGenerate,
   onError,
   themeStyle = 'gold',
@@ -249,7 +266,7 @@ export default function VideoGenerationPanel({
   serverVideoModels,
   floating = false,
   onClose,
-}: VideoGenerationPanelProps) {
+}: VideoGenerationPanelProps, ref) {
   // === 状态 ===
   const [mode, setMode] = useState<'text2video' | 'image2video-first' | 'image2video-ref' | 'video-extend' | 'multi-shot' | 'image2video-firstlast'>('text2video');
   const [prompt, setPrompt] = useState('');
@@ -350,7 +367,9 @@ export default function VideoGenerationPanel({
   ]);
   const [showMultiShotPanel, setShowMultiShotPanel] = useState(false);
   const [chainContinuity, setChainContinuity] = useState(true); // 链式连贯：前段尾帧→后段首帧
-  const [useGlobalReferences, setUseGlobalReferences] = useState(true); // 全局参考图注入
+  const [useGlobalReferences, setUseGlobalReferences] = useState(true);
+  const [tailFrameRelay, setTailFrameRelay] = useState(true); // 尾帧接力开关（默认开启）
+  const [autoDiagnoseOnFail, setAutoDiagnoseOnFail] = useState(true); // 失败自动诊断 // 全局参考图注入
   const [videoHistory, setVideoHistory] = useState<VideoHistoryEntry[]>(loadVideoHistory);
   const [showHistory, setShowHistory] = useState(false);
   const [templateFilter, setTemplateFilter] = useState<'all' | 'product' | 'character' | 'landscape' | 'effect' | 'story'>('all');
@@ -374,11 +393,17 @@ export default function VideoGenerationPanel({
   const [directorEnhanceIntensity, setDirectorEnhanceIntensity] = useState<'soft' | 'standard' | 'cinematic'>('standard');
 
   // === 结构化镜头计划状态 ===
+  type ShotVideoResult = { videoUrl: string; thumbnailUrl?: string };
   const [shotPlans, setShotPlans] = useState<VideoShotPlan[]>([]);
   const [isPlanningShots, setIsPlanningShots] = useState(false);
   const [shotPlanOpen, setShotPlanOpen] = useState(false);
   const [currentGeneratingShotId, setCurrentGeneratingShotId] = useState<string | null>(null);
   const [diagnoseOpen, setDiagnoseOpen] = useState<string | null>(null); // 诊断哪个失败镜头
+  const [isGeneratingAll, setIsGeneratingAll] = useState(false);
+  const [characterRefType, setCharacterRefType] = useState<'character-front'|'character-side'|'character-back'>('character-front');
+  const shotTaskResolversRef = useRef<Map<string, { resolve: (r: ShotVideoResult) => void; reject: (e: unknown) => void; timer: ReturnType<typeof setTimeout> }>>(new Map());
+  const shotTaskIdMapRef = useRef<Map<string, string>>(new Map()); // shotId -> taskId
+  const autoDiagnoseFiredRef = useRef<Set<string>>(new Set());
 
   // === 失败诊断 ===
   const handleDiagnoseFailed = async (shot: VideoShotPlan) => {
@@ -412,6 +437,66 @@ export default function VideoGenerationPanel({
   // ref 保持最新 shotPlans，供异步循环读取不被闭包冻结
   const shotPlansRef = useRef<VideoShotPlan[]>(shotPlans);
   useEffect(() => { shotPlansRef.current = shotPlans; }, [shotPlans]);
+
+  // === shot 任务等待队列：taskId -> {resolve,reject,timer} ===
+  // 暴露给父组件：完成回填 + 等待某 shot 任务
+  useImperativeHandle(ref, () => ({
+    notifyShotVideoGenerated: (shotOrTaskId: string, videoUrl: string, thumbnailUrl?: string) => {
+      // 1) 先按 shotId 找 resolver（串行流水线场景，resolver 以 shotId 为 key）
+      let resolver = shotTaskResolversRef.current.get(shotOrTaskId);
+      // 2) 同步更新 shotPlans 状态（回填视频URL/缩略图/状态），兼容 shotId / taskId 两种匹配
+      setShotPlans(prev => {
+        let hit = false;
+        const next = prev.map(s => {
+          if (s.id === shotOrTaskId || s.taskId === shotOrTaskId) {
+            hit = true;
+            if (!resolver) resolver = shotTaskResolversRef.current.get(s.id) || shotTaskResolversRef.current.get(s.taskId || '');
+            return { ...s, status: 'completed' as const, videoUrl, thumbnailUrl: thumbnailUrl || s.thumbnailUrl, error: undefined, diagnosisOpen: false };
+          }
+          return s;
+        });
+        if (!hit) return prev;
+        return next;
+      });
+      if (resolver) {
+        clearTimeout(resolver.timer);
+        shotTaskResolversRef.current.delete(shotOrTaskId);
+        resolver.resolve({ videoUrl, thumbnailUrl: thumbnailUrl || '' });
+      }
+    },
+    notifyShotVideoFailed: (shotOrTaskId: string, errMsg: string) => {
+      const resolver = shotTaskResolversRef.current.get(shotOrTaskId);
+      setShotPlans(prev => prev.map(s => (s.id === shotOrTaskId || s.taskId === shotOrTaskId) ? { ...s, status: 'failed' as const, error: errMsg } : s));
+      if (resolver) {
+        clearTimeout(resolver.timer);
+        shotTaskResolversRef.current.delete(shotOrTaskId);
+        resolver.reject(new Error(errMsg));
+      }
+    },
+  }));
+
+  // 等待某个 shot 对应的视频任务完成（供串行流水线使用）
+  const waitForShotTask = (taskId: string, timeoutMs = 600000): Promise<ShotVideoResult> => {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        shotTaskResolversRef.current.delete(taskId);
+        reject(new Error('生成超时'));
+      }, timeoutMs);
+      shotTaskResolversRef.current.set(taskId, { resolve, reject, timer });
+    });
+  };
+
+  // 镜头失败时自动诊断（通过 ref Set 避免重复触发）
+  useEffect(() => {
+    if (!autoDiagnoseOnFail) return;
+    shotPlans.forEach(shot => {
+      if (shot.status === 'failed' && shot.error && !autoDiagnoseFiredRef.current.has(shot.id)) {
+        autoDiagnoseFiredRef.current.add(shot.id);
+        setDiagnoseOpen(shot.id);
+        handleDiagnoseFailed(shot).catch(() => {});
+      }
+    });
+  }, [shotPlans, autoDiagnoseOnFail]);
 
   // 自动从服务器加载视频模型（如果未通过 props 传入）
   useEffect(() => {
@@ -822,7 +907,7 @@ Rules:
       // 查找上一个已完成镜头：优先使用服务端 ffmpeg 抽取的尾帧，其次用缩略图
       const shotIdx = shotPlans.findIndex(s => s.id === shotId);
       let firstFrameForThis: string | undefined = firstFrameUrl || undefined;
-      if (shotIdx > 0 && shot.firstFrameFromPrev !== false) {
+      if (shotIdx > 0 && tailFrameRelay) {
         const prev = shotPlans[shotIdx - 1];
         if (prev?.videoUrl) {
           // 调用后端抽帧 API（ffmpeg 抽最后一帧，比前端 video 元素更稳定）
@@ -850,32 +935,59 @@ Rules:
       const camControl = shot.cameraMove ? { type: (cameraControl?.type || 'static'), intensity: motionStrength } : cameraControl || undefined;
       // 连续性提示：用上一镜头结果构造续接 prompt，帮助模型衔接动作与场景
       const prevShot = shotIdx > 0 ? shotPlans[shotIdx - 1] : undefined;
-      const shotPrompt = prevShot && prevShot.status === 'ready'
+      const shotPrompt = prevShot && prevShot.status === 'completed' && prevShot.videoUrl
         ? buildContinuationPrompt(prevShot, shot.directedPrompt || shot.prompt)
         : (shot.directedPrompt || shot.prompt);
-      await onVideoGenerate({
-        prompt: shotPrompt,
-        mode: firstFrameForThis ? 'image2video-first' : 'text2video',
-        model: pureModelId,
-        providerId,
-        aspectRatio: shot.aspectRatio,
-        duration: shot.duration,
-        quality,
-        generateAudio: !!shot.audioCues || generateAudio,
-        firstFrameUrl: firstFrameForThis,
-        lastFrameUrl: shotIdx === shotPlans.length - 1 ? (lastFrameUrl || undefined) : undefined,
-        resolution,
-        cameraControl: camControl,
-        motionBrush: motionBrush || undefined,
-        characterReferences: typedReferences.filter(r => r.type.startsWith('character-')).map(r => r.url),
-        referenceImages: typedReferences.filter(r => !r.type.startsWith('character-') && r.type !== 'first-frame' && r.type !== 'last-frame').map(r => r.url),
-        motionStrength: camControl ? motionStrength : undefined,
-        seed,
-        negativePrompt: negativePrompt.trim() || undefined,
-        useDirector: true,
-        directorStyle,
-      });
-      setShotPlans(prev => prev.map(s => s.id === shotId ? { ...s, status: 'ready' as const } : s));
+
+      setShotPlans(prev => prev.map(s => s.id === shotId ? { ...s, status: 'generating' as const, error: undefined, progress: 0 } : s));
+
+      // 先注册等待器，确保父组件 notify 时 resolver 已就绪
+      const waitPromise = waitForShotTask(shotId, 15 * 60 * 1000);
+
+      let result: any;
+      try {
+        result = await onVideoGenerate({
+          prompt: shotPrompt,
+          mode: firstFrameForThis ? 'image2video-first' : 'text2video',
+          model: pureModelId,
+          providerId,
+          aspectRatio: shot.aspectRatio,
+          duration: shot.duration,
+          quality,
+          generateAudio: !!shot.audioCues || generateAudio,
+          firstFrameUrl: firstFrameForThis,
+          lastFrameUrl: shotIdx === shotPlans.length - 1 ? (lastFrameUrl || undefined) : undefined,
+          resolution,
+          cameraControl: camControl,
+          motionBrush: motionBrush || undefined,
+          characterReferences: typedReferences.filter(r => r.type.startsWith('character-')).map(r => r.url),
+          referenceImages: typedReferences.filter(r => !r.type.startsWith('character-') && r.type !== 'first-frame' && r.type !== 'last-frame').map(r => r.url),
+          motionStrength: camControl ? motionStrength : undefined,
+          seed,
+          negativePrompt: negativePrompt.trim() || undefined,
+          useDirector: true,
+          directorStyle,
+          shotId,
+        });
+      } catch (submitErr: any) {
+        shotTaskResolversRef.current.delete(shotId);
+        throw submitErr;
+      }
+
+      // 等待父组件通知该任务真正完成（视频URL/缩略图就绪）
+      try {
+        const { videoUrl, thumbnailUrl } = await waitPromise;
+        setShotPlans(prev => prev.map(s => s.id === shotId ? {
+          ...s,
+          status: 'completed' as const,
+          videoUrl,
+          thumbnailUrl,
+          progress: 100,
+          error: undefined,
+        } : s));
+      } catch (waitErr: any) {
+        setShotPlans(prev => prev.map(s => s.id === shotId ? { ...s, status: 'failed' as const, error: waitErr?.message || '生成失败' } : s));
+      }
     } catch (err: any) {
       setShotPlans(prev => prev.map(s => s.id === shotId ? { ...s, status: 'failed' as const, error: err?.message || '生成失败' } : s));
     } finally {
@@ -1225,10 +1337,10 @@ Rules:
             </button>
           </div>
         </div>
-      )}
+        )}
 
-      {panelMinimized ? null : (
-      <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+        {panelMinimized ? null : (
+        <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
         {/* 非浮动模式简易头部 */}
         {!floating && (
           <div className="px-5 pt-4 pb-2 flex items-center justify-between flex-shrink-0">
@@ -1571,8 +1683,8 @@ Rules:
                     )}
                   </div>
                 )}
-                {/* 多参考图 */}
-                {currentFeatures?.multiReference && (
+                {/* 多参考图（图生视频模式下，受模型能力约束） */}
+                {(mode === 'image2video-first' || mode === 'multi-shot') && currentFeatures?.multiReference && (
                   <div style={{ borderTop: `1px solid ${borderColor}` }} className="pt-3">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-[11px] font-semibold flex items-center gap-1" style={{ color: subTextColor }}>
@@ -1840,23 +1952,30 @@ Rules:
                       <button onClick={() => removeTypedReference(ref.id)} className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/60 text-white text-[10px] flex items-center justify-center opacity-0 group-hover:opacity-100 cursor-pointer">×</button>
                     </div>
                   ))}
-                  <button
-                    onClick={() => {
-                      const input = document.createElement('input'); input.type = 'file'; input.accept = 'image/*';
-                      input.onchange = async (e) => {
-                        const file = (e.target as HTMLInputElement).files?.[0]; if (!file) return;
-                        const fd = new FormData(); fd.append('file', file);
-                        const res = await fetch('/api/save-image', { method: 'POST', body: fd });
-                        const data = await res.json(); if (data.url) addTypedReference(data.url, 'character-front');
-                      };
-                      input.click();
-                    }}
-                    className="w-16 h-16 rounded-md border-2 border-dashed flex flex-col items-center justify-center gap-0.5 cursor-pointer transition-colors hover:scale-105"
-                    style={{ borderColor: borderColor }}
-                  >
-                    <Plus className="w-4 h-4" style={{ color: accentColor }} />
-                    <span className="text-[9px]" style={{ color: subTextColor }}>添加</span>
-                  </button>
+                  {(['character-front', 'character-side'] as const).map(charType => {
+                    const already = typedReferences.some(r => r.type === charType);
+                    if (already) return null;
+                    return (
+                      <button
+                        key={charType}
+                        onClick={() => {
+                          const input = document.createElement('input'); input.type = 'file'; input.accept = 'image/*';
+                          input.onchange = async (e) => {
+                            const file = (e.target as HTMLInputElement).files?.[0]; if (!file) return;
+                            const fd = new FormData(); fd.append('file', file);
+                            const res = await fetch('/api/save-image', { method: 'POST', body: fd });
+                            const data = await res.json(); if (data.url) addTypedReference(data.url, charType as 'character-front' | 'character-side');
+                          };
+                          input.click();
+                        }}
+                        className="w-16 h-16 rounded-md border-2 border-dashed flex flex-col items-center justify-center gap-0.5 cursor-pointer transition-colors hover:scale-105"
+                        style={{ borderColor: borderColor }}
+                      >
+                        <Plus className="w-4 h-4" style={{ color: accentColor }} />
+                        <span className="text-[9px]" style={{ color: subTextColor }}>{REFERENCE_TYPE_CONFIG[charType]?.label}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </CollapsibleSection>
             )}
@@ -1923,6 +2042,7 @@ Rules:
                     style={{ background: inputBg, color: subTextColor, border: `1px solid ${borderColor}` }}
                   >清空</button>
                   <div className="ml-auto flex items-center gap-3">
+                    <ToggleBtn active={tailFrameRelay} onClick={() => setTailFrameRelay(!tailFrameRelay)} accent={accentColor} sub={subTextColor} mono={isMonochrome}>尾帧接力</ToggleBtn>
                     <ToggleBtn active={chainContinuity} onClick={() => setChainContinuity(!chainContinuity)} accent={accentColor} sub={subTextColor} mono={isMonochrome}>链式连贯</ToggleBtn>
                     <ToggleBtn active={useGlobalReferences} onClick={() => setUseGlobalReferences(!useGlobalReferences)} accent={accentColor} sub={subTextColor} mono={isMonochrome}>全局参考图</ToggleBtn>
                   </div>
@@ -2376,16 +2496,16 @@ Rules:
           {/* ============ 右列结束 ============ */}
         </div>
         {/* 两列 flex 行结束 */}
-      </div>
+        </div>
       )}
     </div>
   );
-}
+});
 
 // 可折叠区块（内联组件，保持简洁）
 function CollapsibleSection({ title, icon, iconColor, badge, defaultOpen = false, isMonochrome, accentColor, inputBg, borderColor, subTextColor, textColor, children }: {
   title: string;
-  icon?: React.ReactNode;
+  icon?: ReactNode;
   iconColor?: string;
   badge?: string;
   defaultOpen?: boolean;
@@ -2395,7 +2515,7 @@ function CollapsibleSection({ title, icon, iconColor, badge, defaultOpen = false
   borderColor: string;
   subTextColor: string;
   textColor: string;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   const [open, setOpen] = React.useState(defaultOpen);
   return (
@@ -2416,7 +2536,7 @@ function CollapsibleSection({ title, icon, iconColor, badge, defaultOpen = false
 }
 
 function ToggleBtn({ active, onClick, accent, sub, mono, children }: {
-  active: boolean; onClick: () => void; accent: string; sub: string; mono: boolean; children: React.ReactNode;
+  active: boolean; onClick: () => void; accent: string; sub: string; mono: boolean; children: ReactNode;
 }) {
   return (
     <button onClick={onClick} className="flex items-center gap-1.5 text-[10px] font-medium cursor-pointer" style={{ color: active ? accent : sub }}>
@@ -2429,3 +2549,5 @@ function ToggleBtn({ active, onClick, accent, sub, mono, children }: {
 }
 
 export { VIDEO_MODEL_REGISTRY };
+
+export default VideoGenerationPanel;
