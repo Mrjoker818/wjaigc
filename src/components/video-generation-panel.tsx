@@ -1660,16 +1660,16 @@ Rules:
               </div>
             )}
 
-            {/* 参数三行堆叠：比例 / 时长 / 质量 —— 每行独占避免文字挤压 */}
-            <div className="space-y-3">
+            {/* 参数区：网格双列避免挤压 */}
+            <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className={labelClass}>画面比例</label>
-                <div className="flex flex-wrap gap-1.5">
+                <div className="grid grid-cols-3 gap-1">
                   {availableRatios.map(r => (
                     <button
                       key={r}
                       onClick={() => setAspectRatio(r)}
-                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] font-medium transition-all cursor-pointer whitespace-nowrap"
+                      className="flex items-center justify-center gap-1 px-1 py-1.5 rounded-md text-[10.5px] font-medium transition-all cursor-pointer whitespace-nowrap"
                       style={{
                         background: aspectRatio === r ? (isGold ? 'rgba(212,175,55,0.18)' : 'rgba(59,130,246,0.18)') : inputBg,
                         color: aspectRatio === r ? accentColor : subTextColor,
@@ -1684,60 +1684,57 @@ Rules:
               </div>
               <div>
                 <label className={labelClass}>视频时长</label>
-                <div className="flex gap-1.5">
+                <div className="grid grid-cols-4 gap-1">
                   {availableDurations.map(d => (
                     <button
                       key={d}
                       onClick={() => setDuration(d)}
-                      className="flex-1 px-2 py-1.5 rounded-md text-[11px] font-medium transition-all cursor-pointer whitespace-nowrap"
+                      className="flex items-center justify-center gap-0.5 px-1 py-1.5 rounded-md text-[10.5px] font-medium transition-all cursor-pointer whitespace-nowrap"
                       style={{
                         background: duration === d ? (isGold ? 'rgba(212,175,55,0.18)' : 'rgba(59,130,246,0.18)') : inputBg,
                         color: duration === d ? accentColor : subTextColor,
                         border: `1px solid ${duration === d ? accentColor : borderColor}`,
                       }}
                     >
-                      <Clock className="w-3 h-3 inline mr-0.5" />{d}秒
+                      <Clock className="w-2.5 h-2.5" />{d}s
                     </button>
                   ))}
                 </div>
               </div>
               <div>
                 <label className={labelClass}>生成质量</label>
-                <div className="flex gap-1.5">
+                <div className="grid grid-cols-2 gap-1">
                   {(['std', 'pro'] as const).map(q => (
                     <button
                       key={q}
                       onClick={() => setQuality(q)}
-                      className="flex-1 px-2 py-1.5 rounded-md text-[11px] font-medium transition-all cursor-pointer whitespace-nowrap"
+                      className="px-1 py-1.5 rounded-md text-[10.5px] font-medium transition-all cursor-pointer whitespace-nowrap"
                       style={{
                         background: quality === q ? (isGold ? 'rgba(212,175,55,0.18)' : 'rgba(59,130,246,0.18)') : inputBg,
                         color: quality === q ? accentColor : subTextColor,
                         border: `1px solid ${quality === q ? accentColor : borderColor}`,
                       }}
-                    >{q === 'std' ? '标准' : '高清 Pro'}</button>
+                    >{q === 'std' ? '标准' : '高清Pro'}</button>
                   ))}
                 </div>
               </div>
-            </div>
-
-            {/* 生成数量 */}
-            <div>
-              <label className={labelClass}>生成数量</label>
-              <div className="flex items-center gap-2">
-                {([1, 2, 4] as const).map(n => (
-                  <button
-                    key={n}
-                    onClick={() => setBatchCount(n)}
-                    className="w-12 h-9 rounded-md text-xs font-semibold transition-all cursor-pointer"
-                    style={{
-                      background: batchCount === n ? accentColor : inputBg,
-                      color: batchCount === n ? (isGold ? '#0a0a0a' : '#fff') : subTextColor,
-                      border: `1px solid ${batchCount === n ? accentColor : borderColor}`,
-                      boxShadow: batchCount === n ? `0 2px 8px ${accentColor}30` : 'none',
-                    }}
-                  >{n}x</button>
-                ))}
-                {batchCount > 1 && <span className="text-[10px] ml-auto" style={{ color: subTextColor }}>生成 {batchCount} 个视频（不同种子）</span>}
+              <div>
+                <label className={labelClass}>生成数量</label>
+                <div className="flex items-center gap-1">
+                  {([1, 2, 4] as const).map(n => (
+                    <button
+                      key={n}
+                      onClick={() => setBatchCount(n)}
+                      className="flex-1 py-1.5 rounded-md text-[11px] font-semibold transition-all cursor-pointer"
+                      style={{
+                        background: batchCount === n ? accentColor : inputBg,
+                        color: batchCount === n ? (isGold ? '#0a0a0a' : '#fff') : subTextColor,
+                        border: `1px solid ${batchCount === n ? accentColor : borderColor}`,
+                        boxShadow: batchCount === n ? `0 2px 6px ${accentColor}30` : 'none',
+                      }}
+                    >{n}x</button>
+                  ))}
+                </div>
               </div>
             </div>
 
