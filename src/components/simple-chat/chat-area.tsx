@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Menu, Paperclip, ArrowUp, Globe, X, Settings, Bot, User as UserIcon, BookOpen, ChevronDown, Copy, RefreshCw, Trash2, Zap, Sun, Moon, FileText, Database, Sparkles, MessageSquarePlus, Minimize2, Maximize2, MoreHorizontal, Telescope, FileCode, GitBranch, Share2, Search, Eye } from "lucide-react";
+import { Menu, Paperclip, ArrowUp, Globe, X, Settings, Bot, User as UserIcon, BookOpen, ChevronDown, Copy, RefreshCw, Trash2, Zap, Sun, Moon, FileText, Database, Sparkles, MessageSquarePlus, Minimize2, Maximize2, MoreHorizontal, Telescope, FileCode, GitBranch, Share2, Search, Eye, Image } from "lucide-react";
 import {
   SimpleChatProject, SimpleChatTask, SimpleChatMessage, SimpleChatAgent, ChatAttachment,
   ProjectInstructions, ProjectKnowledgeItem,
@@ -70,6 +70,11 @@ export default function ChatArea({
   const [branchBaseMessageId, setBranchBaseMessageId] = useState<string | null>(null);
   const [searchStatus, setSearchStatus] = useState<string | null>(null);
 
+  // Image model
+  const [imageModels, setImageModels] = useState<Array<ChatModelInfo>>([]);
+  const [selectedImageModel, setSelectedImageModel] = useState('');
+  const [selectedImageProviderId, setSelectedImageProviderId] = useState('');
+
   // Instructions draft
   const [instructionsDraft, setInstructionsDraft] = useState<ProjectInstructions>(
     project?.instructions || { projectBackground: '', userPreference: '', outputFormat: '', styleRules: '', forbiddenRules: '', language: 'zh-CN' }
@@ -115,40 +120,74 @@ export default function ChatArea({
   useEffect(() => {
     fetch('/api/models?type=chat').then(r => r.json()).then(data => {
       if (data.models) {
+        // Build provider name map from providers array
+        const providerMap = new Map<string, string>();
+        if (data.providers) {
+          data.providers.forEach((p: { id: string; name: string; displayName?: string }) => {
+            providerMap.set(p.id, p.displayName || p.name || p.id);
+          });
+        }
+        // Count duplicate model names
         const nameCount = new Map<string, number>();
         data.models.forEach((m: { name: string; id: string }) => {
           const nm = m.name || m.id;
           nameCount.set(nm, (nameCount.get(nm) || 0) + 1);
         });
-        const list = data.models.map((m: { id: string; name: string; providerId?: string; providerName?: string }) => {
+        const list = data.models.map((m: { id: string; name: string; providerId?: string }) => {
           const baseName = m.name || m.id;
           const dupCount = nameCount.get(baseName) || 1;
+          const provName = providerMap.get(m.providerId || '') || '';
+          // Use composite key to avoid React key collision for same model from different providers
+          const uniqueKey = m.providerId ? `${m.providerId}::${m.id}` : m.id;
           return {
-            id: m.id,
-            name: dupCount > 1 && m.providerName ? `${baseName} (${m.providerName})` : baseName,
+            id: uniqueKey,
+            modelId: m.id,
+            name: dupCount > 1 && provName ? `${baseName} · ${provName}` : baseName,
             originalName: baseName,
             providerId: m.providerId || '',
-            providerName: m.providerName || '',
+            providerName: provName,
             tags: getModelTags(m.id, m.name)
           };
         });
         setChatModels(list);
         if (!selectedModel && list.length > 0) {
-          setSelectedModel(list[0].id);
+          setSelectedModel(list[0].modelId);
           setSelectedProviderId(list[0].providerId);
         }
       }
     }).catch(() => {});
   }, []);
 
-  // Scroll
+  // Fetch image models
+  const fetchImageModels = useCallback(async () => {
+    fetch('/api/models?type=image').then(r => r.json()).then(data => {
+      const models: Array<{ id: string; name: string; providerId: string; providerName: string }> = [];
+      const rawModels = data.models || [];
+      const providers = data.providers || [];
+      const providerMap = new Map<string, string>();
+      for (const p of providers) {
+        providerMap.set(p.id, p.name || p.displayName || '');
+      }
+      for (const m of rawModels) {
+        const providerName = providerMap.get(m.providerId) || '';
+        models.push({ id: m.id, name: m.name || m.id, providerId: m.providerId, providerName });
+      }
+      setImageModels(models);
+      if (models.length > 0 && !selectedImageModel) {
+        setSelectedImageModel(models[0].id);
+        setSelectedImageProviderId(models[0].providerId);
+      }
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => { fetchChatModels(); fetchImageModels(); }, []);
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
   // Sync task to parent
   useEffect(() => {
     if (!task || !project) return;
-    onUpdateTask({ ...task, messages, model: selectedModel, providerId: selectedProviderId, updatedAt: Date.now() });
-  }, [messages, selectedModel, selectedProviderId]);
+    onUpdateTask({ ...task, messages, model: selectedModel, providerId: selectedProviderId, imageModel: selectedImageModel, imageProviderId: selectedImageProviderId, updatedAt: Date.now() });
+  }, [messages, selectedModel, selectedProviderId, selectedImageModel, selectedImageProviderId]);
 
   // Sync knowledge
   useEffect(() => {
@@ -220,7 +259,7 @@ export default function ChatArea({
       const res = await fetch('/api/simple-chat/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: allMessages, model: selectedModel, providerId: selectedProviderId, webSearch, knowledgeItems: project.knowledgeItems, projectId: project.id, taskId: task.id }),
+        body: JSON.stringify({ messages: allMessages, model: selectedModel, providerId: selectedProviderId, imageModel: selectedImageModel, imageProviderId: selectedImageProviderId, webSearch, knowledgeItems: project.knowledgeItems, projectId: project.id, taskId: task.id }),
       });
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -490,25 +529,54 @@ export default function ChatArea({
         <div className="relative group">
           <button className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-muted hover:bg-muted/80 transition-colors text-xs">
             <Sparkles className="w-3.5 h-3.5 text-yellow-500" />
-            <span className="font-medium max-w-[120px] truncate">{chatModels.find(m => m.id === selectedModel)?.name || selectedModel || '选择模型'}</span>
+            <span className="font-medium max-w-[120px] truncate">{chatModels.find(m => m.modelId === selectedModel)?.name || selectedModel || '选择模型'}</span>
             <ChevronDown className="w-3 h-3 text-muted-foreground" />
           </button>
           <div className="absolute right-0 top-full mt-1 w-80 bg-card border border-border rounded-xl shadow-xl z-50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all max-h-96 overflow-y-auto p-1">
             {chatModels.map(m => (
-              <button key={m.id} onClick={() => { setSelectedModel(m.id); setSelectedProviderId(m.providerId); }}
-                className={`w-full text-left px-3 py-2 rounded-lg hover:bg-muted transition-colors ${m.id === selectedModel ? 'bg-primary/10' : ''}`}>
+              <button key={m.id} onClick={() => { setSelectedModel(m.modelId); setSelectedProviderId(m.providerId); }}
+                className={`w-full text-left px-3 py-2 rounded-lg hover:bg-muted transition-colors ${m.modelId === selectedModel ? 'bg-primary/10' : ''}`}>
                 <div className="flex items-center gap-2">
-                  <span className={`text-sm font-medium ${m.id === selectedModel ? 'text-primary' : ''}`}>{m.name}</span>
+                  <span className={`text-sm font-medium ${m.modelId === selectedModel ? 'text-primary' : ''}`}>{m.name}</span>
                   {m.tags && m.tags.map(t => (
                     <span key={t} className="text-[10px] bg-muted px-1.5 py-0.5 rounded-full text-muted-foreground">{t}</span>
                   ))}
                 </div>
                 <div className="text-[11px] text-muted-foreground/60 mt-0.5">
-                  {m.originalName || m.id}
+                  {m.originalName || m.modelId}
                   {m.providerName && <span className="ml-1">· {m.providerName}</span>}
                 </div>
               </button>
             ))}
+          </div>
+        </div>
+        {/* Image Model Selector */}
+        <div className="relative group">
+          <button className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-muted hover:bg-muted/80 transition-colors text-xs">
+            <ImageIcon className="w-3.5 h-3.5 text-purple-400" />
+            <span className="font-medium max-w-[100px] truncate">{imageModels.find(m => m.modelId === selectedImageModel)?.name || selectedImageModel || '图像模型'}</span>
+            <ChevronDown className="w-3 h-3 text-muted-foreground" />
+          </button>
+          <div className="absolute right-0 top-full mt-1 w-80 bg-card border border-border rounded-xl shadow-xl z-50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all max-h-96 overflow-y-auto p-1">
+            <div className="px-3 py-1.5 text-[11px] text-muted-foreground/60 font-medium">图像生成模型</div>
+            {imageModels.map(m => (
+              <button key={m.id} onClick={() => { setSelectedImageModel(m.modelId); setSelectedImageProviderId(m.providerId); }}
+                className={`w-full text-left px-3 py-2 rounded-lg hover:bg-muted transition-colors ${m.modelId === selectedImageModel ? 'bg-primary/10' : ''}`}>
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-medium ${m.modelId === selectedImageModel ? 'text-primary' : ''}`}>{m.name}</span>
+                  {m.tags && m.tags.map(t => (
+                    <span key={t} className="text-[10px] bg-muted px-1.5 py-0.5 rounded-full text-muted-foreground">{t}</span>
+                  ))}
+                </div>
+                <div className="text-[11px] text-muted-foreground/60 mt-0.5">
+                  {m.originalName || m.modelId}
+                  {m.providerName && <span className="ml-1">· {m.providerName}</span>}
+                </div>
+              </button>
+            ))}
+            {imageModels.length === 0 && (
+              <div className="px-3 py-4 text-center text-xs text-muted-foreground/50">暂无可用图像模型</div>
+            )}
           </div>
         </div>
         {/* Project tools */}

@@ -357,6 +357,13 @@ function CanvasApp() {
         const response = await fetch('/api/auth/me', { cache: 'no-store', credentials: 'include' });
         const data = await response.json() as { success?: boolean; user?: User | null };
         if (!cancelled && data.success && data.user) {
+          // ★ 智能对话用户：直接跳转，不渲染画布/工作台，避免闪现
+          const productType = data.user.productType || '';
+          if (productType === 'chat' || (productType.includes('chat') && !productType.includes('canvas'))) {
+            window.location.href = '/simple-chat';
+            return;
+          }
+
           const userMgr = UserManagerCore.getInstance();
           const hydratedUser = await userMgr.upsertUserFromServer(data.user);
           setCurrentUser(hydratedUser);
@@ -4200,12 +4207,10 @@ function CanvasApp() {
       {authChecked && !currentUser && (
         <LoginPanel
           onLogin={async (user, productType) => {
-            // 智能对话模式：直接跳转到 /simple-chat
+            // 智能对话模式：直接跳转到 /simple-chat，不 setCurrentUser 避免闪现
             if (productType === 'chat') {
-              // 先设置用户状态
-              setCurrentUser(user);
-              // 跳转到简洁聊天页
               window.location.href = '/simple-chat';
+              return;
               return;
             }
 
