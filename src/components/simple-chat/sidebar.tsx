@@ -63,7 +63,7 @@ export function SimpleChatSidebar({
       title: '新对话',
       createdAt: Date.now(),
       updatedAt: Date.now(),
-      model: 'gemini-2.5-flash-image-preview',
+      model: '',
       providerId: '',
       messages: [],
     };

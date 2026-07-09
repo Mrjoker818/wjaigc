@@ -12,12 +12,14 @@ interface ChatAreaProps {
   sidebarOpen: boolean;
 }
 
-const MODELS = [
-  { id: 'gemini-2.5-flash-image-preview', name: 'Gemini 2.5 Flash', icon: '⚡' },
-  { id: 'gemini-3.1-flash-image-preview', name: 'Gemini 3.1 Flash', icon: '🚀' },
-  { id: 'gemini-3-pro-image-preview', name: 'Gemini 3 Pro', icon: '💎' },
-  { id: 'gpt-image-2', name: 'GPT Image 2', icon: '🎨' },
-];
+interface AvailableModel {
+  id: string;
+  name: string;
+  providerId: string;
+  icon: string;
+}
+
+const MODEL_ICONS = ['⚡', '🚀', '💎', '🎨', '🧠', '🔥', '✨', '💡', '🌟', '🪄'];
 
 const QUICK_COMMANDS = [
   { trigger: '@生成图片', label: '生成图片', desc: '描述想要的画面' },
@@ -30,14 +32,76 @@ export default function ChatArea({ session, onBackToWorkspace, onNewSession, onU
   const [messages, setMessages] = useState<ChatMessage[]>(session?.messages || []);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
-  const [selectedModel, setSelectedModel] = useState(session?.model || 'gemini-2.5-flash-image-preview');
+  const [selectedModel, setSelectedModel] = useState(session?.model || '');
   const [showModelMenu, setShowModelMenu] = useState(false);
   const [showCommands, setShowCommands] = useState(false);
   const [uploadedImages, setUploadedImages] = useState<string[]>([]);
   const [selectedProviderId, setSelectedProviderId] = useState(session?.providerId || '');
+  const [availableModels, setAvailableModels] = useState<AvailableModel[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 动态获取可用模型列表
+  useEffect(() => {
+    let cancelled = false;
+    async function loadModels() {
+      let data: { models?: Array<{ id: string; name: string; providerId: string }>; providers?: Array<{ selectedModels?: string[]; id: string }> } | null = null;
+      try {
+        setModelsLoading(true);
+        const res = await fetch('/api/models?type=chat');
+        if (!res.ok) throw new Error('Failed to load models');
+        data = await res.json();
+        const models: AvailableModel[] = [];
+        const seen = new Set<string>();
+        const modelsList = (data?.models || []) as { id: string; name: string; providerId: string }[];
+        modelsList.forEach((m, idx) => {
+          if (!seen.has(m.id)) {
+            seen.add(m.id);
+            models.push({
+              id: m.id,
+              name: m.name || m.id,
+              providerId: m.providerId || '',
+              icon: MODEL_ICONS[idx % MODEL_ICONS.length],
+            });
+          }
+        });
+        if (!cancelled) {
+          setAvailableModels(models);
+          if (models.length > 0 && !selectedModel) {
+            setSelectedModel(models[0].id);
+            setSelectedProviderId(models[0].providerId);
+          } else if (models.length > 0 && selectedModel && !models.some(m => m.id === selectedModel)) {
+            // 当前选中的模型不在可用列表中，回退到第一个
+            setSelectedModel(models[0].id);
+            setSelectedProviderId(models[0].providerId);
+          }
+        }
+      } catch {
+        if (!cancelled) {
+          // 回退到管理员配置中的聊天模型
+          const fallback: AvailableModel[] = [];
+          (data?.providers || []).forEach((p: { selectedModels?: string[]; id: string }) => {
+            (p.selectedModels || []).forEach((mid, idx) => {
+              fallback.push({ id: mid, name: mid, providerId: p.id, icon: MODEL_ICONS[idx % MODEL_ICONS.length] });
+            });
+          });
+          if (fallback.length > 0) {
+            setAvailableModels(fallback);
+            if (!selectedModel) {
+              setSelectedModel(fallback[0].id);
+              setSelectedProviderId(fallback[0].providerId);
+            }
+          }
+        }
+      } finally {
+        if (!cancelled) setModelsLoading(false);
+      }
+    }
+    loadModels();
+    return () => { cancelled = true; };
+  }, []);
 
   if (!session) {
     return (
@@ -237,7 +301,7 @@ export default function ChatArea({ session, onBackToWorkspace, onNewSession, onU
     }
   };
 
-  const currentModel = MODELS.find(m => m.id === selectedModel) || MODELS[0];
+  const currentModel = availableModels.find(m => m.id === selectedModel) || { id: selectedModel, name: selectedModel, icon: '🤖' };
 
   return (
     <div className="flex flex-col h-full bg-background">
@@ -257,23 +321,33 @@ export default function ChatArea({ session, onBackToWorkspace, onNewSession, onU
               onClick={() => setShowModelMenu(!showModelMenu)}
               className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-muted/50 hover:bg-muted transition-colors text-sm cursor-pointer"
             >
-              <span>{currentModel.icon}</span>
-              <span className="font-medium">{currentModel.name}</span>
+              {modelsLoading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <span>{currentModel.icon}</span>
+              )}
+              <span className="font-medium">{modelsLoading ? '加载模型...' : currentModel.name}</span>
               <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
             </button>
             {showModelMenu && (
-              <div className="absolute top-full mt-1 right-0 w-56 bg-card border border-border rounded-xl shadow-xl z-50 overflow-hidden">
-                {MODELS.map(m => (
-                  <button
-                    key={m.id}
-                    onClick={() => { setSelectedModel(m.id); setShowModelMenu(false); }}
-                    className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors cursor-pointer ${m.id === selectedModel ? 'bg-primary/10 text-primary' : 'text-foreground'}`}
-                  >
-                    <span>{m.icon}</span>
-                    <span>{m.name}</span>
-                    {m.id === selectedModel && <span className="ml-auto text-primary text-xs">✓</span>}
-                  </button>
-                ))}
+              <div className="absolute top-full mt-1 right-0 w-64 bg-card border border-border rounded-xl shadow-xl z-50 overflow-hidden max-h-80 overflow-y-auto">
+                {availableModels.length === 0 ? (
+                  <div className="px-4 py-3 text-sm text-muted-foreground">
+                    {modelsLoading ? '正在加载可用模型...' : '暂无可用模型，请在管理员面板配置聊天模型'}
+                  </div>
+                ) : (
+                  availableModels.map(m => (
+                    <button
+                      key={m.id}
+                      onClick={() => { setSelectedModel(m.id); setSelectedProviderId(m.providerId); setShowModelMenu(false); }}
+                      className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors cursor-pointer ${m.id === selectedModel ? 'bg-primary/10 text-primary' : 'text-foreground'}`}
+                    >
+                      <span>{m.icon}</span>
+                      <span className="truncate">{m.name}</span>
+                      {m.id === selectedModel && <span className="ml-auto text-primary text-xs shrink-0">✓</span>}
+                    </button>
+                  ))
+                )}
               </div>
             )}
           </div>
