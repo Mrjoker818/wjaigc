@@ -384,7 +384,14 @@ export async function POST(request: NextRequest) {
                 const pollRes = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/poll-task`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ taskId: bgTaskIds[0], model: bgPollModel, providerId: bgPollProviderId }),
+                  body: JSON.stringify({
+                    taskId: bgTaskIds[0],
+                    model: bgPollModel,
+                    providerId: bgPollProviderId,
+                    // bgData 中携带的 API 凭证，直接透传给 poll-task 避免 task registry 查找失败
+                    apiBaseUrl: bgData.apiBaseUrl,
+                    apiKey: bgData.apiKey,
+                  }),
                 });
 
                 // ★ HTML响应检测：第三方API返回502/503时可能返回HTML错误页面而非JSON

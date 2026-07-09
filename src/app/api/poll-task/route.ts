@@ -58,7 +58,7 @@ if (typeof setInterval !== 'undefined') {
 // 通用化设计：支持不同提供商的任务状态查询格式
 export async function POST(request: NextRequest) {
   try {
-    const { taskId, model: rawModel, userId: requestUserId, providerId, engine: requestEngine } = await request.json();
+    const { taskId, model: rawModel, userId: requestUserId, providerId, engine: requestEngine, apiKey: bodyApiKey, apiBaseUrl: bodyApiBaseUrl } = await request.json();
     if (!taskId || typeof taskId !== 'string') {
       return NextResponse.json({
         success: false,
@@ -916,6 +916,13 @@ export async function POST(request: NextRequest) {
       profile = resolveCompatProfile({ baseUrl: regApiBaseUrl, advancedParams: regAdvancedParams });
       providerName = `registry(${regUsedModel || 'unknown'})`;
       console.log(`[poll-task] Using registry-stored provider for taskId=${taskId}, model=${regUsedModel || 'unknown'}, baseUrl=${apiBaseUrl}`);
+    } else if (bodyApiKey && bodyApiKey !== 'server-managed' && bodyApiBaseUrl) {
+      // ★ bgPoll 直接传递的 API 凭证（绕过 registry 查找失败）
+      apiKey = bodyApiKey as string;
+      apiBaseUrl = normalizeApiBaseUrl(bodyApiBaseUrl as string);
+      profile = resolveCompatProfile({ baseUrl: apiBaseUrl, advancedParams: {} });
+      providerName = `bgPoll(${model || 'unknown'})`;
+      console.log(`[poll-task] Using bgPoll-provided credentials for taskId=${taskId}, model=${model || 'unknown'}, baseUrl=${apiBaseUrl}`);
     } else {
       // 降级：从管理员配置查找提供商（优先使用 providerId 精确匹配）
       const provider = await findProviderForModel(model || regUsedModel || '', 'image', effectiveProviderId || undefined)
