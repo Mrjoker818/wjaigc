@@ -111,11 +111,14 @@ export default function ChatArea({ session, onBackToWorkspace, onNewSession, onU
   useEffect(() => { scrollToBottom(); }, [messages, scrollToBottom]);
 
   // 同步 session — 必须在所有条件返回之前声明
+  // ⚠️ session 不能放入 deps，否则 updatedAt: Date.now() 会导致无限循环：
+  //    effect → onUpdateSession → parent setSessions → session 引用变化 → effect 再触发
   useEffect(() => {
     if (!session) return;
     const updated: ChatSession = { ...session, messages, model: selectedModel, providerId: selectedProviderId, updatedAt: Date.now() };
     onUpdateSession(updated);
-  }, [session, messages, selectedModel, selectedProviderId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, selectedModel, selectedProviderId]);
 
   if (!session) {
     return (

@@ -58,12 +58,14 @@ export default function SimpleChatPage() {
   }, []);
 
   const handleDeleteSession = useCallback((id: string) => {
-    setSessions(prev => prev.filter(s => s.id !== id));
-    if (activeSessionId === id) {
-      const remaining = sessions.filter(s => s.id !== id);
-      setActiveSessionId(remaining[0]?.id ?? null);
-    }
-  }, [activeSessionId, sessions]);
+    setSessions(prev => {
+      const remaining = prev.filter(s => s.id !== id);
+      if (activeSessionId === id) {
+        setActiveSessionId(remaining[0]?.id ?? null);
+      }
+      return remaining;
+    });
+  }, [activeSessionId]);
 
   // 登录检查中
   if (!authChecked) {
@@ -111,6 +113,7 @@ export default function SimpleChatPage() {
 
       {/* 主聊天区域 */}
       <ChatArea
+        key={activeSessionId ?? 'empty'}
         onBackToWorkspace={() => window.location.href = '/'}
         session={activeSession ?? null}
         onNewSession={handleNewSession}
