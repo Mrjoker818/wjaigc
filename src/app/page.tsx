@@ -4028,6 +4028,16 @@ function CanvasApp() {
                 </h1>
                 <div className={`w-1.5 h-1.5 rounded-full ${themeStyle === 'monochrome' ? 'bg-blue-500' : 'bg-gold shadow-[0_0_6px_rgba(200,164,92,0.5)]'}`} />
               </div>
+              <a
+                href="/simple-chat"
+                className={`mt-1 text-xs px-2 py-0.5 rounded-full transition-colors ${
+                  themeStyle === 'monochrome'
+                    ? 'text-blue-600 bg-blue-50 hover:bg-blue-100'
+                    : 'text-gold bg-gold/10 hover:bg-gold/20'
+                }`}
+              >
+                简洁聊天
+              </a>
               <span className={`text-[10px] leading-tight font-mono ${themeStyle === 'monochrome' ? 'text-gray-400' : 'text-gold-muted'}`}>
                 {APP_FULL_VERSION_LABEL}
               </span>
