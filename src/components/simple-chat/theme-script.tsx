@@ -40,11 +40,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('simple-chat-theme', theme);
 
     if (theme === 'dark') {
-      root.classList.add('dark');
-      root.classList.remove('light');
+      root.classList.remove('theme-monochrome');
     } else {
-      root.classList.add('light');
-      root.classList.remove('dark');
+      root.classList.add('theme-monochrome');
     }
   }, [theme, mounted]);
 
