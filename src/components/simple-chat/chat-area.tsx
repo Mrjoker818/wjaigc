@@ -103,6 +103,20 @@ export default function ChatArea({ session, onBackToWorkspace, onNewSession, onU
     return () => { cancelled = true; };
   }, []);
 
+  // 滚动到底部 — 必须在所有条件返回之前声明
+  const scrollToBottom = useCallback(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, []);
+
+  useEffect(() => { scrollToBottom(); }, [messages, scrollToBottom]);
+
+  // 同步 session — 必须在所有条件返回之前声明
+  useEffect(() => {
+    if (!session) return;
+    const updated: ChatSession = { ...session, messages, model: selectedModel, providerId: selectedProviderId, updatedAt: Date.now() };
+    onUpdateSession(updated);
+  }, [session, messages, selectedModel, selectedProviderId]);
+
   if (!session) {
     return (
       <div className="flex-1 flex items-center justify-center bg-background">
@@ -113,19 +127,6 @@ export default function ChatArea({ session, onBackToWorkspace, onNewSession, onU
       </div>
     );
   }
-
-  // 滚动到底部
-  const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, []);
-
-  useEffect(() => { scrollToBottom(); }, [messages, scrollToBottom]);
-
-  // 同步 session
-  useEffect(() => {
-    const updated: ChatSession = { ...session, messages, model: selectedModel, providerId: selectedProviderId, updatedAt: Date.now() };
-    onUpdateSession(updated);
-  }, [messages, selectedModel, selectedProviderId]);
 
   // 处理 @ 快捷命令
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
