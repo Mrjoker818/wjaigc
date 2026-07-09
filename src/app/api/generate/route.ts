@@ -2295,6 +2295,7 @@ export async function POST(request: NextRequest) {
       providerName: usedProviderName,
       providerId: usedProviderId,
       apiBaseUrl: usedApiBaseUrl,
+      apiKey: provider?.apiKey || serverApiKey,
       estimatedTime: modelConfig.estimatedTime,
       prompt: enhancedPrompt,
       originalPrompt: prompt,

@@ -833,7 +833,10 @@ export async function POST(request: NextRequest) {
     // 直接返回processing状态，不做远程轮询，避免用本地taskId去查第三方API导致404
     if (registryTask && registryTask.status === 'processing') {
       const regResult = (registryTask.result as Record<string, unknown>) || {};
-      const hasRemoteTaskId = !!regResult.remoteTaskId;
+      // ★ APImart 等异步供应商返回的 taskId 本身就是远程任务 ID（如 task_01KX...）
+      const taskIdIsRemote = typeof taskId === 'string' && taskId.startsWith('task_');
+      const effectiveRemoteTaskId = (regResult.remoteTaskId as string | undefined) || (taskIdIsRemote ? taskId : undefined);
+      const hasRemoteTaskId = !!effectiveRemoteTaskId;
       const hasDirectUrls = !!(regResult.directImageUrls as string[] | undefined)?.length;
       if (!hasRemoteTaskId && !hasDirectUrls) {
         // IIFE还在重试/提交中，尚未获得远程任务ID
@@ -843,6 +846,10 @@ export async function POST(request: NextRequest) {
           progress: registryTask.progress || 10,
           label: registryTask.label || '正在提交生成任务...',
         }, { status: 200 });
+      }
+      // ★ 将推导出的 remoteTaskId 注入 regResult，供后续远端轮询使用
+      if (effectiveRemoteTaskId && !regResult.remoteTaskId) {
+        regResult.remoteTaskId = effectiveRemoteTaskId;
       }
     }
 
