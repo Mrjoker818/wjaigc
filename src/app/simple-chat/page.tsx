@@ -42,7 +42,7 @@ export default function SimpleChatPage() {
   // Auth
   useEffect(() => {
     fetch('/api/auth/me').then(r => r.json()).then(data => {
-      if (data.authenticated && data.user) {
+      if (data.success && data.user) {
         setUser(data.user);
         setShowLogin(false);
       } else { setShowLogin(true); }
