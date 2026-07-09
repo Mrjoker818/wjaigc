@@ -23,7 +23,7 @@ import {
   // Admin prototype icons
   LayoutDashboard, Flame, Coins, TrendingUp, TrendingDown,
   SlidersHorizontal, HardDrive, Megaphone,
-  Brain, Link, Lock, LogIn, ChevronLeft, Globe2, ListChecks,
+  Brain, Link, Lock, LogIn, ChevronLeft, Globe2, ListChecks, MessageSquareMore,
 } from 'lucide-react';
 import { UserManager } from '@/lib/user-manager';
 import { RECHARGE_PACKAGES } from '@/lib/credits-constants';
@@ -33,7 +33,7 @@ import type { ApiProvider, ModelInfo } from '@/lib/universal-api-types';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import JSZip from 'jszip';
 
-type TabType = 'projects' | 'templates' | 'assets' | 'stats' | 'credits' | 'settings' | 'users' | 'apis' | 'data' | 'ecom-templates' | 'payment-config' | 'audit' | 'overview' | 'desktop-admin' | 'connector-admin';
+type TabType = 'projects' | 'templates' | 'assets' | 'stats' | 'credits' | 'settings' | 'users' | 'apis' | 'data' | 'ecom-templates' | 'payment-config' | 'audit' | 'overview' | 'desktop-admin' | 'connector-admin' | 'groups' | 'chat';
 type ProjectFilter = 'all' | 'recent' | 'starred';
 type AssetSubTab = 'images' | 'prompts' | 'brands';
 type ApiKind = 'general' | 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler' | 'removebg' | 'universal' | 'audio';
@@ -103,7 +103,9 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const isAdmin = user.role === 'admin';
 
   // ─── Navigation state ───
-  const [activeTab, setActiveTab] = useState<TabType>('projects');
+  // Chat-only users start on chat tab, others on projects
+  const defaultTab: TabType = (user.productType?.includes('chat') && !user.productType?.includes('canvas')) ? 'chat' : 'projects';
+  const [activeTab, setActiveTab] = useState<TabType>(defaultTab);
   const [desktopAdminData, setDesktopAdminData] = useState<{
     devices: Record<string, unknown>[];
     backups: Record<string, unknown>[];
@@ -170,6 +172,21 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [modelSearchQuery, setModelSearchQuery] = useState('');
   const [advancedParams, setAdvancedParams] = useState<Array<{ key: string; value: string }>>([]);
+  
+  // ─── Admin: Group management state ───
+  const [adminGroups, setAdminGroups] = useState<Array<{ id: string; name: string; product_types: string[]; credit_quota: number; is_active: boolean; created_at: number; updated_at: number }>>([]);
+  const [newGroupName, setNewGroupName] = useState('');
+  const [newGroupProductTypes, setNewGroupProductTypes] = useState<string[]>(['canvas']);
+
+  // ─── Chat projects state ───
+  const [chatProjects, setChatProjects] = useState<Array<{ id: string; name: string; emoji: string; taskCount: number; updatedAt: number }>>([]);
+  const [newGroupCreditQuota, setNewGroupCreditQuota] = useState(0);
+  const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
+  const [editGroupName, setEditGroupName] = useState('');
+  const [editGroupProductTypes, setEditGroupProductTypes] = useState<string[]>([]);
+  const [editGroupCreditQuota, setEditGroupCreditQuota] = useState(0);
+  const [editGroupActive, setEditGroupActive] = useState(true);
+  const [groupMenuOpenId, setGroupMenuOpenId] = useState<string | null>(null);
   
   // 模型搜索筛选计算
   const filteredModels = useMemo(() => {
@@ -722,6 +739,13 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
         else setProviders([]);
       }
     } catch { setProviders([]); }
+    try {
+      const gRes = await fetch('/api/admin/groups', { cache: 'no-store', credentials: 'include' });
+      if (gRes.ok) {
+        const gData = await gRes.json();
+        if (gData.success && Array.isArray(gData.groups)) setAdminGroups(gData.groups);
+      }
+    } catch { /* ignore */ }
   }, []);
 
   const refreshBalances = useCallback(async () => {
@@ -732,6 +756,25 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
         if (data.success) setApiBalances(data.balances || []);
       }
     } catch { setApiBalances([]); }
+  }, []);
+
+  // ─── Load chat projects from localStorage ───
+  const loadChatProjects = useCallback(() => {
+    try {
+      const raw = localStorage.getItem('simpleChatProjects');
+      if (raw) {
+        const projects = JSON.parse(raw);
+        setChatProjects(projects.map((p: { id: string; name: string; emoji?: string; tasks?: unknown[]; updatedAt?: number }) => ({
+          id: p.id,
+          name: p.name,
+          emoji: p.emoji || '💬',
+          taskCount: Array.isArray(p.tasks) ? p.tasks.length : 0,
+          updatedAt: p.updatedAt || 0,
+        })));
+      } else {
+        setChatProjects([]);
+      }
+    } catch { setChatProjects([]); }
   }, []);
 
   // ─── Filtered providers for API management ───
@@ -1836,12 +1879,17 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
         {/* Navigation */}
         <nav className="flex-1 px-3 space-y-1 min-h-0 overflow-y-auto">
-          {/* Regular tabs */}
+          {/* Regular tabs - filtered by productType */}
           {[
-            { key: 'projects' as TabType, label: '我的项目', icon: FolderOpen, count: projects.length },
-            { key: 'templates' as TabType, label: '模板广场', icon: LayoutTemplate, count: null },
-            { key: 'assets' as TabType, label: '资产库', icon: Layers, count: allImages.length },
-            { key: 'stats' as TabType, label: '统计', icon: BarChart3, count: null },
+            ...(user.productType?.includes('canvas') ? [
+              { key: 'projects' as TabType, label: '我的项目', icon: FolderOpen, count: projects.length },
+              { key: 'templates' as TabType, label: '模板广场', icon: LayoutTemplate, count: null },
+              { key: 'assets' as TabType, label: '资产库', icon: Layers, count: allImages.length },
+              { key: 'stats' as TabType, label: '统计', icon: BarChart3, count: null },
+            ] : []),
+            ...(user.productType?.includes('chat') ? [
+              { key: 'chat' as TabType, label: '智能对话', icon: MessageSquareMore, count: chatProjects.length },
+            ] : []),
             { key: 'settings' as TabType, label: '设置', icon: Settings, count: null },
             { key: 'credits' as TabType, label: '积分', icon: Wallet, count: creditsBalance > 0 ? creditsBalance : null },
           ].map(item => (
@@ -1861,6 +1909,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               {[
                 { key: 'overview' as TabType, label: '运营总览', icon: BarChart3, count: null },
                 { key: 'users' as TabType, label: '用户管理', icon: Users, count: adminUsers.length },
+                { key: 'groups' as TabType, label: '分组管理', icon: Layers, count: adminGroups.length },
                 { key: 'credits' as TabType, label: '积分管理', icon: Wallet, count: null },
                 { key: 'audit' as TabType, label: '操作日志', icon: ShieldCheck, count: null },
                 { key: 'apis' as TabType, label: 'API 管理', icon: Server, count: providers.length },
@@ -2296,18 +2345,19 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
         )}
 
         {/* ── Admin Tabs Component ── */}
-        {['overview', 'audit', 'users', 'credits', 'settings'].includes(activeTab) && isAdmin && (
+        {['overview', 'audit', 'users', 'groups', 'credits', 'settings'].includes(activeTab) && isAdmin && (
           <AdminTabs
             activeTab={activeTab}
             adminUsers={adminUsers.map(u => ({
               ...u,
               apiPermissions: u.apiPermissions as Record<string, boolean> | undefined,
             })) as any}
+            adminGroups={adminGroups as any}
             onRefreshAdmin={refreshAdmin}
-            onCreateUser={async (name: string, password: string, email?: string) => {
+            onCreateUser={async (name: string, password: string, email?: string, groupId?: string) => {
               await fetch('/api/admin/users', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-                body: JSON.stringify({ action: 'create', name: name.trim(), password: password.trim(), email: email?.trim() || undefined }),
+                body: JSON.stringify({ action: 'create', name: name.trim(), password: password.trim(), email: email?.trim() || undefined, groupId: groupId || undefined }),
               });
               await refreshAdmin();
               window.dispatchEvent(new Event('wujie-admin-users-updated'));
@@ -2364,7 +2414,184 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
             })) as any}
             onTabChange={(tab: string) => { setActiveTab(tab as TabType); }}
             onOpenApiManager={() => { setActiveTab('apis'); }}
+            onUpdateUserGroup={async (userId: string, groupId: string) => {
+              await fetch('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ action: 'update', userId, updates: { groupId: groupId || null } }) });
+              await refreshAdmin();
+            }}
           />
+        )}
+
+        {/* ── Tab: Group Management ── */}
+        {activeTab === 'groups' && isAdmin && (
+          <div className="h-full overflow-y-auto p-6 relative">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h1 className="text-xl font-bold text-foreground">分组管理</h1>
+                <p className="text-sm text-muted-foreground">管理用户分组，统一设置产品权限与积分配额</p>
+              </div>
+              <button onClick={async () => { await refreshAdmin(); }} className="text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"><RefreshCw className="w-3.5 h-3.5" />刷新</button>
+            </div>
+
+            {/* Create Group */}
+            <div className="bg-card rounded-xl border border-border p-4 mb-4">
+              <h3 className="text-sm font-semibold text-foreground mb-3">新建分组</h3>
+              <div className="flex items-end gap-3 flex-wrap">
+                <div>
+                  <label className="text-[10px] text-muted-foreground block mb-1">分组名称</label>
+                  <input type="text" value={newGroupName} onChange={e => setNewGroupName(e.target.value)} placeholder="如：品牌部、广告部" className={`px-3 py-2 rounded-lg text-sm w-40 border border-border bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/30`} />
+                </div>
+                <div>
+                  <label className="text-[10px] text-muted-foreground block mb-1">产品权限</label>
+                  <div className="flex gap-1">
+                    {['canvas', 'chat'].map(pt => (
+                      <button key={pt} onClick={() => setNewGroupProductTypes(prev => prev.includes(pt) ? prev.filter(p => p !== pt) : [...prev, pt])} className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${newGroupProductTypes.includes(pt) ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80'}`}>
+                        {pt === 'canvas' ? '无限画布' : '智能对话'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[10px] text-muted-foreground block mb-1">积分配额</label>
+                  <input type="number" value={newGroupCreditQuota} onChange={e => setNewGroupCreditQuota(Number(e.target.value))} min={0} className={`px-3 py-2 rounded-lg text-sm w-28 border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30`} />
+                </div>
+                <button
+                  onClick={async () => {
+                    if (!newGroupName.trim()) return;
+                    const res = await fetch('/api/admin/groups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ action: 'create', name: newGroupName.trim(), productTypes: newGroupProductTypes, creditQuota: newGroupCreditQuota, isActive: true }) });
+                    if (res.ok) { setNewGroupName(''); setNewGroupProductTypes(['canvas']); setNewGroupCreditQuota(0); await refreshAdmin(); toast.success('分组已创建'); }
+                  }}
+                  disabled={!newGroupName.trim()}
+                  className="px-4 py-2 rounded-lg text-sm font-semibold cursor-pointer bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                ><Plus className="w-3.5 h-3.5 inline mr-1" />创建</button>
+              </div>
+            </div>
+
+            {/* Group List */}
+            {adminGroups.length === 0 ? (
+              <div className="text-center py-16 text-muted-foreground">
+                <Layers className="w-10 h-10 mx-auto mb-3 opacity-30" />
+                <p className="text-sm">暂无分组，请创建第一个分组</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {adminGroups.map(group => (
+                  <div key={group.id} className="bg-card rounded-xl border border-border p-4 flex items-center gap-4">
+                    {editingGroupId === group.id ? (
+                      <>
+                        <input type="text" value={editGroupName} onChange={e => setEditGroupName(e.target.value)} className={`px-3 py-2 rounded-lg text-sm flex-1 border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30`} />
+                        <div className="flex gap-1">
+                          {['canvas', 'chat'].map(pt => (
+                            <button key={pt} onClick={() => setEditGroupProductTypes(prev => prev.includes(pt) ? prev.filter(p => p !== pt) : [...prev, pt])} className={`px-2 py-1 rounded text-[10px] font-medium transition-colors cursor-pointer ${editGroupProductTypes.includes(pt) ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
+                              {pt === 'canvas' ? '画布' : '对话'}
+                            </button>
+                          ))}
+                        </div>
+                        <input type="number" value={editGroupCreditQuota} onChange={e => setEditGroupCreditQuota(Number(e.target.value))} min={0} className={`px-3 py-2 rounded-lg text-sm w-24 border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30`} />
+                        <button onClick={() => setEditingGroupId(null)} className="text-xs text-muted-foreground hover:text-foreground cursor-pointer"><X className="w-3.5 h-3.5" /></button>
+                        <button onClick={async () => {
+                          await fetch('/api/admin/groups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ action: 'update', id: group.id, name: editGroupName.trim(), productTypes: editGroupProductTypes, creditQuota: editGroupCreditQuota, isActive: editGroupActive }) });
+                          setEditingGroupId(null); await refreshAdmin(); toast.success('分组已更新');
+                        }} className="px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer bg-primary text-primary-foreground hover:bg-primary/90"><Save className="w-3 h-3 inline mr-0.5" />保存</button>
+                      </>
+                    ) : (
+                      <>
+                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${group.is_active ? 'bg-primary/15' : 'bg-destructive/15'}`}>
+                          <Layers className={`w-5 h-5 ${group.is_active ? 'text-primary' : 'text-destructive'}`} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-semibold text-foreground">{group.name}</span>
+                            {!group.is_active && <span className="text-[10px] px-1.5 py-0.5 rounded bg-destructive/15 text-destructive">已停用</span>}
+                          </div>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-[11px] text-muted-foreground">产品：</span>
+                            {group.product_types && group.product_types.length > 0 ? group.product_types.map(pt => (
+                              <span key={pt} className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{pt === 'canvas' ? '无限画布' : '智能对话'}</span>
+                            )) : <span className="text-[10px] text-muted-foreground">未设置</span>}
+                            <span className="text-[11px] text-muted-foreground ml-2">积分配额：{group.credit_quota || '无限制'}</span>
+                            <span className="text-[10px] text-muted-foreground ml-2">用户数：{adminUsers.filter(u => (u as any).groupId === group.id).length}</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button onClick={() => { setEditingGroupId(group.id); setEditGroupName(group.name); setEditGroupProductTypes([...group.product_types || []]); setEditGroupCreditQuota(group.credit_quota || 0); setEditGroupActive(group.is_active); }} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"><Pencil className="w-3.5 h-3.5" /></button>
+                          <button onClick={() => {
+                            setConfirmDlg({ open: true, title: '删除分组', message: `确定删除分组「${group.name}」吗？`, onConfirm: async () => { await fetch('/api/admin/groups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ action: 'delete', id: group.id }) }); await refreshAdmin(); setConfirmDlg(prev => ({ ...prev, open: false })); toast.success('分组已删除'); }, onCancel: () => setConfirmDlg(prev => ({ ...prev, open: false })) });
+                          }} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Tab: Chat (智能对话) ── */}
+        {activeTab === 'chat' && (
+          <div className="h-full overflow-y-auto p-6" onMouseEnter={loadChatProjects}>
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h1 className="text-2xl font-bold text-foreground">智能对话</h1>
+                <p className={`text-sm mt-1 ${textSecondary}`}>
+                  {chatProjects.length} 个对话项目
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => window.location.href = '/simple-chat'}
+                  className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer ${accentBgLight} ${accentClass} hover:opacity-90`}
+                >
+                  <Plus className="w-4 h-4" />
+                  新建对话
+                </button>
+              </div>
+            </div>
+
+            {chatProjects.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-20 text-center">
+                <div className="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center mb-4">
+                  <MessageSquareMore className="w-8 h-8 text-muted-foreground/40" />
+                </div>
+                <p className={`text-sm ${textSecondary}`}>暂无对话项目</p>
+                <button
+                  onClick={() => window.location.href = '/simple-chat'}
+                  className={`mt-4 px-4 py-2 rounded-xl text-sm font-medium transition-all cursor-pointer ${accentBgLight} ${accentClass} hover:opacity-90`}
+                >
+                  开始第一个对话
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {chatProjects.map(project => (
+                  <div
+                    key={project.id}
+                    onClick={() => window.location.href = `/simple-chat?projectId=${project.id}`}
+                    className="group cursor-pointer rounded-xl border border-border bg-card hover:shadow-lg transition-all duration-200 overflow-hidden"
+                  >
+                    <div className="p-5">
+                      <div className="flex items-start justify-between mb-3">
+                        <span className="text-2xl">{project.emoji}</span>
+                      </div>
+                      <h3 className="font-semibold text-foreground mb-1 truncate">{project.name}</h3>
+                      <p className={`text-xs ${textSecondary}`}>
+                        {project.taskCount} 个对话 · {(() => {
+                          const d = new Date(project.updatedAt);
+                          const now = Date.now();
+                          const diff = now - d.getTime();
+                          const mins = Math.floor(diff / 60000);
+                          if (mins < 60) return `${mins}分钟前`;
+                          const hours = Math.floor(mins / 60);
+                          if (hours < 24) return `${hours}小时前`;
+                          return `${Math.floor(hours / 24)}天前`;
+                        })()}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         )}
 
         {/* ── Tab: API Management ── */}

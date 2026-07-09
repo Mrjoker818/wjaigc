@@ -14,6 +14,11 @@ import {
 } from 'lucide-react';
 
 /* ── Types ── */
+interface AdminGroup {
+  id: string; name: string; product_types: string[]; credit_quota: number;
+  is_active: boolean; created_at: string; updated_at: string;
+}
+
 interface AdminUser {
   id: string; name: string; role: string; status: string;
   email?: string; credits?: number; createdAt?: number; created_at?: string;
@@ -25,6 +30,7 @@ interface AdminUser {
   dailyTokenLimit?: number;
   monthlyTokenLimit?: number;
   dailyImageLimit?: number;
+  groupId?: string;
 }
 
 interface AdminProvider {
@@ -68,14 +74,16 @@ interface SystemSettings {
 interface AdminTabsProps {
   activeTab: string;
   adminUsers: AdminUser[];
+  adminGroups: AdminGroup[];
   onRefreshAdmin: () => void;
-  onCreateUser: (name: string, password: string, email: string) => Promise<void>;
+  onCreateUser: (name: string, password: string, email: string, groupId?: string) => Promise<void>;
   onRenameUser: (userId: string, newName: string) => Promise<void>;
   onResetPassword: (userId: string, newPassword: string) => Promise<void>;
   onToggleUser: (user: AdminUser) => Promise<void>;
   onDeleteUser: (user: AdminUser) => void;
   onToggleUserPermission: (user: AdminUser, key: string) => Promise<void>;
   onRechargeCredits: (userId: string, amount: number, description: string) => Promise<void>;
+  onUpdateUserGroup?: (userId: string, groupId: string) => Promise<void>;
   providers: AdminProvider[];
   onTabChange?: (tab: string) => void;
   onOpenApiManager?: () => void;
@@ -204,6 +212,8 @@ export default function AdminTabs(props: AdminTabsProps) {
   const [newUserName, setNewUserName] = useState('');
   const [newUserPassword, setNewUserPassword] = useState('');
   const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserGroupId, setNewUserGroupId] = useState('');
+  const [userFilterGroup, setUserFilterGroup] = useState('all');
 
   /* ── Credits state ── */
   const [creditsOverview, setCreditsOverview] = useState<{
@@ -295,8 +305,9 @@ export default function AdminTabs(props: AdminTabsProps) {
     }
     if (userFilterRole !== 'all') list = list.filter(u => u.role === userFilterRole);
     if (userFilterStatus !== 'all') list = list.filter(u => u.status === userFilterStatus);
+    if (userFilterGroup !== 'all') list = list.filter(u => (u.groupId || '') === userFilterGroup);
     return list;
-  }, [adminUsers, userSearch, userFilterRole, userFilterStatus]);
+  }, [adminUsers, userSearch, userFilterRole, userFilterStatus, userFilterGroup]);
 
   /* ── Handlers ── */
   const handleRefresh = async () => { setLoading(true); await onRefreshAdmin(); setLoading(false); };
@@ -629,6 +640,11 @@ export default function AdminTabs(props: AdminTabsProps) {
   /* ── Render: Users Tab ── */
   if (activeTab === 'users') {
     const detailUser = userDetailId ? adminUsers.find(u => u.id === userDetailId) : null;
+    const getGroupName = (gid?: string) => {
+      if (!gid) return null;
+      const g = props.adminGroups.find(grp => grp.id === gid);
+      return g ? g.name : null;
+    };
     return (
       <div className="space-y-4 px-6 pt-6 pb-8">
         {/* 页面标题 */}
@@ -660,6 +676,16 @@ export default function AdminTabs(props: AdminTabsProps) {
               </select>
               <ChevronDown className="w-3.5 h-3.5 text-muted-foreground absolute right-2.5 pointer-events-none" />
             </div>
+            <div className="relative inline-flex items-center">
+              <select value={userFilterGroup} onChange={e => setUserFilterGroup(e.target.value)} className="bg-background border border-border rounded-md pl-3 pr-8 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer appearance-none">
+                <option value="all">全部分组</option>
+                {props.adminGroups.filter(g => g.is_active).map(g => (
+                  <option key={g.id} value={g.id}>{g.name}</option>
+                ))}
+                <option value="">未分组</option>
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 text-muted-foreground absolute right-2.5 pointer-events-none" />
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <button onClick={() => handleBatchToggleUsers(true)} disabled={selectedUserIds.size === 0} className={`bg-muted text-muted-foreground px-3 py-2 rounded-md text-sm font-medium transition-all inline-flex items-center gap-1.5 ${selectedUserIds.size === 0 ? 'cursor-not-allowed opacity-50' : 'hover:text-foreground cursor-pointer'}`}><CheckCircle className="w-3.5 h-3.5" />批量启用</button>
@@ -681,11 +707,11 @@ export default function AdminTabs(props: AdminTabsProps) {
         {/* 用户列表表格 */}
         <div className="bg-card rounded-lg shadow-card overflow-hidden border border-border/50">
           {/* 表头 */}
-          <div className="grid grid-cols-[40px_1fr_1.2fr_80px_90px_90px_70px_100px_110px_100px] items-center px-4 py-3 bg-muted text-xs font-semibold text-muted-foreground uppercase tracking-wider border-b border-border/20">
+          <div className="grid grid-cols-[40px_1fr_1.2fr_90px_80px_90px_90px_70px_100px_110px_100px] items-center px-4 py-3 bg-muted text-xs font-semibold text-muted-foreground uppercase tracking-wider border-b border-border/20">
             <div className="flex items-center justify-center">
               <input type="checkbox" checked={selectedUserIds.size > 0 && selectedUserIds.size === filteredUsers.length} onChange={() => { if (selectedUserIds.size === filteredUsers.length) setSelectedUserIds(new Set()); else setSelectedUserIds(new Set(filteredUsers.map(u => u.id))); }} className="w-4 h-4 rounded border-border accent-primary" />
             </div>
-            <span>用户名</span><span>邮箱</span><span>角色</span><span>状态</span><span>积分余额</span><span>作品数</span><span>注册时间</span><span>最后登录</span><span className="text-right">操作</span>
+            <span>用户名</span><span>邮箱</span><span>分组</span><span>角色</span><span>状态</span><span>积分余额</span><span>作品数</span><span>注册时间</span><span>最后登录</span><span className="text-right">操作</span>
           </div>
           {/* 表体 */}
           <div className="divide-y divide-border/20">
@@ -693,7 +719,7 @@ export default function AdminTabs(props: AdminTabsProps) {
               const isActive = u.status === 'active';
               const isSelected = selectedUserIds.has(u.id);
               return (
-                <div key={u.id} className={`grid grid-cols-[40px_1fr_1.2fr_80px_90px_90px_70px_100px_110px_100px] items-center px-4 py-3 hover:bg-muted/30 transition-colors ${isSelected ? 'bg-primary/5' : ''}`}>
+                <div key={u.id} className={`grid grid-cols-[40px_1fr_1.2fr_90px_80px_90px_90px_70px_100px_110px_100px] items-center px-4 py-3 hover:bg-muted/30 transition-colors ${isSelected ? 'bg-primary/5' : ''}`}>
                   <div className="flex items-center justify-center">
                     <input type="checkbox" checked={isSelected} onChange={() => setSelectedUserIds(prev => { const n = new Set(prev); n.has(u.id) ? n.delete(u.id) : n.add(u.id); return n; })} className="w-4 h-4 rounded border-border accent-primary" />
                   </div>
@@ -702,6 +728,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                     <span className="text-sm font-medium text-foreground truncate">{u.name}</span>
                   </div>
                   <span className="text-sm text-muted-foreground truncate">{getUserEmail(u) || '-'}</span>
+                  <span className="text-xs text-muted-foreground">{getGroupName(u.groupId) || '-'}</span>
                   <span className={`inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium w-fit ${u.role === 'admin' ? 'bg-primary/15 text-primary' : 'bg-blue-500/15 text-blue-500'}`}>{u.role === 'admin' ? 'admin' : 'user'}</span>
                   <span className="inline-flex items-center gap-1.5 text-sm">
                     <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isActive ? 'bg-green-500' : 'bg-muted-foreground'}`} />
@@ -746,6 +773,24 @@ export default function AdminTabs(props: AdminTabsProps) {
                   <div className="bg-muted/50 rounded-lg p-3 text-center"><p className="text-lg font-bold text-foreground">{(detailUser.credits ?? 0).toLocaleString()}</p><p className="text-[10px] text-muted-foreground mt-0.5">积分余额</p></div>
                   <div className="bg-muted/50 rounded-lg p-3 text-center"><p className="text-lg font-bold text-foreground">{detailUser.project_count ?? '-'}</p><p className="text-[10px] text-muted-foreground mt-0.5">作品数</p></div>
                   <div className="bg-muted/50 rounded-lg p-3 text-center"><p className="text-xs font-bold text-foreground">{getUserCreated(detailUser)}</p><p className="text-[10px] text-muted-foreground mt-0.5">注册时间</p></div>
+                </div>
+                {/* 所属分组 */}
+                <div>
+                  <h4 className="text-sm font-semibold text-foreground mb-2">所属分组</h4>
+                  <select
+                    value={(detailUser as any).groupId || ''}
+                    onChange={async (e) => {
+                      const gid = e.target.value;
+                      if (props.onUpdateUserGroup) await props.onUpdateUserGroup(detailUser.id, gid);
+                    }}
+                    className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  >
+                    <option value="">无分组</option>
+                    {props.adminGroups.filter(g => g.is_active).map(g => (
+                      <option key={g.id} value={g.id}>{g.name}</option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-muted-foreground mt-1">分组的产品权限和积分配额会自动应用</p>
                 </div>
                 {/* 权限 */}
                 <div>
@@ -912,7 +957,15 @@ export default function AdminTabs(props: AdminTabsProps) {
                 <div><label className="text-sm font-medium text-foreground mb-1.5 block">用户名</label><input value={newUserName} onChange={e => setNewUserName(e.target.value)} placeholder="输入用户名" className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30" /></div>
                 <div><label className="text-sm font-medium text-foreground mb-1.5 block">密码</label><input type="password" value={newUserPassword} onChange={e => setNewUserPassword(e.target.value)} placeholder="输入密码" className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30" /></div>
                 <div><label className="text-sm font-medium text-foreground mb-1.5 block">邮箱 (可选)</label><input value={newUserEmail} onChange={e => setNewUserEmail(e.target.value)} placeholder="输入邮箱" className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30" /></div>
-                <button onClick={async () => { if (newUserName && newUserPassword) { await props.onCreateUser(newUserName, newUserPassword, newUserEmail); setShowUserAddDrawer(false); setNewUserName(''); setNewUserPassword(''); setNewUserEmail(''); } }} className="w-full h-10 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors">创建用户</button>
+                <div><label className="text-sm font-medium text-foreground mb-1.5 block">分组 (可选)</label>
+                  <select value={newUserGroupId} onChange={e => setNewUserGroupId(e.target.value)} className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30">
+                    <option value="">无分组</option>
+                    {props.adminGroups.filter(g => g.is_active).map(g => (
+                      <option key={g.id} value={g.id}>{g.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <button onClick={async () => { if (newUserName && newUserPassword) { await props.onCreateUser(newUserName, newUserPassword, newUserEmail, newUserGroupId || undefined); setShowUserAddDrawer(false); setNewUserName(''); setNewUserPassword(''); setNewUserEmail(''); setNewUserGroupId(''); } }} className="w-full h-10 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors">创建用户</button>
               </div>
             </div>
           </div>

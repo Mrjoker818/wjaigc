@@ -357,12 +357,9 @@ function CanvasApp() {
         const response = await fetch('/api/auth/me', { cache: 'no-store', credentials: 'include' });
         const data = await response.json() as { success?: boolean; user?: User | null };
         if (!cancelled && data.success && data.user) {
-          // ★ 智能对话用户：直接跳转，不渲染画布/工作台，避免闪现
+          // ★ 智能对话用户：也进入工作台（dashboard），工作台已支持智能对话入口
+          // 不再直接跳转到 /simple-chat
           const productType = data.user.productType || '';
-          if (productType === 'chat' || (productType.includes('chat') && !productType.includes('canvas'))) {
-            window.location.href = '/simple-chat';
-            return;
-          }
 
           const userMgr = UserManagerCore.getInstance();
           const hydratedUser = await userMgr.upsertUserFromServer(data.user);
@@ -4207,13 +4204,7 @@ function CanvasApp() {
       {authChecked && !currentUser && (
         <LoginPanel
           onLogin={async (user, productType) => {
-            // 智能对话模式：直接跳转到 /simple-chat，不 setCurrentUser 避免闪现
-            if (productType === 'chat') {
-              window.location.href = '/simple-chat';
-              return;
-              return;
-            }
-
+            // 智能对话用户：进入工作台，工作台已支持智能对话入口
             // 关键：先清除旧用户的所有状态，防止数据跨用户泄露
             setCurrentProject(null);
             // ★ 清空 undo 历史，防止旧用户的历史影响新用户

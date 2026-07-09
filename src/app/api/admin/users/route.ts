@@ -74,6 +74,7 @@ export async function POST(request: NextRequest) {
       updates?: Record<string, unknown>;
       dataKey?: string;
       key?: string;
+      groupId?: string;
     };
 
     if (body.action === 'create') {
@@ -81,6 +82,7 @@ export async function POST(request: NextRequest) {
         name: String(body.name || ''),
         password: String(body.password || ''),
         email: body.email ? String(body.email) : undefined,
+        groupId: body.groupId ? String(body.groupId) : undefined,
       });
       await dbAddAuditLog({ user_id: admin.id, user_name: admin.name, action: 'user_create', target_type: 'user', target_id: user?.id, detail: `创建用户 ${body.name}`, ip_address: null, created_at: Date.now() });
       return NextResponse.json({ success: true, user });
@@ -104,6 +106,7 @@ export async function POST(request: NextRequest) {
         ...(body.updates?.dailyTokenLimit !== undefined ? { dailyTokenLimit: Number(body.updates.dailyTokenLimit) || undefined } : {}),
         ...(body.updates?.monthlyTokenLimit !== undefined ? { monthlyTokenLimit: Number(body.updates.monthlyTokenLimit) || undefined } : {}),
         ...(body.updates?.dailyImageLimit !== undefined ? { dailyImageLimit: Number(body.updates.dailyImageLimit) || undefined } : {}),
+        ...(body.updates?.groupId !== undefined ? { groupId: String(body.updates.groupId || '') || undefined } : {}),
       });
       await dbAddAuditLog({ user_id: admin.id, user_name: admin.name, action: 'user_update', target_type: 'user', target_id: body.userId, detail: `更新用户 ${body.userId}: ${JSON.stringify(body.updates)}`, ip_address: null, created_at: Date.now() });
       return NextResponse.json({ success: Boolean(user), user });

@@ -268,6 +268,7 @@ async function writeStore(file: StoredUsersFile): Promise<void> {
           role: (u.role || 'user') as 'admin' | 'user',
           status: (u.status || 'active') as 'active' | 'disabled',
           productType: u.product_type || undefined,
+          groupId: u.group_id || undefined,
           chatModels: u.chat_models ? (Array.isArray(u.chat_models) ? u.chat_models : parseJsonArray(u.chat_models)) : undefined,
           imageModels: u.image_models ? (Array.isArray(u.image_models) ? u.image_models : parseJsonArray(u.image_models)) : undefined,
           dailyTokenLimit: u.daily_token_limit ?? undefined,
@@ -299,6 +300,7 @@ async function writeStore(file: StoredUsersFile): Promise<void> {
     role: u.role || 'user',
     status: u.status || 'active',
     productType: u.productType || null,
+    groupId: u.groupId || null,
     chatModels: u.chatModels || null,
     imageModels: u.imageModels || null,
     dailyTokenLimit: u.dailyTokenLimit ?? null,
@@ -520,6 +522,7 @@ export async function createManagedUser(input: {
   password: string;
   email?: string;
   productType?: string;
+  groupId?: string;
   chatModels?: string[];
   imageModels?: string[];
   dailyTokenLimit?: number;
@@ -549,6 +552,7 @@ export async function createManagedUser(input: {
     role: 'user',
     status: 'active',
     productType: input.productType || undefined,
+    groupId: input.groupId || undefined,
     chatModels: input.chatModels || undefined,
     imageModels: input.imageModels || undefined,
     dailyTokenLimit: input.dailyTokenLimit ?? undefined,
@@ -592,6 +596,7 @@ export async function updateManagedUser(userId: string, updates: ManagedUserUpda
     ...(updates.email !== undefined ? { email: updates.email.trim() || undefined } : {}),
     ...(updates.status ? { status: updates.status } : {}),
     ...(updates.productType !== undefined ? { productType: updates.productType } : {}),
+    ...(updates.groupId !== undefined ? { groupId: updates.groupId } : {}),
     ...(updates.chatModels !== undefined ? { chatModels: updates.chatModels } : {}),
     ...(updates.imageModels !== undefined ? { imageModels: updates.imageModels } : {}),
     ...(updates.dailyTokenLimit !== undefined ? { dailyTokenLimit: updates.dailyTokenLimit } : {}),
