@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Menu, Paperclip, ArrowUp, Globe, X, Settings, Bot, User as UserIcon, BookOpen, ChevronDown, Copy, RefreshCw, Trash2, Zap, Sun, Moon, FileText, Database, Sparkles, MessageSquarePlus, Minimize2, Maximize2, MoreHorizontal } from "lucide-react";
+import { Menu, Paperclip, ArrowUp, Globe, X, Settings, Bot, User as UserIcon, BookOpen, ChevronDown, Copy, RefreshCw, Trash2, Zap, Sun, Moon, FileText, Database, Sparkles, MessageSquarePlus, Minimize2, Maximize2, MoreHorizontal, Telescope, FileCode, GitBranch, Share2, Search } from "lucide-react";
 import {
   SimpleChatProject, SimpleChatTask, SimpleChatMessage, SimpleChatAgent, ChatAttachment,
   ProjectInstructions, ProjectKnowledgeItem,
@@ -17,6 +17,7 @@ interface ChatAreaProps {
   onUpdateTask: (task: SimpleChatTask) => void;
   onUpdateProject: (project: SimpleChatProject) => void;
   onCreateTask: (projectId: string) => void;
+  onSelectTask: (task: SimpleChatTask) => void;
   onUpdateAgent: (agent: SimpleChatAgent) => void;
   onDeleteAgent: (agentId: string) => void;
   onSkillToAgent: (skill: PresetSkill) => void;
@@ -40,7 +41,7 @@ const MODEL_TAGS: Record<string, string[]> = {
 };
 
 export default function ChatArea({
-  user, project, task, onUpdateTask, onUpdateProject, onCreateTask,
+  user, project, task, onUpdateTask, onUpdateProject, onCreateTask, onSelectTask,
   onUpdateAgent, onDeleteAgent, onSkillToAgent,
   onLogout, onBackToWorkspace, sidebarOpen, onToggleSidebar
 }: ChatAreaProps) {
@@ -55,6 +56,15 @@ export default function ChatArea({
   const [showSkillPanel, setShowSkillPanel] = useState(false);
   const [showInstructionsPanel, setShowInstructionsPanel] = useState(false);
   const [showKnowledgePanel, setShowKnowledgePanel] = useState(false);
+  const [deepResearch, setDeepResearch] = useState(false);
+  const [showArtifacts, setShowArtifacts] = useState(false);
+  const [artifacts, setArtifacts] = useState<Array<{ id: string; type: 'document' | 'code' | 'table'; title: string; content: string }>>([]);
+  const [showShare, setShowShare] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<Array<{ taskId: string; taskName: string; messageIndex: number; snippet: string }>>([]);
+  const [branchBaseMessageId, setBranchBaseMessageId] = useState<string | null>(null);
+  const [searchStatus, setSearchStatus] = useState('');
 
   // Instructions draft
   const [instructionsDraft, setInstructionsDraft] = useState<ProjectInstructions>(
@@ -192,7 +202,7 @@ export default function ChatArea({
       const res = await fetch('/api/simple-chat/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: allMessages, model: selectedModel, providerId: selectedProviderId, webSearch, projectId: project.id, taskId: task.id }),
+        body: JSON.stringify({ messages: allMessages, model: selectedModel, providerId: selectedProviderId, webSearch, knowledgeItems: project.knowledgeItems, projectId: project.id, taskId: task.id }),
       });
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -216,7 +226,9 @@ export default function ChatArea({
             if (data === '[DONE]' || data === '') continue;
             try {
               const parsed = JSON.parse(data);
-              if (parsed.type === 'text' && parsed.content) {
+              if (parsed.type === 'search_status' && parsed.label) {
+                setSearchStatus(parsed.label);
+              } else if (parsed.type === 'text' && parsed.content) {
                 fullContent += parsed.content;
                 setMessages(prev => {
                   const updated = [...prev];
@@ -244,6 +256,112 @@ export default function ChatArea({
       setIsStreaming(false);
     }
   }, [input, isStreaming, selectedModel, selectedProviderId, messages, project, task, uploadedImages, webSearch]);
+
+  // Deep Research
+  const handleDeepResearch = useCallback(async () => {
+    if (!input.trim() || isStreaming) return;
+    setIsStreaming(true);
+    const query = input;
+    setInput("");
+
+    const userMsg: SimpleChatMessage = { id: `msg_${Date.now()}`, role: 'user', content: `🔬 Deep Research: ${query}`, createdAt: Date.now() };
+    const aiMsg: SimpleChatMessage = { id: `msg_${Date.now() + 1}`, role: 'assistant', content: '', createdAt: Date.now() + 1 };
+    setMessages(prev => [...prev, userMsg, aiMsg]);
+
+    try {
+      const res = await fetch('/api/simple-chat/deep-research', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, model: selectedModel, providerId: selectedProviderId, depth: 'standard' }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error('No body');
+      const decoder = new TextDecoder();
+      let buffer = "", fullContent = "", phaseLabel = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const data = line.slice(6).trim();
+          if (!data || data === '[DONE]') continue;
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.type === 'phase') {
+              phaseLabel = parsed.label || '';
+              setMessages(prev => {
+                const updated = [...prev];
+                const last = updated[updated.length - 1];
+                if (last?.role === 'assistant') updated[updated.length - 1] = { ...last, content: `*${phaseLabel}*` };
+                return updated;
+              });
+            } else if (parsed.type === 'text') {
+              fullContent += parsed.content;
+              setMessages(prev => {
+                const updated = [...prev];
+                const last = updated[updated.length - 1];
+                if (last?.role === 'assistant') updated[updated.length - 1] = { ...last, content: fullContent };
+                return updated;
+              });
+            } else if (parsed.type === 'citations') {
+              // Save as artifact
+              const artId = `art_${Date.now()}`;
+              setArtifacts(prev => [...prev, { id: artId, type: 'document', title: `研究: ${query.slice(0, 30)}`, content: fullContent }]);
+            }
+          } catch { /* skip */ }
+        }
+      }
+    } catch {
+      setMessages(prev => { const u = [...prev]; u[u.length - 1] = { ...u[u.length - 1], content: 'Deep Research 失败，请重试。' }; return u; });
+    } finally { setIsStreaming(false); }
+  }, [input, isStreaming, selectedModel, selectedProviderId]);
+
+  // Branch from message
+  const branchFromMessage = useCallback((msgId: string) => {
+    setBranchBaseMessageId(msgId);
+    const idx = messages.findIndex(m => m.id === msgId);
+    if (idx >= 0) {
+      setMessages(prev => prev.slice(0, idx + 1));
+      if (task && project) {
+        const newTask: SimpleChatTask = { ...task, id: `task_${Date.now()}`, name: `${task.name} (分支)`, messages: messages.slice(0, idx + 1), createdAt: Date.now(), updatedAt: Date.now() };
+        onCreateTask(project.id);
+      }
+    }
+  }, [messages, task, project, onCreateTask]);
+
+  // Save as artifact
+  const saveAsArtifact = useCallback((msg: SimpleChatMessage) => {
+    const artId = `art_${Date.now()}`;
+    const isCode = msg.content.includes('```');
+    setArtifacts(prev => [...prev, { id: artId, type: isCode ? 'code' : 'document', title: msg.content.slice(0, 40).replace(/\n/g, ' ') + '...', content: msg.content }]);
+  }, []);
+
+  // Project search
+  const handleProjectSearch = useCallback(() => {
+    if (!searchQuery.trim() || !project) return;
+    const results: typeof searchResults = [];
+    project.tasks.forEach(t => {
+      t.messages.forEach((m, i) => {
+        if (m.content.toLowerCase().includes(searchQuery.toLowerCase())) {
+          results.push({ taskId: t.id, taskName: t.name, messageIndex: i, snippet: m.content.slice(0, 100) });
+        }
+      });
+    });
+    setSearchResults(results);
+  }, [searchQuery, project]);
+
+  // Share
+  const handleShare = useCallback(() => {
+    if (!task) return;
+    const shareText = task.messages.map(m => `**${m.role === 'user' ? '用户' : 'AI'}**: ${m.content}`).join('\n\n---\n\n');
+    navigator.clipboard.writeText(shareText).then(() => setShowShare(false));
+  }, [task]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
@@ -350,6 +468,21 @@ export default function ChatArea({
           title="知识库">
           <Database className="w-4 h-4" />
         </button>
+        <button onClick={() => setShowArtifacts(!showArtifacts)}
+          className={`p-1.5 rounded-lg transition-colors ${showArtifacts ? 'bg-primary/10 text-primary' : artifacts.length > 0 ? 'text-primary' : 'text-muted-foreground hover:bg-muted'}`}
+          title="Artifacts 文档">
+          <FileCode className="w-4 h-4" />
+        </button>
+        <button onClick={() => setShowSearch(!showSearch)}
+          className={`p-1.5 rounded-lg transition-colors ${showSearch ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted'}`}
+          title="项目内搜索">
+          <Search className="w-4 h-4" />
+        </button>
+        <button onClick={() => setShowShare(true)}
+          className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors"
+          title="分享对话">
+          <Share2 className="w-4 h-4" />
+        </button>
         <button onClick={() => onCreateTask(project.id)}
           className="px-2.5 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary text-xs transition-colors">
           <MessageSquarePlus className="w-3.5 h-3.5 inline mr-1" />新对话
@@ -432,6 +565,8 @@ export default function ChatArea({
                     <button onClick={makeLonger} className="p-1 rounded hover:bg-muted text-muted-foreground" title="更长"><Maximize2 className="w-3 h-3" /></button>
                     <button onClick={continueConversation} className="p-1 rounded hover:bg-muted text-muted-foreground" title="继续"><MoreHorizontal className="w-3 h-3" /></button>
                     <button onClick={toImagePrompt} className="p-1 rounded hover:bg-muted text-muted-foreground" title="转生图提示词"><Sparkles className="w-3 h-3" /></button>
+                    <button onClick={() => branchFromMessage(msg.id)} className="p-1 rounded hover:bg-muted text-muted-foreground" title="从此分支"><GitBranch className="w-3 h-3" /></button>
+                    <button onClick={() => saveAsArtifact(msg)} className="p-1 rounded hover:bg-muted text-muted-foreground" title="保存为 Artifact"><FileCode className="w-3 h-3" /></button>
                   </div>
                 )}
               </div>
@@ -477,6 +612,11 @@ export default function ChatArea({
                 className={`p-1.5 rounded-lg transition-colors ${webSearch ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted'}`}
                 title="联网搜索">
                 <Globe className="w-4 h-4" />
+              </button>
+              <button onClick={handleDeepResearch} disabled={!input.trim() || isStreaming}
+                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted disabled:opacity-30 transition-colors"
+                title="Deep Research - 深度研究">
+                <Telescope className="w-4 h-4" />
               </button>
               <button onClick={() => setShowSkillPanel(!showSkillPanel)}
                 className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors" title="Skill">
@@ -652,6 +792,100 @@ export default function ChatArea({
             )}
           </div>
         </ModalOverlay>
+      )}
+
+      {/* Artifacts Panel */}
+      {showArtifacts && (
+        <div className="absolute right-0 top-0 bottom-0 w-80 bg-card border-l border-border z-40 flex flex-col shadow-xl" data-modal="true">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+            <h3 className="font-semibold text-sm">Artifacts</h3>
+            <button onClick={() => setShowArtifacts(false)} className="p-1 rounded-lg hover:bg-muted"><X className="w-4 h-4" /></button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-3 space-y-2">
+            {artifacts.length === 0 ? (
+              <div className="text-center text-muted-foreground text-sm py-8">暂无 Artifacts<br />生成代码或文档后自动出现</div>
+            ) : artifacts.map(a => (
+              <div key={a.id} className="bg-muted rounded-xl p-3 border border-border hover:border-primary/30 transition-colors cursor-pointer">
+                <div className="flex items-center gap-2 mb-2">
+                  {a.type === 'code' ? <FileCode className="w-4 h-4 text-primary" /> : <FileText className="w-4 h-4 text-primary" />}
+                  <span className="text-xs font-medium truncate flex-1">{a.title}</span>
+                </div>
+                <pre className="text-[11px] text-muted-foreground line-clamp-4 whitespace-pre-wrap">{a.content}</pre>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Search Panel */}
+      {showSearch && (
+        <ModalOverlay onClose={() => setShowSearch(false)}>
+          <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+            <ModalHeader title="项目内搜索" onClose={() => setShowSearch(false)} />
+            <div className="flex gap-2 mb-4">
+              <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleProjectSearch()}
+                placeholder="搜索消息内容..."
+                className="flex-1 bg-muted px-3 py-2 rounded-lg border border-border text-sm outline-none focus:border-primary/50" />
+              <button onClick={handleProjectSearch} className="px-3 py-2 bg-primary text-primary-foreground rounded-lg text-sm">搜索</button>
+            </div>
+            <div className="space-y-2 max-h-60 overflow-y-auto">
+              {searchResults.map((r, i) => (
+                <button key={i} onClick={() => {
+                  if (task && task.id !== r.taskId) onSelectTask(project.tasks.find(t => t.id === r.taskId) || task);
+                  setShowSearch(false);
+                }}
+                  className="w-full text-left p-3 rounded-xl border border-border hover:bg-muted transition-colors">
+                  <div className="text-xs font-medium">{r.taskName}</div>
+                  <div className="text-[11px] text-muted-foreground line-clamp-2 mt-1">{r.snippet}</div>
+                </button>
+              ))}
+              {searchResults.length === 0 && searchQuery && (
+                <div className="text-center text-muted-foreground text-sm py-4">未找到匹配结果</div>
+              )}
+            </div>
+          </div>
+        </ModalOverlay>
+      )}
+
+      {/* Share Dialog */}
+      {showShare && (
+        <ModalOverlay onClose={() => setShowShare(false)}>
+          <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+            <ModalHeader title="分享对话" onClose={() => setShowShare(false)} />
+            <p className="text-sm text-muted-foreground mb-4">将当前对话内容复制为 Markdown 格式文本</p>
+            <div className="flex gap-2">
+              <button onClick={handleShare}
+                className="flex-1 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm hover:bg-primary/90 transition-colors">
+                复制到剪贴板
+              </button>
+              <button onClick={() => setShowShare(false)}
+                className="px-4 py-2 bg-muted rounded-lg text-sm hover:bg-muted/80 transition-colors">取消</button>
+            </div>
+          </div>
+        </ModalOverlay>
+      )}
+
+      {/* Upload File to Knowledge */}
+      <input id="knowledge-file-upload" type="file" accept=".pdf,.doc,.docx,.txt,.csv,.xlsx,.pptx,.md" className="hidden"
+        onChange={e => {
+          const files = Array.from(e.target.files || []);
+          files.forEach(f => {
+            const id = Math.random().toString(36).slice(2, 10);
+            addKnowledgeItem({
+              id, type: 'file', name: f.name, enabled: true, mimeType: f.type,
+              projectId: project?.id || '', tags: [], createdAt: Date.now(), updatedAt: Date.now()
+            });
+          });
+        }}
+      />
+
+      {/* Search results info bar */}
+      {searchStatus && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-primary/5 border-b border-primary/10 text-xs text-muted-foreground shrink-0">
+          <Globe className="w-3.5 h-3.5 text-primary animate-pulse" />
+          <span>{searchStatus}</span>
+        </div>
       )}
     </div>
   );

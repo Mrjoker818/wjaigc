@@ -197,6 +197,7 @@ export default function SimpleChatPage() {
           onUpdateTask={handleUpdateTask}
           onUpdateProject={handleUpdateProject}
           onCreateTask={(projectId) => handleCreateTask(projectId)}
+          onSelectTask={(task) => setActiveTaskId(task.id)}
           onUpdateAgent={(agent) => activeProject && handleUpdateAgent(activeProject.id, agent)}
           onDeleteAgent={(agentId) => activeProject && handleDeleteAgent(activeProject.id, agentId)}
           onSkillToAgent={(skill) => activeProject && handleSkillToAgent(activeProject.id, skill)}

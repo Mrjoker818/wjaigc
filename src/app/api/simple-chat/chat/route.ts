@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { findProviderForModel } from '@/lib/server-api-config';
 import type { ApiKind } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
+import { SearchClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
 
 const DEFAULT_SYSTEM_PROMPT = `你是无界AI的智能助手。你可以：
 1. 回答用户的各种问题
@@ -10,16 +11,29 @@ const DEFAULT_SYSTEM_PROMPT = `你是无界AI的智能助手。你可以：
 
 请保持回复简洁、专业、友好。`;
 
+interface KnowledgeItem {
+  id: string;
+  type: 'file' | 'url' | 'note';
+  title: string;
+  content: string;
+}
+
 export async function POST(request: NextRequest) {
   const body = await request.json() as {
     messages?: { role: string; content: string; images?: string[] }[];
     model?: string;
     providerId?: string;
     stream?: boolean;
+    webSearch?: boolean;
+    knowledgeItems?: KnowledgeItem[];
+    projectId?: string;
+    taskId?: string;
   };
   const messages = body.messages || [];
   const model = body.model || 'gemini-2.5-flash-image-preview';
   const providerId = body.providerId || '';
+  const webSearch = body.webSearch || false;
+  const knowledgeItems = body.knowledgeItems || [];
 
   // 查找提供商
   const provider = await findProviderForModel(model, 'chat' as ApiKind, providerId || undefined);
@@ -39,9 +53,58 @@ export async function POST(request: NextRequest) {
   const apiKey = provider.apiKey;
   const baseUrl = provider.baseUrl?.replace(/\/+$/, '') || '';
 
-  // 构建消息列表（添加 system prompt）
+  // 构建增强的 system prompt（指令 + 知识库 + 联网搜索结果）
+  let enhancedSystemPrompt = DEFAULT_SYSTEM_PROMPT;
+
+  // 知识库注入
+  if (knowledgeItems.length > 0) {
+    const kbContext = knowledgeItems
+      .filter(k => k.content)
+      .map(k => {
+        const label = k.type === 'file' ? `[文件: ${k.title}]` : k.type === 'url' ? `[链接: ${k.title}]` : `[笔记: ${k.title}]`;
+        return `${label}\n${k.content.slice(0, 2000)}`;
+      })
+      .join('\n\n---\n\n');
+    if (kbContext) {
+      enhancedSystemPrompt += `\n\n## 项目知识库\n以下是用户提供的知识库内容，请基于这些内容回答用户问题：\n\n${kbContext}`;
+    }
+  }
+
+  // 联网搜索
+  let searchResults: string | null = null;
+  if (webSearch) {
+    try {
+      // 取最后一条用户消息作为搜索 query
+      const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
+      const searchQuery = lastUserMsg?.content || '';
+      if (searchQuery) {
+        const customHeaders = HeaderUtils.extractForwardHeaders(request.headers);
+        const searchClient = new SearchClient(new Config(), customHeaders);
+        const searchResp = await searchClient.webSearch(searchQuery, 5, true);
+
+        if (searchResp.web_items && searchResp.web_items.length > 0) {
+          const items = searchResp.web_items.slice(0, 5).map((item, i) =>
+            `[${i + 1}] ${item.title}\nURL: ${item.url || '无'}\n摘要: ${item.snippet || ''}${item.summary ? '\nAI摘要: ' + item.summary : ''}`
+          ).join('\n\n');
+
+          searchResults = `## 联网搜索结果\n搜索关键词: "${searchQuery}"\n\n${items}`;
+          if (searchResp.summary) {
+            searchResults += `\n\n## AI 搜索摘要\n${searchResp.summary}`;
+          }
+          enhancedSystemPrompt += `\n\n${searchResults}\n\n请基于以上联网搜索结果回答用户问题。如有引用，请标注来源编号（如 [1]、[2]）。`;
+        } else {
+          enhancedSystemPrompt += `\n\n(联网搜索未找到相关结果，请基于已有知识回答)`;
+        }
+      }
+    } catch (e: any) {
+      console.error('Web search failed:', e.message);
+      enhancedSystemPrompt += `\n\n(联网搜索暂时不可用: ${e.message})`;
+    }
+  }
+
+  // 构建消息列表
   const fullMessages = [
-    { role: 'system', content: DEFAULT_SYSTEM_PROMPT },
+    { role: 'system', content: enhancedSystemPrompt },
     ...messages.map((m) => {
       const parts: any[] = [{ type: 'text', text: m.content }];
       if (m.images && m.images.length > 0) {
@@ -68,6 +131,11 @@ export async function POST(request: NextRequest) {
       };
 
       try {
+        // 先发送搜索状态（如果有联网搜索）
+        if (webSearch) {
+          send({ type: 'search_status', status: searchResults ? 'completed' : 'failed', resultCount: searchResults ? (searchResults.match(/\[\d+\]/g)?.length || 0) : 0 });
+        }
+
         const apiUrl = `${baseUrl}/chat/completions`;
 
         // 添加工具定义
