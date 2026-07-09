@@ -1,17 +1,17 @@
-import type { Metadata } from 'next';
+'use client';
+
+import { Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
 
-export const metadata: Metadata = {
-  title: {
-    default: '无界AI',
-    template: '%s | 无界AI',
-  },
-  description:
-    '无界AI - 智能图片生成工具，基于无限画布的AI创作平台',
-  icons: {
-    icon: '/favicon.png',
-  },
-};
+const geistSans = Geist({
+  variable: '--font-geist-sans',
+  subsets: ['latin'],
+});
+
+const geistMono = Geist_Mono({
+  variable: '--font-geist-mono',
+  subsets: ['latin'],
+});
 
 export default function RootLayout({
   children,
@@ -19,8 +19,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="zh-CN" className="dark h-full w-full overflow-hidden theme-gold">
-      <body className="antialiased h-full w-full m-0 p-0 overflow-hidden">
+    <html lang="zh-CN" suppressHydrationWarning>
+      <body
+        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+      >
         {children}
       </body>
     </html>

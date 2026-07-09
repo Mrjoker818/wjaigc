@@ -1,472 +1,443 @@
-'use client';
+"use client";
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { ArrowLeft, Send, ImagePlus, Sparkles, Bot, User, Zap, Paperclip, X, Wand2, ChevronDown, Loader2 } from 'lucide-react';
-import { ChatMessage, ChatSession, ToolStatus, ImageResult } from '@/types/simple-chat';
+import { useState, useEffect, useRef, useCallback } from "react";
+import { Menu, Paperclip, ArrowUp, Globe, X, Settings, Bot, User as UserIcon, BookOpen, ChevronDown, Copy, RefreshCw, Trash2, Zap, Sun, Moon, FileText, Database, Sparkles, MessageSquarePlus, Minimize2, Maximize2, MoreHorizontal } from "lucide-react";
+import {
+  SimpleChatProject, SimpleChatTask, SimpleChatMessage, SimpleChatAgent, ChatAttachment,
+  ProjectInstructions, ProjectKnowledgeItem,
+  PRESET_SKILLS, PresetSkill
+} from "./simple-chat-types";
+import { User } from "@/lib/user-types";
+import { useTheme } from "@/app/simple-chat/providers";
 
 interface ChatAreaProps {
-  session: ChatSession | null;
+  user: User;
+  project: SimpleChatProject | null;
+  task: SimpleChatTask | null;
+  onUpdateTask: (task: SimpleChatTask) => void;
+  onUpdateProject: (project: SimpleChatProject) => void;
+  onCreateTask: (projectId: string) => void;
+  onUpdateAgent: (agent: SimpleChatAgent) => void;
+  onDeleteAgent: (agentId: string) => void;
+  onSkillToAgent: (skill: PresetSkill) => void;
+  onLogout: () => void;
   onBackToWorkspace: () => void;
-  onNewSession: (session: ChatSession) => void;
-  onUpdateSession: (s: ChatSession) => void;
   sidebarOpen: boolean;
+  onToggleSidebar: () => void;
 }
 
-interface AvailableModel {
-  id: string;
-  name: string;
-  providerId: string;
-  icon: string;
-}
+const MODEL_TAGS: Record<string, string[]> = {
+  'gpt-4o': ['多模态', '128K'],
+  'gpt-4o-mini': ['快速', '128K'],
+  'gpt-4-turbo': ['128K', '推理'],
+  'gemini-2.5-flash': ['多模态', '1M'],
+  'gemini-2.5-pro': ['多模态', '1M', '推理'],
+  'claude-3.5-sonnet': ['200K', '推理'],
+  'deepseek-chat': ['128K', '推理'],
+  'deepseek-r1': ['推理', '深度思考'],
+  'doubao-1.5-pro': ['128K', '中文'],
+  'qwen-max': ['中文', '推理'],
+};
 
-const MODEL_ICONS = ['⚡', '🚀', '💎', '🎨', '🧠', '🔥', '✨', '💡', '🌟', '🪄'];
+export default function ChatArea({
+  user, project, task, onUpdateTask, onUpdateProject, onCreateTask,
+  onUpdateAgent, onDeleteAgent, onSkillToAgent,
+  onLogout, onBackToWorkspace, sidebarOpen, onToggleSidebar
+}: ChatAreaProps) {
+  const { theme, toggleTheme } = useTheme();
 
-const QUICK_COMMANDS = [
-  { trigger: '@生成图片', label: '生成图片', desc: '描述想要的画面' },
-  { trigger: '@优化提示词', label: '优化提示词', desc: '将简单描述扩展为专业提示词' },
-  { trigger: '@分析图片', label: '分析图片', desc: '上传图片进行内容分析' },
-  { trigger: '@修图建议', label: '修图建议', desc: '分析图片并给出修图建议' },
-];
-
-export default function ChatArea({ session, onBackToWorkspace, onNewSession, onUpdateSession, sidebarOpen }: ChatAreaProps) {
-  const [messages, setMessages] = useState<ChatMessage[]>(session?.messages || []);
-  const [input, setInput] = useState('');
+  // Local state
+  const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
-  const [selectedModel, setSelectedModel] = useState(session?.model || '');
-  const [showModelMenu, setShowModelMenu] = useState(false);
-  const [showCommands, setShowCommands] = useState(false);
-  const [uploadedImages, setUploadedImages] = useState<string[]>([]);
-  const [selectedProviderId, setSelectedProviderId] = useState(session?.providerId || '');
-  const [availableModels, setAvailableModels] = useState<AvailableModel[]>([]);
-  const [modelsLoading, setModelsLoading] = useState(true);
+  const [uploadedImages, setUploadedImages] = useState<ChatAttachment[]>([]);
+  const [webSearch, setWebSearch] = useState(false);
+  const [showAgentPanel, setShowAgentPanel] = useState(false);
+  const [showSkillPanel, setShowSkillPanel] = useState(false);
+  const [showInstructionsPanel, setShowInstructionsPanel] = useState(false);
+  const [showKnowledgePanel, setShowKnowledgePanel] = useState(false);
+
+  // Instructions draft
+  const [instructionsDraft, setInstructionsDraft] = useState<ProjectInstructions>(
+    project?.instructions || { projectBackground: '', userPreference: '', outputFormat: '', styleRules: '', forbiddenRules: '', language: 'zh-CN' }
+  );
+
+  // Knowledge
+  const [knowledgeItems, setKnowledgeItems] = useState<ProjectKnowledgeItem[]>(project?.knowledgeItems || []);
+  const [addingKnowledge, setAddingKnowledge] = useState<'file' | 'url' | 'note' | null>(null);
+  const [knowledgeUrl, setKnowledgeUrl] = useState('');
+  const [knowledgeNote, setKnowledgeNote] = useState('');
+  const [knowledgeNoteName, setKnowledgeNoteName] = useState('');
+
+  // Models
+  const [chatModels, setChatModels] = useState<Array<{ id: string; name: string; providerId: string; tags?: string[] }>>([]);
+  const [selectedModel, setSelectedModel] = useState(task?.model || "");
+  const [selectedProviderId, setSelectedProviderId] = useState(task?.providerId || "");
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 动态获取可用模型列表
+  // Messages: sync from task
+  const [messages, setMessages] = useState<SimpleChatMessage[]>(task?.messages || []);
+
+  // Sync when task changes
   useEffect(() => {
-    let cancelled = false;
-    async function loadModels() {
-      let data: { models?: Array<{ id: string; name: string; providerId: string }>; providers?: Array<{ selectedModels?: string[]; id: string }> } | null = null;
-      try {
-        setModelsLoading(true);
-        const res = await fetch('/api/models?type=chat');
-        if (!res.ok) throw new Error('Failed to load models');
-        data = await res.json();
-        const models: AvailableModel[] = [];
-        const seen = new Set<string>();
-        const modelsList = (data?.models || []) as { id: string; name: string; providerId: string }[];
-        modelsList.forEach((m, idx) => {
-          if (!seen.has(m.id)) {
-            seen.add(m.id);
-            models.push({
-              id: m.id,
-              name: m.name || m.id,
-              providerId: m.providerId || '',
-              icon: MODEL_ICONS[idx % MODEL_ICONS.length],
-            });
-          }
-        });
-        if (!cancelled) {
-          setAvailableModels(models);
-          if (models.length > 0 && !selectedModel) {
-            setSelectedModel(models[0].id);
-            setSelectedProviderId(models[0].providerId);
-          } else if (models.length > 0 && selectedModel && !models.some(m => m.id === selectedModel)) {
-            // 当前选中的模型不在可用列表中，回退到第一个
-            setSelectedModel(models[0].id);
-            setSelectedProviderId(models[0].providerId);
-          }
-        }
-      } catch {
-        if (!cancelled) {
-          // 回退到管理员配置中的聊天模型
-          const fallback: AvailableModel[] = [];
-          (data?.providers || []).forEach((p: { selectedModels?: string[]; id: string }) => {
-            (p.selectedModels || []).forEach((mid, idx) => {
-              fallback.push({ id: mid, name: mid, providerId: p.id, icon: MODEL_ICONS[idx % MODEL_ICONS.length] });
-            });
-          });
-          if (fallback.length > 0) {
-            setAvailableModels(fallback);
-            if (!selectedModel) {
-              setSelectedModel(fallback[0].id);
-              setSelectedProviderId(fallback[0].providerId);
-            }
-          }
-        }
-      } finally {
-        if (!cancelled) setModelsLoading(false);
-      }
+    if (task) {
+      setMessages(task.messages);
+      setSelectedModel(task.model);
+      setSelectedProviderId(task.providerId);
+      setInput("");
     }
-    loadModels();
-    return () => { cancelled = true; };
-  }, []);
+  }, [task?.id]);
 
-  // 滚动到底部 — 必须在所有条件返回之前声明
-  const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, []);
-
-  useEffect(() => { scrollToBottom(); }, [messages, scrollToBottom]);
-
-  // 同步 session — 必须在所有条件返回之前声明
-  // ⚠️ session 不能放入 deps，否则 updatedAt: Date.now() 会导致无限循环：
-  //    effect → onUpdateSession → parent setSessions → session 引用变化 → effect 再触发
+  // Sync when project changes
   useEffect(() => {
-    if (!session) return;
-    const updated: ChatSession = { ...session, messages, model: selectedModel, providerId: selectedProviderId, updatedAt: Date.now() };
-    onUpdateSession(updated);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (project) {
+      setInstructionsDraft(project.instructions || { projectBackground: '', userPreference: '', outputFormat: '', styleRules: '', forbiddenRules: '', language: 'zh-CN' });
+      setKnowledgeItems(project.knowledgeItems || []);
+    }
+  }, [project?.id]);
+
+  // Load models with tags
+  useEffect(() => {
+    fetch('/api/models?type=chat').then(r => r.json()).then(data => {
+      if (data.models) {
+        const list = data.models.map((m: { id: string; name: string; providerId?: string }) => ({
+          id: m.id, name: m.name || m.id, providerId: m.providerId || '',
+          tags: getModelTags(m.id, m.name)
+        }));
+        setChatModels(list);
+        if (!selectedModel && list.length > 0) {
+          setSelectedModel(list[0].id);
+          setSelectedProviderId(list[0].providerId);
+        }
+      }
+    }).catch(() => {});
+  }, []);
+
+  // Scroll
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+
+  // Sync task to parent
+  useEffect(() => {
+    if (!task || !project) return;
+    onUpdateTask({ ...task, messages, model: selectedModel, providerId: selectedProviderId, updatedAt: Date.now() });
   }, [messages, selectedModel, selectedProviderId]);
 
-  if (!session) {
-    return (
-      <div className="flex-1 flex items-center justify-center bg-background">
-        <div className="text-center">
-          <Bot className="w-16 h-16 mx-auto mb-4 text-muted-foreground/30" />
-          <p className="text-muted-foreground">请选择一个会话或创建新会话</p>
-        </div>
-      </div>
-    );
+  // Sync knowledge
+  useEffect(() => {
+    if (!project) return;
+    onUpdateProject({ ...project, knowledgeItems, updatedAt: Date.now() });
+  }, [knowledgeItems]);
+
+  function getModelTags(id: string, name: string): string[] {
+    const lower = (id + ' ' + name).toLowerCase();
+    const tags: string[] = [];
+    for (const [key, t] of Object.entries(MODEL_TAGS)) {
+      if (lower.includes(key)) { tags.push(...t); break; }
+    }
+    return tags;
   }
 
-  // 处理 @ 快捷命令
-  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const val = e.target.value;
-    setInput(val);
-    if (val.endsWith('@')) {
-      setShowCommands(true);
-    } else {
-      setShowCommands(false);
-    }
-  };
-
-  const applyCommand = (cmd: typeof QUICK_COMMANDS[number]) => {
-    setInput(prev => prev.replace(/@$/, '') + cmd.trigger + ' ');
-    setShowCommands(false);
-    inputRef.current?.focus();
-  };
-
-  // 处理图片上传
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
-    for (const file of Array.from(files)) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        setUploadedImages(prev => [...prev, reader.result as string]);
-      };
-      reader.readAsDataURL(file);
-    }
-    e.target.value = '';
-  };
-
-  const removeImage = (idx: number) => {
-    setUploadedImages(prev => prev.filter((_, i) => i !== idx));
-  };
-
-  // 发送消息
-  const handleSend = async () => {
+  // Handle send
+  const handleSend = useCallback(async () => {
     const content = input.trim();
     if (!content && uploadedImages.length === 0) return;
-    if (isStreaming) return;
+    if (isStreaming || !project || !task) return;
 
-    const userMsg: ChatMessage = {
-      id: 'user-' + Date.now(),
-      role: 'user',
-      content,
-      uploadedImages: uploadedImages.length > 0 ? [...uploadedImages] : undefined,
-      timestamp: Date.now(),
+    const userMsg: SimpleChatMessage = {
+      id: Math.random().toString(36).slice(2, 10),
+      role: 'user', content,
+      images: uploadedImages.map(i => i.url).filter(Boolean) as string[],
+      attachments: uploadedImages.length > 0 ? uploadedImages : undefined,
+      createdAt: Date.now(),
     };
 
-    const aiMsg: ChatMessage = {
-      id: 'ai-' + Date.now(),
-      role: 'assistant',
-      content: '',
-      timestamp: Date.now(),
-      toolStatuses: [],
+    const aiMsg: SimpleChatMessage = {
+      id: Math.random().toString(36).slice(2, 10),
+      role: 'assistant', content: '',
+      model: selectedModel, providerId: selectedProviderId,
+      createdAt: Date.now(),
     };
 
     setMessages(prev => [...prev, userMsg, aiMsg]);
-    setInput('');
+    setInput("");
     setUploadedImages([]);
     setIsStreaming(true);
 
     try {
+      const systemMessages: Array<{ role: string; content: string }> = [];
+      const instructions = project.instructions;
+      if (instructions) {
+        const parts = [];
+        if (instructions.projectBackground) parts.push(`项目背景：${instructions.projectBackground}`);
+        if (instructions.userPreference) parts.push(`用户偏好：${instructions.userPreference}`);
+        if (instructions.outputFormat) parts.push(`输出格式：${instructions.outputFormat}`);
+        if (instructions.styleRules) parts.push(`风格规则：${instructions.styleRules}`);
+        if (instructions.forbiddenRules) parts.push(`禁止规则：${instructions.forbiddenRules}`);
+        if (parts.length > 0) systemMessages.push({ role: 'system', content: parts.join('\n') });
+      }
+      if (task.activeAgentId) {
+        const agent = project.agents.find(a => a.id === task.activeAgentId);
+        if (agent) systemMessages.push({ role: 'system', content: agent.systemPrompt });
+      }
+      if (webSearch) {
+        systemMessages.push({ role: 'system', content: '当前开启了联网搜索模式。请基于联网搜索结果回答用户问题，并在回答末尾列出引用来源。' });
+      }
+
+      const allMessages = [
+        ...systemMessages,
+        ...messages.map(m => ({ role: m.role, content: m.content })),
+        { role: 'user', content },
+      ];
+
       const res = await fetch('/api/simple-chat/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: [...messages, userMsg].map(m => ({
-            role: m.role,
-            content: m.content,
-          })),
-          model: selectedModel,
-          providerId: selectedProviderId,
-        }),
+        body: JSON.stringify({ messages: allMessages, model: selectedModel, providerId: selectedProviderId, webSearch, projectId: project.id, taskId: task.id }),
       });
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
       const reader = res.body?.getReader();
-      if (!reader) throw new Error('No reader');
+      if (!reader) throw new Error('No response body');
 
       const decoder = new TextDecoder();
-      let buffer = '';
-      let fullText = '';
+      let buffer = "";
+      let fullContent = "";
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
+        buffer = lines.pop() || "";
         for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed.startsWith('data:')) continue;
-          const jsonStr = trimmed.slice(5).trim();
-          try {
-            const data = JSON.parse(jsonStr);
-
-            setMessages(prev => {
-              const updated = [...prev];
-              const lastIdx = updated.length - 1;
-              if (lastIdx < 0) return updated;
-
-              switch (data.type) {
-                case 'text':
-                  fullText += data.content;
-                  updated[lastIdx] = { ...updated[lastIdx], content: fullText };
-                  break;
-                case 'tool_status': {
-                  const existingTools = updated[lastIdx].toolStatuses || [];
-                  const toolType = data.tool as ToolStatus['type'];
-                  const newTool: ToolStatus = {
-                    type: toolType,
-                    label: data.label || '',
-                    timestamp: Date.now(),
-                    status: data.status,
-                    progress: data.progress,
-                    taskId: data.taskId,
-                  };
-                  updated[lastIdx] = {
-                    ...updated[lastIdx],
-                    toolStatuses: [
-                      ...existingTools.filter((t: ToolStatus) => t.type !== toolType),
-                      newTool,
-                    ],
-                  };
-                  break;
-                }
-                case 'image':
-                  updated[lastIdx] = {
-                    ...updated[lastIdx],
-                    images: [
-                      ...(updated[lastIdx].images || []),
-                      { url: data.imageUrl, prompt: data.prompt || '', width: 1024, height: 1024 } as ImageResult,
-                    ],
-                    toolStatuses: (updated[lastIdx].toolStatuses || []).filter(
-                      (t: ToolStatus) => t.type !== 'generating_image'
-                    ),
-                  };
-                  break;
-                case 'done':
-                  break;
-                case 'error':
-                  updated[lastIdx] = { ...updated[lastIdx], content: fullText || data.error };
-                  break;
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6).trim();
+            if (data === '[DONE]' || data === '') continue;
+            try {
+              const parsed = JSON.parse(data);
+              if (parsed.type === 'text' && parsed.content) {
+                fullContent += parsed.content;
+                setMessages(prev => {
+                  const updated = [...prev];
+                  const last = updated[updated.length - 1];
+                  if (last?.role === 'assistant') {
+                    updated[updated.length - 1] = { ...last, content: fullContent };
+                  }
+                  return updated;
+                });
               }
-              return updated;
-            });
-          } catch { /* ignore parse errors */ }
+            } catch { /* skip */ }
+          }
         }
       }
-    } catch (e: unknown) {
-      const errMsg = e instanceof Error ? e.message : String(e);
+    } catch {
       setMessages(prev => {
         const updated = [...prev];
-        const lastIdx = updated.length - 1;
-        if (lastIdx >= 0) {
-          updated[lastIdx] = { ...updated[lastIdx], content: `错误: ${errMsg}` };
+        const last = updated[updated.length - 1];
+        if (last?.role === 'assistant') {
+          updated[updated.length - 1] = { ...last, content: '抱歉，请求失败，请重试。' };
         }
         return updated;
       });
+    } finally {
+      setIsStreaming(false);
     }
-    setIsStreaming(false);
+  }, [input, isStreaming, selectedModel, selectedProviderId, messages, project, task, uploadedImages, webSearch]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
+  }, [handleSend]);
+
+  // Message operations
+  const copyMessage = (content: string) => { navigator.clipboard.writeText(content); };
+  const regenerateLast = () => { if (messages.length < 2) return; setMessages(prev => prev.slice(0, -2)); };
+  const continueConversation = () => { setInput('继续'); };
+  const makeShorter = () => {
+    const last = messages[messages.length - 1];
+    if (last?.role === 'assistant') setInput(`请将上面的回答缩短，保留核心要点。`);
+  };
+  const makeLonger = () => {
+    const last = messages[messages.length - 1];
+    if (last?.role === 'assistant') setInput(`请将上面的回答扩展得更详细。`);
+  };
+  const toImagePrompt = () => {
+    const last = messages[messages.length - 1];
+    if (last?.role === 'assistant' && last.content) {
+      setInput(`根据以下内容生成图像提示词：${last.content.slice(0, 200)}`);
+    }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
+  // Instructions
+  const saveInstructions = () => {
+    if (!project) return;
+    onUpdateProject({ ...project, instructions: instructionsDraft, updatedAt: Date.now() });
+    setShowInstructionsPanel(false);
   };
 
-  const currentModel = availableModels.find(m => m.id === selectedModel) || { id: selectedModel, name: selectedModel, icon: '🤖' };
+  // Knowledge
+  const addKnowledgeItem = (item: ProjectKnowledgeItem) => {
+    setKnowledgeItems(prev => [...prev, item]);
+    setAddingKnowledge(null);
+    setKnowledgeUrl('');
+    setKnowledgeNote('');
+    setKnowledgeNoteName('');
+  };
+  const removeKnowledgeItem = (id: string) => {
+    setKnowledgeItems(prev => prev.filter(k => k.id !== id));
+  };
+  const toggleKnowledgeItem = (id: string) => {
+    setKnowledgeItems(prev => prev.map(k => k.id === id ? { ...k, enabled: !k.enabled } : k));
+  };
 
-  return (
-    <div className="flex flex-col h-full bg-background">
-      {/* 顶部栏 */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border/50 bg-card/50 backdrop-blur-sm shrink-0">
-        <button
-          onClick={onBackToWorkspace}
-          className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          <span className="hidden sm:inline">返回工作台</span>
-        </button>
-
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <button
-              onClick={() => setShowModelMenu(!showModelMenu)}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-muted/50 hover:bg-muted transition-colors text-sm cursor-pointer"
-            >
-              {modelsLoading ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <span>{currentModel.icon}</span>
-              )}
-              <span className="font-medium">{modelsLoading ? '加载模型...' : currentModel.name}</span>
-              <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
-            </button>
-            {showModelMenu && (
-              <div className="absolute top-full mt-1 right-0 w-64 bg-card border border-border rounded-xl shadow-xl z-50 overflow-hidden max-h-80 overflow-y-auto">
-                {availableModels.length === 0 ? (
-                  <div className="px-4 py-3 text-sm text-muted-foreground">
-                    {modelsLoading ? '正在加载可用模型...' : '暂无可用模型，请在管理员面板配置聊天模型'}
-                  </div>
-                ) : (
-                  availableModels.map(m => (
-                    <button
-                      key={m.id}
-                      onClick={() => { setSelectedModel(m.id); setSelectedProviderId(m.providerId); setShowModelMenu(false); }}
-                      className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors cursor-pointer ${m.id === selectedModel ? 'bg-primary/10 text-primary' : 'text-foreground'}`}
-                    >
-                      <span>{m.icon}</span>
-                      <span className="truncate">{m.name}</span>
-                      {m.id === selectedModel && <span className="ml-auto text-primary text-xs shrink-0">✓</span>}
-                    </button>
-                  ))
-                )}
-              </div>
-            )}
-          </div>
-          <h2 className="text-sm font-semibold text-foreground truncate max-w-[150px]">{session.title}</h2>
+  if (!project || !task) {
+    return (
+      <div className="flex-1 flex items-center justify-center bg-background">
+        <div className="text-center space-y-3">
+          <BookOpen className="w-12 h-12 mx-auto text-muted-foreground/30" />
+          <p className="text-muted-foreground text-lg">选择或创建一个对话</p>
+          <button onClick={() => onCreateTask(project?.id || '')} className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm">
+            新对话
+          </button>
         </div>
       </div>
+    );
+  }
 
-      {/* 消息列表 */}
-      <div className="flex-1 overflow-y-auto px-4 py-6" data-modal="true" data-popup="true">
+  const activeAgent = task.activeAgentId ? project.agents.find(a => a.id === task.activeAgentId) : null;
+
+  return (
+    <div className="flex-1 flex flex-col h-screen bg-background">
+      {/* Top Bar */}
+      <header className="flex items-center gap-2 px-3 py-2 border-b border-border bg-background/80 backdrop-blur-sm shrink-0">
+        <button onClick={onToggleSidebar} className="p-2 rounded-lg hover:bg-muted transition-colors" title="切换侧边栏">
+          <Menu className="w-5 h-5 text-muted-foreground" />
+        </button>
+        <button onClick={onBackToWorkspace} className="text-xs text-muted-foreground hover:text-foreground transition-colors">
+          <ChevronDown className="w-4 h-4 rotate-90 inline" /> 工作台
+        </button>
+        <div className="flex-1" />
+        {/* Model Selector */}
+        <div className="relative group">
+          <button className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-muted hover:bg-muted/80 transition-colors text-xs">
+            <Sparkles className="w-3.5 h-3.5 text-yellow-500" />
+            <span className="font-medium max-w-[120px] truncate">{chatModels.find(m => m.id === selectedModel)?.name || selectedModel || '选择模型'}</span>
+            <ChevronDown className="w-3 h-3 text-muted-foreground" />
+          </button>
+          <div className="absolute right-0 top-full mt-1 w-72 bg-card border border-border rounded-xl shadow-xl z-50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all max-h-96 overflow-y-auto p-1">
+            {chatModels.map(m => (
+              <button key={m.id} onClick={() => { setSelectedModel(m.id); setSelectedProviderId(m.providerId); }}
+                className={`w-full text-left px-3 py-2 rounded-lg hover:bg-muted transition-colors ${m.id === selectedModel ? 'bg-primary/10' : ''}`}>
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-medium ${m.id === selectedModel ? 'text-primary' : ''}`}>{m.name}</span>
+                  {m.tags && m.tags.map(t => (
+                    <span key={t} className="text-[10px] bg-muted px-1.5 py-0.5 rounded-full text-muted-foreground">{t}</span>
+                  ))}
+                </div>
+                <div className="text-[11px] text-muted-foreground/60 mt-0.5">{m.id}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+        {/* Project tools */}
+        <button onClick={() => setShowInstructionsPanel(true)}
+          className={`p-1.5 rounded-lg transition-colors ${project.instructions ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted'}`}
+          title="项目指令">
+          <FileText className="w-4 h-4" />
+        </button>
+        <button onClick={() => setShowKnowledgePanel(true)}
+          className={`p-1.5 rounded-lg transition-colors ${knowledgeItems.length > 0 ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted'}`}
+          title="知识库">
+          <Database className="w-4 h-4" />
+        </button>
+        <button onClick={() => onCreateTask(project.id)}
+          className="px-2.5 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary text-xs transition-colors">
+          <MessageSquarePlus className="w-3.5 h-3.5 inline mr-1" />新对话
+        </button>
+      </header>
+
+      {/* Agent Bar */}
+      {(project.agents.length > 0 || activeAgent) && (
+        <div className="flex items-center gap-2 px-4 py-1.5 border-b border-border bg-muted/30 shrink-0">
+          <Bot className="w-4 h-4 text-muted-foreground" />
+          <span className="text-xs text-muted-foreground">Agent:</span>
+          {activeAgent ? (
+            <span className="text-xs font-medium bg-primary/10 text-primary px-2 py-0.5 rounded-full flex items-center gap-1">
+              {activeAgent.emoji || '🤖'} {activeAgent.name}
+              <button onClick={() => onUpdateTask({ ...task, activeAgentId: undefined })} className="ml-1 hover:text-red-500"><X className="w-3 h-3" /></button>
+            </span>
+          ) : (
+            <span className="text-xs text-muted-foreground">未选择</span>
+          )}
+          <div className="flex-1" />
+          <button onClick={() => setShowAgentPanel(!showAgentPanel)} className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1">
+            <Settings className="w-3 h-3" /> 管理
+          </button>
+        </div>
+      )}
+
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto px-4 py-6">
         <div className="max-w-3xl mx-auto space-y-6">
           {messages.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-20 text-center">
-              <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-4">
-                <Sparkles className="w-8 h-8 text-primary" />
+            <div className="text-center py-20 space-y-4">
+              <h1 className="text-3xl font-bold text-foreground">{activeAgent ? `${activeAgent.emoji || '🤖'} ${activeAgent.name}` : project.name}</h1>
+              <p className="text-muted-foreground">开始一段新的对话吧</p>
+              <div className="flex flex-wrap justify-center gap-2 mt-4">
+                {PRESET_SKILLS.slice(0, 6).map(skill => (
+                  <button key={skill.id} onClick={() => onSkillToAgent(skill)}
+                    className="px-3 py-1.5 rounded-full border border-border hover:bg-muted text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1">
+                    <span>{skill.icon}</span> {skill.name}
+                  </button>
+                ))}
               </div>
-              <h3 className="text-lg font-semibold text-foreground mb-2">开始对话</h3>
-              <p className="text-sm text-muted-foreground max-w-sm">
-                输入 @ 使用快捷命令，或直接描述你想要生成的图片
-              </p>
             </div>
           )}
-
-          {messages.map((msg) => (
-            <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+          {messages.map((msg, idx) => (
+            <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : ''}`}>
               {msg.role === 'assistant' && (
-                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
-                  <Bot className="w-4 h-4 text-primary" />
+                <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-1">
+                  {activeAgent?.emoji ? <span className="text-sm">{activeAgent.emoji}</span> : <Bot className="w-3.5 h-3.5 text-primary" />}
                 </div>
               )}
-
-              <div className={`max-w-[80%] ${msg.role === 'user' ? 'order-first' : ''}`}>
-                {/* 用户消息 */}
-                {msg.role === 'user' && (
-                  <div className="bg-primary text-primary-foreground rounded-2xl rounded-tr-md px-4 py-2.5">
-                    {msg.uploadedImages && msg.uploadedImages.length > 0 && (
-                      <div className="flex gap-2 mb-2 flex-wrap">
-                        {msg.uploadedImages.map((img: string, i: number) => (
-                          <img key={i} src={img} alt="upload" className="w-16 h-16 rounded-lg object-cover" />
-                        ))}
-                      </div>
-                    )}
-                    <p className="text-sm whitespace-pre-wrap break-words">{msg.content}</p>
-                  </div>
-                )}
-
-                {/* AI 消息 */}
-                {msg.role === 'assistant' && (
-                  <div className="bg-card border border-border rounded-2xl rounded-tl-md px-4 py-3">
-                    {/* 工具状态 */}
-                    {msg.toolStatuses && msg.toolStatuses.length > 0 && (
-                      <div className="mb-3 space-y-2">
-                        {msg.toolStatuses.map((ts: ToolStatus, i: number) => (
-                          <div key={i} className="flex items-center gap-2 px-3 py-2 bg-muted/50 rounded-lg text-xs">
-                            {(ts.status === 'generating' || ts.status === 'polling') ? (
-                              <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
-                            ) : ts.status === 'failed' ? (
-                              <X className="w-3.5 h-3.5 text-destructive" />
-                            ) : (
-                              <Zap className="w-3.5 h-3.5 text-primary" />
-                            )}
-                            <span className="text-muted-foreground">{ts.label}</span>
-                            {ts.progress !== undefined && ts.progress > 0 && (
-                              <span className="text-primary ml-auto">{ts.progress}%</span>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* 文字内容 */}
-                    {msg.content ? (
-                      <p className="text-sm whitespace-pre-wrap break-words leading-relaxed text-foreground">
-                        {msg.content}
-                        {isStreaming && msg.id === messages[messages.length - 1]?.id && (
-                          <span className="inline-block w-1.5 h-4 bg-primary ml-0.5 animate-pulse align-middle" />
-                        )}
-                      </p>
-                    ) : (
-                      isStreaming && msg.id === messages[messages.length - 1]?.id && !msg.toolStatuses?.length && (
-                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          思考中...
-                        </div>
-                      )
-                    )}
-
-                    {/* 生成的图片 */}
-                    {msg.images && msg.images.length > 0 && (
-                      <div className="mt-3 space-y-2">
-                        {msg.images.map((img: ImageResult, i: number) => (
-                          <div key={i} className="relative group">
-                            <img
-                              src={img.url}
-                              alt={img.prompt || 'Generated'}
-                              className="w-full max-w-sm rounded-xl border border-border/50"
-                            />
-                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors rounded-xl flex items-center justify-center opacity-0 group-hover:opacity-100">
-                              <button
-                                onClick={() => window.open(img.url, '_blank')}
-                                className="px-3 py-1.5 bg-black/60 text-white text-xs rounded-lg cursor-pointer"
-                              >
-                                查看大图
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+              <div className={`max-w-[82%] ${msg.role === 'user' ? 'order-first' : ''}`}>
+                <div className={`rounded-2xl px-4 py-3 ${
+                  msg.role === 'user'
+                    ? 'bg-primary text-primary-foreground rounded-br-md'
+                    : 'bg-card border border-border rounded-bl-md'
+                }`}>
+                  {msg.role === 'assistant' && !msg.content && isStreaming && idx === messages.length - 1 ? (
+                    <div className="flex items-center gap-1 py-1">
+                      <div className="w-2 h-2 rounded-full bg-muted-foreground/40 animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <div className="w-2 h-2 rounded-full bg-muted-foreground/40 animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <div className="w-2 h-2 rounded-full bg-muted-foreground/40 animate-bounce" style={{ animationDelay: '300ms' }} />
+                    </div>
+                  ) : (
+                    <div className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</div>
+                  )}
+                  {msg.images && msg.images.length > 0 && (
+                    <div className="flex gap-2 mt-2 flex-wrap">
+                      {msg.images.map((url, i) => (
+                        <img key={i} src={url} alt="" className="w-20 h-20 object-cover rounded-lg" />
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {/* Message Operations */}
+                {msg.role === 'assistant' && msg.content && !isStreaming && (
+                  <div className="flex gap-0.5 mt-1 px-1 opacity-0 hover:opacity-100 transition-opacity flex-wrap">
+                    <button onClick={() => copyMessage(msg.content)} className="p-1 rounded hover:bg-muted text-muted-foreground" title="复制"><Copy className="w-3 h-3" /></button>
+                    <button onClick={regenerateLast} className="p-1 rounded hover:bg-muted text-muted-foreground" title="重新生成"><RefreshCw className="w-3 h-3" /></button>
+                    <button onClick={makeShorter} className="p-1 rounded hover:bg-muted text-muted-foreground" title="更短"><Minimize2 className="w-3 h-3" /></button>
+                    <button onClick={makeLonger} className="p-1 rounded hover:bg-muted text-muted-foreground" title="更长"><Maximize2 className="w-3 h-3" /></button>
+                    <button onClick={continueConversation} className="p-1 rounded hover:bg-muted text-muted-foreground" title="继续"><MoreHorizontal className="w-3 h-3" /></button>
+                    <button onClick={toImagePrompt} className="p-1 rounded hover:bg-muted text-muted-foreground" title="转生图提示词"><Sparkles className="w-3 h-3" /></button>
                   </div>
                 )}
               </div>
-
               {msg.role === 'user' && (
-                <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center shrink-0 mt-0.5">
-                  <User className="w-4 h-4 text-primary-foreground" />
+                <div className="w-7 h-7 rounded-full bg-muted flex items-center justify-center shrink-0 mt-1">
+                  <UserIcon className="w-3.5 h-3.5 text-muted-foreground" />
                 </div>
               )}
             </div>
@@ -475,92 +446,267 @@ export default function ChatArea({ session, onBackToWorkspace, onNewSession, onU
         </div>
       </div>
 
-      {/* 快捷命令面板 */}
-      {showCommands && (
-        <div className="absolute bottom-full left-4 right-4 mb-2 bg-card border border-border rounded-xl shadow-xl z-50 max-h-48 overflow-y-auto" data-popup="true">
-          {QUICK_COMMANDS.map(cmd => (
-            <button
-              key={cmd.trigger}
-              onClick={() => applyCommand(cmd)}
-              className="w-full flex items-start gap-3 px-4 py-3 hover:bg-muted/50 transition-colors text-left cursor-pointer"
-            >
-              <Sparkles className="w-4 h-4 text-primary mt-0.5 shrink-0" />
+      {/* Input */}
+      <div className="px-4 pb-4 pt-2">
+        <div className="max-w-3xl mx-auto">
+          <div className="relative bg-card border border-border rounded-2xl shadow-sm focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary/30 transition-all">
+            {uploadedImages.length > 0 && (
+              <div className="flex gap-2 px-4 pt-3 flex-wrap">
+                {uploadedImages.map((att, i) => (
+                  <div key={i} className="relative group">
+                    <img src={att.url} alt="" className="w-16 h-16 object-cover rounded-lg" />
+                    <button onClick={() => setUploadedImages(prev => prev.filter((_, j) => j !== i))}
+                      className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <textarea
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={activeAgent ? `与 ${activeAgent.name} 对话...` : "输入消息，Enter 发送，Shift+Enter 换行"}
+              rows={1}
+              className="w-full bg-transparent px-4 py-3 pr-28 text-sm resize-none outline-none placeholder:text-muted-foreground/50 min-h-[48px] max-h-[200px]"
+              style={{ scrollbarWidth: 'thin' }}
+            />
+            <div className="absolute right-2 bottom-2 flex items-center gap-1">
+              <button onClick={() => setWebSearch(!webSearch)}
+                className={`p-1.5 rounded-lg transition-colors ${webSearch ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted'}`}
+                title="联网搜索">
+                <Globe className="w-4 h-4" />
+              </button>
+              <button onClick={() => setShowSkillPanel(!showSkillPanel)}
+                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors" title="Skill">
+                <BookOpen className="w-4 h-4" />
+              </button>
+              <button onClick={() => document.getElementById('chat-file-upload')?.click()}
+                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors" title="上传图片">
+                <Paperclip className="w-4 h-4" />
+              </button>
+              <button onClick={handleSend} disabled={!input.trim() && uploadedImages.length === 0}
+                className="p-1.5 rounded-lg bg-primary text-primary-foreground disabled:opacity-40 transition-all hover:bg-primary/90">
+                {isStreaming ? <div className="w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" /> : <ArrowUp className="w-4 h-4" />}
+              </button>
+            </div>
+            <input id="chat-file-upload" type="file" accept="image/*" multiple className="hidden"
+              onChange={e => {
+                const files = Array.from(e.target.files || []);
+                files.forEach(f => {
+                  const reader = new FileReader();
+                  reader.onload = ev => {
+                    setUploadedImages(prev => [...prev, {
+                      id: Math.random().toString(36).slice(2, 10),
+                      type: 'image', name: f.name, mimeType: f.type,
+                      url: ev.target?.result as string
+                    }]);
+                  };
+                  reader.readAsDataURL(f);
+                });
+              }} />
+          </div>
+          <p className="text-xs text-muted-foreground/50 text-center mt-2">
+            <button onClick={toggleTheme} className="inline-flex items-center gap-1 hover:text-foreground transition-colors">
+              {theme === 'dark' ? <Sun className="w-3 h-3" /> : <Moon className="w-3 h-3" />}
+              {theme === 'dark' ? '亮色模式' : '暗色模式'}
+            </button>
+          </p>
+        </div>
+      </div>
+
+      {/* Skill Panel */}
+      {showSkillPanel && <SkillPanel skills={PRESET_SKILLS} onSelect={skill => { onSkillToAgent(skill); setShowSkillPanel(false); }} onClose={() => setShowSkillPanel(false)} />}
+
+      {/* Agent Panel */}
+      {showAgentPanel && (
+        <ModalOverlay onClose={() => setShowAgentPanel(false)}>
+          <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] overflow-y-auto p-6" onClick={e => e.stopPropagation()}>
+            <ModalHeader title="Agent 管理" onClose={() => setShowAgentPanel(false)} />
+            {project.agents.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-8">暂无 Agent，从 Skill 书创建</p>
+            ) : (
+              <div className="space-y-2">
+                {project.agents.map(agent => (
+                  <div key={agent.id} className="p-3 rounded-xl border border-border flex items-center gap-3">
+                    <span className="text-xl">{agent.emoji || '🤖'}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-sm truncate">{agent.name}</div>
+                      <div className="text-xs text-muted-foreground truncate">{agent.description}</div>
+                    </div>
+                    <button onClick={() => onUpdateTask({ ...task, activeAgentId: agent.id })} className="text-xs px-2 py-1 rounded-lg bg-primary/10 text-primary hover:bg-primary/20">使用</button>
+                    <button onClick={() => onDeleteAgent(agent.id)} className="p-1 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive"><Trash2 className="w-3.5 h-3.5" /></button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </ModalOverlay>
+      )}
+
+      {/* Instructions Panel */}
+      {showInstructionsPanel && (
+        <ModalOverlay onClose={() => setShowInstructionsPanel(false)}>
+          <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-xl max-h-[85vh] overflow-y-auto p-6" onClick={e => e.stopPropagation()}>
+            <ModalHeader title="项目指令" onClose={() => setShowInstructionsPanel(false)} />
+            <p className="text-xs text-muted-foreground mb-4">设置 AI 的行为规则，所有对话自动生效。</p>
+            <div className="space-y-4">
+              <Field label="项目背景" value={instructionsDraft.projectBackground} onChange={v => setInstructionsDraft(d => ({ ...d, projectBackground: v }))} placeholder="例如：这是一个电商客服系统..." />
+              <Field label="用户偏好" value={instructionsDraft.userPreference} onChange={v => setInstructionsDraft(d => ({ ...d, userPreference: v }))} placeholder="例如：用简洁的语言，不要过于技术化..." />
+              <Field label="输出格式" value={instructionsDraft.outputFormat} onChange={v => setInstructionsDraft(d => ({ ...d, outputFormat: v }))} placeholder="例如：使用 Markdown 格式，代码用代码块..." />
+              <Field label="风格规则" value={instructionsDraft.styleRules} onChange={v => setInstructionsDraft(d => ({ ...d, styleRules: v }))} placeholder="例如：正式商务风格，避免俚语..." />
+              <Field label="禁止规则" value={instructionsDraft.forbiddenRules} onChange={v => setInstructionsDraft(d => ({ ...d, forbiddenRules: v }))} placeholder="例如：不要提及竞争对手，不要给出法律建议..." />
+              <button onClick={saveInstructions} className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors">保存指令</button>
+            </div>
+          </div>
+        </ModalOverlay>
+      )}
+
+      {/* Knowledge Panel */}
+      {showKnowledgePanel && (
+        <ModalOverlay onClose={() => setShowKnowledgePanel(false)}>
+          <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-xl max-h-[85vh] overflow-y-auto p-6" onClick={e => e.stopPropagation()}>
+            <ModalHeader title="知识库" onClose={() => setShowKnowledgePanel(false)} />
+            <p className="text-xs text-muted-foreground mb-4">上传文件、添加链接或笔记，作为 AI 对话的知识来源。</p>
+            {/* Add buttons */}
+            <div className="flex gap-2 mb-4">
+              <button onClick={() => setAddingKnowledge('file')} className="flex-1 py-2 rounded-lg border border-border hover:bg-muted text-xs transition-colors">📁 上传文件</button>
+              <button onClick={() => setAddingKnowledge('url')} className="flex-1 py-2 rounded-lg border border-border hover:bg-muted text-xs transition-colors">🔗 添加链接</button>
+              <button onClick={() => setAddingKnowledge('note')} className="flex-1 py-2 rounded-lg border border-border hover:bg-muted text-xs transition-colors">📝 添加笔记</button>
+            </div>
+            {/* URL input */}
+            {addingKnowledge === 'url' && (
+              <div className="mb-4 p-3 rounded-xl border border-border space-y-2">
+                <input value={knowledgeUrl} onChange={e => setKnowledgeUrl(e.target.value)}
+                  placeholder="输入网址 https://..." className="w-full bg-transparent text-sm px-3 py-2 rounded-lg border border-border outline-none focus:border-primary/50" />
+                <div className="flex gap-2">
+                  <button onClick={() => addKnowledgeItem({
+                    id: Math.random().toString(36).slice(2, 10), projectId: project.id,
+                    type: 'url', name: knowledgeUrl, url: knowledgeUrl, tags: [], enabled: true, createdAt: Date.now(), updatedAt: Date.now()
+                  })} disabled={!knowledgeUrl} className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs disabled:opacity-40">添加</button>
+                  <button onClick={() => setAddingKnowledge(null)} className="px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:bg-muted">取消</button>
+                </div>
+              </div>
+            )}
+            {/* Note input */}
+            {addingKnowledge === 'note' && (
+              <div className="mb-4 p-3 rounded-xl border border-border space-y-2">
+                <input value={knowledgeNoteName} onChange={e => setKnowledgeNoteName(e.target.value)}
+                  placeholder="笔记标题" className="w-full bg-transparent text-sm px-3 py-2 rounded-lg border border-border outline-none focus:border-primary/50" />
+                <textarea value={knowledgeNote} onChange={e => setKnowledgeNote(e.target.value)}
+                  placeholder="笔记内容..." rows={4} className="w-full bg-transparent text-sm px-3 py-2 rounded-lg border border-border outline-none focus:border-primary/50 resize-none" />
+                <div className="flex gap-2">
+                  <button onClick={() => addKnowledgeItem({
+                    id: Math.random().toString(36).slice(2, 10), projectId: project.id,
+                    type: 'note', name: knowledgeNoteName || '未命名笔记', textContent: knowledgeNote, tags: [], enabled: true, createdAt: Date.now(), updatedAt: Date.now()
+                  })} disabled={!knowledgeNote} className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs disabled:opacity-40">添加</button>
+                  <button onClick={() => setAddingKnowledge(null)} className="px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:bg-muted">取消</button>
+                </div>
+              </div>
+            )}
+            {/* File upload */}
+            {addingKnowledge === 'file' && (
+              <div className="mb-4 p-3 rounded-xl border border-border text-center">
+                <input type="file" onChange={e => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = ev => {
+                    addKnowledgeItem({
+                      id: Math.random().toString(36).slice(2, 10), projectId: project.id,
+                      type: file.type.startsWith('image/') ? 'image' : 'file',
+                      name: file.name, mimeType: file.type,
+                      url: ev.target?.result as string, tags: [], enabled: true,
+                      createdAt: Date.now(), updatedAt: Date.now()
+                    });
+                  };
+                  reader.readAsDataURL(file);
+                }} className="text-xs" />
+                <button onClick={() => setAddingKnowledge(null)} className="mt-2 px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:bg-muted">取消</button>
+              </div>
+            )}
+            {/* Items list */}
+            {knowledgeItems.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">暂无知识条目</p>
+            ) : (
+              <div className="space-y-2">
+                {knowledgeItems.map(item => (
+                  <div key={item.id} className="flex items-center gap-3 p-2.5 rounded-xl border border-border group">
+                    <button onClick={() => toggleKnowledgeItem(item.id)}
+                      className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${item.enabled ? 'bg-primary border-primary' : 'border-muted-foreground/30'}`}>
+                      {item.enabled && <div className="w-2 h-2 rounded-sm bg-primary-foreground" />}
+                    </button>
+                    <span className="text-lg shrink-0">{item.type === 'file' ? '📄' : item.type === 'image' ? '🖼️' : item.type === 'url' ? '🔗' : '📝'}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm truncate">{item.name}</div>
+                      <div className="text-[10px] text-muted-foreground">{item.type}</div>
+                    </div>
+                    <button onClick={() => removeKnowledgeItem(item.id)}
+                      className="p-1 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-all">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </ModalOverlay>
+      )}
+    </div>
+  );
+}
+
+// ===== Sub-components =====
+
+function ModalOverlay({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
+      {children}
+    </div>
+  );
+}
+
+function ModalHeader({ title, onClose }: { title: string; onClose: () => void }) {
+  return (
+    <div className="flex items-center justify-between mb-4">
+      <h2 className="text-lg font-semibold">{title}</h2>
+      <button onClick={onClose} className="p-1 rounded-lg hover:bg-muted"><X className="w-5 h-5" /></button>
+    </div>
+  );
+}
+
+function Field({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (v: string) => void; placeholder: string }) {
+  return (
+    <div>
+      <label className="text-xs font-medium text-muted-foreground mb-1 block">{label}</label>
+      <textarea value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} rows={2}
+        className="w-full bg-muted text-sm px-3 py-2 rounded-lg border border-border outline-none focus:border-primary/50 resize-none placeholder:text-muted-foreground/40" />
+    </div>
+  );
+}
+
+function SkillPanel({ skills, onSelect, onClose }: { skills: PresetSkill[]; onSelect: (skill: PresetSkill) => void; onClose: () => void }) {
+  return (
+    <ModalOverlay onClose={onClose}>
+      <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] overflow-y-auto p-6" onClick={e => e.stopPropagation()}>
+        <ModalHeader title="Skill 书" onClose={onClose} />
+        <div className="space-y-2">
+          {skills.map(skill => (
+            <button key={skill.id} onClick={() => onSelect(skill)}
+              className="w-full text-left p-3 rounded-xl border border-border hover:bg-muted transition-colors flex items-start gap-3">
+              <span className="text-2xl">{skill.icon}</span>
               <div>
-                <div className="text-sm font-medium text-foreground">{cmd.label}</div>
-                <div className="text-xs text-muted-foreground">{cmd.desc}</div>
+                <div className="font-medium text-sm">{skill.name}</div>
+                <div className="text-xs text-muted-foreground">{skill.description}</div>
+                <div className="flex gap-1 mt-1">
+                  {skill.tags.map(t => <span key={t} className="text-[10px] bg-muted px-1.5 py-0.5 rounded-full text-muted-foreground">{t}</span>)}
+                </div>
               </div>
             </button>
           ))}
         </div>
-      )}
-
-      {/* 输入区 */}
-      <div className="relative shrink-0 border-t border-border/50 bg-card/30 backdrop-blur-sm px-4 py-3">
-        <div className="max-w-3xl mx-auto">
-          {/* 已上传图片预览 */}
-          {uploadedImages.length > 0 && (
-            <div className="flex gap-2 mb-2 flex-wrap">
-              {uploadedImages.map((img, i) => (
-                <div key={i} className="relative group">
-                  <img src={img} alt="upload" className="w-16 h-16 rounded-lg object-cover border border-border" />
-                  <button
-                    onClick={() => removeImage(i)}
-                    className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-destructive text-destructive-foreground rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className="flex items-end gap-2 bg-muted/50 rounded-2xl border border-border/50 px-3 py-2 focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/30 transition-all">
-            {/* 上传按钮 */}
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="p-2 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
-              title="上传图片"
-            >
-              <ImagePlus className="w-5 h-5" />
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              onChange={handleImageUpload}
-              className="hidden"
-            />
-
-            <textarea
-              ref={inputRef}
-              value={input}
-              onChange={handleInputChange}
-              onKeyDown={handleKeyDown}
-              placeholder="输入消息，@ 使用快捷命令..."
-              rows={1}
-              className="flex-1 bg-transparent resize-none text-sm placeholder:text-muted-foreground/50 focus:outline-none py-2 max-h-32"
-              disabled={isStreaming}
-            />
-
-            <button
-              onClick={handleSend}
-              disabled={(!input.trim() && uploadedImages.length === 0) || isStreaming}
-              className="p-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shrink-0 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
-            >
-              {isStreaming ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              ) : (
-                <Send className="w-5 h-5" />
-              )}
-            </button>
-          </div>
-
-          <p className="text-xs text-muted-foreground/50 text-center mt-2">
-            输入 @ 使用快捷命令 · Shift+Enter 换行 · Enter 发送
-          </p>
-        </div>
       </div>
-    </div>
+    </ModalOverlay>
   );
 }

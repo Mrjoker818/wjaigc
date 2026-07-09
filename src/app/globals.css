@@ -38,6 +38,10 @@ main.dashboard-scrollable {
   --color-sidebar-primary: var(--sidebar-primary);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar: var(--sidebar);
+  --color-sidebar-background: var(--sidebar-background);
+  --color-sidebar-muted: var(--sidebar-muted);
+  --color-sidebar-hover: var(--sidebar-hover);
+  --color-sidebar-active: var(--sidebar-active);
   --color-chart-5: var(--chart-5);
   --color-chart-4: var(--chart-4);
   --color-chart-3: var(--chart-3);
@@ -133,7 +137,11 @@ main.dashboard-scrollable {
   --chart-5: #f85149;
   /* === 侧边栏 === */
   --sidebar: #161b22;
+  --sidebar-background: #161b22;
   --sidebar-foreground: #e6edf3;
+  --sidebar-muted: #6e7681;
+  --sidebar-hover: #1c2128;
+  --sidebar-active: #1c2128;
   --sidebar-primary: #d4af37;
   --sidebar-primary-foreground: #0d1117;
   --sidebar-accent: #262c36;
@@ -198,7 +206,11 @@ main.dashboard-scrollable {
   --chart-4: #60A5FA;
   --chart-5: #F87171;
   --sidebar: #12121A;
+  --sidebar-background: #12121A;
   --sidebar-foreground: #E8E8ED;
+  --sidebar-muted: #6B6B80;
+  --sidebar-hover: #1E1E2C;
+  --sidebar-active: #1E1E2C;
   --sidebar-primary: #D4AF37;
   --sidebar-primary-foreground: #0A0A0F;
   --sidebar-accent: #1E1E2C;
@@ -233,7 +245,11 @@ main.dashboard-scrollable {
   --chart-4: #8b5cf6;
   --chart-5: #ec4899;
   --sidebar: #f8fafc;
+  --sidebar-background: #f8fafc;
   --sidebar-foreground: #1e293b;
+  --sidebar-muted: #94a3b8;
+  --sidebar-hover: #f1f5f9;
+  --sidebar-active: #f1f5f9;
   --sidebar-primary: #3b82f6;
   --sidebar-primary-foreground: #ffffff;
   --sidebar-accent: #eff6ff;
