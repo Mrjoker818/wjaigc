@@ -96,10 +96,10 @@ export default function SimpleChatPage() {
   }, []);
 
   // Task ops
-  const handleCreateTask = useCallback((projectId: string) => {
+  const handleCreateTask = useCallback((projectId: string, initialTask?: Partial<Task>) => {
     const task: Task = {
-      id: generateId(), projectId, name: '新对话',
-      messages: [], model: '', providerId: '',
+      id: generateId(), projectId, name: initialTask?.name || '新对话',
+      messages: initialTask?.messages || [], model: initialTask?.model || '', providerId: initialTask?.providerId || '',
       createdAt: Date.now(), updatedAt: Date.now()
     };
     setProjects(prev => prev.map(p => p.id === projectId ? { ...p, tasks: [...p.tasks, task], updatedAt: Date.now() } : p));

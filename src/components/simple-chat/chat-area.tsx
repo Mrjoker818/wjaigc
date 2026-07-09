@@ -16,7 +16,7 @@ interface ChatAreaProps {
   task: SimpleChatTask | null;
   onUpdateTask: (task: SimpleChatTask) => void;
   onUpdateProject: (project: SimpleChatProject) => void;
-  onCreateTask: (projectId: string) => void;
+  onCreateTask: (projectId: string, initialData?: { name?: string; messages?: SimpleChatMessage[]; model?: string; providerId?: string }) => void;
   onSelectTask: (task: SimpleChatTask) => void;
   onUpdateAgent: (agent: SimpleChatAgent) => void;
   onDeleteAgent: (agentId: string) => void;
@@ -64,7 +64,7 @@ export default function ChatArea({
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Array<{ taskId: string; taskName: string; messageIndex: number; snippet: string }>>([]);
   const [branchBaseMessageId, setBranchBaseMessageId] = useState<string | null>(null);
-  const [searchStatus, setSearchStatus] = useState('');
+  const [searchStatus, setSearchStatus] = useState<string | null>(null);
 
   // Instructions draft
   const [instructionsDraft, setInstructionsDraft] = useState<ProjectInstructions>(
@@ -195,8 +195,8 @@ export default function ChatArea({
 
       const allMessages = [
         ...systemMessages,
-        ...messages.map(m => ({ role: m.role, content: m.content })),
-        { role: 'user', content },
+        ...messages.map(m => ({ role: m.role, content: m.content, images: m.images })),
+        { role: 'user', content: userMsg.content, images: userMsg.images },
       ];
 
       const res = await fetch('/api/simple-chat/chat', {
@@ -226,9 +226,10 @@ export default function ChatArea({
             if (data === '[DONE]' || data === '') continue;
             try {
               const parsed = JSON.parse(data);
-              if (parsed.type === 'search_status' && parsed.label) {
-                setSearchStatus(parsed.label);
+              if (parsed.type === 'search_status') {
+                setSearchStatus(parsed.label || (parsed.status === 'completed' ? `搜索完成，找到 ${parsed.resultCount || 0} 条结果` : parsed.status === 'error' ? '搜索出错' : '正在搜索...'));
               } else if (parsed.type === 'text' && parsed.content) {
+                setSearchStatus(null);
                 fullContent += parsed.content;
                 setMessages(prev => {
                   const updated = [...prev];
@@ -327,13 +328,18 @@ export default function ChatArea({
     setBranchBaseMessageId(msgId);
     const idx = messages.findIndex(m => m.id === msgId);
     if (idx >= 0) {
-      setMessages(prev => prev.slice(0, idx + 1));
+      const branched = messages.slice(0, idx + 1);
+      setMessages(branched);
       if (task && project) {
-        const newTask: SimpleChatTask = { ...task, id: `task_${Date.now()}`, name: `${task.name} (分支)`, messages: messages.slice(0, idx + 1), createdAt: Date.now(), updatedAt: Date.now() };
-        onCreateTask(project.id);
+        onCreateTask(project.id, {
+          name: `${task.name || '对话'} (分支)`,
+          messages: branched,
+          model: selectedModel,
+          providerId: selectedProviderId,
+        });
       }
     }
-  }, [messages, task, project, onCreateTask]);
+  }, [messages, task, project, onCreateTask, selectedModel, selectedProviderId]);
 
   // Save as artifact
   const saveAsArtifact = useCallback((msg: SimpleChatMessage) => {
@@ -369,7 +375,7 @@ export default function ChatArea({
 
   // Message operations
   const copyMessage = (content: string) => { navigator.clipboard.writeText(content); };
-  const regenerateLast = () => { if (messages.length < 2) return; setMessages(prev => prev.slice(0, -2)); };
+  const regenerateLast = () => { if (messages.length < 2) return; const lastUser = [...messages].reverse().find(m => m.role === 'user'); if (lastUser) { setMessages(prev => prev.slice(0, -2)); setInput(lastUser.content); setTimeout(() => { const btn = document.getElementById('send-btn') as HTMLButtonElement; btn?.click(); }, 50); } };
   const continueConversation = () => { setInput('继续'); };
   const makeShorter = () => {
     const last = messages[messages.length - 1];
