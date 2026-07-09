@@ -9,7 +9,8 @@ const DEFAULT_SYSTEM_PROMPT = `你是无界AI的智能助手。你可以：
 2. 当用户需要生成图片时，使用 generate_image 工具
 3. 支持多模态理解（图片识别）
 
-请保持回复简洁、专业、友好。`;
+请保持回复简洁、专业、友好。
+**重要**：请始终以自然语言（纯文本）回复用户，**不要**使用 JSON 格式或 Markdown 代码块格式输出你的回答内容。`;
 
 interface KnowledgeItem {
   id: string;
@@ -135,9 +136,15 @@ export async function POST(request: NextRequest) {
       };
 
       try {
-        // 先发送搜索状态（如果有联网搜索）
+        // 先发送搜索结果（如果有联网搜索）
         if (webSearch) {
-          send({ type: 'search_status', status: searchResults ? 'completed' : 'failed', resultCount: searchResults ? (searchResults.match(/\[\d+\]/g)?.length || 0) : 0 });
+          if (searchResults) {
+            // 解析出搜索条目
+            const resultCount = (searchResults.match(/\[\d+\]/g)?.length || 0);
+            send({ type: 'search_status', status: 'completed', resultCount, searchResults });
+          } else {
+            send({ type: 'search_status', status: 'failed', resultCount: 0 });
+          }
         }
 
         const apiUrl = `${baseUrl}/chat/completions`;

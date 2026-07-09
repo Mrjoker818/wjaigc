@@ -29,7 +29,7 @@ export interface SimpleChatTask {
 
 export interface SimpleChatMessage {
   id: string;
-  role: 'user' | 'assistant' | 'system';
+  role: 'user' | 'assistant' | 'system' | 'search';
   content: string;
   images?: string[];
   attachments?: ChatAttachment[];

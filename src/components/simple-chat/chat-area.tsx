@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Menu, Paperclip, ArrowUp, Globe, X, Settings, Bot, User as UserIcon, BookOpen, ChevronDown, Copy, RefreshCw, Trash2, Zap, Sun, Moon, FileText, Database, Sparkles, MessageSquarePlus, Minimize2, Maximize2, MoreHorizontal, Telescope, FileCode, GitBranch, Share2, Search, Eye, Image } from "lucide-react";
 import {
   SimpleChatProject, SimpleChatTask, SimpleChatMessage, SimpleChatAgent, ChatAttachment,
@@ -52,6 +52,68 @@ const MODEL_TAGS: Record<string, string[]> = {
   'doubao-1.5-pro': ['128K', '中文'],
   'qwen-max': ['中文', '推理'],
 };
+
+// 联网搜索结果卡片
+function SearchResultsCard({ content }: { content: string }) {
+  const parsed = useMemo(() => {
+    const items: Array<{ idx: number; title: string; url: string; snippet: string; summary?: string }> = [];
+    const keywordMatch = content.match(/搜索关键词[：:]\s*"?(.+?)"?\n/);
+    const keyword = keywordMatch?.[1] || '';
+
+    const regex = /\[(\d+)\]\s+(.+?)\nURL:\s*(.+?)\n摘要:\s*(.+?)(?:\nAI摘要:\s*(.+?))?(?=\n\n\[|$)/g;
+    let match;
+    while ((match = regex.exec(content)) !== null) {
+      items.push({
+        idx: parseInt(match[1]),
+        title: match[2].trim(),
+        url: match[3].trim(),
+        snippet: match[4].trim(),
+        summary: match[5]?.trim(),
+      });
+    }
+    return { keyword, items };
+  }, [content]);
+
+  return (
+    <div className="w-full">
+      <div className="bg-gradient-to-r from-blue-500/5 to-cyan-500/5 border border-blue-500/20 rounded-2xl p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="w-6 h-6 rounded-full bg-blue-500/10 flex items-center justify-center">
+            <Globe className="w-3.5 h-3.5 text-blue-500" />
+          </div>
+          <span className="text-sm font-medium text-blue-600 dark:text-blue-400">
+            联网搜索{parsed.keyword ? ` · "${parsed.keyword}"` : ''} · {parsed.items.length} 条结果
+          </span>
+        </div>
+        {parsed.items.length > 0 && (
+          <div className="space-y-2">
+            {parsed.items.map((item) => (
+              <a
+                key={item.idx}
+                href={item.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block p-3 rounded-xl bg-background/50 hover:bg-background/80 border border-border/50 hover:border-border transition-all"
+              >
+                <div className="flex items-start gap-2">
+                  <span className="text-xs font-mono text-muted-foreground mt-0.5 shrink-0 w-5">[{item.idx}]</span>
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-foreground line-clamp-1">{item.title}</div>
+                    <div className="text-xs text-muted-foreground mt-1 line-clamp-2">{item.snippet}</div>
+                    {item.summary && (
+                      <div className="text-xs text-blue-600/70 dark:text-blue-400/70 mt-1 line-clamp-2 italic">AI: {item.summary}</div>
+                    )}
+                    <div className="text-[10px] text-muted-foreground/50 mt-1 truncate">{item.url}</div>
+                  </div>
+                </div>
+              </a>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function ChatArea({
   user, project, task, onUpdateTask, onUpdateProject, onCreateTask, onSelectTask,
@@ -189,7 +251,7 @@ export default function ChatArea({
     }).catch(() => {});
   }, []);
 
-  useEffect(() => { /* models loaded above */ }, []);
+  useEffect(() => { fetchImageModels(); }, []);
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
   // Sync task to parent
@@ -261,7 +323,7 @@ export default function ChatArea({
 
       const allMessages = [
         ...systemMessages,
-        ...messages.map(m => ({ role: m.role, content: m.content, images: m.images })),
+        ...messages.filter(m => m.role !== 'search').map(m => ({ role: m.role, content: m.content, images: m.images })),
         { role: 'user', content: userMsg.content, images: userMsg.images },
       ];
 
@@ -294,14 +356,26 @@ export default function ChatArea({
               const parsed = JSON.parse(data);
               if (parsed.type === 'search_status') {
                 setSearchStatus(parsed.status === 'completed' ? `搜索完成，找到 ${parsed.resultCount || 0} 条结果` : parsed.status === 'error' ? '搜索出错' : '正在搜索...');
-                // 搜索完成后，添加一条系统消息告知用户搜索结果已注入到上下文
+                // 搜索完成后，添加一条系统消息展示搜索结果
                 if (parsed.status === 'completed' && parsed.resultCount > 0) {
+                  const searchMsg = {
+                    id: 'search-' + Math.random().toString(36).slice(2, 8),
+                    role: 'search' as const,
+                    content: parsed.searchResults || '',
+                    createdAt: Date.now(),
+                  };
+                  setMessages(prev => {
+                    const updated = [...prev];
+                    updated.splice(updated.length - 1, 0, searchMsg);
+                    return updated;
+                  });
+                } else if (parsed.status === 'completed' && parsed.resultCount === 0) {
                   setMessages(prev => {
                     const updated = [...prev];
                     updated.splice(updated.length - 1, 0, {
                       id: 'search-' + Math.random().toString(36).slice(2, 8),
                       role: 'system',
-                      content: `🌐 联网搜索完成，找到 ${parsed.resultCount} 条相关结果，已注入到 AI 上下文中`,
+                      content: `🌐 联网搜索未找到相关结果`,
                       createdAt: Date.now(),
                     });
                     return updated;
@@ -538,15 +612,15 @@ export default function ChatArea({
         <div className="relative group">
           <button className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-muted hover:bg-muted/80 transition-colors text-xs">
             <Sparkles className="w-3.5 h-3.5 text-yellow-500" />
-            <span className="font-medium max-w-[120px] truncate">{chatModels.find(m => m.modelId === selectedModel)?.name || selectedModel || '选择模型'}</span>
+            <span className="font-medium max-w-[120px] truncate">{chatModels.find(m => m.providerId === selectedProviderId && m.modelId === selectedModel)?.name || selectedModel || '选择模型'}</span>
             <ChevronDown className="w-3 h-3 text-muted-foreground" />
           </button>
           <div className="absolute right-0 top-full mt-1 w-80 bg-card border border-border rounded-xl shadow-xl z-50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all max-h-96 overflow-y-auto p-1">
             {chatModels.map(m => (
               <button key={m.id} onClick={() => { setSelectedModel(m.modelId); setSelectedProviderId(m.providerId); }}
-                className={`w-full text-left px-3 py-2 rounded-lg hover:bg-muted transition-colors ${m.modelId === selectedModel ? 'bg-primary/10' : ''}`}>
+                className={`w-full text-left px-3 py-2 rounded-lg hover:bg-muted transition-colors ${m.providerId === selectedProviderId && m.modelId === selectedModel ? 'bg-primary/10' : ''}`}>
                 <div className="flex items-center gap-2">
-                  <span className={`text-sm font-medium ${m.modelId === selectedModel ? 'text-primary' : ''}`}>{m.name}</span>
+                  <span className={`text-sm font-medium ${m.providerId === selectedProviderId && m.modelId === selectedModel ? 'text-primary' : ''}`}>{m.name}</span>
                   {m.tags && m.tags.map((t: string) => (
                     <span key={t} className="text-[10px] bg-muted px-1.5 py-0.5 rounded-full text-muted-foreground">{t}</span>
                   ))}
@@ -563,16 +637,16 @@ export default function ChatArea({
         <div className="relative group">
           <button className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-muted hover:bg-muted/80 transition-colors text-xs">
             <Image className="w-3.5 h-3.5 text-purple-400" />
-            <span className="font-medium max-w-[100px] truncate">{imageModels.find(m => m.modelId === selectedImageModel)?.name || selectedImageModel || '图像模型'}</span>
+            <span className="font-medium max-w-[100px] truncate">{imageModels.find(m => m.providerId === selectedImageProviderId && m.modelId === selectedImageModel)?.name || selectedImageModel || '图像模型'}</span>
             <ChevronDown className="w-3 h-3 text-muted-foreground" />
           </button>
           <div className="absolute right-0 top-full mt-1 w-80 bg-card border border-border rounded-xl shadow-xl z-50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all max-h-96 overflow-y-auto p-1">
             <div className="px-3 py-1.5 text-[11px] text-muted-foreground/60 font-medium">图像生成模型</div>
             {imageModels.map(m => (
               <button key={m.id} onClick={() => { setSelectedImageModel(m.modelId); setSelectedImageProviderId(m.providerId); }}
-                className={`w-full text-left px-3 py-2 rounded-lg hover:bg-muted transition-colors ${m.modelId === selectedImageModel ? 'bg-primary/10' : ''}`}>
+                className={`w-full text-left px-3 py-2 rounded-lg hover:bg-muted transition-colors ${m.providerId === selectedImageProviderId && m.modelId === selectedImageModel ? 'bg-primary/10' : ''}`}>
                 <div className="flex items-center gap-2">
-                  <span className={`text-sm font-medium ${m.modelId === selectedImageModel ? 'text-primary' : ''}`}>{m.name}</span>
+                  <span className={`text-sm font-medium ${m.providerId === selectedImageProviderId && m.modelId === selectedImageModel ? 'text-primary' : ''}`}>{m.name}</span>
                   {m.tags && m.tags.map(t => (
                     <span key={t} className="text-[10px] bg-muted px-1.5 py-0.5 rounded-full text-muted-foreground">{t}</span>
                   ))}
@@ -659,6 +733,11 @@ export default function ChatArea({
           )}
           {messages.map((msg, idx) => (
             <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : ''}`}>
+              {/* Search results card */}
+              {msg.role === 'search' && (
+                <SearchResultsCard content={msg.content} />
+              )}
+              {msg.role !== 'search' && (<>
               {msg.role === 'assistant' && (
                 <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-1">
                   {activeAgent?.emoji ? <span className="text-sm">{activeAgent.emoji}</span> : <Bot className="w-3.5 h-3.5 text-primary" />}
@@ -706,6 +785,7 @@ export default function ChatArea({
                   <UserIcon className="w-3.5 h-3.5 text-muted-foreground" />
                 </div>
               )}
+              </>)}
             </div>
           ))}
           <div ref={messagesEndRef} />
@@ -978,13 +1058,37 @@ export default function ChatArea({
           <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-lg max-h-[70vh] flex flex-col p-6" onClick={e => e.stopPropagation()}>
             <ModalHeader title={knowledgePreview.name} onClose={() => setKnowledgePreview(null)} />
             <p className="text-xs text-muted-foreground mb-2">{knowledgePreview.type === 'file' ? '📄 文件内容预览' : knowledgePreview.type === 'url' ? '🔗 URL 链接' : '📝 笔记内容'}</p>
-            <div className="flex-1 overflow-auto bg-muted/50 rounded-xl p-4 text-sm font-mono whitespace-pre-wrap break-all">
+            <div className="flex-1 overflow-auto bg-muted/50 rounded-xl p-4 text-sm">
               {knowledgePreview.type === 'url' ? (
                 <a href={knowledgePreview.url || knowledgePreview.textContent || ''} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline break-all">{knowledgePreview.url || knowledgePreview.textContent || ''}</a>
-              ) : (knowledgePreview.textContent || knowledgePreview.summary) && ((knowledgePreview.textContent || '').length > 5000) ? (
-                <>{(knowledgePreview.textContent || '').slice(0, 5000)}<p className="text-muted-foreground mt-2">... 内容过长，已截断前 5000 字符</p></>
+              ) : knowledgePreview.type === 'image' || (knowledgePreview.url && (knowledgePreview.url.startsWith('data:image/') || knowledgePreview.url.startsWith('blob:'))) ? (
+                <div className="space-y-3">
+                  {knowledgePreview.url && (knowledgePreview.url.startsWith('data:image/') || knowledgePreview.url.startsWith('blob:')) ? (
+                    <img src={knowledgePreview.url} alt={knowledgePreview.name} className="max-w-full max-h-[50vh] rounded-lg object-contain bg-transparent" />
+                  ) : (
+                    <p className="text-muted-foreground text-center py-8">暂不支持预览此图片格式</p>
+                  )}
+                  <div className="text-xs text-muted-foreground space-y-1">
+                    <p>文件名：{knowledgePreview.name}</p>
+                    {knowledgePreview.mimeType && <p>类型：{knowledgePreview.mimeType}</p>}
+                  </div>
+                </div>
+              ) : knowledgePreview.type === 'note' ? (
+                (knowledgePreview.textContent || '').length > 5000 ? (
+                  <div className="font-mono whitespace-pre-wrap break-all">
+                    {(knowledgePreview.textContent || '').slice(0, 5000)}
+                    <p className="text-muted-foreground mt-2">... 内容过长，已截断前 5000 字符</p>
+                  </div>
+                ) : (
+                  <div className="font-mono whitespace-pre-wrap break-all">{knowledgePreview.textContent || '(空笔记)'}</div>
+                )
               ) : (
-                knowledgePreview.textContent || knowledgePreview.summary || '(文件已上传，可在对话中引用)'
+                <div className="text-xs text-muted-foreground space-y-2 text-center py-4">
+                  <p className="text-4xl">📄</p>
+                  <p className="font-medium text-foreground">{knowledgePreview.name}</p>
+                  {knowledgePreview.mimeType && <p>类型：{knowledgePreview.mimeType}</p>}
+                  <p className="text-muted-foreground/60">文件已上传，可在对话中作为知识上下文引用</p>
+                </div>
               )}
             </div>
             <p className="text-xs text-muted-foreground mt-3">💡 知识库内容会自动注入到 AI 对话上下文中，帮助 AI 更准确地理解你的需求。</p>
