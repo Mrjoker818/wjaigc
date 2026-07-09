@@ -31,10 +31,14 @@ const MODEL_TAGS: Record<string, string[]> = {
   'gpt-4o': ['多模态', '128K'],
   'gpt-4o-mini': ['快速', '128K'],
   'gpt-4-turbo': ['128K', '推理'],
+  'gpt-5.5': ['多模态', '256K', '推理'],
+  'gpt-5.5-xhigh': ['多模态', '256K', '深度推理'],
   'gemini-2.5-flash': ['多模态', '1M'],
   'gemini-2.5-pro': ['多模态', '1M', '推理'],
+  'gemini-3.1-flash-lite': ['多模态', '1M', '快速'],
   'claude-3.5-sonnet': ['200K', '推理'],
   'deepseek-chat': ['128K', '推理'],
+  'deepseek-v4-flash': ['128K', '推理', '快速'],
   'deepseek-r1': ['推理', '深度思考'],
   'doubao-1.5-pro': ['128K', '中文'],
   'qwen-max': ['中文', '推理'],
@@ -227,7 +231,34 @@ export default function ChatArea({
             try {
               const parsed = JSON.parse(data);
               if (parsed.type === 'search_status') {
-                setSearchStatus(parsed.label || (parsed.status === 'completed' ? `搜索完成，找到 ${parsed.resultCount || 0} 条结果` : parsed.status === 'error' ? '搜索出错' : '正在搜索...'));
+                setSearchStatus(parsed.status === 'completed' ? `搜索完成，找到 ${parsed.resultCount || 0} 条结果` : parsed.status === 'error' ? '搜索出错' : '正在搜索...');
+                // 搜索完成后，添加一条系统消息告知用户搜索结果已注入到上下文
+                if (parsed.status === 'completed' && parsed.resultCount > 0) {
+                  setMessages(prev => {
+                    const updated = [...prev];
+                    updated.splice(updated.length - 1, 0, {
+                      id: 'search-' + Math.random().toString(36).slice(2, 8),
+                      role: 'system',
+                      content: `🌐 联网搜索完成，找到 ${parsed.resultCount} 条相关结果，已注入到 AI 上下文中`,
+                      createdAt: Date.now(),
+                    });
+                    return updated;
+                  });
+                }
+              } else if (parsed.type === 'error') {
+                // LLM 调用失败 - 更新最后一条 assistant 消息为错误信息
+                setSearchStatus(null);
+                setMessages(prev => {
+                  const updated = [...prev];
+                  const last = updated[updated.length - 1];
+                  if (last?.role === 'assistant') {
+                    updated[updated.length - 1] = {
+                      ...last,
+                      content: `❌ 请求失败：${parsed.error || '未知错误'}\n\n💡 建议：尝试切换模型或稍后重试。`,
+                    };
+                  }
+                  return updated;
+                });
               } else if (parsed.type === 'text' && parsed.content) {
                 setSearchStatus(null);
                 fullContent += parsed.content;

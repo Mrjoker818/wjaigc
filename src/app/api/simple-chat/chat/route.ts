@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
     taskId?: string;
   };
   const messages = body.messages || [];
-  const model = body.model || 'gemini-2.5-flash-image-preview';
+  const model = body.model || 'deepseek-v4-flash';
   const providerId = body.providerId || '';
   const webSearch = body.webSearch || false;
   const knowledgeItems = body.knowledgeItems || [];
