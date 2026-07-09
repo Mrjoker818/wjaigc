@@ -55,6 +55,7 @@ export interface VideoShotPlan {
   // 制片流水线引用（指向本镜头出现的角色和主场景）
   characterIds?: string[]; // ShotCharacter.id[]
   sceneId?: string; // ShotScene.id
+  propIds?: string[]; // 镜头中出现的关键道具 id 列表
   // 上一镜头结尾观察到的状态（用于续写）
   endState?: ShotContinuityState;
 }
@@ -132,6 +133,8 @@ export interface VideoScene {
   mood?: string;
   colorPalette?: string;
   keyProps?: string; // 关键道具
+  /** 3-5 个场景关键词标签 */
+  keywords?: string[];
   /** 场景氛围图提示词（英文逗号分隔），别名：scenePrompt/sceneImagePrompt/environmentPrompt */
   scenePrompt?: string;
   /** @deprecated 兼容旧字段 */
@@ -153,10 +156,14 @@ export interface VideoProp {
   id: string;
   name: string;
   role?: string; // 在故事里的作用（信物/武器/日常物件等）
+  /** 道具类别：weapon/tool/accessory/document/food/vehicle/electronic/decor/misc */
+  category?: string;
   description?: string; // 外观/材质/细节描述
   material?: string;
   color?: string;
   scale?: string; // 尺寸/相对人物大小
+  /** 3-5 个道具关键词标签 */
+  keywords?: string[];
   /** 道具设定图提示词 */
   propPrompt?: string;
   /** 生成后的道具图 URL */
@@ -720,4 +727,117 @@ export function buildContinuationPrompt(prev: VideoShotPlan, nextUserIdea: strin
   parts.push('');
   parts.push('请从首帧衔接上一镜头结尾，保持角色服装/光线/运动方向一致。');
   return parts.join('\n');
+}
+
+// === 制片资产生成 Planner（/api/story-assets/plan） ===
+
+export interface StoryAssetsPlanRequest {
+  storyIdea: string;
+  shots: VideoShotPlan[];
+  characters?: VideoCharacter[];
+  scenes?: VideoScene[];
+  props?: VideoProp[];
+  style?: DirectorStyle;
+  aspectRatio?: string;
+}
+
+export interface StoryAssetGenTask {
+  id: string;
+  type: 'character-front' | 'character-side' | 'scene' | 'prop';
+  name: string;
+  targetId?: string;
+  prompt: string;
+  negativePrompt?: string;
+  aspectRatio?: string;
+  referenceUrls?: string[];
+}
+
+export interface StoryAssetsPlanResult {
+  prompts: StoryAssetGenTask[];
+  totalImages: number;
+}
+
+export function buildStoryAssetsPrompt(req: StoryAssetsPlanRequest): string {
+  const { storyIdea, shots, characters = [], scenes = [], props = [], style = 'cinematic' } = req;
+  const styleDesc = SHOT_PLAN_STYLE_DESC[style] || SHOT_PLAN_STYLE_DESC.cinematic;
+  return `你是电影美术指导与制片资产生成顾问。根据故事梗概、分镜、已有角色/场景/道具清单，输出需要用 AI 图像生成的资产任务列表（prompts[]）。
+
+【故事梗概】
+${storyIdea}
+
+【风格要求】${styleDesc}
+
+【已有分镜】
+${JSON.stringify(shots.map(s => ({
+  id: s.id, title: s.title, prompt: s.prompt, shotSize: s.shotSize,
+  cameraMotion: s.cameraMotion, setting: s.setting, lighting: s.lighting, characterIds: s.characterIds, sceneId: s.sceneId, propIds: s.propIds,
+})), null, 2)}
+
+【已有角色（缺 imageUrlFront / imageUrlSide 的需要生成）】
+${JSON.stringify(characters.map(c => ({
+  id: c.id, name: c.name, age: c.age, gender: c.gender, appearance: c.appearance,
+  costume: c.costume, hair: c.hair, accessories: c.accessories, keywords: c.keywords,
+  imageUrlFront: c.imageUrlFront, imageUrlSide: c.imageUrlSide,
+})), null, 2)}
+
+【已有场景（缺 imageUrl 的需要生成）】
+${JSON.stringify(scenes.map(s => ({
+  id: s.id, name: s.name, location: s.location, timeOfDay: s.timeOfDay, weather: s.weather,
+  lighting: s.lighting, mood: s.mood, keywords: s.keywords, imageUrl: s.imageUrl,
+})), null, 2)}
+
+【已有道具（缺 imageUrl 的需要生成）】
+${JSON.stringify(props.map(p => ({
+  id: p.id, name: p.name, category: p.category, description: p.description,
+  material: p.material, color: p.color, keywords: p.keywords, imageUrl: p.imageUrl,
+})), null, 2)}
+
+【输出要求】
+请严格输出单个 JSON（不要 markdown 包裹、不要解释）：
+{
+  "prompts": [
+    {
+      "id": "char-xxx-front",
+      "type": "character-front | character-side | scene | prop",
+      "name": "显示名",
+      "targetId": "关联的角色/场景/道具 id（场景/道具/角色必填）",
+      "prompt": "英文逗号分隔关键词，适合 text-to-image 模型，画面描述具体、风格明确。character-front 必须包含 front view, neutral pose, white studio background, character reference sheet；character-side 必须包含 side view/profile, same outfit, white background；scene 必须包含 cinematic establishing shot, wide angle, atmospheric, movie still, no people；prop 必须包含 product photography, white background, three-quarter view, studio lighting",
+      "negativePrompt": "可选，英文逗号分隔",
+      "aspectRatio": "1:1（角色/道具）或 16:9（场景）",
+      "referenceUrls": []
+    }
+  ]
+}
+
+规则：
+1. 只为 imageUrlFront/imageUrlSide/imageUrl 缺失的角色/场景/道具生成任务；已有 URL 的跳过。
+2. 每个缺图角色出 2 条任务（front + side），每个缺图场景 1 条，每个缺图道具 1 条。
+3. prompt 必须是**英文**，50-120 个关键词，风格、光线、画质、镜头构图都要明确；禁止出现文字/水印/模糊/变形。
+4. negativePrompt 默认填入 "low quality, blurry, deformed, distorted, extra limbs, bad anatomy, text, watermark, logo, signature"。
+5. 角色 prompt 必须包含服装+发型+年龄+性别+配饰+表情等一致性信息；场景 prompt 必须包含地点+时间+天气+光线+氛围；道具 prompt 必须包含材质+颜色+形状+风格。
+6. 不要输出任何 assets 数组以外的字段，totalImages 由调用方统计。`;
+}
+
+export function parseStoryAssetsResponse(text: string): StoryAssetsPlanResult {
+  let cleaned = text.trim();
+  const fenceMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenceMatch) cleaned = fenceMatch[1].trim();
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  let obj: any = {};
+  if (start >= 0 && end >= 0) {
+    try { obj = JSON.parse(cleaned.slice(start, end + 1)); } catch { obj = {}; }
+  }
+  const arr: any[] = Array.isArray(obj.prompts) ? obj.prompts : [];
+  const prompts: StoryAssetGenTask[] = arr.map((p: any, i: number) => ({
+    id: String(p.id ?? `asset-${Date.now()}-${i}`),
+    type: (['character-front', 'character-side', 'scene', 'prop'].includes(p.type) ? p.type : 'prop') as StoryAssetGenTask['type'],
+    name: String(p.name ?? `资产${i + 1}`),
+    targetId: p.targetId != null ? String(p.targetId) : undefined,
+    prompt: String(p.prompt ?? ''),
+    negativePrompt: p.negativePrompt != null ? String(p.negativePrompt) : undefined,
+    aspectRatio: p.aspectRatio != null ? String(p.aspectRatio) : undefined,
+    referenceUrls: Array.isArray(p.referenceUrls) ? p.referenceUrls.map((u: any) => String(u)) : [],
+  })).filter(t => t.prompt.length > 5);
+  return { prompts, totalImages: prompts.length };
 }
