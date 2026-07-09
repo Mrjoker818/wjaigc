@@ -1,9 +1,42 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { buildShotPlanSystemPrompt } from '@/lib/video-director/continuity';
-import { getChatModelConfig, callChatApi } from '@/lib/server-api-config';
+import { buildShotPlanSystemPrompt, parseShotPlanFullResponse } from '@/lib/video-director/continuity';
+import { findProviderForFeature } from '@/lib/server-api-config';
+import { fetchWithV1Retry } from '@/lib/api-helpers';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
+
+async function callChatLLM(messages: { role: string; content: string }[], temperature = 0.7, maxTokens = 4000): Promise<string | null> {
+  const chatProvider = await findProviderForFeature('chat');
+  if (!chatProvider) return null;
+  const chatModels: string[] = (chatProvider as any)?.selectedModels || [];
+  const chatModel = chatModels[0] || (chatProvider as any)?.defaultChatModel;
+  const baseUrl = String((chatProvider as any).baseUrl || (chatProvider as any).base_url || '').replace(/\/$/, '');
+  const apiKey = String((chatProvider as any).apiKey || (chatProvider as any).api_key || '');
+  if (!baseUrl || !apiKey || !chatModel) return null;
+  try {
+    const endpoint = baseUrl.endsWith('/chat/completions')
+      ? baseUrl
+      : `${baseUrl}${baseUrl.includes('/v1') ? '' : '/v1'}/chat/completions`;
+    const resp = await fetchWithV1Retry(endpoint, '', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: chatModel,
+        messages,
+        temperature,
+        max_tokens: maxTokens,
+      }),
+    }, false, 50000);
+    if (!resp.ok) return null;
+    const data = await resp.json() as any;
+    const text = data?.choices?.[0]?.message?.content || data?.choices?.[0]?.text || '';
+    return typeof text === 'string' ? text : null;
+  } catch (e) {
+    console.warn('[shot-plan] LLM call failed:', e);
+    return null;
+  }
+}
 
 /**
  * AI 分镜规划
@@ -20,55 +53,48 @@ export async function POST(req: NextRequest) {
     const aspectRatio = String(body.aspectRatio || '16:9');
     if (!storyIdea) return NextResponse.json({ error: '请输入故事梗概' }, { status: 400 });
 
-    // 使用共享 system prompt
-    const systemPrompt = buildShotPlanSystemPrompt({ duration: totalDur, shotCount: n, style, aspectRatio });
+    const systemPrompt = buildShotPlanSystemPrompt(totalDur, n, style, aspectRatio);
     const perShotDur = Math.max(3, Math.min(10, Math.round(totalDur / n)));
     const userPrompt = `故事/想法：\n${storyIdea}\n\n请输出 JSON：包含 shots[]（${n}个镜头）、characters[]（人物）、scenes[]（场景）、props[]（关键道具，没有就返回空数组）。每个镜头必须包含 title/purpose/shotSize/cameraMotion/actionBeat/lighting/audioCues/prompt/duration/aspectRatio/continuityNotes/characterIds/sceneId/propIds。`;
 
-    // 优先尝试：从管理员配置找 chat 模型
     let shots: any[] = [];
     let characters: any[] = [];
     let scenes: any[] = [];
-    let props: any[] = [];
+    let propsArr: any[] = [];
     let totalDuration = totalDur;
-    let planText = '';
+    let usedModel = '';
 
     try {
-      const cfg = await getChatModelConfig();
-      if (cfg) {
-        const chatResp = await callChatApi(cfg, [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ], { temperature: 0.7, maxTokens: 4000 });
-        if (chatResp?.text) {
-          planText = chatResp.text;
-          const { parseShotPlanFullResponse } = await import('@/lib/video-director/continuity');
-          const parsed = parseShotPlanFullResponse(planText, perShotDur, aspectRatio);
-          if (parsed.shots.length > 0) {
-            shots = parsed.shots.slice(0, n).map((s, i) => ({
-              ...s,
-              id: `shot-${Date.now()}-${i}`,
-              index: i,
-              duration: Math.max(3, Math.min(10, Number(s.duration) || perShotDur)),
-              aspectRatio: s.aspectRatio || aspectRatio,
-            }));
-            characters = parsed.characters;
-            scenes = parsed.scenes;
-            props = parsed.props;
-            totalDuration = shots.reduce((a, s) => a + (Number(s.duration) || perShotDur), 0);
-            (globalThis as any).__lastShotPlanCharacters = characters;
-            (globalThis as any).__lastShotPlanScenes = scenes;
-            (globalThis as any).__lastShotPlanProps = props;
-            return NextResponse.json({
-              success: true,
-              shots,
-              characters,
-              scenes,
-              props,
-              totalDuration,
-              usedModel: cfg.model,
-            });
-          }
+      const chatProvider = await findProviderForFeature('chat');
+      const chatModels: string[] = (chatProvider as any)?.selectedModels || [];
+      usedModel = chatModels[0] || (chatProvider as any)?.defaultChatModel || '';
+      const llmText = await callChatLLM([
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ], 0.7, 4000);
+      if (llmText) {
+        const parsed = parseShotPlanFullResponse(llmText, perShotDur, aspectRatio);
+        if (parsed.shots.length > 0) {
+          shots = parsed.shots.slice(0, n).map((s: any, i: number) => ({
+            ...s,
+            id: `shot-${Date.now()}-${i}`,
+            index: i,
+            duration: Math.max(3, Math.min(10, Number(s.duration) || perShotDur)),
+            aspectRatio: s.aspectRatio || aspectRatio,
+          }));
+          characters = parsed.characters;
+          scenes = parsed.scenes;
+          propsArr = parsed.props;
+          totalDuration = shots.reduce((a: number, s: any) => a + (Number(s.duration) || perShotDur), 0);
+          return NextResponse.json({
+            success: true,
+            shots,
+            characters,
+            scenes,
+            props: propsArr,
+            totalDuration,
+            usedModel,
+          });
         }
       }
     } catch (llmErr) {
@@ -114,8 +140,8 @@ export async function POST(req: NextRequest) {
         retakeSuggestions: [],
       });
     }
-    totalDuration = shots.reduce((a, s) => a + s.duration, 0);
-    return NextResponse.json({ success: true, shots, characters, scenes, props, totalDuration, fallback: true });
+    totalDuration = shots.reduce((a: number, s: any) => a + s.duration, 0);
+    return NextResponse.json({ success: true, shots, characters, scenes, props: propsArr, totalDuration, fallback: true });
   } catch (err: any) {
     console.error('[video/director/shot-plan] error:', err);
     return NextResponse.json({ error: err?.message || '分镜规划失败' }, { status: 500 });

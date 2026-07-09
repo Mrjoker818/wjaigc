@@ -253,12 +253,29 @@ const SHOT_PLAN_STYLE_DESC: Record<DirectorStyle, string> = {
   artistic: '艺术/实验风格，构图大胆、色彩风格化、节奏自由。',
 };
 
-export function buildShotPlanSystemPrompt(style: DirectorStyle = 'cinematic'): string {
+export function buildShotPlanSystemPrompt(
+  styleOrDuration?: DirectorStyle | number,
+  shotCountOrStyle?: number | DirectorStyle,
+  styleOrAspect?: DirectorStyle | string,
+  aspectRatioOrNothing?: string,
+): string {
+  // 兼容两种调用：(style) 或 (duration, shotCount, style, aspectRatio)
+  let duration = 10, shotCount = 5, style: DirectorStyle = 'cinematic', aspectRatio = '16:9';
+  if (typeof styleOrDuration === 'number') {
+    duration = styleOrDuration;
+    if (typeof shotCountOrStyle === 'number') shotCount = shotCountOrStyle;
+    if (typeof styleOrAspect === 'string' && (styleOrAspect in SHOT_PLAN_STYLE_DESC)) style = styleOrAspect as DirectorStyle;
+    else if (typeof styleOrAspect === 'string') aspectRatio = styleOrAspect;
+    if (typeof aspectRatioOrNothing === 'string') aspectRatio = aspectRatioOrNothing;
+  } else if (typeof styleOrDuration === 'string') {
+    style = styleOrDuration as DirectorStyle;
+  }
+  const nShots = Math.max(2, Math.min(10, shotCount || Math.min(6, Math.ceil((duration || 10) / 4))));
   const styleDesc = SHOT_PLAN_STYLE_DESC[style] || SHOT_PLAN_STYLE_DESC.cinematic;
   return `你是一名资深视频导演和分镜师，将用户的故事梗概拆解成结构化的多镜头计划。
 
 要求：
-1. 基于故事梗概拆出 3~6 个镜头，每镜头聚焦一个动作节拍，避免在一个镜头里塞满多个动作。
+1. 基于故事梗概拆出 ${nShots} 个镜头（总时长约 ${duration} 秒，单镜头 3-8 秒），每镜头聚焦一个动作节拍，避免在一个镜头里塞满多个动作。画面比例 ${aspectRatio}。
 2. 每个镜头必须包含：
    - title：镜头标题（8字以内）
    - purpose：戏剧目的（如：建立场景、角色登场、情绪转折、揭示细节、高潮、收尾）

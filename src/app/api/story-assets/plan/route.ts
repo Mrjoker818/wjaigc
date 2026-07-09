@@ -1,66 +1,99 @@
 import { NextRequest, NextResponse } from 'next/server';
-import {
-  buildShotPlanSystemPrompt,
-  parseShotPlanFullResponse,
-} from '@/lib/video-director/continuity';
-import { getChatModelConfig, callChatApi } from '@/lib/server-api-config';
+import { buildStoryAssetsPrompt, parseStoryAssetsResponse } from '@/lib/video-director/continuity';
+import { findProviderForFeature } from '@/lib/server-api-config';
+import { fetchWithV1Retry } from '@/lib/api-helpers';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-/**
- * 故事资产规划（专用）：只生成/补全 characters / scenes / props，不要求分镜。
- * POST /api/story-assets/plan
- * body: { storyIdea, duration?, aspectRatio?, style? }
- * 返回: { success, characters, scenes, props }
- */
+async function callChatLLM(messages: { role: string; content: string }[], temperature = 0.7, maxTokens = 4000): Promise<string | null> {
+  const chatProvider = await findProviderForFeature('chat');
+  if (!chatProvider) return null;
+  const chatModels: string[] = (chatProvider as any)?.selectedModels || [];
+  const chatModel = chatModels[0] || (chatProvider as any)?.defaultChatModel;
+  const baseUrl = String((chatProvider as any).baseUrl || (chatProvider as any).base_url || '').replace(/\/$/, '');
+  const apiKey = String((chatProvider as any).apiKey || (chatProvider as any).api_key || '');
+  if (!baseUrl || !apiKey || !chatModel) return null;
+  try {
+    const endpoint = baseUrl.endsWith('/chat/completions')
+      ? baseUrl
+      : `${baseUrl}${baseUrl.includes('/v1') ? '' : '/v1'}/chat/completions`;
+    const resp = await fetchWithV1Retry(endpoint, '', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: chatModel,
+        messages,
+        temperature,
+        max_tokens: maxTokens,
+      }),
+    }, false, 50000);
+    if (!resp.ok) return null;
+    const data = await resp.json() as any;
+    const text = data?.choices?.[0]?.message?.content || data?.choices?.[0]?.text || '';
+    return typeof text === 'string' ? text : null;
+  } catch (e) {
+    console.warn('[story-assets/plan] LLM call failed:', e);
+    return null;
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const storyIdea = String(body.storyIdea || body.story || body.prompt || '').trim();
-    const duration = Number(body.duration) || 10;
-    const aspectRatio = String(body.aspectRatio || '16:9');
-    const style = String(body.style || body.directorStyle || 'cinematic');
+    const storyIdea: string = String(body.storyIdea || body.story || body.prompt || '').trim();
+    const duration = Math.max(3, Math.min(30, Number(body.duration) || 10));
+    const aspectRatio: string = String(body.aspectRatio || '16:9');
+    const style: string = String(body.style || body.directorStyle || 'cinematic');
     if (!storyIdea) return NextResponse.json({ error: '请输入故事梗概' }, { status: 400 });
 
-    const systemPrompt = buildShotPlanSystemPrompt({ duration, shotCount: 4, style, aspectRatio });
-    const userPrompt = `故事/想法：\n${storyIdea}\n\n请**仅**输出资产 JSON（shots 数组可以留空或给 1-2 个概括镜头，但重点是 characters[]、scenes[]、props[] 必须完整）。格式要求同前：characters 包含 id/name/age/gender/appearance/costume/hair/accessories/keywords；scenes 包含 id/name/location/timeOfDay/weather/lighting/mood/colorPalette/keyProps/description；props 包含 id/name/role/material/color/scale/description/sceneId/shotIds。没有人物返回 []，没有道具返回 []。`;
+    const systemPrompt = buildStoryAssetsPrompt({ duration, style, aspectRatio });
+    const userPrompt = `故事/剧本：\n${storyIdea}\n\n请输出 JSON：包含 characters[]、scenes[]、props[]（没有道具时返回空数组）。`;
 
-    let text = '';
-    let usedModel = '';
     try {
-      const cfg = await getChatModelConfig();
-      if (cfg) {
-        const resp = await callChatApi(cfg, [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ], { temperature: 0.7, maxTokens: 4000 });
-        if (resp?.text) {
-          text = resp.text;
-          usedModel = cfg.model || '';
+      const llmText = await callChatLLM([
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ], 0.6, 4000);
+      if (llmText) {
+        const parsed = parseStoryAssetsResponse(llmText);
+        if (parsed.characters.length > 0 || parsed.scenes.length > 0 || parsed.props.length > 0) {
+          const now = Date.now();
+          return NextResponse.json({
+            success: true,
+            characters: parsed.characters.map((c: any, i: number) => ({ ...c, id: c.id || `char-${now}-${i}` })),
+            scenes: parsed.scenes.map((s: any, i: number) => ({ ...s, id: s.id || `scene-${now}-${i}` })),
+            props: parsed.props.map((p: any, i: number) => ({ ...p, id: p.id || `prop-${now}-${i}` })),
+          });
         }
       }
-    } catch (llmErr) {
-      console.warn('[story-assets/plan] LLM failed:', llmErr);
+    } catch (e) {
+      console.warn('[story-assets/plan] LLM error:', e);
     }
 
-    if (!text) {
-      return NextResponse.json({
-        success: true,
-        characters: [],
-        scenes: [],
-        props: [],
-        fallback: true,
-      });
-    }
-
-    const parsed = parseShotPlanFullResponse(text, 5, aspectRatio);
+    // 兜底：返回一个默认角色 + 一个默认场景
+    const now = Date.now();
     return NextResponse.json({
       success: true,
-      characters: parsed.characters,
-      scenes: parsed.scenes,
-      props: parsed.props,
-      usedModel,
+      fallback: true,
+      characters: [{
+        id: `char-${now}-0`,
+        name: '主角',
+        appearance: storyIdea.slice(0, 60),
+        role: '主角',
+        gender: 'unknown',
+        frontPrompt: `${storyIdea.slice(0, 60)}, character design reference sheet, front view, white background, studio lighting`,
+        sidePrompt: `${storyIdea.slice(0, 60)}, character design reference sheet, side view, white background, studio lighting`,
+        keywords: ['protagonist'],
+      }],
+      scenes: [{
+        id: `scene-${now}-0`,
+        name: '主场景',
+        description: storyIdea.slice(0, 80),
+        lighting: 'natural cinematic light',
+        scenePrompt: `${storyIdea.slice(0, 80)}, cinematic establishing shot, wide angle, high detail, movie still`,
+      }],
+      props: [],
     });
   } catch (err: any) {
     console.error('[story-assets/plan] error:', err);

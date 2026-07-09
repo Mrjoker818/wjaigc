@@ -797,7 +797,6 @@ Rules:
     const targetShotCount = Math.min(8, Math.max(2, Math.ceil(duration / 4)));
     try {
       // 统一调用一次，字段名对齐后端 storyIdea/duration/shotCount/style
-      let shotsRaw: any[] | null = null;
       const makeCall = async (extraPrompt = '', forcedMin?: number) => {
         const res = await fetch('/api/video/director/shot-plan', {
           method: 'POST',
@@ -818,11 +817,17 @@ Rules:
 
       let planData: any = await makeCall('');
       let shotsRaw: any[] | null = Array.isArray(planData.shots) ? planData.shots : null;
+      const rawCharacters: any[] = Array.isArray(planData.characters) ? planData.characters : [];
+      const rawScenes: any[] = Array.isArray(planData.scenes) ? planData.scenes : [];
+      const rawProps: any[] = Array.isArray(planData.props) ? planData.props : [];
       // 镜头数过少时追加约束再试一次
       if (!shotsRaw || shotsRaw.length < 2) {
         try {
           planData = await makeCall('。请至少拆分为3个镜头，每个镜头明确景别、运镜、光线、声音和连续性备注；同时完整返回 characters（人物）、scenes（场景）、props（关键道具）三类资产。', Math.max(targetShotCount, 3));
           shotsRaw = Array.isArray(planData.shots) ? planData.shots : null;
+          if (Array.isArray(planData.characters) && planData.characters.length > 0) { rawCharacters.splice(0, rawCharacters.length, ...planData.characters); }
+          if (Array.isArray(planData.scenes) && planData.scenes.length > 0) { rawScenes.splice(0, rawScenes.length, ...planData.scenes); }
+          if (Array.isArray(planData.props) && planData.props.length > 0) { rawProps.splice(0, rawProps.length, ...planData.props); }
         } catch { /* 重试失败沿用首次结果 */ }
       }
       if (!shotsRaw || shotsRaw.length < 1) throw new Error('分镜规划失败：返回为空');
