@@ -19,6 +19,7 @@ interface SidebarProps {
   onRenameProject: (id: string, name: string) => void;
   onCreateTask: (projectId: string) => void;
   onDeleteTask: (projectId: string, taskId: string) => void;
+  onRenameTask: (projectId: string, taskId: string, name: string) => void;
   onLogout: () => void;
 }
 
@@ -26,13 +27,15 @@ export default function Sidebar({
   user, projects, activeProjectId, activeTaskId, sidebarOpen,
   onToggleSidebar, onSelectProject, onSelectTask,
   onCreateProject, onDeleteProject, onRenameProject,
-  onCreateTask, onDeleteTask, onLogout
+  onCreateTask, onDeleteTask, onRenameTask, onLogout
 }: SidebarProps) {
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(() => {
     return new Set(projects.map(p => p.id));
   });
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const [taskRenamingId, setTaskRenamingId] = useState<string | null>(null);
+  const [taskRenameValue, setTaskRenameValue] = useState("");
 
   const toggleProject = (id: string) => {
     setExpandedProjects(prev => {
@@ -48,7 +51,16 @@ export default function Sidebar({
 
   const submitRename = (id: string) => {
     if (renameValue.trim()) onRenameProject(id, renameValue.trim());
-    setRenamingId(null);
+    setRenamingId(null); setRenameValue("");
+  };
+
+  const startTaskRename = (taskId: string, name: string) => {
+    setTaskRenamingId(taskId); setTaskRenameValue(name);
+  };
+
+  const submitTaskRename = (projectId: string, taskId: string) => {
+    if (taskRenameValue.trim()) onRenameTask(projectId, taskId, taskRenameValue.trim());
+    setTaskRenamingId(null); setTaskRenameValue("");
   };
 
   if (!sidebarOpen) return null;
@@ -122,8 +134,21 @@ export default function Sidebar({
                   className={`group flex items-center gap-1 ml-6 px-2 py-1.5 rounded-lg transition-colors cursor-pointer ${
                     activeTaskId === task.id ? 'bg-sidebar-active' : 'hover:bg-sidebar-hover'
                   }`}
-                  onClick={() => { onSelectProject(project.id); onSelectTask(task.id); }}>
-                  <span className="text-sm text-sidebar-foreground truncate flex-1">{task.name}</span>
+                  onClick={() => { if (taskRenamingId !== task.id) { onSelectProject(project.id); onSelectTask(task.id); } }}>
+                  {taskRenamingId === task.id ? (
+                    <input autoFocus value={taskRenameValue} onChange={e => setTaskRenameValue(e.target.value)}
+                      onBlur={() => submitTaskRename(project.id, task.id)}
+                      onKeyDown={e => { if (e.key === 'Enter') submitTaskRename(project.id, task.id); if (e.key === 'Escape') setTaskRenamingId(null); }}
+                      onClick={e => e.stopPropagation()}
+                      className="flex-1 bg-sidebar-hover text-sidebar-foreground text-sm px-1 py-0.5 rounded outline-none min-w-0" />
+                  ) : (
+                    <span className="text-sm text-sidebar-foreground truncate flex-1">{task.name}</span>
+                  )}
+                  <button onClick={e => { e.stopPropagation(); startTaskRename(task.id, task.name); }}
+                    className="p-0.5 rounded hover:bg-sidebar-hover text-sidebar-muted hover:text-sidebar-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+                    title="重命名">
+                    <Edit3 className="w-3 h-3" />
+                  </button>
                   <button onClick={e => { e.stopPropagation(); onDeleteTask(project.id, task.id); }}
                     className="p-0.5 rounded hover:bg-sidebar-hover text-sidebar-muted hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity">
                     <Trash2 className="w-3 h-3" />

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Menu, Paperclip, ArrowUp, Globe, X, Settings, Bot, User as UserIcon, BookOpen, ChevronDown, Copy, RefreshCw, Trash2, Zap, Sun, Moon, FileText, Database, Sparkles, MessageSquarePlus, Minimize2, Maximize2, MoreHorizontal, Telescope, FileCode, GitBranch, Share2, Search } from "lucide-react";
+import { Menu, Paperclip, ArrowUp, Globe, X, Settings, Bot, User as UserIcon, BookOpen, ChevronDown, Copy, RefreshCw, Trash2, Zap, Sun, Moon, FileText, Database, Sparkles, MessageSquarePlus, Minimize2, Maximize2, MoreHorizontal, Telescope, FileCode, GitBranch, Share2, Search, Eye } from "lucide-react";
 import {
   SimpleChatProject, SimpleChatTask, SimpleChatMessage, SimpleChatAgent, ChatAttachment,
   ProjectInstructions, ProjectKnowledgeItem,
@@ -77,13 +77,14 @@ export default function ChatArea({
 
   // Knowledge
   const [knowledgeItems, setKnowledgeItems] = useState<ProjectKnowledgeItem[]>(project?.knowledgeItems || []);
+  const [knowledgePreview, setKnowledgePreview] = useState<ProjectKnowledgeItem | null>(null);
   const [addingKnowledge, setAddingKnowledge] = useState<'file' | 'url' | 'note' | null>(null);
   const [knowledgeUrl, setKnowledgeUrl] = useState('');
   const [knowledgeNote, setKnowledgeNote] = useState('');
   const [knowledgeNoteName, setKnowledgeNoteName] = useState('');
 
   // Models
-  const [chatModels, setChatModels] = useState<Array<{ id: string; name: string; providerId: string; tags?: string[] }>>([]);
+  const [chatModels, setChatModels] = useState<Array<{ id: string; name: string; originalName?: string; providerId: string; providerName?: string; tags?: string[] }>>([]);
   const [selectedModel, setSelectedModel] = useState(task?.model || "");
   const [selectedProviderId, setSelectedProviderId] = useState(task?.providerId || "");
 
@@ -114,10 +115,23 @@ export default function ChatArea({
   useEffect(() => {
     fetch('/api/models?type=chat').then(r => r.json()).then(data => {
       if (data.models) {
-        const list = data.models.map((m: { id: string; name: string; providerId?: string }) => ({
-          id: m.id, name: m.name || m.id, providerId: m.providerId || '',
-          tags: getModelTags(m.id, m.name)
-        }));
+        const nameCount = new Map<string, number>();
+        data.models.forEach((m: { name: string; id: string }) => {
+          const nm = m.name || m.id;
+          nameCount.set(nm, (nameCount.get(nm) || 0) + 1);
+        });
+        const list = data.models.map((m: { id: string; name: string; providerId?: string; providerName?: string }) => {
+          const baseName = m.name || m.id;
+          const dupCount = nameCount.get(baseName) || 1;
+          return {
+            id: m.id,
+            name: dupCount > 1 && m.providerName ? `${baseName} (${m.providerName})` : baseName,
+            originalName: baseName,
+            providerId: m.providerId || '',
+            providerName: m.providerName || '',
+            tags: getModelTags(m.id, m.name)
+          };
+        });
         setChatModels(list);
         if (!selectedModel && list.length > 0) {
           setSelectedModel(list[0].id);
@@ -479,7 +493,7 @@ export default function ChatArea({
             <span className="font-medium max-w-[120px] truncate">{chatModels.find(m => m.id === selectedModel)?.name || selectedModel || '选择模型'}</span>
             <ChevronDown className="w-3 h-3 text-muted-foreground" />
           </button>
-          <div className="absolute right-0 top-full mt-1 w-72 bg-card border border-border rounded-xl shadow-xl z-50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all max-h-96 overflow-y-auto p-1">
+          <div className="absolute right-0 top-full mt-1 w-80 bg-card border border-border rounded-xl shadow-xl z-50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all max-h-96 overflow-y-auto p-1">
             {chatModels.map(m => (
               <button key={m.id} onClick={() => { setSelectedModel(m.id); setSelectedProviderId(m.providerId); }}
                 className={`w-full text-left px-3 py-2 rounded-lg hover:bg-muted transition-colors ${m.id === selectedModel ? 'bg-primary/10' : ''}`}>
@@ -489,7 +503,10 @@ export default function ChatArea({
                     <span key={t} className="text-[10px] bg-muted px-1.5 py-0.5 rounded-full text-muted-foreground">{t}</span>
                   ))}
                 </div>
-                <div className="text-[11px] text-muted-foreground/60 mt-0.5">{m.id}</div>
+                <div className="text-[11px] text-muted-foreground/60 mt-0.5">
+                  {m.originalName || m.id}
+                  {m.providerName && <span className="ml-1">· {m.providerName}</span>}
+                </div>
               </button>
             ))}
           </div>
@@ -727,7 +744,9 @@ export default function ChatArea({
         <ModalOverlay onClose={() => setShowInstructionsPanel(false)}>
           <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-xl max-h-[85vh] overflow-y-auto p-6" onClick={e => e.stopPropagation()}>
             <ModalHeader title="项目指令" onClose={() => setShowInstructionsPanel(false)} />
-            <p className="text-xs text-muted-foreground mb-4">设置 AI 的行为规则，所有对话自动生效。</p>
+            <p className="text-xs text-muted-foreground mb-4">
+              项目指令会自动注入到每次对话的 System Prompt 中，控制 AI 的行为、风格和约束。所有对话均生效，无需每次重复说明。
+            </p>
             <div className="space-y-4">
               <Field label="项目背景" value={instructionsDraft.projectBackground} onChange={v => setInstructionsDraft(d => ({ ...d, projectBackground: v }))} placeholder="例如：这是一个电商客服系统..." />
               <Field label="用户偏好" value={instructionsDraft.userPreference} onChange={v => setInstructionsDraft(d => ({ ...d, userPreference: v }))} placeholder="例如：用简洁的语言，不要过于技术化..." />
@@ -745,7 +764,9 @@ export default function ChatArea({
         <ModalOverlay onClose={() => setShowKnowledgePanel(false)}>
           <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-xl max-h-[85vh] overflow-y-auto p-6" onClick={e => e.stopPropagation()}>
             <ModalHeader title="知识库" onClose={() => setShowKnowledgePanel(false)} />
-            <p className="text-xs text-muted-foreground mb-4">上传文件、添加链接或笔记，作为 AI 对话的知识来源。</p>
+            <p className="text-xs text-muted-foreground mb-4">
+              上传文件、添加链接或笔记作为 AI 对话的知识来源。知识内容会自动注入到每次对话的上下文中，让 AI 基于你的资料回答。
+            </p>
             {/* Add buttons */}
             <div className="flex gap-2 mb-4">
               <button onClick={() => setAddingKnowledge('file')} className="flex-1 py-2 rounded-lg border border-border hover:bg-muted text-xs transition-colors">📁 上传文件</button>
@@ -803,13 +824,23 @@ export default function ChatArea({
                 <button onClick={() => setAddingKnowledge(null)} className="mt-2 px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:bg-muted">取消</button>
               </div>
             )}
+            {/* Usage explanation */}
+            {knowledgeItems.length > 0 && (
+              <div className="mb-3 px-3 py-2 rounded-lg bg-primary/5 border border-primary/10 text-[11px] text-muted-foreground leading-relaxed">
+                💡 启用中的知识条目将作为上下文自动注入 AI 对话中，帮助 AI 基于你的资料给出更准确的回答。
+              </div>
+            )}
             {/* Items list */}
             {knowledgeItems.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-4">暂无知识条目</p>
+              <div className="text-center py-8 space-y-3">
+                <p className="text-4xl">📚</p>
+                <p className="text-sm text-muted-foreground">还没有知识条目</p>
+                <p className="text-xs text-muted-foreground/60">上传文件、添加链接或创建笔记，AI 将基于这些内容回答你的问题</p>
+              </div>
             ) : (
               <div className="space-y-2">
                 {knowledgeItems.map(item => (
-                  <div key={item.id} className="flex items-center gap-3 p-2.5 rounded-xl border border-border group">
+                  <div key={item.id} className="flex items-center gap-3 p-2.5 rounded-xl border border-border group hover:bg-muted/30 transition-colors">
                     <button onClick={() => toggleKnowledgeItem(item.id)}
                       className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${item.enabled ? 'bg-primary border-primary' : 'border-muted-foreground/30'}`}>
                       {item.enabled && <div className="w-2 h-2 rounded-sm bg-primary-foreground" />}
@@ -817,8 +848,18 @@ export default function ChatArea({
                     <span className="text-lg shrink-0">{item.type === 'file' ? '📄' : item.type === 'image' ? '🖼️' : item.type === 'url' ? '🔗' : '📝'}</span>
                     <div className="flex-1 min-w-0">
                       <div className="text-sm truncate">{item.name}</div>
-                      <div className="text-[10px] text-muted-foreground">{item.type}</div>
+                      <div className="text-[10px] text-muted-foreground flex items-center gap-1">
+                        <span>{item.type === 'file' ? '文件' : item.type === 'image' ? '图片' : item.type === 'url' ? '链接' : '笔记'}</span>
+                        {item.type === 'url' && item.url && <span>· {item.url.length > 40 ? item.url.slice(0, 40) + '...' : item.url}</span>}
+                        {item.type === 'file' && <span>· {item.mimeType?.split('/')[1] || '未知'} 格式</span>}
+                        {item.type === 'image' && <span>· 图片</span>}
+                        {item.enabled ? <span className="text-primary">· 将注入上下文</span> : <span className="text-muted-foreground/60">· 已禁用</span>}
+                      </div>
                     </div>
+                    <button onClick={() => setKnowledgePreview(item)}
+                      className="p-1 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-all">
+                      <Eye className="w-3.5 h-3.5" />
+                    </button>
                     <button onClick={() => removeKnowledgeItem(item.id)}
                       className="p-1 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-all">
                       <Trash2 className="w-3.5 h-3.5" />
@@ -852,6 +893,26 @@ export default function ChatArea({
             ))}
           </div>
         </div>
+      )}
+
+      {/* Knowledge Preview Modal */}
+      {knowledgePreview && (
+        <ModalOverlay onClose={() => setKnowledgePreview(null)}>
+          <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-lg max-h-[70vh] flex flex-col p-6" onClick={e => e.stopPropagation()}>
+            <ModalHeader title={knowledgePreview.name} onClose={() => setKnowledgePreview(null)} />
+            <p className="text-xs text-muted-foreground mb-2">{knowledgePreview.type === 'file' ? '📄 文件内容预览' : knowledgePreview.type === 'url' ? '🔗 URL 链接' : '📝 笔记内容'}</p>
+            <div className="flex-1 overflow-auto bg-muted/50 rounded-xl p-4 text-sm font-mono whitespace-pre-wrap break-all">
+              {knowledgePreview.type === 'url' ? (
+                <a href={knowledgePreview.url || knowledgePreview.textContent || ''} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline break-all">{knowledgePreview.url || knowledgePreview.textContent || ''}</a>
+              ) : (knowledgePreview.textContent || knowledgePreview.summary) && ((knowledgePreview.textContent || '').length > 5000) ? (
+                <>{(knowledgePreview.textContent || '').slice(0, 5000)}<p className="text-muted-foreground mt-2">... 内容过长，已截断前 5000 字符</p></>
+              ) : (
+                knowledgePreview.textContent || knowledgePreview.summary || '(文件已上传，可在对话中引用)'
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground mt-3">💡 知识库内容会自动注入到 AI 对话上下文中，帮助 AI 更准确地理解你的需求。</p>
+          </div>
+        </ModalOverlay>
       )}
 
       {/* Search Panel */}

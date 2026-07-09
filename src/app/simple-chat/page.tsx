@@ -115,6 +115,13 @@ export default function SimpleChatPage() {
     }));
   }, [activeTaskId]);
 
+  const handleRenameTask = useCallback((projectId: string, taskId: string, name: string) => {
+    setProjects(prev => prev.map(p => p.id === projectId ? {
+      ...p, tasks: p.tasks.map(t => t.id === taskId ? { ...t, name, updatedAt: Date.now() } : t),
+      updatedAt: Date.now()
+    } : p));
+  }, []);
+
   const handleUpdateTask = useCallback((task: Task) => {
     setProjects(prev => prev.map(p => ({
       ...p,
@@ -187,6 +194,7 @@ export default function SimpleChatPage() {
         onRenameProject={handleRenameProject}
         onCreateTask={handleCreateTask}
         onDeleteTask={handleDeleteTask}
+        onRenameTask={handleRenameTask}
         onLogout={() => { setUser(null); setShowLogin(true); }}
       />
       <div className="flex-1 flex flex-col min-w-0">
