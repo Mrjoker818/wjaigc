@@ -28,12 +28,16 @@ export async function POST(request: NextRequest) {
     knowledgeItems?: KnowledgeItem[];
     projectId?: string;
     taskId?: string;
+    imageModel?: string;
+    imageProviderId?: string;
   };
   const messages = body.messages || [];
   const model = body.model || 'deepseek-v4-flash';
   const providerId = body.providerId || '';
   const webSearch = body.webSearch || false;
   const knowledgeItems = body.knowledgeItems || [];
+  const imageModel = body.imageModel || model;
+  const imageProviderId = body.imageProviderId || providerId;
 
   // 查找提供商
   const provider = await findProviderForModel(model, 'chat' as ApiKind, providerId || undefined);
@@ -256,8 +260,8 @@ export async function POST(request: NextRequest) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   prompt: imgPrompt,
-                  model,
-                  providerId,
+                  model: imageModel,
+                  providerId: imageProviderId,
                   size: imgSize,
                   count: 1,
                 }),

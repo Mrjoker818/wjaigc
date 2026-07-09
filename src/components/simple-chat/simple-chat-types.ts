@@ -20,6 +20,8 @@ export interface SimpleChatTask {
   messages: SimpleChatMessage[];
   model: string;
   providerId: string;
+  imageModel?: string;
+  imageProviderId?: string;
   activeAgentId?: string;
   createdAt: number;
   updatedAt: number;
