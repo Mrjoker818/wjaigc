@@ -7,7 +7,7 @@ import {
   ChevronDown, ChevronUp, Loader2, Sparkles, Volume2, VolumeX,
   Upload, X, AlertCircle, Info, FastForward, Users, Plus, Paintbrush, Film, Palette, Images,
   History, RotateCcw, Languages, GripVertical, Minus, Maximize2, ChevronRight, CheckCircle2,
-  Clapperboard, SlidersHorizontal, Mountain, ImageIcon, User, RefreshCw
+  Clapperboard, SlidersHorizontal, Mountain, ImageIcon, User, RefreshCw, Package
 } from 'lucide-react';
 import MotionBrushCanvas, { type MotionBrushResult, type MotionBrushCanvasHandle } from './motion-brush-canvas';
 import { inferVideoModelFeatures, VIDEO_MODEL_REGISTRY, type MotionBrushParams, type CameraControlParams, type VideoGenerateParams as VideoApiGenerateParams } from '@/lib/video-api';
@@ -20,6 +20,7 @@ import type {
   VideoShotPlan,
   VideoCharacter,
   VideoScene,
+  VideoProp,
 } from '@/lib/video-director/continuity';
 import type { DirectorStyle, VideoReferenceBinding } from '@/lib/video-director/prompt-compiler';
 
@@ -339,13 +340,15 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
   const typedReferencesRef = useRef<TypedReference[]>([]);
   useEffect(() => { typedReferencesRef.current = typedReferences; }, [typedReferences]);
 
-  // 角色/场景资产（AI 制片流水线）—— 直接使用后端解析的 VideoCharacter/VideoScene 结构
+  // 角色/场景/道具资产（AI 制片流水线）—— 直接使用后端解析的 VideoCharacter/VideoScene/VideoProp 结构
   const [productionCharacters, setProductionCharacters] = useState<VideoCharacter[]>([]);
   const [productionScenes, setProductionScenes] = useState<VideoScene[]>([]);
+  const [productionProps, setProductionProps] = useState<VideoProp[]>([]);
   const [isGeneratingAssets, setIsGeneratingAssets] = useState(false);
   const [isBuildingProduction, setIsBuildingProduction] = useState(false);
   const [isGeneratingCharacters, setIsGeneratingCharacters] = useState(false);
   const [isGeneratingScenes, setIsGeneratingScenes] = useState(false);
+  const [isGeneratingProps, setIsGeneratingProps] = useState(false);
   const [autoInjectAssets, setAutoInjectAssets] = useState(true);
   // 兼容：从 typedReferences 中提取首帧/尾帧/参考图
   const firstFrameUrl = typedReferences.find(r => r.type === 'first-frame')?.url || '';
@@ -795,7 +798,6 @@ Rules:
     try {
       // 统一调用一次，字段名对齐后端 storyIdea/duration/shotCount/style
       let shotsRaw: any[] | null = null;
-      // 第一次调用：期望 shotCount 个镜头
       const makeCall = async (extraPrompt = '', forcedMin?: number) => {
         const res = await fetch('/api/video/director/shot-plan', {
           method: 'POST',
@@ -811,14 +813,16 @@ Rules:
         });
         const data = await res.json();
         if (!res.ok || !data.success) throw new Error(data.error || '分镜规划失败');
-        return Array.isArray(data.shots) ? data.shots : null;
+        return data;
       };
 
-      shotsRaw = await makeCall('');
+      let planData: any = await makeCall('');
+      let shotsRaw: any[] | null = Array.isArray(planData.shots) ? planData.shots : null;
       // 镜头数过少时追加约束再试一次
       if (!shotsRaw || shotsRaw.length < 2) {
         try {
-          shotsRaw = await makeCall('。请至少拆分为3个镜头，每个镜头明确景别、运镜、光线、声音和连续性备注。', Math.max(targetShotCount, 3));
+          planData = await makeCall('。请至少拆分为3个镜头，每个镜头明确景别、运镜、光线、声音和连续性备注；同时完整返回 characters（人物）、scenes（场景）、props（关键道具）三类资产。', Math.max(targetShotCount, 3));
+          shotsRaw = Array.isArray(planData.shots) ? planData.shots : null;
         } catch { /* 重试失败沿用首次结果 */ }
       }
       if (!shotsRaw || shotsRaw.length < 1) throw new Error('分镜规划失败：返回为空');
@@ -859,6 +863,61 @@ Rules:
       const plans = shotsRaw.map(normalizeShot);
       setShotPlans(plans);
       shotPlansRef.current = plans;
+      // 写入角色/场景/道具资产
+      const now = Date.now();
+      const charList: VideoCharacter[] = Array.isArray(planData.characters) ? planData.characters : [];
+      const sceneList: VideoScene[] = Array.isArray(planData.scenes) ? planData.scenes : [];
+      const propList: VideoProp[] = Array.isArray(planData.props) ? planData.props : [];
+      setProductionCharacters(charList.map((c: any, i: number) => ({
+        id: c.id || `char-${now}-${i}`,
+        name: String(c.name || `角色${i + 1}`).slice(0, 20),
+        role: String(c.role || ''),
+        age: String(c.age || ''),
+        gender: String(c.gender || ''),
+        ethnicity: String(c.ethnicity || ''),
+        style: String(c.style || ''),
+        appearance: String(c.appearance || c.looks || c.visualPrompt || c.appearancePrompt || ''),
+        costume: String(c.costume || c.outfit || c.clothing || ''),
+        hair: String(c.hair || c.hairstyle || ''),
+        accessories: String(c.accessories || ''),
+        frontPrompt: String(c.frontPrompt || c.frontImagePrompt || ''),
+        sidePrompt: String(c.sidePrompt || c.sideImagePrompt || ''),
+        keywords: Array.isArray(c.keywords) ? c.keywords.map((k: any) => String(k)).slice(0, 8) : [],
+        imageUrlFront: String(c.frontImageUrl || c.imageUrlFront || c.frontUrl || ''),
+        imageUrlSide: String(c.sideImageUrl || c.imageUrlSide || c.sideUrl || ''),
+        status: (c.frontImageUrl || c.imageUrlFront) ? 'completed' : 'pending',
+      } as VideoCharacter)));
+      setProductionScenes(sceneList.map((s: any, i: number) => ({
+        id: s.id || `scene-${now}-${i}`,
+        shotId: s.shotId != null ? String(s.shotId) : undefined,
+        forShotIds: Array.isArray(s.forShotIds) ? s.forShotIds.map((x: any) => String(x)) : [],
+        name: String(s.name || `场景${i + 1}`).slice(0, 30),
+        description: String(s.description || ''),
+        location: String(s.location || s.place || s.setting || ''),
+        timeOfDay: String(s.timeOfDay || ''),
+        weather: String(s.weather || ''),
+        lighting: String(s.lighting || s.lightingHint || ''),
+        mood: String(s.mood || ''),
+        colorPalette: String(s.colorPalette || ''),
+        keyProps: String(s.keyProps || ''),
+        scenePrompt: String(s.scenePrompt || s.environmentPrompt || s.visualPrompt || ''),
+        imageUrl: String(s.imageUrl || s.sceneImageUrl || ''),
+        status: s.imageUrl ? 'completed' : 'pending',
+      } as VideoScene)));
+      setProductionProps(propList.map((p: any, i: number) => ({
+        id: p.id || `prop-${now}-${i}`,
+        name: String(p.name || `道具${i + 1}`).slice(0, 20),
+        role: String(p.role || ''),
+        description: String(p.description || ''),
+        material: String(p.material || ''),
+        color: String(p.color || ''),
+        scale: String(p.scale || ''),
+        propPrompt: String(p.propPrompt || p.imagePrompt || ''),
+        imageUrl: String(p.imageUrl || ''),
+        forShotIds: Array.isArray(p.shotIds) ? p.shotIds.map((x: any) => String(x)) : (Array.isArray(p.forShotIds) ? p.forShotIds.map((x: any) => String(x)) : []),
+        sceneId: p.sceneId != null ? String(p.sceneId) : undefined,
+        status: p.imageUrl ? 'completed' : 'pending',
+      } as VideoProp)));
       setShotPlanOpen(true);
       setMode('multi-shot');
       setGenStage('');
@@ -1149,8 +1208,33 @@ Rules:
     }
   }, [productionScenes, shotPlans, aspectRatio, directorStyle, generateSingleImage, persistImageUrl, autoInjectAssets, addTypedReference]);
 
+  // 生成单个道具设定图
+  const generatePropImage = useCallback(async (propId: string) => {
+    const prop = productionProps.find(p => p.id === propId);
+    if (!prop) return;
+    setProductionProps(prev => prev.map(p => p.id === propId ? { ...p, status: 'generating' as const, error: undefined } : p));
+    try {
+      const size = '1024x1024';
+      const base = prop.propPrompt || prop.description || prop.name;
+      const bits = [
+        prop.material ? `${prop.material},` : '',
+        prop.color ? `${prop.color} color,` : '',
+        prop.scale ? `${prop.scale} size,` : '',
+      ].filter(Boolean).join(' ');
+      const imgPrompt = `isolated prop object design sheet, ${prop.name}, ${bits} ${base}, studio lighting, on white background, high detail, product photography style, clear silhouette, no text, no watermark, sharp focus`;
+      const rawUrl = await generateSingleImage(imgPrompt, size);
+      const url = await persistImageUrl(rawUrl);
+      setProductionProps(prev => prev.map(p => p.id === propId ? { ...p, imageUrl: url, status: undefined, error: undefined } : p));
+      if (autoInjectAssets) {
+        addTypedReference(url, 'scene'); // 道具作为 scene 类型参考注入（video-api 支持多参考图）
+      }
+    } catch (err: any) {
+      setProductionProps(prev => prev.map(p => p.id === propId ? { ...p, status: 'failed' as const, error: err?.message || '生成失败' } : p));
+    }
+  }, [productionProps, generateSingleImage, persistImageUrl, autoInjectAssets, addTypedReference]);
+
   const handleGenerateProductionAssets = useCallback(async () => {
-    if ((productionCharacters.length === 0 && productionScenes.length === 0) || isGeneratingAssets) return;
+    if ((productionCharacters.length === 0 && productionScenes.length === 0 && productionProps.length === 0) || isGeneratingAssets) return;
     setIsGeneratingAssets(true);
     const generatedUrls: string[] = [];
     try {
@@ -1169,6 +1253,12 @@ Rules:
         if (!s.imageUrl) sceneTasks.push(generateSceneImage(s.id).then(() => {}).catch(() => {}));
       }
       await Promise.allSettled(sceneTasks);
+      // 并发生成所有道具设定图
+      const propTasks: Promise<void>[] = [];
+      for (const p of productionProps) {
+        if (!p.imageUrl) propTasks.push(generatePropImage(p.id).then(() => {}).catch(() => {}));
+      }
+      await Promise.allSettled(propTasks);
       // 收集成功的URL，加到画布
       productionCharacters.forEach(c => {
         if (c.imageUrlFront) generatedUrls.push(c.imageUrlFront);
@@ -1177,13 +1267,16 @@ Rules:
       productionScenes.forEach(s => {
         if (s.imageUrl) generatedUrls.push(s.imageUrl);
       });
+      productionProps.forEach(p => {
+        if (p.imageUrl) generatedUrls.push(p.imageUrl);
+      });
       if (generatedUrls.length > 0 && onAddImages) {
         try { onAddImages(generatedUrls); } catch {}
       }
     } finally {
       setIsGeneratingAssets(false);
     }
-  }, [productionCharacters, productionScenes, isGeneratingAssets, generateCharacterImage, generateSceneImage, onAddImages]);
+  }, [productionCharacters, productionScenes, productionProps, isGeneratingAssets, generateCharacterImage, generateSceneImage, generatePropImage, onAddImages]);
 
   const buildProductionFromShots = useCallback((chars?: VideoCharacter[], scenes?: VideoScene[]) => {
     // 若后端直接返回了 characters/scenes 则直接用
@@ -1252,11 +1345,85 @@ Rules:
     }
   }, [shotPlans, prompt]);
 
-  // AI 一键制片：从分镜→角色+场景定妆照
+  // AI 一键制片：从分镜→角色+场景+道具定妆照
   const runAIPipeline = useCallback(async () => {
-    if (productionCharacters.length === 0 && productionScenes.length === 0) {
-      onError?.('请先进行 AI 分镜规划');
-      return;
+    if (productionCharacters.length === 0 && productionScenes.length === 0 && productionProps.length === 0) {
+      // 若还没分镜但有 prompt，先调 story-assets/plan 拉取资产清单
+      if (!prompt.trim()) {
+        onError?.('请先输入剧情描述或进行 AI 分镜规划');
+        return;
+      }
+      setIsBuildingProduction(true);
+      try {
+        const res = await fetch('/api/story-assets/plan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ storyIdea: prompt, duration, aspectRatio, style: directorStyle }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.error || '资产规划失败');
+        const now = Date.now();
+        const charList: VideoCharacter[] = Array.isArray(data.characters) ? data.characters : [];
+        const sceneList: VideoScene[] = Array.isArray(data.scenes) ? data.scenes : [];
+        const propList: VideoProp[] = Array.isArray(data.props) ? data.props : [];
+        if (charList.length === 0 && sceneList.length === 0 && propList.length === 0) {
+          onError?.('AI 未识别出角色/场景/道具，请用更具体的描述再试');
+          return;
+        }
+        setProductionCharacters(charList.map((c: any, i: number) => ({
+          id: c.id || `char-${now}-${i}`,
+          name: String(c.name || `角色${i + 1}`).slice(0, 20),
+          role: String(c.role || ''),
+          age: String(c.age || ''),
+          gender: String(c.gender || ''),
+          appearance: String(c.appearance || c.looks || c.visualPrompt || ''),
+          costume: String(c.costume || c.outfit || ''),
+          hair: String(c.hair || ''),
+          accessories: String(c.accessories || ''),
+          frontPrompt: String(c.frontPrompt || c.appearancePrompt || ''),
+          sidePrompt: String(c.sidePrompt || ''),
+          keywords: Array.isArray(c.keywords) ? c.keywords.map((k: any) => String(k)).slice(0, 8) : [],
+          imageUrlFront: String(c.frontImageUrl || c.imageUrlFront || ''),
+          imageUrlSide: String(c.sideImageUrl || c.imageUrlSide || ''),
+          status: 'pending',
+        } as VideoCharacter)));
+        setProductionScenes(sceneList.map((s: any, i: number) => ({
+          id: s.id || `scene-${now}-${i}`,
+          shotId: s.shotId != null ? String(s.shotId) : undefined,
+          forShotIds: Array.isArray(s.forShotIds) ? s.forShotIds.map((x: any) => String(x)) : [],
+          name: String(s.name || `场景${i + 1}`).slice(0, 30),
+          description: String(s.description || ''),
+          location: String(s.location || s.setting || ''),
+          timeOfDay: String(s.timeOfDay || ''),
+          weather: String(s.weather || ''),
+          lighting: String(s.lighting || s.lightingHint || ''),
+          mood: String(s.mood || ''),
+          colorPalette: String(s.colorPalette || ''),
+          keyProps: String(s.keyProps || ''),
+          scenePrompt: String(s.scenePrompt || s.environmentPrompt || s.visualPrompt || ''),
+          imageUrl: String(s.imageUrl || ''),
+          status: 'pending',
+        } as VideoScene)));
+        setProductionProps(propList.map((p: any, i: number) => ({
+          id: p.id || `prop-${now}-${i}`,
+          name: String(p.name || `道具${i + 1}`).slice(0, 20),
+          role: String(p.role || ''),
+          description: String(p.description || ''),
+          material: String(p.material || ''),
+          color: String(p.color || ''),
+          scale: String(p.scale || ''),
+          propPrompt: String(p.propPrompt || p.imagePrompt || ''),
+          imageUrl: String(p.imageUrl || ''),
+          forShotIds: Array.isArray(p.shotIds) ? p.shotIds.map((x: any) => String(x)) : (Array.isArray(p.forShotIds) ? p.forShotIds.map((x: any) => String(x)) : []),
+          sceneId: p.sceneId != null ? String(p.sceneId) : undefined,
+          status: 'pending',
+        } as VideoProp)));
+      } catch (err: any) {
+        onError?.(err?.message || '资产规划失败');
+        return;
+      } finally {
+        setIsBuildingProduction(false);
+      }
     }
     setIsGeneratingAssets(true);
     try {
@@ -1264,7 +1431,7 @@ Rules:
     } finally {
       setIsGeneratingAssets(false);
     }
-  }, [productionCharacters, productionScenes, handleGenerateProductionAssets, onError]);
+  }, [productionCharacters, productionScenes, productionProps, prompt, duration, aspectRatio, directorStyle, handleGenerateProductionAssets, onError]);
 
   const handleGenerateAllShots = async () => {
     if (!model || shotPlans.length === 0) return;
@@ -2363,14 +2530,14 @@ Rules:
                   </div>
                 </div>
 
-                {/* === AI 制片流水线：角色卡 + 场景氛围图 === */}
-                {shotPlans.length > 0 && (productionCharacters.length > 0 || productionScenes.length > 0) && (
+                {/* === AI 一键制片流水线：角色卡 + 场景氛围图 + 道具 === */}
+                {(productionCharacters.length > 0 || productionScenes.length > 0 || productionProps.length > 0) && (
                   <div className="mb-3 p-2.5 rounded-lg border" style={{ borderColor: borderColor, background: isMonochrome ? 'rgba(0,0,0,0.15)' : 'rgba(168,85,247,0.05)' }}>
-                    <div className="flex items-center gap-2 mb-2">
+                    <div className="flex items-center gap-2 mb-2 flex-wrap">
                       <Sparkles className="w-3.5 h-3.5" style={{ color: '#a855f7' }} />
                       <span className="text-[11px] font-semibold" style={{ color: textColor }}>AI 一键制片</span>
                       <span className="text-[9px]" style={{ color: subTextColor }}>
-                        {productionCharacters.length}角色 / {productionScenes.length}场景
+                        {productionCharacters.length}角色 / {productionScenes.length}场景{productionProps.length > 0 ? ` / ${productionProps.length}道具` : ''}
                       </span>
                       <ToggleBtn active={autoInjectAssets} onClick={() => setAutoInjectAssets(!autoInjectAssets)} accent="#a855f7" sub={subTextColor} mono={isMonochrome}>自动注入</ToggleBtn>
                       <button
@@ -2461,11 +2628,42 @@ Rules:
                       </div>
                     )}
 
-                    {(productionCharacters.some(c => c.imageUrlFront || c.frontUrl) || productionScenes.some(s => s.imageUrl)) && (
+                    {/* 道具资产区 */}
+                    {productionProps.length > 0 && (
+                      <div className="mt-2">
+                        <div className="flex items-center gap-1.5 mb-1.5">
+                          <Package className="w-3 h-3" style={{ color: '#f59e0b' }} />
+                          <span className="text-[10px] font-medium" style={{ color: subTextColor }}>关键道具</span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-1.5">
+                          {productionProps.map(prop => {
+                            const propDesc = prop.description || prop.name;
+                            const isGen = prop.status === 'generating' || (prop as any).generating;
+                            const isFail = prop.status === 'failed' || !!(prop as any).error;
+                            return (
+                              <div key={prop.id} className="rounded-md overflow-hidden relative" style={{ background: inputBg, border: `1px solid ${borderColor}` }}>
+                                <div className="aspect-square relative flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.3)' }}>
+                                  {prop.imageUrl ? <img src={prop.imageUrl} alt={prop.name} className="w-full h-full object-cover" /> :
+                                    isGen ? <span className="inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" style={{ color: '#f59e0b' }} /> :
+                                    isFail ? <RefreshCw className="w-4 h-4 text-red-400" /> :
+                                    <Package className="w-5 h-5 opacity-30" />}
+                                </div>
+                                <div className="p-1">
+                                  <div className="text-[9px] font-medium truncate" style={{ color: textColor }} title={prop.name}>{prop.name}</div>
+                                  {(prop as any).error && <div className="text-[8px] text-red-400 truncate">{(prop as any).error}</div>}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {(productionCharacters.some(c => c.imageUrlFront || (c as any).frontUrl) || productionScenes.some(s => s.imageUrl) || productionProps.some(p => p.imageUrl)) && (
                       <div className="mt-2 pt-2" style={{ borderTop: `1px dashed ${borderColor}` }}>
                         <div className="text-[9px] flex items-start gap-1" style={{ color: subTextColor }}>
                           <CheckCircle2 className="w-3 h-3 mt-0.5 shrink-0" style={{ color: '#10b981' }} />
-                          <span>定妆照/场景图生成完成后会自动作为角色参考/镜头首帧注入，多镜头生成时人物与场景保持一致。</span>
+                          <span>定妆照/场景图/道具图生成完成后会自动作为角色参考/镜头首帧/场景锚点注入，多镜头生成时人物、场景、道具保持一致。</span>
                         </div>
                       </div>
                     )}
