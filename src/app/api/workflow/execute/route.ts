@@ -53,12 +53,17 @@ if (wfCleanupTimer && typeof wfCleanupTimer === 'object' && 'unref' in wfCleanup
 /**
  * 节点类型 → 所需API功能映射
  */
-function getFeatureForNodeType(type: NodeType): 'imageEdit' | 'chat' | 'vectorize' | 'layer' | '3d' {
+function getFeatureForNodeType(type: NodeType): 'imageEdit' | 'chat' | 'vectorize' | 'layer' | '3d' | 'video' {
   if (type === 'ai-analyze') return 'chat';
   if (type === 'ai-vectorize') return 'vectorize';
   if (type === 'ai-segment') return 'layer';
   if (type === 'ai-3d-model') return '3d';
   if (type === 'agent-auto' || type === 'agent-chat') return 'chat';
+  // 视频生成/编辑节点 → video
+  if (type === 'ai-video-generate' || type === 'ai-video-i2v' ||
+      type === 'video-speed-change' || type === 'video-trim' ||
+      type === 'video-concat' || type === 'video-filter' ||
+      type === 'video-compose' || type === 'video-extract-frames') return 'video';
   // 图像生成/编辑/修图/字境/精修/品牌 → imageEdit
   return 'imageEdit';
 }
@@ -658,8 +663,8 @@ async function executeAsyncTask(
   const start = Date.now();
 
   // 提交任务（/api/generate 在 direct 模式下可能同步等待数分钟，需要足够长的超时）
-  const isGenerateEndpoint = submitUrl.includes('/api/generate') || submitUrl.includes('/api/edit') || submitUrl.includes('/api/image-edit');
-  const submitTimeoutMs = isGenerateEndpoint ? 600000 : 30000; // 图像生成/编辑类接口10分钟，其他30秒
+  const isGenerateEndpoint = submitUrl.includes('/api/generate') || submitUrl.includes('/api/edit') || submitUrl.includes('/api/image-edit') || submitUrl.includes('/api/video/generate') || submitUrl.includes('/api/video/extend');
+  const submitTimeoutMs = isGenerateEndpoint ? 600000 : 30000; // 生成/编辑类接口10分钟，其他30秒
   const submitRes = await fetch(submitUrl, {
     ...fetchOptions,
     method: 'POST',
