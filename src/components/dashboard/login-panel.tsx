@@ -11,8 +11,12 @@ import {
   Zap,
   Eye,
   EyeOff,
-  FileText,
-  MessageSquareText,
+  Sparkles,
+  Film,
+  Workflow,
+  Shapes,
+  MessageSquareMore,
+  Eraser,
 } from 'lucide-react';
 
 interface LoginPanelProps {
@@ -82,40 +86,78 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
               <img src="/logo.png" alt="无界AI" className="w-10 h-10 object-contain rounded-lg" />
               <h1 className="text-3xl xl:text-4xl font-bold text-foreground tracking-tight">无界AI</h1>
             </div>
-            <p className="text-muted-foreground text-base xl:text-lg">AI图像生成与协作平台</p>
+            <p className="text-muted-foreground text-base xl:text-lg">AI 图像 · 视频 · 3D 一站式创作平台</p>
           </div>
 
           {/* 特性卡片 */}
-          <div className="relative z-10 space-y-4 my-12">
-            <div className="flex items-start gap-4 p-5 rounded-lg bg-muted/50 border border-border/20 hover:border-primary/30 transition-colors group">
-              <div className="w-10 h-10 rounded-md bg-accent flex items-center justify-center shrink-0 group-hover:shadow-[0_0_20px_rgba(212,175,55,0.15)] transition-shadow">
-                <Zap className="w-5 h-5 text-primary" />
+          <div className="relative z-10 grid grid-cols-1 sm:grid-cols-2 gap-3 my-8">
+            <div className="flex items-start gap-3 p-4 rounded-lg bg-muted/50 border border-border/20 hover:border-primary/30 transition-colors group">
+              <div className="w-9 h-9 rounded-md bg-accent flex items-center justify-center shrink-0 group-hover:shadow-[0_0_20px_rgba(212,175,55,0.15)] transition-shadow">
+                <Sparkles className="w-[18px] h-[18px] text-primary" />
               </div>
-              <div>
-                <h3 className="text-sm font-semibold text-foreground mb-1">无限画布</h3>
-                <p className="text-xs text-muted-foreground leading-relaxed">自由缩放、无限延展的创作空间，支持多图层协同编辑</p>
-              </div>
-            </div>
-
-            <div className="flex items-start gap-4 p-5 rounded-lg bg-muted/50 border border-border/20 hover:border-primary/30 transition-colors group">
-              <div className="w-10 h-10 rounded-md bg-accent flex items-center justify-center shrink-0 group-hover:shadow-[0_0_20px_rgba(212,175,55,0.15)] transition-shadow">
-                <MessageSquareText className="w-5 h-5 text-primary" />
-              </div>
-              <div>
-                <h3 className="text-sm font-semibold text-foreground mb-1">AI智能修图</h3>
-                <p className="text-xs text-muted-foreground leading-relaxed">一键抠图、智能补全、风格迁移，让创作更高效</p>
+              <div className="min-w-0">
+                <h3 className="text-[13px] font-semibold text-foreground mb-0.5">AI 图像生成</h3>
+                <p className="text-[11px] text-muted-foreground leading-snug">多模型自由切换，文生图 / 图生图 / 参考图，任意画面比例与质量档位</p>
               </div>
             </div>
 
-            <div className="flex items-start gap-4 p-5 rounded-lg bg-muted/50 border border-border/20 hover:border-primary/30 transition-colors group">
-              <div className="w-10 h-10 rounded-md bg-accent flex items-center justify-center shrink-0 group-hover:shadow-[0_0_20px_rgba(212,175,55,0.15)] transition-shadow">
-                <FileText className="w-5 h-5 text-primary" />
+            <div className="flex items-start gap-3 p-4 rounded-lg bg-muted/50 border border-border/20 hover:border-primary/30 transition-colors group">
+              <div className="w-9 h-9 rounded-md bg-accent flex items-center justify-center shrink-0 group-hover:shadow-[0_0_20px_rgba(212,175,55,0.15)] transition-shadow">
+                <Film className="w-[18px] h-[18px] text-primary" />
               </div>
-              <div>
-                <h3 className="text-sm font-semibold text-foreground mb-1">工作流编排</h3>
-                <p className="text-xs text-muted-foreground leading-relaxed">可视化节点编排，自定义AI处理流水线，自动化批量生成</p>
+              <div className="min-w-0">
+                <h3 className="text-[13px] font-semibold text-foreground mb-0.5">AI 视频导演</h3>
+                <p className="text-[11px] text-muted-foreground leading-snug">文生视频 / 图生视频 / 首尾帧 / 多镜头分镜 / 尾帧接力续写，6种导演风格</p>
               </div>
             </div>
+
+            <div className="flex items-start gap-3 p-4 rounded-lg bg-muted/50 border border-border/20 hover:border-primary/30 transition-colors group">
+              <div className="w-9 h-9 rounded-md bg-accent flex items-center justify-center shrink-0 group-hover:shadow-[0_0_20px_rgba(212,175,55,0.15)] transition-shadow">
+                <Zap className="w-[18px] h-[18px] text-primary" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-[13px] font-semibold text-foreground mb-0.5">无限画布</h3>
+                <p className="text-[11px] text-muted-foreground leading-snug">自由缩放 / 拖拽 / 多选 / Ctrl+Z 无限撤回，一张画布容纳所有创作</p>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-3 p-4 rounded-lg bg-muted/50 border border-border/20 hover:border-primary/30 transition-colors group">
+              <div className="w-9 h-9 rounded-md bg-accent flex items-center justify-center shrink-0 group-hover:shadow-[0_0_20px_rgba(212,175,55,0.15)] transition-shadow">
+                <Eraser className="w-[18px] h-[18px] text-primary" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-[13px] font-semibold text-foreground mb-0.5">AI 修图全家桶</h3>
+                <p className="text-[11px] text-muted-foreground leading-snug">语言修图 / 擦除 / 蒙版 / 无损放大 / 去背景 / 扩展画面 / SVG描摹 / 元素分层</p>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-3 p-4 rounded-lg bg-muted/50 border border-border/20 hover:border-primary/30 transition-colors group">
+              <div className="w-9 h-9 rounded-md bg-accent flex items-center justify-center shrink-0 group-hover:shadow-[0_0_20px_rgba(212,175,55,0.15)] transition-shadow">
+                <Shapes className="w-[18px] h-[18px] text-primary" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-[13px] font-semibold text-foreground mb-0.5">3D · PSD · SVG</h3>
+                <p className="text-[11px] text-muted-foreground leading-snug">单/多图转3D模型预览、PSD三档分层导出、SVG智能描摹、字境大师字体设计</p>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-3 p-4 rounded-lg bg-muted/50 border border-border/20 hover:border-primary/30 transition-colors group">
+              <div className="w-9 h-9 rounded-md bg-accent flex items-center justify-center shrink-0 group-hover:shadow-[0_0_20px_rgba(212,175,55,0.15)] transition-shadow">
+                <Workflow className="w-[18px] h-[18px] text-primary" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-[13px] font-semibold text-foreground mb-0.5">工作流 & Agent</h3>
+                <p className="text-[11px] text-muted-foreground leading-snug">可视化节点编排、AI自然语言建图、Agent智能多轮编辑、30+节点类型</p>
+              </div>
+            </div>
+          </div>
+
+          {/* AI 助手提示 */}
+          <div className="relative z-10 flex items-start gap-2 p-3 rounded-lg bg-primary/5 border border-primary/20 mb-6">
+            <MessageSquareMore className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
+              右侧 <span className="text-primary font-medium">AI 聊天助手</span> 支持模糊意图追问、提示词优化、@引用图片/品牌/模型、21个内置 Skill 一键生成电商套图 / 分镜 / IP角色 / 海报
+            </p>
           </div>
 
           {/* 版本号 */}
