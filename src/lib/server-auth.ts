@@ -60,6 +60,7 @@ const DEFAULT_ADMIN_PASSWORD = process.env.WUJIE_ADMIN_PASSWORD || (() => {
 type StoredUser = Omit<User, 'password'> & {
   passwordHash: string;
   productType?: string;
+  groupId?: string;
   chatModels?: string[];
   imageModels?: string[];
   dailyTokenLimit?: number;
@@ -212,6 +213,7 @@ function publicUser(user: StoredUser): User {
     role: user.role,
     status: user.status,
     productType: user.productType,
+    groupId: user.groupId,
     chatModels: user.chatModels,
     imageModels: user.imageModels,
     dailyTokenLimit: user.dailyTokenLimit,
@@ -233,6 +235,7 @@ function normalizeStoredUser(user: StoredUser): StoredUser {
     role: user.role || 'user',
     status: user.status || 'active',
     productType: user.productType || undefined,
+    groupId: user.groupId || undefined,
     chatModels: user.chatModels || undefined,
     imageModels: user.imageModels || undefined,
     dailyTokenLimit: user.dailyTokenLimit ?? undefined,
@@ -503,7 +506,7 @@ export async function authenticateUser(input: {
   return publicUser(next);
 }
 
-type ManagedUserUpdates = Partial<Pick<User, 'name' | 'email' | 'status' | 'apiPermissions' | 'productType' | 'chatModels' | 'imageModels' | 'dailyTokenLimit' | 'monthlyTokenLimit' | 'dailyImageLimit' | 'avatar' | 'nickname'>> & {
+type ManagedUserUpdates = Partial<Pick<User, 'name' | 'email' | 'status' | 'apiPermissions' | 'productType' | 'groupId' | 'chatModels' | 'imageModels' | 'dailyTokenLimit' | 'monthlyTokenLimit' | 'dailyImageLimit' | 'avatar' | 'nickname'>> & {
   password?: string;
 };
 

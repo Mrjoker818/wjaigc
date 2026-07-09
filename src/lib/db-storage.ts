@@ -173,6 +173,14 @@ export async function ensureCoreTables(): Promise<void> {
       ['wujie_users', 'credits', 'INTEGER DEFAULT 0'],
       ['wujie_users', 'email', 'TEXT DEFAULT \'\''],
       ['wujie_users', 'group_id', 'TEXT DEFAULT NULL'],
+      ['wujie_users', 'product_type', 'TEXT DEFAULT NULL'],
+      ['wujie_users', 'chat_models', 'TEXT[] DEFAULT NULL'],
+      ['wujie_users', 'image_models', 'TEXT[] DEFAULT NULL'],
+      ['wujie_users', 'daily_token_limit', 'INTEGER DEFAULT NULL'],
+      ['wujie_users', 'monthly_token_limit', 'INTEGER DEFAULT NULL'],
+      ['wujie_users', 'daily_image_limit', 'INTEGER DEFAULT NULL'],
+      ['wujie_users', 'avatar', 'TEXT DEFAULT NULL'],
+      ['wujie_users', 'nickname', 'TEXT DEFAULT NULL'],
       ['wujie_recharge_orders', 'bonus', 'INTEGER DEFAULT 0'],
       ['wujie_recharge_orders', 'transaction_id', 'TEXT DEFAULT \'\''],
       ['wujie_recharge_orders', 'expires_at', 'BIGINT'],
@@ -615,6 +623,71 @@ export async function dbWriteUsers(users: Array<{
     return true;
   } catch (e) {
     console.error('[db-storage] dbWriteUsers error:', e);
+    return false;
+  }
+}
+
+// ─── User Groups ─────────────────────────────────────────────────────────────
+
+export interface DbUserGroup {
+  id: string;
+  name: string;
+  product_types: string[];
+  credit_quota: number;
+  is_active: boolean;
+  created_at: number;
+  updated_at: number;
+}
+
+export async function dbReadGroups(): Promise<DbUserGroup[]> {
+  try {
+    const result = await execSql('SELECT * FROM wujie_user_groups ORDER BY created_at ASC');
+    return (result.rows as unknown as Record<string, unknown>[]).map(row => ({
+      id: row.id as string,
+      name: row.name as string,
+      product_types: (Array.isArray(row.product_types) ? row.product_types : []) as string[],
+      credit_quota: (row.credit_quota as number) || 0,
+      is_active: row.is_active !== false,
+      created_at: row.created_at as number,
+      updated_at: row.updated_at as number,
+    }));
+  } catch (e) {
+    console.error('[db-storage] dbReadGroups error:', e);
+    return [];
+  }
+}
+
+export async function dbWriteGroup(group: DbUserGroup): Promise<boolean> {
+  try {
+    await execSql(`
+      INSERT INTO wujie_user_groups (id, name, product_types, credit_quota, is_active, created_at, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      ON CONFLICT (id) DO UPDATE SET
+        name = EXCLUDED.name,
+        product_types = EXCLUDED.product_types,
+        credit_quota = EXCLUDED.credit_quota,
+        is_active = EXCLUDED.is_active,
+        updated_at = EXCLUDED.updated_at
+    `, [
+      group.id, group.name, JSON.stringify(group.product_types),
+      group.credit_quota, group.is_active,
+      group.created_at, group.updated_at
+    ]);
+    return true;
+  } catch (e) {
+    console.error('[db-storage] dbWriteGroup error:', e);
+    return false;
+  }
+}
+
+export async function dbDeleteGroup(groupId: string): Promise<boolean> {
+  try {
+    await execSql('DELETE FROM wujie_user_groups WHERE id = $1', [groupId]);
+    // 清除该分组用户的 group_id
+    await execSql('UPDATE wujie_users SET group_id = NULL WHERE group_id = $1', [groupId]);
+    return true;
+  } catch (e) {
+    console.error('[db-storage] dbDeleteGroup error:', e);
     return false;
   }
 }

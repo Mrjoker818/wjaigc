@@ -7,6 +7,7 @@ export interface User {
   role?: 'admin' | 'user';
   status?: 'active' | 'disabled';
   productType?: string; // 'canvas' | 'chat' | 'canvas,chat' | null
+  groupId?: string; // group ID reference
   chatModels?: string[]; // authorized chat model IDs
   imageModels?: string[]; // authorized image model IDs
   dailyTokenLimit?: number;
