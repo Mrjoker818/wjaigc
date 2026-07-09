@@ -6,6 +6,14 @@ export interface User {
   password?: string;
   role?: 'admin' | 'user';
   status?: 'active' | 'disabled';
+  productType?: string; // 'canvas' | 'chat' | 'canvas,chat' | null
+  chatModels?: string[]; // authorized chat model IDs
+  imageModels?: string[]; // authorized image model IDs
+  dailyTokenLimit?: number;
+  monthlyTokenLimit?: number;
+  dailyImageLimit?: number;
+  avatar?: string;
+  nickname?: string;
   apiPermissions?: {
     image: boolean;
     chat: boolean;
@@ -23,6 +31,15 @@ export interface User {
   email?: string;
   createdAt: number;
   updatedAt: number;
+}
+
+export interface UserUsageRecord {
+  id: number;
+  userId: string;
+  date: string;
+  model: string;
+  tokensUsed: number;
+  imagesGenerated: number;
 }
 
 export interface Project {

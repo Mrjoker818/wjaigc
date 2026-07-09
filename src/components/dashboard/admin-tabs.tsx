@@ -19,6 +19,12 @@ interface AdminUser {
   email?: string; credits?: number; createdAt?: number; created_at?: string;
   last_login?: string; project_count?: number; api_permissions?: string[];
   apiPermissions?: Record<string, boolean>;
+  productType?: string;
+  chatModels?: string[];
+  imageModels?: string[];
+  dailyTokenLimit?: number;
+  monthlyTokenLimit?: number;
+  dailyImageLimit?: number;
 }
 
 interface AdminProvider {
@@ -757,6 +763,125 @@ export default function AdminTabs(props: AdminTabsProps) {
                         </div>
                       );
                     })}
+                  </div>
+                </div>
+                {/* 产品类型 */}
+                <div>
+                  <h4 className="text-sm font-semibold text-foreground mb-2">产品授权</h4>
+                  <div className="space-y-2">
+                    {[
+                      { key: 'canvas', label: '无限画布', desc: 'AI图像生成与协作平台' },
+                      { key: 'chat', label: '智能对话', desc: 'AI对话与图像生成助手' },
+                    ].map(({ key, label, desc }) => {
+                      const productType = detailUser.productType || '';
+                      const has = productType.includes(key);
+                      const handleToggle = async () => {
+                        const current = productType.split(',').filter(Boolean);
+                        const next = has ? current.filter(k => k !== key) : [...current, key];
+                        const newProductType = next.join(',') || '';
+                        try {
+                          const res = await fetch('/api/admin/users', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: 'update', userId: detailUser.id, updates: { productType: newProductType } }),
+                          });
+                          if (res.ok) {
+                            props.onRefreshAdmin();
+                          }
+                        } catch {}
+                      };
+                      return (
+                        <div key={key} className="flex items-center justify-between py-2 px-3 bg-muted/30 rounded-lg">
+                          <div><span className="text-sm text-foreground">{label}</span><p className="text-[10px] text-muted-foreground">{desc}</p></div>
+                          <button onClick={handleToggle} className={`w-10 h-5 rounded-full relative transition-colors ${has ? 'bg-primary' : 'bg-muted'}`}>
+                            <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${has ? 'left-5.5 translate-x-0' : 'left-0.5'}`} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+                {/* 对话模型授权 */}
+                <div>
+                  <h4 className="text-sm font-semibold text-foreground mb-2">对话模型授权</h4>
+                  <div className="space-y-1">
+                    {(() => {
+                      const chatModels = detailUser.chatModels || [];
+                      const availableChatModels = ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'o3', 'o4-mini', 'gemini-2.5-flash', 'gemini-2.5-pro', 'deepseek-v3', 'deepseek-r1', 'claude-sonnet-4-20250514'];
+                      return availableChatModels.map(m => {
+                        const has = chatModels.includes(m);
+                        return (
+                          <label key={m} className="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-muted/50 cursor-pointer">
+                            <input type="checkbox" checked={has} onChange={async () => {
+                              const next = has ? chatModels.filter(x => x !== m) : [...chatModels, m];
+                              try {
+                                const res = await fetch('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'update', userId: detailUser.id, updates: { chatModels: next } }) });
+                                if (res.ok) props.onRefreshAdmin();
+                              } catch {}
+                            }} className="w-4 h-4 rounded accent-primary" />
+                            <span className="text-xs text-foreground">{m}</span>
+                          </label>
+                        );
+                      });
+                    })()}
+                  </div>
+                </div>
+                {/* 图像模型授权 */}
+                <div>
+                  <h4 className="text-sm font-semibold text-foreground mb-2">图像模型授权</h4>
+                  <div className="space-y-1">
+                    {(() => {
+                      const imageModels = detailUser.imageModels || [];
+                      const availableImageModels = ['gpt-image-2', 'gpt-image-2-2k', 'gemini-3-pro-image-preview', 'gemini-3.1-flash-image-preview', 'dall-e-3', 'seedream-4.5', 'flux-pro'];
+                      return availableImageModels.map(m => {
+                        const has = imageModels.includes(m);
+                        return (
+                          <label key={m} className="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-muted/50 cursor-pointer">
+                            <input type="checkbox" checked={has} onChange={async () => {
+                              const next = has ? imageModels.filter(x => x !== m) : [...imageModels, m];
+                              try {
+                                const res = await fetch('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'update', userId: detailUser.id, updates: { imageModels: next } }) });
+                                if (res.ok) props.onRefreshAdmin();
+                              } catch {}
+                            }} className="w-4 h-4 rounded accent-primary" />
+                            <span className="text-xs text-foreground">{m}</span>
+                          </label>
+                        );
+                      });
+                    })()}
+                  </div>
+                </div>
+                {/* 配额 */}
+                <div>
+                  <h4 className="text-sm font-semibold text-foreground mb-2">使用配额</h4>
+                  <div className="space-y-2">
+                    {[
+                      { key: 'dailyTokenLimit', label: '日Token上限', val: detailUser.dailyTokenLimit ?? 0 },
+                      { key: 'monthlyTokenLimit', label: '月Token上限', val: detailUser.monthlyTokenLimit ?? 0 },
+                      { key: 'dailyImageLimit', label: '日生图上限', val: detailUser.dailyImageLimit ?? 0 },
+                    ].map(({ key, label, val }) => (
+                      <div key={key} className="flex items-center justify-between py-2 px-3 bg-muted/30 rounded-lg">
+                        <span className="text-sm text-foreground">{label}</span>
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="number"
+                            defaultValue={val || 0}
+                            min={0}
+                            className="w-20 h-7 px-2 rounded bg-background border border-border text-xs text-foreground text-center focus:outline-none focus:ring-2 focus:ring-primary/30"
+                            placeholder="0=不限"
+                            onBlur={async (e) => {
+                              const v = Number(e.target.value) || 0;
+                              try {
+                                const res = await fetch('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'update', userId: detailUser.id, updates: { [key]: v } }) });
+                                if (res.ok) props.onRefreshAdmin();
+                              } catch {}
+                            }}
+                            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                          />
+                          <span className="text-[10px] text-muted-foreground">0=不限</span>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
                 {/* 操作 */}

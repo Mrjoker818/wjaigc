@@ -4199,7 +4199,16 @@ function CanvasApp() {
       {/* Login Panel - shown when not authenticated */}
       {authChecked && !currentUser && (
         <LoginPanel
-          onLogin={async (user) => {
+          onLogin={async (user, productType) => {
+            // 智能对话模式：直接跳转到 /simple-chat
+            if (productType === 'chat') {
+              // 先设置用户状态
+              setCurrentUser(user);
+              // 跳转到简洁聊天页
+              window.location.href = '/simple-chat';
+              return;
+            }
+
             // 关键：先清除旧用户的所有状态，防止数据跨用户泄露
             setCurrentProject(null);
             // ★ 清空 undo 历史，防止旧用户的历史影响新用户

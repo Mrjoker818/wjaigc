@@ -11,6 +11,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json() as {
       name?: string;
       password?: string;
+      productType?: string;
       profile?: Record<string, unknown>;
     };
 
@@ -26,6 +27,7 @@ export async function POST(request: NextRequest) {
     const user = await authenticateUser({
       name: String(body.name || ''),
       password: String(body.password || ''),
+      productType: body.productType,
       profile: body.profile as Partial<User> | undefined,
     });
 

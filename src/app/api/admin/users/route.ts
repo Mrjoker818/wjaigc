@@ -98,6 +98,12 @@ export async function POST(request: NextRequest) {
         ...(body.updates?.apiPermissions && typeof body.updates.apiPermissions === 'object'
           ? { apiPermissions: body.updates.apiPermissions as User['apiPermissions'] }
           : {}),
+        ...(body.updates?.productType !== undefined ? { productType: String(body.updates.productType || '') || undefined } : {}),
+        ...(body.updates?.chatModels !== undefined ? { chatModels: Array.isArray(body.updates.chatModels) ? body.updates.chatModels as string[] : undefined } : {}),
+        ...(body.updates?.imageModels !== undefined ? { imageModels: Array.isArray(body.updates.imageModels) ? body.updates.imageModels as string[] : undefined } : {}),
+        ...(body.updates?.dailyTokenLimit !== undefined ? { dailyTokenLimit: Number(body.updates.dailyTokenLimit) || undefined } : {}),
+        ...(body.updates?.monthlyTokenLimit !== undefined ? { monthlyTokenLimit: Number(body.updates.monthlyTokenLimit) || undefined } : {}),
+        ...(body.updates?.dailyImageLimit !== undefined ? { dailyImageLimit: Number(body.updates.dailyImageLimit) || undefined } : {}),
       });
       await dbAddAuditLog({ user_id: admin.id, user_name: admin.name, action: 'user_update', target_type: 'user', target_id: body.userId, detail: `更新用户 ${body.userId}: ${JSON.stringify(body.updates)}`, ip_address: null, created_at: Date.now() });
       return NextResponse.json({ success: Boolean(user), user });

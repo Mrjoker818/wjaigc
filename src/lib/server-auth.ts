@@ -28,6 +28,18 @@ function normalizeApiPermissions(val: unknown): User['apiPermissions'] {
   return defaultPerms;
 }
 
+function parseJsonArray(val: unknown): string[] | undefined {
+  if (!val) return undefined;
+  if (Array.isArray(val)) return val as string[];
+  if (typeof val === 'string') {
+    try {
+      const parsed = JSON.parse(val);
+      if (Array.isArray(parsed)) return parsed as string[];
+    } catch { /* ignore */ }
+  }
+  return undefined;
+}
+
 const SYSTEM_DIR = getServerSystemDir();
 const USERS_PATH = path.join(SYSTEM_DIR, 'users.json');
 
@@ -47,6 +59,14 @@ const DEFAULT_ADMIN_PASSWORD = process.env.WUJIE_ADMIN_PASSWORD || (() => {
 
 type StoredUser = Omit<User, 'password'> & {
   passwordHash: string;
+  productType?: string;
+  chatModels?: string[];
+  imageModels?: string[];
+  dailyTokenLimit?: number;
+  monthlyTokenLimit?: number;
+  dailyImageLimit?: number;
+  avatar?: string;
+  nickname?: string;
 };
 
 interface StoredUsersFile {
@@ -191,6 +211,14 @@ function publicUser(user: StoredUser): User {
     name: user.name,
     role: user.role,
     status: user.status,
+    productType: user.productType,
+    chatModels: user.chatModels,
+    imageModels: user.imageModels,
+    dailyTokenLimit: user.dailyTokenLimit,
+    monthlyTokenLimit: user.monthlyTokenLimit,
+    dailyImageLimit: user.dailyImageLimit,
+    avatar: user.avatar,
+    nickname: user.nickname,
     apiPermissions: user.apiPermissions || defaultApiPermissions(),
     storageFolder: storageFolder(user.id),
     email: user.email,
@@ -204,6 +232,14 @@ function normalizeStoredUser(user: StoredUser): StoredUser {
     ...user,
     role: user.role || 'user',
     status: user.status || 'active',
+    productType: user.productType || undefined,
+    chatModels: user.chatModels || undefined,
+    imageModels: user.imageModels || undefined,
+    dailyTokenLimit: user.dailyTokenLimit ?? undefined,
+    monthlyTokenLimit: user.monthlyTokenLimit ?? undefined,
+    dailyImageLimit: user.dailyImageLimit ?? undefined,
+    avatar: user.avatar || undefined,
+    nickname: user.nickname || undefined,
     apiPermissions: user.apiPermissions || defaultApiPermissions(),
     storageFolder: storageFolder(user.id),
     updatedAt: user.updatedAt || Date.now(),
@@ -228,6 +264,14 @@ async function writeStore(file: StoredUsersFile): Promise<void> {
           id: u.id, name: u.name, passwordHash: u.password_hash,
           role: (u.role || 'user') as 'admin' | 'user',
           status: (u.status || 'active') as 'active' | 'disabled',
+          productType: (u as unknown as Record<string, unknown>).product_type as string | undefined,
+          chatModels: parseJsonArray((u as unknown as Record<string, unknown>).chat_models),
+          imageModels: parseJsonArray((u as unknown as Record<string, unknown>).image_models),
+          dailyTokenLimit: (u as unknown as Record<string, unknown>).daily_token_limit as number | undefined,
+          monthlyTokenLimit: (u as unknown as Record<string, unknown>).monthly_token_limit as number | undefined,
+          dailyImageLimit: (u as unknown as Record<string, unknown>).daily_image_limit as number | undefined,
+          avatar: (u as unknown as Record<string, unknown>).avatar as string | undefined,
+          nickname: (u as unknown as Record<string, unknown>).nickname as string | undefined,
           apiPermissions: normalizeApiPermissions(u.api_permissions),
           storageFolder: u.storage_folder || storageFolder(u.id),
           email: u.email || undefined,
@@ -251,6 +295,14 @@ async function writeStore(file: StoredUsersFile): Promise<void> {
     passwordHash: u.passwordHash,
     role: u.role || 'user',
     status: u.status || 'active',
+    productType: u.productType || null,
+    chatModels: u.chatModels || null,
+    imageModels: u.imageModels || null,
+    dailyTokenLimit: u.dailyTokenLimit ?? null,
+    monthlyTokenLimit: u.monthlyTokenLimit ?? null,
+    dailyImageLimit: u.dailyImageLimit ?? null,
+    avatar: u.avatar || null,
+    nickname: u.nickname || null,
     apiPermissions: u.apiPermissions || defaultApiPermissions(),
     storageFolder: u.storageFolder || storageFolder(u.id),
     email: u.email || null,
@@ -274,6 +326,14 @@ async function readStore(): Promise<StoredUsersFile> {
           passwordHash: u.password_hash,
           role: (u.role || 'user') as 'admin' | 'user',
           status: (u.status || 'active') as 'active' | 'disabled',
+          productType: (u as unknown as Record<string, unknown>).product_type as string | undefined,
+          chatModels: parseJsonArray((u as unknown as Record<string, unknown>).chat_models),
+          imageModels: parseJsonArray((u as unknown as Record<string, unknown>).image_models),
+          dailyTokenLimit: (u as unknown as Record<string, unknown>).daily_token_limit as number | undefined,
+          monthlyTokenLimit: (u as unknown as Record<string, unknown>).monthly_token_limit as number | undefined,
+          dailyImageLimit: (u as unknown as Record<string, unknown>).daily_image_limit as number | undefined,
+          avatar: (u as unknown as Record<string, unknown>).avatar as string | undefined,
+          nickname: (u as unknown as Record<string, unknown>).nickname as string | undefined,
           apiPermissions: normalizeApiPermissions(u.api_permissions),
           storageFolder: u.storage_folder || storageFolder(u.id),
           email: u.email || undefined,
@@ -315,6 +375,14 @@ async function readStore(): Promise<StoredUsersFile> {
               passwordHash: dbUser.password_hash,
               role: (dbUser.role || 'user') as 'admin' | 'user',
               status: (dbUser.status || 'active') as 'active' | 'disabled',
+              productType: (dbUser as unknown as Record<string, unknown>).product_type as string | undefined,
+              chatModels: parseJsonArray((dbUser as unknown as Record<string, unknown>).chat_models),
+              imageModels: parseJsonArray((dbUser as unknown as Record<string, unknown>).image_models),
+              dailyTokenLimit: (dbUser as unknown as Record<string, unknown>).daily_token_limit as number | undefined,
+              monthlyTokenLimit: (dbUser as unknown as Record<string, unknown>).monthly_token_limit as number | undefined,
+              dailyImageLimit: (dbUser as unknown as Record<string, unknown>).daily_image_limit as number | undefined,
+              avatar: (dbUser as unknown as Record<string, unknown>).avatar as string | undefined,
+              nickname: (dbUser as unknown as Record<string, unknown>).nickname as string | undefined,
               apiPermissions: normalizeApiPermissions(dbUser.api_permissions),
               storageFolder: dbUser.storage_folder || storageFolder(dbUser.id),
               email: dbUser.email || undefined,
@@ -362,6 +430,7 @@ export async function authenticateUser(input: {
   name: string;
   password: string;
   profile?: Partial<User>;
+  productType?: string; // the mode user selected on login
 }): Promise<User | null> {
   const name = input.name.trim();
   const password = input.password;
@@ -383,6 +452,7 @@ export async function authenticateUser(input: {
       passwordHash: await hashPassword(password),
       role,
       status: input.profile?.status || 'active',
+      productType: 'canvas,chat', // default admin has all access
       apiPermissions: input.profile?.apiPermissions || defaultApiPermissions(),
       storageFolder: storageFolder(id),
       email: input.profile?.email,
@@ -396,6 +466,16 @@ export async function authenticateUser(input: {
 
   const user = file.users[index];
   if (user.status === 'disabled') return null;
+
+  // Check product_type authorization
+  if (input.productType) {
+    const userProductTypes = (user.productType || '').split(',').map(s => s.trim()).filter(Boolean);
+    if (!userProductTypes.includes(input.productType)) {
+      console.log(`[auth] User "${name}" tried to login as "${input.productType}" but only has [${userProductTypes.join(',')}]`);
+      return null;
+    }
+  }
+
   const currentSecret = await authSecret();
   const { matched: passwordMatches, needsMigration } = verifyPassword(password, user.passwordHash, currentSecret);
   const adminBootstrapMatches = isDefaultAdmin && password === DEFAULT_ADMIN_PASSWORD;
@@ -423,7 +503,7 @@ export async function authenticateUser(input: {
   return publicUser(next);
 }
 
-type ManagedUserUpdates = Partial<Pick<User, 'name' | 'email' | 'status' | 'apiPermissions'>> & {
+type ManagedUserUpdates = Partial<Pick<User, 'name' | 'email' | 'status' | 'apiPermissions' | 'productType' | 'chatModels' | 'imageModels' | 'dailyTokenLimit' | 'monthlyTokenLimit' | 'dailyImageLimit' | 'avatar' | 'nickname'>> & {
   password?: string;
 };
 
@@ -436,6 +516,14 @@ export async function createManagedUser(input: {
   name: string;
   password: string;
   email?: string;
+  productType?: string;
+  chatModels?: string[];
+  imageModels?: string[];
+  dailyTokenLimit?: number;
+  monthlyTokenLimit?: number;
+  dailyImageLimit?: number;
+  avatar?: string;
+  nickname?: string;
   apiPermissions?: User['apiPermissions'];
 }): Promise<User> {
   const name = input.name.trim();
@@ -457,6 +545,14 @@ export async function createManagedUser(input: {
     passwordHash: await hashPassword(password),
     role: 'user',
     status: 'active',
+    productType: input.productType || undefined,
+    chatModels: input.chatModels || undefined,
+    imageModels: input.imageModels || undefined,
+    dailyTokenLimit: input.dailyTokenLimit ?? undefined,
+    monthlyTokenLimit: input.monthlyTokenLimit ?? undefined,
+    dailyImageLimit: input.dailyImageLimit ?? undefined,
+    avatar: input.avatar || undefined,
+    nickname: input.nickname || undefined,
     apiPermissions: input.apiPermissions || defaultApiPermissions(),
     storageFolder: storageFolder(id),
     email: input.email?.trim() || undefined,
@@ -492,6 +588,14 @@ export async function updateManagedUser(userId: string, updates: ManagedUserUpda
     ...(updates.name ? { name: updates.name.trim() } : {}),
     ...(updates.email !== undefined ? { email: updates.email.trim() || undefined } : {}),
     ...(updates.status ? { status: updates.status } : {}),
+    ...(updates.productType !== undefined ? { productType: updates.productType } : {}),
+    ...(updates.chatModels !== undefined ? { chatModels: updates.chatModels } : {}),
+    ...(updates.imageModels !== undefined ? { imageModels: updates.imageModels } : {}),
+    ...(updates.dailyTokenLimit !== undefined ? { dailyTokenLimit: updates.dailyTokenLimit } : {}),
+    ...(updates.monthlyTokenLimit !== undefined ? { monthlyTokenLimit: updates.monthlyTokenLimit } : {}),
+    ...(updates.dailyImageLimit !== undefined ? { dailyImageLimit: updates.dailyImageLimit } : {}),
+    ...(updates.avatar !== undefined ? { avatar: updates.avatar } : {}),
+    ...(updates.nickname !== undefined ? { nickname: updates.nickname } : {}),
     ...(updates.apiPermissions ? { apiPermissions: updates.apiPermissions } : {}),
     ...(updates.password ? { passwordHash: await hashPassword(updates.password) } : {}),
     storageFolder: storageFolder(current.id),

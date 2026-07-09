@@ -3,10 +3,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { User } from '@/lib/user-types';
 import { UserManager } from '@/lib/user-manager';
-import type { ChatSession, ChatMessage } from '@/types/simple-chat';
+import type { ChatSession } from '@/types/simple-chat';
 import { SimpleChatSidebar } from '@/components/simple-chat/sidebar';
 import ChatArea from '@/components/simple-chat/chat-area';
-import { SimpleChatLogin } from '@/components/simple-chat/login';
 
 export default function SimpleChatPage() {
   const [user, setUser] = useState<User | null>(null);
@@ -36,10 +35,6 @@ export default function SimpleChatPage() {
       setAuthChecked(true);
     };
     checkAuth();
-  }, []);
-
-  const handleLogin = useCallback((u: User) => {
-    setUser(u);
   }, []);
 
   const handleLogout = useCallback(async () => {
@@ -79,9 +74,21 @@ export default function SimpleChatPage() {
     );
   }
 
-  // 未登录
+  // 未登录 — 重定向到主页面进行双模式登录
   if (!user) {
-    return <SimpleChatLogin onLogin={handleLogin} />;
+    return (
+      <div className="flex h-screen items-center justify-center bg-[#0A0A0F]">
+        <div className="text-center">
+          <p className="text-muted-foreground mb-4">请先登录</p>
+          <button
+            onClick={() => { window.location.href = '/'; }}
+            className="px-6 py-2.5 bg-primary text-primary-foreground rounded-md text-sm font-semibold hover:brightness-110 transition-all"
+          >
+            前往登录
+          </button>
+        </div>
+      </div>
+    );
   }
 
   const activeSession = sessions.find(s => s.id === activeSessionId) ?? null;

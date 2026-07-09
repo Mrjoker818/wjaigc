@@ -512,6 +512,14 @@ export async function dbWriteUsers(users: Array<{
   passwordHash: string;
   role: string;
   status: string;
+  productType?: string | null;
+  chatModels?: string[] | null;
+  imageModels?: string[] | null;
+  dailyTokenLimit?: number | null;
+  monthlyTokenLimit?: number | null;
+  dailyImageLimit?: number | null;
+  avatar?: string | null;
+  nickname?: string | null;
   apiPermissions: Record<string, boolean>;
   storageFolder: string;
   email?: string | null;
@@ -519,24 +527,37 @@ export async function dbWriteUsers(users: Array<{
   updatedAt: number;
 }>): Promise<boolean> {
   try {
-    // Use UPSERT instead of DELETE ALL + INSERT to prevent data loss.
-    // When readStore() reads a partial user list (e.g., from stale file),
-    // DELETE ALL would erase users that exist in DB but not in the list.
     for (const u of users) {
       await execSql(`
-        INSERT INTO wujie_users (id, name, password_hash, role, status, api_permissions, storage_folder, email, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        INSERT INTO wujie_users (id, name, password_hash, role, status, product_type, chat_models, image_models, daily_token_limit, monthly_token_limit, daily_image_limit, avatar, nickname, api_permissions, storage_folder, email, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
         ON CONFLICT (id) DO UPDATE SET
           name = EXCLUDED.name,
           password_hash = EXCLUDED.password_hash,
           role = EXCLUDED.role,
           status = EXCLUDED.status,
+          product_type = EXCLUDED.product_type,
+          chat_models = EXCLUDED.chat_models,
+          image_models = EXCLUDED.image_models,
+          daily_token_limit = EXCLUDED.daily_token_limit,
+          monthly_token_limit = EXCLUDED.monthly_token_limit,
+          daily_image_limit = EXCLUDED.daily_image_limit,
+          avatar = EXCLUDED.avatar,
+          nickname = EXCLUDED.nickname,
           api_permissions = EXCLUDED.api_permissions,
           storage_folder = EXCLUDED.storage_folder,
           email = EXCLUDED.email,
           updated_at = EXCLUDED.updated_at
       `, [
         u.id, u.name, u.passwordHash, u.role, u.status,
+        u.productType || null,
+        u.chatModels ? JSON.stringify(u.chatModels) : null,
+        u.imageModels ? JSON.stringify(u.imageModels) : null,
+        u.dailyTokenLimit ?? null,
+        u.monthlyTokenLimit ?? null,
+        u.dailyImageLimit ?? null,
+        u.avatar || null,
+        u.nickname || null,
         JSON.stringify(u.apiPermissions), u.storageFolder,
         u.email || null, u.createdAt, u.updatedAt
       ]);
