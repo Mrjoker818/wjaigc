@@ -10,5 +10,9 @@ export default function SimpleChatLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return <>{children}</>;
+  return (
+    <div className="min-h-screen bg-background text-foreground antialiased">
+      {children}
+    </div>
+  );
 }

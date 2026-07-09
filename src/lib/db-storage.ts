@@ -484,11 +484,40 @@ interface DbUserReadRow {
   password_hash: string;
   role: string;
   status: string;
-  api_permissions: Record<string, boolean>;
+  product_type?: string | null;
+  chat_models?: string[] | string | null;
+  image_models?: string[] | string | null;
+  daily_token_limit?: number | null;
+  monthly_token_limit?: number | null;
+  daily_image_limit?: number | null;
+  avatar?: string | null;
+  nickname?: string | null;
+  api_permissions: Record<string, boolean> | string;
   storage_folder: string;
   email?: string;
   created_at: number;
   updated_at: number;
+}
+
+function parseJsonField(val: unknown): Record<string, boolean> {
+  if (!val) return {};
+  if (typeof val === 'object' && !Array.isArray(val)) return val as Record<string, boolean>;
+  if (typeof val === 'string') {
+    try { return JSON.parse(val); } catch { return {}; }
+  }
+  return {};
+}
+
+function parseJsonArrayField(val: unknown): string[] | undefined {
+  if (!val) return undefined;
+  if (Array.isArray(val)) return val as string[];
+  if (typeof val === 'string') {
+    try {
+      const parsed = JSON.parse(val);
+      if (Array.isArray(parsed)) return parsed as string[];
+    } catch { /* ignore */ }
+  }
+  return undefined;
 }
 
 export async function dbReadUsers(): Promise<DbUserReadRow[]> {
@@ -496,9 +525,10 @@ export async function dbReadUsers(): Promise<DbUserReadRow[]> {
     const result = await execSql('SELECT * FROM wujie_users ORDER BY created_at ASC');
     return (result.rows as unknown as DbUserReadRow[]).map(row => ({
       ...row,
-      api_permissions: typeof row.api_permissions === 'string' 
-        ? JSON.parse(row.api_permissions as string) 
-        : (row.api_permissions || {}),
+      product_type: row.product_type || undefined,
+      chat_models: parseJsonArrayField(row.chat_models),
+      image_models: parseJsonArrayField(row.image_models),
+      api_permissions: parseJsonField(row.api_permissions),
     }));
   } catch (e) {
     console.error('[db-storage] dbReadUsers error:', e);

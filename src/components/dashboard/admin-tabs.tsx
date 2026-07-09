@@ -807,7 +807,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                   <div className="space-y-1">
                     {(() => {
                       const chatModels = detailUser.chatModels || [];
-                      const availableChatModels = ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'o3', 'o4-mini', 'gemini-2.5-flash', 'gemini-2.5-pro', 'deepseek-v3', 'deepseek-r1', 'claude-sonnet-4-20250514'];
+                      const availableChatModels = Array.from(new Set(props.providers.filter(p => (p.model_type === 'chat' || p.model_type === 'llm') && p.isEnabled).flatMap(p => p.selected_models.length > 0 ? p.selected_models : (p.discovered_models || []))));
                       return availableChatModels.map(m => {
                         const has = chatModels.includes(m);
                         return (
@@ -832,7 +832,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                   <div className="space-y-1">
                     {(() => {
                       const imageModels = detailUser.imageModels || [];
-                      const availableImageModels = ['gpt-image-2', 'gpt-image-2-2k', 'gemini-3-pro-image-preview', 'gemini-3.1-flash-image-preview', 'dall-e-3', 'seedream-4.5', 'flux-pro'];
+                      const availableImageModels = Array.from(new Set(props.providers.filter(p => p.model_type === 'image' && p.isEnabled).flatMap(p => p.selected_models.length > 0 ? p.selected_models : (p.discovered_models || []))));
                       return availableImageModels.map(m => {
                         const has = imageModels.includes(m);
                         return (
