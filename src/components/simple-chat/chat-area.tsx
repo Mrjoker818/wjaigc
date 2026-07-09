@@ -10,6 +10,15 @@ import {
 import { User } from "@/lib/user-types";
 import { useTheme } from "@/app/simple-chat/providers";
 
+type ChatModelInfo = {
+  id: string;
+  name: string;
+  modelId: string;
+  originalName?: string;
+  providerId: string;
+  providerName?: string;
+  tags?: string[];
+};
 interface ChatAreaProps {
   user: User;
   project: SimpleChatProject | null;
@@ -89,7 +98,7 @@ export default function ChatArea({
   const [knowledgeNoteName, setKnowledgeNoteName] = useState('');
 
   // Models
-  const [chatModels, setChatModels] = useState<Array<{ id: string; name: string; originalName?: string; providerId: string; providerName?: string; tags?: string[] }>>([]);
+  const [chatModels, setChatModels] = useState<ChatModelInfo[]>([]);
   const [selectedModel, setSelectedModel] = useState(task?.model || "");
   const [selectedProviderId, setSelectedProviderId] = useState(task?.providerId || "");
 
@@ -161,7 +170,7 @@ export default function ChatArea({
   // Fetch image models
   const fetchImageModels = useCallback(async () => {
     fetch('/api/models?type=image').then(r => r.json()).then(data => {
-      const models: Array<{ id: string; name: string; providerId: string; providerName: string }> = [];
+      const models: ChatModelInfo[] = [];
       const rawModels = data.models || [];
       const providers = data.providers || [];
       const providerMap = new Map<string, string>();
@@ -170,7 +179,7 @@ export default function ChatArea({
       }
       for (const m of rawModels) {
         const providerName = providerMap.get(m.providerId) || '';
-        models.push({ id: m.id, name: m.name || m.id, providerId: m.providerId, providerName });
+        models.push({ id: m.id, modelId: m.id, name: m.name || m.id, providerId: m.providerId, providerName });
       }
       setImageModels(models);
       if (models.length > 0 && !selectedImageModel) {
@@ -180,7 +189,7 @@ export default function ChatArea({
     }).catch(() => {});
   }, []);
 
-  useEffect(() => { fetchChatModels(); fetchImageModels(); }, []);
+  useEffect(() => { /* models loaded above */ }, []);
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
   // Sync task to parent
@@ -538,7 +547,7 @@ export default function ChatArea({
                 className={`w-full text-left px-3 py-2 rounded-lg hover:bg-muted transition-colors ${m.modelId === selectedModel ? 'bg-primary/10' : ''}`}>
                 <div className="flex items-center gap-2">
                   <span className={`text-sm font-medium ${m.modelId === selectedModel ? 'text-primary' : ''}`}>{m.name}</span>
-                  {m.tags && m.tags.map(t => (
+                  {m.tags && m.tags.map((t: string) => (
                     <span key={t} className="text-[10px] bg-muted px-1.5 py-0.5 rounded-full text-muted-foreground">{t}</span>
                   ))}
                 </div>
@@ -553,7 +562,7 @@ export default function ChatArea({
         {/* Image Model Selector */}
         <div className="relative group">
           <button className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-muted hover:bg-muted/80 transition-colors text-xs">
-            <ImageIcon className="w-3.5 h-3.5 text-purple-400" />
+            <Image className="w-3.5 h-3.5 text-purple-400" />
             <span className="font-medium max-w-[100px] truncate">{imageModels.find(m => m.modelId === selectedImageModel)?.name || selectedImageModel || '图像模型'}</span>
             <ChevronDown className="w-3 h-3 text-muted-foreground" />
           </button>

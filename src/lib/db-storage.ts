@@ -154,11 +154,25 @@ export async function ensureCoreTables(): Promise<void> {
     `);
     await execSql(`CREATE INDEX IF NOT EXISTS idx_brand_assets_user ON wujie_brand_assets(user_id)`);
 
+    // 用户分组表
+    await execSql(`
+      CREATE TABLE IF NOT EXISTS wujie_user_groups (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        product_types JSONB DEFAULT '[]',
+        credit_quota INTEGER DEFAULT 0,
+        is_active BOOLEAN DEFAULT true,
+        created_at BIGINT NOT NULL,
+        updated_at BIGINT NOT NULL
+      )
+    `);
+
     // ─── 安全迁移：给已有表补充缺失列 ────────────────────────────────
     // CREATE TABLE IF NOT EXISTS 不会添加新列，需要单独 ALTER TABLE
     const migrations: [string, string, string][] = [
       ['wujie_users', 'credits', 'INTEGER DEFAULT 0'],
       ['wujie_users', 'email', 'TEXT DEFAULT \'\''],
+      ['wujie_users', 'group_id', 'TEXT DEFAULT NULL'],
       ['wujie_recharge_orders', 'bonus', 'INTEGER DEFAULT 0'],
       ['wujie_recharge_orders', 'transaction_id', 'TEXT DEFAULT \'\''],
       ['wujie_recharge_orders', 'expires_at', 'BIGINT'],
@@ -495,6 +509,7 @@ interface DbUserReadRow {
   api_permissions: Record<string, boolean> | string;
   storage_folder: string;
   email?: string;
+  group_id?: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -529,6 +544,7 @@ export async function dbReadUsers(): Promise<DbUserReadRow[]> {
       chat_models: parseJsonArrayField(row.chat_models),
       image_models: parseJsonArrayField(row.image_models),
       api_permissions: parseJsonField(row.api_permissions),
+      group_id: row.group_id || null,
     }));
   } catch (e) {
     console.error('[db-storage] dbReadUsers error:', e);
@@ -553,14 +569,15 @@ export async function dbWriteUsers(users: Array<{
   apiPermissions: Record<string, boolean>;
   storageFolder: string;
   email?: string | null;
+  groupId?: string | null;
   createdAt: number;
   updatedAt: number;
 }>): Promise<boolean> {
   try {
     for (const u of users) {
       await execSql(`
-        INSERT INTO wujie_users (id, name, password_hash, role, status, product_type, chat_models, image_models, daily_token_limit, monthly_token_limit, daily_image_limit, avatar, nickname, api_permissions, storage_folder, email, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+        INSERT INTO wujie_users (id, name, password_hash, role, status, product_type, chat_models, image_models, daily_token_limit, monthly_token_limit, daily_image_limit, avatar, nickname, api_permissions, storage_folder, email, group_id, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
         ON CONFLICT (id) DO UPDATE SET
           name = EXCLUDED.name,
           password_hash = EXCLUDED.password_hash,
@@ -577,6 +594,7 @@ export async function dbWriteUsers(users: Array<{
           api_permissions = EXCLUDED.api_permissions,
           storage_folder = EXCLUDED.storage_folder,
           email = EXCLUDED.email,
+          group_id = EXCLUDED.group_id,
           updated_at = EXCLUDED.updated_at
       `, [
         u.id, u.name, u.passwordHash, u.role, u.status,
@@ -589,7 +607,9 @@ export async function dbWriteUsers(users: Array<{
         u.avatar || null,
         u.nickname || null,
         JSON.stringify(u.apiPermissions), u.storageFolder,
-        u.email || null, u.createdAt, u.updatedAt
+        u.email || null,
+        u.groupId || null,
+        u.createdAt, u.updatedAt
       ]);
     }
     return true;
