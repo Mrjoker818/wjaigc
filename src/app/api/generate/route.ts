@@ -203,6 +203,14 @@ export async function POST(request: NextRequest) {
     sessionUser = await getSessionUser(request);
     const userId = sessionUser?.id ?? requestUserId ?? "anonymous";
 
+    // 图像模型权限校验：非管理员用户需检查 imageModels 授权列表
+    if (sessionUser && sessionUser.role !== 'admin') {
+      const allowed = sessionUser.imageModels;
+      if (allowed && allowed.length > 0 && !allowed.includes(model)) {
+        return NextResponse.json({ success: false, error: '您没有权限使用此图像模型，请联系管理员' }, { status: 403 });
+      }
+    }
+
     // ★ 解析参考图片 URL（转换为 API 可访问的格式）
     // 必须在 submitOnly 检查之前完成，否则后台请求无法获得可访问的参考图 URL
     // 优化：并行处理所有参考图，加速提交

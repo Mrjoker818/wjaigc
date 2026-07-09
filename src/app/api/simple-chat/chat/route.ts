@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { findProviderForModel } from '@/lib/server-api-config';
 import type { ApiKind } from '@/lib/server-api-config';
+import { getSessionUser } from '@/lib/server-auth';
 
 const DEFAULT_SYSTEM_PROMPT = `你是无界AI的智能助手。你可以：
 1. 回答用户的各种问题
@@ -24,6 +25,15 @@ export async function POST(request: NextRequest) {
   const provider = await findProviderForModel(model, 'chat' as ApiKind, providerId || undefined);
   if (!provider) {
     return Response.json({ error: '未找到可用的 API 提供商' }, { status: 400 });
+  }
+
+  // 模型权限校验：非管理员用户需检查 chatModels 授权列表
+  const user = await getSessionUser(request);
+  if (user && user.role !== 'admin') {
+    const allowed = user.chatModels;
+    if (allowed && allowed.length > 0 && !allowed.includes(model)) {
+      return Response.json({ error: '您没有权限使用此模型，请联系管理员' }, { status: 403 });
+    }
   }
 
   const apiKey = provider.apiKey;
