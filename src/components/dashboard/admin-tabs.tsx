@@ -84,6 +84,9 @@ interface AdminTabsProps {
   onToggleUserPermission: (user: AdminUser, key: string) => Promise<void>;
   onRechargeCredits: (userId: string, amount: number, description: string) => Promise<void>;
   onUpdateUserGroup?: (userId: string, groupId: string) => Promise<void>;
+  onUpdateUserModels?: (userId: string, chatModels: string[], imageModels: string[]) => Promise<void>;
+  adminChatModels?: { id: string; name: string; providerId: string }[];
+  adminImageModels?: { id: string; name: string; providerId: string }[];
   providers: AdminProvider[];
   onTabChange?: (tab: string) => void;
   onOpenApiManager?: () => void;
@@ -810,6 +813,79 @@ export default function AdminTabs(props: AdminTabsProps) {
                     })}
                   </div>
                 </div>
+                {/* 模型权限 */}
+                {props.adminChatModels && props.adminChatModels.length > 0 && (
+                  <div>
+                    <h4 className="text-sm font-semibold text-foreground mb-2">聊天模型权限</h4>
+                    <p className="text-[10px] text-muted-foreground mb-2">勾选的模型该用户才能使用，不勾选则使用全部模型</p>
+                    <div className="max-h-[200px] overflow-y-auto space-y-1.5 bg-muted/20 rounded-lg p-3">
+                      {props.adminChatModels.map(m => {
+                        const chatModels = detailUser.chatModels || [];
+                        const isAllowed = chatModels.length === 0 || chatModels.includes(m.id);
+                        const isCustom = chatModels.length > 0;
+                        return (
+                          <label key={m.id} className={`flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer transition-colors ${isCustom && !chatModels.includes(m.id) ? 'opacity-40 hover:opacity-70' : 'hover:bg-muted/50'}`}>
+                            <input
+                              type="checkbox"
+                              checked={isAllowed}
+                              onChange={async () => {
+                                let next: string[];
+                                if (chatModels.length === 0) {
+                                  next = props.adminChatModels!.map(x => x.id).filter(x => x !== m.id);
+                                } else if (chatModels.includes(m.id)) {
+                                  next = chatModels.filter(x => x !== m.id);
+                                } else {
+                                  next = [...chatModels, m.id];
+                                }
+                                if (next.length === props.adminChatModels!.length) next = [];
+                                if (props.onUpdateUserModels) await props.onUpdateUserModels(detailUser.id, next, detailUser.imageModels || []);
+                              }}
+                              className="w-3.5 h-3.5 rounded accent-primary"
+                            />
+                            <span className="text-xs text-foreground truncate">{m.name}</span>
+                            {isCustom && chatModels.includes(m.id) && <span className="text-[10px] text-primary/60 ml-auto shrink-0">已授权</span>}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                {props.adminImageModels && props.adminImageModels.length > 0 && (
+                  <div>
+                    <h4 className="text-sm font-semibold text-foreground mb-2">图像模型权限</h4>
+                    <p className="text-[10px] text-muted-foreground mb-2">勾选的模型该用户才能使用，不勾选则使用全部模型</p>
+                    <div className="max-h-[200px] overflow-y-auto space-y-1.5 bg-muted/20 rounded-lg p-3">
+                      {props.adminImageModels.map(m => {
+                        const imageModels = detailUser.imageModels || [];
+                        const isAllowed = imageModels.length === 0 || imageModels.includes(m.id);
+                        const isCustom = imageModels.length > 0;
+                        return (
+                          <label key={m.id} className={`flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer transition-colors ${isCustom && !imageModels.includes(m.id) ? 'opacity-40 hover:opacity-70' : 'hover:bg-muted/50'}`}>
+                            <input
+                              type="checkbox"
+                              checked={isAllowed}
+                              onChange={async () => {
+                                let next: string[];
+                                if (imageModels.length === 0) {
+                                  next = props.adminImageModels!.map(x => x.id).filter(x => x !== m.id);
+                                } else if (imageModels.includes(m.id)) {
+                                  next = imageModels.filter(x => x !== m.id);
+                                } else {
+                                  next = [...imageModels, m.id];
+                                }
+                                if (next.length === props.adminImageModels!.length) next = [];
+                                if (props.onUpdateUserModels) await props.onUpdateUserModels(detailUser.id, detailUser.chatModels || [], next);
+                              }}
+                              className="w-3.5 h-3.5 rounded accent-primary"
+                            />
+                            <span className="text-xs text-foreground truncate">{m.name}</span>
+                            {isCustom && imageModels.includes(m.id) && <span className="text-[10px] text-primary/60 ml-auto shrink-0">已授权</span>}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
                 {/* 产品类型 */}
                 <div>
                   <h4 className="text-sm font-semibold text-foreground mb-2">产品授权</h4>

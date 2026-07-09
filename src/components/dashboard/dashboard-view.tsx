@@ -2418,6 +2418,12 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               await fetch('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ action: 'update', userId, updates: { groupId: groupId || null } }) });
               await refreshAdmin();
             }}
+            onUpdateUserModels={async (userId: string, chatModels: string[], imageModels: string[]) => {
+              await fetch('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ action: 'update', userId, updates: { chatModels, imageModels } }) });
+              await refreshAdmin();
+            }}
+            adminChatModels={providers.filter(p => p.modelType === 'chat' || p.modelType === 'universal' || p.modelType === 'general').flatMap(p => (p.selectedModels || []).map((m: any) => ({ id: typeof m === 'string' ? m : m.id || m, name: typeof m === 'string' ? m : m.name || m.id || m, providerId: p.id })))}
+            adminImageModels={providers.filter(p => p.modelType === 'image').flatMap(p => (p.selectedModels || []).map((m: any) => ({ id: typeof m === 'string' ? m : m.id || m, name: typeof m === 'string' ? m : m.name || m.id || m, providerId: p.id })))}
           />
         )}
 
