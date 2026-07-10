@@ -758,7 +758,7 @@ export default function AdminTabs(props: AdminTabsProps) {
         {detailUser && (
           <div className="fixed inset-0 z-[200] flex">
             <div className="absolute inset-0 bg-black/50" onClick={() => setUserDetailId(null)} />
-            <div className="ml-auto w-[420px] h-full bg-card border-l border-border overflow-y-auto relative">
+            <div className="ml-auto w-[420px] h-full bg-card border-l border-border overflow-y-auto relative z-10">
               <div className="sticky top-0 z-10 bg-card/95 backdrop-blur-sm border-b border-border/50 px-6 py-4 flex items-center justify-between">
                 <h3 className="text-base font-semibold text-foreground">用户详情</h3>
                 <button onClick={() => setUserDetailId(null)} className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
@@ -794,24 +794,6 @@ export default function AdminTabs(props: AdminTabsProps) {
                     ))}
                   </select>
                   <p className="text-[10px] text-muted-foreground mt-1">分组的产品权限和积分配额会自动应用</p>
-                </div>
-                {/* 权限 */}
-                <div>
-                  <h4 className="text-sm font-semibold text-foreground mb-2">权限设置</h4>
-                  <div className="space-y-2">
-                    {['image', 'chat', 'video', '3d'].map(key => {
-                      const labels: Record<string, string> = { image: '图像生成', chat: 'AI 对话', video: '视频生成', '3d': '3D 模型' };
-                      const has = detailUser.api_permissions?.includes(key);
-                      return (
-                        <div key={key} className="flex items-center justify-between py-2 px-3 bg-muted/30 rounded-lg">
-                          <span className="text-sm text-foreground">{labels[key]}</span>
-                          <button onClick={() => props.onToggleUserPermission(detailUser, key)} className={`w-10 h-5 rounded-full relative transition-colors ${has ? 'bg-primary' : 'bg-muted'}`}>
-                            <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${has ? 'left-5.5 translate-x-0' : 'left-0.5'}`} />
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
                 </div>
                 {/* 模型权限 */}
                 <div className="space-y-3">
@@ -966,7 +948,7 @@ export default function AdminTabs(props: AdminTabsProps) {
         {showUserAddDrawer && (
           <div className="fixed inset-0 z-[200] flex">
             <div className="absolute inset-0 bg-black/50" onClick={() => setShowUserAddDrawer(false)} />
-            <div className="ml-auto w-[380px] h-full bg-card border-l border-border overflow-y-auto">
+            <div className="ml-auto relative z-10 w-[380px] h-full bg-card border-l border-border overflow-y-auto">
               <div className="px-6 py-4 border-b border-border/50 flex items-center justify-between">
                 <h3 className="text-base font-semibold text-foreground">新建用户</h3>
                 <button onClick={() => setShowUserAddDrawer(false)} className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
