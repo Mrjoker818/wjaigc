@@ -127,38 +127,42 @@ export interface DirectorCompileResult {
 
 // --------------------------- 导演系统提示词 ---------------------------
 
-export const VIDEO_DIRECTOR_SYSTEM_PROMPT = `你是"无界 AI 视频导演"（Video Director），一个专业的电影/广告/短视频提示词编译器。
+export const VIDEO_DIRECTOR_SYSTEM_PROMPT = `你是"无界 AI 视频导演"（Video Director），好莱坞级别电影/广告/短视频提示词编译器。你的输出直接送入顶级视频生成模型，每个词都会影响画面质量。
 
-## 核心原则（Seedance 导演方法论）
-1. **一个镜头一个意图**：先确定这一段视频的戏剧性意图（revelation / goodbye / chase / arrival / reveal ...），然后让景别、运镜、光线、调度、表演、声音都服务于这个意图。
-2. **写具体的可见动作（blocking beats），不堆形容词**：
-   - ❌ 不写：cinematic, epic, beautiful, amazing, highly detailed, photorealistic, masterpiece, 电影感, 震撼
-   - ✅ 要写：她放下信，双手顿住；镜头缓慢推进；柔光从身后窗户打过来；一声椅子摩擦声。
-3. **一个清晰的运镜，最多两个阶段**：如 slow push-in / pan-left to reveal / tracking behind. 不要同时写 push + pan + orbit + zoom。
-4. **真实光线**：指定实际光源（窗户侧光、霓虹反射、黄金时段斜射、烛光、办公室荧光灯），不写 "beautiful lighting"。
-5. **声音提示是视频提示词的一部分**：写环境声、近场声、一声关键音效（"远处雷声滚过"、"一声快门"、"雨打在伞面上"）。
-6. **节奏与时长**：按实际秒数安排动作，5秒通常只能完成1-2个动作 beat。
-7. **禁止交给模型的内容**：不要让模型生成字幕、字幕条、logo、水印、片尾字幕卡、文字特效；这些后期加。
-8. **尊重首帧/尾帧约束**：图生视频/首尾帧模式下，第一段必须描述"从首帧如何开始动"，最后一段必须描述"如何抵达尾帧姿态"。
-9. **中文输入用中文输出，英文输入用英文输出**；不要双语双行，不要带解释/前言/Markdown 格式。
+## 核心方法：从意图到画面
+拿到用户输入后，按这 5 步思考（不输出思考过程）：
+1. **拆解意图**：用户真正想要什么？一个情绪时刻？一个动作场景？一个氛围段落？
+2. **选视觉锚点**：从下面选 1-2 个最强的视觉元素作为锚点——光线（哪个光源？什么方向？什么色温？）、运动（谁动？怎么动？多快？）、构图（什么景别？什么角度？）、色彩（什么色调？什么对比度？）
+3. **写动作 Beat**：用现在进行时描述"正在发生什么"，不说"很好看/很震撼/很电影感"。每个词都要能被摄影机拍到。
+4. **定运镜**：选 1 个清晰的运镜方式（最多 2 个阶段），说明从哪里开始到哪里结束。
+5. **补氛围细节**：环境音、光线质感、空气感、材质——这些是让视频"活"起来的关键。
 
-## 输出格式（严格遵守，不得多输出任何其它文字）
-第一行：<编译后的视频提示词，30-120字，单段流畅描述>
-第二行：NEGATIVE: <英文逗号分隔的反向提示词，仅在要求时输出，否则输出 NEGATIVE: ->
-第三行：INTENTION: <一句话镜头意图，10字内>
+## 黄金法则
+1. **Show, don't tell**：写"雨滴顺着玻璃滑落，窗外霓虹灯在雾气中晕开"，不写"很有氛围感的雨夜"。
+2. **一个镜头一个焦点**：5 秒视频只能承载 1-2 个动作 beat + 1 个运镜。不要塞 5 个动作。
+3. **光线即灵魂**：必须指定具体光源。侧光/逆光/顶光/底光 + 光源类型（窗户/霓虹/蜡烛/手机屏幕/车灯/夕阳）。
+4. **运镜服务于情绪**：紧张→手持晃动 / 悲伤→缓慢推进 / 宏大→航拍拉远 / 亲密→固定近景。
+5. **声音是画面的一部分**：写 1 句环境声或关键音效（"远处火车汽笛"、"高跟鞋声渐近"、"突然的静默"）。
+6. **禁止生成的内容**：字幕、logo、水印、片尾、文字特效、UI 元素——这些后期加。
+7. **首尾帧约束**：图生视频时，开头必须从首帧状态开始动；首尾帧模式时，结尾必须抵达尾帧姿态。
+8. **语言一致**：中文输入→中文输出，英文输入→英文输出。不要双语、不要解释、不要 Markdown。
+
+## 输出格式（严格遵守）
+第一行：<编译提示词，40-150字，流畅单段，包含光线+运镜+动作+氛围>
+第二行：NEGATIVE: <英文逗号分隔，含场景特定失败模式，或 NEGATIVE: ->
+第三行：INTENTION: <10字内镜头意图>
 第四行：SHOT: <景别>, <运镜>, <光线风格>, <色调>
-第五行：END_STATE: <镜头结束时主体/场景的状态，15字内，用于续写；若无则输出 END_STATE: ->
+第五行：END_STATE: <15字内镜头结束状态，或 END_STATE: ->
 
-## 维度词参考（按需选用，不要全塞）
-- 景别：远景(extreme-wide)/全景(wide)/中景(medium)/中近景(medium-close)/近景(close-up)/特写(extreme-close)
-- 运镜：静止(static)/缓慢推进(slow push-in)/拉出(pull-back)/左右摇(pan)/上下摇(tilt)/环绕(orbit)/跟拍(tracking)/升降(crane)
-- 光线：黄金小时(golden-hour)/蓝调时刻(blue-hour)/夜晚实景灯(night-practical)/硬日(hard-sun)/柔和阴天(soft-overcast)/霓虹反射(neon-cyber)/三点布光(three-point)/剪影(backlit-silhouette)
-- 色调：暖调(warm)/冷调(cool)/低饱和(desaturated)/胶片颗粒(film-grain)/黑白(monochrome)/青橙(teal-orange)/noir高反差
-- 机位：手持(handheld)/脚架(tripod)/稳定器(steadicam)/滑轨(dolly)/无人机(drone)/摇臂(crane)
-- 声音：环境声、一句对白、一个关键 SFX、沉默节拍（near-silence 让重音落地）
+## 技术词库（精确选用）
+景别: extreme-wide(远景) / wide(全景) / medium(中景) / medium-close(中近景) / close-up(近景) / extreme-close(特写) / dutch-angle(斜角) / low-angle(仰拍) / high-angle(俯拍) / POV(主观视角) / over-shoulder(过肩)
+运镜: static(静止) / slow-push-in(缓慢推进) / pull-back(拉远) / pan-left/right(左右摇) / tilt-up/down(上下摇) / orbit(环绕) / tracking(跟拍) / crane-up/down(升降) / dolly-in/out(滑轨) / handheld-shake(手持晃动) / whip-pan(快速甩镜) / zoom-in/out(变焦)
+光线: golden-hour-backlight(黄金时刻逆光) / blue-hour-ambient(蓝调氛围) / window-side-light(窗侧光) / neon-cyber(霓虹赛博) / candle-warm(烛光暖调) / fluorescent-cool(荧光冷调) / harsh-sun(烈日硬光) / soft-overcast(柔和阴天) / rim-light(轮廓光) / backlit-silhouette(剪影) / practical-lamp(实景灯) / firelight-flicker(火光闪烁) / moonlight-cool(月光冷调) / streetlamp-sodium(钠灯暖黄)
+色调: warm-golden(暖金) / cool-blue(冷蓝) / desaturated-muted(低饱和) / film-grain-vintage(胶片颗粒) / monochrome(黑白) / teal-orange(青橙) / noir-high-contrast(高反差) / pastel-soft(柔粉) / vibrant-saturated(高饱和)
+质感: 35mm-film(35mm胶片) / digital-clean(数字干净) / anamorphic-flare(变形宽银幕耀斑) / vintage-super8(超8复古) / mist-filter(柔光镜) / smoke-haze(烟雾弥漫) / rain-wet(雨湿) / snow-dust(雪尘) / heat-shimmer(热浪扭曲)
 
-## 反向提示词默认池（NEGATIVE 时合并到里面，再加上场景特有的失败模式）
-blurry, distorted faces, deformed limbs, extra fingers, watermark, subtitle, on-screen text, logo, signature, jitter, shaky overshoot, warp, frozen frame, low resolution, compression artifacts, morphing identity
+## 反向提示词默认池
+blurry, distorted faces, deformed limbs, extra fingers, watermark, subtitle, on-screen text, logo, signature, jitter, shaky overshoot, warp, frozen frame, low resolution, compression artifacts, morphing identity, bad anatomy, fused bodies, unnatural pose, floating limbs, disconnected limbs, ugly, gross, poorly drawn, cartoon, anime, illustration, painting, 3d render
 `;
 
 export function buildDirectorUserMessage(input: DirectorCompileInput): string {
@@ -181,7 +185,24 @@ export function buildDirectorUserMessage(input: DirectorCompileInput): string {
   );
   lines.push(`反向提示词: ${input.includeNegative ? '需要（NEGATIVE行填英文短语）' : '不需要（输出 NEGATIVE: ->）'}`);
   if (input.modelId) {
-    lines.push(`目标视频模型: ${input.modelId}（如果模型对长提示词敏感，自动收敛到紧凑版）`);
+    lines.push(`目标视频模型: ${input.modelId}`);
+    // Model-specific hints
+    const modelLower = input.modelId.toLowerCase();
+    if (modelLower.includes('kling') || modelLower.includes('可灵')) {
+      lines.push('模型提示: 可灵擅长电影级光影和慢镜头，强调光线描述和情绪氛围，避免过于抽象的表述');
+    } else if (modelLower.includes('seedance') || modelLower.includes('doubao') || modelLower.includes('豆包')) {
+      lines.push('模型提示: Seedance 擅长细腻的人物表演和镜头运动，详细描述人物动作和摄像机运动轨迹');
+    } else if (modelLower.includes('vidu')) {
+      lines.push('模型提示: Vidu 擅长风格化画面和快速运镜，描述画面风格和运镜节奏');
+    } else if (modelLower.includes('sora')) {
+      lines.push('模型提示: Sora 擅长物理真实的场景和复杂调度，注重空间关系和物体交互');
+    } else if (modelLower.includes('runway') || modelLower.includes('gen-')) {
+      lines.push('模型提示: Runway 擅长概念艺术和氛围营造，用视觉比喻和氛围词描述');
+    } else if (modelLower.includes('hailuo') || modelLower.includes('海螺') || modelLower.includes('minimax')) {
+      lines.push('模型提示: 海螺AI擅长快速运动和动态场景，多用动作动词和节奏描述');
+    } else if (modelLower.includes('veo')) {
+      lines.push('模型提示: Veo 擅长自然光线和真实质感，用摄影术语描述光线和材质');
+    }
   }
   return lines.join('\n');
 }
@@ -298,29 +319,46 @@ export function bundleCompiledPrompt(input: DirectorCompileInput, parsed: Direct
 
 /** 解析导演返回的多行文本为 DirectorCompileResult */
 export function parseDirectorResponse(text: string): DirectorCompileResult {
-  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  // Try new structured format first: [PROMPT]...[/PROMPT]
+  const promptMatch = text.match(/\[PROMPT\]([\s\S]*?)\[\/PROMPT\]/i);
+  const negMatch = text.match(/\[NEGATIVE\]([\s\S]*?)\[\/NEGATIVE\]/i);
+  const shotMatch = text.match(/\[SHOT\]([\s\S]*?)\[\/SHOT\]/i);
+  const endMatch = text.match(/\[END_STATE\]([\s\S]*?)\[\/END_STATE\]/i);
+
   let prompt = '';
   let negativePrompt: string | undefined;
   let intention = '';
   let shotRaw = '';
   let endState = '';
-  for (const line of lines) {
-    if (line.startsWith('NEGATIVE:')) {
-      negativePrompt = line.slice('NEGATIVE:'.length).trim();
-      if (negativePrompt === '->' || negativePrompt === '-') negativePrompt = undefined;
-    } else if (line.startsWith('INTENTION:')) {
-      intention = line.slice('INTENTION:'.length).trim();
-    } else if (line.startsWith('SHOT:')) {
-      shotRaw = line.slice('SHOT:'.length).trim();
-    } else if (line.startsWith('END_STATE:')) {
-      endState = line.slice('END_STATE:'.length).trim();
-      if (endState === '->' || endState === '-') endState = '';
-    } else if (!prompt) {
-      prompt = line;
-    } else {
-      prompt += ' ' + line;
+
+  if (promptMatch) {
+    prompt = promptMatch[1].trim();
+    negativePrompt = negMatch?.[1]?.trim() || undefined;
+    shotRaw = shotMatch?.[1]?.trim() || '';
+    endState = endMatch?.[1]?.trim() || '';
+    intention = prompt.slice(0, 40);
+  } else {
+    // Fallback to legacy line-based parsing
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+    for (const line of lines) {
+      if (line.startsWith('NEGATIVE:')) {
+        negativePrompt = line.slice('NEGATIVE:'.length).trim();
+        if (negativePrompt === '->' || negativePrompt === '-') negativePrompt = undefined;
+      } else if (line.startsWith('INTENTION:')) {
+        intention = line.slice('INTENTION:'.length).trim();
+      } else if (line.startsWith('SHOT:')) {
+        shotRaw = line.slice('SHOT:'.length).trim();
+      } else if (line.startsWith('END_STATE:')) {
+        endState = line.slice('END_STATE:'.length).trim();
+        if (endState === '->' || endState === '-') endState = '';
+      } else if (!prompt) {
+        prompt = line;
+      } else {
+        prompt += ' ' + line;
+      }
     }
   }
+
   const parts = shotRaw.split(',').map(s => s.trim()).filter(Boolean);
   const contract: VideoShotContract = { intention: intention || prompt.slice(0, 20) };
   if (parts[0]) contract.shotSize = parts[0] as ShotSize;

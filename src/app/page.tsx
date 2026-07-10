@@ -3957,7 +3957,15 @@ function CanvasApp() {
           connections={canvasConnections}
           onConnectionsChange={setCanvasConnections}
           versionHistoryManager={treeHistoryRef.current}
-          onOpenVideoPanel={() => setShowVideoPanel(true)}
+          onOpenVideoPanel={() => {
+            // 如果面板已打开（可能正在生成中），先关闭再打开，支持多任务并发
+            if (showVideoPanel) {
+              setShowVideoPanel(false);
+              setTimeout(() => setShowVideoPanel(true), 50);
+            } else {
+              setShowVideoPanel(true);
+            }
+          }}
         />
       </div>
 
