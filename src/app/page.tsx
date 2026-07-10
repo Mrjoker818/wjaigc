@@ -509,6 +509,40 @@ function CanvasApp() {
     });
   }, []);
 
+  // 从 simple-chat 传来的图片桥接
+  useEffect(() => {
+    const bridgeKey = 'wujie_canvas_bridge';
+    try {
+      const raw = localStorage.getItem(bridgeKey);
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      localStorage.removeItem(bridgeKey);
+      if (!data?.images || !Array.isArray(data.images) || data.images.length === 0) return;
+      const timestamp = Date.now();
+      const newImages: CanvasImage[] = data.images.map((url: string, idx: number) => ({
+        id: `chat-bridge-${timestamp}-${idx}`,
+        url,
+        prompt: '',
+        model: '',
+        quality: 'standard',
+        aspectRatio: '1:1',
+        stylePreset: '',
+        category: 'general',
+        size: '1024x1024',
+        x: 200 + (idx % 5) * 220,
+        y: 200 + Math.floor(idx / 5) * 220,
+        width: 512,
+        height: 512,
+        originalWidth: 1024,
+        originalHeight: 1024,
+        isAiGenerated: true,
+      }));
+      setImagesRaw(prev => [...prev, ...newImages]);
+    } catch {
+      // ignore parse errors
+    }
+  }, []);
+
   // 应用主题
   useEffect(() => {
     const root = document.documentElement;

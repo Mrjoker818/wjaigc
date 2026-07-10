@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { Menu, Paperclip, ArrowUp, Globe, X, Settings, Bot, User as UserIcon, BookOpen, ChevronDown, Copy, RefreshCw, Trash2, Zap, Sun, Moon, FileText, Database, Sparkles, MessageSquarePlus, Minimize2, Maximize2, MoreHorizontal, Telescope, FileCode, GitBranch, Share2, Search, Eye, Image, Download } from "lucide-react";
+import { Menu, Paperclip, ArrowUp, Globe, X, Settings, Bot, User as UserIcon, BookOpen, ChevronDown, Copy, RefreshCw, Trash2, Zap, Sun, Moon, FileText, Database, Sparkles, MessageSquarePlus, Minimize2, Maximize2, MoreHorizontal, Telescope, FileCode, GitBranch, Share2, Search, Eye, Image, Download, Send } from "lucide-react";
 import {
   SimpleChatProject, SimpleChatTask, SimpleChatMessage, SimpleChatAgent, ChatAttachment,
   ProjectInstructions, ProjectKnowledgeItem,
@@ -540,8 +540,12 @@ export default function ChatArea({
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
   }, [handleSend]);
 
-  // PPTX download handler
+  // Office file download handlers
   const [downloadingPptx, setDownloadingPptx] = useState(false);
+  const [downloadingExcel, setDownloadingExcel] = useState(false);
+  const [downloadingWord, setDownloadingWord] = useState(false);
+  const [downloadingMindmap, setDownloadingMindmap] = useState(false);
+  const [downloadingFlowchart, setDownloadingFlowchart] = useState(false);
   const downloadPptx = useCallback(async (content: string) => {
     // 提取 JSON 代码块
     const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
@@ -583,6 +587,93 @@ export default function ChatArea({
   // Check if message contains PPT JSON
   const hasPptJson = useCallback((content: string) => {
     return /```json\s*[\s\S]*?"slides"\s*:\s*\[/.test(content);
+  }, []);
+
+  const hasExcelJson = useCallback((content: string) => {
+    return /```json\s*[\s\S]*?"sheets"\s*:\s*\[/.test(content);
+  }, []);
+
+  const hasWordJson = useCallback((content: string) => {
+    return /```json\s*[\s\S]*?"sections"\s*:\s*\[/.test(content);
+  }, []);
+
+  const hasMindmapJson = useCallback((content: string) => {
+    return /```json\s*[\s\S]*?"root"\s*:\s*\{/.test(content) && /```json\s*[\s\S]*?"text"\s*:/.test(content);
+  }, []);
+
+  const hasFlowchartJson = useCallback((content: string) => {
+    return /```json\s*[\s\S]*?"mermaid"\s*:/.test(content);
+  }, []);
+
+  const extractJsonFromContent = useCallback((content: string): object | null => {
+    const match = content.match(/```json\s*([\s\S]*?)\s*```/);
+    if (!match) return null;
+    try { return JSON.parse(match[1]); } catch { return null; }
+  }, []);
+
+  const downloadFile = useCallback(async (url: string, filename: string) => {
+    try {
+      const resp = await fetch(url);
+      const blob = await resp.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = filename;
+      link.click();
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (e) {
+      console.error('Download failed:', e);
+    }
+  }, []);
+
+  const downloadExcel = useCallback(async (data: object) => {
+    const resp = await fetch('/api/excel/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    if (!resp.ok) return;
+    const blob = await resp.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = `${(data as Record<string,unknown>).title || 'workbook'}.xlsx`; a.click();
+    window.URL.revokeObjectURL(url);
+  }, []);
+
+  const downloadWord = useCallback(async (data: object) => {
+    const resp = await fetch('/api/word/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    if (!resp.ok) return;
+    const blob = await resp.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = `${(data as Record<string,unknown>).title || 'document'}.docx`; a.click();
+    window.URL.revokeObjectURL(url);
+  }, []);
+
+  const downloadMindmap = useCallback(async (data: object) => {
+    const resp = await fetch('/api/mindmap/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    if (!resp.ok) return;
+    const blob = await resp.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = `${(data as Record<string,unknown>).title || 'mindmap'}.html`; a.click();
+    window.URL.revokeObjectURL(url);
+  }, []);
+
+  const downloadFlowchart = useCallback(async (data: object) => {
+    const resp = await fetch('/api/flowchart/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    if (!resp.ok) return;
+    const blob = await resp.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = `${(data as Record<string,unknown>).title || 'flowchart'}.html`; a.click();
+    window.URL.revokeObjectURL(url);
+  }, []);
+
+  const sendImagesToCanvas = useCallback((imageUrls: string[]) => {
+    try {
+      const existing = JSON.parse(localStorage.getItem('wujie_canvas_bridge') || '[]');
+      const merged = [...existing, ...imageUrls];
+      localStorage.setItem('wujie_canvas_bridge', JSON.stringify(merged));
+      const toast = document.createElement('div');
+      toast.className = 'fixed bottom-20 right-6 z-[9999] bg-blue-600 text-white px-4 py-3 rounded-lg shadow-lg cursor-pointer hover:bg-blue-700 transition-colors text-sm flex items-center gap-2';
+      toast.innerHTML = `<span>已添加 ${imageUrls.length} 张图片</span><span class="underline">前往画布查看</span>`;
+      toast.onclick = () => { window.open('/', '_blank'); toast.remove(); };
+      document.body.appendChild(toast);
+      setTimeout(() => toast.remove(), 8000);
+    } catch { /* ignore */ }
   }, []);
 
   // Message operations
@@ -826,6 +917,36 @@ export default function ChatArea({
                       <button onClick={() => downloadPptx(msg.content)} disabled={downloadingPptx}
                         className="p-1 rounded hover:bg-primary/10 text-primary transition-colors" title="下载 PPTX">
                         {downloadingPptx ? <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" /> : <Download className="w-3 h-3" />}
+                      </button>
+                    )}
+                    {hasExcelJson(msg.content) && (
+                      <button onClick={() => { const d = extractJsonFromContent(msg.content); if (d) downloadExcel(d); }}
+                        className="p-1 rounded hover:bg-green-500/10 text-green-500 transition-colors" title="下载 Excel">
+                        <Download className="w-3 h-3" />
+                      </button>
+                    )}
+                    {hasWordJson(msg.content) && (
+                      <button onClick={() => { const d = extractJsonFromContent(msg.content); if (d) downloadWord(d); }}
+                        className="p-1 rounded hover:bg-blue-500/10 text-blue-500 transition-colors" title="下载 Word">
+                        <Download className="w-3 h-3" />
+                      </button>
+                    )}
+                    {hasMindmapJson(msg.content) && (
+                      <button onClick={() => { const d = extractJsonFromContent(msg.content); if (d) downloadMindmap(d); }}
+                        className="p-1 rounded hover:bg-amber-500/10 text-amber-500 transition-colors" title="下载思维导图">
+                        <Download className="w-3 h-3" />
+                      </button>
+                    )}
+                    {hasFlowchartJson(msg.content) && (
+                      <button onClick={() => { const d = extractJsonFromContent(msg.content); if (d) downloadFlowchart(d); }}
+                        className="p-1 rounded hover:bg-purple-500/10 text-purple-500 transition-colors" title="下载流程图">
+                        <Download className="w-3 h-3" />
+                      </button>
+                    )}
+                    {msg.images && msg.images.length > 0 && (
+                      <button onClick={() => sendImagesToCanvas(msg.images || [])}
+                        className="p-1 rounded hover:bg-blue-500/10 text-blue-500 transition-colors" title="添加到画布">
+                        <Send className="w-3 h-3" />
                       </button>
                     )}
                   </div>
