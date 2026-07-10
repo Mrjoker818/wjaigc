@@ -437,8 +437,8 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ error: 'Image too large (max 50MB)' }, { status: 400 });
         }
 
-        // ★ 自动压缩：大图（>2MB）自动转 JPEG 缩小体积，保留透明通道的用 PNG
-        if (buffer.length > 2 * 1024 * 1024 && !finalExt.includes('svg') && !finalExt.includes('gif')) {
+        // ★ 自动压缩：仅压缩超大图（>15MB），4K图片（通常5-12MB PNG）保持原始质量
+        if (buffer.length > 15 * 1024 * 1024 && !finalExt.includes('svg') && !finalExt.includes('gif')) {
           try {
             const metadata = await sharp(buffer).metadata();
             // 检测是否真正有透明像素（而非仅 channels===4 或 hasAlpha 标记）

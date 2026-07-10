@@ -377,11 +377,12 @@ export async function persistRemoteImage(
       }
       imageBuffer = Buffer.from(await resp.arrayBuffer());
       
-      // Compress large images (>3MB) to reduce storage and improve browser loading
+      // Compress extremely large images (>15MB) to reduce storage and improve browser loading
       // Note: DO NOT downscale - preserve original resolution for quality
+      // 4K images (typically 5-12MB as PNG) should NOT be compressed to preserve detail
       let wasCompressedAsPng = false;
       let wasCompressedAsJpeg = false;
-      if (imageBuffer.length > 3 * 1024 * 1024) {
+      if (imageBuffer.length > 15 * 1024 * 1024) {
         try {
           const sharp = (await import('sharp')).default;
           const metadata = await sharp(imageBuffer).metadata();
