@@ -10324,7 +10324,7 @@ export function InfiniteCanvas({
                           {srcImages.map(r => `R${r.refNumber}`).join(' + ')} →
                         </span>
                         <span className="text-xs" style={{ color: `${accentColor}66` }}>
-                          {group.toolbar.aspectRatio} {calculateActualPixels(group.toolbar.aspectRatio, group.toolbar.quality, group.toolbar.model)}
+                          {group.toolbar.aspectRatio}
                         </span>
                       </>
                     )}
@@ -10422,7 +10422,7 @@ export function InfiniteCanvas({
                         }}
                       >
                         {supportedRatios.map(r => (
-                          <option key={r} value={r} className={isMonochrome ? 'bg-white text-gray-700' : 'bg-[#1a1d26] text-text-bright'}>{r} ({calculateActualPixels(r, currentResolution, group.toolbar.model)})</option>
+                          <option key={r} value={r} className={isMonochrome ? 'bg-white text-gray-700' : 'bg-[#1a1d26] text-text-bright'}>{r}</option>
                         ))}
                       </select>
                       {/* 分辨率档位 */}
@@ -14615,7 +14615,7 @@ export function InfiniteCanvas({
                             setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, aspectRatio: newAr, size: newSize } } : g));
                           }}
                         >
-                          {hcgRatios.map(r => <option key={r} value={r}>{r} ({calculateActualPixels(r, curResolution, hcg.toolbar.model)})</option>)}
+                          {hcgRatios.map(r => <option key={r} value={r}>{r}</option>)}
                         </select>
                       </div>
                       {(paramType === 'both' || paramType === 'resolution') && (
