@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { Menu, Paperclip, ArrowUp, Globe, X, Settings, Bot, User as UserIcon, BookOpen, ChevronDown, Copy, RefreshCw, Trash2, Zap, Sun, Moon, FileText, Database, Sparkles, MessageSquarePlus, Minimize2, Maximize2, MoreHorizontal, Telescope, FileCode, GitBranch, Share2, Search, Eye, Image } from "lucide-react";
+import { Menu, Paperclip, ArrowUp, Globe, X, Settings, Bot, User as UserIcon, BookOpen, ChevronDown, Copy, RefreshCw, Trash2, Zap, Sun, Moon, FileText, Database, Sparkles, MessageSquarePlus, Minimize2, Maximize2, MoreHorizontal, Telescope, FileCode, GitBranch, Share2, Search, Eye, Image, Download } from "lucide-react";
 import {
   SimpleChatProject, SimpleChatTask, SimpleChatMessage, SimpleChatAgent, ChatAttachment,
   ProjectInstructions, ProjectKnowledgeItem,
@@ -540,6 +540,51 @@ export default function ChatArea({
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
   }, [handleSend]);
 
+  // PPTX download handler
+  const [downloadingPptx, setDownloadingPptx] = useState(false);
+  const downloadPptx = useCallback(async (content: string) => {
+    // 提取 JSON 代码块
+    const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
+    if (!jsonMatch) {
+      alert('未找到幻灯片 JSON 数据。请先用 PPT大师 Skill 生成 PPT 内容。');
+      return;
+    }
+    try {
+      setDownloadingPptx(true);
+      const data = JSON.parse(jsonMatch[1]);
+      if (!data.slides || !Array.isArray(data.slides)) {
+        alert('JSON 格式无效：缺少 slides 数组');
+        return;
+      }
+      const res = await fetch('/api/ppt/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: '生成失败' }));
+        alert(`PPTX 生成失败：${err.error || res.statusText}`);
+        return;
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${data.title || '演示文稿'}.pptx`;
+      link.click();
+      window.URL.revokeObjectURL(url);
+    } catch (e: any) {
+      alert(`解析失败：${e.message}`);
+    } finally {
+      setDownloadingPptx(false);
+    }
+  }, []);
+
+  // Check if message contains PPT JSON
+  const hasPptJson = useCallback((content: string) => {
+    return /```json\s*[\s\S]*?"slides"\s*:\s*\[/.test(content);
+  }, []);
+
   // Message operations
   const copyMessage = (content: string) => { navigator.clipboard.writeText(content); };
   const regenerateLast = () => { if (messages.length < 2) return; const lastUser = [...messages].reverse().find(m => m.role === 'user'); if (lastUser) { setMessages(prev => prev.slice(0, -2)); setInput(lastUser.content); setTimeout(() => { const btn = document.getElementById('send-btn') as HTMLButtonElement; btn?.click(); }, 50); } };
@@ -777,6 +822,12 @@ export default function ChatArea({
                     <button onClick={toImagePrompt} className="p-1 rounded hover:bg-muted text-muted-foreground" title="转生图提示词"><Sparkles className="w-3 h-3" /></button>
                     <button onClick={() => branchFromMessage(msg.id)} className="p-1 rounded hover:bg-muted text-muted-foreground" title="从此分支"><GitBranch className="w-3 h-3" /></button>
                     <button onClick={() => saveAsArtifact(msg)} className="p-1 rounded hover:bg-muted text-muted-foreground" title="保存为 Artifact"><FileCode className="w-3 h-3" /></button>
+                    {hasPptJson(msg.content) && (
+                      <button onClick={() => downloadPptx(msg.content)} disabled={downloadingPptx}
+                        className="p-1 rounded hover:bg-primary/10 text-primary transition-colors" title="下载 PPTX">
+                        {downloadingPptx ? <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" /> : <Download className="w-3 h-3" />}
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

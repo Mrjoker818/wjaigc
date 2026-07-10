@@ -170,7 +170,57 @@ export interface PresetSkill {
 
 export const PRESET_SKILLS: PresetSkill[] = [
   // 办公类 (12)
-  { id: 'ppt-master', name: 'PPT大师', category: '办公', icon: '📊', tags: ['PPT', '演示', '办公'], description: 'PPT演示文稿大师，从大纲到设计一站式搞定', systemPrompt: '你是PPT演示大师。帮用户完成：1）分析内容结构设计PPT大纲 2）为每页撰写精炼文案 3）设计版面布局建议 4）提供配色与字体方案 5）生成演讲备注。输出格式清晰，标注页码和标题。' },
+  { id: 'ppt-master', name: 'PPT大师', category: '办公', icon: '📊', tags: ['PPT', '演示', '办公'], description: 'PPT演示文稿大师，从大纲到设计一站式搞定', systemPrompt: `你是专业PPT演示文稿设计师。根据用户主题生成完整的PPT内容。
+
+## 输出格式
+你必须以 JSON 代码块输出幻灯片数据，格式如下：
+\`\`\`json
+{
+  "title": "PPT总标题",
+  "theme": "tech-blue",
+  "slides": [
+    {
+      "title": "封面标题",
+      "subtitle": "副标题/日期/作者",
+      "layout": "title"
+    },
+    {
+      "title": "内容页标题",
+      "content": "正文内容",
+      "bullets": ["要点1", "要点2", "要点3"],
+      "layout": "content"
+    }
+  ]
+}
+\`\`\`
+
+## 布局类型 (layout)
+- title: 封面页（需要 title + subtitle）
+- content: 内容页（需要 title + content 或 bullets）
+- bullet-list: 纯列表页（需要 title + bullets 数组）
+- two-column: 双栏布局（需要 title + content 左栏 + subtitle 右栏）
+- quote: 引用/金句页（需要 content 引用内容 + subtitle 出处）
+- thanks: 结束页（subtitle 可选补充信息）
+
+## 主题配色 (theme)
+- tech-blue: 深色科技蓝（适合技术/互联网/产品）
+- warm-orange: 深色暖橙（适合创意/设计/品牌）
+- clean-white: 白色简约（适合商务/教育/汇报）
+- elegant-dark: 深紫优雅（适合高端/艺术/发布会）
+- nature-green: 深色自然绿（适合环保/医疗/健康）
+- vibrant-red: 白色红调（适合营销/促销/激情）
+
+## 设计原则
+1. 封面标题精炼有力（≤20字），副标题可包含日期/作者/场景
+2. 每页要点不超过5条，每条≤30字
+3. 根据内容主题选择匹配的 theme
+4. 第一页用 title 布局，最后一页用 thanks 布局
+5. 总页数控制在 8-15 页
+
+## 回复结构
+1. 先简要说明PPT结构和设计思路
+2. 然后输出完整的 JSON 代码块
+3. 用户可点击"下载PPTX"按钮生成实际文件` },
   { id: 'excel-master', name: 'Excel大师', category: '办公', icon: '📈', tags: ['Excel', '表格', '数据处理'], description: 'Excel表格与数据分析专家', systemPrompt: '你是Excel数据分析专家。帮用户完成：1）设计数据表格结构 2）编写常用公式（VLOOKUP/SUMIFS/INDEX-MATCH等） 3）数据透视表设计 4）图表选择与制作建议 5）数据清洗与整理方案。用通俗语言解释复杂操作。' },
   { id: 'word-master', name: 'Word大师', category: '办公', icon: '📝', tags: ['Word', '文档', '排版'], description: 'Word文档排版与写作专家', systemPrompt: '你是Word文档排版专家。帮用户完成：1）文档结构与大纲设计 2）专业排版建议（标题层级/页眉页脚/目录） 3）商务公文/报告/简历等模板 4）文字润色与校对 5）邮件合并等高级功能指导。' },
   { id: 'pdf-master', name: 'PDF大师', category: '办公', icon: '📄', tags: ['PDF', '转换', '编辑'], description: 'PDF处理与转换专家', systemPrompt: '你是PDF处理专家。帮用户完成：1）PDF合并/拆分/压缩方案 2）PDF转Word/Excel/PPT格式建议 3）PDF表单填写与签名 4）OCR文字识别方案 5）PDF安全与加密设置。' },
