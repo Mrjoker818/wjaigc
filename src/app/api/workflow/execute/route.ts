@@ -115,9 +115,69 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ executionId, status: 'cancelled' });
     }
 
+    // ─── 节点重试 (B2) ─── 仅重试单个失败节点，不重跑全流程
+    if (action === 'retry') {
+      if (!executionId) {
+        return NextResponse.json({ error: '缺少 executionId' }, { status: 400 });
+      }
+      const { nodeId } = body;
+      if (!nodeId) {
+        return NextResponse.json({ error: '缺少 nodeId' }, { status: 400 });
+      }
+      const exec = executionCache.get(executionId);
+      if (!exec) {
+        return NextResponse.json({ error: '执行实例不存在或已过期' }, { status: 404 });
+      }
+      const retryNode = (body.nodes || []).find((n: any) => n.id === nodeId);
+      if (!retryNode) {
+        return NextResponse.json({ error: '节点不存在' }, { status: 404 });
+      }
+      try {
+        const retryResultMap = new Map(Object.entries(exec.results || {}));
+        const nodeInputs = getNodeInputs(retryNode, body.connections || [], retryResultMap);
+        const req = buildNodeExecutionRequest(retryNode, nodeInputs);
+        if (!req) {
+          // 纯逻辑节点：直接成功
+          exec.results[nodeId] = { nodeId, status: 'success', output: { ...nodeInputs, _type: retryNode.type }, durationMs: 0 };
+          return NextResponse.json({ success: true, nodeId, output: { ...nodeInputs, _type: retryNode.type } });
+        }
+        // 获取 API 凭证
+        let apiKey = ''; let baseUrl = '';
+        const providerId = retryNode.config?.providerId as string | undefined;
+        const modelName = String(nodeInputs.model || retryNode.config?.model || '');
+        if (providerId) { const p = await findProviderById(providerId); if (p) { apiKey = p.apiKey; baseUrl = p.baseUrl; } }
+        if (!apiKey && modelName) { const p = await findProviderForModel(modelName, undefined, providerId); if (p) { apiKey = p.apiKey; baseUrl = p.baseUrl; } }
+        if (!apiKey || !baseUrl) {
+          const feature = getFeatureForNodeType(retryNode.type as NodeType);
+          const p = await findProviderForFeature(feature);
+          if (p) { apiKey = apiKey || p.apiKey; baseUrl = baseUrl || p.baseUrl; }
+        }
+        const isInternal = req.endpoint.startsWith('/api/');
+        const apiUrl = isInternal
+          ? `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${req.endpoint}`
+          : baseUrl ? `${baseUrl.replace(/\/+$/, '')}${req.endpoint}` : req.endpoint;
+        const apiRes = await fetch(apiUrl, {
+          method: req.method,
+          headers: { 'Content-Type': 'application/json', ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {}) },
+          body: JSON.stringify(req.body),
+          signal: AbortSignal.timeout(300000),
+        });
+        if (!apiRes.ok) {
+          const errText = await apiRes.text().catch(() => '');
+          throw new Error(errText || `API ${apiRes.status}`);
+        }
+        const data = await apiRes.json();
+        exec.results[nodeId] = { nodeId, status: 'success', output: data, durationMs: 0 };
+        return NextResponse.json({ success: true, nodeId, output: data });
+      } catch (err: any) {
+        exec.results[nodeId] = { nodeId, status: 'failed', error: err?.message || String(err), durationMs: 0 };
+        return NextResponse.json({ success: false, nodeId, error: err?.message || String(err) });
+      }
+    }
+
     // ─── 启动执行 ───
     if (action !== 'start') {
-      return NextResponse.json({ error: '无效的 action，支持: start, status, cancel' }, { status: 400 });
+      return NextResponse.json({ error: '无效的 action，支持: start, status, cancel, retry' }, { status: 400 });
     }
 
     if (!nodes || !Array.isArray(nodes) || nodes.length === 0) {

@@ -925,7 +925,26 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
   const [aiBuildOpen, setAiBuildOpen] = useState(false);
 
   // P1: 执行日志
-  const [execLogs, setExecLogs] = useState<{ time: number; nodeId: string; label: string; status: string; message: string; duration?: number; nodeType?: string }[]>([]);  // P1: 节点复制粘贴
+  const [execLogs, setExecLogs] = useState<{ time: number; nodeId: string; label: string; status: string; message: string; duration?: number; nodeType?: string }[]>([]);
+  
+  // B1: 工作流执行状态持久化 — 切页/刷新后恢复执行进度
+  const WORKFLOW_EXEC_STATE_KEY = 'wujie_workflow_exec_state';
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(WORKFLOW_EXEC_STATE_KEY);
+      if (saved) {
+        const state = JSON.parse(saved);
+        if (state.executionId && state.execStatus === 'running') {
+          setExecutionId(state.executionId);
+          setExecStatus('running');
+          setExecLogs(state.execLogs || []);
+          setExecResults(state.execResults || {});
+          // 清除已持久化的running状态，由polling恢复
+          localStorage.removeItem(WORKFLOW_EXEC_STATE_KEY);
+        }
+      }
+    } catch {}
+  }, []);  // P1: 节点复制粘贴
   const [showContentStrip, setShowContentStrip] = useState(true);
   const [showLeftPanel, setShowLeftPanel] = useState(true);
   const [showExecLog, setShowExecLog] = useState(false);
@@ -1852,6 +1871,7 @@ ${contextInfo}
   const handleRunWorkflow = useCallback(async () => {
     setExecStatus('running');
     setExecResults({});
+    setExecLogs([]);
     try {
       const res = await fetch('/api/workflow/execute', {
         method: 'POST',
@@ -1861,6 +1881,10 @@ ${contextInfo}
       const data = await res.json();
       if (data.executionId) {
         setExecutionId(data.executionId);
+        // B1: 持久化执行状态（切页不丢失）
+        localStorage.setItem(WORKFLOW_EXEC_STATE_KEY, JSON.stringify({
+          executionId: data.executionId, execStatus: 'running', execResults: {}, execLogs: [],
+        }));
       } else {
         setExecStatus('failed');
       }
@@ -1879,7 +1903,30 @@ ${contextInfo}
     }
     setExecStatus('idle');
     setExecutionId(null);
+    localStorage.removeItem(WORKFLOW_EXEC_STATE_KEY);
   }, [executionId]);
+
+  // B2: 节点一键重试 — 仅重试单个失败节点，不重跑全流程
+  const handleRetryNode = useCallback(async (nodeId: string) => {
+    if (!executionId) return;
+    setExecLogs(prev => prev.map(l => l.nodeId === nodeId && l.status === 'error' ? { ...l, status: 'running', message: '重试中...' } : l));
+    try {
+      const res = await fetch('/api/workflow/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'retry', executionId, nodeId, nodes: wf.nodes, connections: wf.connections }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setExecLogs(prev => prev.map(l => l.nodeId === nodeId && l.status === 'running' ? { ...l, status: 'success', message: '重试成功', time: Date.now() } : l));
+        setExecResults(prev => ({ ...prev, [nodeId]: { status: 'success', output: data.output } }));
+      } else {
+        setExecLogs(prev => prev.map(l => l.nodeId === nodeId && l.status === 'running' ? { ...l, status: 'error', message: data.error || '重试失败', time: Date.now() } : l));
+      }
+    } catch {
+      setExecLogs(prev => prev.map(l => l.nodeId === nodeId && l.status === 'running' ? { ...l, status: 'error', message: '重试网络错误', time: Date.now() } : l));
+    }
+  }, [executionId, wf]);
 
   // 轮询执行状态
   useEffect(() => {
@@ -1898,6 +1945,14 @@ ${contextInfo}
         if (data.status === 'completed' || data.status === 'failed') {
           setExecStatus(data.status === 'completed' ? 'completed' : 'failed');
           setExecResults(data.results || {});
+          // B1: 持久化最终结果，3秒后清除
+          const finalState = { executionId, execStatus: data.status, execResults: data.results || {}, execLogs };
+          localStorage.setItem(WORKFLOW_EXEC_STATE_KEY, JSON.stringify(finalState));
+          setTimeout(() => {
+            if (localStorage.getItem(WORKFLOW_EXEC_STATE_KEY) === JSON.stringify(finalState)) {
+              localStorage.removeItem(WORKFLOW_EXEC_STATE_KEY);
+            }
+          }, 3000);
           // P1: 记录执行日志
           if (data.results) {
             const newLogs = Object.entries(data.results as Record<string, { status: string; output?: Record<string, unknown>; error?: string }>).map(([nodeId, result]) => {
@@ -2743,13 +2798,19 @@ ${contextInfo}
               {execLogs.map((log, i) => {
                 const nodeIcon = log.nodeType === 'image' ? '🖼' : log.nodeType === 'text' ? '📝' : log.nodeType === 'control' ? '🔄' : '⚙';
                 return (
-                  <div key={i} className={`flex items-center gap-2 px-3 py-1.5 hover:bg-white/5 ${log.status === 'error' ? 'bg-red-500/5' : ''}`}>
+                  <div key={i} className={`flex items-center gap-2 px-3 py-1.5 hover:bg-white/5 group ${log.status === 'error' ? 'bg-red-500/5' : ''}`}>
                     <span className="flex-shrink-0 text-[10px]">{nodeIcon}</span>
                     {log.status === 'success' ? <Check size={8} className="text-green-400 flex-shrink-0" /> : log.status === 'running' ? <Loader2 size={8} className="text-yellow-400 flex-shrink-0 animate-spin" /> : <AlertCircle size={8} className="text-red-400 flex-shrink-0" />}
                     <span className="text-foreground/80 flex-shrink-0 font-medium">{log.label}</span>
                     <span className={`flex-1 truncate ${log.status === 'success' ? 'text-green-400/60' : log.status === 'running' ? 'text-yellow-400/60' : 'text-red-400/60'}`}>{log.message}</span>
                     {log.duration != null && <span className="text-muted-foreground/60 flex-shrink-0 tabular-nums">{log.duration >= 1000 ? `${(log.duration / 1000).toFixed(1)}s` : `${log.duration}ms`}</span>}
                     <span className="text-muted-foreground/40 flex-shrink-0">{new Date(log.time).toLocaleTimeString()}</span>
+                    {/* B2: 失败节点一键重试 */}
+                    {log.status === 'error' && (
+                      <button onClick={(e) => { e.stopPropagation(); handleRetryNode(log.nodeId); }} className="opacity-0 group-hover:opacity-100 text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-all cursor-pointer flex-shrink-0" title="重试此节点">
+                        <RefreshCw size={10} />
+                      </button>
+                    )}
                   </div>
                 );
               })}
@@ -2837,11 +2898,17 @@ ${contextInfo}
               <div className="text-muted-foreground/50 py-2 text-center">暂无执行记录</div>
             ) : (
               execLogs.map((log, i) => (
-                <div key={i} className={`flex items-center gap-2 py-1 ${log.status === 'error' ? 'text-red-400/80' : ''}`}>
+                <div key={i} className={`flex items-center gap-2 py-1 group ${log.status === 'error' ? 'text-red-400/80' : ''}`}>
                   {log.status === 'success' ? <Check size={8} className="text-green-400 shrink-0" /> : log.status === 'running' ? <Loader2 size={8} className="text-yellow-400 shrink-0 animate-spin" /> : <AlertCircle size={8} className="text-red-400 shrink-0" />}
                   <span className="text-foreground/80 shrink-0 font-medium">{log.label}</span>
                   <span className={`flex-1 truncate ${log.status === 'success' ? 'text-green-400/60' : log.status === 'running' ? 'text-yellow-400/60' : 'text-red-400/60'}`}>{log.message}</span>
                   {log.duration != null && <span className="text-muted-foreground/40 shrink-0 tabular-nums">{log.duration >= 1000 ? `${(log.duration / 1000).toFixed(1)}s` : `${log.duration}ms`}</span>}
+                  {/* B2: 失败节点一键重试 */}
+                  {log.status === 'error' && (
+                    <button onClick={(e) => { e.stopPropagation(); handleRetryNode(log.nodeId); }} className="opacity-0 group-hover:opacity-100 text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-all cursor-pointer shrink-0" title="重试此节点">
+                      <RefreshCw size={10} />
+                    </button>
+                  )}
                 </div>
               ))
             )}

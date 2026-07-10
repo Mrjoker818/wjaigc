@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { Menu, Paperclip, ArrowUp, Globe, X, Settings, Bot, User as UserIcon, BookOpen, ChevronDown, Copy, RefreshCw, Trash2, Zap, Sun, Moon, FileText, Database, Sparkles, MessageSquarePlus, Minimize2, Maximize2, MoreHorizontal, Telescope, FileCode, GitBranch, Share2, Search, Eye, Image, Download, Send } from "lucide-react";
+import { Menu, Paperclip, ArrowUp, Globe, X, Settings, Bot, User as UserIcon, BookOpen, ChevronDown, Copy, RefreshCw, Trash2, Zap, Sun, Moon, FileText, Database, Sparkles, MessageSquarePlus, Minimize2, Maximize2, MoreHorizontal, Telescope, FileCode, GitBranch, Share2, Search, Eye, Image, Download, Send, Shield } from "lucide-react";
 import {
   SimpleChatProject, SimpleChatTask, SimpleChatMessage, SimpleChatAgent, ChatAttachment,
   ProjectInstructions, ProjectKnowledgeItem,
@@ -140,6 +140,8 @@ export default function ChatArea({
   const [searchResults, setSearchResults] = useState<Array<{ taskId: string; taskName: string; messageIndex: number; snippet: string }>>([]);
   const [branchBaseMessageId, setBranchBaseMessageId] = useState<string | null>(null);
   const [searchStatus, setSearchStatus] = useState<string | null>(null);
+  // Brand DNA injection
+  const [brandActive, setBrandActive] = useState(false);
 
   // Image model
   const [imageModels, setImageModels] = useState<Array<ChatModelInfo>>([]);
@@ -319,6 +321,24 @@ export default function ChatArea({
       }
       if (webSearch) {
         systemMessages.push({ role: 'system', content: '当前开启了联网搜索模式。请基于联网搜索结果回答用户问题，并在回答末尾列出引用来源。' });
+      }
+      // Brand DNA injection
+      if (brandActive) {
+        try {
+          const raw = localStorage.getItem('wujie_brand_dna');
+          if (raw) {
+            const brand = JSON.parse(raw);
+            const parts = [];
+            if (brand.name) parts.push(`品牌名称：${brand.name}`);
+            if (brand.colors) parts.push(`品牌色彩：${brand.colors}`);
+            if (brand.fonts) parts.push(`品牌字体：${brand.fonts}`);
+            if (brand.tone) parts.push(`品牌调性：${brand.tone}`);
+            if (brand.rules) parts.push(`品牌规则：${brand.rules}`);
+            if (parts.length > 0) {
+              systemMessages.push({ role: 'system', content: `【品牌DNA注入】请严格遵循以下品牌规范进行所有设计输出：\n${parts.join('\n')}` });
+            }
+          }
+        } catch {}
       }
 
       const allMessages = [
@@ -605,6 +625,10 @@ export default function ChatArea({
     return /```json\s*[\s\S]*?"mermaid"\s*:/.test(content);
   }, []);
 
+  const hasPdfJson = useCallback((content: string) => {
+    return /```json\s*[\s\S]*?"type"\s*:\s*"(?:markdown|merge|split|form|watermark|extract)"/.test(content);
+  }, []);
+
   const extractJsonFromContent = useCallback((content: string): object | null => {
     const match = content.match(/```json\s*([\s\S]*?)\s*```/);
     if (!match) return null;
@@ -659,6 +683,15 @@ export default function ChatArea({
     const blob = await resp.blob();
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = `${(data as Record<string,unknown>).title || 'flowchart'}.html`; a.click();
+    window.URL.revokeObjectURL(url);
+  }, []);
+
+  const downloadPdf = useCallback(async (data: object) => {
+    const resp = await fetch('/api/pdf/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    if (!resp.ok) return;
+    const blob = await resp.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = `${(data as Record<string,unknown>).title || 'document'}.pdf`; a.click();
     window.URL.revokeObjectURL(url);
   }, []);
 
@@ -867,8 +900,15 @@ export default function ChatArea({
               </div>
             </div>
           )}
+          {messages.length > 100 && (
+            <div className="flex justify-center py-2">
+              <span className="text-xs text-muted-foreground/60">
+                共 {messages.length} 条消息
+              </span>
+            </div>
+          )}
           {messages.map((msg, idx) => (
-            <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : ''}`}>
+            <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : ''}`} style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 120px' }}>
               {/* Search results card */}
               {msg.role === 'search' && (
                 <SearchResultsCard content={msg.content} />
@@ -943,6 +983,12 @@ export default function ChatArea({
                         <Download className="w-3 h-3" />
                       </button>
                     )}
+                    {hasPdfJson(msg.content) && (
+                      <button onClick={() => { const d = extractJsonFromContent(msg.content); if (d) downloadPdf(d); }}
+                        className="p-1 rounded hover:bg-red-500/10 text-red-500 transition-colors" title="下载 PDF">
+                        <Download className="w-3 h-3" />
+                      </button>
+                    )}
                     {msg.images && msg.images.length > 0 && (
                       <button onClick={() => sendImagesToCanvas(msg.images || [])}
                         className="p-1 rounded hover:bg-blue-500/10 text-blue-500 transition-colors" title="添加到画布">
@@ -991,6 +1037,11 @@ export default function ChatArea({
               style={{ scrollbarWidth: 'thin' }}
             />
             <div className="absolute right-2 bottom-2 flex items-center gap-1">
+              <button onClick={() => setBrandActive(!brandActive)}
+                className={`p-1.5 rounded-lg transition-colors ${brandActive ? 'bg-amber-500/10 text-amber-500' : 'text-muted-foreground hover:bg-muted'}`}
+                title="品牌DNA注入 - 将品牌规范注入对话上下文">
+                <Shield className="w-4 h-4" />
+              </button>
               <button onClick={() => setWebSearch(!webSearch)}
                 className={`p-1.5 rounded-lg transition-colors ${webSearch ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted'}`}
                 title="联网搜索">

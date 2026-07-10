@@ -1127,6 +1127,7 @@ export function InfiniteCanvas({
   const [canvasGenResolution, setCanvasGenResolution] = useState('2K'); // 分辨率档位（1K/2K/4K）
   const [canvasGenQuality, setCanvasGenQuality] = useState('auto'); // 质量级别（auto/low/medium/high/standard）
   const [canvasGenCount, setCanvasGenCount] = useState(1);
+  const [canvasGenPartialFailCount, setCanvasGenPartialFailCount] = useState(0); // B3: 部分失败计数
   const [canvasGenRefImages, setCanvasGenRefImages] = useState<string[]>([]);
   const [canvasGenModels, setCanvasGenModels] = useState<{id: string, providerId: string, providerName: string, apiDisplayName?: string}[]>([]);
   // 模型ID → 提供商名称 映射（用于历史图片 apiProvider 回填）
@@ -5821,6 +5822,12 @@ export function InfiniteCanvas({
         setCanvasGenProgress(100);
         // 不自动关闭面板，让用户查看结果并继续操作
         setCanvasGenFrameId(null);
+        // B3: 部分失败追踪
+        if (validUrls.length < taskIds.length) {
+          setCanvasGenPartialFailCount(taskIds.length - validUrls.length);
+        } else {
+          setCanvasGenPartialFailCount(0);
+        }
       } else {
         throw new Error('生成超时或失败');
       }
@@ -9048,6 +9055,8 @@ export function InfiniteCanvas({
                   width: resizingImage === image.id && resizePreview ? resizePreview.width : image.width,
                   height: resizingImage === image.id && resizePreview ? resizePreview.height : image.height,
                   display: (isGroupCollapsed || isInCollapsedGenGroup || isGenGroupResultImage) ? 'none' : undefined,
+                  contentVisibility: 'auto',
+                  containIntrinsicSize: `${image.width}px ${image.height}px`,
                 }}
                 onMouseEnter={() => {
                   if (visionPromptEnabled && editMode === 'none') {
@@ -15415,6 +15424,74 @@ export function InfiniteCanvas({
                       alt="生成结果"
                       className="absolute inset-0 w-full h-full object-cover"
                     />
+                  )}
+                  {/* B3: 部分失败补发按钮 */}
+                  {canvasGenPartialFailCount > 0 && !canvasGenGenerating && canvasGenPreviewUrl && (
+                    <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-10">
+                      <button
+                        onClick={async () => {
+                          if (canvasGenGenerating) return;
+                          const missing = canvasGenPartialFailCount;
+                          setCanvasGenPartialFailCount(0);
+                          setCanvasGenGenerating(true);
+                          setCanvasGenProgress(0);
+                          try {
+                            const resp = await fetch('/api/generate', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({
+                                prompt: canvasGenPrompt,
+                                negative: canvasGenNegativePrompt,
+                                model: canvasGenModel,
+                                aspectRatio: canvasGenAspectRatio,
+                                resolution: canvasGenResolution,
+                                quality: canvasGenQuality,
+                                n: missing,
+                              }),
+                            });
+                            if (!resp.ok) throw new Error(`生成失败: ${resp.status}`);
+                            const data = await resp.json();
+                            const newTaskIds: string[] = data.taskIds || [data.taskId].filter(Boolean);
+                            const retryResults = await Promise.all(newTaskIds.map((tid: string) => pollForResult(tid, canvasGenModel)));
+                            const retryUrls = retryResults.filter((url): url is string => url !== null);
+                            if (retryUrls.length > 0) {
+                              const frameImg = imagesRef.current.find(img => img.id === canvasGenFrameId);
+                              const baseX = frameImg ? frameImg.x + frameImg.width + 20 : 100;
+                              const baseY = frameImg ? frameImg.y : 100;
+                              const extraImages = retryUrls.map((url, i) => ({
+                                id: `img_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+                                url,
+                                x: baseX + i * 20,
+                                y: baseY + i * 20,
+                                width: 512,
+                                height: 512,
+                                prompt: canvasGenPrompt,
+                                model: canvasGenModel?.includes('::') ? canvasGenModel.split('::').pop()! : canvasGenModel,
+                                quality: canvasGenQuality,
+                                aspectRatio: canvasGenAspectRatio,
+                                modelName: canvasGenModel,
+                                apiProvider: '',
+                              }));
+                              onImagesChange([...imagesRef.current, ...extraImages]);
+                            }
+                            setCanvasGenPartialFailCount(Math.max(0, missing - retryUrls.length));
+                          } catch {
+                            setCanvasGenPartialFailCount(missing);
+                          } finally {
+                            setCanvasGenGenerating(false);
+                            setCanvasGenProgress(100);
+                          }
+                        }}
+                        disabled={canvasGenGenerating}
+                        className={`text-xs px-3 py-1 rounded-full font-medium transition-colors ${
+                          isMonochrome
+                            ? 'bg-blue-500 text-white hover:bg-blue-600'
+                            : 'bg-[#d4af37] text-[#1a1a1a] hover:bg-[#c4a030]'
+                        }`}
+                      >
+                        补发 {canvasGenPartialFailCount} 张失败图片
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>
