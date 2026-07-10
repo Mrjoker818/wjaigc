@@ -1835,7 +1835,7 @@ export async function POST(request: NextRequest) {
     const engineMode = (enginePref === 'ai' || enginePref === 'local' || enginePref === 'cpu') ? enginePref : 'auto';
 
     // ★ 输入校验
-    if (!action || !['erase', 'mask', 'upscale', 'extend', 'removebg', 'inpaint', 'outpaint', 'remove_background'].includes(action)) {
+    if (!action || !['erase', 'mask', 'upscale', 'extend', 'removebg', 'inpaint', 'outpaint', 'remove_background', 'multi_angle'].includes(action)) {
       return NextResponse.json({ success: false, error: '缺少或无效的 action 参数' }, { status: 400 });
     }
     if (imageUrl) {
