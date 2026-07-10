@@ -717,6 +717,8 @@ export function InfiniteCanvas({
 
   // Virtualization: viewport culling — only render images in the visible area
   const canvasContainerRef = useRef<HTMLDivElement | null>(null);
+  const canvasTransformRef = useRef<HTMLDivElement | null>(null);
+  const panRafRef = useRef<number | null>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
   useEffect(() => {
     const el = canvasContainerRef.current;
@@ -2834,17 +2836,30 @@ export function InfiniteCanvas({
     // Middle button panning
     if (isMiddlePanning) {
       middlePanMovedRef.current = true; // 标记已移动，防止 auxclick 误触发缩放重置
-      setViewOffset({
-        x: e.clientX - middlePanStartRef.current.x,
-        y: e.clientY - middlePanStartRef.current.y,
+      const mx = e.clientX - middlePanStartRef.current.x;
+      const my = e.clientY - middlePanStartRef.current.y;
+      if (panRafRef.current) cancelAnimationFrame(panRafRef.current);
+      panRafRef.current = requestAnimationFrame(() => {
+        const el = canvasTransformRef.current;
+        if (el) {
+          el.style.transform = `translate(${mx}px, ${my}px) scale(${zoom})`;
+        }
+        panRafRef.current = null;
       });
       return;
     }
 
     if (isPanning) {
-      setViewOffset({
-        x: e.clientX - panStart.x,
-        y: e.clientY - panStart.y,
+      // 使用 rAF + 直接 DOM 操作，避免每帧触发 React 重渲染
+      const newX = e.clientX - panStart.x;
+      const newY = e.clientY - panStart.y;
+      if (panRafRef.current) cancelAnimationFrame(panRafRef.current);
+      panRafRef.current = requestAnimationFrame(() => {
+        const el = canvasTransformRef.current;
+        if (el) {
+          el.style.transform = `translate(${newX}px, ${newY}px) scale(${zoom})`;
+        }
+        panRafRef.current = null;
       });
       return;
     }
@@ -3064,6 +3079,15 @@ export function InfiniteCanvas({
 
     // Middle button up: stop middle panning
     if (isMiddlePanning && e.button === 1) {
+      // 中键平移结束：同步 DOM 位置回 React state
+      if (canvasTransformRef.current) {
+        const currentTransform = canvasTransformRef.current.style.transform;
+        const translateMatch = currentTransform.match(/translate\(([^)]+)\)/);
+        if (translateMatch) {
+          const [tx, ty] = translateMatch[1].split(',').map(Number);
+          setViewOffset({ x: tx, y: ty });
+        }
+      }
       setIsMiddlePanning(false);
       return;
     }
@@ -3074,6 +3098,15 @@ export function InfiniteCanvas({
     }
 
     if (isPanning) {
+      // 平移结束，从 DOM 同步回 React state
+      const el = canvasTransformRef.current;
+      if (el) {
+        const style = el.style.transform;
+        const match = style.match(/translate\(([^)]+)px,\s*([^)]+)px\)/);
+        if (match) {
+          setViewOffset({ x: parseFloat(match[1]), y: parseFloat(match[2]) });
+        }
+      }
       setIsPanning(false);
       setIsLongPressing(false);
       return;
@@ -3303,6 +3336,14 @@ export function InfiniteCanvas({
       longPressTimerRef.current = null;
     }
     setIsPanning(false);
+    // 平移结束：同步 DOM 位置回 React state
+    if (canvasTransformRef.current) {
+      const style = canvasTransformRef.current.style.transform;
+      const match = style.match(/translate\(([^)]+)px,\s*([^)]+)px\)/);
+      if (match) {
+        setViewOffset({ x: parseFloat(match[1]), y: parseFloat(match[2]) });
+      }
+    }
     setIsMiddlePanning(false);
     setIsLongPressing(false);
     setBoxSelectStart(null);
@@ -8866,7 +8907,7 @@ export function InfiniteCanvas({
         )}
 
         {/* Canvas images */}
-        <div style={{ transform: `translate(${viewOffset.x}px, ${viewOffset.y}px) scale(${zoom})`, transformOrigin: '0 0', willChange: 'transform', contain: 'layout style' }}>
+        <div ref={canvasTransformRef} style={{ transform: `translate(${viewOffset.x}px, ${viewOffset.y}px) scale(${zoom})`, transformOrigin: '0 0', willChange: 'transform', contain: 'layout style' }}>
           {/* Image Groups */}
           {groups.map(group => {
             const groupImages = images.filter(img => img.groupId === group.id);
