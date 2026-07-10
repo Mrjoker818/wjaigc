@@ -416,10 +416,10 @@ export const QUALITY_LEVEL_MODELS = [
 
 /** 分辨率档位到显示名称的映射 */
 export const RESOLUTION_TIER_DISPLAY_NAMES: Record<string, string> = {
-    '1K': '1K (1024档)',
-    '2K': '2K (2048档)',
-    '3K': '3K (3072档)',
-    '4K': '4K (4096档)',
+    '1K': '1K',
+    '2K': '2K',
+    '3K': '3K',
+    '4K': '4K',
 };
 
 /** 质量级别到显示名称的映射 */

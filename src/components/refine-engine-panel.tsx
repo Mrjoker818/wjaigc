@@ -1161,9 +1161,6 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                   );
                 })}
               </div>
-              <div className="text-[10px]" style={{ color: textMutedColor }}>
-                {getPixelSize(aspectRatio)}
-              </div>
             </div>
 
             {/* Quality selector - single row */}
