@@ -1865,7 +1865,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                     { key: 'vectorize', label: '矢量', icon: '📐' }, { key: 'layer', label: '分层', icon: '🗂️' },
                     { key: 'upscaler', label: '放大', icon: '🔍' }, { key: 'removebg', label: '抠图', icon: '✂️' }, { key: 'video', label: '视频', icon: '🎬' }, { key: 'audio', label: '音频', icon: '🔊' },
                   ].map(perm => {
-                    const enabled = user.apiPermissions?.[perm.key as keyof typeof user.apiPermissions] ?? false;
+                    const enabled = user.apiPermissions?.[perm.key as keyof typeof user.apiPermissions] ?? true;
                     return (<span key={perm.key} className={`text-[10px] px-1.5 py-0.5 rounded-md flex items-center gap-1 ${enabled ? `${accentBgLight} ${accentClass}` : isDark ? 'bg-white/5 text-gray-600' : 'bg-gray-100 text-gray-300'}`}><span>{perm.icon}</span><span>{perm.label}</span></span>);
                   })}
                 </div>
