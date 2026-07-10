@@ -1577,7 +1577,10 @@ export function GenerationPanel(
                                                             newStr[i] = parseInt(e.target.value);
                                                             setReferenceStrengths(newStr);
                                                         }}
-                                                        className="flex-1 h-1 accent-blue-500 [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5"
+                                                        className="flex-1 h-1 [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5"
+                                                        style={{
+                                                          background: `linear-gradient(to right, ${mc ? '#3b82f6' : '#d4af37'} ${strength}%, ${mc ? '#e2e8f0' : 'rgba(255,255,255,0.1)'} ${strength}%)`
+                                                        }}
                                                     />
                                                     <span className={`text-xs w-7 text-right ${mc ? 'text-gray-500' : 'text-gold-muted'}`}>{strength}%</span>
                                                 </div>
