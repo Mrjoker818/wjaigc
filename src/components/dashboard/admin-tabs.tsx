@@ -814,78 +814,70 @@ export default function AdminTabs(props: AdminTabsProps) {
                   </div>
                 </div>
                 {/* 模型权限 */}
-                {props.adminChatModels && props.adminChatModels.length > 0 && (
-                  <div>
-                    <h4 className="text-sm font-semibold text-foreground mb-2">聊天模型权限</h4>
-                    <p className="text-[10px] text-muted-foreground mb-2">勾选的模型该用户才能使用，不勾选则使用全部模型</p>
-                    <div className="max-h-[200px] overflow-y-auto space-y-1.5 bg-muted/20 rounded-lg p-3">
-                      {props.adminChatModels.map(m => {
-                        const chatModels = detailUser.chatModels || [];
-                        const isAllowed = chatModels.length === 0 || chatModels.includes(m.id);
-                        const isCustom = chatModels.length > 0;
-                        return (
-                          <label key={m.id} className={`flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer transition-colors ${isCustom && !chatModels.includes(m.id) ? 'opacity-40 hover:opacity-70' : 'hover:bg-muted/50'}`}>
-                            <input
-                              type="checkbox"
-                              checked={isAllowed}
-                              onChange={async () => {
-                                let next: string[];
-                                if (chatModels.length === 0) {
-                                  next = props.adminChatModels!.map(x => x.id).filter(x => x !== m.id);
-                                } else if (chatModels.includes(m.id)) {
-                                  next = chatModels.filter(x => x !== m.id);
-                                } else {
-                                  next = [...chatModels, m.id];
-                                }
-                                if (next.length === props.adminChatModels!.length) next = [];
-                                if (props.onUpdateUserModels) await props.onUpdateUserModels(detailUser.id, next, detailUser.imageModels || []);
-                              }}
-                              className="w-3.5 h-3.5 rounded accent-primary"
-                            />
-                            <span className="text-xs text-foreground truncate">{m.name}</span>
-                            {isCustom && chatModels.includes(m.id) && <span className="text-[10px] text-primary/60 ml-auto shrink-0">已授权</span>}
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-                {props.adminImageModels && props.adminImageModels.length > 0 && (
-                  <div>
-                    <h4 className="text-sm font-semibold text-foreground mb-2">图像模型权限</h4>
-                    <p className="text-[10px] text-muted-foreground mb-2">勾选的模型该用户才能使用，不勾选则使用全部模型</p>
-                    <div className="max-h-[200px] overflow-y-auto space-y-1.5 bg-muted/20 rounded-lg p-3">
-                      {props.adminImageModels.map(m => {
-                        const imageModels = detailUser.imageModels || [];
-                        const isAllowed = imageModels.length === 0 || imageModels.includes(m.id);
-                        const isCustom = imageModels.length > 0;
-                        return (
-                          <label key={m.id} className={`flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer transition-colors ${isCustom && !imageModels.includes(m.id) ? 'opacity-40 hover:opacity-70' : 'hover:bg-muted/50'}`}>
-                            <input
-                              type="checkbox"
-                              checked={isAllowed}
-                              onChange={async () => {
-                                let next: string[];
-                                if (imageModels.length === 0) {
-                                  next = props.adminImageModels!.map(x => x.id).filter(x => x !== m.id);
-                                } else if (imageModels.includes(m.id)) {
-                                  next = imageModels.filter(x => x !== m.id);
-                                } else {
-                                  next = [...imageModels, m.id];
-                                }
-                                if (next.length === props.adminImageModels!.length) next = [];
-                                if (props.onUpdateUserModels) await props.onUpdateUserModels(detailUser.id, detailUser.chatModels || [], next);
-                              }}
-                              className="w-3.5 h-3.5 rounded accent-primary"
-                            />
-                            <span className="text-xs text-foreground truncate">{m.name}</span>
-                            {isCustom && imageModels.includes(m.id) && <span className="text-[10px] text-primary/60 ml-auto shrink-0">已授权</span>}
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
+                <div className="space-y-3">
+                  {(() => {
+                    const modelSections: { key: string; title: string; models: { id: string; name: string }[]; current: string[]; onChange: (ids: string[]) => void }[] = [];
+                    if (props.adminChatModels && props.adminChatModels.length > 0) {
+                      modelSections.push({
+                        key: 'chat', title: '聊天模型',
+                        models: props.adminChatModels,
+                        current: detailUser.chatModels || [],
+                        onChange: (ids) => props.onUpdateUserModels?.(detailUser.id, ids, detailUser.imageModels || []),
+                      });
+                    }
+                    if (props.adminImageModels && props.adminImageModels.length > 0) {
+                      modelSections.push({
+                        key: 'image', title: '图像模型',
+                        models: props.adminImageModels,
+                        current: detailUser.imageModels || [],
+                        onChange: (ids) => props.onUpdateUserModels?.(detailUser.id, detailUser.chatModels || [], ids),
+                      });
+                    }
+                    if (modelSections.length === 0) return null;
+                    return modelSections.map(section => {
+                      const allIds = section.models.map(m => m.id);
+                      const isAll = section.current.length === 0 || allIds.every(id => section.current.includes(id));
+                      const isNone = section.current.length > 0 && !allIds.some(id => section.current.includes(id));
+                      return (
+                        <div key={section.key}>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <h4 className="text-xs font-semibold text-foreground">{section.title}</h4>
+                            <div className="flex gap-2 text-[10px]">
+                              <button
+                                onClick={() => section.onChange(allIds)}
+                                className={`${isAll && section.current.length > 0 ? 'text-primary' : 'text-muted-foreground hover:text-foreground'} transition-colors`}
+                              >全选</button>
+                              <button
+                                onClick={() => section.onChange([])}
+                                className={`${isNone ? 'text-primary' : 'text-muted-foreground hover:text-foreground'} transition-colors`}
+                              >不限</button>
+                            </div>
+                          </div>
+                          <div className="max-h-[140px] overflow-y-auto bg-muted/20 rounded-lg p-2 grid grid-cols-2 gap-0.5">
+                            {section.models.map(m => {
+                              const isCustom = section.current.length > 0;
+                              const checked = !isCustom || section.current.includes(m.id);
+                              return (
+                                <label key={m.id} className={`flex items-center gap-1.5 px-1.5 py-1 rounded cursor-pointer ${isCustom && !section.current.includes(m.id) ? 'opacity-30 hover:opacity-60' : 'hover:bg-muted/40'}`}>
+                                  <input
+                                    type="checkbox" checked={checked}
+                                    onChange={() => {
+                                      if (section.current.length === 0) section.onChange(allIds.filter(x => x !== m.id));
+                                      else if (section.current.includes(m.id)) section.onChange(section.current.filter(x => x !== m.id));
+                                      else section.onChange([...section.current, m.id]);
+                                    }}
+                                    className="w-3 h-3 rounded accent-primary shrink-0"
+                                  />
+                                  <span className="text-[11px] text-foreground truncate">{m.name}</span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
                 {/* 产品类型 */}
                 <div>
                   <h4 className="text-sm font-semibold text-foreground mb-2">产品授权</h4>
@@ -920,56 +912,6 @@ export default function AdminTabs(props: AdminTabsProps) {
                         </div>
                       );
                     })}
-                  </div>
-                </div>
-                {/* 对话模型授权 */}
-                <div>
-                  <h4 className="text-sm font-semibold text-foreground mb-2">对话模型授权</h4>
-                  <div className="space-y-1">
-                    {(() => {
-                      const chatModels = detailUser.chatModels || [];
-                      const availableChatModels = Array.from(new Set(props.providers.filter(p => (p.model_type === 'chat' || p.model_type === 'llm') && p.isEnabled).flatMap(p => p.selected_models.length > 0 ? p.selected_models : (p.discovered_models || []))));
-                      return availableChatModels.map(m => {
-                        const has = chatModels.includes(m);
-                        return (
-                          <label key={m} className="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-muted/50 cursor-pointer">
-                            <input type="checkbox" checked={has} onChange={async () => {
-                              const next = has ? chatModels.filter(x => x !== m) : [...chatModels, m];
-                              try {
-                                const res = await fetch('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'update', userId: detailUser.id, updates: { chatModels: next } }) });
-                                if (res.ok) props.onRefreshAdmin();
-                              } catch {}
-                            }} className="w-4 h-4 rounded accent-primary" />
-                            <span className="text-xs text-foreground">{m}</span>
-                          </label>
-                        );
-                      });
-                    })()}
-                  </div>
-                </div>
-                {/* 图像模型授权 */}
-                <div>
-                  <h4 className="text-sm font-semibold text-foreground mb-2">图像模型授权</h4>
-                  <div className="space-y-1">
-                    {(() => {
-                      const imageModels = detailUser.imageModels || [];
-                      const availableImageModels = Array.from(new Set(props.providers.filter(p => p.model_type === 'image' && p.isEnabled).flatMap(p => p.selected_models.length > 0 ? p.selected_models : (p.discovered_models || []))));
-                      return availableImageModels.map(m => {
-                        const has = imageModels.includes(m);
-                        return (
-                          <label key={m} className="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-muted/50 cursor-pointer">
-                            <input type="checkbox" checked={has} onChange={async () => {
-                              const next = has ? imageModels.filter(x => x !== m) : [...imageModels, m];
-                              try {
-                                const res = await fetch('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'update', userId: detailUser.id, updates: { imageModels: next } }) });
-                                if (res.ok) props.onRefreshAdmin();
-                              } catch {}
-                            }} className="w-4 h-4 rounded accent-primary" />
-                            <span className="text-xs text-foreground">{m}</span>
-                          </label>
-                        );
-                      });
-                    })()}
                   </div>
                 </div>
                 {/* 配额 */}

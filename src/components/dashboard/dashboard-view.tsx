@@ -2355,12 +2355,18 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
             adminGroups={adminGroups as any}
             onRefreshAdmin={refreshAdmin}
             onCreateUser={async (name: string, password: string, email?: string, groupId?: string) => {
-              await fetch('/api/admin/users', {
+              const res = await fetch('/api/admin/users', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
                 body: JSON.stringify({ action: 'create', name: name.trim(), password: password.trim(), email: email?.trim() || undefined, groupId: groupId || undefined }),
               });
-              await refreshAdmin();
-              window.dispatchEvent(new Event('wujie-admin-users-updated'));
+              const data = await res.json();
+              if (data.success) {
+                toast.success(`用户 ${name} 创建成功`);
+                await refreshAdmin();
+                window.dispatchEvent(new Event('wujie-admin-users-updated'));
+              } else {
+                toast.error(data.error || '创建失败');
+              }
             }}
             onRenameUser={async (userId: string, newName: string) => {
               await fetch('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ action: 'update', userId, updates: { name: newName.trim() } }) });
