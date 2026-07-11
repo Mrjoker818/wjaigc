@@ -37,6 +37,14 @@ export interface UpdateCloudTaskInput {
   remoteTaskId?: string;
 }
 
+export interface CloudTaskListFilters {
+  userId?: string;
+  providerId?: string;
+  model?: string;
+  status?: CloudTaskStatus;
+  limit?: number;
+}
+
 let tablesEnsured = false;
 
 export async function ensureCloudTaskTables(): Promise<void> {
@@ -116,6 +124,26 @@ export async function getCloudTaskForUser(taskId: string, userId: string): Promi
   const result = await execSql('SELECT * FROM cloud_tasks WHERE id = $1 AND user_id = $2', [taskId, userId]);
   if (result.rows.length === 0) return null;
   return rowToCloudTask(result.rows[0]);
+}
+
+export async function listCloudTasks(filters: CloudTaskListFilters = {}): Promise<CloudTask[]> {
+  await ensureCloudTaskTables();
+  const clauses: string[] = [];
+  const params: unknown[] = [];
+  const addFilter = (column: string, value: string | undefined) => {
+    if (!value) return;
+    params.push(value);
+    clauses.push(`${column} = $${params.length}`);
+  };
+
+  addFilter('user_id', filters.userId);
+  addFilter('provider_id', filters.providerId);
+  addFilter('model', filters.model);
+  addFilter('status', filters.status);
+  params.push(Math.min(Math.max(filters.limit || 100, 1), 500));
+  const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+  const result = await execSql(`SELECT * FROM cloud_tasks ${where} ORDER BY updated_at DESC LIMIT $${params.length}`, params);
+  return result.rows.map(rowToCloudTask);
 }
 
 function rowToCloudTask(row: Record<string, unknown>): CloudTask {

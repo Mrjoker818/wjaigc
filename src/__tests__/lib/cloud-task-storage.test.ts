@@ -7,6 +7,7 @@ vi.mock('@/lib/db-client', () => ({ execSql }));
 import {
   createCloudTask,
   getCloudTaskForUser,
+  listCloudTasks,
   updateCloudTask,
 } from '@/lib/cloud-task-storage';
 
@@ -80,5 +81,16 @@ describe('cloud-task-storage', () => {
       status: 'completed',
       result: { imageUrl: '/result.png' },
     });
+  });
+
+  it('lists cloud tasks with provider and status filters', async () => {
+    execSql.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+
+    await listCloudTasks({ providerId: 'provider-a', status: 'failed', limit: 25 });
+
+    const select = execSql.mock.calls.find(([sql]) => String(sql).includes('FROM cloud_tasks'));
+    expect(select?.[0]).toContain('provider_id = $1');
+    expect(select?.[0]).toContain('status = $2');
+    expect(select?.[1]).toEqual(['provider-a', 'failed', 25]);
   });
 });

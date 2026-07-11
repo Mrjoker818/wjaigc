@@ -218,6 +218,8 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     totalUsage: number; dailyUsage: number;
     lastUpdated: string; error?: string; endpoint?: string;
   }>>([]);
+  const [cloudTasks, setCloudTasks] = useState<Array<{ id: string; userId: string; type: string; status: string; providerId?: string; model?: string; progress: number; label?: string; error?: string; updatedAt: number }>>([]);
+  const [cloudTasksLoading, setCloudTasksLoading] = useState(false);
   // API management UI state
   const [apiFilterType, setApiFilterType] = useState<ApiKind | 'all'>('all');
   const [apiFilterStatus, setApiFilterStatus] = useState<'all' | 'enabled' | 'disabled'>('all');
@@ -756,6 +758,16 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
         if (data.success) setApiBalances(data.balances || []);
       }
     } catch { setApiBalances([]); }
+  }, []);
+
+  const refreshCloudTasks = useCallback(async () => {
+    setCloudTasksLoading(true);
+    try {
+      const response = await fetch('/api/admin/cloud-tasks?limit=20', { cache: 'no-store', credentials: 'include' });
+      const data = await response.json();
+      setCloudTasks(response.ok && data.success && Array.isArray(data.tasks) ? data.tasks : []);
+    } catch { setCloudTasks([]); }
+    finally { setCloudTasksLoading(false); }
   }, []);
 
   // ─── Load chat projects from localStorage ───
@@ -2608,7 +2620,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
         {/* ── Tab: API Management ── */}
         {activeTab === 'apis' && isAdmin && (
-          <div className="h-full overflow-y-auto p-6 relative">
+          <div className="h-full overflow-y-auto p-6 relative" onMouseEnter={() => { if (!cloudTasks.length && !cloudTasksLoading) void refreshCloudTasks(); }}>
             {/* ── Header with add button ── */}
             <div className="flex items-center justify-between mb-4">
               <div>
@@ -2621,6 +2633,25 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 <button onClick={() => { resetApiForm(); setShowApiDrawer(true); }} className="text-xs px-4 py-2 rounded-lg font-semibold flex items-center gap-1.5 cursor-pointer bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"><Plus className="w-4 h-4" />添加 API</button>
               </div>
             </div>
+
+            <section className="mb-4 rounded-xl border border-border bg-card overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+                <div className="flex items-center gap-2"><ListChecks className="w-4 h-4 text-primary" /><div><h2 className="text-sm font-semibold text-foreground">云端任务监控</h2><p className="text-[11px] text-muted-foreground">最近任务状态与失败摘要</p></div></div>
+                <button onClick={() => void refreshCloudTasks()} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer" title="刷新任务"><RefreshCw className={`w-3.5 h-3.5 ${cloudTasksLoading ? 'animate-spin' : ''}`} /></button>
+              </div>
+              {cloudTasks.length === 0 ? <div className="px-4 py-5 text-xs text-muted-foreground">{cloudTasksLoading ? '正在读取任务记录...' : '暂无云端任务记录'}</div> : (
+                <div className="divide-y divide-border">
+                  {cloudTasks.slice(0, 8).map(task => {
+                    const isFailed = ['failed', 'timeout', 'cancelled'].includes(task.status);
+                    const isCompleted = task.status === 'completed';
+                    return <div key={task.id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 px-4 py-2.5 hover:bg-muted/40">
+                      <div className="min-w-0"><div className="flex items-center gap-2"><span className="text-xs font-medium text-foreground truncate">{task.label || task.type}</span><span className={`text-[10px] px-1.5 py-0.5 rounded ${isFailed ? 'bg-destructive/15 text-destructive' : isCompleted ? 'bg-emerald-500/15 text-emerald-500' : 'bg-primary/10 text-primary'}`}>{task.status}</span></div><div className="mt-1 text-[10px] text-muted-foreground truncate">{task.providerId || '未标记供应商'} · {task.model || '未标记模型'}{task.error ? ` · ${task.error}` : ''}</div></div>
+                      <div className="text-right text-[10px] text-muted-foreground"><div>{task.progress}%</div><div className="mt-1">{new Date(task.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div></div>
+                    </div>;
+                  })}
+                </div>
+              )}
+            </section>
 
             {/* ── Filter bar ── */}
             <div className="flex items-center gap-2 mb-3 p-2 rounded-xl bg-muted/50 border border-border">
