@@ -512,6 +512,16 @@ export async function POST(request: NextRequest) {
             maskUrl: persistedTask.result.maskUrl || '',
           }, { status: 200 });
         }
+        if (persistedTask.status === 'completed' && persistedTask.result?.videoUrl) {
+          return NextResponse.json({
+            success: true,
+            status: 'completed',
+            progress: 100,
+            mediaType: 'video',
+            videoUrl: persistedTask.result.videoUrl,
+            imageUrl: persistedTask.result.videoUrl,
+          }, { status: 200 });
+        }
         if (['failed', 'cancelled', 'timeout'].includes(persistedTask.status)) {
           return NextResponse.json({
             success: false,
