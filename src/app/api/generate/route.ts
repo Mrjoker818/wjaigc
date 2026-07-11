@@ -291,6 +291,19 @@ export async function POST(request: NextRequest) {
     if (submitOnly) {
       const asyncTaskId = `async-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       registerTask(asyncTaskId, 'generate-async', '生成图片', userId);
+      // Persist the client-facing outer task before the background request starts.
+      // A provider can fail before it returns a remote task ID.
+      void recordImageTaskSubmitted({
+        taskId: asyncTaskId,
+        userId,
+        providerId: effectiveProviderId,
+        model,
+        label: '生成图片',
+      }).catch(error => console.warn('[generate] submitOnly cloud task creation failed:', error));
+      const recordSubmitOnlyTerminal = (input: Parameters<typeof recordImageTaskTerminal>[1]) => {
+        void recordImageTaskTerminal(asyncTaskId, input)
+          .catch(error => console.warn('[generate] submitOnly cloud task terminal update failed:', error));
+      };
       // 记录积分成本到任务信息中，用于取消时退款
       if (deductedCredits > 0) {
         updateTaskProgress(asyncTaskId, { creditCost: deductedCredits });
@@ -326,6 +339,11 @@ export async function POST(request: NextRequest) {
 
           if (!bgRes.ok || !bgData.success) {
             updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: bgData.error || '生成失败', label: '生成失败' });
+            recordSubmitOnlyTerminal({
+              status: 'failed',
+              error: typeof bgData.error === 'string' ? bgData.error : '生成失败',
+              creditStatus: deductedCredits > 0 ? 'refunded' : 'not-applicable',
+            });
             // 退款：生成失败时退还已扣除的积分
             if (deductedCredits > 0 && sessionUser) {
               try {
@@ -353,6 +371,11 @@ export async function POST(request: NextRequest) {
                 apiBaseUrl: bgData.apiBaseUrl,
                 providerId: bgData.providerId,
               }
+            });
+            recordSubmitOnlyTerminal({
+              status: 'completed',
+              imageUrl: bgData.directImageUrls[0],
+              creditStatus: deductedCredits > 0 ? 'charged' : 'not-applicable',
             });
             return;
           }
@@ -415,6 +438,11 @@ export async function POST(request: NextRequest) {
                       progress: 0,
                       error: '上游API服务暂时不可用，请稍后重试',
                       label: '服务暂时不可用',
+                    });
+                    recordSubmitOnlyTerminal({
+                      status: 'failed',
+                      error: '上游API服务暂时不可用，请稍后重试',
+                      creditStatus: deductedCredits > 0 ? 'refunded' : 'not-applicable',
                     });
                     // 退款
                     if (deductedCredits > 0 && sessionUser) {
@@ -487,6 +515,12 @@ export async function POST(request: NextRequest) {
                           providerId: bgData.providerId,
                         }
                       });
+                      recordSubmitOnlyTerminal({
+                        status: 'completed',
+                        imageUrl: resultImageUrl,
+                        maskUrl: typeof pollData.maskUrl === 'string' ? pollData.maskUrl : undefined,
+                        creditStatus: deductedCredits > 0 ? 'charged' : 'not-applicable',
+                      });
                       // ★ 结果已通过updateTaskProgress设置到task-registry
                       // poll-task会从registry读取并设置到completedTaskCache
                       console.log(`[generate] submitOnly background completed for ${asyncTaskId}, imageUrl: ${resultImageUrl.substring(0, 80)}...`);
@@ -501,6 +535,11 @@ export async function POST(request: NextRequest) {
                       progress: 0,
                       error: errorMsg,
                       label: '生成失败',
+                    });
+                    recordSubmitOnlyTerminal({
+                      status: 'failed',
+                      error: errorMsg,
+                      creditStatus: deductedCredits > 0 ? 'refunded' : 'not-applicable',
                     });
                     // 退款：轮询检测到生成失败
                     if (deductedCredits > 0 && sessionUser) {
@@ -532,6 +571,11 @@ export async function POST(request: NextRequest) {
             }
 
             updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: '生成超时', label: '生成超时' });
+            recordSubmitOnlyTerminal({
+              status: 'timeout',
+              error: '生成超时',
+              creditStatus: deductedCredits > 0 ? 'refunded' : 'not-applicable',
+            });
             // 退款：生成超时
             if (deductedCredits > 0 && sessionUser) {
               try {
@@ -544,6 +588,11 @@ export async function POST(request: NextRequest) {
 
           // 无图片也无 taskIds — 失败
           updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: '未获得生成结果', label: '生成失败' });
+          recordSubmitOnlyTerminal({
+            status: 'failed',
+            error: '未获得生成结果',
+            creditStatus: deductedCredits > 0 ? 'refunded' : 'not-applicable',
+          });
           // 退款：无生成结果
           if (deductedCredits > 0 && sessionUser) {
             try {
@@ -555,6 +604,11 @@ export async function POST(request: NextRequest) {
           const msg = err instanceof Error ? err.message : String(err);
           console.error(`[generate] submitOnly background error for ${asyncTaskId}:`, msg);
           updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: msg, label: '生成失败' });
+          recordSubmitOnlyTerminal({
+            status: 'failed',
+            error: msg,
+            creditStatus: deductedCredits > 0 ? 'refunded' : 'not-applicable',
+          });
           // 退款：异常失败
           if (deductedCredits > 0 && sessionUser) {
             try {
