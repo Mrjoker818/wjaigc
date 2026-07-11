@@ -212,14 +212,20 @@ export async function POST(request: NextRequest) {
     const taskId = `video_extend_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     const modelName = modelInfo?.name || pureModel;
     registerTask(taskId, 'video', `视频延长 · ${modelName}`, sessionUser?.id);
-    void recordVideoTaskSubmitted({
-      taskId,
-      userId: sessionUser?.id,
-      type: 'video-extend',
-      providerId: provider.id,
-      model: pureModel,
-      label: `视频延长 - ${modelName}`,
-    }).catch((error) => console.warn('[video/extend] Cloud task submit persistence failed:', error));
+    // Persist before returning the task ID. Cloud function runtimes may stop work
+    // scheduled with `void` as soon as this route responds.
+    try {
+      await recordVideoTaskSubmitted({
+        taskId,
+        userId: sessionUser?.id,
+        type: 'video-extend',
+        providerId: provider.id,
+        model: pureModel,
+        label: `视频延长 - ${modelName}`,
+      });
+    } catch (error) {
+      console.warn('[video/extend] Cloud task submit persistence failed:', error);
+    }
 
     // 6. 异步提交到第三方 API
     (async () => {

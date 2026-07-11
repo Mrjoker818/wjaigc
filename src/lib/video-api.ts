@@ -1041,10 +1041,16 @@ function buildRestGenericSubmit(baseUrl: string, apiKey: string, params: VideoGe
  */
 function buildApiMartVideoSubmit(baseUrl: string, apiKey: string, params: VideoGenerateParams) {
   const cleanBase = ensureBaseUrl(baseUrl);
-  const imageUrls: string[] = [];
-  if (params.imageUrl) imageUrls.push(params.imageUrl);
-  if (params.lastFrameImageUrl) imageUrls.push(params.lastFrameImageUrl);
-  if (params.referenceImages?.length) imageUrls.push(...params.referenceImages);
+  const referenceImages = params.referenceImages || [];
+  const imageWithRoles: Array<{ url: string; role: 'first_frame' | 'last_frame' | 'reference_image' }> = [];
+
+  // APImart Seedance 2.0: image_urls are reference-only. Explicitly tag
+  // first/last frames so the provider no longer reinterprets their positions.
+  if (params.imageUrl) imageWithRoles.push({ url: params.imageUrl, role: 'first_frame' });
+  if (params.lastFrameImageUrl) imageWithRoles.push({ url: params.lastFrameImageUrl, role: 'last_frame' });
+  if (imageWithRoles.length > 0) {
+    imageWithRoles.push(...referenceImages.map(url => ({ url, role: 'reference_image' as const })));
+  }
 
   // Map resolution: duration/quality → 720p/1080p/4k (default 1080p)
   let resolution = '1080p';
@@ -1056,11 +1062,14 @@ function buildApiMartVideoSubmit(baseUrl: string, apiKey: string, params: VideoG
     model: params.model,
     prompt: params.prompt,
     n: 1,
-    generation_type: imageUrls.length > 0 ? 'reference' : 'frame',
-    ...(imageUrls.length > 0 ? { image_urls: imageUrls } : {}),
-    ...(params.aspectRatio ? { aspect_ratio: params.aspectRatio } : {}),
+    generation_type: (imageWithRoles.length > 0 || referenceImages.length > 0) ? 'reference' : 'frame',
+    ...(imageWithRoles.length > 0
+      ? { image_with_roles: imageWithRoles }
+      : referenceImages.length > 0 ? { image_urls: referenceImages } : {}),
+    ...(params.aspectRatio ? { size: params.aspectRatio } : {}),
     ...(params.duration ? { duration: params.duration } : {}),
     resolution,
+    ...(params.generateAudio !== undefined ? { generate_audio: params.generateAudio } : {}),
     ...(params.negativePrompt ? { negative_prompt: params.negativePrompt } : {}),
     ...(params.seed !== undefined ? { seed: params.seed } : {}),
   };

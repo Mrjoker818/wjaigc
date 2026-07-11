@@ -292,13 +292,19 @@ export async function POST(request: NextRequest) {
     const modeLabel = imageUrl ? '图生视频' : '文生视频';
     const modelName = modelInfo?.name || model;
     registerTask(taskId, 'video', `${modeLabel} · ${modelName}`, sessionUser?.id);
-    void recordVideoTaskSubmitted({
-      taskId,
-      userId: sessionUser?.id,
-      providerId: provider.id,
-      model: pureModel,
-      label: `${modeLabel} - ${modelName}`,
-    }).catch((error) => console.warn('[video/generate] Cloud task submit persistence failed:', error));
+    // Persist before returning the task ID. Cloud function runtimes may stop work
+    // scheduled with `void` as soon as this route responds.
+    try {
+      await recordVideoTaskSubmitted({
+        taskId,
+        userId: sessionUser?.id,
+        providerId: provider.id,
+        model: pureModel,
+        label: `${modeLabel} - ${modelName}`,
+      });
+    } catch (error) {
+      console.warn('[video/generate] Cloud task submit persistence failed:', error);
+    }
 
     // 6. 异步提交到第三方 API
     // 使用 IIFE 异步执行，不阻塞响应
