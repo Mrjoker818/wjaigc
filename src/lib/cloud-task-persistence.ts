@@ -147,3 +147,11 @@ export async function recordThreeDTaskTerminal(taskId: string, input: ThreeDTask
     creditStatus: input.creditStatus || 'pending',
   });
 }
+
+export async function recordCloudTaskCancelled(taskId: string, refunded: boolean): Promise<void> {
+  await updateCloudTask(taskId, {
+    status: 'cancelled',
+    progress: 0,
+    creditStatus: refunded ? 'refunded' : 'pending',
+  });
+}

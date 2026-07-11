@@ -10,6 +10,7 @@ vi.mock('@/lib/cloud-task-storage', () => ({ createCloudTask, updateCloudTask })
 import {
   recordImageTaskSubmitted,
   recordImageTaskTerminal,
+  recordCloudTaskCancelled,
   recordThreeDTaskSubmitted,
   recordThreeDTaskTerminal,
   recordVideoTaskSubmitted,
@@ -87,6 +88,16 @@ describe('cloud-task-persistence', () => {
       status: 'failed',
       progress: 0,
       error: '上游服务超时',
+      creditStatus: 'refunded',
+    }));
+  });
+
+  it('records a cancelled task as refunded when cancellation refunds credits', async () => {
+    await recordCloudTaskCancelled('remote-task-1', true);
+
+    expect(updateCloudTask).toHaveBeenCalledWith('remote-task-1', expect.objectContaining({
+      status: 'cancelled',
+      progress: 0,
       creditStatus: 'refunded',
     }));
   });

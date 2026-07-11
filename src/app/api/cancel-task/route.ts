@@ -3,6 +3,8 @@ import { cancelTask, isTaskCancelled, getTaskInfo } from '@/lib/task-registry';
 import { cancelEditTask } from '@/lib/edit-task-store';
 import { getSessionUser as getAuthUser } from '@/lib/server-auth';
 import { refundCredits } from '@/lib/credits';
+import { recordCloudTaskCancelled } from '@/lib/cloud-task-persistence';
+import { getCloudTaskForUser } from '@/lib/cloud-task-storage';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,6 +38,18 @@ export async function POST(request: NextRequest) {
 
     // 检查任务是否存在于注册中心
     const taskInfo = getTaskInfo(taskId);
+
+    // After a restart the in-memory registry may be empty. Use the persisted
+    // task owner before allowing a normal user to cancel a historical task.
+    if (!taskInfo && user.role !== 'admin') {
+      const persistedTask = await getCloudTaskForUser(taskId, user.id);
+      if (!persistedTask) {
+        return NextResponse.json(
+          { success: false, error: '任务不存在或无权取消' },
+          { status: 404 },
+        );
+      }
+    }
 
     // 权限检查：只有任务创建者或管理员可以取消
     if (taskInfo?.userId && taskInfo.userId !== 'anonymous' && taskInfo.userId !== user.id) {
@@ -73,6 +87,7 @@ export async function POST(request: NextRequest) {
     cancelEditTask(taskId);
 
     // ★ 退款：取消任务时退还已扣除的积分
+    let refunded = false;
     if (taskInfo?.creditCost && taskInfo.creditCost > 0 && taskInfo.userId && taskInfo.userId !== 'anonymous') {
       try {
         await refundCredits(
@@ -81,11 +96,14 @@ export async function POST(request: NextRequest) {
           `任务取消退款 (taskId: ${taskId}, type: ${taskInfo.type})`,
           taskId
         );
+        refunded = true;
         console.log(`[cancel-task] Refunded ${taskInfo.creditCost} credits for cancelled task ${taskId}`);
       } catch (refundErr) {
         console.error('[cancel-task] Refund failed:', refundErr);
       }
     }
+    void recordCloudTaskCancelled(taskId, refunded)
+      .catch((error) => console.warn('[cancel-task] Cloud task cancellation persistence failed:', error));
 
     return NextResponse.json({
       success: true,
