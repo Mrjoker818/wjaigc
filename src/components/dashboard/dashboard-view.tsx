@@ -221,6 +221,13 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const [cloudTasks, setCloudTasks] = useState<Array<{ id: string; userId: string; type: string; status: string; providerId?: string; model?: string; progress: number; label?: string; error?: string; updatedAt: number }>>([]);
   const [cloudTasksLoading, setCloudTasksLoading] = useState(false);
   const [providerTaskSummary, setProviderTaskSummary] = useState<Record<string, { total: number; processing: number; failed: number }>>({});
+  const [productionReadiness, setProductionReadiness] = useState<{
+    success: boolean;
+    database: { status: 'pass' | 'warn' | 'fail'; detail: string };
+    summary: { total: number; enabled: number; ready: number; warnings: number; failures: number };
+    providers: Array<{ id: string; name: string; modelType: string; status: 'pass' | 'warn' | 'fail'; issues: string[] }>;
+  } | null>(null);
+  const [productionReadinessLoading, setProductionReadinessLoading] = useState(false);
   // API management UI state
   const [apiFilterType, setApiFilterType] = useState<ApiKind | 'all'>('all');
   const [apiFilterStatus, setApiFilterStatus] = useState<'all' | 'enabled' | 'disabled'>('all');
@@ -778,6 +785,16 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       if (!response.ok || !data.success || !Array.isArray(data.providers)) return;
       setProviderTaskSummary(Object.fromEntries(data.providers.map((item: { providerId: string; total: number; processing: number; failed: number }) => [item.providerId, item])));
     } catch { /* Keep the last known summary. */ }
+  }, []);
+
+  const refreshProductionReadiness = useCallback(async () => {
+    setProductionReadinessLoading(true);
+    try {
+      const response = await fetch('/api/admin/production-readiness', { cache: 'no-store', credentials: 'include' });
+      const data = await response.json();
+      setProductionReadiness(response.ok && data.database && data.summary && Array.isArray(data.providers) ? data : null);
+    } catch { setProductionReadiness(null); }
+    finally { setProductionReadinessLoading(false); }
   }, []);
 
   // ─── Load chat projects from localStorage ───
@@ -2630,7 +2647,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
         {/* ── Tab: API Management ── */}
         {activeTab === 'apis' && isAdmin && (
-          <div className="h-full overflow-y-auto p-6 relative" onMouseEnter={() => { if (!cloudTasks.length && !cloudTasksLoading) void refreshCloudTasks(); if (!Object.keys(providerTaskSummary).length) void refreshProviderTaskSummary(); }}>
+          <div className="h-full overflow-y-auto p-6 relative" onMouseEnter={() => { if (!productionReadiness && !productionReadinessLoading) void refreshProductionReadiness(); if (!cloudTasks.length && !cloudTasksLoading) void refreshCloudTasks(); if (!Object.keys(providerTaskSummary).length) void refreshProviderTaskSummary(); }}>
             {/* ── Header with add button ── */}
             <div className="flex items-center justify-between mb-4">
               <div>
@@ -2638,11 +2655,33 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 <p className="text-sm text-muted-foreground">配置图像、对话、3D、矢量等模型接口</p>
               </div>
               <div className="flex items-center gap-2">
+                <button onClick={() => void refreshProductionReadiness()} className="text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"><ShieldCheck className={`w-3.5 h-3.5 ${productionReadinessLoading ? 'animate-pulse' : ''}`} />发布自检</button>
                 <button onClick={() => void refreshBalances()} className="text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"><Activity className="w-3.5 h-3.5" />刷新余额</button>
                 <button onClick={() => { void refreshAdmin(); }} className="text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"><RefreshCw className="w-3.5 h-3.5" />刷新列表</button>
                 <button onClick={() => { resetApiForm(); setShowApiDrawer(true); }} className="text-xs px-4 py-2 rounded-lg font-semibold flex items-center gap-1.5 cursor-pointer bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"><Plus className="w-4 h-4" />添加 API</button>
               </div>
             </div>
+
+            <section className="mb-4 rounded-xl border border-border bg-card overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+                <div className="flex items-center gap-2"><ShieldCheck className="w-4 h-4 text-primary" /><div><h2 className="text-sm font-semibold text-foreground">发布前自检</h2><p className="text-[11px] text-muted-foreground">只检查云端数据库与已启用供应商配置，不调用供应商</p></div></div>
+                <button onClick={() => void refreshProductionReadiness()} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer" title="刷新自检"><RefreshCw className={`w-3.5 h-3.5 ${productionReadinessLoading ? 'animate-spin' : ''}`} /></button>
+              </div>
+              {productionReadinessLoading && !productionReadiness ? <div className="px-4 py-5 text-xs text-muted-foreground">正在检查云端配置...</div> : !productionReadiness ? <div className="px-4 py-5 text-xs text-muted-foreground">尚未读取发布前自检结果</div> : (
+                <div className="px-4 py-3">
+                  <div className="flex flex-wrap items-center gap-2 text-[10px]">
+                    <span className={`px-1.5 py-0.5 rounded ${productionReadiness.database.status === 'pass' ? 'bg-emerald-500/15 text-emerald-500' : 'bg-destructive/15 text-destructive'}`}>任务数据库 {productionReadiness.database.status === 'pass' ? '可用' : '异常'}</span>
+                    <span className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground">已配置 {productionReadiness.summary.total}</span>
+                    <span className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground">已启用 {productionReadiness.summary.enabled}</span>
+                    <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-500">可验收 {productionReadiness.summary.ready}</span>
+                    {productionReadiness.summary.warnings > 0 && <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400">待补充 {productionReadiness.summary.warnings}</span>}
+                    {productionReadiness.summary.failures > 0 && <span className="px-1.5 py-0.5 rounded bg-destructive/15 text-destructive">配置异常 {productionReadiness.summary.failures}</span>}
+                  </div>
+                  {productionReadiness.providers.filter(provider => provider.status !== 'pass').slice(0, 5).map(provider => <div key={provider.id} className="mt-2 text-[11px] text-muted-foreground"><span className="text-foreground font-medium">{provider.name}</span><span className="mx-1">·</span>{provider.issues.join('、')}</div>)}
+                  {productionReadiness.database.status !== 'pass' && <p className="mt-2 text-[11px] text-destructive">{productionReadiness.database.detail}</p>}
+                </div>
+              )}
+            </section>
 
             <section className="mb-4 rounded-xl border border-border bg-card overflow-hidden">
               <div className="flex items-center justify-between px-4 py-3 border-b border-border">
