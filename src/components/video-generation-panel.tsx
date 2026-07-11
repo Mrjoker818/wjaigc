@@ -460,7 +460,7 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
   };
 
   // 合并服务器模型与内置注册表
-  const [videoModels, setVideoModels] = useState<{ id: string; name: string; providerId: string; providerName: string; region: 'cn' | 'global'; features: VideoModelInfo['features'] }[]>([]);
+  const [videoModels, setVideoModels] = useState<{ id: string; modelId: string; name: string; providerId: string; providerName: string; region: 'cn' | 'global'; features: VideoModelInfo['features'] }[]>([]);
 
   // ref 保持最新 shotPlans，供异步循环读取不被闭包冻结
   const shotPlansRef = useRef<VideoShotPlan[]>(shotPlans);
@@ -562,14 +562,17 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
     };
     if (serverVideoModels && serverVideoModels.length > 0) {
       const merged = serverVideoModels.map(sm => {
-        const registry = VIDEO_MODEL_REGISTRY[sm.id as keyof typeof VIDEO_MODEL_REGISTRY] as unknown as {
+        const modelId = sm.id.includes('::') ? sm.id.split('::').pop()! : sm.id;
+        const providerId = sm.providerId || (sm.id.includes('::') ? sm.id.split('::')[0] : '');
+        const registry = VIDEO_MODEL_REGISTRY[modelId as keyof typeof VIDEO_MODEL_REGISTRY] as unknown as {
           name?: string; features?: string[]; maxDuration?: number; supportedRatios?: string[];
           maxBatch?: number; audio?: boolean; provider?: string; region?: 'cn' | 'global';
         } | undefined;
         return {
-          id: sm.id,
-          name: sm.name || registry?.name || sm.id,
-          providerId: sm.providerId,
+          id: providerId ? `${providerId}::${modelId}` : modelId,
+          modelId,
+          name: sm.name || registry?.name || modelId,
+          providerId,
           providerName: sm.providerName || registry?.provider || '',
           region: (registry?.region || 'cn') as 'cn' | 'global',
           features: registry?.features || inferFallbackFeatures(sm.id),
@@ -596,8 +599,9 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
           }
           if (data.models && Array.isArray(data.models)) {
             for (const m of data.models) {
+              const modelId = m.id || m.name;
               vModels.push({
-                id: m.id || m.name,
+                id: modelId,
                 name: m.name || m.id || '',
                 providerId: m.providerId || '',
                 providerName: providerMap.get(m.providerId) || m.providerId || '',
@@ -605,11 +609,14 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
             }
           }
           const merged = vModels.map(sm => {
-            const registry: any = VIDEO_MODEL_REGISTRY[sm.id as keyof typeof VIDEO_MODEL_REGISTRY];
+            const modelId = sm.id.includes('::') ? sm.id.split('::').pop()! : sm.id;
+            const providerId = sm.providerId || (sm.id.includes('::') ? sm.id.split('::')[0] : '');
+            const registry: any = VIDEO_MODEL_REGISTRY[modelId as keyof typeof VIDEO_MODEL_REGISTRY];
             return {
-              id: sm.id,
-              name: sm.name || registry?.name || sm.id,
-              providerId: sm.providerId,
+              id: providerId ? `${providerId}::${modelId}` : modelId,
+              modelId,
+              name: sm.name || registry?.name || modelId,
+              providerId,
               providerName: sm.providerName || registry?.provider || '',
               region: (registry?.region || 'cn') as 'cn' | 'global',
               features: registry?.features || inferFallbackFeatures(sm.id),
@@ -629,7 +636,7 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
   // 当前模型信息
   const currentModel = videoModels.find(m => m.id === model);
   const currentFeatures = currentModel?.features;
-  const currentRegistry = VIDEO_MODEL_REGISTRY[model];
+  const currentRegistry = VIDEO_MODEL_REGISTRY[currentModel?.modelId || model];
 
   // 动态可选比例
   const availableRatios = currentFeatures?.aspectRatios || ['1:1', '4:3', '16:9', '9:16'];
@@ -1000,7 +1007,7 @@ Rules:
         }
       }
       const pureModelId = model.includes('::') ? model.split('::').pop()! : model;
-      const providerId = model.includes('::') ? model.split('::')[0] : undefined;
+      const providerId = currentModel?.providerId || (model.includes('::') ? model.split('::')[0] : undefined);
       // 把 shot.cameraMove 文本规范化为 cameraControl.type 枚举
       const normalizeCameraType = (move: string): string => {
         const m = move.toLowerCase();
@@ -1443,7 +1450,7 @@ Rules:
     setIsGeneratingAllShots(true);
     try {
       const pureModelId = model.includes('::') ? model.split('::').pop()! : model;
-      const providerId = model.includes('::') ? model.split('::')[0] : undefined;
+      const providerId = currentModel?.providerId || (model.includes('::') ? model.split('::')[0] : undefined);
       const _charRefs = typedReferences.filter(r => r.type.startsWith('character-')).map(r => r.url);
       const _otherRefs = typedReferences.filter(r => !r.type.startsWith('character-') && r.type !== 'first-frame' && r.type !== 'last-frame').map(r => r.url);
 
@@ -1554,7 +1561,7 @@ Rules:
 
     // 提取 providerId（如果 model 是复合键）
     const pureModelId = model.includes('::') ? model.split('::').pop()! : model;
-    const providerId = model.includes('::') ? model.split('::')[0] : undefined;
+    const providerId = currentModel?.providerId || (model.includes('::') ? model.split('::')[0] : undefined);
 
     // 多镜头叙事模式：使用结构化 ShotPlans（优先）或旧的 multiShotScenes 兼容
     const finalPrompt = mode === 'multi-shot'
@@ -1927,7 +1934,7 @@ Rules:
                 >
                   {videoModels.length === 0 && <option value="">请在管理员后台添加视频模型</option>}
                   {videoModels.map(m => (
-                    <option key={m.id} value={m.id}>{m.name} {m.region === 'cn' ? '🇨🇳' : '🌍'}</option>
+                    <option key={m.id} value={m.id}>{m.name} · {m.providerName || '未标记供应商'} {m.region === 'cn' ? '🇨🇳' : '🌍'}</option>
                   ))}
                 </select>
                 <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none" style={{ color: subTextColor }} />
