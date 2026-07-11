@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { join } from 'path';
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
+import { requireAdminUser } from '@/lib/server-auth';
 
 // 动态导入JSZip
 let JSZip: any;
@@ -44,6 +45,11 @@ function sanitizeObject(obj: Record<string, unknown>): Record<string, unknown> {
 }
 
 export async function GET(req: NextRequest) {
+  const admin = await requireAdminUser(req);
+  if (!admin) {
+    return NextResponse.json({ success: false, error: 'Admin access required' }, { status: 403 });
+  }
+
   try {
     const Zip = await getJSZip();
     const zip = new Zip();
