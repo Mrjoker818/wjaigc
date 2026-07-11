@@ -397,8 +397,8 @@ export async function POST(request: NextRequest) {
         if (order.payment_status === 'paid') {
           return NextResponse.json({ success: false, error: '订单已处理' }, { status: 400 });
         }
-        if (order.payment_status === 'failed' || order.payment_status === 'rejected') {
-          return NextResponse.json({ success: false, error: '订单已被驳回' }, { status: 400 });
+        if (!['pending', 'submitted', 'pending_paid'].includes(String(order.payment_status))) {
+          return NextResponse.json({ success: false, error: '订单不是可确认到账的待审核状态' }, { status: 409 });
         }
 
         // Add credits to user
@@ -436,10 +436,15 @@ export async function POST(request: NextRequest) {
       }
       try {
         const rejectReason = reason || '未收到对应款项';
-        await execSql(
-          `UPDATE wujie_recharge_orders SET payment_status = 'rejected', payment_note = $2, updated_at = $3 WHERE id = $1`,
+        const rejectResult = await execSql(
+          `UPDATE wujie_recharge_orders
+           SET payment_status = 'rejected', payment_note = $2, updated_at = $3
+           WHERE id = $1 AND payment_status IN ('pending', 'submitted', 'pending_paid')`,
           [orderId, rejectReason, Date.now()]
         );
+        if ((rejectResult.rowCount ?? 0) === 0) {
+          return NextResponse.json({ success: false, error: '订单不是待审核状态，无法驳回' }, { status: 409 });
+        }
         return NextResponse.json({ success: true, message: '订单已驳回' });
       } catch (dbErr) {
         console.error('[credits] admin reject error:', dbErr);
@@ -454,17 +459,18 @@ export async function POST(request: NextRequest) {
       }
       const reason = (body as Record<string, unknown>).reason as string || '管理员撤销：未收到付款';
       try {
-        const result = await execSql(
-          'SELECT * FROM wujie_recharge_orders WHERE id = $1',
-          [orderId]
+        // Claim the paid order before touching credits so concurrent admins cannot deduct twice.
+        const claimResult = await execSql(
+          `UPDATE wujie_recharge_orders
+           SET payment_status = 'reversing', updated_at = $2
+           WHERE id = $1 AND payment_status = 'paid'
+           RETURNING user_id, amount`,
+          [orderId, Date.now()]
         );
-        if (result.rows.length === 0) {
-          return NextResponse.json({ success: false, error: '订单不存在' }, { status: 404 });
+        if ((claimResult.rowCount ?? 0) === 0 || claimResult.rows.length === 0) {
+          return NextResponse.json({ success: false, error: '订单不是可撤销的已到账状态，或正在被其他管理员处理' }, { status: 409 });
         }
-        const order = result.rows[0] as Record<string, unknown>;
-        if (order.payment_status !== 'paid') {
-          return NextResponse.json({ success: false, error: '只能撤销已到账的订单' }, { status: 400 });
-        }
+        const order = claimResult.rows[0] as Record<string, unknown>;
 
         // Deduct credits from user
         const orderAmount = Number(order.amount) || 0;
@@ -472,14 +478,21 @@ export async function POST(request: NextRequest) {
         const deductResult = await dbAdjustCredits(targetUser, -orderAmount, 'admin_adjust', `${reason}（撤销订单${orderId}）`);
 
         if (!deductResult.success) {
+          await execSql(
+            `UPDATE wujie_recharge_orders SET payment_status = 'paid', updated_at = $2 WHERE id = $1 AND payment_status = 'reversing'`,
+            [orderId, Date.now()]
+          );
           return NextResponse.json({ success: false, error: '扣除积分失败: ' + (deductResult.message || '') }, { status: 500 });
         }
 
         // Update order status to reversed
-        await execSql(
-          `UPDATE wujie_recharge_orders SET payment_status = 'reversed', updated_at = $2 WHERE id = $1`,
+        const finishResult = await execSql(
+          `UPDATE wujie_recharge_orders SET payment_status = 'reversed', updated_at = $2 WHERE id = $1 AND payment_status = 'reversing'`,
           [orderId, Date.now()]
         );
+        if ((finishResult.rowCount ?? 0) === 0) {
+          return NextResponse.json({ success: false, error: '撤销积分已扣除，但订单状态更新失败，请在审计记录中人工处理' }, { status: 500 });
+        }
 
         return NextResponse.json({ success: true, message: '订单已撤销，积分已扣回', balance: deductResult.balance });
       } catch (dbErr) {
@@ -523,7 +536,7 @@ export async function POST(request: NextRequest) {
       const statusFilter = typeof status === 'string' ? status : '';
       try {
         let res;
-        const validStatuses = ['pending', 'submitted', 'paid', 'rejected', 'failed', 'cancelled', 'reversed'];
+        const validStatuses = ['pending', 'submitted', 'paid', 'rejected', 'failed', 'cancelled', 'reversing', 'reversed'];
         if (statusFilter && validStatuses.includes(statusFilter)) {
           res = await execSql(
             `SELECT o.*, u.name as username
