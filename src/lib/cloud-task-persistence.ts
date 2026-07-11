@@ -13,6 +13,7 @@ interface ImageTaskSubmission {
   providerId?: string;
   model?: string;
   label?: string;
+  persist?: boolean;
 }
 
 interface ImageTaskTerminal {
@@ -21,6 +22,7 @@ interface ImageTaskTerminal {
   maskUrl?: string;
   error?: string;
   creditStatus?: CloudTaskCreditStatus;
+  persist?: boolean;
 }
 
 interface VideoTaskSubmission {
@@ -57,6 +59,8 @@ interface ThreeDTaskTerminal {
 }
 
 export async function recordImageTaskSubmitted(input: ImageTaskSubmission): Promise<void> {
+  if (input.persist === false) return;
+
   const now = Date.now();
   await createCloudTask({
     id: input.taskId,
@@ -74,6 +78,8 @@ export async function recordImageTaskSubmitted(input: ImageTaskSubmission): Prom
 }
 
 export async function recordImageTaskTerminal(taskId: string, input: ImageTaskTerminal): Promise<void> {
+  if (input.persist === false) return;
+
   const result = input.imageUrl
     ? { imageUrl: input.imageUrl, maskUrl: input.maskUrl || '' }
     : undefined;

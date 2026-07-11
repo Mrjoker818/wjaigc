@@ -132,6 +132,7 @@ export async function POST(request: NextRequest) {
       providerId,
       submitOnly,
       _skipCredits, // 内部标记：后台重试时跳过积分扣除（避免双重扣费）
+      _skipCloudTaskPersistence,
       resolution, // GPT-Image系列分辨率档位参数（1K/2K/4K）
     } = body;
     // quality 默认值 '1K'，后续可能被模型别名 resolutionTier 覆盖
@@ -318,6 +319,7 @@ export async function POST(request: NextRequest) {
         ...body,
         submitOnly: false,
         _skipCredits: true,
+        _skipCloudTaskPersistence: true,
         // 使用解析后的可访问参考图 URL（而非原始相对路径或不可访问 URL）
         referenceImages: accessibleReferenceImages.length > 0 ? accessibleReferenceImages : undefined,
       };
@@ -2288,6 +2290,7 @@ export async function POST(request: NextRequest) {
           userId,
           providerId: usedProviderId,
           model: usedModelId,
+          persist: !_skipCloudTaskPersistence,
         }).catch(error => console.warn('[generate] 云端任务记录创建失败:', error));
         // 先用原始 URL 标记为已完成，确保前端能立即获取到结果
         updateTaskProgress(directTid, {
@@ -2308,6 +2311,7 @@ export async function POST(request: NextRequest) {
           status: 'completed',
           imageUrl: rawUrl,
           creditStatus: deductedCredits > 0 ? 'charged' : 'not-applicable',
+          persist: !_skipCloudTaskPersistence,
         }).catch(error => console.warn('[generate] 云端任务完成记录失败:', error));
         // 后台异步持久化：不阻塞响应，完成后更新 task 结果为持久化 URL
         const tid = directTid;
@@ -2349,6 +2353,7 @@ export async function POST(request: NextRequest) {
         userId,
         providerId: usedProviderId,
         model: usedModelId,
+        persist: !_skipCloudTaskPersistence,
       }).catch(error => console.warn('[generate] 云端任务记录创建失败:', error));
       // ★ 关键修复：存储提供商信息到 task-registry，确保 poll-task 能直接使用正确的提供商
       // 而不需要通过 findProviderForModel 重新查找（可能找不到或找到错误的提供商）
