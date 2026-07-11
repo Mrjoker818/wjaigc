@@ -1126,12 +1126,11 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
         let operationResult = '';
         switch (detectedOperation) {
           case 'execute':
-            // 执行当前选中的节点
+            // 执行当前选中的节点（级联执行选中节点的下游链路）
+            handleCascadeRun(node.id);
             operationResult = `已触发执行节点 "${node.label}"，请在工作流执行面板查看进度。`;
-            // 触发工作流执行（仅执行选中节点的下游链路）
-            // TODO: 实现单节点执行逻辑
             break;
-          case 'add':
+          case 'add': {
             // 解析要添加的节点类型
             const nodeTypeKeywords: Record<string, string> = {
               '生成': 'ai-generate', '图像': 'ai-generate', '图片': 'ai-generate',
@@ -1140,20 +1139,35 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
               '条件': 'condition', '循环': 'loop',
               '输出': 'output-image', '导出': 'output-export'
             };
-            let newNodeType = 'ai-generate'; // 默认
+            let newNodeType = 'ai-generate' as NodeType;
             for (const [kw, type] of Object.entries(nodeTypeKeywords)) {
               if (userMsg.includes(kw)) {
-                newNodeType = type;
+                newNodeType = type as NodeType;
                 break;
               }
             }
-            operationResult = `已添加新节点 [${newNodeType}] 到画布右侧，请手动连接。`;
-            // TODO: 实现节点添加逻辑
+            // 在选中节点右侧创建新节点
+            const newNode = createWorkflowNode(newNodeType, node.x + node.width + 80, node.y);
+            setWf(prev => {
+              // 自动连线：选中节点输出 → 新节点输入
+              const selOutPort = node.ports.find(p => p.direction === 'out');
+              const newInPort = newNode.ports.find(p => p.direction === 'in');
+              const autoConn = (selOutPort && newInPort && canConnectPorts(selOutPort.type, newInPort.type))
+                ? [createConnection(node.id, selOutPort.id, newNode.id, newInPort.id, selOutPort.type)]
+                : [];
+              return { ...prev, nodes: [...prev.nodes, newNode], connections: [...prev.connections, ...autoConn] };
+            });
+            setSelectedNodeIds(new Set([newNode.id]));
+            operationResult = `已添加新节点 [${NODE_TYPE_LABELS[newNodeType] || newNodeType}] 并自动连线，可在右侧属性面板编辑配置。`;
             break;
-          case 'delete':
-            operationResult = `已删除节点 "${node.label}" 及其所有连线。`;
-            // TODO: 实现节点删除逻辑
+          }
+          case 'delete': {
+            const nodeLabel = node.label;
+            handleDeleteNode(node.id);
+            setSelectedNodeIds(new Set());
+            operationResult = `已删除节点 "${nodeLabel}" 及其所有连线。`;
             break;
+          }
           default:
             operationResult = `已识别操作意图: ${detectedOperation}，请确认具体参数。`;
         }

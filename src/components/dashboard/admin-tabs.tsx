@@ -1163,7 +1163,7 @@ export default function AdminTabs(props: AdminTabsProps) {
               <button className="bg-primary/10 text-primary px-3 py-1.5 rounded-md text-xs font-medium hover:bg-primary/20 transition-all">+ 新增套餐</button>
             </div>
             <div className="space-y-3">
-              {(providers || []).filter(p => (p.model_type || (p as any).modelType) === 'image').slice(0, 8).map((p, i) => (
+              {(providers || []).filter(p => (p.model_type || (p as any).modelType) === 'video').slice(0, 8).map((p, i) => (
                 <div key={i} className="flex items-center gap-4 p-3 bg-muted/30 rounded-lg">
                   <span className="text-sm font-medium text-foreground min-w-[120px] truncate">{p.name}</span>
                   <div className="flex-1 text-xs text-muted-foreground">图像模型</div>
