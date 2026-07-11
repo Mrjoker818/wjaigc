@@ -1463,7 +1463,7 @@ export default function AdminTabs(props: AdminTabsProps) {
   if (activeTab === 'settings') {
     const imageModelOpts = (providers || []).filter(p => (p.model_type || (p as any).modelType) === 'image').flatMap(p => ((p.selected_models || (p as any).selectedModels || []) as string[]).map(m => ({ value: `${p.id}::${m}`, label: m })));
     const chatModelOpts = (providers || []).filter(p => (p.model_type || (p as any).modelType) === 'chat').flatMap(p => ((p.selected_models || (p as any).selectedModels || []) as string[]).map(m => ({ value: `${p.id}::${m}`, label: m })));
-    const videoModelOpts = (providers || []).filter(p => (p.model_type || (p as any).modelType) === 'image').flatMap(p => ((p.selected_models || (p as any).selectedModels || []) as string[]).filter(m => /kling|seedance|vidu|runway|sora|veo|pika|luma|minimax/i.test(m)).map(m => ({ value: `${p.id}::${m}`, label: m })));
+    const videoModelOpts = (providers || []).filter(p => (p.model_type || (p as any).modelType) === 'video').flatMap(p => ((p.selected_models || (p as any).selectedModels || []) as string[]).filter(m => /kling|seedance|vidu|runway|sora|veo|pika|luma|minimax/i.test(m)).map(m => ({ value: `${p.id}::${m}`, label: m })));
 
     const s = (key: string) => systemSettings[key] ?? '';
 
