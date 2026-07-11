@@ -220,6 +220,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   }>>([]);
   const [cloudTasks, setCloudTasks] = useState<Array<{ id: string; userId: string; type: string; status: string; providerId?: string; model?: string; progress: number; label?: string; error?: string; updatedAt: number }>>([]);
   const [cloudTasksLoading, setCloudTasksLoading] = useState(false);
+  const [providerTaskSummary, setProviderTaskSummary] = useState<Record<string, { total: number; processing: number; failed: number }>>({});
   // API management UI state
   const [apiFilterType, setApiFilterType] = useState<ApiKind | 'all'>('all');
   const [apiFilterStatus, setApiFilterStatus] = useState<'all' | 'enabled' | 'disabled'>('all');
@@ -768,6 +769,15 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       setCloudTasks(response.ok && data.success && Array.isArray(data.tasks) ? data.tasks : []);
     } catch { setCloudTasks([]); }
     finally { setCloudTasksLoading(false); }
+  }, []);
+
+  const refreshProviderTaskSummary = useCallback(async () => {
+    try {
+      const response = await fetch('/api/admin/cloud-tasks?view=provider-summary', { cache: 'no-store', credentials: 'include' });
+      const data = await response.json();
+      if (!response.ok || !data.success || !Array.isArray(data.providers)) return;
+      setProviderTaskSummary(Object.fromEntries(data.providers.map((item: { providerId: string; total: number; processing: number; failed: number }) => [item.providerId, item])));
+    } catch { /* Keep the last known summary. */ }
   }, []);
 
   // ─── Load chat projects from localStorage ───
@@ -2620,7 +2630,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
         {/* ── Tab: API Management ── */}
         {activeTab === 'apis' && isAdmin && (
-          <div className="h-full overflow-y-auto p-6 relative" onMouseEnter={() => { if (!cloudTasks.length && !cloudTasksLoading) void refreshCloudTasks(); }}>
+          <div className="h-full overflow-y-auto p-6 relative" onMouseEnter={() => { if (!cloudTasks.length && !cloudTasksLoading) void refreshCloudTasks(); if (!Object.keys(providerTaskSummary).length) void refreshProviderTaskSummary(); }}>
             {/* ── Header with add button ── */}
             <div className="flex items-center justify-between mb-4">
               <div>
@@ -2698,6 +2708,11 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                       {p.balance !== undefined && p.balance !== null && (
                         <div className="text-[10px] text-primary/80">余额: ${typeof p.balance === 'number' ? (p.balance as number).toFixed(2) : String(p.balance)}</div>
                       )}
+                      {providerTaskSummary[p.id] && <div className="mt-2 flex items-center gap-1.5 text-[10px]">
+                        <span className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground">任务 {providerTaskSummary[p.id].total}</span>
+                        {providerTaskSummary[p.id].processing > 0 && <span className="px-1.5 py-0.5 rounded bg-primary/10 text-primary">处理中 {providerTaskSummary[p.id].processing}</span>}
+                        {providerTaskSummary[p.id].failed > 0 && <span className="px-1.5 py-0.5 rounded bg-destructive/10 text-destructive">异常 {providerTaskSummary[p.id].failed}</span>}
+                      </div>}
                       {(p.discoveredModels && p.discoveredModels.length > 0) && (
                         <div className="mt-2">
                           <button

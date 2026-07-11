@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { listCloudTasks, type CloudTaskStatus } from '@/lib/cloud-task-storage';
+import { getCloudTaskProviderSummary, listCloudTasks, type CloudTaskStatus } from '@/lib/cloud-task-storage';
 import { requireAdminUser } from '@/lib/server-auth';
 
 const VALID_STATUSES = new Set<CloudTaskStatus>(['queued', 'pending', 'processing', 'completed', 'failed', 'cancelled', 'timeout']);
@@ -9,6 +9,10 @@ export async function GET(request: NextRequest) {
   if (!admin) return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
 
   const { searchParams } = request.nextUrl;
+  if (searchParams.get('view') === 'provider-summary') {
+    const providers = await getCloudTaskProviderSummary();
+    return NextResponse.json({ success: true, providers });
+  }
   const statusValue = searchParams.get('status') || undefined;
   const limitValue = Number(searchParams.get('limit') || '100');
   const tasks = await listCloudTasks({

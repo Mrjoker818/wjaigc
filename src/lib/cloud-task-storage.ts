@@ -45,6 +45,15 @@ export interface CloudTaskListFilters {
   limit?: number;
 }
 
+export interface CloudTaskProviderSummary {
+  providerId: string;
+  total: number;
+  processing: number;
+  failed: number;
+  completed: number;
+  lastUpdatedAt: number;
+}
+
 let tablesEnsured = false;
 
 export async function ensureCloudTaskTables(): Promise<void> {
@@ -144,6 +153,31 @@ export async function listCloudTasks(filters: CloudTaskListFilters = {}): Promis
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
   const result = await execSql(`SELECT * FROM cloud_tasks ${where} ORDER BY updated_at DESC LIMIT $${params.length}`, params);
   return result.rows.map(rowToCloudTask);
+}
+
+export async function getCloudTaskProviderSummary(): Promise<CloudTaskProviderSummary[]> {
+  await ensureCloudTaskTables();
+  const result = await execSql(`
+    SELECT
+      provider_id,
+      COUNT(*)::int AS total,
+      COUNT(*) FILTER (WHERE status IN ('queued', 'pending', 'processing'))::int AS processing,
+      COUNT(*) FILTER (WHERE status IN ('failed', 'timeout', 'cancelled'))::int AS failed,
+      COUNT(*) FILTER (WHERE status = 'completed')::int AS completed,
+      MAX(updated_at) AS last_updated_at
+    FROM cloud_tasks
+    WHERE provider_id <> ''
+    GROUP BY provider_id
+    ORDER BY last_updated_at DESC
+  `);
+  return result.rows.map(row => ({
+    providerId: String(row.provider_id),
+    total: Number(row.total || 0),
+    processing: Number(row.processing || 0),
+    failed: Number(row.failed || 0),
+    completed: Number(row.completed || 0),
+    lastUpdatedAt: Number(row.last_updated_at || 0),
+  }));
 }
 
 function rowToCloudTask(row: Record<string, unknown>): CloudTask {

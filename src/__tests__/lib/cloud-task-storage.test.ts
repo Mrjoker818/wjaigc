@@ -8,6 +8,7 @@ import {
   createCloudTask,
   getCloudTaskForUser,
   listCloudTasks,
+  getCloudTaskProviderSummary,
   updateCloudTask,
 } from '@/lib/cloud-task-storage';
 
@@ -92,5 +93,15 @@ describe('cloud-task-storage', () => {
     expect(select?.[0]).toContain('provider_id = $1');
     expect(select?.[0]).toContain('status = $2');
     expect(select?.[1]).toEqual(['provider-a', 'failed', 25]);
+  });
+
+  it('summarizes task states by provider without reading task payloads', async () => {
+    execSql.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+
+    await getCloudTaskProviderSummary();
+
+    const select = execSql.mock.calls.find(([sql]) => String(sql).includes('GROUP BY provider_id'));
+    expect(select?.[0]).toContain("status IN ('failed', 'timeout', 'cancelled')");
+    expect(select?.[0]).not.toContain('result');
   });
 });
