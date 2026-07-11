@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getApiProvider, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { resolveCompatProfile, type ApiCompatProfile } from '@/lib/api-compatibility';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { requireAdminUser } from '@/lib/server-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,6 +15,11 @@ export const dynamic = 'force-dynamic';
  */
 export async function POST(request: NextRequest) {
   try {
+    const admin = await requireAdminUser(request);
+    if (!admin) {
+      return NextResponse.json({ success: false, error: 'Admin access required' }, { status: 403 });
+    }
+
     const body = await request.json();
     let { baseUrl, apiKey, advancedParams } = body;
 
