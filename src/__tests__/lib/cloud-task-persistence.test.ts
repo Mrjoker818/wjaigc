@@ -11,6 +11,7 @@ import {
   recordImageTaskSubmitted,
   recordImageTaskTerminal,
   recordCloudTaskCancelled,
+  buildRecoveredTaskContext,
   recordThreeDTaskSubmitted,
   recordThreeDTaskTerminal,
   recordVideoTaskSubmitted,
@@ -100,6 +101,21 @@ describe('cloud-task-persistence', () => {
       progress: 0,
       creditStatus: 'refunded',
     }));
+  });
+
+  it('builds recovery context without credentials or request payloads', () => {
+    const context = buildRecoveredTaskContext({
+      id: 'remote-task-1', userId: 'user-a', type: 'generate', status: 'processing',
+      providerId: 'provider-a', model: 'image-model-a', remoteTaskId: 'remote-id',
+      progress: 35, label: '生成图片', creditStatus: 'charged', createdAt: 1, updatedAt: 2,
+      result: { apiKey: 'must-not-copy', imageUrl: 'https://example.com/old.png' },
+    });
+
+    expect(context).toEqual({
+      taskId: 'remote-task-1', remoteTaskId: 'remote-id', providerId: 'provider-a',
+      model: 'image-model-a', type: 'generate', progress: 35, label: '生成图片', userId: 'user-a',
+    });
+    expect(JSON.stringify(context)).not.toContain('apiKey');
   });
 
   it('records video submission and completion without provider credentials', async () => {

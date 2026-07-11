@@ -3,6 +3,7 @@ import {
   updateCloudTask,
   type CloudTaskCreditStatus,
   type CloudTaskStatus,
+  type CloudTask,
 } from '@/lib/cloud-task-storage';
 
 interface ImageTaskSubmission {
@@ -154,4 +155,26 @@ export async function recordCloudTaskCancelled(taskId: string, refunded: boolean
     progress: 0,
     creditStatus: refunded ? 'refunded' : 'pending',
   });
+}
+
+export function buildRecoveredTaskContext(task: CloudTask): {
+  taskId: string;
+  remoteTaskId: string;
+  providerId?: string;
+  model?: string;
+  type: string;
+  progress: number;
+  label?: string;
+  userId: string;
+} {
+  return {
+    taskId: task.id,
+    remoteTaskId: task.remoteTaskId || task.id,
+    providerId: task.providerId,
+    model: task.model,
+    type: task.type,
+    progress: task.progress,
+    label: task.label,
+    userId: task.userId,
+  };
 }

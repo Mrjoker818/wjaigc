@@ -10,7 +10,7 @@ import { postProcessAIRemoveBG } from '@/lib/remove-bg-postprocess';
 import { fetchImageBuffer } from '@/lib/fetch-image-buffer';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { getEditTask, deleteEditTask, setEditTask, failEditTask } from '@/lib/edit-task-store';
-import { isTaskCancelled, updateTaskProgress, getTaskInfo, releaseQueueSlot } from '@/lib/task-registry';
+import { isTaskCancelled, updateTaskProgress, getTaskInfo, registerTask, releaseQueueSlot, type TaskType } from '@/lib/task-registry';
 import { translateApiError } from '@/lib/api-error-translate';
 import { classifyApiError, type ClassifiedError, isCloudflareTimeoutError } from '@/lib/api-error-translator';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
@@ -18,7 +18,8 @@ import { getRefineResult } from '@/app/api/refine-engine/route';
 import { getBrandResult } from '@/app/api/brand-ecommerce/route';
 import { getFontDesignResult } from '@/app/api/font-design/generate-image/route';
 import { enhanceViaAI } from '@/lib/quality-enhance';
-import { recordImageTaskTerminal, recordVideoTaskTerminal } from '@/lib/cloud-task-persistence';
+import { buildRecoveredTaskContext, recordImageTaskTerminal, recordVideoTaskTerminal } from '@/lib/cloud-task-persistence';
+import { getCloudTaskForUser } from '@/lib/cloud-task-storage';
 
 export const dynamic = 'force-dynamic';
 
@@ -498,7 +499,43 @@ export async function POST(request: NextRequest) {
     }
 
     // ★ 检查 task-registry 中的任务
-    const registryTask = getTaskInfo(taskId);
+    let registryTask = getTaskInfo(taskId);
+    if (!registryTask && sessionUser) {
+      const persistedTask = await getCloudTaskForUser(taskId, sessionUser.id);
+      if (persistedTask) {
+        if (persistedTask.status === 'completed' && persistedTask.result?.imageUrl) {
+          return NextResponse.json({
+            success: true,
+            status: 'completed',
+            progress: 100,
+            imageUrl: persistedTask.result.imageUrl,
+            maskUrl: persistedTask.result.maskUrl || '',
+          }, { status: 200 });
+        }
+        if (['failed', 'cancelled', 'timeout'].includes(persistedTask.status)) {
+          return NextResponse.json({
+            success: false,
+            status: persistedTask.status,
+            error: persistedTask.error || '任务未完成',
+            retryable: persistedTask.status === 'failed',
+          }, { status: 200 });
+        }
+
+        const recovery = buildRecoveredTaskContext(persistedTask);
+        const recovered = registerTask(recovery.taskId, recovery.type as TaskType, recovery.label, recovery.userId);
+        updateTaskProgress(recovered.taskId, {
+          status: 'processing',
+          progress: recovery.progress,
+          result: {
+            remoteTaskId: recovery.remoteTaskId,
+            providerId: recovery.providerId,
+            usedModel: recovery.model,
+            modelName: recovery.model,
+          },
+        });
+        registryTask = getTaskInfo(taskId);
+      }
+    }
     if (registryTask) {
       const taskType = registryTask.type;
       if (registryTask.status === 'completed') {
@@ -918,6 +955,7 @@ export async function POST(request: NextRequest) {
     const regApiBaseUrl = regResultForProvider.apiBaseUrl as string | undefined;
     const regApiKey = regResultForProvider.apiKey as string | undefined;
     const regAdvancedParams = regResultForProvider.advancedParams as Record<string, string> | undefined;
+    const regProviderId = regResultForProvider.providerId as string | undefined;
     const regUsedModel = regResultForProvider.usedModel as string | undefined;
     const regModelName = regResultForProvider.modelName as string | undefined;
     const regProviderName = regResultForProvider.providerName as string | undefined;
@@ -943,8 +981,9 @@ export async function POST(request: NextRequest) {
       console.log(`[poll-task] Using bgPoll-provided credentials for taskId=${taskId}, model=${model || 'unknown'}, baseUrl=${apiBaseUrl}`);
     } else {
       // 降级：从管理员配置查找提供商（优先使用 providerId 精确匹配）
-      const provider = await findProviderForModel(model || regUsedModel || '', 'image', effectiveProviderId || undefined)
-        || await findProviderForModel(model || regUsedModel || '', 'universal', effectiveProviderId || undefined);
+      const recoveredProviderId = effectiveProviderId || regProviderId;
+      const provider = await findProviderForModel(model || regUsedModel || '', 'image', recoveredProviderId || undefined)
+        || await findProviderForModel(model || regUsedModel || '', 'universal', recoveredProviderId || undefined);
       apiKey = provider?.apiKey;
       apiBaseUrl = normalizeApiBaseUrl(provider?.baseUrl || '');
       providerName = provider?.name || 'unknown';
