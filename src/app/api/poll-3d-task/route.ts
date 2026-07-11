@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, getApiProviders, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
+import { recordThreeDTaskTerminal } from '@/lib/cloud-task-persistence';
 
 // Filter sensitive fields (apiKey, secret, token, password) from response data before sending to client
 function filterSensitiveFields(obj: unknown): unknown {
@@ -227,6 +228,10 @@ export async function POST(request: NextRequest) {
     if (!response.ok) {
       const errorText = await response.text().catch(() => '');
       console.error('[poll-3d-task] Error:', response.status, errorText.slice(0, 500));
+      void recordThreeDTaskTerminal(body.taskId, {
+        status: 'failed',
+        error: `Poll failed: ${response.status}`,
+      }).catch((persistError) => console.warn('[poll-3d-task] Cloud task failure persistence failed:', persistError));
       return NextResponse.json({
         success: false,
         status: 'error',
@@ -324,6 +329,11 @@ export async function POST(request: NextRequest) {
         if (meshyProgress !== undefined) extraData.progress = meshyProgress;
         if (data.consumed_credits !== undefined) extraData.consumed_credits = data.consumed_credits;
 
+        void recordThreeDTaskTerminal(body.taskId, {
+          status: 'completed',
+          assetUrl,
+          previewImageUrl,
+        }).catch((persistError) => console.warn('[poll-3d-task] Cloud task completion persistence failed:', persistError));
         return NextResponse.json({
           success: true,
           taskId: body.taskId,
@@ -338,6 +348,10 @@ export async function POST(request: NextRequest) {
         status = 'failed';
         const taskError = data.task_error as Record<string, unknown> | undefined;
         const errorMsg = (taskError?.message || data.error_message || data.message) as string | undefined;
+        void recordThreeDTaskTerminal(body.taskId, {
+          status: 'failed',
+          error: errorMsg || '3D generation failed',
+        }).catch((persistError) => console.warn('[poll-3d-task] Cloud task failure persistence failed:', persistError));
         return NextResponse.json({
           success: true,
           taskId: body.taskId,
@@ -359,6 +373,19 @@ export async function POST(request: NextRequest) {
           rawData: filterSensitiveFields(data),
         });
       }
+    }
+
+    if (status === 'succeeded') {
+      void recordThreeDTaskTerminal(body.taskId, {
+        status: 'completed',
+        assetUrl,
+        previewImageUrl,
+      }).catch((persistError) => console.warn('[poll-3d-task] Cloud task completion persistence failed:', persistError));
+    } else if (status === 'failed') {
+      void recordThreeDTaskTerminal(body.taskId, {
+        status: 'failed',
+        error: '3D generation failed',
+      }).catch((persistError) => console.warn('[poll-3d-task] Cloud task failure persistence failed:', persistError));
     }
 
     return NextResponse.json({

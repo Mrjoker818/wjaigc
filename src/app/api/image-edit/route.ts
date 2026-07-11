@@ -24,6 +24,7 @@ import { fetchImageBuffer } from '@/lib/fetch-image-buffer';
 import { consumeCredits, refundCredits } from '@/lib/credits';
 import { validateImageUrl } from '@/lib/input-validation';
 import { enhanceViaAI } from '@/lib/quality-enhance';
+import { recordImageTaskSubmitted, recordImageTaskTerminal } from '@/lib/cloud-task-persistence';
 
 const SUPPORTED_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
 
@@ -2282,6 +2283,8 @@ export async function POST(request: NextRequest) {
       if (result?.taskId) {
         const maCandidate = candidateModels.find(c => c.model === result.usedModel) || candidateModels[0];
         registerTask(result.taskId, 'multi-angle', '多角度旋转', sessionUser?.id);
+        void recordImageTaskSubmitted({ taskId: result.taskId, userId: sessionUser?.id, type: 'multi-angle', providerId: effectiveProviderId, model: result.usedModel || maCandidate?.model, label: '多角度旋转' })
+          .catch(error => console.warn('[image-edit] 云端任务记录创建失败:', error));
         updateTaskProgress(result.taskId, {
           status: 'processing',
           progress: 10,
@@ -2747,6 +2750,8 @@ export async function POST(request: NextRequest) {
       // 通过在 task result 中标记 _needsResize + targetW/targetH，让 poll-task 完成后触发 resize
       if (aiResult?.taskId) {
         const regTaskId = registerTask(aiResult.taskId, 'upscale', 'AI放大', sessionUser?.id);
+        void recordImageTaskSubmitted({ taskId: regTaskId.taskId, userId: sessionUser?.id, type: 'upscale', providerId: effectiveProviderId, model: aiResult.usedModel, label: 'AI放大' })
+          .catch(error => console.warn('[image-edit] 云端任务记录创建失败:', error));
         updateTaskProgress(regTaskId.taskId, {
           status: 'processing',
           progress: 12,
@@ -2861,6 +2866,8 @@ export async function POST(request: NextRequest) {
           const rbUsedCandidate = candidateModels.find(c => c.model === aiUsedModel) || candidateModels[0];
           aiSuccess = true;
           registerTask(submitResult.taskId, 'generate', 'AI 移除背景', sessionUser?.id);
+          void recordImageTaskSubmitted({ taskId: submitResult.taskId, userId: sessionUser?.id, type: 'removebg', providerId: effectiveProviderId, model: aiUsedModel, label: 'AI 移除背景' })
+            .catch(error => console.warn('[image-edit] 云端任务记录创建失败:', error));
           updateTaskProgress(submitResult.taskId, {
             status: 'processing',
             progress: 10,
@@ -3205,6 +3212,8 @@ export async function POST(request: NextRequest) {
               // ★ 注册异步擦除任务（存储提供商信息，供 poll-task 轮询远端API）
               const eraseUsedCandidate = candidateModels.find(c => c.model === eraseResult.usedModel) || candidateModels[0];
               registerTask(eraseResult.taskId, 'erase', '擦除', sessionUser?.id);
+              void recordImageTaskSubmitted({ taskId: eraseResult.taskId, userId: sessionUser?.id, type: 'erase', providerId: effectiveProviderId, model: eraseResult.usedModel || eraseUsedCandidate?.model, label: '擦除' })
+                .catch(error => console.warn('[image-edit] 云端任务记录创建失败:', error));
               updateTaskProgress(eraseResult.taskId, {
                 status: 'processing',
                 progress: 10,
@@ -3302,6 +3311,8 @@ export async function POST(request: NextRequest) {
 
                           // 更新任务注册中心
                           updateTaskProgress(eraseResult.taskId, { status: 'completed', progress: 100, result: { imageUrl: resultDataUrl } });
+                          void recordImageTaskTerminal(eraseResult.taskId, { status: 'completed', imageUrl: resultDataUrl })
+                            .catch(error => console.warn('[image-edit] 云端任务完成记录失败:', error));
 
                           asyncEraseSucceeded = true;
                           eraseUsedAI = true;
@@ -3332,6 +3343,8 @@ export async function POST(request: NextRequest) {
                 // ★ 注册异步擦除任务（存储提供商信息，供 poll-task 轮询远端API）
                 const eraseCandidate = candidateModels.find(c => c.model === eraseResult.usedModel) || candidateModels[0];
                 registerTask(eraseResult.taskId, 'erase', 'AI擦除', sessionUser?.id);
+                void recordImageTaskSubmitted({ taskId: eraseResult.taskId, userId: sessionUser?.id, type: 'erase', providerId: effectiveProviderId, model: eraseResult.usedModel || eraseCandidate?.model, label: 'AI擦除' })
+                  .catch(error => console.warn('[image-edit] 云端任务记录创建失败:', error));
                 updateTaskProgress(eraseResult.taskId, {
                   status: 'processing',
                   progress: 30,
@@ -3526,6 +3539,8 @@ export async function POST(request: NextRequest) {
       if (result.taskId) {
         const usedCandidate = candidateModels.find(c => c.model === result.usedModel) || candidateModels[0];
         registerTask(result.taskId, 'mask', '蒙版修图', sessionUser?.id);
+        void recordImageTaskSubmitted({ taskId: result.taskId, userId: sessionUser?.id, type: 'mask', providerId: effectiveProviderId, model: result.usedModel || usedCandidate?.model, label: '蒙版修图' })
+          .catch(error => console.warn('[image-edit] 云端任务记录创建失败:', error));
         updateTaskProgress(result.taskId, {
           status: 'processing',
           progress: 10,
@@ -3778,6 +3793,8 @@ export async function POST(request: NextRequest) {
       // 异步结果 - 返回 taskId，前端轮询后直接使用 AI 结果
       if (result.taskId) {
         registerTask(result.taskId, 'outpaint', '扩展画面', sessionUser?.id);
+        void recordImageTaskSubmitted({ taskId: result.taskId, userId: sessionUser?.id, type: 'outpaint', providerId: effectiveProviderId, model: result.usedModel || apiModelStr, label: '扩展画面' })
+          .catch(error => console.warn('[image-edit] 云端任务记录创建失败:', error));
         updateTaskProgress(result.taskId, {
           status: 'processing',
           progress: 10,

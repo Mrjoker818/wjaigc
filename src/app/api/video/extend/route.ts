@@ -21,6 +21,7 @@ import {
   type VideoGenerateParams,
 } from '@/lib/video-api';
 import { buildDirectorPrompt, type DirectorStyle } from '@/lib/video-director';
+import { recordVideoTaskSubmitted, recordVideoTaskTerminal } from '@/lib/cloud-task-persistence';
 
 export const maxDuration = 300; // 5 min timeout
 
@@ -211,6 +212,14 @@ export async function POST(request: NextRequest) {
     const taskId = `video_extend_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     const modelName = modelInfo?.name || pureModel;
     registerTask(taskId, 'video', `视频延长 · ${modelName}`, sessionUser?.id);
+    void recordVideoTaskSubmitted({
+      taskId,
+      userId: sessionUser?.id,
+      type: 'video-extend',
+      providerId: provider.id,
+      model: pureModel,
+      label: `视频延长 - ${modelName}`,
+    }).catch((error) => console.warn('[video/extend] Cloud task submit persistence failed:', error));
 
     // 6. 异步提交到第三方 API
     (async () => {
@@ -259,6 +268,8 @@ export async function POST(request: NextRequest) {
             errorMessage = errorJson.message || errorJson.error?.message || errorJson.msg || errorMessage;
           } catch { /* ignore */ }
           updateTaskProgress(taskId, { status: 'failed', error: errorMessage, progress: 0 });
+          void recordVideoTaskTerminal(taskId, { status: 'failed', error: errorMessage })
+            .catch((error) => console.warn('[video/extend] Cloud task failure persistence failed:', error));
           return;
         }
 
@@ -309,6 +320,11 @@ export async function POST(request: NextRequest) {
               videoDuration: (submitResult as unknown as Record<string, unknown>).videoDuration as number || extendDuration,
             },
           });
+          void recordVideoTaskTerminal(taskId, {
+            status: 'completed',
+            videoUrl: finalVideoUrl,
+            imageUrl: finalImageUrl,
+          }).catch((error) => console.warn('[video/extend] Cloud task completion persistence failed:', error));
           return;
         }
 
@@ -318,6 +334,8 @@ export async function POST(request: NextRequest) {
             error: '提交视频延长任务失败：未获取到任务ID',
             progress: 0,
           });
+          void recordVideoTaskTerminal(taskId, { status: 'failed', error: '提交视频延长任务失败：未获取到任务ID' })
+            .catch((error) => console.warn('[video/extend] Cloud task failure persistence failed:', error));
           return;
         }
 
@@ -339,6 +357,8 @@ export async function POST(request: NextRequest) {
       } catch (err: any) {
         const errorMsg = err.name === 'AbortError' ? '提交超时，请稍后重试' : (err.message || '提交视频延长任务失败');
         updateTaskProgress(taskId, { status: 'failed', error: errorMsg, progress: 0 });
+        void recordVideoTaskTerminal(taskId, { status: 'failed', error: errorMsg })
+          .catch((error) => console.warn('[video/extend] Cloud task failure persistence failed:', error));
       }
     })();
 

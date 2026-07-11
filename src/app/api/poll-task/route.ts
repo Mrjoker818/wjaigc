@@ -18,6 +18,7 @@ import { getRefineResult } from '@/app/api/refine-engine/route';
 import { getBrandResult } from '@/app/api/brand-ecommerce/route';
 import { getFontDesignResult } from '@/app/api/font-design/generate-image/route';
 import { enhanceViaAI } from '@/lib/quality-enhance';
+import { recordImageTaskTerminal, recordVideoTaskTerminal } from '@/lib/cloud-task-persistence';
 
 export const dynamic = 'force-dynamic';
 
@@ -669,6 +670,8 @@ export async function POST(request: NextRequest) {
                 ? '视频任务不存在或已过期'
                 : `API 返回错误: ${errorBody.slice(0, 200)}`;
               updateTaskProgress(taskId, { status: 'failed', error: errorMsg, progress: 0 });
+              void recordVideoTaskTerminal(taskId, { status: 'failed', error: errorMsg })
+                .catch((error) => console.warn('[poll-task] Video failure persistence failed:', error));
               releaseQueueSlot(taskId);
               failedTaskCache.set(taskId, { error: errorMsg, timestamp: Date.now() });
               return NextResponse.json({
@@ -741,6 +744,10 @@ export async function POST(request: NextRequest) {
               }
 
               updateTaskProgress(taskId, { status: 'completed', progress: 100 });
+              void recordVideoTaskTerminal(taskId, {
+                status: 'completed',
+                videoUrl: persistedVideoUrl,
+              }).catch((error) => console.warn('[poll-task] Video completion persistence failed:', error));
               releaseQueueSlot(taskId);
               completedTaskCache.set(taskId, { imageUrl: persistedVideoUrl, modelName: '', providerName: '', timestamp: Date.now() });
 
@@ -762,6 +769,10 @@ export async function POST(request: NextRequest) {
 
           if (videoResult.status === 'failed') {
             updateTaskProgress(taskId, { status: 'failed', error: videoResult.error || '视频生成失败', progress: 0 });
+            void recordVideoTaskTerminal(taskId, {
+              status: 'failed',
+              error: videoResult.error || '视频生成失败',
+            }).catch((error) => console.warn('[poll-task] Video failure persistence failed:', error));
             releaseQueueSlot(taskId);
             failedTaskCache.set(taskId, { error: videoResult.error || '视频生成失败', timestamp: Date.now() });
             return NextResponse.json({
@@ -1509,6 +1520,11 @@ export async function POST(request: NextRequest) {
       const finalModelName = (existingResult.modelName as string) || regModelName || (model || regUsedModel || '');
       const finalProviderName = (existingResult.providerName as string) || regProviderName || '';
       updateTaskProgress(taskId, { status: 'completed', progress: 100, result: { ...existingResult, imageUrl: pollResult.imageUrl, maskUrl: maskUrl || '', usedModel: model || regUsedModel || existingResult.usedModel, modelName: finalModelName, providerName: finalProviderName } });
+      void recordImageTaskTerminal(taskId, {
+        status: 'completed',
+        imageUrl: typeof pollResult.imageUrl === 'string' ? pollResult.imageUrl : undefined,
+        maskUrl,
+      }).catch(error => console.warn('[poll-task] 云端任务完成记录失败:', error));
 
       // ★ 将 cropInfo（蒙版修图需要）和 targetWidth/Height（扩展需要）等元数据附加到 pollResult
       if (existingResult.cropInfo) {
@@ -1547,6 +1563,10 @@ export async function POST(request: NextRequest) {
       const translatedError = classifiedErr.friendlyMessage + (classifiedErr.suggestion ? ' — ' + classifiedErr.suggestion : '');
       const isCfTimeout = isCloudflareTimeoutError(rawError);
       updateTaskProgress(taskId, { status: 'failed', error: translatedError });
+      void recordImageTaskTerminal(taskId, {
+        status: 'failed',
+        error: translatedError,
+      }).catch(error => console.warn('[poll-task] 云端任务失败记录失败:', error));
       failedTaskCache.set(taskId, { error: translatedError, timestamp: Date.now() });
       releaseQueueSlot(taskId);
       pollResult.error = translatedError;

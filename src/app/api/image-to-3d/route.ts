@@ -7,6 +7,7 @@ import fsSync from 'fs';
 import path from 'path';
 import { validateApiInputs } from '@/lib/api-validator';
 import { logOperation, logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
+import { recordThreeDTaskSubmitted } from '@/lib/cloud-task-persistence';
 
 /**
  * Image-to-3D API route
@@ -900,6 +901,15 @@ export async function POST(request: NextRequest) {
 
     const external = await tryExternalRequest(body);
     if (external?.assetUrl || external?.taskId) {
+      if (external.taskId) {
+        void recordThreeDTaskSubmitted({
+          taskId: external.taskId,
+          userId: sessionUser?.id,
+          providerId: body.provider?.id,
+          model: body.provider?.model,
+          label: '3D model generation',
+        }).catch((persistError) => console.warn('[image-to-3d] Cloud task submit persistence failed:', persistError));
+      }
       // 记录成功日志
       logOperation({
         userId: sessionUser?.id || 'anonymous',

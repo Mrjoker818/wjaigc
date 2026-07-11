@@ -88,6 +88,8 @@ src/
 │   ├── db-client.ts                # PostgreSQL 连接池（使用 PGDATABASE_URL 环境变量）
 │   ├── db-storage.ts               # 数据库持久化存储（用户/API提供商/用户数据/系统设置）
 │   ├── task-registry.ts            # 任务注册中心（统一任务管理、SSE推送、取消、队列）
+│   ├── cloud-task-storage.ts       # 云端任务持久化存储（cloud_tasks 表 CRUD，自动建表）
+│   ├── cloud-task-persistence.ts   # 云端任务持久化业务层（图片/视频/3D 提交与终态记录）
 │   ├── task-events-client.ts       # SSE任务事件客户端（前端连接SSE、取消任务）
 │   ├── agent-engine.ts             # Agent编排引擎（工具注册表、Agent循环、多轮决策）
 │   ├── workflow-engine.ts          # 工作流引擎（DAG拓扑排序, 节点输入解析, 执行请求构建, 25+节点类型定义, AI建图结果解析, 自动布局）
@@ -383,6 +385,22 @@ scripts/
   - GET `/api/task-events?taskId=xxx` — SSE 事件流 (实时推送进度)
   - GET/POST `/api/queue-position` — 查询排队位置 (taskId)
 - **集成路由**: generate, image-edit, edit, agent-edit 均已集成任务注册
+
+### 14.1 云端任务持久化 (cloud-task-storage.ts + cloud-task-persistence.ts)
+
+基于 PostgreSQL 的异步任务持久化记录系统，所有调用均为 fire-and-forget，不阻塞主任务流程。
+
+- **cloud-task-storage.ts**: `cloud_tasks` 表自动创建与 CRUD
+  - `ensureCloudTaskTables()`: 首次调用时自动建表 + 索引（user_id+created_at, status+updated_at）
+  - `createCloudTask()`: INSERT ... ON CONFLICT DO NOTHING（幂等）
+  - `updateCloudTask()`: 动态 SET 子句更新状态/进度/结果/错误/积分
+  - `getCloudTaskForUser()`: 按 taskId + userId 查询
+- **cloud-task-persistence.ts**: 6 个业务快捷函数
+  - `recordImageTaskSubmitted/Terminal`: 图片生成/编辑（generate/erase/mask/outpaint/upscale/removebg/multi-angle）
+  - `recordVideoTaskSubmitted/Terminal`: 视频生成/延长
+  - `recordThreeDTaskSubmitted/Terminal`: 3D 模型生成
+- **安全设计**: 不存储 API Key，参数化查询防注入，所有持久化调用 `void`（fire-and-forget）
+- **集成路由**: generate, image-edit, poll-task, video/generate, video/extend, image-to-3d, poll-3d-task
 
 ### 15. SSE 任务推送 (task-events/route.ts + task-events-client.ts)
 

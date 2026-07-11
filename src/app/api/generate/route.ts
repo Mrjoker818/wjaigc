@@ -19,6 +19,7 @@ import { consumeCredits } from '@/lib/credits';
 
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, stripEditsOnlyFields, isEditsEndpointRejected, type ApiCompatProfile, resolveProfileForModel, isGeminiImageModel, isNanoBananaModel, buildGeminiChatImageRequest, parseGeminiChatImageResponse, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
 import { registerTask, updateTaskProgress, isTaskCancelled, getTaskInfo } from '@/lib/task-registry';
+import { recordImageTaskSubmitted, recordImageTaskTerminal } from '@/lib/cloud-task-persistence';
 import { persistRemoteImage } from '@/lib/s3-storage';
 import { calculateActualPixelsFromRatio } from '@/lib/calculate-pixels';
 import { RESOLUTION_TIER_MODELS, QUALITY_LEVEL_MODELS, getModelParamType, ModelParamType } from '@/lib/canvas-generation-group';
@@ -2228,6 +2229,12 @@ export async function POST(request: NextRequest) {
         const directTid = `direct-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}`;
         taskIds.push(directTid);
         registerTask(directTid, 'generate', '生成图片', userId);
+        void recordImageTaskSubmitted({
+          taskId: directTid,
+          userId,
+          providerId: usedProviderId,
+          model: usedModelId,
+        }).catch(error => console.warn('[generate] 云端任务记录创建失败:', error));
         // 先用原始 URL 标记为已完成，确保前端能立即获取到结果
         updateTaskProgress(directTid, {
           status: 'completed',
@@ -2243,6 +2250,11 @@ export async function POST(request: NextRequest) {
             advancedParams: provider?.advancedParams,
           }
         });
+        void recordImageTaskTerminal(directTid, {
+          status: 'completed',
+          imageUrl: rawUrl,
+          creditStatus: deductedCredits > 0 ? 'charged' : 'not-applicable',
+        }).catch(error => console.warn('[generate] 云端任务完成记录失败:', error));
         // 后台异步持久化：不阻塞响应，完成后更新 task 结果为持久化 URL
         const tid = directTid;
         const providerInfo = {
@@ -2278,6 +2290,12 @@ export async function POST(request: NextRequest) {
       const existingTask = getTaskInfo(tid);
       if (existingTask) continue;
       registerTask(tid, 'generate', '生成图片', userId);
+      void recordImageTaskSubmitted({
+        taskId: tid,
+        userId,
+        providerId: usedProviderId,
+        model: usedModelId,
+      }).catch(error => console.warn('[generate] 云端任务记录创建失败:', error));
       // ★ 关键修复：存储提供商信息到 task-registry，确保 poll-task 能直接使用正确的提供商
       // 而不需要通过 findProviderForModel 重新查找（可能找不到或找到错误的提供商）
       updateTaskProgress(tid, {
