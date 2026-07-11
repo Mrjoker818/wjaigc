@@ -667,7 +667,11 @@ export function GenerationPanel(
                     }
                 }
             });
-            setDiscoveredModels(imageModels);
+            // Cloud-admin models are loaded separately from /api/models. An empty
+            // legacy local provider list must not erase that server-provided list.
+            if (imageModels.length > 0) {
+                setDiscoveredModels(imageModels);
+            }
             setUniversalProviders(providers);
         }
     }, [showThirdPartyDialog, universalApiManager]);
