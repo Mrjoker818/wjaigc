@@ -6,6 +6,7 @@ import { InfiniteCanvas, CanvasImage, ImageGroup } from '@/components/infinite-c
 import { IncrementalHistoryManager } from '@/lib/canvas-incremental-history';
 import { TreeHistoryManager, type VersionNode } from '@/lib/canvas-tree-history';
 import { createAutoConnection, type ConnectionRelationType } from '@/lib/canvas-connections';
+import { VIDEO_PANEL_OPEN_EVENT } from '@/lib/video-panel-events';
 import { GenerationPanel, GenerationParams, CtrlRefSelection } from '@/components/generation-panel';
 import VideoGenerationPanel, { VideoGenerateParams, type VideoGenerationPanelHandle } from '@/components/video-generation-panel';
 import { ImagePreview } from '@/components/image-preview';
@@ -277,6 +278,12 @@ function CanvasApp() {
 
   // Floating video panel state
   const [showVideoPanel, setShowVideoPanel] = useState(false);
+
+  useEffect(() => {
+    const openVideoPanel = () => setShowVideoPanel(true);
+    window.addEventListener(VIDEO_PANEL_OPEN_EVENT, openVideoPanel);
+    return () => window.removeEventListener(VIDEO_PANEL_OPEN_EVENT, openVideoPanel);
+  }, []);
 
   // Chat panel integration states
   const [chatInitialImage, setChatInitialImage] = useState<CanvasImage | null>(null);

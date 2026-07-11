@@ -1,6 +1,7 @@
 'use client';
 import { toast } from 'sonner';
 import { getModeHandler, shouldEditModeIntercept, type CanvasContext } from '@/lib/canvas-mode-handlers';
+import { requestVideoPanelOpen } from '@/lib/video-panel-events';
 
 /** 标准画面比例列表（与后端 SUPPORTED_RATIOS 一致） */
 const STANDARD_RATIOS = ['1:1','2:3','3:2','3:4','4:3','4:5','5:4','9:16','16:9','21:9'] as const;
@@ -15895,7 +15896,10 @@ export function InfiniteCanvas({
           {/* Video Generation - Floating Panel */}
           <button
             aria-label="视频生成"
-            onClick={() => onOpenVideoPanel?.()}
+            onClick={() => {
+              onOpenVideoPanel?.();
+              requestVideoPanelOpen();
+            }}
             className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-blue-500 hover:text-blue-600 hover:bg-blue-50' : 'text-blue-400 hover:text-blue-300 hover:bg-blue-500/10'}`}
             title="视频生成"
           >
