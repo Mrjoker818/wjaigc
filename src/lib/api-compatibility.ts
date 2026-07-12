@@ -98,6 +98,9 @@ export interface ApiCompatProfile {
 
   /** Whether derived width/height hints are accepted alongside an aspect ratio. */
   includeDerivedPixelHints?: boolean;
+
+  /** Whether quality must be omitted because it overrides the selected size tier. */
+  omitQualityWhenSizingByResolution?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -146,6 +149,9 @@ export const PROFILE_4SAPI: ApiCompatProfile = {
   pollPathTemplate: '',
   resolutionTierMode: 'size',
   omitAutoSize: true,
+  // 4SAPI's GPT Image 2 treats quality=high as a 4K override. The explicit
+  // pixel size is the only reliable representation of the user's resolution choice.
+  omitQualityWhenSizingByResolution: true,
 };
 
 /**
@@ -1656,6 +1662,9 @@ export function adjustRequestForProfile(
     }
     if (profile.resolutionTierMode === 'size') {
       delete body.resolution;
+    }
+    if (profile.omitQualityWhenSizingByResolution) {
+      delete body.quality;
     }
   } else if (profile.sizeFormat === 'aspect-ratio' && body.size && typeof body.size === 'string') {
     const sizeStr = body.size as string;

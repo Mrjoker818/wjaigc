@@ -36,7 +36,7 @@ describe('provider request contracts', () => {
     expect(getProviderPixelSizingOption('apimart', 'high', '2K')).toBe('high');
   });
 
-  it('converts a 4SAPI/OpenAI ratio to pixels and removes the unsupported resolution tier', () => {
+  it('keeps 4SAPI size authoritative by removing conflicting quality and resolution tiers', () => {
     const { body } = adjustRequestForProfile({
       model: 'gpt-image-2',
       prompt: 'A cinematic landscape',
@@ -45,8 +45,9 @@ describe('provider request contracts', () => {
       quality: 'high',
     }, PROFILE_4SAPI);
 
-    expect(body).toMatchObject({ size: '2048x1152', quality: 'high' });
+    expect(body).toMatchObject({ size: '2048x1152' });
     expect(body).not.toHaveProperty('resolution');
+    expect(body).not.toHaveProperty('quality');
   });
 
   it('omits size auto for a 4SAPI/OpenAI request and keeps no invented resolution field', () => {
