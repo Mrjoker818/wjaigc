@@ -54,6 +54,7 @@ const RANDOM_EXAMPLES = [
 ];
 
 import { MODEL_ASPECT_RATIOS, DEFAULT_ASPECT_RATIOS, findModelConfig, ASPECT_RATIO_TO_PIXELS } from '@/lib/canvas-generation-group';
+import { extractFontDesignPollImageUrl } from '@/lib/font-design-poll-result';
 
 const COLOR_OPTIONS = [
   { id: '白色', color: '#ffffff', border: '#888' },
@@ -275,8 +276,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
             const meta = activeTasksRef.current.get(tid);
             activeTasksRef.current.delete(tid);
             // Take ONLY 1 image from the result
-            const urls: string[] = data.result?.directImageUrls || (data.imageUrl ? [data.imageUrl] : []);
-            const firstUrl = urls[0];
+            const firstUrl = extractFontDesignPollImageUrl(data);
             if (firstUrl && meta) {
               setGeneratedImages(prev => [...prev, { url: firstUrl, planIndex: meta.planIndex, variant: meta.variant, planTitle: meta.planTitle }]);
             }

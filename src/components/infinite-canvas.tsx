@@ -74,6 +74,9 @@ import { taskEventsClient } from '@/lib/task-events-client';
 import { extractTaskResultImageUrl } from '@/lib/task-result-url';
 import { shouldShowAnnotationBubble } from '@/lib/canvas-annotation-visibility';
 import { closestSupportedImageAspectRatio } from '@/lib/image-aspect-ratio';
+import { getHexCubeInitialPosition } from '@/lib/hex-cube-position';
+import { resolveRefineEngineInitialImageUrl } from '@/lib/refine-engine-image';
+import { translateApiError } from '@/lib/api-error-translator';
 import { APP_VERSION_LABEL } from '@/config/app-meta';
 import OhMyPrompt from '@/components/oh-my-prompt';
 import dynamic from 'next/dynamic';
@@ -3798,14 +3801,8 @@ export function InfiniteCanvas({
 
   /** 创建六面体组 */
   const handleCreateHexCube = useCallback(() => {
-    // 在视口中心创建，使用屏幕坐标直接定位
-    const vpX = (typeof window !== 'undefined' ? window.innerWidth / 2 : 500);
-    const vpY = (typeof window !== 'undefined' ? window.innerHeight / 2 : 400);
-    // 将屏幕坐标转换为画布坐标，但使用固定偏移让面板在视口中心
-    const panelWidth = 500;
-    const panelHeight = 400;
-    // 直接使用屏幕坐标作为偏移基准
-    const group = createHexCubeGroup({ x: (vpX - panelWidth / 2 - viewOffset.x) / zoom, y: (vpY - panelHeight / 2 - viewOffset.y) / zoom });
+    const position = getHexCubeInitialPosition({ viewportWidth: typeof window !== 'undefined' ? window.innerWidth : 1000, viewportHeight: typeof window !== 'undefined' ? window.innerHeight : 800, viewOffset, zoom });
+    const group = createHexCubeGroup({ x: position.x, y: position.y });
     // 设置当前模型
     const currentModelInfo = getCurrentModel();
     group.toolbar.model = currentModelInfo.model;
@@ -6044,7 +6041,7 @@ export function InfiniteCanvas({
         const errText = await submitResp.text().catch(() => '');
         console.error('Submit refine error:', submitResp.status, errText);
         setAnnotations(prev => prev.map(a =>
-          a.id === annotation.id ? { ...a, status: 'failed' as const, aiReply: '提交修改请求失败' } : a
+          a.id === annotation.id ? { ...a, status: 'failed' as const, aiReply: translateApiError(errText, submitResp.status, errText).title || '提交修改请求失败' } : a
         ));
         return;
       }
@@ -8241,7 +8238,7 @@ export function InfiniteCanvas({
     { icon: <BoxIcon size={14} className={isMonochrome ? monoColors['图转3D工厂'] : ''} />, label: '图转3D工厂', desc: '生成3D模型预览', action: handleOpen3D },
     { icon: <Expand size={14} className={isMonochrome ? monoColors['扩展'] : ''} />, label: '扩展', desc: '向四周延伸画面，自动补齐背景', action: handleOpenExpand },
     { icon: <Scissors size={14} className={isMonochrome ? monoColors['裁切'] : ''} />, label: '裁切', desc: '自由/预设比例裁切', action: handleOpenCrop },
-    { icon: <Scan size={14} className={isMonochrome ? monoColors['精修引擎'] : ''} />, label: '精修引擎', desc: '产品精修：标准/专家模式，AI商业级修图', action: () => { const img = selectedImageData || selectedImage; setRefineEngineImageUrl(img?.url || ''); setShowRefineEngine(true); } },
+    { icon: <Scan size={14} className={isMonochrome ? monoColors['精修引擎'] : ''} />, label: '精修引擎', desc: '产品精修：标准/专家模式，AI商业级修图', action: () => { setRefineEngineImageUrl(resolveRefineEngineInitialImageUrl(selectedImageData, selectedImage)); setShowRefineEngine(true); } },
     { icon: <Pencil size={14} className={isMonochrome ? monoColors['语言修图'] : ''} />, label: '语言修图', desc: '用自然语言描述修改图片', action: () => { if (selectedImage) onEditImage?.(selectedImage); else onEditImage?.(null); } },
     { icon: <Bot size={14} className={isMonochrome ? monoColors['Agent编排'] : ''} />, label: 'Agent编排', desc: '智能编排多工具编辑图片', action: () => { const img = selectedImageData || selectedImage; if (img) { setAgentEditImage(img); } else { setAgentEditImage(null); } setShowAgentEditor(true); } },
     { icon: <Globe size={14} className={isMonochrome ? 'text-emerald-500' : 'text-emerald-400'} />, label: '全景生成', desc: '生成720°全景图', action: () => handleGeneratePanorama() },

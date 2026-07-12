@@ -1119,7 +1119,7 @@ ${themeDesc}
       while (true) {
         // 收集当前待处理的项
         const currentPlan = planRef.current;
-        const pendingItems = currentPlan.filter(p => p.status === 'pending' || p.status === 'failed');
+        const pendingItems = currentPlan.filter(p => p.status === 'pending');
         if (pendingItems.length === 0) break;
 
         // 取一批待处理项（最多MAX_CONCURRENT个）
