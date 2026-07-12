@@ -4,6 +4,7 @@ import { useState, useCallback, useRef, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { getResumedTaskPollingOutcome, RESUMED_TASK_MAX_POLL_ATTEMPTS } from '@/lib/resumed-task-polling';
 import { hasDirectVideoPollingTimedOut } from '@/lib/video-task-polling';
+import { shouldPersistProcessingPlaceholder } from '@/lib/canvas-task-placeholders';
 import { InfiniteCanvas, CanvasImage, ImageGroup } from '@/components/infinite-canvas';
 import { IncrementalHistoryManager } from '@/lib/canvas-incremental-history';
 import { TreeHistoryManager, type VersionNode } from '@/lib/canvas-tree-history';
@@ -297,7 +298,7 @@ function CanvasApp() {
   } | null>(null);
 
   // ★ 检测画布中是否有进行中的生图任务
-  const hasActiveCanvasTasks = images.some(img => img.isProcessingPlaceholder || img.processing);
+  const hasActiveCanvasTasks = images.some(img => shouldPersistProcessingPlaceholder(img) || img.processing?.status === 'processing');
 
   // 安全切换模式：有进行中任务时弹窗确认
   const safeSwitchMode = useCallback((targetMode: 'node' | 'workflow-hub' | 'dashboard') => {
@@ -771,7 +772,7 @@ function CanvasApp() {
             isProcessingPlaceholder: img.isProcessingPlaceholder || false,
             processing: img.processing,
           }))
-          .filter(img => img.url || img.videoUrl || img.svgDataUrl || img.isProcessingPlaceholder) as PersistableCanvasImage[];
+          .filter(img => img.url || img.videoUrl || img.svgDataUrl || shouldPersistProcessingPlaceholder(img)) as PersistableCanvasImage[];
         const updatedMeta = {
           ...(currentProject.metadata || {}),
           groups: groupsRef.current,
@@ -860,7 +861,7 @@ function CanvasApp() {
             isProcessingPlaceholder: img.isProcessingPlaceholder || false,
             processing: img.processing,
           }))
-          .filter(img => img.url || img.videoUrl || img.isProcessingPlaceholder) as PersistableCanvasImage[];
+          .filter(img => img.url || img.videoUrl || shouldPersistProcessingPlaceholder(img)) as PersistableCanvasImage[];
         // 1. localStorage 即时写入
         mgr.updateProject(proj.id, {
           canvasImages: persistableCanvasImages,
@@ -941,9 +942,7 @@ function CanvasApp() {
             setCurrentProject(latest);
             if (latest.canvasImages) {
               // 保留当前正在处理的占位框（isProcessingPlaceholder），避免服务器同步覆盖导致加载框消失
-              const processingPlaceholders = latestImagesRef.current.filter(
-                img => img.isProcessingPlaceholder
-              );
+              const processingPlaceholders = latestImagesRef.current.filter(shouldPersistProcessingPlaceholder);
               // 去重：避免服务器数据中已包含占位框 id 时重复添加
               const serverIds = new Set(latest.canvasImages.map(img => img.id));
               const uniquePlaceholders = processingPlaceholders.filter(
@@ -953,7 +952,7 @@ function CanvasApp() {
               // ★ BUG3 修复：如果服务器数据中 URL 为空但本地有有效 URL，不从 validImages 中移除
               // 后续 enrichment 会从 localImgMap 恢复 URL
               const validImages = latest.canvasImages.filter(
-                (img) => img.url || img.isProcessingPlaceholder || img._needsPersist
+                (img) => img.url || shouldPersistProcessingPlaceholder(img) || img._needsPersist
               );
               // ★ 过滤近期删除的图片：防止服务器同步把刚删除的图片恢复回来
               const afterDeletedFilter = validImages.filter(
