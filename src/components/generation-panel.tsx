@@ -10,7 +10,7 @@ import { UserManager as UserManagerCore } from '@/lib/user-manager';
 import { ThirdPartyModelDialog } from '@/components/third-party-model-dialog';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import { getPromptTemplates, PromptTemplate, searchTemplates } from '@/lib/prompt-templates';
-import { MODEL_ASPECT_RATIOS as SHARED_MODEL_ASPECT_RATIOS, MODEL_QUALITIES as SHARED_MODEL_QUALITIES, QUALITY_DISPLAY_NAMES as SHARED_QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE as SHARED_QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS as SHARED_ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS as SHARED_DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES as SHARED_DEFAULT_QUALITIES, findModelConfig as sharedFindModelConfig, calculateActualPixels as sharedCalculateActualPixels, ModelParamType, getModelParamType, getResolutionTierOptions, getQualityLevelOptions, getDefaultParamValue, RESOLUTION_TIER_DISPLAY_NAMES, QUALITY_LEVEL_DISPLAY_NAMES, RESOLUTION_TIER_MODELS, QUALITY_LEVEL_MODELS } from '@/lib/canvas-generation-group';
+import { MODEL_ASPECT_RATIOS as SHARED_MODEL_ASPECT_RATIOS, MODEL_QUALITIES as SHARED_MODEL_QUALITIES, QUALITY_DISPLAY_NAMES as SHARED_QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE as SHARED_QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS as SHARED_ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS as SHARED_DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES as SHARED_DEFAULT_QUALITIES, findModelConfig as sharedFindModelConfig, calculateActualPixels as sharedCalculateActualPixels, ModelParamType, getModelParamType, getResolutionTierOptions, getQualityLevelOptions, getDefaultParamValue, getProviderAspectRatios, getProviderPixelSizingOption, RESOLUTION_TIER_DISPLAY_NAMES, QUALITY_LEVEL_DISPLAY_NAMES, RESOLUTION_TIER_MODELS, QUALITY_LEVEL_MODELS } from '@/lib/canvas-generation-group';
 
 export interface GenerationParams {
     prompt: string;
@@ -387,6 +387,7 @@ export function GenerationPanel(
     const [productCategory, setProductCategory] = useState("none");
     const [designType, setDesignType] = useState("none");
     const [model, setModel] = useState("");
+    const [discoveredModels, setDiscoveredModels] = useState<{id: string, providerId: string, providerName: string, is3DProvider?: boolean, displayLabel?: string, apiDisplayName?: string}[]>([]);
     const [showThirdPartyDialog, setShowThirdPartyDialog] = useState(false);
     const [thirdPartyDefaultType, setThirdPartyDefaultType] = useState<'image' | 'chat'>('image');
     const [universalApiName, setUniversalApiName] = useState('');
@@ -439,11 +440,13 @@ export function GenerationPanel(
         setQuality(defaultQuality);
 
         // 画面比例：重置为新模型支持的首个比例
-        const supportedRatios = sharedFindModelConfig(SHARED_MODEL_ASPECT_RATIOS, pureModelId) || SHARED_DEFAULT_ASPECT_RATIOS;
+        const providerId = model.includes('::') ? model.split('::')[0] : '';
+        const providerName = discoveredModels.find(item => item.id === pureModelId && item.providerId === providerId)?.providerName || '';
+        const supportedRatios = getProviderAspectRatios(pureModelId, `${providerId} ${providerName}`);
         if (supportedRatios.length > 0 && !supportedRatios.includes(aspectRatio)) {
             setAspectRatio(supportedRatios[0]);
         }
-    }, [model]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [model, discoveredModels]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Load initial model selection from localStorage
     const [pendingModelMigration, setPendingModelMigration] = useState<string | null>(null);
@@ -495,9 +498,12 @@ export function GenerationPanel(
 
     // 获取当前模型支持的比例
     const pureModelId = model ? (model.includes('::') ? model.split('::').pop()! : model) : '';
+    const selectedProviderId = model.includes('::') ? model.split('::')[0] : '';
+    const selectedProviderName = discoveredModels.find(item => item.id === pureModelId && item.providerId === selectedProviderId)?.providerName || '';
+    const selectedProviderHint = `${selectedProviderId} ${selectedProviderName}`;
     const getSupportedAspectRatios = useCallback(() => {
-        return findModelConfig(MODEL_ASPECT_RATIOS, pureModelId) || SHARED_DEFAULT_ASPECT_RATIOS;
-    }, [pureModelId]);
+        return getProviderAspectRatios(pureModelId, selectedProviderHint);
+    }, [pureModelId, selectedProviderHint]);
 
     // 获取当前模型支持的质量
     const getSupportedQualities = useCallback(() => {
@@ -511,7 +517,8 @@ export function GenerationPanel(
 
     // 尺寸映射 — 使用 calculateActualPixels 综合考虑模型+比例+质量
     const getModelSize = useCallback((ratio: string): string => {
-        const modelSize = sharedCalculateActualPixels(ratio, quality, pureModelId);
+        const sizingOption = getProviderPixelSizingOption(selectedProviderHint, quality, resolution);
+        const modelSize = sharedCalculateActualPixels(ratio, sizingOption, pureModelId);
         if (modelSize) return modelSize.replace('×', 'x');
         // 通用回退
         if (SHARED_ASPECT_RATIO_TO_PIXELS[ratio]) return SHARED_ASPECT_RATIO_TO_PIXELS[ratio];
@@ -521,7 +528,7 @@ export function GenerationPanel(
             "2:3": "1024x1536", "21:9": "2048x878", "9:21": "878x2048",
         };
         return fallback[ratio] || "1024x1024";
-    }, [quality, pureModelId]);
+    }, [quality, resolution, pureModelId, selectedProviderHint]);
 
     // 质量对应的尺寸提示 — 显示该质量+当前比例的实际像素
     const getQualitySizeHint = useCallback((q: string): string => {
@@ -782,7 +789,6 @@ export function GenerationPanel(
         : "bg-transparent";
 
     // 万能API相关函数
-    const [discoveredModels, setDiscoveredModels] = useState<{id: string, providerId: string, providerName: string, is3DProvider?: boolean, displayLabel?: string, apiDisplayName?: string}[]>([]);
   // 迁移旧版纯 modelId → 复合键 providerId::modelId
     useEffect(() => {
         if (pendingModelMigration && discoveredModels.length > 0) {
@@ -1106,8 +1112,10 @@ export function GenerationPanel(
                             } catch {}
                             // Extract pure modelId for ratio/quality lookup
                             const newPureModelId = compositeKey.includes('::') ? compositeKey.split('::').pop()! : compositeKey;
+                            const newProviderId = compositeKey.includes('::') ? compositeKey.split('::')[0] : '';
                             // 动态获取模型支持的画面比例列表
-                            const supportedRatios = sharedFindModelConfig(SHARED_MODEL_ASPECT_RATIOS, newPureModelId) || SHARED_DEFAULT_ASPECT_RATIOS;
+                            const newProviderName = discoveredModels.find(item => item.id === newPureModelId && item.providerId === newProviderId)?.providerName || '';
+                            const supportedRatios = getProviderAspectRatios(newPureModelId, `${newProviderId} ${newProviderName}`);
                             setAspectRatio(supportedRatios[0]);
                             // 动态获取模型支持的分辨率/质量选项
                             const paramType = getModelParamType(newPureModelId);

@@ -1047,6 +1047,21 @@ export function findModelConfig<T>(map: Record<string, T>, modelId: string): T |
     return undefined;
 }
 
+/** Provider-specific UI rules keep documented parameters selectable and visible. */
+export function getProviderAspectRatios(modelId: string, providerHint = ''): string[] {
+    const ratios = findModelConfig(MODEL_ASPECT_RATIOS, modelId) || DEFAULT_ASPECT_RATIOS;
+    return /4sapi/i.test(providerHint) ? ratios.filter(ratio => ratio !== 'auto') : ratios;
+}
+
+/** 4SAPI maps the UI resolution tier to pixels; other providers use quality previews. */
+export function getProviderPixelSizingOption(
+    providerHint: string,
+    quality: string,
+    resolution: string,
+): string {
+    return /4sapi/i.test(providerHint) ? resolution || quality : quality;
+}
+
 // ============ 工具函数 ============
 
 let _groupCounter = 0;

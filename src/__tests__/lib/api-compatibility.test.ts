@@ -7,6 +7,10 @@ import {
   resolveProviderPixelSize,
   resolveProfileForModel,
 } from '@/lib/api-compatibility';
+import {
+  getProviderAspectRatios,
+  getProviderPixelSizingOption,
+} from '@/lib/canvas-generation-group';
 
 describe('provider request contracts', () => {
   it('selects the dedicated 4SAPI profile instead of the generic OpenAI profile', () => {
@@ -20,6 +24,16 @@ describe('provider request contracts', () => {
   it('uses the selected 4S resolution tier instead of quality when calculating pixels', () => {
     expect(resolveProviderPixelSize('16:9', 'high', '2K', 'gpt-image-2', PROFILE_4SAPI))
       .toBe('2048x1152');
+  });
+
+  it('hides the undocumented auto aspect ratio for 4SAPI while preserving it for APImart', () => {
+    expect(getProviderAspectRatios('gpt-image-2', '4SAPI')).not.toContain('auto');
+    expect(getProviderAspectRatios('gpt-image-2', 'APImart')).toContain('auto');
+  });
+
+  it('uses the visible 4S resolution control for pixel size previews', () => {
+    expect(getProviderPixelSizingOption('4sapi', 'high', '2K')).toBe('2K');
+    expect(getProviderPixelSizingOption('apimart', 'high', '2K')).toBe('high');
   });
 
   it('converts a 4SAPI/OpenAI ratio to pixels and removes the unsupported resolution tier', () => {
