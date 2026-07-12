@@ -20,6 +20,7 @@ import { consumeCredits } from '@/lib/credits';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, stripEditsOnlyFields, isEditsEndpointRejected, type ApiCompatProfile, resolveProfileForModel, resolveProviderPixelSize, isGeminiImageModel, isNanoBananaModel, buildGeminiChatImageRequest, parseGeminiChatImageResponse, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
 import { registerTask, updateTaskProgress, isTaskCancelled, getTaskInfo } from '@/lib/task-registry';
 import { recordImageTaskSubmitted, recordImageTaskTerminal } from '@/lib/cloud-task-persistence';
+import { canFallbackToAnotherProvider } from '@/lib/provider-fallback-policy';
 import { persistRemoteImage } from '@/lib/s3-storage';
 import { calculateActualPixelsFromRatio } from '@/lib/calculate-pixels';
 import { RESOLUTION_TIER_MODELS, QUALITY_LEVEL_MODELS, getModelParamType, ModelParamType } from '@/lib/canvas-generation-group';
@@ -128,6 +129,7 @@ export async function POST(request: NextRequest) {
       outputCount,
       model: rawModel = 'gemini-2.5-flash-image-preview',
       userId: requestUserId,
+      projectId,
       strength,
       providerId,
       submitOnly,
@@ -297,6 +299,7 @@ export async function POST(request: NextRequest) {
       void recordImageTaskSubmitted({
         taskId: asyncTaskId,
         userId,
+        projectId: typeof projectId === 'string' ? projectId : undefined,
         providerId: effectiveProviderId,
         model,
         label: '生成图片',
@@ -678,6 +681,14 @@ export async function POST(request: NextRequest) {
     }
 
     if (!serverApiKey || !apiBaseUrl) {
+      if (!canFallbackToAnotherProvider(effectiveProviderId)) {
+        return NextResponse.json({
+          success: false,
+          error: `所选供应商"${effectiveProviderId}"不可用，或缺少 API 地址/密钥配置。`,
+          providerId: effectiveProviderId,
+          model,
+        }, { status: 400 });
+      }
       // 没有找到指定模型的凭证，尝试使用第一个可用的备选模型
       if (candidateModels.length > 0) {
         const fallback = candidateModels.shift()!;
@@ -2199,7 +2210,7 @@ export async function POST(request: NextRequest) {
           }
         }
         
-        if (!submitted && isRetryable && candidateModels.length > 0) {
+        if (!submitted && canFallbackToAnotherProvider(effectiveProviderId) && isRetryable && candidateModels.length > 0) {
           console.log(`模型 ${modelConfig.modelId} 不可用 (${errMsg})，尝试备选模型...`);
           
           for (let ci = 0; ci < candidateModels.length; ci++) {
@@ -2294,6 +2305,7 @@ export async function POST(request: NextRequest) {
         void recordImageTaskSubmitted({
           taskId: directTid,
           userId,
+          projectId: typeof projectId === 'string' ? projectId : undefined,
           providerId: usedProviderId,
           model: usedModelId,
           persist: !_skipCloudTaskPersistence,
@@ -2357,6 +2369,7 @@ export async function POST(request: NextRequest) {
       void recordImageTaskSubmitted({
         taskId: tid,
         userId,
+        projectId: typeof projectId === 'string' ? projectId : undefined,
         providerId: usedProviderId,
         model: usedModelId,
         persist: !_skipCloudTaskPersistence,

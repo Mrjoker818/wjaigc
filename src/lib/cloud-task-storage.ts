@@ -8,6 +8,7 @@ export interface CloudTask {
   userId: string;
   type: string;
   status: CloudTaskStatus;
+  projectId?: string;
   providerId?: string;
   model?: string;
   remoteTaskId?: string;
@@ -39,6 +40,7 @@ export interface UpdateCloudTaskInput {
 
 export interface CloudTaskListFilters {
   userId?: string;
+  projectId?: string;
   providerId?: string;
   model?: string;
   status?: CloudTaskStatus;
@@ -65,6 +67,7 @@ export async function ensureCloudTaskTables(): Promise<void> {
       user_id TEXT NOT NULL,
       type TEXT NOT NULL,
       status TEXT NOT NULL,
+      project_id TEXT DEFAULT '',
       provider_id TEXT DEFAULT '',
       model TEXT DEFAULT '',
       remote_task_id TEXT DEFAULT '',
@@ -77,7 +80,9 @@ export async function ensureCloudTaskTables(): Promise<void> {
       updated_at BIGINT NOT NULL
     )
   `);
+  await execSql("ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS project_id TEXT DEFAULT ''");
   await execSql('CREATE INDEX IF NOT EXISTS idx_cloud_tasks_user_created ON cloud_tasks(user_id, created_at DESC)');
+  await execSql('CREATE INDEX IF NOT EXISTS idx_cloud_tasks_user_project_updated ON cloud_tasks(user_id, project_id, updated_at DESC)');
   await execSql('CREATE INDEX IF NOT EXISTS idx_cloud_tasks_status_updated ON cloud_tasks(status, updated_at DESC)');
   tablesEnsured = true;
 }
@@ -86,17 +91,18 @@ export async function createCloudTask(input: CreateCloudTaskInput): Promise<void
   await ensureCloudTaskTables();
   await execSql(`
     INSERT INTO cloud_tasks (
-      id, user_id, type, status, provider_id, model, remote_task_id,
+      id, user_id, type, status, project_id, provider_id, model, remote_task_id,
       progress, label, result, error, credit_status, created_at, updated_at
     ) VALUES (
-      $1, $2, $3, $4, $5, $6, $7,
-      $8, $9, $10, $11, $12, $13, $14
+      $1, $2, $3, $4, $5, $6, $7, $8,
+      $9, $10, $11, $12, $13, $14, $15
     ) ON CONFLICT (id) DO NOTHING
   `, [
     input.id,
     input.userId,
     input.type,
     input.status,
+    input.projectId || '',
     input.providerId || '',
     input.model || '',
     input.remoteTaskId || '',
@@ -146,6 +152,7 @@ export async function listCloudTasks(filters: CloudTaskListFilters = {}): Promis
   };
 
   addFilter('user_id', filters.userId);
+  addFilter('project_id', filters.projectId);
   addFilter('provider_id', filters.providerId);
   addFilter('model', filters.model);
   addFilter('status', filters.status);
@@ -186,6 +193,7 @@ function rowToCloudTask(row: Record<string, unknown>): CloudTask {
     userId: String(row.user_id),
     type: String(row.type),
     status: row.status as CloudTaskStatus,
+    projectId: String(row.project_id || '') || undefined,
     providerId: String(row.provider_id || '') || undefined,
     model: String(row.model || '') || undefined,
     remoteTaskId: String(row.remote_task_id || '') || undefined,

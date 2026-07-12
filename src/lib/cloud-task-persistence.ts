@@ -9,6 +9,7 @@ import {
 interface ImageTaskSubmission {
   taskId: string;
   userId?: string;
+  projectId?: string;
   type?: string;
   providerId?: string;
   model?: string;
@@ -72,6 +73,7 @@ export async function recordImageTaskSubmitted(input: ImageTaskSubmission): Prom
     userId: input.userId || 'anonymous',
     type: input.type || 'generate',
     status: 'processing',
+    projectId: input.projectId,
     providerId: input.providerId,
     model: input.model,
     remoteTaskId: input.taskId,

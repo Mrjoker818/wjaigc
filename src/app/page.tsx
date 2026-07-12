@@ -581,6 +581,8 @@ function CanvasApp() {
   const serverSyncMergeRef = useRef(false);
   // ★ 近期删除的图片 ID 集合：防止服务器同步把刚删除的图片恢复回来
   const recentlyDeletedIdsRef = useRef<Set<string>>(new Set());
+  // 已恢复的云任务 ID 集合：防止重复创建恢复占位框
+  const restoredCloudTaskIdsRef = useRef<Set<string>>(new Set());
   // Keep a ref to latest images to avoid stale closure in setTimeout
   const latestImagesRef = useRef(images);
   latestImagesRef.current = images;
@@ -648,6 +650,105 @@ function CanvasApp() {
 
     return () => { cancelled = true; };
   }, [images]);
+
+  // Recreate task cards after returning to a project or refreshing the page.
+  // The server authorizes the current user and filters by projectId.
+  useEffect(() => {
+    const projectId = currentProject?.id;
+    if (!projectId) return;
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch(`/api/tasks/recover?projectId=${encodeURIComponent(projectId)}`, {
+          cache: 'no-store',
+          credentials: 'include',
+        });
+        if (!response.ok || cancelled) return;
+        const data = await response.json() as {
+          success?: boolean;
+          tasks?: Array<{
+            id: string;
+            status: string;
+            progress?: number;
+            label?: string;
+            providerId?: string;
+            model?: string;
+            result?: { imageUrl?: string; videoUrl?: string };
+            updatedAt?: number;
+          }>;
+        };
+        if (!data.success || !Array.isArray(data.tasks) || cancelled) return;
+
+        const recoverable = data.tasks.filter(task =>
+          ['queued', 'pending', 'processing'].includes(task.status)
+          || (task.status === 'completed' && Date.now() - (task.updatedAt || 0) < 24 * 60 * 60 * 1000),
+        );
+        if (recoverable.length === 0) return;
+
+        setImages(current => {
+          const existingTaskIds = new Set(current.map(item => item.processing?.taskId).filter(Boolean));
+          const existingUrls = new Set(current.map(item => item.url || item.videoUrl).filter(Boolean));
+          const additions: CanvasImage[] = [];
+
+          recoverable.forEach((task, index) => {
+            if (restoredCloudTaskIdsRef.current.has(task.id) || existingTaskIds.has(task.id)) return;
+            restoredCloudTaskIdsRef.current.add(task.id);
+            const resultUrl = task.result?.videoUrl || task.result?.imageUrl;
+            if (task.status === 'completed' && resultUrl) {
+              if (existingUrls.has(resultUrl)) return;
+              additions.push({
+                id: `recovered-${task.id}`,
+                url: resultUrl,
+                videoUrl: task.result?.videoUrl,
+                mediaType: task.result?.videoUrl ? 'video' : 'image',
+                x: 80 + (index % 4) * 280,
+                y: 80 + Math.floor(index / 4) * 240,
+                width: 240,
+                height: 180,
+                originalWidth: 1024,
+                originalHeight: 1024,
+                prompt: 'Recovered cloud task',
+                model: task.model,
+                modelName: task.model,
+                apiProvider: task.providerId,
+                createdAt: task.updatedAt || Date.now(),
+              });
+              return;
+            }
+            additions.push({
+              id: `recovered-${task.id}`,
+              url: '',
+              x: 80 + (index % 4) * 280,
+              y: 80 + Math.floor(index / 4) * 240,
+              width: 240,
+              height: 180,
+              originalWidth: 1024,
+              originalHeight: 1024,
+              isProcessingPlaceholder: true,
+              processing: {
+                taskId: task.id,
+                label: task.label || 'Recovering task',
+                status: 'processing',
+                progress: task.progress || 5,
+                startTime: task.updatedAt || Date.now(),
+              },
+              model: task.model,
+              modelName: task.model,
+              apiProvider: task.providerId,
+              createdAt: task.updatedAt || Date.now(),
+            });
+          });
+
+          return additions.length > 0 ? [...current, ...additions] : current;
+        });
+      } catch {
+        // Recovery is best effort. Existing project state remains usable offline.
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [currentProject?.id, setImages]);
 
   // ★ 追踪图片删除：当 images 减少时，记录被删除的 ID，5 秒后自动清除
   const prevImageIdsRef2 = useRef<Set<string>>(new Set());
