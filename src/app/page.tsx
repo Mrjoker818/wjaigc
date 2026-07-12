@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { getResumedTaskPollingOutcome, RESUMED_TASK_MAX_POLL_ATTEMPTS } from '@/lib/resumed-task-polling';
+import { hasDirectVideoPollingTimedOut } from '@/lib/video-task-polling';
 import { InfiniteCanvas, CanvasImage, ImageGroup } from '@/components/infinite-canvas';
 import { IncrementalHistoryManager } from '@/lib/canvas-incremental-history';
 import { TreeHistoryManager, type VersionNode } from '@/lib/canvas-tree-history';
@@ -2823,9 +2824,8 @@ function CanvasApp() {
 
       // 渐进式轮询视频任务（与图片生成一致，SSE加速 + 渐进间隔）
       const videoPollStartTime = Date.now();
-      const VIDEO_MAX_POLL_TIME = 10 * 60 * 1000; // 10分钟绝对超时
       const pollVideoResult = async (attempt = 0): Promise<void> => {
-        if (attempt > 200 || Date.now() - videoPollStartTime > VIDEO_MAX_POLL_TIME) { // 最多200次轮询或10分钟
+        if (hasDirectVideoPollingTimedOut(attempt, Date.now() - videoPollStartTime)) {
           setImages(prev => prev.filter(img => img.id !== phId));
           toast.error('视频生成超时', { description: '已超过最大等待时间', className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
           setActiveGenerationCount(prev => Math.max(0, prev - 1));
