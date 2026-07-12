@@ -71,6 +71,9 @@ import { getModelDisplayName } from '@/lib/model-name-map';
 import type { PsdLayerItem } from '@/types/psdLayer';
 import { toStableImageUrl, awaitStableImageUrl, onPersistComplete, getCachedLocalUrl, persistVideoUrlInBackground, persistRemoteUrlInBackground } from '@/lib/stable-image-url';
 import { taskEventsClient } from '@/lib/task-events-client';
+import { extractTaskResultImageUrl } from '@/lib/task-result-url';
+import { shouldShowAnnotationBubble } from '@/lib/canvas-annotation-visibility';
+import { closestSupportedImageAspectRatio } from '@/lib/image-aspect-ratio';
 import { APP_VERSION_LABEL } from '@/config/app-meta';
 import OhMyPrompt from '@/components/oh-my-prompt';
 import dynamic from 'next/dynamic';
@@ -4309,9 +4312,10 @@ export function InfiniteCanvas({
             // 处理已完成的任务
             for (const { taskId: tid, data: pollData } of pollResults) {
               const pollResult = pollData as unknown as Record<string, unknown>;
+              const normalizedResultUrl = extractTaskResultImageUrl(pollResult);
               const pollResultData = pollResult.result as Record<string, unknown> | undefined;
               // ★ 兼容多种返回格式
-              const singleResultUrl = (pollResult.imageUrl as string)
+              const singleResultUrl = normalizedResultUrl || (pollResult.imageUrl as string)
                 || (pollResultData?.url as string)
                 || (pollResultData?.imageUrl as string)
                 || ((pollResultData?.image as Record<string, unknown>)?.url as string)
@@ -4319,7 +4323,8 @@ export function InfiniteCanvas({
               const resultUrlsFromArray: string[] = [];
               if (Array.isArray(pollResultData?.images)) {
                 for (const img of (pollResultData?.images as Array<Record<string, unknown>>)) {
-                  if (img?.url) resultUrlsFromArray.push(img.url as string);
+                  const imageUrl = extractTaskResultImageUrl({ result: { image: img } });
+                  if (imageUrl) resultUrlsFromArray.push(imageUrl);
                 }
               }
               console.log(`[pollForResult] taskId=${tid} pollData.status=${pollData.status}, imageUrl=${singleResultUrl ? 'YES' : 'NO'}, results=${resultUrlsFromArray.length || 0}`);
@@ -5981,9 +5986,7 @@ export function InfiniteCanvas({
       const { model: currentModel, providerId: currentProviderId } = getCurrentModel();
       const effectiveModel = currentModel || 'gpt-image-2';
       // Calculate aspect ratio from original image
-      const gcd = (a: number, b: number): number => b === 0 ? a : gcd(b, a % b);
-      const g = gcd(targetImg.width, targetImg.height);
-      const aspectRatio = `${targetImg.width / g}:${targetImg.height / g}`;
+      const aspectRatio = closestSupportedImageAspectRatio(targetImg.width, targetImg.height);
       const requestBody: Record<string, unknown> = {
         image: imageDataUrl,
         prompt,

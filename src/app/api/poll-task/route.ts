@@ -17,6 +17,7 @@ import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getRefineResult } from '@/app/api/refine-engine/route';
 import { getBrandResult } from '@/app/api/brand-ecommerce/route';
 import { getFontDesignResult } from '@/app/api/font-design/generate-image/route';
+import { unwrapFontDesignTaskResult } from '@/lib/font-design-task-result';
 import { enhanceViaAI } from '@/lib/quality-enhance';
 import { buildRecoveredTaskContext, recordImageTaskTerminal, recordVideoTaskTerminal } from '@/lib/cloud-task-persistence';
 import { getCloudTaskForUser } from '@/lib/cloud-task-storage';
@@ -952,12 +953,13 @@ export async function POST(request: NextRequest) {
       const fontDesignCached = getFontDesignResult(taskId);
       if (fontDesignCached) {
         console.log(`[poll-task] task-registry 未找到，从 globalThis 缓存返回 font-design 结果: ${taskId}`);
+        const fontDesignResult = unwrapFontDesignTaskResult(fontDesignCached);
         return NextResponse.json({
           success: true,
           status: 'completed',
           progress: 100,
-          result: fontDesignCached,
-          directImageUrls: (fontDesignCached as Record<string, unknown>)?.directImageUrls as string[] | undefined,
+          result: fontDesignResult,
+          directImageUrls: fontDesignResult?.directImageUrls as string[] | undefined,
         }, { status: 200 });
       }
       // 再检查 refine-engine 缓存

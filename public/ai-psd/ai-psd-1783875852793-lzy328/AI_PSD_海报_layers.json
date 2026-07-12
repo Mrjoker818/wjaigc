@@ -1,0 +1,157 @@
+{
+  "version": "4.0",
+  "taskId": "ai-psd-1783875852793-lzy328",
+  "createdAt": "2026-07-12T17:04:51.277Z",
+  "canvas": {
+    "width": 1792,
+    "height": 1008
+  },
+  "generation": {
+    "mode": "reference_to_psd",
+    "prompt": "",
+    "sceneType": "海报",
+    "styleTags": [],
+    "colorTone": "auto",
+    "complexity": "simple",
+    "quality": "lite",
+    "imageModel": "gpt-image-2-2k",
+    "llmModel": "gpt-5.5"
+  },
+  "layers": [
+    {
+      "name": "背景层",
+      "type": "background",
+      "v4Name": "背景层",
+      "visible": true,
+      "opacity": 1,
+      "blendMode": "normal",
+      "description": "",
+      "prompt": "Full canvas non-transparent background only. Create a sleek modern poster background with deep navy blue #0B1020 at the edges, blending into dark violet #24113F and subtle cyan glow near the center. Smooth radial gradient, premium commercial advertising mood, no text, no products, no foreground objects.",
+      "isUserAsset": false,
+      "editable": false
+    },
+    {
+      "name": "氛围光效层",
+      "type": "light",
+      "v4Name": "氛围光效层",
+      "visible": true,
+      "opacity": 0.75,
+      "blendMode": "normal",
+      "description": "",
+      "prompt": "Full canvas transparent layer containing only soft atmospheric lighting effects: cyan and electric blue radial glow behind the center product area, faint purple rim light along the right side, gentle warm golden highlight from upper left, subtle lens flare streaks, no text, no product, transparent background.",
+      "isUserAsset": false,
+      "editable": false
+    },
+    {
+      "name": "产品阴影层",
+      "type": "shadow",
+      "v4Name": "产品阴影层",
+      "visible": true,
+      "opacity": 0.55,
+      "blendMode": "normal",
+      "description": "",
+      "prompt": "Full canvas transparent layer containing only a realistic soft elliptical shadow under the central product position, located around x 690 to 1130 and y 770 to 890. Semi-transparent black with blurred edges, subtle reflected blue tint, no text, no product, transparent background.",
+      "isUserAsset": false,
+      "editable": false
+    },
+    {
+      "name": "产品占位层",
+      "type": "product",
+      "v4Name": "产品占位层",
+      "visible": true,
+      "opacity": 1,
+      "blendMode": "normal",
+      "description": "",
+      "prompt": "Full canvas transparent layer with placeholder for user product image. Place the product area centered slightly right of canvas, occupying approximately x 720 to 1160 and y 220 to 800. Do not generate an actual product; leave transparent placeholder region for user-provided product image, clean commercial composition.",
+      "isUserAsset": false,
+      "editable": false
+    },
+    {
+      "name": "装饰元素层",
+      "type": "decoration",
+      "v4Name": "装饰元素层",
+      "visible": true,
+      "opacity": 0.85,
+      "blendMode": "normal",
+      "description": "",
+      "prompt": "Full canvas transparent layer containing only abstract decorative elements: flowing neon cyan and gold curved ribbons sweeping diagonally from lower left toward upper right around the central product, small geometric accents, thin glowing lines, scattered tiny particles, premium tech-commercial style, no text, no product, transparent background.",
+      "isUserAsset": false,
+      "editable": false
+    },
+    {
+      "name": "文字预览层",
+      "type": "text_preview",
+      "v4Name": "文字预览层",
+      "visible": true,
+      "opacity": 0.65,
+      "blendMode": "normal",
+      "description": "",
+      "prompt": "Full canvas transparent layer showing a visual preview of the poster typography only. Upper left large bold Chinese headline: 新品上市 in bright white with subtle cyan glow. Beneath it smaller text: 质感升级 全新体验 in light cyan. Top left small brand text: 品牌名称. Lower left rounded button text: 立即了解. Typography should be clean modern sans-serif, aligned to the left, no background, no product, transparent background.",
+      "isUserAsset": false,
+      "editable": false
+    },
+    {
+      "name": "质感纹理层",
+      "type": "texture",
+      "v4Name": "质感纹理层",
+      "visible": true,
+      "opacity": 0.25,
+      "blendMode": "normal",
+      "description": "",
+      "prompt": "Full canvas transparent layer containing only subtle premium texture overlays: very fine film grain, faint dust particles, barely visible diagonal mesh texture, low opacity, evenly distributed across the poster, no text, no product, transparent background.",
+      "isUserAsset": false,
+      "editable": false
+    }
+  ],
+  "layerManifest": [
+    {
+      "name": "背景层",
+      "type": "background",
+      "visible": true,
+      "opacity": 1,
+      "editable": false
+    },
+    {
+      "name": "氛围光效层",
+      "type": "light",
+      "visible": true,
+      "opacity": 0.75,
+      "editable": false
+    },
+    {
+      "name": "产品阴影层",
+      "type": "shadow",
+      "visible": true,
+      "opacity": 0.55,
+      "editable": false
+    },
+    {
+      "name": "产品占位层",
+      "type": "product",
+      "visible": true,
+      "opacity": 1,
+      "editable": false
+    },
+    {
+      "name": "装饰元素层",
+      "type": "decoration",
+      "visible": true,
+      "opacity": 0.85,
+      "editable": false
+    },
+    {
+      "name": "文字预览层",
+      "type": "text_preview",
+      "visible": true,
+      "opacity": 0.65,
+      "editable": false
+    },
+    {
+      "name": "质感纹理层",
+      "type": "texture",
+      "visible": true,
+      "opacity": 0.25,
+      "editable": false
+    }
+  ]
+}

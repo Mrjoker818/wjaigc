@@ -24,6 +24,7 @@ import { classifyIntent, ClassifiedIntent, IntentCategory } from '@/lib/intent-c
 import { generateClarificationMessage, detectVagueScenarios, type ClarificationTemplate, type VagueScenario } from '@/lib/clarification-templates';
 import { generateSuggestions, type Suggestion, type SuggestionContext, type ContentCategory } from '@/lib/suggestion-engine';
 import { parseCanvasOperationIntent, extractCanvasActionFromAIResponse, type CanvasAction, type CanvasActionResult, type CanvasActionType } from '@/lib/canvas-action-executor';
+import { extractTaskResultImageUrl } from '@/lib/task-result-url';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
@@ -4160,7 +4161,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                         const vUrl = pollData.videoUrl || pollData.result?.videoUrl;
                         if (vUrl) allPolledVideoUrls.push(vUrl);
                       } else {
-                        const extractedUrl = pollData.imageUrl || pollData.result?.imageUrl || pollData.result?.image?.url || pollData.result?.images?.[0]?.url || pollData.result?.images?.[0];
+                        const extractedUrl = extractTaskResultImageUrl(pollData);
                         if (extractedUrl && typeof extractedUrl === 'string') allPolledUrls.push(extractedUrl);
                       }
                       break;
@@ -4311,7 +4312,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                         });
                         const pollData = await pollRes.json();
                         if (pollData.status === 'completed') {
-                          const extractedUrl = pollData.imageUrl || pollData.result?.imageUrl || pollData.result?.image?.url || pollData.result?.images?.[0]?.url || pollData.result?.images?.[0];
+                          const extractedUrl = extractTaskResultImageUrl(pollData);
                           if (extractedUrl && typeof extractedUrl === 'string') { promptResultUrls.push(extractedUrl); }
                           break;
                         } else if (pollData.status === 'failed' || pollData.retryable === false) { break; }
@@ -4437,7 +4438,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                         });
                         const pollData = await pollRes.json();
                         if (pollData.status === 'completed') {
-                          const extractedUrl = pollData.imageUrl || pollData.result?.imageUrl || pollData.result?.image?.url || pollData.result?.images?.[0]?.url || pollData.result?.images?.[0];
+                          const extractedUrl = extractTaskResultImageUrl(pollData);
                           if (extractedUrl && typeof extractedUrl === 'string') { resultUrls.push(extractedUrl); }
                           break;
                         } else if (pollData.status === 'failed' || pollData.retryable === false) {
