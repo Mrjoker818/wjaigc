@@ -149,6 +149,9 @@ export const PROFILE_4SAPI: ApiCompatProfile = {
   pollPathTemplate: '',
   resolutionTierMode: 'size',
   omitAutoSize: true,
+  // 4SAPI documents the OpenAI-compatible `size` field. Do not send the
+  // internal width/height/size_px hints, which are not part of that contract.
+  includeDerivedPixelHints: false,
   // 4SAPI's GPT Image 2 treats quality=high as a 4K override. The explicit
   // pixel size is the only reliable representation of the user's resolution choice.
   omitQualityWhenSizingByResolution: true,
