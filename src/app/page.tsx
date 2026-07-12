@@ -4363,6 +4363,24 @@ function CanvasApp() {
           floating
           onVideoGenerate={handleVideoGenerate as any}
           onAddImages={(urls: string[]) => handleAddImages(urls)}
+          onStoryVideoComposed={({ videoUrl, thumbnailUrl, duration }) => {
+            const id = `story-video-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+            setImages(prev => [...prev, {
+              id,
+              url: thumbnailUrl || '',
+              videoUrl,
+              mediaType: 'video' as const,
+              x: 160,
+              y: 160,
+              width: 480,
+              height: 270,
+              originalWidth: 1920,
+              originalHeight: 1080,
+              videoDuration: duration,
+              prompt: '故事板合成视频',
+              createdAt: Date.now(),
+            } as CanvasImage]);
+          }}
           onClose={() => setShowVideoPanel(false)}
           onError={(error: string) => {
             toast.error('视频生成失败', {

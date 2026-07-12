@@ -55,6 +55,7 @@ export async function POST(request: NextRequest) {
       negativePrompt,
       cameraControl,
       seed,
+      projectId,
     } = body;
 
     if (!videoUrl || !model) {
@@ -218,6 +219,7 @@ export async function POST(request: NextRequest) {
       await recordVideoTaskSubmitted({
         taskId,
         userId: sessionUser?.id,
+        projectId: typeof projectId === 'string' ? projectId : undefined,
         type: 'video-extend',
         providerId: provider.id,
         model: pureModel,

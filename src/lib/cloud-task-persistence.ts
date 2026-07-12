@@ -29,6 +29,7 @@ interface ImageTaskTerminal {
 interface VideoTaskSubmission {
   taskId: string;
   userId?: string;
+  projectId?: string;
   type?: string;
   providerId?: string;
   model?: string;
@@ -105,6 +106,7 @@ export async function recordVideoTaskSubmitted(input: VideoTaskSubmission): Prom
   await createCloudTask({
     id: input.taskId,
     userId: input.userId || 'anonymous',
+    projectId: input.projectId,
     type: input.type || 'video',
     status: 'processing',
     providerId: input.providerId,

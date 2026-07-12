@@ -218,6 +218,8 @@ interface VideoGenerationPanelProps {
   onError?: (error: string) => void;
   /** 画布添加图片（用于把制片资产加入画布） */
   onAddImages?: (imageUrls: string[]) => void;
+  /** 故事视频合成完成回调 */
+  onStoryVideoComposed?: (result: { videoUrl: string; thumbnailUrl?: string; duration?: number }) => void;
   themeStyle?: 'gold' | 'monochrome';
   /** 当前画布选中的图片URL，自动用作图生视频首帧 */
   selectedImageUrl?: string | null;
@@ -266,6 +268,7 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
   onShotVideoCompleted,
   onAddImages,
   onError,
+  onStoryVideoComposed,
   themeStyle = 'gold',
   selectedImageUrl,
   selectedVideoUrl,
@@ -557,7 +560,7 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
       return {
         firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true,
         audio: true, cameraControl: true, motionBrush: true, characterConsistency: false, multiShot: false,
-        maxDuration: 10, durations: [5, 10], aspectRatios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p'],
+        maxDuration: 15, durations: [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], aspectRatios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p','4K'],
       };
     };
     if (serverVideoModels && serverVideoModels.length > 0) {
@@ -1097,6 +1100,7 @@ Rules:
 
   // === 批量生成所有镜头（串行，自动串联尾帧→首帧，使用后端链式 API 实现连续性）===
   const [isGeneratingAllShots, setIsGeneratingAllShots] = useState(false);
+  const [isComposingStory, setIsComposingStory] = useState(false);
   const [isExtending, setIsExtending] = useState(false);
   // === AI 制片流水线：角色卡 & 场景图（state 声明在文件前部统一管理） ===
   // 调用图像生成 API 生成单张图片（使用后端默认图像模型）
@@ -1478,6 +1482,48 @@ Rules:
       setCurrentGeneratingShotId(null);
     }
   };
+
+  // 故事视频合成 - 调用 /api/video/tools concat-videos
+  const handleComposeStoryVideo = useCallback(async () => {
+    const completedShots = shotPlansRef.current
+      .filter((shot) => shot.status === 'completed' && Boolean(shot.videoUrl))
+      .sort((a, b) => a.index - b.index);
+
+    if (completedShots.length < 2) {
+      onError?.('请先完成至少两个镜头，再合成故事视频');
+      return;
+    }
+
+    if (completedShots.length !== shotPlansRef.current.length) {
+      onError?.('请先完成全部镜头，避免成片遗漏剧情段落');
+      return;
+    }
+
+    setIsComposingStory(true);
+    try {
+      const response = await fetch('/api/video/tools', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'concat-videos',
+          videoUrls: completedShots.map((shot) => shot.videoUrl),
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success || !data.videoUrl) {
+        throw new Error(data.error || '故事视频合成失败');
+      }
+      onStoryVideoComposed?.({
+        videoUrl: data.videoUrl,
+        thumbnailUrl: data.thumbnailUrl,
+        duration: completedShots.reduce((sum, shot) => sum + (shot.duration || 0), 0),
+      });
+    } catch (error) {
+      onError?.(error instanceof Error ? error.message : '故事视频合成失败');
+    } finally {
+      setIsComposingStory(false);
+    }
+  }, [onError, onStoryVideoComposed]);
 
   // 中英翻译 - 调用 optimize-prompt API 的 translate 模式
   const handleTranslatePrompt = useCallback(async () => {
@@ -2954,6 +3000,14 @@ Rules:
                       style={{ background: accentColor, color: '#0a0a0a' }}
                     >
                       {isGeneratingAllShots ? (<><Loader2 className="w-3.5 h-3.5 animate-spin" />连续生成中（尾帧→首帧串联）...</>) : (<><Film className="w-3.5 h-3.5" />生成全部镜头（自动串联尾帧→首帧）</>)}
+                    </button>
+                    <button
+                      onClick={handleComposeStoryVideo}
+                      disabled={isComposingStory || isGeneratingAllShots || shotPlans.some((shot) => shot.status !== 'completed' || !shot.videoUrl)}
+                      className="w-full mt-1.5 py-2 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      style={{ background: `${accentColor}22`, color: accentColor, border: `1px solid ${accentColor}66` }}
+                    >
+                      {isComposingStory ? (<><Loader2 className="w-3.5 h-3.5 animate-spin" />合成故事视频中...</>) : (<><Clapperboard className="w-3.5 h-3.5" />合成故事视频</>)}
                     </button>
                     <button
                       onClick={() => {

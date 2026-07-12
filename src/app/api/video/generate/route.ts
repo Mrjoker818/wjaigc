@@ -15,6 +15,7 @@ import {
   resolveVideoCompatProfile,
   getVideoModelInfo,
   ratioToSize,
+  validateVideoDuration,
   type VideoGenerateParams,
   type VideoCompatProfile,
 } from '@/lib/video-api';
@@ -58,6 +59,7 @@ export async function POST(request: NextRequest) {
       negativePrompt,
       seed,
       providerId,
+      projectId,
       // === 新增高级参数 ===
       cameraControl,
       motionBrush,
@@ -84,6 +86,17 @@ export async function POST(request: NextRequest) {
       console.log(`[video/generate] Stripped provider prefix from model: "${model}" → "${pureModel}"`);
     }
     const effectiveProviderId = providerId || extractedProviderId || '';
+    const parsedDuration = Number(duration);
+    const durationValidation = validateVideoDuration(pureModel, parsedDuration);
+    if (!durationValidation.valid) {
+      const allowed = durationValidation.allowedDurations;
+      return NextResponse.json({
+        error: allowed.length > 0
+          ? `模型 ${pureModel} 仅支持单段 ${allowed.join('/')} 秒视频`
+          : '视频时长必须是大于 0 的整数秒',
+        allowedDurations: allowed,
+      }, { status: 400 });
+    }
 
     // 积分扣除（登录用户才扣积分，按模型差异化扣分）
     sessionUser = await getSessionUser(request);
@@ -298,6 +311,7 @@ export async function POST(request: NextRequest) {
       await recordVideoTaskSubmitted({
         taskId,
         userId: sessionUser?.id,
+        projectId: typeof projectId === 'string' ? projectId : undefined,
         providerId: provider.id,
         model: pureModel,
         label: `${modeLabel} - ${modelName}`,

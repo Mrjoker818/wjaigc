@@ -148,11 +148,11 @@ export const VIDEO_MODEL_REGISTRY: Record<string, VideoModelInfo> = {
   },
   'doubao-seedance-2-0': {
     profile: 'volcengine-ark', name: 'Seedance 2.0', short: 'SD 2.0', provider: 'ByteDance',
-    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, cameraControl: true, motionBrush: true, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5, 10], ratios: ['1:1','4:3','3:4','16:9','9:16','21:9'], resolutions: ['480p','720p','1080p'], region: 'cn' },
+    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, cameraControl: true, motionBrush: true, characterConsistency: false, multiShot: false, maxDuration: 15, durations: [5,6,7,8,9,10,11,12,13,14,15], ratios: ['1:1','4:3','3:4','16:9','9:16','21:9'], resolutions: ['480p','720p','1080p','4K'], region: 'cn' },
   },
   'doubao-seedance-2-0-fast': {
     profile: 'volcengine-ark', name: 'Seedance 2.0 Fast', short: 'SD 2.0F', provider: 'ByteDance',
-    features: { firstLastFrame: true, multiReference: true, videoEdit: false, videoExtend: true, audio: true, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5, 10], ratios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['480p','720p','1080p'], region: 'cn' },
+    features: { firstLastFrame: true, multiReference: true, videoEdit: false, videoExtend: true, audio: true, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 15, durations: [5,6,7,8,9,10,11,12,13,14,15], ratios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['480p','720p'], region: 'cn' },
   },
   'doubao-seedance-1-0-lite': {
     profile: 'volcengine-ark', name: 'Seedance 1.0 Lite', short: 'SD 1.0L', provider: 'ByteDance',
@@ -1645,4 +1645,35 @@ export function getVideoPixelSize(aspectRatio: string, resolution: string = '108
     width: Math.round(baseWidth / 8) * 8,
     height: Math.round(baseHeight / 8) * 8,
   };
+}
+
+/**
+ * Validates a single-clip duration only when the model matches a maintained
+ * capability contract. Unknown administrator-defined models remain pass-through.
+ */
+export function validateVideoDuration(
+  modelId: string,
+  duration: number,
+): { valid: true } | { valid: false; allowedDurations: number[] } {
+  if (!Number.isInteger(duration) || duration <= 0) {
+    return { valid: false, allowedDurations: [] };
+  }
+
+  const exact = VIDEO_MODEL_REGISTRY[modelId];
+  let registered = exact;
+  if (!registered) {
+    const lower = modelId.toLowerCase();
+    for (const [key, info] of Object.entries(VIDEO_MODEL_REGISTRY)) {
+      if (lower.includes(key) || key.includes(lower)) {
+        registered = info;
+        break;
+      }
+    }
+  }
+
+  if (!registered || registered.features.durations.includes(duration)) {
+    return { valid: true };
+  }
+
+  return { valid: false, allowedDurations: registered.features.durations };
 }
