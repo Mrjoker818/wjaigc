@@ -356,6 +356,7 @@ export interface CanvasImage {
     label: string;
     status: string;
     progress: number;
+    taskId?: string;
     sourceUrl?: string;
     error?: string;
     startTime?: number; // 生图开始时间戳(ms)，用于显示已用时间

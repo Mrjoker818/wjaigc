@@ -108,7 +108,13 @@ export interface CanvasImage {
   threeDTextureUrls?: Array<Record<string, string>>;
   threeDModelInfo?: { faceCount?: number; vertexCount?: number; fileSize?: string; providerId?: string; providerName?: string; model3DName?: string; modelTaskId?: string };
   isProcessingPlaceholder?: boolean;
-  processing?: string;
+  processing?: {
+    label: string;
+    status: string;
+    progress: number;
+    taskId?: string;
+    startTime?: number;
+  };
   generatedFromImageId?: string;
   svgDataUrl?: string;
   svgUrl?: string; // SVG服务器文件URL（轻量级，用于下载矢量图，避免存储超大svgDataUrl）

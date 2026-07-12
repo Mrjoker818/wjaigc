@@ -225,6 +225,7 @@ function CanvasApp() {
             generatedFromImageId: img.generatedFromImageId || undefined,
             relationType: img.relationType || undefined,
             isProcessingPlaceholder: img.isProcessingPlaceholder || false,
+            processing: img.processing || undefined,
           })) as CanvasImage[]);
         } else {
           setImages([]);
@@ -423,6 +424,7 @@ function CanvasApp() {
                     generatedFromImageId: img.generatedFromImageId || undefined,
                     relationType: img.relationType || undefined,
                     isProcessingPlaceholder: img.isProcessingPlaceholder || false,
+                    processing: img.processing || undefined,
                   })) as CanvasImage[]);
                   // 恢复分组数据
                   const metaGroups = targetProject.metadata?.groups;
@@ -581,6 +583,58 @@ function CanvasApp() {
   const currentUserRef = useRef(currentUser);
   currentUserRef.current = currentUser;
 
+  const resumedTaskIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    let cancelled = false;
+    const pending = images.filter((image) => image.isProcessingPlaceholder && image.processing?.taskId);
+
+    for (const image of pending) {
+      const taskId = image.processing?.taskId;
+      if (!taskId || resumedTaskIdsRef.current.has(taskId)) continue;
+      resumedTaskIdsRef.current.add(taskId);
+
+      void (async () => {
+        for (let attempt = 0; attempt < 200 && !cancelled; attempt += 1) {
+          try {
+            const response = await fetch('/api/poll-task', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ taskId, model: image.model || image.modelName, providerId: image.apiProvider }),
+            });
+            const data = await response.json();
+            const videoUrl = data.videoUrl || data.result?.videoUrl;
+            const imageUrl = data.imageUrl || data.result?.imageUrl;
+            if (data.status === 'completed' && (videoUrl || imageUrl)) {
+              setImages((current) => current.map((item) => item.id === image.id ? {
+                ...item,
+                url: videoUrl || imageUrl,
+                videoUrl: videoUrl || undefined,
+                mediaType: videoUrl ? 'video' as const : item.mediaType,
+                isProcessingPlaceholder: false,
+                processing: undefined,
+              } : item));
+              return;
+            }
+            if (data.status === 'failed' || data.status === 'cancelled') {
+              setImages((current) => current.map((item) => item.id === image.id ? {
+                ...item,
+                processing: { ...item.processing!, status: 'failed', label: data.error || '生成失败' },
+              } : item));
+              return;
+            }
+            setImages((current) => current.map((item) => item.id === image.id ? {
+              ...item,
+              processing: { ...item.processing!, status: 'processing', progress: Math.max(item.processing?.progress || 0, data.progress || 0), label: data.label || item.processing?.label || '生成中' },
+            } : item));
+          } catch { /* transient polling errors are retried */ }
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+        }
+      })();
+    }
+
+    return () => { cancelled = true; };
+  }, [images]);
+
   // ★ 追踪图片删除：当 images 减少时，记录被删除的 ID，5 秒后自动清除
   const prevImageIdsRef2 = useRef<Set<string>>(new Set());
   useEffect(() => {
@@ -668,7 +722,6 @@ function CanvasApp() {
           url: urlMapping[img.url] || img.url,
         }));
         const persistableCanvasImages = resolvedImages
-          .filter(img => !img.isProcessingPlaceholder) // 不保存正在处理的占位框到项目数据
           .map(img => ({
             id: img.id,
             url: img.url,
@@ -703,8 +756,10 @@ function CanvasApp() {
             videoUrl: img.videoUrl || '',
             videoDuration: img.videoDuration || undefined,
             videoThumbnailUrl: img.videoThumbnailUrl || '',
+            isProcessingPlaceholder: img.isProcessingPlaceholder || false,
+            processing: img.processing,
           }))
-          .filter(img => img.url || img.videoUrl || img.svgDataUrl) as PersistableCanvasImage[];
+          .filter(img => img.url || img.videoUrl || img.svgDataUrl || img.isProcessingPlaceholder) as PersistableCanvasImage[];
         const updatedMeta = {
           ...(currentProject.metadata || {}),
           groups: groupsRef.current,
@@ -790,8 +845,10 @@ function CanvasApp() {
             videoUrl: img.videoUrl || '',
             videoDuration: img.videoDuration || undefined,
             videoThumbnailUrl: img.videoThumbnailUrl || '',
+            isProcessingPlaceholder: img.isProcessingPlaceholder || false,
+            processing: img.processing,
           }))
-          .filter(img => img.url) as PersistableCanvasImage[];
+          .filter(img => img.url || img.videoUrl || img.isProcessingPlaceholder) as PersistableCanvasImage[];
         // 1. localStorage 即时写入
         mgr.updateProject(proj.id, {
           canvasImages: persistableCanvasImages,
@@ -3733,8 +3790,10 @@ function CanvasApp() {
                   videoUrl: img.videoUrl || '',
                   videoDuration: img.videoDuration || undefined,
                   videoThumbnailUrl: img.videoThumbnailUrl || '',
+                  isProcessingPlaceholder: img.isProcessingPlaceholder || false,
+                  processing: img.processing,
                 }))
-                .filter(img => img.url) as PersistableCanvasImage[];
+                .filter(img => img.url || img.videoUrl || img.isProcessingPlaceholder) as PersistableCanvasImage[];
               mgr.updateProject(currentProject.id, {
                 canvasImages: persistableCanvasImages,
                 metadata: { ...(currentProject.metadata || {}), groups: groupsRef.current },
