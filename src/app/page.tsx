@@ -30,6 +30,7 @@ import { HelpGuide } from '@/components/help-guide';
 import { FavoritesPanel } from '@/components/favorites-panel';
 import PromptTemplatePanel from '@/components/prompt-template-panel';
 import { taskEventsClient } from '@/lib/task-events-client';
+import { waitForTaskPollInterval } from '@/lib/task-polling-wait';
 
 interface FavoriteItem {
   id: number;
@@ -1414,21 +1415,12 @@ function CanvasApp() {
             }
 
             const interval = getPollInterval(pollCount, estimatedTime);
-            // ★ SSE加速：同时等待定时器和SSE完成事件，任一先到即继续
-            await Promise.race([
-              new Promise(resolve => setTimeout(resolve, interval)),
-              new Promise(resolve => {
-                if (!taskEventsClient.isConnected()) { resolve(undefined); return; }
-                const unsub = taskEventsClient.onTaskEvent(event => {
-                  if (event.taskId === currentTaskId && ['completed', 'failed', 'cancelled'].includes(event.type)) {
-                    unsub();
-                    resolve(undefined);
-                  }
-                });
-                // 安全超时：确保不会永久等待SSE（SSE可能断连）
-                setTimeout(() => { unsub(); resolve(undefined); }, interval + 2000);
-              })
-            ]);
+            await waitForTaskPollInterval({
+              taskId: currentTaskId,
+              intervalMs: interval,
+              isConnected: () => taskEventsClient.isConnected(),
+              onTaskEvent: callback => taskEventsClient.onTaskEvent(callback),
+            });
             pollCount++;
 
             try {
@@ -2253,20 +2245,12 @@ function CanvasApp() {
             }
 
             const interval = getPollInterval(pollCount, estimatedTime);
-            // ★ SSE加速：同时等待定时器和SSE完成事件
-            await Promise.race([
-              new Promise(resolve => setTimeout(resolve, interval)),
-              new Promise(resolve => {
-                if (!taskEventsClient.isConnected()) { resolve(undefined); return; }
-                const unsub = taskEventsClient.onTaskEvent(event => {
-                  if (event.taskId === currentTaskId && ['completed', 'failed', 'cancelled'].includes(event.type)) {
-                    unsub();
-                    resolve(undefined);
-                  }
-                });
-                setTimeout(() => { unsub(); resolve(undefined); }, interval + 2000);
-              })
-            ]);
+            await waitForTaskPollInterval({
+              taskId: currentTaskId,
+              intervalMs: interval,
+              isConnected: () => taskEventsClient.isConnected(),
+              onTaskEvent: callback => taskEventsClient.onTaskEvent(callback),
+            });
             pollCount++;
 
             try {
