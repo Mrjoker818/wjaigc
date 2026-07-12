@@ -21,7 +21,7 @@ import {
   type VideoGenerateParams,
 } from '@/lib/video-api';
 import { buildDirectorPrompt, type DirectorStyle } from '@/lib/video-director';
-import { recordVideoTaskSubmitted, recordVideoTaskTerminal } from '@/lib/cloud-task-persistence';
+import { recordVideoTaskRemotePolling, recordVideoTaskSubmitted, recordVideoTaskTerminal } from '@/lib/cloud-task-persistence';
 
 export const maxDuration = 300; // 5 min timeout
 
@@ -360,6 +360,10 @@ export async function POST(request: NextRequest) {
             usedImagesEndpoint,
           },
         });
+        void recordVideoTaskRemotePolling(taskId, {
+          remoteTaskId: submitResult.taskId,
+          usedImagesEndpoint,
+        }).catch((error) => console.warn('[video/extend] Cloud task remote ID persistence failed:', error));
       } catch (err: any) {
         const errorMsg = err.name === 'AbortError' ? '提交超时，请稍后重试' : (err.message || '提交视频延长任务失败');
         updateTaskProgress(taskId, { status: 'failed', error: errorMsg, progress: 0 });

@@ -21,6 +21,7 @@ import { enhanceViaAI } from '@/lib/quality-enhance';
 import { buildRecoveredTaskContext, recordImageTaskTerminal, recordVideoTaskTerminal } from '@/lib/cloud-task-persistence';
 import { getCloudTaskForUser } from '@/lib/cloud-task-storage';
 import { getCompletedVideoTaskResult } from '@/lib/video-task-result';
+import { resolveVideoCompatProfile } from '@/lib/video-api';
 
 export const dynamic = 'force-dynamic';
 
@@ -534,11 +535,27 @@ export async function POST(request: NextRequest) {
 
         const recovery = buildRecoveredTaskContext(persistedTask);
         const recovered = registerTask(recovery.taskId, recovery.type as TaskType, recovery.label, recovery.userId);
+        const recoveredProvider = recovery.providerId
+          ? await findProviderById(recovery.providerId)
+          : recovery.model ? await findProviderForModel(recovery.model) : null;
+        const recoveredVideoProfile = recovery.type.startsWith('video') && recoveredProvider
+          ? resolveVideoCompatProfile(
+              recovery.model || '',
+              recoveredProvider.advancedParams?.compatProfile,
+              normalizeApiBaseUrl(recoveredProvider.baseUrl),
+            )
+          : undefined;
         updateTaskProgress(recovered.taskId, {
           status: 'processing',
           progress: recovery.progress,
           result: {
             remoteTaskId: recovery.remoteTaskId,
+            ...(recovery.type.startsWith('video') ? {
+              thirdPartyTaskId: recovery.remoteTaskId,
+              profile: recoveredVideoProfile,
+              model: recovery.model,
+              usedImagesEndpoint: persistedTask.result?.usedImagesEndpoint === true,
+            } : {}),
             providerId: recovery.providerId,
             usedModel: recovery.model,
             modelName: recovery.model,

@@ -14,6 +14,7 @@ import {
   buildRecoveredTaskContext,
   recordThreeDTaskSubmitted,
   recordThreeDTaskTerminal,
+  recordVideoTaskRemotePolling,
   recordVideoTaskSubmitted,
   recordVideoTaskTerminal,
 } from '@/lib/cloud-task-persistence';
@@ -93,6 +94,24 @@ describe('cloud-task-persistence', () => {
     }));
   });
 
+  it('does not persist an internal image task when its outer task owns monitoring', async () => {
+    await recordImageTaskSubmitted({
+      taskId: 'internal-direct-task',
+      userId: 'user-a',
+      providerId: 'provider-a',
+      model: 'image-model-a',
+      persist: false,
+    });
+    await recordImageTaskTerminal('internal-direct-task', {
+      status: 'completed',
+      imageUrl: '/uploads/result.png',
+      persist: false,
+    });
+
+    expect(createCloudTask).not.toHaveBeenCalled();
+    expect(updateCloudTask).not.toHaveBeenCalled();
+  });
+
   it('records a cancelled task as refunded when cancellation refunds credits', async () => {
     await recordCloudTaskCancelled('remote-task-1', true);
 
@@ -149,6 +168,23 @@ describe('cloud-task-persistence', () => {
         imageUrl: '/api/serve-upload/video/video-task-1/cover.png',
       },
     }));
+  });
+
+  it('persists the third-party video task ID required after a server restart', async () => {
+    await recordVideoTaskRemotePolling('video-task-1', {
+      remoteTaskId: 'supplier-video-task-9',
+      usedImagesEndpoint: true,
+    });
+
+    expect(updateCloudTask).toHaveBeenCalledWith('video-task-1', expect.objectContaining({
+      remoteTaskId: 'supplier-video-task-9',
+      progress: 10,
+      result: {
+        thirdPartyTaskId: 'supplier-video-task-9',
+        usedImagesEndpoint: true,
+      },
+    }));
+    expect(JSON.stringify(updateCloudTask.mock.calls[0][1])).not.toContain('apiKey');
   });
 
   it('records 3D submission and terminal model URL without provider credentials', async () => {

@@ -42,6 +42,11 @@ interface VideoTaskTerminal {
   creditStatus?: CloudTaskCreditStatus;
 }
 
+interface VideoTaskRemotePolling {
+  remoteTaskId: string;
+  usedImagesEndpoint?: boolean;
+}
+
 interface ThreeDTaskSubmission {
   taskId: string;
   userId?: string;
@@ -107,6 +112,21 @@ export async function recordVideoTaskSubmitted(input: VideoTaskSubmission): Prom
     label: input.label || 'Video generation',
     createdAt: now,
     updatedAt: now,
+  });
+}
+
+/** Stores only the remote identifier and routing flag; credentials stay in provider config. */
+export async function recordVideoTaskRemotePolling(
+  taskId: string,
+  input: VideoTaskRemotePolling,
+): Promise<void> {
+  await updateCloudTask(taskId, {
+    remoteTaskId: input.remoteTaskId,
+    progress: 10,
+    result: {
+      thirdPartyTaskId: input.remoteTaskId,
+      usedImagesEndpoint: input.usedImagesEndpoint === true,
+    },
   });
 }
 
