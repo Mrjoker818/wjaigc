@@ -17,7 +17,7 @@ import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { validateImageUrl } from '@/lib/input-validation';
 import { consumeCredits } from '@/lib/credits';
 
-import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, stripEditsOnlyFields, isEditsEndpointRejected, type ApiCompatProfile, resolveProfileForModel, isGeminiImageModel, isNanoBananaModel, buildGeminiChatImageRequest, parseGeminiChatImageResponse, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
+import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, stripEditsOnlyFields, isEditsEndpointRejected, type ApiCompatProfile, resolveProfileForModel, resolveProviderPixelSize, isGeminiImageModel, isNanoBananaModel, buildGeminiChatImageRequest, parseGeminiChatImageResponse, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
 import { registerTask, updateTaskProgress, isTaskCancelled, getTaskInfo } from '@/lib/task-registry';
 import { recordImageTaskSubmitted, recordImageTaskTerminal } from '@/lib/cloud-task-persistence';
 import { persistRemoteImage } from '@/lib/s3-storage';
@@ -972,7 +972,13 @@ export async function POST(request: NextRequest) {
 
       // ★ 关键修复：优先使用后端规范表计算像素尺寸（传入 modelId），
       // 确保与 API 官方文档一致；前端传来的 requestedPixelSize 仅作兜底
-      const calculatedPixelSize = calculateActualPixelsFromRatio(effectiveSize, quality, currentModelConfig.modelId);
+      const calculatedPixelSize = resolveProviderPixelSize(
+        effectiveSize,
+        quality,
+        resolutionTier,
+        currentModelConfig.modelId,
+        profile,
+      ) || calculateActualPixelsFromRatio(effectiveSize, quality, currentModelConfig.modelId);
       const pixelSize = calculatedPixelSize || requestedPixelSize;
 
       // ★ 关键修复：根据 profile.sizeFormat 决定发送哪种格式

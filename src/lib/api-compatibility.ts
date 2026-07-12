@@ -89,6 +89,15 @@ export interface ApiCompatProfile {
 
   /** Extra body parameters to inject into requests for this profile */
   extraBodyParams?: Record<string, unknown>;
+
+  /** How a UI resolution tier is represented by this provider. */
+  resolutionTierMode?: 'native' | 'size';
+
+  /** Whether an automatic size value must be omitted instead of sent. */
+  omitAutoSize?: boolean;
+
+  /** Whether derived width/height hints are accepted alongside an aspect ratio. */
+  includeDerivedPixelHints?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -114,8 +123,29 @@ export const PROFILE_APIMART: ApiCompatProfile = {
   supportsInputFidelity: false,
   pollMode: 'path',
   pollMethod: 'GET',
+  resolutionTierMode: 'native',
+  includeDerivedPixelHints: false,
   // APImart官方: GET /v1/tasks/{task_id}?language=zh（buildPollUrl自动加/v1前缀，这里写相对baseUrl的路径）
   pollPathTemplate: '/tasks/{taskId}?language=zh',
+};
+
+/**
+ * 4SAPI's GPT Image endpoint follows the OpenAI image protocol, but rejects
+ * an explicit size="auto" value and does not accept APIMart's resolution field.
+ */
+export const PROFILE_4SAPI: ApiCompatProfile = {
+  id: '4sapi',
+  label: '4SAPI OpenAI 图像 (像素尺寸)',
+  responseMode: 'direct',
+  sizeFormat: 'pixel',
+  defaultEndpoint: '/images/generations',
+  editEndpoint: '/images/edits',
+  editEncoding: 'multipart-only',
+  supportsInputFidelity: true,
+  pollMode: 'none',
+  pollPathTemplate: '',
+  resolutionTierMode: 'size',
+  omitAutoSize: true,
 };
 
 /**
@@ -282,6 +312,7 @@ export const PROFILE_302AI_UPSCALE: ApiCompatProfile = {
 /** Map of all built-in profiles by id */
 export const COMPAT_PROFILES: Record<string, ApiCompatProfile> = {
   [PROFILE_APIMART.id]: PROFILE_APIMART,
+  [PROFILE_4SAPI.id]: PROFILE_4SAPI,
   [PROFILE_OPENAI.id]: PROFILE_OPENAI,
   [PROFILE_OPENAI_ASYNC.id]: PROFILE_OPENAI_ASYNC,
   [PROFILE_AUTO.id]: PROFILE_AUTO,
@@ -306,7 +337,7 @@ const URL_PROFILE_RULES: Array<{ pattern: RegExp; profile: ApiCompatProfile }> =
   { pattern: /api\.openai\.com/i,         profile: PROFILE_OPENAI },
   { pattern: /pearapi\.ai/i,              profile: PROFILE_PEARAPI },  // PearAPI: nano-banana models use aspect-ratio format
   { pattern: /tokln\.com/i,               profile: PROFILE_OPENAI },   // token link: OpenAI-compatible direct response, pixel size format
-  { pattern: /4sapi\.com/i,               profile: PROFILE_OPENAI },   // 4SAPI: 标准OpenAI兼容中转，参考官方文档替换api.openai.com即可
+  { pattern: /4sapi\.com/i,               profile: PROFILE_4SAPI },
   { pattern: /302\.ai|302ai/i,            profile: PROFILE_OPENAI },   // 302.AI: 标准OpenAI兼容中转，替换api.openai.com为api.302.ai即可
   { pattern: /rust\.cat/i,                profile: PROFILE_RUSTCAT },  // 虚宝图像: 使用宽高比格式，直接返回图片
   { pattern: /fhl\.mom/i,                 profile: PROFILE_FHL },  // FHL: 像素尺寸+扁平参考图(不转嵌套)
@@ -823,7 +854,7 @@ export function resolveProfileForModel(
   // These providers have their own format requirements (e.g., APImart uses image_urls, not images[]).
   // Only force the openai profile for 'auto' or undefined baseProfiles.
   // For 'auto' profile, also preserve sizeFormat and use correct editEndpoint for GPT-Image models.
-  const providerSpecificProfiles = ['apimart', 'pearapi'];
+  const providerSpecificProfiles = ['apimart', 'pearapi', '4sapi'];
   if (isOpenAIImageModel(modelId) && !providerSpecificProfiles.includes(baseProfile.id)) {
     const openaiProfile = COMPAT_PROFILES['openai'];
     // GPT-Image models use /images/generations for reference images (images[]),
@@ -1601,14 +1632,30 @@ export function adjustRequestForProfile(
   // ★ 防御空 body 导致后续解构崩溃
   const body = requestBody ? { ...requestBody } : {};
 
+  if (profile.includeDerivedPixelHints === false) {
+    delete body.width;
+    delete body.height;
+    delete body.size_px;
+  }
+
   // --- Size format conversion ---
   if (profile.sizeFormat === 'pixel' && body.size && typeof body.size === 'string') {
     const sizeStr = body.size as string;
     if (sizeStr.includes(':')) {
-      const quality = typeof body.quality === 'string' ? body.quality :
-                      typeof body.resolution === 'string' ? body.resolution : undefined;
+      const resolution = typeof body.resolution === 'string' ? body.resolution : undefined;
+      const quality = profile.resolutionTierMode === 'size' && resolution
+        ? resolution
+        : typeof body.quality === 'string'
+          ? body.quality
+          : resolution;
       const modelId = typeof body.model === 'string' ? body.model : undefined;
       body.size = convertAspectRatioToSize(sizeStr, quality, modelId);
+    }
+    if (profile.omitAutoSize && body.size === 'auto') {
+      delete body.size;
+    }
+    if (profile.resolutionTierMode === 'size') {
+      delete body.resolution;
     }
   } else if (profile.sizeFormat === 'aspect-ratio' && body.size && typeof body.size === 'string') {
     const sizeStr = body.size as string;
@@ -1621,7 +1668,7 @@ export function adjustRequestForProfile(
     // 也计算并附带像素尺寸，确保即使 API 不理解 resolution 参数，
     // 也能通过 width/height 获取正确的分辨率信息
     const resolution = typeof body.resolution === 'string' ? body.resolution : undefined;
-    if (resolution && typeof body.size === 'string' && body.size.includes(':')) {
+    if (profile.includeDerivedPixelHints !== false && resolution && typeof body.size === 'string' && body.size.includes(':')) {
       const modelId = typeof body.model === 'string' ? body.model : undefined;
       const pixelSize = convertAspectRatioToSize(body.size, resolution, modelId);
       if (pixelSize && /^\d+x\d+$/.test(pixelSize)) {
@@ -1780,6 +1827,23 @@ export function adjustRequestForProfile(
   }
 
   return { body, endpoint };
+}
+
+/**
+ * Converts a UI aspect ratio into pixels using the resolution control only
+ * when the provider documents that its resolution tier maps to pixel output.
+ */
+export function resolveProviderPixelSize(
+  aspectRatio: string,
+  quality: string | undefined,
+  resolution: string | undefined,
+  modelId: string | undefined,
+  profile: ApiCompatProfile,
+): string {
+  const sizeHint = profile.resolutionTierMode === 'size' && resolution
+    ? resolution
+    : quality;
+  return convertAspectRatioToSize(aspectRatio, sizeHint, modelId);
 }
 
 /**
