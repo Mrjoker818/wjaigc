@@ -162,6 +162,10 @@ export const VIDEO_MODEL_REGISTRY: Record<string, VideoModelInfo> = {
     profile: 'minimax', name: '海螺 Hailuo 02', short: 'Hailuo 02', provider: 'MiniMax',
     features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5, 6, 10], ratios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['512p','768p','1080p'], region: 'cn' },
   },
+  'doubao-seedance-2-0-mini': {
+    profile: 'volcengine-ark', name: 'Seedance 2.0 Mini', short: 'SD 2.0M', provider: 'ByteDance',
+    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5, 6, 10], ratios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['480p','720p'], region: 'cn' },
+  },
   'hailuo-2.3': {
     profile: 'minimax', name: '海螺 Hailuo 2.3', short: 'Hailuo 2.3', provider: 'MiniMax',
     features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5, 6, 10], ratios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['768p','1080p'], region: 'cn' },
