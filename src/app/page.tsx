@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { getResumedTaskPollingOutcome, RESUMED_TASK_MAX_POLL_ATTEMPTS } from '@/lib/resumed-task-polling';
 import { InfiniteCanvas, CanvasImage, ImageGroup } from '@/components/infinite-canvas';
 import { IncrementalHistoryManager } from '@/lib/canvas-incremental-history';
 import { TreeHistoryManager, type VersionNode } from '@/lib/canvas-tree-history';
@@ -594,7 +595,7 @@ function CanvasApp() {
       resumedTaskIdsRef.current.add(taskId);
 
       void (async () => {
-        for (let attempt = 0; attempt < 200 && !cancelled; attempt += 1) {
+        for (let attempt = 0; attempt < RESUMED_TASK_MAX_POLL_ATTEMPTS && !cancelled; attempt += 1) {
           try {
             const response = await fetch('/api/poll-task', {
               method: 'POST',
@@ -628,6 +629,16 @@ function CanvasApp() {
             } : item));
           } catch { /* transient polling errors are retried */ }
           await new Promise((resolve) => setTimeout(resolve, 3000));
+        }
+
+        if (!cancelled) {
+          const outcome = getResumedTaskPollingOutcome(RESUMED_TASK_MAX_POLL_ATTEMPTS, true);
+          if (outcome) {
+            setImages((current) => current.map((item) => item.id === image.id ? {
+              ...item,
+              processing: { ...item.processing!, status: outcome.status, label: outcome.label },
+            } : item));
+          }
         }
       })();
     }

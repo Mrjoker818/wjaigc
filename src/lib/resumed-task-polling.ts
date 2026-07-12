@@ -1,0 +1,20 @@
+export interface ResumedTaskPollingOutcome {
+  status: 'failed';
+  label: string;
+}
+
+export const RESUMED_TASK_MAX_POLL_ATTEMPTS = 400;
+
+export function getResumedTaskPollingOutcome(
+  attempts: number,
+  isStillProcessing: boolean,
+): ResumedTaskPollingOutcome | null {
+  if (isStillProcessing && attempts >= RESUMED_TASK_MAX_POLL_ATTEMPTS) {
+    return {
+      status: 'failed',
+      label: '任务恢复超时，请在任务中心确认供应商结果后重试',
+    };
+  }
+
+  return null;
+}
