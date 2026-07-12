@@ -20,6 +20,7 @@ import { getFontDesignResult } from '@/app/api/font-design/generate-image/route'
 import { enhanceViaAI } from '@/lib/quality-enhance';
 import { buildRecoveredTaskContext, recordImageTaskTerminal, recordVideoTaskTerminal } from '@/lib/cloud-task-persistence';
 import { getCloudTaskForUser } from '@/lib/cloud-task-storage';
+import { getCompletedVideoTaskResult } from '@/lib/video-task-result';
 
 export const dynamic = 'force-dynamic';
 
@@ -574,12 +575,20 @@ export async function POST(request: NextRequest) {
         }
         // ★ 过滤敏感字段，防止 apiKey/apiBaseUrl 等泄露到前端
         const { apiKey: _ak, apiBaseUrl: _abu, advancedParams: _ap, ...safeResult } = (taskResult as Record<string, unknown>) || {};
+        const completedVideo = registryTask.type === 'video'
+          ? getCompletedVideoTaskResult(safeResult)
+          : undefined;
         return NextResponse.json({
           success: true,
           status: 'completed',
           progress: registryTask.progress,
           result: safeResult,
           imageUrl: safeResult?.imageUrl as string | undefined,
+          ...(completedVideo?.videoUrl ? {
+            mediaType: 'video',
+            videoUrl: completedVideo.videoUrl,
+            imageUrl: completedVideo.videoUrl,
+          } : {}),
           maskUrl: safeResult?.maskUrl as string | undefined,
           modelName: (safeResult?.usedModel as string) || (safeResult?.modelName as string) || '',
           providerName: (safeResult?.providerName as string) || (safeResult?.providerId as string) || '',
@@ -790,7 +799,15 @@ export async function POST(request: NextRequest) {
                 console.warn('[poll-task] Video persist failed, using source URL:', persistErr);
               }
 
-              updateTaskProgress(taskId, { status: 'completed', progress: 100 });
+              updateTaskProgress(taskId, {
+                status: 'completed',
+                progress: 100,
+                result: {
+                  ...regResult,
+                  videoUrl: persistedVideoUrl,
+                  videoDuration: videoResult.duration,
+                },
+              });
               void recordVideoTaskTerminal(taskId, {
                 status: 'completed',
                 videoUrl: persistedVideoUrl,
