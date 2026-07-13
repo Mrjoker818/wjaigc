@@ -108,7 +108,7 @@ export interface ChatArtifact {
   projectId: string;
   taskId: string;
   title: string;
-  type: 'markdown' | 'html' | 'table' | 'json' | 'prompt';
+  type: 'markdown' | 'html' | 'table' | 'json' | 'prompt' | 'code' | 'document';
   content: string;
   version: number;
   createdAt: number;

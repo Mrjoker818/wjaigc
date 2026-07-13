@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Menu, Paperclip, ArrowUp, Globe, X, Settings, Bot, User as UserIcon, BookOpen, ChevronDown, Copy, RefreshCw, Trash2, Zap, Sun, Moon, FileText, Database, Sparkles, MessageSquarePlus, Minimize2, Maximize2, MoreHorizontal, Telescope, FileCode, GitBranch, Share2, Search, Eye, Image, Download, Send, Shield } from "lucide-react";
 import {
-  SimpleChatProject, SimpleChatTask, SimpleChatMessage, SimpleChatAgent, ChatAttachment,
+  SimpleChatProject, SimpleChatTask, SimpleChatMessage, SimpleChatAgent, ChatAttachment, ChatArtifact,
   ProjectInstructions, ProjectKnowledgeItem,
   PRESET_SKILLS, PresetSkill
 } from "./simple-chat-types";
@@ -107,7 +107,7 @@ function SearchResultsCard({ content }: { content: string }) {
                   </div>
                 </div>
               </a>
-            ))}
+            )) }
           </div>
         )}
       </div>
@@ -243,11 +243,11 @@ export default function ChatArea({
       }
       for (const m of rawModels) {
         const providerName = providerMap.get(m.providerId) || '';
-        models.push({ id: m.id, modelId: m.id, name: m.name || m.id, providerId: m.providerId, providerName });
+        models.push({ id: m.providerId ? `${m.providerId}::${m.id}` : m.id, modelId: m.id, name: m.name || m.id, providerId: m.providerId, providerName });
       }
       setImageModels(models);
       if (models.length > 0 && !selectedImageModel) {
-        setSelectedImageModel(models[0].id);
+        setSelectedImageModel(models[0].modelId);
         setSelectedImageProviderId(models[0].providerId);
       }
     }).catch(() => {});
@@ -325,17 +325,13 @@ export default function ChatArea({
       // Brand DNA injection
       if (brandActive) {
         try {
-          const raw = localStorage.getItem('wujie_brand_dna');
-          if (raw) {
-            const brand = JSON.parse(raw);
-            const parts = [];
-            if (brand.name) parts.push(`品牌名称：${brand.name}`);
-            if (brand.colors) parts.push(`品牌色彩：${brand.colors}`);
-            if (brand.fonts) parts.push(`品牌字体：${brand.fonts}`);
-            if (brand.tone) parts.push(`品牌调性：${brand.tone}`);
-            if (brand.rules) parts.push(`品牌规则：${brand.rules}`);
-            if (parts.length > 0) {
-              systemMessages.push({ role: 'system', content: `【品牌DNA注入】请严格遵循以下品牌规范进行所有设计输出：\n${parts.join('\n')}` });
+          const { loadBrandDNARegistry, generateBrandSystemPrompt } = await import('@/lib/brand-dna');
+          const registry = loadBrandDNARegistry();
+          const latest = registry.at(-1);
+          if (latest) {
+            const systemPrompt = generateBrandSystemPrompt(latest);
+            if (systemPrompt) {
+              systemMessages.push({ role: 'system', content: systemPrompt });
             }
           }
         } catch {}
@@ -347,10 +343,20 @@ export default function ChatArea({
         { role: 'user', content: userMsg.content, images: userMsg.images },
       ];
 
+      const apiKnowledgeItems = knowledgeItems
+        .filter(item => item.enabled && item.type !== 'image')
+        .map(item => ({
+          id: item.id,
+          type: item.type,
+          title: item.name,
+          content: item.textContent || item.url || '',
+        }))
+        .filter(item => item.content);
+
       const res = await fetch('/api/simple-chat/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: allMessages, model: selectedModel, providerId: selectedProviderId, imageModel: selectedImageModel, imageProviderId: selectedImageProviderId, webSearch, knowledgeItems: project.knowledgeItems, projectId: project.id, taskId: task.id }),
+        body: JSON.stringify({ messages: allMessages, model: selectedModel, providerId: selectedProviderId, imageModel: selectedImageModel, imageProviderId: selectedImageProviderId, webSearch, knowledgeItems: apiKnowledgeItems, projectId: project.id, taskId: task.id }),
       });
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -384,12 +390,9 @@ export default function ChatArea({
                     content: parsed.searchResults || '',
                     createdAt: Date.now(),
                   };
-                  setMessages(prev => {
-                    const updated = [...prev];
-                    updated.splice(updated.length - 1, 0, searchMsg);
-                    return updated;
-                  });
+                  setMessages(prev => [...prev, searchMsg]);
                 } else if (parsed.status === 'completed' && parsed.resultCount === 0) {
+                  // 搜索无结果 — 显式失败
                   setMessages(prev => {
                     const updated = [...prev];
                     updated.splice(updated.length - 1, 0, {
@@ -401,6 +404,34 @@ export default function ChatArea({
                     return updated;
                   });
                 }
+              } else if (parsed.type === 'tool_status') {
+                setSearchStatus(null);
+                setMessages(prev => {
+                  const updated = [...prev];
+                  const last = updated[updated.length - 1];
+                  if (last?.role === 'assistant') {
+                    updated[updated.length - 1] = {
+                      ...last,
+                      content: parsed.status === 'failed'
+                        ? (last.content || '') + `\n\n❌ 图片生成失败：${parsed.error || '未知错误'}`
+                        : (last.content || '') + `\n\n🎨 ${parsed.message || '正在生成图片...'}`,
+                    };
+                  }
+                  return updated;
+                });
+              } else if (parsed.type === 'image' && parsed.imageUrl) {
+                setSearchStatus(null);
+                setMessages(prev => {
+                  const updated = [...prev];
+                  const last = updated[updated.length - 1];
+                  if (last?.role === 'assistant') {
+                    updated[updated.length - 1] = {
+                      ...last,
+                      images: [...(last.images || []), parsed.imageUrl],
+                    };
+                  }
+                  return updated;
+                });
               } else if (parsed.type === 'error') {
                 // LLM 调用失败 - 更新最后一条 assistant 消息为错误信息
                 setSearchStatus(null);
@@ -528,11 +559,12 @@ export default function ChatArea({
     }
   }, [messages, task, project, onCreateTask, selectedModel, selectedProviderId]);
 
-  // Save as artifact
+  // Save as artifact — writes to the source message, not local state
   const saveAsArtifact = useCallback((msg: SimpleChatMessage) => {
     const artId = `art_${Date.now()}`;
     const isCode = msg.content.includes('```');
-    setArtifacts(prev => [...prev, { id: artId, type: isCode ? 'code' : 'document', title: msg.content.slice(0, 40).replace(/\n/g, ' ') + '...', content: msg.content }]);
+    const artifact: ChatArtifact = { id: artId, projectId: project?.id ?? '', taskId: '', type: (isCode ? 'code' : 'document') as ChatArtifact['type'], title: msg.content.slice(0, 40).replace(/\n/g, ' ') + '...', content: msg.content, version: 1, createdAt: Date.now(), updatedAt: Date.now() };
+    setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, artifacts: [...(m.artifacts || []), artifact] } : m));
   }, []);
 
   // Project search
@@ -712,19 +744,16 @@ export default function ChatArea({
   // Message operations
   const copyMessage = (content: string) => { navigator.clipboard.writeText(content); };
   const regenerateLast = () => { if (messages.length < 2) return; const lastUser = [...messages].reverse().find(m => m.role === 'user'); if (lastUser) { setMessages(prev => prev.slice(0, -2)); setInput(lastUser.content); setTimeout(() => { const btn = document.getElementById('send-btn') as HTMLButtonElement; btn?.click(); }, 50); } };
-  const continueConversation = () => { setInput('继续'); };
-  const makeShorter = () => {
-    const last = messages[messages.length - 1];
-    if (last?.role === 'assistant') setInput(`请将上面的回答缩短，保留核心要点。`);
+  const continueConversation = (msg: SimpleChatMessage) => { setInput('继续'); };
+  const makeShorter = (msg: SimpleChatMessage) => {
+    if (msg?.role === 'assistant') setInput(`请将上面的回答缩短，保留核心要点。`);
   };
-  const makeLonger = () => {
-    const last = messages[messages.length - 1];
-    if (last?.role === 'assistant') setInput(`请将上面的回答扩展得更详细。`);
+  const makeLonger = (msg: SimpleChatMessage) => {
+    if (msg?.role === 'assistant') setInput(`请将上面的回答扩展得更详细。`);
   };
-  const toImagePrompt = () => {
-    const last = messages[messages.length - 1];
-    if (last?.role === 'assistant' && last.content) {
-      setInput(`根据以下内容生成图像提示词：${last.content.slice(0, 200)}`);
+  const toImagePrompt = (msg: SimpleChatMessage) => {
+    if (msg?.role === 'assistant' && msg.content) {
+      setInput(`根据以下内容生成图像提示词：${msg.content.slice(0, 200)}`);
     }
   };
 
@@ -947,10 +976,10 @@ export default function ChatArea({
                   <div className="flex gap-0.5 mt-1 px-1 opacity-0 hover:opacity-100 transition-opacity flex-wrap">
                     <button onClick={() => copyMessage(msg.content)} className="p-1 rounded hover:bg-muted text-muted-foreground" title="复制"><Copy className="w-3 h-3" /></button>
                     <button onClick={regenerateLast} className="p-1 rounded hover:bg-muted text-muted-foreground" title="重新生成"><RefreshCw className="w-3 h-3" /></button>
-                    <button onClick={makeShorter} className="p-1 rounded hover:bg-muted text-muted-foreground" title="更短"><Minimize2 className="w-3 h-3" /></button>
-                    <button onClick={makeLonger} className="p-1 rounded hover:bg-muted text-muted-foreground" title="更长"><Maximize2 className="w-3 h-3" /></button>
-                    <button onClick={continueConversation} className="p-1 rounded hover:bg-muted text-muted-foreground" title="继续"><MoreHorizontal className="w-3 h-3" /></button>
-                    <button onClick={toImagePrompt} className="p-1 rounded hover:bg-muted text-muted-foreground" title="转生图提示词"><Sparkles className="w-3 h-3" /></button>
+                    <button onClick={() => makeShorter(msg)} className="p-1 rounded hover:bg-muted text-muted-foreground" title="更短"><Minimize2 className="w-3 h-3" /></button>
+                    <button onClick={() => makeLonger(msg)} className="p-1 rounded hover:bg-muted text-muted-foreground" title="更长"><Maximize2 className="w-3 h-3" /></button>
+                    <button onClick={() => continueConversation(msg)} className="p-1 rounded hover:bg-muted text-muted-foreground" title="继续"><MoreHorizontal className="w-3 h-3" /></button>
+                    <button onClick={() => toImagePrompt(msg)} className="p-1 rounded hover:bg-muted text-muted-foreground" title="转生图提示词"><Sparkles className="w-3 h-3" /></button>
                     <button onClick={() => branchFromMessage(msg.id)} className="p-1 rounded hover:bg-muted text-muted-foreground" title="从此分支"><GitBranch className="w-3 h-3" /></button>
                     <button onClick={() => saveAsArtifact(msg)} className="p-1 rounded hover:bg-muted text-muted-foreground" title="保存为 Artifact"><FileCode className="w-3 h-3" /></button>
                     {hasPptJson(msg.content) && (
@@ -1260,9 +1289,9 @@ export default function ChatArea({
             <button onClick={() => setShowArtifacts(false)} className="p-1 rounded-lg hover:bg-muted"><X className="w-4 h-4" /></button>
           </div>
           <div className="flex-1 overflow-y-auto p-3 space-y-2">
-            {artifacts.length === 0 ? (
+            {(() => { const allArtifacts = messages.flatMap(m => m.artifacts || []); return allArtifacts.length === 0 ? (
               <div className="text-center text-muted-foreground text-sm py-8">暂无 Artifacts<br />生成代码或文档后自动出现</div>
-            ) : artifacts.map(a => (
+            ) : allArtifacts.map(a => (
               <div key={a.id} className="bg-muted rounded-xl p-3 border border-border hover:border-primary/30 transition-colors cursor-pointer">
                 <div className="flex items-center gap-2 mb-2">
                   {a.type === 'code' ? <FileCode className="w-4 h-4 text-primary" /> : <FileText className="w-4 h-4 text-primary" />}
@@ -1270,7 +1299,7 @@ export default function ChatArea({
                 </div>
                 <pre className="text-[11px] text-muted-foreground line-clamp-4 whitespace-pre-wrap">{a.content}</pre>
               </div>
-            ))}
+            ))})()}
           </div>
         </div>
       )}

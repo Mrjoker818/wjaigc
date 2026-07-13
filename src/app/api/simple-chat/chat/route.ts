@@ -3,6 +3,7 @@ import { findProviderForModel } from '@/lib/server-api-config';
 import type { ApiKind } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { SearchClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
+import { fetchWithTimeout } from '@/lib/api-helpers';
 
 const DEFAULT_SYSTEM_PROMPT = `你是无界AI的智能助手。你可以：
 1. 回答用户的各种问题
@@ -175,7 +176,7 @@ export async function POST(request: NextRequest) {
           },
         ];
 
-        const fetchRes = await fetch(apiUrl, {
+        const fetchRes = await fetchWithTimeout(apiUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -188,7 +189,7 @@ export async function POST(request: NextRequest) {
             tools,
             tool_choice: 'auto',
           }),
-        });
+        }, 'chat');
 
         if (!fetchRes.ok) {
           const errText = await fetchRes.text().catch(() => '');
