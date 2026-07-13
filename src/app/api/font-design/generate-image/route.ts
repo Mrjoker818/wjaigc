@@ -9,6 +9,7 @@ import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits, refundCredits } from '@/lib/credits';
 import { validateApiInputs } from '@/lib/api-validator';
 import { logOperation, logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
+import { recordImageTaskSubmitted, recordImageTaskRemotePolling, recordImageTaskTerminal } from '@/lib/cloud-task-persistence';
 
 // ★ 字境大师任务结果独立存储（防HMR丢失task-registry状态）
 const fontDesignResults = new Map<string, {
@@ -239,6 +240,26 @@ export async function POST(request: NextRequest) {
     registerTask(taskId, 'font-design', `字体设计: ${textStr || '生成图片'}`, sessionUser?.id);
     updateTaskProgress(taskId, { status: 'processing', progress: 0, label: '正在生成字体设计图片...' });
 
+    // 记录到云端任务持久化
+    void recordImageTaskSubmitted({
+      taskId,
+      userId: sessionUser?.id || 'anonymous',
+      type: 'font-design',
+      model: String(model || ''),
+      providerId: String(providerId || ''),
+    });
+
+    // 持久化任务终态（完成/失败）
+    const persistTaskTerminal = (partial: { status: string; imageUrl?: string; error?: string; cost?: number; providerId?: string; model?: string }) => {
+      void recordImageTaskTerminal(taskId, {
+        status: partial.status as any,
+        model: partial.model || String(model),
+        providerId: partial.providerId || String(providerId),
+        imageUrl: partial.imageUrl,
+        error: partial.error || '',
+      });
+    };
+
     // ★ 判断是否为可重试错误（429限流/502网关/503服务不可用）
     const isRetryableError = (status: number, errText: string): boolean => {
       if (status === 429) return true; // 限流
@@ -329,6 +350,7 @@ export async function POST(request: NextRequest) {
                     result: completedResult,
                   });
                   fontDesignResults.set(taskId, { status: 'completed', result: completedResult, updatedAt: Date.now() });
+                  void recordImageTaskTerminal(taskId, { status: 'completed', imageUrl: persistedUrls[0], providerId: String(provider.id), model: String(model) });
                   return;
                 }
               } catch (chatErr) {
@@ -359,11 +381,16 @@ export async function POST(request: NextRequest) {
               result: completedResult,
             });
             fontDesignResults.set(taskId, { status: 'completed', result: completedResult, updatedAt: Date.now() });
+            persistTaskTerminal({ status: 'completed', providerId: provider.id, model: pModel });
           } else if (parsed.taskIds && parsed.taskIds.length > 0) {
             const asyncResult = {
               remoteTaskId: parsed.taskIds[0],
               apiBaseUrl: pBaseUrl, apiKey: pApiKey, usedModel: pModel, compatProfile: pCompatProfile, prompt: finalPrompt,
             };
+            void recordImageTaskRemotePolling(taskId, {
+              remoteTaskId: parsed.taskIds[0],
+              providerId: provider.id, model: pModel,
+            });
             updateTaskProgress(taskId, {
               status: 'processing', progress: 30,
               label: '图片生成中，等待远程API返回...',

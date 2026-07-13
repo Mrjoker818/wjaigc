@@ -1143,10 +1143,15 @@ export async function POST(request: NextRequest) {
               });
             }
           }
-          proj.batch_results = JSON.stringify(results.filter(r => r.imageUrl).map(r => ({
+          const existingBatchResults = (proj.batch_results as string) || '[]';
+          let batchResults: Record<string, unknown>[] = [];
+          try { batchResults = JSON.parse(existingBatchResults); } catch { /* ignore */ }
+          batchResults.push(...results.filter(r => r.imageUrl).map(r => ({
             item: r.item,
             imageUrl: r.imageUrl,
           })));
+          proj.generated_materials = JSON.stringify(materials);
+          proj.batch_results = JSON.stringify(batchResults);
           proj.updated_at = new Date().toISOString();
           projectsStore.set(projectId, proj);
           await persistProjects();

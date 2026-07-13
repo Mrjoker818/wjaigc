@@ -117,6 +117,8 @@ function CanvasApp() {
   // 树状版本历史，支持分支和任意节点回溯
   const treeHistoryRef = useRef<TreeHistoryManager>(new TreeHistoryManager({ maxNodes: 50 }));
   const [treeHistoryNodes, setTreeHistoryNodes] = useState<VersionNode[]>([]);
+  const treeHistoryLastImagesRef = useRef<CanvasImage[] | null>(null);
+  const treeHistoryProjectIdRef = useRef<string | null>(null);
 
   // P2-1: 画布连线状态
   const [canvasConnections, setCanvasConnections] = useState<import('@/lib/canvas-connections').CanvasConnection[]>([]);
@@ -489,6 +491,28 @@ function CanvasApp() {
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
   const currentProjectRef = useRef(currentProject);
   currentProjectRef.current = currentProject;
+
+  // Sync tree history with canvas images
+  useEffect(() => {
+    const projectId = currentProject?.id ?? null;
+    const treeHistory = treeHistoryRef.current;
+
+    if (treeHistoryProjectIdRef.current !== projectId) {
+      treeHistoryProjectIdRef.current = projectId;
+      treeHistory.clear();
+      treeHistoryLastImagesRef.current = null;
+    }
+
+    if (treeHistory.getNodeCount() === 0) {
+      treeHistory.initializeRoot(images, images.length > 0 ? '项目打开' : '空白画布');
+    } else if (!skipHistoryRef.current && treeHistoryLastImagesRef.current !== null && treeHistoryLastImagesRef.current !== images) {
+      treeHistory.recordOperation(images, '画布更新');
+    }
+
+    treeHistoryLastImagesRef.current = images;
+    setTreeHistoryNodes(treeHistory.getAllNodes());
+  }, [images, currentProject?.id]);
+
   const videoPanelRef = useRef<VideoGenerationPanelHandle>(null);
   const shotTaskIdMapRef = useRef<Map<string, string>>(new Map());
   const groupsRef = useRef<ImageGroupData[]>([]);
@@ -777,6 +801,7 @@ function CanvasApp() {
           ...(currentProject.metadata || {}),
           groups: groupsRef.current,
           viewState: viewStateRef.current,
+          versionHistory: treeHistoryRef.current.exportData(),
         };
         const autoSaveMgr = UserManagerCore.getInstance();
         autoSaveMgr.updateProject(currentProject.id, {
@@ -4066,6 +4091,7 @@ function CanvasApp() {
           connections={canvasConnections}
           onConnectionsChange={setCanvasConnections}
           versionHistoryManager={treeHistoryRef.current}
+          onVersionHistoryChange={() => setTreeHistoryNodes(treeHistoryRef.current.getAllNodes())}
           onOpenVideoPanel={() => {
             // 如果面板已打开（可能正在生成中），先关闭再打开，支持多任务并发
             if (showVideoPanel) {

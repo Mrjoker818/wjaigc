@@ -474,6 +474,10 @@ interface InfiniteCanvasProps {
   onSendToChat?: (image: CanvasImage) => void;
   /** 树状版本历史管理器（P1功能） */
   versionHistoryManager?: import('@/lib/canvas-tree-history').TreeHistoryManager;
+  /** 外部版本历史刷新版本号 */
+  versionHistoryRevision?: number;
+  /** 版本历史变更回调 */
+  onVersionHistoryChange?: () => void;
   /** Open floating video generation panel */
   onOpenVideoPanel?: () => void;
 }
@@ -627,9 +631,14 @@ export function InfiniteCanvas({
   connections,
   onConnectionsChange,
   versionHistoryManager,
+  versionHistoryRevision = 0,
+  onVersionHistoryChange,
   onOpenVideoPanel,
 }: InfiniteCanvasProps) {
   const isMonochrome = themeStyle === 'monochrome';
+
+  // Version history local revision tracker
+  const [historyRevision, setHistoryRevision] = useState(0);
 
   // Stable refs for callbacks used in effects (avoid stale closures)
   const onSelectImageRef = useRef(onSelectImage);
@@ -7227,22 +7236,22 @@ export function InfiniteCanvas({
     // For single-image, prefer threeDSingleImageUrl (from upload/canvas pick), fallback to selected image
     const singleImageUrl = threeDSingleImageUrl || img?.url || selectedImageData?.url || '';
     if (threeDMode === 'single-image' && !singleImageUrl) {
-      alert('请先选择或上传一张图片');
+      toast.error('请先选择或上传一张图片');
       return;
     }
     if (threeDMode === 'text-to-3d' && !threeDPrompt.trim()) {
-      alert('请输入3D模型描述');
+      toast.error('请输入3D模型描述');
       return;
     }
     if (threeDMode === 'multi-image' && threeDMultiImages.length === 0) {
-      alert('请至少上传一张图片');
+      toast.error('请至少上传一张图片');
       return;
     }
     const modelInfo = getCurrentModel();
     const providers = getThreeDProviders();
     const provider = providers.find(p => p.id === threeDProviderId);
     if (threeDBackend === 'api' && !provider) {
-      alert('请先在图像生成面板的「第三方模型」中添加 3D 模型 API，或切换到本地模型模式');
+      toast.error('请先在图像生成面板的「第三方模型」中添加 3D 模型 API，或切换到本地模型模式');
       return;
     }
 
@@ -7289,7 +7298,7 @@ export function InfiniteCanvas({
       const data = await res.json();
       console.log('[3D] API response:', JSON.stringify(data).slice(0, 500));
       if (!data.success) {
-        alert(translateErrorFrontend(data.error || '图生 3D 任务创建失败'));
+        toast.error(translateErrorFrontend(data.error || '图生 3D 任务创建失败'));
         setThreeDProgress(null);
         return;
       }
@@ -7340,7 +7349,7 @@ export function InfiniteCanvas({
               break;
             }
             if (pollData.status === 'failed') {
-              alert(translateErrorFrontend(pollData.error || '3D 生成失败'));
+              toast.error(translateErrorFrontend(pollData.error || '3D 生成失败'));
               removeProcessingFrame(placeholderId);
               setThreeDProgress(null);
               return;
@@ -7350,7 +7359,7 @@ export function InfiniteCanvas({
           }
         }
         if (!previewUrl) {
-          alert('3D 生成超时，请稍后重试');
+          toast.error('3D 生成超时，请稍后重试');
           removeProcessingFrame(placeholderId);
           setThreeDProgress(null);
           return;
@@ -15794,15 +15803,21 @@ export function InfiniteCanvas({
           <VersionHistoryPanel
             manager={versionHistoryManager}
             isMonochrome={isMonochrome}
+            revision={historyRevision + versionHistoryRevision}
             onRestore={(nodeId) => {
               const snapshot = versionHistoryManager?.getSnapshot(nodeId);
               if (snapshot) {
+                versionHistoryManager?.setCurrentNodeId(nodeId);
                 onImagesChange(snapshot);
                 setSelectedIds(new Set());
+                setHistoryRevision(revision => revision + 1);
+                onVersionHistoryChange?.();
               }
             }}
-            onCreateBranch={(nodeId) => {
-              versionHistoryManager?.setCurrentNodeId(nodeId);
+            onCreateBranch={(nodeId, branchName) => {
+              versionHistoryManager?.createBranch(nodeId, images, branchName);
+              setHistoryRevision(revision => revision + 1);
+              onVersionHistoryChange?.();
             }}
             onClose={() => setShowVersionHistory(false)}
           />
@@ -15879,7 +15894,7 @@ export function InfiniteCanvas({
         {/* ── Right: Feature buttons (collapsible) ── */}
         <div
           className={`flex items-center transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${
-            bottomBarHovered ? 'max-w-[900px] opacity-100 ml-1.5 overflow-visible' : 'max-w-0 opacity-0 ml-0 overflow-hidden'
+            bottomBarHovered ? 'min-w-0 max-w-[min(900px,calc(100vw-10rem))] opacity-100 ml-1.5 overflow-x-auto scrollbar-none' : 'max-w-0 opacity-0 ml-0 overflow-hidden'
           }`}
         >
           <div className={`w-px h-5 mr-1.5 ${separatorCls}`} />

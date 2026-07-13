@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { useProgressTimer } from '@/hooks/useProgressTimer';
 import { normalizeBrandFactoryImageUrl } from '@/lib/brand-factory-image-url';
+import { toast } from "sonner";
 
 /* ========== TYPES ========== */
 interface BrandProject {
@@ -31,6 +32,7 @@ interface BrandProject {
   creativeDirections: CreativeDirection[];
   kvImageUrl: string;
   batchResults: { item: string; imageUrl: string }[];
+  generatedMaterials: GeneratedMaterial[];
   consistencyScores: { overall: number; details: Record<string, number> } | null;
   status: 'draft' | 'active' | 'completed' | 'archived';
   isArchived: boolean;
@@ -450,6 +452,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
   const { elapsed: apiElapsed, totalTime: apiTotalTime, startTimer: startApiTimer, stopTimer: stopApiTimer, resetTimer: resetApiTimer, formatTime: formatApiTime } = useProgressTimer();
   const [isMinimized, setIsMinimized] = useState(false);
   const [error, setError] = useState('');
+  const [generatedMats, setGeneratedMats] = useState<GeneratedMaterial[]>([]);
 
   // === Model selection ===
   const [imageModels, setImageModels] = useState<ImageModel[]>([]);
@@ -482,7 +485,6 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
   // === Materials state ===
   const [selectedPkg, setSelectedPkg] = useState<string>('brand-basics');
   const [selectedMats, setSelectedMats] = useState<Set<string>>(new Set());
-  const [generatedMats, setGeneratedMats] = useState<GeneratedMaterial[]>([]);
   const [batchGenerating, setBatchGenerating] = useState(false);
 
   // === Consistency state ===
@@ -545,6 +547,8 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
   // Load projects
   useEffect(() => { loadProjects(); }, []);
 
+  const ACTIVE_PROJECT_STORAGE_KEY = 'wujie_bf_active_project_id';
+
   // Load models from admin system
   useEffect(() => {
     fetch('/api/models?type=image')
@@ -603,9 +607,24 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
       if (data.success) {
         const parsed = (data.projects || []).map(parseProject);
         setProjects(parsed);
+        // 恢复上次激活项目
+        const savedId = typeof window !== 'undefined' ? sessionStorage.getItem(ACTIVE_PROJECT_STORAGE_KEY) : null;
+        if (savedId) {
+          const found = parsed.find((p: BrandProject) => p.id === savedId);
+          if (found) {
+            setCurrentProject(found);
+            setGeneratedMats(found.generatedMaterials ?? []);
+          }
+        }
       }
     } catch { /* ignore */ }
   };
+
+  const activateProject = useCallback((project: BrandProject | null) => {
+    setCurrentProject(project);
+    setGeneratedMats(project?.generatedMaterials ?? []);
+    try { sessionStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, project?.id ?? ''); } catch { /* ignore */ }
+  }, []);
 
   const parseProject = (p: Record<string, unknown>): BrandProject => ({
     id: (p.id as string) || '',
@@ -628,6 +647,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
     consistencyScores: safeParseJSON<{overall: number; details: Record<string, number>} | null>(p.consistency_scores as string || p.consistencyScores as string, null),
     status: (p.status as string) === 'active' ? 'active' : (p.status as string) === 'completed' ? 'completed' : 'draft',
     isArchived: Boolean(p.is_archived ?? p.isArchived ?? false),
+    generatedMaterials: safeParseJSON<GeneratedMaterial[]>(p.generated_materials as string || p.generatedMaterials as string, []),
     createdAt: (p.created_at as string) || (p.createdAt as string) || '',
     updatedAt: (p.updated_at as string) || (p.updatedAt as string) || '',
   });
@@ -677,7 +697,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
     if (data?.project) {
       const proj = parseProject(data.project);
       setProjects(prev => [...prev, proj]);
-      setCurrentProject(proj);
+      activateProject(proj);
       const logoSrc = newProject.logoSource;
       setNewProject({ brandName: '', industry: '', projectType: '', tone: '', keywords: '', targetAudience: '', description: '', logoSource: 'generate' });
       // 如果选择了 AI 生成 Logo，创建项目后自动打开 Logo Generator
@@ -690,7 +710,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
   const handleDeleteProject = async (id: string) => {
     await apiCall('delete-project', { id });
     setProjects(prev => prev.filter(p => p.id !== id));
-    if (currentProject?.id === id) setCurrentProject(null);
+    if (currentProject?.id === id) activateProject(null);
   };
 
   const handleArchiveProject = async (id: string) => {
@@ -797,6 +817,9 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
             createdAt: new Date().toISOString(),
           }));
         setGeneratedMats(prev => [...prev, ...newMats]);
+        // 持久化到项目
+        const merged = [...(currentProject.generatedMaterials ?? []), ...newMats];
+        setCurrentProject(prev => prev ? { ...prev, generatedMaterials: merged, batchResults: data.results } : null);
       }
     } finally {
       setBatchGenerating(false);
@@ -812,6 +835,28 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
       materials: generatedMats,
     });
     if (data?.scores) setConsistencyResult(data.scores);
+  };
+
+  const handleSaveMaterialsToAssetLibrary = async () => {
+    if (!currentProject) return;
+    const mats = currentProject.generatedMaterials ?? generatedMats;
+    if (mats.length === 0) return;
+    try {
+      const resp = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'save-assets',
+          projectId: currentProject.id,
+          brandName: currentProject.brandName,
+          assets: mats.map(m => ({ type: m.type, imageUrl: m.imageUrl })),
+        }),
+      });
+      const data = await resp.json();
+      if (data?.success) toast.success(`已保存 ${mats.length} 个物料到资产库`);
+    } catch {
+      toast.error('保存到资产库失败');
+    }
   };
 
   const handleSaveVersion = async () => {
@@ -1000,7 +1045,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
         <h3 className={`${th.textSec} text-xs font-medium`}>已有项目（{projects.length}）</h3>
         {projects.filter(p => !p.isArchived).map(p => (
           <div key={p.id} className={`${th.card} p-3 flex items-center justify-between cursor-pointer ${ac.borderAccent30} transition-colors ${currentProject?.id === p.id ? ac.borderAccent50 : ''}`}
-            onClick={() => setCurrentProject(p)}>
+            onClick={() => activateProject(p)}>
             <div className="flex-1 min-w-0">
               <div className={`${th.text} text-sm font-medium truncate`}>{p.brandName}</div>
               <div className={`${th.textMuted} text-xs`}>{p.industry} · {p.projectType || '未设类型'} · {p.tone || '未设调性'}</div>
@@ -1452,7 +1497,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
           </div>
           <div className="grid grid-cols-3 gap-2">
             <button className={`${th.btnGhost} text-xs border ${th.borderLight} py-2`} onClick={handleConsistencyCheck}><CheckCircle className="w-3 h-3 inline mr-1" />检测一致性</button>
-            <button className={`${th.btnGhost} text-xs border ${th.borderLight} py-2`}><Save className="w-3 h-3 inline mr-1" />保存到资产库</button>
+            <button className={`${th.btnGhost} text-xs border ${th.borderLight} py-2`} onClick={handleSaveMaterialsToAssetLibrary} disabled={!currentProject || generatedMats.length === 0}><Save className="w-3 h-3 inline mr-1" />保存到资产库</button>
             <button className={`${th.btnGhost} text-xs border ${th.borderLight} py-2`}><Download className="w-3 h-3 inline mr-1" />导出选中物料</button>
           </div>
           {currentProject?.batchResults && currentProject.batchResults.length > 0 && (

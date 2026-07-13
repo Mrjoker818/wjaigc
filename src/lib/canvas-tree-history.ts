@@ -181,6 +181,11 @@ export class TreeHistoryManager {
     // 更新父节点
     fromNode.children.push(branchId);
 
+    const previousHead = this.headId ? this.nodes.get(this.headId) : undefined;
+    if (previousHead) {
+      previousHead.isHead = false;
+    }
+
     this.nodes.set(branchId, newBranchNode);
     this.headId = branchId;
 
