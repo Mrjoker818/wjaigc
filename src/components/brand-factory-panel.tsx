@@ -427,7 +427,7 @@ interface BrandFactoryPanelProps {
   onOpenLogoSkill?: (project: { id: string; brandName: string; mission?: string; vision?: string; tone?: string; colorPalette?: string[]; primaryColor?: string }) => void;
 }
 
-const BRAND_FACTORY_ACTIVE_PROJECT_KEY = 'brand_factory_active_project';
+const ACTIVE_PROJECT_STORAGE_KEY = 'wujie_bf_active_project_id';
 
 export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome = false, onOpenLogoSkill }: BrandFactoryPanelProps) {
   // === Panel drag state ===
@@ -452,6 +452,22 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
   const { elapsed: apiElapsed, totalTime: apiTotalTime, startTimer: startApiTimer, stopTimer: stopApiTimer, resetTimer: resetApiTimer, formatTime: formatApiTime } = useProgressTimer();
   const [isMinimized, setIsMinimized] = useState(false);
   const [error, setError] = useState('');
+
+  const activateProject = useCallback((project: BrandProject | null) => {
+    setCurrentProject(project);
+
+    if (typeof window === 'undefined') return;
+
+    try {
+      if (project) {
+        sessionStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, project.id);
+      } else {
+        sessionStorage.removeItem(ACTIVE_PROJECT_STORAGE_KEY);
+      }
+    } catch {
+      // The panel state remains usable when browser storage is unavailable.
+    }
+  }, []);
 
   // === Model selection ===
   const [imageModels, setImageModels] = useState<ImageModel[]>([]);
@@ -603,17 +619,18 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
       const res = await fetch('/api/brand-factory');
       const data = await res.json();
       if (data.success) {
-        const parsed = (data.projects || []).map(parseProject);
+        const parsed: BrandProject[] = (data.projects || []).map(parseProject);
         setProjects(parsed);
-        // 恢复 sessionStorage 中的激活项目
-        try {
-          const saved = sessionStorage.getItem(BRAND_FACTORY_ACTIVE_PROJECT_KEY);
-          if (saved) {
-            const { projectId } = JSON.parse(saved);
-            const matched = parsed.find((p: BrandProject) => p.id === projectId);
-            if (matched) setCurrentProject(matched);
+
+        if (typeof window !== 'undefined') {
+          const activeProjectId = sessionStorage.getItem(ACTIVE_PROJECT_STORAGE_KEY);
+          const activeProject = parsed.find(project => project.id === activeProjectId);
+          if (activeProject) {
+            setCurrentProject(activeProject);
+          } else if (activeProjectId) {
+            sessionStorage.removeItem(ACTIVE_PROJECT_STORAGE_KEY);
           }
-        } catch { /* ignore */ }
+        }
       }
     } catch { /* ignore */ }
   };
@@ -688,7 +705,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
     if (data?.project) {
       const proj = parseProject(data.project);
       setProjects(prev => [...prev, proj]);
-      setCurrentProject(proj);
+      activateProject(proj);
       const logoSrc = newProject.logoSource;
       setNewProject({ brandName: '', industry: '', projectType: '', tone: '', keywords: '', targetAudience: '', description: '', logoSource: 'generate' });
       // 如果选择了 AI 生成 Logo，创建项目后自动打开 Logo Generator
@@ -701,7 +718,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
   const handleDeleteProject = async (id: string) => {
     await apiCall('delete-project', { id });
     setProjects(prev => prev.filter(p => p.id !== id));
-    if (currentProject?.id === id) setCurrentProject(null);
+    if (currentProject?.id === id) activateProject(null);
   };
 
   const handleArchiveProject = async (id: string) => {
@@ -1011,7 +1028,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
         <h3 className={`${th.textSec} text-xs font-medium`}>已有项目（{projects.length}）</h3>
         {projects.filter(p => !p.isArchived).map(p => (
           <div key={p.id} className={`${th.card} p-3 flex items-center justify-between cursor-pointer ${ac.borderAccent30} transition-colors ${currentProject?.id === p.id ? ac.borderAccent50 : ''}`}
-            onClick={() => { setCurrentProject(p); try { sessionStorage.setItem(BRAND_FACTORY_ACTIVE_PROJECT_KEY, JSON.stringify({ projectId: p.id })); } catch { /* ignore */ } }}>
+            onClick={() => activateProject(p)}>
             <div className="flex-1 min-w-0">
               <div className={`${th.text} text-sm font-medium truncate`}>{p.brandName}</div>
               <div className={`${th.textMuted} text-xs`}>{p.industry} · {p.projectType || '未设类型'} · {p.tone || '未设调性'}</div>

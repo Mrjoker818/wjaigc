@@ -109,9 +109,9 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
 
   // Sync sourceImage when initialImageUrl changes (cross-component entry)
   useEffect(() => {
-    if (initialImageUrl) {
-      setSourceImage(initialImageUrl);
-    }
+    if (!initialImageUrl) return;
+    setSourceImage(initialImageUrl);
+    setActiveTab('settings');
   }, [initialImageUrl]);
 
   // ─── Product refinement state ───
