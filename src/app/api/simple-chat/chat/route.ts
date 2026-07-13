@@ -262,10 +262,18 @@ export async function POST(request: NextRequest) {
             const imgPrompt = args.prompt || fullContent.slice(0, 500);
             const imgSize = args.size || '1024x1024';
 
+            const generateHeaders: Record<string, string> = {
+              'Content-Type': 'application/json',
+            };
+            const cookie = request.headers.get('cookie');
+            if (cookie) generateHeaders['Cookie'] = cookie;
+            const authHeader = request.headers.get('authorization');
+            if (authHeader) generateHeaders['Authorization'] = authHeader;
+
             try {
               const imgRes = await fetch(`${request.nextUrl.origin}/api/generate`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: generateHeaders,
                 body: JSON.stringify({
                   prompt: imgPrompt,
                   model: imageModel,
