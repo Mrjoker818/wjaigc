@@ -4710,12 +4710,6 @@ export function InfiniteCanvas({
     return selectedImageData;
   }, [editImageId, images, selectedImageData]);
 
-  const openRefineEngine = useCallback((image?: CanvasImage | null) => {
-    const activeImage = image || getActiveImageData();
-    setRefineEngineImageUrl(resolveRefineEngineInitialImageUrl(activeImage, selectedImage));
-    setShowRefineEngine(true);
-  }, [getActiveImageData, selectedImage]);
-
   const loadImageAsDataUrl = useCallback(async (url: string): Promise<{ dataUrl: string; width: number; height: number }> => {
     const image = new Image();
     image.crossOrigin = 'anonymous';
@@ -7291,14 +7285,11 @@ export function InfiniteCanvas({
           },
         }),
       });
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => null);
-        throw new Error(String(errorData?.error || `3D任务创建失败: HTTP ${res.status}`));
-      }
+      if (!res.ok) throw new Error(`3D任务创建失败: HTTP ${res.status}`);
       const data = await res.json();
       console.log('[3D] API response:', JSON.stringify(data).slice(0, 500));
       if (!data.success) {
-        toast.error(translateErrorFrontend(data.error || '图生 3D 任务创建失败'));
+        alert(translateErrorFrontend(data.error || '图生 3D 任务创建失败'));
         setThreeDProgress(null);
         return;
       }
@@ -7391,7 +7382,7 @@ export function InfiniteCanvas({
       setThreeDProgress(null);
     } catch (e) {
       console.error('Image to 3D failed:', e);
-      toast.error(translateErrorFrontend(e instanceof Error ? e.message : '图生 3D 调用失败，请检查 API 或本地模型服务'));
+      alert('图生 3D 调用失败，请检查 API 或本地模型服务');
       setThreeDProgress(null);
     }
   }, [selectedImageData, getThreeDProviders, threeDProviderId, threeDBackend, threeDMode, threeDMultiImages, threeDPrompt, threeDType, threeDQuality, threeDTexture, threeDFormat, threeDEnablePBR, threeDFaceCount, threeDPose, threeDLocalEndpoint, threeDLocalModel, renderEditElementsPreview, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, removeProcessingFrame]);
@@ -8264,9 +8255,8 @@ export function InfiniteCanvas({
     { icon: <BoxIcon size={14} className={isMonochrome ? monoColors['图转3D工厂'] : ''} />, label: '图转3D工厂', desc: '生成3D模型预览', action: handleOpen3D },
     { icon: <Expand size={14} className={isMonochrome ? monoColors['扩展'] : ''} />, label: '扩展', desc: '向四周延伸画面，自动补齐背景', action: handleOpenExpand },
     { icon: <Scissors size={14} className={isMonochrome ? monoColors['裁切'] : ''} />, label: '裁切', desc: '自由/预设比例裁切', action: handleOpenCrop },
-    { icon: <Scan size={14} className={isMonochrome ? monoColors['精修引擎'] : ''} />, label: '精修引擎', desc: '产品精修：标准/专家模式，AI商业级修图', action: openRefineEngine },
+    { icon: <Scan size={14} className={isMonochrome ? monoColors['精修引擎'] : ''} />, label: '精修引擎', desc: '产品精修：标准/专家模式，AI商业级修图', action: () => { setRefineEngineImageUrl(resolveRefineEngineInitialImageUrl(selectedImageData, selectedImage)); setShowRefineEngine(true); } },
     { icon: <Pencil size={14} className={isMonochrome ? monoColors['语言修图'] : ''} />, label: '语言修图', desc: '用自然语言描述修改图片', action: () => { if (selectedImage) onEditImage?.(selectedImage); else onEditImage?.(null); } },
-    { icon: <Scan size={14} className={isMonochrome ? monoColors['精修引擎'] : ''} />, label: '添加到精修引擎', desc: '将选中图片发送到精修引擎', action: () => { openRefineEngine(selectedImageData); } },
     { icon: <Bot size={14} className={isMonochrome ? monoColors['Agent编排'] : ''} />, label: 'Agent编排', desc: '智能编排多工具编辑图片', action: () => { const img = selectedImageData || selectedImage; if (img) { setAgentEditImage(img); } else { setAgentEditImage(null); } setShowAgentEditor(true); } },
     { icon: <Globe size={14} className={isMonochrome ? 'text-emerald-500' : 'text-emerald-400'} />, label: '全景生成', desc: '生成720°全景图', action: () => handleGeneratePanorama() },
     { icon: <Film size={14} className={isMonochrome ? 'text-purple-500' : 'text-purple-400'} />, label: '视频抽帧', desc: '从视频中提取帧图片', action: () => { const img = selectedImageData; if (img?.mediaType === 'video') { setEditImageId(img.id); setVideoExtractFrameCount(12); setVideoExtractProcessing(false); setShowVideoExtractPanel(true); } else { toast.error('请先选中视频文件'); } } },
@@ -8520,7 +8510,6 @@ export function InfiniteCanvas({
     { label: '发送参考图', action: () => { const img = selectedImageData; if (img) onGenerateVariation(img); } },
     { label: '提取关键词', action: () => { const img = selectedImageData; if (img) onExtractKeywords(img); } },
     { label: '语言修图', action: () => { const img = selectedImageData; if (img) onEditImage?.(img); else onEditImage?.(null); } },
-    { label: '添加到精修引擎', action: () => { openRefineEngine(selectedImageData); } },
     { label: 'Agent编排', action: () => { const img = selectedImageData; if (img) { setAgentEditImage(img); setShowAgentEditor(true); } } },
     ...(selectedImageData?.mediaType !== 'video' ? [{ label: '生成720全景图', action: () => { handleGeneratePanorama(selectedImageData ?? undefined); } }] : []),
     { label: '发送到聊天修改', action: () => { const img = selectedImageData; if (img && onSendToChat) onSendToChat(img); } },
@@ -15909,10 +15898,7 @@ export function InfiniteCanvas({
           {/* Language Edit */}
           <button
             aria-label="语言修图"
-            onClick={(event) => {
-              event.stopPropagation();
-              onEditImage?.(selectedImage || getActiveImageData());
-            }}
+            onClick={() => { onEditImage?.(null); }}
             className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
             title="语言修图"
           >
@@ -15963,7 +15949,7 @@ export function InfiniteCanvas({
           {/* Refine Engine */}
           <button
             aria-label="精修引擎"
-            onClick={() => openRefineEngine()}
+            onClick={() => { setRefineEngineImageUrl(''); setShowRefineEngine(true); }}
             className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
             title="精修引擎"
           >

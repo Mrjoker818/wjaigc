@@ -32,14 +32,6 @@ export interface SimpleChatMessage {
   role: 'user' | 'assistant' | 'system' | 'search';
   content: string;
   images?: string[];
-  isGeneratingImage?: boolean;
-  generationTask?: {
-    taskId: string;
-    model: string;
-    providerId: string;
-    status: 'polling' | 'completed' | 'failed';
-    imageUrl?: string;
-  };
   attachments?: ChatAttachment[];
   artifacts?: ChatArtifact[];
   model?: string;
