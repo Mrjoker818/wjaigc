@@ -107,6 +107,13 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
   const fileInputRef = useRef<HTMLInputElement>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
 
+  // Sync sourceImage when initialImageUrl changes (cross-component entry)
+  useEffect(() => {
+    if (initialImageUrl) {
+      setSourceImage(initialImageUrl);
+    }
+  }, [initialImageUrl]);
+
   // ─── Product refinement state ───
   const [categories, setCategories] = useState<CategoryPreset[]>([]);
   const [lightings, setLightings] = useState<LightingPreset[]>([]);

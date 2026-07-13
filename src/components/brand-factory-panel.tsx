@@ -427,6 +427,8 @@ interface BrandFactoryPanelProps {
   onOpenLogoSkill?: (project: { id: string; brandName: string; mission?: string; vision?: string; tone?: string; colorPalette?: string[]; primaryColor?: string }) => void;
 }
 
+const BRAND_FACTORY_ACTIVE_PROJECT_KEY = 'brand_factory_active_project';
+
 export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome = false, onOpenLogoSkill }: BrandFactoryPanelProps) {
   // === Panel drag state ===
   const [panelPos, setPanelPos] = useState({ x: 0, y: 20 });
@@ -603,6 +605,15 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
       if (data.success) {
         const parsed = (data.projects || []).map(parseProject);
         setProjects(parsed);
+        // 恢复 sessionStorage 中的激活项目
+        try {
+          const saved = sessionStorage.getItem(BRAND_FACTORY_ACTIVE_PROJECT_KEY);
+          if (saved) {
+            const { projectId } = JSON.parse(saved);
+            const matched = parsed.find((p: BrandProject) => p.id === projectId);
+            if (matched) setCurrentProject(matched);
+          }
+        } catch { /* ignore */ }
       }
     } catch { /* ignore */ }
   };
@@ -1000,7 +1011,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
         <h3 className={`${th.textSec} text-xs font-medium`}>已有项目（{projects.length}）</h3>
         {projects.filter(p => !p.isArchived).map(p => (
           <div key={p.id} className={`${th.card} p-3 flex items-center justify-between cursor-pointer ${ac.borderAccent30} transition-colors ${currentProject?.id === p.id ? ac.borderAccent50 : ''}`}
-            onClick={() => setCurrentProject(p)}>
+            onClick={() => { setCurrentProject(p); try { sessionStorage.setItem(BRAND_FACTORY_ACTIVE_PROJECT_KEY, JSON.stringify({ projectId: p.id })); } catch { /* ignore */ } }}>
             <div className="flex-1 min-w-0">
               <div className={`${th.text} text-sm font-medium truncate`}>{p.brandName}</div>
               <div className={`${th.textMuted} text-xs`}>{p.industry} · {p.projectType || '未设类型'} · {p.tone || '未设调性'}</div>
