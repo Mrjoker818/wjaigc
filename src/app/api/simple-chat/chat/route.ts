@@ -277,7 +277,7 @@ export async function POST(request: NextRequest) {
                   sessionId: body.taskId || '',
                 }),
               });
-              const imgData = await imgRes.json() as { success?: boolean; taskIds?: string[]; imageUrls?: string[] };
+              const imgData = await imgRes.json() as { success?: boolean; taskIds?: string[]; imageUrls?: string[]; error?: string };
 
               if (imgData.success && imgData.taskIds?.length) {
                 const taskId = imgData.taskIds[0];
@@ -285,7 +285,7 @@ export async function POST(request: NextRequest) {
                 send({ type: 'tool_status', tool: 'generating_image', status: 'submitted', label: '图片生成已提交', taskId });
                 send({ type: 'generation_task', taskId, model: imageModel, providerId: imageProviderId, prompt: imgPrompt });
               } else {
-                send({ type: 'tool_status', tool: 'generating_image', status: 'failed', label: '图片提交失败' });
+                send({ type: 'tool_status', tool: 'generating_image', status: 'failed', label: `图片提交失败: ${imgData.error || '未知错误'}` });
               }
             } catch (e: any) {
               send({ type: 'tool_status', tool: 'generating_image', status: 'failed', label: `图片生成失败: ${e.message}` });
