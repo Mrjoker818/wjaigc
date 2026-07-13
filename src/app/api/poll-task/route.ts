@@ -1604,6 +1604,26 @@ export async function POST(request: NextRequest) {
       // ★ 保留模型名称和供应商信息到 result，确保后续 poll 和前端能获取到
       const finalModelName = (existingResult.modelName as string) || regModelName || (model || regUsedModel || '');
       const finalProviderName = (existingResult.providerName as string) || regProviderName || '';
+
+      if (!pollResult.imageUrl) {
+        const taskError = taskData?.error as Record<string, unknown> | undefined;
+        const errorDetail = (taskError?.message as string) || '';
+        const classifiedNoImgErr = classifyApiError(errorDetail || '模型返回了文本而不是生成图像');
+
+        const terminalError = classifiedNoImgErr.friendlyMessage
+          || translateApiError(errorDetail)
+          || '模型返回了文本而不是生成图像，请尝试重新措辞提示';
+
+        updateTaskProgress(taskId, { status: 'failed', progress: 100, error: terminalError });
+        void recordImageTaskTerminal(taskId, { status: 'failed', error: terminalError });
+        failedTaskCache.set(taskId, { error: terminalError, timestamp: Date.now() });
+        releaseQueueSlot(taskId);
+        pollResult.status = 'failed';
+        pollResult.progress = 100;
+        pollResult.error = terminalError;
+        pollResult.success = false;
+        pollResult.retryable = false;
+      } else {
       updateTaskProgress(taskId, { status: 'completed', progress: 100, result: { ...existingResult, imageUrl: pollResult.imageUrl, maskUrl: maskUrl || '', usedModel: model || regUsedModel || existingResult.usedModel, modelName: finalModelName, providerName: finalProviderName } });
       void recordImageTaskTerminal(taskId, {
         status: 'completed',
@@ -1631,16 +1651,6 @@ export async function POST(request: NextRequest) {
       if (cachedImageUrl) {
         completedTaskCache.set(taskId, { imageUrl: cachedImageUrl, maskUrl: cachedMaskUrl || '', modelName: finalModelName, providerName: finalProviderName, timestamp: Date.now() });
       }
-
-      if (!pollResult.imageUrl) {
-        const taskError = taskData?.error as Record<string, unknown> | undefined;
-        const errorDetail = (taskError?.message as string) || '';
-        const classifiedNoImgErr = classifyApiError(errorDetail || '模型返回了文本而不是生成图像');
-        pollResult.error = classifiedNoImgErr.friendlyMessage || translateApiError(errorDetail) || '模型返回了文本而不是生成图像，请尝试重新措辞提示';
-        pollResult.success = false;
-        pollResult.retryable = classifiedNoImgErr.isRetryable;
-        (pollResult as Record<string, unknown>).errorCategory = classifiedNoImgErr.category;
-        (pollResult as Record<string, unknown>).isCfTimeout = isCloudflareTimeoutError(errorDetail);
       }
     } else if (taskStatus?.toLowerCase() === 'failed') {
       const rawError = ((taskData?.error as Record<string, unknown>)?.message as string) || '图像生成任务失败';

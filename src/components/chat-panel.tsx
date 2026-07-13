@@ -25,6 +25,7 @@ import { generateClarificationMessage, detectVagueScenarios, type ClarificationT
 import { generateSuggestions, type Suggestion, type SuggestionContext, type ContentCategory } from '@/lib/suggestion-engine';
 import { parseCanvasOperationIntent, extractCanvasActionFromAIResponse, type CanvasAction, type CanvasActionResult, type CanvasActionType } from '@/lib/canvas-action-executor';
 import { extractTaskResultImageUrl } from '@/lib/task-result-url';
+import { CHAT_TASK_MAX_ATTEMPTS, getChatTaskPollIntervalMs } from '@/lib/chat-task-polling';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
@@ -4140,10 +4141,10 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 const genModel = model || imageModelInfo.model;
                 const genProviderId = providerId || imageModelInfo.providerId;
 
-                for (let i = 0; i < 120; i++) {
-                  const interval = i <= 2 ? 800 : i <= 5 ? 1000 : i <= 15 ? 1500 : 2000;
+                for (let i = 0; i < CHAT_TASK_MAX_ATTEMPTS; i++) {
+                  const interval = getChatTaskPollIntervalMs(i);
                   await new Promise(r => setTimeout(r, interval));
-                  const pollProgress = Math.min(90, 5 + Math.round(((tIdx + i / 120) / toolPendingTaskIds.length) * 85));
+                  const pollProgress = Math.min(90, 5 + Math.round(((tIdx + i / CHAT_TASK_MAX_ATTEMPTS) / toolPendingTaskIds.length) * 85));
                   setMessages(prev => prev.map(msg =>
                     msg.id === assistantMessageId ? { ...msg, generateProgress: pollProgress } : msg
                   ));
@@ -4295,12 +4296,12 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 const taskIds: string[] = generateData.taskIds || [];
                 if (taskIds.length > 0 && promptResultUrls.length === 0) {
                   for (const taskId of taskIds) {
-                    for (let i = 0; i < 120; i++) {
-                      const interval = i <= 2 ? 800 : i <= 5 ? 1000 : i <= 15 ? 1500 : 2000;
+                    for (let i = 0; i < CHAT_TASK_MAX_ATTEMPTS; i++) {
+                      const interval = getChatTaskPollIntervalMs(i);
                       await new Promise(r => setTimeout(r, interval));
                       const pollProgress = isMultiPrompt
-                        ? Math.round(((promptIdx + (i / 120)) / prompts.length) * 100)
-                        : Math.min(90, 10 + Math.round((i / 120) * 80));
+                        ? Math.round(((promptIdx + (i / CHAT_TASK_MAX_ATTEMPTS)) / prompts.length) * 100)
+                        : Math.min(90, 10 + Math.round((i / CHAT_TASK_MAX_ATTEMPTS) * 80));
                       setMessages(prev => prev.map(msg => 
                         msg.id === assistantMessageId ? { ...msg, generateProgress: pollProgress } : msg
                       ));
@@ -4423,10 +4424,10 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
 
                 if (taskIds.length > 0 && resultUrls.length === 0) {
                   for (const taskId of taskIds) {
-                    for (let i = 0; i < 120; i++) {
-                      const interval = i <= 2 ? 800 : i <= 5 ? 1000 : i <= 15 ? 1500 : 2000;
+                    for (let i = 0; i < CHAT_TASK_MAX_ATTEMPTS; i++) {
+                      const interval = getChatTaskPollIntervalMs(i);
                       await new Promise(r => setTimeout(r, interval));
-                      const progress = Math.min(90, 10 + Math.round((i / 120) * 80));
+                      const progress = Math.min(90, 10 + Math.round((i / CHAT_TASK_MAX_ATTEMPTS) * 80));
                       setMessages(prev => prev.map(msg => 
                         msg.id === assistantMessageId ? { ...msg, generateProgress: progress } : msg
                       ));
