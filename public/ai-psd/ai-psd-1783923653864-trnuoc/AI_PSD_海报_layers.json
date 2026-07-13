@@ -1,0 +1,214 @@
+{
+  "version": "4.0",
+  "taskId": "ai-psd-1783923653864-trnuoc",
+  "createdAt": "2026-07-13T06:21:38.132Z",
+  "canvas": {
+    "width": 1792,
+    "height": 1008
+  },
+  "generation": {
+    "mode": "reference_to_psd",
+    "prompt": "极简白底产品海报",
+    "sceneType": "海报",
+    "styleTags": [],
+    "colorTone": "auto",
+    "complexity": "standard",
+    "quality": "pro",
+    "imageModel": "gpt-image-2-2k",
+    "llmModel": "gpt-5.5"
+  },
+  "layers": [
+    {
+      "name": "暖白背景层",
+      "type": "background",
+      "v4Name": "暖白背景层",
+      "visible": true,
+      "opacity": 1,
+      "blendMode": "normal",
+      "description": "",
+      "prompt": "Full canvas minimal warm white background, solid off-white color #F8F8F6 with extremely subtle vertical gradient, clean studio poster background, no objects, no text",
+      "isUserAsset": false,
+      "editable": false
+    },
+    {
+      "name": "细腻纸感纹理",
+      "type": "texture",
+      "v4Name": "细腻纸感纹理",
+      "visible": true,
+      "opacity": 0.18,
+      "blendMode": "normal",
+      "description": "",
+      "prompt": "Very subtle fine paper grain texture overlay across the full canvas, barely visible light gray speckles, premium matte poster feel, transparent background, no text, no objects",
+      "isUserAsset": false,
+      "editable": false
+    },
+    {
+      "name": "柔和主光层",
+      "type": "light",
+      "v4Name": "柔和主光层",
+      "visible": true,
+      "opacity": 0.55,
+      "blendMode": "normal",
+      "description": "",
+      "prompt": "Soft diffused studio light glow from upper left, gentle white illumination fading toward the center-right, minimal commercial photography lighting, transparent background, no text",
+      "isUserAsset": false,
+      "editable": false
+    },
+    {
+      "name": "浅灰展示台面",
+      "type": "decoration",
+      "v4Name": "浅灰展示台面",
+      "visible": true,
+      "opacity": 0.65,
+      "blendMode": "normal",
+      "description": "",
+      "prompt": "Minimal light gray display platform surface at the lower center of the canvas, very low profile horizontal oval and soft rectangular plane, clean geometric studio pedestal impression, subtle #EDEDEA tones, transparent background, no text",
+      "isUserAsset": false,
+      "editable": false
+    },
+    {
+      "name": "极简辅助线条",
+      "type": "decoration",
+      "v4Name": "极简辅助线条",
+      "visible": true,
+      "opacity": 0.35,
+      "blendMode": "normal",
+      "description": "",
+      "prompt": "Thin minimalist decorative line elements in pale gray, one short vertical line near left text area and one small horizontal line near lower right, elegant editorial layout guides, transparent background, no text",
+      "isUserAsset": false,
+      "editable": false
+    },
+    {
+      "name": "产品接触阴影",
+      "type": "shadow",
+      "v4Name": "产品接触阴影",
+      "visible": true,
+      "opacity": 0.42,
+      "blendMode": "normal",
+      "description": "",
+      "prompt": "Soft realistic elliptical contact shadow under the central product position, light gray semi-transparent shadow on the display platform, blurred edges, centered slightly to the right, transparent background",
+      "isUserAsset": false,
+      "editable": false
+    },
+    {
+      "name": "产品占位层",
+      "type": "product",
+      "v4Name": "产品占位层",
+      "visible": true,
+      "opacity": 1,
+      "blendMode": "normal",
+      "description": "",
+      "prompt": "Placeholder for user product image, positioned center-right, clean isolated product cutout area, product should occupy roughly 520 by 620 pixels, no regenerated product details, transparent background",
+      "isUserAsset": false,
+      "editable": false
+    },
+    {
+      "name": "产品边缘高光",
+      "type": "light",
+      "v4Name": "产品边缘高光",
+      "visible": true,
+      "opacity": 0.38,
+      "blendMode": "normal",
+      "description": "",
+      "prompt": "Subtle white rim highlight glow around the center-right product area, very soft edge light to separate product from white background, transparent background, no text",
+      "isUserAsset": false,
+      "editable": false
+    },
+    {
+      "name": "清透氛围层",
+      "type": "atmosphere",
+      "v4Name": "清透氛围层",
+      "visible": true,
+      "opacity": 0.22,
+      "blendMode": "normal",
+      "description": "",
+      "prompt": "Extremely subtle clean air atmosphere with faint soft bokeh haze near the upper right and center, white translucent glow, minimal premium feeling, transparent background, no text",
+      "isUserAsset": false,
+      "editable": false
+    },
+    {
+      "name": "文字预览层",
+      "type": "text_preview",
+      "v4Name": "文字预览层",
+      "visible": true,
+      "opacity": 0.3,
+      "blendMode": "normal",
+      "description": "",
+      "prompt": "Visual preview of minimalist poster typography layout only: dark gray title block on the left, small brand label above, thin subtitle lines below, price or call-to-action area near bottom left; match clean modern sans-serif hierarchy, transparent background",
+      "isUserAsset": false,
+      "editable": false
+    }
+  ],
+  "layerManifest": [
+    {
+      "name": "暖白背景层",
+      "type": "background",
+      "visible": true,
+      "opacity": 1,
+      "editable": false
+    },
+    {
+      "name": "细腻纸感纹理",
+      "type": "texture",
+      "visible": true,
+      "opacity": 0.18,
+      "editable": false
+    },
+    {
+      "name": "柔和主光层",
+      "type": "light",
+      "visible": true,
+      "opacity": 0.55,
+      "editable": false
+    },
+    {
+      "name": "浅灰展示台面",
+      "type": "decoration",
+      "visible": true,
+      "opacity": 0.65,
+      "editable": false
+    },
+    {
+      "name": "极简辅助线条",
+      "type": "decoration",
+      "visible": true,
+      "opacity": 0.35,
+      "editable": false
+    },
+    {
+      "name": "产品接触阴影",
+      "type": "shadow",
+      "visible": true,
+      "opacity": 0.42,
+      "editable": false
+    },
+    {
+      "name": "产品占位层",
+      "type": "product",
+      "visible": true,
+      "opacity": 1,
+      "editable": false
+    },
+    {
+      "name": "产品边缘高光",
+      "type": "light",
+      "visible": true,
+      "opacity": 0.38,
+      "editable": false
+    },
+    {
+      "name": "清透氛围层",
+      "type": "atmosphere",
+      "visible": true,
+      "opacity": 0.22,
+      "editable": false
+    },
+    {
+      "name": "文字预览层",
+      "type": "text_preview",
+      "visible": true,
+      "opacity": 0.3,
+      "editable": false
+    }
+  ]
+}

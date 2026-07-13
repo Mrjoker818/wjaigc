@@ -1179,6 +1179,14 @@ ${themeDesc}
   /* ── 重试失败项 ── */
   const handleRetry = useCallback((id: number) => {
     setPlan(prev => prev.map(p => p.id === id ? { ...p, status: 'pending' as const, error: undefined } : p));
+    setStep(2);
+    setGenerating(true);
+  }, []);
+
+  const handleRetryFailed = useCallback(() => {
+    setPlan(prev => prev.map(p => p.status === 'failed' ? { ...p, status: 'pending' as const, error: undefined } : p));
+    setStep(2);
+    setGenerating(true);
   }, []);
 
   /* ── 停止生成 ── */
@@ -1727,7 +1735,7 @@ ${themeDesc}
                       <button
                         className="text-xs px-2 py-1 rounded cursor-pointer transition-colors duration-150"
                         style={{ color: t.accent, background: t.accentBg }}
-                        onClick={() => { setGenerating(true); }}
+                        onClick={handleRetryFailed}
                       >
                         重试失败
                       </button>

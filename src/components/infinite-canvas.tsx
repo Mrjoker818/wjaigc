@@ -75,6 +75,7 @@ import { extractTaskResultImageUrl } from '@/lib/task-result-url';
 import { shouldShowAnnotationBubble } from '@/lib/canvas-annotation-visibility';
 import { closestSupportedImageAspectRatio } from '@/lib/image-aspect-ratio';
 import { getHexCubeInitialPosition } from '@/lib/hex-cube-position';
+import { buildHexCubeGenerationInput } from '@/lib/hex-cube-generation';
 import { resolveRefineEngineInitialImageUrl } from '@/lib/refine-engine-image';
 import { translateApiError } from '@/lib/api-error-translator';
 import { APP_VERSION_LABEL } from '@/config/app-meta';
@@ -14784,11 +14785,19 @@ export function InfiniteCanvas({
                         style={{ background: isMonochrome ? 'linear-gradient(135deg, #3b82f6, #60a5fa)' : 'linear-gradient(135deg, #d4af37, #f0d060)' }}
                         onClick={async () => {
                           if (!hcg.toolbar.model || !hcg.toolbar.prompt.trim()) return;
-                          const faceDescriptions = hcg.faces
-                            .filter(f => f.imageUrl)
-                            .map(f => `[${CUBE_FACE_LABELS[f.face]}面]`)
-                            .join(' ');
-                          const fullPrompt = `${faceDescriptions} ${hcg.toolbar.prompt}`;
+                          let hexCubeInput;
+                          try {
+                            hexCubeInput = buildHexCubeGenerationInput({
+                              faces: hcg.faces,
+                              rotationY: hcg.toolbar.rotationY,
+                              tiltX: hcg.toolbar.tiltX,
+                              zoom: hcg.toolbar.zoom,
+                              userPrompt: hcg.toolbar.prompt,
+                            });
+                          } catch (err) {
+                            toast.error(err instanceof Error ? err.message : '六面体参数无效');
+                            return;
+                          }
                           setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, status: 'generating', progress: 10 } : g));
                           try {
                             // 提交生成请求（带超时保护，匹配后端maxDuration）
@@ -14800,14 +14809,13 @@ export function InfiniteCanvas({
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({
-                                  prompt: fullPrompt,
+                                  ...hexCubeInput,
                                   model: hcg.toolbar.model,
                                   providerId: hcg.toolbar.providerId,
                                   aspectRatio: hcg.toolbar.aspectRatio,
                                   resolution: hcg.toolbar.resolution || '2K',
                                   quality: hcg.toolbar.quality || 'auto',
                                   n: hcg.toolbar.outputCount,
-                                  referenceImageUrls: hcg.faces.filter(f => f.imageUrl).map(f => f.imageUrl!),
                                   submitOnly: true,
                                 }),
                                 signal: hexCubeController.signal,
