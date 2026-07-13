@@ -15908,7 +15908,7 @@ export function InfiniteCanvas({
             aria-label="语言修图"
             onClick={(event) => {
               event.stopPropagation();
-              onEditImage?.(getActiveImageData());
+              onEditImage?.(selectedImage || getActiveImageData());
             }}
             className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
             title="语言修图"
