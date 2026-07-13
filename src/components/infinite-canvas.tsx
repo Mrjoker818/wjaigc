@@ -8517,6 +8517,7 @@ export function InfiniteCanvas({
     { label: '发送参考图', action: () => { const img = selectedImageData; if (img) onGenerateVariation(img); } },
     { label: '提取关键词', action: () => { const img = selectedImageData; if (img) onExtractKeywords(img); } },
     { label: '语言修图', action: () => { const img = selectedImageData; if (img) onEditImage?.(img); else onEditImage?.(null); } },
+    { label: '添加到精修引擎', action: () => { openRefineEngine(selectedImageData); } },
     { label: 'Agent编排', action: () => { const img = selectedImageData; if (img) { setAgentEditImage(img); setShowAgentEditor(true); } } },
     ...(selectedImageData?.mediaType !== 'video' ? [{ label: '生成720全景图', action: () => { handleGeneratePanorama(selectedImageData ?? undefined); } }] : []),
     { label: '发送到聊天修改', action: () => { const img = selectedImageData; if (img && onSendToChat) onSendToChat(img); } },
