@@ -42,6 +42,14 @@ export function mergeChatSessionMessages<T extends ChatSessionMessageSnapshot>(
   });
 }
 
+export function updateChatSessionMessage<T extends { id: string }>(
+  messages: T[],
+  messageId: string,
+  update: (message: T) => T,
+): T[] {
+  return messages.map(message => message.id === messageId ? update(message) : message);
+}
+
 export function getResumableChatGenerationTasks(
   messages: PendingGenerationMessage[],
   resumedKeys?: Set<string>,

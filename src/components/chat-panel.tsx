@@ -3259,6 +3259,27 @@ IP角色设计规范：
     if (!currentSessionId) setCurrentSessionId(id);
   }, [currentSessionId]);
 
+  // 即时持久化消息更新（pendingGenerationTasks 立即写入 localStorage）
+  const persistMessageUpdate = useCallback((updater: React.SetStateAction<Message[]>) => {
+    setMessages(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      // 即时持久化到 localStorage，避免崩溃丢失
+      if (currentSessionId) {
+        try {
+          const sessions: ChatSession[] = JSON.parse(localStorage.getItem('chat-sessions') || '[]');
+          const idx = sessions.findIndex(s => s.id === currentSessionId);
+          if (idx >= 0) {
+            // Merge to preserve any pendingGenerationTasks in the new messages
+            const merged = mergeChatSessionMessages(sessions[idx].messages, next);
+            sessions[idx] = { ...sessions[idx], messages: merged as Message[], updatedAt: Date.now() };
+            localStorage.setItem('chat-sessions', JSON.stringify(sessions));
+          }
+        } catch {}
+      }
+      return next;
+    });
+  }, [currentSessionId]);
+
   // 新建对话
   const handleNewChat = useCallback(() => {
     saveSession(messages, model, systemPrompt);
@@ -4188,8 +4209,8 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               : msg
           ));
 
-          // Save pending generation tasks for recovery
-          setMessages(prev => prev.map(msg =>
+          // Save pending generation tasks for recovery (immediate persist)
+          persistMessageUpdate(prev => prev.map(msg =>
             msg.id === assistantMessageId
               ? { ...msg, pendingGenerationTasks: toolPendingTaskIds.map(taskId => ({
                   taskIds: [taskId],
@@ -4364,8 +4385,8 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 else if (generateData.imageUrl) { promptResultUrls.push(generateData.imageUrl); }
 
                 const taskIds: string[] = generateData.taskIds || [];
-                // Save pending generation tasks for recovery
-                setMessages(prev => prev.map(msg =>
+                // Save pending generation tasks for recovery (immediate persist)
+                persistMessageUpdate(prev => prev.map(msg =>
                   msg.id === assistantMessageId
                     ? { ...msg, pendingGenerationTasks: [{ taskIds, model: genModel, providerId: imageModelInfo.providerId, assistantMessageId, timestamp: Date.now() }] } as unknown as Message
                     : msg
@@ -4493,8 +4514,8 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
 
                 const taskIds: string[] = generateData.taskIds || [];
                 const genModel = generateData.model || imageModelInfo.model;
-                // Save pending generation tasks for recovery
-                setMessages(prev => prev.map(msg =>
+                // Save pending generation tasks for recovery (immediate persist)
+                persistMessageUpdate(prev => prev.map(msg =>
                   msg.id === assistantMessageId
                     ? { ...msg, pendingGenerationTasks: [{ taskIds, model: genModel, providerId: imageModelInfo.providerId, assistantMessageId, timestamp: Date.now() }] } as unknown as Message
                     : msg
