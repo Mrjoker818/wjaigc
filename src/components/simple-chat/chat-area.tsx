@@ -412,9 +412,7 @@ export default function ChatArea({
                   if (last?.role === 'assistant') {
                     updated[updated.length - 1] = {
                       ...last,
-                      content: parsed.status === 'failed'
-                        ? (last.content || '') + `\n\n❌ 图片生成失败：${parsed.error || '未知错误'}`
-                        : (last.content || '') + `\n\n🎨 ${parsed.message || '正在生成图片...'}`,
+                      content: `*${parsed.label || '正在处理图片任务...'}*`,
                     };
                   }
                   return updated;
@@ -427,13 +425,13 @@ export default function ChatArea({
                   if (last?.role === 'assistant') {
                     updated[updated.length - 1] = {
                       ...last,
+                      content: last.content || '图片已生成',
                       images: [...(last.images || []), parsed.imageUrl],
                     };
                   }
                   return updated;
                 });
               } else if (parsed.type === 'error') {
-                // LLM 调用失败 - 更新最后一条 assistant 消息为错误信息
                 setSearchStatus(null);
                 setMessages(prev => {
                   const updated = [...prev];
@@ -441,7 +439,7 @@ export default function ChatArea({
                   if (last?.role === 'assistant') {
                     updated[updated.length - 1] = {
                       ...last,
-                      content: `❌ 请求失败：${parsed.error || '未知错误'}\n\n💡 建议：尝试切换模型或稍后重试。`,
+                      content: `请求失败：${parsed.error || '未知错误'}\n\n建议：尝试切换模型或稍后重试。`,
                     };
                   }
                   return updated;
