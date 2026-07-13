@@ -4,6 +4,9 @@ import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Bot, Send, Sparkles, Copy, Check, Trash2, Loader2, Eye, EyeOff, Wand2, User, Upload, X, Image as ImageIcon, Languages, Settings, Plug, Plus, History, FolderOpen, MessageSquare, Bookmark, BookmarkCheck, Lightbulb, Zap, ArrowRight, Palette, Target, Sliders, Download, AlertCircle, LocateFixed, RotateCcw, FileText, Cpu, ChevronRight, AtSign, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { toast } from 'sonner';
+import { extractTaskResultImageUrl } from '@/lib/task-result-url';
+import { CHAT_TASK_MAX_ATTEMPTS, getChatTaskPollIntervalMs } from '@/lib/chat-task-polling';
+import { getResumableChatGenerationTasks, mergeChatSessionMessages, mergeRecoveredChatTasks, updateChatSessionMessage, type ChatPendingGenerationTask, type RecoverableChatCloudTask } from '@/lib/chat-pending-generation';
 import { UserManager } from '@/lib/user-manager';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -24,9 +27,6 @@ import { classifyIntent, ClassifiedIntent, IntentCategory } from '@/lib/intent-c
 import { generateClarificationMessage, detectVagueScenarios, type ClarificationTemplate, type VagueScenario } from '@/lib/clarification-templates';
 import { generateSuggestions, type Suggestion, type SuggestionContext, type ContentCategory } from '@/lib/suggestion-engine';
 import { parseCanvasOperationIntent, extractCanvasActionFromAIResponse, type CanvasAction, type CanvasActionResult, type CanvasActionType } from '@/lib/canvas-action-executor';
-import { extractTaskResultImageUrl } from '@/lib/task-result-url';
-import { CHAT_TASK_MAX_ATTEMPTS, getChatTaskPollIntervalMs } from '@/lib/chat-task-polling';
-import { getResumableChatGenerationTasks, mergeChatSessionMessages, type ChatPendingGenerationTask } from '@/lib/chat-pending-generation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
@@ -58,11 +58,11 @@ interface Message {
   generateProgress?: number; // 生成进度 0-100
   generateImageCount?: number; // 生成图片数量
   generateError?: string; // 生成失败时的错误信息
+  pendingGenerationTasks?: ChatPendingGenerationTask[];
   imageAnchors?: Array<{ imageId: string; imageUrl: string; imageName: string }>; // 画布图片锚点（Lovart风格）
   suggestions?: NextSuggestion[]; // 建议下一步操作
   isClarifying?: boolean; // 是否为追问消息
   toolExecutions?: ToolExecution[]; // Agent工具执行记录
-  pendingGenerationTasks?: ChatPendingGenerationTask[]; // 待恢复的异步生成任务
 }
 
 interface ToolExecution {
@@ -453,6 +453,7 @@ const AGENTS: AgentDefinition[] = [
 
 interface ChatPanelProps {
   themeStyle: 'gold' | 'monochrome';
+  projectId?: string;
 
   onAddToPrompt?: (prompt: string) => void;
   onAddImages?: (imageUrls: string[], sourceImageId?: string, meta?: { modelName?: string; apiProvider?: string }) => void;
@@ -1381,8 +1382,10 @@ ${outputSpec || '1. 设计理念（200字内）\n2. 详细方案描述\n3. 材�
   );
 }
 
-export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages = [], selectedCanvasImage, onChatModelChange, onSuggestionAction, onGenerateImage, brandDna, onInjectBrandDna, chatInitialImage, onChatInitialImageConsumed, chatTabOpen, onChatTabOpenChange, onNavigateToImage }: ChatPanelProps) {
+export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, canvasImages = [], selectedCanvasImage, onChatModelChange, onSuggestionAction, onGenerateImage, brandDna, onInjectBrandDna, chatInitialImage, onChatInitialImageConsumed, chatTabOpen, onChatTabOpenChange, onNavigateToImage }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
+  const messagesRef = useRef<Message[]>(messages);
+  messagesRef.current = messages;
   const [input, setInput] = useState('');
   const [suggestedAgent, setSuggestedAgent] = useState<AgentDefinition | null>(null); // P2-10: auto-routing suggestion
   const [model, setModel] = useState('gemini-3.1-pro-preview');
@@ -1468,6 +1471,8 @@ export function ChatPanel({ themeStyle, onAddToPrompt, onAddImages, canvasImages
   // 对话管理相关状态
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string>('');
+  const [chatSessionsLoaded, setChatSessionsLoaded] = useState(false);
+  const resumedChatTaskKeysRef = useRef<Set<string>>(new Set());
   // 自定义智能体相关状态
   const [customAgents, setCustomAgents] = useState<typeof AGENTS>([]);
   const [showAgentBuilder, setShowAgentBuilder] = useState(false);
@@ -3159,10 +3164,6 @@ IP角色设计规范：
     }
   }, [loadImageModels]);
 
-  // 标记会话是否已加载完成（用于触发保存和恢复）
-  const chatSessionsLoadedRef = useRef(false);
-  const resumedChatTaskKeysRef = useRef(new Set<string>());
-
   // 初始化对话列表
   useEffect(() => {
     const saved = localStorage.getItem('chat-sessions');
@@ -3181,76 +3182,30 @@ IP角色设计规范：
         // ignore
       }
     }
-    chatSessionsLoadedRef.current = true;
+    setChatSessionsLoaded(true);
   }, []);
-
-  // 会话加载完成后，若消息非空则触发一次保存（确保持久化）
-  useEffect(() => {
-    if (chatSessionsLoadedRef.current && messages.length > 0) {
-      saveSession(messages, model, systemPrompt);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chatSessionsLoadedRef.current, messages.length]);
-
-  // 恢复未完成的异步生成任务
-  useEffect(() => {
-    if (!chatSessionsLoadedRef.current || messages.length === 0) return;
-    const tasks = getResumableChatGenerationTasks(messages, resumedChatTaskKeysRef.current);
-    if (tasks.length === 0) return;
-    tasks.forEach(task => resumedChatTaskKeysRef.current.add(task.assistantMessageId));
-
-    const pollAndUpdate = async () => {
-      for (const task of tasks) {
-        const results: string[] = [];
-        for (const taskId of task.taskIds) {
-          try {
-            const resp = await fetch('/api/poll-task', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ taskId, model: task.model, providerId: task.providerId }),
-            });
-            const data = await resp.json();
-            if (data.status === 'completed') {
-              const url = extractTaskResultImageUrl(data);
-              if (url) results.push(url);
-            }
-          } catch { /* skip individual poll errors */ }
-        }
-        if (results.length > 0) {
-          setMessages(prev => prev.map(m => {
-            if (m.id === task.assistantMessageId) {
-              return { ...m, generatedImages: [...(m.generatedImages || []), ...results], pendingGenerationTasks: undefined };
-            }
-            return m;
-          }));
-        }
-      }
-    };
-    pollAndUpdate();
-  }, [chatSessionsLoadedRef.current, messages]);
 
   // 保存对话到localStorage
   const saveSession = useCallback((sessionMessages: Message[], sessionModel: string, sessionSystemPrompt: string, sessionId?: string) => {
     const id = sessionId || currentSessionId || `session-${Date.now()}`;
-    const title = sessionMessages.length > 0
-      ? sessionMessages[0].content.substring(0, 20) + (sessionMessages[0].content.length > 20 ? '...' : '')
-      : '新对话';
-    // Merge to preserve pendingGenerationTasks that may have been added after streaming snapshot
-    const mergedMessages = mergeChatSessionMessages(
-      chatSessions.find(s => s.id === id)?.messages ?? [],
-      sessionMessages
-    );
-    const session: ChatSession = {
-      id,
-      title,
-      messages: mergedMessages as Message[],
-      model: sessionModel,
-      systemPrompt: sessionSystemPrompt,
-      createdAt: sessionMessages.length > 0 ? sessionMessages[0].timestamp : Date.now(),
-      updatedAt: Date.now(),
-      agentId: sessionSystemPrompt && allAgents.find(a => a.id === sessionSystemPrompt) ? sessionSystemPrompt : undefined,
-    };
     setChatSessions(prev => {
+      const existing = prev.find(session => session.id === id);
+      const mergedMessages = existing
+        ? mergeChatSessionMessages(existing.messages, sessionMessages)
+        : sessionMessages;
+      const title = mergedMessages.length > 0
+        ? mergedMessages[0].content.substring(0, 20) + (mergedMessages[0].content.length > 20 ? '...' : '')
+        : '新对话';
+      const session: ChatSession = {
+        id,
+        title,
+        messages: mergedMessages,
+        model: sessionModel,
+        systemPrompt: sessionSystemPrompt,
+        createdAt: mergedMessages.length > 0 ? mergedMessages[0].timestamp : Date.now(),
+        updatedAt: Date.now(),
+        agentId: sessionSystemPrompt && allAgents.find(a => a.id === sessionSystemPrompt) ? sessionSystemPrompt : undefined,
+      };
       const filtered = prev.filter(s => s.id !== id);
       const updated = [session, ...filtered].slice(0, 50);
       localStorage.setItem('chat-sessions', JSON.stringify(updated));
@@ -3259,26 +3214,115 @@ IP角色设计规范：
     if (!currentSessionId) setCurrentSessionId(id);
   }, [currentSessionId]);
 
-  // 即时持久化消息更新（pendingGenerationTasks 立即写入 localStorage）
-  const persistMessageUpdate = useCallback((updater: React.SetStateAction<Message[]>) => {
-    setMessages(prev => {
-      const next = typeof updater === 'function' ? updater(prev) : updater;
-      // 即时持久化到 localStorage，避免崩溃丢失
-      if (currentSessionId) {
+  const persistMessageUpdate = useCallback((messageId: string, update: (message: Message) => Message) => {
+    const nextMessages = updateChatSessionMessage(messagesRef.current, messageId, update);
+    messagesRef.current = nextMessages;
+    setMessages(nextMessages);
+    saveSession(nextMessages, model, systemPrompt);
+  }, [model, saveSession, systemPrompt]);
+
+  // Persist incremental tool output and task progress, not only the first chat reply.
+  useEffect(() => {
+    if (!chatSessionsLoaded || messages.length === 0) return;
+    saveSession(messages, model, systemPrompt);
+  }, [chatSessionsLoaded, messages, model, systemPrompt, saveSession]);
+
+  // A refreshed canvas rehydrates chat history first, then resumes only unfinished
+  // provider tasks with the exact model/provider pair that created them.
+  useEffect(() => {
+    if (!chatSessionsLoaded) return;
+    let cancelled = false;
+
+    const resume = async (): Promise<void> => {
+      if (projectId && currentSessionId) {
         try {
-          const sessions: ChatSession[] = JSON.parse(localStorage.getItem('chat-sessions') || '[]');
-          const idx = sessions.findIndex(s => s.id === currentSessionId);
-          if (idx >= 0) {
-            // Merge to preserve any pendingGenerationTasks in the new messages
-            const merged = mergeChatSessionMessages(sessions[idx].messages, next);
-            sessions[idx] = { ...sessions[idx], messages: merged as Message[], updatedAt: Date.now() };
-            localStorage.setItem('chat-sessions', JSON.stringify(sessions));
+          const response = await fetch(`/api/chat-tasks?projectId=${encodeURIComponent(projectId)}&sessionId=${encodeURIComponent(currentSessionId)}`);
+          const data = await response.json();
+          if (response.ok && data.success && Array.isArray(data.tasks)) {
+            const recoveredMessages = mergeRecoveredChatTasks(
+              messagesRef.current,
+              data.tasks as RecoverableChatCloudTask[],
+            );
+            messagesRef.current = recoveredMessages;
+            setMessages(recoveredMessages);
+            saveSession(recoveredMessages, model, systemPrompt, currentSessionId);
           }
-        } catch {}
+        } catch {
+          // Local session recovery remains available if the task-center query is transiently unavailable.
+        }
       }
-      return next;
+
+      const pendingMessages = messagesRef.current
+        .map(message => ({ message, tasks: getResumableChatGenerationTasks(message) }))
+        .filter(({ tasks }) => tasks.length > 0);
+
+      for (const { message, tasks } of pendingMessages) {
+        const resumeKey = `${message.id}:${tasks.map(task => task.taskId).join(',')}`;
+        if (resumedChatTaskKeysRef.current.has(resumeKey)) continue;
+        resumedChatTaskKeysRef.current.add(resumeKey);
+
+        const recoveredUrls: string[] = [];
+        let terminalError = '';
+
+        for (const task of tasks) {
+          for (let attempt = 0; attempt < CHAT_TASK_MAX_ATTEMPTS && !cancelled; attempt += 1) {
+            try {
+              const response = await fetch('/api/poll-task', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ taskId: task.taskId, model: task.model, providerId: task.providerId }),
+              });
+              const data = await response.json();
+              const videoUrl = data.videoUrl || data.result?.videoUrl;
+              const resultUrl = task.type === 'video' || videoUrl
+                ? videoUrl
+                : extractTaskResultImageUrl(data);
+
+              if (data.status === 'completed') {
+                if (typeof resultUrl === 'string' && resultUrl) recoveredUrls.push(resultUrl);
+                else terminalError = '生成完成但未获取到结果';
+                break;
+              }
+              if (data.status === 'failed' || data.status === 'cancelled' || data.retryable === false) {
+                terminalError = data.error || '生成失败';
+                break;
+              }
+
+              const progress = Math.min(90, Math.max(5, data.progress || Math.round(((attempt + 1) / CHAT_TASK_MAX_ATTEMPTS) * 85)));
+              setMessages(current => current.map(item => item.id === message.id
+                ? { ...item, generateProgress: progress }
+                : item));
+            } catch {
+              // Transient provider or network failures are retried within the same window.
+            }
+            await new Promise(resolve => setTimeout(resolve, getChatTaskPollIntervalMs(attempt)));
+          }
+          if (terminalError) break;
+        }
+
+        if (cancelled) return;
+        const uniqueUrls = [...new Set(recoveredUrls)];
+        if (uniqueUrls.length > 0 && onAddImages) onAddImages(uniqueUrls);
+        setMessages(current => current.map(item => item.id === message.id
+          ? {
+            ...item,
+            generatedImages: uniqueUrls.length > 0
+              ? [...new Set([...(item.generatedImages || []), ...uniqueUrls])]
+              : item.generatedImages,
+            isGeneratingImage: false,
+            generateProgress: uniqueUrls.length > 0 ? 100 : item.generateProgress,
+            generateError: uniqueUrls.length > 0 ? undefined : (terminalError || '任务恢复超时，请在任务中心确认供应商结果后重试'),
+            pendingGenerationTasks: undefined,
+          }
+          : item));
+      }
+    };
+
+    void Promise.resolve().then(() => {
+      if (!cancelled) return resume();
     });
-  }, [currentSessionId]);
+    return () => { cancelled = true; };
+  }, [chatSessionsLoaded, currentSessionId, model, onAddImages, projectId, saveSession, systemPrompt]);
 
   // 新建对话
   const handleNewChat = useCallback(() => {
@@ -3516,6 +3560,9 @@ IP角色设计规范：
     }
 
     const trimmedInput = textToSend.trim();
+    const taskSessionId = currentSessionId || `session-${Date.now()}`;
+    if (!currentSessionId) setCurrentSessionId(taskSessionId);
+    const assistantMessageId = `assistant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     // P0-2: 增强意图分类 - 使用新版意图分类器
     const intentResult = classifyIntent(trimmedInput, { hasImages: pendingImages.length > 0 || activeMentions.some(m => m.type === 'canvas-image') });
@@ -3923,6 +3970,9 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
           imageModel,  // 前端当前选择的图像模型
           imageProviderId: imageModelProviderId,  // 前端当前选择的图像提供商ID
           isAgentMode,  // Agent模式标记：放宽意图检测，强制启用工具
+          projectId,
+          sessionId: taskSessionId,
+          messageId: assistantMessageId,
         }),
       });
 
@@ -3944,7 +3994,6 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
 
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
-      const assistantMessageId = `assistant-${Date.now()}`;
       let assistantContent = '';
       const toolExecutions: ToolExecution[] = []; // Agent工具执行记录
       const toolGeneratedImages: string[] = []; // 工具生成的图片URL
@@ -4203,24 +4252,20 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
         // 当工具返回 taskIds（异步任务）但没有直接的 imageUrls 时，需要轮询获取结果
         if (toolPendingTaskIds.length > 0) {
           const imageModelInfo = getCurrentImageModelInfo(imageModel, imageModelProviderId);
-          setMessages(prev => prev.map(msg =>
-            msg.id === assistantMessageId
-              ? { ...msg, isGeneratingImage: true, generateModelName: imageModelInfo.model || '图像生成', generateProviderId: imageModelInfo.providerId, generateProgress: 5, generateImageCount: toolPendingTaskIds.length }
-              : msg
-          ));
-
-          // Save pending generation tasks for recovery (immediate persist)
-          persistMessageUpdate(prev => prev.map(msg =>
-            msg.id === assistantMessageId
-              ? { ...msg, pendingGenerationTasks: toolPendingTaskIds.map(taskId => ({
-                  taskIds: [taskId],
-                  model: imageModelInfo.model,
-                  providerId: imageModelInfo.providerId,
-                  assistantMessageId,
-                  timestamp: Date.now(),
-                })) } as unknown as Message
-              : msg
-          ));
+          const pendingGenerationTasks: ChatPendingGenerationTask[] = toolPendingTaskIds.map(task => ({
+            ...task,
+            model: task.model || imageModelInfo.model,
+            providerId: task.providerId || imageModelInfo.providerId || '',
+          }));
+          persistMessageUpdate(assistantMessageId, msg => ({
+            ...msg,
+            isGeneratingImage: true,
+            generateModelName: imageModelInfo.model || '图像生成',
+            generateProviderId: imageModelInfo.providerId,
+            generateProgress: 5,
+            generateImageCount: toolPendingTaskIds.length,
+            pendingGenerationTasks,
+          }));
 
           (async () => {
             try {
@@ -4372,6 +4417,9 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                     quality,
                     outputCount: 1,
                     submitOnly: true,
+                    projectId,
+                    sessionId: taskSessionId,
+                    messageId: assistantMessageId,
                     ...(referenceImages.length > 0 ? { referenceImages } : {}),
                   }),
                 });
@@ -4385,13 +4433,17 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 else if (generateData.imageUrl) { promptResultUrls.push(generateData.imageUrl); }
 
                 const taskIds: string[] = generateData.taskIds || [];
-                // Save pending generation tasks for recovery (immediate persist)
-                persistMessageUpdate(prev => prev.map(msg =>
-                  msg.id === assistantMessageId
-                    ? { ...msg, pendingGenerationTasks: [{ taskIds, model: genModel, providerId: imageModelInfo.providerId, assistantMessageId, timestamp: Date.now() }] } as unknown as Message
-                    : msg
-                ));
                 if (taskIds.length > 0 && promptResultUrls.length === 0) {
+                  const pendingGenerationTasks: ChatPendingGenerationTask[] = taskIds.map(taskId => ({
+                    taskId,
+                    model: genModel,
+                    providerId: imageModelInfo.providerId || '',
+                    type: 'image',
+                  }));
+                  persistMessageUpdate(assistantMessageId, msg => ({
+                    ...msg,
+                    pendingGenerationTasks: [...(msg.pendingGenerationTasks || []), ...pendingGenerationTasks],
+                  }));
                   for (const taskId of taskIds) {
                     for (let i = 0; i < CHAT_TASK_MAX_ATTEMPTS; i++) {
                       const interval = getChatTaskPollIntervalMs(i);
@@ -4499,6 +4551,9 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                   body: JSON.stringify({
                     prompt: optimizedPrompt, model: imageModelInfo.model, providerId: imageModelInfo.providerId,
                     aspectRatio, quality, outputCount, submitOnly: true,
+                    projectId,
+                    sessionId: taskSessionId,
+                    messageId: assistantMessageId,
                     ...(referenceImages.length > 0 ? { referenceImages } : {}),
                   }),
                 });
@@ -4514,18 +4569,19 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
 
                 const taskIds: string[] = generateData.taskIds || [];
                 const genModel = generateData.model || imageModelInfo.model;
-                // Save pending generation tasks for recovery (immediate persist)
-                persistMessageUpdate(prev => prev.map(msg =>
-                  msg.id === assistantMessageId
-                    ? { ...msg, pendingGenerationTasks: [{ taskIds, model: genModel, providerId: imageModelInfo.providerId, assistantMessageId, timestamp: Date.now() }] } as unknown as Message
-                    : msg
-                ));
                 const resultUrls: string[] = [];
 
                 if (generateData.imageUrls?.length > 0) { resultUrls.push(...generateData.imageUrls); }
                 else if (generateData.imageUrl) { resultUrls.push(generateData.imageUrl); }
 
                 if (taskIds.length > 0 && resultUrls.length === 0) {
+                  const pendingGenerationTasks: ChatPendingGenerationTask[] = taskIds.map(taskId => ({
+                    taskId,
+                    model: genModel,
+                    providerId: imageModelInfo.providerId || '',
+                    type: 'image',
+                  }));
+                  persistMessageUpdate(assistantMessageId, msg => ({ ...msg, pendingGenerationTasks }));
                   for (const taskId of taskIds) {
                     for (let i = 0; i < CHAT_TASK_MAX_ATTEMPTS; i++) {
                       const interval = getChatTaskPollIntervalMs(i);
@@ -4620,7 +4676,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
 
       // 保存对话
       const finalMessages = [...newMessages, { id: assistantMessageId, role: 'assistant' as const, content: assistantContent, timestamp: Date.now() }];
-      saveSession(finalMessages, model, systemPrompt);
+      saveSession(finalMessages, model, systemPrompt, taskSessionId);
       // 记录聊天使用
       try { UserManager.getInstance().recordUsage('chat'); } catch {}
     } catch (error) {
@@ -4636,7 +4692,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       setIsLoading(false);
       abortControllerRef.current = null;
     }
-  }, [input, isLoading, messages, model, systemPrompt, isThinkingMode, saveSession, pendingImages, allAgents, activeMentions, brandDna, tuneContextString, activeSkill, skillParamValues, onAddImages]);
+  }, [input, isLoading, messages, model, systemPrompt, isThinkingMode, saveSession, persistMessageUpdate, pendingImages, allAgents, activeMentions, brandDna, tuneContextString, activeSkill, skillParamValues, onAddImages, currentSessionId, projectId]);
 
   // Lovart 风格 Skill 调用：点击 Skill 直接创建对话并自动发送，AI 按 Skill 方法论引导用户
   const handleUseSkill = useCallback((skill: ChatSkill) => {

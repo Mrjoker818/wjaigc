@@ -17,6 +17,12 @@ const MAX_AGENT_ITERATIONS = 8;
 /** Timeout for each tool execution */
 const TOOL_EXECUTION_TIMEOUT = 120000;
 
+interface ChatTaskContext {
+  projectId?: string;
+  sessionId?: string;
+  messageId?: string;
+}
+
 export async function POST(request: NextRequest) {
   const opTimer = startTimer();
   let deductedCredits = 0;
@@ -37,6 +43,9 @@ export async function POST(request: NextRequest) {
       imageModel = undefined as string | undefined,  // 前端当前选择的图像模型
       imageProviderId = undefined as string | undefined,  // 前端当前选择的图像提供商ID
       isAgentMode = false,  // 是否是Agent模式（Agent模式下放宽意图检测，强制启用工具）
+      projectId: requestProjectId = undefined as string | undefined,
+      sessionId: requestSessionId = undefined as string | undefined,
+      messageId: requestMessageId = undefined as string | undefined,
     } = await request.json();
     
     // P2-9: 极度模糊时强制禁用工具，确保LLM只追问不执行
@@ -50,6 +59,11 @@ export async function POST(request: NextRequest) {
     
     sessionUser = await getSessionUser(request);
     const userId = sessionUser?.id ?? requestUserId ?? "anonymous";
+    const taskContext = {
+      projectId: typeof requestProjectId === 'string' ? requestProjectId : undefined,
+      sessionId: typeof requestSessionId === 'string' ? requestSessionId : undefined,
+      messageId: typeof requestMessageId === 'string' ? requestMessageId : undefined,
+    };
     deductedCredits = 0; // 跟踪已扣积分，用于失败退款
 
     // 参数验证
@@ -167,7 +181,7 @@ export async function POST(request: NextRequest) {
     // 直到 LLM 返回纯文本（无 tool_calls）或达到最大循环次数
 
     if (effectiveEnableTools && stream) {
-      return handleAgentStream(fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, isThinkingModel, availableTools, imageModel, imageProviderId, isAgentMode);
+      return handleAgentStream(fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, isThinkingModel, availableTools, imageModel, imageProviderId, isAgentMode, taskContext);
     }
 
     // Non-stream or non-tool mode: original behavior
@@ -249,7 +263,7 @@ export async function POST(request: NextRequest) {
       
       // Handle tool_calls in non-stream mode
       if (effectiveEnableTools && retryData.choices?.[0]?.message?.tool_calls) {
-        return handleNonStreamAgentLoop(retryData, fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, availableTools, imageModel, imageProviderId, isAgentMode);
+        return handleNonStreamAgentLoop(retryData, fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, availableTools, imageModel, imageProviderId, isAgentMode, taskContext);
       }
       
       await appendUserJsonl(userId, 'chat', { model, providerId, messageCount: messages.length, stream: false });
@@ -384,7 +398,7 @@ export async function POST(request: NextRequest) {
     
     // Handle tool_calls in non-stream mode
     if (effectiveEnableTools && data.choices?.[0]?.message?.tool_calls) {
-      return handleNonStreamAgentLoop(data, fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, availableTools, imageModel, imageProviderId);
+      return handleNonStreamAgentLoop(data, fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, availableTools, imageModel, imageProviderId, undefined, taskContext);
     }
     
     await appendUserJsonl(userId, 'chat', { model, providerId, messageCount: messages.length, stream: false });
@@ -428,6 +442,7 @@ async function handleAgentStream(
   imageModel?: string,
   imageProviderId?: string,
   isAgentMode?: boolean,
+  taskContext: ChatTaskContext = {},
 ): Promise<NextResponse> {
   const agentModeEnabled = isAgentMode ?? false; // 捕获isAgentMode到局部变量
   const encoder = new TextEncoder();
@@ -625,6 +640,7 @@ async function handleAgentStream(
                   userId,
                   imageModel: imageModel || '',
                   imageProviderId: imageProviderId || '',
+                  ...taskContext,
                 }),
                 new Promise<ToolCallResult>((_, reject) =>
                   setTimeout(() => reject(new Error('Tool execution timeout')), TOOL_EXECUTION_TIMEOUT)
@@ -705,6 +721,7 @@ async function handleNonStreamAgentLoop(
   imgModel?: string,
   imgProviderId?: string,
   isAgentMode?: boolean,
+  taskContext: ChatTaskContext = {},
 ): Promise<NextResponse> {
   const agentModeEnabled = isAgentMode ?? false;
   const currentMessages = [...fixedMessages];
@@ -740,6 +757,7 @@ async function handleNonStreamAgentLoop(
         userId,
         imageModel: imgModel,
         imageProviderId: imgProviderId,
+        ...taskContext,
       });
 
       allToolResults.push({ toolName, result: toolResult });

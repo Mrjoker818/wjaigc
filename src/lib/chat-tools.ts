@@ -265,6 +265,9 @@ export async function executeToolCall(
     userId: string;
     imageModel?: string;
     imageProviderId?: string;
+    projectId?: string;
+    sessionId?: string;
+    messageId?: string;
   }
 ): Promise<ToolCallResult> {
   switch (toolName) {
@@ -297,6 +300,9 @@ interface ToolContext {
   userId: string;
   imageModel?: string;
   imageProviderId?: string;
+  projectId?: string;
+  sessionId?: string;
+  messageId?: string;
 }
 
 async function executeGenerateImage(
@@ -336,6 +342,9 @@ async function executeGenerateImage(
         quality,
         outputCount: count,
         submitOnly: true,
+        projectId: context.projectId,
+        sessionId: context.sessionId,
+        messageId: context.messageId,
       }),
       signal: AbortSignal.timeout(30000),
     });
@@ -499,6 +508,9 @@ async function executeImg2Img(
         strength,
         aspectRatio: '1:1',
         submitOnly: true,
+        projectId: context.projectId,
+        sessionId: context.sessionId,
+        messageId: context.messageId,
       }),
       signal: AbortSignal.timeout(30000),
     });

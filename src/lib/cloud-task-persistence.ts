@@ -10,6 +10,8 @@ interface ImageTaskSubmission {
   taskId: string;
   userId?: string;
   projectId?: string;
+  sessionId?: string;
+  messageId?: string;
   type?: string;
   providerId?: string;
   model?: string;
@@ -72,9 +74,11 @@ export async function recordImageTaskSubmitted(input: ImageTaskSubmission): Prom
   await createCloudTask({
     id: input.taskId,
     userId: input.userId || 'anonymous',
+    projectId: input.projectId,
+    sessionId: input.sessionId,
+    messageId: input.messageId,
     type: input.type || 'generate',
     status: 'processing',
-    projectId: input.projectId,
     providerId: input.providerId,
     model: input.model,
     remoteTaskId: input.taskId,

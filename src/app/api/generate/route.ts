@@ -17,10 +17,9 @@ import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { validateImageUrl } from '@/lib/input-validation';
 import { consumeCredits } from '@/lib/credits';
 
-import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, stripEditsOnlyFields, isEditsEndpointRejected, type ApiCompatProfile, resolveProfileForModel, resolveProviderPixelSize, isGeminiImageModel, isNanoBananaModel, buildGeminiChatImageRequest, parseGeminiChatImageResponse, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
+import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, stripEditsOnlyFields, isEditsEndpointRejected, type ApiCompatProfile, resolveProfileForModel, isGeminiImageModel, isNanoBananaModel, buildGeminiChatImageRequest, parseGeminiChatImageResponse, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
 import { registerTask, updateTaskProgress, isTaskCancelled, getTaskInfo } from '@/lib/task-registry';
 import { recordImageTaskSubmitted, recordImageTaskTerminal } from '@/lib/cloud-task-persistence';
-import { canFallbackToAnotherProvider } from '@/lib/provider-fallback-policy';
 import { persistRemoteImage } from '@/lib/s3-storage';
 import { calculateActualPixelsFromRatio } from '@/lib/calculate-pixels';
 import { RESOLUTION_TIER_MODELS, QUALITY_LEVEL_MODELS, getModelParamType, ModelParamType } from '@/lib/canvas-generation-group';
@@ -129,10 +128,12 @@ export async function POST(request: NextRequest) {
       outputCount,
       model: rawModel = 'gemini-2.5-flash-image-preview',
       userId: requestUserId,
-      projectId,
       strength,
       providerId,
       submitOnly,
+      projectId,
+      sessionId,
+      messageId,
       _skipCredits, // 内部标记：后台重试时跳过积分扣除（避免双重扣费）
       _skipCloudTaskPersistence,
       resolution, // GPT-Image系列分辨率档位参数（1K/2K/4K）
@@ -296,14 +297,21 @@ export async function POST(request: NextRequest) {
       registerTask(asyncTaskId, 'generate-async', '生成图片', userId);
       // Persist the client-facing outer task before the background request starts.
       // A provider can fail before it returns a remote task ID.
-      void recordImageTaskSubmitted({
-        taskId: asyncTaskId,
-        userId,
-        projectId: typeof projectId === 'string' ? projectId : undefined,
-        providerId: effectiveProviderId,
-        model,
-        label: '生成图片',
-      }).catch(error => console.warn('[generate] submitOnly cloud task creation failed:', error));
+      try {
+        // Return the client task ID only after its recovery record is durable.
+        await recordImageTaskSubmitted({
+          taskId: asyncTaskId,
+          userId,
+          projectId: typeof projectId === 'string' ? projectId : undefined,
+          sessionId: typeof sessionId === 'string' ? sessionId : undefined,
+          messageId: typeof messageId === 'string' ? messageId : undefined,
+          providerId: effectiveProviderId,
+          model,
+          label: '生成图片',
+        });
+      } catch (error) {
+        console.warn('[generate] submitOnly cloud task creation failed:', error);
+      }
       const recordSubmitOnlyTerminal = (input: Parameters<typeof recordImageTaskTerminal>[1]) => {
         void recordImageTaskTerminal(asyncTaskId, input)
           .catch(error => console.warn('[generate] submitOnly cloud task terminal update failed:', error));
@@ -681,14 +689,6 @@ export async function POST(request: NextRequest) {
     }
 
     if (!serverApiKey || !apiBaseUrl) {
-      if (!canFallbackToAnotherProvider(effectiveProviderId)) {
-        return NextResponse.json({
-          success: false,
-          error: `所选供应商"${effectiveProviderId}"不可用，或缺少 API 地址/密钥配置。`,
-          providerId: effectiveProviderId,
-          model,
-        }, { status: 400 });
-      }
       // 没有找到指定模型的凭证，尝试使用第一个可用的备选模型
       if (candidateModels.length > 0) {
         const fallback = candidateModels.shift()!;
@@ -983,13 +983,7 @@ export async function POST(request: NextRequest) {
 
       // ★ 关键修复：优先使用后端规范表计算像素尺寸（传入 modelId），
       // 确保与 API 官方文档一致；前端传来的 requestedPixelSize 仅作兜底
-      const calculatedPixelSize = resolveProviderPixelSize(
-        effectiveSize,
-        quality,
-        resolutionTier,
-        currentModelConfig.modelId,
-        profile,
-      ) || calculateActualPixelsFromRatio(effectiveSize, quality, currentModelConfig.modelId);
+      const calculatedPixelSize = calculateActualPixelsFromRatio(effectiveSize, quality, currentModelConfig.modelId);
       const pixelSize = calculatedPixelSize || requestedPixelSize;
 
       // ★ 关键修复：根据 profile.sizeFormat 决定发送哪种格式
@@ -2210,7 +2204,7 @@ export async function POST(request: NextRequest) {
           }
         }
         
-        if (!submitted && canFallbackToAnotherProvider(effectiveProviderId) && isRetryable && candidateModels.length > 0) {
+        if (!submitted && isRetryable && candidateModels.length > 0) {
           console.log(`模型 ${modelConfig.modelId} 不可用 (${errMsg})，尝试备选模型...`);
           
           for (let ci = 0; ci < candidateModels.length; ci++) {
@@ -2306,6 +2300,8 @@ export async function POST(request: NextRequest) {
           taskId: directTid,
           userId,
           projectId: typeof projectId === 'string' ? projectId : undefined,
+          sessionId: typeof sessionId === 'string' ? sessionId : undefined,
+          messageId: typeof messageId === 'string' ? messageId : undefined,
           providerId: usedProviderId,
           model: usedModelId,
           persist: !_skipCloudTaskPersistence,
@@ -2370,6 +2366,8 @@ export async function POST(request: NextRequest) {
         taskId: tid,
         userId,
         projectId: typeof projectId === 'string' ? projectId : undefined,
+        sessionId: typeof sessionId === 'string' ? sessionId : undefined,
+        messageId: typeof messageId === 'string' ? messageId : undefined,
         providerId: usedProviderId,
         model: usedModelId,
         persist: !_skipCloudTaskPersistence,
