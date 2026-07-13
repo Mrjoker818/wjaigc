@@ -7291,7 +7291,10 @@ export function InfiniteCanvas({
           },
         }),
       });
-      if (!res.ok) throw new Error(`3D任务创建失败: HTTP ${res.status}`);
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => null);
+        throw new Error(String(errorData?.error || `3D任务创建失败: HTTP ${res.status}`));
+      }
       const data = await res.json();
       console.log('[3D] API response:', JSON.stringify(data).slice(0, 500));
       if (!data.success) {
@@ -7388,7 +7391,7 @@ export function InfiniteCanvas({
       setThreeDProgress(null);
     } catch (e) {
       console.error('Image to 3D failed:', e);
-      alert('图生 3D 调用失败，请检查 API 或本地模型服务');
+      alert(translateErrorFrontend(e instanceof Error ? e.message : '图生 3D 调用失败，请检查 API 或本地模型服务'));
       setThreeDProgress(null);
     }
   }, [selectedImageData, getThreeDProviders, threeDProviderId, threeDBackend, threeDMode, threeDMultiImages, threeDPrompt, threeDType, threeDQuality, threeDTexture, threeDFormat, threeDEnablePBR, threeDFaceCount, threeDPose, threeDLocalEndpoint, threeDLocalModel, renderEditElementsPreview, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, removeProcessingFrame]);

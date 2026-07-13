@@ -935,17 +935,11 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const note = body.backend === 'api'
-      ? 'No live 3D API response yet; generated a configurable task preview.'
-      : 'Local 3D endpoint is not running or not reachable; generated a local-model preview.';
-
-    return NextResponse.json({
-      success: true,
-      backend: body.backend,
-      assetUrl: buildPlaceholderAsset(body),
-      previewImageUrl: buildPreviewSvg(body, note),
-      note,
-    });
+    throw new Error(
+      body.backend === 'api'
+        ? '3D provider did not return a task ID or model file.'
+        : 'Local 3D service did not return a model file.',
+    );
   } catch (error) {
     console.error('[image-to-3d] Fatal error:', error);
     const durationMs = Date.now() - startTime;
