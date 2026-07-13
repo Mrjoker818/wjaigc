@@ -18,6 +18,7 @@ import { getRefineResult } from '@/app/api/refine-engine/route';
 import { getBrandResult } from '@/app/api/brand-ecommerce/route';
 import { getFontDesignResult } from '@/app/api/font-design/generate-image/route';
 import { unwrapFontDesignTaskResult } from '@/lib/font-design-task-result';
+import { isPendingLocalAsyncGenerateTask } from '@/lib/async-generate-task';
 import { enhanceViaAI } from '@/lib/quality-enhance';
 import { buildRecoveredTaskContext, recordImageTaskTerminal, recordVideoTaskTerminal } from '@/lib/cloud-task-persistence';
 import { getCloudTaskForUser } from '@/lib/cloud-task-storage';
@@ -629,6 +630,17 @@ export async function POST(request: NextRequest) {
           status: 'cancelled',
           error: '任务已被取消',
           retryable: false,
+        }, { status: 200 });
+      }
+      // submitOnly uses this task as a local progress wrapper. Its background
+      // worker owns the provider task ID, so polling it remotely would send an
+      // async-* ID to the provider and can falsely terminally fail the task.
+      if (isPendingLocalAsyncGenerateTask(registryTask)) {
+        return NextResponse.json({
+          success: true,
+          status: 'processing',
+          progress: registryTask.progress,
+          label: registryTask.label || '生成中...',
         }, { status: 200 });
       }
       // ★ 视频任务轮询：使用 video-api 协议适配器
