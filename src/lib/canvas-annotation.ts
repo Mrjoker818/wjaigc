@@ -63,6 +63,27 @@ export function createAnnotationId(): string {
   return `ann_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
 }
 
+/** 批注执行结果 */
+export interface AnnotationExecutionResult {
+  status: Extract<AnnotationStatus, 'done' | 'failed'>;
+  aiReply: string;
+  resultImageUrl?: string;
+}
+
+/** 将合并批注执行结果回写到单条批注 */
+export function applyMergedAnnotationExecutionResult(
+  annotation: CanvasAnnotation,
+  result: AnnotationExecutionResult,
+): CanvasAnnotation {
+  return {
+    ...annotation,
+    status: result.status,
+    aiReply: result.aiReply,
+    ...(result.resultImageUrl ? { resultImageUrl: result.resultImageUrl } : {}),
+    chatExpanded: true,
+  };
+}
+
 /** 创建新批注 */
 export function createAnnotation(
   x: number,

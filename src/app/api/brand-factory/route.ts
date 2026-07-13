@@ -21,6 +21,7 @@ import type { ApiProvider } from '@/lib/universal-api-types';
 import { dbGetUserData, dbSetUserData } from '@/lib/db-storage';
 import { calculateActualPixelsFromRatio } from '@/lib/calculate-pixels';
 import { validateApiInputs } from '@/lib/api-validator';
+import { normalizeBrandFactoryImageUrl, normalizeBrandFactoryImageUrls } from '@/lib/brand-factory-image-url';
 
 // ─── 内存项目存储 ────────────────────────────────────────────────────
 const BRAND_PROJECTS_KEY = 'brand_factory_projects';
@@ -402,10 +403,11 @@ async function generateImage(
       if (firstItem?.task_id) {
         return { success: true, taskId: firstItem.task_id as string };
       }
-      const urls = data.data
+      const rawDataUrls = data.data
         .map((item: Record<string, unknown>) => item.url || item.b64_json)
         .filter(Boolean) as string[];
-      if (urls.length > 0) {
+      if (rawDataUrls.length > 0) {
+        const urls = normalizeBrandFactoryImageUrls(rawDataUrls);
         return { success: true, imageUrl: urls[0], imageUrls: urls };
       }
     }
@@ -429,13 +431,15 @@ async function generateImage(
     // ★ 使用增强版 extractImageUrlsFromRaw 兜底提取URL
     const rawUrls = extractImageUrlsFromRaw(data);
     if (rawUrls.length > 0) {
-      return { success: true, imageUrl: rawUrls[0], imageUrls: rawUrls };
+      const urls = normalizeBrandFactoryImageUrls(rawUrls);
+      return { success: true, imageUrl: urls[0], imageUrls: urls };
     }
 
     // ★ 最终兜底：使用复用 poll-task 逻辑的深度提取
     const deepUrls = extractImageUrlsFromPollData(data, provider.baseUrl.replace(/\/+$/, ''));
     if (deepUrls.length > 0) {
-      return { success: true, imageUrl: deepUrls[0], imageUrls: deepUrls };
+      const urls = normalizeBrandFactoryImageUrls(deepUrls);
+      return { success: true, imageUrl: urls[0], imageUrls: urls };
     }
 
     console.warn(`[brand-factory] generateImage: 所有提取方式均未找到图片URL, data=${JSON.stringify(data).substring(0, 500)}`);

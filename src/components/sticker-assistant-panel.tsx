@@ -4,6 +4,8 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { GripVertical, X, Minus, Sparkles, Loader2, CheckCircle2, XCircle, Clock, RefreshCw, Download, ChevronRight, Smile, Upload, ImagePlus, Archive } from 'lucide-react';
 import JSZip from 'jszip';
 import { getModelDisplayName } from '@/lib/model-name-map';
+import { getStickerModelLoadDiagnosticMessage } from '@/lib/sticker-model-load-state';
+import { getStickerFailureMessage } from '@/lib/sticker-failure-message';
 
 
 /* ──────────────────── 主题色 ──────────────────── */
@@ -640,6 +642,7 @@ export default function StickerAssistantPanel({
   const [models, setModels] = useState<ModelOption[]>([]);
   const [selectedModelId, setSelectedModelId] = useState('');
   const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelDiagnostic, setModelDiagnostic] = useState('');
   const [chatModelId, setChatModelId] = useState('');
   const [chatModels, setChatModels] = useState<ModelOption[]>([]);
 
@@ -727,6 +730,12 @@ export default function StickerAssistantPanel({
     };
     loadModels();
   }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 模型加载完成后生成诊断信息
+  useEffect(() => {
+    if (!isOpen || modelsLoading) return;
+    setModelDiagnostic(getStickerModelLoadDiagnosticMessage(models.length > 0, selectedModelId || ''));
+  }, [isOpen, modelsLoading, models.length, selectedModelId]);
 
   const selectedModel = models.find(m => m.id === selectedModelId);
 
@@ -1503,6 +1512,17 @@ ${themeDesc}
                 </div>
               </div>
 
+              {/* 模型加载诊断 */}
+              {modelDiagnostic && (
+                <div className="mt-2 px-3 py-2 rounded-lg text-xs leading-relaxed" style={{
+                  background: isMonochrome ? 'rgba(255,255,255,0.05)' : 'rgba(212,175,55,0.08)',
+                  color: t.textDim,
+                  borderLeft: `3px solid ${t.accent}`,
+                }}>
+                  {modelDiagnostic}
+                </div>
+              )}
+
               {/* 风格选择 */}
               <div>
                 <label className="block text-xs mb-1.5 font-medium" style={{ color: t.textSub }}>风格</label>
@@ -1752,6 +1772,7 @@ ${themeDesc}
                       <div
                         className="w-full h-full flex flex-col items-center justify-center gap-1 cursor-pointer"
                         onClick={() => handleRetry(item.id)}
+                        title={getStickerFailureMessage(item.status, item.error)}
                       >
                         <XCircle size={18} className="text-red-500" />
                         <span className="text-[10px] text-red-400">点击重试</span>

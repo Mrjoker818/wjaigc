@@ -10,6 +10,7 @@ import {
   Cpu, MessageCircle, Minus
 } from 'lucide-react';
 import { useProgressTimer } from '@/hooks/useProgressTimer';
+import { normalizeBrandFactoryImageUrl } from '@/lib/brand-factory-image-url';
 
 /* ========== TYPES ========== */
 interface BrandProject {
@@ -622,7 +623,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
     referenceUrls: safeParseJSON<string[]>(p.reference_urls as string || p.referenceUrls as string, []),
     brandDna: safeParseJSON<BrandDNA | null>(p.brand_dna as string || p.brandDna as string, null),
     creativeDirections: safeParseJSON<CreativeDirection[]>(p.creative_directions as string || p.creativeDirections as string, []),
-    kvImageUrl: (p.kv_image_url as string) || (p.kvImageUrl as string) || '',
+    kvImageUrl: normalizeBrandFactoryImageUrl((p.kv_image_url as string) || (p.kvImageUrl as string) || '') || '',
     batchResults: safeParseJSON<Array<{item: string; imageUrl: string}>>(p.batch_results as string || p.batchResults as string, []),
     consistencyScores: safeParseJSON<{overall: number; details: Record<string, number>} | null>(p.consistency_scores as string || p.consistencyScores as string, null),
     status: (p.status as string) === 'active' ? 'active' : (p.status as string) === 'completed' ? 'completed' : 'draft',
@@ -748,7 +749,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
         brandDna: currentProject.brandDna,
       });
       if (data?.imageUrl) {
-        setKvImageUrl(data.imageUrl);
+        setKvImageUrl(normalizeBrandFactoryImageUrl(data.imageUrl) || '');
       } else if (data?.taskId) {
         // 异步任务 - 轮询结果
         const maxPolls = 120;
@@ -764,7 +765,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
             const pollData = await pollRes.json();
             if (pollData.status === 'success' || pollData.status === 'completed') {
               const url = pollData.imageUrl || pollData.result?.url || pollData.result?.imageUrl || (pollData.result?.image as Record<string, unknown>)?.url || (pollData.result?.images as Array<Record<string, unknown>>)?.[0]?.url;
-              if (url && typeof url === 'string') { setKvImageUrl(url); break; }
+              if (url && typeof url === 'string') { setKvImageUrl(normalizeBrandFactoryImageUrl(url) || ''); break; }
             } else if (pollData.status === 'failed') {
               break;
             }
@@ -792,7 +793,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
           .filter((r: { imageUrl?: string }) => r.imageUrl)
           .map((r: { item: string; imageUrl: string }) => ({
             type: r.item,
-            imageUrl: r.imageUrl,
+            imageUrl: normalizeBrandFactoryImageUrl(r.imageUrl),
             createdAt: new Date().toISOString(),
           }));
         setGeneratedMats(prev => [...prev, ...newMats]);

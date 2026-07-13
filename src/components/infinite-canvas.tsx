@@ -63,8 +63,8 @@ import {
   RotateCcw, Minus, Type, GitMerge, GitBranch, Wrench, ChevronRight,
   Settings, Palette, Users, HelpCircle, Box as BoxIcon, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, MoreHorizontal, Brush, ShoppingBag, Scan, GripVertical, Building2, FileImage, Workflow, LayoutGrid, LayoutDashboard, ChevronsRight, ChevronsLeft, Boxes, MessageCircle, Play, Pause, Package, Store, Globe, Volume2, Loader2, Film, Mic2, Music, FileVideo
 } from 'lucide-react';
-import type { CanvasAnnotation, AnnotationRegion, AnnotationTool } from '@/lib/canvas-annotation';
-import { createAnnotation, hitTestAnnotationTarget, buildAnnotationPrompt, mergeAnnotationsForImage, ANNOTATION_COLORS, ANNOTATION_COLORS_MONO, computeAnnotationRegion, BRUSH_COLOR_PALETTE } from '@/lib/canvas-annotation';
+import type { CanvasAnnotation, AnnotationRegion, AnnotationTool, AnnotationExecutionResult } from '@/lib/canvas-annotation';
+import { createAnnotation, hitTestAnnotationTarget, buildAnnotationPrompt, mergeAnnotationsForImage, ANNOTATION_COLORS, ANNOTATION_COLORS_MONO, computeAnnotationRegion, BRUSH_COLOR_PALETTE, applyMergedAnnotationExecutionResult } from '@/lib/canvas-annotation';
 import type { CanvasGenGroup, GenGroupToolbar, GroupRefImage, GenGroupType, ReferenceCategory, HexCubeGroup, HexCubeFaceData, CubeFace, ZoomLevel } from '@/lib/canvas-generation-group';
 import { createGroupRefImage, createGenGroup, generateGroupId, calculateConnectionPoints, aspectRatioToDimensions, calculateActualPixels, REFERENCE_CATEGORIES, REFERENCE_CATEGORY_LABELS, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS, MODEL_ASPECT_RATIOS, MODEL_QUALITIES, QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES, findModelConfig, getModelParamType, getResolutionTierOptions, getQualityLevelOptions, RESOLUTION_TIER_DISPLAY_NAMES, QUALITY_LEVEL_DISPLAY_NAMES } from '@/lib/canvas-generation-group';
 import { getModelDisplayName } from '@/lib/model-name-map';
@@ -5928,11 +5928,11 @@ export function InfiniteCanvas({
   }, []);
 
   /** 执行单条批注：调用 /api/edit 修图 */
-  const executeAnnotation = useCallback(async (annotation: CanvasAnnotation) => {
-    if (!annotation.targetImageId || !annotation.text.trim()) return;
+  const executeAnnotation = useCallback(async (annotation: CanvasAnnotation): Promise<AnnotationExecutionResult> => {
+    if (!annotation.targetImageId || !annotation.text.trim()) return { status: 'failed', aiReply: '无目标图片或批注内容为空' };
 
     const targetImg = images.find(i => i.id === annotation.targetImageId);
-    if (!targetImg) return;
+    if (!targetImg) return { status: 'failed', aiReply: '未找到目标图片' };
 
     // 标记为执行中 + 保存原始图片URL用于对比
     setAnnotations(prev => prev.map(a =>
@@ -6040,10 +6040,11 @@ export function InfiniteCanvas({
       if (!submitResp.ok) {
         const errText = await submitResp.text().catch(() => '');
         console.error('Submit refine error:', submitResp.status, errText);
+        const aiReply = translateApiError(errText, submitResp.status, errText).title || '提交修改请求失败';
         setAnnotations(prev => prev.map(a =>
-          a.id === annotation.id ? { ...a, status: 'failed' as const, aiReply: translateApiError(errText, submitResp.status, errText).title || '提交修改请求失败' } : a
+          a.id === annotation.id ? { ...a, status: 'failed' as const, aiReply } : a
         ));
-        return;
+        return { status: 'failed', aiReply };
       }
       const submitData = await submitResp.json();
       if (!submitData.success || !submitData.taskId) {
@@ -6051,7 +6052,7 @@ export function InfiniteCanvas({
         setAnnotations(prev => prev.map(a =>
           a.id === annotation.id ? { ...a, status: 'failed' as const, aiReply: errMsg } : a
         ));
-        return;
+        return { status: 'failed', aiReply: errMsg };
       }
 
       // 轮询任务结果
@@ -6076,11 +6077,12 @@ export function InfiniteCanvas({
           if (!pollData.success && pollData.status !== 'completed') {
             // 任务不存在或已过期
             if (pollData.status === 'failed' || pollData.status === 'not_found') {
+              const aiReply = pollData.error || '任务已过期或不存在';
               setAnnotations(prev => prev.map(a =>
-                a.id === annotation.id ? { ...a, status: 'failed' as const, aiReply: pollData.error || '任务已过期或不存在' } : a
+                a.id === annotation.id ? { ...a, status: 'failed' as const, aiReply } : a
               ));
               completed = true;
-              break;
+              return { status: 'failed', aiReply };
             }
             continue;
           }
@@ -6108,14 +6110,18 @@ export function InfiniteCanvas({
               prompt: annotation.text || prompt.replace(/^\[画布上下文[：:][^\]]*\]\s*/, ''),
             };
             onImagesChange([...imagesRef.current, newImage]);
+            const aiReply = '修改完成';
             setAnnotations(prev => prev.map(a =>
-              a.id === annotation.id ? { ...a, status: 'done' as const, resultImageUrl: resultUrl, aiReply: '修改完成', chatExpanded: true } : a
+              a.id === annotation.id ? { ...a, status: 'done' as const, resultImageUrl: resultUrl, aiReply, chatExpanded: true } : a
             ));
+            return { status: 'done', aiReply, resultImageUrl: resultUrl };
           } else if (pollData.status === 'failed' || pollData.status === 'not_found' || !pollData.success) {
             completed = true;
+            const aiReply = pollData.error || pollData.label || '修改失败';
             setAnnotations(prev => prev.map(a =>
-              a.id === annotation.id ? { ...a, status: 'failed' as const, aiReply: pollData.error || pollData.label || '修改失败', chatExpanded: true } : a
+              a.id === annotation.id ? { ...a, status: 'failed' as const, aiReply, chatExpanded: true } : a
             ));
+            return { status: 'failed', aiReply };
           }
         } catch {
           // 轮询网络错误，继续重试
@@ -6123,16 +6129,21 @@ export function InfiniteCanvas({
       }
 
       if (!completed) {
+        const aiReply = '修改超时';
         setAnnotations(prev => prev.map(a =>
-          a.id === annotation.id ? { ...a, status: 'failed' as const, aiReply: '修改超时' } : a
+          a.id === annotation.id ? { ...a, status: 'failed' as const, aiReply } : a
         ));
+        return { status: 'failed', aiReply };
       }
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : '修改失败';
       setAnnotations(prev => prev.map(a =>
         a.id === annotation.id ? { ...a, status: 'failed' as const, aiReply: errMsg } : a
       ));
+      return { status: 'failed', aiReply: errMsg };
     }
+    // TypeScript exhaustiveness — all code paths above return
+    return { status: 'failed', aiReply: '未知错误' };
   }, [images, onImagesChange]);
 
   /** 执行所有 pending 批注 */
@@ -6196,7 +6207,7 @@ export function InfiniteCanvas({
     }
 
     // Execute each group (different images can run in parallel)
-    const promises: Promise<void>[] = [];
+    const promises: Promise<AnnotationExecutionResult>[] = [];
     for (const [, groupAnns] of groups) {
       if (groupAnns.length === 1) {
         // Single annotation — execute directly
@@ -6215,16 +6226,21 @@ export function InfiniteCanvas({
           text: mergedText,
         };
         promises.push(
-          executeAnnotation(mergedAnn).then(() => {
-            // Mark all as done
+          executeAnnotation(mergedAnn).then((result) => {
             setAnnotations(prev => prev.map(a =>
-              groupAnns.some(ga => ga.id === a.id) ? { ...a, status: 'done' as const } : a
+              groupAnns.some(ga => ga.id === a.id)
+                ? applyMergedAnnotationExecutionResult(a, result)
+                : a
             ));
-          }).catch(() => {
-            // Mark all as failed
+            return result;
+          }).catch((err: unknown) => {
+            const aiReply = err instanceof Error ? err.message : '修改失败';
             setAnnotations(prev => prev.map(a =>
-              groupAnns.some(ga => ga.id === a.id) ? { ...a, status: 'failed' as const } : a
+              groupAnns.some(ga => ga.id === a.id)
+                ? applyMergedAnnotationExecutionResult(a, { status: 'failed', aiReply })
+                : a
             ));
+            return { status: 'failed' as const, aiReply };
           })
         );
       }
