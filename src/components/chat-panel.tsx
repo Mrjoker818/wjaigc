@@ -26,6 +26,7 @@ import { generateSuggestions, type Suggestion, type SuggestionContext, type Cont
 import { parseCanvasOperationIntent, extractCanvasActionFromAIResponse, type CanvasAction, type CanvasActionResult, type CanvasActionType } from '@/lib/canvas-action-executor';
 import { extractTaskResultImageUrl } from '@/lib/task-result-url';
 import { CHAT_TASK_MAX_ATTEMPTS, getChatTaskPollIntervalMs } from '@/lib/chat-task-polling';
+import { getResumableChatGenerationTasks, type ChatPendingGenerationTask } from '@/lib/chat-pending-generation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
@@ -61,6 +62,7 @@ interface Message {
   suggestions?: NextSuggestion[]; // 建议下一步操作
   isClarifying?: boolean; // 是否为追问消息
   toolExecutions?: ToolExecution[]; // Agent工具执行记录
+  pendingGenerationTasks?: ChatPendingGenerationTask[]; // 待恢复的异步生成任务
 }
 
 interface ToolExecution {
@@ -3157,6 +3159,10 @@ IP角色设计规范：
     }
   }, [loadImageModels]);
 
+  // 标记会话是否已加载完成（用于触发保存和恢复）
+  const chatSessionsLoadedRef = useRef(false);
+  const resumedChatTaskKeysRef = useRef(new Set<string>());
+
   // 初始化对话列表
   useEffect(() => {
     const saved = localStorage.getItem('chat-sessions');
@@ -3175,7 +3181,53 @@ IP角色设计规范：
         // ignore
       }
     }
+    chatSessionsLoadedRef.current = true;
   }, []);
+
+  // 会话加载完成后，若消息非空则触发一次保存（确保持久化）
+  useEffect(() => {
+    if (chatSessionsLoadedRef.current && messages.length > 0) {
+      saveSession(messages, model, systemPrompt);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatSessionsLoadedRef.current, messages.length]);
+
+  // 恢复未完成的异步生成任务
+  useEffect(() => {
+    if (!chatSessionsLoadedRef.current || messages.length === 0) return;
+    const tasks = getResumableChatGenerationTasks(messages, resumedChatTaskKeysRef.current);
+    if (tasks.length === 0) return;
+    tasks.forEach(task => resumedChatTaskKeysRef.current.add(task.assistantMessageId));
+
+    const pollAndUpdate = async () => {
+      for (const task of tasks) {
+        const results: string[] = [];
+        for (const taskId of task.taskIds) {
+          try {
+            const resp = await fetch('/api/poll-task', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ taskId, model: task.model, providerId: task.providerId }),
+            });
+            const data = await resp.json();
+            if (data.status === 'completed') {
+              const url = extractTaskResultImageUrl(data);
+              if (url) results.push(url);
+            }
+          } catch { /* skip individual poll errors */ }
+        }
+        if (results.length > 0) {
+          setMessages(prev => prev.map(m => {
+            if (m.id === task.assistantMessageId) {
+              return { ...m, generatedImages: [...(m.generatedImages || []), ...results], pendingGenerationTasks: undefined };
+            }
+            return m;
+          }));
+        }
+      }
+    };
+    pollAndUpdate();
+  }, [chatSessionsLoadedRef.current, messages]);
 
   // 保存对话到localStorage
   const saveSession = useCallback((sessionMessages: Message[], sessionModel: string, sessionSystemPrompt: string, sessionId?: string) => {
@@ -4131,6 +4183,19 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               : msg
           ));
 
+          // Save pending generation tasks for recovery
+          setMessages(prev => prev.map(msg =>
+            msg.id === assistantMessageId
+              ? { ...msg, pendingGenerationTasks: toolPendingTaskIds.map(taskId => ({
+                  taskIds: [taskId],
+                  model: imageModelInfo.model,
+                  providerId: imageModelInfo.providerId,
+                  assistantMessageId,
+                  timestamp: Date.now(),
+                })) } as unknown as Message
+              : msg
+          ));
+
           (async () => {
             try {
               const allPolledUrls: string[] = [];
@@ -4294,6 +4359,12 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 else if (generateData.imageUrl) { promptResultUrls.push(generateData.imageUrl); }
 
                 const taskIds: string[] = generateData.taskIds || [];
+                // Save pending generation tasks for recovery
+                setMessages(prev => prev.map(msg =>
+                  msg.id === assistantMessageId
+                    ? { ...msg, pendingGenerationTasks: [{ taskIds, model: genModel, providerId: imageModelInfo.providerId, assistantMessageId, timestamp: Date.now() }] } as unknown as Message
+                    : msg
+                ));
                 if (taskIds.length > 0 && promptResultUrls.length === 0) {
                   for (const taskId of taskIds) {
                     for (let i = 0; i < CHAT_TASK_MAX_ATTEMPTS; i++) {
@@ -4417,6 +4488,12 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
 
                 const taskIds: string[] = generateData.taskIds || [];
                 const genModel = generateData.model || imageModelInfo.model;
+                // Save pending generation tasks for recovery
+                setMessages(prev => prev.map(msg =>
+                  msg.id === assistantMessageId
+                    ? { ...msg, pendingGenerationTasks: [{ taskIds, model: genModel, providerId: imageModelInfo.providerId, assistantMessageId, timestamp: Date.now() }] } as unknown as Message
+                    : msg
+                ));
                 const resultUrls: string[] = [];
 
                 if (generateData.imageUrls?.length > 0) { resultUrls.push(...generateData.imageUrls); }
