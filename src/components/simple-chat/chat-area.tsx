@@ -167,6 +167,7 @@ export default function ChatArea({
   const [selectedProviderId, setSelectedProviderId] = useState(task?.providerId || "");
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const activeGenerationTaskIdsRef = useRef<Set<string>>(new Set());
 
   // Messages: sync from task
   const [messages, setMessages] = useState<SimpleChatMessage[]>(task?.messages || []);
@@ -413,12 +414,41 @@ export default function ChatArea({
                     updated[updated.length - 1] = {
                       ...last,
                       content: `*${parsed.label || '正在处理图片任务...'}*`,
+                      ...(parsed.generationTask ? {
+                        generationTask: parsed.generationTask,
+                        isGeneratingImage: true,
+                      } : {}),
                     };
+                    if (parsed.generationTask) {
+                      activeGenerationTaskIdsRef.current.add(parsed.generationTask.taskId);
+                    }
                   }
                   return updated;
                 });
+              } else if (parsed.type === 'generation_task') {
+                // 从 SSE 获取 taskId 后，浏览器端开始轮询
+                if (parsed.taskId) {
+                  setMessages(prev => {
+                    const updated = [...prev];
+                    const last = updated[updated.length - 1];
+                    if (last?.role === 'assistant') {
+                      updated[updated.length - 1] = {
+                        ...last,
+                        generationTask: { taskId: parsed.taskId, model: parsed.model, providerId: parsed.providerId, status: 'polling' },
+                        isGeneratingImage: true,
+                      };
+                      activeGenerationTaskIdsRef.current.add(parsed.taskId);
+                    }
+                    return updated;
+                  });
+                  startImageTaskPolling(parsed.taskId);
+                }
               } else if (parsed.type === 'image' && parsed.imageUrl) {
                 setSearchStatus(null);
+                // 如果有 generationTask，标记为完成并清理
+                if (parsed.taskId) {
+                  activeGenerationTaskIdsRef.current.delete(parsed.taskId);
+                }
                 setMessages(prev => {
                   const updated = [...prev];
                   const last = updated[updated.length - 1];
@@ -427,6 +457,7 @@ export default function ChatArea({
                       ...last,
                       content: last.content || '图片已生成',
                       images: [...(last.images || []), parsed.imageUrl],
+                      isGeneratingImage: false,
                     };
                   }
                   return updated;
@@ -564,6 +595,65 @@ export default function ChatArea({
     const artifact: ChatArtifact = { id: artId, projectId: project?.id ?? '', taskId: '', type: (isCode ? 'code' : 'document') as ChatArtifact['type'], title: msg.content.slice(0, 40).replace(/\n/g, ' ') + '...', content: msg.content, version: 1, createdAt: Date.now(), updatedAt: Date.now() };
     setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, artifacts: [...(m.artifacts || []), artifact] } : m));
   }, []);
+
+  // Start polling a single image generation taskId (browser-side, replaces server polling)
+  const startImageTaskPolling = useCallback(async (taskId: string) => {
+    if (!taskId || activeGenerationTaskIdsRef.current.has(taskId)) return;
+    activeGenerationTaskIdsRef.current.add(taskId);
+
+    const MAX_ATTEMPTS = 600;
+    for (let i = 0; i < MAX_ATTEMPTS; i++) {
+      if (!activeGenerationTaskIdsRef.current.has(taskId)) return; // cancelled
+      try {
+        const res = await fetch('/api/poll-task', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ taskId }),
+        });
+        if (!res.ok) continue;
+        const data = await res.json();
+        if (data.status === 'completed' || data.status === 'failed') {
+          activeGenerationTaskIdsRef.current.delete(taskId);
+          // Import dynamically to avoid circular dependency
+          const { extractTaskResultImageUrl } = await import('@/lib/task-result-url');
+          const imageUrl = extractTaskResultImageUrl(data);
+          setMessages(prev => prev.map(m => {
+            if (m.generationTask?.taskId !== taskId) return m;
+            return {
+              ...m,
+              isGeneratingImage: false,
+              images: imageUrl ? [...(m.images || []), imageUrl] : m.images,
+              generationTask: m.generationTask ? { ...m.generationTask, status: data.status as 'completed' | 'failed', imageUrl: imageUrl || undefined } : undefined,
+            };
+          }));
+          return;
+        }
+      } catch {
+        // ignore network errors, continue polling
+      }
+      const delay = Math.min(2000 + i * 100, 8000);
+      await new Promise(r => setTimeout(r, delay));
+    }
+    activeGenerationTaskIdsRef.current.delete(taskId);
+  }, []);
+
+  // Resume pending image generation tasks on mount
+  useEffect(() => {
+    if (!project) return;
+    const toResume: Array<{ taskId: string; messageId: string }> = [];
+    for (const t of project.tasks) {
+      for (const m of t.messages) {
+        if (m.generationTask?.status === 'polling' && m.generationTask.taskId && m.isGeneratingImage) {
+          toResume.push({ taskId: m.generationTask.taskId, messageId: m.id });
+        }
+      }
+    }
+    if (toResume.length > 0) {
+      toResume.forEach(({ taskId }) => {
+        startImageTaskPolling(taskId);
+      });
+    }
+  }, [project, startImageTaskPolling]);
 
   // Project search
   const handleProjectSearch = useCallback(() => {

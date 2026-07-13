@@ -254,7 +254,7 @@ export async function POST(request: NextRequest) {
         if (Object.keys(toolCalls).length > 0) {
           const tc = toolCalls[0];
           if (tc.name === 'generate_image') {
-            send({ type: 'tool_status', tool: 'generating_image', status: 'generating', label: '正在生成图片...' });
+            send({ type: 'tool_status', tool: 'generating_image', status: 'generating', label: '正在提交图片生成...' });
 
             let args: { prompt?: string; size?: string } = {};
             try { args = JSON.parse(tc.arguments); } catch { /* ignore */ }
@@ -272,36 +272,20 @@ export async function POST(request: NextRequest) {
                   providerId: imageProviderId,
                   size: imgSize,
                   count: 1,
+                  submitOnly: true,
+                  projectId: body.projectId || '',
+                  sessionId: body.taskId || '',
                 }),
               });
               const imgData = await imgRes.json() as { success?: boolean; taskIds?: string[]; imageUrls?: string[] };
 
               if (imgData.success && imgData.taskIds?.length) {
                 const taskId = imgData.taskIds[0];
-                send({ type: 'tool_status', tool: 'generating_image', status: 'polling', label: '图片生成中...', taskId });
-
-                // 轮询直到完成
-                let attempts = 0;
-                while (attempts < 60) {
-                  await new Promise(r => setTimeout(r, 3000));
-                  const pollRes = await fetch(`${request.nextUrl.origin}/api/poll-task`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ taskId, model }),
-                  });
-                  const pollData = await pollRes.json() as { status?: string; imageUrl?: string; progress?: number };
-
-                  if (pollData.status === 'completed' && pollData.imageUrl) {
-                    send({ type: 'image', imageUrl: pollData.imageUrl, prompt: imgPrompt });
-                    break;
-                  }
-                  if (pollData.status === 'failed') {
-                    send({ type: 'tool_status', tool: 'generating_image', status: 'failed', label: '图片生成失败' });
-                    break;
-                  }
-                  send({ type: 'tool_status', tool: 'generating_image', status: 'polling', label: `图片生成中... ${pollData.progress || ''}`, taskId, progress: pollData.progress });
-                  attempts++;
-                }
+                // 仅提交任务，不轮询 — 浏览器侧会通过 activeGenerationTaskIds 自行轮询
+                send({ type: 'tool_status', tool: 'generating_image', status: 'submitted', label: '图片生成已提交', taskId });
+                send({ type: 'generation_task', taskId, model: imageModel, providerId: imageProviderId, prompt: imgPrompt });
+              } else {
+                send({ type: 'tool_status', tool: 'generating_image', status: 'failed', label: '图片提交失败' });
               }
             } catch (e: any) {
               send({ type: 'tool_status', tool: 'generating_image', status: 'failed', label: `图片生成失败: ${e.message}` });
