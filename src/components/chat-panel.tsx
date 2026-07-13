@@ -26,7 +26,7 @@ import { generateSuggestions, type Suggestion, type SuggestionContext, type Cont
 import { parseCanvasOperationIntent, extractCanvasActionFromAIResponse, type CanvasAction, type CanvasActionResult, type CanvasActionType } from '@/lib/canvas-action-executor';
 import { extractTaskResultImageUrl } from '@/lib/task-result-url';
 import { CHAT_TASK_MAX_ATTEMPTS, getChatTaskPollIntervalMs } from '@/lib/chat-task-polling';
-import { getResumableChatGenerationTasks, type ChatPendingGenerationTask } from '@/lib/chat-pending-generation';
+import { getResumableChatGenerationTasks, mergeChatSessionMessages, type ChatPendingGenerationTask } from '@/lib/chat-pending-generation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
@@ -3235,10 +3235,15 @@ IP角色设计规范：
     const title = sessionMessages.length > 0
       ? sessionMessages[0].content.substring(0, 20) + (sessionMessages[0].content.length > 20 ? '...' : '')
       : '新对话';
+    // Merge to preserve pendingGenerationTasks that may have been added after streaming snapshot
+    const mergedMessages = mergeChatSessionMessages(
+      chatSessions.find(s => s.id === id)?.messages ?? [],
+      sessionMessages
+    );
     const session: ChatSession = {
       id,
       title,
-      messages: sessionMessages,
+      messages: mergedMessages as Message[],
       model: sessionModel,
       systemPrompt: sessionSystemPrompt,
       createdAt: sessionMessages.length > 0 ? sessionMessages[0].timestamp : Date.now(),

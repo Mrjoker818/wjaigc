@@ -7,11 +7,39 @@ export interface ChatPendingGenerationTask {
   messageContent?: string;
 }
 
-interface PendingGenerationMessage {
+export interface PendingGenerationMessage {
   id?: string;
   isGeneratingImage?: boolean;
   content?: string;
   pendingGenerationTasks?: ChatPendingGenerationTask[];
+}
+
+export interface ChatSessionMessageSnapshot extends PendingGenerationMessage {
+  id: string;
+}
+
+export function mergeChatSessionMessages<T extends ChatSessionMessageSnapshot>(
+  persistedMessages: T[],
+  incomingMessages: T[],
+): T[] {
+  const persistedById = new Map(persistedMessages.map(message => [message.id, message]));
+
+  return incomingMessages.map(incoming => {
+    const persisted = persistedById.get(incoming.id);
+    const persistedTasks = persisted ? getResumableChatGenerationTasks([persisted]) : [];
+    const incomingTasks = getResumableChatGenerationTasks([incoming]);
+
+    if (persistedTasks.length > 0 && incomingTasks.length === 0 && incoming.isGeneratingImage !== false) {
+      return {
+        ...persisted,
+        ...incoming,
+        isGeneratingImage: true,
+        pendingGenerationTasks: persistedTasks,
+      } as T;
+    }
+
+    return incoming;
+  });
 }
 
 export function getResumableChatGenerationTasks(
