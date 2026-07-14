@@ -1356,6 +1356,7 @@ export function InfiniteCanvas({
   const [annotationTool, setAnnotationTool] = useState<'pin' | 'region' | 'brush'>('pin');
   // Brush mask drawing state
   const [brushDrawingAnnId, setBrushDrawingAnnId] = useState<string | null>(null);
+  const brushDrawingAnnIdRef = useRef<string | null>(null);
   const [annotationBrushSize, setAnnotationBrushSize] = useState(20);
   const [annotationBrushColor, setAnnotationBrushColor] = useState('#ef4444');
   const brushCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -2657,6 +2658,7 @@ export function InfiniteCanvas({
           setAnnotations(prev => [...prev, newAnn]);
           setEditingAnnotationId(newAnn.id);
           setBrushDrawingAnnId(newAnn.id);
+          brushDrawingAnnIdRef.current = newAnn.id;
 
           // Initialize brush canvas overlay for this image — use original dimensions
           const overlayW = targetImg.originalWidth || targetImg.width;
@@ -2792,7 +2794,7 @@ export function InfiniteCanvas({
       setBoxSelectStart({ x: e.clientX, y: e.clientY });
       setBoxSelectEnd({ x: e.clientX, y: e.clientY });
     }
-  }, [isSpacePressed, viewOffset, selectedIds, images, screenToCanvas, hitTestImage, selectImage, editMode, zoom, handleEditMouseDown, compareSelecting, compareImages, annotationMode]);
+  }, [isSpacePressed, viewOffset, selectedIds, images, screenToCanvas, hitTestImage, selectImage, editMode, zoom, handleEditMouseDown, compareSelecting, compareImages, annotationMode, annotationTool, annotationBrushSize, annotationBrushColor, annotations]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     // Annotation region drag tracking or brush drawing
@@ -2800,8 +2802,9 @@ export function InfiniteCanvas({
       const canvasPos = screenToCanvas(e.clientX, e.clientY);
 
       // Brush drawing (clamped to image bounds)
-      if (isBrushDrawingRef.current && brushDrawingAnnId && brushCtxRef.current) {
-        const ann = annotations.find(a => a.id === brushDrawingAnnId);
+      const activeBrushDrawingAnnId = brushDrawingAnnIdRef.current;
+      if (isBrushDrawingRef.current && activeBrushDrawingAnnId && brushCtxRef.current) {
+        const ann = annotations.find(a => a.id === activeBrushDrawingAnnId);
         const targetImg = ann?.targetImageId ? images.find(i => i.id === ann.targetImageId) : null;
         if (targetImg) {
           const scaleRatio = brushScaleRef.current;
@@ -3007,14 +3010,16 @@ export function InfiniteCanvas({
 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
     // Brush drawing completion
-    if (isBrushDrawingRef.current && brushDrawingAnnId && brushCanvasRef.current) {
+    const activeBrushDrawingAnnId = brushDrawingAnnIdRef.current;
+    if (isBrushDrawingRef.current && activeBrushDrawingAnnId && brushCanvasRef.current) {
       isBrushDrawingRef.current = false;
       // Export brush mask as data URL and save to annotation
       const maskDataUrl = brushCanvasRef.current.toDataURL('image/png');
       setAnnotations(prev => prev.map(a =>
-        a.id === brushDrawingAnnId ? { ...a, brushMaskDataUrl: maskDataUrl } : a
+        a.id === activeBrushDrawingAnnId ? { ...a, brushMaskDataUrl: maskDataUrl } : a
       ));
       setBrushDrawingAnnId(null);
+      brushDrawingAnnIdRef.current = null;
       brushCanvasRef.current = null;
       brushCtxRef.current = null;
       brushStrokesRef.current = [];
@@ -12267,21 +12272,6 @@ export function InfiniteCanvas({
                       <rect x={rx} y={ry} width={rw} height={rh} fill="none" stroke={fillColor} strokeWidth={1.5} strokeDasharray="6 3" rx={2} opacity={0.7} />
                     );
                   })()}
-                  {/* Brush mask overlay */}
-                  {ann.brushMaskDataUrl && (() => {
-                    const hitImg = ann.targetImageId ? images.find(i => i.id === ann.targetImageId) : null;
-                    if (!hitImg) return null;
-                    const imgSx = hitImg.x * zoom + viewOffset.x;
-                    const imgSy = hitImg.y * zoom + viewOffset.y;
-                    const imgSw = hitImg.width * zoom;
-                    const imgSh = hitImg.height * zoom;
-                    return (
-                      <g>
-                        <defs><mask id={`brush-mask-${ann.id}`}><image href={ann.brushMaskDataUrl} x={imgSx} y={imgSy} width={imgSw} height={imgSh} /></mask></defs>
-                        <rect x={imgSx} y={imgSy} width={imgSw} height={imgSh} fill={ann.brushColor || '#d4af37'} opacity={0.4} mask={`url(#brush-mask-${ann.id})`} />
-                      </g>
-                    );
-                  })()}
                   {/* Done checkmark */}
                   {ann.status === 'done' && (
                     <text x={sx} y={sy + 1} textAnchor="middle" dominantBaseline="central" fill="#fff" fontSize={10} fontWeight="bold" fontFamily="system-ui">✓</text>
@@ -12598,7 +12588,12 @@ export function InfiniteCanvas({
 
         {/* ====== ANNOTATION MODE BANNER ====== */}
         {annotationMode && (
-          <div className={`absolute top-3 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-2 px-4 py-2 rounded-xl shadow-lg ${isMonochrome ? 'bg-white border border-blue-200' : 'bg-[#1a1a1a] border border-gold/30'}`}>
+          <div
+            data-toolbar="annotation-tools"
+            onMouseDown={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+            className={`absolute top-3 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-2 px-4 py-2 rounded-xl shadow-lg ${isMonochrome ? 'bg-white border border-blue-200' : 'bg-[#1a1a1a] border border-gold/30'}`}
+          >
             <MessageCircle size={16} className={isMonochrome ? 'text-blue-500' : 'text-gold'} />
             <span className={`text-sm font-medium ${isMonochrome ? 'text-gray-700' : 'text-text-bright'}`}>批注模式</span>
             {/* Tool selector */}

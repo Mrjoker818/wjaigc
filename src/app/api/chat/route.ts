@@ -9,6 +9,7 @@ import { consumeCredits, refundCredits } from '@/lib/credits';
 import { CHAT_TOOLS, executeToolCall, parseToolCallsFromStream, ToolCallResult } from '@/lib/chat-tools';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { logOperation, logError, startTimer, OP_ACTIONS } from '@/lib/op-log';
+import { resolveChatAgentToolChoice } from '@/lib/chat-agent-tool-choice';
 
 export const maxDuration = 120;
 
@@ -453,10 +454,8 @@ async function handleAgentStream(
 
       try {
         while (iteration < MAX_AGENT_ITERATIONS) {
+          const toolChoice = resolveChatAgentToolChoice(agentModeEnabled, iteration);
           iteration++;
-          
-          // Agent模式强制调用工具，非Agent模式让LLM自行选择
-          const toolChoice = isAgentMode ? 'required' : 'auto';
           
           const requestBody: Record<string, unknown> = {
             model: requestModel,

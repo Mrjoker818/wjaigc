@@ -42,17 +42,17 @@ export function getResumableChatGenerationTasks(
  * until an explicit terminal update is saved for the same message.
  */
 export function mergeChatSessionMessages<T extends ChatSessionMessageSnapshot>(
-  persistedMessages: T[],
+  persistedMessages: T[] | null | undefined,
   incomingMessages: T[],
 ): T[] {
-  const persistedById = new Map(persistedMessages.map(message => [message.id, message]));
+  const persistedById = new Map((persistedMessages || []).map(message => [message.id, message]));
 
   return incomingMessages.map(incoming => {
     const persisted = persistedById.get(incoming.id);
     const persistedTasks = persisted ? getResumableChatGenerationTasks(persisted) : [];
     const incomingTasks = getResumableChatGenerationTasks(incoming);
 
-    if (persistedTasks.length > 0 && incomingTasks.length === 0 && incoming.isGeneratingImage !== false) {
+    if (persistedTasks.length > 0 && incomingTasks.length === 0) {
       return {
         ...persisted,
         ...incoming,

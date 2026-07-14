@@ -27,6 +27,6 @@ export function getStickerModelLoadMessage(state: StickerModelLoadState): string
 
 /** 贴纸面板简化版：只关心模型是否加载成功 */
 export function getStickerModelLoadDiagnosticMessage(hasModels: boolean, selectedModelId: string): string {
-  if (hasModels) return '';
+  if (hasModels || selectedModelId.trim()) return '';
   return '后台未返回可用的生图模型。请检查当前用户的模型授权、供应商启用状态和模型类型。';
 }
