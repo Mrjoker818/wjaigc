@@ -160,7 +160,7 @@ const HANDLE_ROPE_OPTIONS = ['无', '棉绳', '丝带', '皮绳', '织带', '金
 const WINDOW_OPTIONS = ['否', '透明开窗', '异形开窗', '镂空透窗', '半透明磨砂窗'];
 
 const EXTEND_SCENES = ['电商主图', '礼盒套装', '节日限定', '旅行便携', '会员专享', '联名款', '限定款', '环保概念', '高奢礼赠', '日常家用', '商务定制', '活动促销'];
-const PACKAGING_POLL_MAX_ATTEMPTS = 400;
+const PACKAGING_POLL_MAX_ATTEMPTS = 600;
 
 /* ============================================================
    Prompt 模板

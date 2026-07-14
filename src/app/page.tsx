@@ -119,6 +119,7 @@ function CanvasApp() {
   const [treeHistoryNodes, setTreeHistoryNodes] = useState<VersionNode[]>([]);
   const treeHistoryLastImagesRef = useRef<CanvasImage[] | null>(null);
   const treeHistoryProjectIdRef = useRef<string | null>(null);
+  const treeHistoryDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // P2-1: 画布连线状态
   const [canvasConnections, setCanvasConnections] = useState<import('@/lib/canvas-connections').CanvasConnection[]>([]);
@@ -498,25 +499,35 @@ function CanvasApp() {
   const currentProjectRef = useRef(currentProject);
   currentProjectRef.current = currentProject;
 
-  // Sync tree history with canvas images
+  // Sync tree history with canvas images (debounced to avoid high-frequency writes)
   useEffect(() => {
-    const projectId = currentProject?.id ?? null;
-    const treeHistory = treeHistoryRef.current;
-
-    if (treeHistoryProjectIdRef.current !== projectId) {
-      treeHistoryProjectIdRef.current = projectId;
-      treeHistory.clear();
-      treeHistoryLastImagesRef.current = null;
+    if (treeHistoryDebounceRef.current) {
+      clearTimeout(treeHistoryDebounceRef.current);
     }
+    treeHistoryDebounceRef.current = setTimeout(() => {
+      const projectId = currentProject?.id ?? null;
+      const treeHistory = treeHistoryRef.current;
 
-    if (treeHistory.getNodeCount() === 0) {
-      treeHistory.initializeRoot(images, images.length > 0 ? '项目打开' : '空白画布');
-    } else if (!skipHistoryRef.current && treeHistoryLastImagesRef.current !== null && treeHistoryLastImagesRef.current !== images) {
-      treeHistory.recordOperation(images, '画布更新');
-    }
+      if (treeHistoryProjectIdRef.current !== projectId) {
+        treeHistoryProjectIdRef.current = projectId;
+        treeHistory.clear();
+        treeHistoryLastImagesRef.current = null;
+      }
 
-    treeHistoryLastImagesRef.current = images;
-    setTreeHistoryNodes(treeHistory.getAllNodes());
+      if (treeHistory.getNodeCount() === 0) {
+        treeHistory.initializeRoot(images, images.length > 0 ? '项目打开' : '空白画布');
+      } else if (!skipHistoryRef.current && treeHistoryLastImagesRef.current !== null && treeHistoryLastImagesRef.current !== images) {
+        treeHistory.recordOperation(images, '画布更新');
+      }
+
+      treeHistoryLastImagesRef.current = images;
+      setTreeHistoryNodes(treeHistory.getAllNodes());
+    }, 500);
+    return () => {
+      if (treeHistoryDebounceRef.current) {
+        clearTimeout(treeHistoryDebounceRef.current);
+      }
+    };
   }, [images, currentProject?.id]);
 
   const videoPanelRef = useRef<VideoGenerationPanelHandle>(null);

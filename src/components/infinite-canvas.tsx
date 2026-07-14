@@ -1319,8 +1319,22 @@ export function InfiniteCanvas({
 
   // ChatCanvas 批注模式
   const [annotationMode, setAnnotationMode] = useState(false);
-  const [annotations, setAnnotations] = useState<CanvasAnnotation[]>([]);
+  const [annotations, setAnnotations] = useState<CanvasAnnotation[]>(initialAnnotations ?? []);
   const [editingAnnotationId, setEditingAnnotationId] = useState<string | null>(null);
+
+  // V48: 外部 annotations 同步到内部状态（项目切换/初始化）
+  useEffect(() => {
+    if (initialAnnotations && initialAnnotations.length > 0) {
+      setAnnotations(initialAnnotations);
+    }
+  }, [initialAnnotations]);
+
+  // V48: 内部 annotations 变更时通知外部持久化
+  const annotationsRef = useRef(annotations);
+  annotationsRef.current = annotations;
+  useEffect(() => {
+    onAnnotationsChange?.(annotations);
+  }, [annotations, onAnnotationsChange]);
 
   // Snap guides state - alignment assist lines during drag
   const [activeSnapGuides, setActiveSnapGuides] = useState<SnapGuide[]>([]);

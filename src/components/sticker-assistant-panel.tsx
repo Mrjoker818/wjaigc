@@ -1074,6 +1074,7 @@ ${themeDesc}
       } catch { /* 使用原始 URL 兜底 */ }
     }
 
+    setLoadingStep('正在提交生成请求...');
     const res = await fetch('/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1089,6 +1090,7 @@ ${themeDesc}
       imageUrl = data.imageUrls[0];
     } else if (data.taskIds?.length > 0) {
       const taskId = data.taskIds[0];
+      setLoadingStep('正在生成...');
       const pollModelId = selectedModelId?.includes('::') ? selectedModelId.split('::').pop()! : (selectedModelId || undefined);
       const pollProviderId = selectedModelId?.includes('::') ? selectedModelId.split('::')[0] : undefined;
       pollAttemptsRef.current = 0;
@@ -1104,11 +1106,13 @@ ${themeDesc}
         const pollData = await pollRes.json();
         if (pollData.status === 'completed') {
           imageUrl = pollData.imageUrl || (pollData.imageUrls?.length > 0 ? pollData.imageUrls[0] : undefined);
+          setLoadingStep('');
           break;
         }
         if (pollData.status === 'failed') {
           const fm = getStickerFailureMessage(pollData.error || '生成失败');
           failedMessageRef.current = fm;
+          setLoadingStep(fm);
           throw new Error(fm);
         }
         // After 150 attempts (5 minutes), set a failure message
@@ -1116,6 +1120,7 @@ ${themeDesc}
           const fm = getStickerFailureMessage(pollData.error || '生成超时');
           failedMessageRef.current = fm;
           setFailedMessage(fm);
+          setLoadingStep(fm);
         }
       }
     }
@@ -1752,6 +1757,9 @@ ${themeDesc}
                   {generating && generatingCount > 0 && <span className="ml-1 opacity-60">（{generatingCount}张同时生成中）</span>}
                   {failCount > 0 && <span className="text-red-500 ml-1">({failCount}失败)</span>}
                 </span>
+                {loadingStep && (
+                  <span className="text-xs ml-2 opacity-70" style={{ color: t.textDim }}>{loadingStep}</span>
+                )}
                 {generating ? (
                   <button
                     className="text-xs px-2 py-1 rounded cursor-pointer transition-colors duration-150"
