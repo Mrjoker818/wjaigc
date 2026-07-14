@@ -5753,9 +5753,18 @@ export function InfiniteCanvas({
               || pollData.result?.imageUrl 
               || (pollData.result?.image as Record<string, unknown>)?.url 
               || (pollData.result?.images as Array<Record<string, unknown>>)?.[0]?.url;
-            if (pollData.status === 'completed' && resultUrl) {
-              lastPollData = pollData;
-              return resultUrl as string;
+            // ★ 支持 submitOnly 模式返回的 imageUrls 数组（单 taskId → 多张图）
+            const imageUrlsArr = pollData.result?.imageUrls as string[] | undefined;
+            if (pollData.status === 'completed') {
+              if (imageUrlsArr && imageUrlsArr.length > 0) {
+                lastPollData = pollData;
+                // 返回特殊标记，由上层展开
+                return `__multi__${JSON.stringify(imageUrlsArr)}`;
+              }
+              if (resultUrl) {
+                lastPollData = pollData;
+                return resultUrl as string;
+              }
             }
             if (pollData.status === 'failed' || pollData.status === 'cancelled') {
               return null;
@@ -5777,7 +5786,20 @@ export function InfiniteCanvas({
       };
 
       const results = await Promise.all(taskIds.map(pollForResult));
-      const validUrls = results.filter((url): url is string => url !== null);
+      // ★ 展开 submitOnly 模式返回的多图数组（__multi__[...]）
+      const validUrls: string[] = [];
+      for (const url of results) {
+        if (url && typeof url === 'string') {
+          if (url.startsWith('__multi__')) {
+            try {
+              const urlsArr = JSON.parse(url.slice(9)) as string[];
+              validUrls.push(...urlsArr);
+            } catch { /* ignore parse error */ }
+          } else {
+            validUrls.push(url);
+          }
+        }
+      }
 
       if (validUrls.length > 0) {
         // Replace the placeholder frame with the first result

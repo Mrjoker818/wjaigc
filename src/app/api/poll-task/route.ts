@@ -1657,6 +1657,11 @@ export async function POST(request: NextRequest) {
       (pollResult as Record<string, unknown>).usedModel = model || regUsedModel || existingResult.usedModel;
       (pollResult as Record<string, unknown>).modelName = finalModelName;
       (pollResult as Record<string, unknown>).providerName = finalProviderName;
+
+      // ★ 将 imageUrls 数组传递给前端（批量出图时使用）
+      if (existingResult.imageUrls) {
+        (pollResult as Record<string, unknown>).imageUrls = existingResult.imageUrls;
+      }
       // ★ 同时更新本地完成缓存（Next.js dev模式下 registry 实例可能不一致）
       const cachedImageUrl = pollResult.imageUrl as string | undefined;
       const cachedMaskUrl = (pollResult as Record<string, unknown>).maskUrl as string | undefined;
