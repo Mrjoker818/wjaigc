@@ -12320,21 +12320,6 @@ export function InfiniteCanvas({
                       </g>
                     );
                   })()}
-                  {/* Brush mask overlay */}
-                  {ann.brushMaskDataUrl && (() => {
-                    const hitImg = ann.targetImageId ? images.find(i => i.id === ann.targetImageId) : null;
-                    if (!hitImg) return null;
-                    const imgSx = hitImg.x * zoom + viewOffset.x;
-                    const imgSy = hitImg.y * zoom + viewOffset.y;
-                    const imgSw = hitImg.width * zoom;
-                    const imgSh = hitImg.height * zoom;
-                    return (
-                      <g>
-                        <defs><mask id={`brush-mask-${ann.id}`}><image href={ann.brushMaskDataUrl} x={imgSx} y={imgSy} width={imgSw} height={imgSh} /></mask></defs>
-                        <rect x={imgSx} y={imgSy} width={imgSw} height={imgSh} fill={ann.brushColor || '#d4af37'} opacity={0.25} mask={`url(#brush-mask-${ann.id})`} />
-                      </g>
-                    );
-                  })()}
                   {/* Done checkmark */}
                   {ann.status === 'done' && (
                     <text x={sx} y={sy + 1} textAnchor="middle" dominantBaseline="central" fill="#fff" fontSize={10} fontWeight="bold" fontFamily="system-ui">✓</text>
