@@ -123,6 +123,12 @@ function CanvasApp() {
   // P2-1: 画布连线状态
   const [canvasConnections, setCanvasConnections] = useState<import('@/lib/canvas-connections').CanvasConnection[]>([]);
 
+  // P3-1: ChatCanvas 批注持久化
+  const [canvasAnnotations, setCanvasAnnotations] = useState<import('@/lib/canvas-annotation').CanvasAnnotation[]>([]);
+  const handleAnnotationsChange = useCallback((anns: import('@/lib/canvas-annotation').CanvasAnnotation[]) => {
+    setCanvasAnnotations(anns);
+  }, []);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => { isMountedRef.current = false; };
@@ -802,6 +808,7 @@ function CanvasApp() {
           groups: groupsRef.current,
           viewState: viewStateRef.current,
           versionHistory: treeHistoryRef.current.exportData(),
+          annotations: canvasAnnotations,
         };
         const autoSaveMgr = UserManagerCore.getInstance();
         autoSaveMgr.updateProject(currentProject.id, {
@@ -4092,6 +4099,8 @@ function CanvasApp() {
           onConnectionsChange={setCanvasConnections}
           versionHistoryManager={treeHistoryRef.current}
           onVersionHistoryChange={() => setTreeHistoryNodes(treeHistoryRef.current.getAllNodes())}
+          initialAnnotations={canvasAnnotations}
+          onAnnotationsChange={handleAnnotationsChange}
           onOpenVideoPanel={() => {
             // 如果面板已打开（可能正在生成中），先关闭再打开，支持多任务并发
             if (showVideoPanel) {

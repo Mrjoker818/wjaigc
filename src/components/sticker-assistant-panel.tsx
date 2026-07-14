@@ -656,6 +656,13 @@ export default function StickerAssistantPanel({
   /* ── 生成 ── */
   const [generating, setGenerating] = useState(false);
   const [genIdx, setGenIdx] = useState(-1);
+  const [loadingStep, setLoadingStep] = useState('');
+  const isGeneratingRef = useRef(false); // 整体生成标记
+  const [failedMessage, setFailedMessage] = useState('');
+  const pollAttemptsRef = useRef(0);
+  const failedMessageRef = useRef('');
+  const lastAttemptRef = useRef(0);
+  const modelLoadDiagnosticShownRef = useRef(false);
 
   /* ── 文件上传 ref ── */
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -735,6 +742,18 @@ export default function StickerAssistantPanel({
   useEffect(() => {
     if (!isOpen || modelsLoading) return;
     setModelDiagnostic(getStickerModelLoadDiagnosticMessage(models.length > 0, selectedModelId || ''));
+  }, [isOpen, modelsLoading, models.length, selectedModelId]);
+
+  // 模型加载诊断
+  useEffect(() => {
+    if (!isOpen) { modelLoadDiagnosticShownRef.current = false; return; }
+    if (modelsLoading) return;
+    if (modelLoadDiagnosticShownRef.current) return;
+    if (selectedModelId && models.length > 0) {
+      modelLoadDiagnosticShownRef.current = true;
+      const diag = getStickerModelLoadDiagnosticMessage(models.length > 0, selectedModelId);
+      if (diag) setModelDiagnostic(diag);
+    }
   }, [isOpen, modelsLoading, models.length, selectedModelId]);
 
   const selectedModel = models.find(m => m.id === selectedModelId);
@@ -1072,7 +1091,9 @@ ${themeDesc}
       const taskId = data.taskIds[0];
       const pollModelId = selectedModelId?.includes('::') ? selectedModelId.split('::').pop()! : (selectedModelId || undefined);
       const pollProviderId = selectedModelId?.includes('::') ? selectedModelId.split('::')[0] : undefined;
-      for (let attempt = 0; attempt < 120; attempt++) {
+      pollAttemptsRef.current = 0;
+      for (let attempt = 0; attempt < 360; attempt++) {
+        pollAttemptsRef.current = attempt;
         await new Promise(r => setTimeout(r, 2000));
         const pollRes = await fetch('/api/poll-task', {
           method: 'POST',
@@ -1085,7 +1106,17 @@ ${themeDesc}
           imageUrl = pollData.imageUrl || (pollData.imageUrls?.length > 0 ? pollData.imageUrls[0] : undefined);
           break;
         }
-        if (pollData.status === 'failed') throw new Error(pollData.error || '生成失败');
+        if (pollData.status === 'failed') {
+          const fm = getStickerFailureMessage(pollData.error || '生成失败');
+          failedMessageRef.current = fm;
+          throw new Error(fm);
+        }
+        // After 150 attempts (5 minutes), set a failure message
+        if (attempt > 150 && !failedMessageRef.current) {
+          const fm = getStickerFailureMessage(pollData.error || '生成超时');
+          failedMessageRef.current = fm;
+          setFailedMessage(fm);
+        }
       }
     }
     if (!imageUrl) throw new Error('未获取到图片');
@@ -1669,7 +1700,7 @@ ${themeDesc}
                     </div>
                     <div className="text-[10px]" style={{ color: t.textDim }}>
                       计划: {chatModels.find(m => m.id === chatModelId)?.displayLabel || '默认'}
-                      {' · '}生图: {selectedModel?.displayLabel || selectedModel?.id || '默认'}
+                      {' · '}生图: {selectedModel?.displayLabel || selectedModel?.id || '(未选择模型)'}
                       {' · '}风格: {selectedStyle.label}
                       {' · '}主题: {selectedTheme.label}
                     </div>

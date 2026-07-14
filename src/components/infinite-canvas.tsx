@@ -480,6 +480,10 @@ interface InfiniteCanvasProps {
   onVersionHistoryChange?: () => void;
   /** Open floating video generation panel */
   onOpenVideoPanel?: () => void;
+  /** Canvas annotations data */
+  initialAnnotations?: import('@/lib/canvas-annotation').CanvasAnnotation[];
+  /** Canvas annotations change callback */
+  onAnnotationsChange?: (annotations: import('@/lib/canvas-annotation').CanvasAnnotation[]) => void;
 }
 
 type EditMode = 'none' | 'erase' | 'mask' | 'expand' | 'crop' | 'upscale' | 'colorAdjust' | 'panorama';
@@ -634,6 +638,8 @@ export function InfiniteCanvas({
   versionHistoryRevision = 0,
   onVersionHistoryChange,
   onOpenVideoPanel,
+  initialAnnotations = [],
+  onAnnotationsChange,
 }: InfiniteCanvasProps) {
   const isMonochrome = themeStyle === 'monochrome';
 
@@ -14840,7 +14846,10 @@ export function InfiniteCanvas({
                                 let attempts = 0;
                                 const maxAttempts = 300;
                                 const poll = async () => {
-                                  if (attempts >= maxAttempts) return;
+                                  if (attempts >= maxAttempts) {
+                                    setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, status: 'idle', progress: 0, errorMsg: '六面体生成超时，请稍后重试' } : g));
+                                    return;
+                                  }
                                   attempts++;
                                   try {
                                     const pollRes = await fetch('/api/poll-task', {
@@ -14854,7 +14863,7 @@ export function InfiniteCanvas({
                                       setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, status: 'completed', resultImageUrl: pollData.imageUrl, progress: 100 } : g));
                                       return;
                                     } else if (pollData.status === 'failed') {
-                                      setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, status: 'idle', progress: 0 } : g));
+                                      setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, status: 'idle', progress: 0, errorMsg: pollData.error || '六面体生成失败' } : g));
                                       return;
                                     }
                                     setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, progress: Math.min(90, 10 + attempts * 2) } : g));
@@ -14867,11 +14876,11 @@ export function InfiniteCanvas({
                               if (onAddImages) onAddImages([data.imageUrl], undefined, { modelName: hcg.toolbar.model, apiProvider: modelProviderMap.get(hcg.toolbar.providerId || '') || hcg.toolbar.providerId });
                               setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, status: 'completed', resultImageUrl: data.imageUrl, progress: 100 } : g));
                             } else {
-                              setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, status: 'idle', progress: 0 } : g));
+                              setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, status: 'idle', progress: 0, errorMsg: '六面体生成失败' } : g));
                             }
                           } catch (err) {
                             console.error('生成失败:', err);
-                            setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, status: 'idle', progress: 0 } : g));
+                            setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, status: 'idle', progress: 0, errorMsg: '六面体生成失败' } : g));
                           }
                         }}
                         disabled={hcg.status === 'generating' || !hcg.toolbar.model || !hcg.toolbar.prompt.trim()}

@@ -167,6 +167,77 @@ export default function ChatArea({
   const [selectedProviderId, setSelectedProviderId] = useState(task?.providerId || "");
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const activeGenerationTaskIds = useRef<Set<string>>(new Set());
+
+  // Append artifact to messages
+  const appendArtifact = useCallback((artifact: ChatArtifact) => {
+    setMessages(prev => {
+      const last = prev[prev.length - 1];
+      if (last && last.role === 'assistant') {
+        return [
+          ...prev.slice(0, -1),
+          { ...last, artifacts: [...(last.artifacts || []), artifact] }
+        ];
+      }
+      return prev;
+    });
+  }, []);
+
+  // Start polling an image generation task
+  const startImageTaskPolling = useCallback((taskId: string) => {
+    if (activeGenerationTaskIds.current.has(taskId)) return;
+    activeGenerationTaskIds.current.add(taskId);
+    const poll = async () => {
+      let attempts = 0;
+      while (activeGenerationTaskIds.current.has(taskId)) {
+        try {
+          const res = await fetch('/api/poll-task', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ taskId, model: selectedModel }),
+          });
+          const data = await res.json();
+          if (data.status === 'completed' && data.result) {
+            const urls = data.result.imageUrls || data.result.directImageUrls || (data.result.imageUrl ? [data.result.imageUrl] : []);
+            if (urls.length > 0) {
+              appendArtifact({ id: taskId, projectId: '', taskId, title: 'Image Generation', type: 'image' as const, data: { imageUrls: urls, taskId }, content: '', version: 1, createdAt: Date.now(), updatedAt: Date.now() });
+            }
+            activeGenerationTaskIds.current.delete(taskId);
+            return;
+          }
+          if (data.status === 'failed' || data.status === 'cancelled') {
+            activeGenerationTaskIds.current.delete(taskId);
+            return;
+          }
+          attempts++;
+          if (attempts > 600) {
+            activeGenerationTaskIds.current.delete(taskId);
+            return;
+          }
+        } catch (e) {
+          attempts++;
+          if (attempts > 600) {
+            activeGenerationTaskIds.current.delete(taskId);
+            return;
+          }
+        }
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    };
+    poll();
+  }, [selectedModel, appendArtifact]);
+
+  // Auto-poll pending image tasks on mount
+  useEffect(() => {
+    messages.forEach(msg => {
+      (msg.artifacts || []).forEach(art => {
+        if (art.type === 'image_task' && art.data?.taskId) {
+          startImageTaskPolling(String(art.data.taskId));
+        }
+      });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Messages: sync from task
   const [messages, setMessages] = useState<SimpleChatMessage[]>(task?.messages || []);
