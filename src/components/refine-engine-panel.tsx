@@ -57,8 +57,6 @@ interface Props {
   initialImageUrl?: string;
 }
 
-const REFINE_POLL_MAX_ATTEMPTS = 600;
-
 /* ─── component ─── */
 export default function RefineEnginePanel({ isMonochrome = false, onClose, onAddImage, initialImageUrl }: Props) {
   // ─── Theme tokens ───
@@ -388,8 +386,8 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
         const pollRefine = async () => {
           if (!isMountedRef.current) return; // 组件已卸载，停止轮询
           pollAttemptRef.current++;
-          // Safety: stop polling after twenty minutes for slow providers.
-          if (pollAttemptRef.current >= REFINE_POLL_MAX_ATTEMPTS) {
+          // Safety: stop polling after 10 minutes (300+ dynamic attempts)
+          if (pollAttemptRef.current > 300) {
             setProgressLabel('超时，请重试');
             setIsProcessing(false);
             stopTimer();

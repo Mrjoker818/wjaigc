@@ -17,19 +17,6 @@ interface ImageTaskSubmission {
   model?: string;
   label?: string;
   persist?: boolean;
-  remoteTaskId?: string;
-}
-
-interface ImageTaskRemotePolling {
-  remoteTaskId: string;
-  persist?: boolean;
-  userId?: string;
-  sessionId?: string;
-  messageId?: string;
-  providerId?: string;
-  model?: string;
-  progress?: number;
-  label?: string;
 }
 
 interface ImageTaskTerminal {
@@ -39,8 +26,6 @@ interface ImageTaskTerminal {
   error?: string;
   creditStatus?: CloudTaskCreditStatus;
   persist?: boolean;
-  model?: string;
-  providerId?: string;
 }
 
 interface VideoTaskSubmission {
@@ -104,17 +89,6 @@ export async function recordImageTaskSubmitted(input: ImageTaskSubmission): Prom
   });
 }
 
-export async function recordImageTaskRemotePolling(taskId: string, input: ImageTaskRemotePolling): Promise<void> {
-  if (input.persist === false) return;
-  await updateCloudTask(taskId, {
-    remoteTaskId: input.remoteTaskId,
-    providerId: input.providerId,
-    model: input.model,
-    progress: input.progress ?? 10,
-    label: input.label,
-  });
-}
-
 export async function recordImageTaskTerminal(taskId: string, input: ImageTaskTerminal): Promise<void> {
   if (input.persist === false) return;
 
@@ -128,8 +102,6 @@ export async function recordImageTaskTerminal(taskId: string, input: ImageTaskTe
     result,
     error: input.error,
     creditStatus: input.creditStatus || 'pending',
-    providerId: input.providerId,
-    model: input.model,
   });
 }
 

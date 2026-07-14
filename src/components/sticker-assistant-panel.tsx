@@ -656,13 +656,6 @@ export default function StickerAssistantPanel({
   /* ── 生成 ── */
   const [generating, setGenerating] = useState(false);
   const [genIdx, setGenIdx] = useState(-1);
-  const [loadingStep, setLoadingStep] = useState('');
-  const isGeneratingRef = useRef(false); // 整体生成标记
-  const [failedMessage, setFailedMessage] = useState('');
-  const pollAttemptsRef = useRef(0);
-  const failedMessageRef = useRef('');
-  const lastAttemptRef = useRef(0);
-  const modelLoadDiagnosticShownRef = useRef(false);
 
   /* ── 文件上传 ref ── */
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -742,18 +735,6 @@ export default function StickerAssistantPanel({
   useEffect(() => {
     if (!isOpen || modelsLoading) return;
     setModelDiagnostic(getStickerModelLoadDiagnosticMessage(models.length > 0, selectedModelId || ''));
-  }, [isOpen, modelsLoading, models.length, selectedModelId]);
-
-  // 模型加载诊断
-  useEffect(() => {
-    if (!isOpen) { modelLoadDiagnosticShownRef.current = false; return; }
-    if (modelsLoading) return;
-    if (modelLoadDiagnosticShownRef.current) return;
-    if (selectedModelId && models.length > 0) {
-      modelLoadDiagnosticShownRef.current = true;
-      const diag = getStickerModelLoadDiagnosticMessage(models.length > 0, selectedModelId);
-      if (diag) setModelDiagnostic(diag);
-    }
   }, [isOpen, modelsLoading, models.length, selectedModelId]);
 
   const selectedModel = models.find(m => m.id === selectedModelId);
@@ -1074,7 +1055,6 @@ ${themeDesc}
       } catch { /* 使用原始 URL 兜底 */ }
     }
 
-    setLoadingStep('正在提交生成请求...');
     const res = await fetch('/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1090,12 +1070,9 @@ ${themeDesc}
       imageUrl = data.imageUrls[0];
     } else if (data.taskIds?.length > 0) {
       const taskId = data.taskIds[0];
-      setLoadingStep('正在生成...');
       const pollModelId = selectedModelId?.includes('::') ? selectedModelId.split('::').pop()! : (selectedModelId || undefined);
       const pollProviderId = selectedModelId?.includes('::') ? selectedModelId.split('::')[0] : undefined;
-      pollAttemptsRef.current = 0;
-      for (let attempt = 0; attempt < 360; attempt++) {
-        pollAttemptsRef.current = attempt;
+      for (let attempt = 0; attempt < 120; attempt++) {
         await new Promise(r => setTimeout(r, 2000));
         const pollRes = await fetch('/api/poll-task', {
           method: 'POST',
@@ -1106,22 +1083,9 @@ ${themeDesc}
         const pollData = await pollRes.json();
         if (pollData.status === 'completed') {
           imageUrl = pollData.imageUrl || (pollData.imageUrls?.length > 0 ? pollData.imageUrls[0] : undefined);
-          setLoadingStep('');
           break;
         }
-        if (pollData.status === 'failed') {
-          const fm = getStickerFailureMessage(pollData.error || '生成失败');
-          failedMessageRef.current = fm;
-          setLoadingStep(fm);
-          throw new Error(fm);
-        }
-        // After 150 attempts (5 minutes), set a failure message
-        if (attempt > 150 && !failedMessageRef.current) {
-          const fm = getStickerFailureMessage(pollData.error || '生成超时');
-          failedMessageRef.current = fm;
-          setFailedMessage(fm);
-          setLoadingStep(fm);
-        }
+        if (pollData.status === 'failed') throw new Error(pollData.error || '生成失败');
       }
     }
     if (!imageUrl) throw new Error('未获取到图片');
@@ -1705,7 +1669,7 @@ ${themeDesc}
                     </div>
                     <div className="text-[10px]" style={{ color: t.textDim }}>
                       计划: {chatModels.find(m => m.id === chatModelId)?.displayLabel || '默认'}
-                      {' · '}生图: {selectedModel?.displayLabel || selectedModel?.id || '(未选择模型)'}
+                      {' · '}生图: {selectedModel?.displayLabel || selectedModel?.id || '默认'}
                       {' · '}风格: {selectedStyle.label}
                       {' · '}主题: {selectedTheme.label}
                     </div>
@@ -1757,9 +1721,6 @@ ${themeDesc}
                   {generating && generatingCount > 0 && <span className="ml-1 opacity-60">（{generatingCount}张同时生成中）</span>}
                   {failCount > 0 && <span className="text-red-500 ml-1">({failCount}失败)</span>}
                 </span>
-                {loadingStep && (
-                  <span className="text-xs ml-2 opacity-70" style={{ color: t.textDim }}>{loadingStep}</span>
-                )}
                 {generating ? (
                   <button
                     className="text-xs px-2 py-1 rounded cursor-pointer transition-colors duration-150"

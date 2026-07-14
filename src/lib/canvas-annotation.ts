@@ -38,10 +38,6 @@ export interface CanvasAnnotation {
   region?: AnnotationRegion;
   /** 可选：画笔蒙版（base64 data URL，与原图同尺寸，白色=修改区域，黑色=保留区域） */
   brushMaskDataUrl?: string;
-  /** 可选：画笔笔触数据（用于视觉显示轨迹） */
-  brushStrokesData?: Array<{ x: number; y: number }>;
-  /** 可选：画笔大小（用于视觉显示） */
-  brushSize?: number;
   /** 画笔颜色（用于视觉显示，不影响蒙版功能） */
   brushColor?: string;
   /** 当前状态 */
@@ -164,25 +160,21 @@ export function computeAnnotationRegion(
  * 包含区域描述（如果有框选区域或画笔蒙版）
  */
 export function buildAnnotationPrompt(annotation: CanvasAnnotation): string {
-  let prompt = annotation.text || '';
+  let prompt = annotation.text;
 
   // 如果有画笔蒙版，补充描述
   if (annotation.brushMaskDataUrl) {
-    prompt = prompt.trim()
-      ? `[用户已用画笔标记了需要修改的具体区域] ${prompt}`
-      : '[用户已用画笔标记了需要修改的区域，请根据标记区域智能修改]';
+    prompt = `[用户已用画笔标记了需要修改的具体区域] ${prompt}`;
   } else if (annotation.region) {
     // 如果有框选区域，补充位置描述
     const { x, y, w, h } = annotation.region;
     // 判断区域大致位置
     const posH = y < 0.33 ? '上方' : y > 0.66 ? '下方' : '中间';
     const posV = x < 0.33 ? '左侧' : x > 0.66 ? '右侧' : '中间';
-    prompt = prompt.trim()
-      ? `[修改位置：图片${posV}${posH}区域] ${prompt}`
-      : `[修改图片${posV}${posH}区域]`;
+    prompt = `[修改位置：图片${posV}${posH}区域] ${prompt}`;
   }
 
-  return prompt || '修改此图片';
+  return prompt;
 }
 
 /**
@@ -194,7 +186,7 @@ export function mergeAnnotationsForImage(
   imageId: string,
 ): string {
   const imageAnnotations = annotations.filter(
-    (a) => a.targetImageId === imageId && a.status === 'pending' && (a.text.trim() || a.brushMaskDataUrl || a.region),
+    (a) => a.targetImageId === imageId && a.status === 'pending' && a.text.trim(),
   );
 
   if (imageAnnotations.length === 0) return '';

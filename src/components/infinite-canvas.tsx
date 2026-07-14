@@ -70,7 +70,6 @@ import { createGroupRefImage, createGenGroup, generateGroupId, calculateConnecti
 import { getModelDisplayName } from '@/lib/model-name-map';
 import type { PsdLayerItem } from '@/types/psdLayer';
 import { toStableImageUrl, awaitStableImageUrl, onPersistComplete, getCachedLocalUrl, persistVideoUrlInBackground, persistRemoteUrlInBackground } from '@/lib/stable-image-url';
-import { ConfirmDialog } from '@/components/custom-dialogs';
 import { taskEventsClient } from '@/lib/task-events-client';
 import { extractTaskResultImageUrl } from '@/lib/task-result-url';
 import { shouldShowAnnotationBubble } from '@/lib/canvas-annotation-visibility';
@@ -475,16 +474,8 @@ interface InfiniteCanvasProps {
   onSendToChat?: (image: CanvasImage) => void;
   /** 树状版本历史管理器（P1功能） */
   versionHistoryManager?: import('@/lib/canvas-tree-history').TreeHistoryManager;
-  /** 外部版本历史刷新版本号 */
-  versionHistoryRevision?: number;
-  /** 版本历史变更回调 */
-  onVersionHistoryChange?: () => void;
   /** Open floating video generation panel */
   onOpenVideoPanel?: () => void;
-  /** Canvas annotations data */
-  initialAnnotations?: import('@/lib/canvas-annotation').CanvasAnnotation[];
-  /** Canvas annotations change callback */
-  onAnnotationsChange?: (annotations: import('@/lib/canvas-annotation').CanvasAnnotation[]) => void;
 }
 
 type EditMode = 'none' | 'erase' | 'mask' | 'expand' | 'crop' | 'upscale' | 'colorAdjust' | 'panorama';
@@ -636,16 +627,9 @@ export function InfiniteCanvas({
   connections,
   onConnectionsChange,
   versionHistoryManager,
-  versionHistoryRevision = 0,
-  onVersionHistoryChange,
   onOpenVideoPanel,
-  initialAnnotations = [],
-  onAnnotationsChange,
 }: InfiniteCanvasProps) {
   const isMonochrome = themeStyle === 'monochrome';
-
-  // Version history local revision tracker
-  const [historyRevision, setHistoryRevision] = useState(0);
 
   // Stable refs for callbacks used in effects (avoid stale closures)
   const onSelectImageRef = useRef(onSelectImage);
@@ -1320,22 +1304,8 @@ export function InfiniteCanvas({
 
   // ChatCanvas 批注模式
   const [annotationMode, setAnnotationMode] = useState(false);
-  const [annotations, setAnnotations] = useState<CanvasAnnotation[]>(initialAnnotations ?? []);
+  const [annotations, setAnnotations] = useState<CanvasAnnotation[]>([]);
   const [editingAnnotationId, setEditingAnnotationId] = useState<string | null>(null);
-
-  // V48: 外部 annotations 同步到内部状态（项目切换/初始化）
-  useEffect(() => {
-    if (initialAnnotations && initialAnnotations.length > 0) {
-      setAnnotations(initialAnnotations);
-    }
-  }, [initialAnnotations]);
-
-  // V48: 内部 annotations 变更时通知外部持久化
-  const annotationsRef = useRef(annotations);
-  annotationsRef.current = annotations;
-  useEffect(() => {
-    onAnnotationsChange?.(annotations);
-  }, [annotations, onAnnotationsChange]);
 
   // Snap guides state - alignment assist lines during drag
   const [activeSnapGuides, setActiveSnapGuides] = useState<SnapGuide[]>([]);
@@ -1386,7 +1356,6 @@ export function InfiniteCanvas({
   const [annotationTool, setAnnotationTool] = useState<'pin' | 'region' | 'brush'>('pin');
   // Brush mask drawing state
   const [brushDrawingAnnId, setBrushDrawingAnnId] = useState<string | null>(null);
-  const brushDrawingAnnIdRef = useRef<string | null>(null);
   const [annotationBrushSize, setAnnotationBrushSize] = useState(20);
   const [annotationBrushColor, setAnnotationBrushColor] = useState('#ef4444');
   const brushCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1655,9 +1624,6 @@ export function InfiniteCanvas({
   // Download popup
   const [showDownloadPopup, setShowDownloadPopup] = useState(false);
   const [downloadFormat, setDownloadFormat] = useState<'png' | 'svg' | '3d'>('png');
-
-  // Confirm dialog (replaces native window.confirm)
-  const [confirmDialog, setConfirmDialog] = useState<{ open: boolean; title: string; message: string; variant?: 'danger' | 'warning'; onConfirm: () => void }>({ open: false, title: '', message: '', onConfirm: () => {} });
   const [threeDDownloadFormat, setThreeDDownloadFormat] = useState('');
   const [svgMode, setSvgMode] = useState<'pro' | 'studio'>('pro');
   const [downloadProgress, setDownloadProgress] = useState<string | null>(null);
@@ -2691,7 +2657,8 @@ export function InfiniteCanvas({
           setAnnotations(prev => [...prev, newAnn]);
           setEditingAnnotationId(newAnn.id);
           setBrushDrawingAnnId(newAnn.id);
-          brushDrawingAnnIdRef.current = newAnn.id;
+
+          // Initialize brush canvas overlay for this image — use original dimensions
           const overlayW = targetImg.originalWidth || targetImg.width;
           const overlayH = targetImg.originalHeight || targetImg.height;
           const scaleRatioX = overlayW / targetImg.width;
@@ -2825,7 +2792,7 @@ export function InfiniteCanvas({
       setBoxSelectStart({ x: e.clientX, y: e.clientY });
       setBoxSelectEnd({ x: e.clientX, y: e.clientY });
     }
-  }, [isSpacePressed, viewOffset, selectedIds, images, screenToCanvas, hitTestImage, selectImage, editMode, zoom, handleEditMouseDown, compareSelecting, compareImages, annotationMode, annotationTool, annotationBrushSize, annotationBrushColor, annotations]);
+  }, [isSpacePressed, viewOffset, selectedIds, images, screenToCanvas, hitTestImage, selectImage, editMode, zoom, handleEditMouseDown, compareSelecting, compareImages, annotationMode]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     // Annotation region drag tracking or brush drawing
@@ -2833,9 +2800,8 @@ export function InfiniteCanvas({
       const canvasPos = screenToCanvas(e.clientX, e.clientY);
 
       // Brush drawing (clamped to image bounds)
-      const activeBrushAnnotationId = brushDrawingAnnIdRef.current;
-      if (isBrushDrawingRef.current && activeBrushAnnotationId && brushCtxRef.current) {
-        const ann = annotations.find(a => a.id === activeBrushAnnotationId);
+      if (isBrushDrawingRef.current && brushDrawingAnnId && brushCtxRef.current) {
+        const ann = annotations.find(a => a.id === brushDrawingAnnId);
         const targetImg = ann?.targetImageId ? images.find(i => i.id === ann.targetImageId) : null;
         if (targetImg) {
           const scaleRatio = brushScaleRef.current;
@@ -3041,18 +3007,14 @@ export function InfiniteCanvas({
 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
     // Brush drawing completion
-    const activeBrushAnnotationId = brushDrawingAnnIdRef.current;
-    if (isBrushDrawingRef.current && activeBrushAnnotationId && brushCanvasRef.current) {
+    if (isBrushDrawingRef.current && brushDrawingAnnId && brushCanvasRef.current) {
       isBrushDrawingRef.current = false;
       // Export brush mask as data URL and save to annotation
       const maskDataUrl = brushCanvasRef.current.toDataURL('image/png');
-      // Also save brush strokes for persistent rendering (like asui-canvas)
-      const strokesSnapshot = [...brushStrokesRef.current];
       setAnnotations(prev => prev.map(a =>
-        a.id === activeBrushAnnotationId ? { ...a, brushMaskDataUrl: maskDataUrl, brushStrokesData: strokesSnapshot } : a
+        a.id === brushDrawingAnnId ? { ...a, brushMaskDataUrl: maskDataUrl } : a
       ));
       setBrushDrawingAnnId(null);
-      brushDrawingAnnIdRef.current = null;
       brushCanvasRef.current = null;
       brushCtxRef.current = null;
       brushStrokesRef.current = [];
@@ -5968,9 +5930,7 @@ export function InfiniteCanvas({
 
   /** 执行单条批注：调用 /api/edit 修图 */
   const executeAnnotation = useCallback(async (annotation: CanvasAnnotation): Promise<AnnotationExecutionResult> => {
-    // Brush annotations with mask don't require text — the mask alone is the instruction
-    if (!annotation.targetImageId) return { status: 'failed', aiReply: '无目标图片' };
-    if (!annotation.text.trim() && !annotation.brushMaskDataUrl && !annotation.region) return { status: 'failed', aiReply: '批注内容为空，请填写修改描述或使用画笔/框选标记区域' };
+    if (!annotation.targetImageId || !annotation.text.trim()) return { status: 'failed', aiReply: '无目标图片或批注内容为空' };
 
     const targetImg = images.find(i => i.id === annotation.targetImageId);
     if (!targetImg) return { status: 'failed', aiReply: '未找到目标图片' };
@@ -6236,7 +6196,7 @@ export function InfiniteCanvas({
 
   /** 执行当前图片的所有pending批注 */
   const executePendingAnnotations = useCallback(async () => {
-    const pending = annotations.filter(a => a.status === 'pending' && (a.text.trim() || a.brushMaskDataUrl || a.region));
+    const pending = annotations.filter(a => a.status === 'pending' && a.text.trim());
     if (pending.length === 0) return;
 
     // Group annotations by targetImageId — same image annotations merged into one request
@@ -7267,22 +7227,22 @@ export function InfiniteCanvas({
     // For single-image, prefer threeDSingleImageUrl (from upload/canvas pick), fallback to selected image
     const singleImageUrl = threeDSingleImageUrl || img?.url || selectedImageData?.url || '';
     if (threeDMode === 'single-image' && !singleImageUrl) {
-      toast.error('请先选择或上传一张图片');
+      alert('请先选择或上传一张图片');
       return;
     }
     if (threeDMode === 'text-to-3d' && !threeDPrompt.trim()) {
-      toast.error('请输入3D模型描述');
+      alert('请输入3D模型描述');
       return;
     }
     if (threeDMode === 'multi-image' && threeDMultiImages.length === 0) {
-      toast.error('请至少上传一张图片');
+      alert('请至少上传一张图片');
       return;
     }
     const modelInfo = getCurrentModel();
     const providers = getThreeDProviders();
     const provider = providers.find(p => p.id === threeDProviderId);
     if (threeDBackend === 'api' && !provider) {
-      toast.error('请先在图像生成面板的「第三方模型」中添加 3D 模型 API，或切换到本地模型模式');
+      alert('请先在图像生成面板的「第三方模型」中添加 3D 模型 API，或切换到本地模型模式');
       return;
     }
 
@@ -7329,7 +7289,7 @@ export function InfiniteCanvas({
       const data = await res.json();
       console.log('[3D] API response:', JSON.stringify(data).slice(0, 500));
       if (!data.success) {
-        toast.error(translateErrorFrontend(data.error || '图生 3D 任务创建失败'));
+        alert(translateErrorFrontend(data.error || '图生 3D 任务创建失败'));
         setThreeDProgress(null);
         return;
       }
@@ -7380,7 +7340,7 @@ export function InfiniteCanvas({
               break;
             }
             if (pollData.status === 'failed') {
-              toast.error(translateErrorFrontend(pollData.error || '3D 生成失败'));
+              alert(translateErrorFrontend(pollData.error || '3D 生成失败'));
               removeProcessingFrame(placeholderId);
               setThreeDProgress(null);
               return;
@@ -7390,7 +7350,7 @@ export function InfiniteCanvas({
           }
         }
         if (!previewUrl) {
-          toast.error('3D 生成超时，请稍后重试');
+          alert('3D 生成超时，请稍后重试');
           removeProcessingFrame(placeholderId);
           setThreeDProgress(null);
           return;
@@ -8972,7 +8932,7 @@ export function InfiniteCanvas({
         )}
 
         {/* Canvas images */}
-        <div ref={canvasTransformRef} style={{ transform: `translate(${viewOffset.x}px, ${viewOffset.y}px) scale(${zoom})`, transformOrigin: '0 0', willChange: 'transform' }}>
+        <div ref={canvasTransformRef} style={{ transform: `translate(${viewOffset.x}px, ${viewOffset.y}px) scale(${zoom})`, transformOrigin: '0 0', willChange: 'transform', contain: 'layout style' }}>
           {/* Image Groups */}
           {groups.map(group => {
             const groupImages = images.filter(img => img.groupId === group.id);
@@ -12285,38 +12245,18 @@ export function InfiniteCanvas({
                       <rect x={rx} y={ry} width={rw} height={rh} fill="none" stroke={fillColor} strokeWidth={1.5} strokeDasharray="6 3" rx={2} opacity={0.7} />
                     );
                   })()}
-                  {/* Persistent brush strokes (like asui-canvas shapes stay on canvas) */}
-                  {ann.brushStrokesData && ann.brushStrokesData.length > 1 && (() => {
-                    const pts = ann.brushStrokesData as { x: number; y: number }[];
+                  {/* Brush mask overlay */}
+                  {ann.brushMaskDataUrl && (() => {
                     const hitImg = ann.targetImageId ? images.find(i => i.id === ann.targetImageId) : null;
-                    // Build smooth SVG path using quadratic bezier midpoints
-                    let smoothD = `M${pts[0].x} ${pts[0].y}`;
-                    for (let i = 1; i < pts.length - 1; i++) {
-                      const midX = (pts[i].x + pts[i + 1].x) / 2;
-                      const midY = (pts[i].y + pts[i + 1].y) / 2;
-                      smoothD += ` Q${pts[i].x} ${pts[i].y} ${midX} ${midY}`;
-                    }
-                    if (pts.length > 1) {
-                      const last = pts[pts.length - 1];
-                      smoothD += ` L${last.x} ${last.y}`;
-                    }
-                    const strokeClr = ann.brushColor || '#ef4444';
-                    const strokeW = ann.brushSize || 12;
+                    if (!hitImg) return null;
+                    const imgSx = hitImg.x * zoom + viewOffset.x;
+                    const imgSy = hitImg.y * zoom + viewOffset.y;
+                    const imgSw = hitImg.width * zoom;
+                    const imgSh = hitImg.height * zoom;
                     return (
                       <g>
-                        {hitImg && (
-                          <clipPath id={`brush-clip-${ann.id}`}>
-                            <rect x={hitImg.x * zoom + viewOffset.x} y={hitImg.y * zoom + viewOffset.y} width={hitImg.width * zoom} height={hitImg.height * zoom} rx={4} />
-                          </clipPath>
-                        )}
-                        <g clipPath={hitImg ? `url(#brush-clip-${ann.id})` : undefined}>
-                          {/* Glow layer */}
-                          <path d={smoothD} fill="none" stroke={strokeClr} strokeWidth={strokeW + 6} strokeLinecap="round" strokeLinejoin="round" opacity={0.15} />
-                          {/* Main stroke */}
-                          <path d={smoothD} fill="none" stroke={strokeClr} strokeWidth={strokeW} strokeLinecap="round" strokeLinejoin="round" opacity={0.65} />
-                          {/* Core line */}
-                          <path d={smoothD} fill="none" stroke={strokeClr} strokeWidth={Math.max(2, strokeW / 4)} strokeLinecap="round" strokeLinejoin="round" opacity={0.9} />
-                        </g>
+                        <defs><mask id={`brush-mask-${ann.id}`}><image href={ann.brushMaskDataUrl} x={imgSx} y={imgSy} width={imgSw} height={imgSh} /></mask></defs>
+                        <rect x={imgSx} y={imgSy} width={imgSw} height={imgSh} fill={ann.brushColor || '#d4af37'} opacity={0.4} mask={`url(#brush-mask-${ann.id})`} />
                       </g>
                     );
                   })()}
@@ -12328,7 +12268,7 @@ export function InfiniteCanvas({
               );
             })}
             {/* Selection drag rectangle (while drawing) */}
-            {annotationMode && annotationRegionStart && annotationRegionCurrent && (() => {
+            {isDraggingRegion && annotationRegionStart && annotationRegionCurrent && (() => {
               const x1 = Math.min(annotationRegionStart.cx, annotationRegionCurrent.cx) * zoom + viewOffset.x;
               const y1 = Math.min(annotationRegionStart.cy, annotationRegionCurrent.cy) * zoom + viewOffset.y;
               const w = Math.abs(annotationRegionCurrent.cx - annotationRegionStart.cx) * zoom;
@@ -12337,30 +12277,12 @@ export function InfiniteCanvas({
                 <rect x={x1} y={y1} width={w} height={h} fill={isMonochrome ? 'rgba(59,130,246,0.1)' : 'rgba(212,175,55,0.1)'} stroke={isMonochrome ? '#3b82f6' : '#d4af37'} strokeWidth={1.5} strokeDasharray="6 3" rx={2} />
               );
             })()}
-            {/* Live brush stroke preview while drawing (clipped to target image) — smooth bezier curves */}
-            {brushStrokes.length > 0 && (() => {
+            {/* Live brush stroke preview while drawing (clipped to target image) */}
+            {brushStrokes.length > 1 && (() => {
               const ann = brushDrawingAnnId ? annotations.find(a => a.id === brushDrawingAnnId) : null;
               const targetImg = ann?.targetImageId ? images.find(i => i.id === ann.targetImageId) : null;
-              const pts = brushStrokes;
-              // Build smooth path using quadratic bezier midpoints
-              let smoothPath = `M${pts[0].x} ${pts[0].y}`;
-              if (pts.length === 1) {
-                // Show a dot for single-point preview
-                smoothPath += ` h0.01`;
-              } else {
-                for (let i = 1; i < pts.length - 1; i++) {
-                  const midX = (pts[i].x + pts[i + 1].x) / 2;
-                  const midY = (pts[i].y + pts[i + 1].y) / 2;
-                  smoothPath += ` Q${pts[i].x} ${pts[i].y} ${midX} ${midY}`;
-                }
-                if (pts.length > 1) {
-                  const last = pts[pts.length - 1];
-                  smoothPath += ` L${last.x} ${last.y}`;
-                }
-              }
-              const clipId = `brush-clip-live-${brushDrawingAnnId || 'live'}`;
-              const brushClr = annotationBrushColor || '#ef4444';
-              const brushSz = annotationBrushSize || 12;
+              const pathD = brushStrokes.map((p, i) => i === 0 ? `M${p.x} ${p.y}` : `L${p.x} ${p.y}`).join(' ');
+              const clipId = `brush-clip-${brushDrawingAnnId || 'live'}`;
               if (targetImg) {
                 const imgSx = targetImg.x * zoom + viewOffset.x;
                 const imgSy = targetImg.y * zoom + viewOffset.y;
@@ -12368,24 +12290,13 @@ export function InfiniteCanvas({
                 const imgSh = targetImg.height * zoom;
                 return (
                   <g>
-                    <defs><clipPath id={clipId}><rect x={imgSx} y={imgSy} width={imgSw} height={imgSh} rx={4} /></clipPath></defs>
-                    <g clipPath={`url(#${clipId})`}>
-                      {/* Glow layer */}
-                      <path d={smoothPath} fill="none" stroke={brushClr} strokeWidth={brushSz + 6} strokeLinecap="round" strokeLinejoin="round" opacity={0.12} />
-                      {/* Main stroke */}
-                      <path d={smoothPath} fill="none" stroke={brushClr} strokeWidth={brushSz} strokeLinecap="round" strokeLinejoin="round" opacity={0.7} />
-                      {/* Core line */}
-                      <path d={smoothPath} fill="none" stroke={brushClr} strokeWidth={Math.max(1.5, brushSz / 5)} strokeLinecap="round" strokeLinejoin="round" opacity={0.9} />
-                    </g>
+                    <defs><clipPath id={clipId}><rect x={imgSx} y={imgSy} width={imgSw} height={imgSh} /></clipPath></defs>
+                    <path d={pathD} fill="none" stroke={annotationBrushColor} strokeWidth={annotationBrushSize} strokeLinecap="round" strokeLinejoin="round" opacity={0.6} clipPath={`url(#${clipId})`} />
                   </g>
                 );
               }
               return (
-                <g>
-                  <path d={smoothPath} fill="none" stroke={brushClr} strokeWidth={brushSz + 6} strokeLinecap="round" strokeLinejoin="round" opacity={0.12} />
-                  <path d={smoothPath} fill="none" stroke={brushClr} strokeWidth={brushSz} strokeLinecap="round" strokeLinejoin="round" opacity={0.7} />
-                  <path d={smoothPath} fill="none" stroke={brushClr} strokeWidth={Math.max(1.5, brushSz / 5)} strokeLinecap="round" strokeLinejoin="round" opacity={0.9} />
-                </g>
+                <path d={pathD} fill="none" stroke={annotationBrushColor} strokeWidth={annotationBrushSize} strokeLinecap="round" strokeLinejoin="round" opacity={0.6} />
               );
             })()}
           </svg>
@@ -12665,12 +12576,7 @@ export function InfiniteCanvas({
 
         {/* ====== ANNOTATION MODE BANNER ====== */}
         {annotationMode && (
-          <div
-            data-toolbar="annotation-tools"
-            onMouseDown={(e) => e.stopPropagation()}
-            onPointerDown={(e) => e.stopPropagation()}
-            className={`absolute top-3 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-2 px-4 py-2 rounded-xl shadow-lg ${isMonochrome ? 'bg-white border border-blue-200' : 'bg-[#1a1a1a] border border-gold/30'}`}
-          >
+          <div className={`absolute top-3 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-2 px-4 py-2 rounded-xl shadow-lg ${isMonochrome ? 'bg-white border border-blue-200' : 'bg-[#1a1a1a] border border-gold/30'}`}>
             <MessageCircle size={16} className={isMonochrome ? 'text-blue-500' : 'text-gold'} />
             <span className={`text-sm font-medium ${isMonochrome ? 'text-gray-700' : 'text-text-bright'}`}>批注模式</span>
             {/* Tool selector */}
@@ -13408,11 +13314,7 @@ export function InfiniteCanvas({
                       <button
                         onClick={async () => {
                           const prompt = threeDPrompt || '一个精美的3D物体';
-                          const message = `将使用AI自动生成4个视角的图片（正面/左面/右面/背面），然后自动提交3D生成。提示词：${prompt}`;
-                          // 使用自定义弹窗替代原生 confirm
-                          const doGenerate = () => {
-                            setConfirmDialog({ open: false, title: '', message: '', onConfirm: () => {} });
-                            (async () => {
+                          if (!confirm(`将使用AI自动生成4个视角的图片（正面/左面/右面/背面），然后自动提交3D生成。提示词：${prompt}\n\n确认开始？`)) return;
                           try {
                             toast.loading('正在自动生成多视角图片...', { id: 'auto-3d-multi' });
                             const res = await fetch('/api/image-to-3d/auto-multi-view', {
@@ -13436,9 +13338,6 @@ export function InfiniteCanvas({
                           } catch (err) {
                             toast.error('自动生成多视角图片失败', { id: 'auto-3d-multi' });
                           }
-                            })();
-                          };
-                          setConfirmDialog({ open: true, title: '确认操作', message, variant: 'warning', onConfirm: doGenerate });
                         }}
                         className={`w-full py-2 rounded-xl text-xs border transition-colors flex items-center justify-center gap-1 ${isMonochrome ? 'border-purple-200 text-purple-600 hover:bg-purple-50' : 'border-purple-500/30 text-purple-400 hover:bg-purple-500/10'}`}
                       >
@@ -14932,10 +14831,7 @@ export function InfiniteCanvas({
                                 let attempts = 0;
                                 const maxAttempts = 300;
                                 const poll = async () => {
-                                  if (attempts >= maxAttempts) {
-                                    setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, status: 'idle', progress: 0, errorMsg: '六面体生成超时，请稍后重试' } : g));
-                                    return;
-                                  }
+                                  if (attempts >= maxAttempts) return;
                                   attempts++;
                                   try {
                                     const pollRes = await fetch('/api/poll-task', {
@@ -14949,7 +14845,7 @@ export function InfiniteCanvas({
                                       setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, status: 'completed', resultImageUrl: pollData.imageUrl, progress: 100 } : g));
                                       return;
                                     } else if (pollData.status === 'failed') {
-                                      setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, status: 'idle', progress: 0, errorMsg: pollData.error || '六面体生成失败' } : g));
+                                      setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, status: 'idle', progress: 0 } : g));
                                       return;
                                     }
                                     setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, progress: Math.min(90, 10 + attempts * 2) } : g));
@@ -14962,11 +14858,11 @@ export function InfiniteCanvas({
                               if (onAddImages) onAddImages([data.imageUrl], undefined, { modelName: hcg.toolbar.model, apiProvider: modelProviderMap.get(hcg.toolbar.providerId || '') || hcg.toolbar.providerId });
                               setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, status: 'completed', resultImageUrl: data.imageUrl, progress: 100 } : g));
                             } else {
-                              setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, status: 'idle', progress: 0, errorMsg: '六面体生成失败' } : g));
+                              setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, status: 'idle', progress: 0 } : g));
                             }
                           } catch (err) {
                             console.error('生成失败:', err);
-                            setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, status: 'idle', progress: 0, errorMsg: '六面体生成失败' } : g));
+                            setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, status: 'idle', progress: 0 } : g));
                           }
                         }}
                         disabled={hcg.status === 'generating' || !hcg.toolbar.model || !hcg.toolbar.prompt.trim()}
@@ -15898,21 +15794,15 @@ export function InfiniteCanvas({
           <VersionHistoryPanel
             manager={versionHistoryManager}
             isMonochrome={isMonochrome}
-            revision={historyRevision + versionHistoryRevision}
             onRestore={(nodeId) => {
               const snapshot = versionHistoryManager?.getSnapshot(nodeId);
               if (snapshot) {
-                versionHistoryManager?.setCurrentNodeId(nodeId);
                 onImagesChange(snapshot);
                 setSelectedIds(new Set());
-                setHistoryRevision(revision => revision + 1);
-                onVersionHistoryChange?.();
               }
             }}
-            onCreateBranch={(nodeId, branchName) => {
-              versionHistoryManager?.createBranch(nodeId, images, branchName);
-              setHistoryRevision(revision => revision + 1);
-              onVersionHistoryChange?.();
+            onCreateBranch={(nodeId) => {
+              versionHistoryManager?.setCurrentNodeId(nodeId);
             }}
             onClose={() => setShowVersionHistory(false)}
           />
@@ -15989,7 +15879,7 @@ export function InfiniteCanvas({
         {/* ── Right: Feature buttons (collapsible) ── */}
         <div
           className={`flex items-center transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${
-            bottomBarHovered ? 'min-w-0 max-w-[min(900px,calc(100vw-10rem))] opacity-100 ml-1.5 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]' : 'max-w-0 opacity-0 ml-0 overflow-hidden'
+            bottomBarHovered ? 'max-w-[900px] opacity-100 ml-1.5 overflow-visible' : 'max-w-0 opacity-0 ml-0 overflow-hidden'
           }`}
         >
           <div className={`w-px h-5 mr-1.5 ${separatorCls}`} />
@@ -16307,16 +16197,6 @@ export function InfiniteCanvas({
           toast(`引擎已设置为：${eng === 'auto' ? '自动' : eng === 'ai' ? '云端AI' : '本地算法'}`);
         }}
         onClose={() => setEngineDialog(null)}
-      />
-
-      {/* 自定义确认弹窗（替代原生 window.confirm） */}
-      <ConfirmDialog
-        open={confirmDialog.open}
-        title={confirmDialog.title}
-        message={confirmDialog.message}
-        variant={confirmDialog.variant}
-        onConfirm={confirmDialog.onConfirm}
-        onCancel={() => setConfirmDialog({ open: false, title: '', message: '', onConfirm: () => {} })}
       />
     </div>
   );

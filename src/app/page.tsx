@@ -117,18 +117,9 @@ function CanvasApp() {
   // 树状版本历史，支持分支和任意节点回溯
   const treeHistoryRef = useRef<TreeHistoryManager>(new TreeHistoryManager({ maxNodes: 50 }));
   const [treeHistoryNodes, setTreeHistoryNodes] = useState<VersionNode[]>([]);
-  const treeHistoryLastImagesRef = useRef<CanvasImage[] | null>(null);
-  const treeHistoryProjectIdRef = useRef<string | null>(null);
-  const treeHistoryDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // P2-1: 画布连线状态
   const [canvasConnections, setCanvasConnections] = useState<import('@/lib/canvas-connections').CanvasConnection[]>([]);
-
-  // P3-1: ChatCanvas 批注持久化
-  const [canvasAnnotations, setCanvasAnnotations] = useState<import('@/lib/canvas-annotation').CanvasAnnotation[]>([]);
-  const handleAnnotationsChange = useCallback((anns: import('@/lib/canvas-annotation').CanvasAnnotation[]) => {
-    setCanvasAnnotations(anns);
-  }, []);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -498,38 +489,6 @@ function CanvasApp() {
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
   const currentProjectRef = useRef(currentProject);
   currentProjectRef.current = currentProject;
-
-  // Sync tree history with canvas images (debounced to avoid high-frequency writes)
-  useEffect(() => {
-    if (treeHistoryDebounceRef.current) {
-      clearTimeout(treeHistoryDebounceRef.current);
-    }
-    treeHistoryDebounceRef.current = setTimeout(() => {
-      const projectId = currentProject?.id ?? null;
-      const treeHistory = treeHistoryRef.current;
-
-      if (treeHistoryProjectIdRef.current !== projectId) {
-        treeHistoryProjectIdRef.current = projectId;
-        treeHistory.clear();
-        treeHistoryLastImagesRef.current = null;
-      }
-
-      if (treeHistory.getNodeCount() === 0) {
-        treeHistory.initializeRoot(images, images.length > 0 ? '项目打开' : '空白画布');
-      } else if (!skipHistoryRef.current && treeHistoryLastImagesRef.current !== null && treeHistoryLastImagesRef.current !== images) {
-        treeHistory.recordOperation(images, '画布更新');
-      }
-
-      treeHistoryLastImagesRef.current = images;
-      setTreeHistoryNodes(treeHistory.getAllNodes());
-    }, 500);
-    return () => {
-      if (treeHistoryDebounceRef.current) {
-        clearTimeout(treeHistoryDebounceRef.current);
-      }
-    };
-  }, [images, currentProject?.id]);
-
   const videoPanelRef = useRef<VideoGenerationPanelHandle>(null);
   const shotTaskIdMapRef = useRef<Map<string, string>>(new Map());
   const groupsRef = useRef<ImageGroupData[]>([]);
@@ -818,8 +777,6 @@ function CanvasApp() {
           ...(currentProject.metadata || {}),
           groups: groupsRef.current,
           viewState: viewStateRef.current,
-          versionHistory: treeHistoryRef.current.exportData(),
-          annotations: canvasAnnotations,
         };
         const autoSaveMgr = UserManagerCore.getInstance();
         autoSaveMgr.updateProject(currentProject.id, {
@@ -4109,9 +4066,6 @@ function CanvasApp() {
           connections={canvasConnections}
           onConnectionsChange={setCanvasConnections}
           versionHistoryManager={treeHistoryRef.current}
-          onVersionHistoryChange={() => setTreeHistoryNodes(treeHistoryRef.current.getAllNodes())}
-          initialAnnotations={canvasAnnotations}
-          onAnnotationsChange={handleAnnotationsChange}
           onOpenVideoPanel={() => {
             // 如果面板已打开（可能正在生成中），先关闭再打开，支持多任务并发
             if (showVideoPanel) {

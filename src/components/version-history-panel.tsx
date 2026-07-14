@@ -18,15 +18,13 @@ export interface VersionHistoryPanelProps {
   /** 恢复到指定节点回调 */
   onRestore: (nodeId: string) => void;
   /** 创建新分支回调 */
-  onCreateBranch: (nodeId: string, branchName?: string) => void;
+  onCreateBranch: (nodeId: string) => void;
   /** 关闭面板回调 */
   onClose: () => void;
   /** 面板位置 */
   position?: 'left' | 'right';
   /** 面板宽度 */
   width?: number;
-  /** 外部触发刷新的版本号 */
-  revision?: number;
 }
 
 /** 时间格式化 */
@@ -51,7 +49,6 @@ export function VersionHistoryPanel({
   onClose,
   position = 'right',
   width = 280,
-  revision = 0,
 }: VersionHistoryPanelProps) {
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
   const [showBranchDialog, setShowBranchDialog] = useState(false);
@@ -59,9 +56,9 @@ export function VersionHistoryPanel({
   const [branchName, setBranchName] = useState('');
 
   // 获取所有节点和分支信息
-  const nodes = useMemo(() => manager.getAllNodes(), [manager, revision]);
-  const branches = useMemo(() => manager.getBranches(), [manager, revision]);
-  const currentPath = useMemo(() => manager.getCurrentPath(), [manager, revision]);
+  const nodes = useMemo(() => manager.getAllNodes(), [manager]);
+  const branches = useMemo(() => manager.getBranches(), [manager]);
+  const currentPath = useMemo(() => manager.getCurrentPath(), [manager]);
   const headId = useMemo(() => {
     const snapshot = manager.getCurrentSnapshot();
     return nodes.find(n => n.isHead)?.id;
@@ -269,7 +266,7 @@ export function VersionHistoryPanel({
               <button
                 onClick={() => {
                   if (branchFromNode) {
-                    onCreateBranch(branchFromNode, branchName.trim() || undefined);
+                    onCreateBranch(branchFromNode);
                   }
                   setShowBranchDialog(false);
                 }}

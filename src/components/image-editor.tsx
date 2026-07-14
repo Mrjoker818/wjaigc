@@ -1292,16 +1292,9 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
           if (pollData.status === 'completed' && pollData.result) {
             completedTasks.add(taskId);
             const data = pollData.result;
-            // ★ 兼容旧版轮询返回格式：directPollUrls 直接包含 URL 数组
-            if (data.directPollUrls && Array.isArray(data.directPollUrls) && data.directPollUrls.length > 0) {
-              collectedUrls.push(...data.directPollUrls.map((u: string | { url: string }) => typeof u === 'string' ? u : u.url));
-              if (!collectedLlmInstruction && data.llmInstruction) {
-                collectedLlmInstruction = data.llmInstruction;
-              }
-              if (collectedEditRegions.length === 0 && data.editRegions && Array.isArray(data.editRegions) && data.editRegions.length > 0) {
-                collectedEditRegions = data.editRegions;
-              }
-            } else if (data.images && Array.isArray(data.images) && data.images.length > 0) {
+            // ★ 优先使用 images 数组（后端存储 image:images[0] + images:[all]，
+            //   count>1 时 images 数组包含所有生成结果，data.image 只是第一张）
+            if (data.images && Array.isArray(data.images) && data.images.length > 0) {
               collectedUrls.push(...data.images.map((img: { url: string }) => img.url));
               if (!collectedLlmInstruction && data.llmInstruction) {
                 collectedLlmInstruction = data.llmInstruction;
@@ -1323,9 +1316,6 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
           } else if (pollData.status === 'failed') {
             completedTasks.add(taskId);
             if (!firstError) firstError = translateErrorFrontend(pollData.error || pollData.message || '编辑失败');
-          } else if (pollData.status === 'cancelled') {
-            completedTasks.add(taskId);
-            if (!firstError) firstError = '任务已取消';
           } else if (pollData.status === 'error') {
             // 任务不存在或已过期（可能是服务重启导致内存清空）
             completedTasks.add(taskId);

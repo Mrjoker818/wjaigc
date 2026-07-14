@@ -416,7 +416,6 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
       const data = await res.json();
       if (!res.ok || data.error) {
         console.error('[display-3d] Generate error:', data.error);
-        setErrorMsg(data.error?.message || data.error || '3D 生成提交失败');
         setIsGenerating(false);
         return;
       }
@@ -450,14 +449,12 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
               setIsGenerating(false);
             } else if (taskData.status === 'failed') {
               console.error('[display-3d] Task failed:', taskData.error);
-              setErrorMsg(taskData.error?.message || taskData.error || '3D 生成任务失败');
               setIsGenerating(false);
             } else {
               setTimeout(poll, 3000);
             }
           } catch (e) {
             console.error('[display-3d] Poll error:', e);
-            setErrorMsg(e instanceof Error ? e.message : '3D 任务轮询失败');
             setIsGenerating(false);
           }
         };
@@ -470,7 +467,6 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
       }
     } catch (e) {
       console.error('[display-3d] Generate failed:', e);
-      setErrorMsg(e instanceof Error ? e.message : '3D 生成请求失败');
       setIsGenerating(false);
     }
   }, [brandName, productName, sceneType, environment, dimensions, imageUsageMode, materialStyle, lightingStyle, budget, viewOptions, renderStyle, outputResolution, outputFormat, outputQuality, customPrompt, crowdStyle, assets, onAddImages, selectedModel, selectedProviderId, brandColor, focusProduct]);

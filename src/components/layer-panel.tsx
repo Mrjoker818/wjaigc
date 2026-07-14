@@ -258,55 +258,27 @@ export function LayerPanel({
     onRename?.(imageId, name);
   }, [onRename]);
 
-  // 图层偏移辅助函数：按zIndex排序后偏移目标图层位置
-  const moveLayerByOffset = useCallback((imgs: typeof images, imageId: string, offset: number) => {
-    const sorted = [...imgs].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
-    const idx = sorted.findIndex(img => img.id === imageId);
-    if (idx < 0) return imgs;
-    const newIdx = Math.max(0, Math.min(sorted.length - 1, idx + offset));
-    if (newIdx === idx) return imgs;
-    // 移除目标图层
-    const [moved] = sorted.splice(idx, 1);
-    // 插入新位置
-    sorted.splice(newIdx, 0, moved);
-    // 重新分配zIndex
-    return imgs.map(img => {
-      const newPos = sorted.findIndex(s => s.id === img.id);
-      return newPos >= 0 ? { ...img, zIndex: newPos } : img;
-    });
-  }, []);
-
-  // 拖拽重排：将draggedId移到targetId的位置
-  const reorderLayers = useCallback((imgs: typeof images, draggedId: string, targetId: string) => {
-    const draggedImg = imgs.find(img => img.id === draggedId);
-    const targetImg = imgs.find(img => img.id === targetId);
-    if (!draggedImg || !targetImg) return imgs;
-    const targetZ = targetImg.zIndex ?? 0;
-    const draggedZ = draggedImg.zIndex ?? 0;
-    const direction = draggedZ < targetZ ? 1 : -1;
-    return imgs.map(img => {
-      if (img.id === draggedId) return { ...img, zIndex: targetZ };
-      if (direction > 0 && (img.zIndex ?? 0) > draggedZ && (img.zIndex ?? 0) <= targetZ) {
-        return { ...img, zIndex: (img.zIndex ?? 0) - 1 };
-      }
-      if (direction < 0 && (img.zIndex ?? 0) < draggedZ && (img.zIndex ?? 0) >= targetZ) {
-        return { ...img, zIndex: (img.zIndex ?? 0) + 1 };
-      }
-      return img;
-    });
-  }, []);
-
   // 上移一层（增加zIndex）
   const handleMoveUp = useCallback((imageId: string) => {
     if (!onReorder) return;
-    onReorder(moveLayerByOffset(images, imageId, -1));
-  }, [images, onReorder, moveLayerByOffset]);
+    const currentZIndexes = images.map(img => img.zIndex ?? 0);
+    const maxZ = Math.max(...currentZIndexes);
+    onReorder(images.map(img => {
+      if (img.id !== imageId) return img;
+      return { ...img, zIndex: maxZ + 1 };
+    }));
+  }, [images, onReorder]);
 
   // 下移一层（减少zIndex）
   const handleMoveDown = useCallback((imageId: string) => {
     if (!onReorder) return;
-    onReorder(moveLayerByOffset(images, imageId, 1));
-  }, [images, onReorder, moveLayerByOffset]);
+    const currentZIndexes = images.map(img => img.zIndex ?? 0);
+    const minZ = Math.min(...currentZIndexes);
+    onReorder(images.map(img => {
+      if (img.id !== imageId) return img;
+      return { ...img, zIndex: minZ - 1 };
+    }));
+  }, [images, onReorder]);
 
   // 批量操作状态
   const visibleCount = images.filter(img => img.visible !== false).length;
@@ -351,12 +323,16 @@ export function LayerPanel({
     const draggedIndex = images.findIndex(img => img.id === draggedId);
     if (draggedIndex === -1 || draggedIndex === targetIndex) return;
 
-    // 找到目标位置的图片ID
-    const targetId = sortedImages[targetIndex]?.id;
-    if (!targetId) return;
+    // 找到目标位置的zIndex
+    const targetZ = sortedImages[targetIndex]?.zIndex ?? 0;
 
     // 更新被拖拽图片的zIndex到目标位置
-    onReorder(reorderLayers(images, draggedId, targetId));
+    onReorder(images.map(img => {
+      if (img.id === draggedId) {
+        return { ...img, zIndex: targetZ };
+      }
+      return img;
+    }));
   }, [images, sortedImages, onReorder]);
 
   const positionClass = position === 'left' ? 'left-0' : 'right-0';

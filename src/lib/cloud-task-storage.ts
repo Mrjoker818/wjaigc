@@ -38,8 +38,6 @@ export interface UpdateCloudTaskInput {
   error?: string;
   creditStatus?: CloudTaskCreditStatus;
   remoteTaskId?: string;
-  providerId?: string;
-  model?: string;
 }
 
 export interface CloudTaskListFilters {
@@ -143,8 +141,6 @@ export async function updateCloudTask(taskId: string, input: UpdateCloudTaskInpu
   if (input.error !== undefined) { sets.push(`error = $${index++}`); params.push(input.error); }
   if (input.creditStatus !== undefined) { sets.push(`credit_status = $${index++}`); params.push(input.creditStatus); }
   if (input.remoteTaskId !== undefined) { sets.push(`remote_task_id = $${index++}`); params.push(input.remoteTaskId); }
-  if (input.providerId !== undefined) { sets.push(`provider_id = $${index++}`); params.push(input.providerId); }
-  if (input.model !== undefined) { sets.push(`model = $${index++}`); params.push(input.model); }
 
   await execSql(`UPDATE cloud_tasks SET ${sets.join(', ')} WHERE id = $1`, params);
 }

@@ -7,7 +7,6 @@ import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { consumeCredits, refundCredits } from '@/lib/credits';
 import { CHAT_TOOLS, executeToolCall, parseToolCallsFromStream, ToolCallResult } from '@/lib/chat-tools';
-import { getAgentToolChoice } from '@/lib/chat-agent-tool-choice';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { logOperation, logError, startTimer, OP_ACTIONS } from '@/lib/op-log';
 
@@ -456,7 +455,8 @@ async function handleAgentStream(
         while (iteration < MAX_AGENT_ITERATIONS) {
           iteration++;
           
-          const toolChoice = getAgentToolChoice(agentModeEnabled, iteration);
+          // Agent模式强制调用工具，非Agent模式让LLM自行选择
+          const toolChoice = isAgentMode ? 'required' : 'auto';
           
           const requestBody: Record<string, unknown> = {
             model: requestModel,

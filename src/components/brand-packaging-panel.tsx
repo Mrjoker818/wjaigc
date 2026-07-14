@@ -160,7 +160,6 @@ const HANDLE_ROPE_OPTIONS = ['无', '棉绳', '丝带', '皮绳', '织带', '金
 const WINDOW_OPTIONS = ['否', '透明开窗', '异形开窗', '镂空透窗', '半透明磨砂窗'];
 
 const EXTEND_SCENES = ['电商主图', '礼盒套装', '节日限定', '旅行便携', '会员专享', '联名款', '限定款', '环保概念', '高奢礼赠', '日常家用', '商务定制', '活动促销'];
-const PACKAGING_POLL_MAX_ATTEMPTS = 600;
 
 /* ============================================================
    Prompt 模板
@@ -443,15 +442,8 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
       if (data.taskId) {
         // Poll for results via /api/poll-task (POST) — standard task polling mechanism
         const taskId = data.taskId;
-        let pollAttempts = 0;
         const poll = async () => {
           try {
-            if (pollAttempts >= PACKAGING_POLL_MAX_ATTEMPTS) {
-              setIsGenerating(false);
-              setErrorMsg('任务轮询超时，请刷新后查看结果');
-              return;
-            }
-            pollAttempts++;
             const taskRes = await fetch('/api/poll-task', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -532,26 +524,19 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
       });
       const data = await res.json();
       if (data.taskId) {
-        const taskId = data.taskId;
-        let pollAttempts = 0;
         const poll = async () => {
           try {
-            if (pollAttempts >= PACKAGING_POLL_MAX_ATTEMPTS) {
-              setIsGenerating(false);
-              return;
-            }
-            pollAttempts++;
             const taskRes = await fetch('/api/poll-task', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ taskId, model: selectedModel, providerId: selectedProviderId }),
+              body: JSON.stringify({ taskId: data.taskId, model: selectedModel, providerId: selectedProviderId }),
             });
             const taskData = await taskRes.json();
             if (taskData.status === 'completed') {
               const imageUrls: string[] = taskData.result?.imageUrls || taskData.imageUrls || [];
               if (imageUrls.length > 0) {
                 const newResults = imageUrls.map((url: string, i: number) => ({
-                  id: `series_${taskId}_${i}`,
+                  id: `series_${data.taskId}_${i}`,
                   type: 'series_family' as const,
                   url,
                   prompt: seriesPrompt,
@@ -601,26 +586,19 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
       });
       const data = await res.json();
       if (data.taskId) {
-        const taskId = data.taskId;
-        let pollAttempts = 0;
         const poll = async () => {
           try {
-            if (pollAttempts >= PACKAGING_POLL_MAX_ATTEMPTS) {
-              setIsGenerating(false);
-              return;
-            }
-            pollAttempts++;
             const taskRes = await fetch('/api/poll-task', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ taskId, model: selectedModel, providerId: selectedProviderId }),
+              body: JSON.stringify({ taskId: data.taskId, model: selectedModel, providerId: selectedProviderId }),
             });
             const taskData = await taskRes.json();
             if (taskData.status === 'completed') {
               const imageUrls: string[] = taskData.result?.imageUrls || taskData.imageUrls || [];
               if (imageUrls.length > 0) {
                 const newResults = imageUrls.map((url: string, i: number) => ({
-                  id: `scene_${taskId}_${i}`,
+                  id: `scene_${data.taskId}_${i}`,
                   type: 'scene_display' as const,
                   url,
                   prompt: scenePrompt,

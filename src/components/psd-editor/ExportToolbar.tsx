@@ -22,7 +22,7 @@ export function ExportToolbar({ mode, onModeChange, onExport, isExporting, progr
   return (
     <div className="space-y-3">
       <div>
-        <label className="text-xs text-[#888] uppercase tracking-wider mb-1.5 block">
+        <label className="text-xs text-neutral-400 uppercase tracking-wider mb-1.5 block">
           导出模式
         </label>
         <div className="grid grid-cols-3 gap-1">
@@ -32,8 +32,8 @@ export function ExportToolbar({ mode, onModeChange, onExport, isExporting, progr
               onClick={() => onModeChange(opt.value)}
               className={`px-1.5 py-1.5 text-xs rounded transition-colors text-center ${
                 mode === opt.value
-                  ? 'bg-[#d4af37] text-[#1a1a1a] font-semibold'
-                  : 'bg-[#2a2a2a] text-[#bbb] hover:bg-[#444]'
+                  ? 'bg-amber-500 text-black font-semibold'
+                  : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700'
               }`}
               title={opt.desc}
             >
@@ -45,10 +45,10 @@ export function ExportToolbar({ mode, onModeChange, onExport, isExporting, progr
 
       {isExporting && (
         <div>
-          <div className="h-1 bg-[#2a2a2a] rounded-full overflow-hidden">
-            <div className="h-full bg-[#d4af37] transition-all duration-300" style={{ width: `${progress}%` }} />
+          <div className="h-1 bg-neutral-800 rounded-full overflow-hidden">
+            <div className="h-full bg-amber-500 transition-all duration-300" style={{ width: `${progress}%` }} />
           </div>
-          <p className="text-xs text-[#888] mt-1">{progressMessage}</p>
+          <p className="text-xs text-neutral-400 mt-1">{progressMessage}</p>
         </div>
       )}
 
@@ -57,8 +57,8 @@ export function ExportToolbar({ mode, onModeChange, onExport, isExporting, progr
         disabled={isExporting}
         className={`w-full py-2 text-xs font-semibold rounded transition-colors ${
           isExporting
-            ? 'bg-[#2a2a2a] text-[#666] cursor-not-allowed'
-            : 'bg-[#d4af37] text-[#1a1a1a] hover:bg-[#e6c14a]'
+            ? 'bg-neutral-700 text-neutral-400 cursor-not-allowed'
+            : 'bg-amber-500 text-black hover:bg-amber-400'
         }`}
       >
         {isExporting ? `导出中 ${Math.round(progress)}%` : '导出 PSD'}

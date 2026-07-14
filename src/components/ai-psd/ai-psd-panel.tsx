@@ -89,8 +89,6 @@ interface HistoryItem {
   thumbnailUrl: string;
 }
 
-const ACTIVE_TASK_KEY = 'wujie_ai_psd_active_task';
-
 interface AiPsdPanelProps {
   onClose: () => void;
   onAddImages: (urls: string[], meta?: { modelName?: string; apiProvider?: string }) => void;
@@ -344,15 +342,6 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false,
   // === Progress timer ===
   const { elapsed, totalTime, startTimer, stopTimer, resetTimer, formatTime } = useProgressTimer();
 
-  useEffect(() => {
-    const savedTaskId = sessionStorage.getItem(ACTIVE_TASK_KEY);
-    if (!savedTaskId) return;
-
-    setTaskId(savedTaskId);
-    setIsGenerating(true);
-    startTimer();
-  }, [startTimer]);
-
   // === Right panel state ===
   const [rightTab, setRightTab] = useState<'layers' | 'report'>('layers');
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
@@ -457,13 +446,11 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false,
           if (data.task.status === 'success' || data.task.status === 'completed') {
             setIsGenerating(false);
             stopTimer();
-            sessionStorage.removeItem(ACTIVE_TASK_KEY);
             setCurrentStep(3);
             return; // done, don't schedule next poll
           } else if (data.task.status === 'failed') {
             setIsGenerating(false);
             stopTimer();
-            sessionStorage.removeItem(ACTIVE_TASK_KEY);
             setError(data.task.error || '任务失败');
             return; // done, don't schedule next poll
           } else {
@@ -574,7 +561,6 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false,
       const data = await res.json();
       if (data.success) {
         setTaskId(data.taskId);
-        sessionStorage.setItem(ACTIVE_TASK_KEY, data.taskId);
       } else {
         setError(data.error || '创建任务失败');
         setIsGenerating(false);
@@ -604,7 +590,6 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false,
     stopTimer();
     setTaskData(null);
     setTaskId('');
-    sessionStorage.removeItem(ACTIVE_TASK_KEY);
   }, [taskId]);
 
   // ─── Reset handler ─────────────────────────────────────────
@@ -615,7 +600,6 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false,
     setCurrentStep(0);
     setError('');
     resetTimer();
-    sessionStorage.removeItem(ACTIVE_TASK_KEY);
   }, []);
 
   // ─── Download handler ──────────────────────────────────────
