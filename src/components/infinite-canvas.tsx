@@ -79,6 +79,8 @@ import { buildHexCubeGenerationInput } from '@/lib/hex-cube-generation';
 import { resolveRefineEngineInitialImageUrl } from '@/lib/refine-engine-image';
 import { translateApiError } from '@/lib/api-error-translator';
 import { APP_VERSION_LABEL } from '@/config/app-meta';
+import { shouldSuspendCanvasVirtualization } from '@/lib/canvas-pan-virtualization';
+import { applyCanvasGenerationResults } from '@/lib/canvas-generation-results';
 import OhMyPrompt from '@/components/oh-my-prompt';
 import dynamic from 'next/dynamic';
 
@@ -709,6 +711,7 @@ export function InfiniteCanvas({
   const [viewOffset, setViewOffset] = useState({ x: initialViewState?.offsetX ?? 0, y: initialViewState?.offsetY ?? 0 });
   const [zoom, setZoom] = useState(initialViewState?.zoom ?? 1);
   const [isPanning, setIsPanning] = useState(false);
+  const [isMiddlePanning, setIsMiddlePanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const [isSpacePressed, setIsSpacePressed] = useState(false);
 
@@ -754,6 +757,7 @@ export function InfiniteCanvas({
 
   const visibleImages = useMemo(() => {
     if (canvasSize.width === 0 || canvasSize.height === 0) return images;
+    if (shouldSuspendCanvasVirtualization(isPanning, isMiddlePanning)) return images;
     // Visible area in canvas coordinates
     const vx1 = -viewOffset.x / zoom;
     const vy1 = -viewOffset.y / zoom;
@@ -777,7 +781,7 @@ export function InfiniteCanvas({
       const iy2 = img.y + img.height;
       return ix2 >= vx1 - marginW && ix1 <= vx2 + marginW && iy2 >= vy1 - marginH && iy1 <= vy2 + marginH;
     });
-  }, [images, viewOffset, zoom, canvasSize]);
+  }, [images, viewOffset, zoom, canvasSize, isPanning, isMiddlePanning]);
 
   // ★ Keep spatial index in sync with images
   useEffect(() => {
@@ -1109,7 +1113,6 @@ export function InfiniteCanvas({
   const [boxSelectEnd, setBoxSelectEnd] = useState<{ x: number; y: number } | null>(null);
 
   // Middle button pan state
-  const [isMiddlePanning, setIsMiddlePanning] = useState(false);
   const middlePanStartRef = useRef({ x: 0, y: 0 });
   const middlePanMovedRef = useRef(false); // 中键拖动是否移动过（防止拖动后误触发 auxclick 缩放重置）
 
@@ -5580,18 +5583,22 @@ export function InfiniteCanvas({
         isProcessingPlaceholder: true,
         processing: { label: '生成中...', status: 'processing', progress: 10, startTime: Date.now() },
       };
-      onImagesChange([...imagesRef.current, newFrame]);
+      const nextImages = [...imagesRef.current, newFrame];
+      imagesRef.current = nextImages;
+      onImagesChange(nextImages);
       setCanvasGenFrameId(frameId);
       setCanvasGenFramePos({ x: newFrame.x, y: newFrame.y });
       currentFrameId = frameId;
     } else {
       // Update existing frame to processing state
-      onImagesChange(images.map(img => {
+      const nextImages = imagesRef.current.map(img => {
         if (img.id === currentFrameId) {
           return { ...img, processing: { label: '生成中...', status: 'processing', progress: 10, startTime: img.processing?.startTime || Date.now() } };
         }
         return img;
-      }));
+      });
+      imagesRef.current = nextImages;
+      onImagesChange(nextImages);
     }
 
     try {
@@ -5636,6 +5643,46 @@ export function InfiniteCanvas({
       // 支持两种格式：
       // 1. { success: true, mode: 'direct', imageUrls: [...] }
       // 2. { taskIds: [], directImageUrls: [...], usedModel, usedProviderId } (Responses API)
+      const commitGeneratedUrls = (
+        urls: string[],
+        modelName: string | undefined,
+        apiProvider: string | undefined,
+      ) => {
+        const nextImages = applyCanvasGenerationResults(
+          imagesRef.current,
+          currentFrameId,
+          urls,
+          (frame, url) => ({
+            ...frame,
+            url,
+            isProcessingPlaceholder: false,
+            processing: undefined,
+            prompt: canvasGenPrompt,
+            model: canvasGenPureModel,
+            quality: canvasGenQuality,
+            aspectRatio: canvasGenAspectRatio,
+            modelName,
+            apiProvider,
+          }),
+          (frame, url, index) => ({
+            id: `gen-result-${Date.now()}-${index}`,
+            url,
+            x: frame ? frame.x + frame.width + 20 + index * (canvasGenFrameWidth + 20) : 100 + index * (canvasGenFrameWidth + 20),
+            y: frame?.y ?? 100,
+            width: canvasGenFrameWidth,
+            height: canvasGenFrameHeight,
+            prompt: canvasGenPrompt,
+            model: canvasGenPureModel,
+            quality: canvasGenQuality,
+            aspectRatio: canvasGenAspectRatio,
+            modelName,
+            apiProvider,
+          } as CanvasImage),
+        );
+        imagesRef.current = nextImages;
+        onImagesChange(nextImages);
+      };
+
       const directUrls: string[] = (data.success && data.mode === 'direct')
         ? data.imageUrls
         : (data.directImageUrls && data.directImageUrls.length > 0)
@@ -5660,41 +5707,11 @@ export function InfiniteCanvas({
           } catch {}
           return savedUrl;
         }));
-        // Replace the processing frame with the actual images
-        const newImages: CanvasImage[] = [];
-        for (let i = 0; i < savedUrls.length; i++) {
-          if (i === 0 && currentFrameId) {
-            // Replace the placeholder frame with the first result
-            onImagesChange(images.map(img => {
-              if (img.id === currentFrameId) {
-                return { ...img, url: savedUrls[i], isProcessingPlaceholder: false, processing: undefined, prompt: canvasGenPrompt,
-                  modelName: data.usedModel || data.modelName || (canvasGenModel?.includes('::') ? canvasGenModel.split('::')[1] : canvasGenModel),
-                  apiProvider: data.usedProviderId || data.providerName,
-                };
-              }
-              return img;
-            }));
-          } else {
-            // Add additional images next to the frame
-            const pos = canvasGenFramePos || { x: 100, y: 100 };
-            newImages.push({
-              id: `canvas-gen-${Date.now()}-${i}`,
-              url: savedUrls[i],
-              x: pos.x + (i * 320),
-              y: pos.y,
-              width: 300,
-              height: 300,
-              prompt: canvasGenPrompt,
-              modelName: data.usedModel || data.modelName || (canvasGenModel?.includes('::') ? canvasGenModel.split('::')[1] : canvasGenModel),
-              apiProvider: data.usedProviderId || data.providerName,
-            });
-          }
-        }
-        if (newImages.length > 0) {
-          setTimeout(() => {
-            onImagesChange([...imagesRef.current, ...newImages]);
-          }, 100);
-        }
+        commitGeneratedUrls(
+          savedUrls,
+          data.usedModel || data.modelName || canvasGenPureModel,
+          data.usedProviderId || data.providerName,
+        );
         setCanvasGenGenerating(false);
         // 设置预览URL，保持面板打开让用户查看结果
         if (savedUrls[0]) {
@@ -5778,12 +5795,14 @@ export function InfiniteCanvas({
             const progress = Math.min(90, 10 + (attempt / maxAttempts) * 80);
             setCanvasGenProgress(progress);
             if (currentFrameId) {
-              onImagesChange(imagesRef.current.map(img => {
+              const nextImages = imagesRef.current.map(img => {
                 if (img.id === currentFrameId) {
                   return { ...img, processing: { label: '生成中...', status: 'processing', progress } };
                 }
                 return img;
-              }));
+              });
+              imagesRef.current = nextImages;
+              onImagesChange(nextImages);
             }
           } catch { /* continue polling */ }
         }
@@ -5807,47 +5826,12 @@ export function InfiniteCanvas({
       }
 
       if (validUrls.length > 0) {
-        // Replace the placeholder frame with the first result
-        if (currentFrameId) {
-          onImagesChange(imagesRef.current.map(img => {
-            if (img.id === currentFrameId) {
-              return {
-                ...img,
-                url: validUrls[0],
-                isProcessingPlaceholder: false as const,
-                processing: undefined as string | undefined,
-                prompt: canvasGenPrompt,
-                model: canvasGenPureModel || (canvasGenModel?.includes('::') ? canvasGenModel.split('::').pop()! : canvasGenModel),
-                quality: canvasGenQuality,
-                aspectRatio: canvasGenAspectRatio,
-                modelName: lastPollData?.modelName || canvasGenPureModel || canvasGenModel,
-                apiProvider: lastPollData?.providerName || '',
-              } as CanvasImage;
-            }
-            return img;
-          }));
-        }
-        // If multiple results, add the rest as new images to the right
-        if (validUrls.length > 1) {
-          const frameImg = imagesRef.current.find(img => img.id === currentFrameId);
-          const baseX = frameImg ? frameImg.x + frameImg.width + 20 : 100;
-          const baseY = frameImg ? frameImg.y : 100;
-          const additionalImages: CanvasImage[] = validUrls.slice(1).map((url, idx) => ({
-            id: `gen-result-${Date.now()}-${idx}`,
-            url,
-            x: baseX + idx * (canvasGenFrameWidth + 20),
-            y: baseY,
-            width: canvasGenFrameWidth,
-            height: canvasGenFrameHeight,
-            prompt: canvasGenPrompt,
-            model: canvasGenPureModel || (canvasGenModel?.includes('::') ? canvasGenModel.split('::').pop()! : canvasGenModel),
-            quality: canvasGenQuality,
-            aspectRatio: canvasGenAspectRatio,
-            modelName: lastPollData?.modelName || canvasGenPureModel || canvasGenModel,
-            apiProvider: lastPollData?.providerName || '',
-          } as CanvasImage));
-          onImagesChange([...imagesRef.current, ...additionalImages]);
-        }
+        const completedPollData = lastPollData as Record<string, unknown> | null;
+        commitGeneratedUrls(
+          validUrls,
+          typeof completedPollData?.modelName === 'string' ? completedPollData.modelName : canvasGenPureModel,
+          typeof completedPollData?.providerName === 'string' ? completedPollData.providerName : undefined,
+        );
         // 设置面板预览框的结果
         setCanvasGenPreviewUrl(validUrls[0]);
         setCanvasGenProgress(100);
@@ -5866,12 +5850,14 @@ export function InfiniteCanvas({
       const errorMsg = err instanceof Error ? err.message : '生成失败';
       // Show error on frame
       if (currentFrameId) {
-        onImagesChange(imagesRef.current.map(img => {
+        const nextImages = imagesRef.current.map(img => {
           if (img.id === currentFrameId) {
             return { ...img, processing: { label: errorMsg, status: 'failed', progress: 0 } };
           }
           return img;
-        }));
+        });
+        imagesRef.current = nextImages;
+        onImagesChange(nextImages);
       }
     } finally {
       setCanvasGenGenerating(false);
