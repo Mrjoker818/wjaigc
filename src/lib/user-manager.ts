@@ -689,6 +689,29 @@ export class UserManager {
                 mergedImages.push(img);
               }
             }
+            // ★ 防止僵尸任务恢复：过滤掉已失败/取消/错误的处理占位框
+            // 服务器可能保存了旧状态的占位框（如 queued→服务器→failed→用户删除），
+            // 合并时这些占位框会从服务器端被恢复，导致已删除的失败任务重新出现。
+            // 这里按 id 统一过滤，确保任何来源的终端状态占位框都不会被合并。
+            const terminalProcessingStatuses = new Set(['failed', 'cancelled', 'error']);
+            const filteredMergedImages = mergedImages.filter(img => {
+              if (!img.isProcessingPlaceholder) return true;
+              const status = img.processing?.status as string | undefined;
+              // 终端状态：已失败/取消/错误 → 永不恢复
+              if (status && terminalProcessingStatuses.has(status)) return false;
+              // 非终端状态(queued/processing)但本地没有对应图片 → 说明本地已删除，服务器数据是过期的
+              if (status && !localImgMap.has(img.id)) {
+                console.log(`[Sync] merge: filtered out stale processing placeholder ${img.id} (status=${status}, missing in local)`);
+                return false;
+              }
+              return true;
+            });
+            if (filteredMergedImages.length < mergedImages.length) {
+              console.log(`[Sync] merge: filtered out ${mergedImages.length - filteredMergedImages.length} terminal processing placeholders`);
+            }
+            // 用过滤后的数组替换
+            mergedImages.length = 0;
+            mergedImages.push(...filteredMergedImages);
             // 取双方较新的 updatedAt
             const localTime = lp.updatedAt || lp.createdAt || 0;
             const serverTime = sp.updatedAt || sp.createdAt || 0;
