@@ -1386,6 +1386,7 @@ export function InfiniteCanvas({
   const [annotationTool, setAnnotationTool] = useState<'pin' | 'region' | 'brush'>('pin');
   // Brush mask drawing state
   const [brushDrawingAnnId, setBrushDrawingAnnId] = useState<string | null>(null);
+  const brushDrawingAnnIdRef = useRef<string | null>(null);
   const [annotationBrushSize, setAnnotationBrushSize] = useState(20);
   const [annotationBrushColor, setAnnotationBrushColor] = useState('#ef4444');
   const brushCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -2690,8 +2691,7 @@ export function InfiniteCanvas({
           setAnnotations(prev => [...prev, newAnn]);
           setEditingAnnotationId(newAnn.id);
           setBrushDrawingAnnId(newAnn.id);
-
-          // Initialize brush canvas overlay for this image — use original dimensions
+          brushDrawingAnnIdRef.current = newAnn.id;
           const overlayW = targetImg.originalWidth || targetImg.width;
           const overlayH = targetImg.originalHeight || targetImg.height;
           const scaleRatioX = overlayW / targetImg.width;
@@ -2833,8 +2833,9 @@ export function InfiniteCanvas({
       const canvasPos = screenToCanvas(e.clientX, e.clientY);
 
       // Brush drawing (clamped to image bounds)
-      if (isBrushDrawingRef.current && brushDrawingAnnId && brushCtxRef.current) {
-        const ann = annotations.find(a => a.id === brushDrawingAnnId);
+      const activeBrushAnnotationId = brushDrawingAnnIdRef.current;
+      if (isBrushDrawingRef.current && activeBrushAnnotationId && brushCtxRef.current) {
+        const ann = annotations.find(a => a.id === activeBrushAnnotationId);
         const targetImg = ann?.targetImageId ? images.find(i => i.id === ann.targetImageId) : null;
         if (targetImg) {
           const scaleRatio = brushScaleRef.current;
@@ -3040,16 +3041,18 @@ export function InfiniteCanvas({
 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
     // Brush drawing completion
-    if (isBrushDrawingRef.current && brushDrawingAnnId && brushCanvasRef.current) {
+    const activeBrushAnnotationId = brushDrawingAnnIdRef.current;
+    if (isBrushDrawingRef.current && activeBrushAnnotationId && brushCanvasRef.current) {
       isBrushDrawingRef.current = false;
       // Export brush mask as data URL and save to annotation
       const maskDataUrl = brushCanvasRef.current.toDataURL('image/png');
       // Also save brush strokes for persistent rendering (like asui-canvas)
       const strokesSnapshot = [...brushStrokesRef.current];
       setAnnotations(prev => prev.map(a =>
-        a.id === brushDrawingAnnId ? { ...a, brushMaskDataUrl: maskDataUrl, brushStrokesData: strokesSnapshot } : a
+        a.id === activeBrushAnnotationId ? { ...a, brushMaskDataUrl: maskDataUrl, brushStrokesData: strokesSnapshot } : a
       ));
       setBrushDrawingAnnId(null);
+      brushDrawingAnnIdRef.current = null;
       brushCanvasRef.current = null;
       brushCtxRef.current = null;
       brushStrokesRef.current = [];
