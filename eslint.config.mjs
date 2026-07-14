@@ -46,6 +46,8 @@ const eslintConfig = defineConfig([
     'dist/**',
     // Script files (CommonJS):
     'scripts/**/*.js',
+    // User assets (upgrade packages etc):
+    'assets/**',
     // Python venv (contains minified JS from iopaint):
     '.venv/**',
   ]),

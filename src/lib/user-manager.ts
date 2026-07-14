@@ -342,7 +342,7 @@ export class UserManager {
 
       // 检测异常：如果某个项目从≥N张掉到0，标记，用快照数据修复
       let needRestore = false;
-      let restoreSnapshot: any = null;
+      let restoreSnapshot: unknown = null;
       for (const [uid, ud] of Object.entries(this.multiUserData.userData as Record<string, any>)) {
         const projects = ud?.projects || [];
         for (const proj of projects) {
@@ -358,7 +358,7 @@ export class UserManager {
               try {
                 const snapData = JSON.parse(snap.payload);
                 const snapUd = snapData?.userData?.[uid];
-                const snapProj = snapUd?.projects?.find((p: any) => (p.id || p.projectId) === pid);
+                const snapProj = snapUd?.projects?.find((p: Record<string, unknown>) => (p.id || p.projectId) === pid);
                 if (snapProj && (snapProj.canvasImages || []).length >= 10) {
                   proj.canvasImages = snapProj.canvasImages;
                   proj.updatedAt = Date.now();

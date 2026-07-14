@@ -824,8 +824,8 @@ export async function POST(request: NextRequest) {
   const startTime = Date.now();
   let deductedCredits = 0;
   let sessionUser: any = null;
-  let finalModel = '';
-  let finalProviderId = '';
+  const finalModel = '';
+  const finalProviderId = '';
   try {
     const body = await resolveServerProvider(await request.json() as ImageTo3DRequest);
     // 输入校验

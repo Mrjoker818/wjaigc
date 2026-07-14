@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Extract theme colors from ppt/theme/theme1.xml
-    let themeColors: string[] = [];
+    const themeColors: string[] = [];
     const themeXml = await zip.file('ppt/theme/theme1.xml')?.async('string');
     if (themeXml) {
       const colorRegex = /<a:srgbClr val="([0-9A-Fa-f]{6})"/g;

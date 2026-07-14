@@ -490,8 +490,8 @@ export async function POST(request: NextRequest) {
  * GET /api/video/generate - 获取支持的视频模型列表信息
  */
 export async function GET() {
-  let deductedCredits = 0;
-  let sessionUser: any = null;
+  const deductedCredits = 0;
+  const sessionUser: any = null;
   try {
     return NextResponse.json({
       defaultRatios: ['1:1', '4:3', '16:9', '9:16', '21:9'],

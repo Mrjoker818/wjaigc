@@ -754,7 +754,7 @@ export async function POST(req: NextRequest) {
   let deductedCredits = 0;
   let sessionUser: any = null;
   let selectedMode = '';
-  let engineUsed = '';
+  const engineUsed = '';
   try {
     const body = await req.json();
     // 输入校验

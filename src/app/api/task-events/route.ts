@@ -66,7 +66,7 @@ export async function GET(request: NextRequest) {
       } catch { return; }
 
       // 心跳变量提前声明，避免回调中引用未赋值变量
-      let heartbeat: ReturnType<typeof setInterval> | undefined;
+      let heartbeat: ReturnType<typeof setInterval> | undefined = undefined;
 
       // 订阅任务事件（按用户过滤，仅推送当前用户的任务）
       const unsubscribe = subscribeToTaskEvents((event: TaskEvent) => {

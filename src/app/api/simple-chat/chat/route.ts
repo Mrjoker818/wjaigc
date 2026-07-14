@@ -207,7 +207,7 @@ export async function POST(request: NextRequest) {
 
         const decoder = new TextDecoder();
         let buffer = '';
-        let toolCalls: Record<number, { id: string; name: string; arguments: string }> = {};
+        const toolCalls: Record<number, { id: string; name: string; arguments: string }> = {};
         let fullContent = '';
 
         while (true) {

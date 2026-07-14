@@ -67,7 +67,7 @@ function inferModelConfig(modelId: string, profile: ApiCompatProfile, providerNa
   // ★ 使用核心配置中的模型列表判断参数类型（保持与 UI 一致）
   // 核心改进：不再简单依赖关键词匹配，而是使用规范化的模型能力表
   const paramTypeFromConfig = getModelParamType(modelId);
-  let paramType: ModelConfig['paramType'] = paramTypeFromConfig;
+  const paramType: ModelConfig['paramType'] = paramTypeFromConfig;
 
   // 根据模型名称推断是否支持图生图
   // 大多数现代图像模型都支持图生图，只有极少数纯文生图模型不支持
@@ -418,7 +418,7 @@ export async function POST(request: NextRequest) {
             const bgPollProviderId = bgData.providerId || effectiveProviderId;
             let bgPollAttempts = 0;
             const bgMaxPollAttempts = 120;
-            let htmlResponseRetryCount = 0;
+            const htmlResponseRetryCount = 0;
             const maxHtmlResponseRetries = 5;
             const collectedImageUrls: string[] = [];
             const collectedMaskUrls: string[] = [];

@@ -12,7 +12,7 @@ import os from 'os';
  * for knowledge base indexing and AI reference.
  */
 export async function POST(req: NextRequest) {
-  let tmpPath: string | null = null;
+  const tmpPath: string | null = null;
 
   try {
     const body = await req.json();

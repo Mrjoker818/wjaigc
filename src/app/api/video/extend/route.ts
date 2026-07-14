@@ -29,8 +29,8 @@ export async function POST(request: NextRequest) {
   const startTime = Date.now();
   let deductedCredits = 0;
   let sessionUser: any = null;
-  let model = '';
-  let providerId = '';
+  const model = '';
+  const providerId = '';
   try {
     const body = await request.json();
     // 输入校验

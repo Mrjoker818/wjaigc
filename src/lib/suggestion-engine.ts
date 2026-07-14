@@ -164,7 +164,7 @@ const SUGGESTION_RULES: Record<ContentCategory, Suggestion[]> = {
  * @returns 建议列表（最多返回6条，按优先级排序）
  */
 export function generateSuggestions(context: SuggestionContext): Suggestion[] {
-  let suggestions = SUGGESTION_RULES[context.contentCategory] || SUGGESTION_RULES.unknown;
+  const suggestions = SUGGESTION_RULES[context.contentCategory] || SUGGESTION_RULES.unknown;
   
   // 根据上下文特征动态调整建议
   if (context.hasTransparentBackground) {

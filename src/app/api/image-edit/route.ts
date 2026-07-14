@@ -1849,8 +1849,8 @@ export async function POST(request: NextRequest) {
     // ★ 模型别名规范化：延迟到选定 provider 后再做精确匹配，避免误剥离 PearAPI 的 -4k/-2k 后缀
     const lookupModel = modelStr;
     // 初始仅做 quality/resolution 后缀推断（不剥离别名）
-    let normalized = normalizeModelForApi(modelStr, { providerModels: [] });
-    let apiModelStr = modelStr;
+    const normalized = normalizeModelForApi(modelStr, { providerModels: [] });
+    const apiModelStr = modelStr;
 
     // Content safety check (for actions that accept prompt input)
     if (prompt && typeof prompt === 'string') {

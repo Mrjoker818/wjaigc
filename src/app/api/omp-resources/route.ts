@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { listResources } from '@/lib/desktop-cloud';
 
@@ -69,8 +69,7 @@ function extractStaticResources(): Array<Record<string, unknown>> {
     const catsDir = join(dir, 'categories');
     if (!existsSync(catsDir)) return [];
     // 静态数据为每个分类一个json，包含 items/resources 数组
-    const fs = require('fs');
-    const files: string[] = fs.readdirSync(catsDir).filter((f: string) => f.endsWith('.json'));
+    const files: string[] = readdirSync(catsDir).filter((f: string) => f.endsWith('.json'));
     for (const f of files) {
       try {
         const data = JSON.parse(readFileSync(join(catsDir, f), 'utf-8'));

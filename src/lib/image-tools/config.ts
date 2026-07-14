@@ -2,7 +2,7 @@
 // Image Tools — Configuration
 // ============================================================
 
-import fs from 'fs';
+import fs, { accessSync } from 'fs';
 import path from 'path';
 
 let _serverDataRootCache: string | null = null;
@@ -128,7 +128,7 @@ const VENV_PYTHON = path.join(process.cwd(), '.venv', 'bin', 'python3');
 const SYSTEM_PYTHON = 'python3';
 const VENV_EXISTS = (() => {
   try {
-    require('fs').accessSync(VENV_PYTHON);
+    accessSync(VENV_PYTHON);
     return true;
   } catch {
     return false;
@@ -136,7 +136,7 @@ const VENV_EXISTS = (() => {
 })();
 const SPACE_VENV_EXISTS = (() => {
   try {
-    require('fs').accessSync(SPACE_VENV_PYTHON);
+    accessSync(SPACE_VENV_PYTHON);
     return true;
   } catch {
     return false;

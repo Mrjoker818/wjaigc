@@ -210,7 +210,7 @@ export async function POST(request: NextRequest) {
       const dataRoot = getServerDataRoot();
 
       try {
-        let allS3Keys: string[] = [];
+        const allS3Keys: string[] = [];
         let token: string | undefined;
         let pages = 0;
         const prefix = 'images/';

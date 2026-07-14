@@ -492,8 +492,8 @@ export async function POST(request: NextRequest) {
   const startTime = Date.now();
   let deductedCredits = 0;
   let sessionUser: any = null;
-  let selectedModel = '';
-  let providerIdUsed = '';
+  const selectedModel = '';
+  const providerIdUsed = '';
   try {
     const body = await request.json();
     // 输入校验

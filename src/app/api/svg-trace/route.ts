@@ -2258,7 +2258,9 @@ export async function POST(req: NextRequest) {
         if (!svgContent || svgContent.trim().length < 50) {
           console.warn('[svg-trace] VTracer输出为空，尝试ImageTracer.js兜底');
           try {
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
             const ImageTracer = require('imagetracerjs');
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
             const sharp = require('sharp');
             const pngBuffer = await sharp(preprocessed).png().toBuffer();
             const base64Data = pngBuffer.toString('base64');
@@ -2409,6 +2411,7 @@ export async function POST(req: NextRequest) {
         // 获取原始图片尺寸用于 SVG 标准化
         let bwImgW = 0, bwImgH = 0;
         try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
           const sharp = require('sharp');
           const meta = await sharp(inputBuffer).metadata();
           bwImgW = meta.width || 0;

@@ -210,7 +210,7 @@ export async function GET(request: NextRequest) {
 
   // 2. Fetch from upstream
   try {
-    let res = await fetch(parsedUrl.href, {
+    const res = await fetch(parsedUrl.href, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (compatible; 3DProxy/1.0)',
         'Accept': '*/*',

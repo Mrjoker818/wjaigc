@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createReadStream, statSync, existsSync } from 'fs';
+import { createReadStream, statSync, existsSync, readdirSync } from 'fs';
 import { join, relative } from 'path';
 import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { createGzip } from 'zlib';
+import { spawn, execSync } from 'child_process';
 
 const PROJECT_ROOT = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
 
@@ -30,11 +31,10 @@ interface FileEntry {
  */
 function walkDir(dir: string, baseDir: string, excludes: string[], includes: string[] | null): FileEntry[] {
   const results: FileEntry[] = [];
-  const fs = require('fs');
   
-  if (!fs.existsSync(dir)) return results;
+  if (!existsSync(dir)) return results;
   
-  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  const entries = readdirSync(dir, { withFileTypes: true });
   
   for (const entry of entries) {
     const fullPath = join(dir, entry.name);
@@ -80,8 +80,6 @@ function walkDir(dir: string, baseDir: string, excludes: string[], includes: str
  * Uses Node.js child_process to call tar for reliability with large directories
  */
 async function createTarGz(scope: string): Promise<{ stream: Readable; fileCount: number; totalSize: number }> {
-  const { spawn } = require('child_process');
-  
   const excludes = [...EXCLUDE_COMMON];
   let includes: string[] | null = null;
   
@@ -144,11 +142,10 @@ async function createTarGz(scope: string): Promise<{ stream: Readable; fileCount
   
   // Count files (non-blocking, approximate)
   let fileCount = 0;
-  let totalSize = 0;
+  const totalSize = 0;
   
   // Quick file count for metadata
   try {
-    const { execSync } = require('child_process');
     let findCmd = `find ${PROJECT_ROOT}`;
     for (const exc of EXCLUDE_COMMON) {
       if (!exc.startsWith('*.')) {

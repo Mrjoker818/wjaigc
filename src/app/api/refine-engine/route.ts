@@ -872,8 +872,8 @@ export async function POST(request: NextRequest) {
   const startTime = Date.now();
   let deductedCredits = 0;
   let sessionUser: any = null;
-  let refineModel = '';
-  let refineProviderId = '';
+  const refineModel = '';
+  const refineProviderId = '';
   try {
     const body = await request.json();
     const { action } = body;

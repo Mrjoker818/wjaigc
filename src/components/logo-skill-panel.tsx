@@ -134,7 +134,7 @@ function ModelDropdownPortal({
         zIndex: 9999,
       });
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [buttonRef]);
 
   return ReactDOM.createPortal(

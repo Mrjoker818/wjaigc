@@ -58,8 +58,8 @@ export async function POST(request: NextRequest) {
   const startTime = Date.now();
   let deductedCredits = 0;
   let sessionUser: any = null;
-  let selectedModel = '';
-  let providerId = '';
+  const selectedModel = '';
+  const providerId = '';
   try {
     const authResult = await requireApiAuthOrReject(request);
     if (authResult instanceof NextResponse) return authResult;
