@@ -59,6 +59,8 @@ export async function ensureAiPsdTables(): Promise<void> {
         material_type TEXT DEFAULT '',
         image_model TEXT DEFAULT '',
         llm_model TEXT DEFAULT '',
+        image_provider_id TEXT DEFAULT '',
+        llm_provider_id TEXT DEFAULT '',
         created_at BIGINT NOT NULL DEFAULT 0,
         updated_at BIGINT NOT NULL DEFAULT 0
       )
@@ -92,6 +94,8 @@ export async function ensureAiPsdTables(): Promise<void> {
       ['brand_slogan', 'TEXT DEFAULT \'\''],
       ['brand_colors', 'TEXT DEFAULT \'\''],
       ['material_type', 'TEXT DEFAULT \'\''],
+      ['image_provider_id', 'TEXT DEFAULT \'\''],
+      ['llm_provider_id', 'TEXT DEFAULT \'\''],
     ] as const;
     for (const [col, type] of newCols) {
       try {
@@ -121,11 +125,11 @@ export async function dbCreateTask(task: AiPsdTask): Promise<boolean> {
         report_url, error_message, layer_plan, reference_image_urls,
         product_image_urls, logo_image_urls, brand_name, brand_slogan,
         brand_colors, material_type, image_model, llm_model,
-        created_at, updated_at
+        image_provider_id, llm_provider_id, created_at, updated_at
       ) VALUES (
         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
         $18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,
-        $33,$34,$35,$36,$37,$38,$39,$40,$41
+        $33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43
       )
     `, [
       task.id, task.userId || null, task.generationMode, task.prompt,
@@ -144,6 +148,7 @@ export async function dbCreateTask(task: AiPsdTask): Promise<boolean> {
       Array.isArray(task.brandColors) ? JSON.stringify(task.brandColors) : (task.brandColors || ''),
       task.materialType || '',
       task.imageModel || '', task.llmModel || '',
+      task.imageProviderId || '', task.llmProviderId || '',
       task.createdAt, task.updatedAt,
     ]);
     return true;
@@ -306,6 +311,8 @@ function rowToTask(row: Record<string, unknown>): AiPsdTask {
       : undefined,
     imageModel: (row.image_model as string) || undefined,
     llmModel: (row.llm_model as string) || undefined,
+    imageProviderId: (row.image_provider_id as string) || undefined,
+    llmProviderId: (row.llm_provider_id as string) || undefined,
     brandName: (row.brand_name as string) || undefined,
     brandSlogan: (row.brand_slogan as string) || undefined,
     brandColors: Array.isArray(row.brand_colors) ? row.brand_colors as string[]

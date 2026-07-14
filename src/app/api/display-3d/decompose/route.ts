@@ -7,6 +7,7 @@ import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getSessionUser } from '@/lib/server-auth';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { validateApiInputs } from '@/lib/api-validator';
+import { resolveRequestedImageModel } from '@/lib/display3d-request-contract';
 
 export async function POST(request: NextRequest) {
   try {
@@ -41,7 +42,7 @@ export async function POST(request: NextRequest) {
     }
 
     const profile = resolveCompatProfile(provider);
-    const rawSelectedModel = provider.selectedModels?.[0] || model || 'gemini-2.5-flash';
+    const rawSelectedModel = resolveRequestedImageModel({ requestedModel: model, providerModels: provider.selectedModels, fallbackModel: 'gemini-2.5-flash' });
     const { apiModelName: selectedModel } = normalizeModelForApi(rawSelectedModel);
 
     // Register task

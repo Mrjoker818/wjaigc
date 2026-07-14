@@ -400,10 +400,16 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = 'image/*';
-    input.onchange = (e) => {
+    input.onchange = async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (!file) return;
-      const url = URL.createObjectURL(file);
+      const formData = new FormData();
+      formData.append('file', file);
+      const response = await fetch('/api/upload', { method: 'POST', body: formData });
+      if (!response.ok) return;
+      const data = await response.json();
+      const url = data.url as string;
+      if (!url) return;
       if (type === 'Logo') setLogoUrl(url);
       else setUploads(prev => [...prev, { type, url, name: file.name }]);
     };

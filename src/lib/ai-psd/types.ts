@@ -262,6 +262,8 @@ export interface AiPsdTask {
   // 模型选择
   imageModel?: string;
   llmModel?: string;
+  imageProviderId?: string;
+  llmProviderId?: string;
   createdAt: number;
   updatedAt: number;
 }

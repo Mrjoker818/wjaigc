@@ -276,7 +276,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
       const data = await resp.json();
       if (data.url) setRefImage(data.url);
     } catch {
-      setRefImage(URL.createObjectURL(file));
+      setRefImage('');
     }
   }, []);
 
@@ -297,7 +297,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
       const data = await resp.json();
       if (data.url) setProductImage(data.url);
     } catch {
-      setProductImage(URL.createObjectURL(file));
+      setProductImage('');
     }
   }, []);
 

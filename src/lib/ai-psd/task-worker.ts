@@ -218,7 +218,7 @@ export async function runAiPsdTask(taskId: string): Promise<void> {
     const llmResult = await callLLM(userPrompt, systemPrompt, t.llmModel, {
       maxTokens: 4096,
       temperature: 0.7,
-    });
+    }, t.llmProviderId);
 
     if (!llmResult.success || !llmResult.content) {
       throw new Error(`LLM 规划调用失败: ${llmResult.error ?? '无返回内容'}`);
@@ -259,13 +259,13 @@ export async function runAiPsdTask(taskId: string): Promise<void> {
       quality: t.outputQuality === 'hd' ? 'hd' : 'standard',
       n: 1,
       ...(previewRefImage ? { referenceImageUrl: previewRefImage, strength: previewStrength } : {}),
-    });
+    }, t.imageProviderId);
 
     if (previewResult.success) {
       let previewUrl = previewResult.imageUrl || previewResult.imageUrls?.[0];
       // 异步任务模式：有taskId但无imageUrls，需要轮询
       if (!previewUrl && previewResult.taskId) {
-        const pollResult = await pollImageTask(previewResult.taskId, t.imageModel);
+        const pollResult = await pollImageTask(previewResult.taskId, t.imageModel, 60, 5000, t.imageProviderId);
         if (pollResult.success && (pollResult.imageUrl || pollResult.imageUrls?.length)) {
           previewUrl = pollResult.imageUrl || pollResult.imageUrls![0];
         }
@@ -343,7 +343,7 @@ export async function runAiPsdTask(taskId: string): Promise<void> {
             quality: t.outputQuality === 'hd' ? 'hd' : 'standard',
             n: 1,
             ...(layerRefImage ? { referenceImageUrl: layerRefImage, strength: layerStrength } : {}),
-          });
+          }, t.imageProviderId);
 
           if (imgResult.success) {
             // 异步任务模式：有taskId但无imageUrls，需要轮询
@@ -351,7 +351,7 @@ export async function runAiPsdTask(taskId: string): Promise<void> {
 
             if (!imageUrl && imgResult.taskId) {
               console.info(`[ai-psd-worker] Async image task for layer "${layer.name}", polling...`);
-              const pollResult = await pollImageTask(imgResult.taskId, t.imageModel);
+              const pollResult = await pollImageTask(imgResult.taskId, t.imageModel, 60, 5000, t.imageProviderId);
               if (pollResult.success && (pollResult.imageUrl || pollResult.imageUrls?.length)) {
                 imageUrl = pollResult.imageUrl || pollResult.imageUrls![0];
               } else {

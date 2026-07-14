@@ -80,9 +80,10 @@ export async function callLLM(
   prompt: string,
   systemPrompt: string,
   llmModel?: string,
-  options?: { maxTokens?: number; temperature?: number }
+  options?: { maxTokens?: number; temperature?: number },
+  providerId?: string,
 ): Promise<LLMCallResult> {
-  const provider = await getLLMProvider(llmModel);
+  const provider = await getLLMProvider(llmModel, providerId);
   if (!provider) {
     return { success: false, error: '未找到可用的LLM模型提供商，请在管理员后台配置' };
   }
@@ -284,9 +285,10 @@ export async function generateImage(
     n?: number;
     referenceImageUrl?: string;
     strength?: number;
-  }
+  },
+  providerId?: string,
 ): Promise<ImageGenerationResult> {
-  const provider = await getImageProvider(imageModel);
+  const provider = await getImageProvider(imageModel, providerId);
   if (!provider) {
     return { success: false, error: '未找到可用的图像模型提供商，请在管理员后台配置' };
   }
@@ -392,9 +394,10 @@ export async function pollImageTask(
   taskId: string,
   imageModel?: string,
   maxAttempts: number = 60,
-  intervalMs: number = 5000
+  intervalMs: number = 5000,
+  providerId?: string,
 ): Promise<ImageGenerationResult> {
-  const provider = await getImageProvider(imageModel);
+  const provider = await getImageProvider(imageModel, providerId);
   if (!provider) {
     return { success: false, error: '未找到可用的图像模型提供商' };
   }

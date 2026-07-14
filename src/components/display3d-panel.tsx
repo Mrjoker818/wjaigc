@@ -3,6 +3,7 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { getModelDisplayName } from '@/lib/model-name-map';
+import { isServerReadableImageUrl } from '@/lib/display3d-request-contract';
 import {
   Box, X, Minus, Maximize2, Upload, Image as ImageIcon, Layers,
   ChevronDown, Sparkles, Download, Send, Search,
@@ -281,11 +282,13 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
           }));
         setAvailableModels(models);
         // Auto-select from localStorage or first available
-        const saved = typeof window !== 'undefined' ? localStorage.getItem('currentImageModel') : '';
+        const saved = localStorage.getItem('wujie_selected_model');
         if (saved) {
-          const savedProvider = typeof window !== 'undefined' ? localStorage.getItem('currentImageProviderId') : '';
-          const match = models.find((m: { providerId: string; model: string }) => m.model === saved && m.providerId === savedProvider);
-          if (match) { setSelectedModel(match.model); setSelectedProviderId(match.providerId); return; }
+          try {
+            const parsed = JSON.parse(saved) as { model?: string; id?: string; providerId?: string };
+            const match = models.find((m: { providerId: string; model: string }) => m.model === (parsed.model || parsed.id) && m.providerId === parsed.providerId);
+            if (match) { setSelectedModel(match.model); setSelectedProviderId(match.providerId); return; }
+          } catch {}
         }
         if (models.length > 0) { setSelectedModel(models[0].model); setSelectedProviderId(models[0].providerId); }
       })
@@ -382,8 +385,16 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
     input.onchange = (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (!file) return;
-      const url = URL.createObjectURL(file);
-      setAssets(prev => [...prev, { id: Date.now().toString(), type, url, name: file.name }]);
+      const formData = new FormData();
+      formData.append('file', file);
+      fetch('/api/upload', { method: 'POST', body: formData })
+        .then(response => response.ok ? response.json() : Promise.reject(new Error('upload failed')))
+        .then(data => {
+          if (isServerReadableImageUrl(data.url)) {
+            setAssets(prev => [...prev, { id: Date.now().toString(), type, url: data.url, name: file.name }]);
+          }
+        })
+        .catch(() => {});
     };
     input.click();
   };
@@ -427,7 +438,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
             const taskRes = await fetch('/api/poll-task', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ taskId, model: selectedModel, providerId: selectedProviderId }),
+              body: JSON.stringify({ taskId, model: selectedChatModel, providerId: selectedChatProviderId }),
             });
             const taskData = await taskRes.json();
             if (taskData.status === 'completed') {
