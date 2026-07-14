@@ -2825,7 +2825,7 @@ export function InfiniteCanvas({
       setBoxSelectStart({ x: e.clientX, y: e.clientY });
       setBoxSelectEnd({ x: e.clientX, y: e.clientY });
     }
-  }, [isSpacePressed, viewOffset, selectedIds, images, screenToCanvas, hitTestImage, selectImage, editMode, zoom, handleEditMouseDown, compareSelecting, compareImages, annotationMode]);
+  }, [isSpacePressed, viewOffset, selectedIds, images, screenToCanvas, hitTestImage, selectImage, editMode, zoom, handleEditMouseDown, compareSelecting, compareImages, annotationMode, annotationTool, annotationBrushSize, annotationBrushColor, annotations]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     // Annotation region drag tracking or brush drawing
