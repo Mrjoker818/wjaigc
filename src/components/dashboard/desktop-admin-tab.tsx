@@ -3,6 +3,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   Box,
   CheckCircle2,
   Clipboard,
@@ -276,6 +286,7 @@ export default function DesktopAdminTab({
   const [resourceForm, setResourceForm] = useState<CloudResource>(emptyResourceForm());
   const [resourcePayloadText, setResourcePayloadText] = useState(JSON.stringify(emptyResourceForm().payload, null, 2));
   const [updateFile, setUpdateFile] = useState<File | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<{ kind: 'resource' | 'backup'; id: string } | null>(null);
 
   const cardClass = `${softClass} rounded-xl border ${isDark ? 'border-white/10' : 'border-gray-200'}`;
   const buttonGhost = `rounded-lg px-3 py-2 text-xs font-medium transition-colors ${isDark ? 'bg-white/5 hover:bg-white/10 text-white/75' : 'bg-gray-100 hover:bg-gray-200 text-gray-700'}`;
@@ -433,7 +444,7 @@ export default function DesktopAdminTab({
   }, []);
 
   const deleteResource = useCallback(async (id: string) => {
-    if (!id || !window.confirm('确认删除这个公共资源？')) return;
+    if (!id) return;
     const response = await fetch('/api/admin/resources', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -476,7 +487,7 @@ export default function DesktopAdminTab({
   }, [loadAll, updateConfig, updateFile]);
 
   const deleteBackup = useCallback(async (id: string) => {
-    if (!id || !window.confirm('确认删除这个云端备份？')) return;
+    if (!id) return;
     const response = await fetch(`/api/admin/backups/${encodeURIComponent(id)}`, { method: 'DELETE' });
     const json = await response.json().catch(() => ({}));
     if (!response.ok || json.success === false) {
@@ -486,6 +497,17 @@ export default function DesktopAdminTab({
     toast.success('备份已删除');
     await loadAll();
   }, [loadAll]);
+
+  const confirmDelete = useCallback(async () => {
+    const action = pendingDelete;
+    if (!action) return;
+    setPendingDelete(null);
+    if (action.kind === 'resource') {
+      await deleteResource(action.id);
+      return;
+    }
+    await deleteBackup(action.id);
+  }, [deleteBackup, deleteResource, pendingDelete]);
 
   const copyConnection = useCallback(async () => {
     await navigator.clipboard.writeText(desktopEnvText);
@@ -655,7 +677,7 @@ export default function DesktopAdminTab({
                 <td><div className={`font-medium ${textPrimary}`}>{item.originalFilename || item.filename}</div><div className={`text-[11px] ${textSecondary}`}>{item.id}</div></td>
                 <td><div className={`inline-flex rounded-full border px-2 py-1 text-xs ${isDark ? 'border-white/10' : 'border-gray-200'}`}>{item.userId || '-'}</div><div className={`mt-1 text-xs ${textSecondary}`}>{item.category || '-'}</div></td>
                 <td><div>{formatBytes(item.size)}</div><div className={`text-xs ${textSecondary}`}>{formatTime(item.createdAt)}</div></td>
-                <td><div className="flex gap-2"><a className={buttonGhost} href={`/api/admin/backups/${encodeURIComponent(item.id)}/download`}><Download size={13} className="inline mr-1" />下载</a><button className="rounded-lg px-3 py-2 text-xs font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20" onClick={() => void deleteBackup(item.id)}><Trash2 size={13} className="inline mr-1" />删除</button></div></td>
+                <td><div className="flex gap-2"><a className={buttonGhost} href={`/api/admin/backups/${encodeURIComponent(item.id)}/download`}><Download size={13} className="inline mr-1" />下载</a><button className="rounded-lg px-3 py-2 text-xs font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20" onClick={() => setPendingDelete({ kind: 'backup', id: item.id })}><Trash2 size={13} className="inline mr-1" />删除</button></div></td>
               </tr>
             ))}
             {backups.length === 0 && <EmptyRow colSpan={4} text="暂无备份。桌面端本地保存成功后会自动同步一份到这里。" textSecondary={textSecondary} />}
@@ -718,7 +740,7 @@ export default function DesktopAdminTab({
                   <td><div className="flex items-center gap-3">{item.thumbnailUrl ? <img src={item.thumbnailUrl} alt="" className="h-11 w-14 rounded object-cover" /> : <div className="h-11 w-14 rounded bg-black/20" />}<div><div className={`font-medium ${textPrimary}`}>{item.name}</div><div className={`text-xs ${textSecondary}`}>{item.description || item.id}</div></div></div></td>
                   <td><div>{resourceMeta(item.type).label}</div><div className={`text-xs ${textSecondary}`}>{item.category || '-'}</div></td>
                   <td>{item.enabled ? <span className="inline-flex items-center gap-1 text-emerald-400"><CheckCircle2 size={13} />启用</span> : <span className={textSecondary}>停用</span>}</td>
-                  <td><div className="flex gap-2"><button className={buttonGhost} onClick={() => editResource(item)}>编辑</button><button className="rounded-lg px-3 py-2 text-xs font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20" onClick={() => void deleteResource(item.id)}>删除</button></div></td>
+                  <td><div className="flex gap-2"><button className={buttonGhost} onClick={() => editResource(item)}>编辑</button><button className="rounded-lg px-3 py-2 text-xs font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20" onClick={() => setPendingDelete({ kind: 'resource', id: item.id })}>删除</button></div></td>
                 </tr>
               ))}
               {filteredResources.length === 0 && <EmptyRow colSpan={4} text="暂无公共资源" textSecondary={textSecondary} />}
@@ -742,6 +764,23 @@ export default function DesktopAdminTab({
           </Table>
         </DataCard>
       )}
+
+      <AlertDialog open={Boolean(pendingDelete)} onOpenChange={open => { if (!open) setPendingDelete(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认删除</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingDelete?.kind === 'resource' ? '删除后公共资源将无法恢复。' : '删除后云端备份将无法恢复。'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction className="bg-red-600 text-white hover:bg-red-700" onClick={() => void confirmDelete()}>
+              删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
