@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
+import { ConfirmDialog } from '@/components/custom-dialogs';
 import {
   Box,
   CheckCircle2,
@@ -272,10 +273,17 @@ export default function DesktopAdminTab({
   const [resourceSearch, setResourceSearch] = useState('');
   const [recordSearch, setRecordSearch] = useState('');
   const [savingResource, setSavingResource] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ type: 'resource' | 'backup'; id: string; name?: string } | null>(null);
   const [savingUpdate, setSavingUpdate] = useState(false);
   const [resourceForm, setResourceForm] = useState<CloudResource>(emptyResourceForm());
   const [resourcePayloadText, setResourcePayloadText] = useState(JSON.stringify(emptyResourceForm().payload, null, 2));
   const [updateFile, setUpdateFile] = useState<File | null>(null);
+  const [confirmState, setConfirmState] = useState<{ open: boolean; title: string; message: string; onConfirm: () => void }>({
+    open: false,
+    title: '',
+    message: '',
+    onConfirm: () => {},
+  });
 
   const cardClass = `${softClass} rounded-xl border ${isDark ? 'border-white/10' : 'border-gray-200'}`;
   const buttonGhost = `rounded-lg px-3 py-2 text-xs font-medium transition-colors ${isDark ? 'bg-white/5 hover:bg-white/10 text-white/75' : 'bg-gray-100 hover:bg-gray-200 text-gray-700'}`;
@@ -433,21 +441,9 @@ export default function DesktopAdminTab({
   }, []);
 
   const deleteResource = useCallback(async (id: string) => {
-    if (!id || !window.confirm('确认删除这个公共资源？')) return;
-    const response = await fetch('/api/admin/resources', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'delete', id }),
-    });
-    const json = await response.json().catch(() => ({}));
-    if (!response.ok || json.success === false) {
-      toast.error(String(json.error || '资源删除失败'));
-      return;
-    }
-    toast.success('资源已删除');
-    if (resourceForm.id === id) resetResourceForm();
-    await loadAll();
-  }, [loadAll, resetResourceForm, resourceForm.id]);
+    if (!id) return;
+    setDeleteTarget({ type: 'resource', id });
+  }, []);
 
   const saveUpdate = useCallback(async () => {
     setSavingUpdate(true);
@@ -476,16 +472,9 @@ export default function DesktopAdminTab({
   }, [loadAll, updateConfig, updateFile]);
 
   const deleteBackup = useCallback(async (id: string) => {
-    if (!id || !window.confirm('确认删除这个云端备份？')) return;
-    const response = await fetch(`/api/admin/backups/${encodeURIComponent(id)}`, { method: 'DELETE' });
-    const json = await response.json().catch(() => ({}));
-    if (!response.ok || json.success === false) {
-      toast.error(String(json.error || '备份删除失败'));
-      return;
-    }
-    toast.success('备份已删除');
-    await loadAll();
-  }, [loadAll]);
+    if (!id) return;
+    setDeleteTarget({ type: 'backup', id });
+  }, []);
 
   const copyConnection = useCallback(async () => {
     await navigator.clipboard.writeText(desktopEnvText);
@@ -742,6 +731,40 @@ export default function DesktopAdminTab({
           </Table>
         </DataCard>
       )}
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="确认删除"
+        message={deleteTarget?.type === 'backup' ? `确定删除备份「${deleteTarget.name || deleteTarget.id}」？此操作不可恢复。` : `确定删除资源「${deleteTarget?.name || deleteTarget?.id || '未知'}」？此操作不可恢复。`}
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          if (deleteTarget.type === 'backup') {
+            const response = await fetch(`/api/admin/backups/${encodeURIComponent(deleteTarget.id)}`, { method: 'DELETE' });
+            const json = await response.json().catch(() => ({}));
+            if (!response.ok || json.success === false) {
+              toast.error(String(json.error || '备份删除失败'));
+            } else {
+              toast.success('备份已删除');
+              await loadAll();
+            }
+          } else {
+            const response = await fetch('/api/admin/resources', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'delete', id: deleteTarget.id }),
+            });
+            const json = await response.json().catch(() => ({}));
+            if (!response.ok || json.success === false) {
+              toast.error(String(json.error || '资源删除失败'));
+            } else {
+              toast.success('资源已删除');
+              if (resourceForm.id === deleteTarget.id) resetResourceForm();
+              await loadAll();
+            }
+          }
+          setDeleteTarget(null);
+        }}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

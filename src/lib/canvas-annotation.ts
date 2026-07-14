@@ -38,6 +38,10 @@ export interface CanvasAnnotation {
   region?: AnnotationRegion;
   /** 可选：画笔蒙版（base64 data URL，与原图同尺寸，白色=修改区域，黑色=保留区域） */
   brushMaskDataUrl?: string;
+  /** 可选：画笔笔触数据（用于视觉显示轨迹） */
+  brushStrokesData?: Array<{ x: number; y: number }>;
+  /** 可选：画笔大小（用于视觉显示） */
+  brushSize?: number;
   /** 画笔颜色（用于视觉显示，不影响蒙版功能） */
   brushColor?: string;
   /** 当前状态 */

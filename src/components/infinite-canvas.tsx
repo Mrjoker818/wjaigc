@@ -3044,8 +3044,10 @@ export function InfiniteCanvas({
       isBrushDrawingRef.current = false;
       // Export brush mask as data URL and save to annotation
       const maskDataUrl = brushCanvasRef.current.toDataURL('image/png');
+      // Also save brush strokes for persistent rendering (like asui-canvas)
+      const strokesSnapshot = [...brushStrokesRef.current];
       setAnnotations(prev => prev.map(a =>
-        a.id === brushDrawingAnnId ? { ...a, brushMaskDataUrl: maskDataUrl } : a
+        a.id === brushDrawingAnnId ? { ...a, brushMaskDataUrl: maskDataUrl, brushStrokesData: strokesSnapshot } : a
       ));
       setBrushDrawingAnnId(null);
       brushCanvasRef.current = null;
@@ -12280,6 +12282,41 @@ export function InfiniteCanvas({
                       <rect x={rx} y={ry} width={rw} height={rh} fill="none" stroke={fillColor} strokeWidth={1.5} strokeDasharray="6 3" rx={2} opacity={0.7} />
                     );
                   })()}
+                  {/* Persistent brush strokes (like asui-canvas shapes stay on canvas) */}
+                  {ann.brushStrokesData && ann.brushStrokesData.length > 1 && (() => {
+                    const pts = ann.brushStrokesData as { x: number; y: number }[];
+                    const hitImg = ann.targetImageId ? images.find(i => i.id === ann.targetImageId) : null;
+                    // Build smooth SVG path using quadratic bezier midpoints
+                    let smoothD = `M${pts[0].x} ${pts[0].y}`;
+                    for (let i = 1; i < pts.length - 1; i++) {
+                      const midX = (pts[i].x + pts[i + 1].x) / 2;
+                      const midY = (pts[i].y + pts[i + 1].y) / 2;
+                      smoothD += ` Q${pts[i].x} ${pts[i].y} ${midX} ${midY}`;
+                    }
+                    if (pts.length > 1) {
+                      const last = pts[pts.length - 1];
+                      smoothD += ` L${last.x} ${last.y}`;
+                    }
+                    const strokeClr = ann.brushColor || '#ef4444';
+                    const strokeW = ann.brushSize || 12;
+                    return (
+                      <g>
+                        {hitImg && (
+                          <clipPath id={`brush-clip-${ann.id}`}>
+                            <rect x={hitImg.x * zoom + viewOffset.x} y={hitImg.y * zoom + viewOffset.y} width={hitImg.width * zoom} height={hitImg.height * zoom} rx={4} />
+                          </clipPath>
+                        )}
+                        <g clipPath={hitImg ? `url(#brush-clip-${ann.id})` : undefined}>
+                          {/* Glow layer */}
+                          <path d={smoothD} fill="none" stroke={strokeClr} strokeWidth={strokeW + 6} strokeLinecap="round" strokeLinejoin="round" opacity={0.15} />
+                          {/* Main stroke */}
+                          <path d={smoothD} fill="none" stroke={strokeClr} strokeWidth={strokeW} strokeLinecap="round" strokeLinejoin="round" opacity={0.65} />
+                          {/* Core line */}
+                          <path d={smoothD} fill="none" stroke={strokeClr} strokeWidth={Math.max(2, strokeW / 4)} strokeLinecap="round" strokeLinejoin="round" opacity={0.9} />
+                        </g>
+                      </g>
+                    );
+                  })()}
                   {/* Brush mask overlay */}
                   {ann.brushMaskDataUrl && (() => {
                     const hitImg = ann.targetImageId ? images.find(i => i.id === ann.targetImageId) : null;
@@ -12291,7 +12328,7 @@ export function InfiniteCanvas({
                     return (
                       <g>
                         <defs><mask id={`brush-mask-${ann.id}`}><image href={ann.brushMaskDataUrl} x={imgSx} y={imgSy} width={imgSw} height={imgSh} /></mask></defs>
-                        <rect x={imgSx} y={imgSy} width={imgSw} height={imgSh} fill={ann.brushColor || '#d4af37'} opacity={0.4} mask={`url(#brush-mask-${ann.id})`} />
+                        <rect x={imgSx} y={imgSy} width={imgSw} height={imgSh} fill={ann.brushColor || '#d4af37'} opacity={0.25} mask={`url(#brush-mask-${ann.id})`} />
                       </g>
                     );
                   })()}
@@ -12312,12 +12349,30 @@ export function InfiniteCanvas({
                 <rect x={x1} y={y1} width={w} height={h} fill={isMonochrome ? 'rgba(59,130,246,0.1)' : 'rgba(212,175,55,0.1)'} stroke={isMonochrome ? '#3b82f6' : '#d4af37'} strokeWidth={1.5} strokeDasharray="6 3" rx={2} />
               );
             })()}
-            {/* Live brush stroke preview while drawing (clipped to target image) */}
-            {brushStrokes.length > 1 && (() => {
+            {/* Live brush stroke preview while drawing (clipped to target image) — smooth bezier curves */}
+            {brushStrokes.length > 0 && (() => {
               const ann = brushDrawingAnnId ? annotations.find(a => a.id === brushDrawingAnnId) : null;
               const targetImg = ann?.targetImageId ? images.find(i => i.id === ann.targetImageId) : null;
-              const pathD = brushStrokes.map((p, i) => i === 0 ? `M${p.x} ${p.y}` : `L${p.x} ${p.y}`).join(' ');
-              const clipId = `brush-clip-${brushDrawingAnnId || 'live'}`;
+              const pts = brushStrokes;
+              // Build smooth path using quadratic bezier midpoints
+              let smoothPath = `M${pts[0].x} ${pts[0].y}`;
+              if (pts.length === 1) {
+                // Show a dot for single-point preview
+                smoothPath += ` h0.01`;
+              } else {
+                for (let i = 1; i < pts.length - 1; i++) {
+                  const midX = (pts[i].x + pts[i + 1].x) / 2;
+                  const midY = (pts[i].y + pts[i + 1].y) / 2;
+                  smoothPath += ` Q${pts[i].x} ${pts[i].y} ${midX} ${midY}`;
+                }
+                if (pts.length > 1) {
+                  const last = pts[pts.length - 1];
+                  smoothPath += ` L${last.x} ${last.y}`;
+                }
+              }
+              const clipId = `brush-clip-live-${brushDrawingAnnId || 'live'}`;
+              const brushClr = annotationBrushColor || '#ef4444';
+              const brushSz = annotationBrushSize || 12;
               if (targetImg) {
                 const imgSx = targetImg.x * zoom + viewOffset.x;
                 const imgSy = targetImg.y * zoom + viewOffset.y;
@@ -12325,13 +12380,24 @@ export function InfiniteCanvas({
                 const imgSh = targetImg.height * zoom;
                 return (
                   <g>
-                    <defs><clipPath id={clipId}><rect x={imgSx} y={imgSy} width={imgSw} height={imgSh} /></clipPath></defs>
-                    <path d={pathD} fill="none" stroke={annotationBrushColor} strokeWidth={annotationBrushSize} strokeLinecap="round" strokeLinejoin="round" opacity={0.6} clipPath={`url(#${clipId})`} />
+                    <defs><clipPath id={clipId}><rect x={imgSx} y={imgSy} width={imgSw} height={imgSh} rx={4} /></clipPath></defs>
+                    <g clipPath={`url(#${clipId})`}>
+                      {/* Glow layer */}
+                      <path d={smoothPath} fill="none" stroke={brushClr} strokeWidth={brushSz + 6} strokeLinecap="round" strokeLinejoin="round" opacity={0.12} />
+                      {/* Main stroke */}
+                      <path d={smoothPath} fill="none" stroke={brushClr} strokeWidth={brushSz} strokeLinecap="round" strokeLinejoin="round" opacity={0.7} />
+                      {/* Core line */}
+                      <path d={smoothPath} fill="none" stroke={brushClr} strokeWidth={Math.max(1.5, brushSz / 5)} strokeLinecap="round" strokeLinejoin="round" opacity={0.9} />
+                    </g>
                   </g>
                 );
               }
               return (
-                <path d={pathD} fill="none" stroke={annotationBrushColor} strokeWidth={annotationBrushSize} strokeLinecap="round" strokeLinejoin="round" opacity={0.6} />
+                <g>
+                  <path d={smoothPath} fill="none" stroke={brushClr} strokeWidth={brushSz + 6} strokeLinecap="round" strokeLinejoin="round" opacity={0.12} />
+                  <path d={smoothPath} fill="none" stroke={brushClr} strokeWidth={brushSz} strokeLinecap="round" strokeLinejoin="round" opacity={0.7} />
+                  <path d={smoothPath} fill="none" stroke={brushClr} strokeWidth={Math.max(1.5, brushSz / 5)} strokeLinecap="round" strokeLinejoin="round" opacity={0.9} />
+                </g>
               );
             })()}
           </svg>
