@@ -8972,7 +8972,7 @@ export function InfiniteCanvas({
         )}
 
         {/* Canvas images */}
-        <div ref={canvasTransformRef} style={{ transform: `translate(${viewOffset.x}px, ${viewOffset.y}px) scale(${zoom})`, transformOrigin: '0 0', willChange: 'transform', contain: 'layout style' }}>
+        <div ref={canvasTransformRef} style={{ transform: `translate(${viewOffset.x}px, ${viewOffset.y}px) scale(${zoom})`, transformOrigin: '0 0', willChange: 'transform' }}>
           {/* Image Groups */}
           {groups.map(group => {
             const groupImages = images.filter(img => img.groupId === group.id);
