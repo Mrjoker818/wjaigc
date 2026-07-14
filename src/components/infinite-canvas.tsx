@@ -12665,7 +12665,12 @@ export function InfiniteCanvas({
 
         {/* ====== ANNOTATION MODE BANNER ====== */}
         {annotationMode && (
-          <div className={`absolute top-3 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-2 px-4 py-2 rounded-xl shadow-lg ${isMonochrome ? 'bg-white border border-blue-200' : 'bg-[#1a1a1a] border border-gold/30'}`}>
+          <div
+            data-toolbar="annotation-tools"
+            onMouseDown={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+            className={`absolute top-3 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-2 px-4 py-2 rounded-xl shadow-lg ${isMonochrome ? 'bg-white border border-blue-200' : 'bg-[#1a1a1a] border border-gold/30'}`}
+          >
             <MessageCircle size={16} className={isMonochrome ? 'text-blue-500' : 'text-gold'} />
             <span className={`text-sm font-medium ${isMonochrome ? 'text-gray-700' : 'text-text-bright'}`}>批注模式</span>
             {/* Tool selector */}
