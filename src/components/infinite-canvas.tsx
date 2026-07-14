@@ -70,6 +70,7 @@ import { createGroupRefImage, createGenGroup, generateGroupId, calculateConnecti
 import { getModelDisplayName } from '@/lib/model-name-map';
 import type { PsdLayerItem } from '@/types/psdLayer';
 import { toStableImageUrl, awaitStableImageUrl, onPersistComplete, getCachedLocalUrl, persistVideoUrlInBackground, persistRemoteUrlInBackground } from '@/lib/stable-image-url';
+import { ConfirmDialog } from '@/components/custom-dialogs';
 import { taskEventsClient } from '@/lib/task-events-client';
 import { extractTaskResultImageUrl } from '@/lib/task-result-url';
 import { shouldShowAnnotationBubble } from '@/lib/canvas-annotation-visibility';
@@ -1653,6 +1654,9 @@ export function InfiniteCanvas({
   // Download popup
   const [showDownloadPopup, setShowDownloadPopup] = useState(false);
   const [downloadFormat, setDownloadFormat] = useState<'png' | 'svg' | '3d'>('png');
+
+  // Confirm dialog (replaces native window.confirm)
+  const [confirmDialog, setConfirmDialog] = useState<{ open: boolean; title: string; message: string; variant?: 'danger' | 'warning'; onConfirm: () => void }>({ open: false, title: '', message: '', onConfirm: () => {} });
   const [threeDDownloadFormat, setThreeDDownloadFormat] = useState('');
   const [svgMode, setSvgMode] = useState<'pro' | 'studio'>('pro');
   const [downloadProgress, setDownloadProgress] = useState<string | null>(null);
@@ -5959,7 +5963,9 @@ export function InfiniteCanvas({
 
   /** 执行单条批注：调用 /api/edit 修图 */
   const executeAnnotation = useCallback(async (annotation: CanvasAnnotation): Promise<AnnotationExecutionResult> => {
-    if (!annotation.targetImageId || !annotation.text.trim()) return { status: 'failed', aiReply: '无目标图片或批注内容为空' };
+    // Brush annotations with mask don't require text — the mask alone is the instruction
+    if (!annotation.targetImageId) return { status: 'failed', aiReply: '无目标图片' };
+    if (!annotation.text.trim() && !annotation.brushMaskDataUrl && !annotation.region) return { status: 'failed', aiReply: '批注内容为空，请填写修改描述或使用画笔/框选标记区域' };
 
     const targetImg = images.find(i => i.id === annotation.targetImageId);
     if (!targetImg) return { status: 'failed', aiReply: '未找到目标图片' };
@@ -6225,7 +6231,7 @@ export function InfiniteCanvas({
 
   /** 执行当前图片的所有pending批注 */
   const executePendingAnnotations = useCallback(async () => {
-    const pending = annotations.filter(a => a.status === 'pending' && a.text.trim());
+    const pending = annotations.filter(a => a.status === 'pending' && (a.text.trim() || a.brushMaskDataUrl || a.region));
     if (pending.length === 0) return;
 
     // Group annotations by targetImageId — same image annotations merged into one request
@@ -12297,7 +12303,7 @@ export function InfiniteCanvas({
               );
             })}
             {/* Selection drag rectangle (while drawing) */}
-            {isDraggingRegion && annotationRegionStart && annotationRegionCurrent && (() => {
+            {annotationMode && annotationRegionStart && annotationRegionCurrent && (() => {
               const x1 = Math.min(annotationRegionStart.cx, annotationRegionCurrent.cx) * zoom + viewOffset.x;
               const y1 = Math.min(annotationRegionStart.cy, annotationRegionCurrent.cy) * zoom + viewOffset.y;
               const w = Math.abs(annotationRegionCurrent.cx - annotationRegionStart.cx) * zoom;
@@ -13343,7 +13349,11 @@ export function InfiniteCanvas({
                       <button
                         onClick={async () => {
                           const prompt = threeDPrompt || '一个精美的3D物体';
-                          if (!confirm(`将使用AI自动生成4个视角的图片（正面/左面/右面/背面），然后自动提交3D生成。提示词：${prompt}\n\n确认开始？`)) return;
+                          const message = `将使用AI自动生成4个视角的图片（正面/左面/右面/背面），然后自动提交3D生成。提示词：${prompt}`;
+                          // 使用自定义弹窗替代原生 confirm
+                          const doGenerate = () => {
+                            setConfirmDialog({ open: false, title: '', message: '', onConfirm: () => {} });
+                            (async () => {
                           try {
                             toast.loading('正在自动生成多视角图片...', { id: 'auto-3d-multi' });
                             const res = await fetch('/api/image-to-3d/auto-multi-view', {
@@ -13367,6 +13377,9 @@ export function InfiniteCanvas({
                           } catch (err) {
                             toast.error('自动生成多视角图片失败', { id: 'auto-3d-multi' });
                           }
+                            })();
+                          };
+                          setConfirmDialog({ open: true, title: '确认操作', message, variant: 'warning', onConfirm: doGenerate });
                         }}
                         className={`w-full py-2 rounded-xl text-xs border transition-colors flex items-center justify-center gap-1 ${isMonochrome ? 'border-purple-200 text-purple-600 hover:bg-purple-50' : 'border-purple-500/30 text-purple-400 hover:bg-purple-500/10'}`}
                       >
@@ -15917,7 +15930,7 @@ export function InfiniteCanvas({
         {/* ── Right: Feature buttons (collapsible) ── */}
         <div
           className={`flex items-center transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${
-            bottomBarHovered ? 'min-w-0 max-w-[min(900px,calc(100vw-10rem))] opacity-100 ml-1.5 overflow-x-auto scrollbar-none' : 'max-w-0 opacity-0 ml-0 overflow-hidden'
+            bottomBarHovered ? 'min-w-0 max-w-[min(900px,calc(100vw-10rem))] opacity-100 ml-1.5 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]' : 'max-w-0 opacity-0 ml-0 overflow-hidden'
           }`}
         >
           <div className={`w-px h-5 mr-1.5 ${separatorCls}`} />
@@ -16235,6 +16248,16 @@ export function InfiniteCanvas({
           toast(`引擎已设置为：${eng === 'auto' ? '自动' : eng === 'ai' ? '云端AI' : '本地算法'}`);
         }}
         onClose={() => setEngineDialog(null)}
+      />
+
+      {/* 自定义确认弹窗（替代原生 window.confirm） */}
+      <ConfirmDialog
+        open={confirmDialog.open}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        variant={confirmDialog.variant}
+        onConfirm={confirmDialog.onConfirm}
+        onCancel={() => setConfirmDialog({ open: false, title: '', message: '', onConfirm: () => {} })}
       />
     </div>
   );

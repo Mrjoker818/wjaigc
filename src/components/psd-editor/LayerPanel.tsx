@@ -36,8 +36,8 @@ export function LayerPanel({
 
   return (
     <div className="flex flex-col h-full">
-      <div className="px-2.5 py-2 border-b border-neutral-800">
-        <h3 className="text-xs text-neutral-400 uppercase tracking-wider">图层</h3>
+      <div className="px-2.5 py-2 border-b border-[#333]">
+        <h3 className="text-xs text-[#888] uppercase tracking-wider">图层</h3>
       </div>
       <div className="flex-1 overflow-y-auto">
         {reversedLayers.map((layer, i) => {
@@ -62,7 +62,7 @@ export function LayerPanel({
           );
         })}
         {layers.length === 0 && (
-          <div className="px-3 py-6 text-center text-xs text-neutral-500">
+          <div className="px-3 py-6 text-center text-xs text-[#777]">
             暂无图层
           </div>
         )}

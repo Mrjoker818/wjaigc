@@ -48,10 +48,10 @@ export function LayerRow({ layer, isSelected, onSelect, onToggleVisibility, onTo
       onClick={onSelect}
       onDoubleClick={handleDoubleClick}
       className={`flex items-center gap-1.5 px-2 py-1.5 cursor-pointer transition-colors group ${
-        isSelected ? 'bg-amber-500/15 border-l-2 border-amber-500' : 'hover:bg-neutral-800 border-l-2 border-transparent'
+        isSelected ? 'bg-[#d4af37]/15 border-l-2 border-amber-500' : 'hover:bg-[#1a1a1a] border-l-2 border-transparent'
       } ${!layer.visible ? 'opacity-50' : ''}`}
     >
-      <span className="text-xs text-neutral-400 w-5 text-center flex-shrink-0">
+      <span className="text-xs text-[#888] w-5 text-center flex-shrink-0">
         {roleIcon(layer.role)}
       </span>
 
@@ -66,11 +66,11 @@ export function LayerRow({ layer, isSelected, onSelect, onToggleVisibility, onTo
             if (e.key === 'Escape') setIsRenaming(false);
             e.stopPropagation();
           }}
-          className="flex-1 bg-neutral-700 text-white text-xs px-1 py-0.5 rounded outline-none min-w-0"
+          className="flex-1 bg-[#2a2a2a] text-[#f0e6d3] text-xs px-1 py-0.5 rounded outline-none min-w-0"
           onClick={(e) => e.stopPropagation()}
         />
       ) : (
-        <span className="flex-1 text-xs text-white truncate min-w-0">
+        <span className="flex-1 text-xs text-[#f0e6d3] truncate min-w-0">
           {layer.name}
         </span>
       )}
@@ -86,7 +86,7 @@ export function LayerRow({ layer, isSelected, onSelect, onToggleVisibility, onTo
       <button
         onClick={(e) => { e.stopPropagation(); onToggleLock(); }}
         className={`w-5 h-5 flex items-center justify-center text-xs transition-opacity ${
-          layer.locked ? 'opacity-100 text-amber-400' : 'opacity-0 group-hover:opacity-100'
+          layer.locked ? 'opacity-100 text-[#d4af37]' : 'opacity-0 group-hover:opacity-100'
         }`}
         title={layer.locked ? '解锁' : '锁定'}
       >
