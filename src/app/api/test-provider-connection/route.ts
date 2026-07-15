@@ -46,8 +46,6 @@ export async function POST(request: NextRequest) {
 
     // Determine the test endpoint based on requestStyle
     const style = requestStyle || 'images-generations';
-    let testUrl: string | undefined;
-
     if (style === 'chat-completions') {
       const cleanBaseUrl = baseUrl.replace(/\/+$/, '');
 

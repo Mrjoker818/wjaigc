@@ -91,7 +91,7 @@ export async function POST(request: NextRequest) {
               snippet: item.snippet || '',
             }));
             allResults.push({ step: step.step, query: step.query, items });
-          } catch (e: any) {
+          } catch {
             allResults.push({ step: step.step, query: step.query, items: [] });
           }
         }
@@ -151,6 +151,7 @@ ${searchContext}
         const decoder = new TextDecoder();
         let buffer = '';
         let fullReport = '';
+        void fullReport;
 
         while (true) {
           const { done, value } = await reader.read();
@@ -187,13 +188,12 @@ ${searchContext}
 
         send({ type: 'citations', citations });
         send({ type: 'done' });
-      } catch (e: any) {
-        send({ type: 'error', error: e.message || 'Deep Research 失败' });
+      } catch (error: unknown) {
+        send({ type: 'error', error: error instanceof Error ? error.message : 'Deep Research 失败' });
       }
       controller.close();
     },
   });
-
   return new Response(stream, {
     headers: {
       'Content-Type': 'text/event-stream',

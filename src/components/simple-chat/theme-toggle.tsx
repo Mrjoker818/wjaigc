@@ -9,18 +9,7 @@ export function ThemeToggle() {
   const [theme, setTheme] = useState<Theme>('system');
   const [mounted, setMounted] = useState(false);
 
-  useEffect(() => {
-    setMounted(true);
-    const stored = localStorage.getItem('theme') as Theme | null;
-    if (stored) {
-      setTheme(stored);
-      applyTheme(stored);
-    } else {
-      applyTheme('system');
-    }
-  }, []);
-
-  const applyTheme = (t: Theme) => {
+  function applyTheme(t: Theme): void {
     const root = document.documentElement;
     if (t === 'dark') {
       root.classList.add('dark');
@@ -31,7 +20,18 @@ export function ThemeToggle() {
       if (prefersDark) root.classList.add('dark');
       else root.classList.remove('dark');
     }
-  };
+  }
+
+  useEffect(() => {
+    setMounted(true);
+    const stored = localStorage.getItem('theme') as Theme | null;
+    if (stored) {
+      setTheme(stored);
+      applyTheme(stored);
+    } else {
+      applyTheme('system');
+    }
+  }, []);
 
   const cycleTheme = () => {
     const next: Theme = theme === 'light' ? 'dark' : theme === 'dark' ? 'system' : 'light';

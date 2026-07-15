@@ -96,11 +96,8 @@ export async function findVectorizeApiProvider(): Promise<{
  * 调用 Vectorizer.AI 风格的 API（如 302AI 代理）
  * POST /vectorizer/api/v1/vectorize — multipart form-data
  */
-async function vectorizeApiCall(
-  provider: { baseUrl: string; apiKey: string; model: string },
-  imageBuffer: Buffer,
-  imageUrl: string,
-): Promise<{ success: boolean; svg?: string; error?: string; pathCount?: number; svgSize?: number }> {
+async function vectorizeApiCall(provider: { baseUrl: string; apiKey: string; model: string }, imageBuffer: Buffer, imageUrl: string): Promise<{ success: boolean; svg?: string; error?: string; pathCount?: number; svgSize?: number }> {
+  void imageUrl;
   const { baseUrl, apiKey, model } = provider;
   const mime = detectImageMimeFromBuffer(imageBuffer);
 

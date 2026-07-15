@@ -6,42 +6,31 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { join } from 'path';
-import { readFile, writeFile, mkdir } from 'fs/promises';
+import { readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { requireAdminUser } from '@/lib/server-auth';
 
+interface ZipArchive {
+  file(name: string, data: string): void;
+  generateAsync(options: { type: 'nodebuffer'; compression: 'DEFLATE' }): Promise<Buffer>;
+}
+
+type JSZipConstructor = new () => ZipArchive;
+
 // 动态导入JSZip
-let JSZip: any;
-async function getJSZip() {
-  if (!JSZip) {
-    const mod = await import('jszip');
-    JSZip = mod.default;
+let jsZipConstructor: JSZipConstructor | null = null;
+async function getJSZip(): Promise<JSZipConstructor> {
+  if (!jsZipConstructor) {
+    const mod = await import('jszip') as unknown as { default: JSZipConstructor };
+    jsZipConstructor = mod.default;
   }
-  return JSZip;
+  return jsZipConstructor;
 }
 
 /** 脱敏字符串（保留首尾字符） */
 function maskString(s: string, keepStart = 4, keepEnd = 4): string {
   if (!s || s.length < keepStart + keepEnd + 2) return '***';
   return `${s.slice(0, keepStart)}${'*'.repeat(Math.max(4, s.length - keepStart - keepEnd))}${s.slice(-keepEnd)}`;
-}
-
-/** 脱敏对象中的API Key等敏感字段 */
-function sanitizeObject(obj: Record<string, unknown>): Record<string, unknown> {
-  const sensitiveKeys = ['api_key', 'apikey', 'apiKey', 'key', 'secret', 'password', 'token', 'authorization'];
-  const result: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(obj)) {
-    if (sensitiveKeys.some(sk => k.toLowerCase().includes(sk.toLowerCase()))) {
-      result[k] = typeof v === 'string' ? maskString(v) : '***';
-    } else if (typeof v === 'object' && v !== null && !Array.isArray(v)) {
-      result[k] = sanitizeObject(v as Record<string, unknown>);
-    } else if (Array.isArray(v)) {
-      result[k] = v.map(item => typeof item === 'object' && item !== null ? sanitizeObject(item as Record<string, unknown>) : item);
-    } else {
-      result[k] = v;
-    }
-  }
-  return result;
 }
 
 export async function GET(req: NextRequest) {
@@ -151,7 +140,7 @@ export async function GET(req: NextRequest) {
     // 生成zip
     const zipBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
     
-    return new NextResponse(zipBuffer, {
+    return new NextResponse(new Uint8Array(zipBuffer), {
       headers: {
         'Content-Type': 'application/zip',
         'Content-Disposition': `attachment; filename="wujie-diagnostics-${timestamp}.zip"`,

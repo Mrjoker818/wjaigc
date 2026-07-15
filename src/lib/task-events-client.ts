@@ -14,7 +14,7 @@
  *   await taskEventsClient.cancelTask(taskId);
  */
 
-import type { TaskInfo, TaskType } from './task-registry';
+import type { TaskInfo } from './task-registry';
 
 export interface TaskEvent {
   taskId: string;

@@ -1,10 +1,17 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback, useMemo, Suspense, lazy } from 'react';
+import NextImage from 'next/image';
+import React, { useState, useEffect, useRef, useCallback, useMemo, Suspense } from 'react';
 import { createPortal } from 'react-dom';
-import { Canvas, useThree, ThreeEvent, extend } from '@react-three/fiber';
-import { OrbitControls, TransformControls, Grid, GizmoHelper, GizmoViewport, useGLTF, Html } from '@react-three/drei';
+import { Canvas, ThreeEvent, extend } from '@react-three/fiber';
+import { OrbitControls, TransformControls, Grid, GizmoHelper, GizmoViewport, useGLTF } from '@react-three/drei';
+import type { TransformControls as TransformControlsImpl } from 'three-stdlib';
 import * as THREE from 'three';
+
+interface TransformControlsEventTarget {
+  addEventListener(type: 'objectChange', listener: () => void): void;
+  removeEventListener(type: 'objectChange', listener: () => void): void;
+}
 
 // Register Three.js classes with R3F to avoid React 19 "incorrect casing" warnings
 extend({
@@ -26,20 +33,10 @@ extend({
 });
 import {
   Box as BoxIcon, Cylinder as CylinderIcon, Plane as PlaneIcon,
-  X, Plus, Trash2, Lock, Unlock, Eye, EyeOff,
-  Move, RotateCcw, Maximize2, Copy, Download,
-  Camera, Sun, Lightbulb, Image as ImageIcon,
-  Sparkles, Wand2, Film, Save, FolderOpen,
-  ChevronRight, ChevronDown, Upload, BoxSelect,
-  Settings, Palette, Layers, MousePointer2,
-  ZoomIn, ZoomOut, RotateCw, FlipHorizontal,
-  ArrowRight, Check, Loader2, AlertCircle,
-  Send, ImagePlus, Video, LayoutGrid, Store,
-  Package, Tag, Archive, Cuboid, Circle,
-  Layout, Columns3, Minimize2, Expand,
-  Undo2, Redo2,
-  Trash, Bookmark, RotateCcw as ResetIcon, GripVertical,
-  Scan, Paintbrush, LayoutDashboard, Minus, Hammer, Boxes
+  X, Plus, Maximize2,
+  Camera, Sun,
+  Sparkles, Wand2, Save, FolderOpen, Upload, BoxSelect, FlipHorizontal, Loader2, LayoutGrid, Tag, Circle,
+  Undo2, Redo2, Minus, Hammer, Boxes
 } from 'lucide-react';
 
 /* ========== TYPES ========== */
@@ -86,18 +83,6 @@ interface GenerationResult {
   mode: GenerationMode;
   strengthMode: StrengthMode;
   timestamp: number;
-}
-
-interface SavedScene {
-  id: string;
-  name: string;
-  objects: SceneObject[];
-  lights: SceneLight[];
-  cameraPreset: CameraPreset;
-  savedCameraViews: CameraView[];
-  prompt: string;
-  timestamp: number;
-  sceneData?: Record<string, unknown>;
 }
 
 interface SceneStudioProps {
@@ -148,11 +133,7 @@ function getTheme(isMonochrome?: boolean) {
 // that don't receive isMonochrome as a prop still get the correct colors.
 const _t = () => getTheme(_themeRef.mono);
 const ACCENT       = () => _t().accent;
-const ACCENT_DIM   = () => _t().accentDim;
-const BG_PRIMARY   = () => _t().bgPrimary;
-const BG_SECONDARY = () => _t().bgSecondary;
 const BG_TERTIARY  = () => _t().bgTertiary;
-const BG_HOVER     = () => _t().bgHover;
 const BORDER_COLOR = () => _t().borderColor;
 const TEXT_PRIMARY  = () => _t().textPrimary;
 const TEXT_SECONDARY = () => _t().textSecondary;
@@ -220,12 +201,7 @@ const STRENGTH_MODES: { key: StrengthMode; name: string; label: string; value: n
   { key: 'creative', name: '创意发挥', label: '创意', value: 35, desc: '只参考大结构，AI自由发挥', promptHint: '参考整体构图结构，自由发挥创意，可以改变风格、色调、氛围，生成更有艺术感的画面' },
   { key: 'commercial', name: '商业强化', label: '强化', value: 70, desc: '强化广告质感、光影、材质', promptHint: '商业摄影级别，强化产品光影、材质质感和广告氛围，景深效果，studio lighting，8K ultra detail' },
 ];
-
-const ASPECT_RATIOS = ['16:9', '1:1', '9:16', '4:3', '3:4'] as const;
 const MAX_MODEL_SIZE_MB = 20;
-const ACCENT_COLOR = '#d4af37';
-const TEXT_MUTED = '#888';
-
 // CircleDot icon (not in lucide-react by default)
 function CircleDot({ size = 16 }: { size?: number }) {
   return (
@@ -259,7 +235,7 @@ function TransformControlsWrapper({ meshRef, mode, objId, onTransformChange }: {
   objId: string;
   onTransformChange: (id: string, position: [number, number, number], rotation: [number, number, number], scale: [number, number, number]) => void;
 }) {
-  const controlsRef = useRef<any>(null);
+  const controlsRef = useRef<TransformControlsImpl | null>(null);
 
   useEffect(() => {
     if (controlsRef.current && meshRef.current) {
@@ -268,7 +244,7 @@ function TransformControlsWrapper({ meshRef, mode, objId, onTransformChange }: {
   }, [meshRef]);
 
   useEffect(() => {
-    const controls = controlsRef.current;
+    const controls = controlsRef.current as unknown as TransformControlsEventTarget | null;
     if (!controls) return;
     const callback = () => {
       if (meshRef.current) {
@@ -354,7 +330,7 @@ function SceneObjectMesh({ obj, isSelected, onSelect, transformMode, onTransform
   onTransformChange: (id: string, position: [number, number, number], rotation: [number, number, number], scale: [number, number, number]) => void;
 }) {
   const meshRef = useRef<THREE.Mesh>(null);
-  const [hovered, setHovered] = useState(false);
+  const [, setHovered] = useState(false);
 
   const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
@@ -534,73 +510,6 @@ function SceneCanvas({ objects, lights, selectedId, transformMode, onSelectObjec
 
 /* ========== LEFT SIDEBAR TAB CONTENTS ========== */
 
-function GeometryGrid({ onAddObject }: { onAddObject: (type: SceneObject['type']) => void }) {
-  return (
-    <div className="grid grid-cols-2 gap-1.5 p-2">
-      {GEOMETRY_PRESETS.map(preset => (
-        <button
-          key={preset.type}
-          onClick={() => onAddObject(preset.type)}
-          className="flex flex-col items-center gap-1 p-2 rounded-lg transition-all cursor-pointer hover:scale-[1.02]"
-          style={{ background: BG_TERTIARY(), border: `1px solid ${BORDER_COLOR()}`, color: TEXT_SECONDARY() }}
-          onMouseEnter={e => { e.currentTarget.style.borderColor = ACCENT(); e.currentTarget.style.color = ACCENT(); }}
-          onMouseLeave={e => { e.currentTarget.style.borderColor = BORDER_COLOR(); e.currentTarget.style.color = TEXT_SECONDARY(); }}
-        >
-          {preset.icon}
-          <span className="text-[13px]">{preset.name}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function ObjectList({ objects, selectedId, onSelectObject, onDeleteObject, onToggleVisibility, onToggleLock, onDuplicateObject }: {
-  objects: SceneObject[];
-  selectedId: string | null;
-  onSelectObject: (id: string) => void;
-  onDeleteObject: (id: string) => void;
-  onToggleVisibility: (id: string) => void;
-  onToggleLock: (id: string) => void;
-  onDuplicateObject: (id: string) => void;
-}) {
-  return (
-    <div className="space-y-0.5 p-2">
-      {objects.length === 0 && (
-        <p className="text-center py-4 text-xs" style={{ color: TEXT_DIM() }}>场景为空，添加几何体开始</p>
-      )}
-      {objects.map(obj => (
-        <div
-          key={obj.id}
-          onClick={() => onSelectObject(obj.id)}
-          className="flex items-center gap-1.5 px-2 py-1.5 rounded cursor-pointer transition-colors group"
-          style={{
-            background: selectedId === obj.id ? `${ACCENT()}15` : 'transparent',
-            borderLeft: selectedId === obj.id ? `2px solid ${ACCENT()}` : '2px solid transparent',
-          }}
-        >
-          <span className="text-xs flex-1 truncate" style={{ color: selectedId === obj.id ? ACCENT() : TEXT_PRIMARY(), opacity: obj.visible ? 1 : 0.4 }}>
-            {obj.name}
-          </span>
-          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button onClick={(e) => { e.stopPropagation(); onToggleVisibility(obj.id); }} className="p-0.5 cursor-pointer" style={{ color: TEXT_DIM() }}>
-              {obj.visible ? <Eye size={11} /> : <EyeOff size={11} />}
-            </button>
-            <button onClick={(e) => { e.stopPropagation(); onToggleLock(obj.id); }} className="p-0.5 cursor-pointer" style={{ color: TEXT_DIM() }}>
-              {obj.locked ? <Lock size={11} /> : <Unlock size={11} />}
-            </button>
-            <button onClick={(e) => { e.stopPropagation(); onDuplicateObject(obj.id); }} className="p-0.5 cursor-pointer" style={{ color: TEXT_DIM() }}>
-              <Copy size={11} />
-            </button>
-            <button onClick={(e) => { e.stopPropagation(); onDeleteObject(obj.id); }} className="p-0.5 cursor-pointer hover:text-red-400" style={{ color: TEXT_DIM() }}>
-              <Trash2 size={11} />
-            </button>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function ModelImportPanel({ onModelUpload }: { onModelUpload: (file: File) => void }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -651,423 +560,8 @@ function ModelImportPanel({ onModelUpload }: { onModelUpload: (file: File) => vo
   );
 }
 
-function LightPresetsPanel({ onApplyPreset }: { onApplyPreset: (preset: Omit<SceneLight, 'id'>[]) => void }) {
-  return (
-    <div className="space-y-1.5 p-2">
-      <p className="text-[13px] uppercase tracking-wider font-semibold mb-1" style={{ color: TEXT_DIM() }}>灯光预设</p>
-      {LIGHT_PRESETS_DATA.map((preset, i) => (
-        <button
-          key={i}
-          onClick={() => onApplyPreset(preset.lights)}
-          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs transition-colors cursor-pointer"
-          style={{ background: BG_TERTIARY(), color: TEXT_SECONDARY(), border: `1px solid ${BORDER_COLOR()}` }}
-          onMouseEnter={e => { e.currentTarget.style.borderColor = ACCENT(); e.currentTarget.style.color = ACCENT(); }}
-          onMouseLeave={e => { e.currentTarget.style.borderColor = BORDER_COLOR(); e.currentTarget.style.color = TEXT_SECONDARY(); }}
-        >
-          <Sun size={12} />
-          {preset.name}
-          <span className="ml-auto text-[9px]" style={{ color: TEXT_DIM() }}>{preset.lights.length}灯</span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function CameraPresetsPanel({ currentPreset, onApplyPreset, savedViews, onSaveView, onDeleteView, onGoToView }: {
-  currentPreset: CameraPreset;
-  onApplyPreset: (preset: CameraPreset) => void;
-  savedViews: CameraView[];
-  onSaveView: () => void;
-  onDeleteView: (id: string) => void;
-  onGoToView: (view: CameraView) => void;
-}) {
-  return (
-    <div className="space-y-2 p-2">
-      <p className="text-[13px] uppercase tracking-wider font-semibold" style={{ color: TEXT_DIM() }}>相机预设</p>
-      <div className="flex flex-wrap gap-1">
-        {CAMERA_PRESETS.map(preset => (
-          <button
-            key={preset.key}
-            onClick={() => onApplyPreset(preset.key)}
-            className="px-2.5 py-1.5 rounded text-[13px] transition-colors cursor-pointer"
-            style={{
-              background: currentPreset === preset.key ? `${ACCENT()}20` : BG_TERTIARY(),
-              color: currentPreset === preset.key ? ACCENT() : TEXT_SECONDARY(),
-              border: `1px solid ${currentPreset === preset.key ? ACCENT() : BORDER_COLOR()}`,
-            }}
-          >
-            {preset.name}
-          </button>
-        ))}
-      </div>
-      <div className="flex items-center justify-between mt-2">
-        <p className="text-[13px] uppercase tracking-wider font-semibold" style={{ color: TEXT_DIM() }}>保存的视角</p>
-        <button onClick={onSaveView} className="flex items-center gap-1 px-2 py-0.5 rounded text-[13px] cursor-pointer" style={{ color: ACCENT() }}>
-          <Bookmark size={10} /> 保存当前视角
-        </button>
-      </div>
-      {savedViews.length === 0 ? (
-        <p className="text-[13px] text-center py-2" style={{ color: TEXT_DIM() }}>暂无保存的视角</p>
-      ) : (
-        <div className="space-y-0.5">
-          {savedViews.map(view => (
-            <div key={view.id} className="flex items-center gap-1.5 px-2 py-1.5 rounded group" style={{ background: BG_TERTIARY() }}>
-              <Camera size={10} style={{ color: TEXT_DIM() }} />
-              <button onClick={() => onGoToView(view)} className="text-xs flex-1 text-left cursor-pointer" style={{ color: TEXT_PRIMARY() }}>{view.name}</button>
-              <button onClick={() => onDeleteView(view.id)} className="p-0.5 opacity-0 group-hover:opacity-100 cursor-pointer" style={{ color: TEXT_DIM() }}>
-                <Trash2 size={9} />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 /* ========== RIGHT PANEL: PROPERTIES ========== */
-
-function PropertiesPanel({ selectedObject, onUpdateObject, isMonochrome }: {
-  selectedObject: SceneObject | null;
-  onUpdateObject: (id: string, updates: Partial<SceneObject>) => void;
-  isMonochrome?: boolean;
-}) {
-  if (!selectedObject) {
-    return (
-      <div className="flex-shrink-0 flex flex-col items-center justify-center py-6" style={{ color: TEXT_DIM() }}>
-        <MousePointer2 size={20} />
-        <p className="text-[13px] mt-2">选中对象查看属性</p>
-      </div>
-    );
-  }
-
-  const accent = isMonochrome ? '#3b82f6' : ACCENT();
-
-  return (
-    <div className="flex-shrink-0 flex flex-col overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
-      {/* Object name */}
-      <div className="p-2 border-b" style={{ borderColor: BORDER_COLOR() }}>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded" style={{ background: selectedObject.color }} />
-          <input
-            value={selectedObject.name}
-            onChange={e => onUpdateObject(selectedObject.id, { name: e.target.value })}
-            className="flex-1 bg-transparent text-xs font-medium outline-none"
-            style={{ color: TEXT_PRIMARY() }}
-          />
-        </div>
-      </div>
-
-      {/* Transform */}
-      <div className="p-2 border-b" style={{ borderColor: BORDER_COLOR() }}>
-        <h4 className="text-[9px] uppercase tracking-wider mb-1.5 font-semibold" style={{ color: TEXT_DIM() }}>位置</h4>
-        <div className="grid grid-cols-3 gap-1">
-          {(['x', 'y', 'z'] as const).map(axis => (
-            <div key={axis} className="flex flex-col">
-              <label className="text-[8px] mb-0.5" style={{ color: axis === 'x' ? '#f73b3b' : axis === 'y' ? '#3bf73b' : '#3b3bf7' }}>{axis.toUpperCase()}</label>
-              <input
-                type="number"
-                step={0.1}
-                value={selectedObject.position[{ x: 0, y: 1, z: 2 }[axis]]}
-                onChange={e => {
-                  const i = { x: 0, y: 1, z: 2 }[axis];
-                  const p: [number, number, number] = [...selectedObject.position];
-                  p[i] = parseFloat(e.target.value) || 0;
-                  onUpdateObject(selectedObject.id, { position: p });
-                }}
-                className="w-full px-1 py-0.5 rounded text-[13px] outline-none"
-                style={{ background: BG_TERTIARY(), color: TEXT_PRIMARY(), border: `1px solid ${BORDER_COLOR()}` }}
-              />
-            </div>
-          ))}
-        </div>
-
-        <h4 className="text-[9px] uppercase tracking-wider mb-1.5 mt-2 font-semibold" style={{ color: TEXT_DIM() }}>旋转</h4>
-        <div className="grid grid-cols-3 gap-1">
-          {(['x', 'y', 'z'] as const).map(axis => (
-            <div key={axis} className="flex flex-col">
-              <label className="text-[8px] mb-0.5" style={{ color: axis === 'x' ? '#f73b3b' : axis === 'y' ? '#3bf73b' : '#3b3bf7' }}>{axis.toUpperCase()}</label>
-              <input
-                type="number"
-                step={5}
-                value={Math.round(selectedObject.rotation[{ x: 0, y: 1, z: 2 }[axis]])}
-                onChange={e => {
-                  const i = { x: 0, y: 1, z: 2 }[axis];
-                  const r: [number, number, number] = [...selectedObject.rotation];
-                  r[i] = parseFloat(e.target.value) || 0;
-                  onUpdateObject(selectedObject.id, { rotation: r });
-                }}
-                className="w-full px-1 py-0.5 rounded text-[13px] outline-none"
-                style={{ background: BG_TERTIARY(), color: TEXT_PRIMARY(), border: `1px solid ${BORDER_COLOR()}` }}
-              />
-            </div>
-          ))}
-        </div>
-
-        <h4 className="text-[9px] uppercase tracking-wider mb-1.5 mt-2 font-semibold" style={{ color: TEXT_DIM() }}>缩放</h4>
-        <div className="grid grid-cols-3 gap-1">
-          {(['x', 'y', 'z'] as const).map(axis => (
-            <div key={axis} className="flex flex-col">
-              <label className="text-[8px] mb-0.5" style={{ color: axis === 'x' ? '#f73b3b' : axis === 'y' ? '#3bf73b' : '#3b3bf7' }}>{axis.toUpperCase()}</label>
-              <input
-                type="number"
-                step={0.1}
-                value={selectedObject.scale[{ x: 0, y: 1, z: 2 }[axis]].toFixed(2)}
-                onChange={e => {
-                  const i = { x: 0, y: 1, z: 2 }[axis];
-                  const s: [number, number, number] = [...selectedObject.scale];
-                  s[i] = parseFloat(e.target.value) || 0.1;
-                  onUpdateObject(selectedObject.id, { scale: s });
-                }}
-                className="w-full px-1 py-0.5 rounded text-[13px] outline-none"
-                style={{ background: BG_TERTIARY(), color: TEXT_PRIMARY(), border: `1px solid ${BORDER_COLOR()}` }}
-              />
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Material */}
-      <div className="p-2 border-b" style={{ borderColor: BORDER_COLOR() }}>
-        <h4 className="text-[9px] uppercase tracking-wider mb-1.5 font-semibold" style={{ color: TEXT_DIM() }}>材质颜色</h4>
-        <div className="flex items-center gap-2">
-          <input
-            type="color"
-            value={selectedObject.color}
-            onChange={e => onUpdateObject(selectedObject.id, { color: e.target.value })}
-            className="w-6 h-6 rounded cursor-pointer border-0"
-            style={{ background: BG_TERTIARY() }}
-          />
-          <input
-            value={selectedObject.color}
-            onChange={e => onUpdateObject(selectedObject.id, { color: e.target.value })}
-            className="flex-1 px-2 py-0.5 rounded text-[13px] outline-none"
-            style={{ background: BG_TERTIARY(), color: TEXT_PRIMARY(), border: `1px solid ${BORDER_COLOR()}` }}
-          />
-        </div>
-      </div>
-
-      {/* Quick actions */}
-      <div className="p-2">
-        <h4 className="text-[9px] uppercase tracking-wider mb-1.5 font-semibold" style={{ color: TEXT_DIM() }}>快捷操作</h4>
-        <div className="space-y-0.5">
-          <button
-            onClick={() => onUpdateObject(selectedObject.id, { position: [0, 0, 0] })}
-            className="w-full flex items-center gap-1.5 px-2 py-1 rounded text-[13px] transition-colors cursor-pointer"
-            style={{ background: BG_TERTIARY(), color: TEXT_SECONDARY(), border: `1px solid ${BORDER_COLOR()}` }}
-          >
-            <RotateCw size={10} /> 归零位置
-          </button>
-          <button
-            onClick={() => onUpdateObject(selectedObject.id, { scale: [1, 1, 1] })}
-            className="w-full flex items-center gap-1.5 px-2 py-1 rounded text-[13px] transition-colors cursor-pointer"
-            style={{ background: BG_TERTIARY(), color: TEXT_SECONDARY(), border: `1px solid ${BORDER_COLOR()}` }}
-          >
-            <Maximize2 size={10} /> 重置缩放
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 /* ========== AI GENERATION PANEL ========== */
-
-function AIGenerationPanel({
-  onCaptureScreenshot, generationMode, setGenerationMode, strengthMode, setStrengthMode,
-  prompt, setPrompt, negativePrompt, setNegativePrompt, onGenerate, isGenerating,
-  generationResults, onAddToCanvas, isMonochrome, aspectRatio, setAspectRatio, imageCount, setImageCount
-}: {
-  onCaptureScreenshot: () => void;
-  generationMode: GenerationMode;
-  setGenerationMode: (m: GenerationMode) => void;
-  strengthMode: StrengthMode;
-  setStrengthMode: (s: StrengthMode) => void;
-  prompt: string;
-  setPrompt: (p: string) => void;
-  negativePrompt: string;
-  setNegativePrompt: (p: string) => void;
-  onGenerate: () => void;
-  isGenerating: boolean;
-  generationResults: GenerationResult[];
-  onAddToCanvas: (url: string) => void;
-  isMonochrome?: boolean;
-  aspectRatio: string;
-  setAspectRatio: (r: string) => void;
-  imageCount: number;
-  setImageCount: (n: number) => void;
-}) {
-  const accent = isMonochrome ? '#3b82f6' : ACCENT();
-  const [showNegPrompt, setShowNegPrompt] = useState(false);
-  const [aiLayoutPrompt, setAiLayoutPrompt] = useState('');
-  const [showResults, setShowResults] = useState(false);
-
-  return (
-    <div className="space-y-2 p-2">
-      {/* Mode selection */}
-      <div className="flex items-center gap-1">
-        {[
-          { mode: 'image-to-image' as GenerationMode, label: '当前视角生图', icon: <ImagePlus size={12} /> },
-          { mode: 'text-to-image' as GenerationMode, label: '文生图', icon: <Sparkles size={12} /> },
-        ].map(tab => (
-          <button
-            key={tab.mode}
-            onClick={() => setGenerationMode(tab.mode)}
-            className="flex items-center gap-1 px-2 py-1 rounded-full text-[13px] transition-all cursor-pointer"
-            style={{
-              background: generationMode === tab.mode ? `${accent}20` : 'transparent',
-              color: generationMode === tab.mode ? accent : TEXT_DIM(),
-              border: generationMode === tab.mode ? `1px solid ${accent}40` : '1px solid transparent',
-            }}
-          >
-            {tab.icon}
-            {tab.label}
-          </button>
-        ))}
-        <button
-          onClick={onCaptureScreenshot}
-          className="flex items-center gap-1 px-2 py-1 rounded text-[13px] cursor-pointer ml-auto"
-          style={{ background: BG_TERTIARY(), color: TEXT_SECONDARY(), border: `1px solid ${BORDER_COLOR()}` }}
-        >
-          <Camera size={10} /> 截图
-        </button>
-      </div>
-
-      {/* Strength mode */}
-      <div className="flex flex-wrap items-center gap-1">
-        {STRENGTH_MODES.map(mode => (
-          <button
-            key={mode.key}
-            onClick={() => { setStrengthMode(mode.key); if (!prompt.trim()) setPrompt(mode.promptHint); }}
-            className="px-1.5 py-0.5 rounded text-[9px] transition-colors cursor-pointer"
-            style={{
-              background: strengthMode === mode.key ? `${accent}20` : BG_TERTIARY(),
-              color: strengthMode === mode.key ? accent : TEXT_DIM(),
-              border: `1px solid ${strengthMode === mode.key ? accent : BORDER_COLOR()}`,
-            }}
-            title={mode.desc}
-          >
-            {mode.name}
-          </button>
-        ))}
-      </div>
-
-      {/* Aspect ratio and count */}
-      <div className="flex items-center gap-2">
-        <div className="flex items-center gap-1">
-          <span className="text-[9px]" style={{ color: TEXT_DIM() }}>比例</span>
-          <select
-            value={aspectRatio}
-            onChange={e => setAspectRatio(e.target.value)}
-            className="px-1.5 py-0.5 rounded text-[13px] outline-none cursor-pointer"
-            style={{ background: BG_TERTIARY(), color: TEXT_PRIMARY(), border: `1px solid ${BORDER_COLOR()}` }}
-          >
-            {ASPECT_RATIOS.map(r => <option key={r} value={r}>{r}</option>)}
-          </select>
-        </div>
-        <div className="flex items-center gap-1">
-          <span className="text-[9px]" style={{ color: TEXT_DIM() }}>数量</span>
-          <div className="flex gap-0.5">
-            {[1, 4].map(n => (
-              <button
-                key={n}
-                onClick={() => setImageCount(n)}
-                className="px-2 py-0.5 rounded text-[13px] cursor-pointer"
-                style={{
-                  background: imageCount === n ? `${accent}20` : BG_TERTIARY(),
-                  color: imageCount === n ? accent : TEXT_DIM(),
-                  border: `1px solid ${imageCount === n ? accent : BORDER_COLOR()}`,
-                }}
-              >
-                {n}张
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Prompt */}
-      <div className="flex flex-col gap-1">
-        <textarea
-          value={prompt}
-          onChange={e => setPrompt(e.target.value)}
-          placeholder="描述你想要的画面效果..."
-          rows={3}
-          className="w-full px-2 py-1.5 rounded-lg text-[13px] outline-none resize-none"
-          style={{ background: BG_TERTIARY(), color: TEXT_PRIMARY(), border: `1px solid ${BORDER_COLOR()}`, scrollbarWidth: 'thin' }}
-          onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !isGenerating) onGenerate(); }}
-        />
-        <button
-          onClick={() => setShowNegPrompt(!showNegPrompt)}
-          className="text-[9px] text-left cursor-pointer"
-          style={{ color: TEXT_DIM() }}
-        >
-          {showNegPrompt ? '▼' : '▶'} 反向提示词
-        </button>
-        {showNegPrompt && (
-          <textarea
-            value={negativePrompt}
-            onChange={e => setNegativePrompt(e.target.value)}
-            placeholder="不想要的元素..."
-            rows={2}
-            className="w-full px-2 py-1.5 rounded-lg text-[13px] outline-none resize-none"
-            style={{ background: BG_TERTIARY(), color: TEXT_PRIMARY(), border: `1px solid ${BORDER_COLOR()}` }}
-          />
-        )}
-      </div>
-
-      {/* Generate button */}
-      <button
-        onClick={onGenerate}
-        disabled={isGenerating || !prompt.trim()}
-        className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-medium transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-        style={{
-          background: isGenerating ? BG_TERTIARY() : accent,
-          color: isGenerating ? TEXT_DIM() : '#000000',
-        }}
-      >
-        {isGenerating ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
-        {isGenerating ? '生成中...' : `生成${imageCount > 1 ? ` ${imageCount} 张` : ''}`}
-      </button>
-
-      {/* Results */}
-      {generationResults.length > 0 && (
-        <div>
-          <button
-            onClick={() => setShowResults(!showResults)}
-            className="flex items-center gap-1 text-[13px] cursor-pointer"
-            style={{ color: accent }}
-          >
-            {showResults ? '▼' : '▶'} 生成结果 ({generationResults.length})
-          </button>
-          {showResults && (
-            <div className="grid grid-cols-2 gap-1.5 mt-1.5">
-              {generationResults.map(result => (
-                <div
-                  key={result.id}
-                  className="rounded-lg overflow-hidden relative group cursor-pointer"
-                  style={{ border: `1px solid ${BORDER_COLOR()}` }}
-                >
-                  <img src={result.url} alt="" className="w-full h-20 object-cover" />
-                  <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
-                    <button
-                      onClick={() => onAddToCanvas(result.url)}
-                      className="px-1.5 py-0.5 rounded text-[9px] cursor-pointer"
-                      style={{ background: accent, color: '#000' }}
-                    >
-                      加入画布
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 /* ========== AI AUTO LAYOUT PANEL ========== */
 
 function AIAutoLayoutPanel({ onApplyLayout, isGenerating, isMonochrome, chatModels, selectedChatModel, onSelectChatModel }: {
@@ -1140,206 +634,7 @@ function AIAutoLayoutPanel({ onApplyLayout, isGenerating, isMonochrome, chatMode
 }
 
 /* ========== ASSET MANAGEMENT PANEL ========== */
-
-function AssetManagementPanel({ onSaveScene, onLoadScene, onExportScene, onDeleteScene, onDuplicateScene, scenes, onLoadById, isMonochrome }: {
-  onSaveScene: () => void;
-  onLoadScene: () => void;
-  onExportScene: () => void;
-  onDeleteScene: (id: string) => void;
-  onDuplicateScene: (id: string) => void;
-  scenes: { id: string; name: string; updatedAt?: string }[];
-  onLoadById: (id: string) => void;
-  isMonochrome?: boolean;
-}) {
-  const accent = isMonochrome ? '#3b82f6' : ACCENT();
-  const [showSceneList, setShowSceneList] = useState(false);
-
-  return (
-    <div className="space-y-1.5 p-2">
-      <div className="flex items-center gap-1.5">
-        <Archive size={12} style={{ color: accent }} />
-        <span className="text-[13px] font-medium" style={{ color: TEXT_PRIMARY() }}>资产管理</span>
-      </div>
-
-      <button
-        onClick={onSaveScene}
-        className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-[13px] transition-colors cursor-pointer"
-        style={{ background: BG_TERTIARY(), color: TEXT_PRIMARY(), border: `1px solid ${BORDER_COLOR()}` }}
-      >
-        <Save size={10} style={{ color: accent }} /> 保存当前场景
-      </button>
-
-      <button
-        onClick={() => setShowSceneList(!showSceneList)}
-        className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-[13px] transition-colors cursor-pointer"
-        style={{ background: BG_TERTIARY(), color: TEXT_PRIMARY(), border: `1px solid ${BORDER_COLOR()}` }}
-      >
-        <FolderOpen size={10} style={{ color: accent }} /> 已保存场景 ({scenes.length})
-      </button>
-
-      {showSceneList && (
-        <div className="space-y-0.5 max-h-40 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
-          {scenes.length === 0 ? (
-            <p className="text-[13px] text-center py-2" style={{ color: TEXT_DIM() }}>暂无保存的场景</p>
-          ) : (
-            scenes.map(scene => (
-              <div key={scene.id} className="flex items-center gap-1.5 px-2 py-1 rounded group" style={{ background: BG_TERTIARY() }}>
-                <LayoutGrid size={9} style={{ color: TEXT_DIM() }} />
-                <button onClick={() => onLoadById(scene.id)} className="text-[13px] flex-1 text-left cursor-pointer" style={{ color: TEXT_PRIMARY() }}>
-                  {scene.name}
-                </button>
-                <button onClick={() => onDuplicateScene(scene.id)} className="p-0.5 opacity-0 group-hover:opacity-100 cursor-pointer" style={{ color: TEXT_DIM() }} title="复制场景">
-                  <Copy size={9} />
-                </button>
-                <button onClick={() => onDeleteScene(scene.id)} className="p-0.5 opacity-0 group-hover:opacity-100 cursor-pointer" style={{ color: TEXT_DIM() }}>
-                  <Trash2 size={9} />
-                </button>
-              </div>
-            ))
-          )}
-        </div>
-      )}
-
-      <button
-        onClick={onExportScene}
-        className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-[13px] transition-colors cursor-pointer"
-        style={{ background: BG_TERTIARY(), color: TEXT_PRIMARY(), border: `1px solid ${BORDER_COLOR()}` }}
-      >
-        <Download size={10} style={{ color: accent }} /> 导出场景文件
-      </button>
-    </div>
-  );
-}
-
 /* ========== LIGHT EDITOR PANEL ========== */
-
-function LightEditorPanel({ lights, onLightsChange, isMonochrome }: {
-  lights: SceneLight[];
-  onLightsChange: (lights: SceneLight[]) => void;
-  isMonochrome?: boolean;
-}) {
-  const accent = isMonochrome ? '#3b82f6' : ACCENT();
-  const [expandedLight, setExpandedLight] = useState<string | null>(null);
-  const LIGHT_TYPE_LABELS: Record<SceneLight['type'], string> = { ambient: '环境光', directional: '方向光', point: '点光', spot: '聚光灯' };
-
-  return (
-    <div className="space-y-1.5 p-2">
-      <div className="flex items-center justify-between">
-        <span className="text-[9px] uppercase tracking-wider font-semibold" style={{ color: TEXT_DIM() }}>灯光设置</span>
-        <button
-          onClick={() => onLightsChange([...lights, {
-            id: `light_${Date.now()}`,
-            type: 'directional' as const,
-            name: `灯光${lights.length + 1}`,
-            intensity: 1,
-            color: '#ffffff',
-            position: [3, 5, 4] as [number, number, number],
-          }])}
-          className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] cursor-pointer"
-          style={{ color: accent }}
-        >
-          <Plus size={9} /> 添加
-        </button>
-      </div>
-      {lights.map(light => (
-        <div key={light.id}>
-          <div className="flex items-center gap-1.5 px-2 py-1 rounded cursor-pointer" style={{ background: BG_TERTIARY() }} onClick={() => setExpandedLight(expandedLight === light.id ? null : light.id)}>
-            <Lightbulb size={10} style={{ color: light.color }} />
-            <span className="text-[13px] flex-1 truncate" style={{ color: TEXT_PRIMARY() }}>{light.name}</span>
-            <span className="text-[9px] px-1 py-0.5 rounded" style={{ background: BG_HOVER(), color: TEXT_DIM() }}>{LIGHT_TYPE_LABELS[light.type]}</span>
-            <input
-              type="range" min={0} max={3} step={0.1}
-              value={light.intensity}
-              onChange={e => { e.stopPropagation(); onLightsChange(lights.map(l => l.id === light.id ? { ...l, intensity: parseFloat(e.target.value) } : l)); }}
-              className="w-10 h-1 accent-amber-500"
-              onClick={e => e.stopPropagation()}
-            />
-            <input
-              type="color"
-              value={light.color}
-              onChange={e => { e.stopPropagation(); onLightsChange(lights.map(l => l.id === light.id ? { ...l, color: e.target.value } : l)); }}
-              className="w-4 h-4 rounded cursor-pointer border-0"
-              onClick={e => e.stopPropagation()}
-            />
-            <button onClick={e => { e.stopPropagation(); onLightsChange(lights.filter(l => l.id !== light.id)); }} className="cursor-pointer" style={{ color: TEXT_DIM() }}>
-              <Trash2 size={9} />
-            </button>
-            {expandedLight === light.id ? <ChevronDown size={9} style={{ color: TEXT_DIM() }} /> : <ChevronRight size={9} style={{ color: TEXT_DIM() }} />}
-          </div>
-          {expandedLight === light.id && (
-            <div className="px-2 py-1.5 space-y-1.5 mt-0.5 rounded-b" style={{ background: BG_HOVER() }}>
-              {/* Light name */}
-              <div className="flex items-center gap-1.5">
-                <span className="text-[9px] w-8" style={{ color: TEXT_DIM() }}>名称</span>
-                <input
-                  value={light.name}
-                  onChange={e => onLightsChange(lights.map(l => l.id === light.id ? { ...l, name: e.target.value } : l))}
-                  className="flex-1 px-1.5 py-0.5 rounded text-[13px] outline-none"
-                  style={{ background: BG_TERTIARY(), color: TEXT_PRIMARY(), border: `1px solid ${BORDER_COLOR()}` }}
-                />
-              </div>
-              {/* Light type */}
-              <div className="flex items-center gap-1.5">
-                <span className="text-[9px] w-8" style={{ color: TEXT_DIM() }}>类型</span>
-                <select
-                  value={light.type}
-                  onChange={e => onLightsChange(lights.map(l => l.id === light.id ? { ...l, type: e.target.value as SceneLight['type'] } : l))}
-                  className="flex-1 px-1.5 py-0.5 rounded text-[13px] outline-none cursor-pointer"
-                  style={{ background: BG_TERTIARY(), color: TEXT_PRIMARY(), border: `1px solid ${BORDER_COLOR()}` }}
-                >
-                  <option value="ambient">环境光</option>
-                  <option value="directional">方向光</option>
-                  <option value="point">点光</option>
-                  <option value="spot">聚光灯</option>
-                </select>
-              </div>
-              {/* Light position */}
-              {light.type !== 'ambient' && (
-                <div className="space-y-1">
-                  <span className="text-[9px]" style={{ color: TEXT_DIM() }}>位置</span>
-                  <div className="grid grid-cols-3 gap-1">
-                    {(['x', 'y', 'z'] as const).map(axis => {
-                      const idx = { x: 0, y: 1, z: 2 }[axis];
-                      return (
-                        <div key={axis} className="flex flex-col">
-                          <label className="text-[8px]" style={{ color: axis === 'x' ? '#f73b3b' : axis === 'y' ? '#3bf73b' : '#3b3bf7' }}>{axis.toUpperCase()}</label>
-                          <input
-                            type="number" step={0.5}
-                            value={light.position[idx]}
-                            onChange={e => {
-                              const p: [number, number, number] = [...light.position];
-                              p[idx] = parseFloat(e.target.value) || 0;
-                              onLightsChange(lights.map(l => l.id === light.id ? { ...l, position: p } : l));
-                            }}
-                            className="w-full px-1 py-0.5 rounded text-[13px] outline-none"
-                            style={{ background: BG_TERTIARY(), color: TEXT_PRIMARY(), border: `1px solid ${BORDER_COLOR()}` }}
-                          />
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-              {/* Spot angle */}
-              {light.type === 'spot' && (
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[9px] w-8" style={{ color: TEXT_DIM() }}>角度</span>
-                  <input
-                    type="range" min={10} max={90} step={5} value={light.angle ?? 45}
-                    onChange={e => onLightsChange(lights.map(l => l.id === light.id ? { ...l, angle: parseInt(e.target.value) } : l))}
-                    className="flex-1 h-1 accent-amber-500"
-                  />
-                  <span className="text-[9px]" style={{ color: TEXT_DIM() }}>{light.angle ?? 45}°</span>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
 /* ========== MAIN COMPONENT ========== */
 
 export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, initialModelUrl, initialModelName }: SceneStudioProps) {
@@ -1402,9 +697,6 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
     queueMicrotask(() => { isUndoRedoRef.current = false; });
   }, []);
 
-  const canUndo = sceneHistoryIdxRef.current > 0;
-  const canRedo = sceneHistoryIdxRef.current < sceneHistoryRef.current.length - 1;
-
   // Push history when objects or lights change
   useEffect(() => {
     pushSceneHistory(objects, lights);
@@ -1427,8 +719,8 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
   const [chatModels, setChatModels] = useState<{ id: string; name: string; providerId: string; providerName: string }[]>([]);
   const [selectedImageModelId, setSelectedImageModelId] = useState<string>('');
   const [selectedChatModelId, setSelectedChatModelId] = useState<string>('');
-  const [showImageModelDropdown, setShowImageModelDropdown] = useState(false);
-  const [showChatModelDropdown, setShowChatModelDropdown] = useState(false);
+  const [, ] = useState(false);
+  const [, ] = useState(false);
 
   // Load models on mount
   useEffect(() => {
@@ -1615,19 +907,19 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
     if (selectedId === id) setSelectedId(null);
   }, [selectedId]);
 
-  const duplicateObject = useCallback((id: string) => {
-    const obj = objects.find(o => o.id === id);
-    if (!obj) return;
-    const newId = `obj_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-    const newObj: SceneObject = {
-      ...obj,
-      id: newId,
-      name: `${obj.name} 副本`,
-      position: [obj.position[0] + 1, obj.position[1], obj.position[2]],
-    };
-    setObjects(prev => [...prev, newObj]);
-    setSelectedId(newId);
-  }, [objects]);
+  useCallback((id: string) => {
+        const obj = objects.find(o => o.id === id);
+        if (!obj) return;
+        const newId = `obj_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        const newObj: SceneObject = {
+          ...obj,
+          id: newId,
+          name: `${obj.name} 副本`,
+          position: [obj.position[0] + 1, obj.position[1], obj.position[2]],
+        };
+        setObjects(prev => [...prev, newObj]);
+        setSelectedId(newId);
+      }, [objects]);
 
   const handleTransformChange = useCallback((id: string, position: [number, number, number], rotation: [number, number, number], scale: [number, number, number]) => {
     updateObject(id, { position, rotation, scale });
@@ -2011,16 +1303,16 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
     } catch { /* ignore */ }
   }, [loadSceneList]);
 
-  const exportScene = useCallback(() => {
-    const sceneJson = JSON.stringify({ name: sceneName, objects, lights, cameraPreset, savedCameraViews }, null, 2);
-    const blob = new Blob([sceneJson], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${sceneName}.wujie-scene`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [sceneName, objects, lights, cameraPreset, savedCameraViews]);
+  useCallback(() => {
+        const sceneJson = JSON.stringify({ name: sceneName, objects, lights, cameraPreset, savedCameraViews }, null, 2);
+        const blob = new Blob([sceneJson], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${sceneName}.wujie-scene`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }, [sceneName, objects, lights, cameraPreset, savedCameraViews]);
 
   const addImageToCanvas = useCallback((url: string) => {
     // ★ 传递模型信息
@@ -2035,31 +1327,31 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
   }, [onAddImages, selectedImageModelId, imageModels]);
 
   // Save camera view
-  const saveCameraView = useCallback(() => {
-    const orbitControls = document.querySelector('.scene-studio-canvas');
-    // Get camera position from the OrbitControls
-    const canvasEl = document.querySelector('.scene-studio-canvas canvas');
-    if (!canvasEl) return;
-    // Use a default approach - save the current camera preset position
-    const preset = CAMERA_PRESETS.find(p => p.key === cameraPreset);
-    const view: CameraView = {
-      id: `view_${Date.now()}`,
-      name: `视角${savedCameraViews.length + 1}`,
-      position: preset?.position || [4, 3, 6],
-      target: preset?.target || [0, 0.5, 0],
-    };
-    setSavedCameraViews(prev => [...prev, view]);
-  }, [cameraPreset, savedCameraViews]);
+  useCallback(() => {
+        document.querySelector('.scene-studio-canvas');
+        // Get camera position from the OrbitControls
+        const canvasEl = document.querySelector('.scene-studio-canvas canvas');
+        if (!canvasEl) return;
+        // Use a default approach - save the current camera preset position
+        const preset = CAMERA_PRESETS.find(p => p.key === cameraPreset);
+        const view: CameraView = {
+          id: `view_${Date.now()}`,
+          name: `视角${savedCameraViews.length + 1}`,
+          position: preset?.position || [4, 3, 6],
+          target: preset?.target || [0, 0.5, 0],
+        };
+        setSavedCameraViews(prev => [...prev, view]);
+      }, [cameraPreset, savedCameraViews]);
 
-  const goToCameraView = useCallback((_view: CameraView) => {
-    // Camera view navigation is handled by the SceneCanvas component
-    // For now, set the camera preset to 'free' and it would need a more complex implementation
-    // to set exact camera position. This is a placeholder that works for preset views.
-  }, []);
+  useCallback(() => {
+        // Camera view navigation is handled by the SceneCanvas component
+        // For now, set the camera preset to 'free' and it would need a more complex implementation
+        // to set exact camera position. This is a placeholder that works for preset views.
+      }, []);
 
-  const deleteCameraView = useCallback((id: string) => {
-    setSavedCameraViews(prev => prev.filter(v => v.id !== id));
-  }, []);
+  useCallback((id: string) => {
+        setSavedCameraViews(prev => prev.filter(v => v.id !== id));
+      }, []);
 
   // Apply light preset
   const applyLightPreset = useCallback((presetLights: Omit<SceneLight, 'id'>[]) => {
@@ -2100,12 +1392,6 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
   }, [onClose, selectedId, selectedObject, deleteObject]);
 
   // Tab button style helper
-  const tabStyle = (isActive: boolean) => ({
-    color: isActive ? accent : TEXT_DIM(),
-    borderBottom: isActive ? `2px solid ${accent}` : '2px solid transparent',
-    background: 'transparent' as const,
-  });
-
   // Side tab button helper
 
   // ====== RENDER ======
@@ -2700,7 +1986,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
                       <div className="grid grid-cols-2 gap-1.5">
                         {generationResults.map((result, i) => (
                           <div key={i} className="relative group">
-                            <img src={result.url} alt={`结果${i + 1}`} className="w-full rounded cursor-pointer" onClick={() => addImageToCanvas(result.url)} />
+                            <NextImage unoptimized width={1} height={1} src={result.url} alt={`结果${i + 1}`} className="w-full rounded cursor-pointer" onClick={() => addImageToCanvas(result.url)} />
                             <a
                               href={result.url}
                               download={`scene-result-${i + 1}.png`}
@@ -2824,7 +2110,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
                       <div className="grid grid-cols-3 gap-1.5">
                         {generationResults.map((result, i) => (
                           <div key={i} className="relative group">
-                            <img src={result.url} alt={`素材${i + 1}`} className="w-full rounded cursor-pointer aspect-square object-cover" onClick={() => addImageToCanvas(result.url)} />
+                            <NextImage unoptimized width={1} height={1} src={result.url} alt={`素材${i + 1}`} className="w-full rounded cursor-pointer aspect-square object-cover" onClick={() => addImageToCanvas(result.url)} />
                             <div className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded gap-1">
                               <button
                                 className="text-[9px] px-1 py-0.5 rounded cursor-pointer"
@@ -2887,7 +2173,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
                   {screenshotUrl && (
                     <div className="rounded-lg p-3" style={{ background: isMonochrome ? '#f9fafb' : '#1a1a1a', border: isMonochrome ? '1px solid #e5e5e5' : '1px solid #d4af3720' }}>
                       <div className="text-sm font-medium mb-2" style={{ color: accent }}>截图预览</div>
-                      <img src={screenshotUrl} alt="截图" className="w-full rounded" />
+                      <NextImage unoptimized width={1} height={1} src={screenshotUrl} alt="截图" className="w-full rounded" />
                       <div className="flex gap-1.5 mt-2">
                         <a
                           href={screenshotUrl}

@@ -20,7 +20,7 @@ import { calculateActualPixelsFromRatio } from '@/lib/calculate-pixels';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import { adaptBrandProjectToSanbaoInput, buildSanbaoInputFromUserInput } from '@/modules/brand-factory/logo-generator-core/sanbaoInputAdapter';
 import { buildDirectionSystemPrompt, buildDirectionUserMessage, parseDirectionResponse } from '@/modules/brand-factory/logo-generator-core/sanbaoPromptParser';
-import { selectPlatformPrompts, getBestGenerationPrompt } from '@/modules/brand-factory/logo-generator-core/platformPromptSelector';
+import { selectPlatformPrompts } from '@/modules/brand-factory/logo-generator-core/platformPromptSelector';
 import type { SanbaoInput } from '@/modules/brand-factory/logo-generator-core/sanbaoInputAdapter';
 import type { TargetPlatform, OutputLayout } from '@/modules/brand-factory/logo-generator-core/platformPromptSelector';
 
@@ -157,8 +157,8 @@ async function handleGenerateImage(body: Record<string, unknown>) {
   if (model !== rawModel) {
     console.log(`[logo-skill] Model normalized: ${rawModel} → ${model}`);
   }
-  const baseUrl = provider.baseUrl.replace(/\/+$/, '');
-  const profile = resolveCompatProfile(provider);
+  provider.baseUrl.replace(/\/+$/, '');
+  resolveCompatProfile(provider);
 
   // ★ 多提供商轮询：渠道耗尽时自动切换其他图像提供商
   const triedProviderIds = new Set<string>();

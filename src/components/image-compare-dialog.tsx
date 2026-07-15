@@ -1,5 +1,6 @@
 'use client';
 
+import NextImage from 'next/image';
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { X, Columns2, SplitSquareHorizontal, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Move } from 'lucide-react';
 
@@ -208,8 +209,7 @@ export function ImageCompareDialog({
             >
               {/* Right image (full, rendered first = behind) */}
               <div className="absolute inset-0">
-                <img
-                  src={rightImage.url}
+                <NextImage unoptimized width={1} height={1}                   src={rightImage.url}
                   alt="B"
                   className="absolute inset-0 w-full h-full object-contain"
                   style={{ transform: imageTransform }}
@@ -224,8 +224,7 @@ export function ImageCompareDialog({
                   clipPath: `inset(0 ${100 - sliderPos}% 0 0)`,
                 }}
               >
-                <img
-                  src={leftImage.url}
+                <NextImage unoptimized width={1} height={1}                   src={leftImage.url}
                   alt="A"
                   className="absolute inset-0 w-full h-full object-contain"
                   style={{ transform: imageTransform }}
@@ -295,8 +294,7 @@ export function ImageCompareDialog({
                   A - {leftImage.modelName || '图片1'}
                 </div>
                 <div className="flex-1 flex items-center justify-center overflow-hidden w-full">
-                  <img
-                    src={leftImage.url}
+                  <NextImage unoptimized width={1} height={1}                     src={leftImage.url}
                     alt="A"
                     className="object-contain"
                     style={{
@@ -319,8 +317,7 @@ export function ImageCompareDialog({
                   B - {rightImage.modelName || '图片2'}
                 </div>
                 <div className="flex-1 flex items-center justify-center overflow-hidden w-full">
-                  <img
-                    src={rightImage.url}
+                  <NextImage unoptimized width={1} height={1}                     src={rightImage.url}
                     alt="B"
                     className="object-contain"
                     style={{

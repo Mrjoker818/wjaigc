@@ -18,6 +18,12 @@ interface ColorAdjustParams {
   shadows?: number;      // -100 ~ 100
 }
 
+interface ModulateOptions {
+  brightness?: number;
+  saturation?: number;
+  hue?: number;
+}
+
 function normalizeRange(value: number | undefined, min: number, max: number, def: number): number {
   if (value === undefined || value === null || isNaN(value)) return def;
   return Math.max(min, Math.min(max, value));
@@ -84,7 +90,7 @@ export async function POST(req: NextRequest) {
     
     // 亮度/对比度/饱和度/色相通过 modulate 处理
     // modulate 的 brightness/contrast/saturation/hue 接收浮点数，1.0为原始值
-    const mod: Record<string, number> = {};
+    const mod: ModulateOptions = {};
 
     if (brightness !== 0) {
       // brightness -100~100 → 0.5~1.5 范围
@@ -99,7 +105,7 @@ export async function POST(req: NextRequest) {
       mod.hue = Math.round(hue);
     }
     if (Object.keys(mod).length > 0) {
-      pipeline = pipeline.modulate(mod as any);
+      pipeline = pipeline.modulate(mod);
     }
 
     // 色温调整（temperature）：通过 RGB 通道线性调节
@@ -159,10 +165,10 @@ export async function POST(req: NextRequest) {
       format: isTransparent ? 'png' : 'jpg',
       size: outputBuffer.length,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[color-adjust] 处理失败:', error);
     return NextResponse.json(
-      { error: '色彩调整失败: ' + (error?.message || String(error)) },
+      { error: '色彩调整失败: ' + (error instanceof Error ? error.message : String(error)) },
       { status: 500 }
     );
   }

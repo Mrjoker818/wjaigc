@@ -20,9 +20,6 @@ declare module 'imagetracerjs' {
     [key: string]: unknown;
   }
 
-  function imageToSVG(url: string, options?: ImageTracerOptions): Promise<string>;
-  function imageToSVG(url: string, callback: (svgstr: string) => void, options?: ImageTracerOptions): void;
-
   const ImageTracer: {
     imageToSVG: typeof imageToSVG;
     imagedataToSVG: (imagedata: ImageData, options?: ImageTracerOptions) => string;

@@ -2,11 +2,9 @@
 
 import { useState } from 'react';
 import {
-  Move, Sparkles, MessageSquare, Layers, Keyboard, Lightbulb,
-  BookOpen, X, Info, Pen, Wand2, ImagePlus, GitMerge, ImageIcon,
-  ZoomIn, Eraser, Maximize, Download, Shapes, Settings, Database,
-  FileBox, ChevronRight, Check, PenTool, Pencil, Box, Type,
-  LayoutGrid, Bot, Palette, FolderOpen, FileImage, Building2, ShoppingBag, Store
+  Move, Sparkles, MessageSquare, Keyboard, Lightbulb,
+  BookOpen, X, Info, Wand2, ImagePlus, GitMerge, Shapes, Settings,
+  FileBox, ChevronRight, Check, PenTool, Pencil, Box, Type, Bot, Palette, FolderOpen, FileImage, Building2, ShoppingBag, Store
 } from 'lucide-react';
 import { APP_VERSION_LABEL } from '@/config/app-meta';
 
@@ -133,7 +131,7 @@ function Img2ImgSection() {
     <div>
       <h3 className="text-sm font-bold text-[var(--color-on-surface)] mb-2">图生图</h3>
       <p className="text-xs text-[var(--color-on-surface-variant)] mb-3">
-        选中图片后，通过顶部工具栏"图生图"按钮进入。基于原图生成新图，支持多维度参考控制。
+        选中图片后，通过顶部工具栏&ldquo;图生图&rdquo;按钮进入。基于原图生成新图，支持多维度参考控制。
       </p>
       <SubTitle>参考类别（独立开关 + 强度滑块）</SubTitle>
       <FeatureItem>风格（in the style of）：参考原图的风格</FeatureItem>
@@ -141,8 +139,8 @@ function Img2ImgSection() {
       <FeatureItem>角色（featuring the character of）：参考原图的角色</FeatureItem>
       <FeatureItem>IP（based on the IP of）：参考原图的 IP 形象</FeatureItem>
       <SubTitle>快捷操作</SubTitle>
-      <FeatureItem>"当前图片描述"：一键填充图片原始描述到关键词输入框</FeatureItem>
-      <FeatureItem>"反向提示词"：自动填充默认反向提示词，可编辑修改</FeatureItem>
+      <FeatureItem>&ldquo;当前图片描述&rdquo;：一键填充图片原始描述到关键词输入框</FeatureItem>
+      <FeatureItem>&ldquo;反向提示词&rdquo;：自动填充默认反向提示词，可编辑修改</FeatureItem>
       <FeatureItem>生成比例自动与原图一致（4:3、16:9 等）</FeatureItem>
       <FeatureItem>生成结果在原图右侧显示，不覆盖原图</FeatureItem>
     </div>
@@ -167,7 +165,7 @@ function ToolsSection() {
       <FeatureItem>画笔涂抹消除并自动无缝补上新的画面</FeatureItem>
       <FeatureItem>IOPaint 多模型优先（LaMa 通用 / ZITS 结构保持 / Anime-Lama 动漫），AI 模型兜底</FeatureItem>
       <SubTitle>蒙版修图</SubTitle>
-      <FeatureItem>给图片加"透明遮罩膜"，精准控制编辑范围</FeatureItem>
+      <FeatureItem>给图片加&ldquo;透明遮罩膜&rdquo;，精准控制编辑范围</FeatureItem>
       <FeatureItem>画笔 + 提示词输入 + AI 生成，后端精确蒙版合成</FeatureItem>
       <SubTitle>扩展画面</SubTitle>
       <FeatureItem>往图片四周延伸画面，扩大画布</FeatureItem>
@@ -208,7 +206,7 @@ function LangEditSection() {
       <FeatureItem>OpenAI：GPT Image 2、DALL-E 3 — 支持画笔涂抹指定修改区域（蒙版）</FeatureItem>
       <FeatureItem>Google Gemini：仅文字描述，AI 智能理解修改意图</FeatureItem>
       <SubTitle>操作方式</SubTitle>
-      <FeatureItem>选中图片 → 工具栏"语言修图" → 用自然语言描述修改意图</FeatureItem>
+      <FeatureItem>选中图片 → 工具栏&ldquo;语言修图&rdquo; → 用自然语言描述修改意图</FeatureItem>
       <FeatureItem>OpenAI 模型：画笔/橡皮擦/清除工具绘制蒙版区域</FeatureItem>
       <FeatureItem>Gemini 模型：仅文字描述即可，无需蒙版</FeatureItem>
       <FeatureItem>支持尺寸选择（1024 / 1536 / 2048）和质量选择（低 / 中 / 高）</FeatureItem>
@@ -236,7 +234,7 @@ function AgentEditSection() {
       <FeatureItem>LLM 思考 → 选工具 → 执行 → 反馈 → 再思考，重复直到任务完成</FeatureItem>
       <FeatureItem>最大轮次可选（3 / 5 / 8），安全限制：单轮 60 秒超时，全局 5 分钟超时</FeatureItem>
       <SubTitle>入口</SubTitle>
-      <FeatureItem>选中图片工具栏"Agent 编排" / 右键菜单 / 底部工具栏</FeatureItem>
+      <FeatureItem>选中图片工具栏&ldquo;Agent 编排&rdquo; / 右键菜单 / 底部工具栏</FeatureItem>
     </div>
   );
 }
@@ -253,8 +251,8 @@ function RefineEngineSection() {
       <FeatureItem>画面比例和生图质量根据所选模型自动适配</FeatureItem>
       <FeatureItem>精修结果自动替换原图并保存到画布</FeatureItem>
       <SubTitle>入口</SubTitle>
-      <FeatureItem>选中图片 → 工具栏"精修"按钮</FeatureItem>
-      <FeatureItem>右键菜单"精修引擎"</FeatureItem>
+      <FeatureItem>选中图片 → 工具栏&ldquo;精修&rdquo;按钮</FeatureItem>
+      <FeatureItem>右键菜单&ldquo;精修引擎&rdquo;</FeatureItem>
     </div>
   );
 }
@@ -272,7 +270,7 @@ function StickerSection() {
       <FeatureItem>每张图可独立重新生成，不满意可以单独重试</FeatureItem>
       <FeatureItem>快速模板：猫咪、柴犬、兔子、熊猫等预设角色</FeatureItem>
       <SubTitle>入口</SubTitle>
-      <FeatureItem>底部工具栏"表情"按钮</FeatureItem>
+      <FeatureItem>底部工具栏&ldquo;表情&rdquo;按钮</FeatureItem>
     </div>
   );
 }
@@ -290,7 +288,7 @@ function FontDesignSection() {
       <FeatureItem>提示词模式：完整版 / 精简版 / 增强版 / 黑底白字 / 透明 Logo</FeatureItem>
       <FeatureItem>异步提交 + 轮询，支持多种图像模型</FeatureItem>
       <SubTitle>入口</SubTitle>
-      <FeatureItem>底部工具栏"字境"按钮</FeatureItem>
+      <FeatureItem>底部工具栏&ldquo;字境&rdquo;按钮</FeatureItem>
     </div>
   );
 }
@@ -316,7 +314,7 @@ function NodeEditorSection() {
       <FeatureItem>撤销重做：50 步历史栈，<KeyBadge>Ctrl+Z</KeyBadge> / <KeyBadge>Ctrl+Shift+Z</KeyBadge></FeatureItem>
       <FeatureItem>ComfyUI 工作流导入：支持前端格式和 API 格式</FeatureItem>
       <SubTitle>入口</SubTitle>
-      <FeatureItem>底部工具栏"节点"按钮</FeatureItem>
+      <FeatureItem>底部工具栏&ldquo;节点&rdquo;按钮</FeatureItem>
     </div>
   );
 }
@@ -340,7 +338,7 @@ function SceneStudioSection() {
       <FeatureItem>选择 LLM 模型，输入场景描述一键生成布局</FeatureItem>
       <FeatureItem>快速模板：品牌快闪店 / 产品展台 / 便利店 / 美妆柜台 / 科技展位 / 食品货架</FeatureItem>
       <SubTitle>入口</SubTitle>
-      <FeatureItem>底部工具栏"3D"按钮</FeatureItem>
+      <FeatureItem>底部工具栏&ldquo;3D&rdquo;按钮</FeatureItem>
     </div>
   );
 }
@@ -361,7 +359,7 @@ function Display3DSection() {
       <FeatureItem>环境与尺寸：设定场地环境、预算、材质风格、灯光氛围、人群氛围</FeatureItem>
       <FeatureItem>输出视角：选择效果图视角（正面/45度/侧面/俯视/入口/细节）</FeatureItem>
       <FeatureItem>输出设置：设定分辨率、格式和质量</FeatureItem>
-      <FeatureItem>点击底部"生成展陈方案"按钮开始生成</FeatureItem>
+      <FeatureItem>点击底部&ldquo;生成展陈方案&rdquo;按钮开始生成</FeatureItem>
       <SubTitle>右侧预览区</SubTitle>
       <FeatureItem>效果图：查看生成的主效果图，点击可添加到画布</FeatureItem>
       <FeatureItem>多角度：不同视角的效果图展示</FeatureItem>
@@ -380,8 +378,8 @@ function Display3DSection() {
       <FeatureItem>上传资产越丰富（KV、Logo、IP形象），生成效果越贴合品牌</FeatureItem>
       <FeatureItem>需要管理员后台配置可用的图像模型才能生成效果图</FeatureItem>
       <SubTitle>入口</SubTitle>
-      <FeatureItem>底部工具栏"展陈"按钮</FeatureItem>
-      <FeatureItem>右键菜单"3D展陈"</FeatureItem>
+      <FeatureItem>底部工具栏&ldquo;展陈&rdquo;按钮</FeatureItem>
+      <FeatureItem>右键菜单&ldquo;3D展陈&rdquo;</FeatureItem>
     </div>
   );
 }
@@ -401,7 +399,7 @@ function ChatSection() {
       <FeatureItem>模糊意图追问：AI 自动判断意图清晰度，主动追问或补全</FeatureItem>
       <FeatureItem>生成后引导：AI 回复末尾推荐后续操作（图生图 / 修图 / 放大等）</FeatureItem>
       <FeatureItem>@引用系统：输入 @ 触发引用菜单（@图片 / @品牌 / @模型 / @提示词）</FeatureItem>
-      <FeatureItem>Tab 模式：选中画布图片后自动切换为"针对此图片"模式</FeatureItem>
+      <FeatureItem>Tab 模式：选中画布图片后自动切换为&ldquo;针对此图片&rdquo;模式</FeatureItem>
     </div>
   );
 }
@@ -507,7 +505,7 @@ function VideoSection() {
       <FeatureItem>视频播放器：黑金主题，进度条 / 音量 / 倍速（0.5x ~ 2x） / 全屏</FeatureItem>
       <SubTitle>入口</SubTitle>
       <FeatureItem>右侧面板图像 / 视频 Tab 切换到视频生成</FeatureItem>
-      <FeatureItem>画布右键菜单"视频编辑" / "视频延长"</FeatureItem>
+      <FeatureItem>画布右键菜单&ldquo;视频编辑&rdquo; / &ldquo;视频延长&rdquo;</FeatureItem>
       <FeatureItem>视频图片点击播放按钮覆盖层</FeatureItem>
     </div>
   );
@@ -529,7 +527,7 @@ function LogoProSection() {
       <FeatureItem>8 种配色方案（单色 / 双色 / 渐变 / 金属 / 霓虹 / 水彩 / 几何 / 自然）</FeatureItem>
       <FeatureItem>黑金主题浮动面板，支持缩小 / 拖动</FeatureItem>
       <SubTitle>入口</SubTitle>
-      <FeatureItem>底部工具栏"Logo"按钮</FeatureItem>
+      <FeatureItem>底部工具栏&ldquo;Logo&rdquo;按钮</FeatureItem>
     </div>
   );
 }
@@ -550,7 +548,7 @@ function BrandFactorySection() {
       <FeatureItem>支持多种场景：品牌主视觉 / 海报 / 社交媒体 / 包装等</FeatureItem>
       <FeatureItem>生成的图片自动注入品牌色彩和调性</FeatureItem>
       <SubTitle>入口</SubTitle>
-      <FeatureItem>底部工具栏"品牌"按钮</FeatureItem>
+      <FeatureItem>底部工具栏&ldquo;品牌&rdquo;按钮</FeatureItem>
     </div>
   );
 }
@@ -568,7 +566,7 @@ function BrandEcommerceSection() {
       <FeatureItem>支持品牌工厂 BrandDNA 注入，保持品牌一致性</FeatureItem>
       <FeatureItem>批量生成，一次产出多张不同角度的电商图</FeatureItem>
       <SubTitle>入口</SubTitle>
-      <FeatureItem>底部工具栏"电商"按钮</FeatureItem>
+      <FeatureItem>底部工具栏&ldquo;电商&rdquo;按钮</FeatureItem>
     </div>
   );
 }
@@ -589,7 +587,7 @@ function AiPsdSection() {
       <FeatureItem>自动分层导出 PSD，V4 规范图层命名（bg/main, subject/{'{idx}'}/{'{label}'} 等）</FeatureItem>
       <FeatureItem>使用 ag-psd 确保 Photoshop 兼容性</FeatureItem>
       <SubTitle>入口</SubTitle>
-      <FeatureItem>底部工具栏"PSD"按钮</FeatureItem>
+      <FeatureItem>底部工具栏&ldquo;PSD&rdquo;按钮</FeatureItem>
     </div>
   );
 }
@@ -714,7 +712,7 @@ interface HelpGuideProps {
   themeStyle?: string;
 }
 
-export function HelpGuide({ isOpen, onClose, initialSection = 'canvas', themeStyle }: HelpGuideProps) {
+export function HelpGuide({ isOpen, onClose, initialSection = 'canvas' }: HelpGuideProps) {
   const [activeSection, setActiveSection] = useState<SectionId>(initialSection);
 
   if (!isOpen) return null;

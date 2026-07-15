@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { writeFile, mkdir, copyFile, readdir } from 'fs/promises';
+import { writeFile, mkdir, copyFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import { uploadImageToS3, isS3Available } from '@/lib/s3-storage';
-import { saveImageDataMapping, getImageSourceUrl } from '@/lib/image-source-map';
+import { saveImageDataMapping } from '@/lib/image-source-map';
 import { getSessionUser as getAuthUser } from '@/lib/server-auth';
 import sharp from 'sharp';
 import { validateApiInputs } from '@/lib/api-validator';
@@ -353,7 +353,7 @@ export async function POST(request: NextRequest) {
           size: buffer.length,
           s3Key,
         });
-      } catch (fetchError) {
+      } catch {
         return NextResponse.json({ error: 'Failed to fetch local image path' }, { status: 400 });
       }
     }

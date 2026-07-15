@@ -8,7 +8,7 @@ import { consumeCredits, refundCredits } from '@/lib/credits';
 import fsSync from 'fs';
 import path from 'path';
 import { validateApiInputs } from '@/lib/api-validator';
-import { logOperation, logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
+import { logError, OP_ACTIONS } from '@/lib/op-log';
 
 /**
  * 编辑元素/分层 API - 根据图片元素进行智能分层
@@ -121,7 +121,7 @@ async function resolveImageBuffer(imageUrl: string): Promise<Buffer | null> {
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
   let deductedCredits = 0;
-  let sessionUser: any = null;
+  let sessionUser: Awaited<ReturnType<typeof getSessionUser>> = null;
   const selectedModel = '';
   const providerIdUsed = '';
   try {

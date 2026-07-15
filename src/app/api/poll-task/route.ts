@@ -1,18 +1,18 @@
-import { NextRequest, NextResponse, after } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 export const maxDuration = 1800; // 30分钟 - 支持长时间轮询慢速API（apimart等需要260s+任务）
 
 import { appendUserJsonl } from '@/lib/server-user-storage';
 import { findProviderForModel, findProviderById, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
-import { resolveCompatProfile, buildPollUrl, extractImageUrl, type ApiCompatProfile } from '@/lib/api-compatibility';
+import { resolveCompatProfile, buildPollUrl, type ApiCompatProfile } from '@/lib/api-compatibility';
 import { postProcessAIRemoveBG } from '@/lib/remove-bg-postprocess';
 import { fetchImageBuffer } from '@/lib/fetch-image-buffer';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { getEditTask, deleteEditTask, setEditTask, failEditTask } from '@/lib/edit-task-store';
 import { isTaskCancelled, updateTaskProgress, getTaskInfo, registerTask, releaseQueueSlot, type TaskType } from '@/lib/task-registry';
 import { translateApiError } from '@/lib/api-error-translate';
-import { classifyApiError, type ClassifiedError, isCloudflareTimeoutError } from '@/lib/api-error-translator';
+import { classifyApiError, isCloudflareTimeoutError } from '@/lib/api-error-translator';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getRefineResult } from '@/app/api/refine-engine/route';
 import { getBrandResult } from '@/app/api/brand-ecommerce/route';
@@ -23,7 +23,7 @@ import { enhanceViaAI } from '@/lib/quality-enhance';
 import { buildRecoveredTaskContext, recordImageTaskTerminal, recordVideoTaskTerminal } from '@/lib/cloud-task-persistence';
 import { getCloudTaskForUser } from '@/lib/cloud-task-storage';
 import { getCompletedVideoTaskResult } from '@/lib/video-task-result';
-import { resolveVideoCompatProfile } from '@/lib/video-api';
+import { resolveVideoCompatProfile, type VideoCompatProfile } from '@/lib/video-api';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,7 +31,7 @@ export const dynamic = 'force-dynamic';
 // （Next.js dev模式下不同路由可能使用不同的 task-registry 实例，
 //   所以在 poll-task 内部维护自己的缓存更可靠）
 const completedTaskCache = new Map<string, { imageUrl: string; maskUrl?: string; modelName?: string; providerName?: string; timestamp: number }>();
-const FAILED_CACHE = Symbol('failed');
+Symbol('failed');
 const failedTaskCache = new Map<string, { error: string; timestamp: number }>();
 
 // 定期清理过期缓存（5分钟以上的缓存清除）
@@ -64,7 +64,7 @@ if (typeof setInterval !== 'undefined') {
 // 通用化设计：支持不同提供商的任务状态查询格式
 export async function POST(request: NextRequest) {
   try {
-    const { taskId, model: rawModel, userId: requestUserId, providerId, engine: requestEngine, apiKey: bodyApiKey, apiBaseUrl: bodyApiBaseUrl } = await request.json();
+    const { taskId, model: rawModel, providerId, engine: requestEngine, apiKey: bodyApiKey, apiBaseUrl: bodyApiBaseUrl } = await request.json();
     if (!taskId || typeof taskId !== 'string') {
       return NextResponse.json({
         success: false,
@@ -119,7 +119,7 @@ export async function POST(request: NextRequest) {
       if (task.status === 'completed') {
         setTimeout(() => deleteEditTask(taskId), 5 * 60 * 1000);
         // ★ 过滤敏感字段
-        const { apiKey: _ak, apiBaseUrl: _abu, advancedParams: _ap, ...safeResult } = (task.result as Record<string, unknown>) || {};
+        const { ...safeResult } = (task.result as Record<string, unknown>) || {};
         return NextResponse.json({
           success: true,
           status: 'completed',
@@ -567,7 +567,6 @@ export async function POST(request: NextRequest) {
       }
     }
     if (registryTask) {
-      const taskType = registryTask.type;
       if (registryTask.status === 'completed') {
         // ★ 释放队列槽位
         releaseQueueSlot(taskId);
@@ -593,7 +592,7 @@ export async function POST(request: NextRequest) {
           console.log(`[poll-task] 从 task-registry 获取 generate-async 结果: ${taskId}`);
         }
         // ★ 过滤敏感字段，防止 apiKey/apiBaseUrl 等泄露到前端
-        const { apiKey: _ak, apiBaseUrl: _abu, advancedParams: _ap, ...safeResult } = (taskResult as Record<string, unknown>) || {};
+        const { ...safeResult } = (taskResult as Record<string, unknown>) || {};
         const completedVideo = registryTask.type === 'video'
           ? getCompletedVideoTaskResult(safeResult)
           : undefined;
@@ -660,7 +659,7 @@ export async function POST(request: NextRequest) {
           const syncVideoUrl = regResult.videoUrl as string | undefined;
           if (syncVideoUrl) {
             releaseQueueSlot(taskId);
-            const safeRegistryResult = (({ apiKey: _ak, apiBaseUrl: _abu, ...rest }) => rest)(registryTask.result as Record<string, unknown>);
+            const safeRegistryResult = (({ ...rest }) => rest)(registryTask.result as Record<string, unknown>);
             return NextResponse.json({
               success: true,
               status: 'completed',
@@ -697,7 +696,7 @@ export async function POST(request: NextRequest) {
           }, { status: 200 });
         }
 
-        let videoAdvancedParams = (regResult.advancedParams || regResult.providerAdvancedParams) as Record<string, any> | undefined;
+        let videoAdvancedParams = (regResult.advancedParams || regResult.providerAdvancedParams) as Record<string, string> | undefined;
         
         // 检查提交时是否使用了 images 端点，以便轮询也用对应端点
         const usedImagesEndpoint = regResult.usedImagesEndpoint as boolean | undefined;
@@ -713,7 +712,7 @@ export async function POST(request: NextRequest) {
           } = await import('@/lib/video-api');
 
           const pollReq = buildVideoPollRequest(
-            (videoProfile || 'rest-generic') as any,
+            (videoProfile || 'rest-generic') as VideoCompatProfile,
             vBaseUrl,
             vApiKey || '',
             thirdPartyTaskId,
@@ -777,7 +776,7 @@ export async function POST(request: NextRequest) {
 
           const pollData = await pollResp.json();
           const videoResult = parseVideoPollResponse(
-            (videoProfile || 'rest-generic') as any,
+            (videoProfile || 'rest-generic') as VideoCompatProfile,
             pollData,
           );
 
@@ -1305,7 +1304,7 @@ export async function POST(request: NextRequest) {
         // 检测是否需要后处理（outpaint/removeBG/crop），这些任务需要同步持久化
         const registryInfoForCheck = getTaskInfo(taskId);
         const registryResultForCheck = (registryInfoForCheck?.result as Record<string, unknown>) || {};
-        const needsPostProcess = !!(registryResultForCheck.outpaintInfo || registryResultForCheck.engine === 'ai-background-remove' || registryResultForCheck.cropInfo);
+        void registryResultForCheck;
 
         try {
           // 同步持久化：所有图片URL都需要先保存到本地，确保浏览器可靠加载
@@ -1328,7 +1327,7 @@ export async function POST(request: NextRequest) {
                 const meta = await sharp(buf).metadata();
                 console.log(`[poll-task] Persisted image dimensions: ${meta.width}x${meta.height}, source: ${typeof sourceImageUrl === 'string' ? sourceImageUrl.substring(0, 80) : '(non-string)'}...`);
               }
-            } catch (dimErr) {
+            } catch {
               // 尺寸检测失败不影响主流程
             }
 

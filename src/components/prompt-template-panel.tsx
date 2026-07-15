@@ -1,5 +1,6 @@
 'use client';
 
+import NextImage from 'next/image';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { X, Plus, Edit2, Trash2, Search, Tag, FileText, Save, ChevronDown, Image as ImageIcon, Upload } from 'lucide-react';
 import { 
@@ -375,7 +376,7 @@ export default function PromptTemplatePanel({
                       mc ? 'bg-gray-100 border border-gray-200' : 'bg-[#1a1a1a] border border-white/[0.12]'
                     }`}>
                       {formThumbnail ? (
-                        <img src={formThumbnail} alt="预览" className="w-full h-full object-cover" />
+                        <NextImage unoptimized width={1} height={1} src={formThumbnail} alt="预览" className="w-full h-full object-cover" />
                       ) : (
                         <div className={`w-full h-full flex items-center justify-center ${
                           mc ? 'text-gray-400' : 'text-white/30'
@@ -466,7 +467,7 @@ export default function PromptTemplatePanel({
               <div className={`text-center py-12 ${mc ? 'text-gray-400' : 'text-gold-muted/50'}`}>
                 <FileText className="w-12 h-12 mx-auto mb-3 opacity-50" />
                 <p className="text-sm">暂无模板</p>
-                <p className="text-xs mt-1 opacity-60">点击"新建"创建你的第一个模板</p>
+                <p className="text-xs mt-1 opacity-60">点击&ldquo;新建&rdquo;创建你的第一个模板</p>
               </div>
             ) : (
               filteredTemplates.map(template => (
@@ -484,7 +485,7 @@ export default function PromptTemplatePanel({
                       mc ? 'bg-gray-100 border border-gray-200' : 'bg-[#1a1a1a] border border-white/[0.12]'
                     }`}>
                       {template.thumbnail ? (
-                        <img src={template.thumbnail} alt={template.name} className="w-full h-full object-cover" />
+                        <NextImage unoptimized width={1} height={1} src={template.thumbnail} alt={template.name} className="w-full h-full object-cover" />
                       ) : (
                         <div className={`w-full h-full flex items-center justify-center ${
                           mc ? 'text-gray-300' : 'text-white/20'

@@ -168,8 +168,7 @@ export async function compositePreview(
 async function applyOpacity(input: Buffer, opacity: number): Promise<Buffer> {
   // 创建一个同尺寸的alpha通道
   const metadata = await sharp(input).metadata();
-  const width = metadata.width || 1;
-  const height = metadata.height || 1;
+  void metadata;
 
   // 使用ensureAlpha确保有alpha通道，然后modulate调整
   return await sharp(input)

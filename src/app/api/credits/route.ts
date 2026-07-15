@@ -2,21 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/server-auth';
 import { dbGetCredits, dbAdjustCredits, dbGetCreditTransactions, dbGetAllCredits, dbInitCredits } from '@/lib/db-storage';
 import { execSql } from '@/lib/db-client';
-import { CREDITS_TO_CNY, CNY_TO_CREDITS, IMAGE_MODEL_CREDITS, VIDEO_MODEL_CREDITS, CHAT_MODEL_CREDITS, RECHARGE_PACKAGES, getModelPricingInfo } from '@/lib/credits';
-
-type RechargeOrder = {
-  order_id: string;
-  user_id: string;
-  username: string;
-  amount_yuan: number;
-  credits: number;
-  payment_method: 'wechat' | 'alipay';
-  status: 'pending' | 'submitted' | 'paid' | 'cancelled' | 'rejected';
-  created_at: string;
-  paid_at: string | null;
-  credited_at: string | null;
-  payment_note: string | null;
-};
+import { CREDITS_TO_CNY, CNY_TO_CREDITS, IMAGE_MODEL_CREDITS, VIDEO_MODEL_CREDITS, CHAT_MODEL_CREDITS, RECHARGE_PACKAGES } from '@/lib/credits';
 
 /**
  * GET /api/credits
@@ -222,7 +208,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { action, amount, description, userId: targetUserId, packageName, paymentMethod, orderId, status, reason } = body as {
+    const { action, amount, description, userId: targetUserId, paymentMethod, orderId, status, reason } = body as {
       action: 'create-order' | 'query-order' | 'confirm-paid' | 'admin-confirm' | 'admin-confirm-paid' | 'admin-reject' | 'reverse-order' | 'admin_adjust' | 'admin-recharge' | 'my-orders' | 'admin-all-orders';
       amount?: number;
       description?: string;

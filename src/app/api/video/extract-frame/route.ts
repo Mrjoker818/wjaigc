@@ -196,8 +196,8 @@ export async function POST(req: Request) {
         unlink(downloadedTempPath).catch(() => {});
       }
     }
-  } catch (err: any) {
-    console.error('[extract-frame] error:', err);
-    return NextResponse.json({ error: err?.message || '抽帧异常' }, { status: 500 });
+  } catch (error: unknown) {
+    console.error('[extract-frame] error:', error);
+    return NextResponse.json({ error: error instanceof Error ? error.message : '抽帧异常' }, { status: 500 });
   }
 }

@@ -1871,7 +1871,7 @@ export async function dbGetDashboardStats(periodDays = 7) {
     const weekStart = now - 7 * 86400000;
     const monthStart = now - 30 * 86400000;
 
-    const [usersRes, creditsRes, todayRes, weekRes, monthRes] = await Promise.all([
+    const [usersRes, creditsRes, , , ] = await Promise.all([
       execSql('SELECT COUNT(*) as count FROM wujie_users'),
       execSql('SELECT COALESCE(SUM(total_recharged), 0) as recharged, COALESCE(SUM(total_used), 0) as consumed FROM wujie_credits'),
       execSql('SELECT COUNT(*) as count FROM wujie_users WHERE created_at >= $1', [todayStart]),
@@ -1879,7 +1879,7 @@ export async function dbGetDashboardStats(periodDays = 7) {
       execSql('SELECT COUNT(*) as count FROM wujie_users WHERE created_at >= $1', [monthStart]),
     ]);
 
-    const [activeTodayRes, activeWeekRes, activeMonthRes] = await Promise.all([
+    const [, activeWeekRes, ] = await Promise.all([
       execSql('SELECT COUNT(DISTINCT user_id) as count FROM wujie_credit_transactions WHERE created_at >= $1', [todayStart]),
       execSql('SELECT COUNT(DISTINCT user_id) as count FROM wujie_credit_transactions WHERE created_at >= $1', [weekStart]),
       execSql('SELECT COUNT(DISTINCT user_id) as count FROM wujie_credit_transactions WHERE created_at >= $1', [monthStart]),

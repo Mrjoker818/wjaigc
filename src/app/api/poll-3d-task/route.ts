@@ -51,7 +51,7 @@ function detectProviderType(provider: PollRequest['provider']): ProviderType {
 
   if (modelName.includes('hunyuan') || providerPreset.includes('hunyuan') || providerName.includes('hunyuan')) return 'hunyuan3d';
   if (providerPreset === 'meshy' || providerName.includes('meshy') || endpoint.includes('meshy')) return 'meshy';
-  if (providerPreset === 'tripo' || providerName.includes('tripo') || endpoint.includes('tripo')) return 'tripo';
+  if (modelName.includes('tripo') || providerPreset === 'tripo' || providerName.includes('tripo') || endpoint.includes('tripo')) return 'tripo';
   if (providerPreset === 'rodin' || providerName.includes('rodin') || providerPreset === 'deemos' || providerName.includes('deemos')) return 'rodin';
   return 'generic';
 }
@@ -117,6 +117,13 @@ function buildPollConfig(request: PollRequest): PollConfig | undefined {
     }
 
     case 'tripo':
+      // 302.ai routes Tripo through /tripo3d/v2/openapi/task/{id}
+      if (baseUrl.includes('302.ai') || baseUrl.includes('302ai')) {
+        return {
+          endpoint: `${baseUrl.replace(/\/v\d+$/, '')}/tripo3d/v2/openapi/task/${request.taskId}`,
+          method: 'GET',
+        };
+      }
       return {
         endpoint: `${baseUrl.replace(/\/v\d+$/, '')}/v2/openapi/task/${request.taskId}`,
         method: 'GET',
@@ -217,6 +224,7 @@ export async function POST(request: NextRequest) {
     const fetchOptions: RequestInit = {
       method: config.method,
       headers,
+      signal: AbortSignal.timeout(30000), // 30s timeout per poll request
     };
     if (config.body && config.method === 'POST') {
       fetchOptions.body = JSON.stringify(config.body);
@@ -301,6 +309,46 @@ export async function POST(request: NextRequest) {
     } else {
       // Generic parsing (Meshy, Tripo, Rodin, etc.)
       const taskStatus = (data.status || data.StatusCode || data.state) as string | undefined;
+
+      // 302.ai Tripo3D response: { code: 0, data: { status: "success", result: { pbr_model: { url: "..." } } } }
+      const isTripo302 = data.code === 0 && data.data && (data.data as Record<string, unknown>).result;
+      if (isTripo302 && (taskStatus === 'success' || taskStatus === 'succeeded' || taskStatus === 'completed')) {
+        status = 'succeeded';
+        const inner = data.data as Record<string, unknown>;
+        const result = inner.result as Record<string, unknown> | undefined;
+        const output = inner.output as Record<string, unknown> | undefined;
+
+        if (result) {
+          const pbrModel = result.pbr_model as Record<string, string> | undefined;
+          if (pbrModel?.url) {
+            assetUrl = pbrModel.url;
+            modelUrls = { glb: pbrModel.url, pbr: pbrModel.url };
+            // Also collect other model formats
+            if (result.model) modelUrls.model = (result.model as Record<string, string>).url;
+          }
+        }
+        if (output) {
+          previewImageUrl = (output.rendered_image || output.generated_image) as string | undefined;
+        }
+        const tripoProgress = inner.progress as number | undefined;
+
+        void recordThreeDTaskTerminal(body.taskId, {
+          status: 'completed',
+          assetUrl,
+          previewImageUrl,
+        }).catch((persistError) => console.warn('[poll-3d-task] Cloud task completion persistence failed:', persistError));
+        return NextResponse.json({
+          success: true,
+          taskId: body.taskId,
+          status,
+          assetUrl,
+          previewImageUrl,
+          modelUrls,
+          progress: tripoProgress,
+          rawData: filterSensitiveFields(data),
+        });
+      }
+
       if (taskStatus === 'SUCCEEDED' || taskStatus === 'succeeded' || taskStatus === 'completed' || taskStatus === 'done') {
         status = 'succeeded';
         const inner = (data.data || data.result || data) as Record<string, unknown>;

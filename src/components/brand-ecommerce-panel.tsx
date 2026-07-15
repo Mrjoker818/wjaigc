@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { X, Minus, ShoppingBag, Loader2, Sparkles, Settings, GripVertical } from 'lucide-react';
 import { BrandTemplateSelector } from './brand-ecommerce/BrandTemplateSelector';
-import { type TemplateFieldValues } from './brand-ecommerce/template-fields';
+import { } from './brand-ecommerce/template-fields';
 import { BrandSettingsForm } from './brand-ecommerce/BrandSettingsForm';
 import { BrandResultGallery, type GenerateResult } from './brand-ecommerce/BrandResultGallery';
 import { BrandAssetManager, type BrandAssetData } from './brand-ecommerce/BrandAssetManager';
@@ -57,9 +57,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
   const bg = isMonochrome ? 'bg-white' : 'bg-[#1a1a1a]';
   const bgDeep = isMonochrome ? 'bg-gray-50' : 'bg-[#141414]';
   const border = isMonochrome ? 'border-gray-200' : 'border-white/[0.08]';
-  const text = isMonochrome ? 'text-gray-900' : 'text-gray-100';
   const textSub = isMonochrome ? 'text-gray-500' : 'text-gray-400';
-  const textMuted = isMonochrome ? 'text-gray-400' : 'text-gray-500';
   const accent = isMonochrome ? 'bg-blue-500' : 'bg-[#d4af37]';
   const accentHover = isMonochrome ? 'hover:bg-blue-600' : 'hover:bg-[#e0b840]';
   const accentText = isMonochrome ? 'text-blue-500' : 'text-[#d4af37]';
@@ -83,15 +81,15 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
   const [brandColors, setBrandColors] = useState<string[]>([]);
   const [colorInput, setColorInput] = useState('');
   const [refImage, setRefImage] = useState(referenceImageUrl || '');
-  const [refImageFile, setRefImageFile] = useState<File | null>(null);
+  const [, setRefImageFile] = useState<File | null>(null);
   const [productImage, setProductImage] = useState('');
-  const [productImageFile, setProductImageFile] = useState<File | null>(null);
+  const [, setProductImageFile] = useState<File | null>(null);
   const [productConsistencyMode, setProductConsistencyMode] = useState<'text' | 'fusion' | 'compose'>('text');
   const [productConsistencyStrength, setProductConsistencyStrength] = useState(60);
   const [templateFieldValues, setTemplateFieldValues] = useState<Record<string, Record<string, string>>>({});
   const [isGenerating, setIsGenerating] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
-  const { elapsed, totalTime, startTimer, stopTimer, resetTimer, formatTime } = useProgressTimer();
+  const { elapsed, totalTime, startTimer, stopTimer, formatTime } = useProgressTimer();
   const [isAssisting, setIsAssisting] = useState(false);
   const [assistError, setAssistError] = useState('');
   const [taskId, setTaskId] = useState<string | null>(null);
@@ -478,7 +476,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
       setIsGenerating(false);
       stopTimer();
     }
-  }, [selectedTemplates, productDesc, styleExtra, sceneDesc, selectedModel, refImage, brandColors, productImage]);
+  }, [selectedTemplates, productDesc, selectedModel, startTimer, styleExtra, sceneDesc, selectedImageProviderId, selectedLlmModel, selectedLlmProviderId, refImage, productImage, productConsistencyMode, productConsistencyStrength, brandColors, templateFieldValues, stopTimer]);
 
   // ─── Add to canvas ────────────────────────────────────────────
 
@@ -511,7 +509,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
     }
     setIsGenerating(false);
     stopTimer();
-  }, [taskId]);
+  }, [stopTimer, taskId]);
 
   // ─── Regenerate single template ──────────────────────────────
 
@@ -578,7 +576,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
         }
       })
       .catch(() => { setIsGenerating(false); stopTimer(); });
-  }, [selectedModel, productDesc, styleExtra, sceneDesc, refImage, productImage, brandColors]);
+  }, [selectedModel, productDesc, startTimer, styleExtra, sceneDesc, selectedImageProviderId, selectedLlmModel, selectedLlmProviderId, refImage, productImage, brandColors, stopTimer]);
 
   // ─── AI Assist ────────────────────────────────────────────────
 
@@ -684,7 +682,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
       setAssistError(err instanceof Error ? err.message : 'AI辅助优化失败，请稍后重试');
     }
     setIsAssisting(false);
-  }, [selectedLlmModel, productDesc, sceneDesc, selectedTemplates, mainText, secondaryText, accentSymbol, styleExtra]);
+  }, [selectedLlmModel, productDesc, sceneDesc, selectedTemplates, styleExtra, brandColors.length, mainText, secondaryText, accentSymbol]);
 
   // ─── Apply loaded brand asset ────────────────────────────────────
 

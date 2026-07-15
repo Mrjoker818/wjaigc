@@ -27,16 +27,6 @@ const THEMES: Record<string, { primary: [number, number, number]; secondary: [nu
   'dark-elegance': { primary: [0.83, 0.69, 0.22], secondary: [0.9, 0.75, 0.3], bg: [0.1, 0.1, 0.1], text: [0.92, 0.92, 0.92] },
   'minimal-gray': { primary: [0.25, 0.25, 0.25], secondary: [0.45, 0.45, 0.45], bg: [1, 1, 1], text: [0.15, 0.15, 0.15] },
 };
-
-function hexToRgb(hex: string): [number, number, number] {
-  const clean = hex.replace('#', '');
-  return [
-    parseInt(clean.slice(0, 2), 16) / 255,
-    parseInt(clean.slice(2, 4), 16) / 255,
-    parseInt(clean.slice(4, 6), 16) / 255,
-  ];
-}
-
 // Simple markdown-to-PDF with basic formatting
 async function buildMarkdownPdf(content: string, themeName: string): Promise<Uint8Array> {
   const theme = THEMES[themeName] || THEMES['tech-blue'];

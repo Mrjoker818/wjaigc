@@ -1,5 +1,6 @@
 'use client';
 
+import NextImage from 'next/image';
 import { Info, FileText, X, Eraser, Brush, Scissors, ZoomIn, Pencil, Bot, Type, Scan, ShoppingBag, PenTool, Expand, MoreHorizontal } from 'lucide-react';
 import { APP_VERSION_LABEL } from '@/config/app-meta';
 
@@ -37,7 +38,7 @@ export function CanvasHelpModal({ mode, isMonochrome, onClose }: CanvasHelpModal
 function HelpImage({ file, alt, isMonochrome }: { file: string; alt: string; isMonochrome: boolean }) {
   return (
     <div className="rounded-xl overflow-hidden border" style={{ borderColor: isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.1)' }}>
-      <img src={`/api/help-image?file=${file}`} alt={alt} className="w-full" loading="lazy" />
+      <NextImage unoptimized width={1} height={1} src={`/api/help-image?file=${file}`} alt={alt} className="w-full" loading="lazy" />
     </div>
   );
 }
@@ -59,7 +60,7 @@ function ToolCard({ icon: Icon, title, desc, imageFile, detail, isMonochrome }: 
       </div>
       {imageFile && (
         <div className="rounded-lg overflow-hidden border mt-2" style={{ borderColor: isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.08)' }}>
-          <img src={`/api/help-image?file=${imageFile}`} alt={title} className="w-full" loading="lazy" />
+          <NextImage unoptimized width={1} height={1} src={`/api/help-image?file=${imageFile}`} alt={title} className="w-full" loading="lazy" />
         </div>
       )}
       <p className={`text-xs mt-1.5 ${isMonochrome ? 'text-gray-500' : 'text-gold-muted'}`}>{detail}</p>

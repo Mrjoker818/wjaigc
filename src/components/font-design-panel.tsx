@@ -1,11 +1,12 @@
 'use client';
 
+import NextImage from 'next/image';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   X, Sparkles, Copy, Image as ImageIcon, Download, Loader2,
-  ChevronDown, ChevronUp, RefreshCw, Star, Cpu, Wand2,
-  Check, Shuffle, Trash2, Clock, Plus, GripVertical, Minus, PenTool,
-  Palette, Zap, Search, List, Grid3X3, Maximize2,
+  ChevronDown, RefreshCw, Cpu, Wand2,
+  Check, Trash2, Clock, Plus, GripVertical, Minus, PenTool,
+  Palette, Search, List, Grid3X3, Maximize2,
 } from 'lucide-react';
 import { useProgressTimer } from '@/hooks/useProgressTimer';
 
@@ -53,7 +54,7 @@ const RANDOM_EXAMPLES = [
   '浮生六记', '食光食堂', '如故', '一念之间', '潮汐',
 ];
 
-import { MODEL_ASPECT_RATIOS, DEFAULT_ASPECT_RATIOS, findModelConfig, ASPECT_RATIO_TO_PIXELS } from '@/lib/canvas-generation-group';
+import { MODEL_ASPECT_RATIOS, DEFAULT_ASPECT_RATIOS, findModelConfig } from '@/lib/canvas-generation-group';
 import { extractFontDesignPollImageUrl } from '@/lib/font-design-poll-result';
 
 const COLOR_OPTIONS = [
@@ -121,7 +122,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
-  const { elapsed: imageElapsed, totalTime: imageTotalTime, startTimer: startImageTimer, stopTimer: stopImageTimer, resetTimer: resetImageTimer, formatTime: formatImageTime } = useProgressTimer();
+  const { elapsed: imageElapsed, totalTime: imageTotalTime, startTimer: startImageTimer, stopTimer: stopImageTimer, formatTime: formatImageTime } = useProgressTimer();
   // Gallery state
   const [galleryLoading, setGalleryLoading] = useState(false);
   const [galleryItems, setGalleryItems] = useState<GalleryDataItem[]>([]);
@@ -264,6 +265,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
       }
 
       let hasRemaining = false;
+      void hasRemaining;
       for (const tid of taskIds) {
         try {
           const res = await fetch('/api/poll-task', {
@@ -301,9 +303,8 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
         pollingTimerRef.current = null;
       }
     };
-
     poll(); // Start immediately
-  }, []);
+  }, [imageModels, stopImageTimer]);
 
   const stopPolling = useCallback(() => {
     if (pollingTimerRef.current) {
@@ -314,7 +315,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
   }, []);
 
   // Cleanup on unmount
-  useEffect(() => { return () => { stopPolling(); setIsGeneratingImage(false); stopImageTimer(); }; }, [stopPolling]);
+  useEffect(() => { return () => { stopPolling(); setIsGeneratingImage(false); stopImageTimer(); }; }, [stopImageTimer, stopPolling]);
 
   const handleRandomExample = useCallback(() => {
     setText(RANDOM_EXAMPLES[Math.floor(Math.random() * RANDOM_EXAMPLES.length)]);
@@ -434,7 +435,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
       }
       setHistory(prev => [{ id: `h-${Date.now()}`, text, scene, style: secondaryStyle || primaryStyleCategory, prompt: data.prompt || '', createdAt: new Date().toLocaleString() }, ...prev]);
     } catch { showToast('生成图片失败'); setIsGeneratingImage(false); stopImageTimer(); }
-  }, [text, scene, primaryStyleCategory, secondaryStyle, ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced, selectedModel, showToast, stopPolling, startPolling]);
+  }, [text, stopPolling, startImageTimer, scene, primaryStyleCategory, secondaryStyle, ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced, selectedModel, imageModels, showToast, stopImageTimer, startPolling]);
 
   /** Generate 2 variant images for a single design plan */
   const handleGeneratePlanImage = useCallback(async (plan: DesignPlan, planIndex: number) => {
@@ -478,7 +479,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
       }
       setHistory(prev => [{ id: `h-${Date.now()}`, text, scene, style: plan.title || secondaryStyle || primaryStyleCategory, prompt: plan.prompt || '', createdAt: new Date().toLocaleString() }, ...prev]);
     } catch { showToast('生成图片失败'); setIsGeneratingImage(false); stopImageTimer(); }
-  }, [text, scene, primaryStyleCategory, secondaryStyle, ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced, selectedModel, showToast, stopPolling, startPolling, buildStyleEnforcementPrefix]);
+  }, [text, stopPolling, startImageTimer, buildStyleEnforcementPrefix, scene, secondaryStyle, primaryStyleCategory, ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced, selectedModel, showToast, startPolling, stopImageTimer]);
 
   /** Generate 2 varied images per plan × 4 plans = 8 different images total */
   const handleGenerateAllPlanImages = useCallback(async () => {
@@ -525,7 +526,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
       }
       setHistory(prev => [...plans.map((plan, i) => ({ id: `h-${Date.now()}-${i}`, text, scene, style: plan.title || secondaryStyle || primaryStyleCategory, prompt: plan.prompt || '', createdAt: new Date().toLocaleString() })), ...prev]);
     } catch { showToast('生成图片失败'); setIsGeneratingImage(false); stopImageTimer(); }
-  }, [plans, text, scene, primaryStyleCategory, secondaryStyle, ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced, selectedModel, showToast, stopPolling, startPolling, buildStyleEnforcementPrefix]);
+  }, [plans, stopPolling, startImageTimer, buildStyleEnforcementPrefix, showToast, text, scene, secondaryStyle, primaryStyleCategory, ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced, selectedModel, startPolling, stopImageTimer]);
 
   /** Black-on-white test: 2 images per plan × 4 plans = 8 different images */
   const handleBlackOnWhiteTest = useCallback(async () => {
@@ -562,7 +563,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
       }
       if (activeTasksRef.current.size > 0) { startPolling(); } else { setIsGeneratingImage(false); stopImageTimer(); }
     } catch { showToast('黑底白字测试失败'); setIsGeneratingImage(false); stopImageTimer(); }
-  }, [plans, text, scene, primaryStyleCategory, secondaryStyle, ratio, selectedModel, showToast, stopPolling, startPolling, buildStyleEnforcementPrefix]);
+  }, [plans, stopPolling, startImageTimer, buildStyleEnforcementPrefix, showToast, text, scene, secondaryStyle, primaryStyleCategory, selectedModel, ratio, startPolling, stopImageTimer]);
 
   const handleAddToCanvas = useCallback((url: string) => {
     // ★ 传递模型信息
@@ -667,7 +668,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
         if (vIdx === 1) { setIsGeneratingImage(false); stopImageTimer(); }
       });
     }
-  }, [inspirationKeywords, isGeneratingImage, inspirationRef, text, ratio, primaryStyleCategory, startPolling, showToast]);
+  }, [inspirationKeywords, isGeneratingImage, showToast, ratio, text, inspirationRef?.displayText, inspirationRef?.categoryName, primaryStyleCategory, startPolling, stopImageTimer]);
 
   const currentCategory = styleCategories.find(c => c.id === primaryStyleCategory);
 
@@ -788,7 +789,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
-            <img src="/logo.png" alt="" className="w-4 h-4 object-contain rounded" />
+            <NextImage unoptimized width={1} height={1} src="/logo.png" alt="" className="w-4 h-4 object-contain rounded" />
             <h1 className="text-sm font-semibold" style={{ color: textColor }}>字境大师 Pro</h1>
           </div>
           <p className="text-[11px] mt-0.5" style={{ color: subTextColor }}>中文标题字 / KV文字 / 封面字 / 文字Logo 设计器</p>
@@ -861,8 +862,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                     {/* Image preview */}
                     <div className="p-3 flex justify-center" style={{ background: isMonochrome ? '#f9fafb' : '#0a0a0a' }}>
                       <div className="rounded-lg overflow-hidden shadow-lg" style={{ maxWidth: '100%', maxHeight: 160 }}>
-                        <img
-                          src={inspirationRef.localPath || `/api/font-design/gallery-image?id=${inspirationRef.id}`}
+                        <NextImage unoptimized width={1} height={1}                           src={inspirationRef.localPath || `/api/font-design/gallery-image?id=${inspirationRef.id}`}
                           alt="灵感参考图"
                           className="object-contain"
                           style={{ maxWidth: '100%', maxHeight: 160, display: 'block' }}
@@ -1527,7 +1527,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                                 onMouseEnter={e => { e.currentTarget.style.borderColor = accentColor; }}
                                 onMouseLeave={e => { e.currentTarget.style.borderColor = borderColorLight; }}
                               >
-                                <img src={img.url} alt={`${planTitle} 变体${vIdx + 1}`} className="w-full object-cover" style={getAspectRatioStyle(ratio)} crossOrigin="anonymous" />
+                                <NextImage unoptimized width={1} height={1} src={img.url} alt={`${planTitle} 变体${vIdx + 1}`} className="w-full object-cover" style={getAspectRatioStyle(ratio)} crossOrigin="anonymous" />
                                 <div
                                   className="absolute inset-0 flex items-center justify-center gap-2 transition-opacity opacity-0 group-hover:opacity-100"
                                   style={{ background: 'rgba(0,0,0,0.7)' }}
@@ -1664,8 +1664,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                           onMouseLeave={e => { e.currentTarget.style.borderColor = borderColor; }}
                         >
                           <div className="w-10 h-10 rounded overflow-hidden shrink-0" style={{ background: isMonochrome ? '#f3f4f6' : '#1c1c1c' }}>
-                            <img
-                              src={`${item.localPath || `/api/font-design/gallery-image?id=${item.id}`}`}
+                            <NextImage unoptimized width={1} height={1}                               src={`${item.localPath || `/api/font-design/gallery-image?id=${item.id}`}`}
                               alt={item.displayText || '灵感'}
                               className="w-full h-full object-cover"
                               loading="lazy"
@@ -1700,8 +1699,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                           style={{ border: `1px solid ${borderColor}`, background: cardBgColor, cursor: 'default' }}
                         >
                           <div className="relative aspect-[4/3] overflow-hidden" style={{ background: isMonochrome ? '#f3f4f6' : '#111' }}>
-                            <img
-                              src={`${item.localPath || `/api/font-design/gallery-image?id=${item.id}`}`}
+                            <NextImage unoptimized width={1} height={1}                               src={`${item.localPath || `/api/font-design/gallery-image?id=${item.id}`}`}
                               alt={item.displayText || '灵感'}
                               className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
                               loading="lazy"
@@ -1738,8 +1736,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                           style={{ border: `1px solid ${borderColor}`, background: cardBgColor, cursor: 'default' }}
                         >
                           <div className="relative aspect-[16/9] overflow-hidden" style={{ background: isMonochrome ? '#f3f4f6' : '#111' }}>
-                            <img
-                              src={`${item.localPath || `/api/font-design/gallery-image?id=${item.id}`}`}
+                            <NextImage unoptimized width={1} height={1}                               src={`${item.localPath || `/api/font-design/gallery-image?id=${item.id}`}`}
                               alt={item.displayText || '灵感'}
                               className="w-full h-full object-cover"
                               loading="lazy"

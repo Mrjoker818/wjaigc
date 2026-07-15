@@ -8,7 +8,7 @@ import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { consumeCredits, refundCredits } from '@/lib/credits';
 import { CHAT_TOOLS, executeToolCall, parseToolCallsFromStream, ToolCallResult } from '@/lib/chat-tools';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
-import { logOperation, logError, startTimer, OP_ACTIONS } from '@/lib/op-log';
+import { logError, startTimer, OP_ACTIONS } from '@/lib/op-log';
 import { resolveChatAgentToolChoice } from '@/lib/chat-agent-tool-choice';
 
 export const maxDuration = 120;
@@ -27,7 +27,7 @@ interface ChatTaskContext {
 export async function POST(request: NextRequest) {
   const opTimer = startTimer();
   let deductedCredits = 0;
-  let sessionUser: any = null;
+  let sessionUser: Awaited<ReturnType<typeof getSessionUser>> = null;
   try {
     const authResult = await requireApiAuthOrReject(request);
     if (authResult instanceof NextResponse) return authResult;

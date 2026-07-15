@@ -1,11 +1,12 @@
 'use client';
 
+import NextImage from 'next/image';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   X, FolderOpen, Trash2, Search, Grid3X3, List,
   CheckSquare, Square, Image as ImageIcon,
   Copy, Wand2, Download, ArrowUpDown,
-  ChevronDown, Clock, Tag, SlidersHorizontal
+  ChevronDown, Clock, Tag
 } from 'lucide-react';
 import JSZip from 'jszip';
 
@@ -371,8 +372,7 @@ export function ProjectDataPanel({
                     }
                   }}
                 >
-                  <img
-                    src={img.url}
+                  <NextImage unoptimized width={1} height={1}                     src={img.url}
                     alt={img.prompt || '图片'}
                     className="w-full h-full object-cover"
                     loading="lazy"
@@ -471,7 +471,7 @@ export function ProjectDataPanel({
               >
                 {/* Thumbnail */}
                 <div className="w-12 h-12 rounded-lg overflow-hidden bg-black/20 flex-shrink-0">
-                  <img src={img.url} alt="" className="w-full h-full object-cover" loading="lazy" />
+                  <NextImage unoptimized width={1} height={1} src={img.url} alt="" className="w-full h-full object-cover" loading="lazy" />
                 </div>
                 {/* Info */}
                 <div className="flex-1 min-w-0">

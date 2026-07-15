@@ -1584,6 +1584,7 @@ export function convertAspectRatioToSize(ratio: string, quality?: string, modelI
  * This function finds the best match from the model's supported ratios.
  */
 export function convertPixelSizeToAspectRatio(pixelSize: string, modelId?: string): string {
+  void modelId;
   const parts = pixelSize.split('x').map(Number);
   if (parts.length !== 2 || parts[0] <= 0 || parts[1] <= 0) {
     return '1:1';
@@ -1928,10 +1929,8 @@ export interface ParsedImageResponse {
  * Handles both direct image responses and async task_id responses,
  * regardless of what the profile predicts (the actual response may differ).
  */
-export function parseResponseForProfile(
-  apiResponse: Record<string, unknown>,
-  _profile: ApiCompatProfile,
-): ParsedImageResponse {
+export function parseResponseForProfile(apiResponse: Record<string, unknown>, _profile: ApiCompatProfile): ParsedImageResponse {
+  void _profile;
   const directImageUrls: string[] = [];
   const taskIds: string[] = [];
 

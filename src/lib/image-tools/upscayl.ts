@@ -101,9 +101,7 @@ export async function isOnnxUpscaleAvailable(): Promise<{
         }
       }, 10000);
       let stdout = '';
-      let stderr = '';
       proc.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
-      proc.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
       proc.on('close', (code: number | null) => {
         if (!settled) {
           settled = true;
@@ -157,6 +155,7 @@ interface OnnxUpscaleResult {
 
 /** 动态计算 tileSize：根据图片尺寸和可用内存自适应 */
 export function calcOptimalTileSize(width: number, height: number, scale: number): number {
+  void scale;
   const pixels = width * height;
   if (pixels > 1024 * 1024) return 128;
   if (pixels >= 512 * 512) return 192;

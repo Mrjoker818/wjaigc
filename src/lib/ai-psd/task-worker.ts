@@ -11,10 +11,8 @@ import type {
   AiPsdTask,
   AiPsdTaskStatus,
   LayerPlan,
-  LayerPlanLayer,
   TextLayerDef,
-  TextLayerEditableConfig,
-  LayerDef,
+  TextLayerEditableConfig
 } from './types';
 import {
   dbGetTask,
@@ -31,8 +29,6 @@ import { validateLayerPlan, type ValidationResult } from './schema-validator';
 import {
   callLLM,
   generateImage,
-  getImageProvider,
-  getLLMProvider,
   pollImageTask,
 } from './model-router';
 import {
@@ -41,19 +37,14 @@ import {
 } from './layer-prompt';
 import {
   buildTextLayers,
-  renderTextToPng,
   buildTextLayer,
 } from './text-layer-builder';
 import {
   normalizeImage,
   downloadImageToBuffer,
-  getCanvasDimensions,
-  type NormalizeOptions,
-  type NormalizeResult,
+  getCanvasDimensions
 } from './image-normalize';
 import {
-  generateShadowLayer,
-  type ShadowParams,
 } from './shadow-generator';
 import {
   buildPsd,
@@ -66,7 +57,6 @@ import {
   buildLayerJson,
   buildReportMd,
   calculateQualityScore,
-  type ExportFormat,
   type ExportResult,
   type QualityScore,
 } from './export-packager';
@@ -76,22 +66,6 @@ import {
 function checkCancel(taskId: string): void {
   if (isTaskCancelled(taskId)) {
     throw new Error('TASK_CANCELLED');
-  }
-}
-
-function makeV4Name(layer: LayerPlanLayer): string {
-  const group = layer.group ?? 'deco';
-  const idx = 1;
-  const label = (layer.description ?? layer.name ?? 'layer').slice(0, 20).replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '_');
-  switch (group) {
-    case 'background': return 'bg/main';
-    case 'light': return `fx/light/${idx}`;
-    case 'subject': return `subject/${idx}/${label}`;
-    case 'decoration': return `deco/${idx}/${label}`;
-    case 'identity': return `deco/${idx}/${label}`;
-    case 'atmosphere': return `fx/atmosphere/${idx}`;
-    case 'text': return `text/${idx}/${label}`;
-    default: return `deco/${idx}/${label}`;
   }
 }
 
@@ -400,7 +374,7 @@ export async function runAiPsdTask(taskId: string): Promise<void> {
 
     for (let i = 0; i < textLayers.length; i++) {
       const textDef = textLayers[i];
-      const { name: layerName, pngBuffer } = buildTextLayer(textDef, dims.width, dims.height);
+      const { pngBuffer } = buildTextLayer(textDef, dims.width, dims.height);
       const v4Name = `text/${i + 1}/${textDef.text.slice(0, 20).replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '_')}`;
 
       // 文字层PNG添加到layerBuffers (key必须与psd-builder的layerDef.name一致)
@@ -463,7 +437,7 @@ export async function runAiPsdTask(taskId: string): Promise<void> {
     console.info(`[ai-psd-worker] Task ${taskId} completed successfully in ${(durationMs / 1000).toFixed(1)}s`);
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);
-    const isCancel = errMsg.includes('已取消');
+    errMsg.includes('已取消');
     console.error(`[ai-psd-worker] Task ${taskId} failed:`, errMsg);
     await advanceTask(taskId, 'failed', 0, { currentStep: `生成失败: ${errMsg}`, errorMessage: errMsg });
   }

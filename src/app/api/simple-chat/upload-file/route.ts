@@ -1,18 +1,6 @@
 import { NextRequest } from 'next/server';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-const ALLOWED_TYPES = [
-  'text/plain',
-  'application/pdf',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'text/markdown',
-  'application/json',
-  'text/csv',
-  'text/html',
-  'application/xml',
-  'text/xml',
-];
 
 export async function POST(request: NextRequest) {
   try {
@@ -66,8 +54,9 @@ export async function POST(request: NextRequest) {
       stats: { lines, chars, originalSize: file.size },
       filename: file.name,
     });
-  } catch (e: any) {
-    return Response.json({ error: `文件解析失败: ${e.message}` }, { status: 500 });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    return Response.json({ error: `文件解析失败: ${message}` }, { status: 500 });
   }
 }
 

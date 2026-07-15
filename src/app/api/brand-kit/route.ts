@@ -172,7 +172,7 @@ async function handleAnalyze(body: {
   const apiKey = provider.apiKey || provider.apiKey || '';
 
   // Build vision prompt for brand DNA extraction
-  const imageContents = images.map((url: string, i: number) => ({
+  const imageContents = images.map((url: string) => ({
     type: 'image_url',
     image_url: { url, detail: 'high' as const }
   }));

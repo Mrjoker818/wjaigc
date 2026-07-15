@@ -1,13 +1,14 @@
 'use client';
 
+import NextImage from 'next/image';
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, Component, type ReactNode } from 'react';
 import { Canvas, useLoader, useThree, useFrame } from '@react-three/fiber';
-import { OrbitControls, Grid, Environment } from '@react-three/drei';
+import { OrbitControls, Grid } from '@react-three/drei';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
-import { X, Download, ZoomIn, ZoomOut, Maximize2, RotateCcw, Move, Box, Image, ImagePlus, Eye, ChevronDown, GripVertical, Camera, Sun, Lightbulb, Aperture, Grid3x3, BoxSelect, RefreshCw, Palette } from 'lucide-react';
+import { X, Download, ZoomIn, Maximize2, RotateCcw, Move, Box, ImagePlus, Eye, ChevronDown, GripVertical, Camera, Sun, Lightbulb, Aperture, Grid3x3, BoxSelect, RefreshCw, Palette } from 'lucide-react';
 
 /* ------------------------------------------------------------------ */
 /*  Simple Error Boundary for Three.js loading failures                */
@@ -854,8 +855,7 @@ export default function ModelViewer3D({
                 <div className="p-3 border-b border-[#2a2a2a]/40">
                   <div className="text-xs font-medium text-[#888] uppercase tracking-wider mb-2">原始图片</div>
                   <div className="rounded-xl overflow-hidden border border-[#2a2a2a]/60 bg-[#0a0a0a]">
-                    <img
-                      src={previewImageUrl}
+                    <NextImage unoptimized width={1} height={1}                       src={previewImageUrl}
                       alt="Source"
                       className="w-full h-[140px] object-contain"
                       draggable={false}
@@ -879,7 +879,7 @@ export default function ModelViewer3D({
                             else if (key === 'left') setCameraPreset('left');
                           }}
                         >
-                          <img src={url} alt={label} className="w-full h-[80px] object-cover" draggable={false} />
+                          <NextImage unoptimized width={1} height={1} src={url} alt={label} className="w-full h-[80px] object-cover" draggable={false} />
                         </div>
                         <span className="absolute bottom-1 left-1 text-[9px] px-1 py-0.5 rounded bg-black/70 text-[#aaa]">{label}</span>
                       </div>
@@ -1018,8 +1018,7 @@ export default function ModelViewer3D({
                 )}
                 </div>
                 {previewImageUrl && (
-                  <img
-                    src={previewImageUrl}
+                  <NextImage unoptimized width={1} height={1}                     src={previewImageUrl}
                     alt="预览备用图"
                     className="max-w-[200px] max-h-[200px] rounded-xl border border-[#2a2a2a] object-contain"
                   />

@@ -31,11 +31,7 @@ interface PaymentStatus {
   status: { wechat: boolean; alipay: boolean };
 }
 
-export default function UserCreditsTab({
-  isDark,
-  userId,
-  onToast
-}: UserCreditsTabProps) {
+export default function UserCreditsTab({ isDark, onToast }: UserCreditsTabProps) {
   const [balance, setBalance] = useState(0);
   const [totalEarned, setTotalEarned] = useState(0);
   const [totalSpent, setTotalSpent] = useState(0);

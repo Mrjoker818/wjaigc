@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, ChevronRight, Plus, Trash2, Edit3, LogOut, MessageSquare, FolderOpen, Settings, Home, User, X, PanelLeftClose, PanelLeft } from "lucide-react";
-import { SimpleChatProject, SimpleChatTask } from "./simple-chat-types";
+import { ChevronDown, ChevronRight, Plus, Trash2, Edit3, LogOut, MessageSquare, FolderOpen, User, PanelLeftClose } from "lucide-react";
+import { SimpleChatProject } from "./simple-chat-types";
 import { User as UserType } from "@/lib/user-types";
 
 interface SidebarProps {
@@ -38,9 +38,9 @@ export default function Sidebar({
   const [taskRenameValue, setTaskRenameValue] = useState("");
 
   const toggleProject = (id: string) => {
+    void id;
     setExpandedProjects(prev => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
   };

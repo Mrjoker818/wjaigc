@@ -13,7 +13,7 @@ import { isTaskCancelled as isRegistryCancelled } from '@/lib/task-registry';
 import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits, refundCredits } from '@/lib/credits';
 import { validateApiInputs } from '@/lib/api-validator';
-import { logOperation, logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
+import { logError, OP_ACTIONS } from '@/lib/op-log';
 export const runtime = 'nodejs';
 export const maxDuration = 600;
 
@@ -57,7 +57,7 @@ if (typeof setInterval !== 'undefined') {
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
   let deductedCredits = 0;
-  let sessionUser: any = null;
+  let sessionUser: Awaited<ReturnType<typeof getSessionUser>> = null;
   const selectedModel = '';
   const providerId = '';
   try {
@@ -74,7 +74,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: _validationError }, { status: 400 });
     }
 
-    const { image, prompt, maskDataUrl, model, providerId, maxRounds, imagePrompt, imageModel, imageProviderId, quality, aspectRatio } = body;
+    const { image, prompt, maskDataUrl, model, maxRounds, imagePrompt, imageModel, imageProviderId, quality, aspectRatio } = body;
 
     // ★ 从 model 中提取纯 modelId（前端可能传 providerId::modelId 格式）
     let pureModel = model;
@@ -879,7 +879,7 @@ async function performImageEdit(
       const effectiveQuality = qualityFromFrontend || '1K';
       const effectiveAspectRatio = aspectRatioFromFrontend || '1:1';
       const dynamicSize = calculateActualPixelsFromRatio(effectiveAspectRatio, effectiveQuality, imageModel) || '2048x2048';
-      const { body: genBody, endpoint: _resolvedEp } = adjustRequestForProfile(
+      const { body: genBody } = adjustRequestForProfile(
         {
           model: imageModel,
           prompt: editPrompt,

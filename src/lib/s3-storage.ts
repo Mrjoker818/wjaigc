@@ -160,7 +160,7 @@ export async function s3FileExists(key: string): Promise<boolean> {
       const kBase = k.replace(/\.[^.]+$/, '');
       return kBase === baseName || k.startsWith(baseName + '_');
     });
-  } catch (e) {
+  } catch {
     return false;
   }
 }
@@ -197,7 +197,7 @@ export async function resolveS3Key(baseKey: string): Promise<string | null> {
       }
     }
     return null;
-  } catch (e) {
+  } catch {
     return null;
   }
 }
@@ -348,10 +348,10 @@ export async function persistRemoteImage(
   imageUrl: string,
   subfolder: string = ''
 ): Promise<string | null> {
-  const path = await import('path');
-  const fs = await import('fs/promises');
+  await import('path');
+  await import('fs/promises');
   const { getServerDataRoot } = await import('./server-data-root');
-  const dataRoot = getServerDataRoot();
+  getServerDataRoot();
   
   try {
     let imageBuffer: Buffer;

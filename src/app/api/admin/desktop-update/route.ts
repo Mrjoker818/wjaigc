@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const admin = await requireAdminUser(request);
   if (!admin) return NextResponse.json({ success: false, error: 'Admin access required' }, { status: 403 });
-  let body: Record<string, any> = {};
+  let body: Record<string, unknown> = {};
   try {
     body = await request.json();
   } catch {

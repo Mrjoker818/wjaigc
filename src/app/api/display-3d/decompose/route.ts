@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '未找到可用的LLM模型，请在管理员后台配置' }, { status: 400 });
     }
 
-    const profile = resolveCompatProfile(provider);
+    resolveCompatProfile(provider);
     const rawSelectedModel = resolveRequestedImageModel({ requestedModel: model, providerModels: provider.selectedModels, fallbackModel: 'gemini-2.5-flash' });
     const { apiModelName: selectedModel } = normalizeModelForApi(rawSelectedModel);
 

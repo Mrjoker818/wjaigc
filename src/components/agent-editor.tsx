@@ -1,9 +1,10 @@
 'use client';
 
+import NextImage from 'next/image';
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { X, GripVertical, RefreshCw, ChevronDown, ChevronUp, Loader2, CheckCircle2, XCircle, ImagePlus, Minus, Zap, Timer, Clock, FileText } from 'lucide-react';
+import { X, GripVertical, RefreshCw, ChevronDown, ChevronUp, CheckCircle2, XCircle, ImagePlus, Minus, Zap, FileText } from 'lucide-react';
 import { useProgressTimer } from '@/hooks/useProgressTimer';
-import { getPromptTemplates, searchTemplates, type PromptTemplate } from '@/lib/prompt-templates';
+import { getPromptTemplates, searchTemplates } from '@/lib/prompt-templates';
 
 interface AgentEditorProps {
   imageUrl?: string;
@@ -106,7 +107,7 @@ export function AgentEditor({
   const filteredTemplates = templateSearch ? searchTemplates(templateSearch) : getPromptTemplates();
   const [resultPrompt, setResultPrompt] = useState('');
   const [taskId, setTaskId] = useState<string | null>(null);
-  const { elapsed, totalTime, formatTime, startTimer, stopTimer, resetTimer } = useProgressTimer();
+  const { elapsed, totalTime, formatTime, startTimer, stopTimer } = useProgressTimer();
 
   // 拖动状态
   const [position, setPosition] = useState(() => {
@@ -457,8 +458,7 @@ export function AgentEditor({
                 backgroundColor: isMonochrome ? '#e5e5e5' : '#111111',
               }}
             >
-              <img
-                src={imageUrl}
+              <NextImage unoptimized width={1} height={1}                 src={imageUrl}
                 alt="编辑图片"
                 className="w-full h-full object-contain"
                 draggable={false}
@@ -565,8 +565,7 @@ export function AgentEditor({
         {resultImageUrl && (
           <div className="px-3 pb-1">
             <div className="rounded overflow-hidden" style={{ border: `1px solid ${accentColor}40` }}>
-              <img
-                src={resultImageUrl}
+              <NextImage unoptimized width={1} height={1}                 src={resultImageUrl}
                 alt="结果"
                 className="w-full object-contain"
                 style={{ maxHeight: 120 }}
@@ -694,7 +693,7 @@ export function AgentEditor({
                 >
                   <div className="flex items-center gap-2">
                     {tpl.thumbnail ? (
-                      <img src={tpl.thumbnail} alt={tpl.name} className="w-6 h-6 rounded object-cover flex-shrink-0 border border-white/10" />
+                      <NextImage unoptimized width={1} height={1} src={tpl.thumbnail} alt={tpl.name} className="w-6 h-6 rounded object-cover flex-shrink-0 border border-white/10" />
                     ) : (
                       <FileText className="w-3.5 h-3.5 flex-shrink-0 text-gold-muted/50" />
                     )}
@@ -704,7 +703,7 @@ export function AgentEditor({
                   {tpl.thumbnail && (
                     <div className="absolute left-full ml-2 top-0 z-[60] hidden group-hover/tpl:block">
                       <div className="rounded-lg shadow-2xl overflow-hidden border border-white/10 bg-[#1a1a1a]">
-                        <img src={tpl.thumbnail} alt={tpl.name} className="w-36 h-36 object-cover" />
+                        <NextImage unoptimized width={1} height={1} src={tpl.thumbnail} alt={tpl.name} className="w-36 h-36 object-cover" />
                         <div className="px-2 py-1 text-[10px] truncate text-gold-muted">{tpl.name}</div>
                       </div>
                     </div>

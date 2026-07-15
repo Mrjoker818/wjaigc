@@ -10,6 +10,7 @@ export const dynamic = 'force-dynamic';
  * 返回 JSON 提示使用 GET 连接 SSE，避免 405 错误
  */
 export async function POST(_request: NextRequest) {
+  void _request;
   return NextResponse.json({
     success: false,
     error: 'SSE endpoint requires GET method. Use EventSource or fetch with GET to connect.',

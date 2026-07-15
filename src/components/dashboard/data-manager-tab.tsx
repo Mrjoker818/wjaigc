@@ -1,5 +1,6 @@
 'use client';
 
+import NextImage from 'next/image';
 import { useState, useEffect, useCallback } from 'react';
 import {
   Search, Image, User, Users, Download, RefreshCw,
@@ -83,10 +84,7 @@ function sourceBadgeClass(s: string, isDark: boolean): string {
 }
 
 /* ── Component ── */
-export default function DataManagerTab({
-  isDark, isMonochrome, textPrimary, textSecondary,
-  softClass, inputClass, accentBgClass, accentTextOnBgClass, accentHoverBgClass,
-}: DataManagerTabProps) {
+export default function DataManagerTab({ isDark, textPrimary, textSecondary, softClass, inputClass }: DataManagerTabProps) {
   // State
   const [view, setView] = useState<'overview' | 'gallery' | 'users'>('overview');
   const [returnView, setReturnView] = useState<'overview' | 'users'>('overview');
@@ -362,9 +360,7 @@ export default function DataManagerTab({
               onClick={() => setSelectedImage(img)}
             >
               <div className="aspect-square bg-black/10">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={img.url}
+                <NextImage unoptimized width={1} height={1}                   src={img.url}
                   alt={img.prompt || '图片'}
                   className="w-full h-full object-cover"
                   loading="lazy"
@@ -396,8 +392,7 @@ export default function DataManagerTab({
               onClick={() => setSelectedImage(img)}
             >
               <div className={`w-12 h-12 rounded-lg overflow-hidden shrink-0 ${isDark ? 'bg-white/5' : 'bg-gray-100'}`}>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={img.url} alt="" className="w-full h-full object-cover" loading="lazy" />
+                <NextImage unoptimized width={1} height={1} src={img.url} alt="" className="w-full h-full object-cover" loading="lazy" />
               </div>
               <div className="flex-1 min-w-0">
                 <div className={`text-sm truncate ${textPrimary}`}>
@@ -534,9 +529,7 @@ export default function DataManagerTab({
           <div className="flex flex-col md:flex-row">
             {/* Image */}
             <div className="md:w-1/2 bg-black/5">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={selectedImage.url}
+              <NextImage unoptimized width={1} height={1}                 src={selectedImage.url}
                 alt={selectedImage.prompt || '图片详情'}
                 className="w-full h-auto max-h-[60vh] object-contain"
               />

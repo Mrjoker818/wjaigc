@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
   const auth = await requireApiAuthOrReject(request);
   if (auth instanceof NextResponse) return auth;
   let deductedCredits = 0;
-  let sessionUser: any = null;
+  let sessionUser: Awaited<ReturnType<typeof getSessionUser>> = null;
   try {
     const { image } = await request.json();
     // 输入校验

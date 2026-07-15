@@ -10,7 +10,7 @@
  * - 同模型重试 2 次（间隔 10s），不需要切换模型
  */
 
-import { translateApiError, isCloudflareTimeoutError } from './api-error-translator';
+import { translateApiError } from './api-error-translator';
 
 /** 错误分类 */
 export type ErrorCategory =

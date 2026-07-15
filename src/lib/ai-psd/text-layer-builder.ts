@@ -24,14 +24,15 @@ function planTextLayerToDef(tl: LayerPlanTextLayer): TextLayerDef {
 
 /** 使用canvas光栅化文字为PNG Buffer */
 export function renderTextToPng(textDef: TextLayerDef, canvasWidth: number, canvasHeight: number): Buffer {
+  void canvasHeight;
+  void canvasWidth;
   // 服务端无canvas，使用简单的纯色背景+文字占位图
   // 生成一个带文字信息的标记PNG（用于PSD层占位）
   const text = textDef.text || '';
-  const fontSize = textDef.fontSize || 32;
   
   // 创建一个简单的PNG标记：白色文字信息矩形
   // 在实际PSD中，文字层会被标记为text类型，Photoshop中可编辑
-  const header = Buffer.from(text.slice(0, 50), 'utf-8');
+  Buffer.from(text.slice(0, 50), 'utf-8');
   
   // 最小有效PNG (1x1 透明像素)
   const PNG_HEADER = Buffer.from([
@@ -56,7 +57,6 @@ export function buildTextLayers(
   layerPlan: LayerPlan | null,
 ): TextLayerDef[] {
   const layers: TextLayerDef[] = [];
-  let order = 1;
 
   // 从用户输入的文案内容构建文字层
   if (task.title) {
@@ -71,7 +71,6 @@ export function buildTextLayers(
       bold: true,
       italic: false,
     });
-    order++;
   }
 
   if (task.subtitle) {
@@ -86,7 +85,6 @@ export function buildTextLayers(
       bold: false,
       italic: false,
     });
-    order++;
   }
 
   // 从LLM规划的文字层构建
@@ -95,7 +93,6 @@ export function buildTextLayers(
       // 避免重复
       if (!layers.some(l => l.text === tl.text)) {
         layers.push(planTextLayerToDef(tl));
-        order++;
       }
     }
   }

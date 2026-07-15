@@ -37,19 +37,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: _validationError }, { status: 400 });
     }
 
-    const {
-      prompt,
-      model,
-      apiKey: _clientApiKey,
-      baseUrl: _clientBaseUrl,
-      quality = 'standard',
-      aspectRatio = '1:1',
-      n = 1,
-      referenceImageUrl,
-      providerId,
-    } = body;
+    const { prompt, model, quality = 'standard', aspectRatio = '1:1', n = 1, referenceImageUrl, providerId } = body;
 
-    const sessionUser = await getSessionUser(request);
+    await getSessionUser(request);
 
     // Content safety check
     const safetyResult = checkPromptSafety(prompt || '');

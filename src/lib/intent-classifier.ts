@@ -176,6 +176,7 @@ export function classifyIntent(
  * 检测操作意图
  */
 function detectOperateIntent(text: string, hasSelectedImage: boolean): ClassifiedIntent | null {
+  void hasSelectedImage;
   for (const [action, keywords] of Object.entries(OPERATE_KEYWORDS)) {
     for (const keyword of keywords) {
       if (text.includes(keyword.toLowerCase())) {
@@ -200,6 +201,7 @@ function detectOperateIntent(text: string, hasSelectedImage: boolean): Classifie
  * 检测生成意图
  */
 function detectGenerateIntent(text: string, hasImages: boolean): ClassifiedIntent | null {
+  void hasImages;
   // 检测视频生成关键词
   for (const [action, keywords] of Object.entries(GENERATE_KEYWORDS)) {
     for (const keyword of keywords) {

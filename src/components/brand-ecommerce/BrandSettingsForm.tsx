@@ -1,7 +1,8 @@
 'use client';
 
+import NextImage from 'next/image';
 import { useRef, useCallback } from 'react';
-import { Upload, Palette, Sparkles, Loader2, ChevronDown, Package, GripVertical, ShieldCheck, Plus, AlertCircle } from 'lucide-react';
+import { Upload, Palette, Sparkles, Loader2, ChevronDown, Package, ShieldCheck, Plus, AlertCircle } from 'lucide-react';
 import { getTemplateFieldGroups, getTemplateDisplayName, type TemplateFieldValues, type TemplateFieldDef } from './template-fields';
 
 // ─── Types ────────────────────────────────────────────────────────
@@ -603,7 +604,7 @@ export function BrandSettingsForm({
         <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
         {refImage ? (
           <div className={`relative rounded-lg overflow-hidden border ${border} group`}>
-            <img src={refImage} alt="参考图" className="w-full h-28 object-cover" />
+            <NextImage unoptimized width={1} height={1} src={refImage} alt="参考图" className="w-full h-28 object-cover" />
             <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
               <button
                 onClick={() => fileInputRef.current?.click()}
@@ -637,7 +638,7 @@ export function BrandSettingsForm({
         <input ref={productFileInputRef} type="file" accept="image/*" className="hidden" onChange={handleProductFileChange} />
         {productImage ? (
           <div className="relative group">
-            <img src={productImage} alt="产品图" className="w-full h-28 object-contain rounded-lg border border-white/[0.08]" />
+            <NextImage unoptimized width={1} height={1} src={productImage} alt="产品图" className="w-full h-28 object-contain rounded-lg border border-white/[0.08]" />
             <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center gap-2">
               <button
                 onClick={() => productFileInputRef.current?.click()}

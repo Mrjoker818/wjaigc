@@ -216,7 +216,7 @@ export async function POST(request: NextRequest) {
                   const saveRes = await fetch(`${baseUrl}/api/save-image`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imageData: url, subdir: 'generate' }) });
                   const saveData = await saveRes.json();
                   if (saveData.url) return saveData.url;
-                } catch (e) { /* ignore */ }
+                } catch { /* ignore */ }
               }
               return url;
             }));

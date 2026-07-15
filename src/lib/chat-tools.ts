@@ -1,4 +1,4 @@
-import { calculateActualPixels } from './canvas-generation-group';
+import { } from './canvas-generation-group';
 
 // 服务器端口，所有服务器间 fetch 调用统一使用 localhost + 此端口
 const SERVER_PORT = process.env.DEPLOY_RUN_PORT || '5000';
@@ -821,15 +821,12 @@ async function executeExtendCanvas(
 // ============ Helpers ============
 
 function normalizeImageUrl(url: string, origin: string): string {
+  void origin;
   if (url.startsWith('/')) {
     // 服务器端调用始终使用 localhost，避免外部 URL 回环
     return `http://localhost:${SERVER_PORT}${url}`;
   }
   return url;
-}
-
-function mapAspectRatioToSize(aspectRatio: string, quality: string, modelId?: string): string {
-  return calculateActualPixels(aspectRatio, quality, modelId) || '1024x1024';
 }
 
 /**

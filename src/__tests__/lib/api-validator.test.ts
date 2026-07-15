@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { validateApiInputs, type FieldType } from '@/lib/api-validator';
+import { validateApiInputs } from '@/lib/api-validator';
 
 describe('api-validator 模块', () => {
   // ========== validateApiInputs ==========

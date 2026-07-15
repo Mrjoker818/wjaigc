@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Play, Pause, Volume2, VolumeX, RotateCcw, Download, Sparkles, X, Film, Clock, Wand2, Loader2 } from 'lucide-react';
+import { Play, Pause, Volume2, VolumeX, RotateCcw, Sparkles, X, Film, Clock, Wand2, Loader2 } from 'lucide-react';
 
 interface VideoEditPanelProps {
   /** 是否打开 */

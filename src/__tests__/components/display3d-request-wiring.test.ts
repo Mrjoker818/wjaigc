@@ -14,4 +14,13 @@ describe('Display3D request wiring', () => {
     expect(source).toMatch(/try\s*\{[\s\S]*const parsed = JSON\.parse\(saved\)/);
     expect(source).toMatch(/catch\s*\{\s*\}/);
   });
+
+  it('polls generated renders with the selected image model rather than the chat model', () => {
+    const generateHandler = source.slice(
+      source.indexOf('const handleGenerate'),
+      source.indexOf('// === Decompose handler ==='),
+    );
+
+    expect(generateHandler).toContain('body: JSON.stringify({ taskId, model: selectedModel, providerId: selectedProviderId })');
+  });
 });

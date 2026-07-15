@@ -15,13 +15,13 @@ import { findProviderForModel, findProviderForFeature, findProviderById } from '
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
-import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, buildPollUrl, extractImageUrl, tryChatCompletionsImageFallback, isChannelUnavailableError, persistResultImage } from '@/lib/api-compatibility';
+import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, buildPollUrl, tryChatCompletionsImageFallback, isChannelUnavailableError, persistResultImage } from '@/lib/api-compatibility';
 import type { ApiCompatProfile } from '@/lib/api-compatibility';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import { dbGetUserData, dbSetUserData } from '@/lib/db-storage';
 import { calculateActualPixelsFromRatio } from '@/lib/calculate-pixels';
 import { validateApiInputs } from '@/lib/api-validator';
-import { normalizeBrandFactoryImageUrl, normalizeBrandFactoryImageUrls } from '@/lib/brand-factory-image-url';
+import { normalizeBrandFactoryImageUrls } from '@/lib/brand-factory-image-url';
 
 // ─── 内存项目存储 ────────────────────────────────────────────────────
 const BRAND_PROJECTS_KEY = 'brand_factory_projects';
@@ -297,29 +297,6 @@ function extractImageUrlsFromRaw(data: Record<string, unknown>): string[] {
     if (typeof resultUrl === 'string' && !urls.includes(resultUrl)) urls.push(resultUrl);
   }
 
-  return urls;
-}
-
-/** 深度提取响应中所有以 http 开头的图片URL（最终兜底） */
-function deepExtractImageUrls(obj: unknown, depth = 0): string[] {
-  if (depth > 5) return []; // 防止无限递归
-  const urls: string[] = [];
-  if (typeof obj === 'string') {
-    // 匹配 http/https 开头、常见图片后缀或包含 /image/ 的 URL
-    if (/^https?:\/\/.+\.(png|jpg|jpeg|webp|gif|bmp|svg)/i.test(obj) ||
-        /^https?:\/\/.*\/image\//i.test(obj) ||
-        /^https?:\/\/.*\.(com|cn|io|net)\/.+\.(png|jpg|jpeg|webp)/i.test(obj)) {
-      urls.push(obj);
-    }
-  } else if (Array.isArray(obj)) {
-    for (const item of obj) {
-      urls.push(...deepExtractImageUrls(item, depth + 1));
-    }
-  } else if (typeof obj === 'object' && obj !== null) {
-    for (const value of Object.values(obj as Record<string, unknown>)) {
-      urls.push(...deepExtractImageUrls(value, depth + 1));
-    }
-  }
   return urls;
 }
 
@@ -823,7 +800,7 @@ function buildChineseTitlePrompt(
 
 // ─── GET: 获取项目列表 ────────────────────────────────────────────────
 
-export async function GET(_request: NextRequest) {
+export async function GET() {
   try {
     const projects = await loadProjects();
     return NextResponse.json({ success: true, projects });

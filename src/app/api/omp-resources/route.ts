@@ -36,30 +36,6 @@ function findDataDir(): string | null {
   cachedDataDir = null;
   return null;
 }
-
-let cachedIndexData: Record<string, unknown> | null = null;
-let cachedIndexTime = 0;
-const INDEX_CACHE_TTL = 5 * 60 * 1000;
-
-function getIndexData(): Record<string, unknown> | null {
-  const now = Date.now();
-  if (cachedIndexData !== null && now - cachedIndexTime < INDEX_CACHE_TTL) return cachedIndexData;
-  const dir = findDataDir();
-  if (dir) {
-    try {
-      const raw = readFileSync(join(dir, 'index.json'), 'utf-8');
-      cachedIndexData = JSON.parse(raw);
-      cachedIndexTime = now;
-      return cachedIndexData;
-    } catch (err) {
-      console.error('[omp-resources] Error reading index.json:', err);
-    }
-  }
-  cachedIndexData = null;
-  cachedIndexTime = 0;
-  return null;
-}
-
 // 从静态 categories 数据中提取所有 resource 项（兼容旧版静态格式）
 function extractStaticResources(): Array<Record<string, unknown>> {
   const dir = findDataDir();

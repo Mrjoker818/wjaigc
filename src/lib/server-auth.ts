@@ -318,7 +318,6 @@ async function writeStore(file: StoredUsersFile): Promise<void> {
 
 async function readStore(): Promise<StoredUsersFile> {
   let file: StoredUsersFile;
-  let usedFallback = false;
 
   // Try database first (persistent across deployments)
   try {
@@ -352,7 +351,6 @@ async function readStore(): Promise<StoredUsersFile> {
     }
   } catch (dbError) {
     // Fallback to file system
-    usedFallback = true;
     console.warn('[auth] DB read failed, falling back to file system:', dbError instanceof Error ? dbError.message : dbError);
     try {
       const raw = await readFile(USERS_PATH, 'utf8');

@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
-import { Mic, Play, Square, Loader2, Settings, RefreshCw, Copy, Download } from 'lucide-react';
+import React, { useState } from 'react';
+import { Mic, Play, Loader2, Settings, RefreshCw, Copy } from 'lucide-react';
 import { AudioPlayer } from './audio-player';
 
 interface AudioGenerationPanelProps {

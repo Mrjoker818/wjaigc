@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 
 /**
  * POST /api/knowledge/extract-text
@@ -12,8 +11,6 @@ import os from 'os';
  * for knowledge base indexing and AI reference.
  */
 export async function POST(req: NextRequest) {
-  const tmpPath: string | null = null;
-
   try {
     const body = await req.json();
     const { fileUrl, fileType } = body;

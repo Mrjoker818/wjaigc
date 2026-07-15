@@ -195,7 +195,7 @@ export function startTimer(): { end: () => number } {
 export async function extractUserFromRequest(request: Request): Promise<{ userId: string; userName: string }> {
   try {
     const { getSessionUser } = await import('./server-auth');
-    const user = await getSessionUser(request as any);
+    const user = await getSessionUser(request as unknown as Parameters<typeof getSessionUser>[0]);
     return {
       userId: user?.id || 'anonymous',
       userName: user?.name || '匿名用户',

@@ -21,7 +21,6 @@ import {
 } from './config';
 import {
   ensureOutputDirs,
-  generateFilename,
   readImageToBuffer,
   saveOutputBuffer,
 } from './file';
@@ -46,8 +45,7 @@ export type EraseModelId = (typeof ERASE_MODELS)[number]['id'];
 export const DEFAULT_ERASE_MODEL: EraseModelId = 'lama';
 export const VALID_ERASE_MODELS: readonly string[] = ERASE_MODELS.map((m) => m.id);
 
-/** LaMa 模型文件路径 (项目持久化目录，不受沙箱重启影响) */
-const LAMA_MODEL_PATH = path.join(IOPAINT_MODELS_DIR, 'big-lama.pt');
+path.join(IOPAINT_MODELS_DIR, 'big-lama.pt');
 
 /**
  * IOPaint RemoveBG 支持的模型 (4 个，覆盖高精度/通用/人像/轻量场景)
@@ -102,22 +100,11 @@ async function checkPythonEnv(mode: 'erase' | 'removebg' = 'erase'): Promise<boo
       _pythonEnvAvailable = true;
       console.log(`[IOPaint] Python environment check passed for erase (${pythonBin} + cv2/opencv available, using OpenCV inpaint)`);
     }
-  } catch (e) {
+  } catch {
     _pythonEnvAvailable = false;
     console.log(`[IOPaint] Python environment check failed for ${mode} (python3/torch not available), skipping local processing`);
   }
   return _pythonEnvAvailable;
-}
-
-/** 检查 LaMa 模型文件是否存在且有效 (>1MB) */
-function isLamaModelAvailable(): boolean {
-  try {
-    if (!fs.existsSync(LAMA_MODEL_PATH)) return false;
-    const stat = fs.statSync(LAMA_MODEL_PATH);
-    return stat.size > 1_000_000; // > 1MB (real model is ~200MB)
-  } catch {
-    return false;
-  }
 }
 
 /** 擦除结果 */
@@ -181,6 +168,10 @@ export async function eraseWithLama(
   ensureOutputDirs();
 
   try {
+    // The current Python fallback uses the same OpenCV implementation for all
+    // choices, but retaining the requested model preserves the public contract.
+    void eraseModel;
+
     // 归一化蒙版
     const normalizedMask = await validateAndNormalizeMask(
       maskBuffer,
@@ -700,7 +691,7 @@ export async function inpaintFromUrls(
   maskDataUrl: string,
   prompt?: string,
 ): Promise<InpaintResult> {
-  const { buffer: imageBuffer, width, height } =
+  const { buffer: imageBuffer } =
     await readImageToBuffer(imageUrl);
 
   const { buffer: processBuffer, width: procW, height: procH } =
@@ -731,7 +722,7 @@ export async function removeBgFromUrl(
   imageUrl: string,
   model: string = DEFAULT_REMOVEBG_MODEL,
 ): Promise<RemoveBgResult> {
-  const { buffer: imageBuffer, width, height } =
+  const { buffer: imageBuffer } =
     await readImageToBuffer(imageUrl);
 
   const { buffer: processBuffer, width: procW, height: procH } =

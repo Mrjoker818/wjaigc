@@ -1,12 +1,10 @@
 'use client';
 
-import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import {
-  GitBranch, History, ChevronRight, ChevronDown, Circle, CircleDot,
-  Undo2, Redo2, RotateCcw, BookmarkPlus, Trash2, X, Clock,
-  Plus, ArrowRight, ArrowDown, Share2, FolderTree, Tag
+  GitBranch, History, ChevronRight, ChevronDown, Circle, CircleDot, X, FolderTree
 } from 'lucide-react';
-import type { VersionNode, BranchInfo } from '@/lib/canvas-tree-history';
+import type { VersionNode } from '@/lib/canvas-tree-history';
 import { TreeHistoryManager } from '@/lib/canvas-tree-history';
 
 /** 版本历史面板Props */
@@ -59,10 +57,10 @@ export function VersionHistoryPanel({
   const nodes = useMemo(() => manager.getAllNodes(), [manager]);
   const branches = useMemo(() => manager.getBranches(), [manager]);
   const currentPath = useMemo(() => manager.getCurrentPath(), [manager]);
-  const headId = useMemo(() => {
-    const snapshot = manager.getCurrentSnapshot();
-    return nodes.find(n => n.isHead)?.id;
-  }, [manager, nodes]);
+  useMemo(() => {
+        manager.getCurrentSnapshot();
+        return nodes.find(n => n.isHead)?.id;
+      }, [manager, nodes]);
 
   // 获取根节点
   const rootNode = useMemo(() => nodes.find(n => n.parentId === null), [nodes]);
@@ -87,7 +85,7 @@ export function VersionHistoryPanel({
   }, []);
 
   // 渲染单个节点行
-  const renderNodeRow = useCallback((node: VersionNode, depth: number, isExpanded: boolean, isCurrent: boolean, isInPath: boolean, hasChildren: boolean, children: VersionNode[]) => {
+  const renderNodeRow = useCallback(function renderNodeRow(node: VersionNode, depth: number, isExpanded: boolean, isCurrent: boolean, isInPath: boolean, hasChildren: boolean, children: VersionNode[]) {
     const nodeBgClass = isCurrent
       ? isMonochrome ? 'bg-blue-100 border-blue-300' : 'bg-gold/10 border-gold/30'
       : isInPath

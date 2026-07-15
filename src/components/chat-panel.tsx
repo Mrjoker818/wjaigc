@@ -1,22 +1,23 @@
 'use client';
 
+import NextImage from 'next/image';
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Bot, Send, Sparkles, Copy, Check, Trash2, Loader2, Eye, EyeOff, Wand2, User, Upload, X, Image as ImageIcon, Languages, Settings, Plug, Plus, History, FolderOpen, MessageSquare, Bookmark, BookmarkCheck, Lightbulb, Zap, ArrowRight, Palette, Target, Sliders, Download, AlertCircle, LocateFixed, RotateCcw, FileText, Cpu, ChevronRight, AtSign, ThumbsUp, ThumbsDown } from 'lucide-react';
-import { AgentBuilderDialog, type AgentDefinition, type AgentRecipe } from '@/components/chat/AgentBuilderDialog';
+import { Bot, Send, Sparkles, Copy, Check, Trash2, Loader2, Wand2, User, Upload, X, Image as ImageIcon, Settings, Plug, Plus, History, FolderOpen, MessageSquare, Bookmark, BookmarkCheck, Lightbulb, Zap, ArrowRight, Palette, Sliders, Download, AlertCircle, LocateFixed, RotateCcw, FileText, Cpu, ChevronRight, ThumbsUp, ThumbsDown } from 'lucide-react';
+import { AgentBuilderDialog, type AgentDefinition } from '@/components/chat/AgentBuilderDialog';
 import { toast } from 'sonner';
 import { extractTaskResultImageUrl } from '@/lib/task-result-url';
 import { CHAT_TASK_MAX_ATTEMPTS, getChatTaskPollIntervalMs } from '@/lib/chat-task-polling';
 import { getResumableChatGenerationTasks, mergeChatSessionMessages, mergeRecoveredChatTasks, updateChatSessionMessage, type ChatPendingGenerationTask, type RecoverableChatCloudTask } from '@/lib/chat-pending-generation';
 import { UserManager } from '@/lib/user-manager';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuLabel, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuLabel } from '@/components/ui/dropdown-menu';
+import { ChevronDown } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { Input } from '@/components/ui/input';
+import { } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { ThirdPartyModelDialog } from '@/components/third-party-model-dialog';
 import { UniversalApiManager } from '@/lib/universal-api-manager';
@@ -24,10 +25,10 @@ import type { ApiProvider } from '@/lib/universal-api-types';
 import type { CanvasImage } from '@/components/infinite-canvas';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import { getPromptTemplates, searchTemplates, type PromptTemplate } from '@/lib/prompt-templates';
-import { classifyIntent, ClassifiedIntent, IntentCategory } from '@/lib/intent-classifier';
-import { generateClarificationMessage, detectVagueScenarios, type ClarificationTemplate, type VagueScenario } from '@/lib/clarification-templates';
-import { generateSuggestions, type Suggestion, type SuggestionContext, type ContentCategory } from '@/lib/suggestion-engine';
-import { parseCanvasOperationIntent, extractCanvasActionFromAIResponse, type CanvasAction, type CanvasActionResult, type CanvasActionType } from '@/lib/canvas-action-executor';
+import { classifyIntent } from '@/lib/intent-classifier';
+import { generateClarificationMessage, detectVagueScenarios } from '@/lib/clarification-templates';
+import { generateSuggestions } from '@/lib/suggestion-engine';
+import { extractCanvasActionFromAIResponse } from '@/lib/canvas-action-executor';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
@@ -466,55 +467,6 @@ function isImageUrl(url: string): boolean {
 }
 
 // Helper: extract image URLs from AI response content
-function extractImageUrls(content: string): string[] {
-  const urls: string[] = [];
-  
-  // Match markdown images: ![alt](url)
-  const mdImgRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
-  let match;
-  while ((match = mdImgRegex.exec(content)) !== null) {
-    const url = match[2].trim();
-    if ((url.startsWith('http') || url.startsWith('data:image')) && !urls.includes(url)) {
-      urls.push(url);
-    }
-  }
-  
-  // Match standalone image URLs (with image extension)
-  const extUrlRegex = /https?:\/\/[^\s<>"')\]]+\.(?:png|jpg|jpeg|gif|webp|svg|bmp)(?:\?[^\s<>"')\]]*)?/gi;
-  while ((match = extUrlRegex.exec(content)) !== null) {
-    if (!urls.includes(match[0])) urls.push(match[0]);
-  }
-  
-  // Match base64 data URIs
-  const dataUriRegex = /data:image\/(?:png|jpeg|jpg|gif|webp|svg\+xml|bmp);base64,[A-Za-z0-9+/=]+/g;
-  while ((match = dataUriRegex.exec(content)) !== null) {
-    if (!urls.includes(match[0])) urls.push(match[0]);
-  }
-  
-  // Check code blocks for URLs that look like images
-  const codeBlockRegex = /```[\s\S]*?\n([\s\S]*?)```/g;
-  let codeMatch;
-  while ((codeMatch = codeBlockRegex.exec(content)) !== null) {
-    const codeContent = codeMatch[1];
-    const codeUrlRegex = /https?:\/\/[^\s<>"')\]]+/g;
-    let urlInCode;
-    while ((urlInCode = codeUrlRegex.exec(codeContent)) !== null) {
-      const url = urlInCode[0].trim();
-      if (isImageUrl(url) && !urls.includes(url)) {
-        urls.push(url);
-      }
-    }
-    // Also check for base64 in code blocks
-    const base64InCode = /data:image\/[a-zA-Z+]+;base64,[A-Za-z0-9+/=]+/g;
-    let b64Match;
-    while ((b64Match = base64InCode.exec(codeContent)) !== null) {
-      if (!urls.includes(b64Match[0])) urls.push(b64Match[0]);
-    }
-  }
-  
-  return urls;
-}
-
 // Helper: parse next-step suggestions from AI response
 function parseSuggestions(content: string): { cleanedContent: string; suggestions: NextSuggestion[] } {
   const suggestions: NextSuggestion[] = [];
@@ -570,15 +522,7 @@ function parseSuggestions(content: string): { cleanedContent: string; suggestion
 }
 
 // Helper: detect if user input is too vague
-/** P2-9: 多级意图澄清 - 评估用户输入的完整度 */
-
-type IntentLevel = 'extremely_vague' | 'moderately_vague' | 'clear';
-
 // 兼容旧版意图分类函数（内部调用新版）
-function classifyIntentLevel(text: string, hasImages: boolean): IntentLevel {
-  const result = classifyIntent(text, { hasImages });
-  return result.clarity;
-}
 
 /** P2-10: 智能体自动路由 - 基于关键词匹配推荐最佳智能体 */
 function matchAgentByInput(text: string, agents: AgentDefinition[]): AgentDefinition | null {
@@ -609,13 +553,13 @@ function matchAgentByInput(text: string, agents: AgentDefinition[]): AgentDefini
 function createMarkdownComponents(isGold: boolean, onAddImage?: (url: string) => void): Components {
   return {
     // Custom image rendering with "add to canvas" button
-    img: ({ src, alt, ...props }) => {
+    img: ({ src, alt, width, height, ...props }) => {
+      void width;
+      void height;
       const imgSrc = typeof src === 'string' ? src : '';
       return (
         <div className="my-2 relative group/img inline-block">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={imgSrc}
+          <NextImage unoptimized width={1} height={1}             src={imgSrc}
             alt={alt || 'AI生成的图片'}
             className="max-w-full rounded-lg border cursor-pointer hover:opacity-90 transition-opacity"
             style={{ maxHeight: '240px' }}
@@ -653,9 +597,7 @@ function createMarkdownComponents(isGold: boolean, onAddImage?: (url: string) =>
             <div className="my-2 space-y-2">
               {lines.map((url, idx) => (
                 <div key={idx} className="relative group/img inline-block">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={url}
+                  <NextImage unoptimized width={1} height={1}                     src={url}
                     alt="AI生成的图片"
                     className="max-w-full rounded-lg border cursor-pointer hover:opacity-90 transition-opacity"
                     style={{ maxHeight: '240px' }}
@@ -795,38 +737,6 @@ function detectQualityFromText(text: string): string | undefined {
 }
 
 // Read the current image generation model from localStorage
-function getCurrentGenerationModel(): string {
-  try {
-    if (typeof window === 'undefined') return 'gemini-2.5-flash-image-preview';
-    // 优先从 wujie_selected_model 读取（generation panel 最新选择的模型）
-    const rawModel = localStorage.getItem('wujie_selected_model');
-    if (rawModel) {
-      const modelInfo = JSON.parse(rawModel);
-      if (modelInfo.model) {
-        console.log('[ChatPanel] getCurrentGenerationModel read from wujie_selected_model:', modelInfo.model);
-        return modelInfo.model;
-      }
-    }
-    console.log('[ChatPanel] getCurrentGenerationModel wujie_selected_model is empty, falling back to userData');
-    // 备用：从 userData 读取
-    const currentUserId = localStorage.getItem('unbounded_ai_current_user');
-    const raw = localStorage.getItem('unbounded_ai_user_data');
-    if (!raw || !currentUserId) return 'gemini-2.5-flash-image-preview';
-    const data = JSON.parse(raw);
-    const selectedModel = data?.userData?.[currentUserId]?.selectedModel;
-    if (selectedModel) {
-      // selectedModel format: "providerId::modelId" or just "modelId"
-      if (selectedModel.includes('::')) {
-        const [, modelId] = selectedModel.split('::');
-        console.log('[ChatPanel] getCurrentGenerationModel read from userData:', modelId);
-        return modelId;
-      }
-      console.log('[ChatPanel] getCurrentGenerationModel read from userData:', selectedModel);
-      return selectedModel;
-    }
-  } catch { /* fallback */ }
-  return 'gemini-2.5-flash-image-preview';
-}
 
 /** 获取当前图像生成模型（优先使用聊天面板选择的模型） */
 function getCurrentImageModelInfo(imageModelState: string, imageModelProviderIdState: string): { model: string; providerId?: string } {
@@ -1127,7 +1037,7 @@ function extractPromptForGeneration(content: string): string {
 /* ========== 智能体搭建弹窗 ========== */
 /* AgentBuilderDialog 已提取至 src/components/chat/AgentBuilderDialog.tsx */
 
-export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, canvasImages = [], selectedCanvasImage, onChatModelChange, onSuggestionAction, onGenerateImage, brandDna, onInjectBrandDna, chatInitialImage, onChatInitialImageConsumed, chatTabOpen, onChatTabOpenChange, onNavigateToImage }: ChatPanelProps) {
+export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, canvasImages = [], selectedCanvasImage, onChatModelChange, onGenerateImage, brandDna, onInjectBrandDna, chatInitialImage, onChatInitialImageConsumed, chatTabOpen, onChatTabOpenChange, onNavigateToImage }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const messagesRef = useRef<Message[]>(messages);
   messagesRef.current = messages;
@@ -1174,14 +1084,14 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, c
   const [systemPrompt, setSystemPrompt] = useState('');
   const [isThinkingMode, setIsThinkingMode] = useState(false);
   const [isAgentMode, setIsAgentMode] = useState(true); // 默认开启Agent模式，即梦体验
-  const [agentSteps, setAgentSteps] = useState<Array<{id: string; tool: string; status: 'pending'|'running'|'done'|'error'; result?: string; startTime?: number}>>([]);
+  const [, ] = useState<Array<{id: string; tool: string; status: 'pending'|'running'|'done'|'error'; result?: string; startTime?: number}>>([]);
   const [isLoading, setIsLoading] = useState(false);
   const thinkingStartTimeRef = useRef<number>(0);
   const [thinkingElapsed, setThinkingElapsed] = useState(0);
   const thinkingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [showChatSettings, setShowChatSettings] = useState(true);
+  const [, ] = useState(true);
   // 提示词大师相关状态
   const [activeTab, setActiveTab] = useState<'chat' | 'optimizer' | 'skills'>('chat');
   const [optimizerInput, setOptimizerInput] = useState('');
@@ -1204,7 +1114,7 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, c
   const [imageModel, setImageModel] = useState('');
   const [imageModelProviderId, setImageModelProviderId] = useState('');
   const [discoveredImageModels, setDiscoveredImageModels] = useState<{id: string; name: string; provider: string; providerId: string}[]>([]);
-  const [showImageModelSelector, setShowImageModelSelector] = useState(false);
+  const [, ] = useState(false);
 
   // Resolve providerId to human-readable display name
   const providerDisplayName = useCallback((pid: string | undefined): string => {
@@ -1435,7 +1345,7 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, c
       }
     }
     setTemplatePopupOpen(false);
-  }, []);
+  }, [customAgents, systemPrompt]);
 
   // Select a mention item
   const selectMentionItem = useCallback((item: MentionRef) => {
@@ -1526,12 +1436,12 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, c
     { label: '添加文字', prompt: '请在图片上添加文字：', icon: '📝' },
     { label: '品牌设计', prompt: '请按照品牌规范设计', icon: '💎' },
   ], []);
-  const [showQuickCommands, setShowQuickCommands] = useState(false);
+  const [, ] = useState(false);
 
   // ===== End Quick Commands =====
 
   // 合并内置+自定义智能体
-  const allAgents = [...AGENTS, ...customAgents];
+  const allAgents = useMemo(() => [...AGENTS, ...customAgents], [customAgents]);
 
   // 加载自定义智能体
   useEffect(() => {
@@ -2784,7 +2694,7 @@ IP角色设计规范：
   }, [chatSkills, saveSkills]);
   const [showHistoryPanel, setShowHistoryPanel] = useState(false);
   const [showFilePanel, setShowFilePanel] = useState(false);
-  const [showImagePicker, setShowImagePicker] = useState(false);
+  const [, setShowImagePicker] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -2957,7 +2867,7 @@ IP角色设计规范：
       return updated;
     });
     if (!currentSessionId) setCurrentSessionId(id);
-  }, [currentSessionId]);
+  }, [allAgents, currentSessionId]);
 
   const persistMessageUpdate = useCallback((messageId: string, update: (message: Message) => Message) => {
     const nextMessages = updateChatSessionMessage(messagesRef.current, messageId, update);
@@ -3195,87 +3105,82 @@ IP角色设计规范：
     e.target.value = '';
   };
 
-  const handleAnalyzeImage = useCallback(async () => {
-    if (pendingImages.length === 0 || isAnalyzingImage) return;
-    setIsAnalyzingImage(true);
+  useCallback(async () => {
+        if (pendingImages.length === 0 || isAnalyzingImage) return;
+        setIsAnalyzingImage(true);
 
-    try {
-      const imageContents = pendingImages.map(img => ({
-        type: 'image_url' as const,
-        image_url: { url: img.url, detail: 'high' as const }
-      }));
+        try {
+          const imageContents = pendingImages.map(img => ({
+            type: 'image_url' as const,
+            image_url: { url: img.url, detail: 'high' as const }
+          }));
 
-      const requestMessages = [
-        {
-          role: 'system',
-          content: pendingImages.length > 1
-            ? '你是一个专业的AI图像分析专家。用户会给你多张图片，请逐张分析图片内容并生成适合AI图像生成的关键词描述。请分别输出英文和中文两个版本，格式如下：\n\n【English】\n英文关键词描述\n\n【中文】\n中文关键词描述'
-            : '你是一个专业的AI图像分析专家。用户会给你一张图片，请详细分析图片内容并生成适合AI图像生成的关键词描述。请分别输出英文和中文两个版本，格式如下：\n\n【English】\n英文关键词描述\n\n【中文】\n中文关键词描述'
-        },
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: pendingImages.length > 1 ? `请分析这${pendingImages.length}张图片，生成AI图像生成用的关键词描述。` : '请分析这张图片，生成AI图像生成用的关键词描述。' },
-            ...imageContents
-          ]
+          const requestMessages = [
+            {
+              role: 'system',
+              content: pendingImages.length > 1
+                ? '你是一个专业的AI图像分析专家。用户会给你多张图片，请逐张分析图片内容并生成适合AI图像生成的关键词描述。请分别输出英文和中文两个版本，格式如下：\n\n【English】\n英文关键词描述\n\n【中文】\n中文关键词描述'
+                : '你是一个专业的AI图像分析专家。用户会给你一张图片，请详细分析图片内容并生成适合AI图像生成的关键词描述。请分别输出英文和中文两个版本，格式如下：\n\n【English】\n英文关键词描述\n\n【中文】\n中文关键词描述'
+            },
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: pendingImages.length > 1 ? `请分析这${pendingImages.length}张图片，生成AI图像生成用的关键词描述。` : '请分析这张图片，生成AI图像生成用的关键词描述。' },
+                ...imageContents
+              ]
+            }
+          ];
+
+          const response = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: model,
+              providerId: model.includes('::') ? model.split('::')[0] : undefined,
+              messages: requestMessages,
+              stream: false,
+            }),
+          });
+
+          if (!response.ok) throw new Error(`分析失败: ${response.status}`);
+
+          const data = await response.json();
+          const result = data.choices?.[0]?.message?.content || '';
+
+          const userMsg: Message = {
+            id: `user-${Date.now()}`,
+            role: 'user',
+            content: pendingImages.length > 1 ? `请分析这${pendingImages.length}张图片并生成关键词` : '请分析这张图片并生成关键词',
+            timestamp: Date.now(),
+            imageAnchors: pendingImages.map(img => ({ imageId: img.id, imageUrl: img.url, imageName: img.name })),
+          };
+          const newMessages = [...messages, userMsg];
+          setMessages(newMessages);
+
+          const assistantMsg: Message = {
+            id: `assistant-${Date.now()}`,
+            role: 'assistant',
+            content: result,
+            timestamp: Date.now(),
+          };
+          const updatedMessages = [...newMessages, assistantMsg];
+          setMessages(updatedMessages);
+          saveSession(updatedMessages, model, systemPrompt);
+
+          setPendingImages([]);
+        } catch (error) {
+          console.error('Image analysis error:', error);
+          const assistantMsg: Message = {
+            id: `error-${Date.now()}`,
+            role: 'assistant',
+            content: `图片分析失败：${error instanceof Error ? error.message : '未知错误'}`,
+            timestamp: Date.now(),
+          };
+          setMessages(prev => [...prev, assistantMsg]);
+        } finally {
+          setIsAnalyzingImage(false);
         }
-      ];
-
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: model,
-          providerId: model.includes('::') ? model.split('::')[0] : undefined,
-          messages: requestMessages,
-          stream: false,
-        }),
-      });
-
-      if (!response.ok) throw new Error(`分析失败: ${response.status}`);
-
-      const data = await response.json();
-      const result = data.choices?.[0]?.message?.content || '';
-
-      const userMsg: Message = {
-        id: `user-${Date.now()}`,
-        role: 'user',
-        content: pendingImages.length > 1 ? `请分析这${pendingImages.length}张图片并生成关键词` : '请分析这张图片并生成关键词',
-        timestamp: Date.now(),
-        imageAnchors: pendingImages.map(img => ({ imageId: img.id, imageUrl: img.url, imageName: img.name })),
-      };
-      const newMessages = [...messages, userMsg];
-      setMessages(newMessages);
-
-      const assistantMsg: Message = {
-        id: `assistant-${Date.now()}`,
-        role: 'assistant',
-        content: result,
-        timestamp: Date.now(),
-      };
-      const updatedMessages = [...newMessages, assistantMsg];
-      setMessages(updatedMessages);
-      saveSession(updatedMessages, model, systemPrompt);
-
-      setPendingImages([]);
-    } catch (error) {
-      console.error('Image analysis error:', error);
-      const assistantMsg: Message = {
-        id: `error-${Date.now()}`,
-        role: 'assistant',
-        content: `图片分析失败：${error instanceof Error ? error.message : '未知错误'}`,
-        timestamp: Date.now(),
-      };
-      setMessages(prev => [...prev, assistantMsg]);
-    } finally {
-      setIsAnalyzingImage(false);
-    }
-  }, [pendingImages, isAnalyzingImage, model, messages, systemPrompt, saveSession]);
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
+      }, [pendingImages, isAnalyzingImage, model, messages, systemPrompt, saveSession]);
   const copyToClipboard = async (text: string, id: string) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -3938,7 +3843,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                   // P2-11: 检测智能体适应建议标记
                   const agentSuggestMatch = assistantContent.match(/\[AGENT_SUGGEST:([^:]+):([^\]]+)\]/);
                   if (agentSuggestMatch && !suggestedAgent) {
-                    const [, agentId, agentName] = agentSuggestMatch;
+                    const [, agentId, ] = agentSuggestMatch;
                     const found = allAgents.find(a => a.id === agentId);
                     if (found) setSuggestedAgent(found);
                   }
@@ -4437,7 +4342,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       setIsLoading(false);
       abortControllerRef.current = null;
     }
-  }, [input, isLoading, messages, model, systemPrompt, isThinkingMode, saveSession, persistMessageUpdate, pendingImages, allAgents, activeMentions, brandDna, tuneContextString, activeSkill, skillParamValues, onAddImages, currentSessionId, projectId]);
+  }, [input, isLoading, currentSessionId, pendingImages, activeMentions, messages, isThinkingMode, model, systemPrompt, allAgents, isAgentMode, activeSkill, tuneContextString, canvasImages, imageModel, imageModelProviderId, projectId, selectedCanvasImage, saveSession, skillParamValues, suggestedAgent, persistMessageUpdate, onAddImages, providerDisplayName]);
 
   // Lovart 风格 Skill 调用：点击 Skill 直接创建对话并自动发送，AI 按 Skill 方法论引导用户
   const handleUseSkill = useCallback((skill: ChatSkill) => {
@@ -4892,7 +4797,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                       }}
                       title={img.prompt || '点击添加到聊天'}
                     >
-                      <img src={img.url} alt="" className="w-full h-full object-cover" />
+                      <NextImage unoptimized width={1} height={1} src={img.url} alt="" className="w-full h-full object-cover" />
                       <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
                         <Plus size={16} className="text-white opacity-0 group-hover:opacity-100 transition-opacity" />
                       </div>
@@ -5296,7 +5201,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 <div className={`max-w-[92%] ${message.role === 'user' ? 'order-2' : ''}`}>
                   {message.imageUrl && (
                     <div className={`rounded-xl overflow-hidden mb-0.5 ${isGold ? 'border border-white/[0.04]' : 'border border-gray-200'}`}>
-                      <img src={message.imageUrl} alt="上传的图片" className="max-w-full max-h-40 object-contain" />
+                      <NextImage unoptimized width={1} height={1} src={message.imageUrl} alt="上传的图片" className="max-w-full max-h-40 object-contain" />
                     </div>
                   )}
                   {/* 图片锚点 */}
@@ -5311,7 +5216,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                         >
                           <div className="w-6 h-6 rounded overflow-hidden bg-white/10 flex-shrink-0">
                             {anchor.imageUrl ? (
-                              <img src={anchor.imageUrl} alt="" className="w-full h-full object-cover" />
+                              <NextImage unoptimized width={1} height={1} src={anchor.imageUrl} alt="" className="w-full h-full object-cover" />
                             ) : (
                               <ImageIcon size={12} className="text-white/40 m-auto" />
                             )}
@@ -5410,9 +5315,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                           </div>
                           {/* 图片区域 */}
                           <div className="relative group/chat-img">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={imgUrl}
+                            <NextImage unoptimized width={1} height={1}                               src={imgUrl}
                               alt={`AI生成图片${imgIdx + 1}`}
                               className="w-full cursor-pointer hover:opacity-95 transition-opacity"
                               style={{ maxHeight: '400px', objectFit: 'contain' }}
@@ -5744,7 +5647,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                   {allRefImgs.map((img, idx) => (
                     <div key={img.id} className="relative shrink-0 group">
                       <div className="w-12 h-12 rounded-md overflow-hidden bg-black/20">
-                        <img src={img.url} alt="" className="w-full h-full object-cover" />
+                        <NextImage unoptimized width={1} height={1} src={img.url} alt="" className="w-full h-full object-cover" />
                       </div>
                       {/* 右上角关闭按钮 */}
                       <button
@@ -5881,7 +5784,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                           className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs ${isGold ? 'text-white/80 focus:bg-white/5' : 'text-gray-700 focus:bg-gray-50'} ${isAdded ? (isGold ? 'bg-gold/10' : 'bg-blue-50') : ''}`}
                         >
                           <div className="w-7 h-7 rounded overflow-hidden shrink-0 border border-white/10">
-                            <img src={img.url} alt="" className="w-full h-full object-cover" />
+                            <NextImage unoptimized width={1} height={1} src={img.url} alt="" className="w-full h-full object-cover" />
                           </div>
                           <span className="truncate flex-1 text-left">{img.prompt?.slice(0, 20) || '图片'}</span>
                           {isAdded && <span className={`text-[10px] ${isGold ? 'text-gold' : 'text-blue-500'}`}>已引用</span>}
@@ -6183,7 +6086,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                             }`}
                           >
                             {item.imageUrl ? (
-                              <img src={item.imageUrl} alt="" className="w-5 h-5 rounded object-cover shrink-0 border border-white/10" crossOrigin="anonymous" />
+                              <NextImage unoptimized width={1} height={1} src={item.imageUrl} alt="" className="w-5 h-5 rounded object-cover shrink-0 border border-white/10" crossOrigin="anonymous" />
                             ) : (
                               <ImageIcon size={12} className="shrink-0" />
                             )}
@@ -6271,7 +6174,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                       }`}
                     >
                       {template.thumbnail ? (
-                        <img src={template.thumbnail} alt={template.name} className="w-6 h-6 rounded object-cover flex-shrink-0 mt-0.5 border border-white/10" />
+                        <NextImage unoptimized width={1} height={1} src={template.thumbnail} alt={template.name} className="w-6 h-6 rounded object-cover flex-shrink-0 mt-0.5 border border-white/10" />
                       ) : (
                         <FileText size={12} className="shrink-0 mt-0.5" />
                       )}
@@ -6302,7 +6205,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                       }}
                     >
                       <div className={`rounded-lg shadow-2xl overflow-hidden border ${isGold ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-gray-200'}`}>
-                        <img src={tpl.thumbnail} alt={tpl.name} className="w-36 h-36 object-cover" />
+                        <NextImage unoptimized width={1} height={1} src={tpl.thumbnail} alt={tpl.name} className="w-36 h-36 object-cover" />
                         <div className={`px-2 py-1 text-[10px] truncate ${isGold ? 'text-gold-muted' : 'text-gray-600'}`}>{tpl.name}</div>
                       </div>
                     </div>,
@@ -6654,7 +6557,6 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                     .filter((s: ChatSkill) => !skillCategoryFilter || s.category === skillCategoryFilter)
                     .filter((s: ChatSkill) => !skillSearchQuery || s.name.includes(skillSearchQuery) || s.description.includes(skillSearchQuery))
                     .map((skill: ChatSkill) => {
-                    const isActive = activeSkill?.id === skill.id;
                     return (
                       <div
                         key={skill.id}
@@ -6826,7 +6728,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
             setModel('gemini-3.1-pro-preview');
           }
         }}
-        onProviderUpdated={(provider) => {
+        onProviderUpdated={() => {
           const mgr = UniversalApiManager.getInstance();
           const providers = mgr.getProviders();
           const chatModels: {id: string; name: string; provider: string; providerId: string}[] = [];

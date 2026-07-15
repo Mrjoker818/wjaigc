@@ -365,6 +365,7 @@ async function querySiliconFlowBalance(apiKey: string): Promise<Omit<BalanceInfo
  * Strategy 5: PearAPI — 自定义平台，暂不支持 API 余额查询
  */
 async function queryPearApiBalance(_apiKey: string): Promise<Omit<BalanceInfo, 'providerId' | 'providerName' | 'providerType' | 'baseUrl'> | null> {
+  void _apiKey;
   // PearAPI 使用自定义认证体系（/auth/login + /auth/me），
   // 但 nginx 层阻止了直接 API 调用（返回 405），
   // 只能通过浏览器控制台查看余额

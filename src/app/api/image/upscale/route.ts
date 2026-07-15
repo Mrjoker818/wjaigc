@@ -11,7 +11,7 @@ import { validateApiInputs } from '@/lib/api-validator';
 
 export async function POST(request: NextRequest) {
   let deductedCredits = 0;
-  let sessionUser: any = null;
+  let sessionUser: Awaited<ReturnType<typeof getSessionUser>> = null;
   try {
     const body = await request.json();
     // 输入校验

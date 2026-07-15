@@ -116,7 +116,7 @@ async function handleAnalyze(_request: NextRequest, body: { logIds?: string[]; q
   if (logIds && logIds.length > 0) {
     // 先获取足够多的日志再筛选
     const result = await dbGetAuditLogs({ limit: 200, offset: 0 });
-    logsToAnalyze = result.logs.filter((l: any) => logIds.includes(String(l.id)));
+    logsToAnalyze = result.logs.filter(log => logIds.includes(String(log.id)));
   } else {
     // 默认分析最近的错误日志
     const result = await dbGetAuditLogs({
@@ -132,7 +132,7 @@ async function handleAnalyze(_request: NextRequest, body: { logIds?: string[]; q
   }
 
   // 构建分析提示词
-  const logsSummary = logsToAnalyze.map((log: any) => ({
+  const logsSummary = logsToAnalyze.map(log => ({
     id: log.id,
     time: new Date(log.created_at).toISOString(),
     action: log.action,
@@ -273,7 +273,7 @@ async function handleFix(_request: NextRequest, body: { logId: string; fixAction
 
   // 获取日志详情 - 查找特定日志
   const allResult = await dbGetAuditLogs({ limit: 500, offset: 0 });
-  const log = allResult.logs.find((l: any) => String(l.id) === String(logId));
+  const log = allResult.logs.find(logEntry => String(logEntry.id) === String(logId));
   if (!log) {
     return NextResponse.json({ success: false, error: '日志不存在' }, { status: 404 });
   }
@@ -432,7 +432,7 @@ async function handleExport(body: { format?: string; startTime?: number; endTime
 
   if (format === 'csv') {
     const headers = ['ID', '时间', '用户ID', '用户名', '操作', '级别', '目标类型', '错误信息', '模型', '提供商', '耗时(ms)', '处理状态'];
-    const rows = result.logs.map((log: any) => [
+    const rows = result.logs.map(log => [
       log.id,
       new Date(log.created_at).toISOString(),
       log.user_id,
@@ -447,7 +447,7 @@ async function handleExport(body: { format?: string; startTime?: number; endTime
       log.resolution_status || 'none',
     ]);
 
-    const csv = [headers.join(','), ...rows.map((r: string[]) => r.map(c => `"${c}"`).join(','))].join('\n');
+    const csv = [headers.join(','), ...rows.map(row => row.map(value => `"${value}"`).join(','))].join('\n');
     return new NextResponse(csv, {
       headers: {
         'Content-Type': 'text/csv; charset=utf-8',

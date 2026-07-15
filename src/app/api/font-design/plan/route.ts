@@ -177,30 +177,6 @@ export function buildTransparentLogoPrompt(text: string): string {
   return '透明背景，原创中文文字Logo，文字内容为"' + text + '"，只保留这几个中文。字体具有矢量感，结构简洁，小尺寸清晰，黑白适配，适合品牌Logo、网站Logo、App图标使用。不要其他文字，不要英文，不要乱码，不要重复字，不要复杂背景。';
 }
 
-function parseSSEToJSON(text: string): Record<string, unknown> | null {
-  const lines = text.split('\n');
-  for (const line of lines) {
-    if (line.startsWith('data: ')) {
-      const data = line.slice(6).trim();
-      if (data === '[DONE]') continue;
-      try {
-        const parsed = JSON.parse(data) as Record<string, unknown>;
-        const choices = parsed.choices as Record<string, unknown>[] | undefined;
-        const firstChoice = choices?.[0];
-        const delta = firstChoice?.delta as Record<string, unknown> | undefined;
-        if (typeof delta?.content === 'string' && delta.content.trim()) {
-          return parsed;
-        }
-        const msg = firstChoice?.message as Record<string, unknown> | undefined;
-        if (typeof msg?.content === 'string' && msg.content.trim()) {
-          return parsed;
-        }
-      } catch { /* skip */ }
-    }
-  }
-  return null;
-}
-
 function parseSSETextToJSON(text: string): string | null {
   let fullContent = '';
   const lines = text.split('\n');

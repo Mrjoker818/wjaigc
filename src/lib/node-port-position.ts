@@ -9,7 +9,7 @@
  * - 节点最小高度约束: header + 至少一个端口行
  */
 
-import type { NodePort, NodeType, WorkflowNode } from './workflow-engine';
+import type { NodeType, WorkflowNode } from './workflow-engine';
 
 // ========== 布局常量 ==========
 
@@ -17,7 +17,6 @@ const HEADER_HEIGHT = 32;
 const PORT_ROW_HEIGHT = 20;      // port-row: padding 4px + dot 12px + padding 4px
 const INPUT_CARD_HEIGHT = 34;    // input-card: padding 6px + icon 28px
 const INPUT_CARD_MARGIN_BOTTOM = 6;
-const FIELD_ROW_HEIGHT = 28;     // 字段行
 const NODE_MIN_HEIGHT = 80;
 
 // ========== 节点分类辅助 ==========

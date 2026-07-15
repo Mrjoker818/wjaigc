@@ -1,5 +1,6 @@
 'use client';
 
+import NextImage from 'next/image';
 import { useState, useEffect, use, useRef } from 'react';
 import QRCode from 'qrcode';
 import { RECHARGE_PACKAGES } from '@/lib/credits-constants';
@@ -376,8 +377,7 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
                     }
                   </p>
                   <div className="inline-block p-3 bg-white rounded-xl">
-                    <img
-                      src={payQrDataUrl}
+                    <NextImage unoptimized width={1} height={1}                       src={payQrDataUrl}
                       alt="支付二维码"
                       className="w-44 h-44 object-contain"
                     />
@@ -437,8 +437,7 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
                     }
                   </p>
                   <div className="inline-block p-2 bg-white rounded-lg">
-                    <img
-                      src={payQrDataUrl}
+                    <NextImage unoptimized width={1} height={1}                       src={payQrDataUrl}
                       alt="支付二维码"
                       className="w-32 h-32 object-contain"
                     />
@@ -456,7 +455,7 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
 
           {hasGoneToPay && (
             <p className="text-white/25 text-xs text-center mt-3">
-              付款完成后点击"我已完成付款"，管理员审核通过后积分将到账
+              付款完成后点击&ldquo;我已完成付款&rdquo;，管理员审核通过后积分将到账
             </p>
           )}
 

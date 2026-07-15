@@ -9,13 +9,13 @@ import { consumeCredits, refundCredits } from '@/lib/credits';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { validateImageUrl, validatePrompt } from '@/lib/input-validation';
 import type { ApiProvider } from '@/lib/universal-api-types';
-import { getEditTask, deleteEditTask, setEditTask, updateTaskStage, failEditTask } from '@/lib/edit-task-store';
+import { getEditTask, setEditTask, updateTaskStage, failEditTask } from '@/lib/edit-task-store';
 import { calculateActualPixelsFromRatio } from '@/lib/calculate-pixels';
 import type { EditTask } from '@/lib/edit-task-store';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
 import { logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
 import { translateApiError } from '@/lib/api-error-translate';
-import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, buildPollUrl, isEditsEndpointRejected, stripEditsOnlyFields, extractImageUrl } from '@/lib/api-compatibility';
+import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile } from '@/lib/api-compatibility';
 
 // 允许大请求体（base64图片可能很大，50MB限制）
 export const runtime = 'nodejs';
@@ -24,21 +24,6 @@ export const maxDuration = 600;
 // ============================================================
 // 本地任务存储已迁移到 @/lib/edit-task-store（避免 HMR 隔离）
 // ============================================================
-interface EditTaskResult {
-  success: boolean;
-  image?: { url: string; revisedPrompt?: string };
-  images?: Array<{ url: string; revisedPrompt?: string }>;
-  model?: string;
-  provider?: string;
-  llmInstruction?: string;
-  editRegions?: Array<{ label: string; bounds: { x: number; y: number; width: number; height: number } }>;
-  autoMaskGenerated?: boolean;
-  error?: string;
-  networkError?: boolean;
-  requiresApiKey?: boolean;
-  status?: number;
-}
-
 // 重新导出供 poll-task 使用（保持兼容）
 // Re-exports removed - import directly from '@/lib/edit-task-store' instead
 // export { getEditTask, deleteEditTask };
@@ -278,7 +263,7 @@ export async function POST(request: NextRequest) {
   const authResult = await requireApiAuthOrReject(request);
   if (authResult instanceof NextResponse) return authResult;
   let deductedCredits = 0;
-  let sessionUser: any = null;
+  let sessionUser: Awaited<ReturnType<typeof getSessionUser>> = null;
   try {
     const {
       image,         // base64 data URL（客户端已转换）
@@ -1593,7 +1578,7 @@ async function tryImagesGenerations(
 // ============================================================
 // GET: 获取支持的编辑模型列表（从管理员系统获取）
 // ============================================================
-export async function GET(_request: NextRequest) {
+export async function GET() {
   try {
     const { getApiProviders } = await import('@/lib/server-api-config');
     const providers = await getApiProviders();

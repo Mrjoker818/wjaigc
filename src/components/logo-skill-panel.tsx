@@ -1,13 +1,14 @@
 'use client';
 
+import NextImage from 'next/image';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import {
   PenTool, X, Loader2, Wand2, Star, Eye, ArrowRight,
   Copy, Check, ChevronDown, ChevronRight, RotateCcw,
-  RefreshCw, Sparkles, Download, Save, Palette, ImageIcon,
-  Layout, GripVertical, Minus, Cpu, Zap, AlertTriangle,
-  Settings2, Layers, MessageSquare,
+  RefreshCw, Download, Save, Palette, ImageIcon,
+  Layout, GripVertical, Minus, Cpu, AlertTriangle,
+  Settings2, MessageSquare,
 } from 'lucide-react';
 
 /* ========== TYPES ========== */
@@ -166,15 +167,7 @@ const TARGET_PLATFORMS = [
 
 /* ========== COMPONENT ========== */
 
-export default function LogoSkillPanel({
-  isMonochrome = false,
-  onClose,
-  onAddImages,
-  brandProject,
-  onSaveToBrandAssets,
-  onOpenBrandDna,
-  onOpenMainKv,
-}: LogoSkillPanelProps) {
+export default function LogoSkillPanel({ isMonochrome = false, onClose, onAddImages, brandProject, onOpenBrandDna, onOpenMainKv }: LogoSkillPanelProps) {
   // ─── Panel position (draggable) ──────────────────────────────
   const panelRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ x: 0, y: 0 });
@@ -228,7 +221,7 @@ export default function LogoSkillPanel({
   const [direction, setDirection] = useState<LogoDirection | null>(null);
   const [symbol, setSymbol] = useState<SymbolConcept | null>(null);
   const [visualNotes, setVisualNotes] = useState<VisualSystemNotes | null>(null);
-  const [boardLayout, setBoardLayout] = useState<BrandSystemBoardLayout | null>(null);
+  const [, setBoardLayout] = useState<BrandSystemBoardLayout | null>(null);
   const [platformPrompts, setPlatformPrompts] = useState<PlatformPrompt[]>([]);
   const [rawResponse, setRawResponse] = useState('');
 
@@ -1341,7 +1334,7 @@ export default function LogoSkillPanel({
           <div className="flex-1 min-w-0 space-y-3">
             {selectedImageUrl && (
               <div className={`rounded-xl overflow-hidden border ${border} ${isMonochrome ? 'bg-gray-50' : 'bg-white/5'}`}>
-                <img src={selectedImageUrl} alt="Logo 预览" className="w-full aspect-square object-contain bg-white" />
+                <NextImage unoptimized width={1} height={1} src={selectedImageUrl} alt="Logo 预览" className="w-full aspect-square object-contain bg-white" />
               </div>
             )}
             {imageUrls.length > 1 && (
@@ -1356,7 +1349,7 @@ export default function LogoSkillPanel({
                         : `${border} hover:opacity-80`
                     }`}
                   >
-                    <img src={url} alt={`Logo ${i + 1}`} className="w-full h-full object-contain bg-white" />
+                    <NextImage unoptimized width={1} height={1} src={url} alt={`Logo ${i + 1}`} className="w-full h-full object-contain bg-white" />
                   </button>
                 ))}
               </div>

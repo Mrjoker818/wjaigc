@@ -21,24 +21,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: _validationError }, { status: 400 });
     }
 
-    const {
-      brandName = '',
-      productName = '',
-      category = 'beauty',
-      structure = {},
-      materialCraft = {},
-      extendScenes = [],
-      outputModes = ['package_render'],
-      advancedOptions = {},
-      uploads = [],
-      model,
-      providerId,
-      chatModel,
-      chatProviderId,
-      prompt: clientPrompt,
-      quality = '2K',
-      aspectRatio = '1:1',
-    } = body;
+    const { brandName = '', productName = '', category = 'beauty', structure = {}, materialCraft = {}, extendScenes = [], outputModes = ['package_render'], advancedOptions = {}, uploads = [], model, providerId, prompt: clientPrompt, quality = '2K', aspectRatio = '1:1' } = body;
 
     if (!brandName && !productName) {
       return NextResponse.json({ error: '请提供品牌名或产品名称' }, { status: 400 });
@@ -122,7 +105,7 @@ export async function POST(request: NextRequest) {
               providers.push(p.provider);
             }
           }
-        } catch (_e) { /* ignore fallback lookup errors */ }
+        } catch { /* ignore fallback lookup errors */ }
 
         let lastError = '';
         let success = false;

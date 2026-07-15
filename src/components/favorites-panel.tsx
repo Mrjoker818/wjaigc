@@ -1,7 +1,8 @@
 'use client';
 
+import NextImage from 'next/image';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { X, Heart, Grid3X3, List, Search, Sparkles, Trash2, Clock, User, Copy, ChevronDown, ChevronUp, Image as ImageIcon, Download, Upload, Shuffle, Eye, ArrowRight, Tag, Filter, SortAsc, FolderOpen, CheckSquare, Square, GripHorizontal } from 'lucide-react';
+import { X, Heart, Grid3X3, List, Search, Sparkles, Trash2, Clock, User, Copy, ChevronDown, Download, Upload, Shuffle, Eye, CheckSquare, Square, GripHorizontal } from 'lucide-react';
 
 export interface FavoriteItem {
     id: number | string;
@@ -78,7 +79,6 @@ export function FavoritesPanel({ userId, onClose, isMonochrome, onApplyParams }:
     const mc = !!isMonochrome;
     const bg = mc ? '#ffffff' : '#141414';
     const bgCard = mc ? '#f8fafc' : 'rgba(255,255,255,0.02)';
-    const bgCardHover = mc ? '#f1f5f9' : 'rgba(255,255,255,0.04)';
     const border = mc ? 'rgba(203,213,225,0.6)' : 'rgba(212,175,55,0.15)';
     const borderLight = mc ? 'rgba(203,213,225,0.3)' : 'rgba(212,175,55,0.08)';
     const accent = mc ? '#3b82f6' : '#d4af37';
@@ -468,7 +468,7 @@ export function FavoritesPanel({ userId, onClose, isMonochrome, onApplyParams }:
                                     )}
                                     {/* Image */}
                                     <div className="relative aspect-square" style={{ background: mc ? '#e2e8f0' : 'rgba(255,255,255,0.05)' }}>
-                                        <img src={item.imageUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
+                                        <NextImage unoptimized width={1} height={1} src={item.imageUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
                                         {/* Hover overlay */}
                                         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all duration-200 flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100">
                                             <button
@@ -543,7 +543,7 @@ export function FavoritesPanel({ userId, onClose, isMonochrome, onApplyParams }:
                                     )}
                                     {/* Thumbnail */}
                                     <div className="w-16 h-16 rounded-lg overflow-hidden flex-shrink-0 cursor-pointer" style={{ background: mc ? '#e2e8f0' : 'rgba(255,255,255,0.05)' }}>
-                                        <img src={item.imageUrl} alt="" className="w-full h-full object-cover" loading="lazy" onClick={e => { e.stopPropagation(); setPreviewItem(item); }} />
+                                        <NextImage unoptimized width={1} height={1} src={item.imageUrl} alt="" className="w-full h-full object-cover" loading="lazy" onClick={e => { e.stopPropagation(); setPreviewItem(item); }} />
                                     </div>
                                     {/* Info */}
                                     <div className="flex-1 min-w-0">
@@ -711,8 +711,7 @@ export function FavoritesPanel({ userId, onClose, isMonochrome, onApplyParams }:
                             onClick={e => e.stopPropagation()}
                             style={{ background: bg, borderRadius: 12, padding: 16, border: `1px solid ${border}` }}
                         >
-                            <img
-                                src={previewItem.imageUrl}
+                            <NextImage unoptimized width={1} height={1}                                 src={previewItem.imageUrl}
                                 alt=""
                                 className="max-h-[60vh] max-w-[50%] object-contain rounded-lg"
                             />

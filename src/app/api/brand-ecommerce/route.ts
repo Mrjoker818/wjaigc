@@ -9,7 +9,7 @@ import { consumeCredits, refundCredits } from '@/lib/credits';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import sharp from 'sharp';
 import { validateApiInputs } from '@/lib/api-validator';
-import { logOperation, logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
+import { logError, OP_ACTIONS } from '@/lib/op-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -239,7 +239,7 @@ async function compositeProductToScene(
   const targetH = sceneMeta.height || 1024;
 
   const resizedProduct = await sharp(productBuffer).resize(targetW, targetH, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } }).ensureAlpha().raw().toBuffer();
-  const resizedMask = await sharp(productMask).resize(targetW, targetH, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } }).ensureAlpha().raw().toBuffer();
+  await sharp(productMask).resize(targetW, targetH, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } }).ensureAlpha().raw().toBuffer();
   const sceneRaw = await sharp(sceneBuffer).resize(targetW, targetH).ensureAlpha().raw().toBuffer();
 
   // Apply Gaussian blur to mask for feathering
@@ -491,7 +491,7 @@ function resolveDimensions(aspectRatio: string): { width: number; height: number
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
   let deductedCredits = 0;
-  let sessionUser: any = null;
+  let sessionUser: Awaited<ReturnType<typeof getSessionUser>> = null;
   const selectedModel = '';
   const providerIdUsed = '';
   try {

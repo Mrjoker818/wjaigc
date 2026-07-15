@@ -1,5 +1,6 @@
 'use client';
 
+import NextImage from 'next/image';
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { X, Pencil, Eraser, Trash2, Loader2, Check, Sparkles, History, Image as ImageIcon, ChevronDown, ChevronUp, Plus, Minus, Maximize2, GripVertical, Upload, RefreshCw, FileText } from 'lucide-react';
 import type { CanvasImage } from './infinite-canvas';
@@ -71,7 +72,7 @@ const MODEL_HINTS: Record<string, string> = {
 import { getModelDisplayName } from '@/lib/model-name-map';
 import { MODEL_ASPECT_RATIOS, MODEL_QUALITIES, DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES, QUALITY_DISPLAY_NAMES, findModelConfig } from '@/lib/canvas-generation-group';
 import { taskEventsClient } from '@/lib/task-events-client';
-import { getPromptTemplates, searchTemplates, type PromptTemplate } from '@/lib/prompt-templates';
+import { getPromptTemplates, searchTemplates } from '@/lib/prompt-templates';
 
 function getModelHint(modelId: string): string {
   for (const [key, hint] of Object.entries(MODEL_HINTS)) {
@@ -116,30 +117,15 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     ? 'bg-white border-gray-200'
     : 'bg-[#1a1a1a] border-white/[0.08]';
 
-  // 头部背景
-  const thHeader = isMonochrome
-    ? 'bg-gradient-to-r from-gray-50 to-white border-gray-200'
-    : 'bg-gradient-to-r from-[#1a1a1a] to-[#141414] border-white/[0.08]';
-
-  // 标题文字
-  const thTitle = isMonochrome ? 'text-gray-900' : 'text-gray-100';
-
   // 强调色（蓝/金）
   const thAccent = isMonochrome ? 'text-blue-600' : 'text-[#d4af37]';
   const thAccentIcon = isMonochrome ? 'text-blue-500' : 'text-[#d4af37]';
-
-  // 强调色背景类（用于按钮高亮、选中状态）
-  const thAccentBg = isMonochrome ? 'bg-blue-500' : 'bg-[#d4af37]';
-  const thAccentBgText = isMonochrome ? 'text-white' : 'text-black';
-  const thAccentBgHover = isMonochrome ? 'hover:bg-blue-600' : 'hover:bg-[#e0b840]';
   const thAccentLight = isMonochrome ? 'bg-blue-50' : 'bg-[#d4af37]/10';
   const thAccentLightText = isMonochrome ? 'text-blue-600' : 'text-[#d4af37]';
-  const thAccentBorder = isMonochrome ? 'border-blue-300' : 'border-[#d4af37]';
 
   // 次要/背景色
   const thBg = isMonochrome ? 'bg-gray-50' : 'bg-[#1a1a1a]';
   const thBgDeep = isMonochrome ? 'bg-white' : 'bg-[#141414]';
-  const thBgHover = isMonochrome ? 'hover:bg-gray-100' : 'hover:bg-[#1a1a1a]';
   const thBorder = isMonochrome ? 'border-gray-200' : 'border-white/[0.08]';
   const thBorderLight = isMonochrome ? 'border-gray-100' : 'border-white/[0.06]';
 
@@ -155,21 +141,6 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     ? 'bg-white border-gray-200 text-gray-800 focus:border-blue-400'
     : 'bg-[#111] border-white/[0.08] text-gray-100 focus:border-[#d4af37]';
 
-  // 按钮
-  const thBtnSecondary = isMonochrome
-    ? 'bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200'
-    : 'bg-[#1a1a1a] text-gray-400 hover:text-white border border-white/[0.08]';
-
-  // 渐变主按钮
-  const thBtnPrimary = isMonochrome
-    ? 'bg-blue-500 hover:bg-blue-600 text-white'
-    : 'bg-gradient-to-r from-[#d4af37] to-[#b8860b] hover:from-[#daa520] hover:to-[#cd9b1d] text-black';
-
-  // 关闭按钮
-  const thCloseBtn = isMonochrome
-    ? 'hover:bg-blue-50 text-blue-400'
-    : 'hover:bg-[#2a2a2a] text-gray-400';
-
   // 下拉菜单
   const thDropdown = isMonochrome
     ? 'bg-white border-gray-200'
@@ -180,30 +151,10 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     ? 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 border-gray-100'
     : 'text-gray-300 hover:bg-[#2a2a2a] hover:text-white border-white/[0.06]';
 
-  // 下拉选项选中
-  const thDropdownItemSelected = isMonochrome
-    ? 'bg-gray-100 text-gray-900'
-    : `${thAccentLight} ${thAccentLightText}`;
-
-  // 标签徽章
-  const thBadgeTag = isMonochrome
-    ? 'bg-gray-100 text-gray-600'
-    : 'bg-[#2a2a2a] text-gray-400';
-
   // 虚线边框
   const thBorderDashed = isMonochrome
     ? 'border-dashed border-gray-300'
     : 'border-dashed border-white/[0.08]';
-
-  // 进度/加载框
-  const thLoadingBorder = isMonochrome
-    ? 'border-gray-300'
-    : 'border-[#d4af37]/20';
-
-  // 滚动条
-  const thSelectOption = isMonochrome
-    ? 'text-gray-800 bg-white'
-    : 'text-gray-100 bg-[#1a1a1a]';
   // 状态管理
   const [isDrawing, setIsDrawing] = useState(false);
   const [brushSize, setBrushSize] = useState(20);
@@ -239,7 +190,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   // 进度计时 & 取消
   const [editStartTime, setEditStartTime] = useState<number | null>(null);
   const editStartTimeRef = useRef<number | null>(null);
-  const [editElapsed, setEditElapsed] = useState(0);
+  const [, setEditElapsed] = useState(0);
   const [editTotalTime, setEditTotalTime] = useState<number | null>(null);
   const [editTaskId, setEditTaskId] = useState<string | null>(null);
   const editTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -337,12 +288,6 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   }, [showTemplatePopup, atImagePickerOpen]);
 
   // 格式化时间 mm:ss
-  const formatElapsed = (seconds: number) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}:${s.toString().padStart(2, '0')}`;
-  };
-
   // 取消当前编辑任务
   const handleCancelEdit = async () => {
     if (editTaskId) {
@@ -1273,7 +1218,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
             });
             const pollData = await pollResp.json();
             return { taskId, pollData };
-          } catch (err) {
+          } catch {
             return { taskId, pollData: null };
           }
         });
@@ -1417,7 +1362,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
       // Ensure progressInterval is always cleaned up
       if (progressIntervalId) clearInterval(progressIntervalId);
     }
-  }, [prompt, selectedModelKey, selectedLlmKey, currentImageUrl, aspectRatio, quality, outputCount, currentModelSupportsMask, exportMask, clearMask, currentHistoryIndex, referenceImages, imageToDataUrl, compressImageDataUrl]);
+  }, [currentImageUrl, prompt, selectedModelKey, selectedLlmKey, currentModelSupportsMask, exportMask, referenceImages, aspectRatio, quality, editContextHistory, outputCount, imageToDataUrl, compressImageDataUrl, currentImageModel?.id, currentImageModel?.providerId, clearMask, currentHistoryIndex, image?.originalWidth, image?.width, image?.originalHeight, image?.height]);
 
   // ★ 确认使用自动Mask（将预览mask绘制到Canvas上，与手动mask互斥）
   const handleConfirmAutoMask = useCallback(() => {
@@ -1441,10 +1386,10 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   }, [autoMaskPreview]);
 
   // ★ 取消自动Mask
-  const handleCancelAutoMask = useCallback(() => {
-    setAutoMaskPreview(null);
-    setPendingAutoRegions([]);
-  }, []);
+  useCallback(() => {
+        setAutoMaskPreview(null);
+        setPendingAutoRegions([]);
+      }, []);
 
   const handleConfirmResult = useCallback((url?: string) => {
     if (url) {
@@ -1535,7 +1480,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
       return { x: rect.left, y: rect.top + rect.height / 2 };
     }
     return { x: position.x + 360 + 80, y: position.y + 140 };
-  }, [position, resultImages]);
+  }, [position]);
 
   // 模型列表项组件
   const renderModelItem = (model: ServerModel, modelKey: string, isSelected: boolean, supportsMask?: boolean) => {
@@ -1695,7 +1640,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                       onClick={() => handleSelectMainFromCanvas(ci)}
                       className={`w-full flex items-center gap-2 px-2 py-1.5 text-left text-sm ${thDropdownItem} transition-all border-b ${thBorderLight} last:border-b-0`}
                     >
-                      <img src={ci.url} alt="" className="w-8 h-8 object-cover rounded flex-shrink-0" crossOrigin="anonymous" />
+                      <NextImage unoptimized width={1} height={1} src={ci.url} alt="" className="w-8 h-8 object-cover rounded flex-shrink-0" crossOrigin="anonymous" />
                       <div className="flex-1 min-w-0">
                         <div className={`truncate text-sm`}>{ci.prompt || ci.url.split('/').pop() || '图片'}</div>
                         <div className={`text-xs ${thTextMuted}`}>{ci.originalWidth || 0}x{ci.originalHeight || 0}</div>
@@ -1777,7 +1722,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                       onClick={() => { handleSelectMainFromCanvas(ci); setMainPickerOpen(false); }}
                       className={`w-full flex items-center gap-2 px-2 py-1.5 text-left text-sm ${thDropdownItem} transition-all border-b ${thBorderLight} last:border-b-0`}
                     >
-                      <img src={ci.url} alt="" className="w-8 h-8 object-cover rounded flex-shrink-0" crossOrigin="anonymous" />
+                      <NextImage unoptimized width={1} height={1} src={ci.url} alt="" className="w-8 h-8 object-cover rounded flex-shrink-0" crossOrigin="anonymous" />
                       <div className="flex-1 min-w-0">
                         <div className={`truncate text-sm`}>{ci.prompt || ci.url.split('/').pop() || '图片'}</div>
                         <div className={`text-xs ${thTextMuted}`}>{ci.originalWidth || 0}x{ci.originalHeight || 0}</div>
@@ -1834,7 +1779,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                   height: imageDisplaySize.height * previewZoom,
                 }}
               >
-                <img src={currentImageUrl} alt="编辑" className="absolute top-0 left-0 w-full h-full object-contain rounded" crossOrigin="anonymous" />
+                <NextImage unoptimized width={1} height={1} src={currentImageUrl} alt="编辑" className="absolute top-0 left-0 w-full h-full object-contain rounded" crossOrigin="anonymous" />
                 <canvas
                   ref={canvasRef}
                   className={`absolute top-0 left-0 w-full h-full ${currentModelSupportsMask && !isSpaceHeld ? 'cursor-crosshair' : 'pointer-events-none'}`}
@@ -1905,7 +1850,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                       isMonochrome ? 'border-gray-200 hover:border-gray-400' : 'border-white/[0.08] hover:border-white/[0.15]'
                     }`}
                   >
-                    <img src={ref.url} alt={`参考${idx + 1}`} className="w-full h-full object-cover" crossOrigin="anonymous" />
+                    <NextImage unoptimized width={1} height={1} src={ref.url} alt={`参考${idx + 1}`} className="w-full h-full object-cover" crossOrigin="anonymous" />
                     {/* 序号 */}
                     <div className={`absolute bottom-0 left-0 right-0 ${isMonochrome ? 'bg-white/70' : 'bg-black/60'} text-[8px] text-center ${isMonochrome ? 'text-gray-600' : 'text-[#ccc]'}`}>
                       {idx + 1}
@@ -1946,7 +1891,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                     onClick={() => handleAddRefFromCanvas(ci)}
                     className={`w-full flex items-center gap-2 px-2 py-1.5 text-left text-sm ${thDropdownItem} transition-all border-b ${thBorderLight} last:border-b-0`}
                   >
-                    <img src={ci.url} alt="" className="w-8 h-8 object-cover rounded flex-shrink-0" crossOrigin="anonymous" />
+                    <NextImage unoptimized width={1} height={1} src={ci.url} alt="" className="w-8 h-8 object-cover rounded flex-shrink-0" crossOrigin="anonymous" />
                     <div className="flex-1 min-w-0">
                       <div className={`truncate text-sm`}>{ci.prompt || ci.url.split('/').pop() || '图片'}</div>
                       <div className={`text-xs ${thTextMuted}`}>{ci.originalWidth || 0}x{ci.originalHeight || 0}</div>
@@ -2136,7 +2081,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                   >
                     <div className="flex items-center gap-2">
                       {tpl.thumbnail ? (
-                        <img src={tpl.thumbnail} alt={tpl.name} className="w-6 h-6 rounded object-cover flex-shrink-0 border border-white/10" />
+                        <NextImage unoptimized width={1} height={1} src={tpl.thumbnail} alt={tpl.name} className="w-6 h-6 rounded object-cover flex-shrink-0 border border-white/10" />
                       ) : (
                         <FileText className="w-3.5 h-3.5 flex-shrink-0 text-gold-muted/50" />
                       )}
@@ -2146,7 +2091,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                     {tpl.thumbnail && (
                       <div className="absolute left-full ml-2 top-0 z-[60] hidden group-hover/tpl:block">
                         <div className="rounded-lg shadow-2xl overflow-hidden border border-white/10 bg-[#1a1a1a]">
-                          <img src={tpl.thumbnail} alt={tpl.name} className="w-36 h-36 object-cover" />
+                          <NextImage unoptimized width={1} height={1} src={tpl.thumbnail} alt={tpl.name} className="w-36 h-36 object-cover" />
                           <div className="px-2 py-1 text-[10px] truncate text-gold-muted">{tpl.name}</div>
                         </div>
                       </div>
@@ -2170,8 +2115,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                     onClick={() => handleSelectAtImage(img)}
                     className={`w-full text-left px-2 py-1.5 text-sm border-b border-white/5 last:border-0 transition-colors flex items-center gap-2 ${i === atImageIndex ? 'bg-[#d4af37]/20 text-white' : 'text-gray-300 hover:bg-white/5'}`}
                   >
-                    <img
-                      src={img.url}
+                    <NextImage unoptimized width={1} height={1}                       src={img.url}
                       alt=""
                       className="w-8 h-8 rounded object-cover flex-shrink-0 border border-white/10"
                       onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
@@ -2535,7 +2479,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                         }
                       }}
                     >
-                      <img src={url} alt={`结果 ${idx + 1}`} className="w-full h-full object-contain rounded-lg" />
+                      <NextImage unoptimized width={1} height={1} src={url} alt={`结果 ${idx + 1}`} className="w-full h-full object-contain rounded-lg" />
                       {/* 选中勾选框 */}
                       {resultImages.length > 1 && (
                         <div className={`absolute top-1.5 left-1.5 w-5 h-5 rounded-full flex items-center justify-center transition-all ${

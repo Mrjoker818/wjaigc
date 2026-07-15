@@ -1,19 +1,19 @@
 import { NextRequest, NextResponse, after } from 'next/server';
-import { findProviderForModel, findProviderById } from '@/lib/server-api-config';
+import { } from '@/lib/server-api-config';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, tryChatCompletionsImageFallback, isChannelUnavailableError, persistResultImage } from '@/lib/api-compatibility';
-import { registerTask, updateTaskProgress, isTaskCancelled, getTaskInfo } from '@/lib/task-registry';
+import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
 import { buildJimengPrompt, buildBlackOnWhitePrompt, buildTransparentLogoPrompt, FONT_STYLE_CATEGORIES, SCENE_MAP, STROKE_MAP, GRAPHIC_MAP, MATERIAL_MAP } from '../plan/route';
 import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits, refundCredits } from '@/lib/credits';
 import { validateApiInputs } from '@/lib/api-validator';
-import { logOperation, logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
+import { logError, OP_ACTIONS } from '@/lib/op-log';
 
 // ★ 字境大师任务结果独立存储（防HMR丢失task-registry状态）
 const fontDesignResults = new Map<string, {
   status: 'completed' | 'failed';
-  result?: any;
+  result?: unknown;
   error?: string;
   updatedAt: number;
 }>();
@@ -107,7 +107,7 @@ function buildUserSettingsSuffix(params: {
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
   let deductedCredits = 0;
-  let sessionUser: any = null;
+  let sessionUser: Awaited<ReturnType<typeof getSessionUser>> = null;
   const selectedModel = '';
   const providerIdUsed = '';
   try {

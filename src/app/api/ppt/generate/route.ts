@@ -75,12 +75,6 @@ export async function POST(request: NextRequest) {
     pres.layout = 'WIDESCREEN';
 
     const t = THEMES[theme] || THEMES['tech-blue'];
-
-    const hexToRgb = (hex: string): [number, number, number] => {
-      const v = parseInt(hex.replace('#', ''), 16);
-      return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
-    };
-
     for (let i = 0; i < slides.length; i++) {
       const slide = slides[i];
       const sl = pres.addSlide();
@@ -268,7 +262,7 @@ export async function POST(request: NextRequest) {
               : 'bar') as 'bar' | 'line' | 'pie' | 'doughnut';
 
             const chartLabels = chartData.labels || [];
-            const chartSeries = (chartData.series || []).map((s, idx) => ({
+            const chartSeries = (chartData.series || []).map((s) => ({
               name: s.name,
               labels: chartLabels,
               values: s.values,

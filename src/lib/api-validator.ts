@@ -103,6 +103,7 @@ export function validateStrength(value: unknown, fieldName = 'strength', max = 1
 
 // 字符串长度校验（通用）
 export function validateStringLength(value: unknown, fieldName: string, min = 0, max = 50000): ValidateResult {
+  void min;
   if (value === undefined || value === null) return null;
   if (typeof value !== 'string') return `${fieldName} 必须是字符串`;
   if (value.length > max) return `${fieldName} 长度超出限制`;
