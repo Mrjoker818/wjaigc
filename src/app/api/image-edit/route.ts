@@ -1,21 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { findProviderForModel, findProviderById, findAllProvidersForType, normalizeApiBaseUrl } from '@/lib/server-api-config';
+import { findProviderForModel, findProviderById, findProviderForFeature, findAllProvidersForType, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { translateApiError } from '@/lib/api-error-translate';
-import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, buildPollUrl, isEditsEndpointRejected, stripEditsOnlyFields, type ImageEndpoint, buildGeminiChatImageRequest, parseGeminiChatImageResponse, resolveProfileForModel, isGeminiImageModel, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
+import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, convertAspectRatioToSize, buildPollUrl, isEditsEndpointRejected, stripEditsOnlyFields, type ApiCompatProfile, type ImageEndpoint, buildGeminiChatImageRequest, parseGeminiChatImageResponse, resolveProfileForModel, isGeminiImageModel, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
 import { saveImageFile } from '@/lib/server-data-root';
 import { logError, logOperation, OP_ACTIONS, startTimer } from '@/lib/op-log';
 import sharp from 'sharp';
+import fsSync from 'fs';
 import fs from 'fs/promises';
 const { writeFile, mkdir, copyFile } = fs;
 import path from 'path';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import { isS3Available, uploadImageToS3 } from '@/lib/s3-storage';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
-import { eraseWithLama, generateRemoveBgMask, DEFAULT_REMOVEBG_MODEL, VALID_ERASE_MODELS, REMOVEBG_MODELS } from '@/lib/image-tools/iopaint-client';
+import { eraseWithLama, removeBgWithIOPaint, generateRemoveBgMask, DEFAULT_REMOVEBG_MODEL, VALID_ERASE_MODELS, REMOVEBG_MODELS } from '@/lib/image-tools/iopaint-client';
 import { LOCAL_AI_ENABLED } from '@/lib/image-tools/config';
 import { postProcessAIRemoveBG, postProcessLocalRemoveBG } from '@/lib/remove-bg-postprocess';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
@@ -26,6 +27,34 @@ import { enhanceViaAI } from '@/lib/quality-enhance';
 import { recordImageTaskSubmitted, recordImageTaskTerminal } from '@/lib/cloud-task-persistence';
 
 const SUPPORTED_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
+
+/** 将图片 Buffer 转为 data URL，确保前端 100% 可渲染 */
+function imageBufferToDataUrl(buffer: Buffer, mimeType: string = 'image/png'): string {
+  return `data:${mimeType};base64,${buffer.toString('base64')}`;
+}
+
+/** 将图片 Buffer 持久化保存，优先 S3 → 本地文件 → base64 data URL 兜底 */
+async function persistImageBuffer(buffer: Buffer, filename: string, subDir: string, mimeType: string = 'image/png'): Promise<string> {
+  // 1. 优先上传到 S3（最可靠的公开访问方式）
+  if (await isS3Available()) {
+    try {
+      const s3Url = await uploadImageToS3(buffer, filename, mimeType);
+      if (s3Url) return s3Url;
+    } catch (e) {
+      console.warn(`[image-edit] S3 upload failed for ${filename}:`, e);
+    }
+  }
+  // 2. 保存到本地文件（通过 /api/serve-upload/ 可访问）
+  try {
+    const localUrl = saveImageFile(buffer, filename, subDir);
+    if (localUrl) return localUrl;
+  } catch (e) {
+    console.warn(`[image-edit] Local save failed for ${filename}:`, e);
+  }
+  // 3. 最终兜底：base64 data URL（始终可渲染，但体积约大 33%）
+  console.log(`[image-edit] Using base64 data URL fallback for ${filename}`);
+  return imageBufferToDataUrl(buffer, mimeType);
+}
 
 function findClosestAspectRatio(aspectRatio: string): string {
   if (SUPPORTED_RATIOS.includes(aspectRatio)) return aspectRatio;
@@ -374,6 +403,80 @@ async function createLocalEraseInpaint(
   }
 
   return sharp(finalPixels, { raw: { width: origW, height: origH, channels: 4 } })
+    .png()
+    .toBuffer();
+}
+
+/**
+ * AI 结果蒙版合成：将裁剪区域的 AI 结果精确合成到原图中
+ * 仅在蒙版区域（白色）使用 AI 结果，非蒙版区域（黑色）保持原图不变
+ * 蒙版边界做羽化过渡，避免硬边
+ */
+async function compositeAIResultToOriginal(
+  origImageBuffer: Buffer,
+  aiResultBuffer: Buffer,   // 裁剪区域尺寸的 AI 结果
+  fullMaskBuffer: Buffer,   // 全尺寸蒙版（白色=修改区域）
+  origW: number,
+  origH: number,
+  cropInfo: InpaintCropInfo,
+): Promise<Buffer> {
+  const src = await sharp(origImageBuffer).ensureAlpha().raw().toBuffer();
+  const maskRaw = await sharp(fullMaskBuffer).ensureAlpha().raw().toBuffer();
+  const aiRaw = await sharp(aiResultBuffer).ensureAlpha().raw().toBuffer();
+  const aiMeta = await sharp(aiResultBuffer).metadata();
+  const aiW = aiMeta.width || cropInfo.cropW;
+  const aiH = aiMeta.height || cropInfo.cropH;
+  if (!aiW || !aiH || aiW <= 0 || aiH <= 0) {
+    throw new Error('AI返回图片尺寸无效，无法合成');
+  }
+
+  // 将 AI 结果放到裁剪区域位置
+  const result = Buffer.from(src);
+
+  for (let cy = 0; cy < cropInfo.cropH; cy++) {
+    for (let cx = 0; cx < cropInfo.cropW; cx++) {
+      const origX = cropInfo.cropX + cx;
+      const origY = cropInfo.cropY + cy;
+      if (origX < 0 || origX >= origW || origY < 0 || origY >= origH) continue;
+
+      const origP = (origY * origW + origX);
+      const maskIdx = origP * 4;
+      const maskBrightness = (maskRaw[maskIdx] + maskRaw[maskIdx + 1] + maskRaw[maskIdx + 2]) / 3;
+
+      // 非蒙版区域完全保留原图
+      if (maskBrightness < 20) continue;
+
+      // AI 结果坐标（AI结果可能和裁剪区域尺寸不完全一致）
+      const aiX = Math.min(Math.round(cx * aiW / cropInfo.cropW), aiW - 1);
+      const aiY = Math.min(Math.round(cy * aiH / cropInfo.cropH), aiH - 1);
+      const aiP = (aiY * aiW + aiX);
+
+      const origIdx = origP * 4;
+      const aiIdx = aiP * 4;
+
+      // 蒙版边界羽化：20像素过渡区
+      // 计算到蒙版边界的距离
+      const featherRadius = 20;
+      const minDistToEdge = featherRadius;
+      // 简化：直接用蒙版亮度作为混合权重
+      // maskBrightness: 0=黑(保留原图) 255=白(AI结果)
+      let blend: number;
+      if (maskBrightness >= 200) {
+        blend = 1.0;
+      } else if (maskBrightness <= 40) {
+        blend = 0.0;
+      } else {
+        blend = (maskBrightness - 40) / 160;
+      }
+
+      result[origIdx] = Math.round(aiRaw[aiIdx] * blend + src[origIdx] * (1 - blend));
+      result[origIdx + 1] = Math.round(aiRaw[aiIdx + 1] * blend + src[origIdx + 1] * (1 - blend));
+      result[origIdx + 2] = Math.round(aiRaw[aiIdx + 2] * blend + src[origIdx + 2] * (1 - blend));
+      result[origIdx + 3] = 255;
+    }
+  }
+
+  return sharp(result, { raw: { width: origW, height: origH, channels: 4 } })
     .png()
     .toBuffer();
 }
@@ -1355,6 +1458,268 @@ async function autoTryChatVisionFallback(
 // 分块放大 (Tile-based Upscale) 辅助函数
 // ============================================================
 
+interface TileInfo {
+  col: number; row: number;
+  x: number; y: number;           // 在原图中的起始坐标
+  width: number; height: number;   // 原图中的实际尺寸
+  buffer: Buffer;                  // tile 图像数据
+  overlapLeft: number; overlapTop: number;   // 与左边/上边 tile 的重叠像素
+  overlapRight: number; overlapBottom: number; // 与右边/下边的重叠像素
+}
+
+/**
+ * 将图像分割为网格 tiles，带重叠区域（用于无缝拼接）
+ * @param imageBuffer 原始图像 buffer
+ * @param cols 列数
+ * @param rows 行数
+ * @param overlap 重叠像素数（默认 16px）
+ */
+async function splitImageIntoTiles(
+  imageBuffer: Buffer,
+  cols: number,
+  rows: number,
+  overlap: number = 16,
+): Promise<{ tiles: TileInfo[]; origWidth: number; origHeight: number }> {
+  const meta = await sharp(imageBuffer).metadata();
+  const origW = meta.width || 512;
+  const origH = meta.height || 512;
+
+  const tileW = Math.ceil(origW / cols);
+  const tileH = Math.ceil(origH / rows);
+  const tiles: TileInfo[] = [];
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const x = c * tileW;
+      const y = r * tileH;
+      // 实际裁切宽高（最后一个 tile 可能不满一格）
+      const w = Math.min(tileW, origW - x);
+      const h = Math.min(tileH, origH - y);
+
+      // 扩展裁切区域以包含重叠（clamp 到图像边界）
+      const extX = Math.max(0, x - (c > 0 ? overlap : 0));
+      const extY = Math.max(0, y - (r > 0 ? overlap : 0));
+      const extRight = Math.min(origW, x + w + (c < cols - 1 ? overlap : 0));
+      const extBottom = Math.min(origH, y + h + (r < rows - 1 ? overlap : 0));
+      const extW = extRight - extX;
+      const extH = extBottom - extY;
+
+      const tileBuffer = await sharp(imageBuffer)
+        .extract({ left: extX, top: extY, width: extW, height: extH })
+        .png()
+        .toBuffer();
+
+      tiles.push({
+        col: c, row: r,
+        x: extX, y: extY,
+        width: extW, height: extH,
+        buffer: tileBuffer,
+        overlapLeft: extX < x ? x - extX : 0,
+        overlapTop: extY < y ? y - extY : 0,
+        overlapRight: extRight > x + w ? extRight - (x + w) : 0,
+        overlapBottom: extBottom > y + h ? extBottom - (y + h) : 0,
+      });
+    }
+  }
+
+  return { tiles, origWidth: origW, origHeight: origH };
+}
+
+/**
+ * 合并 tiles 为最终图像
+ * 使用线性渐变混合重叠区域，消除拼接缝隙
+ * @param tileResults 每个 tile 的图像 buffer（已放大）
+ * @param tiles 原始 tile 信息
+ * @param scale 放大倍率
+ * @param targetWidth 最终输出宽度
+ * @param targetHeight 最终输出高度
+ */
+async function mergeTiles(
+  tileResults: Buffer[],
+  tiles: TileInfo[],
+  scale: number,
+  targetWidth: number,
+  targetHeight: number,
+): Promise<Buffer> {
+  // 创建最终画布
+  const canvas = sharp({
+    create: {
+      width: targetWidth,
+      height: targetHeight,
+      channels: 3,
+      background: { r: 0, g: 0, b: 0 },
+    },
+  });
+
+  // 使用 compositing 逐 tile 叠加
+  // 策略：每个 tile 按放大后的坐标放置，重叠区域后放置的 tile 覆盖先放置的
+  // 为了无缝混合，我们在重叠区域使用 alpha 渐变
+  const composites: sharp.OverlayOptions[] = [];
+
+  for (let i = 0; i < tiles.length; i++) {
+    const tile = tiles[i];
+    const tileImg = tileResults[i];
+
+    // 放大后的坐标
+    const left = Math.round(tile.x * scale);
+    const top = Math.round(tile.y * scale);
+
+    // 如果有重叠区域，为 tile 添加 alpha 渐变实现平滑混合
+    const hasOverlap = tile.overlapLeft > 0 || tile.overlapTop > 0 ||
+                       tile.overlapRight > 0 || tile.overlapBottom > 0;
+
+    let compositeInput: Buffer;
+
+    if (hasOverlap) {
+      // 获取放大后 tile 的元数据
+      const tileMeta = await sharp(tileImg).metadata();
+      const tw = tileMeta.width || Math.round(tile.width * scale);
+      const th = tileMeta.height || Math.round(tile.height * scale);
+
+      // 创建 alpha 通道：重叠区域用渐变，核心区域全不透明
+      const alphaChannels: Buffer[] = [];
+
+      // 使用 raw 像素操作创建 alpha 通道
+      // 先创建全不透明的 alpha
+      const rawTile = await sharp(tileImg).ensureAlpha().raw().toBuffer();
+      const channels = tileMeta.channels || 4;
+      const pixelCount = tw * th;
+
+      // 构建新的 alpha 通道
+      const newAlpha = Buffer.alloc(pixelCount);
+      for (let py = 0; py < th; py++) {
+        for (let px = 0; px < tw; px++) {
+          let alpha = 255;
+
+          // 左重叠渐变
+          if (tile.overlapLeft > 0 && px < Math.round(tile.overlapLeft * scale)) {
+            const t = px / Math.round(tile.overlapLeft * scale);
+            alpha = Math.min(alpha, Math.round(t * 255));
+          }
+          // 右重叠渐变
+          if (tile.overlapRight > 0 && px >= tw - Math.round(tile.overlapRight * scale)) {
+            const overlapPx = px - (tw - Math.round(tile.overlapRight * scale));
+            const t = 1 - overlapPx / Math.round(tile.overlapRight * scale);
+            alpha = Math.min(alpha, Math.round(t * 255));
+          }
+          // 上重叠渐变
+          if (tile.overlapTop > 0 && py < Math.round(tile.overlapTop * scale)) {
+            const t = py / Math.round(tile.overlapTop * scale);
+            alpha = Math.min(alpha, Math.round(t * 255));
+          }
+          // 下重叠渐变
+          if (tile.overlapBottom > 0 && py >= th - Math.round(tile.overlapBottom * scale)) {
+            const overlapPy = py - (th - Math.round(tile.overlapBottom * scale));
+            const t = 1 - overlapPy / Math.round(tile.overlapBottom * scale);
+            alpha = Math.min(alpha, Math.round(t * 255));
+          }
+
+          newAlpha[py * tw + px] = alpha;
+        }
+      }
+
+      // 将新 alpha 通道写入图像
+      for (let idx = 0; idx < pixelCount; idx++) {
+        rawTile[idx * channels + (channels - 1)] = newAlpha[idx];
+      }
+
+      compositeInput = await sharp(rawTile, { raw: { width: tw, height: th, channels } })
+        .png()
+        .toBuffer();
+    } else {
+      compositeInput = tileImg;
+    }
+
+    composites.push({
+      input: compositeInput,
+      left,
+      top,
+      blend: 'over',
+    });
+  }
+
+  const result = await canvas.composite(composites).png({ quality: 95 }).toBuffer();
+  return result;
+}
+
+/**
+ * 轮询单个任务直到完成，返回图片 URL
+ * 使用提供商的任务状态查询接口（兼容性档案决定轮询路径）
+ */
+async function pollTaskUntilComplete(
+  taskId: string,
+  apiKey: string,
+  apiBaseUrl: string,
+  profile: ApiCompatProfile,
+  maxAttempts: number = 120,
+  intervalMs: number = 1500,
+): Promise<string> {
+  // 使用兼容性档案确定轮询 URL
+  const pollUrl = buildPollUrl(apiBaseUrl, taskId, profile);
+  if (!pollUrl) {
+    throw new Error(`Provider does not support polling for task ${taskId}`);
+  }
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    // 动态轮询间隔: 前3次500ms快速检测，之后逐步增长
+    const dynamicInterval = attempt < 3 ? 500 : attempt < 10 ? 1000 : attempt < 20 ? 1500 : 2000;
+    await new Promise(r => setTimeout(r, dynamicInterval));
+
+    try {
+      const pollRes = await fetch(pollUrl, {
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        signal: AbortSignal.timeout(15000),
+      });
+
+      if (!pollRes.ok) continue;
+
+      // 防止 API 返回 HTML 页面导致 JSON 解析失败
+      const pollText = await pollRes.text();
+      let pollData: Record<string, unknown>;
+      try {
+        pollData = JSON.parse(pollText) as Record<string, unknown>;
+      } catch {
+        console.error('[image-edit poll] Non-JSON response, first 200 chars:', pollText.substring(0, 200));
+        continue; // 跳过这次轮询，下次重试
+      }
+      const taskData = pollData.data as Record<string, unknown> | undefined;
+      const taskResult = taskData?.result as Record<string, unknown> | undefined;
+      const status = taskData?.status;
+
+      if (status === 'completed') {
+        // 从 result.images 提取图片 URL
+        const images = taskResult?.images as Array<Record<string, unknown>> | undefined;
+        if (images && images.length > 0) {
+          const rawUrl = images[0].url || images[0].image_url || images[0].src;
+          const imageUrl = Array.isArray(rawUrl) ? rawUrl[0] : rawUrl;
+          if (imageUrl) return imageUrl as string;
+        }
+        // 兜底：b64_json
+        const b64Json = taskResult?.b64_json as string | undefined;
+        if (b64Json) {
+          return `data:image/png;base64,${b64Json}`;
+        }
+        throw new Error(`Tile task ${taskId} completed but no image URL found`);
+      }
+      if (status === 'failed') {
+        const taskError = taskData?.error as Record<string, unknown> | undefined;
+        const failReason = (taskError?.message as string) || 'unknown';
+        throw new Error(`Tile task ${taskId} failed: ${failReason}`);
+      }
+      if (status === 'cancelled') {
+        throw new Error(`Tile task ${taskId} was cancelled`);
+      }
+      // status = 'pending' / 'processing' → continue polling
+    } catch (err: unknown) {
+      if (err instanceof Error && (err.message.includes('failed:') || err.message.includes('cancelled') || err.message.includes('no image URL'))) throw err;
+      // 网络错误继续重试
+    }
+  }
+  throw new Error(`Tile task ${taskId} timed out after ${maxAttempts} attempts`);
+}
+
 /**
  * 保存 buffer 到 public 目录并返回可访问的 URL 路径
  */
@@ -1430,14 +1795,34 @@ async function saveBufferToPublic(buffer: Buffer, filename: string): Promise<str
 export async function POST(request: NextRequest) {
   const opTimer = startTimer();
   let deductedCredits = 0;
-  let sessionUser: Awaited<ReturnType<typeof getSessionUser>> = null;
+  let sessionUser: any = null;
   try {
     const authResult = await requireApiAuthOrReject(request);
     if (authResult instanceof NextResponse) return authResult;
     const body: EditRequest = await request.json();
     sessionUser = await getSessionUser(request);
     deductedCredits = 0; // 跟踪已扣积分，用于失败退款
-    const { action, imageUrl, maskImage, prompt, editMode, expandRatio, expandScale = 1, expandPadding, targetWidth, targetHeight, aspectRatio, angleMode = 'image', rotation = 0, tilt = 0, zoom = 1, model: rawModel = 'gemini-2.5-flash-image-preview', providerId, engine: enginePref = 'auto' } = body;
+    const {
+      action,
+      imageUrl,
+      maskImage,
+      prompt,
+      editMode,
+      expandRatio,
+      expandScale = 1,
+      expandPadding,
+      targetWidth,
+      targetHeight,
+      aspectRatio,
+      angleMode = 'image',
+      rotation = 0,
+      tilt = 0,
+      zoom = 1,
+      originalPrompt = '',
+      model: rawModel = 'gemini-2.5-flash-image-preview',
+      providerId,
+      engine: enginePref = 'auto',
+    } = body;
 
     // 防御性处理：确保 model 是字符串（前端可能误传对象）
     let modelStr = typeof rawModel === 'string' ? rawModel : (rawModel as Record<string, unknown>)?.model as string || String(rawModel);
@@ -1464,7 +1849,7 @@ export async function POST(request: NextRequest) {
     // ★ 模型别名规范化：延迟到选定 provider 后再做精确匹配，避免误剥离 PearAPI 的 -4k/-2k 后缀
     const lookupModel = modelStr;
     // 初始仅做 quality/resolution 后缀推断（不剥离别名）
-    normalizeModelForApi(modelStr, { providerModels: [] });
+    const normalized = normalizeModelForApi(modelStr, { providerModels: [] });
     const apiModelStr = modelStr;
 
     // Content safety check (for actions that accept prompt input)
@@ -1552,10 +1937,10 @@ export async function POST(request: NextRequest) {
     // 2.5 功能专用模型优先插入到候选列表首位（按action类型）:
     //   removebg: 优先使用管理员配置的 removebg 类型专用模型
     //   upscale: 优先使用管理员配置的 upscaler 类型专用模型
-    if (action === 'removebg' || action === 'upscale') {
-      const specialType = action === 'removebg' ? 'removebg' : 'upscaler';
+    if ((action as string) === 'removebg' || action === 'upscale') {
+      const specialType = (action as string) === 'removebg' ? 'removebg' : 'upscaler';
       const { isRemoveBgModel, isUpscalerModel } = await import('@/lib/model-capabilities');
-      const specialProviders = await findAllProvidersForType(specialType);
+      const specialProviders = await findAllProvidersForType(specialType as any);
       const specialModels: typeof candidateModels = [];
       for (const entry of specialProviders) {
         for (const m of entry.models) {
@@ -1606,7 +1991,22 @@ export async function POST(request: NextRequest) {
         error: '请先在管理员系统配置可用的图像模型（image类型）',
       }, { status: 400 });
     }
+    
+    // 选取第一个候选模型作为初始模型（后续 submitImageTask 失败时会自动尝试下一个）
+    let currentModelIdx = 0;
+    const getCurrentModel = () => candidateModels[currentModelIdx];
+    
     // 自动尝试下一个候选模型
+    const tryNextModel = (): { model: string; apiKey: string; apiBaseUrl: string } | null => {
+      currentModelIdx++;
+      if (currentModelIdx < candidateModels.length) {
+        const next = candidateModels[currentModelIdx];
+        console.log(`[image-edit] Trying next model: ${next.model} (source: ${next.source})`);
+        return next;
+      }
+      return null;
+    };
+
     // Helper: resolve local/blob/external image URL to base64 data URL
     const resolveImageToBase64 = async (url: string): Promise<string> => {
       if (url.startsWith('data:')) return url;
@@ -2074,12 +2474,7 @@ export async function POST(request: NextRequest) {
       const specialUpscalerCandidates = candidateModels.filter(c => isUpscalerModel(c.model));
       const generalImageCandidates = candidateModels.filter(c => !isUpscalerModel(c.model));
 
-      let aiResult: (Awaited<ReturnType<typeof submitImageTask>> & {
-        imageUrl?: string;
-        width?: number;
-        height?: number;
-        usedModel?: string;
-      }) | null = null;
+      let aiResult: any = null;
       let aiError: Error | null = null;
 
       // Step 0: 302.AI 专用放大端点（如果有302.AI放大模型）
@@ -2403,6 +2798,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === 'removebg' || action === 'remove_background') {
+      const normalizedAction = 'remove_background';
       const bgSize = aspectRatio ? findClosestAspectRatio(aspectRatio) : '1:1';
       const imageBase64ForBg = await resolveImageToBase64(imageUrl).catch(() => null);
       
@@ -2451,7 +2847,7 @@ export async function POST(request: NextRequest) {
               aiSuccess = true;
               logOperation({
                 action: OP_ACTIONS.IMAGE_EDIT,
-                userId: sessionUser?.id || 'anonymous',
+                userId: sessionUser?.id,
                 level: 'info',
                 model: aiUsedModel || '',
                 detail: `engine:ai-background-remove action:${action}`,
@@ -2745,6 +3141,7 @@ export async function POST(request: NextRequest) {
         const eraseEffectiveSize = aspectRatio ? findClosestAspectRatio(aspectRatio) : eraseAspectStr;
 
         // 尝试使用 AI 模型擦除
+        let eraseUsedAI = false;
         if (candidateModels.length > 0) {
           try {
             const eraseRequestBody: Record<string, unknown> = {
@@ -2804,6 +3201,7 @@ export async function POST(request: NextRequest) {
               const compositeJpeg = await sharp(resultOrigSize).jpeg({ quality: 92 }).toBuffer();
               const resultDataUrl = `data:image/jpeg;base64,${compositeJpeg.toString('base64')}`;
               console.log(`[inpaint] AI erase result (no composite): JPEG base64 (${(compositeJpeg.length / 1024).toFixed(0)}KB)`);
+              eraseUsedAI = true;
               return NextResponse.json({ success: true, imageUrl: resultDataUrl, action, engine: 'ai-erase' });
             } else if (eraseResult.taskId) {
               // 异步模式：服务器端短时间轮询（30秒），超时则返回taskId让前端poll-task接管
@@ -2917,6 +3315,7 @@ export async function POST(request: NextRequest) {
                             .catch(error => console.warn('[image-edit] 云端任务完成记录失败:', error));
 
                           asyncEraseSucceeded = true;
+                          eraseUsedAI = true;
                           return NextResponse.json({ success: true, imageUrl: resultDataUrl, action, engine: 'ai-erase-async' });
                         }
                         break; // completed but no URL → fall through to BFS
@@ -3049,7 +3448,7 @@ export async function POST(request: NextRequest) {
           '蒙版修图',
           '/images/edits',
         );
-      } catch {
+      } catch (autoTryErr: unknown) {
         console.log(`[inpaint] All image models failed, trying chat-vision fallback...`);
         const fallbackResult = await autoTryChatVisionFallback(
           croppedImageDataUrl, croppedMaskDataUrl, inpaintPrompt, 'inpaint'
@@ -3106,6 +3505,9 @@ export async function POST(request: NextRequest) {
             .composite([{ input: resizedResult, left: cropInfo.cropX, top: cropInfo.cropY }])
             .png()
             .toBuffer();
+
+          const resultFileName = `inpaint_${Date.now()}.png`;
+
           // 直接返回 base64 data URL，彻底避免文件路径可达性问题
           // 输出用 JPEG 压缩减少传输体积
           const compositeJpeg = await sharp(compositeResult).jpeg({ quality: 92 }).toBuffer();

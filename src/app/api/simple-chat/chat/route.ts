@@ -20,10 +20,6 @@ interface KnowledgeItem {
   content: string;
 }
 
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 export async function POST(request: NextRequest) {
   const body = await request.json() as {
     messages?: { role: string; content: string; images?: string[] }[];
@@ -106,8 +102,7 @@ export async function POST(request: NextRequest) {
           enhancedSystemPrompt += `\n\n(联网搜索未找到相关结果，请基于已有知识回答)`;
         }
       }
-    } catch (error: unknown) {
-      const e = { message: getErrorMessage(error) };
+    } catch (e: any) {
       console.error('Web search failed:', e.message);
       enhancedSystemPrompt += `\n\n(联网搜索暂时不可用: ${e.message})`;
     }
@@ -117,7 +112,7 @@ export async function POST(request: NextRequest) {
   const fullMessages = [
     { role: 'system', content: enhancedSystemPrompt },
     ...messages.map((m) => {
-      const parts: Array<Record<string, unknown>> = [{ type: 'text', text: m.content }];
+      const parts: any[] = [{ type: 'text', text: m.content }];
       if (m.images && m.images.length > 0) {
         for (const img of m.images) {
           parts.push({
@@ -156,7 +151,7 @@ export async function POST(request: NextRequest) {
         const apiUrl = `${baseUrl}/chat/completions`;
 
         // 添加工具定义
-        const tools: Array<Record<string, unknown>> = [
+        const tools: any[] = [
           {
             type: 'function',
             function: {
@@ -308,16 +303,14 @@ export async function POST(request: NextRequest) {
                   attempts++;
                 }
               }
-            } catch (error: unknown) {
-              const e = { message: getErrorMessage(error) };
+            } catch (e: any) {
               send({ type: 'tool_status', tool: 'generating_image', status: 'failed', label: `图片生成失败: ${e.message}` });
             }
           }
         }
 
         send({ type: 'done' });
-      } catch (error: unknown) {
-        const e = { message: getErrorMessage(error) };
+      } catch (e: any) {
         send({ type: 'error', error: e.message || '未知错误' });
       }
       controller.close();

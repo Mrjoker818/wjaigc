@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { existsSync } from 'fs';
-import { join } from 'path';
+import { createReadStream, statSync, existsSync, readdirSync } from 'fs';
+import { join, relative } from 'path';
 import { Readable } from 'stream';
-import { } from 'stream/promises';
-import { } from 'zlib';
+import { pipeline } from 'stream/promises';
+import { createGzip } from 'zlib';
 import { spawn, execSync } from 'child_process';
 
 const PROJECT_ROOT = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
@@ -20,12 +20,59 @@ const EXCLUDE_COMMON = [
   'project-source.tar.gz',
 ];
 
-function toWebStream(stream: Readable): ReadableStream<Uint8Array> {
-  return Readable.toWeb(stream) as ReadableStream<Uint8Array>;
+interface FileEntry {
+  path: string;        // Relative path from project root
+  fullPath: string;    // Absolute path
+  size: number;
 }
 
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+/**
+ * Walk directory and collect files matching include/exclude rules
+ */
+function walkDir(dir: string, baseDir: string, excludes: string[], includes: string[] | null): FileEntry[] {
+  const results: FileEntry[] = [];
+  
+  if (!existsSync(dir)) return results;
+  
+  const entries = readdirSync(dir, { withFileTypes: true });
+  
+  for (const entry of entries) {
+    const fullPath = join(dir, entry.name);
+    const relPath = relative(baseDir, fullPath);
+    
+    // Check excludes
+    if (excludes.some(exc => {
+      if (exc.startsWith('*.')) {
+        return entry.name.endsWith(exc.slice(1));
+      }
+      return entry.name === exc || relPath.startsWith(exc + '/');
+    })) {
+      continue;
+    }
+    
+    // Check includes (if specified, only include matching paths)
+    if (includes && !includes.some(inc => relPath.startsWith(inc + '/') || relPath === inc)) {
+      if (entry.isDirectory()) {
+        // Still recurse into subdirs that might contain included paths
+        const subResults = walkDir(fullPath, baseDir, excludes, includes);
+        results.push(...subResults);
+      }
+      continue;
+    }
+    
+    if (entry.isDirectory()) {
+      results.push(...walkDir(fullPath, baseDir, excludes, null));
+    } else if (entry.isFile()) {
+      try {
+        const stat = statSync(fullPath);
+        results.push({ path: relPath, fullPath, size: stat.size });
+      } catch {
+        // Skip files we can't stat
+      }
+    }
+  }
+  
+  return results;
 }
 
 /**
@@ -34,13 +81,16 @@ function getErrorMessage(error: unknown): string {
  */
 async function createTarGz(scope: string): Promise<{ stream: Readable; fileCount: number; totalSize: number }> {
   const excludes = [...EXCLUDE_COMMON];
+  let includes: string[] | null = null;
   
   switch (scope) {
     case 'source':
       // Source code only: src, scripts, configs
+      includes = ['src', 'scripts'];
       break;
     case 'source-config':
       // Source + config files
+      includes = ['src', 'scripts'];
       // Also include root config files
       break;
     case 'with-assets':
@@ -51,6 +101,7 @@ async function createTarGz(scope: string): Promise<{ stream: Readable; fileCount
       // Everything
       break;
     default:
+      includes = ['src', 'scripts'];
   }
   
   // Build tar arguments
@@ -140,7 +191,7 @@ export async function GET(request: NextRequest) {
 
       const filename = `${scopeLabels[scope] || 'project'}-${new Date().toISOString().slice(0, 10)}.tar.gz`;
 
-      return new NextResponse(toWebStream(stream), {
+      return new NextResponse(stream as any, {
         headers: {
           'Content-Type': 'application/gzip',
           'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
@@ -148,10 +199,10 @@ export async function GET(request: NextRequest) {
           'X-Export-File-Count': String(fileCount),
         },
       });
-    } catch (error: unknown) {
+    } catch (error: any) {
       console.error('[export-project] Export failed:', error);
       return NextResponse.json(
-        { error: `Export failed: ${getErrorMessage(error)}` },
+        { error: `Export failed: ${error.message}` },
         { status: 500 }
       );
     }
@@ -212,7 +263,7 @@ export async function POST(request: NextRequest) {
     const filename = `${scopeLabels[scope] || 'project'}-${new Date().toISOString().slice(0,10)}.tar.gz`;
     
     // Return streaming response
-    return new NextResponse(toWebStream(stream), {
+    return new NextResponse(stream as any, {
       headers: {
         'Content-Type': 'application/gzip',
         'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
@@ -220,10 +271,10 @@ export async function POST(request: NextRequest) {
         'X-Export-File-Count': String(fileCount),
       },
     });
-  } catch (error: unknown) {
+  } catch (error: any) {
     console.error('[export-project] Export failed:', error);
     return NextResponse.json(
-      { error: `Export failed: ${getErrorMessage(error)}` },
+      { error: `Export failed: ${error.message}` },
       { status: 500 }
     );
   }

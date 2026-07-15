@@ -128,7 +128,7 @@ export async function POST(request: NextRequest) {
       if (!exec) {
         return NextResponse.json({ error: '执行实例不存在或已过期' }, { status: 404 });
       }
-      const retryNode = (body.nodes || []).find((node: WorkflowNode) => node.id === nodeId);
+      const retryNode = (body.nodes || []).find((n: any) => n.id === nodeId);
       if (!retryNode) {
         return NextResponse.json({ error: '节点不存在' }, { status: 404 });
       }
@@ -169,10 +169,9 @@ export async function POST(request: NextRequest) {
         const data = await apiRes.json();
         exec.results[nodeId] = { nodeId, status: 'success', output: data, durationMs: 0 };
         return NextResponse.json({ success: true, nodeId, output: data });
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
-        exec.results[nodeId] = { nodeId, status: 'failed', error: message, durationMs: 0 };
-        return NextResponse.json({ success: false, nodeId, error: message });
+      } catch (err: any) {
+        exec.results[nodeId] = { nodeId, status: 'failed', error: err?.message || String(err), durationMs: 0 };
+        return NextResponse.json({ success: false, nodeId, error: err?.message || String(err) });
       }
     }
 

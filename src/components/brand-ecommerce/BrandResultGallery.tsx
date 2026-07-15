@@ -1,7 +1,6 @@
 'use client';
 
-import NextImage from 'next/image';
-import { Loader2, X, Image as ImageIcon, Sparkles, RotateCw, Plus } from 'lucide-react';
+import { Loader2, X, Image as ImageIcon, Sparkles, Download, RotateCw, Plus } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -139,7 +138,8 @@ export function BrandResultGallery({
                   <div className={`grid ${hasMultipleVariants ? 'grid-cols-2' : 'grid-cols-1'} gap-0.5 p-1`}>
                     {successVariants.map((r, i) => (
                       <div key={i} className="relative group">
-                        <NextImage unoptimized width={1} height={1}                           src={r.imageUrl!}
+                        <img
+                          src={r.imageUrl}
                           alt={`${r.templateName} 变体${i + 1}`}
                           className="w-full object-cover cursor-pointer transition-opacity group-hover:opacity-90"
                           style={{ aspectRatio: r.aspectRatio || '1/1' }}

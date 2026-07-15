@@ -1180,9 +1180,12 @@ export function aspectRatioToDimensions(
 }
 
 /** 计算结果框在参考图组右侧的位置 */
-export function calculateResultFramePosition(refImages: { x: number; y: number; width: number; height: number }[], aspectRatio: string, canvasWidth: number, canvasHeight: number): { x: number; y: number; width: number; height: number } {
-  void canvasHeight;
-  void canvasWidth;
+export function calculateResultFramePosition(
+  refImages: { x: number; y: number; width: number; height: number }[],
+  aspectRatio: string,
+  canvasWidth: number,
+  canvasHeight: number
+): { x: number; y: number; width: number; height: number } {
   if (refImages.length === 0) {
     return { x: 400, y: 200, width: 512, height: 512 };
   }

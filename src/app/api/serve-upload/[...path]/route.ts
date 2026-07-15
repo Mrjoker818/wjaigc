@@ -126,7 +126,7 @@ export async function GET(
             const restoreDir = path.join(dataRoot, path.dirname(filePath));
             if (!fs.existsSync(restoreDir)) fs.mkdirSync(restoreDir, { recursive: true });
             fs.writeFileSync(path.join(dataRoot, filePath), buffer);
-          } catch {
+          } catch (writeErr) {
             // 忽略
           }
           
@@ -134,7 +134,7 @@ export async function GET(
           try {
             const { uploadImageToS3 } = await import('@/lib/s3-storage');
             await uploadImageToS3(buffer, path.basename(filePath), contentType);
-          } catch {
+          } catch (s3Err) {
             // 忽略
           }
           

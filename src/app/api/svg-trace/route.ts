@@ -3,7 +3,7 @@ import sharp from 'sharp';
 import { execFile } from 'child_process';
 import { unlink, mkdir, readFile } from 'fs/promises';
 import { existsSync } from 'fs';
-import { } from '@/lib/api-helpers';
+import { getInternalApiUrl } from '@/lib/api-helpers';
 import path from 'path';
 import { getServerDataRoot, saveImageFile } from '@/lib/server-data-root';
 import { uploadImageToS3, isS3Available } from '@/lib/s3-storage';
@@ -12,9 +12,9 @@ import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits, refundCredits } from '@/lib/credits';
 import { optimize as runSvgoOptimize } from 'svgo';
 import { vectorizePipeline, type VectorizeEngine, type VectorizeQuality as PipelineQuality } from '@/lib/vectorize-pipeline';
-import { } from '@/lib/vectorize-analyzer';
+import { analyzeWithSharp } from '@/lib/vectorize-analyzer';
 import { validateApiInputs } from '@/lib/api-validator';
-import { logError, OP_ACTIONS } from '@/lib/op-log';
+import { logOperation, logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -410,9 +410,9 @@ async function runVTracer(
 
 // ─── WASM VTracer (Node.js native, no Python dependency) ─────
 
-let wasmVtracerModule: typeof import('wasm_vtracer') | null = null;
+let wasmVtracerModule: any = null;
 
-async function getWasmVtracer(): Promise<typeof import('wasm_vtracer')> {
+async function getWasmVtracer(): Promise<any> {
   if (wasmVtracerModule) return wasmVtracerModule;
   try {
     const vtracer = await import('wasm_vtracer');
@@ -421,7 +421,7 @@ async function getWasmVtracer(): Promise<typeof import('wasm_vtracer')> {
     const wasmPath = pathModule.join(
       process.cwd(), 'node_modules/wasm_vtracer/wasm_vtracer_bg.wasm'
     );
-    fs.readFileSync(wasmPath);
+    const wasmBuffer = fs.readFileSync(wasmPath);
     await vtracer.init();
     wasmVtracerModule = vtracer;
     console.log('[svg-trace] WASM vtracer initialized successfully');
@@ -441,7 +441,7 @@ async function runWasmVTracer(
 
   // Decode image to raw RGBA pixels using sharp
   const image = sharp(inputBuffer);
-  await image.metadata();
+  const metadata = await image.metadata();
   const { data, info } = await image
     .raw()
     .ensureAlpha()
@@ -943,6 +943,65 @@ function optimizeSvgLayers(svg: string): string {
 
 // ─── SVG Same-Color Path Merging ──────────────────────────────
 // 丹青AI: "在保证图形保真的前提下压缩文件体积"
+
+function mergeSameColorPaths(svg: string): string {
+  const svgTagMatch = svg.match(/(<svg[^>]*>)([\s\S]*?)(<\/svg>)/);
+  if (!svgTagMatch) return svg;
+
+  const [, svgOpen, content, svgClose] = svgTagMatch;
+
+  const pathRegex = /<path\s+([^>]*)\/>/g;
+  const paths: Array<{ fill: string; xml: string; d: string }> = [];
+
+  let pathMatch: RegExpExecArray | null;
+  while ((pathMatch = pathRegex.exec(content)) !== null) {
+    const attrs = pathMatch[1];
+    const fillMatch = attrs.match(/fill="([^"]*)"/);
+    const dMatch = attrs.match(/d="([^"]+)"/);
+    const fill = fillMatch ? fillMatch[1] : 'none';
+    const d = dMatch ? dMatch[1] : '';
+    paths.push({ fill, xml: pathMatch[0], d });
+  }
+
+  if (paths.length < 5) return svg;
+
+  const colorGroups = new Map<string, Array<{ d: string; xml: string }>>();
+  for (const p of paths) {
+    if (!colorGroups.has(p.fill)) {
+      colorGroups.set(p.fill, []);
+    }
+    colorGroups.get(p.fill)!.push({ d: p.d, xml: p.xml });
+  }
+
+  let mergedCount = 0;
+  let newContent = content;
+
+  for (const [fill, group] of colorGroups) {
+    if (group.length < 3) continue;
+
+    const mergeableCount = Math.min(group.length, 20);
+    if (mergeableCount < 2) continue;
+
+    const mergedD = group.slice(0, mergeableCount)
+      .map(p => p.d)
+      .join(' Z M ');
+
+    const mergedPath = `<path fill="${fill}" d="M ${mergedD} Z"/>`;
+
+    for (let i = 0; i < mergeableCount; i++) {
+      newContent = newContent.replace(group[i].xml, '');
+      mergedCount++;
+    }
+    newContent = mergedPath + newContent;
+  }
+
+  if (mergedCount > 0) {
+    console.log(`[svg-trace] Path merge: ${mergedCount} paths merged into compound paths`);
+    return svgOpen + newContent + svgClose;
+  }
+  return svg;
+}
+
 // ─── SVG Comprehensive Post-Processing Pipeline ──────────────
 // 丹青AI级别 SVG 后处理管线
 
@@ -1269,6 +1328,88 @@ function cssToSvgAttr(cssProp: string): string | null {
 }
 
 /**
+ * Group adjacent <path> elements with the same fill color into <g> elements.
+ * This creates meaningful layer groups in Illustrator's layers panel.
+ */
+function groupPathsByFill(svg: string): string {
+  // Only group direct children paths with fill attributes
+  // Find the content between <svg...> and </svg>
+  const svgTagMatch = svg.match(/(<svg[^>]*>)([\s\S]*?)(<\/svg>)/);
+  if (!svgTagMatch) return svg;
+
+  const [fullMatch, svgOpen, content, svgClose] = svgTagMatch;
+
+  // Extract all top-level elements (paths, groups, etc.)
+  const elements: Array<{ fill: string; xml: string }> = [];
+  const pathRegex = /<path\s+([^>]*)\/>/g;
+  let match: RegExpExecArray | null;
+  const lastIndex = 0;
+
+  // Simple approach: find all paths with their fill, group consecutive same-fill paths
+  const paths: Array<{ fill: string; xml: string; index: number }> = [];
+  while ((match = pathRegex.exec(content)) !== null) {
+    const attrs = match[1];
+    const fillMatch = attrs.match(/fill="([^"]*)"/);
+    const fill = fillMatch ? fillMatch[1] : 'none';
+    paths.push({
+      fill,
+      xml: match[0],
+      index: match.index,
+    });
+  }
+
+  if (paths.length < 3) return svg; // Too few paths to bother grouping
+
+  // Group consecutive paths with same fill
+  const groups: Array<{ fill: string; paths: string[] }> = [];
+  let currentGroup: { fill: string; paths: string[] } | null = null;
+
+  for (const p of paths) {
+    if (currentGroup && currentGroup.fill === p.fill) {
+      currentGroup.paths.push(p.xml);
+    } else {
+      if (currentGroup) groups.push(currentGroup);
+      currentGroup = { fill: p.fill, paths: [p.xml] };
+    }
+  }
+  if (currentGroup) groups.push(currentGroup);
+
+  // If all paths have the same fill, no need to group
+  if (groups.length <= 1) return svg;
+
+  // Build grouped content: replace individual paths with <g> groups
+  let newContent = content;
+
+  // Replace from end to start to preserve indices
+  for (let i = paths.length - 1; i >= 0; i--) {
+    const p = paths[i];
+    // Only remove the path, we'll insert groups separately
+    newContent = newContent.substring(0, p.index) + newContent.substring(p.index + p.xml.length);
+  }
+
+  // Insert grouped paths
+  const groupIdx = 0;
+  const insertOffset = 0;
+  const insertPoint = paths[0].index;
+
+  const groupXml = groups.map((g, idx) => {
+    const colorName = g.fill.startsWith('#')
+      ? g.fill.substring(1, 7).toUpperCase()
+      : g.fill.replace(/[^a-zA-Z0-9]/g, '_');
+    const id = `layer_${idx + 1}_${colorName}`;
+    const inner = g.paths.join('\n');
+    if (g.paths.length === 1) {
+      return g.paths[0]; // Single path, no need for group wrapper
+    }
+    return `<g id="${id}">\n${inner}\n</g>`;
+  }).join('\n');
+
+  newContent = newContent.substring(0, insertPoint) + groupXml + newContent.substring(insertPoint);
+
+  return svgOpen + newContent + svgClose;
+}
+
+/**
  * Sanitize AI-generated SVG content for security.
  * Rejects dangerous elements and attributes, validates structure.
  * Returns { safe, reason?, sanitized? }
@@ -1507,6 +1648,19 @@ function normalizeVectorSvg(svg: string, width: number, height: number): string 
   normalized = normalized.replace(/<svg/i, `<svg width="${width}" height="${height}"`);
 
   return normalized;
+}
+
+/**
+ * Count total graphic elements in an SVG string.
+ */
+function countSvgElements(svg: string): number {
+  const tags = ['path', 'circle', 'rect', 'line', 'polyline', 'polygon', 'ellipse'];
+  let count = 0;
+  for (const tag of tags) {
+    const regex = new RegExp(`<${tag}[\\s>]`, 'gi');
+    count += (svg.match(regex) || []).length;
+  }
+  return count;
 }
 
 /**
@@ -1851,7 +2005,7 @@ async function tryDesignVectorizeFallback(req: NextRequest, imageUrl: string, mo
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
   let deductedCredits = 0;
-  let sessionUser: Awaited<ReturnType<typeof getSessionUser>> = null;
+  let sessionUser: any = null;
   let selectedMode = '';
   try {
     const body: TraceRequest = await req.json();

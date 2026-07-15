@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import NextImage from 'next/image';
-import { Menu, Paperclip, ArrowUp, Globe, X, Settings, Bot, User as UserIcon, BookOpen, ChevronDown, Copy, RefreshCw, Trash2, Sun, Moon, FileText, Database, Sparkles, MessageSquarePlus, Minimize2, Maximize2, MoreHorizontal, Telescope, FileCode, GitBranch, Share2, Search, Eye, Image as ImageIcon, Download, Send, Shield } from "lucide-react";
+import { Menu, Paperclip, ArrowUp, Globe, X, Settings, Bot, User as UserIcon, BookOpen, ChevronDown, Copy, RefreshCw, Trash2, Zap, Sun, Moon, FileText, Database, Sparkles, MessageSquarePlus, Minimize2, Maximize2, MoreHorizontal, Telescope, FileCode, GitBranch, Share2, Search, Eye, Image, Download, Send, Shield } from "lucide-react";
 import {
   SimpleChatProject, SimpleChatTask, SimpleChatMessage, SimpleChatAgent, ChatAttachment, ChatArtifact,
   ProjectInstructions, ProjectKnowledgeItem,
@@ -116,7 +115,11 @@ function SearchResultsCard({ content }: { content: string }) {
   );
 }
 
-export default function ChatArea({ project, task, onUpdateTask, onUpdateProject, onCreateTask, onSelectTask, onDeleteAgent, onSkillToAgent, onBackToWorkspace, onToggleSidebar }: ChatAreaProps) {
+export default function ChatArea({
+  user, project, task, onUpdateTask, onUpdateProject, onCreateTask, onSelectTask,
+  onUpdateAgent, onDeleteAgent, onSkillToAgent,
+  onLogout, onBackToWorkspace, sidebarOpen, onToggleSidebar
+}: ChatAreaProps) {
   const { theme, toggleTheme } = useTheme();
 
   // Local state
@@ -128,14 +131,14 @@ export default function ChatArea({ project, task, onUpdateTask, onUpdateProject,
   const [showSkillPanel, setShowSkillPanel] = useState(false);
   const [showInstructionsPanel, setShowInstructionsPanel] = useState(false);
   const [showKnowledgePanel, setShowKnowledgePanel] = useState(false);
-  const [, ] = useState(false);
+  const [deepResearch, setDeepResearch] = useState(false);
   const [showArtifacts, setShowArtifacts] = useState(false);
   const [artifacts, setArtifacts] = useState<Array<{ id: string; type: 'document' | 'code' | 'table'; title: string; content: string }>>([]);
   const [showShare, setShowShare] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Array<{ taskId: string; taskName: string; messageIndex: number; snippet: string }>>([]);
-  const [, setBranchBaseMessageId] = useState<string | null>(null);
+  const [branchBaseMessageId, setBranchBaseMessageId] = useState<string | null>(null);
   const [searchStatus, setSearchStatus] = useState<string | null>(null);
   // Brand DNA injection
   const [brandActive, setBrandActive] = useState(false);
@@ -176,7 +179,7 @@ export default function ChatArea({ project, task, onUpdateTask, onUpdateProject,
       setSelectedProviderId(task.providerId);
       setInput("");
     }
-  }, [task, task?.id]);
+  }, [task?.id]);
 
   // Sync when project changes
   useEffect(() => {
@@ -184,7 +187,7 @@ export default function ChatArea({ project, task, onUpdateTask, onUpdateProject,
       setInstructionsDraft(project.instructions || { projectBackground: '', userPreference: '', outputFormat: '', styleRules: '', forbiddenRules: '', language: 'zh-CN' });
       setKnowledgeItems(project.knowledgeItems || []);
     }
-  }, [project, project?.id]);
+  }, [project?.id]);
 
   // Load models with tags
   useEffect(() => {
@@ -226,7 +229,7 @@ export default function ChatArea({ project, task, onUpdateTask, onUpdateProject,
         }
       }
     }).catch(() => {});
-  }, [selectedModel]);
+  }, []);
 
   // Fetch image models
   const fetchImageModels = useCallback(async () => {
@@ -248,22 +251,22 @@ export default function ChatArea({ project, task, onUpdateTask, onUpdateProject,
         setSelectedImageProviderId(models[0].providerId);
       }
     }).catch(() => {});
-  }, [selectedImageModel]);
+  }, []);
 
-  useEffect(() => { fetchImageModels(); }, [fetchImageModels]);
+  useEffect(() => { fetchImageModels(); }, []);
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
   // Sync task to parent
   useEffect(() => {
     if (!task || !project) return;
     onUpdateTask({ ...task, messages, model: selectedModel, providerId: selectedProviderId, imageModel: selectedImageModel, imageProviderId: selectedImageProviderId, updatedAt: Date.now() });
-  }, [messages, selectedModel, selectedProviderId, selectedImageModel, selectedImageProviderId, task, project, onUpdateTask]);
+  }, [messages, selectedModel, selectedProviderId, selectedImageModel, selectedImageProviderId]);
 
   // Sync knowledge
   useEffect(() => {
     if (!project) return;
     onUpdateProject({ ...project, knowledgeItems, updatedAt: Date.now() });
-  }, [knowledgeItems, onUpdateProject, project]);
+  }, [knowledgeItems]);
 
   function getModelTags(id: string, name: string): string[] {
     const lower = (id + ' ' + name).toLowerCase();
@@ -469,7 +472,7 @@ export default function ChatArea({ project, task, onUpdateTask, onUpdateProject,
     } finally {
       setIsStreaming(false);
     }
-  }, [input, uploadedImages, isStreaming, project, task, selectedModel, selectedProviderId, webSearch, brandActive, messages, knowledgeItems, selectedImageModel, selectedImageProviderId]);
+  }, [input, isStreaming, selectedModel, selectedProviderId, messages, project, task, uploadedImages, webSearch]);
 
   // Deep Research
   const handleDeepResearch = useCallback(async () => {
@@ -560,7 +563,7 @@ export default function ChatArea({ project, task, onUpdateTask, onUpdateProject,
     const isCode = msg.content.includes('```');
     const artifact: ChatArtifact = { id: artId, projectId: project?.id ?? '', taskId: '', type: (isCode ? 'code' : 'document') as ChatArtifact['type'], title: msg.content.slice(0, 40).replace(/\n/g, ' ') + '...', content: msg.content, version: 1, createdAt: Date.now(), updatedAt: Date.now() };
     setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, artifacts: [...(m.artifacts || []), artifact] } : m));
-  }, [project?.id]);
+  }, []);
 
   // Project search
   const handleProjectSearch = useCallback(() => {
@@ -589,10 +592,10 @@ export default function ChatArea({ project, task, onUpdateTask, onUpdateProject,
 
   // Office file download handlers
   const [downloadingPptx, setDownloadingPptx] = useState(false);
-  const [, ] = useState(false);
-  const [, ] = useState(false);
-  const [, ] = useState(false);
-  const [, ] = useState(false);
+  const [downloadingExcel, setDownloadingExcel] = useState(false);
+  const [downloadingWord, setDownloadingWord] = useState(false);
+  const [downloadingMindmap, setDownloadingMindmap] = useState(false);
+  const [downloadingFlowchart, setDownloadingFlowchart] = useState(false);
   const downloadPptx = useCallback(async (content: string) => {
     // 提取 JSON 代码块
     const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
@@ -624,8 +627,7 @@ export default function ChatArea({ project, task, onUpdateTask, onUpdateProject,
       link.download = `${data.title || '演示文稿'}.pptx`;
       link.click();
       window.URL.revokeObjectURL(url);
-    } catch (error: unknown) {
-      const e = { message: error instanceof Error ? error.message : String(error) };
+    } catch (e: any) {
       alert(`解析失败：${e.message}`);
     } finally {
       setDownloadingPptx(false);
@@ -663,20 +665,20 @@ export default function ChatArea({ project, task, onUpdateTask, onUpdateProject,
     try { return JSON.parse(match[1]); } catch { return null; }
   }, []);
 
-  useCallback(async (url: string, filename: string) => {
-        try {
-          const resp = await fetch(url);
-          const blob = await resp.blob();
-          const blobUrl = window.URL.createObjectURL(blob);
-          const link = document.createElement('a');
-          link.href = blobUrl;
-          link.download = filename;
-          link.click();
-          window.URL.revokeObjectURL(blobUrl);
-        } catch (e) {
-          console.error('Download failed:', e);
-        }
-      }, []);
+  const downloadFile = useCallback(async (url: string, filename: string) => {
+    try {
+      const resp = await fetch(url);
+      const blob = await resp.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = filename;
+      link.click();
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (e) {
+      console.error('Download failed:', e);
+    }
+  }, []);
 
   const downloadExcel = useCallback(async (data: object) => {
     const resp = await fetch('/api/excel/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
@@ -740,8 +742,7 @@ export default function ChatArea({ project, task, onUpdateTask, onUpdateProject,
   // Message operations
   const copyMessage = (content: string) => { navigator.clipboard.writeText(content); };
   const regenerateLast = () => { if (messages.length < 2) return; const lastUser = [...messages].reverse().find(m => m.role === 'user'); if (lastUser) { setMessages(prev => prev.slice(0, -2)); setInput(lastUser.content); setTimeout(() => { const btn = document.getElementById('send-btn') as HTMLButtonElement; btn?.click(); }, 50); } };
-  const continueConversation = (msg: SimpleChatMessage) => {
-    void msg; setInput('继续'); };
+  const continueConversation = (msg: SimpleChatMessage) => { setInput('继续'); };
   const makeShorter = (msg: SimpleChatMessage) => {
     if (msg?.role === 'assistant') setInput(`请将上面的回答缩短，保留核心要点。`);
   };
@@ -831,7 +832,7 @@ export default function ChatArea({ project, task, onUpdateTask, onUpdateProject,
         {/* Image Model Selector */}
         <div className="relative group">
           <button className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-muted hover:bg-muted/80 transition-colors text-xs">
-            <ImageIcon className="w-3.5 h-3.5 text-purple-400" />
+            <Image className="w-3.5 h-3.5 text-purple-400" />
             <span className="font-medium max-w-[100px] truncate">{imageModels.find(m => m.providerId === selectedImageProviderId && m.modelId === selectedImageModel)?.name || selectedImageModel || '图像模型'}</span>
             <ChevronDown className="w-3 h-3 text-muted-foreground" />
           </button>
@@ -963,7 +964,7 @@ export default function ChatArea({ project, task, onUpdateTask, onUpdateProject,
                   {msg.images && msg.images.length > 0 && (
                     <div className="flex gap-2 mt-2 flex-wrap">
                       {msg.images.map((url, i) => (
-                        <NextImage unoptimized width={1} height={1} key={i} src={url} alt="" className="w-20 h-20 object-cover rounded-lg" />
+                        <img key={i} src={url} alt="" className="w-20 h-20 object-cover rounded-lg" />
                       ))}
                     </div>
                   )}
@@ -1044,7 +1045,7 @@ export default function ChatArea({ project, task, onUpdateTask, onUpdateProject,
               <div className="flex gap-2 px-4 pt-3 flex-wrap">
                 {uploadedImages.map((att, i) => (
                   <div key={i} className="relative group">
-                    {att.url && <NextImage unoptimized width={1} height={1} src={att.url} alt="" className="w-16 h-16 object-cover rounded-lg" />}
+                    <img src={att.url} alt="" className="w-16 h-16 object-cover rounded-lg" />
                     <button onClick={() => setUploadedImages(prev => prev.filter((_, j) => j !== i))}
                       className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                       <X className="w-3 h-3" />
@@ -1313,7 +1314,7 @@ export default function ChatArea({ project, task, onUpdateTask, onUpdateProject,
               ) : knowledgePreview.type === 'image' || (knowledgePreview.url && (knowledgePreview.url.startsWith('data:image/') || knowledgePreview.url.startsWith('blob:'))) ? (
                 <div className="space-y-3">
                   {knowledgePreview.url && (knowledgePreview.url.startsWith('data:image/') || knowledgePreview.url.startsWith('blob:')) ? (
-                    <NextImage unoptimized width={1} height={1} src={knowledgePreview.url} alt={knowledgePreview.name} className="max-w-full max-h-[50vh] rounded-lg object-contain bg-transparent" />
+                    <img src={knowledgePreview.url} alt={knowledgePreview.name} className="max-w-full max-h-[50vh] rounded-lg object-contain bg-transparent" />
                   ) : (
                     <p className="text-muted-foreground text-center py-8">暂不支持预览此图片格式</p>
                   )}

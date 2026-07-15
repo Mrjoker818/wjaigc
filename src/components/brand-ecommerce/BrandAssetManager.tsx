@@ -201,7 +201,7 @@ export function BrandAssetManager({ currentSettings, onApply, userId, isMonochro
             ) : assets.length === 0 ? (
               <div className={`py-6 text-center text-xs ${textSub}`}>
                 暂无保存的品牌方案<br />
-                <span className="text-[10px]">点击&ldquo;保存当前&rdquo;将当前设置保存为品牌方案</span>
+                <span className="text-[10px]">点击"保存当前"将当前设置保存为品牌方案</span>
               </div>
             ) : (
               assets.map(asset => (

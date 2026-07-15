@@ -1,6 +1,5 @@
 'use client';
 
-import NextImage from 'next/image';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import {
@@ -19,6 +18,7 @@ import {
   Clipboard,
   Download,
   FileArchive,
+  HardDrive,
   Image,
   Link,
   Megaphone,
@@ -26,7 +26,8 @@ import {
   Save,
   Search,
   Server,
-  Trash2
+  Trash2,
+  Upload,
 } from 'lucide-react';
 
 type DesktopSection = 'overview' | 'updates' | 'backups' | 'connection' | 'resources' | 'records';
@@ -719,7 +720,7 @@ export default function DesktopAdminTab({
               <Field label="标签，逗号分隔"><input className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} value={resourceForm.tags.join(', ')} onChange={e => setResourceForm(prev => ({ ...prev, tags: e.target.value.split(',').map(v => v.trim()).filter(Boolean) }))} /></Field>
               <Field label={resourceMeta(resourceForm.type).thumbnailLabel || '缩略图 URL（可选）'}><input className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} value={resourceForm.thumbnailUrl.startsWith('data:') ? '已上传本地文件' : resourceForm.thumbnailUrl} onChange={e => setResourceForm(prev => ({ ...prev, thumbnailUrl: e.target.value }))} /></Field>
               <Field label="上传缩略图"><input className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} type="file" accept="image/*" onChange={e => void handleThumbFile(e.target.files?.[0])} /></Field>
-              {resourceForm.thumbnailUrl && <div className="md:col-span-2 flex items-center gap-3"><NextImage unoptimized width={1} height={1} src={resourceForm.thumbnailUrl} alt="" className="h-20 w-28 rounded-lg object-cover border border-white/10" /><button className={buttonGhost} onClick={() => setResourceForm(prev => ({ ...prev, thumbnailUrl: '' }))}>移除缩略图</button></div>}
+              {resourceForm.thumbnailUrl && <div className="md:col-span-2 flex items-center gap-3"><img src={resourceForm.thumbnailUrl} alt="" className="h-20 w-28 rounded-lg object-cover border border-white/10" /><button className={buttonGhost} onClick={() => setResourceForm(prev => ({ ...prev, thumbnailUrl: '' }))}>移除缩略图</button></div>}
               {resourceForm.type === 'material' && <Field label="上传素材文件" className="md:col-span-2"><input className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} type="file" onChange={e => void handleAssetFile(e.target.files?.[0])} /></Field>}
               <Field label={resourceMeta(resourceForm.type).contentLabel} className="md:col-span-2"><textarea className={`w-full h-28 px-3 py-2 rounded-lg border text-sm ${inputClass} resize-y`} value={resourceForm.content} onChange={e => setResourceForm(prev => ({ ...prev, content: e.target.value }))} placeholder={resourceMeta(resourceForm.type).contentPlaceholder} /></Field>
               {resourceForm.type === 'ecom-template' && <><Field label="模板 ID"><input className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} onChange={e => updatePayloadField('id', e.target.value)} placeholder="white-bg-main" /></Field><Field label="画面比例"><input className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} onChange={e => updatePayloadField('aspectRatio', e.target.value)} placeholder="1:1" /></Field></>}
@@ -736,7 +737,7 @@ export default function DesktopAdminTab({
             <Table headers={['资源', '类型 / 分类', '状态', '操作']}>
               {filteredResources.map(item => (
                 <tr key={item.id}>
-                  <td><div className="flex items-center gap-3">{item.thumbnailUrl ? <NextImage unoptimized width={1} height={1} src={item.thumbnailUrl} alt="" className="h-11 w-14 rounded object-cover" /> : <div className="h-11 w-14 rounded bg-black/20" />}<div><div className={`font-medium ${textPrimary}`}>{item.name}</div><div className={`text-xs ${textSecondary}`}>{item.description || item.id}</div></div></div></td>
+                  <td><div className="flex items-center gap-3">{item.thumbnailUrl ? <img src={item.thumbnailUrl} alt="" className="h-11 w-14 rounded object-cover" /> : <div className="h-11 w-14 rounded bg-black/20" />}<div><div className={`font-medium ${textPrimary}`}>{item.name}</div><div className={`text-xs ${textSecondary}`}>{item.description || item.id}</div></div></div></td>
                   <td><div>{resourceMeta(item.type).label}</div><div className={`text-xs ${textSecondary}`}>{item.category || '-'}</div></td>
                   <td>{item.enabled ? <span className="inline-flex items-center gap-1 text-emerald-400"><CheckCircle2 size={13} />启用</span> : <span className={textSecondary}>停用</span>}</td>
                   <td><div className="flex gap-2"><button className={buttonGhost} onClick={() => editResource(item)}>编辑</button><button className="rounded-lg px-3 py-2 text-xs font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20" onClick={() => setPendingDelete({ kind: 'resource', id: item.id })}>删除</button></div></td>
@@ -753,7 +754,7 @@ export default function DesktopAdminTab({
           <Table headers={['缩略图', '提示词 / 模型', '用户 / 设备', '时间']}>
             {filteredRecords.map((item, idx) => (
               <tr key={String(item.id || idx)}>
-                <td>{item.thumbnail_url ? <NextImage unoptimized width={1} height={1} src={String(item.thumbnail_url)} alt="" className="h-16 w-16 rounded object-cover" /> : <div className="h-16 w-16 rounded bg-black/20" />}</td>
+                <td>{item.thumbnail_url ? <img src={String(item.thumbnail_url)} alt="" className="h-16 w-16 rounded object-cover" /> : <div className="h-16 w-16 rounded bg-black/20" />}</td>
                 <td><div className={`${textPrimary} max-w-xl truncate`}>{String(item.prompt || '无提示词')}</div><div className={`text-xs ${textSecondary}`}>{String(item.model || '-')}</div></td>
                 <td><div>{String(item.user_id || '-')}</div><div className={`text-xs ${textSecondary}`}>{String(item.device_id || '-')}</div></td>
                 <td>{formatTime(item.created_at || item.createdAt)}</td>

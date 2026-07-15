@@ -7,7 +7,6 @@ import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getSessionUser } from '@/lib/server-auth';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { validateApiInputs } from '@/lib/api-validator';
-import { resolveRequestedImageModel } from '@/lib/display3d-request-contract';
 
 export async function POST(request: NextRequest) {
   try {
@@ -41,8 +40,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '未找到可用的LLM模型，请在管理员后台配置' }, { status: 400 });
     }
 
-    resolveCompatProfile(provider);
-    const rawSelectedModel = resolveRequestedImageModel({ requestedModel: model, providerModels: provider.selectedModels, fallbackModel: 'gemini-2.5-flash' });
+    const profile = resolveCompatProfile(provider);
+    const rawSelectedModel = provider.selectedModels?.[0] || model || 'gemini-2.5-flash';
     const { apiModelName: selectedModel } = normalizeModelForApi(rawSelectedModel);
 
     // Register task

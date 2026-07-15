@@ -24,7 +24,7 @@ interface TestResult {
 }
 
 async function testProvider(
-  provider: { id: string; name: string; displayName?: string; baseUrl?: string; apiKey?: string; modelType?: string; selectedModels?: string[]; advancedParams?: Record<string, string>; requestStyle?: string; isEnabled?: boolean }
+  provider: { id: string; name: string; displayName?: string; baseUrl?: string; apiKey?: string; modelType?: string; selectedModels?: string[]; advancedParams?: any; requestStyle?: string; isEnabled?: boolean }
 ): Promise<TestResult> {
   const { id, name, baseUrl = '', apiKey = '', modelType = 'unknown', selectedModels = [], advancedParams, requestStyle } = provider;
   const displayName = provider.displayName || name;

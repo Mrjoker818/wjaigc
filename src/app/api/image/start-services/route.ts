@@ -8,7 +8,6 @@ export const dynamic = 'force-dynamic';
 
 // Auto-start IOPaint and check Upscayl services
 export async function POST(request: NextRequest) {
-  void request;
   const results: Record<string, { started: boolean; error?: string }> = {};
 
   // 1. Check and start IOPaint
@@ -72,7 +71,7 @@ export async function POST(request: NextRequest) {
               error: 'IOPaint 启动中，请稍后再试。如果持续失败，请检查 iopaint 是否已安装: pip install iopaint',
             };
           }
-        } catch {
+        } catch (startErr) {
           results.iopaint = {
             started: false,
             error: '无法启动 IOPaint，请确认已安装: pip install iopaint',

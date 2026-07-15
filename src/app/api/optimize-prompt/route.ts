@@ -44,9 +44,16 @@ function normalizeChatBaseUrl(baseUrl: string): string {
 
 export async function POST(request: NextRequest) {
   let deductedCredits = 0;
-  let sessionUser: Awaited<ReturnType<typeof getSessionUser>> = null;
+  let sessionUser: any = null;
   try {
-    const { prompt, model, mode, providerId, systemPrompt: customSystemPrompt } = await request.json();
+    const {
+      prompt,
+      model,
+      mode,
+      providerId,
+      systemPrompt: customSystemPrompt,
+      userId: requestUserId,
+    } = await request.json();
     // 输入校验
     const _validationError = validateApiInputs({ prompt }, {
         prompt: 'prompt'

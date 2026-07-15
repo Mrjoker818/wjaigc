@@ -8,7 +8,6 @@ import { getSessionUser } from '@/lib/server-auth';
 import { calculateActualPixelsFromRatio } from '@/lib/calculate-pixels';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { validateApiInputs } from '@/lib/api-validator';
-import { isServerReadableImageUrl, resolveRequestedImageModel } from '@/lib/display3d-request-contract';
 
 export async function POST(request: NextRequest) {
   try {
@@ -83,7 +82,7 @@ export async function POST(request: NextRequest) {
     }
 
     const profile = resolveCompatProfile(provider);
-    const rawSelectedModel = resolveRequestedImageModel({ requestedModel: model, providerModels: provider.selectedModels, fallbackModel: 'gpt-image-2' });
+    const rawSelectedModel = provider.selectedModels?.[0] || model || 'gpt-image-2';
     const { apiModelName: selectedModel } = normalizeModelForApi(rawSelectedModel);
     if (selectedModel !== rawSelectedModel) {
       console.log(`[display-3d] Model normalized: ${rawSelectedModel} → ${selectedModel}`);
@@ -103,7 +102,7 @@ export async function POST(request: NextRequest) {
 
     // Add reference images
     if (Array.isArray(assets) && assets.length > 0) {
-      const imageUrls = assets.map((a: { url?: unknown }) => a.url).filter(isServerReadableImageUrl);
+      const imageUrls = assets.filter((a: { url?: string }) => a.url).map((a: { url: string }) => a.url);
       if (imageUrls.length > 0) {
         rawBody.image = imageUrls[0];
         rawBody.image_urls = imageUrls;

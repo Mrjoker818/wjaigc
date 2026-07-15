@@ -9,7 +9,7 @@
  * 此文件仅包含服务端函数（依赖 db-storage）
  */
 
-import { dbGetCredits, dbInitCredits, dbRecordCreditTransaction } from './db-storage';
+import { dbGetCredits, dbAdjustCredits, dbInitCredits, dbRecordCreditTransaction } from './db-storage';
 export {
   CREDITS_TO_CNY, CNY_TO_CREDITS,
   IMAGE_MODEL_CREDITS, VIDEO_MODEL_CREDITS, CHAT_MODEL_CREDITS,

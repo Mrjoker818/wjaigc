@@ -4,18 +4,6 @@ import { execSql } from '@/lib/db-client';
 
 export const dynamic = 'force-dynamic';
 
-type QueryRow = Record<string, unknown>;
-
-function getRowString(row: QueryRow, key: string): string {
-  const value = row[key];
-  return typeof value === 'string' ? value : '';
-}
-
-function getRowNumber(row: QueryRow, key: string): number {
-  const value = Number(row[key]);
-  return Number.isFinite(value) ? value : 0;
-}
-
 export async function GET(request: NextRequest) {
   try {
     const admin = await requireAdminUser(request);
@@ -57,45 +45,41 @@ export async function GET(request: NextRequest) {
       ),
     ]);
 
-    const summary = (summaryRes.rows as QueryRow[])[0] || {};
-    const dist = (distributionRes.rows as QueryRow[])[0] || {};
-    const totalConsumed = getRowNumber(summary, 'total_consumed') || 1;
+    const summary = (summaryRes.rows as any[])[0] || {};
+    const dist = (distributionRes.rows as any[])[0] || {};
+    const totalConsumed = Number(summary.total_consumed) || 1;
 
     const distribution = [
-      { label: '图像生成', value: getRowNumber(dist, 'image_consumed'), color: '#d4af37', pct: `${Math.round(getRowNumber(dist, 'image_consumed') / totalConsumed * 100)}%` },
-      { label: 'AI 对话', value: getRowNumber(dist, 'chat_consumed'), color: '#22c55e', pct: `${Math.round(getRowNumber(dist, 'chat_consumed') / totalConsumed * 100)}%` },
-      { label: '视频生成', value: getRowNumber(dist, 'video_consumed'), color: '#3b82f6', pct: `${Math.round(getRowNumber(dist, 'video_consumed') / totalConsumed * 100)}%` },
-      { label: '其他', value: getRowNumber(dist, 'other_consumed'), color: '#a1a1aa', pct: `${Math.round(getRowNumber(dist, 'other_consumed') / totalConsumed * 100)}%` },
+      { label: '图像生成', value: Number(dist.image_consumed) || 0, color: '#d4af37', pct: `${Math.round((Number(dist.image_consumed) || 0) / totalConsumed * 100)}%` },
+      { label: 'AI 对话', value: Number(dist.chat_consumed) || 0, color: '#22c55e', pct: `${Math.round((Number(dist.chat_consumed) || 0) / totalConsumed * 100)}%` },
+      { label: '视频生成', value: Number(dist.video_consumed) || 0, color: '#3b82f6', pct: `${Math.round((Number(dist.video_consumed) || 0) / totalConsumed * 100)}%` },
+      { label: '其他', value: Number(dist.other_consumed) || 0, color: '#a1a1aa', pct: `${Math.round((Number(dist.other_consumed) || 0) / totalConsumed * 100)}%` },
     ];
 
-    const topUsers = (topUsersRes.rows as QueryRow[]).map(row => ({
-      userId: getRowString(row, 'user_id'),
-      name: getRowString(row, 'name') || getRowString(row, 'user_id'),
-      consumed: getRowNumber(row, 'total_used'),
-      totalConsumed: getRowNumber(row, 'total_used'),
-      balance: getRowNumber(row, 'balance'),
-      totalRecharged: getRowNumber(row, 'total_recharged'),
+    const topUsers = (topUsersRes.rows as any[]).map(r => ({
+      userId: r.user_id,
+      name: r.name || r.user_id,
+      consumed: Number(r.total_used) || 0,
+      totalConsumed: Number(r.total_used) || 0,
+      balance: Number(r.balance) || 0,
+      totalRecharged: Number(r.total_recharged) || 0,
     }));
 
-    const recentTransactions = (recentTxRes.rows as QueryRow[]).map(row => {
-      const description = getRowString(row, 'desc');
-      const amount = getRowNumber(row, 'amount');
-      return {
-        user: getRowString(row, 'user') || getRowString(row, 'user_id'),
-        type: amount > 0 ? 'recharge' : description.includes('生图') || description.includes('生成') ? 'image' : description.includes('视频') ? 'video' : description.includes('聊天') || description.includes('chat') ? 'chat' : 'other',
-        amount,
-        desc: description || '-',
-        time: new Date(getRowNumber(row, 'created_at')).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }),
-      };
-    });
+    const recentTransactions = (recentTxRes.rows as any[]).map(r => ({
+      user: r.user || r.user_id,
+      type: r.amount > 0 ? 'recharge' : (r.desc || '').includes('生图') || (r.desc || '').includes('生成') ? 'image' : (r.desc || '').includes('视频') ? 'video' : (r.desc || '').includes('聊天') || (r.desc || '').includes('chat') ? 'chat' : 'other',
+      amount: Number(r.amount) || 0,
+      desc: r.desc || '-',
+      time: new Date(Number(r.created_at)).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }),
+    }));
 
     return NextResponse.json({
       success: true,
-      totalBalance: getRowNumber(summary, 'total_balance'),
-      totalRecharged: getRowNumber(summary, 'total_recharged'),
-      totalConsumed: getRowNumber(summary, 'total_consumed'),
-      totalUsers: getRowNumber(summary, 'total_users'),
-      avgPerUser: getRowNumber(summary, 'avg_per_user'),
+      totalBalance: Number(summary.total_balance) || 0,
+      totalRecharged: Number(summary.total_recharged) || 0,
+      totalConsumed: Number(summary.total_consumed) || 0,
+      totalUsers: Number(summary.total_users) || 0,
+      avgPerUser: Number(summary.avg_per_user) || 0,
       distribution,
       topUsers,
       recentTransactions,

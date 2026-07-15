@@ -1,6 +1,5 @@
 'use client';
 
-import NextImage from 'next/image';
 import React, { useState, useMemo } from 'react';
 import { User } from '@/lib/user-types';
 import { UserManager as UserManagerCore } from '@/lib/user-manager';
@@ -107,7 +106,7 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
           {/* 品牌头部 */}
           <div className="relative z-10">
             <div className="flex items-center gap-3 mb-3">
-              <NextImage unoptimized width={1} height={1} src="/logo.png" alt="无界AI" className="w-10 h-10 object-contain rounded-lg" />
+              <img src="/logo.png" alt="无界AI" className="w-10 h-10 object-contain rounded-lg" />
               <h1 className="text-3xl xl:text-4xl font-bold text-foreground tracking-tight">无界AI</h1>
             </div>
             <p className="text-muted-foreground text-base xl:text-lg">AI 图像 · 视频 · 3D 一站式创作平台</p>
@@ -196,7 +195,7 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
 
             {/* 移动端品牌标识 */}
             <div className="lg:hidden flex items-center gap-2 mb-10 justify-center">
-              <NextImage unoptimized width={1} height={1} src="/logo.png" alt="无界AI" className="w-8 h-8 object-contain rounded" />
+              <img src="/logo.png" alt="无界AI" className="w-8 h-8 object-contain rounded" />
               <span className="text-2xl font-bold text-foreground tracking-tight">无界AI</span>
             </div>
 

@@ -201,7 +201,7 @@ export function generateSuggestions(context: SuggestionContext): Suggestion[] {
  */
 export function inferContentCategory(
   response: string,
-  toolCalls?: Array<{ name: string; result?: unknown }>
+  toolCalls?: Array<{ name: string; result?: any }>
 ): ContentCategory {
   // 检查工具调用
   if (toolCalls && toolCalls.length > 0) {

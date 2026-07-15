@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { writeFile, mkdir, readFile } from 'fs/promises';
+import { writeFile, mkdir, readFile, unlink } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
@@ -138,9 +138,9 @@ export async function POST(req: NextRequest) {
       videoInfo,
       mode,
     });
-  } catch (error: unknown) {
+  } catch (error: any) {
     console.error('[video/extract-frames] 抽帧失败:', error);
-    const msg = error instanceof Error ? error.message : String(error);
+    const msg = error?.stderr || error?.message || String(error);
     return NextResponse.json(
       { error: '视频抽帧失败: ' + msg.slice(0, 500) },
       { status: 500 }

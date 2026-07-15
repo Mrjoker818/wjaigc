@@ -8,14 +8,13 @@
  * 主题：黑金配色，与品牌工厂/精修引擎一致
  */
 
-import NextImage from 'next/image';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useProgressTimer } from '@/hooks/useProgressTimer';
 import {
   X, GripVertical, Layers, Image as ImageIcon, Sparkles, FileImage,
   Upload, RotateCcw, Eye, EyeOff, ChevronDown, ChevronRight,
-  Download, Maximize2, Loader2, Check, Clock,
-  Type, Palette, Box, Trash2, FileText, Archive,
+  Download, ZoomIn, Maximize2, Loader2, Check, Clock,
+  Type, Palette, Box, Trash2, FileText, Archive, Info,
   Plus, Minus, RefreshCw, Settings
 } from 'lucide-react';
 
@@ -50,6 +49,12 @@ interface LayerItem {
     bold?: boolean;
     italic?: boolean;
   };
+}
+
+interface QualityReport {
+  overall: number;
+  consistency: number;
+  editability: number;
 }
 
 interface TaskData {
@@ -342,7 +347,7 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false,
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [previewScale, setPreviewScale] = useState(1);
   const [showHistory, setShowHistory] = useState(false);
-  const [, ] = useState<HistoryItem[]>([]);
+  const [history, setHistory] = useState<HistoryItem[]>([]);
 
   // === Error state ===
   const [error, setError] = useState('');
@@ -469,7 +474,7 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false,
     };
     poll();
     return () => { if (timerId) clearTimeout(timerId); };
-  }, [taskId, isGenerating, stopTimer]);
+  }, [taskId, isGenerating]);
 
   // ─── File upload handler ───────────────────────────────────
   const handleFileUpload = useCallback(async (
@@ -543,8 +548,6 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false,
           textRenderMode: textLayerMode,
           imageModel: selectedImageModel,
           llmModel: selectedLlmModel,
-          imageProviderId: imageModels.find(m => m.id === selectedImageModel)?.providerId,
-          llmProviderId: llmModels.find(m => m.id === selectedLlmModel)?.providerId,
           referenceImageUrls: referenceImages.map(r => r.url),
           productImageUrls: productImage ? [productImage.url] : [],
           logoImageUrls: logoImage ? [logoImage.url] : [],
@@ -563,12 +566,15 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false,
         setIsGenerating(false);
         stopTimer();
       }
-    } catch {
+    } catch (err) {
       setError('网络错误');
       setIsGenerating(false);
       stopTimer();
     }
-  }, [prompt, generateMode, startTimer, title, subtitle, slogan, aspectRatio, customWidth, customHeight, usageType, styleDirections, colorTendency, customColors, layerComplexity, outputQuality, textLayerMode, selectedImageModel, selectedLlmModel, imageModels, llmModels, referenceImages, productImage, logoImage, brandName, brandSlogan, brandColors, materialType, stopTimer]);
+  }, [prompt, title, subtitle, slogan, aspectRatio, customWidth, customHeight, usageType,
+    styleDirections, colorTendency, customColors, layerComplexity, outputQuality, textLayerMode,
+    selectedImageModel, selectedLlmModel, referenceImages, productImage, logoImage,
+    generateMode, brandName, brandSlogan, brandColors, brandFont, materialType]);
 
   // ─── Cancel handler ────────────────────────────────────────
   const handleCancel = useCallback(async () => {
@@ -584,7 +590,7 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false,
     stopTimer();
     setTaskData(null);
     setTaskId('');
-  }, [stopTimer, taskId]);
+  }, [taskId]);
 
   // ─── Reset handler ─────────────────────────────────────────
   const handleReset = useCallback(() => {
@@ -594,7 +600,7 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false,
     setCurrentStep(0);
     setError('');
     resetTimer();
-  }, [resetTimer]);
+  }, []);
 
   // ─── Download handler ──────────────────────────────────────
   const handleDownload = useCallback(async (format: 'psd' | 'zip' | 'json' | 'report') => {
@@ -920,7 +926,7 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false,
           <div className="space-y-2">
             {referenceImages.map((img, i) => (
               <div key={i} className={`${th.card} p-2 flex items-center gap-2`}>
-                <NextImage unoptimized width={1} height={1} src={img.url} alt={img.name} className="w-10 h-10 rounded object-cover" />
+                <img src={img.url} alt={img.name} className="w-10 h-10 rounded object-cover" />
                 <span className="text-xs text-gray-400 flex-1 truncate">{img.name}</span>
                 <button className="text-gray-500 hover:text-red-400" onClick={() => setReferenceImages(prev => prev.filter((_, j) => j !== i))}>
                   <Trash2 className="w-3.5 h-3.5" />
@@ -1006,7 +1012,7 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false,
         <div className={th.sectionLabel}>产品图 <span className={`${th.accentText} normal-case`}>(原图保留)</span></div>
         {productImage ? (
           <div className={`${th.card} p-2 flex items-center gap-2`}>
-            <NextImage unoptimized width={1} height={1} src={productImage.url} alt={productImage.name} className="w-10 h-10 rounded object-cover" />
+            <img src={productImage.url} alt={productImage.name} className="w-10 h-10 rounded object-cover" />
             <span className="text-xs text-gray-400 flex-1 truncate">{productImage.name}</span>
             <button className="text-gray-500 hover:text-red-400" onClick={() => setProductImage(null)}>
               <Trash2 className="w-3.5 h-3.5" />
@@ -1026,7 +1032,7 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false,
         <div className={th.sectionLabel}>Logo <span className={`${th.accentText} normal-case`}>(原图保留)</span></div>
         {logoImage ? (
           <div className={`${th.card} p-2 flex items-center gap-2`}>
-            <NextImage unoptimized width={1} height={1} src={logoImage.url} alt={logoImage.name} className="w-10 h-10 rounded object-cover" />
+            <img src={logoImage.url} alt={logoImage.name} className="w-10 h-10 rounded object-cover" />
             <span className="text-xs text-gray-400 flex-1 truncate">{logoImage.name}</span>
             <button className="text-gray-500 hover:text-red-400" onClick={() => setLogoImage(null)}>
               <Trash2 className="w-3.5 h-3.5" />
@@ -1139,7 +1145,7 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false,
           {/* Preview image if available */}
           {taskData?.previewUrl ? (
             <div className="flex-1 flex items-center justify-center bg-black/20 rounded-lg overflow-hidden">
-              <NextImage unoptimized width={1} height={1} src={taskData.previewUrl} alt="预览"
+              <img src={taskData.previewUrl} alt="预览"
                 className="max-w-full max-h-full object-contain rounded" />
             </div>
           ) : (
@@ -1167,7 +1173,7 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false,
           </div>
           {taskData?.previewUrl ? (
             <div className="flex-1 flex items-center justify-center bg-black/20 rounded-lg overflow-hidden relative">
-              <NextImage unoptimized width={1} height={1} src={taskData.previewUrl} alt="预览"
+              <img src={taskData.previewUrl} alt="预览"
                 className="max-w-full max-h-full object-contain rounded"
                 style={{ transform: `scale(${previewScale})` }} />
               {/* Zoom controls */}

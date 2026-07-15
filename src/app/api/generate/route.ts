@@ -1,28 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { appendUserJsonl } from '@/lib/server-user-storage';
-import { findProviderForModel, normalizeApiBaseUrl, findAllProvidersForType } from '@/lib/server-api-config';
+import { findProviderForModel, normalizeApiBaseUrl, findAllProvidersForType, findProviderById } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { identifyImageSubject } from '@/lib/identify-subject';
-import { logError, startTimer, OP_ACTIONS } from '@/lib/op-log';
+import { logOperation, logError, startTimer, OP_ACTIONS, sanitizeRequestData } from '@/lib/op-log';
 
 import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { translateApiError } from '@/lib/api-error-translate';
-import { classifyApiError } from '@/lib/api-error-translator';
-import { repairSize } from '@/lib/size-auto-repair';
-import { } from '@/lib/smart-retry';
-import { streamResponsesApiSSE, buildResponsesApiPayload, extractImageUrlFromMarkdown, type ResponsesApiSSEEvent } from '@/lib/responses-api-sse';
-import { filterRequestForModel, shouldUseResponsesAPIForProvider, normalizeModelForApi } from '@/lib/model-capabilities';
+import { classifyApiError, type ClassifiedError, isCloudflareTimeoutError, translateApiError as translateApiErrorV2 } from '@/lib/api-error-translator';
+import { detectInvalidSizeError, repairSize, classifyImageModelFamily } from '@/lib/size-auto-repair';
+import { fetchWithSmartRetry } from '@/lib/smart-retry';
+import { streamResponsesApiSSE, buildResponsesApiPayload, extractImageUrlFromMarkdown, type ResponsesApiResult, type ResponsesApiSSEEvent } from '@/lib/responses-api-sse';
+import { getModelCapabilities, filterRequestForModel, shouldUseResponsesAPI, shouldUseResponsesAPIForProvider, type ModelCapabilities, normalizeModelForApi } from '@/lib/model-capabilities';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { validateImageUrl } from '@/lib/input-validation';
 import { consumeCredits } from '@/lib/credits';
 
-import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, stripEditsOnlyFields, isEditsEndpointRejected, type ApiCompatProfile, resolveProfileForModel, buildGeminiChatImageRequest, parseGeminiChatImageResponse, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
+import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, stripEditsOnlyFields, isEditsEndpointRejected, type ApiCompatProfile, resolveProfileForModel, isGeminiImageModel, isNanoBananaModel, buildGeminiChatImageRequest, parseGeminiChatImageResponse, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
 import { registerTask, updateTaskProgress, isTaskCancelled, getTaskInfo } from '@/lib/task-registry';
 import { recordImageTaskSubmitted, recordImageTaskTerminal } from '@/lib/cloud-task-persistence';
 import { persistRemoteImage } from '@/lib/s3-storage';
 import { calculateActualPixelsFromRatio } from '@/lib/calculate-pixels';
-import { getModelParamType, ModelParamType } from '@/lib/canvas-generation-group';
+import { RESOLUTION_TIER_MODELS, QUALITY_LEVEL_MODELS, getModelParamType, ModelParamType } from '@/lib/canvas-generation-group';
 
 // 直接模式（OpenAI兼容API返回图片需60-120秒）
 // 异步模式（返回task_id只需几秒）两者共存，取较大值
@@ -110,7 +110,7 @@ export async function POST(request: NextRequest) {
   if (authResult instanceof NextResponse) return authResult;
   try {
     let deductedCredits = 0;
-    let sessionUser: Awaited<ReturnType<typeof getSessionUser>> = null;
+    let sessionUser: any = null;
     const body = await request.json();
     // quality 需要在后续被模型别名的 resolutionTier 覆盖，所以单独用 let 声明
     const {
@@ -139,7 +139,7 @@ export async function POST(request: NextRequest) {
       resolution, // GPT-Image系列分辨率档位参数（1K/2K/4K）
     } = body;
     // quality 默认值 '1K'，后续可能被模型别名 resolutionTier 覆盖
-    let quality: string = body.quality || '1K';
+    let quality: string = (body as any).quality || '1K';
     // resolution 默认值 '2K'（仅GPT-Image系列使用）
     const resolutionTier: string = resolution || '2K';
     // 诊断日志：显示接收到的参考图参数
@@ -341,7 +341,7 @@ export async function POST(request: NextRequest) {
             headers: {
               'Content-Type': 'application/json',
               'x-internal-request': 'true',
-              'x-internal-user-id': sessionUser?.id || 'system',
+              'x-internal-user-id': sessionUser?.userId || 'system',
             },
             body: JSON.stringify(backgroundBody),
             signal: AbortSignal.timeout(600000), // 10分钟超时
@@ -418,6 +418,8 @@ export async function POST(request: NextRequest) {
             const bgPollProviderId = bgData.providerId || effectiveProviderId;
             let bgPollAttempts = 0;
             const bgMaxPollAttempts = 120;
+            const htmlResponseRetryCount = 0;
+            const maxHtmlResponseRetries = 5;
             const collectedImageUrls: string[] = [];
             const collectedMaskUrls: string[] = [];
             let allCompleted = false;
@@ -1038,7 +1040,7 @@ export async function POST(request: NextRequest) {
       }
 
       // ★ 基于模型能力的参数过滤：只发送模型实际支持的字段，避免 API 报错
-      filterRequestForModel(currentModelConfig.modelId, requestBody);
+      const filteredBody = filterRequestForModel(currentModelConfig.modelId, requestBody);
 
       // ★ 诊断日志：记录发送给 API 的关键分辨率参数，便于排查"用户设置4K但实际生成1K"问题
       console.log(`[generate] Resolution params → model: ${currentModelConfig.modelId}, paramType: ${currentModelConfig.paramType}, quality: ${quality}, effectiveSize: ${effectiveSize}, pixelSize: ${pixelSize || 'null'}, finalSize: ${finalSize}, profile.sizeFormat: ${profile.sizeFormat}, requestBody.size: ${requestBody.size}, requestBody.resolution: ${requestBody.resolution || 'N/A'}, requestBody.width: ${requestBody.width || 'N/A'}, requestBody.height: ${requestBody.height || 'N/A'}`);
@@ -1763,7 +1765,7 @@ export async function POST(request: NextRequest) {
         let submitResult: Record<string, unknown>;
         try {
           submitResult = JSON.parse(responseText);
-        } catch {
+        } catch (parseErr) {
           console.error('[generate] API returned non-JSON response, first 200 chars:', responseText.substring(0, 200));
           throw new Error('API 返回了非 JSON 响应（可能是端点不存在或服务器错误），请检查 API 地址配置');
         }
@@ -2139,10 +2141,7 @@ export async function POST(request: NextRequest) {
         const isRetryable = singleError instanceof Error && (singleError as Error & { retryable?: boolean }).retryable;
         
         // ★ 智能重试: 识别 CF 524/504 超时，同模型重试后再切换备选模型
-        const errorStatus = singleError instanceof Error
-          ? (singleError as Error & { status?: unknown }).status
-          : undefined;
-        const errorClassify = classifyApiError(errMsg, typeof errorStatus === 'number' ? errorStatus : undefined);
+        const errorClassify = classifyApiError(errMsg, singleError instanceof Error ? (singleError as any).status : undefined);
         const isCloudflareTimeout = errorClassify.category === 'cloudflare_timeout';
         const isSizeError = errorClassify.category === 'invalid_size';
         

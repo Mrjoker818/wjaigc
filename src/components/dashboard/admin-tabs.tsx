@@ -3,9 +3,11 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { AdminRechargeOrders } from './admin-recharge-orders';
 import {
-  Users, TrendingUp, Wallet, ShieldCheck, Activity, BarChart3, CreditCard, Search, RefreshCw, ChevronRight, ChevronDown,
-  ChevronLeft, AlertTriangle, Eye, Save,
-  X, Check, Ban, UserPlus, Database, HardDrive,
+  Users, TrendingUp, Wallet, ShieldCheck, Activity, BarChart3, CreditCard,
+  Settings2, Search, RefreshCw, Plus, ChevronRight, ChevronDown,
+  ChevronLeft, AlertTriangle, Eye, EyeOff, RotateCcw, Save,
+  X, Check, Ban, MoreHorizontal, UserPlus, ArrowUpDown, Filter,
+  CircleDot, Server, Database, Bell, Lock, HardDrive, Cpu,
   SlidersHorizontal, Shield, Brain, Megaphone, Bold, Italic,
   Underline, Link2, List, AlertCircle, Download,
   CheckCircle, CheckCircle2, Trash2, Info, Pencil, Wrench
@@ -14,7 +16,7 @@ import {
 /* ── Types ── */
 interface AdminGroup {
   id: string; name: string; product_types: string[]; credit_quota: number;
-  is_active: boolean; created_at: string | number; updated_at: string | number;
+  is_active: boolean; created_at: string; updated_at: string;
 }
 
 interface AdminUser {
@@ -32,31 +34,41 @@ interface AdminUser {
 }
 
 interface AdminProvider {
-  id: string; name: string; base_url?: string; baseUrl?: string; api_key?: string; apiKey?: string;
-  model_type?: string; selected_models?: string[]; discovered_models?: string[];
-  modelType?: string; selectedModels?: string[];
+  id: string; name: string; base_url: string; api_key: string;
+  model_type: string; selected_models: string[]; discovered_models: string[];
   isEnabled: boolean; balance?: number; balanceCurrency?: string;
   compatProfile?: string; advancedParams?: Record<string, unknown>;
 }
 
+interface DashboardStats {
+  totalUsers: number; dau: number; wau: number; mau: number;
+  totalCredits: number; creditsUsedToday: number; creditsUsedWeek: number;
+  totalProviders: number; activeProviders: number;
+  recentUsers?: Array<{ name: string; date: string; email?: string }>;
+  providerHealth?: Array<{ name: string; status: 'healthy' | 'degraded' | 'down'; latency?: number }>;
+  alerts?: Array<{ type: 'warning' | 'error'; message: string; time: string }>;
+}
+
 interface AuditLogEntry {
-  id: string; action: string; level?: string;
-  userId?: string; userName?: string; user_id?: string; user_name?: string;
-  targetType?: string; targetId?: string; target_type?: string; target_id?: string;
-  detail?: unknown; ipAddress?: string; createdAt?: number | string; created_at?: number | string;
-  resolutionStatus?: string; errorMessage?: string; model?: string; providerId?: string;
-  duration?: number | string; stackTrace?: string; requestData?: unknown;
+  id: string; userId: string; userName: string; action: string;
+  targetType?: string; targetId?: string; detail?: string;
+  ipAddress?: string; createdAt: number;
 }
 
 interface AuditStats {
   todayCount: number; weekCount: number; totalCount: number;
   byAction?: Record<string, number>;
-  errorCount?: number; warnCount?: number; unresolvedCount?: number;
 }
 
-interface CreditTopUser {
-  name: string; userId?: string; consumed: number; totalConsumed: number;
-  balance: number; totalRecharged: number; pct?: string;
+interface SystemSettings {
+  defaultImageModel?: string; defaultChatModel?: string; defaultVideoModel?: string;
+  maxConcurrentTasks?: number; imageMaxSizeMB?: number; imageMaxEdge?: number;
+  maxUploadMB?: number; maxVideoDuration?: number; storageQuotaMB?: number;
+  sessionTimeout?: number; passwordExpiryDays?: number;
+  openRegistration?: boolean; apiRateLimiting?: boolean;
+  videoGenerationEnabled?: boolean; threeDModelEnabled?: boolean;
+  announcementEnabled?: boolean; announcementType?: string;
+  announcementExpiry?: string; announcement?: string;
 }
 
 interface AdminTabsProps {
@@ -106,8 +118,9 @@ function formatDate(iso: string | number | undefined): string {
 function getUserCredits(u: AdminUser): number { return u.credits ?? 0; }
 function getUserProjects(u: AdminUser): number { return u.project_count ?? 0; }
 function getUserCreated(u: AdminUser): string { return formatDate(u.createdAt ?? u.created_at); }
-
+function getUserLastLogin(u: AdminUser): string { return u.last_login ? formatDate(u.last_login) : '从未'; }
 function getUserEmail(u: AdminUser): string { return u.email ?? '-'; }
+function getUserPermissions(u: AdminUser): Record<string, boolean> { return u.apiPermissions ?? {}; }
 
 function formatDateTime(ts: string | number): string {
   if (!ts) return '-';
@@ -209,7 +222,7 @@ export default function AdminTabs(props: AdminTabsProps) {
   const [creditsOverview, setCreditsOverview] = useState<{
     totalBalance: number; totalRecharged: number; totalConsumed: number; totalUsers: number; avgPerUser: number;
     distribution: { label: string; value: number; color: string; pct: string }[];
-    topUsers: CreditTopUser[];
+    topUsers: { name: string; consumed: number; totalConsumed: number; balance: number; totalRecharged: number; pct?: string }[];
     recentTransactions: { id: string; user: string; type: string; amount: number; desc: string; time: string }[];
   } | null>(null);
   const [rechargeUserId, setRechargeUserId] = useState<string | null>(null);
@@ -220,8 +233,8 @@ export default function AdminTabs(props: AdminTabsProps) {
   const [creditSort, setCreditSort] = useState('balance');
 
   /* ── Audit state ── */
-  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
-  const [auditStats, setAuditStats] = useState<AuditStats | null>(null);
+  const [auditLogs, setAuditLogs] = useState<Array<Record<string, unknown>>>([]);
+  const [auditStats, setAuditStats] = useState<{ todayCount: number; weekCount: number; totalCount: number } | null>(null);
   const [auditLoading, setAuditLoading] = useState(false);
   const [auditFilterAction, setAuditFilterAction] = useState('all');
   const [auditFilterLevel, setAuditFilterLevel] = useState('all');
@@ -711,7 +724,7 @@ export default function AdminTabs(props: AdminTabsProps) {
               return (
                 <div key={u.id} className={`grid grid-cols-[40px_1fr_1.2fr_90px_80px_90px_90px_70px_100px_110px_100px] items-center px-4 py-3 hover:bg-muted/30 transition-colors ${isSelected ? 'bg-primary/5' : ''}`}>
                   <div className="flex items-center justify-center">
-                    <input type="checkbox" checked={isSelected} onChange={() => setSelectedUserIds(prev => { const n = new Set(prev); return n; })} className="w-4 h-4 rounded border-border accent-primary" />
+                    <input type="checkbox" checked={isSelected} onChange={() => setSelectedUserIds(prev => { const n = new Set(prev); n.has(u.id) ? n.delete(u.id) : n.add(u.id); return n; })} className="w-4 h-4 rounded border-border accent-primary" />
                   </div>
                   <div className="flex items-center gap-2.5">
                     <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center text-xs font-bold text-primary shrink-0">{u.name.charAt(0).toUpperCase()}</div>
@@ -768,7 +781,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                 <div>
                   <h4 className="text-sm font-semibold text-foreground mb-2">所属分组</h4>
                   <select
-                    value={detailUser.groupId || ''}
+                    value={(detailUser as any).groupId || ''}
                     onChange={async (e) => {
                       const gid = e.target.value;
                       if (props.onUpdateUserGroup) await props.onUpdateUserGroup(detailUser.id, gid);
@@ -1049,7 +1062,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                     <span className="text-sm text-foreground font-mono">{u.totalRecharged.toLocaleString()}</span>
                     <span className="text-sm text-muted-foreground font-mono">{u.consumed.toLocaleString()}</span>
                     <div className="flex justify-end">
-                      <button onClick={() => { setRechargeUserId(u.userId || u.name); setRechargeAmount(100); setShowRechargeModal(true); }} className="bg-primary/10 text-primary px-3 py-1.5 rounded-md text-xs font-medium hover:bg-primary/20 active:scale-[0.98] transition-all">充值</button>
+                      <button onClick={() => { setRechargeUserId((u as any).userId || u.name); setRechargeAmount(100); setShowRechargeModal(true); }} className="bg-primary/10 text-primary px-3 py-1.5 rounded-md text-xs font-medium hover:bg-primary/20 active:scale-[0.98] transition-all">充值</button>
                     </div>
                   </div>
                 ))}
@@ -1129,10 +1142,10 @@ export default function AdminTabs(props: AdminTabsProps) {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-sm font-medium text-foreground truncate">{u.name}</span>
-                        <span className="text-xs font-mono text-muted-foreground">{(u.consumed || u.totalConsumed || 0).toLocaleString()}</span>
+                        <span className="text-xs font-mono text-muted-foreground">{((u as any).consumed || (u as any).totalConsumed || 0).toLocaleString()}</span>
                       </div>
                       <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                        <div className="h-full bg-primary/60 rounded-full" style={{ width: `${Math.min(100, (u.consumed || u.totalConsumed || 0) / Math.max(co?.topUsers?.[0]?.consumed || co?.topUsers?.[0]?.totalConsumed || 1, 1) * 100)}%` }} />
+                        <div className="h-full bg-primary/60 rounded-full" style={{ width: `${Math.min(100, ((u as any).consumed || (u as any).totalConsumed || 0) / Math.max((co?.topUsers?.[0]?.consumed || (co?.topUsers?.[0] as any)?.totalConsumed || 1), 1) * 100)}%` }} />
                       </div>
                     </div>
                   </div>
@@ -1150,14 +1163,14 @@ export default function AdminTabs(props: AdminTabsProps) {
               <button className="bg-primary/10 text-primary px-3 py-1.5 rounded-md text-xs font-medium hover:bg-primary/20 transition-all">+ 新增套餐</button>
             </div>
             <div className="space-y-3">
-              {(providers || []).filter(p => (p.model_type || p.modelType) === 'video').slice(0, 8).map((p, i) => (
+              {(providers || []).filter(p => (p.model_type || (p as any).modelType) === 'video').slice(0, 8).map((p, i) => (
                 <div key={i} className="flex items-center gap-4 p-3 bg-muted/30 rounded-lg">
                   <span className="text-sm font-medium text-foreground min-w-[120px] truncate">{p.name}</span>
                   <div className="flex-1 text-xs text-muted-foreground">图像模型</div>
                   <input type="number" placeholder="积分/次" className="w-24 h-8 px-2 rounded-md bg-background border border-border text-sm text-foreground text-center focus:outline-none focus:ring-2 focus:ring-primary/30" />
                 </div>
               ))}
-              {providers.filter(p => (p.model_type || p.modelType) === 'image').length === 0 && <div className="py-8 text-center text-sm text-muted-foreground">暂无图像模型，请先在API管理中添加</div>}
+              {providers.filter(p => (p.model_type || (p as any).modelType) === 'image').length === 0 && <div className="py-8 text-center text-sm text-muted-foreground">暂无图像模型，请先在API管理中添加</div>}
             </div>
           </div>
         )}
@@ -1280,9 +1293,9 @@ export default function AdminTabs(props: AdminTabsProps) {
           <StatCard icon={ShieldCheck} label="今日操作" value={as ? formatNumber(as.todayCount) : '-'} colorClass="text-primary" iconBg="bg-primary/15" />
           <StatCard icon={Activity} label="本周操作" value={as ? formatNumber(as.weekCount) : '-'} colorClass="text-blue-500" iconBg="bg-blue-500/15" />
           <StatCard icon={Database} label="总记录" value={as ? formatNumber(as.totalCount) : '-'} colorClass="text-green-500" iconBg="bg-green-500/15" />
-          <StatCard icon={AlertTriangle} label="今日错误" value={as ? formatNumber(as.errorCount || 0) : '-'} colorClass="text-destructive" iconBg="bg-destructive/15" />
-          <StatCard icon={AlertTriangle} label="今日警告" value={as ? formatNumber(as.warnCount || 0) : '-'} colorClass="text-yellow-500" iconBg="bg-yellow-500/15" />
-          <StatCard icon={Wrench} label="未处理" value={as ? formatNumber(as.unresolvedCount || 0) : '-'} colorClass="text-orange-500" iconBg="bg-orange-500/15" />
+          <StatCard icon={AlertTriangle} label="今日错误" value={as ? formatNumber((as as any).errorCount || 0) : '-'} colorClass="text-destructive" iconBg="bg-destructive/15" />
+          <StatCard icon={AlertTriangle} label="今日警告" value={as ? formatNumber((as as any).warnCount || 0) : '-'} colorClass="text-yellow-500" iconBg="bg-yellow-500/15" />
+          <StatCard icon={Wrench} label="未处理" value={as ? formatNumber((as as any).unresolvedCount || 0) : '-'} colorClass="text-orange-500" iconBg="bg-orange-500/15" />
         </div>
 
         {/* 筛选栏 */}
@@ -1340,7 +1353,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                 </tr>
               </thead>
               <tbody>
-                {auditLogs.map((log, i) => {
+                {auditLogs.map((log: Record<string, unknown>, i) => {
                   const action = String(log.action || '');
                   const level = String(log.level || 'info');
                   const logId = String(log.id || i);
@@ -1348,16 +1361,16 @@ export default function AdminTabs(props: AdminTabsProps) {
                   const isDanger = level === 'error';
                   const li = levelIcons[level] || levelIcons.info;
                   const LevelIcon = li.icon;
-                  const resStatus = String(log.resolutionStatus || 'unresolved');
+                  const resStatus = String((log as any).resolutionStatus || 'unresolved');
                   const resInfo = resolutionLabels[resStatus] || resolutionLabels.unresolved;
                   return (
                     <React.Fragment key={logId}>
                       <tr className={`border-b border-border/30 hover:bg-muted/30 transition-colors ${isDanger ? 'bg-destructive/5' : ''}`}>
-                        <td className="py-2.5 px-3 text-muted-foreground font-mono text-xs">{formatDateTime(String(log.createdAt || log.created_at || ''))}</td>
+                        <td className="py-2.5 px-3 text-muted-foreground font-mono text-xs">{formatDateTime(String(log.createdAt || (log as any).created_at || ''))}</td>
                         <td className="py-2.5 px-3"><span className={`inline-flex items-center gap-1 text-xs font-medium ${li.color}`}><LevelIcon className="w-3 h-3" />{li.label}</span></td>
                         <td className="py-2.5 px-3 text-foreground font-medium text-xs truncate max-w-20" title={String(log.user_name || log.user_id || '-')}>{String(log.user_name || log.user_id || '-')}</td>
                         <td className="py-2.5 px-3"><span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${actionColors[action] || 'bg-muted text-muted-foreground'}`}>{actionLabels[action] || action}</span></td>
-                        <td className="py-2.5 px-3 text-muted-foreground text-xs truncate max-w-64" title={String(log.errorMessage || log.detail || '')}>{String(log.errorMessage || log.detail || '-')}</td>
+                        <td className="py-2.5 px-3 text-muted-foreground text-xs truncate max-w-64" title={String((log as any).errorMessage || log.detail || '')}>{String((log as any).errorMessage || log.detail || '-')}</td>
                         <td className="py-2.5 px-3"><span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${resInfo.color}`}>{resInfo.label}</span></td>
                         <td className="py-2.5 px-3">
                           <div className="flex items-center gap-1">
@@ -1375,23 +1388,23 @@ export default function AdminTabs(props: AdminTabsProps) {
                               <div className="grid grid-cols-2 gap-2 text-xs">
                                 <div><span className="text-muted-foreground">用户ID:</span> <span className="text-foreground font-mono">{String(log.user_id || '-')}</span></div>
                                 <div><span className="text-muted-foreground">目标:</span> <span className="text-foreground">{String(log.target_type || '')}{log.target_id ? ` #${log.target_id}` : ''}</span></div>
-                                {log.errorMessage && <div className="col-span-2"><span className="text-muted-foreground">错误信息:</span> <span className="text-destructive font-mono">{String(log.errorMessage)}</span></div>}
-                                {log.model && <div><span className="text-muted-foreground">模型:</span> <span className="text-foreground">{String(log.model)}</span></div>}
-                                {log.providerId && <div><span className="text-muted-foreground">提供商:</span> <span className="text-foreground">{String(log.providerId)}</span></div>}
-                                {log.duration && <div><span className="text-muted-foreground">耗时:</span> <span className="text-foreground">{Number(log.duration).toFixed(0)}ms</span></div>}
+                                {(log as any).errorMessage && <div className="col-span-2"><span className="text-muted-foreground">错误信息:</span> <span className="text-destructive font-mono">{String((log as any).errorMessage)}</span></div>}
+                                {(log as any).model && <div><span className="text-muted-foreground">模型:</span> <span className="text-foreground">{String((log as any).model)}</span></div>}
+                                {(log as any).providerId && <div><span className="text-muted-foreground">提供商:</span> <span className="text-foreground">{String((log as any).providerId)}</span></div>}
+                                {(log as any).duration && <div><span className="text-muted-foreground">耗时:</span> <span className="text-foreground">{Number((log as any).duration).toFixed(0)}ms</span></div>}
                               </div>
                               {/* 堆栈 */}
-                              {Boolean(log.stackTrace) && (
+                              {(log as any).stackTrace && (
                                 <details className="text-xs">
                                   <summary className="text-muted-foreground cursor-pointer hover:text-foreground">堆栈跟踪</summary>
-                                  <pre className="text-destructive/80 whitespace-pre-wrap font-mono max-h-32 overflow-auto mt-1 p-2 bg-background rounded">{String(log.stackTrace)}</pre>
+                                  <pre className="text-destructive/80 whitespace-pre-wrap font-mono max-h-32 overflow-auto mt-1 p-2 bg-background rounded">{String((log as any).stackTrace)}</pre>
                                 </details>
                               )}
                               {/* 请求数据 */}
-                              {log.requestData != null && (
+                              {(log as any).requestData && (
                                 <details className="text-xs">
                                   <summary className="text-muted-foreground cursor-pointer hover:text-foreground">请求数据</summary>
-                                  <pre className="text-muted-foreground whitespace-pre-wrap font-mono max-h-32 overflow-auto mt-1 p-2 bg-background rounded">{typeof log.requestData === 'string' ? log.requestData : JSON.stringify(log.requestData, null, 2)}</pre>
+                                  <pre className="text-muted-foreground whitespace-pre-wrap font-mono max-h-32 overflow-auto mt-1 p-2 bg-background rounded">{typeof (log as any).requestData === 'string' ? String((log as any).requestData) : JSON.stringify((log as any).requestData, null, 2)}</pre>
                                 </details>
                               )}
                               {/* 详情 */}
@@ -1448,9 +1461,9 @@ export default function AdminTabs(props: AdminTabsProps) {
 
   /* ── Render: Settings Tab ── */
   if (activeTab === 'settings') {
-    const imageModelOpts = (providers || []).filter(p => (p.model_type || p.modelType) === 'image').flatMap(p => (p.selected_models || p.selectedModels || []).map(m => ({ value: `${p.id}::${m}`, label: m })));
-    const chatModelOpts = (providers || []).filter(p => (p.model_type || p.modelType) === 'chat').flatMap(p => (p.selected_models || p.selectedModels || []).map(m => ({ value: `${p.id}::${m}`, label: m })));
-    const videoModelOpts = (providers || []).filter(p => (p.model_type || p.modelType) === 'video').flatMap(p => (p.selected_models || p.selectedModels || []).filter(m => /kling|seedance|vidu|runway|sora|veo|pika|luma|minimax/i.test(m)).map(m => ({ value: `${p.id}::${m}`, label: m })));
+    const imageModelOpts = (providers || []).filter(p => (p.model_type || (p as any).modelType) === 'image').flatMap(p => ((p.selected_models || (p as any).selectedModels || []) as string[]).map(m => ({ value: `${p.id}::${m}`, label: m })));
+    const chatModelOpts = (providers || []).filter(p => (p.model_type || (p as any).modelType) === 'chat').flatMap(p => ((p.selected_models || (p as any).selectedModels || []) as string[]).map(m => ({ value: `${p.id}::${m}`, label: m })));
+    const videoModelOpts = (providers || []).filter(p => (p.model_type || (p as any).modelType) === 'video').flatMap(p => ((p.selected_models || (p as any).selectedModels || []) as string[]).filter(m => /kling|seedance|vidu|runway|sora|veo|pika|luma|minimax/i.test(m)).map(m => ({ value: `${p.id}::${m}`, label: m })));
 
     const s = (key: string) => systemSettings[key] ?? '';
 

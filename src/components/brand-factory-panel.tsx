@@ -1,12 +1,11 @@
 'use client';
 
-import NextImage from 'next/image';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Building2, X, GripVertical, Plus, Trash2, Archive, FolderOpen,
   Upload, Image as ImageIcon, Palette, Sparkles, Layout, FileText,
-  CheckCircle, Clock, Download, Copy, RotateCcw,
-  ChevronRight, ChevronDown, Eye, Star, MessageSquare,
+  CheckCircle, AlertTriangle, Clock, Download, Copy, RotateCcw,
+  ChevronRight, ChevronDown, Eye, Star, MessageSquare, Send,
   Zap, RefreshCw, Save, BookOpen, Users, PenTool, Type,
   Cpu, MessageCircle, Minus
 } from 'lucide-react';
@@ -119,17 +118,6 @@ interface ImageModel {
   name: string;
   providerId: string;
   providerName: string;
-}
-
-function safeParseJSON<T>(str: string | null | undefined, fallback: T): T {
-  if (!str) return fallback;
-  try { return JSON.parse(str); } catch { return fallback; }
-}
-
-function parseProject(p: Record<string, unknown>): BrandProject {
-  return {
-    id: (p.id as string) || '', projectName: (p.project_name as string) || (p.projectName as string) || '', brandName: (p.brand_name as string) || (p.brandName as string) || '', industry: (p.industry as string) || '', projectType: (p.project_type as string) || (p.projectType as string) || '', keywords: safeParseJSON<string[]>(p.keywords as string, []), targetAudience: (p.target_audience as string) || (p.targetAudience as string) || '', tone: (p.tone as string) || '', description: (p.description as string) || '', logoUrl: (p.logo_url as string) || (p.logoUrl as string) || '', productUrl: (p.product_url as string) || (p.productUrl as string) || '', ipUrl: (p.ip_url as string) || (p.ipUrl as string) || '', referenceUrls: safeParseJSON<string[]>(p.reference_urls as string || p.referenceUrls as string, []), brandDna: safeParseJSON<BrandDNA | null>(p.brand_dna as string || p.brandDna as string, null), creativeDirections: safeParseJSON<CreativeDirection[]>(p.creative_directions as string || p.creativeDirections as string, []), kvImageUrl: normalizeBrandFactoryImageUrl((p.kv_image_url as string) || (p.kvImageUrl as string) || '') || '', batchResults: safeParseJSON<Array<{item: string; imageUrl: string}>>(p.batch_results as string || p.batchResults as string, []), consistencyScores: safeParseJSON<{overall: number; details: Record<string, number>} | null>(p.consistency_scores as string || p.consistencyScores as string, null), status: (p.status as string) === 'active' ? 'active' : (p.status as string) === 'completed' ? 'completed' : 'draft', isArchived: Boolean(p.is_archived ?? p.isArchived ?? false), createdAt: (p.created_at as string) || (p.createdAt as string) || '', updatedAt: (p.updated_at as string) || (p.updatedAt as string) || '',
-  };
 }
 
 /* ========== CONSTANTS ========== */
@@ -459,7 +447,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
   const [projects, setProjects] = useState<BrandProject[]>([]);
   const [currentProject, setCurrentProject] = useState<BrandProject | null>(null);
   const [loading, setLoading] = useState(false);
-  const { elapsed: apiElapsed, totalTime: apiTotalTime, startTimer: startApiTimer, stopTimer: stopApiTimer, formatTime: formatApiTime } = useProgressTimer();
+  const { elapsed: apiElapsed, totalTime: apiTotalTime, startTimer: startApiTimer, stopTimer: stopApiTimer, resetTimer: resetApiTimer, formatTime: formatApiTime } = useProgressTimer();
   const [isMinimized, setIsMinimized] = useState(false);
   const [error, setError] = useState('');
 
@@ -489,7 +477,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
   // === KV state ===
   const [kvForm, setKvForm] = useState({ theme: '', slogan: '', ratio: '16:9', direction: '' });
   const [kvImageUrl, setKvImageUrl] = useState('');
-  const [, setKvGenerating] = useState(false);
+  const [kvGenerating, setKvGenerating] = useState(false);
 
   // === Materials state ===
   const [selectedPkg, setSelectedPkg] = useState<string>('brand-basics');
@@ -512,7 +500,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
   const [titleResult, setTitleResult] = useState<{ imageUrl?: string; text?: string; scene?: string; style?: string } | null>(null);
 
   // === Template state ===
-  const [, ] = useState<BrandTemplate[]>([]);
+  const [templateList, setTemplateList] = useState<BrandTemplate[]>([]);
 
   // === Comment state ===
   const [comments, setComments] = useState<CommentRecord[]>([]);
@@ -553,6 +541,9 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
       y: Math.max(0, (window.innerHeight - maxH) / 2),
     });
   }, []);
+
+  // Load projects
+  useEffect(() => { loadProjects(); }, []);
 
   // Load models from admin system
   useEffect(() => {
@@ -605,7 +596,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
       .catch(() => {});
   }, []);
 
-  const loadProjects = useCallback(async () => {
+  const loadProjects = async () => {
     try {
       const res = await fetch('/api/brand-factory');
       const data = await res.json();
@@ -614,10 +605,37 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
         setProjects(parsed);
       }
     } catch { /* ignore */ }
-  }, []);
+  };
 
-  // Load projects after the loader is initialized.
-  useEffect(() => { void loadProjects(); }, [loadProjects]);
+  const parseProject = (p: Record<string, unknown>): BrandProject => ({
+    id: (p.id as string) || '',
+    projectName: (p.project_name as string) || (p.projectName as string) || '',
+    brandName: (p.brand_name as string) || (p.brandName as string) || '',
+    industry: (p.industry as string) || '',
+    projectType: (p.project_type as string) || (p.projectType as string) || '',
+    keywords: safeParseJSON<string[]>(p.keywords as string, []),
+    targetAudience: (p.target_audience as string) || (p.targetAudience as string) || '',
+    tone: (p.tone as string) || '',
+    description: (p.description as string) || '',
+    logoUrl: (p.logo_url as string) || (p.logoUrl as string) || '',
+    productUrl: (p.product_url as string) || (p.productUrl as string) || '',
+    ipUrl: (p.ip_url as string) || (p.ipUrl as string) || '',
+    referenceUrls: safeParseJSON<string[]>(p.reference_urls as string || p.referenceUrls as string, []),
+    brandDna: safeParseJSON<BrandDNA | null>(p.brand_dna as string || p.brandDna as string, null),
+    creativeDirections: safeParseJSON<CreativeDirection[]>(p.creative_directions as string || p.creativeDirections as string, []),
+    kvImageUrl: normalizeBrandFactoryImageUrl((p.kv_image_url as string) || (p.kvImageUrl as string) || '') || '',
+    batchResults: safeParseJSON<Array<{item: string; imageUrl: string}>>(p.batch_results as string || p.batchResults as string, []),
+    consistencyScores: safeParseJSON<{overall: number; details: Record<string, number>} | null>(p.consistency_scores as string || p.consistencyScores as string, null),
+    status: (p.status as string) === 'active' ? 'active' : (p.status as string) === 'completed' ? 'completed' : 'draft',
+    isArchived: Boolean(p.is_archived ?? p.isArchived ?? false),
+    createdAt: (p.created_at as string) || (p.createdAt as string) || '',
+    updatedAt: (p.updated_at as string) || (p.updatedAt as string) || '',
+  });
+
+  function safeParseJSON<T>(str: string | null | undefined, fallback: T): T {
+    if (!str) return fallback;
+    try { return JSON.parse(str); } catch { return fallback; }
+  }
 
   // === API calls (pass model info) ===
   const apiCall = async (action: string, body: Record<string, unknown> = {}) => {
@@ -1012,7 +1030,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
           {currentProject.logoUrl ? (
             <div className="space-y-3">
               <div className="flex items-center gap-3">
-                <NextImage unoptimized width={1} height={1} src={currentProject.logoUrl} alt="当前Logo" className="w-16 h-16 object-contain rounded bg-black/30" />
+                <img src={currentProject.logoUrl} alt="当前Logo" className="w-16 h-16 object-contain rounded bg-black/30" />
                 <div>
                   <div className={`${th.text} text-sm font-medium`}>当前已有 Logo</div>
                   <div className={`${th.textMuted} text-xs`}>可重新生成替换</div>
@@ -1065,7 +1083,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
                 </div>
                 {currentProject[field] ? (
                   <div className="relative group">
-                    <NextImage unoptimized width={1} height={1} src={currentProject[field]} alt={labels[field]} className="w-full h-32 object-contain rounded bg-black/30" />
+                    <img src={currentProject[field]} alt={labels[field]} className="w-full h-32 object-contain rounded bg-black/30" />
                     <button className="absolute top-1 right-1 bg-red-500/80 text-white rounded p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
                       onClick={() => setCurrentProject(p => p ? { ...p, [field]: '' } : p)}><X className="w-3 h-3" /></button>
                   </div>
@@ -1105,7 +1123,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
             <div className="grid grid-cols-4 gap-2">
               {currentProject.referenceUrls.map((url, i) => (
                 <div key={i} className="relative group">
-                  <NextImage unoptimized width={1} height={1} src={url} alt="" className="w-full h-20 object-cover rounded" />
+                  <img src={url} alt="" className="w-full h-20 object-cover rounded" />
                   <button className="absolute top-0.5 right-0.5 bg-red-500/80 text-white rounded p-0.5 opacity-0 group-hover:opacity-100"
                     onClick={() => {
                       setCurrentProject(p => p ? { ...p, referenceUrls: p.referenceUrls.filter((_, j) => j !== i) } : p);
@@ -1345,7 +1363,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
             </button>
             {kvImageUrl && (
               <div className="mt-2 rounded-lg overflow-hidden border border-white/[0.06]">
-                <NextImage unoptimized width={1} height={1} src={kvImageUrl} alt="KV主视觉" className="w-full h-auto" crossOrigin="anonymous" />
+                <img src={kvImageUrl} alt="KV主视觉" className="w-full h-auto" crossOrigin="anonymous" />
                 <div className="flex gap-1.5 p-1.5">
                   <button className={`${th.btnGhost} text-[10px] px-2 py-1 border ${th.borderLight}`}
                     onClick={() => {
@@ -1413,6 +1431,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
                     onChange={() => {
                       setSelectedMats(prev => {
                         const next = new Set(prev);
+                        next.has(item.name) ? next.delete(item.name) : next.add(item.name);
                         return next;
                       });
                     }} />
@@ -1442,7 +1461,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
               <div className="grid grid-cols-2 gap-2">
                 {currentProject.batchResults.map((r: {item: string; imageUrl: string}, i: number) => (
                   <div key={i} className="rounded-lg overflow-hidden border border-white/[0.06]">
-                    <NextImage unoptimized width={1} height={1} src={r.imageUrl} alt={r.item} className="w-full h-auto" crossOrigin="anonymous" />
+                    <img src={r.imageUrl} alt={r.item} className="w-full h-auto" crossOrigin="anonymous" />
                     <div className="flex items-center justify-between p-1">
                       <span className="text-[10px] text-white/60">{r.item}</span>
                       <button className={`${th.btnGhost} text-[10px] px-1 py-0.5`}
@@ -1614,7 +1633,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
                   {apiTotalTime !== null && apiTotalTime > 0 && <span className={`${th.textMuted} text-[11px]`}>总耗时 {formatApiTime(apiTotalTime)}</span>}
                 </div>
                 {titleResult.imageUrl && (
-                  <NextImage unoptimized width={1} height={1} src={titleResult.imageUrl} alt="中文标题" className="w-full rounded mb-2" />
+                  <img src={titleResult.imageUrl} alt="中文标题" className="w-full rounded mb-2" />
                 )}
                 {titleResult.text && (
                   <pre className={`${th.text} text-sm whitespace-pre-wrap bg-black/30 p-3 rounded`}>{titleResult.text}</pre>
@@ -1756,6 +1775,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
                     onChange={() => {
                       setExportSections(prev => {
                         const next = new Set(prev);
+                        next.has(section) ? next.delete(section) : next.add(section);
                         return next;
                       });
                     }} />
@@ -1865,7 +1885,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
         <div className={`${th.header} flex items-center gap-2 cursor-grab active:cursor-grabbing select-none relative ${isMinimized ? 'rounded-2xl border-b-0' : ''}`}
           onMouseDown={handleDragStart}>
           <GripVertical className="w-4 h-4 text-gray-500" />
-          <NextImage unoptimized width={1} height={1} src="/logo.png" alt="" className="w-4 h-4 object-contain rounded" />
+          <img src="/logo.png" alt="" className="w-4 h-4 object-contain rounded" />
           <Building2 className={`w-4 h-4 ${ac.textAccent}`} />
           <span className={th.title + ' text-sm flex-1'}>品牌工厂</span>
           {currentProject && <span className={`text-[10px] ${ac.textAccent} ${ac.bgAccent10} px-2 py-0.5 rounded`}>{currentProject.brandName}</span>}

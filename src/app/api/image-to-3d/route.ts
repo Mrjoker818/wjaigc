@@ -6,7 +6,7 @@ import { getServerDataRoot } from '@/lib/server-data-root';
 import fsSync from 'fs';
 import path from 'path';
 import { validateApiInputs } from '@/lib/api-validator';
-import { logOperation, logError, OP_ACTIONS } from '@/lib/op-log';
+import { logOperation, logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
 import { recordThreeDTaskSubmitted } from '@/lib/cloud-task-persistence';
 
 /**
@@ -196,7 +196,7 @@ function detectProviderType(request: ImageTo3DRequest): ProviderType {
   }
 
   // Tripo
-  if (providerPreset === 'tripo' || providerName.includes('tripo') || endpoint.includes('tripo') || modelName.includes('tripo')) {
+  if (providerPreset === 'tripo' || providerName.includes('tripo') || endpoint.includes('tripo')) {
     return 'tripo';
   }
 
@@ -250,13 +250,8 @@ function buildEndpoint(request: ImageTo3DRequest): string | undefined {
       return `${baseUrl}/image-to-3d`;
     }
 
-    case 'tripo': {
-      if (baseUrl.includes('302.ai') || baseUrl.includes('302ai')) {
-        // 302.ai Tripo3D uses /tripo3d/v2/openapi/task endpoint
-        return `${baseUrl.replace(/\/v\d+$/, '')}/tripo3d/v2/openapi/task`;
-      }
+    case 'tripo':
       return `${baseUrl.replace(/\/v\d+$/, '')}/v2/openapi/image2model`;
-    }
 
     case 'rodin':
       return `${baseUrl.replace(/\/v\d+$/, '')}/api/generation/generate`;
@@ -293,20 +288,15 @@ async function buildHunyuan3DBody(request: ImageTo3DRequest): Promise<Record<str
     }
     body.ImageBase64 = mainBase64;
 
-    // 附加多视角图片 (API要求: ViewType + ViewImageBase64)
-    const multiViewImages: Array<{ ViewType: string; ViewImageBase64: string }> = [];
+    // 附加多视角图片
+    const multiViewImages: Array<{ ImageBase64: string; View: string }> = [];
     for (const img of request.images) {
       if (img.url === request.imageUrl) continue; // 主图已处理
       const b64 = await imageUrlToBase64(img.url);
       if (b64) {
-        // 映射前端视角值到API支持的ViewType
-        const viewMap: Record<string, string> = {
-          front: 'left_front', left: 'left', right: 'right', back: 'back',
-          top: 'top', bottom: 'bottom', front_left: 'left_front', front_right: 'right_front',
-        };
         multiViewImages.push({
-          ViewType: viewMap[img.view || ''] || 'left_front',
-          ViewImageBase64: b64,
+          ImageBase64: b64,
+          View: img.view || 'front',
         });
       }
     }
@@ -377,9 +367,6 @@ async function buildHunyuan3DBody(request: ImageTo3DRequest): Promise<Record<str
       body.FaceCount = Math.min(Math.max(request.faceCount, 3000), 1500000);
     }
   }
-
-  // 302.ai 代理层要求显式声明图片格式
-  body.ImageFormat = 'png';
 
   return body;
 }
@@ -502,109 +489,6 @@ function buildRodinBody(request: ImageTo3DRequest): Record<string, unknown> {
     quality: request.quality,
     texture_resolution: request.texture,
   };
-}
-
-// ─── 302.ai Tripo3D helpers ────────────────────────────────────
-
-function is302Ai(request: ImageTo3DRequest): boolean {
-  const baseUrl = request.provider?.baseUrl || '';
-  return baseUrl.includes('302.ai') || baseUrl.includes('302ai');
-}
-
-/** Download an image from URL or data URL into a Buffer */
-async function fetchImageAsBuffer(url: string): Promise<Buffer> {
-  if (url.startsWith('data:')) {
-    const b64 = url.split(',')[1];
-    return Buffer.from(b64, 'base64');
-  }
-  // Local path: read from disk
-  if (url.startsWith('/')) {
-    const fs = await import('fs/promises');
-    const publicPath = url.startsWith('/api/serve-upload/')
-      ? `/tmp/uploads/${url.split('/').pop()}`
-      : url;
-    try {
-      return await fs.readFile(publicPath);
-    } catch {
-      // Try with /tmp prefix
-      return await fs.readFile(`/tmp${url}`);
-    }
-  }
-  // Remote URL
-  const resp = await fetch(url);
-  const arrayBuf = await resp.arrayBuffer();
-  return Buffer.from(arrayBuf);
-}
-
-/** Upload a single image to 302.ai Tripo and return the file_token */
-async function uploadImageTo302Tripo(
-  imageData: Buffer,
-  fileName: string,
-  apiKey: string,
-  baseUrl: string
-): Promise<string> {
-  const cleanBase = baseUrl.replace(/\/v\d+$/, '').replace(/\/$/, '');
-  const uploadUrl = `${cleanBase}/tripo3d/v2/openapi/upload`;
-
-  const formData = new FormData();
-  const blob = new Blob([imageData as BlobPart], { type: 'image/png' });
-  formData.append('file', blob, fileName || 'image.png');
-
-  console.log(`[image-to-3d] Uploading to 302.ai Tripo: ${uploadUrl}, size: ${imageData.length} bytes`);
-
-  const uploadResp = await fetch(uploadUrl, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}` },
-    body: formData,
-  });
-
-  const uploadResult = await uploadResp.json() as Record<string, unknown>;
-  console.log(`[image-to-3d] 302.ai upload response:`, JSON.stringify(uploadResult).substring(0, 300));
-
-  if ((uploadResult.code as number) !== 0) {
-    throw new Error(`302.ai Tripo upload failed: ${JSON.stringify(uploadResult)}`);
-  }
-
-  const data = uploadResult.data as Record<string, unknown>;
-  const fileToken = data.image_token as string;
-  if (!fileToken) {
-    throw new Error(`302.ai Tripo upload: no image_token in response`);
-  }
-
-  return fileToken;
-}
-
-/** Build task body for 302.ai Tripo3D using file_tokens */
-function buildTripo302TaskBody(
-  request: ImageTo3DRequest,
-  fileTokens: string[]
-): Record<string, unknown> {
-  const texture = request.texture !== 'none';
-  const pbr = request.enablePBR !== false;
-
-  if (request.mode === 'multi-image' && fileTokens.length > 1) {
-    return {
-      type: 'multiview_to_model',
-      files: fileTokens.map(ft => ({ type: 'png' as const, file_token: ft })),
-      texture,
-      pbr,
-      format: request.format || 'glb',
-    };
-  }
-
-  return {
-    type: 'image_to_model',
-    file: { type: 'png', file_token: fileTokens[0] },
-    texture,
-    pbr,
-    format: request.format || 'glb',
-  };
-}
-
-/** Parse 302.ai Tripo submit response → taskId */
-function parseTripo302Submit(data: Record<string, unknown>): { taskId?: string } {
-  const inner = (data.data || data) as Record<string, unknown>;
-  return { taskId: inner.task_id as string | undefined };
 }
 
 function buildGenericBody(request: ImageTo3DRequest): Record<string, unknown> {
@@ -847,48 +731,6 @@ function buildPreviewSvg(request: ImageTo3DRequest, note?: string): string {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
-// ==================== Image Compression ====================
-
-async function compressImageDataUrl(dataUrl: string, maxEdge = 1024): Promise<string> {
-  if (!dataUrl.startsWith('data:image/')) return dataUrl;
-  try {
-    const base64 = dataUrl.split(',')[1];
-    if (!base64) return dataUrl;
-    const buffer = Buffer.from(base64, 'base64');
-    if (buffer.length < 100 * 1024) return dataUrl; // skip small images (<100KB)
-    
-    const sharp = (await import('sharp')).default;
-    const metadata = await sharp(buffer).metadata();
-    const originalEdge = Math.max(metadata.width || 0, metadata.height || 0);
-    if (originalEdge <= maxEdge) return dataUrl; // already small enough
-    
-    const resized = await sharp(buffer)
-      .resize(maxEdge, maxEdge, { fit: 'inside', withoutEnlargement: true })
-      .jpeg({ quality: 85 })
-      .toBuffer();
-    const compressed = `data:image/jpeg;base64,${resized.toString('base64')}`;
-    console.log(`[image-to-3d] Compressed image: ${originalEdge}px → ${maxEdge}px, ${(buffer.length / 1024).toFixed(0)}KB → ${(resized.length / 1024).toFixed(0)}KB`);
-    return compressed;
-  } catch (e) {
-    console.warn('[image-to-3d] Image compression failed:', e instanceof Error ? e.message : e);
-    return dataUrl; // fallback to original
-  }
-}
-
-async function compressRequestImages(req: ImageTo3DRequest): Promise<ImageTo3DRequest> {
-  const MAX_EDGE = 1024;
-  return {
-    ...req,
-    imageUrl: req.imageUrl ? await compressImageDataUrl(req.imageUrl, MAX_EDGE) : req.imageUrl,
-    images: req.images ? await Promise.all(
-      req.images.map(async (img) => ({
-        ...img,
-        url: await compressImageDataUrl(img.url, MAX_EDGE),
-      }))
-    ) : req.images,
-  };
-}
-
 // ==================== Main External Request ====================
 
 async function tryExternalRequest(request: ImageTo3DRequest): Promise<{
@@ -898,108 +740,20 @@ async function tryExternalRequest(request: ImageTo3DRequest): Promise<{
   modelUrls?: Record<string, string>;
   note: string;
 } | null> {
-  // Compress images before building request body
-  const compressedRequest = await compressRequestImages(request);
-  
-  const endpoint = buildEndpoint(compressedRequest);
+  const endpoint = buildEndpoint(request);
   if (!endpoint) {
-    console.log('[image-to-3d] No endpoint configured for backend:', compressedRequest.backend);
+    console.log('[image-to-3d] No endpoint configured for backend:', request.backend);
     return null;
   }
 
-  const providerType = detectProviderType(compressedRequest);
-  const apiKey = compressedRequest.provider?.apiKey || '';
-  const baseUrl = compressedRequest.provider?.baseUrl || '';
-
-  // ─── 302.ai Tripo3D: Upload → Submit → Poll flow ───
-  if (providerType === 'tripo' && is302Ai(compressedRequest)) {
-    try {
-      console.log('[image-to-3d] Using 302.ai Tripo3D upload→submit flow');
-
-      // Step 1: Upload images to get file_tokens
-      const fileTokens: string[] = [];
-      const imagesToUpload: Array<{ data: Buffer; name: string }> = [];
-
-      if (compressedRequest.mode === 'multi-image' && compressedRequest.images?.length) {
-        for (const img of compressedRequest.images) {
-          const buf = await fetchImageAsBuffer(img.url);
-          imagesToUpload.push({ data: buf, name: `image_${img.view || 'view'}.png` });
-        }
-      } else if (compressedRequest.imageUrl) {
-        const buf = await fetchImageAsBuffer(compressedRequest.imageUrl);
-        imagesToUpload.push({ data: buf, name: 'image.png' });
-      }
-
-      for (const img of imagesToUpload) {
-        const token = await uploadImageTo302Tripo(img.data, img.name, apiKey, baseUrl);
-        fileTokens.push(token);
-      }
-
-      if (fileTokens.length === 0) {
-        console.error('[image-to-3d] No images to upload for 302.ai Tripo');
-        return null;
-      }
-
-      console.log(`[image-to-3d] 302.ai Tripo uploaded ${fileTokens.length} images, tokens:`, fileTokens);
-
-      // Step 2: Build task body with file_tokens
-      const taskBody = buildTripo302TaskBody(compressedRequest, fileTokens);
-      const bodyStr = JSON.stringify(taskBody);
-      console.log('[image-to-3d] 302.ai Tripo task body size:', bodyStr.length, 'bytes');
-
-      // Step 3: Submit task
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 30000);
-
-      try {
-        const submitResp = await fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${apiKey}`,
-          },
-          body: bodyStr,
-          signal: controller.signal,
-        });
-
-        console.log('[image-to-3d] 302.ai Tripo submit status:', submitResp.status);
-
-        if (!submitResp.ok) {
-          const errText = await submitResp.text().catch(() => '');
-          console.error('[image-to-3d] 302.ai Tripo submit error:', submitResp.status, errText.slice(0, 500));
-          return null;
-        }
-
-        const submitData = await submitResp.json() as Record<string, unknown>;
-        console.log('[image-to-3d] 302.ai Tripo submit response:', JSON.stringify(submitData).slice(0, 500));
-
-        const parsed = parseTripo302Submit(submitData);
-        if (parsed.taskId) {
-          return {
-            taskId: parsed.taskId,
-            note: `302.ai Tripo3D task submitted (ID: ${parsed.taskId}).`,
-          };
-        }
-
-        console.warn('[image-to-3d] 302.ai Tripo: no task_id in submit response');
-        return null;
-      } finally {
-        clearTimeout(timeout);
-      }
-    } catch (err) {
-      console.error('[image-to-3d] 302.ai Tripo flow failed:', err instanceof Error ? err.message : String(err));
-      return null;
-    }
-  }
-
-  // ─── Standard flow for other providers ───
-  const requestBody = await buildRequestBody(compressedRequest);
+  const providerType = detectProviderType(request);
+  const requestBody = await buildRequestBody(request);
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 180000); // 180s timeout - 3D task submission can be slow for large images
+  const timeout = setTimeout(() => controller.abort(), 60000); // 60s timeout - 3D generation can be slow
 
   try {
-    console.log('[image-to-3d] Provider type:', providerType, 'Endpoint:', endpoint, 'Model:', compressedRequest.provider?.model, 'Version:', compressedRequest.version || (compressedRequest.provider?.model?.toLowerCase().includes('lite') ? 'rapid' : 'pro'));
+    console.log('[image-to-3d] Provider type:', providerType, 'Endpoint:', endpoint, 'Model:', request.provider?.model, 'Version:', request.version || (request.provider?.model?.toLowerCase().includes('lite') ? 'rapid' : 'pro'));
     // Log request body size (don't log base64 data)
     const bodyStr = JSON.stringify(requestBody);
     const hasBase64 = bodyStr.includes('ImageBase64');
@@ -1010,8 +764,8 @@ async function tryExternalRequest(request: ImageTo3DRequest): Promise<{
     };
 
     // Build auth headers
-    if (compressedRequest.backend === 'api' && compressedRequest.provider?.apiKey) {
-      headers['Authorization'] = `Bearer ${compressedRequest.provider.apiKey}`;
+    if (request.backend === 'api' && request.provider?.apiKey) {
+      headers['Authorization'] = `Bearer ${request.provider.apiKey}`;
     }
 
     const response = await fetch(endpoint, {
@@ -1032,7 +786,7 @@ async function tryExternalRequest(request: ImageTo3DRequest): Promise<{
     const data = await response.json();
     console.log('[image-to-3d] API response:', JSON.stringify(data).slice(0, 1500));
 
-    const parsed = parseProviderResponse(data, compressedRequest);
+    const parsed = parseProviderResponse(data, request);
     console.log('[image-to-3d] Parsed:', JSON.stringify(parsed));
 
     // If we got an asset URL directly
@@ -1069,7 +823,7 @@ async function tryExternalRequest(request: ImageTo3DRequest): Promise<{
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
   let deductedCredits = 0;
-  let sessionUser: Awaited<ReturnType<typeof getSessionUser>> = null;
+  let sessionUser: any = null;
   const finalModel = '';
   const finalProviderId = '';
   try {

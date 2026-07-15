@@ -2,8 +2,8 @@
 
 import React, { useState, useCallback } from 'react';
 import {
-  Workflow,
-  createEmptyWorkflow
+  Workflow, NODE_TYPE_COLORS, NODE_CATEGORY_LABELS, NODE_TEMPLATES,
+  createEmptyWorkflow, getNodeCategory,
 } from '@/lib/workflow-engine';
 
 // ==================== 双主题 ====================

@@ -58,7 +58,6 @@ export interface OperationIntent {
  * 从用户消息解析画布操作意图
  */
 export function parseCanvasOperationIntent(userMessage: string, canvasImages: CanvasImage[]): OperationIntent {
-  void canvasImages;
   const lowerMsg = userMessage.toLowerCase();
   
   // 操作关键词映射
@@ -540,12 +539,10 @@ export function buildCanvasActionRequest(
   }
 }
 
-const canvasActionExecutor = {
+export default {
   parseCanvasOperationIntent,
   extractCanvasActionFromAIResponse,
   getActionExecutorConfig,
   buildCanvasActionRequest,
   CHATCANVAS_SYSTEM_PROMPT,
 };
-
-export default canvasActionExecutor;

@@ -1,12 +1,11 @@
 'use client';
 
-import NextImage from 'next/image';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Palette, Plus, Trash2, Edit3, Check, X, Sparkles,
   ChevronDown, ChevronUp, Image as ImageIcon, Loader2,
-  Wand2, LayoutGrid, Copy, Upload, Type,
-  SwatchBook, Tag, Zap, ArrowRight, Camera
+  Wand2, LayoutGrid, Eye, Copy, Upload, Type,
+  SwatchBook, Tag, Zap, ArrowRight, Camera, FileImage
 } from 'lucide-react';
 
 // ========== Brand Kit Type ==========
@@ -220,7 +219,7 @@ function ImageUploader({ onImageReady, isGold, compact }: {
       ) : null}
       {preview ? (
         <div className="relative h-full w-full">
-          <NextImage unoptimized width={1} height={1} src={preview} alt="brand" className="w-full h-full object-cover" />
+          <img src={preview} alt="brand" className="w-full h-full object-cover" />
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
           <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between">
             <span className="text-[10px] text-white/80">点击更换图片</span>
@@ -653,7 +652,7 @@ function BatchGenerateDialog({ kit, isGold, onClose, onAddImages, currentImageMo
   const [aspectRatio, setAspectRatio] = useState('1:1');
   const [generating, setGenerating] = useState(false);
   const [results, setResults] = useState<Array<{scene: string; prompt: string; url?: string}>>([]);
-  const [, setTaskIds] = useState<string[]>([]);
+  const [taskIds, setTaskIds] = useState<string[]>([]);
   const [polling, setPolling] = useState(false);
   const t = useTheme(isGold);
   const inputCls = `w-full ${t.inputBg} border ${t.inputBorder} rounded-lg px-2.5 py-1.5 text-xs ${t.text} focus:outline-none focus:ring-1 focus:ring-[#d4af37]/30 transition-all`;
@@ -711,7 +710,6 @@ function BatchGenerateDialog({ kit, isGold, onClose, onAddImages, currentImageMo
   };
 
   const pollForResults = async (tIds: string[], prompts: Array<{scene: string; prompt: string}>) => {
-    void prompts;
     const completed = new Set<string>();
     const maxAttempts = 120;
     let attempts = 0;
@@ -856,7 +854,7 @@ function BatchGenerateDialog({ kit, isGold, onClose, onAddImages, currentImageMo
               {results.map((r, i) => (
                 <div key={i} className={`flex gap-2.5 p-2 rounded-lg border ${r.url ? t.accentBorder : t.borderLight} ${t.surface}`}>
                   {r.url ? (
-                    <NextImage unoptimized width={1} height={1} src={r.url} alt={r.scene} className="w-14 h-14 object-cover rounded-md shrink-0" />
+                    <img src={r.url} alt={r.scene} className="w-14 h-14 object-cover rounded-md shrink-0" />
                   ) : (
                     <div className={`w-14 h-14 rounded-md flex items-center justify-center ${generating ? 'animate-pulse' : ''} ${isGold ? 'bg-[#222]' : 'bg-muted'}`}>
                       {generating ? <Loader2 className={`w-4 h-4 animate-spin ${t.accentText}`} /> : <ImageIcon className="w-4 h-4 text-gray-600" />}

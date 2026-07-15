@@ -28,6 +28,24 @@ export interface LLMCallResult {
   usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
 }
 
+/**
+ * 将完整URL拆分为baseUrl和path供fetchWithV1Retry使用
+ * fetchWithV1Retry(baseUrl, path, options) 会自动拼接和重试 /v1
+ */
+function splitUrl(fullUrl: string): { baseUrl: string; path: string } {
+  try {
+    const u = new URL(fullUrl);
+    return { baseUrl: `${u.protocol}//${u.host}`, path: u.pathname + u.search };
+  } catch {
+    // 如果URL解析失败，尝试简单的拆分
+    const idx = fullUrl.indexOf('/', 8); // skip https://
+    if (idx > 0) {
+      return { baseUrl: fullUrl.slice(0, idx), path: fullUrl.slice(idx) };
+    }
+    return { baseUrl: fullUrl, path: '/' };
+  }
+}
+
 /** 获取图像模型提供商 */
 export async function getImageProvider(imageModel?: string, providerId?: string): Promise<ApiProvider | null> {
   if (imageModel) {
@@ -62,10 +80,9 @@ export async function callLLM(
   prompt: string,
   systemPrompt: string,
   llmModel?: string,
-  options?: { maxTokens?: number; temperature?: number },
-  providerId?: string,
+  options?: { maxTokens?: number; temperature?: number }
 ): Promise<LLMCallResult> {
-  const provider = await getLLMProvider(llmModel, providerId);
+  const provider = await getLLMProvider(llmModel);
   if (!provider) {
     return { success: false, error: '未找到可用的LLM模型提供商，请在管理员后台配置' };
   }
@@ -267,10 +284,9 @@ export async function generateImage(
     n?: number;
     referenceImageUrl?: string;
     strength?: number;
-  },
-  providerId?: string,
+  }
 ): Promise<ImageGenerationResult> {
-  const provider = await getImageProvider(imageModel, providerId);
+  const provider = await getImageProvider(imageModel);
   if (!provider) {
     return { success: false, error: '未找到可用的图像模型提供商，请在管理员后台配置' };
   }
@@ -376,10 +392,9 @@ export async function pollImageTask(
   taskId: string,
   imageModel?: string,
   maxAttempts: number = 60,
-  intervalMs: number = 5000,
-  providerId?: string,
+  intervalMs: number = 5000
 ): Promise<ImageGenerationResult> {
-  const provider = await getImageProvider(imageModel, providerId);
+  const provider = await getImageProvider(imageModel);
   if (!provider) {
     return { success: false, error: '未找到可用的图像模型提供商' };
   }
@@ -495,6 +510,7 @@ export async function pollImageTask(
       // 格式3: { error: { message } }
       const status = (data.status || data.state || innerData.status || innerData.state || '') as string;
       const errorObj = (data.error || innerData.error) as Record<string, unknown> | undefined;
+      const isCompleted = innerData.completed || data.completed || status === 'succeeded';
       const hasImageUrls = (innerData.image_urls || innerData.output || innerData.images);
       if (status === 'failed' || status === 'error' || (errorObj && !hasImageUrls)) {
         const errorMsg = (errorObj?.message as string) || (errorObj?.code as string) || (data.error as string) || (data.message as string) || '未知错误';

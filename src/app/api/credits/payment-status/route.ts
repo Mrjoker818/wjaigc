@@ -3,7 +3,6 @@ import { dbGetSystemSetting } from '@/lib/db-storage';
 
 /** GET：公开的支付状态（无需管理员权限，返回收款码可用状态和收款码图片） */
 export async function GET(_request: NextRequest) {
-  void _request;
   try {
     let cfg: Record<string, unknown> | null = null;
     try {

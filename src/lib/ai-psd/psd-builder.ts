@@ -13,7 +13,7 @@
 import { writePsd, initializeCanvas } from 'ag-psd';
 import type { Psd, Layer, BlendMode } from 'ag-psd';
 import sharp from 'sharp';
-import type { AiPsdTask, LayerPlan, TextLayerEditableConfig } from './types';
+import type { AiPsdTask, LayerPlan, LayerPlanLayer, LayerDef, TextLayerEditableConfig } from './types';
 
 // 初始化 ag-psd 的 canvas 方法（服务器端使用 @napi-rs/canvas）
 let canvasInitialized = false;
@@ -130,6 +130,98 @@ function mapBlendMode(blend?: string): BlendMode | undefined {
     '强光': 'hard light',
   };
   return blend ? map[blend] : undefined;
+}
+
+/** 构建分组结构 */
+function buildGroupedLayers(
+  layers: LayerDef[],
+  layerBuffers: Map<string, Buffer>,
+  textConfigs: TextLayerEditableConfig[],
+  width: number,
+  height: number
+): Layer[] {
+  // 按V4顺序分组
+  const groups = new Map<string, LayerDef[]>();
+  for (const layer of layers) {
+    const prefix = layer.name.split('/')[0];
+    if (!groups.has(prefix)) groups.set(prefix, []);
+    groups.get(prefix)!.push(layer);
+  }
+
+  const agLayers: Layer[] = [];
+
+  // V4标准顺序：bg → fx → subject → deco → fx(atmosphere) → text
+  const groupOrder = ['bg', 'fx', 'subject', 'deco', 'text'];
+
+  for (const groupKey of groupOrder) {
+    const groupLayers = groups.get(groupKey);
+    if (!groupLayers || groupLayers.length === 0) continue;
+
+    // 分离atmosphere到最底部
+    const normalLayers = groupLayers.filter(l => !l.name.includes('atmosphere'));
+    const atmosphereLayers = groupLayers.filter(l => l.name.includes('atmosphere'));
+
+    const groupChildren: Layer[] = [];
+
+    for (const layerDef of [...normalLayers, ...atmosphereLayers]) {
+      const buffer = layerBuffers.get(layerDef.name);
+      if (!buffer) continue;
+
+      // 构建图层
+      const agLayer: Layer = {
+        name: layerDef.name,
+        opacity: layerDef.opacity ?? 255,
+        blendMode: mapBlendMode(layerDef.blendMode),
+        hidden: layerDef.visible === false,
+      };
+
+      // 产品图/Logo为用户原图，标记不重绘
+      if (layerDef.name.includes('product') || layerDef.name.includes('logo')) {
+        agLayer.name = `${layerDef.name} [原素材-勿重绘]`;
+      }
+
+      // 文字层特殊处理：PNG预览 + JSON配置注释
+      if (layerDef.type === 'text') {
+        const textConfig = textConfigs.find(c => c.v4Name === layerDef.name);
+        if (textConfig) {
+          agLayer.name = `${layerDef.name} [可编辑:${textConfig.text.slice(0, 10)}]`;
+        }
+      }
+
+      // 设置imageData（服务器端）
+      agLayer.canvas = undefined; // 服务器端无canvas
+      // ag-psd在服务器端使用canvas字段时需要createCanvas，改用直接构建方式
+
+      groupChildren.push(agLayer);
+    }
+
+    if (groupChildren.length === 0) continue;
+
+    // 如果组内只有一层，不建组直接添加
+    if (groupChildren.length === 1) {
+      agLayers.push(groupChildren[0]);
+    } else {
+      agLayers.push({
+        name: getGroupDisplayName(groupKey),
+        opened: true,
+        children: groupChildren,
+      });
+    }
+  }
+
+  return agLayers;
+}
+
+/** 获取组的显示名称 */
+function getGroupDisplayName(groupKey: string): string {
+  const names: Record<string, string> = {
+    bg: '01_背景层',
+    fx: '02_光效/阴影',
+    subject: '03_主体层',
+    deco: '04_装饰层',
+    text: '05_文字层',
+  };
+  return names[groupKey] || groupKey;
 }
 
 /**

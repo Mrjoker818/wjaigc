@@ -1,11 +1,10 @@
 'use client';
 
-import NextImage from 'next/image';
 import React, { useState, useCallback, useMemo } from 'react';
 import {
   Eye, EyeOff, Lock, Unlock, Trash2, ChevronUp, ChevronDown,
-  GripVertical, MoreHorizontal, Pencil,
-  Layers, FileImage
+  GripVertical, MoreHorizontal, Pencil, X, Check, Image as ImageIcon,
+  Layers, Square, Circle, Triangle, Type, FileImage
 } from 'lucide-react';
 import type { CanvasImage } from '@/components/infinite-canvas';
 
@@ -97,7 +96,8 @@ function LayerItem({
 
       {/* 缩略图 */}
       <div className="flex-shrink-0 w-8 h-8 rounded overflow-hidden relative">
-        <NextImage unoptimized width={1} height={1}           src={image.url}
+        <img
+          src={image.url}
           alt={displayName}
           className="w-full h-full object-cover"
           style={{ opacity: isVisible ? 1 : 0.3 }}
@@ -218,7 +218,20 @@ function LayerItem({
 }
 
 /** 图层面板主组件 */
-export function LayerPanel({ images, selectedIds = [], isMonochrome = false, onSelect, onReorder, onToggleVisibility, onToggleLock, onRename, onDelete, position = 'right', width = 220 }: LayerPanelProps) {
+export function LayerPanel({
+  images,
+  selectedIds = [],
+  isMonochrome = false,
+  onSelect,
+  onReorder,
+  onToggleVisibility,
+  onToggleLock,
+  onRename,
+  onDelete,
+  onClose,
+  position = 'right',
+  width = 220,
+}: LayerPanelProps) {
   // 按zIndex排序（高zIndex在上面）
   const sortedImages = useMemo(() => {
     return [...images]

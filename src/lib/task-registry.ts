@@ -93,7 +93,7 @@ export function registerTask(taskId: string, type: TaskType, label?: string, use
   evictOldestTerminalTasks();
 
   // ★ 自动接入排队机制
-  enqueueTask(taskId, effectiveUserId);
+  const queuePos = enqueueTask(taskId, effectiveUserId);
   // enqueueTask 内部已通过 updateTaskProgress 更新了 status 和 queuePosition
   // 这里需要回读最新状态
   const updated = taskRegistry.get(taskId);

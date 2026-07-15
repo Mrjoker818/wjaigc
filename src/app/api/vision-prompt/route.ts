@@ -239,9 +239,17 @@ async function imageUrlToBase64(imageUrl: string): Promise<string> {
   }
 }
 
+/**
+ * Build the chat completions endpoint based on provider preset
+ */
+function buildChatEndpoint(baseUrl: string, _providerPreset?: string): string {
+  const normalized = normalizeApiBaseUrl(baseUrl.replace(/\/+$/, ''));
+  return `${normalized}/chat/completions`;
+}
+
 export async function POST(request: NextRequest) {
   let deductedCredits = 0;
-  let sessionUser: Awaited<ReturnType<typeof getSessionUser>> = null;
+  let sessionUser: any = null;
   try {
     const {
       imageUrl,

@@ -1,12 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { topologicalSort } from '@/lib/workflow-engine';
-import type { NodeType, WorkflowNode, WorkflowConnection } from '@/lib/workflow-engine';
+import type { WorkflowNode, WorkflowConnection } from '@/lib/workflow-engine';
 
 /** 创建最小合法 WorkflowNode */
 function makeNode(id: string, type: string = 'input-text'): WorkflowNode {
   return {
     id,
-    type: type as NodeType,
+    type: type as any,
     label: id,
     x: 0,
     y: 0,

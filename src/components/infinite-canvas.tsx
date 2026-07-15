@@ -1,37 +1,35 @@
 'use client';
-import NextImage from 'next/image';
 import { toast } from 'sonner';
-import { } from '@/lib/canvas-mode-handlers';
-import { findClosestStandardRatio, STANDARD_RATIOS, type StandardRatio } from '@/lib/canvas-utils';
+import { getModeHandler, shouldEditModeIntercept, type CanvasContext } from '@/lib/canvas-mode-handlers';
+import { findClosestStandardRatio, extractPollImageUrl, extractPollMaskUrl, STANDARD_RATIOS, type StandardRatio } from '@/lib/canvas-utils';
 
 import React, { useState, useRef, useEffect, useCallback, useMemo, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  Plus, Trash2, Download, ZoomIn, ZoomOut, Maximize2, Hand,
-  FileText, X, ChevronDown, Eraser,
+  Plus, Trash2, Copy, Download, Image as ImageIcon,
+  Move, ZoomIn, ZoomOut, Maximize2, Hand, Info,
+  FileText, X, ChevronDown, ArrowUpFromLine, Eraser,
   Scissors, Wand2, Expand, Layers, Paintbrush,
-  Check, MousePointer2, Upload, Sparkles,
-  RotateCcw, Minus, GitMerge, GitBranch,
-  Settings, Palette, Users, HelpCircle, Box as BoxIcon, Camera, ImagePlus, Shield, FolderOpen, Contrast, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, ShoppingBag, Scan, GripVertical, Building2, FileImage, Workflow, LayoutGrid, LayoutDashboard, ChevronsRight, ChevronsLeft, Boxes, MessageCircle, Play, Pause, Package, Store, Globe, Volume2, Loader2, Film
+  Check, MousePointer2, BoxSelect, Upload, Eye, Sparkles,
+  RotateCcw, Minus, Type, GitMerge, GitBranch, Wrench, ChevronRight,
+  Settings, Palette, Users, HelpCircle, Box as BoxIcon, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, MoreHorizontal, Brush, ShoppingBag, Scan, GripVertical, Building2, FileImage, Workflow, LayoutGrid, LayoutDashboard, ChevronsRight, ChevronsLeft, Boxes, MessageCircle, Play, Pause, Package, Store, Globe, Volume2, Loader2, Film, Mic2, Music, FileVideo
 } from 'lucide-react';
-import type { CanvasAnnotation, AnnotationRegion, AnnotationExecutionResult } from '@/lib/canvas-annotation';
-import { createAnnotation, hitTestAnnotationTarget, buildAnnotationPrompt, computeAnnotationRegion, BRUSH_COLOR_PALETTE, applyMergedAnnotationExecutionResult } from '@/lib/canvas-annotation';
-import type { CanvasGenGroup, GenGroupToolbar, GroupRefImage, GenGroupType, ReferenceCategory, HexCubeGroup, CubeFace, ZoomLevel } from '@/lib/canvas-generation-group';
-import { calculateActualPixels, REFERENCE_CATEGORIES, REFERENCE_CATEGORY_LABELS, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS, MODEL_ASPECT_RATIOS, QUALITY_DISPLAY_NAMES, DEFAULT_ASPECT_RATIOS, findModelConfig, getModelParamType, getResolutionTierOptions, getQualityLevelOptions, RESOLUTION_TIER_DISPLAY_NAMES, QUALITY_LEVEL_DISPLAY_NAMES } from '@/lib/canvas-generation-group';
+import type { CanvasAnnotation, AnnotationRegion, AnnotationTool, AnnotationExecutionResult } from '@/lib/canvas-annotation';
+import { createAnnotation, hitTestAnnotationTarget, buildAnnotationPrompt, mergeAnnotationsForImage, ANNOTATION_COLORS, ANNOTATION_COLORS_MONO, computeAnnotationRegion, BRUSH_COLOR_PALETTE, applyMergedAnnotationExecutionResult } from '@/lib/canvas-annotation';
+import type { CanvasGenGroup, GenGroupToolbar, GroupRefImage, GenGroupType, ReferenceCategory, HexCubeGroup, HexCubeFaceData, CubeFace, ZoomLevel } from '@/lib/canvas-generation-group';
+import { createGroupRefImage, createGenGroup, generateGroupId, calculateConnectionPoints, aspectRatioToDimensions, calculateActualPixels, REFERENCE_CATEGORIES, REFERENCE_CATEGORY_LABELS, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS, MODEL_ASPECT_RATIOS, MODEL_QUALITIES, QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES, findModelConfig, getModelParamType, getResolutionTierOptions, getQualityLevelOptions, RESOLUTION_TIER_DISPLAY_NAMES, QUALITY_LEVEL_DISPLAY_NAMES } from '@/lib/canvas-generation-group';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import type { PsdLayerItem } from '@/types/psdLayer';
-import { awaitStableImageUrl, onPersistComplete, getCachedLocalUrl, persistVideoUrlInBackground, persistRemoteUrlInBackground } from '@/lib/stable-image-url';
+import { toStableImageUrl, awaitStableImageUrl, onPersistComplete, getCachedLocalUrl, persistVideoUrlInBackground, persistRemoteUrlInBackground } from '@/lib/stable-image-url';
 import { taskEventsClient } from '@/lib/task-events-client';
 import { extractTaskResultImageUrl } from '@/lib/task-result-url';
-import { } from '@/lib/canvas-annotation-visibility';
+import { shouldShowAnnotationBubble } from '@/lib/canvas-annotation-visibility';
 import { closestSupportedImageAspectRatio } from '@/lib/image-aspect-ratio';
 import { getHexCubeInitialPosition } from '@/lib/hex-cube-position';
 import { buildHexCubeGenerationInput } from '@/lib/hex-cube-generation';
 import { resolveRefineEngineInitialImageUrl } from '@/lib/refine-engine-image';
 import { translateApiError } from '@/lib/api-error-translator';
-import { } from '@/config/app-meta';
-import { shouldSuspendCanvasVirtualization } from '@/lib/canvas-pan-virtualization';
-import { applyCanvasGenerationResults } from '@/lib/canvas-generation-results';
+import { APP_VERSION_LABEL } from '@/config/app-meta';
 import OhMyPrompt from '@/components/oh-my-prompt';
 import { CanvasHelpModal } from '@/components/canvas/CanvasHelpModal';
 import dynamic from 'next/dynamic';
@@ -44,7 +42,7 @@ const VideoCompareDialog = dynamic(() => import('@/components/video-compare-dial
 const PsdLayerEditor = lazy(() => import('@/components/psd-editor/PsdLayerEditor'));
 const AgentEditor = lazy(() => import('@/components/agent-editor').then(m => ({ default: m.AgentEditor })));
 import { computeSnapGuides, findBestSnapOffset, type SnapGuide } from '@/lib/canvas-snap-guides';
-import { type CanvasConnection, type ConnectionRelationType, createAutoConnection, computeConnectionEndpoints, buildConnectionPath, buildArrowHead, RELATION_TYPE_CONFIG } from '@/lib/canvas-connections';
+import { type CanvasConnection, type ConnectionRelationType, createAutoConnection, createEditConnection, createImg2ImgConnection, computeConnectionEndpoints, buildConnectionPath, buildArrowHead, RELATION_TYPE_CONFIG, removeConnectionsForImage, getConnectionsForImage } from '@/lib/canvas-connections';
 import { EngineSelectDialog, type EditEngine } from '@/components/engine-select-dialog';
 const BrandEcommercePanel = lazy(() => import('@/components/brand-ecommerce-panel').then(m => ({ default: m.BrandEcommercePanel })));
 const RefineEnginePanel = lazy(() => import('@/components/refine-engine-panel'));
@@ -135,8 +133,7 @@ function MultiAngleSpherePreview({
     const imgData = imgDataRef.current;
     const yaw = (rotation / 90) * Math.PI * 0.5;  // -PI/2 to PI/2
     const pitch = -(tilt / 60) * Math.PI * 0.5;   // negated: positive tilt = looking up (仰视)
-    const camDist = 2.5 / (zoom === 0 ? 0.7 : zoom === 2 ? 1.5 : 1.0);
-    void camDist;  // 特写=0.7, 标准=1.0, 广角=1.5
+    const camDist = 2.5 / (zoom === 0 ? 0.7 : zoom === 2 ? 1.5 : 1.0);  // 特写=0.7, 标准=1.0, 广角=1.5
 
     if (!imgData) {
       // Draw placeholder sphere
@@ -172,6 +169,7 @@ function MultiAngleSpherePreview({
     const out = outImg.data;
 
     const rR2 = rR * rR;
+    const invCamDist = 1 / camDist;
 
     for (let py = 0; py < rH; py++) {
       for (let px = 0; px < rW; px++) {
@@ -352,78 +350,6 @@ export interface CanvasImage {
   zIndex?: number;
 }
 
-type JsonRecord = Record<string, unknown>;
-
-interface GroupGenerationResponse {
-  error?: string;
-  mode?: string;
-  imageUrls: string[];
-  taskIds: string[];
-  estimatedTime?: number;
-  modelName?: string;
-  providerName?: string;
-}
-
-interface ImageEditResponse {
-  success?: boolean;
-  error?: unknown;
-  imageUrl?: string;
-  taskId?: string;
-  engine?: string;
-  cropInfo?: unknown;
-  compositeInfo?: unknown;
-  targetWidth?: number;
-  targetHeight?: number;
-}
-
-function asJsonRecord(value: unknown): JsonRecord | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? value as JsonRecord
-    : undefined;
-}
-
-function getJsonString(record: JsonRecord | undefined, key: string): string | undefined {
-  const value = record?.[key];
-  return typeof value === 'string' ? value : undefined;
-}
-
-function getJsonNumber(record: JsonRecord | undefined, key: string): number | undefined {
-  const value = record?.[key];
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
-}
-
-function parseGroupGenerationResponse(value: unknown): GroupGenerationResponse {
-  const record = asJsonRecord(value);
-  return {
-    error: getJsonString(record, 'error'),
-    mode: getJsonString(record, 'mode'),
-    imageUrls: Array.isArray(record?.imageUrls)
-      ? record.imageUrls.filter((url): url is string => typeof url === 'string')
-      : [],
-    taskIds: Array.isArray(record?.taskIds)
-      ? record.taskIds.filter((taskId): taskId is string => typeof taskId === 'string')
-      : [],
-    estimatedTime: getJsonNumber(record, 'estimatedTime'),
-    modelName: getJsonString(record, 'modelName'),
-    providerName: getJsonString(record, 'providerName'),
-  };
-}
-
-function parseImageEditResponse(value: unknown): ImageEditResponse {
-  const record = asJsonRecord(value);
-  return {
-    success: typeof record?.success === 'boolean' ? record.success : undefined,
-    error: record?.error,
-    imageUrl: getJsonString(record, 'imageUrl'),
-    taskId: getJsonString(record, 'taskId'),
-    engine: getJsonString(record, 'engine'),
-    cropInfo: record?.cropInfo,
-    compositeInfo: record?.compositeInfo,
-    targetWidth: getJsonNumber(record, 'targetWidth'),
-    targetHeight: getJsonNumber(record, 'targetHeight'),
-  };
-}
-
 interface InfiniteCanvasProps {
   images: CanvasImage[];
   onImagesChange: (images: CanvasImage[]) => void;
@@ -595,7 +521,66 @@ function ElapsedTime({ startTime, className }: { startTime: number; className?: 
   return <span className={className}>{formatted}</span>;
 }
 
-export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelectImage, onGenerateVariation, onExtractKeywords, onAddImages, referenceIds = [], isGenerating = false, generationProgress = undefined, themeStyle = 'gold', onVisionPrompt, visionPromptEnabled = false, onToggleVisionPrompt, ohMyPromptOpen = false, onCloseOhMyPrompt, onInsertPrompt, ohMyPromptThemeStyle = 'gold', isVisionAnalyzing = false, visionResult = null, ompActiveTab = 'agent', ompVisionImageUrl = null, onToggleSettings, onToggleTheme, onToggleUserManager, onToggleAdminSystem, onToggleProjectData, isAdmin = false, onToggleHelp, onUndo, onRedo, navigateToImageId, onNavigateToImageComplete, onGroupsChange, initialGroups, altRefMarkerIds = [], onForceSave, onEditImage, onViewStateChange, initialViewState, onAddToFavorites, onToggleFavorites, onTogglePromptTemplate, onSwitchToNodeMode, onSwitchToWorkflowHub, onSwitchToDashboard, onSendToChat, connections, onConnectionsChange, versionHistoryManager, onOpenVideoPanel }: InfiniteCanvasProps) {
+export function InfiniteCanvas({
+  images,
+  onImagesChange,
+  selectedImage,
+  onSelectImage,
+  onPreviewImage,
+  onGenerateVariation,
+  onExtractKeywords,
+  onFusion,
+  onAddImages,
+  onReferenceSelect,
+  referenceIds = [],
+  isGenerating = false,
+  generationProgress = undefined,
+  themeStyle = 'gold',
+  onVisionPrompt,
+  visionPromptEnabled = false,
+  onToggleVisionPrompt,
+  ohMyPromptOpen = false,
+  onCloseOhMyPrompt,
+  onToggleOhMyPrompt,
+  onInsertPrompt,
+  ohMyPromptThemeStyle = 'gold',
+  isVisionAnalyzing = false,
+  visionResult = null,
+  ompActiveTab = 'agent',
+  ompVisionImageUrl = null,
+  onToggleSettings,
+  onToggleTheme,
+  onToggleUserManager,
+  onToggleAdminSystem,
+  onToggleProjectData,
+  isAdmin = false,
+  onToggleHelp,
+  isPanelCollapsed = true,
+  onUndo,
+  onRedo,
+  navigateToImageId,
+  onNavigateToImageComplete,
+  onGroupsChange,
+  initialGroups,
+  onAltMarkReference,
+  altRefMarkerIds = [],
+  onForceSave,
+  onEditImage,
+  onViewStateChange,
+  initialViewState,
+  onAddToFavorites,
+  onToggleFavorites,
+  onTogglePromptTemplate,
+  brandProject,
+  onSwitchToNodeMode,
+  onSwitchToWorkflowHub,
+  onSwitchToDashboard,
+  onSendToChat,
+  connections,
+  onConnectionsChange,
+  versionHistoryManager,
+  onOpenVideoPanel,
+}: InfiniteCanvasProps) {
   const isMonochrome = themeStyle === 'monochrome';
 
   // Stable refs for callbacks used in effects (avoid stale closures)
@@ -628,11 +613,11 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   }, []);
 
   /** 对比模式：选中第一张图后点击第二张进行叠加滑块对比 */
-  const [compareFirstImageId, ] = useState<string | null>(null);
-  void compareFirstImageId;
-  const [, ] = useState(false);
-  const [, ] = useState(50); // 百分比 0-100
-  useRef(false);
+  const [compareFirstImageId, setCompareFirstImageId] = useState<string | null>(null);
+  const [compareActive, setCompareActive] = useState(false);
+  const [compareSliderPos, setCompareSliderPos] = useState(50); // 百分比 0-100
+  const compareDraggingRef = useRef(false);
+  const compareFirstImage = compareFirstImageId ? images.find(img => img.id === compareFirstImageId) : null;
 
   // Agent editor state
   const [showAgentEditor, setShowAgentEditor] = useState(false);
@@ -676,7 +661,6 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [viewOffset, setViewOffset] = useState({ x: initialViewState?.offsetX ?? 0, y: initialViewState?.offsetY ?? 0 });
   const [zoom, setZoom] = useState(initialViewState?.zoom ?? 1);
   const [isPanning, setIsPanning] = useState(false);
-  const [isMiddlePanning, setIsMiddlePanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const [isSpacePressed, setIsSpacePressed] = useState(false);
 
@@ -723,7 +707,6 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
   const visibleImages = useMemo(() => {
     if (canvasSize.width === 0 || canvasSize.height === 0) return images;
-    if (shouldSuspendCanvasVirtualization(isPanning, isMiddlePanning)) return images;
     // Visible area in canvas coordinates
     const vx1 = -viewOffset.x / zoom;
     const vy1 = -viewOffset.y / zoom;
@@ -747,7 +730,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       const iy2 = img.y + img.height;
       return ix2 >= vx1 - marginW && ix1 <= vx2 + marginW && iy2 >= vy1 - marginH && iy1 <= vy2 + marginH;
     });
-  }, [images, viewOffset, zoom, canvasSize, isPanning, isMiddlePanning]);
+  }, [images, viewOffset, zoom, canvasSize]);
 
   // ★ Keep spatial index in sync with images
   useEffect(() => {
@@ -757,7 +740,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   }, [images]);
 
   // Track total vs visible for debugging
-  useMemo(() => ({ total: images.length, visible: visibleImages.length }), [images.length, visibleImages.length]);
+  const virtualizationStats = useMemo(() => ({ total: images.length, visible: visibleImages.length }), [images.length, visibleImages.length]);
 
   // ★ 缩略图生成：为大图（>1024px）生成客户端缩略图，减少4K图片解码开销
   const thumbnailCacheRef = useRef<Map<string, string>>(new Map()); // imageUrl → thumbnailDataUrl
@@ -982,7 +965,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     onSelectImageRef.current(targetImg);
     // Notify parent that navigation is complete
     onNavigateToImageCompleteRef.current?.();
-  }, [images, navigateToImageId]);
+  }, [navigateToImageId]);
 
   // Auto-center view on newly added images (upload / generate / paste)
   const prevImageCountRef = useRef(images.length);
@@ -1050,8 +1033,6 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [groupDragOffset, setGroupDragOffset] = useState({ x: 0, y: 0 });
   const groupDragReadyRef = useRef(false);
   const groupDragTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const removeRefFromGroupRef = useRef<(groupId: string, imageId: string) => void>(() => {});
-  const exitEditModeRef = useRef<() => void>(() => {});
 
   // 同步groups到父组件
   useEffect(() => {
@@ -1081,11 +1062,12 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [boxSelectEnd, setBoxSelectEnd] = useState<{ x: number; y: number } | null>(null);
 
   // Middle button pan state
+  const [isMiddlePanning, setIsMiddlePanning] = useState(false);
   const middlePanStartRef = useRef({ x: 0, y: 0 });
   const middlePanMovedRef = useRef(false); // 中键拖动是否移动过（防止拖动后误触发 auxclick 缩放重置）
 
   // Long press for drag
-  const [, setIsLongPressing] = useState(false);
+  const [isLongPressing, setIsLongPressing] = useState(false);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mouseDownPosRef = useRef({ x: 0, y: 0 });
   const mouseDownOnImageRef = useRef(false);
@@ -1129,7 +1111,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [canvasGenGenerating, setCanvasGenGenerating] = useState(false);
   const [canvasGenPreviewUrl, setCanvasGenPreviewUrl] = useState<string | null>(null);
   const [canvasGenProgress, setCanvasGenProgress] = useState(0);
-  const [, setCanvasGenFramePos] = useState<{x: number, y: number}>({ x: 0, y: 0 });
+  const [canvasGenFramePos, setCanvasGenFramePos] = useState<{x: number, y: number}>({ x: 0, y: 0 });
   const canvasGenFrameWidth = 512;
   const canvasGenFrameHeight = 288; // 16:9 ratio
   // 浮动面板拖拽状态
@@ -1153,10 +1135,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [editImageId, setEditImageId] = useState<string | null>(null);
   const [brushSize, setBrushSize] = useState(20);
   const [editPrompt, setEditPrompt] = useState('');
-  const [, setExpandRatio] = useState('原始比例');
-  const [, ] = useState(false);
+  const [expandRatio, setExpandRatio] = useState('原始比例');
+  const [showExpandScaleMenu, setShowExpandScaleMenu] = useState(false);
   // 参数调色状态
-  const [, ] = useState({ brightness: 0, contrast: 0, saturation: 0, temperature: 0, hue: 0 });
+  const [colorAdjustParams, setColorAdjustParams] = useState({ brightness: 0, contrast: 0, saturation: 0, temperature: 0, hue: 0 });
   const [colorBrightness, setColorBrightness] = useState(0);
   const [colorContrast, setColorContrast] = useState(0);
   const [colorSaturation, setColorSaturation] = useState(0);
@@ -1164,9 +1146,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [colorHue, setColorHue] = useState(0);
   const [colorAdjustProcessing, setColorAdjustProcessing] = useState(false);
   // 全景生成状态
-  const [panoramaPrompt, ] = useState('360度全景室内环境，等距圆柱投影，无缝全景，HDR高质量');
-  const [, setIsGeneratingPanorama] = useState(false);
-  const [, ] = useState(false);
+  const [panoramaPrompt, setPanoramaPrompt] = useState('360度全景室内环境，等距圆柱投影，无缝全景，HDR高质量');
+  const [isGeneratingPanorama, setIsGeneratingPanorama] = useState(false);
+  const [panoramaProcessing, setPanoramaProcessing] = useState(false);
   // 视频抽帧状态
   const [videoExtractMode, setVideoExtractMode] = useState<'uniform'|'fps'|'first_last'|'keyframes'>('uniform');
   const [showVideoExtractPanel, setShowVideoExtractPanel] = useState(false);
@@ -1175,10 +1157,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   // 即梦风格方向性扩展：上下左右独立 padding（像素值，基于原始图片尺寸）
   const [expandPadding, setExpandPadding] = useState({ top: 0, right: 0, bottom: 0, left: 0 });
   // 拖拽控制点状态
-  const [, setDraggingHandle] = useState<string | null>(null);
+  const [draggingHandle, setDraggingHandle] = useState<string | null>(null);
   const expandPaddingRef = useRef({ top: 0, right: 0, bottom: 0, left: 0 });
   const [cropRatio, setCropRatio] = useState('free');
-  const [, setShowExpandRatios] = useState(false);
+  const [showExpandRatios, setShowExpandRatios] = useState(false);
   const [showCropRatios, setShowCropRatios] = useState(false);
   // 图片工具栏折叠状态
   const [toolbarExpanded, setToolbarExpanded] = useState(false);
@@ -1187,7 +1169,19 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
   // P2-1: 轻量连线状态
   const canvasConnections = connections ?? [];
+  const handleConnectionsChange = onConnectionsChange ?? (() => {});
+  const toolBtnCls = isMonochrome
+    ? 'p-2 rounded-full transition-all relative group text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+    : 'p-2 rounded-full transition-all relative group text-gold-muted hover:text-text-bright hover:bg-white/10';
+  const toolBtnActiveCls = isMonochrome
+    ? 'bg-blue-500 text-white rounded-full'
+    : 'bg-gold/20 text-gold rounded-full';
   const separatorCls = isMonochrome ? 'w-px h-5 bg-gray-200' : 'w-px h-5 bg-white/[0.06]';
+
+  // Left toolbar styles (expanded & collapsed)
+  const ltContainerCls = isMonochrome
+    ? 'bg-white border border-gray-200 shadow-lg'
+    : 'bg-[#1a1a1a] border border-white/[0.12] shadow-2xl';
   const ltExpandedBtnCls = isMonochrome
     ? 'flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-blue-50 text-blue-700 hover:bg-blue-100'
     : 'flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-all bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright';
@@ -1278,7 +1272,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const annAtPickerItems = useMemo(() => {
     return images
       .filter(img => !annAtFilter || (img.prompt || '').toLowerCase().includes(annAtFilter.toLowerCase()) || `图片#${images.indexOf(img) + 1}`.includes(annAtFilter))
-      .map((img) => {
+      .map((img, i) => {
         const num = images.indexOf(img) + 1;
         return { id: img.id, url: img.url, label: `图片 #${num}`, desc: img.prompt ? img.prompt.slice(0, 20) : '', num };
       });
@@ -1296,17 +1290,17 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     setAnnAtHighlightIdx(0);
   }, []);
   const annotationIdCounter = useRef(0);
-  useRef<HTMLDivElement>(null);
+  const annotationContainerRef = useRef<HTMLDivElement>(null);
   const annotationInputRef = useRef<HTMLTextAreaElement>(null);
   const [followUpInputId, setFollowUpInputId] = useState<string | null>(null);
   const annotationPanelRef = useRef<HTMLDivElement>(null);
   const annotationPanelPos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const annotationPanelDragging = useRef(false);
   const annotationPanelDragStart = useRef({ mx: 0, my: 0, px: 0, py: 0 });
-  const [, ] = useState({ x: 0, y: 0 });
-  useRef<{ startX: number; startY: number; startOffsetX: number; startOffsetY: number } | null>(null);
+  const [annotationPanelOffset, setAnnotationPanelOffset] = useState({ x: 0, y: 0 });
+  const annotationPanelDragRef = useRef<{ startX: number; startY: number; startOffsetX: number; startOffsetY: number } | null>(null);
   const [followUpInputText, setFollowUpInputText] = useState('');
-  const [, ] = useState<string | null>(null);
+  const [expandedBubbleId, setExpandedBubbleId] = useState<string | null>(null);
   // Region selection state for annotation drag
   const [annotationRegionStart, setAnnotationRegionStart] = useState<{cx: number; cy: number} | null>(null);
   const [annotationRegionCurrent, setAnnotationRegionCurrent] = useState<{cx: number; cy: number} | null>(null);
@@ -1327,10 +1321,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [isDraggingRegion, setIsDraggingRegion] = useState(false);
 
   // Upscale state
-  const [, setUpscaleMultiplier] = useState(2);
-  const [, setUpscaylAvailable] = useState(false);
+  const [upscaleMultiplier, setUpscaleMultiplier] = useState(2);
+  const [upscaylAvailable, setUpscaylAvailable] = useState(false);
   const [upscaylSelectedModel] = useState('realesrgan-x4plus');
-  const [, setUpscaylChecking] = useState(true);
+  const [upscaylChecking, setUpscaylChecking] = useState(true);
   const [upscalePreset, setUpscalePreset] = useState<'2k' | '4k' | '8k'>('2k');
   const [showUpscalePresetMenu, setShowUpscalePresetMenu] = useState(false);
   const [upscaleMode, setUpscaleMode] = useState<'lossless' | 'ai'>('lossless'); // 无损放大 / AI放大
@@ -1341,7 +1335,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   };
   const [removeBgEngine, setRemoveBgEngine] = useState<'auto' | 'ai' | 'local'>(() => getEnginePref('removebg'));
   const [upscaleEnginePref, setUpscaleEnginePref] = useState<'auto' | 'ai' | 'local'>(() => getEnginePref('upscale'));
-  const [, setSegmentEnginePref] = useState<'auto' | 'ai' | 'local'>(() => getEnginePref('segment'));
+  const [segmentEnginePref, setSegmentEnginePref] = useState<'auto' | 'ai' | 'local'>(() => getEnginePref('segment'));
   const [engineDialog, setEngineDialog] = useState<null | 'upscale' | 'removebg' | 'svg' | 'segment'>(null);
   // Actual pixel dimensions of the image being upscaled (loaded from DOM)
   const [upscaleActualW, setUpscaleActualW] = useState(0);
@@ -1353,11 +1347,11 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [svgTraceEngine, setSvgTraceEngine] = useState<'auto' | 'vectorize-api' | 'vlm' | 'vtracer' | 'wasm-vtracer'>('auto');
   const svgTraceOutputFormat = 'svg' as const;
   const [svgTraceColorPrecision, setSvgTraceColorPrecision] = useState<number | null>(null);  // null = use preset
-  const [svgTraceFilterSpeckle, ] = useState<number | null>(null);
+  const [svgTraceFilterSpeckle, setSvgTraceFilterSpeckle] = useState<number | null>(null);
   const [svgTraceCornerThreshold, setSvgTraceCornerThreshold] = useState<number | null>(null);
-  const [svgTraceLengthThreshold, ] = useState<number | null>(null);
-  const [svgTraceCurveMode, ] = useState<'polygon' | 'spline' | null>(null);
-  const [svgTraceHierarchical, ] = useState<'stacked' | 'cutout' | null>(null);
+  const [svgTraceLengthThreshold, setSvgTraceLengthThreshold] = useState<number | null>(null);
+  const [svgTraceCurveMode, setSvgTraceCurveMode] = useState<'polygon' | 'spline' | null>(null);
+  const [svgTraceHierarchical, setSvgTraceHierarchical] = useState<'stacked' | 'cutout' | null>(null);
 
   // Fixed position ref for SVG trace panel — prevents random movement on click
   const svgTraceFixedPosRef = useRef<{top: number; left: number} | null>(null);
@@ -1365,8 +1359,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     if (!showSvgTracePanel) svgTraceFixedPosRef.current = null;
   }, [showSvgTracePanel]);
   const [svgTraceBwThreshold, setSvgTraceBwThreshold] = useState(50);
-  const [svgTraceBwTurdSize, ] = useState(2);
-  const [svgTraceBwInvert, ] = useState(false);
+  const [svgTraceBwTurdSize, setSvgTraceBwTurdSize] = useState(2);
+  const [svgTraceBwInvert, setSvgTraceBwInvert] = useState(false);
 
   // Check ONNX upscale availability on mount
   useEffect(() => {
@@ -1395,9 +1389,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   // Image to 3D state
   const [show3DModal, setShow3DModal] = useState(false);
 
-  const [, ] = useState<'erase' | 'mask'>('erase');
+  const [imageEditMode, setImageEditMode] = useState<'erase' | 'mask'>('erase');
   const [threeDBackend, setThreeDBackend] = useState<ThreeDBackend>('api');
-  const [threeDType, ] = useState<ThreeDType>('ip');
+  const [threeDType, setThreeDType] = useState<ThreeDType>('ip');
   // 3D Model Viewer state
   const [show3DViewer, setShow3DViewer] = useState(false);
   const [viewer3DModelUrl, setViewer3DModelUrl] = useState('');
@@ -1405,7 +1399,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [viewer3DModelUrls, setViewer3DModelUrls] = useState<Record<string, string>>({});
   const [viewer3DThumbnailUrls, setViewer3DThumbnailUrls] = useState<Record<string, string>>({});
   const [viewer3DTextureUrls, setViewer3DTextureUrls] = useState<Array<Record<string, string>>>([]);
-  const [viewer3DModelInfo, setViewer3DModelInfo] = useState<{ faceCount?: number; vertexCount?: number; fileSize?: string; providerId?: string; providerName?: string; model3DName?: string; modelTaskId?: string }>({});
+  const [viewer3DModelInfo, setViewer3DModelInfo] = useState<{ faceCount?: number; vertexCount?: number; fileSize?: string; providerId?: string; modelTaskId?: string }>({});
 
   // Video player state
   const [videoPlayerUrl, setVideoPlayerUrl] = useState('');
@@ -1420,7 +1414,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const inlineVideoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
   const [showVideoEditPanel, setShowVideoEditPanel] = useState(false);
   const [videoEditTarget, setVideoEditTarget] = useState<CanvasImage | null>(null);
-  const [, setVideoEditTab] = useState<'edit' | 'extend'>('edit');
+  const [videoEditTab, setVideoEditTab] = useState<'edit' | 'extend'>('edit');
   // AI视频配音
   const [showVideoDubPanel, setShowVideoDubPanel] = useState(false);
   const [videoDubTarget, setVideoDubTarget] = useState<CanvasImage | null>(null);
@@ -1572,10 +1566,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [admin3DModels, setAdmin3DModels] = useState<Array<{ id: string; name: string; baseUrl: string; apiKey: string; model?: string; providerPreset?: string; providerName: string; advancedParams?: Record<string, string> }>>([]);
 
   // Crop state
-  const [, setCropLeft] = useState(0);
-  const [, setCropTop] = useState(0);
-  const [, setCropWidth] = useState(0);
-  const [, setCropHeight] = useState(0);
+  const [cropLeft, setCropLeft] = useState(0);
+  const [cropTop, setCropTop] = useState(0);
+  const [cropWidth, setCropWidth] = useState(0);
+  const [cropHeight, setCropHeight] = useState(0);
 
   // Mask keyword popup
 
@@ -1612,7 +1606,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         }
       }
     }
-  }, [downloadFormat, images, selectedIds, threeDDownloadFormat]);
+  }, [downloadFormat, images, selectedIds]);
 
   // Reset 3D format when download format changes away from '3d'
   useEffect(() => {
@@ -1624,7 +1618,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   // PSD Layer Editor
   const [showPsdEditor, setShowPsdEditor] = useState(false);
   const [psdEditorImageUrl, setPsdEditorImageUrl] = useState<string>('');
-  const [, ] = useState<PsdLayerItem[]>([]);
+  const [psdEditorLayers, setPsdEditorLayers] = useState<PsdLayerItem[]>([]);
   const [psdEditorMode, setPsdEditorMode] = useState<'basic' | 'standard' | 'advanced' | 'studio'>('standard');
 
   // Misc
@@ -1653,7 +1647,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   // Force re-render for brush cursor display
 
   // Force re-render when strokes change (for SVG overlay)
-  const [, setStrokesVersion] = useState(0);
+  const [strokesVersion, setStrokesVersion] = useState(0);
   const [cropRect, setCropRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [cropDragStart, setCropDragStart] = useState<{ x: number; y: number } | null>(null);
   const [cropDragMode, setCropDragMode] = useState<'create' | 'move' | 'resize-tl' | 'resize-tr' | 'resize-bl' | 'resize-br'>('create');
@@ -1686,7 +1680,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const genGroupDragTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // HexCube 六面体组状态
   const [hexCubeGroups, setHexCubeGroups] = useState<HexCubeGroup[]>([]);
-  useRef<HexCubeGroup[]>(hexCubeGroups);
+  const hexCubeGroupsRef = useRef<HexCubeGroup[]>(hexCubeGroups);
   const [hexCubeDragTarget, setHexCubeDragTarget] = useState<string | null>(null);
   const [hexCubeDragStart, setHexCubeDragStart] = useState({ x: 0, y: 0 });
   const [hexCubeDragOffset, setHexCubeDragOffset] = useState({ x: 0, y: 0 });
@@ -1783,7 +1777,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [isEventFromOverlay]);
+  }, []);
 
   const clampMultiAngleValue = useCallback((value: number, min: number, max: number) => {
     return Math.max(min, Math.min(max, value));
@@ -1825,7 +1819,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       window.removeEventListener('mousemove', handleMove);
       window.removeEventListener('mouseup', handleUp);
     };
-  }, [clampMultiAngleValue, isEventFromOverlay, isMultiAngleDragging]);
+  }, [clampMultiAngleValue, isMultiAngleDragging]);
 
   // HexCube 3D cube drag interaction
   useEffect(() => {
@@ -1851,7 +1845,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       window.removeEventListener('mousemove', handleMove);
       window.removeEventListener('mouseup', handleUp);
     };
-  }, [hexCube3dDragging, isEventFromOverlay]);
+  }, [hexCube3dDragging]);
 
   const selectImage = useCallback((id: string | null) => {
     if (id) {
@@ -1878,8 +1872,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     // Calculate bounding box
     const minX = Math.min(...selectedImages.map(i => i.x));
     const minY = Math.min(...selectedImages.map(i => i.y));
-    Math.max(...selectedImages.map(i => i.x + i.width));
-    Math.max(...selectedImages.map(i => i.y + i.height));
+    const maxX = Math.max(...selectedImages.map(i => i.x + i.width));
+    const maxY = Math.max(...selectedImages.map(i => i.y + i.height));
     const padding = 30;
     const titleBarH = 36;
 
@@ -1915,7 +1909,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     );
     onImagesChange(updatedImages);
     setGroups(prev => prev.filter(g => g.id !== groupId));
-  }, [images, onImagesChange]);
+  }, [images, onImagesChange, getCurrentModel]);
 
   // Toggle group collapse
   const handleToggleGroupCollapse = useCallback((groupId: string) => {
@@ -1950,7 +1944,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     };
     window.addEventListener('mouseup', handleWindowMouseUp);
     return () => window.removeEventListener('mouseup', handleWindowMouseUp);
-  }, [isEventFromOverlay]);
+  }, []);
 
   // Keyboard events
   useEffect(() => {
@@ -2286,7 +2280,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('paste', handlePaste);
     };
-  }, [selectedIds, images, onImagesChange, selectImage, editMode, onUndo, zoom, viewOffset, isEventFromOverlay, isInputFocused, annotationMode, onRedo, handleCreateGroup, compareSelecting, agentSelectingImage, showSvgTracePanel, editImageId]);
+  }, [selectedIds, images, onImagesChange, selectImage, editMode, onUndo, zoom, viewOffset]);
 
   // Click outside to close menus
   useEffect(() => {
@@ -2299,7 +2293,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     };
     window.addEventListener('click', handleClick);
     return () => window.removeEventListener('click', handleClick);
-  }, [isEventFromOverlay]);
+  }, []);
 
   // Non-passive wheel listener to prevent browser Ctrl+zoom
   useEffect(() => {
@@ -2422,7 +2416,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       setCropRect({ x: clampedX, y: clampedY, w: 0, h: 0 });
       setCropDragOrigin(null);
     }
-  }, [editMode, editImageId, images, cropRect, zoom, viewOffset]);
+  }, [editMode, editImageId, images, screenToCanvas, cropRect, zoom, viewOffset]);
 
   const handleEditMouseMove = useCallback((e: React.MouseEvent) => {
     // Erase/mask modes now use floating window - don't handle strokes on main canvas
@@ -2532,7 +2526,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         setCropRect({ x: newX, y: newY, w: newW, h: newH });
       }
     }
-  }, [editMode, editImageId, images, cropDragStart, cropDragMode, cropDragOrigin, cropRatio, zoom, viewOffset]);
+  }, [editMode, editImageId, images, screenToCanvas, cropDragStart, cropDragMode, cropDragOrigin, cropRatio, zoom, viewOffset]);
 
   const handleEditMouseUp = useCallback(() => {
     if (isDrawingRef.current) {
@@ -2552,7 +2546,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     setCropDragStart(null);
     setCropDragMode('create');
     setCropDragOrigin(null);
-  }, [cropDragMode]);
+  }, [cropDragMode, editMode]);
 
   // Mouse handlers
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -2845,6 +2839,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       const img = images.find(i => i.id === resizingImage);
       if (!img) return;
       const dx = canvasPos.x - resizeStart.x;
+      const dy = canvasPos.y - resizeStart.y;
       const aspect = resizeStart.w / resizeStart.h;
       let newW = resizeStart.w;
       let newH = resizeStart.h;
@@ -2964,7 +2959,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       const offsetY = e.clientY - hexCubeDragStart.y;
       setHexCubeDragOffset({ x: offsetX, y: offsetY });
     }
-  }, [annotationMode, annotationRegionStart, editMode, screenToCanvas, isMiddlePanning, isPanning, boxSelectStart, resizingImage, resizeCorner, dragTarget, groupDragTarget, genGroupDragTarget, hexCubeDragTarget, annotations, images, annotationBrushSize, zoom, viewOffset.x, viewOffset.y, handleEditMouseMove, panStart.x, panStart.y, resizeStart.x, resizeStart.w, resizeStart.h, resizeStart.imgX, resizeStart.imgY, dragStart.x, dragStart.y, groupDragStart.x, groupDragStart.y, genGroupDragStart.x, genGroupDragStart.y, hexCubeDragStart.x, hexCubeDragStart.y]);
+  }, [editMode, isPanning, isMiddlePanning, panStart, boxSelectStart, isLongPressing, resizingImage, resizeCorner, images, dragTarget, dragStart, resizeStart, screenToCanvas, onImagesChange, handleEditMouseMove, groupDragTarget, groupDragStart, genGroupDragTarget, genGroupDragStart, hexCubeDragTarget, hexCubeDragStart, annotationMode, annotationTool, annotationBrushSize, brushDrawingAnnId, annotations, hitTestImage, annotationRegionStart]);
 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
     // Brush drawing completion
@@ -3193,7 +3188,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
               }
             } else if (!isInside && gGroup.sourceImageIds.includes(imgId)) {
               // ── Drag OUT: remove image from this group ──
-              removeRefFromGroupRef.current(gGroup.id, imgId);
+              removeRefFromGroup(gGroup.id, imgId);
             }
           }
         }
@@ -3296,7 +3291,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     }
 
     mouseDownOnImageRef.current = false;
-  }, [annotationRegionStart, annotationMode, isDraggingRegion, annotationRegionCurrent, editMode, isMiddlePanning, isPanning, boxSelectStart, boxSelectEnd, resizingImage, resizePreview, dragTarget, groupDragTarget, genGroupDragTarget, hexCubeDragTarget, hexCubeDragOffset.x, hexCubeDragOffset.y, hitTestImage, images, annotationTool, screenToCanvas, handleEditMouseUp, genGroups, onImagesChange, dragOffset.x, dragOffset.y, selectedIds, groupDragOffset.x, groupDragOffset.y, genGroupDragOffset.x, genGroupDragOffset.y, zoom]);
+  }, [editMode, isPanning, isMiddlePanning, boxSelectStart, boxSelectEnd, dragTarget, dragOffset, images, selectedIds, zoom, viewOffset, onImagesChange, handleEditMouseUp, groupDragTarget, groupDragOffset, genGroupDragTarget, genGroupDragOffset, hexCubeDragTarget, hexCubeDragOffset, resizingImage, resizePreview, annotationMode, annotationTool, annotationRegionStart, annotationRegionCurrent, isDraggingRegion, brushDrawingAnnId, annotations, annotationBrushSize]);
 
   const handleMouseLeave = useCallback(() => {
     if (editMode !== 'none') {
@@ -3342,7 +3337,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       clearTimeout(groupDragTimerRef.current);
       groupDragTimerRef.current = null;
     }
-  }, [dragTarget, editMode, groupDragTarget, handleEditMouseUp]);
+  }, [dragTarget, editMode, handleEditMouseUp]);
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     // Prevent scroll from affecting canvas when cursor is over a modal/overlay/popup
@@ -3450,7 +3445,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         if (validUrls.length > 0) onAddImages(validUrls);
       });
     }
-  }, [onAddImages]);
+  }, [images, onImagesChange, onAddImages, screenToCanvas]);
 
   const handleCanvasImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -3726,27 +3721,27 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       }).filter(g => g.refImages.length > 0);
     });
   }, []);
-  useEffect(() => { removeRefFromGroupRef.current = removeRefFromGroup; }, [removeRefFromGroup]);
 
+  /** 更新生成组工具栏设置 */
+  const updateGroupToolbar = useCallback((groupId: string, updates: Partial<GenGroupToolbar>) => {
+    setGenGroups(prev => prev.map(g => {
+      if (g.id !== groupId) return g;
+      return { ...g, toolbar: { ...g.toolbar, ...updates } };
+    }));
+  }, []);
 
-  useCallback((groupId: string, updates: Partial<GenGroupToolbar>) => {
-        setGenGroups(prev => prev.map(g => {
-          if (g.id !== groupId) return g;
-          return { ...g, toolbar: { ...g.toolbar, ...updates } };
-        }));
-      }, []);
-
-  useCallback((groupId: string, imageId: string, categories: ReferenceCategory[], strengths: Record<string, number>) => {
-        setGenGroups(prev => prev.map(g => {
-          if (g.id !== groupId) return g;
-          return {
-            ...g,
-            refImages: g.refImages.map(r =>
-              r.imageId === imageId ? { ...r, categories, strengths } : r
-            ),
-          };
-        }));
-      }, []);
+  /** 更新参考图类别和强度 */
+  const updateRefImageCategories = useCallback((groupId: string, imageId: string, categories: ReferenceCategory[], strengths: Record<string, number>) => {
+    setGenGroups(prev => prev.map(g => {
+      if (g.id !== groupId) return g;
+      return {
+        ...g,
+        refImages: g.refImages.map(r =>
+          r.imageId === imageId ? { ...r, categories, strengths } : r
+        ),
+      };
+    }));
+  }, []);
 
   /** 删除生成组 */
   const deleteGenGroup = useCallback((groupId: string) => {
@@ -3775,7 +3770,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     const currentModelObj = canvasGenModels.find(m => m.id === currentModelInfo.model && m.providerId === currentModelInfo.providerId);
     group.toolbar.providerName = currentModelObj?.providerName || '';
     setHexCubeGroups(prev => [...prev, group]);
-  }, [canvasGenModels, getCurrentModel, viewOffset, zoom]);
+  }, [canvasGenModels]);
 
   /** 删除六面体组 */
   const deleteHexCubeGroup = useCallback((groupId: string) => {
@@ -4090,10 +4085,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       }
 
       // 安全解析响应：优先尝试 JSON，回退到纯文本
-      let data: GroupGenerationResponse;
+      let data: any;
       const responseText = await res.text();
       try {
-        data = parseGroupGenerationResponse(JSON.parse(responseText));
+        data = JSON.parse(responseText);
       } catch {
         console.error('[GroupGenerate] Non-JSON response:', res.status, responseText.substring(0, 200));
         const errMsg = res.status === 413 ? '请求体过大，请减少参考图数量或缩小图片尺寸' : `服务器错误 (${res.status}): ${responseText.substring(0, 80)}`;
@@ -4117,7 +4112,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         // 直接模式：立即显示结果
         // Save images to get persistent URLs, then add to canvas images for persistence
         const savedUrls: string[] = [];
-        for (const url of data.imageUrls) {
+        for (const url of data.imageUrls as string[]) {
           try {
             const saveRes = await fetch('/api/save-image', {
               method: 'POST',
@@ -4198,7 +4193,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       } else if (data.taskIds) {
         // 轮询模式 — 与生成面板一致的动态轮询策略
         // ★ 支持多 taskId 并行轮询（outputCount>1 时 API 可能返回多个 taskIds）
-        const allTaskIds = data.taskIds;
+        const allTaskIds = data.taskIds as string[];
         const estimatedTime = data.estimatedTime || 30;
         // 单任务最大25分钟（1500秒），兼容慢速API如apimart(可能需要10-20分钟)、gpt-image-2 4K(7-10分钟)
         const maxPollTime = Math.min(1500, Math.max(600, estimatedTime * 8 + 600)) * 1000;
@@ -4218,6 +4213,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             pollCount++;
             // 动态间隔：快速初始轮询，逐步增长
             const delay = pollCount <= 5 ? 300 : pollCount <= 15 ? 600 : pollCount <= 30 ? 1200 : 2000;
+
+            // ★ SSE加速：同时等待定时器和SSE完成事件
+            const primaryTaskId = pendingTaskIds[0];
             await Promise.race([
               new Promise(r => setTimeout(r, delay)),
               new Promise(resolve => {
@@ -4404,7 +4402,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         return { ...g, status: 'idle' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0, errorMsg: `生成失败: ${error instanceof Error ? error.message : String(error)}` } };
       }));
     }
-  }, [images, modelProviderMap, onImagesChange, zoom]);
+  }, [getCurrentModel, onImagesChange]);
 
   // handleGenGroupGenerate: 通过groupId查找组并调用handleGroupGenerate
   const handleGenGroupGenerate = useCallback((groupId: string) => {
@@ -4646,7 +4644,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       dataImg.src = newUrl;
     }
     return completedImage;
-  }, [onImagesChange, onSelectImage]);
+  }, [onImagesChange, onSelectImage, connections, onConnectionsChange]);
 
   const removeProcessingFrame = useCallback((id: string) => {
     const nextImages = imagesRef.current.filter(image => image.id !== id);
@@ -5000,7 +4998,13 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     if (!threeDCapabilities.formats.find((f: { value: string }) => f.value === threeDFormat)) {
       setThreeDFormat(threeDCapabilities.formats[0]?.value || 'glb');
     }
-  }, [threeDCapabilities, threeDFormat, threeDQuality, threeDTexture]);
+  }, [threeDCapabilities]);
+
+  // Get API key from localStorage - use the first enabled API key
+  const getApiKey = useCallback((): string => {
+    // API Key 由服务端管理，前端不再传递 API Key
+    return 'server-managed';
+  }, []);
 
   // 获取当前选择的 providerId（从复合键中拆解）
   const getCurrentProviderId = useCallback((): string | null => {
@@ -5025,171 +5029,176 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   }, []);
 
   // Render edit strokes onto a canvas and return base64
-  useCallback(async (
-        originalImageUrl: string,
-        maskBase64: string,
-        resultImageUrl: string,
-        origW: number,
-        origH: number,
-        cropInfo?: { cropX: number; cropY: number; cropW: number; cropH: number } | null,
-        mode?: 'erase' | 'mask'
-      ): Promise<string> => {
-        // 使用 Canvas 2D 合成，IOPaint/LaMa 风格的蒙版合成
-        // cropInfo: 如果API使用了裁剪策略，结果图像是裁剪尺寸，需要放置到(cropX, cropY)位置
-        const isErase = mode === 'erase';
-        const canvas = document.createElement('canvas');
-        canvas.width = origW;
-        canvas.height = origH;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) throw new Error('Canvas 2D context unavailable');
+  /**
+   * 蒙版合成：将 API 生成的结果仅应用到蒙版区域，保留原图非蒙版区域
+   * 这是确保擦除/蒙版精准度的核心函数——无论 API 是否正确处理了 mask_image，
+   * 最终结果只会修改用户涂抹的区域
+   */
+  const compositeInpaintResult = useCallback(async (
+    originalImageUrl: string,
+    maskBase64: string,
+    resultImageUrl: string,
+    origW: number,
+    origH: number,
+    cropInfo?: { cropX: number; cropY: number; cropW: number; cropH: number } | null,
+    mode?: 'erase' | 'mask'
+  ): Promise<string> => {
+    // 使用 Canvas 2D 合成，IOPaint/LaMa 风格的蒙版合成
+    // cropInfo: 如果API使用了裁剪策略，结果图像是裁剪尺寸，需要放置到(cropX, cropY)位置
+    const isErase = mode === 'erase';
+    const canvas = document.createElement('canvas');
+    canvas.width = origW;
+    canvas.height = origH;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas 2D context unavailable');
 
-        // 1. 加载所有图像
-        const [origImg, maskImg, resultImg] = await Promise.all([
-          loadImage(originalImageUrl),
-          loadImage(maskBase64),
-          loadImage(resultImageUrl),
-        ]);
+    // 1. 加载所有图像
+    const [origImg, maskImg, resultImg] = await Promise.all([
+      loadImage(originalImageUrl),
+      loadImage(maskBase64),
+      loadImage(resultImageUrl),
+    ]);
 
-        // 2. 绘制原图作为底层
-        ctx.drawImage(origImg, 0, 0, origW, origH);
+    // 2. 绘制原图作为底层
+    ctx.drawImage(origImg, 0, 0, origW, origH);
 
-        // 3. 解析蒙版（带模糊，擦除用12px，蒙版修图用18px）
-        const maskCanvas = document.createElement('canvas');
-        maskCanvas.width = origW;
-        maskCanvas.height = origH;
-        const maskCtx = maskCanvas.getContext('2d');
-        if (!maskCtx) throw new Error('Canvas 2D context unavailable');
-        maskCtx.drawImage(maskImg, 0, 0, origW, origH);
-        const blurMaskCanvas = document.createElement('canvas');
-        blurMaskCanvas.width = origW;
-        blurMaskCanvas.height = origH;
-        const blurMaskCtx = blurMaskCanvas.getContext('2d');
-        if (!blurMaskCtx) throw new Error('Canvas 2D context unavailable');
-        try {
-          blurMaskCtx.filter = `blur(${isErase ? 12 : 18}px)`;
-        } catch {
-          // ignore unsupported filter
-        }
-        blurMaskCtx.drawImage(maskCanvas, 0, 0, origW, origH);
-        const maskData = blurMaskCtx.getImageData(0, 0, origW, origH);
+    // 3. 解析蒙版（带模糊，擦除用12px，蒙版修图用18px）
+    const maskCanvas = document.createElement('canvas');
+    maskCanvas.width = origW;
+    maskCanvas.height = origH;
+    const maskCtx = maskCanvas.getContext('2d');
+    if (!maskCtx) throw new Error('Canvas 2D context unavailable');
+    maskCtx.drawImage(maskImg, 0, 0, origW, origH);
+    const blurMaskCanvas = document.createElement('canvas');
+    blurMaskCanvas.width = origW;
+    blurMaskCanvas.height = origH;
+    const blurMaskCtx = blurMaskCanvas.getContext('2d');
+    if (!blurMaskCtx) throw new Error('Canvas 2D context unavailable');
+    try {
+      blurMaskCtx.filter = `blur(${isErase ? 12 : 18}px)`;
+    } catch {
+      // ignore unsupported filter
+    }
+    blurMaskCtx.drawImage(maskCanvas, 0, 0, origW, origH);
+    const maskData = blurMaskCtx.getImageData(0, 0, origW, origH);
 
-        // 4. 创建蒙版化的生成结果
-        // 如果有cropInfo，结果图像是裁剪区域的，需要放置到正确位置
-        const resultCanvas = document.createElement('canvas');
-        resultCanvas.width = origW;
-        resultCanvas.height = origH;
-        const resultCtx = resultCanvas.getContext('2d');
-        if (!resultCtx) throw new Error('Canvas 2D context unavailable');
+    // 4. 创建蒙版化的生成结果
+    // 如果有cropInfo，结果图像是裁剪区域的，需要放置到正确位置
+    const resultCanvas = document.createElement('canvas');
+    resultCanvas.width = origW;
+    resultCanvas.height = origH;
+    const resultCtx = resultCanvas.getContext('2d');
+    if (!resultCtx) throw new Error('Canvas 2D context unavailable');
 
-        if (cropInfo) {
-          // 裁剪策略：结果图像需要覆盖 (cropX, cropY, cropW, cropH) 区域
-          // 使用 inside 模式：等比缩放保留 AI 完整内容，居中放置，避免 cover 裁切导致错位
-          const resultAspect = resultImg.naturalWidth / resultImg.naturalHeight;
-          const cropAspect = cropInfo.cropW / cropInfo.cropH;
-          let drawW: number, drawH: number, drawX: number, drawY: number;
-          if (resultAspect > cropAspect) {
-            // 结果更宽，以高度为准缩放
-            drawH = cropInfo.cropH;
-            drawW = Math.round(cropInfo.cropH * resultAspect);
-            drawX = cropInfo.cropX + Math.round((cropInfo.cropW - drawW) / 2);
-            drawY = cropInfo.cropY;
-          } else if (resultAspect < cropAspect) {
-            // 结果更高，以宽度为准缩放
-            drawW = cropInfo.cropW;
-            drawH = Math.round(cropInfo.cropW / resultAspect);
-            drawX = cropInfo.cropX;
-            drawY = cropInfo.cropY + Math.round((cropInfo.cropH - drawH) / 2);
-          } else {
-            drawW = cropInfo.cropW;
-            drawH = cropInfo.cropH;
-            drawX = cropInfo.cropX;
-            drawY = cropInfo.cropY;
-          }
-          resultCtx.drawImage(resultImg, drawX, drawY, drawW, drawH);
-          // 蒙版修图模式：对裁剪边缘做羽化处理 + 应用蒙版alpha通道
-          if (!isErase) {
-            // ★ 修复叠加bug：蒙版修图必须应用蒙版alpha通道，不能仅做边缘羽化
-            // 否则裁剪区域内蒙版外的区域也会显示AI结果，产生叠加效果
-            
-            // 1) 先对裁剪边缘做羽化处理
-            const edgeFeather = 24;
-            const patchData = resultCtx.getImageData(0, 0, origW, origH);
-            const cropRight = cropInfo.cropX + cropInfo.cropW - 1;
-            const cropBottom = cropInfo.cropY + cropInfo.cropH - 1;
-            for (let y = cropInfo.cropY; y <= cropBottom; y++) {
-              for (let x = cropInfo.cropX; x <= cropRight; x++) {
-                const idx = (y * origW + x) * 4 + 3;
-                const edgeDistance = Math.min(
-                  x - cropInfo.cropX,
-                  y - cropInfo.cropY,
-                  cropRight - x,
-                  cropBottom - y
-                );
-                if (edgeDistance < edgeFeather) {
-                  patchData.data[idx] = Math.min(
-                    patchData.data[idx],
-                    Math.max(0, Math.round((edgeDistance / edgeFeather) * 255))
-                  );
-                }
-              }
+    if (cropInfo) {
+      // 裁剪策略：结果图像需要覆盖 (cropX, cropY, cropW, cropH) 区域
+      // 使用 inside 模式：等比缩放保留 AI 完整内容，居中放置，避免 cover 裁切导致错位
+      const resultAspect = resultImg.naturalWidth / resultImg.naturalHeight;
+      const cropAspect = cropInfo.cropW / cropInfo.cropH;
+      let drawW: number, drawH: number, drawX: number, drawY: number;
+      if (resultAspect > cropAspect) {
+        // 结果更宽，以高度为准缩放
+        drawH = cropInfo.cropH;
+        drawW = Math.round(cropInfo.cropH * resultAspect);
+        drawX = cropInfo.cropX + Math.round((cropInfo.cropW - drawW) / 2);
+        drawY = cropInfo.cropY;
+      } else if (resultAspect < cropAspect) {
+        // 结果更高，以宽度为准缩放
+        drawW = cropInfo.cropW;
+        drawH = Math.round(cropInfo.cropW / resultAspect);
+        drawX = cropInfo.cropX;
+        drawY = cropInfo.cropY + Math.round((cropInfo.cropH - drawH) / 2);
+      } else {
+        drawW = cropInfo.cropW;
+        drawH = cropInfo.cropH;
+        drawX = cropInfo.cropX;
+        drawY = cropInfo.cropY;
+      }
+      resultCtx.drawImage(resultImg, drawX, drawY, drawW, drawH);
+      // 蒙版修图模式：对裁剪边缘做羽化处理 + 应用蒙版alpha通道
+      if (!isErase) {
+        // ★ 修复叠加bug：蒙版修图必须应用蒙版alpha通道，不能仅做边缘羽化
+        // 否则裁剪区域内蒙版外的区域也会显示AI结果，产生叠加效果
+        
+        // 1) 先对裁剪边缘做羽化处理
+        const edgeFeather = 24;
+        const patchData = resultCtx.getImageData(0, 0, origW, origH);
+        const cropRight = cropInfo.cropX + cropInfo.cropW - 1;
+        const cropBottom = cropInfo.cropY + cropInfo.cropH - 1;
+        for (let y = cropInfo.cropY; y <= cropBottom; y++) {
+          for (let x = cropInfo.cropX; x <= cropRight; x++) {
+            const idx = (y * origW + x) * 4 + 3;
+            const edgeDistance = Math.min(
+              x - cropInfo.cropX,
+              y - cropInfo.cropY,
+              cropRight - x,
+              cropBottom - y
+            );
+            if (edgeDistance < edgeFeather) {
+              patchData.data[idx] = Math.min(
+                patchData.data[idx],
+                Math.max(0, Math.round((edgeDistance / edgeFeather) * 255))
+              );
             }
-            
-            // 2) 应用蒙版alpha通道：仅蒙版白色区域显示AI结果，蒙版黑色区域保持原图
-            const WHITE_START = 160;
-            const BLACK_START = 4;
-            for (let i = 0; i < maskData.data.length; i += 4) {
-              const maskValue = maskData.data[i]; // R channel (模糊后)
-              let maskAlpha: number;
-              if (maskValue >= WHITE_START) {
-                maskAlpha = 255;
-              } else if (maskValue <= BLACK_START) {
-                maskAlpha = 0;
-              } else {
-                maskAlpha = Math.round(((maskValue - BLACK_START) / (WHITE_START - BLACK_START)) * 255);
-              }
-              // 取蒙版alpha和边缘羽化alpha的较小值，确保蒙版外区域完全透明
-              const currentAlpha = patchData.data[i + 3];
-              patchData.data[i + 3] = Math.min(currentAlpha, maskAlpha);
-            }
-            
-            resultCtx.putImageData(patchData, 0, 0);
-            ctx.drawImage(resultCanvas, 0, 0);
-            return canvas.toDataURL('image/png');
           }
-        } else {
-          // 全图策略：结果图像是完整尺寸
-          resultCtx.drawImage(resultImg, 0, 0, origW, origH);
         }
-
-        // 获取生成结果的像素数据
-        const resultImageData = resultCtx.getImageData(0, 0, origW, origH);
-
-        // 5. 应用蒙版作为 alpha 通道（IOPaint sd_mask_blur 风格）
-        // 模糊后的蒙版提供更平滑的边界过渡
-        // 擦除模式：WHITE_START=210, BLACK_START=24 → 保留更多原图边界
-        // 蒙版模式：WHITE_START=160, BLACK_START=4 → 更自然的过渡边界
-        const WHITE_START = isErase ? 210 : 160;
-        const BLACK_START = isErase ? 24 : 4;
+        
+        // 2) 应用蒙版alpha通道：仅蒙版白色区域显示AI结果，蒙版黑色区域保持原图
+        const WHITE_START = 160;
+        const BLACK_START = 4;
         for (let i = 0; i < maskData.data.length; i += 4) {
           const maskValue = maskData.data[i]; // R channel (模糊后)
-          let alpha: number;
+          let maskAlpha: number;
           if (maskValue >= WHITE_START) {
-            alpha = 255;
+            maskAlpha = 255;
           } else if (maskValue <= BLACK_START) {
-            alpha = 0;
+            maskAlpha = 0;
           } else {
-            alpha = Math.round(((maskValue - BLACK_START) / (WHITE_START - BLACK_START)) * 255);
+            maskAlpha = Math.round(((maskValue - BLACK_START) / (WHITE_START - BLACK_START)) * 255);
           }
-          resultImageData.data[i + 3] = alpha;
+          // 取蒙版alpha和边缘羽化alpha的较小值，确保蒙版外区域完全透明
+          const currentAlpha = patchData.data[i + 3];
+          patchData.data[i + 3] = Math.min(currentAlpha, maskAlpha);
         }
-        resultCtx.putImageData(resultImageData, 0, 0);
-
-        // 6. 将蒙版化的生成结果覆盖到原图上
+        
+        resultCtx.putImageData(patchData, 0, 0);
         ctx.drawImage(resultCanvas, 0, 0);
-
-        // 7. 输出结果
         return canvas.toDataURL('image/png');
-      }, []);
+      }
+    } else {
+      // 全图策略：结果图像是完整尺寸
+      resultCtx.drawImage(resultImg, 0, 0, origW, origH);
+    }
+
+    // 获取生成结果的像素数据
+    const resultImageData = resultCtx.getImageData(0, 0, origW, origH);
+
+    // 5. 应用蒙版作为 alpha 通道（IOPaint sd_mask_blur 风格）
+    // 模糊后的蒙版提供更平滑的边界过渡
+    // 擦除模式：WHITE_START=210, BLACK_START=24 → 保留更多原图边界
+    // 蒙版模式：WHITE_START=160, BLACK_START=4 → 更自然的过渡边界
+    const WHITE_START = isErase ? 210 : 160;
+    const BLACK_START = isErase ? 24 : 4;
+    for (let i = 0; i < maskData.data.length; i += 4) {
+      const maskValue = maskData.data[i]; // R channel (模糊后)
+      let alpha: number;
+      if (maskValue >= WHITE_START) {
+        alpha = 255;
+      } else if (maskValue <= BLACK_START) {
+        alpha = 0;
+      } else {
+        alpha = Math.round(((maskValue - BLACK_START) / (WHITE_START - BLACK_START)) * 255);
+      }
+      resultImageData.data[i + 3] = alpha;
+    }
+    resultCtx.putImageData(resultImageData, 0, 0);
+
+    // 6. 将蒙版化的生成结果覆盖到原图上
+    ctx.drawImage(resultCanvas, 0, 0);
+
+    // 7. 输出结果
+    return canvas.toDataURL('image/png');
+  }, []);
 
   // 加载图像辅助函数
   const loadImage = (src: string): Promise<HTMLImageElement> => {
@@ -5499,7 +5508,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     if (!canvasGenModel && canvasGenModels.length > 0) {
       setCanvasGenModel(`${canvasGenModels[0].providerId}::${canvasGenModels[0].id}`);
     }
-  }, [showCanvasGenerator, canvasGenFrameId, onImagesChange, canvasGenModel, canvasGenModels]);
+  }, [showCanvasGenerator, canvasGenFrameId, images, zoom, viewOffset, onImagesChange, canvasGenModel, canvasGenModels]);
 
   const handleCanvasGenerate = useCallback(async () => {
     if (!canvasGenPrompt.trim() || canvasGenGenerating) return;
@@ -5604,13 +5613,41 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           } catch {}
           return savedUrl;
         }));
-        const nextImages = applyCanvasGenerationResults(
-          imagesRef.current, currentFrameId, savedUrls,
-          (frame, url) => ({ ...frame, url, isProcessingPlaceholder: false, processing: undefined, prompt: canvasGenPrompt, modelName: data.usedModel || data.modelName || canvasGenPureModel, apiProvider: data.usedProviderId || data.providerName }),
-          (frame, url, index) => ({ id: `canvas-gen-${Date.now()}-${index}`, url, x: frame ? frame.x + frame.width + 20 + index * (canvasGenFrameWidth + 20) : 100, y: frame?.y ?? 100, width: canvasGenFrameWidth, height: canvasGenFrameHeight, prompt: canvasGenPrompt, modelName: data.usedModel || data.modelName || canvasGenPureModel, apiProvider: data.usedProviderId || data.providerName } as CanvasImage),
-        );
-        imagesRef.current = nextImages;
-        onImagesChange(nextImages);
+        // Replace the processing frame with the actual images
+        const newImages: CanvasImage[] = [];
+        for (let i = 0; i < savedUrls.length; i++) {
+          if (i === 0 && currentFrameId) {
+            // Replace the placeholder frame with the first result
+            onImagesChange(images.map(img => {
+              if (img.id === currentFrameId) {
+                return { ...img, url: savedUrls[i], isProcessingPlaceholder: false, processing: undefined, prompt: canvasGenPrompt,
+                  modelName: data.usedModel || data.modelName || (canvasGenModel?.includes('::') ? canvasGenModel.split('::')[1] : canvasGenModel),
+                  apiProvider: data.usedProviderId || data.providerName,
+                };
+              }
+              return img;
+            }));
+          } else {
+            // Add additional images next to the frame
+            const pos = canvasGenFramePos || { x: 100, y: 100 };
+            newImages.push({
+              id: `canvas-gen-${Date.now()}-${i}`,
+              url: savedUrls[i],
+              x: pos.x + (i * 320),
+              y: pos.y,
+              width: 300,
+              height: 300,
+              prompt: canvasGenPrompt,
+              modelName: data.usedModel || data.modelName || (canvasGenModel?.includes('::') ? canvasGenModel.split('::')[1] : canvasGenModel),
+              apiProvider: data.usedProviderId || data.providerName,
+            });
+          }
+        }
+        if (newImages.length > 0) {
+          setTimeout(() => {
+            onImagesChange([...imagesRef.current, ...newImages]);
+          }, 100);
+        }
         setCanvasGenGenerating(false);
         // 设置预览URL，保持面板打开让用户查看结果
         if (savedUrls[0]) {
@@ -5723,14 +5760,47 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       }
 
       if (validUrls.length > 0) {
-        const completedPollData = lastPollData as Record<string, unknown> | null;
-        const nextImages = applyCanvasGenerationResults(
-          imagesRef.current, currentFrameId, validUrls,
-          (frame, url) => ({ ...frame, url, isProcessingPlaceholder: false, processing: undefined, prompt: canvasGenPrompt, model: canvasGenPureModel, quality: canvasGenQuality, aspectRatio: canvasGenAspectRatio, modelName: typeof completedPollData?.modelName === 'string' ? completedPollData.modelName : canvasGenPureModel, apiProvider: typeof completedPollData?.providerName === 'string' ? completedPollData.providerName : undefined }),
-          (frame, url, index) => ({ id: `gen-result-${Date.now()}-${index}`, url, x: frame ? frame.x + frame.width + 20 + index * (canvasGenFrameWidth + 20) : 100, y: frame?.y ?? 100, width: canvasGenFrameWidth, height: canvasGenFrameHeight, prompt: canvasGenPrompt, model: canvasGenPureModel, quality: canvasGenQuality, aspectRatio: canvasGenAspectRatio, modelName: typeof completedPollData?.modelName === 'string' ? completedPollData.modelName : canvasGenPureModel, apiProvider: typeof completedPollData?.providerName === 'string' ? completedPollData.providerName : undefined } as CanvasImage),
-        );
-        imagesRef.current = nextImages;
-        onImagesChange(nextImages);
+        // Replace the placeholder frame with the first result
+        if (currentFrameId) {
+          onImagesChange(imagesRef.current.map(img => {
+            if (img.id === currentFrameId) {
+              return {
+                ...img,
+                url: validUrls[0],
+                isProcessingPlaceholder: false as const,
+                processing: undefined as string | undefined,
+                prompt: canvasGenPrompt,
+                model: canvasGenPureModel || (canvasGenModel?.includes('::') ? canvasGenModel.split('::').pop()! : canvasGenModel),
+                quality: canvasGenQuality,
+                aspectRatio: canvasGenAspectRatio,
+                modelName: lastPollData?.modelName || canvasGenPureModel || canvasGenModel,
+                apiProvider: lastPollData?.providerName || '',
+              } as CanvasImage;
+            }
+            return img;
+          }));
+        }
+        // If multiple results, add the rest as new images to the right
+        if (validUrls.length > 1) {
+          const frameImg = imagesRef.current.find(img => img.id === currentFrameId);
+          const baseX = frameImg ? frameImg.x + frameImg.width + 20 : 100;
+          const baseY = frameImg ? frameImg.y : 100;
+          const additionalImages: CanvasImage[] = validUrls.slice(1).map((url, idx) => ({
+            id: `gen-result-${Date.now()}-${idx}`,
+            url,
+            x: baseX + idx * (canvasGenFrameWidth + 20),
+            y: baseY,
+            width: canvasGenFrameWidth,
+            height: canvasGenFrameHeight,
+            prompt: canvasGenPrompt,
+            model: canvasGenPureModel || (canvasGenModel?.includes('::') ? canvasGenModel.split('::').pop()! : canvasGenModel),
+            quality: canvasGenQuality,
+            aspectRatio: canvasGenAspectRatio,
+            modelName: lastPollData?.modelName || canvasGenPureModel || canvasGenModel,
+            apiProvider: lastPollData?.providerName || '',
+          } as CanvasImage));
+          onImagesChange([...imagesRef.current, ...additionalImages]);
+        }
         // 设置面板预览框的结果
         setCanvasGenPreviewUrl(validUrls[0]);
         setCanvasGenProgress(100);
@@ -5759,7 +5829,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     } finally {
       setCanvasGenGenerating(false);
     }
-  }, [canvasGenPrompt, canvasGenGenerating, canvasGenFrameId, viewOffset.x, viewOffset.y, zoom, onImagesChange, images, canvasGenModel, canvasGenNegativePrompt, canvasGenAspectRatio, canvasGenResolution, canvasGenQuality, canvasGenCount, canvasGenRefImages]);
+  }, [canvasGenPrompt, canvasGenNegativePrompt, canvasGenModel, canvasGenAspectRatio, canvasGenResolution, canvasGenQuality, canvasGenCount, canvasGenRefImages, canvasGenGenerating, canvasGenFrameId, images, onImagesChange]);
 
   // Update frame position when images change
   useEffect(() => {
@@ -5804,37 +5874,39 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
   // ============ ChatCanvas 批注功能 ============
 
-  useCallback((canvasX: number, canvasY: number) => {
-        // 碰撞检测：找到点击位置对应的图片
-        const targetId = hitTestAnnotationTarget(canvasX, canvasY, images);
-        if (!targetId) {
-          // 点击空白区域，提示用户
-          return;
-        }
-        // 创建批注并进入编辑状态
-        const ann = createAnnotation(canvasX, canvasY, '', targetId);
-        // 计算点击区域（用于告诉AI修改位置）
-        const targetImg = images.find(i => i.id === targetId);
-        if (targetImg) {
-          ann.region = computeAnnotationRegion(canvasX, canvasY, targetImg.x, targetImg.y, targetImg.width, targetImg.height);
-        }
-        annotationIdCounter.current += 1;
-        setAnnotations(prev => [...prev, ann]);
-        setEditingAnnotationId(ann.id);
-      }, [images]);
+  /** 批注模式：点击画布时创建批注Pin */
+  const handleAnnotationCanvasClick = useCallback((canvasX: number, canvasY: number) => {
+    // 碰撞检测：找到点击位置对应的图片
+    const targetId = hitTestAnnotationTarget(canvasX, canvasY, images);
+    if (!targetId) {
+      // 点击空白区域，提示用户
+      return;
+    }
+    // 创建批注并进入编辑状态
+    const ann = createAnnotation(canvasX, canvasY, '', targetId);
+    // 计算点击区域（用于告诉AI修改位置）
+    const targetImg = images.find(i => i.id === targetId);
+    if (targetImg) {
+      ann.region = computeAnnotationRegion(canvasX, canvasY, targetImg.x, targetImg.y, targetImg.width, targetImg.height);
+    }
+    annotationIdCounter.current += 1;
+    setAnnotations(prev => [...prev, ann]);
+    setEditingAnnotationId(ann.id);
+  }, [images]);
 
-  useCallback((annotationId: string, text: string) => {
-        if (!text.trim()) {
-          // 空文字，删除批注
-          setAnnotations(prev => prev.filter(a => a.id !== annotationId));
-          setEditingAnnotationId(null);
-          return;
-        }
-        setAnnotations(prev => prev.map(a =>
-          a.id === annotationId ? { ...a, text: text.trim(), status: 'pending' as const } : a
-        ));
-        setEditingAnnotationId(null);
-      }, []);
+  /** 提交批注文字（回车或点击提交按钮） */
+  const submitAnnotationText = useCallback((annotationId: string, text: string) => {
+    if (!text.trim()) {
+      // 空文字，删除批注
+      setAnnotations(prev => prev.filter(a => a.id !== annotationId));
+      setEditingAnnotationId(null);
+      return;
+    }
+    setAnnotations(prev => prev.map(a =>
+      a.id === annotationId ? { ...a, text: text.trim(), status: 'pending' as const } : a
+    ));
+    setEditingAnnotationId(null);
+  }, []);
 
   /** 执行单条批注：调用 /api/edit 修图 */
   const executeAnnotation = useCallback(async (annotation: CanvasAnnotation): Promise<AnnotationExecutionResult> => {
@@ -6053,41 +6125,44 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     }
     // TypeScript exhaustiveness — all code paths above return
     return { status: 'failed', aiReply: '未知错误' };
-  }, [getCurrentModel, images, onImagesChange]);
+  }, [images, onImagesChange]);
 
-  useCallback(async () => {
-        const pendingAnnotations = annotations.filter(a => a.status === 'pending' && a.text.trim());
-        if (pendingAnnotations.length === 0) return;
+  /** 执行所有 pending 批注 */
+  const executeAllAnnotations = useCallback(async () => {
+    const pendingAnnotations = annotations.filter(a => a.status === 'pending' && a.text.trim());
+    if (pendingAnnotations.length === 0) return;
 
-        // 按图片分组，同图批注串行执行
-        const grouped = new Map<string, CanvasAnnotation[]>();
-        for (const ann of pendingAnnotations) {
-          const key = ann.targetImageId || 'none';
-          if (!grouped.has(key)) grouped.set(key, []);
-          grouped.get(key)!.push(ann);
+    // 按图片分组，同图批注串行执行
+    const grouped = new Map<string, CanvasAnnotation[]>();
+    for (const ann of pendingAnnotations) {
+      const key = ann.targetImageId || 'none';
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key)!.push(ann);
+    }
+
+    // 不同图片的批注可以并行
+    const promises: Promise<void>[] = [];
+    for (const [, groupAnns] of grouped) {
+      promises.push((async () => {
+        for (const ann of groupAnns) {
+          await executeAnnotation(ann);
         }
+      })());
+    }
+    await Promise.all(promises);
+  }, [annotations, executeAnnotation]);
 
-        // 不同图片的批注可以并行
-        const promises: Promise<void>[] = [];
-        for (const [, groupAnns] of grouped) {
-          promises.push((async () => {
-            for (const ann of groupAnns) {
-              await executeAnnotation(ann);
-            }
-          })());
-        }
-        await Promise.all(promises);
-      }, [annotations, executeAnnotation]);
+  /** 删除批注 */
+  const deleteAnnotation = useCallback((id: string) => {
+    setAnnotations(prev => prev.filter(a => a.id !== id));
+    if (editingAnnotationId === id) setEditingAnnotationId(null);
+  }, [editingAnnotationId]);
 
-  useCallback((id: string) => {
-        setAnnotations(prev => prev.filter(a => a.id !== id));
-        if (editingAnnotationId === id) setEditingAnnotationId(null);
-      }, [editingAnnotationId]);
-
-  useCallback(() => {
-        setAnnotationMode(false);
-        setEditingAnnotationId(null);
-      }, []);
+  /** 退出批注模式 */
+  const exitAnnotationMode = useCallback(() => {
+    setAnnotationMode(false);
+    setEditingAnnotationId(null);
+  }, []);
 
   /** 提交批注输入框内容 */
   const submitAnnotationInput = useCallback(() => {
@@ -6286,7 +6361,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         } : a
       ));
     }
-  }, [annotations, images, getCurrentModel, onImagesChange]);
+  }, [annotations, images, getCurrentModel]);
 
   // Clean up pending annotations when exiting annotation mode
   useEffect(() => {
@@ -6303,9 +6378,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   }, [annotationMode]);
 
   // 1. UPSCALE - floating panel with size options
-  useCallback((mult: number) => {
-        setUpscaleMultiplier(mult);
-      }, []);
+  const handleUpscaleMultiplierChange = useCallback((mult: number) => {
+    setUpscaleMultiplier(mult);
+  }, []);
 
   // Compute target dimensions from preset (2x/4x/8x multiplier based on actual image size)
   const getUpscaleTargetDimensions = useCallback((origW: number, origH: number, preset: '2k' | '4k' | '8k') => {
@@ -6339,7 +6414,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       '正在提交放大任务...'
     );
     setIsEditProcessing(true);
-    exitEditModeRef.current();
+    exitEditMode();
     try {
       const modelInfo = getCurrentModel();
       // Determine actual engine for upscale from preference
@@ -6529,7 +6604,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     }
     setIsEditProcessing(false);
     setActiveTool('none');
-  }, [getActiveImageData, upscaleActualW, upscaleActualH, getUpscaleTargetDimensions, upscalePreset, createProcessingFrameRightOf, getCurrentModel, upscaleEnginePref, updateProcessingFrame, upscaleMode, upscaylSelectedModel, getCurrentProviderId, removeProcessingFrame, pollForResult, completeProcessingFrame]);
+  }, [selectedImageData, upscalePreset, upscaleMode, upscaleActualW, upscaleActualH, getApiKey, getCurrentModel, pollForResult, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, awaitStableImageUrl, getUpscaleTargetDimensions]);
 
   // Engine selection helper: if pref saved, run directly; else open dialog
   const triggerWithEngine = useCallback((tool: 'upscale'|'removebg'|'svg'|'segment', doExecute: (engine: 'auto'|'ai'|'local') => void) => {
@@ -6573,7 +6648,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     };
     imgEl.src = img.url;
     });
-  }, [getActiveImageData, triggerWithEngine]);
+  }, [selectedImageData, triggerWithEngine]);
 
   // 2. REMOVE BACKGROUND - auto, result to the right
   const handleRemoveBackground = useCallback(async () => {
@@ -6740,7 +6815,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       alert(`操作失败: ${e instanceof Error ? e.message : '请重试'}`);
     }
     setIsEditProcessing(false);
-  }, [getActiveImageData, createProcessingFrameRightOf, getCurrentModel, updateProcessingFrame, getCurrentProviderId, removeBgModelId, removeBgEngine, completeProcessingFrame, onImagesChange]);
+  }, [selectedImageData, getApiKey, getCurrentModel, pollForResult, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, onImagesChange]);
 
   // 3. SVG智能描摹 - Sharp + VTracer (彩色) / ImageMagick + Potrace (黑白) / Sharp (压缩/缩略图)
   const handleOpenSvgTrace = useCallback(() => {
@@ -6995,7 +7070,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     }
     setIsSvgTraceProcessing(false);
     setShowSvgTracePanel(false);
-  }, [getActiveImageData, getCurrentModel, svgTraceMode, createProcessingFrameRightOf, svgTraceEngine, updateProcessingFrame, svgTraceQualityPreset, svgTraceCornerThreshold, svgTraceLengthThreshold, svgTraceHierarchical, completeProcessingFrame, removeProcessingFrame, svgTraceColorPrecision, svgTraceFilterSpeckle, svgTraceCurveMode, svgTraceBwThreshold, svgTraceBwTurdSize, svgTraceBwInvert]);
+  }, [getActiveImageData, svgTraceMode, svgTraceEngine, svgTraceQualityPreset, svgTraceColorPrecision, svgTraceFilterSpeckle, svgTraceCornerThreshold, svgTraceLengthThreshold, svgTraceCurveMode, svgTraceHierarchical, svgTraceBwThreshold, svgTraceBwTurdSize, svgTraceBwInvert, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, removeProcessingFrame]);
 
   // Multi-angle - Lovart-style subject/camera mode, result to the right
   const handleOpenMultiAngle = useCallback(() => {
@@ -7090,7 +7165,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     } finally {
       setIsMultiAngleProcessing(false);
     }
-  }, [getActiveImageData, createProcessingFrameRightOf, getCurrentModel, updateProcessingFrame, multiAngleMode, multiAngleRotation, multiAngleTilt, multiAngleZoom, getCurrentProviderId, pollForResult, completeProcessingFrame, removeProcessingFrame]);
+  }, [selectedImageData, getApiKey, getCurrentModel, pollForResult, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, removeProcessingFrame, multiAngleMode, multiAngleRotation, multiAngleTilt, multiAngleZoom]);
 
   // Edit elements - open semantic layer editor directly
   const handleEditElements = useCallback(async () => {
@@ -7100,7 +7175,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     setPsdEditorImageUrl(img.url);
     setPsdEditorMode('studio');
     setShowPsdEditor(true);
-  }, [getActiveImageData]);
+  }, [selectedImageData]);
 
   const handleOpen3D = useCallback((fromToolbar?: boolean) => {
     const providers = getThreeDProviders();
@@ -7156,7 +7231,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       const sourceImage = img || selectedImageData;
       const placeholderId = sourceImage
         ? createProcessingFrameRightOf(sourceImage, '图转3D中', sourceImage.width, sourceImage.height, '正在创建图转3D任务...')
-        : createProcessingFrameRightOf({ id: 'text-to-3d-source', url: '', x: 100, y: 100, width: 300, height: 200 }, '图转3D中', 300, 200, '正在创建文生3D任务...');
+        : createProcessingFrameRightOf({ x: 100, y: 100, width: 300, height: 200 } as any, '图转3D中', 300, 200, '正在创建文生3D任务...');
       updateProcessingFrame(placeholderId, { progress: 16, status: '正在提交3D转换参数...' });
       // 关闭3D弹窗，回到画布查看进度
       setShow3DModal(false);
@@ -7205,7 +7280,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       if (data.taskId) {
         // Async task - need to poll for result
         updateProcessingFrame(placeholderId, { progress: 25, status: '3D 任务已提交，等待 AI 生成...' });
-        const maxAttempts = 1440; // 最多轮询1440次（7200秒/120分钟，兼容3D等超慢速API）
+        const maxAttempts = 300; // 最多轮询300次（600秒，兼容token link等慢速API）
         for (let i = 0; i < maxAttempts; i++) {
           // 动态更新进度和状态
           const elapsed = (i + 1) * 5;
@@ -7290,7 +7365,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       alert('图生 3D 调用失败，请检查 API 或本地模型服务');
       setThreeDProgress(null);
     }
-  }, [getActiveImageData, threeDSingleImageUrl, selectedImageData, threeDMode, threeDPrompt, threeDMultiImages, getCurrentModel, getThreeDProviders, threeDBackend, threeDProviderId, createProcessingFrameRightOf, updateProcessingFrame, threeDType, threeDQuality, threeDTexture, threeDFormat, threeDEnablePBR, threeDFaceCount, threeDPose, threeDLocalEndpoint, threeDLocalModel, completeProcessingFrame, removeProcessingFrame, renderEditElementsPreview]);
+  }, [selectedImageData, getThreeDProviders, threeDProviderId, threeDBackend, threeDMode, threeDMultiImages, threeDPrompt, threeDType, threeDQuality, threeDTexture, threeDFormat, threeDEnablePBR, threeDFaceCount, threeDPose, threeDLocalEndpoint, threeDLocalModel, renderEditElementsPreview, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, removeProcessingFrame]);
 
   // 4. ERASE - floating window mode
   const handleOpenErase = useCallback(() => {
@@ -7304,7 +7379,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     setEditCanvasZoom(1);
     setEditCanvasPan({ x: 0, y: 0 });
     setMaskKeyword('');
-  }, [getActiveImageData]);
+  }, [selectedImageData]);
 
   // 参数调色处理
   const colorAdjustingRef = useRef(false);
@@ -7318,7 +7393,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     setColorSaturation(0);
     setColorTemperature(0);
     setColorHue(0);
-  }, [getActiveImageData]);
+  }, [selectedImageData]);
 
   const applyColorAdjust = useCallback(async () => {
     if (colorAdjustingRef.current) return;
@@ -7357,7 +7432,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       colorAdjustingRef.current = false;
       setColorAdjustProcessing(false);
     }
-  }, [getActiveImageData, colorBrightness, colorContrast, colorSaturation, colorTemperature, colorHue, onImagesChange, images]);
+  }, [selectedImageData, colorBrightness, colorContrast, colorSaturation, colorTemperature, colorHue, images, onImagesChange]);
 
   const handleConfirmColorAdjust = applyColorAdjust;
 
@@ -7420,13 +7495,13 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     } finally {
       setIsGeneratingPanorama(false);
     }
-  }, [getActiveImageData, panoramaPrompt, getCurrentModel, createProcessingFrameRightOf, pollForResult]);
+  }, [selectedImageData, panoramaPrompt]);
 
   // 全景查看器
   const [panoramaViewerUrl, setPanoramaViewerUrl] = useState<string | null>(null);
-  useCallback((img: CanvasImage) => {
-        setPanoramaViewerUrl(img.url);
-      }, []);
+  const openPanoramaViewer = useCallback((img: CanvasImage) => {
+    setPanoramaViewerUrl(img.url);
+  }, []);
 
   // 5. MASK - floating window mode
   const handleOpenMask = useCallback(() => {
@@ -7440,7 +7515,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     setEditCanvasZoom(1);
     setEditCanvasPan({ x: 0, y: 0 });
     setMaskKeyword('');
-  }, [getActiveImageData]);
+  }, [selectedImageData]);
 
   // 6. EXPAND - 即梦风格方向性扩展
   const handleOpenExpand = useCallback(() => {
@@ -7452,65 +7527,65 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     // 重置方向性扩展 padding
     setExpandPadding({ top: 0, right: 0, bottom: 0, left: 0 });
     expandPaddingRef.current = { top: 0, right: 0, bottom: 0, left: 0 };
-  }, [getActiveImageData]);
+  }, [selectedImageData]);
 
   // 即梦风格扩展：拖拽控制点事件处理
-  useCallback((handle: string, e: React.MouseEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
-        setDraggingHandle(handle);
-        const startX = e.clientX;
-        const startY = e.clientY;
-        const startPadding = { ...expandPaddingRef.current };
+  const handleExpandDragStart = useCallback((handle: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDraggingHandle(handle);
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const startPadding = { ...expandPaddingRef.current };
 
-        const handleMouseMove = (ev: MouseEvent) => {
-          if (isEventFromOverlay(ev)) return;
-          const dx = ev.clientX - startX;
-          const dy = ev.clientY - startY;
-          // 屏幕像素 → 原始像素
-          const origImg = images.find(i => i.id === editImageId);
-          if (!origImg) return;
-          const origW = origImg.originalWidth || Math.round(origImg.width);
-          const origH = origImg.originalHeight || Math.round(origImg.height);
-          const displayW = origImg.width;
-          const displayH = origImg.height;
-          const scaleX = origW / (displayW * zoom);
-          const scaleY = origH / (displayH * zoom);
+    const handleMouseMove = (ev: MouseEvent) => {
+      if (isEventFromOverlay(ev)) return;
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+      // 屏幕像素 → 原始像素
+      const origImg = images.find(i => i.id === editImageId);
+      if (!origImg) return;
+      const origW = origImg.originalWidth || Math.round(origImg.width);
+      const origH = origImg.originalHeight || Math.round(origImg.height);
+      const displayW = origImg.width;
+      const displayH = origImg.height;
+      const scaleX = origW / (displayW * zoom);
+      const scaleY = origH / (displayH * zoom);
 
-          const newPadding = { ...startPadding };
-          const step = 8; // 对齐到8的倍数
+      const newPadding = { ...startPadding };
+      const step = 8; // 对齐到8的倍数
 
-          // 根据拖拽方向更新 padding
-          if (handle === 'top' || handle === 'top-left' || handle === 'top-right') {
-            const delta = Math.round((-dy * scaleY) / step) * step;
-            newPadding.top = Math.max(0, startPadding.top + delta);
-          }
-          if (handle === 'bottom' || handle === 'bottom-left' || handle === 'bottom-right') {
-            const delta = Math.round((dy * scaleY) / step) * step;
-            newPadding.bottom = Math.max(0, startPadding.bottom + delta);
-          }
-          if (handle === 'left' || handle === 'top-left' || handle === 'bottom-left') {
-            const delta = Math.round((-dx * scaleX) / step) * step;
-            newPadding.left = Math.max(0, startPadding.left + delta);
-          }
-          if (handle === 'right' || handle === 'top-right' || handle === 'bottom-right') {
-            const delta = Math.round((dx * scaleX) / step) * step;
-            newPadding.right = Math.max(0, startPadding.right + delta);
-          }
+      // 根据拖拽方向更新 padding
+      if (handle === 'top' || handle === 'top-left' || handle === 'top-right') {
+        const delta = Math.round((-dy * scaleY) / step) * step;
+        newPadding.top = Math.max(0, startPadding.top + delta);
+      }
+      if (handle === 'bottom' || handle === 'bottom-left' || handle === 'bottom-right') {
+        const delta = Math.round((dy * scaleY) / step) * step;
+        newPadding.bottom = Math.max(0, startPadding.bottom + delta);
+      }
+      if (handle === 'left' || handle === 'top-left' || handle === 'bottom-left') {
+        const delta = Math.round((-dx * scaleX) / step) * step;
+        newPadding.left = Math.max(0, startPadding.left + delta);
+      }
+      if (handle === 'right' || handle === 'top-right' || handle === 'bottom-right') {
+        const delta = Math.round((dx * scaleX) / step) * step;
+        newPadding.right = Math.max(0, startPadding.right + delta);
+      }
 
-          expandPaddingRef.current = newPadding;
-          setExpandPadding(newPadding);
-        };
+      expandPaddingRef.current = newPadding;
+      setExpandPadding(newPadding);
+    };
 
-        const handleMouseUp = () => {
-          setDraggingHandle(null);
-          window.removeEventListener('mousemove', handleMouseMove);
-          window.removeEventListener('mouseup', handleMouseUp);
-        };
+    const handleMouseUp = () => {
+      setDraggingHandle(null);
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
 
-        window.addEventListener('mousemove', handleMouseMove);
-        window.addEventListener('mouseup', handleMouseUp);
-      }, [isEventFromOverlay, images, zoom, editImageId]);
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  }, [images, editImageId, zoom]);
 
   // 快捷扩展：等比扩展四边
   const handleExpandEqualPadding = useCallback((pixels: number) => {
@@ -7520,12 +7595,12 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   }, []);
 
   // 快捷扩展：单方向扩展
-  useCallback((direction: 'top' | 'right' | 'bottom' | 'left', pixels: number) => {
-        const newPadding = { ...expandPaddingRef.current };
-        newPadding[direction] = pixels;
-        expandPaddingRef.current = newPadding;
-        setExpandPadding(newPadding);
-      }, []);
+  const handleExpandDirection = useCallback((direction: 'top' | 'right' | 'bottom' | 'left', pixels: number) => {
+    const newPadding = { ...expandPaddingRef.current };
+    newPadding[direction] = pixels;
+    expandPaddingRef.current = newPadding;
+    setExpandPadding(newPadding);
+  }, []);
 
   // 快捷扩展：扩展到指定比例（居中放置原图）
   const handleExpandToRatio = useCallback((ratioW: number, ratioH: number) => {
@@ -7564,7 +7639,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     setCropTop(0);
     setCropWidth(img.originalWidth || Math.round(img.width));
     setCropHeight(img.originalHeight || Math.round(img.height));
-  }, [getActiveImageData]);
+  }, [selectedImageData]);
 
   // 8. DOWNLOAD - popup with PNG/SVG/PSD
   const handleOpenDownload = useCallback(() => {
@@ -7573,6 +7648,16 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   }, []);
 
   // Edit mode handlers
+  const startEditMode = (mode: EditMode, imageId: string) => {
+    setEditMode(mode);
+    setEditImageId(imageId);
+    setEditStrokes([]);
+    setCurrentStroke([]);
+    setCropRect(null);
+    currentStrokeRef.current = [];
+    isDrawingRef.current = false;
+  };
+
   const exitEditMode = useCallback(() => {
     setEditMode('none');
     setEditImageId(null);
@@ -7591,8 +7676,6 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     setStrokesVersion(v => v + 1);
     currentStrokeRef.current = [];
   }, []);
-  useEffect(() => { exitEditModeRef.current = exitEditMode; }, [exitEditMode]);
-
 
   // Edit confirm for erase/mask/expand/crop
   const handleEditConfirm = useCallback(async () => {
@@ -7731,9 +7814,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           throw new Error(`服务器错误 (${res.status})，请稍后重试`);
         }
 
-        let data: ImageEditResponse;
+        let data: any;
         try {
-          data = parseImageEditResponse(await res.json());
+          data = await res.json();
         } catch {
           console.error('[inpaint] JSON parse failed, response starts with:', (await res.text().catch(() => '')).substring(0, 100));
           throw new Error('服务器返回了非预期格式，请稍后重试');
@@ -7741,7 +7824,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         if (!data.success) {
           console.error('Image edit failed:', data.error);
           // 后端已根据 editMode 返回不同错误消息
-          const errorMessage = translateErrorFrontend(String(data.error ?? '编辑失败'));
+          const errorMessage = translateErrorFrontend(data.error || '编辑失败');
           updateProcessingFrame(placeholderId, {
             progress: -1,
             status: `❌ ${errorMessage}`,
@@ -7751,7 +7834,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           return;
         }
 
-        const syncResultUrl: string | undefined = data.imageUrl; // 异步擦除超时后返回的合成信息
+        const syncResultUrl: string | undefined = data.imageUrl;
+        const cropInfo = data.cropInfo || null;
+        const compositeInfo = data.compositeInfo || null; // 异步擦除超时后返回的合成信息
 
         if (syncResultUrl) {
           const engineLabel = data.engine?.includes('iopaint') ? 'IOPaint 正在处理' : data.engine === 'local-erase' ? '本地修复完成' : '正在载入编辑结果';
@@ -7849,15 +7934,15 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           }),
         });
 
-        let data: ImageEditResponse;
+        let data: any;
         try {
           const resText = await res.text();
-          try { data = parseImageEditResponse(JSON.parse(resText)); } catch { data = { success: false, error: resText.substring(0, 200) }; }
+          try { data = JSON.parse(resText); } catch { data = { success: false, error: resText.substring(0, 200) }; }
         } catch {
           data = { success: false, error: `HTTP ${res.status}` };
         }
         if (!data.success) {
-          alert(translateErrorFrontend(String(data.error ?? '扩展失败')));
+          alert(translateErrorFrontend(data.error || '扩展失败'));
           removeProcessingFrame(placeholderId);
           return;
         }
@@ -7888,7 +7973,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           try {
             const stableUrl = await awaitStableImageUrl(resultUrl);
             completeProcessingFrame(placeholderId, stableUrl, currentEditImg.width * (finalW / origW), currentEditImg.height * (finalH / origH), { originalWidth: finalW, originalHeight: finalH, modelName: modelInfo.apiDisplayName || modelInfo.model, apiProvider: modelInfo.providerName || '' }, 'edit');
-          } catch {
+          } catch (stableErr) {
             completeProcessingFrame(placeholderId, resultUrl, currentEditImg.width * (finalW / origW), currentEditImg.height * (finalH / origH), { originalWidth: finalW, originalHeight: finalH, modelName: modelInfo.apiDisplayName || modelInfo.model, apiProvider: modelInfo.providerName || '' }, 'edit');
           }
         } else {
@@ -7907,7 +7992,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     }
 
     exitEditMode();
-  }, [images, getCurrentModel, editMode, exitEditMode, editImageId, cropRect, createProcessingFrameRightOf, zoom, viewOffset.x, viewOffset.y, updateProcessingFrame, completeProcessingFrame, renderMaskFromStrokes, editStrokes.length, maskKeyword, editPrompt, getCurrentProviderId, eraseModelId, removeProcessingFrame, pollForResult, expandPadding]);
+  }, [editMode, editImageId, images, editStrokes, editPrompt, maskKeyword, expandPadding, brushSize, zoom, cropRect, onImagesChange, getCurrentModel, renderMaskFromStrokes, exitEditMode, viewOffset, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, removeProcessingFrame]);
 
   // Mask keyword confirm
   // Download handlers
@@ -8194,7 +8279,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     { label: '粘贴', shortcut: 'Ctrl+V', action: () => {} },
     { label: '放大', shortcut: 'Ctrl++', action: () => { setZoom(z => Math.min(5, z * 1.2)); } },
     { label: '缩小', shortcut: 'Ctrl+-', action: () => { setZoom(z => Math.max(0.1, z / 1.2)); } },
-    { label: '显示所有元素', shortcut: 'Shift+1', action: () => { if (images.length === 0) return; const minX = Math.min(...images.map(i => i.x)); const minY = Math.min(...images.map(i => i.y)); Math.max(...images.map(i => i.x + i.width)); Math.max(...images.map(i => i.y + i.height)); setViewOffset({ x: -minX * zoom + 50, y: -minY * zoom + 50 }); } },
+    { label: '显示所有元素', shortcut: 'Shift+1', action: () => { if (images.length === 0) return; const minX = Math.min(...images.map(i => i.x)); const minY = Math.min(...images.map(i => i.y)); const maxX = Math.max(...images.map(i => i.x + i.width)); const maxY = Math.max(...images.map(i => i.y + i.height)); setViewOffset({ x: -minX * zoom + 50, y: -minY * zoom + 50 }); } },
     { label: '缩放至100%', shortcut: 'Ctrl+0', action: () => { setZoom(1); setViewOffset({ x: 0, y: 0 }); } },
   ];
 
@@ -8358,7 +8443,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             const ext = isSvg ? 'svg' : (url.toLowerCase().includes('.webp') ? 'webp' : 'png');
             const name = `wujie_${String(idx + 1).padStart(3, '0')}_${(img.prompt || 'image').slice(0, 30).replace(/[\\/:*?"<>|]/g, '_')}.${ext}`;
             return { name, blob };
-          } catch {
+          } catch (e) {
             return null;
           }
         }));
@@ -8514,7 +8599,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           <div className={`absolute top-4 left-4 z-50 flex flex-col gap-1 min-w-[160px] p-2 rounded-xl ${isMonochrome ? 'bg-white border border-gray-200 shadow-lg' : 'bg-[#1a1a1a] border border-white/[0.12] shadow-2xl'} transition-all duration-200`}>
             {/* Logo header */}
             <div className="flex items-center gap-2 px-2 py-1.5">
-              <NextImage unoptimized width={1} height={1} src="/logo.png" alt="无界AI" className="w-6 h-6 object-contain rounded" />
+              <img src="/logo.png" alt="无界AI" className="w-6 h-6 object-contain rounded" />
               <span className={`text-sm font-bold ${isMonochrome ? 'text-gray-900' : 'text-foreground'}`}>无界AI</span>
             </div>
             {/* Divider */}
@@ -9006,7 +9091,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                 {image.isProcessingPlaceholder && image.processing ? (
                   <div className={`relative w-full h-full overflow-hidden border ${isMonochrome ? 'border-gray-200 bg-gray-100' : 'border-white/[0.14] bg-[#0f0f0f]'}`}>
                     {(image.processing.sourceUrl || image.url) && (
-                    <NextImage unoptimized width={1} height={1}                       src={image.processing.sourceUrl || image.url}
+                    <img
+                      src={image.processing.sourceUrl || image.url}
                       alt=""
                       className="absolute inset-0 w-full h-full object-cover blur-xl scale-110 opacity-40 pointer-events-none"
                       draggable={false}
@@ -9120,7 +9206,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                     </div>
                   </div>
                 ) : image.url ? (
-                  <NextImage unoptimized width={1} height={1}                     src={zoom > 0.5 || (image.width && image.width * zoom > THUMBNAIL_MAX) ? image.url : (image.thumbnailUrl || image.url)}
+                  <img
+                    src={zoom > 0.5 || (image.width && image.width * zoom > THUMBNAIL_MAX) ? image.url : (image.thumbnailUrl || image.url)}
                     alt={image.prompt ? image.prompt.replace(/^\[画布上下文[：:][^\]]*\]\s*/, '').substring(0, 60) : 'canvas image'}
                     className="w-full h-full object-cover pointer-events-none overflow-hidden"
                     draggable={false}
@@ -9447,12 +9534,12 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                 {/* Model & API info badge (bottom-left) */}
                 {(() => {
                   // 3D模型优先使用3D提供商信息
-                  const is3DImage = !!image.threeDModelInfo;
+                  const is3DImage = !!(image as any).threeDModelInfo;
                   const displayModelName = is3DImage
-                    ? (image.threeDModelInfo?.model3DName || image.modelName || '')
+                    ? ((image as any).threeDModelInfo?.model3DName || image.modelName || '')
                     : (image.modelName || '');
                   const rawApiProvider = is3DImage
-                    ? (image.threeDModelInfo?.providerName || image.apiProvider || '')
+                    ? ((image as any).threeDModelInfo?.providerName || image.apiProvider || '')
                     : (image.apiProvider || '');
                   const displayApiProvider = (() => {
                     // 1. 优先使用 apiProvider 直接值（后端返回的提供商名称）
@@ -9534,7 +9621,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                   const dashArray = conn.dashArray;
                   // Type icon from config
                   const typeConfig = RELATION_TYPE_CONFIG[conn.relationType];
-                  void typeConfig;
+                  const icon = typeConfig?.icon || '';
                   const midX = (fromX + toX) / 2;
                   const midY = (fromY + toY) / 2;
                   return (
@@ -9579,7 +9666,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                     const ty = frame.y + frame.height / 2;
                     const dx = tx - sx;
                     const dy = ty - sy;
-                    Math.sqrt(dx * dx + dy * dy);
+                    const dist = Math.sqrt(dx * dx + dy * dy);
                     return (
                       <g key={`proc-defs-${frame.id}`}>
                         {/* Gradient along the connection */}
@@ -9792,6 +9879,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             const gapX = 80;
             const outputX = lastRef.x + lastRef.width + gapX;
             const outputY = refImages[0].y;
+            const outputCenterX = outputX + outputFrameWidth / 2;
+            const outputCenterY = outputY + outputFrameHeight / 2;
 
             return (
               <>
@@ -9917,6 +10006,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             // 结果框位置：优先使用存储的位置，避免跟随源图片移动
             const resultX = (group.position.resultX || 0) + dragDx;
             const resultY = (group.position.resultY || 0) + dragDy;
+            const resultCenterX = resultX + resultW / 2;
+            const resultCenterY = resultY + resultH / 2;
 
             // Container bounds: include all source images + result placeholder + toolbar (apply drag offset)
             const resultFrameW = Math.max(resultW, 420);
@@ -9927,6 +10018,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
               { x: resultX, y: resultY, w: resultFrameW, h: resultH + toolbarH }
             ];
             const containerPad = 24;
+            // 参考图组下方需要额外空间显示类别标签
+            const leftPad = containerPad;
             const bottomPad = isRef ? 142 : containerPad;
             const containerMinX = Math.min(...allBounds.map(b => b.x)) - containerPad;
             const containerMinY = Math.min(...allBounds.map(b => b.y)) - containerPad - 40;
@@ -10056,6 +10149,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                 {/* Source image labels (R1, R2, ...) with bottom category tags */}
                 {srcImages.map(img => {
                   const imgCats = isRef ? (group.sourceCategories[img.id] || []) : [];
+                  const hasAnyCat = imgCats.length > 0;
                   return (
                   <div
                     key={`ref-label-${img.id}`}
@@ -10261,7 +10355,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                         </span>
                       </>
                     ) : group.resultPlaceholder.resultUrl ? (
-                      <NextImage unoptimized width={1} height={1}                         src={group.resultPlaceholder.resultUrl}
+                      <img
+                        src={group.resultPlaceholder.resultUrl}
                         className="w-full h-full object-cover rounded-[10px]"
                         alt="result"
                         draggable={false}
@@ -11048,7 +11143,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                       }}
                     >
                       {/* Image */}
-                      <NextImage unoptimized width={1} height={1}                         src={editImg.url}
+                      <img
+                        src={editImg.url}
                         alt="edit"
                         className="w-full h-full object-contain select-none"
                         draggable={false}
@@ -11430,7 +11526,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
               <div className="p-4 overflow-y-auto flex flex-col gap-4" style={{ maxHeight: '60vh' }}>
                 {/* 实时预览 - 使用CSS filter即时反馈 */}
                 <div className="w-full aspect-video rounded-lg overflow-hidden bg-black/40 flex items-center justify-center border border-[#333] relative">
-                  <NextImage unoptimized width={1} height={1}                     src={editImg.url}
+                  <img
+                    src={editImg.url}
                     alt="预览"
                     className="max-w-full max-h-full object-contain transition-all duration-100"
                     crossOrigin="anonymous"
@@ -12174,6 +12271,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         {editingAnnotationId && (() => {
           const ann = annotations.find(a => a.id === editingAnnotationId);
           if (!ann) return null;
+          const sx = ann.x * zoom + viewOffset.x;
+          const sy = ann.y * zoom + viewOffset.y;
           const panelLeft = Math.max(16, (window.innerWidth - 280) / 2);
           const panelTop = Math.max(60, (window.innerHeight - 260) / 2);
           return (
@@ -12238,7 +12337,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                         onMouseEnter={() => setAnnAtHighlightIdx(i)}
                       >
                         <div className="w-8 h-8 rounded overflow-hidden shrink-0 border border-white/10">
-                          <NextImage unoptimized width={1} height={1} src={item.url} alt={item.label || '参考图片'} className="w-full h-full object-cover" />
+                          <img src={item.url} alt={item.label || '参考图片'} className="w-full h-full object-cover" />
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className={`text-xs font-medium truncate ${isMonochrome ? 'text-gray-800' : 'text-text-bright'}`}>{item.label}</div>
@@ -12426,11 +12525,11 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                 <div className={`mt-1 rounded-xl shadow-lg overflow-hidden ${isMonochrome ? 'bg-white border border-gray-200' : 'bg-[#1a1a1a] border border-gold/30'}`}>
                   <div className="grid grid-cols-2 gap-0.5 p-1">
                     <div className="relative">
-                      <NextImage unoptimized width={1} height={1} src={ann.originalImageUrl} alt="原图" className="w-full h-20 object-cover rounded" />
+                      <img src={ann.originalImageUrl} alt="原图" className="w-full h-20 object-cover rounded" />
                       <span className={`absolute bottom-0.5 left-0.5 text-[9px] px-1 py-0.5 rounded ${isMonochrome ? 'bg-white/80 text-gray-600' : 'bg-black/60 text-gold'}`}>原图</span>
                     </div>
                     <div className="relative">
-                      <NextImage unoptimized width={1} height={1} src={ann.resultImageUrl} alt="结果" className="w-full h-20 object-cover rounded" />
+                      <img src={ann.resultImageUrl} alt="结果" className="w-full h-20 object-cover rounded" />
                       <span className={`absolute bottom-0.5 left-0.5 text-[9px] px-1 py-0.5 rounded ${isMonochrome ? 'bg-blue-500/80 text-white' : 'bg-gold/80 text-black'}`}>结果</span>
                     </div>
                   </div>
@@ -12732,7 +12831,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                       >
                         {/* Front face - main image */}
                         <div className="absolute inset-0 rounded-lg overflow-hidden border-2 border-blue-400/60 shadow-[0_0_20px_rgba(59,130,246,0.3)]" style={{ transform: 'translateZ(55px)' }}>
-                          <NextImage unoptimized width={1} height={1} src={selectedImageData.url} alt="front" className="w-full h-full object-cover" crossOrigin="anonymous" referrerPolicy="no-referrer" />
+                          <img src={selectedImageData.url} alt="front" className="w-full h-full object-cover" crossOrigin="anonymous" referrerPolicy="no-referrer" />
                         </div>
                         {/* Back face */}
                         <div className={`absolute inset-0 rounded-lg border flex items-center justify-center ${isMonochrome ? 'bg-gray-200 border-gray-300' : 'bg-[#1e1e1e] border-[#444]'}`} style={{ transform: 'rotateY(180deg) translateZ(55px)' }}>
@@ -12918,7 +13017,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                 {downloadFormat === '3d' && selectedImageData?.threeDModelUrls && Object.keys(selectedImageData.threeDModelUrls).length > 0 && (
                   <div className={`flex flex-col gap-1 pt-1 border-t ${isMonochrome ? 'border-gray-100' : 'border-white/[0.14]'}`}>
                     <span className={`text-xs font-medium ${isMonochrome ? 'text-gray-500' : 'text-gold-muted'}`}>模型格式</span>
-                    {Object.entries(selectedImageData.threeDModelUrls).map(([format, ]) => (
+                    {Object.entries(selectedImageData.threeDModelUrls).map(([format, url]) => (
                       <button
                         key={format}
                         onClick={() => setThreeDDownloadFormat(format)}
@@ -13033,7 +13132,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                     <div className="space-y-2">
                       {threeDSingleImageUrl ? (
                         <div className={`rounded-2xl overflow-hidden flex items-center justify-center p-3 relative group ${isMonochrome ? 'bg-gray-50' : 'bg-[#0a0a0a]/90'}`}>
-                          <NextImage unoptimized width={1} height={1} src={threeDSingleImageUrl} alt="3D source" className="max-w-full max-h-[160px] object-contain rounded-lg" />
+                          <img src={threeDSingleImageUrl} alt="3D source" className="max-w-full max-h-[160px] object-contain rounded-lg" />
                           <button
                             onClick={() => setThreeDSingleImageUrl('')}
                             className={`absolute top-2 right-2 w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity ${isMonochrome ? 'bg-gray-200 text-gray-600 hover:bg-gray-300' : 'bg-black/60 text-white hover:bg-black/80'}`}
@@ -13092,7 +13191,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                                     onClick={() => { setThreeDSingleImageUrl(img.url); setThreeDShowCanvasPicker(false); }}
                                     className={`w-full flex items-center gap-2 px-3 py-2 text-left transition-colors ${isMonochrome ? 'hover:bg-blue-50' : 'hover:bg-[#252525]'}`}
                                   >
-                                    <NextImage unoptimized width={1} height={1} src={img.url} alt="" className="w-8 h-8 object-cover rounded-md" />
+                                    <img src={img.url} alt="" className="w-8 h-8 object-cover rounded-md" />
                                     <span className={`text-xs truncate flex-1 ${isMonochrome ? 'text-gray-700' : 'text-white/80'}`}>{img.prompt || '未命名图片'}</span>
                                   </button>
                                 ))
@@ -13158,7 +13257,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                               >
                                 {existing ? (
                                   <>
-                                    <NextImage unoptimized width={1} height={1} src={existing.url} alt={slot.label} className="w-full h-full object-cover absolute inset-0" />
+                                    <img src={existing.url} alt={slot.label} className="w-full h-full object-cover absolute inset-0" />
                                     <div className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/60 flex items-center justify-center">
                                       <X size={10} className="text-white" />
                                     </div>
@@ -13206,7 +13305,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                             if (data.backImageUrl) generatedImages.push({ url: data.backImageUrl, view: 'back', label: '背面' });
                             setThreeDMultiImages(generatedImages);
                             toast.success(`已生成${generatedImages.length}张视角图`, { id: 'auto-3d-multi' });
-                          } catch {
+                          } catch (err) {
                             toast.error('自动生成多视角图片失败', { id: 'auto-3d-multi' });
                           }
                         }}
@@ -13466,14 +13565,14 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                 body: JSON.stringify({ imageData: dataUrl, fileName }),
               }).then(res => res.json()).then(data => {
                 if (data.url) {
-                  onAddImages?.([data.url], undefined, { modelName: '3D截图', apiProvider: viewer3DModelInfo.providerName || '' });
+                  onAddImages?.([data.url], undefined, { modelName: '3D截图', apiProvider: (viewer3DModelInfo as any)?.providerName || '' });
                 }
               }).catch(() => toast.error('截图保存失败'));
             }}
             onSendToSceneStudio={() => {
               // 关闭3D预览器，传递模型URL到3D构图面板
               const modelUrl = viewer3DModelUrl || viewer3DModelUrls?.glb || '';
-              const modelName = viewer3DModelInfo.model3DName || '3D模型';
+              const modelName = (viewer3DModelInfo as any)?.model3DName || '3D模型';
               setPendingSceneStudioModel(modelUrl ? { url: modelUrl, name: modelName } : null);
               setShow3DViewer(false);
               setShowSceneStudio(true);
@@ -13549,7 +13648,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                 window.addEventListener('mouseup', onUp);
               }}
             >
-              <NextImage unoptimized width={1} height={1} 
+              <img 
                 src={panoramaViewerUrl} 
                 alt="全景图" 
                 className="panorama-img absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 max-w-none h-full w-auto"
@@ -13591,15 +13690,15 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                 <div className="space-y-2">
                   <label className="text-xs text-white/60">抽帧模式</label>
                   <div className="grid grid-cols-2 gap-2">
-                    {([
+                    {[
                       { id: 'uniform', label: '均匀抽帧' },
                       { id: 'fps', label: '每秒1帧' },
                       { id: 'first_last', label: '首尾帧' },
                       { id: 'keyframes', label: '关键帧' },
-                    ] as const).map(mode => (
+                    ].map(mode => (
                       <button
                         key={mode.id}
-                        onClick={() => setVideoExtractMode(mode.id)}
+                        onClick={() => setVideoExtractMode(mode.id as any)}
                         className={`px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
                           videoExtractMode === mode.id ? 'bg-[#d4af37] text-black' : 'bg-[#2a2a2a] text-white/70 hover:bg-[#333]'
                         }`}
@@ -13636,10 +13735,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                       });
                       const data = await res.json();
                       if (data.frames?.length > 0) {
-                        onAddImages(data.frames.flatMap((frame: unknown) => {
-                          if (!frame || typeof frame !== 'object' || !('url' in frame)) return [];
-                          return typeof frame.url === 'string' ? [frame.url] : [];
-                        }));
+                        onAddImages(data.frames.map((f: any) => f.url));
                         toast.success(`成功提取 ${data.frames.length} 帧`);
                         setShowVideoExtractPanel(false);
                         setEditMode('none');
@@ -13895,7 +13991,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                 {videoDubTarget.videoUrl ? (
                   <video src={videoDubTarget.videoUrl} className="w-full h-full object-contain" controls muted />
                 ) : (
-                  <NextImage unoptimized width={1} height={1} src={videoDubTarget.url} alt="视频配音目标图片" className="w-full h-full object-contain" />
+                  <img src={videoDubTarget.url} alt="视频配音目标图片" className="w-full h-full object-contain" />
                 )}
               </div>
               <div className="space-y-2">
@@ -14166,6 +14262,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           const layoutCols = 3;
           const layoutRows = 2;
           const netW = layoutCols * cellSize + (layoutCols - 1) * cellGap;
+          const netH = layoutRows * cellSize + (layoutRows - 1) * cellGap;
           const previewSize = 180;
 
           return (
@@ -14296,7 +14393,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                               }}
                             >
                               {faceData?.imageUrl ? (
-                                <NextImage unoptimized width={1} height={1} src={faceData.imageUrl} alt={label} className="w-full h-full object-cover" />
+                                <img src={faceData.imageUrl} alt={label} className="w-full h-full object-cover" />
                               ) : (
                                 <div className="flex flex-col items-center gap-1">
                                   <svg className="w-5 h-5" style={{ color: isMonochrome ? '#93c5fd' : '#555' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -14355,7 +14452,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                             return (
                               <div className="absolute inset-0 rounded-lg overflow-hidden border-2 border-blue-400/60 shadow-[0_0_20px_rgba(59,130,246,0.3)]" style={{ transform: 'translateZ(55px)', backfaceVisibility: 'hidden' }}>
                                 {frontFace?.imageUrl ? (
-                                  <NextImage unoptimized width={1} height={1} src={frontFace.imageUrl} alt="front" className="w-full h-full object-cover" />
+                                  <img src={frontFace.imageUrl} alt="front" className="w-full h-full object-cover" />
                                 ) : (
                                   <div className={`w-full h-full flex items-center justify-center ${isMonochrome ? 'bg-gray-200' : 'bg-[#1e1e1e]'}`}>
                                     <span className={`text-xs font-bold ${isMonochrome ? 'text-gray-500' : 'text-gold-muted/50'}`}>前</span>
@@ -14370,7 +14467,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                             return (
                               <div className={`absolute inset-0 rounded-lg border flex items-center justify-center overflow-hidden ${isMonochrome ? 'bg-gray-200 border-gray-300' : 'bg-[#1e1e1e] border-[#444]'}`} style={{ transform: 'rotateY(180deg) translateZ(55px)' }}>
                                 {backFace?.imageUrl ? (
-                                  <NextImage unoptimized width={1} height={1} src={backFace.imageUrl} alt="back" className="w-full h-full object-cover" />
+                                  <img src={backFace.imageUrl} alt="back" className="w-full h-full object-cover" />
                                 ) : (
                                   <span className={`text-xs font-bold ${isMonochrome ? 'text-gray-500' : 'text-gold-muted/50'}`}>后</span>
                                 )}
@@ -14383,7 +14480,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                             return (
                               <div className={`absolute inset-0 rounded-lg border flex items-center justify-center overflow-hidden ${isMonochrome ? 'bg-gray-100 border-gray-200' : 'bg-[#151515] border-white/[0.14]'}`} style={{ transform: 'rotateY(90deg) translateZ(55px)' }}>
                                 {rightFace?.imageUrl ? (
-                                  <NextImage unoptimized width={1} height={1} src={rightFace.imageUrl} alt="right" className="w-full h-full object-cover" />
+                                  <img src={rightFace.imageUrl} alt="right" className="w-full h-full object-cover" />
                                 ) : (
                                   <span className={`text-xs font-bold ${isMonochrome ? 'text-gray-400' : 'text-[#444]'}`}>右</span>
                                 )}
@@ -14396,7 +14493,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                             return (
                               <div className={`absolute inset-0 rounded-lg border flex items-center justify-center overflow-hidden ${isMonochrome ? 'bg-gray-100 border-gray-200' : 'bg-[#151515] border-white/[0.14]'}`} style={{ transform: 'rotateY(-90deg) translateZ(55px)' }}>
                                 {leftFace?.imageUrl ? (
-                                  <NextImage unoptimized width={1} height={1} src={leftFace.imageUrl} alt="left" className="w-full h-full object-cover" />
+                                  <img src={leftFace.imageUrl} alt="left" className="w-full h-full object-cover" />
                                 ) : (
                                   <span className={`text-xs font-bold ${isMonochrome ? 'text-gray-400' : 'text-[#444]'}`}>左</span>
                                 )}
@@ -14409,7 +14506,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                             return (
                               <div className={`absolute inset-0 rounded-lg border flex items-center justify-center overflow-hidden ${isMonochrome ? 'bg-gray-100 border-gray-200' : 'bg-[#151515] border-white/[0.14]'}`} style={{ transform: 'rotateX(90deg) translateZ(55px)' }}>
                                 {topFace?.imageUrl ? (
-                                  <NextImage unoptimized width={1} height={1} src={topFace.imageUrl} alt="top" className="w-full h-full object-cover" />
+                                  <img src={topFace.imageUrl} alt="top" className="w-full h-full object-cover" />
                                 ) : (
                                   <span className={`text-xs font-bold ${isMonochrome ? 'text-gray-400' : 'text-[#444]'}`}>上</span>
                                 )}
@@ -14422,7 +14519,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                             return (
                               <div className={`absolute inset-0 rounded-lg border flex items-center justify-center overflow-hidden ${isMonochrome ? 'bg-gray-100 border-gray-200' : 'bg-[#151515] border-white/[0.14]'}`} style={{ transform: 'rotateX(-90deg) translateZ(55px)' }}>
                                 {bottomFace?.imageUrl ? (
-                                  <NextImage unoptimized width={1} height={1} src={bottomFace.imageUrl} alt="bottom" className="w-full h-full object-cover" />
+                                  <img src={bottomFace.imageUrl} alt="bottom" className="w-full h-full object-cover" />
                                 ) : (
                                   <span className={`text-xs font-bold ${isMonochrome ? 'text-gray-400' : 'text-[#444]'}`}>下</span>
                                 )}
@@ -15052,7 +15149,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                   )}
                   {/* 生成完成 - 显示结果图片 */}
                   {canvasGenPreviewUrl && !canvasGenGenerating && (
-                    <NextImage unoptimized width={1} height={1}                       src={canvasGenPreviewUrl}
+                    <img
+                      src={canvasGenPreviewUrl}
                       alt="生成结果"
                       className="absolute inset-0 w-full h-full object-cover"
                     />
@@ -15299,7 +15397,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                 <div className="flex gap-2 flex-wrap">
                   {canvasGenRefImages.map((refUrl, idx) => (
                     <div key={idx} className="relative group">
-                      <NextImage unoptimized width={1} height={1} src={refUrl} alt="" className={`w-9 h-9 rounded-lg object-cover border ${isMonochrome ? 'border-gray-200' : 'border-white/[0.12]'}`} />
+                      <img src={refUrl} alt="" className={`w-9 h-9 rounded-lg object-cover border ${isMonochrome ? 'border-gray-200' : 'border-white/[0.12]'}`} />
                       <button
                         onClick={() => setCanvasGenRefImages(prev => prev.filter((_, i) => i !== idx))}
                         className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity shadow-md"

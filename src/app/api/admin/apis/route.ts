@@ -10,17 +10,9 @@ import {
   updateApiProvider,
 } from '@/lib/server-api-config';
 import { requireAdminUser } from '@/lib/server-auth';
-import type { ApiKind, ApiProvider } from '@/lib/universal-api-types';
+import type { ApiProvider } from '@/lib/universal-api-types';
 
 export const dynamic = 'force-dynamic';
-
-const API_KINDS: ApiKind[] = ['image', 'chat', 'universal', 'general', '3d', 'vectorize', 'layer', 'video', 'vlm', 'imageEdit', 'upscaler', 'removebg', 'audio'];
-
-function resolveApiKind(value: unknown): ApiKind {
-  return typeof value === 'string' && API_KINDS.includes(value as ApiKind)
-    ? value as ApiKind
-    : 'image';
-}
 
 export async function GET(request: NextRequest) {
   try {
@@ -55,7 +47,7 @@ export async function POST(request: NextRequest) {
           const result = await discoverModelsForCredentials(
             existing.baseUrl,
             existing.apiKey,
-            existing.modelType || 'image',
+            (existing.modelType || 'image') as any,
           );
           return NextResponse.json(result);
         }
@@ -65,7 +57,7 @@ export async function POST(request: NextRequest) {
       const result = await discoverModelsForCredentials(
         String(body.baseUrl || ''),
         String(body.apiKey || ''),
-        resolveApiKind(body.modelType),
+        (body.modelType || 'image') as any,
       );
       return NextResponse.json(result);
     }

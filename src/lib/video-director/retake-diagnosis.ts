@@ -24,7 +24,7 @@ export interface FailureDiagnosis {
   retakeSuggestions: Array<{
     label: string;
     /** 要修改的字段和新值 */
-    patch: Record<string, unknown>;
+    patch: Record<string, any>;
     /** 提示词补丁（在原 prompt 前后追加） */
     promptPrepend?: string;
     promptAppend?: string;

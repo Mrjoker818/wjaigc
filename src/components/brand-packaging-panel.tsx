@@ -1,13 +1,14 @@
 'use client';
 
-import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import NextImage from 'next/image';
 import {
-  Package, X, Minus, Maximize2, Trash2, Star,
-  Upload, Image as ImageIcon, FileText, Layers, DollarSign, CheckCircle2, Sparkles, Download,
-  Send, Palette, Box, Search,
-  Grid3X3, LayoutGrid, Store, ShoppingBag, BookOpen, Loader2, Type, Scissors, PenLine, Video, GitBranch
+  Package, X, Minus, Maximize2, Plus, Trash2, Star,
+  Upload, Image, FileText, Layers, DollarSign, CheckCircle2,
+  ChevronDown, ChevronUp, Settings2, Sparkles, Download,
+  Send, Palette, Box, Ruler, Paintbrush, FileImage, Search,
+  Grid3X3, LayoutGrid, Store, ShoppingBag, BookOpen, BarChart3,
+  Tag, Info, Loader2, Type, Scissors, PenLine, Video, GitBranch
 } from 'lucide-react';
 import { getModelDisplayName } from '@/lib/model-name-map';
 
@@ -136,7 +137,7 @@ const OUTPUT_MODES: { value: PackagingOutputMode; label: string; icon: React.Rea
   { value: 'structural_flat_layout', label: '结构展开图', icon: <Grid3X3 size={14} /> },
   { value: 'knife_template', label: '刀版图', icon: <Scissors size={14} /> },
   { value: 'line_drawing', label: '线稿图', icon: <PenLine size={14} /> },
-  { value: 'scene_display', label: '场景展示', icon: <ImageIcon size={14} /> },
+  { value: 'scene_display', label: '场景展示', icon: <Image size={14} /> },
   { value: 'shelf_display', label: '货架陈列', icon: <Store size={14} /> },
   { value: 'ecommerce_image', label: '电商主图', icon: <ShoppingBag size={14} /> },
   { value: 'series_family', label: '系列包装', icon: <Layers size={14} /> },
@@ -255,9 +256,13 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
 
   // Theme — 品牌包装系统: 标准黑金配色 (#d4af37 + #1a1a1a)
   const accent = isMonochrome ? '#3b82f6' : '#d4af37';
+  const accentLight = isMonochrome ? '#60a5fa' : '#e0b840';
   const bg = isMonochrome ? '#ffffff' : '#1a1a1a';
+  const bgSoft = isMonochrome ? '#f9fafb' : '#111';
+  const bgPanel = isMonochrome ? 'rgba(249,250,251,0.95)' : 'rgba(26,26,26,0.92)';
   const bgCard = isMonochrome ? '#f3f4f6' : 'rgba(17,17,17,0.9)';
   const border = isMonochrome ? '#e5e5e5' : 'rgba(255,255,255,0.1)';
+  const borderStrong = isMonochrome ? '#3b82f6' : 'rgba(212,175,55,0.4)';
   const textPrimary = isMonochrome ? '#111827' : '#e5e5e5';
   const textMuted = isMonochrome ? '#6b7280' : '#888';
   const textAccent = isMonochrome ? '#3b82f6' : '#d4af37';
@@ -395,16 +400,10 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = 'image/*';
-    input.onchange = async (e) => {
+    input.onchange = (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (!file) return;
-      const formData = new FormData();
-      formData.append('file', file);
-      const response = await fetch('/api/upload', { method: 'POST', body: formData });
-      if (!response.ok) return;
-      const data = await response.json();
-      const url = data.url as string;
-      if (!url) return;
+      const url = URL.createObjectURL(file);
       if (type === 'Logo') setLogoUrl(url);
       else setUploads(prev => [...prev, { type, url, name: file.name }]);
     };
@@ -818,7 +817,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                         <button className="w-[72px] h-[72px] rounded-lg border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition-colors"
                           style={{ borderColor: border, color: textMuted }}
                           onClick={() => handleUpload('Logo')}>
-                          {logoUrl ? <NextImage unoptimized width={1} height={1} src={logoUrl} alt="品牌 Logo" className="w-full h-full object-contain rounded" /> : <><Upload size={14} /><span className="text-[9px] mt-0.5">Logo</span></>}
+                          {logoUrl ? <img src={logoUrl} className="w-full h-full object-contain rounded" /> : <><Upload size={14} /><span className="text-[9px] mt-0.5">Logo</span></>}
                         </button>
                         <div className="flex gap-1">
                           <input type="color" className="w-6 h-6 rounded cursor-pointer" value={brandColors[0] || '#d4af37'} onChange={e => setBrandColors([e.target.value])} title="品牌色" />
@@ -890,7 +889,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                       <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>上传参考与素材</h3>
                     </div>
                     <div className="grid grid-cols-4 gap-2">
-                      {['产品图', '包装参考图', 'Logo', '材质贴图'].map((t) => (
+                      {['产品图', '包装参考图', 'Logo', '材质贴图'].map((t, i) => (
                         <button key={t} className="h-[72px] rounded-lg border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition-colors"
                           style={{ borderColor: border, color: textMuted }}
                           onClick={() => handleUpload(t)}>
@@ -903,7 +902,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                       <div className="mt-2 flex flex-wrap gap-1.5">
                         {uploads.map((u, i) => (
                           <div key={i} className="relative w-12 h-12 rounded border overflow-hidden" style={{ borderColor: border }}>
-                            <NextImage unoptimized width={1} height={1} src={u.url} alt="已上传参考图" className="w-full h-full object-cover" />
+                            <img src={u.url} className="w-full h-full object-cover" />
                             <button className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-red-500 text-white flex items-center justify-center" onClick={() => setUploads(prev => prev.filter((_, j) => j !== i))}><X size={8} /></button>
                           </div>
                         ))}
@@ -1085,7 +1084,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                         <div className="grid grid-cols-2 gap-2">
                           {filteredResults.map(r => (
                             <div key={r.id} className="rounded-lg border overflow-hidden cursor-pointer group relative" style={{ borderColor: border }}>
-                              <NextImage unoptimized width={1} height={1} src={r.url} alt={OUTPUT_MODES.find(m => m.value === r.type)?.label || r.type} className="w-full aspect-[4/3] object-cover" />
+                              <img src={r.url} className="w-full aspect-[4/3] object-cover" />
                               <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-2">
                                 <span className="text-[12px] text-white">{OUTPUT_MODES.find(m => m.value === r.type)?.label || r.type}</span>
                                 <div className="flex gap-1 mt-1">

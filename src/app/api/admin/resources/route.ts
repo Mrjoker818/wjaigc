@@ -10,12 +10,6 @@ function tags(value: unknown): string[] {
   return String(value || '').split(',').map(item => item.trim()).filter(Boolean);
 }
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
-}
-
 export async function GET(request: NextRequest) {
   const admin = await requireAdminUser(request);
   if (!admin) return NextResponse.json({ success: false, error: 'Admin access required' }, { status: 403 });
@@ -29,7 +23,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const admin = await requireAdminUser(request);
   if (!admin) return NextResponse.json({ success: false, error: 'Admin access required' }, { status: 403 });
-  let body: Record<string, unknown> = {};
+  let body: Record<string, any> = {};
   try {
     body = await request.json();
   } catch {
@@ -42,17 +36,16 @@ export async function POST(request: NextRequest) {
     await dbAddAuditLog({ user_id: admin.id, user_name: admin.name, action: 'resource_delete', target_type: 'resource', target_id: id, detail: '', ip_address: null, created_at: Date.now() });
     return NextResponse.json({ success });
   }
-  const payload = asRecord(body.payload);
   const resource = await saveResource({
     id: body.id ? String(body.id) : undefined,
-    type: String(body.type || payload?.type || 'material'),
-    name: String(body.name || payload?.name || '').trim(),
-    description: String(body.description || payload?.description || ''),
-    category: String(body.category || payload?.category || ''),
-    tags: tags(body.tags || payload?.tags),
-    thumbnailUrl: String(body.thumbnailUrl || payload?.thumbnailUrl || ''),
-    content: String(body.content || payload?.content || ''),
-    payload: payload || {},
+    type: String(body.type || body.payload?.type || 'material'),
+    name: String(body.name || body.payload?.name || '').trim(),
+    description: String(body.description || body.payload?.description || ''),
+    category: String(body.category || body.payload?.category || ''),
+    tags: tags(body.tags || body.payload?.tags),
+    thumbnailUrl: String(body.thumbnailUrl || body.payload?.thumbnailUrl || ''),
+    content: String(body.content || body.payload?.content || ''),
+    payload: body.payload && typeof body.payload === 'object' ? body.payload : {},
     enabled: body.enabled !== false,
     sortOrder: Number(body.sortOrder || body.sort_order || 0),
   });

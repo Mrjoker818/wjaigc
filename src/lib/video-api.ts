@@ -72,55 +72,10 @@ export interface VideoGenerateParams {
   providerId?: string;          // 提供商ID
   apiKey?: string;              // API密钥
   baseUrl?: string;             // API基础URL
-  advancedParams?: Record<string, unknown>;  
+  advancedParams?: Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any -- 提供商高级参数
 }
 
 /** 摄像机控制参数 */
-function getAdvancedString(params: Record<string, unknown> | undefined, key: string): string | undefined {
-  const value = params?.[key];
-  return typeof value === 'string' ? value : undefined;
-}
-
-type JsonRecord = Record<string, unknown>;
-
-function asRecord(value: unknown): JsonRecord | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? value as JsonRecord
-    : undefined;
-}
-
-function getRecord(record: JsonRecord | undefined, key: string): JsonRecord | undefined {
-  return asRecord(record?.[key]);
-}
-
-function getArray(record: JsonRecord | undefined, key: string): unknown[] | undefined {
-  const value = record?.[key];
-  return Array.isArray(value) ? value : undefined;
-}
-
-function getString(record: JsonRecord | undefined, key: string): string | undefined {
-  const value = record?.[key];
-  return typeof value === 'string' ? value : undefined;
-}
-
-function getNumber(record: JsonRecord | undefined, key: string): number | undefined {
-  const value = record?.[key];
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
-}
-
-function firstString(...values: unknown[]): string | undefined {
-  return values.find((value): value is string => typeof value === 'string' && value.length > 0);
-}
-
-function getErrorMessage(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : getString(asRecord(value), 'message');
-}
-
-function normalizeProgress(value: unknown, fallback: number): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
-  return value > 1 ? Math.round(value) : Math.round(value * 100);
-}
-
 export interface CameraControlParams {
   type: 'push_in' | 'push_out' | 'pan_left' | 'pan_right' | 'tilt_up' | 'tilt_down' | 'orbit_left' | 'orbit_right' | 'zoom_in' | 'zoom_out' | 'tracking' | 'static';
   intensity?: number;           // 运动强度 0-100
@@ -521,114 +476,108 @@ export function buildVideoSubmitRequest(
  */
 export function parseVideoSubmitResponse(
   profile: VideoCompatProfile,
-  data: unknown,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  data: any,
 ): VideoTaskSubmitResult {
-  const root: JsonRecord = asRecord(data) ?? {};
-  const output = getRecord(root, 'output');
-
   switch (profile) {
     case 'dashscope':
       return {
-        taskId: firstString(getString(output, 'task_id'), getString(root, 'request_id')) ?? '',
+        taskId: data?.output?.task_id || data?.request_id || '',
         status: 'submitted',
         estimatedTime: 120,
       };
     case 'volcengine-ark':
       return {
-        taskId: getString(root, 'id') ?? '',
+        taskId: data?.id || '',
         status: 'submitted',
         estimatedTime: 120,
       };
     case 'minimax':
       return {
-        taskId: getString(root, 'task_id') ?? '',
+        taskId: data?.task_id || '',
         status: 'submitted',
         estimatedTime: 90,
       };
     case 'vidu':
       return {
-        taskId: firstString(getString(root, 'task_id'), getString(root, 'id')) ?? '',
+        taskId: data?.task_id || data?.id || '',
         status: 'submitted',
         estimatedTime: 90,
       };
     case 'openai-video':
       return {
-        taskId: getString(root, 'id') ?? '',
+        taskId: data?.id || '',
         status: 'submitted',
         estimatedTime: 120,
       };
     case 'fal-video':
       return {
-        taskId: firstString(getString(root, 'request_id'), getString(root, 'id')) ?? '',
+        taskId: data?.request_id || data?.id || '',
         status: 'submitted',
         estimatedTime: 90,
       };
     case 'apimart-video': {
       // APImart: {code:200, data:[{status:"submitted", task_id:"xxx"}]}
-      const nestedData = root.data;
-      const item = Array.isArray(nestedData) ? asRecord(nestedData[0]) : asRecord(nestedData);
+      const items = data?.data;
+      const item = Array.isArray(items) ? items[0] : items;
       return {
-        taskId: firstString(getString(item, 'task_id'), getString(item, 'id'), getString(root, 'task_id')) ?? '',
+        taskId: item?.task_id || item?.id || data?.task_id || '',
         status: 'submitted',
         estimatedTime: 240,
       };
     }
     case 'pearapi-video': {
       // PearAPI async: {id, status:'queued', model}
-      const id = getString(root, 'id');
-      const status = getString(root, 'status');
-      if (id && (status === 'queued' || status === 'running')) {
+      if (data?.id && (data?.status === 'queued' || data?.status === 'running')) {
         return {
-          taskId: id,
+          taskId: data.id,
           status: 'submitted',
           estimatedTime: 240,
         };
       }
       // PearAPI sync: {created, data:[{url}]}
-      const syncData = asRecord(getArray(root, 'data')?.[0]);
-      const syncVideoUrl = firstString(getString(syncData, 'url'), getString(syncData, 'video_url'));
-      if (syncVideoUrl) {
+      const syncData = data?.data?.[0];
+      if (syncData?.url) {
         return {
           taskId: '',
           status: 'succeeded',
-          videoUrl: syncVideoUrl,
+          videoUrl: syncData.url,
         };
       }
-      return { taskId: id ?? '', status: 'submitted', estimatedTime: 240 };
+      return { taskId: data?.id || '', status: 'submitted', estimatedTime: 240 };
     }
     case 'rest-generic':
     default: {
-      const syncData = asRecord(getArray(root, 'data')?.[0]) ?? asRecord(getArray(root, 'results')?.[0]);
-      const syncVideoUrl = firstString(getString(syncData, 'url'), getString(syncData, 'video_url'));
-      if (syncVideoUrl) {
+      // 检查是否同步返回结果（第三方API可能直接返回视频URL）
+      const syncData = data?.data?.[0] || data?.results?.[0] || (Array.isArray(data?.data) && data.data[0]);
+      if (syncData && (syncData.url || syncData.video_url)) {
         return {
           taskId: '__sync_complete__',
           status: 'succeeded',
-          videoUrl: syncVideoUrl,
+          videoUrl: syncData.url || syncData.video_url,
           estimatedTime: 0,
         };
       }
-      const nestedTaskId = firstString(getString(syncData, 'task_id'), getString(syncData, 'id'), getString(syncData, 'request_id'));
-      if (nestedTaskId) {
+      // 检查嵌套的task_id（如 apimart 格式: {code:200, data:[{task_id:"xxx"}]}）
+      if (syncData?.task_id || syncData?.id || syncData?.request_id) {
         return {
-          taskId: nestedTaskId,
-          status: 'submitted',
+          taskId: syncData.task_id || syncData.id || syncData.request_id || '',
+          status: syncData.status || 'submitted',
           estimatedTime: 120,
         };
       }
       // 检查顶层直接返回视频URL
-      const topLevelVideoUrl = firstString(getString(root, 'url'), getString(root, 'video_url'), getString(output, 'video_url'));
-      if (topLevelVideoUrl) {
+      if (data?.url || data?.video_url || data?.output?.video_url) {
         return {
           taskId: '__sync_complete__',
           status: 'succeeded',
-          videoUrl: topLevelVideoUrl,
+          videoUrl: data.url || data.video_url || data.output.video_url,
           estimatedTime: 0,
         };
       }
       return {
-        taskId: firstString(getString(root, 'task_id'), getString(root, 'id'), getString(root, 'request_id')) ?? '',
-        status: 'submitted',
+        taskId: data?.task_id || data?.id || data?.request_id || '',
+        status: data?.status || 'submitted',
         estimatedTime: 120,
       };
     }
@@ -643,7 +592,7 @@ export function buildVideoPollRequest(
   baseUrl: string,
   apiKey: string,
   taskId: string,
-  advancedParams?: Record<string, unknown>,
+  advancedParams?: Record<string, any>,
 ): { url: string; headers: Record<string, string>; method: string } {
   const cleanBaseUrl = ensureBaseUrl(baseUrl);
 
@@ -699,7 +648,7 @@ export function buildVideoPollRequest(
     case 'rest-generic':
     default: {
       // 支持自定义轮询端点（通过advancedParams.pollEndpoint指定）
-      const customPollEndpoint = getAdvancedString(advancedParams, 'pollEndpoint');
+      const customPollEndpoint = advancedParams?.pollEndpoint;
       if (customPollEndpoint) {
         return {
           url: customPollEndpoint.replace('{taskId}', taskId),
@@ -713,8 +662,8 @@ export function buildVideoPollRequest(
       // /v1/tasks/{taskId} (通用任务)
       // /tasks/{taskId} (简化路径)
       // 优先使用 /v1/images/generations/{taskId} 因为大部分代理通过 images 端点暴露视频模型
-      const submitEndpoint = getAdvancedString(advancedParams, 'submitEndpoint') || '';
-      if (submitEndpoint.includes('images') || getAdvancedString(advancedParams, 'videoEndpoint') === 'images') {
+      const submitEndpoint = advancedParams?.submitEndpoint || '';
+      if (submitEndpoint.includes('images') || advancedParams?.videoEndpoint === 'images') {
         // 提交使用的是 images 端点，轮询也用 images 端点
         return {
           url: `${cleanBaseUrl}/v1/images/generations/${taskId}`,
@@ -736,7 +685,7 @@ export function buildVideoPollRequest(
  */
 export function parseVideoPollResponse(
   profile: VideoCompatProfile,
-  data: unknown,
+  data: any,
 ): VideoTaskPollResult {
   switch (profile) {
     case 'dashscope':
@@ -777,7 +726,7 @@ function buildDashscopeSubmit(baseUrl: string, apiKey: string, params: VideoGene
     });
   }
 
-  const body: Record<string, unknown> = {
+  const body: Record<string, any> = {
     model: params.model,
     input: {
       prompt: params.prompt,
@@ -831,7 +780,7 @@ function buildDashscopeSubmit(baseUrl: string, apiKey: string, params: VideoGene
 }
 
 function buildVolcengineSubmit(baseUrl: string, apiKey: string, params: VideoGenerateParams) {
-  const content: Array<Record<string, unknown>> = [
+  const content: Array<Record<string, any>> = [
     { type: 'text', text: params.prompt },
   ];
   if (params.imageUrl) {
@@ -852,7 +801,7 @@ function buildVolcengineSubmit(baseUrl: string, apiKey: string, params: VideoGen
     });
   }
 
-  const body: Record<string, unknown> = {
+  const body: Record<string, any> = {
     model: params.model,
     content,
     ...(params.aspectRatio ? { ratio: params.aspectRatio } : {}),
@@ -896,7 +845,7 @@ function buildVolcengineSubmit(baseUrl: string, apiKey: string, params: VideoGen
 }
 
 function buildMinimaxSubmit(baseUrl: string, apiKey: string, params: VideoGenerateParams) {
-  const body: Record<string, unknown> = {
+  const body: Record<string, any> = {
     model: params.model,
     prompt: params.prompt,
     ...(params.imageUrl ? { first_frame_image: params.imageUrl } : {}),
@@ -930,7 +879,7 @@ function buildViduSubmit(baseUrl: string, apiKey: string, params: VideoGenerateP
     });
   }
 
-  const body: Record<string, unknown> = {
+  const body: Record<string, any> = {
     model: params.model,
     prompt: params.prompt,
     ...(images.length > 0 ? { images } : {}),
@@ -975,7 +924,7 @@ function buildViduSubmit(baseUrl: string, apiKey: string, params: VideoGenerateP
 }
 
 function buildOpenAIVideoSubmit(baseUrl: string, apiKey: string, params: VideoGenerateParams) {
-  const body: Record<string, unknown> = {
+  const body: Record<string, any> = {
     model: params.model,
     prompt: params.prompt,
     ...(params.imageUrl ? { image_url: params.imageUrl } : {}),
@@ -997,7 +946,7 @@ function buildOpenAIVideoSubmit(baseUrl: string, apiKey: string, params: VideoGe
 
 function buildFalVideoSubmit(baseUrl: string, apiKey: string, params: VideoGenerateParams) {
   // fal.ai uses a queue-based pattern
-  const body: Record<string, unknown> = {
+  const body: Record<string, any> = {
     prompt: params.prompt,
     ...(params.imageUrl ? { image_url: params.imageUrl } : {}),
     ...(params.aspectRatio ? { aspect_ratio: params.aspectRatio } : {}),
@@ -1025,10 +974,10 @@ function buildRestGenericSubmit(baseUrl: string, apiKey: string, params: VideoGe
   // Many third-party APIs expose video generation via /v1/images/generations
   const cleanBase = ensureBaseUrl(baseUrl);
 
-  const advancedEndpoint = getAdvancedString(params.advancedParams, 'submitEndpoint');
+  const advancedEndpoint = params.advancedParams?.submitEndpoint;
   const useImageEndpoint = advancedEndpoint
     ? advancedEndpoint.includes('images')
-    : (getAdvancedString(params.advancedParams, 'videoEndpoint') === 'images'
+    : (params.advancedParams?.videoEndpoint === 'images'
       || baseUrl.includes('/v1/images'));
 
   const endpoint = advancedEndpoint
@@ -1039,7 +988,7 @@ function buildRestGenericSubmit(baseUrl: string, apiKey: string, params: VideoGe
 
   // Build request body compatible with both OpenAI image and video API formats
   // 策略：视频模型始终使用 aspect_ratio（如 "16:9"），不发送像素 size（代理可能误映射为 ratio）
-  const body: Record<string, unknown> = {
+  const body: Record<string, any> = {
     model: params.model,
     prompt: params.prompt,
     // Image-style: image as array of objects; Video-style: flat fields
@@ -1110,10 +1059,10 @@ function buildApiMartVideoSubmit(baseUrl: string, apiKey: string, params: VideoG
   // Map resolution: duration/quality → 720p/1080p/4k (default 1080p)
   let resolution = '1080p';
   if (params.mode === 'pro') resolution = '4k';
-  const advRes = getAdvancedString(params.advancedParams, 'resolution');
+  const advRes = params.advancedParams?.resolution;
   if (advRes) resolution = advRes;
 
-  const body: Record<string, unknown> = {
+  const body: Record<string, any> = {
     model: params.model,
     prompt: params.prompt,
     n: 1,
@@ -1144,50 +1093,43 @@ function buildApiMartVideoSubmit(baseUrl: string, apiKey: string, params: VideoG
  * GET /v1/tasks/{id}
  * Response: {code:200, data:{id, status, progress(0-100), result:{videos:[{url:[...URLs]}]}, error:{code,message}}}
  */
-function parseApiMartVideoPoll(data: unknown): VideoTaskPollResult {
-  const root: JsonRecord = asRecord(data) ?? {};
-  const nestedData = root.data;
-  const item = Array.isArray(nestedData) ? asRecord(nestedData[0]) : asRecord(nestedData);
-  const status = (firstString(getString(item, 'status'), getString(root, 'status')) ?? '').toLowerCase();
+function parseApiMartVideoPoll(data: any): VideoTaskPollResult {
+  const inner = data?.data;
+  const item = Array.isArray(inner) ? inner[0] : inner;
+  const status = (item?.status || data?.status || '').toLowerCase();
 
   if (status === 'succeeded' || status === 'completed' || status === 'success' || status === 'done') {
-    const result: JsonRecord = getRecord(item, 'result') ?? getRecord(item, 'results') ?? getRecord(item, 'output') ?? {};
-    const videos = getArray(result, 'videos') ?? getArray(result, 'video_results') ?? [];
-    const video = asRecord(videos[0]);
-    const videoUrl = firstString(
-      getArray(video, 'url')?.find((value): value is string => typeof value === 'string'),
-      getString(video, 'url'),
-      getString(video, 'video_url'),
-      getString(result, 'video_url'),
-      getString(result, 'url'),
-      getString(item, 'video_url'),
-    );
+    const result = item?.result || item?.results || item?.output || {};
+    const videos = result?.videos || result?.video_results || [];
+    let videoUrl: string | undefined;
+    if (Array.isArray(videos) && videos.length > 0) {
+      const v = videos[0];
+      videoUrl = Array.isArray(v.url) ? v.url[0] : (v.url || v.video_url);
+    }
+    if (!videoUrl) videoUrl = result?.video_url || result?.url || item?.video_url;
     return {
       status: 'succeeded',
       progress: 100,
       videoUrl,
-      duration: getNumber(result, 'duration'),
-      thumbnailUrl: firstString(getString(result, 'thumbnail_url'), getString(result, 'cover_url')),
+      duration: result?.duration,
+      thumbnailUrl: result?.thumbnail_url || result?.cover_url,
     };
   }
   if (status === 'failed' || status === 'error' || status === 'cancelled') {
     return {
       status: 'failed',
-      error: firstString(
-        getErrorMessage(getRecord(item, 'error')),
-        getString(item, 'fail_reason'),
-        getErrorMessage(getRecord(root, 'error')),
-        getString(root, 'message'),
-      ) ?? 'Video generation failed',
+      error: item?.error?.message || item?.fail_reason || data?.error?.message || data?.message || 'Video generation failed',
     };
   }
   if (status === 'running' || status === 'processing' || status === 'in_progress') {
-    return {
-      status: 'running',
-      progress: normalizeProgress(getNumber(item, 'progress') ?? getNumber(root, 'progress'), 50),
-    };
+    const rawProgress = item?.progress ?? data?.progress;
+    const progress = rawProgress != null
+      ? (rawProgress > 1 ? rawProgress : Math.round(rawProgress * 100))
+      : 50;
+    return { status: 'running', progress };
   }
-  return { status: 'pending', progress: normalizeProgress(getNumber(item, 'progress'), 10) };
+  // pending/queued/submitted
+  return { status: 'pending', progress: item?.progress ?? 10 };
 }
 
 /** Build PearAPI video submit request.
@@ -1208,7 +1150,7 @@ function buildPearApiVideoSubmit(baseUrl: string, apiKey: string, params: VideoG
     ? params.aspectRatio
     : '16:9';
 
-  const body: Record<string, unknown> = {
+  const body: Record<string, any> = {
     model: params.model,
     prompt: params.prompt,
     n: 1,
@@ -1243,47 +1185,42 @@ function buildPearApiVideoSubmit(baseUrl: string, apiKey: string, params: VideoG
  * GET /v1/videos/tasks/{id}
  * Completed response: {status:'completed', output:{created, data:[{url}], video_urls:[...]}, progress, error:{message}}
  */
-function parsePearApiVideoPoll(data: unknown): VideoTaskPollResult {
-  const root: JsonRecord = asRecord(data) ?? {};
-  const output = getRecord(root, 'output') ?? root;
-  const status = (getString(root, 'status') ?? '').toLowerCase();
+function parsePearApiVideoPoll(data: any): VideoTaskPollResult {
+  const status = (data?.status || '').toLowerCase();
+  const output = data?.output || data;
 
   if (status === 'succeeded' || status === 'completed' || status === 'success' || status === 'done') {
-    const resultItems = getArray(output, 'data') ?? getArray(output, 'video_urls') ?? [];
-    const first = resultItems[0];
-    const videoUrl = firstString(
-      typeof first === 'string' ? first : undefined,
-      getString(asRecord(first), 'url'),
-      getString(asRecord(first), 'video_url'),
-      getString(output, 'video_url'),
-      getString(output, 'url'),
-      getString(root, 'video_url'),
-    );
+    const dataArr = output?.data || output?.video_urls || [];
+    let videoUrl: string | undefined;
+    if (Array.isArray(dataArr) && dataArr.length > 0) {
+      const first = dataArr[0];
+      videoUrl = typeof first === 'string' ? first : (first.url || first.video_url);
+    }
+    if (!videoUrl) videoUrl = output?.video_url || output?.url || data?.video_url;
+
     return {
       status: 'succeeded',
       progress: 100,
       videoUrl,
-      duration: getNumber(output, 'duration'),
-      thumbnailUrl: firstString(getString(output, 'thumbnail_url'), getString(output, 'cover_url')),
+      duration: output?.duration,
+      thumbnailUrl: output?.thumbnail_url || output?.cover_url,
     };
   }
   if (status === 'failed' || status === 'error' || status === 'cancelled') {
     return {
       status: 'failed',
-      error: firstString(
-        getErrorMessage(getRecord(root, 'error')),
-        getString(root, 'message'),
-        getErrorMessage(getRecord(output, 'error')),
-      ) ?? 'Video generation failed',
+      error: data?.error?.message || data?.message || output?.error?.message || 'Video generation failed',
     };
   }
   if (status === 'running' || status === 'processing' || status === 'in_progress') {
-    return {
-      status: 'running',
-      progress: normalizeProgress(getNumber(root, 'progress') ?? getNumber(output, 'progress'), 50),
-    };
+    const rawProgress = data?.progress ?? output?.progress;
+    const progress = rawProgress != null
+      ? (rawProgress > 1 ? rawProgress : Math.round(rawProgress * 100))
+      : 50;
+    return { status: 'running', progress };
   }
-  return { status: 'pending', progress: normalizeProgress(getNumber(root, 'progress'), 5) };
+  // queued/pending
+  return { status: 'pending', progress: data?.progress ?? 5 };
 }
 
 /** Convert aspect ratio like "16:9" to approximate pixel size string "1920x1080" */
@@ -1301,24 +1238,22 @@ export function ratioToSize(ratio: string): string {
 
 // ==================== Protocol-Specific Parsers ====================
 
-function parseDashscopePoll(data: unknown): VideoTaskPollResult {
-  const root: JsonRecord = asRecord(data) ?? {};
-  const output = getRecord(root, 'output');
-  const status = getString(output, 'task_status') ?? '';
-  const videoResult = asRecord(getArray(output, 'video_result')?.[0]);
+function parseDashscopePoll(data: any): VideoTaskPollResult {
+  const status = data?.output?.task_status || '';
+  const videoResult = data?.output?.video_result?.[0];
 
   if (status === 'SUCCEEDED') {
     return {
       status: 'succeeded',
       progress: 100,
-      videoUrl: getString(videoResult, 'video_url'),
-      watermarkVideoUrl: getString(videoResult, 'watermark_video_url'),
-      duration: getNumber(videoResult, 'duration'),
+      videoUrl: videoResult?.video_url,
+      watermarkVideoUrl: videoResult?.watermark_video_url,
+      duration: videoResult?.duration,
     };
   } else if (status === 'FAILED') {
     return {
       status: 'failed',
-      error: firstString(getString(output, 'message'), getString(root, 'message')) ?? 'Video generation failed',
+      error: data?.output?.message || data?.message || 'Video generation failed',
     };
   } else if (status === 'RUNNING' || status === 'PENDING') {
     return {
@@ -1329,22 +1264,21 @@ function parseDashscopePoll(data: unknown): VideoTaskPollResult {
   return { status: 'pending', progress: 0 };
 }
 
-function parseVolcenginePoll(data: unknown): VideoTaskPollResult {
-  const root: JsonRecord = asRecord(data) ?? {};
-  const status = getString(root, 'status') ?? '';
-  const content = getRecord(root, 'content');
+function parseVolcenginePoll(data: any): VideoTaskPollResult {
+  const status = data?.status || '';
+  const content = data?.content;
 
   if (status === 'succeeded') {
     return {
       status: 'succeeded',
       progress: 100,
-      videoUrl: getString(content, 'video_url'),
-      duration: getNumber(content, 'duration'),
+      videoUrl: content?.video_url,
+      duration: content?.duration,
     };
   } else if (status === 'failed') {
     return {
       status: 'failed',
-      error: firstString(getErrorMessage(getRecord(root, 'error')), getString(root, 'message')) ?? 'Video generation failed',
+      error: data?.error?.message || data?.message || 'Video generation failed',
     };
   } else if (status === 'running' || status === 'queued') {
     return {
@@ -1355,21 +1289,20 @@ function parseVolcenginePoll(data: unknown): VideoTaskPollResult {
   return { status: 'pending', progress: 0 };
 }
 
-function parseMinimaxPoll(data: unknown): VideoTaskPollResult {
-  const root: JsonRecord = asRecord(data) ?? {};
-  const status = firstString(getString(root, 'status'), getString(root, 'task_status')) ?? '';
+function parseMinimaxPoll(data: any): VideoTaskPollResult {
+  const status = data?.status || data?.task_status || '';
 
   if (status === 'succeeded' || status === 'Success' || status === 'done') {
     return {
       status: 'succeeded',
       progress: 100,
-      videoUrl: firstString(getString(root, 'video_url'), getString(root, 'file_id')),
-      duration: getNumber(root, 'duration'),
+      videoUrl: data?.video_url || data?.file_id,
+      duration: data?.duration,
     };
   } else if (status === 'failed' || status === 'Fail' || status === 'error') {
     return {
       status: 'failed',
-      error: firstString(getErrorMessage(getRecord(root, 'error')), getString(root, 'message')) ?? 'Video generation failed',
+      error: data?.error?.message || data?.message || 'Video generation failed',
     };
   } else if (status === 'running' || status === 'processing' || status === 'Queueing') {
     return {
@@ -1380,22 +1313,20 @@ function parseMinimaxPoll(data: unknown): VideoTaskPollResult {
   return { status: 'pending', progress: 0 };
 }
 
-function parseViduPoll(data: unknown): VideoTaskPollResult {
-  const root: JsonRecord = asRecord(data) ?? {};
-  const status = getString(root, 'status') ?? '';
-  const result = getRecord(root, 'result');
+function parseViduPoll(data: any): VideoTaskPollResult {
+  const status = data?.status || '';
 
   if (status === 'success' || status === 'succeeded') {
     return {
       status: 'succeeded',
       progress: 100,
-      videoUrl: firstString(getString(root, 'video_url'), getString(result, 'video_url')),
-      duration: getNumber(root, 'duration'),
+      videoUrl: data?.video_url || data?.result?.video_url,
+      duration: data?.duration,
     };
   } else if (status === 'failed' || status === 'error') {
     return {
       status: 'failed',
-      error: firstString(getErrorMessage(root.error), getString(root, 'message')) ?? 'Video generation failed',
+      error: data?.error || data?.message || 'Video generation failed',
     };
   } else if (status === 'processing' || status === 'running' || status === 'pending') {
     return {
@@ -1406,22 +1337,21 @@ function parseViduPoll(data: unknown): VideoTaskPollResult {
   return { status: 'pending', progress: 0 };
 }
 
-function parseOpenAIVideoPoll(data: unknown): VideoTaskPollResult {
-  const root: JsonRecord = asRecord(data) ?? {};
-  const status = getString(root, 'status') ?? '';
+function parseOpenAIVideoPoll(data: any): VideoTaskPollResult {
+  const status = data?.status || '';
 
   if (status === 'completed' || status === 'succeeded') {
-    const videoData = asRecord(getArray(root, 'data')?.[0]) ?? root;
+    const videoData = data?.data?.[0] || data;
     return {
       status: 'succeeded',
       progress: 100,
-      videoUrl: firstString(getString(videoData, 'url'), getString(videoData, 'video_url')),
-      duration: getNumber(videoData, 'duration'),
+      videoUrl: videoData?.url || videoData?.video_url,
+      duration: videoData?.duration,
     };
   } else if (status === 'failed' || status === 'error') {
     return {
       status: 'failed',
-      error: firstString(getErrorMessage(getRecord(root, 'error')), getErrorMessage(getRecord(root, 'last_error'))) ?? 'Video generation failed',
+      error: data?.error?.message || data?.last_error?.message || 'Video generation failed',
     };
   } else if (status === 'processing' || status === 'running' || status === 'queued' || status === 'in_progress') {
     return {
@@ -1432,87 +1362,72 @@ function parseOpenAIVideoPoll(data: unknown): VideoTaskPollResult {
   return { status: 'pending', progress: 0 };
 }
 
-function parseFalVideoPoll(data: unknown): VideoTaskPollResult {
-  const root: JsonRecord = asRecord(data) ?? {};
-  const status = getString(root, 'status') ?? '';
+function parseFalVideoPoll(data: any): VideoTaskPollResult {
+  const status = data?.status || '';
 
   if (status === 'COMPLETED' || status === 'completed' || status === 'succeeded') {
-    const output = getRecord(root, 'output') ?? root;
+    const output = data?.output || data;
     return {
       status: 'succeeded',
       progress: 100,
-      videoUrl: firstString(getString(output, 'video_url'), getString(output, 'url')),
-      duration: getNumber(output, 'duration'),
+      videoUrl: output?.video_url || output?.url,
+      duration: output?.duration,
     };
   } else if (status === 'FAILED' || status === 'failed') {
     return {
       status: 'failed',
-      error: firstString(getErrorMessage(root.error), getString(root, 'message')) ?? 'Video generation failed',
+      error: data?.error || data?.message || 'Video generation failed',
     };
   } else if (status === 'IN_PROGRESS' || status === 'in_progress' || status === 'running') {
     return {
       status: 'running',
-      progress: normalizeProgress(getNumber(root, 'progress'), 50),
+      progress: data?.progress ? Math.round(data.progress * 100) : 50,
     };
   }
   return { status: 'pending', progress: 0 };
 }
 
-function parseRestGenericPoll(data: unknown): VideoTaskPollResult {
-  const root: JsonRecord = asRecord(data) ?? {};
-  const innerData = root.data;
-  const pollItem = Array.isArray(innerData) ? asRecord(innerData[0]) : asRecord(innerData);
-  const status = (firstString(
-    getString(pollItem, 'status'),
-    getString(pollItem, 'task_status'),
-    getString(root, 'status'),
-    getString(root, 'task_status'),
-  ) ?? '').toLowerCase();
+function parseRestGenericPoll(data: any): VideoTaskPollResult {
+  // apimart 格式: {code:200, data:{task_status:"SUCCEEDED", results:{video_url:"..."}}}
+  // 或: {code:200, data:[{status:"SUCCEEDED", video_url:"..."}]}
+  const innerData = data?.data;
+  const pollItem = Array.isArray(innerData) ? innerData[0] : innerData;
+  
+  // 优先从嵌套data中提取状态和结果
+  const status = (pollItem?.status || pollItem?.task_status || data?.status || data?.task_status || '').toLowerCase();
 
   if (status === 'succeeded' || status === 'completed' || status === 'success' || status === 'done') {
-    const result: JsonRecord = getRecord(pollItem, 'results')
-      ?? getRecord(pollItem, 'result')
-      ?? getRecord(pollItem, 'output')
-      ?? getRecord(root, 'result')
-      ?? getRecord(root, 'output')
-      ?? (Array.isArray(innerData) ? asRecord(innerData[0]) : undefined)
-      ?? root;
-    const videosArray = getArray(result, 'videos') ?? getArray(result, 'video_results') ?? [];
-    const firstVideo = asRecord(videosArray[0]);
-    const videoUrl = firstString(
-      getString(result, 'video_url'),
-      getString(result, 'url'),
-      getString(getRecord(result, 'content'), 'video_url'),
-      getString(pollItem, 'video_url'),
-      getString(pollItem, 'url'),
-      getArray(firstVideo, 'url')?.find((value): value is string => typeof value === 'string'),
-      getString(firstVideo, 'url'),
-      getString(firstVideo, 'video_url'),
-    );
+    const result = pollItem?.results || pollItem?.result || pollItem?.output || data?.result || data?.output || data?.data?.[0] || data;
+    // apimart 格式: result.videos[0].url[0] 或 result.videos[0].url
+    // 通用格式: result.video_url / result.url / result.content.video_url
+    const videosArray = result?.videos || result?.video_results;
+    const videoUrl = result?.video_url || result?.url || result?.content?.video_url
+      || pollItem?.video_url || pollItem?.url
+      || (Array.isArray(videosArray) && videosArray.length > 0
+        ? (Array.isArray(videosArray[0].url) ? videosArray[0].url[0] : videosArray[0].url)
+        : undefined);
     return {
       status: 'succeeded',
       progress: 100,
       videoUrl,
-      duration: getNumber(result, 'duration'),
+      duration: result?.duration,
     };
-  }
-  if (status === 'failed' || status === 'error') {
+  } else if (status === 'failed' || status === 'error') {
     return {
       status: 'failed',
-      error: firstString(
-        getErrorMessage(pollItem?.error),
-        getErrorMessage(root.error),
-        getString(root, 'message'),
-      ) ?? 'Video generation failed',
+      error: pollItem?.error || data?.error?.message || data?.message || data?.error || 'Video generation failed',
     };
-  }
-  if (status === 'running' || status === 'processing' || status === 'in_progress') {
+  } else if (status === 'running' || status === 'processing' || status === 'in_progress') {
+    // 进度值可能是 0-1（比例）或 0-100（百分比），智能判断
+    const rawProgress = data?.progress ?? pollItem?.progress;
+    const progress = rawProgress != null
+      ? (rawProgress > 1 ? rawProgress : Math.round(rawProgress * 100))
+      : 50;
     return {
       status: 'running',
-      progress: normalizeProgress(getNumber(root, 'progress') ?? getNumber(pollItem, 'progress'), 50),
+      progress,
     };
-  }
-  if (status === 'pending' || status === 'queued' || status === 'submitted') {
+  } else if (status === 'pending' || status === 'queued' || status === 'submitted') {
     return { status: 'pending', progress: 10 };
   }
   return { status: 'pending', progress: 0 };
@@ -1552,7 +1467,7 @@ export function buildVideoExtendRequest(
 }
 
 function buildDashscopeExtend(baseUrl: string, apiKey: string, params: VideoGenerateParams) {
-  const body: Record<string, unknown> = {
+  const body: Record<string, any> = {
     model: params.model,
     input: {
       video_url: params.videoUrl,
@@ -1577,14 +1492,14 @@ function buildDashscopeExtend(baseUrl: string, apiKey: string, params: VideoGene
 }
 
 function buildVolcengineExtend(baseUrl: string, apiKey: string, params: VideoGenerateParams) {
-  const content: Array<Record<string, unknown>> = [
+  const content: Array<Record<string, any>> = [
     { type: 'text', text: params.prompt || '请延长视频' },
   ];
   if (params.videoUrl) {
     content.push({ type: 'video_url', video_url: { url: params.videoUrl } });
   }
 
-  const body: Record<string, unknown> = {
+  const body: Record<string, any> = {
     model: params.model,
     content,
     action: 'extend',
@@ -1604,7 +1519,7 @@ function buildVolcengineExtend(baseUrl: string, apiKey: string, params: VideoGen
 }
 
 function buildViduExtend(baseUrl: string, apiKey: string, params: VideoGenerateParams) {
-  const body: Record<string, unknown> = {
+  const body: Record<string, any> = {
     model: params.model,
     prompt: params.prompt || '请延长视频',
     video_url: params.videoUrl,
@@ -1624,7 +1539,7 @@ function buildViduExtend(baseUrl: string, apiKey: string, params: VideoGenerateP
 }
 
 function buildOpenAIVideoExtend(baseUrl: string, apiKey: string, params: VideoGenerateParams) {
-  const body: Record<string, unknown> = {
+  const body: Record<string, any> = {
     model: params.model,
     prompt: params.prompt || 'Extend this video',
     video_url: params.videoUrl,
@@ -1644,7 +1559,7 @@ function buildOpenAIVideoExtend(baseUrl: string, apiKey: string, params: VideoGe
 }
 
 function buildFalVideoExtend(baseUrl: string, apiKey: string, params: VideoGenerateParams) {
-  const body: Record<string, unknown> = {
+  const body: Record<string, any> = {
     prompt: params.prompt || 'Extend this video',
     video_url: params.videoUrl,
     ...(params.extendDuration ? { duration: params.extendDuration } : {}),
@@ -1666,7 +1581,7 @@ function buildFalVideoExtend(baseUrl: string, apiKey: string, params: VideoGener
 }
 
 function buildRestGenericExtend(baseUrl: string, apiKey: string, params: VideoGenerateParams) {
-  const body: Record<string, unknown> = {
+  const body: Record<string, any> = {
     model: params.model,
     prompt: params.prompt || '请延长视频',
     video_url: params.videoUrl,

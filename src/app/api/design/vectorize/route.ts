@@ -4,12 +4,12 @@ import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits, refundCredits } from '@/lib/credits';
-import { vectorizePipeline } from '@/lib/vectorize-pipeline';
+import { vectorizePipeline, type VectorizeEngine } from '@/lib/vectorize-pipeline';
 import fsSync from 'fs';
 import path from 'path';
 import sharp from 'sharp';
 import { validateApiInputs } from '@/lib/api-validator';
-import { logError, OP_ACTIONS } from '@/lib/op-log';
+import { logOperation, logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
 
 function escapeXml(value: string) {
   return value
@@ -676,6 +676,28 @@ async function tryOpenAIFormat(
   return null;
 }
 
+/**
+ * Strategy 5: Try using a chat model provider for vectorization.
+ * If no vectorize provider is configured but a chat provider with vision is available,
+ * use it to generate SVG from the image.
+ */
+async function tryChatProviderFallback(
+  imageBase64: string | null,
+  imageUrl: string,
+  mode: string,
+): Promise<{ svg: string; engine: string } | null> {
+  const chatProvider = await findProviderForFeature('chat');
+  if (!chatProvider) return null;
+
+  const rawBaseUrl = chatProvider.baseUrl.replace(/\/+$/, '');
+  const baseUrl = normalizeApiBaseUrl(rawBaseUrl);
+  const model = chatProvider.selectedModels?.[0] || chatProvider.selectedModel || '';
+
+  console.log('[vectorize] Trying chat provider fallback:', { baseUrl, model });
+
+  return tryChatCompletionsVectorize(baseUrl, chatProvider.apiKey, imageBase64, imageUrl, mode, model);
+}
+
 /** Sanitize SVG for Adobe Illustrator compatibility — removes DOCTYPE, metadata, external refs, ensures proper viewBox/xmlns */
 function sanitizeSvgForAI(svg: string): string {
   let s = svg;
@@ -730,7 +752,7 @@ function sanitizeSvgForAI(svg: string): string {
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
   let deductedCredits = 0;
-  let sessionUser: Awaited<ReturnType<typeof getSessionUser>> = null;
+  let sessionUser: any = null;
   let selectedMode = '';
   const engineUsed = '';
   try {

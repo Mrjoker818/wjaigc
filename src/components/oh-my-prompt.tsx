@@ -1,12 +1,11 @@
 'use client';
 
-import NextImage from 'next/image';
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Lightbulb, X, Upload, Wand2, Eye, Sparkles, Loader2, Copy, Check, Send, RotateCcw, Zap } from 'lucide-react';
+import { Lightbulb, X, Upload, Wand2, Eye, Sparkles, Loader2, Copy, Check, Send, Image as ImageIcon, RotateCcw, ChevronDown, ChevronUp, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { } from '@/components/ui/input';
+import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { } from '@/components/ui/tabs';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
 // Types
 type OmpActiveTab = 'vision' | 'agent';
@@ -96,7 +95,7 @@ function VisionTab({ initialImageUrl, onInsertPrompt, onOptimizePrompt }: Vision
     if (initialImageUrl && !imagePreview) {
       setImagePreview(initialImageUrl);
     }
-  }, [imagePreview, initialImageUrl]);
+  }, [initialImageUrl]);
 
   const handleFileUpload = useCallback((file: File) => {
     if (!file.type.startsWith('image/')) return;
@@ -157,7 +156,7 @@ function VisionTab({ initialImageUrl, onInsertPrompt, onOptimizePrompt }: Vision
           
           {imagePreview ? (
             <div className="relative group">
-              <NextImage unoptimized width={1} height={1} src={imagePreview} alt="Upload" className="w-full h-32 object-contain bg-muted/30" />
+              <img src={imagePreview} alt="Upload" className="w-full h-32 object-contain bg-muted/30" />
               <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                 <span className="text-white text-xs">点击更换图片</span>
               </div>
@@ -263,7 +262,7 @@ interface AgentEnhanceTabProps {
 
 interface ChatMessage { role: 'user' | 'assistant'; content: string; }
 
-function AgentEnhanceTab({ initialPrompt, onInsertPrompt, floating }: AgentEnhanceTabProps) {
+function AgentEnhanceTab({ initialPrompt, onInsertPrompt, onClose, floating }: AgentEnhanceTabProps) {
   const [input, setInput] = useState(initialPrompt || '');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -304,8 +303,8 @@ function AgentEnhanceTab({ initialPrompt, onInsertPrompt, floating }: AgentEnhan
         setStreamingText(partial);
       });
       setMessages(prev => [...prev, { role: 'assistant', content: result }]);
-    } catch (error: unknown) {
-      if (!(error instanceof Error && error.name === 'AbortError')) {
+    } catch (e: any) {
+      if (e.name !== 'AbortError') {
         setMessages(prev => [...prev, { role: 'assistant', content: '优化失败，请重试' }]);
       }
     } finally {
@@ -437,8 +436,22 @@ interface OhMyPromptProps {
   visionResult?: VisionApiResultData | null;
 }
 
-export default function OhMyPrompt({ isOpen, onClose, onInsertPrompt, onOptimizePrompt, onVisionPrompt, initialImageUrl, initialPrompt, initialTab = 'agent', themeStyle = 'default', floating = false, defaultActiveTab, autoAnalyzeImageUrl }: OhMyPromptProps) {
-  void themeStyle;
+export default function OhMyPrompt({
+  isOpen,
+  onClose,
+  onInsertPrompt,
+  onOptimizePrompt,
+  onVisionPrompt,
+  initialImageUrl,
+  initialPrompt,
+  initialTab = 'agent',
+  themeStyle = 'default',
+  floating = false,
+  defaultActiveTab,
+  autoAnalyzeImageUrl,
+  isVisionAnalyzing: externalIsAnalyzing,
+  visionResult: externalVisionResult,
+}: OhMyPromptProps) {
   const [activeTab, setActiveTab] = useState<OmpActiveTab>(defaultActiveTab || initialTab);
   const settings = loadSettings();
 
@@ -466,6 +479,8 @@ export default function OhMyPrompt({ isOpen, onClose, onInsertPrompt, onOptimize
   }, [onVisionPrompt, onInsertPrompt]);
 
   if (!isOpen) return null;
+
+  const isGold = themeStyle === 'gold';
   const panelClass = floating 
     ? 'absolute right-2 bottom-16 w-80 bg-[#1a1a1a] text-white rounded-xl shadow-2xl border border-[#333] overflow-hidden flex flex-col z-50'
     : 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm';

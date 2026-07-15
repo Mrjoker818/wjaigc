@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
       projectName,
       message: '已准备好发送到无限画布',
     });
-  } catch (error: unknown) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }

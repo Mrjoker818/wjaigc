@@ -8,7 +8,7 @@
     "start": "next start -p 5000 -H 0.0.0.0",
     "lint": "eslint",
     "ts-check": "tsc -p tsconfig.json",
-    "postinstall": "node scripts/prepare-tools.mjs",
+    "postinstall": "bash scripts/prepare-tools.sh 2>/dev/null || true",
     "lint:build": "eslint . --quiet",
     "validate": "pnpm run --parallel '/^(ts-check|lint:build)$/'",
     "test": "vitest run",

@@ -1,5 +1,5 @@
 // 用户数据管理器 - localStorage + 服务器数据库双重存储
-import { User, Project, ApiKey, UsageStats, UserData, WujieProjectFile, ImageGroupData, CanvasImage } from './user-types';
+import { User, Project, ApiKey, UsageStats, UserData, WujieProjectFile, ImageGroupData } from './user-types';
 import { APP_VERSION_LABEL } from '@/config/app-meta';
 
 const STORAGE_KEY = 'unbounded_ai_user_data';
@@ -27,18 +27,6 @@ const defaultApiPermissions = () => ({
 interface MultiUserData {
   users: User[];
   userData: Record<string, UserData>; // userId -> UserData
-}
-
-type LegacyProject = Project & { images?: CanvasImage[]; projectId?: string };
-
-function normalizeProjectCanvasImages(project: Project): void {
-  const legacyProject = project as LegacyProject;
-  if (!project.canvasImages && legacyProject.images) {
-    project.canvasImages = legacyProject.images;
-  }
-  if (!Array.isArray(project.canvasImages)) {
-    project.canvasImages = [];
-  }
 }
 
 export class UserManager {
@@ -308,7 +296,7 @@ export class UserManager {
         // 先尝试直接保存，如果配额不足则将 data: URL 替换为空字符串后重试
         try {
           localStorage.setItem(STORAGE_KEY, JSON.stringify(this.multiUserData));
-        } catch {
+        } catch (quotaError) {
           // localStorage 配额溢出，将 data:/blob: URL 替换为空字符串后重试
           console.warn('[saveData] localStorage quota exceeded, retrying without data:/blob: URLs');
           const trimmedData = JSON.parse(JSON.stringify(this.multiUserData));
@@ -353,10 +341,12 @@ export class UserManager {
       } catch { snapshots = []; }
 
       // 检测异常：如果某个项目从≥N张掉到0，标记，用快照数据修复
-      for (const [uid, ud] of Object.entries(this.multiUserData.userData)) {
+      let needRestore = false;
+      let restoreSnapshot: unknown = null;
+      for (const [uid, ud] of Object.entries(this.multiUserData.userData as Record<string, any>)) {
         const projects = ud?.projects || [];
         for (const proj of projects) {
-          const pid = proj.id || (proj as LegacyProject).projectId;
+          const pid = proj.id || proj.projectId;
           if (!pid) continue;
           const current = (proj.canvasImages || []).length;
           const last = this.lastProjectImageCounts.get(pid) || 0;
@@ -372,6 +362,8 @@ export class UserManager {
                 if (snapProj && (snapProj.canvasImages || []).length >= 10) {
                   proj.canvasImages = snapProj.canvasImages;
                   proj.updatedAt = Date.now();
+                  restoreSnapshot = true;
+                  needRestore = true;
                   break;
                 }
               } catch {}
@@ -434,8 +426,10 @@ export class UserManager {
     }, UserManager.SYNC_DEBOUNCE_MS);
   }
 
-  /** 将当前用户的项目数据同步到服务器数据库。 */
-  private async syncToServer(): Promise<void> {
+  /** 将当前用户的项目数据同步到服务器数据库
+   * @param immediate 是否立即同步（跳过防抖），用于删除等关键操作
+   */
+  private async syncToServer(immediate: boolean = false): Promise<void> {
     if (!this.currentUserId || !this.multiUserData) return;
     const userData = this.multiUserData.userData[this.currentUserId];
     if (!userData) return;
@@ -553,9 +547,31 @@ export class UserManager {
 
       // 字段名兼容：服务器/本地数据可能使用 'images'（旧字段名）或 'canvasImages'（新字段名）
       // 统一归一化为 canvasImages
-      for (const project of serverProjects) normalizeProjectCanvasImages(project);
-      for (const project of userData.projects) normalizeProjectCanvasImages(project);
-      for (const project of localProjectsFiltered) normalizeProjectCanvasImages(project);
+      for (const p of serverProjects) {
+        if (!p.canvasImages && (p as any).images) {
+          p.canvasImages = (p as any).images;
+        }
+        // 确保canvasImages是数组
+        if (!Array.isArray(p.canvasImages)) {
+          p.canvasImages = [];
+        }
+      }
+      for (const p of userData.projects) {
+        if (!p.canvasImages && (p as any).images) {
+          p.canvasImages = (p as any).images;
+        }
+        if (!Array.isArray(p.canvasImages)) {
+          p.canvasImages = [];
+        }
+      }
+      for (const p of localProjectsFiltered) {
+        if (!p.canvasImages && (p as any).images) {
+          p.canvasImages = (p as any).images;
+        }
+        if (!Array.isArray(p.canvasImages)) {
+          p.canvasImages = [];
+        }
+      }
 
       // 【数据隔离增强】跨用户ID冲突检测
       // 如果某个项目ID同时出现在其他用户的数据槽中，说明该数据已被污染
@@ -1060,13 +1076,12 @@ export class UserManager {
 
   private createDemoProjects(): Project[] {
     const now = Date.now();
-    const sampleImages: CanvasImage[] = [
+    const sampleImages = [
       {
         id: 'demo-1',
         url: 'https://images.unsplash.com/photo-1682687220742-aba13b6e50ba?w=800&q=80',
         prompt: '美丽的山景，日落时分',
         x: 100, y: 100, width: 400, height: 300,
-        originalWidth: 400, originalHeight: 300, rotation: 0, zIndex: 0,
         createdAt: now - 60000,
         mediaType: 'image' as const,
       },
@@ -1075,7 +1090,6 @@ export class UserManager {
         url: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800&q=80',
         prompt: '阿尔卑斯山脉，雪峰',
         x: 550, y: 200, width: 400, height: 267,
-        originalWidth: 400, originalHeight: 267, rotation: 0, zIndex: 1,
         createdAt: now - 30000,
         mediaType: 'image' as const,
       },
@@ -1085,7 +1099,7 @@ export class UserManager {
         id: 'demo-project',
         userId: this.currentUserId || 'demo',
         name: '示例项目',
-        canvasImages: sampleImages,
+        canvasImages: sampleImages as any,
         createdAt: now,
         updatedAt: now,
         settings: {},
@@ -1161,7 +1175,7 @@ export class UserManager {
     if (userData.projects.length !== initialLength) {
       this.saveData();
       // 删除项目后等待服务器同步完成，防止刷新后从服务器恢复
-      await this.syncToServer();
+      await this.syncToServer(true);
       return true;
     }
 

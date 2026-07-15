@@ -140,7 +140,7 @@ export function PromptEquation({ open, onClose, onSendToPrompt, chatModel, isMon
         if (!finalText.trim()) return;
         onSendToPrompt(finalText.trim());
         onClose();
-    }, [useOptimized, optimizedText, resultText, fields, onSendToPrompt, onClose]);
+    }, [useOptimized, optimizedText, resultText, fields, onSendToPrompt, onClose, synthesize]);
 
     // 重置
     const handleReset = useCallback(() => {

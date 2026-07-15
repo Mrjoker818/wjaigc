@@ -1,11 +1,10 @@
 'use client';
 
-import NextImage from 'next/image';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   X, Upload, Sparkles, Image as ImageIcon,
   Scan, Loader2, ChevronDown,
-  Eye, GripVertical, Sun, Camera, Cpu, Wand2, Sliders, Ratio, BadgeCheck
+  Eye, GripVertical, Sun, Camera, Package, Cpu, Wand2, Sliders, Ratio, BadgeCheck
 } from 'lucide-react';
 import {
   MODEL_ASPECT_RATIOS as SHARED_MODEL_ASPECT_RATIOS,
@@ -98,7 +97,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
   const [models, setModels] = useState<ImageModel[]>([]);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const { elapsed, totalTime, startTimer, stopTimer, formatTime } = useProgressTimer();
+  const { elapsed, totalTime, startTimer, stopTimer, resetTimer, formatTime } = useProgressTimer();
   const [progress, setProgress] = useState(0);
   const [progressLabel, setProgressLabel] = useState('');
   const [results, setResults] = useState<RefineResult[]>([]);
@@ -222,9 +221,9 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
   }, [selectedModel]);
 
   // ─── Get pixel size hint for current aspect ratio ───
-  useCallback((ratio: string): string => {
-        return SHARED_ASPECT_RATIO_TO_PIXELS[ratio] || '1024x1024';
-      }, []);
+  const getPixelSize = useCallback((ratio: string): string => {
+    return SHARED_ASPECT_RATIO_TO_PIXELS[ratio] || '1024x1024';
+  }, []);
 
   // ─── Update material/reflect when category changes ───
   useEffect(() => {
@@ -603,7 +602,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
           <div className="p-4 space-y-4">
             {sourceImage ? (
               <div className="relative rounded-lg overflow-hidden" style={{ border: `1px solid ${borderColor}` }}>
-                <NextImage unoptimized width={1} height={1} src={sourceImage} alt="Source" className="w-full h-auto max-h-[240px] object-contain" style={{ background: isMonochrome ? '#e5e7eb' : 'rgba(0,0,0,0.3)' }} />
+                <img src={sourceImage} alt="Source" className="w-full h-auto max-h-[240px] object-contain" style={{ background: isMonochrome ? '#e5e7eb' : 'rgba(0,0,0,0.3)' }} />
                 <button
                   onClick={() => setSourceImage('')}
                   className="absolute top-2 right-2 p-1.5 rounded-full transition-colors"
@@ -660,7 +659,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
 
             {onAddImage && !sourceImage && (
               <p className="text-xs text-center" style={{ color: textMutedColor }}>
-                选中画布图片后，可通过图片工具栏的&ldquo;精修引擎&rdquo;按钮直接打开
+                选中画布图片后，可通过图片工具栏的"精修引擎"按钮直接打开
               </p>
             )}
           </div>
@@ -672,7 +671,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
             {/* Source thumbnail */}
             {sourceImage && (
               <div className="flex items-center gap-3 p-2.5 rounded-lg" style={{ background: isMonochrome ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.03)' }}>
-                <NextImage unoptimized width={1} height={1} src={sourceImage} alt="Source" className="w-12 h-12 object-cover rounded-md" style={{ border: `1px solid ${borderColor}` }} />
+                <img src={sourceImage} alt="Source" className="w-12 h-12 object-cover rounded-md" style={{ border: `1px solid ${borderColor}` }} />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm truncate" style={{ color: textColor }}>已选择图片</p>
                   <button onClick={() => { if (fileInputRef.current) { fileInputRef.current.value = ''; fileInputRef.current.click(); } }} className="text-xs" style={{ color: accentColor }}>更换图片</button>
@@ -1285,7 +1284,8 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                           background: isMonochrome ? 'rgba(0,0,0,0.02)' : 'rgba(255,255,255,0.02)',
                         }}
                       >
-                        <NextImage unoptimized width={1} height={1}                           src={r.imageUrl}
+                        <img
+                          src={r.imageUrl}
                           alt={r.label}
                           className="w-full h-full object-contain"
                           onLoad={() => console.log(`[refine-engine-panel] Image ${i} loaded:`, r.imageUrl.slice(0, 80))}
@@ -1346,7 +1346,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
               <div className="flex flex-col items-center justify-center py-10 gap-3">
                 <Scan size={36} style={{ color: textMutedColor }} />
                 <p className="text-sm" style={{ color: textSubColor }}>暂无精修结果</p>
-                <p className="text-xs" style={{ color: textMutedColor }}>请在&ldquo;精修设置&rdquo;中配置参数后开始精修</p>
+                <p className="text-xs" style={{ color: textMutedColor }}>请在"精修设置"中配置参数后开始精修</p>
               </div>
             )}
           </div>

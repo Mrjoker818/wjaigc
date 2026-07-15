@@ -1,20 +1,19 @@
 'use client';
 
-import NextImage from 'next/image';
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import {
   WorkflowNode, WorkflowConnection, Workflow as WorkflowData, NodeType, NodeCategory,
   NODE_TYPE_COLORS, NODE_TYPE_LABELS, NODE_TYPE_ICONS, NODE_CATEGORY_LABELS,
   PORT_COLORS, NodePort, PortType, PropertyField,
-  createWorkflowNode, createConnection, createEmptyWorkflow,
+  createWorkflowNode, createConnection, createEmptyWorkflow, createDemoWorkflow,
   getNodePropertyFields, getNodeCategory, NODE_TEMPLATES,
   canConnectPorts, autoLayoutWorkflow, parseComfyUIWorkflow, isImageGeneratingNode, getOutputNodeSize,
 } from '@/lib/workflow-engine';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import { computePortPosition } from '@/lib/node-port-position';
 import { MODEL_QUALITIES, MODEL_ASPECT_RATIOS } from '@/lib/canvas-generation-group';
-import { getPromptTemplates, searchTemplates, addPromptTemplate } from '@/lib/prompt-templates';
+import { getPromptTemplates, searchTemplates, addPromptTemplate, type PromptTemplate } from '@/lib/prompt-templates';
 import {
   Image as ImageIcon, Type, SlidersHorizontal, Wand2, Pencil, Maximize, Scissors,
   PenTool, Palette, Sun, GitBranch, GitMerge, Repeat, RefreshCw, Layers,
@@ -22,9 +21,10 @@ import {
   FileInput,
   ChevronRight, ChevronDown, ChevronLeft, Plus, Trash2, ZoomIn, ZoomOut, RotateCcw,
   Settings, Upload, X, Check, AlertCircle, Loader2, BoxSelect, Group,
-  Search, ScanSearch,
-  ArrowLeft, LayoutGrid, Sparkles, Rotate3d, Box, ShoppingBag,
-  Copy, Clipboard, Film, Bookmark, BookmarkPlus, GitCompare, Grid3X3, ArrowLeftFromLine, ImagePlus, BookOpen, Blocks, FolderOpen, ScrollText, MousePointer2, Maximize2,
+  Search, ScanSearch, Eye, Pause, SkipForward, Workflow as WorkflowIcon, Timer,
+  ArrowLeft, LayoutGrid, Sparkles, MessageCircle, Rotate3d, Box, ShoppingBag, Zap,
+  Copy, Clipboard, Film, Bookmark, BookmarkPlus, GitCompare, Grid3X3, ArrowLeftFromLine, ImagePlus,
+  Shapes, BookOpen, Blocks, FolderOpen, ScrollText, MousePointer2, Maximize2,
   CopyPlus, Unlink, Shuffle, Paintbrush, Video, FileVideo, FileText,
   Mic, Volume2, Music, Camera, Clapperboard, Scissors as CutIcon, Globe, AudioLines, Brain,
 } from 'lucide-react';
@@ -709,8 +709,117 @@ const nodeThemes = {
 
 
 // 底部内容面板 - 显示项目图片，支持拖拽到画布创建节点
+function ContentPanel({ canvasImages, onDragImage, themeStyle }: { canvasImages?: CanvasImageRef[]; onDragImage: (url: string) => void; themeStyle: string }) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [selectedImgId, setSelectedImgId] = useState<string | null>(null);
+  const images = canvasImages || [];
+  const T = nodeThemes[themeStyle as keyof typeof nodeThemes];
+  const stripRef = useRef<HTMLDivElement>(null);
 
-export default function NodeEditor({ workflow, onBack, onWorkflowChange, canvasImages, themeStyle = 'gold', onAddImages }: NodeEditorProps) {
+  const handleDragStart = (e: React.DragEvent, url: string) => {
+    e.dataTransfer.setData('text/uri-list', url);
+    e.dataTransfer.setData('text/plain', url);
+    e.dataTransfer.effectAllowed = 'copy';
+    onDragImage(url);
+  };
+
+  return (
+    <div
+      className={`border-t border-border bg-card/85 backdrop-blur-xl transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] ${collapsed ? 'h-[38px]' : 'h-[120px]'}`}
+      data-popup="content-strip"
+      role="region"
+      aria-label="内容资产"
+    >
+      {/* 标题栏 - 固定高度38px */}
+      <button
+        onClick={() => setCollapsed(prev => !prev)}
+        className="w-full h-[38px] flex items-center gap-2 px-4 hover:bg-muted transition-colors cursor-pointer"
+        aria-expanded={!collapsed}
+        aria-label={collapsed ? '展开内容窗口' : '收起内容窗口'}
+      >
+        <LayoutGrid size={14} className="text-primary" />
+        <span className="text-xs font-semibold uppercase tracking-wider flex-1 text-left text-foreground">内容</span>
+        {images.length > 0 && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-primary/10 text-primary">{images.length}</span>
+        )}
+        {/* 下载全部按钮 */}
+        {!collapsed && images.length > 0 && (
+          <button
+            onClick={(e) => { e.stopPropagation(); }}
+            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] transition-colors cursor-pointer bg-muted text-foreground hover:bg-muted/80"
+            aria-label="下载全部"
+          >
+            <Download size={10} /> 下载全部
+          </button>
+        )}
+        <ChevronDown size={14} className="text-muted-foreground transition-transform duration-300" style={{ transform: collapsed ? 'rotate(0deg)' : 'rotate(180deg)' }} />
+      </button>
+
+      {/* 横向滚动条 - 展开时显示 */}
+      {!collapsed && (
+        <div className="px-3 pb-2 h-[calc(100%-38px)]">
+          {images.length === 0 ? (
+            <div className="flex items-center justify-center h-full text-xs text-muted-foreground">
+              暂无图片，生成后将自动出现在此处
+            </div>
+          ) : (
+            <div
+              ref={stripRef}
+              className="flex gap-2 h-full overflow-x-auto overflow-y-hidden pb-1 scrollbar-thin"
+              style={{
+                scrollbarWidth: 'thin',
+                scrollbarColor: 'var(--color-primary) / 0.18 transparent',
+              }}
+              onWheel={(e) => {
+                // 横向滚动: 将纵向滚轮转为横向
+                if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+                  e.currentTarget.scrollLeft += e.deltaY;
+                  e.preventDefault();
+                }
+              }}
+            >
+              {images.map((img, idx) => {
+                const isSelected = selectedImgId === (img.id || idx);
+                return (
+                <div
+                  key={img.id || idx}
+                  draggable
+                  onDragStart={e => handleDragStart(e, img.url)}
+                  onClick={() => setSelectedImgId(prev => prev === (img.id || idx) ? null : String(img.id || idx))}
+                  className={`group relative flex-shrink-0 w-[72px] h-[72px] rounded-lg overflow-hidden border cursor-grab active:cursor-grabbing transition-all duration-200 hover:-translate-y-0.5 ${isSelected ? 'border-primary shadow-[0_0_0_2px_var(--color-primary),0_0_12px_var(--color-primary)/0.18,0_4px_12px_rgba(0,0,0,0.3)]' : 'border-primary/25 shadow-[0_2px_8px_rgba(0,0,0,0.2)]'}`}
+                  style={{
+                    background: 'repeating-conic-gradient(var(--color-muted) 0% 25%, var(--color-card) 0% 50%) 0 0 / 12px 12px',
+                  }}
+                  title={img.description || img.name || `图片 ${idx + 1} - 拖拽到画布添加节点`}
+                >
+                  <img src={img.url} alt="" className="w-full h-full object-cover" loading="lazy" />
+                  {/* 格式标签 */}
+                  <span className="absolute top-1 right-1 text-[8px] font-bold px-1 py-0 rounded leading-tight bg-black/70 text-white">
+                    {img.url?.includes('.svg') ? 'SVG' : img.url?.includes('.png') ? 'PNG' : 'JPG'}
+                  </span>
+                  {/* 悬停遮罩 */}
+                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
+                    <ImagePlus size={16} className="text-white" />
+                  </div>
+                </div>
+              );
+              })}
+              {/* 添加按钮 */}
+              <div
+                className="flex-shrink-0 w-[72px] h-[72px] rounded-lg border-2 border-dashed border-primary/40 flex flex-col items-center justify-center gap-1 cursor-pointer text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+              >
+                <Plus size={16} />
+                <span className="text-[9px]">添加</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenWorkflowHub, canvasImages, themeStyle = 'gold', onAddImages }: NodeEditorProps) {
   const T = nodeThemes[themeStyle];
   // CSS自定义属性，供Tailwind中 var(--ne-xxx) 引用
   const neVars = {
@@ -811,9 +920,9 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, canvasI
 
   // AI建图状态
   const [aiBuildInput, setAiBuildInput] = useState('');
-  const [, setAiBuildLoading] = useState(false);
-  const [, setAiBuildError] = useState<string | null>(null);
-  const [, setAiBuildOpen] = useState(false);
+  const [aiBuildLoading, setAiBuildLoading] = useState(false);
+  const [aiBuildError, setAiBuildError] = useState<string | null>(null);
+  const [aiBuildOpen, setAiBuildOpen] = useState(false);
 
   // P1: 执行日志
   const [execLogs, setExecLogs] = useState<{ time: number; nodeId: string; label: string; status: string; message: string; duration?: number; nodeType?: string }[]>([]);
@@ -844,7 +953,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, canvasI
   const [contextMenu, setContextMenu] = useState<{ type: 'canvas' | 'node'; x: number; y: number; nodeId?: string } | null>(null);
 
   // P2: 提示词库 - 使用统一的提示词模板系统
-  const [, setPromptSnippets] = useState<PromptSnippet[]>(() => {
+  const [promptSnippets, setPromptSnippets] = useState<PromptSnippet[]>(() => {
     try {
       // 从统一的提示词模板系统加载
       const templates = getPromptTemplates();
@@ -862,24 +971,21 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, canvasI
       return [...fromTemplates, ...fromOld];
     } catch { return []; }
   });
-  const [, ] = useState('');
-  const [, ] = useState('');
-  const [, ] = useState('');
-  const [, ] = useState('通用');
+  const [promptSearch, setPromptSearch] = useState('');
+  const [newSnippetText, setNewSnippetText] = useState('');
+  const [newSnippetTags, setNewSnippetTags] = useState('');
+  const [newSnippetCategory, setNewSnippetCategory] = useState('通用');
 
   // P2: 撤销重做
   const [historyStack, setHistoryStack] = useState<HistoryEntry[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const historyIndexRef = useRef(-1);
   const isUndoRedoRef = useRef(false);
-  const handleCascadeRunRef = useRef<(nodeId: string) => Promise<void>>(async () => {});
-  const handleDeleteNodeRef = useRef<(nodeId: string) => void>(() => {});
-  const getPortPositionLocalRef = useRef<(node: WorkflowNode, port: NodePort) => { x: number; y: number } | null>(() => null);
 
   // P2: 画布助手 (节点感知)
-  const [, setAssistantMessages] = useState<{ role: 'user' | 'assistant'; content: string; suggestions?: { text: string; action: string }[] }[]>([]);
+  const [assistantMessages, setAssistantMessages] = useState<{ role: 'user' | 'assistant'; content: string; suggestions?: { text: string; action: string }[] }[]>([]);
   const [assistantInput, setAssistantInput] = useState('');
-  const [, setAssistantLoading] = useState(false);
+  const [assistantLoading, setAssistantLoading] = useState(false);
 
   // P2: JSON编辑器
   const [jsonEditorOpen, setJsonEditorOpen] = useState(false);
@@ -922,7 +1028,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, canvasI
       historyIndexRef.current = newIdx;
       return newIdx;
     });
-  }, [setWf]);
+  }, []);
 
   const handleRedo = useCallback(() => {
     const idx = historyIndexRef.current;
@@ -938,148 +1044,148 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, canvasI
       });
       return stack;
     });
-  }, [setWf]);
+  }, []);
 
   // P2: 保存提示词到库 - 同时保存到统一的提示词模板系统
-  useCallback((text: string, tags: string[], category: string) => {
-        const snippet: PromptSnippet = { id: `ps-${Date.now()}`, text, tags, category, createdAt: Date.now() };
-        // 保存到统一的提示词模板系统（顶层 import，避免客户端 require）
-        addPromptTemplate({
-          name: text.slice(0, 30) + (text.length > 30 ? '...' : ''),
-          content: text,
-          category,
-          tags,
-          createdBy: 'user',
-          isGlobal: false,
-        });
-        // 同时保存到旧的存储（向后兼容）
-        setPromptSnippets(prev => {
-          const next = [...prev, snippet];
-          localStorage.setItem('wujie-prompt-snippets', JSON.stringify(next));
-          return next;
-        });
-      }, []);
+  const savePromptSnippet = useCallback((text: string, tags: string[], category: string) => {
+    const snippet: PromptSnippet = { id: `ps-${Date.now()}`, text, tags, category, createdAt: Date.now() };
+    // 保存到统一的提示词模板系统（顶层 import，避免客户端 require）
+    addPromptTemplate({
+      name: text.slice(0, 30) + (text.length > 30 ? '...' : ''),
+      content: text,
+      category,
+      tags,
+      createdBy: 'user',
+      isGlobal: false,
+    });
+    // 同时保存到旧的存储（向后兼容）
+    setPromptSnippets(prev => {
+      const next = [...prev, snippet];
+      localStorage.setItem('wujie-prompt-snippets', JSON.stringify(next));
+      return next;
+    });
+  }, []);
 
   // P2: 画布助手发送消息 (P1增强: 上游节点自动引用 + P0增强: 意图分类+操作执行+建议)
-  useCallback(async () => {
-        if (!assistantInput.trim()) return;
-        const userMsg = assistantInput.trim();
-        setAssistantInput('');
-        setAssistantMessages(prev => [...prev, { role: 'user', content: userMsg }]);
-        setAssistantLoading(true);
-        try {
-          const node = wf.nodes.find(n => n.id === selectedNodeId);
-          // P1: 自动遍历上游节点构建上下文
-          let contextInfo = '';
-          if (node) {
-            const upstreamChain: string[] = [];
-            const visited = new Set<string>();
-            const queue = [node.id];
-            visited.add(node.id);
-            while (queue.length > 0) {
-              const currentId = queue.shift()!;
-              const upstreamConns = wf.connections.filter(c => c.toNodeId === currentId);
-              for (const conn of upstreamConns) {
-                if (!visited.has(conn.fromNodeId)) {
-                  visited.add(conn.fromNodeId);
-                  const upNode = wf.nodes.find(n => n.id === conn.fromNodeId);
-                  if (upNode) {
-                    upstreamChain.push(`  → [${upNode.type}] ${upNode.label}: ${JSON.stringify(upNode.config).slice(0, 150)}`);
-                    queue.push(conn.fromNodeId);
-                  }
-                }
+  const sendAssistantMessage = useCallback(async () => {
+    if (!assistantInput.trim()) return;
+    const userMsg = assistantInput.trim();
+    setAssistantInput('');
+    setAssistantMessages(prev => [...prev, { role: 'user', content: userMsg }]);
+    setAssistantLoading(true);
+    try {
+      const node = wf.nodes.find(n => n.id === selectedNodeId);
+      // P1: 自动遍历上游节点构建上下文
+      let contextInfo = '';
+      if (node) {
+        const upstreamChain: string[] = [];
+        const visited = new Set<string>();
+        const queue = [node.id];
+        visited.add(node.id);
+        while (queue.length > 0) {
+          const currentId = queue.shift()!;
+          const upstreamConns = wf.connections.filter(c => c.toNodeId === currentId);
+          for (const conn of upstreamConns) {
+            if (!visited.has(conn.fromNodeId)) {
+              visited.add(conn.fromNodeId);
+              const upNode = wf.nodes.find(n => n.id === conn.fromNodeId);
+              if (upNode) {
+                upstreamChain.push(`  → [${upNode.type}] ${upNode.label}: ${JSON.stringify(upNode.config).slice(0, 150)}`);
+                queue.push(conn.fromNodeId);
               }
             }
-            contextInfo = `当前选中节点: [${node.type}] ${node.label}, 配置: ${JSON.stringify(node.config).slice(0, 200)}`;
-            if (upstreamChain.length > 0) {
-              contextInfo += `\n上游节点链路:\n${upstreamChain.join('\n')}`;
-            }
-          } else {
-            contextInfo = '未选中任何节点';
           }
-          
-          // P0增强: 检测操作意图并执行
-          const operationKeywords = {
-            execute: ['执行', '运行', '跑一下', '生成', '开始'],
-            connect: ['连接', '连线', '接到', '连到'],
-            add: ['添加', '新增', '创建', '增加', '加一个'],
-            delete: ['删除', '移除', '去掉', '删掉'],
-            modify: ['修改', '改一下', '调整', '设置', '配置']
-          };
-          
-          let detectedOperation: string | null = null;
-          for (const [op, keywords] of Object.entries(operationKeywords)) {
-            if (keywords.some(kw => userMsg.toLowerCase().includes(kw))) {
-              detectedOperation = op;
-              break;
-            }
-          }
-          
-          // 如果检测到操作意图，先执行操作再回复
-          if (detectedOperation && node) {
-            let operationResult = '';
-            switch (detectedOperation) {
-              case 'execute':
-                // 执行当前选中的节点（级联执行选中节点的下游链路）
-                void handleCascadeRunRef.current(node.id);
-                operationResult = `已触发执行节点 "${node.label}"，请在工作流执行面板查看进度。`;
-                break;
-              case 'add': {
-                // 解析要添加的节点类型
-                const nodeTypeKeywords: Record<string, string> = {
-                  '生成': 'ai-generate', '图像': 'ai-generate', '图片': 'ai-generate',
-                  '视频': 'ai-video-generate', '音频': 'ai-audio',
-                  '文字': 'input-text', '输入': 'input-text', '提示词': 'input-text',
-                  '条件': 'condition', '循环': 'loop',
-                  '输出': 'output-image', '导出': 'output-export'
-                };
-                let newNodeType = 'ai-generate' as NodeType;
-                for (const [kw, type] of Object.entries(nodeTypeKeywords)) {
-                  if (userMsg.includes(kw)) {
-                    newNodeType = type as NodeType;
-                    break;
-                  }
-                }
-                // 在选中节点右侧创建新节点
-                const newNode = createWorkflowNode(newNodeType, node.x + node.width + 80, node.y);
-                setWf(prev => {
-                  // 自动连线：选中节点输出 → 新节点输入
-                  const selOutPort = node.ports.find(p => p.direction === 'out');
-                  const newInPort = newNode.ports.find(p => p.direction === 'in');
-                  const autoConn = (selOutPort && newInPort && canConnectPorts(selOutPort.type, newInPort.type))
-                    ? [createConnection(node.id, selOutPort.id, newNode.id, newInPort.id, selOutPort.type)]
-                    : [];
-                  return { ...prev, nodes: [...prev.nodes, newNode], connections: [...prev.connections, ...autoConn] };
-                });
-                setSelectedNodeIds(new Set([newNode.id]));
-                operationResult = `已添加新节点 [${NODE_TYPE_LABELS[newNodeType] || newNodeType}] 并自动连线，可在右侧属性面板编辑配置。`;
+        }
+        contextInfo = `当前选中节点: [${node.type}] ${node.label}, 配置: ${JSON.stringify(node.config).slice(0, 200)}`;
+        if (upstreamChain.length > 0) {
+          contextInfo += `\n上游节点链路:\n${upstreamChain.join('\n')}`;
+        }
+      } else {
+        contextInfo = '未选中任何节点';
+      }
+      
+      // P0增强: 检测操作意图并执行
+      const operationKeywords = {
+        execute: ['执行', '运行', '跑一下', '生成', '开始'],
+        connect: ['连接', '连线', '接到', '连到'],
+        add: ['添加', '新增', '创建', '增加', '加一个'],
+        delete: ['删除', '移除', '去掉', '删掉'],
+        modify: ['修改', '改一下', '调整', '设置', '配置']
+      };
+      
+      let detectedOperation: string | null = null;
+      for (const [op, keywords] of Object.entries(operationKeywords)) {
+        if (keywords.some(kw => userMsg.toLowerCase().includes(kw))) {
+          detectedOperation = op;
+          break;
+        }
+      }
+      
+      // 如果检测到操作意图，先执行操作再回复
+      if (detectedOperation && node) {
+        let operationResult = '';
+        switch (detectedOperation) {
+          case 'execute':
+            // 执行当前选中的节点（级联执行选中节点的下游链路）
+            handleCascadeRun(node.id);
+            operationResult = `已触发执行节点 "${node.label}"，请在工作流执行面板查看进度。`;
+            break;
+          case 'add': {
+            // 解析要添加的节点类型
+            const nodeTypeKeywords: Record<string, string> = {
+              '生成': 'ai-generate', '图像': 'ai-generate', '图片': 'ai-generate',
+              '视频': 'ai-video-generate', '音频': 'ai-audio',
+              '文字': 'input-text', '输入': 'input-text', '提示词': 'input-text',
+              '条件': 'condition', '循环': 'loop',
+              '输出': 'output-image', '导出': 'output-export'
+            };
+            let newNodeType = 'ai-generate' as NodeType;
+            for (const [kw, type] of Object.entries(nodeTypeKeywords)) {
+              if (userMsg.includes(kw)) {
+                newNodeType = type as NodeType;
                 break;
               }
-              case 'delete': {
-                const nodeLabel = node.label;
-                handleDeleteNodeRef.current(node.id);
-                setSelectedNodeIds(new Set());
-                operationResult = `已删除节点 "${nodeLabel}" 及其所有连线。`;
-                break;
-              }
-              default:
-                operationResult = `已识别操作意图: ${detectedOperation}，请确认具体参数。`;
             }
-            setAssistantMessages(prev => [...prev, { 
-              role: 'assistant', 
-              content: `✅ ${operationResult}\n\n有什么其他需要帮助的吗？`,
-              suggestions: [
-                { text: '执行整个工作流', action: 'execute-all' },
-                { text: '查看节点配置', action: 'view-config' },
-                { text: '继续对话', action: 'chat' }
-              ]
-            }]);
-            setAssistantLoading(false);
-            return;
+            // 在选中节点右侧创建新节点
+            const newNode = createWorkflowNode(newNodeType, node.x + node.width + 80, node.y);
+            setWf(prev => {
+              // 自动连线：选中节点输出 → 新节点输入
+              const selOutPort = node.ports.find(p => p.direction === 'out');
+              const newInPort = newNode.ports.find(p => p.direction === 'in');
+              const autoConn = (selOutPort && newInPort && canConnectPorts(selOutPort.type, newInPort.type))
+                ? [createConnection(node.id, selOutPort.id, newNode.id, newInPort.id, selOutPort.type)]
+                : [];
+              return { ...prev, nodes: [...prev.nodes, newNode], connections: [...prev.connections, ...autoConn] };
+            });
+            setSelectedNodeIds(new Set([newNode.id]));
+            operationResult = `已添加新节点 [${NODE_TYPE_LABELS[newNodeType] || newNodeType}] 并自动连线，可在右侧属性面板编辑配置。`;
+            break;
           }
-          
-          // P0增强: 智能系统提示词
-          const enhancedSystemPrompt = `你是无界AI工作流助手，具备以下能力：
+          case 'delete': {
+            const nodeLabel = node.label;
+            handleDeleteNode(node.id);
+            setSelectedNodeIds(new Set());
+            operationResult = `已删除节点 "${nodeLabel}" 及其所有连线。`;
+            break;
+          }
+          default:
+            operationResult = `已识别操作意图: ${detectedOperation}，请确认具体参数。`;
+        }
+        setAssistantMessages(prev => [...prev, { 
+          role: 'assistant', 
+          content: `✅ ${operationResult}\n\n有什么其他需要帮助的吗？`,
+          suggestions: [
+            { text: '执行整个工作流', action: 'execute-all' },
+            { text: '查看节点配置', action: 'view-config' },
+            { text: '继续对话', action: 'chat' }
+          ]
+        }]);
+        setAssistantLoading(false);
+        return;
+      }
+      
+      // P0增强: 智能系统提示词
+      const enhancedSystemPrompt = `你是无界AI工作流助手，具备以下能力：
 1. 节点配置指导：帮助用户理解和配置各类节点参数
 2. 工作流优化建议：分析节点链路，提出效率或质量改进建议
 3. 操作执行：识别用户操作意图并执行（如添加节点、连线、删除等）
@@ -1094,41 +1200,41 @@ ${contextInfo}
 - 如果用户请求执行操作，回复格式为 "✅ [操作结果]\n\n[后续建议]"
 - 如果用户询问问题，直接回答并附上"💡 建议下一步"
 - 如果意图模糊，追问具体需求（如"您想添加什么类型的节点？"）`;
-          
-          const res = await fetch('/api/chat', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ messages: [{ role: 'system', content: enhancedSystemPrompt }, { role: 'user', content: userMsg }] }),
-          });
-          if (res.ok) {
-            const data = await res.json();
-            const assistantContent = data.content || data.message || '无法获取回复';
-            
-            // P0增强: 根据回复内容自动生成建议
-            const suggestions: Array<{ text: string; action: string }> = [];
-            if (node) {
-              if (node.type.startsWith('ai-')) {
-                suggestions.push({ text: '执行此节点', action: 'execute-node' });
-                suggestions.push({ text: '查看参数说明', action: 'view-params' });
-              }
-              if (assistantContent.includes('建议') || assistantContent.includes('可以')) {
-                suggestions.push({ text: '应用建议', action: 'apply-suggestion' });
-              }
-            }
-            suggestions.push({ text: '添加相关节点', action: 'add-related' });
-            
-            setAssistantMessages(prev => [...prev, { 
-              role: 'assistant', 
-              content: assistantContent,
-              suggestions: suggestions.length > 0 ? suggestions : undefined
-            }]);
-          } else {
-            setAssistantMessages(prev => [...prev, { role: 'assistant', content: '助手暂时无法回复，请稍后再试。' }]);
+      
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: [{ role: 'system', content: enhancedSystemPrompt }, { role: 'user', content: userMsg }] }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const assistantContent = data.content || data.message || '无法获取回复';
+        
+        // P0增强: 根据回复内容自动生成建议
+        const suggestions: Array<{ text: string; action: string }> = [];
+        if (node) {
+          if (node.type.startsWith('ai-')) {
+            suggestions.push({ text: '执行此节点', action: 'execute-node' });
+            suggestions.push({ text: '查看参数说明', action: 'view-params' });
           }
-        } catch {
-          setAssistantMessages(prev => [...prev, { role: 'assistant', content: '网络错误，请稍后再试。' }]);
-        } finally { setAssistantLoading(false); }
-      }, [assistantInput, wf.nodes, wf.connections, selectedNodeId, setWf]);
+          if (assistantContent.includes('建议') || assistantContent.includes('可以')) {
+            suggestions.push({ text: '应用建议', action: 'apply-suggestion' });
+          }
+        }
+        suggestions.push({ text: '添加相关节点', action: 'add-related' });
+        
+        setAssistantMessages(prev => [...prev, { 
+          role: 'assistant', 
+          content: assistantContent,
+          suggestions: suggestions.length > 0 ? suggestions : undefined
+        }]);
+      } else {
+        setAssistantMessages(prev => [...prev, { role: 'assistant', content: '助手暂时无法回复，请稍后再试。' }]);
+      }
+    } catch {
+      setAssistantMessages(prev => [...prev, { role: 'assistant', content: '网络错误，请稍后再试。' }]);
+    } finally { setAssistantLoading(false); }
+  }, [assistantInput, selectedNodeId, wf.nodes, wf.connections]);
 
   const svgRef = useRef<SVGSVGElement>(null);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
@@ -1187,7 +1293,7 @@ ${contextInfo}
     // 如果是自身回写（引用相同），跳过
     if (workflow === lastEmittedRef.current) return;
     if (!isDraggingRef.current) setWf(workflow);
-  }, [setWf, workflow]);
+  }, [workflow]);
 
   // 通知外部 (拖动期间跳过)
   const onWorkflowChangeRef = useRef(onWorkflowChange);
@@ -1258,7 +1364,7 @@ ${contextInfo}
     });
     setSelectedNodeIds(new Set([node.id]));
     setSidebarTab('props');
-  }, [selectedNodeIds, setWf]);
+  }, [selectedNodeIds]);
 
   const handleDeleteNode = useCallback((nodeId: string) => {
     setWf(prev => ({
@@ -1267,9 +1373,7 @@ ${contextInfo}
       connections: prev.connections.filter(c => c.fromNodeId !== nodeId && c.toNodeId !== nodeId),
     }));
     setSelectedNodeIds(prev => { const next = new Set(prev); next.delete(nodeId); return next; });
-  }, [setWf]);
-  useEffect(() => { handleDeleteNodeRef.current = handleDeleteNode; }, [handleDeleteNode]);
-
+  }, []);
 
   // 从内容面板拖拽图片到画布 → 创建 input-image 节点
   const handleCanvasImageDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
@@ -1297,7 +1401,7 @@ ${contextInfo}
     node.height = nodeH;
     setWf(prev => ({ ...prev, nodes: [...prev.nodes, node] }));
     setSelectedNodeIds(new Set([node.id]));
-  }, [canvasImages, setWf]);
+  }, [canvasImages]);
 
   const handleNodeUpdate = useCallback((nodeId: string, updates: Partial<WorkflowNode>) => {
     setWf(prev => ({
@@ -1310,7 +1414,7 @@ ${contextInfo}
         return { ...n, ...topLevel, config: { ...n.config, ...(updates.config || {}) } };
       }),
     }));
-  }, [setWf]);
+  }, []);
 
   // P0: LLM优化提示词
   const handleLlmOptimize = useCallback(async (nodeId: string, _prompt: string, model: string, systemPrompt: string, instruction: string) => {
@@ -1363,8 +1467,6 @@ ${contextInfo}
       });
     } catch (e) { console.error('Cascade run failed:', e); }
   }, [wf.connections, wf.nodes]);
-  useEffect(() => { handleCascadeRunRef.current = handleCascadeRun; }, [handleCascadeRun]);
-
 
   // P0: 节点字段变更（用于节点上直接编辑）
   const handleNodeFieldChange = useCallback((nodeId: string, field: string, value: unknown) => {
@@ -1407,7 +1509,7 @@ ${contextInfo}
       nodes: [...prev.nodes, sourceNode],
       connections: [...prev.connections, createConnection(sourceNode.id, 'output-image', nodeId, 'input-image', 'image')],
     }));
-  }, [wf.nodes, handleNodeUpdate, setWf]);
+  }, [wf.nodes, handleNodeUpdate]);
 
   // P2: 宫格切分
   const handleGridSplit = useCallback((nodeId: string, cols: number, rows: number) => {
@@ -1426,7 +1528,7 @@ ${contextInfo}
       }
     }
     setWf(prev => ({ ...prev, nodes: [...prev.nodes, ...newNodes], connections: [...prev.connections, ...newConns] }));
-  }, [setWf, wf.nodes]);
+  }, [wf.nodes]);
 
   // P2: 对比滑块 — 找到上游原图，与当前节点图片对比
   const handleCompare = useCallback((nodeId: string) => {
@@ -1504,7 +1606,7 @@ ${contextInfo}
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedNodeIds, selectedNodeId, clipboard, wf, handleDeleteNode, handleUndo, handleRedo, setWf]);
+  }, [selectedNodeIds, selectedNodeId, clipboard, wf, handleDeleteNode, handleUndo, handleRedo]);
 
   // ─── 连线操作 (含端口类型约束) ───
 
@@ -1513,7 +1615,7 @@ ${contextInfo}
     if (port.direction !== 'out') return;
     const node = wf.nodes.find(n => n.id === nodeId);
     if (!node) return;
-    const pos = getPortPositionLocalRef.current(node, port);
+    const pos = getPortPositionLocal(node, port);
     if (!pos) return;
     setDraggingConn({ fromNodeId: nodeId, fromPortId: port.id, fromX: pos.x, fromY: pos.y, toX: pos.x, toY: pos.y, portType: port.type });
   }, [wf.nodes]);
@@ -1542,7 +1644,7 @@ ${contextInfo}
     const conn = createConnection(draggingConn.fromNodeId, draggingConn.fromPortId, nodeId, port.id, connType);
     setWf(prev => ({ ...prev, connections: [...prev.connections, conn] }));
     setDraggingConn(null);
-  }, [draggingConn, setWf, wf.connections]);
+  }, [draggingConn, wf.connections]);
 
   // ─── 画布交互 ───
 
@@ -1599,7 +1701,7 @@ ${contextInfo}
       const my = (e.clientY - canvasRect.top - vp.y) / vp.zoom;
       setBoxSelect(prev => prev ? { ...prev, endX: mx, endY: my } : null);
     }
-  }, [isPanning, draggingConn, boxSelect, panStart.vx, panStart.x, panStart.vy, panStart.y, setWf]);
+  }, [isPanning, panStart, draggingConn, boxSelect]);
 
   const handleCanvasMouseUp = useCallback(() => {
     setIsPanning(false);
@@ -1650,7 +1752,7 @@ ${contextInfo}
     }
     setBoxSelect(null);
     isBoxSelectingRef.current = false;
-  }, [boxSelect, setWf, onWorkflowChange, wf.nodes]);
+  }, [wf, historyIndex, boxSelect]);
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
@@ -1680,7 +1782,6 @@ ${contextInfo}
   }, [contextMenu, closeContextMenu]);
 
   const handleContextAction = useCallback((action: string) => {
-    if (!contextMenu) return;
     if (contextMenu?.type === 'canvas') {
       switch (action) {
         case 'add-node': {
@@ -1777,7 +1878,7 @@ ${contextInfo}
       }
     }
     closeContextMenu();
-  }, [contextMenu, closeContextMenu, setWf, clipboard, wf.nodes, wf.connections, selectedNodeIds]);
+  }, [contextMenu, clipboard, wf, selectedNodeIds, closeContextMenu]);
 
   // ─── 执行工作流 ───
 
@@ -1944,7 +2045,7 @@ ${contextInfo}
     };
     poll();
     return () => { if (timerId) clearTimeout(timerId); };
-  }, [execLogs, execStatus, executionId, onAddImages, wf.nodes]);
+  }, [execStatus, executionId]);
 
   // ─── 保存工作流 ───
 
@@ -2050,73 +2151,73 @@ ${contextInfo}
 
   // ─── AI自然语言建图 ───
 
-  useCallback(async () => {
-        if (!aiBuildInput.trim()) return;
-        setAiBuildLoading(true);
-        setAiBuildError(null);
-        try {
-          const res = await fetch('/api/workflow/ai-build', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ description: aiBuildInput }),
-          });
-          const data = await res.json();
-          if (data.success && data.workflow) {
-            setWf(data.workflow);
-            setSelectedNodeIds(new Set());
-            setSidebarTab('nodes');
-            setAiBuildInput('');
-          } else {
-            setAiBuildError(data.error || 'AI建图失败，请重试');
-          }
-        } catch (e) {
-          setAiBuildError('网络错误，请重试');
-          console.error('[NodeEditor] AI建图失败:', e);
-        } finally {
-          setAiBuildLoading(false);
-        }
-      }, [aiBuildInput, setWf]);
+  const handleAIBuild = useCallback(async () => {
+    if (!aiBuildInput.trim()) return;
+    setAiBuildLoading(true);
+    setAiBuildError(null);
+    try {
+      const res = await fetch('/api/workflow/ai-build', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description: aiBuildInput }),
+      });
+      const data = await res.json();
+      if (data.success && data.workflow) {
+        setWf(data.workflow);
+        setSelectedNodeIds(new Set());
+        setSidebarTab('nodes');
+        setAiBuildInput('');
+      } else {
+        setAiBuildError(data.error || 'AI建图失败，请重试');
+      }
+    } catch (e) {
+      setAiBuildError('网络错误，请重试');
+      console.error('[NodeEditor] AI建图失败:', e);
+    } finally {
+      setAiBuildLoading(false);
+    }
+  }, [aiBuildInput]);
 
   // ─── 加载预设模板 ───
 
-  useCallback((preset: WorkflowPreset) => {
-        const newWf = createEmptyWorkflow(preset.name);
-        newWf.description = preset.description;
+  const handleLoadPreset = useCallback((preset: WorkflowPreset) => {
+    const newWf = createEmptyWorkflow(preset.name);
+    newWf.description = preset.description;
 
-        // 创建节点
-        const createdNodes = preset.nodes.map((n, i) => {
-          const node = createWorkflowNode(n.type, 80 + i * 280, 200, n.label);
-          if (n.config) node.config = { ...node.config, ...n.config };
-          return node;
-        });
-        newWf.nodes = createdNodes;
+    // 创建节点
+    const createdNodes = preset.nodes.map((n, i) => {
+      const node = createWorkflowNode(n.type, 80 + i * 280, 200, n.label);
+      if (n.config) node.config = { ...node.config, ...n.config };
+      return node;
+    });
+    newWf.nodes = createdNodes;
 
-        // 创建连线
-        for (const c of preset.connections) {
-          const fromNode = createdNodes[c.from];
-          const toNode = createdNodes[c.to];
-          if (!fromNode || !toNode) continue;
-          const fromPort = fromNode.ports.find(p => p.id === c.fromPort && p.direction === 'out')
-            || fromNode.ports.find(p => p.direction === 'out');
-          const toPort = toNode.ports.find(p => p.id === c.toPort && p.direction === 'in')
-            || toNode.ports.find(p => p.direction === 'in');
-          if (fromPort && toPort) {
-            newWf.connections.push(createConnection(fromNode.id, fromPort.id, toNode.id, toPort.id, c.type));
-          }
-        }
+    // 创建连线
+    for (const c of preset.connections) {
+      const fromNode = createdNodes[c.from];
+      const toNode = createdNodes[c.to];
+      if (!fromNode || !toNode) continue;
+      const fromPort = fromNode.ports.find(p => p.id === c.fromPort && p.direction === 'out')
+        || fromNode.ports.find(p => p.direction === 'out');
+      const toPort = toNode.ports.find(p => p.id === c.toPort && p.direction === 'in')
+        || toNode.ports.find(p => p.direction === 'in');
+      if (fromPort && toPort) {
+        newWf.connections.push(createConnection(fromNode.id, fromPort.id, toNode.id, toPort.id, c.type));
+      }
+    }
 
-        // 自动布局
-        const layouted = autoLayoutWorkflow(newWf);
-        setWf(layouted);
-        setSelectedNodeIds(new Set());
-        setSidebarTab('nodes');
-      }, [setWf]);
+    // 自动布局
+    const layouted = autoLayoutWorkflow(newWf);
+    setWf(layouted);
+    setSelectedNodeIds(new Set());
+    setSidebarTab('nodes');
+  }, []);
 
   // ─── 自动布局 ───
 
-  useCallback(() => {
-        setWf(prev => autoLayoutWorkflow(prev));
-      }, [setWf]);
+  const handleAutoLayout = useCallback(() => {
+    setWf(prev => autoLayoutWorkflow(prev));
+  }, []);
 
   // ─── 连线路径计算 ───
 
@@ -2149,8 +2250,6 @@ ${contextInfo}
     }
     return result;
   }, []);
-  useEffect(() => { getPortPositionLocalRef.current = getPortPositionLocal; }, [getPortPositionLocal]);
-
 
   // ─── 高亮连线 (选中节点时高亮上下游) ───
 
@@ -2189,11 +2288,11 @@ ${contextInfo}
   }, [filteredTemplates]);
 
   // 过滤预设
-  useMemo(() => {
-        if (!searchQuery) return WORKFLOW_PRESETS;
-        const q = searchQuery.toLowerCase();
-        return WORKFLOW_PRESETS.filter(p => p.name.includes(q) || p.description.includes(q) || p.tags.some(t => t.includes(q)));
-      }, [searchQuery]);
+  const filteredPresets = useMemo(() => {
+    if (!searchQuery) return WORKFLOW_PRESETS;
+    const q = searchQuery.toLowerCase();
+    return WORKFLOW_PRESETS.filter(p => p.name.includes(q) || p.description.includes(q) || p.tags.some(t => t.includes(q)));
+  }, [searchQuery]);
 
   // ─── 渲染 ───
 
@@ -2781,7 +2880,7 @@ ${contextInfo}
           <div className="flex gap-2 px-4 pb-2 overflow-x-auto">
             {(canvasImages || []).map((img, i) => (
               <div key={i} className="shrink-0 w-14 h-14 rounded border border-border/20 overflow-hidden bg-muted/30 relative group cursor-pointer" title={img.description || img.name || `图片 ${i+1}`}>
-                <NextImage unoptimized width={1} height={1} src={img.url} alt="" className="w-full h-full object-cover" />
+                <img src={img.url} alt="" className="w-full h-full object-cover" />
                 <span className="absolute bottom-0 left-0 right-0 text-[7px] text-center text-muted-foreground bg-card/80 py-px">
                   {(img.url?.split('.').pop() || 'PNG').toUpperCase()}
                 </span>
@@ -2835,7 +2934,7 @@ ${contextInfo}
       {imagePreviewUrl && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center" onClick={() => setImagePreviewUrl(null)}>
           <div className="relative max-w-[80vw] max-h-[80vh]">
-            <NextImage unoptimized width={1} height={1} src={imagePreviewUrl} alt="预览" className="max-w-full max-h-[80vh] rounded shadow-2xl" />
+            <img src={imagePreviewUrl} alt="预览" className="max-w-full max-h-[80vh] rounded shadow-2xl" />
             <button onClick={() => setImagePreviewUrl(null)} className="absolute -top-2 -right-2 p-1 bg-muted rounded-full text-muted-foreground hover:text-foreground cursor-pointer">
               <X size={14} />
             </button>
@@ -2848,10 +2947,10 @@ ${contextInfo}
         <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center" onClick={() => setCompareImages(null)}>
           <div className="relative w-[80vw] max-w-[900px] aspect-video bg-black rounded-lg overflow-hidden" onClick={e => e.stopPropagation()}>
             {/* Before 图片 (底层, 完整显示) */}
-            <NextImage unoptimized width={1} height={1} src={compareImages.before} alt="原图" className="absolute inset-0 w-full h-full object-contain" />
+            <img src={compareImages.before} alt="原图" className="absolute inset-0 w-full h-full object-contain" />
             {/* After 图片 (顶层, clip 裁切) */}
             <div className="absolute inset-0" style={{ clipPath: `inset(0 0 0 ${comparePosition}%)` }}>
-              <NextImage unoptimized width={1} height={1} src={compareImages.after} alt="结果" className="w-full h-full object-contain" />
+              <img src={compareImages.after} alt="结果" className="w-full h-full object-contain" />
             </div>
             {/* 滑块线 */}
             <div className="absolute top-0 bottom-0 w-0.5 bg-white/80" style={{ left: `${comparePosition}%` }}>
@@ -3030,7 +3129,7 @@ function OutputImageGroupContent({ imageUrls, theme: T, onPreviewImage }: {
           style={{ background: T.nodeBg === '#161b22' ? '#1c2128' : '#f0f0f0' }}
           onClick={() => onPreviewImage(currentUrl)}
         >
-          <NextImage unoptimized width={1} height={1} src={currentUrl} alt={`图片 ${page + 1}`} className="max-w-full max-h-full object-contain transition-opacity opacity-90 group-hover:opacity-100" />
+          <img src={currentUrl} alt={`图片 ${page + 1}`} className="max-w-full max-h-full object-contain transition-opacity opacity-90 group-hover:opacity-100" />
           <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
             <span className="opacity-0 group-hover:opacity-100 text-white text-xs bg-black/50 px-2 py-0.5 rounded transition-opacity">预览</span>
           </div>
@@ -3076,7 +3175,7 @@ function OutputImageGroupContent({ imageUrls, theme: T, onPreviewImage }: {
   );
 }
 
-const NodeCard = React.memo(function NodeCard({ node, isSelected, isHovered, execResult, isRunning, theme, canvasImages, llmModels, imageModels, onNodeFieldChange, onLlmOptimize, onCascadeRun, onExtractToSource, onGridSplit, onCompare, onTriggerImageUpload, upstreamImageUrl, onSelect, onHover, onDragStart, onPortMouseDown, onPortMouseUp, onDeselect, onPreviewImage, onResizeNode, onUpdateNodeSize, collapsedNodes, onToggleCollapse, onContextMenu }: NodeCardProps) {
+const NodeCard = React.memo(function NodeCard({ node, isSelected, isHighlighted, isHovered, execResult, isRunning, theme, canvasImages, llmModels, imageModels, onNodeFieldChange, onLlmOptimize, onCascadeRun, onExtractToSource, onGridSplit, onCompare, onTriggerImageUpload, upstreamImageUrl, onSelect, onHover, onDragStart, onPortMouseDown, onPortMouseUp, onDelete, onDeselect, onPreviewImage, onResizeNode, onUpdateNodeSize, collapsedNodes, onToggleCollapse, onContextMenu }: NodeCardProps) {
   const T = theme;
   const cat = getNodeCategory(node.type);
   const color = NODE_TYPE_COLORS[cat];
@@ -3104,6 +3203,10 @@ const NodeCard = React.memo(function NodeCard({ node, isSelected, isHovered, exe
   const isOutputImage = node.type === 'output-image';
   const isOutputImageGroup = node.type === 'output-image-group';
 
+  const statusColor = execResult?.status === 'success' ? T.statusSuccess
+    : execResult?.status === 'failed' ? T.statusError
+    : isRunning ? 'var(--ne-accent)' : 'transparent';
+
   // 图片URL: 优先执行结果, 其次节点配置(input-image节点)
   const hasImageOutput = (execResult?.output?.imageUrl || node.config?.imageUrl) as string | undefined;
   // 画布模式专用节点标记
@@ -3127,6 +3230,22 @@ const NodeCard = React.memo(function NodeCard({ node, isSelected, isHovered, exe
   const filteredTemplates = templateSearch ? searchTemplates(templateSearch) : getPromptTemplates();
 
   // P0: 解析文本中的 [img:id] 引用，渲染为缩略图
+  const renderTextWithMentions = (text: string) => {
+    if (!canvasImages?.length) return text;
+    const parts = text.split(/(\[img:[^\]]+\])/g);
+    return parts.map((part, i) => {
+      const match = part.match(/^\[img:(.+)\]$/);
+      if (match) {
+        const imgId = match[1];
+        const img = canvasImages.find(ci => ci.id === imgId);
+        if (img) {
+          return <img key={i} src={img.url} alt={img.name || 'ref'} className="inline-block max-w-[20px] max-h-[20px] rounded mx-0.5 align-middle object-cover border border-border/50" title={img.name || imgId} />;
+        }
+      }
+      return <span key={i}>{part}</span>;
+    });
+  };
+
   // P1: 提示词预设列表 (localStorage, 支持增删)
   const [presetList, setPresetList] = useState<{ id: string; name: string; text: string }[]>(() => {
     try { return JSON.parse(localStorage.getItem('wujie-node-presets') || '[]'); } catch { return []; }
@@ -3330,7 +3449,7 @@ const NodeCard = React.memo(function NodeCard({ node, isSelected, isHovered, exe
                     >
                       <div className="flex items-center gap-2">
                         {tpl.thumbnail ? (
-                          <NextImage unoptimized width={1} height={1} src={tpl.thumbnail} alt={tpl.name} className="w-6 h-6 rounded object-cover flex-shrink-0 border border-white/10" />
+                          <img src={tpl.thumbnail} alt={tpl.name} className="w-6 h-6 rounded object-cover flex-shrink-0 border border-white/10" />
                         ) : (
                           <FileText className="w-3.5 h-3.5 flex-shrink-0 text-gold-muted/50" />
                         )}
@@ -3353,7 +3472,7 @@ const NodeCard = React.memo(function NodeCard({ node, isSelected, isHovered, exe
                         }}
                       >
                         <div className="rounded-lg shadow-2xl overflow-hidden border border-white/10 bg-[#1a1a1a]">
-                          <NextImage unoptimized width={1} height={1} src={tpl.thumbnail} alt={tpl.name} className="w-36 h-36 object-cover" />
+                          <img src={tpl.thumbnail} alt={tpl.name} className="w-36 h-36 object-cover" />
                           <div className="px-2 py-1 text-[10px] truncate text-gold-muted">{tpl.name}</div>
                         </div>
                       </div>,
@@ -3368,7 +3487,7 @@ const NodeCard = React.memo(function NodeCard({ node, isSelected, isHovered, exe
                     const id = ref.match(/^\[img:(.+)\]$/)?.[1];
                     const img = canvasImages.find(ci => ci.id === id);
                     return img ? (
-                      <NextImage unoptimized width={1} height={1} key={i} src={img.url} alt="" className="w-5 h-5 rounded object-cover border border-border/50" title={img.name || id} onClick={(e) => { e.stopPropagation(); onPreviewImage(img.url); }} />
+                      <img key={i} src={img.url} alt="" className="w-5 h-5 rounded object-cover border border-border/50" title={img.name || id} onClick={(e) => { e.stopPropagation(); onPreviewImage(img.url); }} />
                     ) : null;
                   })}
                 </div>
@@ -3467,7 +3586,7 @@ const NodeCard = React.memo(function NodeCard({ node, isSelected, isHovered, exe
                     style={{ background: '#1c2128' }}
                     onClick={() => onPreviewImage(hasImageOutput)}
                   >
-                    <NextImage unoptimized width={1} height={1} src={hasImageOutput} alt="" className="image-preview img" style={{ objectFit: 'cover' }} />
+                    <img src={hasImageOutput} alt="" className="image-preview img" style={{ objectFit: 'cover' }} />
                     <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
                       <span className="opacity-0 group-hover:opacity-100 text-white text-xs bg-black/50 px-2 py-0.5 rounded transition-opacity">预览</span>
                     </div>
@@ -3630,7 +3749,7 @@ const NodeCard = React.memo(function NodeCard({ node, isSelected, isHovered, exe
           {!isInputText && !isInputImage && !isOutputImage && !isOutputImageGroup && hasImageOutput && (
             <div className="w-full h-full px-2 py-1">
               <div className="w-full h-full relative group cursor-pointer flex items-center justify-center" onClick={() => onPreviewImage(hasImageOutput)} onWheel={(e) => e.stopPropagation()}>
-                <NextImage unoptimized width={1} height={1} src={hasImageOutput} alt="" className="max-w-full max-h-full object-contain rounded opacity-70 group-hover:opacity-100 transition-opacity" />
+                <img src={hasImageOutput} alt="" className="max-w-full max-h-full object-contain rounded opacity-70 group-hover:opacity-100 transition-opacity" />
               </div>
             </div>
           )}
@@ -3662,7 +3781,7 @@ const NodeCard = React.memo(function NodeCard({ node, isSelected, isHovered, exe
                 ) : singleUrl ? (
                   <div className="w-full h-full flex flex-col items-center justify-center gap-1" onWheel={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
                     <div className="image-preview has-image cursor-pointer" onClick={() => onPreviewImage(singleUrl)}>
-                      <NextImage unoptimized width={1} height={1} src={singleUrl} alt="" style={{ objectFit: 'cover' }} />
+                      <img src={singleUrl} alt="" style={{ objectFit: 'cover' }} />
                     </div>
                   </div>
                 ) : (
@@ -3890,7 +4009,7 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
                       }}
                     >
                       <span className="w-6 h-6 rounded bg-card flex-shrink-0 overflow-hidden">
-                        {img.url && <NextImage unoptimized width={1} height={1} src={img.url} alt="" className="w-full h-full object-cover" />}
+                        {img.url && <img src={img.url} alt="" className="w-full h-full object-cover" />}
                       </span>
                       <span className="truncate">{img.description || img.url.slice(-20)}</span>
                     </button>
@@ -4048,7 +4167,7 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
           <div className="space-y-2">
             {node.config?.imageUrl ? (
               <div className="relative group">
-                <NextImage unoptimized width={1} height={1} src={String(node.config.imageUrl)} alt="预览" className="w-full h-24 object-cover rounded border border-border" />
+                <img src={String(node.config.imageUrl)} alt="预览" className="w-full h-24 object-cover rounded border border-border" />
                 <button onClick={() => onUpdate(node.id, { config: { [field.key]: '' } })} className="absolute top-1 right-1 p-0.5 bg-black/70 rounded text-muted-foreground hover:text-red-400 cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity">
                   <X size={10} />
                 </button>

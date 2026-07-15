@@ -1,16 +1,15 @@
 'use client';
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import NextImage from 'next/image';
 import { getModelDisplayName } from '@/lib/model-name-map';
-import { isServerReadableImageUrl } from '@/lib/display3d-request-contract';
 import {
-  Box, X, Minus, Maximize2, Image as ImageIcon, Layers, Sparkles,
-  Ruler, Paintbrush, Eye,
-  Users, Store, Building2, TreePine,
-  Grid3X3, Info, Loader2,
-  Camera, DoorOpen, FileImage, Package, Monitor
+  Box, X, Minus, Maximize2, Upload, Image as ImageIcon, Layers,
+  ChevronDown, Sparkles, Download, Send, Search,
+  Ruler, Paintbrush, LayoutGrid, Eye, Lightbulb,
+  Users, Store, Building2, TreePine, FileText,
+  Grid3X3, BarChart3, DollarSign, Info, Loader2, Palette,
+  Camera, RotateCcw, FileDown, DoorOpen, FileImage, Package, Monitor
 } from 'lucide-react';
 
 /* ============================================================
@@ -282,13 +281,11 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
           }));
         setAvailableModels(models);
         // Auto-select from localStorage or first available
-        const saved = localStorage.getItem('wujie_selected_model');
+        const saved = typeof window !== 'undefined' ? localStorage.getItem('currentImageModel') : '';
         if (saved) {
-          try {
-            const parsed = JSON.parse(saved) as { model?: string; id?: string; providerId?: string };
-            const match = models.find((m: { providerId: string; model: string }) => m.model === (parsed.model || parsed.id) && m.providerId === parsed.providerId);
-            if (match) { setSelectedModel(match.model); setSelectedProviderId(match.providerId); return; }
-          } catch {}
+          const savedProvider = typeof window !== 'undefined' ? localStorage.getItem('currentImageProviderId') : '';
+          const match = models.find((m: { providerId: string; model: string }) => m.model === saved && m.providerId === savedProvider);
+          if (match) { setSelectedModel(match.model); setSelectedProviderId(match.providerId); return; }
         }
         if (models.length > 0) { setSelectedModel(models[0].model); setSelectedProviderId(models[0].providerId); }
       })
@@ -353,6 +350,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
   // Theme — 3D展陈系统: 标准黑金配色 (#d4af37 + #1a1a1a)
   const accent = isMonochrome ? '#3b82f6' : '#d4af37';
   const bg = isMonochrome ? '#ffffff' : '#1a1a1a';
+  const bgPanel = isMonochrome ? 'rgba(249,250,251,0.95)' : 'rgba(26,26,26,0.92)';
   const bgCard = isMonochrome ? '#f3f4f6' : 'rgba(17,17,17,0.9)';
   const border = isMonochrome ? '#e5e5e5' : 'rgba(255,255,255,0.1)';
   const textPrimary = isMonochrome ? '#111827' : '#e5e5e5';
@@ -384,16 +382,8 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
     input.onchange = (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (!file) return;
-      const formData = new FormData();
-      formData.append('file', file);
-      fetch('/api/upload', { method: 'POST', body: formData })
-        .then(response => response.ok ? response.json() : Promise.reject(new Error('upload failed')))
-        .then(data => {
-          if (isServerReadableImageUrl(data.url)) {
-            setAssets(prev => [...prev, { id: Date.now().toString(), type, url: data.url, name: file.name }]);
-          }
-        })
-        .catch(() => {});
+      const url = URL.createObjectURL(file);
+      setAssets(prev => [...prev, { id: Date.now().toString(), type, url, name: file.name }]);
     };
     input.click();
   };
@@ -550,7 +540,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
       console.error('[display-3d] Decompose failed:', e);
       setIsDecomposing(false);
     }
-  }, [brandName, sceneType, dimensions, results, selectedChatModel, selectedChatProviderId, selectedModel, selectedProviderId]);
+  }, [brandName, sceneType, dimensions, results, onAddImages, selectedChatModel, selectedChatProviderId, selectedModel, selectedProviderId]);
 
   // === Export handlers ===
   const handleExportPdf = useCallback(async () => {
@@ -634,10 +624,10 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
     } catch (e) { console.error('[display-3d] Export annotation failed:', e); }
   }, [results, brandName, sceneType, dimensions]);
 
-  useCallback(() => {
-        const urls = results.map(r => r.url).filter(Boolean);
-        if (urls.length > 0) onAddImages?.(urls, { modelName: selectedModel, apiProvider: selectedProviderId });
-      }, [results, onAddImages, selectedModel, selectedProviderId]);
+  const handleSendToCanvas = useCallback(() => {
+    const urls = results.map(r => r.url).filter(Boolean);
+    if (urls.length > 0) onAddImages?.(urls, { modelName: selectedModel, apiProvider: selectedProviderId });
+  }, [results, onAddImages, selectedModel, selectedProviderId]);
 
   // === Render helpers ===
   const inputCls = `w-full rounded-lg border px-3 py-2 text-xs outline-none transition-colors ${isMonochrome ? 'bg-white border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-blue-400 focus:ring-1 focus:ring-blue-200' : 'bg-black/30 border-white/10 text-amber-50 placeholder:text-white/30 focus:border-amber-400/60 focus:ring-1 focus:ring-amber-400/20'}`;
@@ -775,7 +765,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                         {assets.map(a => (
                           <div key={a.id} className="relative group rounded border overflow-hidden" style={{ borderColor: border }}>
                             <div className="w-12 h-12">
-                              <NextImage unoptimized width={1} height={1} src={a.url} alt={a.type} className="w-full h-full object-cover" />
+                              <img src={a.url} className="w-full h-full object-cover" />
                             </div>
                             <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-[8px] text-white text-center py-0.5 truncate px-0.5">{a.type}</div>
                             <button className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => setAssets(prev => prev.filter(x => x.id !== a.id))}><X size={8} /></button>
@@ -1029,7 +1019,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                         <div className="flex-1 rounded-xl border flex items-center justify-center relative overflow-hidden"
                           style={{ background: isMonochrome ? '#f9fafb' : 'rgba(0,0,0,0.4)', borderColor: border }}>
                           {results.length > 0 ? (
-                            <NextImage unoptimized width={1} height={1} src={results[0]?.url} alt="3D 展陈生成结果" className="w-full h-full object-contain" />
+                            <img src={results[0]?.url} className="w-full h-full object-contain" />
                           ) : (
                             <div className="flex flex-col items-center text-xs" style={{ color: textMuted }}>
                               <Box size={32} className="mb-2 opacity-20" />
@@ -1046,7 +1036,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                         </div>
                         {/* View thumbnails */}
                         <div className="w-[120px] space-y-1.5 overflow-y-auto">
-                          {VIEW_OPTIONS.filter(v => viewOptions.includes(v.value)).map((v) => (
+                          {VIEW_OPTIONS.filter(v => viewOptions.includes(v.value)).map((v, i) => (
                             <button key={v.value} className={`w-full h-[46px] rounded-lg border flex items-center justify-center text-[12px] cursor-pointer ${selectedView === v.value ? (isMonochrome ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-amber-400 text-amber-200') : (isMonochrome ? 'border-gray-200 text-gray-500' : 'border-white/10 text-white/50')}`}
                               onClick={() => setSelectedView(v.value)}>
                               {v.label}
@@ -1159,7 +1149,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                         {results.length > 0 ? (
                           <div className="space-y-2">
                             <div className="relative rounded-xl border overflow-hidden" style={{ background: isMonochrome ? '#f9fafb' : 'rgba(0,0,0,0.4)', borderColor: border }}>
-                              <NextImage unoptimized width={1} height={1} src={results[0]?.url} alt="3D 展陈尺寸示意图" className="w-full h-auto max-h-[280px] object-contain" />
+                              <img src={results[0]?.url} className="w-full h-auto max-h-[280px] object-contain" />
                               {/* Dimension overlay lines */}
                               <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
                                 <line x1="10" y1="50" x2="90" y2="50" stroke={accent} strokeWidth="0.5" strokeDasharray="2,1" />
@@ -1211,7 +1201,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                                 return (
                                   <div key={v} className="rounded-lg border flex flex-col items-center justify-center h-[120px] relative overflow-hidden" style={{ borderColor: border, background: bgCard }}>
                                     {viewResult?.url ? (
-                                      <NextImage unoptimized width={1} height={1} src={viewResult.url} alt={VIEW_OPTIONS.find(o => o.value === v)?.label || v} className="w-full h-full object-cover" />
+                                      <img src={viewResult.url} className="w-full h-full object-cover" />
                                     ) : (
                                       <span className="text-[12px]" style={{ color: textMuted }}>{VIEW_OPTIONS.find(o => o.value === v)?.label || v}</span>
                                     )}
@@ -1226,7 +1216,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                         ) : (
                           <div className="flex-1 flex flex-col items-center justify-center text-xs py-8" style={{ color: textMuted }}>
                             <Camera size={28} className="mb-2 opacity-20" />
-                            请在&ldquo;输出视角选择&rdquo;中勾选视角
+                            请在"输出视角选择"中勾选视角
                           </div>
                         )}
                       </div>
@@ -1356,7 +1346,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                         <li><b style={{ color: textPrimary }}>场景设置</b>：选择展陈类型（快闪店/展会展位/商超堆头/橱窗陈列/打卡装置/产品展示台/商场美陈）和空间尺寸（长×宽×高 mm）</li>
                         <li><b style={{ color: textPrimary }}>环境与尺寸</b>：设定场地环境（商场中庭/展馆/门店/户外/超市）、预算、材质风格、灯光氛围、人群氛围、品牌主色、重点展示产品</li>
                       </ol>
-                      <p className="mt-2" style={{ color: textMuted }}>然后在&ldquo;输出视角选择&rdquo;中勾选需要的视角，设置分辨率/格式/质量，点击&ldquo;生成展陈方案&rdquo;即可。</p>
+                      <p className="mt-2" style={{ color: textMuted }}>然后在"输出视角选择"中勾选需要的视角，设置分辨率/格式/质量，点击"生成展陈方案"即可。</p>
                     </section>
                     <section>
                       <h3 className="text-sm font-semibold mb-1.5" style={{ color: textAccent }}>右侧预览区</h3>

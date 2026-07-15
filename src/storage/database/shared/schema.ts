@@ -1,5 +1,5 @@
 import { pgTable, serial, timestamp } from "drizzle-orm/pg-core"
-import { } from "drizzle-orm"
+import { sql } from "drizzle-orm"
 
 
 

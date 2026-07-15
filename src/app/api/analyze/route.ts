@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { LLMClient, Config, HeaderUtils } from "coze-coding-dev-sdk";
 import { requireApiAuthOrReject } from '@/lib/api-auth';
-import { } from '@/lib/api-validator';
+import { validateApiInputs } from '@/lib/api-validator';
 
 export const runtime = 'nodejs';
 

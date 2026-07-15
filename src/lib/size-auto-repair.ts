@@ -11,7 +11,7 @@
  */
 
 import { calculateActualPixels, calculateActualPixelsFromRatio } from './canvas-generation-group';
-import { getModelCapabilities, classifyModelFamily } from './model-capabilities';
+import { getModelCapabilities, classifyModelFamily, type ModelFamily } from './model-capabilities';
 
 /** 向后兼容的旧模型族类型 */
 type LegacyModelFamily = 'dalle3' | 'gpt-image' | 'other';
@@ -55,6 +55,14 @@ export function detectInvalidSizeError(errorMsg: string): string | null {
   }
 
   return null;
+}
+
+/**
+ * 将宽度和高度对齐到 alignment 的倍数
+ */
+function alignTo(n: number, alignment: number): number {
+  if (alignment <= 0) return n;
+  return Math.round(n / alignment) * alignment;
 }
 
 /**

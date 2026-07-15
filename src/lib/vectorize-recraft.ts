@@ -8,7 +8,7 @@
  * - 精确路径（非机械描摹）
  * - 支持图形、图标、卡通吉祥物接近 1:1 还原
  */
-import { findProviderForFeature, getApiProviders } from '@/lib/server-api-config';
+import { findProviderForFeature, findProviderById, getApiProviders } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 
 export interface RecraftVectorizeOptions {
@@ -145,6 +145,8 @@ export async function recraftVectorize(
       const formData = new FormData();
       formData.append('image', imageBlob, 'image.png');
       formData.append('output_format', outputFormat);
+
+      const url = `${baseUrl}${endpoint}`;
       const response = await fetchWithV1Retry(baseUrl, endpoint, {
         method: 'POST',
         headers: {

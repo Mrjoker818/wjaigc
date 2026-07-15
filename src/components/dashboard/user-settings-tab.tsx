@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import {
-  User, Bell, Palette, Shield,
-  Moon, Sun, Monitor, ChevronRight, Camera, Lock, History
+  User, Bell, Palette, Shield, Save, Check,
+  Moon, Sun, Monitor, ChevronRight, Camera, Key, Lock, History
 } from 'lucide-react';
 
 interface UserSettingsTabProps {

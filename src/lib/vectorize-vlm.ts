@@ -268,6 +268,8 @@ export async function vlmVectorize(
         options.customPrompt,
         attempt > 0,
       );
+
+      const url = `${baseUrl}/chat/completions`;
       const response = await fetchWithV1Retry(baseUrl, '/chat/completions', {
         method: 'POST',
         headers: {

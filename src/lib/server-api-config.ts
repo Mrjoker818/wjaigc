@@ -7,7 +7,7 @@ export type { ApiProvider, ModelInfo, ApiBalanceInfo, ApiKind };
 import { fetchWithV1Retry, shouldSkipV1Retry } from './api-helpers';
 import { getModelDisplayName } from './model-name-map';
 import { getServerSystemDir } from './server-data-root';
-import { dbGetApiProviders, dbUpsertApiProvider, dbDeleteApiProvider } from './db-storage';
+import { dbGetApiProviders, dbUpsertApiProvider, dbDeleteApiProvider, dbDeleteStaleProviders } from './db-storage';
 
 const SYSTEM_DIR = getServerSystemDir();
 const CONFIG_PATH = path.join(SYSTEM_DIR, 'api-providers.json');

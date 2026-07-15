@@ -1,8 +1,7 @@
 'use client';
 
-import NextImage from 'next/image';
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { GripVertical, X, Minus, Sparkles, Loader2, CheckCircle2, XCircle, Clock, ChevronRight, Smile, Upload, ImagePlus, Archive } from 'lucide-react';
+import { GripVertical, X, Minus, Sparkles, Loader2, CheckCircle2, XCircle, Clock, RefreshCw, Download, ChevronRight, Smile, Upload, ImagePlus, Archive } from 'lucide-react';
 import JSZip from 'jszip';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import { getStickerModelLoadDiagnosticMessage } from '@/lib/sticker-model-load-state';
@@ -44,6 +43,9 @@ const themes = {
     btnClose: '#dc2626',
   },
 } as const;
+
+type ThemeKey = keyof typeof themes;
+
 /* ──────────────────── 数据类型 ──────────────────── */
 interface StickerItem {
   id: number;
@@ -653,7 +655,7 @@ export default function StickerAssistantPanel({
 
   /* ── 生成 ── */
   const [generating, setGenerating] = useState(false);
-  const [, setGenIdx] = useState(-1);
+  const [genIdx, setGenIdx] = useState(-1);
 
   /* ── 文件上传 ref ── */
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -743,7 +745,7 @@ export default function StickerAssistantPanel({
     setDragging(true);
     const rect = (e.currentTarget.parentElement as HTMLElement)?.getBoundingClientRect();
     dragOff.current = { x: e.clientX - (rect?.left ?? 0), y: e.clientY - (rect?.top ?? 0) };
-  }, []);
+  }, [chatModelId]);
   useEffect(() => {
     if (!dragging) return;
     const mv = (e: MouseEvent) => setPos({ x: e.clientX - dragOff.current.x, y: e.clientY - dragOff.current.y });
@@ -844,7 +846,7 @@ export default function StickerAssistantPanel({
       }
     };
     reader.readAsDataURL(file);
-  }, [chatModelId, chatModels]);
+  }, []);
 
   /* ── 处理文件拖放 ── */
   const handleSubjectImageDrop = useCallback((e: React.DragEvent) => {
@@ -1120,7 +1122,7 @@ ${themeDesc}
 
     const runBatchGeneration = async () => {
       // 1. 先检测平台是否支持批量生成
-      detectBatchSupport();
+      const supportsBatch = detectBatchSupport();
 
       // 2. 持续处理直到所有项完成
       while (true) {
@@ -1372,7 +1374,8 @@ ${themeDesc}
                   <div>
                     {subjectImage ? (
                       <div className="relative rounded-md overflow-hidden" style={{ border: `1px solid ${t.border}` }}>
-                        <NextImage unoptimized width={1} height={1}                           src={subjectImage}
+                        <img
+                          src={subjectImage}
                           alt="主体参考图"
                           className="w-full max-h-40 object-contain"
                           style={{ background: t.cardBg }}
@@ -1658,7 +1661,7 @@ ${themeDesc}
               {(subjectImage || subject) && (
                 <div className="flex items-center gap-2 px-2.5 py-2 rounded-md" style={{ background: t.cardBg, border: `1px solid ${t.border}` }}>
                   {subjectImage && (
-                    <NextImage unoptimized width={1} height={1} src={subjectImage} alt="" className="w-8 h-8 rounded object-cover shrink-0" />
+                    <img src={subjectImage} alt="" className="w-8 h-8 rounded object-cover shrink-0" />
                   )}
                   <div className="min-w-0 flex-1">
                     <div className="text-xs font-medium truncate" style={{ color: t.text }}>
@@ -1762,7 +1765,8 @@ ${themeDesc}
                     }}
                   >
                     {item.status === 'done' && item.imageUrl ? (
-                      <NextImage unoptimized width={1} height={1}                         src={item.imageUrl}
+                      <img
+                        src={item.imageUrl}
                         alt={item.caption}
                         className="w-full h-full object-cover"
                         loading="lazy"

@@ -5,8 +5,9 @@ import Sidebar from "@/components/simple-chat/sidebar";
 import ChatArea from "@/components/simple-chat/chat-area";
 import { LoginPanel } from "@/components/dashboard/login-panel";
 import {
-  SimpleChatAgent,
-  loadProjects, saveProjects, SimpleChatProject as Project, SimpleChatTask as Task, PresetSkill
+  SimpleChatProject, SimpleChatTask, SimpleChatMessage, SimpleChatAgent,
+  loadProjects, saveProjects, SimpleChatProject as Project, SimpleChatTask as Task,
+  PRESET_SKILLS, PresetSkill
 } from "@/components/simple-chat/simple-chat-types";
 import { User } from "@/lib/user-types";
 
@@ -172,8 +173,7 @@ export default function SimpleChatPage() {
   if (showLogin || !user) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        <LoginPanel onLogin={(nextUser: User, _productType: string) => {
-          void _productType; setUser(nextUser); setShowLogin(false); }} />
+        <LoginPanel onLogin={(nextUser: User, _productType: string) => { setUser(nextUser); setShowLogin(false); }} />
       </div>
     );
   }

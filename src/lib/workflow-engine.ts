@@ -11,7 +11,7 @@
  * - 节点自动布局
  */
 
-import { SHARED_ASPECT_RATIOS, calculateActualPixels } from './canvas-generation-group';
+import { MODEL_QUALITIES, QUALITY_TO_SIZE, MODEL_ASPECT_RATIOS, SHARED_ASPECT_RATIOS, calculateActualPixels } from './canvas-generation-group';
 
 /** getModelParamType: 判断模型的参数类型（resolution/quality/both/none） */
 import { getModelParamType } from './canvas-generation-group';
@@ -1284,14 +1284,6 @@ export function buildNodeExecutionRequest(
   inputs: Record<string, unknown>
 ): { endpoint: string; method: string; body: Record<string, unknown> } | null {
   const config = { ...node.config, ...inputs };
-  const getConfigString = (key: string, fallback = ''): string =>
-    typeof config[key] === 'string' ? config[key] : fallback;
-  const getConfigNumber = (key: string, fallback = 0): number => {
-    const value = Number(config[key]);
-    return Number.isFinite(value) ? value : fallback;
-  };
-  const getConfigStringArray = (key: string): string[] =>
-    Array.isArray(config[key]) ? config[key].filter((value): value is string => typeof value === 'string') : [];
 
   // 解析复合键 providerId::modelId，确保 model 和 providerId 正确分离
   if (config.model && typeof config.model === 'string' && config.model.includes('::')) {
@@ -1784,7 +1776,6 @@ export function buildNodeExecutionRequest(
           videoUrl: config.videoUrl || inputs.videoUrl || '',
           startTime: Number(config.startTime) || 0,
           endTime: Number(config.endTime) || 0,
-          duration: getConfigNumber('duration', 5),
         }
       };
 
@@ -1793,16 +1784,17 @@ export function buildNodeExecutionRequest(
     case 'parallel':
     case 'input-param':
     case 'output-image':
+    case 'output-video':
     case 'subgraph':
     case 'group':
       return null;
 
     // ─── AI LLM 文案策划节点 ───
     case 'ai-llm': {
-      const sysPrompt = getConfigString('systemPrompt', '你是专业的创意文案策划师，请根据用户需求撰写高质量的创意文案。');
-      const userPrompt = getConfigString('prompt') || getConfigString('text');
-      const refImage = getConfigString('imageUrl');
-      const model = getConfigString('model');
+      const sysPrompt = (config as any).systemPrompt || '你是专业的创意文案策划师，请根据用户需求撰写高质量的创意文案。';
+      const userPrompt = (config as any).prompt || (config as any).text || '';
+      const refImage = (config as any).imageUrl || '';
+      const model = (config as any).model || '';
       return {
         endpoint: '/api/chat',
         method: 'POST',
@@ -1827,18 +1819,18 @@ export function buildNodeExecutionRequest(
 
     // ─── 参数化色彩调整节点（非AI重绘，纯参数） ───
     case 'manual-color-adjust': {
-      const imageUrl = getConfigString('imageUrl');
+      const imageUrl = (config as any).imageUrl || '';
       return {
         endpoint: '/api/image/color-adjust',
         method: 'POST',
         body: {
           imageUrl,
           params: {
-            brightness: getConfigNumber('brightness'),
-            contrast: getConfigNumber('contrast'),
-            saturation: getConfigNumber('saturation'),
-            temperature: getConfigNumber('temperature'),
-            hue: getConfigNumber('hue'),
+            brightness: Number((config as any).brightness) || 0,
+            contrast: Number((config as any).contrast) || 0,
+            saturation: Number((config as any).saturation) || 0,
+            temperature: Number((config as any).temperature) || 0,
+            hue: Number((config as any).hue) || 0,
           }
         }
       };
@@ -1846,39 +1838,39 @@ export function buildNodeExecutionRequest(
 
     // ─── 音频生成节点（TTS） ───
     case 'ai-audio': {
-      const text = getConfigString('text');
+      const text = (config as any).text || '';
       return {
         endpoint: '/api/audio/generate',
         method: 'POST',
         body: {
           text,
-          voice: getConfigString('voice', 'zh-CN-XiaoxiaoNeural'),
-          speed: getConfigNumber('speed', 1.0),
+          voice: (config as any).voice || 'zh-CN-XiaoxiaoNeural',
+          speed: Number((config as any).speed) || 1.0,
         }
       };
     }
 
     // ─── 视频抽帧节点 ───
     case 'video-extract-frames': {
-      const videoUrl = getConfigString('videoUrl');
+      const videoUrl = (config as any).videoUrl || '';
       return {
         endpoint: '/api/video/tools',
         method: 'POST',
         body: {
           action: 'extract-frames',
           videoUrl,
-          mode: getConfigString('mode', 'uniform'),
-          count: getConfigNumber('count') || getConfigNumber('frameCount', 8),
-          fps: getConfigNumber('fps', 1),
+          mode: (config as any).mode || 'uniform',
+          count: Number((config as any).count || (config as any).frameCount) || 8,
+          fps: Number((config as any).fps) || 1,
         }
       };
     }
 
     // ─── 视频合成节点（视频+音频/多视频拼接） ───
     case 'video-compose': {
-      const videoUrl = getConfigString('videoUrl');
-      const audioUrl = getConfigString('audioUrl');
-      const videoUrls = getConfigStringArray('videoUrls');
+      const videoUrl = (config as any).videoUrl || '';
+      const audioUrl = (config as any).audioUrl || '';
+      const videoUrls = (config as any).videoUrls || [];
       return {
         endpoint: '/api/video/tools',
         method: 'POST',
@@ -1887,21 +1879,37 @@ export function buildNodeExecutionRequest(
           videoUrl: videoUrls.length ? '' : videoUrl,
           videoUrls: videoUrls.length ? videoUrls : undefined,
           audioUrl,
-          volume: getConfigNumber('volume', 1.0),
+          volume: Number((config as any).volume) || 1.0,
+        }
+      };
+    }
+
+    // ─── 视频裁剪 ───
+    case 'video-trim': {
+      const videoUrl = (config as any).videoUrl || '';
+      return {
+        endpoint: '/api/video/tools',
+        method: 'POST',
+        body: {
+          action: 'trim',
+          videoUrl,
+          startTime: Number((config as any).startTime) || 0,
+          endTime: Number((config as any).endTime) || 0,
+          duration: Number((config as any).duration) || 5,
         }
       };
     }
 
     // ─── 720全景图节点 ───
     case 'ai-panorama': {
-      const refImage = getConfigString('imageUrl');
-      const prompt = getConfigString('prompt', '360度全景环境图');
+      const refImage = (config as any).imageUrl || '';
+      const prompt = (config as any).prompt || '360度全景环境图';
       return {
         endpoint: '/api/generate',
         method: 'POST',
         body: {
           prompt: prompt + ', 360 degree panorama, equirectangular projection, spherical panorama, seamless',
-          model: getConfigString('model'),
+          model: (config as any).model || '',
           aspectRatio: '2:1',
           n: 1,
           imageUrl: refImage || undefined,
@@ -1943,6 +1951,7 @@ export function autoLayoutWorkflow(wf: Workflow): Workflow {
   }
 
   // BFS分层
+  const nodeMap = new Map(wf.nodes.map(n => [n.id, n]));
   for (const node of sorted) {
     let maxLevel = 0;
     // 找所有上游节点
@@ -2143,6 +2152,7 @@ export function createWorkflowFromAIResult(
   wf.description = result.description;
 
   // 创建节点 (自动布局)
+  const H_GAP = 280;
   const V_GAP = 120;
   const START_X = 80;
   const START_Y = 80;
@@ -2459,7 +2469,7 @@ export function parseComfyUIWorkflow(json: string): Workflow | null {
         const toWujieId = nodeIdMap.get(comfyId);
         if (!toWujieId) continue;
 
-        for (const [, inputValue] of Object.entries(nd.inputs)) {
+        for (const [inputName, inputValue] of Object.entries(nd.inputs)) {
           if (Array.isArray(inputValue) && typeof inputValue[0] === 'string' && typeof inputValue[1] === 'number') {
             const fromWujieId = nodeIdMap.get(inputValue[0]);
             if (!fromWujieId) continue;

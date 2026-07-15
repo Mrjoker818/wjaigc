@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
       `SELECT id FROM wujie_users WHERE id = $1`,
       [userId]
     );
-    if (userCheck.rows.length === 0) {
+    if ((userCheck.rows as any[]).length === 0) {
       return NextResponse.json({ success: false, error: `用户 ${userId} 不存在` }, { status: 404 });
     }
 
@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
       `SELECT balance FROM wujie_credits WHERE user_id = $1`,
       [userId]
     );
-    const newBalance = Number(balanceRes.rows[0]?.balance) || 0;
+    const newBalance = Number((balanceRes.rows as any[])[0]?.balance) || 0;
 
     return NextResponse.json({
       success: true,

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { } from 'fs';
+import { existsSync } from 'fs';
 import { getSessionUser as getAuthUser } from '@/lib/server-auth';
 
 export async function POST(request: NextRequest) {

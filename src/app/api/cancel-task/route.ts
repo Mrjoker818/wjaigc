@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
     const safeTaskInfo = taskInfo ? (() => {
       const { result, ...rest } = taskInfo;
       if (result && typeof result === 'object') {
-        const { ...safeResult } = result as Record<string, unknown>;
+        const { apiKey: _ak, apiBaseUrl: _abu, ...safeResult } = result as Record<string, unknown>;
         return { ...rest, result: safeResult };
       }
       return rest;

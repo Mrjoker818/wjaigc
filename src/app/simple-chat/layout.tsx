@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import Script from 'next/script';
 import { Providers } from './providers';
 
 export const metadata: Metadata = {
@@ -14,10 +13,27 @@ export default function SimpleChatLayout({
 }) {
   return (
     <html lang="zh-CN" data-theme="dark" suppressHydrationWarning>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function() {
+                try {
+                  var theme = localStorage.getItem('simple-chat-theme');
+                  if (!theme) {
+                    theme = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+                  }
+                  document.documentElement.setAttribute('data-theme', theme);
+                  if (theme === 'light') {
+                    document.documentElement.classList.add('theme-monochrome');
+                  }
+                } catch(e) {}
+              })();
+            `,
+          }}
+        />
+      </head>
       <body className="antialiased" suppressHydrationWarning>
-        <Script id="simple-chat-theme" strategy="beforeInteractive">
-          {`(function(){try{var theme=localStorage.getItem('simple-chat-theme');if(!theme){theme=window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';}document.documentElement.setAttribute('data-theme',theme);if(theme==='light'){document.documentElement.classList.add('theme-monochrome');}}catch(e){}})();`}
-        </Script>
         <Providers>{children}</Providers>
       </body>
     </html>

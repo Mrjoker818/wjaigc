@@ -1,9 +1,8 @@
 'use client';
 
-import NextImage from 'next/image';
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Copy, X, ZoomIn, ZoomOut, Check, FileImage, FileCode, Loader2, FileJson, Box, Eye, RotateCcw, Pencil } from 'lucide-react';
-import { } from '@/lib/psd-export';
+import { Download, Copy, X, ZoomIn, ZoomOut, Check, FileImage, FileCode, Loader2, FileJson, Box, Eye, RotateCcw, Pencil } from 'lucide-react';
+import { exportAsPSD } from '@/lib/psd-export';
 import { downloadSVG } from '@/lib/svg-export';
 import type { CanvasImage } from './infinite-canvas';
 
@@ -113,7 +112,7 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
         .catch(() => {});
     };
     img.src = image!.url;
-  }, [viewMode, image]);
+  }, [viewMode, image?.url]);
 
   // Auto rotation
   useEffect(() => {
@@ -510,15 +509,14 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
                 style={{ transform: `scale(${zoom})`, transformOrigin: 'center center', transition: 'transform 0.2s ease' }}
                 className="flex items-center justify-center min-h-[60vh]"
               >
-                {image.url && (
-                  <NextImage unoptimized width={1} height={1} src={image.url}
-                    alt={image.prompt || '图片预览'}
-                    className="max-w-full max-h-[80vh] object-contain"
-                    onLoad={() => setIsLoading(false)}
-                    onError={() => setIsLoading(false)}
-                    draggable={false}
-                  />
-                )}
+                <img
+                  src={image.url}
+                  alt={image.prompt}
+                  className="max-w-full max-h-[80vh] object-contain"
+                  onLoad={() => setIsLoading(false)}
+                  onError={() => setIsLoading(false)}
+                  draggable={false}
+                />
               </div>
             </div>
           </>
@@ -591,7 +589,7 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
                   >
                     {/* Front - main image */}
                     {cubeFace(`translateZ(${half}px)`,
-                      <NextImage unoptimized width={1} height={1} src={image.url} alt="front" crossOrigin="anonymous" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />,
+                      <img src={image.url} alt="front" crossOrigin="anonymous" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />,
                       { border: '2px solid #d4af37' }
                     )}
                     {/* Back */}

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel } from '@/lib/server-api-config';
-import { registerTask } from '@/lib/task-registry';
-import { } from '@/lib/api-helpers';
+import { registerTask, updateTaskProgress } from '@/lib/task-registry';
+import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getSessionUser } from '@/lib/server-auth';
 import { validateApiInputs } from '@/lib/api-validator';
 
@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Use LLM to generate annotation content
-    await findProviderForModel('', 'chat');
+    const provider = await findProviderForModel('', 'chat');
     const annotationPrompt = `请为以下品牌展陈效果图生成标注信息：品牌：${brandName}，标题：${title}。
 请以JSON格式输出标注列表，每个标注包含：{ "label": "标注名称", "description": "说明", "material": "材质", "craft": "工艺" }`;
 

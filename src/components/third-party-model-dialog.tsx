@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { UniversalApiManager } from '@/lib/universal-api-manager';
 import { ApiProvider, PROVIDER_PRESETS, REQUEST_STYLES } from '@/lib/universal-api-types';
-import { X, Key, RefreshCw, Plus, Trash2, Eye, EyeOff, Check, AlertCircle, Link2, ChevronDown, ChevronUp, Image as ImageIcon, MessageSquare, Settings, Box } from 'lucide-react';
+import { X, Key, RefreshCw, Plus, Trash2, Eye, EyeOff, Check, AlertCircle, Link2, ChevronDown, ChevronUp, Image, MessageSquare, Settings, Box } from 'lucide-react';
 
 interface ThirdPartyModelDialogProps {
   isOpen: boolean;
@@ -51,7 +51,15 @@ export function ThirdPartyModelDialog({
 
   const isGold = themeStyle === 'gold';
 
-  const resetForm = useCallback(() => {
+  useEffect(() => {
+    if (isOpen) {
+      setProviders(manager.getProviders());
+      setActiveTab(defaultType);
+      resetForm();
+    }
+  }, [isOpen, defaultType, manager]);
+
+  const resetForm = () => {
     setFormDisplayName('');
     setFormIsEnabled(true);
     setFormProvider('openai');
@@ -67,15 +75,7 @@ export function ThirdPartyModelDialog({
     setEditingProviderId(null);
     setShowAddForm(false);
     setModelSearch('');
-  }, [activeTab]);
-
-  useEffect(() => {
-    if (isOpen) {
-      setProviders(manager.getProviders());
-      setActiveTab(defaultType);
-      resetForm();
-    }
-  }, [isOpen, defaultType, manager, resetForm]);
+  };
 
   const handleProviderPresetChange = (presetId: string) => {
     setFormProvider(presetId);
@@ -117,7 +117,7 @@ export function ThirdPartyModelDialog({
     try {
       const result = await UniversalApiManager.quickTestConnection(formBaseUrl, formApiKey);
       setTestResult(result);
-    } catch {
+    } catch (e) {
       setTestResult({ success: false, message: '测试失败' });
     } finally {
       setIsTesting(false);
@@ -303,7 +303,7 @@ export function ThirdPartyModelDialog({
                         : 'bg-gray-50 text-gray-400 border border-gray-100 hover:text-gray-600'
                   }`}
                 >
-                  <ImageIcon className="w-3.5 h-3.5" />
+                  <Image className="w-3.5 h-3.5" />
                   图像模型
                 </button>
                 <button
@@ -353,7 +353,7 @@ export function ThirdPartyModelDialog({
                               : (isGold ? 'bg-[#1a1a1a]' : 'bg-gray-100')
                           }`}>
                             {activeTab === 'image' ? (
-                              <ImageIcon className={`w-3.5 h-3.5 ${
+                              <Image className={`w-3.5 h-3.5 ${
                                 provider.connectionStatus === 'success' ? 'text-green-400'
                                 : provider.connectionStatus === 'failed' ? 'text-red-400'
                                 : isGold ? 'text-[#d4af37]' : 'text-gray-500'
@@ -420,7 +420,7 @@ export function ThirdPartyModelDialog({
                 ) : (
                   <div className={`flex flex-col items-center justify-center py-8 text-center rounded-xl mb-3 ${isGold ? 'bg-[#0f0f0f] border border-dashed border-[#2a2a2a]' : 'bg-gray-50 border border-dashed border-gray-200'}`}>
                     {activeTab === 'image' ? (
-                      <ImageIcon className={`w-8 h-8 mb-2 ${isGold ? 'text-[#333]' : 'text-gray-300'}`} />
+                      <Image className={`w-8 h-8 mb-2 ${isGold ? 'text-[#333]' : 'text-gray-300'}`} />
                     ) : activeTab === '3d' ? (
                       <Box className={`w-8 h-8 mb-2 ${isGold ? 'text-[#333]' : 'text-gray-300'}`} />
                     ) : (

@@ -1,17 +1,16 @@
 'use client';
 
-import NextImage from 'next/image';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Upload, X, Plus, Cpu, GitMerge, GripHorizontal, Zap, FileText } from 'lucide-react';
-import { } from 'sonner';
+import { toast } from 'sonner';
 import { UniversalApiManager } from '@/lib/universal-api-manager';
 import { ApiProvider } from '@/lib/universal-api-types';
-import { } from '@/lib/user-manager';
+import { UserManager as UserManagerCore } from '@/lib/user-manager';
 import { ThirdPartyModelDialog } from '@/components/third-party-model-dialog';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import { getPromptTemplates, PromptTemplate, searchTemplates } from '@/lib/prompt-templates';
-import { QUALITY_TO_SIZE as SHARED_QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS as SHARED_ASPECT_RATIO_TO_PIXELS, findModelConfig as sharedFindModelConfig, calculateActualPixels as sharedCalculateActualPixels, getModelParamType, getResolutionTierOptions, getQualityLevelOptions, getProviderAspectRatios, getProviderPixelSizingOption, RESOLUTION_TIER_DISPLAY_NAMES, QUALITY_LEVEL_DISPLAY_NAMES } from '@/lib/canvas-generation-group';
+import { MODEL_ASPECT_RATIOS as SHARED_MODEL_ASPECT_RATIOS, MODEL_QUALITIES as SHARED_MODEL_QUALITIES, QUALITY_DISPLAY_NAMES as SHARED_QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE as SHARED_QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS as SHARED_ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS as SHARED_DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES as SHARED_DEFAULT_QUALITIES, findModelConfig as sharedFindModelConfig, calculateActualPixels as sharedCalculateActualPixels, ModelParamType, getModelParamType, getResolutionTierOptions, getQualityLevelOptions, getDefaultParamValue, getProviderAspectRatios, getProviderPixelSizingOption, RESOLUTION_TIER_DISPLAY_NAMES, QUALITY_LEVEL_DISPLAY_NAMES, RESOLUTION_TIER_MODELS, QUALITY_LEVEL_MODELS } from '@/lib/canvas-generation-group';
 
 export interface GenerationParams {
     prompt: string;
@@ -232,8 +231,17 @@ const getQuickTags = (category: string, designType: string): string[] => {
     return [...COMMON_QUICK_TAGS, ...categoryTags, ...designTags];
 };
 
+// 使用共享的模型配置映射
+const MODEL_ASPECT_RATIOS = SHARED_MODEL_ASPECT_RATIOS;
+
+// 使用共享的画面比例像素映射
+const ASPECT_RATIO_TO_PIXELS = SHARED_ASPECT_RATIO_TO_PIXELS;
+
 // 使用共享的质量尺寸映射
 const QUALITY_TO_SIZE = SHARED_QUALITY_TO_SIZE;
+
+// 使用共享的模型质量配置
+const MODEL_QUALITIES = SHARED_MODEL_QUALITIES;
 
 // 模型列表仅从管理员/用户配置的服务器端加载，无内置默认模型
 
@@ -242,19 +250,28 @@ const QUALITY_TO_SIZE = SHARED_QUALITY_TO_SIZE;
 // 使用共享的模糊匹配函数
 const findModelConfig = sharedFindModelConfig;
 
-function get3DModelLabel(modelId: string): string {
-    const m = modelId.toLowerCase();
-    if (m.includes('hunyuan') || m.includes('混元')) {
-        if (m.includes('lite') || m.includes('quick')) return '极速版';
-        if (m.includes('pro') || m.includes('standard')) return '专业版';
-    }
-    if (m.includes('lite') || m.includes('quick')) return '极速版';
-    if (m.includes('pro') || m.includes('professional') || m.includes('standard')) return '专业版';
-    return modelId;
-}
-
 export function GenerationPanel(
-    { onGenerate, onAddToCanvas, themeStyle = 'gold', externalPrompt, onExternalPromptConsumed, ctrlRefSelections = [], altRefMarkers = [], onRemoveAltRefMarker, onRemoveCtrlRef, onUpdateCtrlRefKeyword, onFusionGenerate, onModelChange, externalReferenceImage, onExternalReferenceImageConsumed, onOpenPromptEquation, applyFavoriteParams, onFavoriteParamsApplied }: GenerationPanelProps
+    {
+        onGenerate,
+        onAddToCanvas,
+        onError,
+        themeStyle = 'gold',
+        externalPrompt,
+        onExternalPromptConsumed,
+        ctrlRefSelections = [],
+        altRefMarkers = [],
+        onRemoveAltRefMarker,
+        onRemoveCtrlRef,
+        onUpdateCtrlRefKeyword,
+        onFusionGenerate,
+        onModelChange,
+        externalReferenceImage,
+        onExternalReferenceImageConsumed,
+        onOpenPromptEquation,
+        applyFavoriteParams,
+        onFavoriteParamsApplied,
+        selectedImageUrl,
+    }: GenerationPanelProps
 ) {
     const [prompt, setPrompt] = useState("");
     const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -270,20 +287,7 @@ export function GenerationPanel(
     const [hoveredTemplateId, setHoveredTemplateId] = useState<string | null>(null);
     const [thumbnailRect, setThumbnailRect] = useState<DOMRect | null>(null);
     const promptTextareaRef = useRef<HTMLTextAreaElement>(null);
-    useRef<HTMLDivElement>(null);
-    const [referenceImages, setReferenceImages] = useState<string[]>([]);
-    const [referenceDescriptions, setReferenceDescriptions] = useState<string[]>([]);
-    const [referenceSelectedCategories, setReferenceSelectedCategories] = useState<Record<number, Set<string>>>({});
-    const [referenceStrengths, setReferenceStrengths] = useState<number[]>([]);
-    const [aspectRatio, setAspectRatio] = useState("1:1");
-    const [quality, setQuality] = useState("auto");
-    const [resolution, setResolution] = useState("2K");
-    const [outputCount, setOutputCount] = useState(1);
-    const [stylePreset, setStylePreset] = useState("auto");
-    const [productCategory, setProductCategory] = useState("none");
-    const [designType, setDesignType] = useState("none");
-    const [model, setModel] = useState("");
-    const [discoveredModels, setDiscoveredModels] = useState<{id: string, providerId: string, providerName: string, is3DProvider?: boolean, displayLabel?: string, apiDisplayName?: string}[]>([]);
+    const templatePopupRef = useRef<HTMLDivElement>(null);
 
     // Sync external prompt from chat-panel prompt optimizer
     useEffect(() => {
@@ -332,7 +336,7 @@ export function GenerationPanel(
             // data for future use and for the "copy keywords" feature.
             onFavoriteParamsApplied?.();
         }
-    }, [applyFavoriteParams, discoveredModels, onFavoriteParamsApplied, onModelChange]);
+    }, [applyFavoriteParams, onFavoriteParamsApplied, onModelChange]);
 
     // Sync external reference image from canvas right-click "发送参考图"
     useEffect(() => {
@@ -358,6 +362,10 @@ export function GenerationPanel(
             setExternalRefImgApplied(false);
         }
     }, [externalReferenceImage, externalRefImgApplied, onExternalReferenceImageConsumed]);
+    const [referenceImages, setReferenceImages] = useState<string[]>([]);
+    const [referenceDescriptions, setReferenceDescriptions] = useState<string[]>([]);
+    const [referenceSelectedCategories, setReferenceSelectedCategories] = useState<Record<number, Set<string>>>({}); // per-image category selection
+    const [referenceStrengths, setReferenceStrengths] = useState<number[]>([]);
     const MAX_REF_IMAGES = 10;
 
     // Reference category labels
@@ -371,12 +379,21 @@ export function GenerationPanel(
     ];
     // Reference panel: max 2 categories per image
     const MAX_REF_CATEGORIES = 2;
+    const [aspectRatio, setAspectRatio] = useState("1:1");
+    const [quality, setQuality] = useState("auto");
+    const [resolution, setResolution] = useState("2K"); // GPT-Image系列分辨率档位
+    const [outputCount, setOutputCount] = useState(1);
+    const [stylePreset, setStylePreset] = useState("auto");
+    const [productCategory, setProductCategory] = useState("none");
+    const [designType, setDesignType] = useState("none");
+    const [model, setModel] = useState("");
+    const [discoveredModels, setDiscoveredModels] = useState<{id: string, providerId: string, providerName: string, is3DProvider?: boolean, displayLabel?: string, apiDisplayName?: string}[]>([]);
     const [showThirdPartyDialog, setShowThirdPartyDialog] = useState(false);
     const [thirdPartyDefaultType, setThirdPartyDefaultType] = useState<'image' | 'chat'>('image');
-    const [, ] = useState('');
-    const [, ] = useState('');
-    const [, ] = useState('');
-    const [, ] = useState(false);
+    const [universalApiName, setUniversalApiName] = useState('');
+    const [universalApiUrl, setUniversalApiUrl] = useState('');
+    const [universalApiKey, setUniversalApiKey] = useState('');
+    const [showUniversalApiKey, setShowUniversalApiKey] = useState(false);
     const [universalProviders, setUniversalProviders] = useState<ApiProvider[]>([]);
     const [universalApiManager, setUniversalApiManager] = useState<UniversalApiManager | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -400,7 +417,7 @@ export function GenerationPanel(
         if (!pureModelId) return;
 
         const lower = pureModelId.toLowerCase();
-        getModelParamType(pureModelId);
+        const paramType = getModelParamType(pureModelId);
         const resolutionTiers = getResolutionTierOptions(pureModelId);
         const qualityLevels = getQualityLevelOptions(pureModelId);
 
@@ -470,7 +487,7 @@ export function GenerationPanel(
                 }
             } catch {}
         }
-    }, [aspectRatio, discoveredModels, model, quality]);
+    }, []);
 
     // 通知父组件当前模型变化（API Key由服务端管理，无需传递）
     // 传递纯 modelId（从复合键 providerId::modelId 中拆解）
@@ -489,14 +506,14 @@ export function GenerationPanel(
     }, [pureModelId, selectedProviderHint]);
 
     // 获取当前模型支持的质量
-    useCallback(() => {
-            const paramType = getModelParamType(pureModelId);
-            if (paramType === 'quality') {
-                return getQualityLevelOptions(pureModelId);
-            }
-            // 'resolution' or 'both': return resolution tier options
-            return getResolutionTierOptions(pureModelId);
-        }, [pureModelId]);
+    const getSupportedQualities = useCallback(() => {
+        const paramType = getModelParamType(pureModelId);
+        if (paramType === 'quality') {
+            return getQualityLevelOptions(pureModelId);
+        }
+        // 'resolution' or 'both': return resolution tier options
+        return getResolutionTierOptions(pureModelId);
+    }, [pureModelId]);
 
     // 尺寸映射 — 使用 calculateActualPixels 综合考虑模型+比例+质量
     const getModelSize = useCallback((ratio: string): string => {
@@ -514,13 +531,13 @@ export function GenerationPanel(
     }, [quality, resolution, pureModelId, selectedProviderHint]);
 
     // 质量对应的尺寸提示 — 显示该质量+当前比例的实际像素
-    useCallback((q: string): string => {
-            const actualSize = sharedCalculateActualPixels(aspectRatio, q, pureModelId);
-            if (actualSize) return actualSize.replace('×', 'x');
-            const qMap = findModelConfig(QUALITY_TO_SIZE, pureModelId);
-            if (qMap && qMap[q]) return qMap[q];
-            return q;
-        }, [aspectRatio, pureModelId]);
+    const getQualitySizeHint = useCallback((q: string): string => {
+        const actualSize = sharedCalculateActualPixels(aspectRatio, q, pureModelId);
+        if (actualSize) return actualSize.replace('×', 'x');
+        const qMap = findModelConfig(QUALITY_TO_SIZE, pureModelId);
+        if (qMap && qMap[q]) return qMap[q];
+        return q;
+    }, [aspectRatio, pureModelId]);
 
     // 生成
     const handleGenerate = () => {
@@ -610,9 +627,7 @@ export function GenerationPanel(
 
     // 监听自定义生成事件
     const handleGenerateRef = useRef(handleGenerate);
-    useEffect(() => {
-        handleGenerateRef.current = handleGenerate;
-    });
+    handleGenerateRef.current = handleGenerate;
     useEffect(() => {
         const handleTriggerGenerate = () => {
             handleGenerateRef.current();
@@ -814,9 +829,29 @@ export function GenerationPanel(
             }
             setPendingModelMigration(null);
         }
-    }, [pendingModelMigration, discoveredModels, quality, aspectRatio]);
+    }, [pendingModelMigration, discoveredModels]);
 
     // 3D模型名称友好标签映射
+    const get3DModelLabel = (modelId: string): string => {
+        const m = modelId.toLowerCase();
+        // 混元3D模型映射
+        if (m.includes('hunyuan') || m.includes('混元')) {
+            if (m.includes('lite') || m.includes('quick') || m.includes('极速')) return '极速版';
+            if (m.includes('pro') || m.includes('专业')) return '专业版';
+            if (m.includes('standard') || m.includes('标准')) return '专业版';
+            return modelId;
+        }
+        // Meshy模型
+        if (m.includes('meshy')) return modelId;
+        // Tripo模型
+        if (m.includes('tripo')) return modelId;
+        // 其他3D模型
+        if (m.includes('lite') || m.includes('quick')) return '极速版';
+        if (m.includes('pro') || m.includes('professional')) return '专业版';
+        if (m.includes('standard')) return '专业版';
+        return modelId;
+    };
+
     // 从服务器加载管理员配置的图像模型
     const loadServerModels = useCallback(async (signal?: AbortSignal) => {
         try {
@@ -878,6 +913,110 @@ export function GenerationPanel(
             document.removeEventListener('visibilitychange', handleVisibility);
         };
     }, [loadServerModels]);
+
+    const handleAddUniversalApi = async () => {
+        if (!universalApiManager || !universalApiName.trim() || !universalApiUrl.trim() || !universalApiKey.trim()) {
+            return;
+        }
+
+        try {
+            const provider = universalApiManager.addProvider(
+                universalApiName,
+                universalApiUrl,
+                universalApiKey,
+                'universal'
+            );
+            
+            // 同步到用户管理器
+            try {
+                const userMgr = UserManagerCore.getInstance();
+                const existingKeys = userMgr.getApiKeys();
+                // 检查是否已存在相同key的密钥
+                if (!existingKeys.some(k => k.key === universalApiKey)) {
+                    const providerType: 'async-poll' | 'direct' | 'custom' = 
+                        universalApiUrl.includes('apimart') ? 'async-poll' :
+                        universalApiUrl.includes('gemini') || universalApiUrl.includes('google') ? 'direct' : 'custom';
+                    userMgr.addApiKey(universalApiName, providerType, universalApiKey, universalApiUrl);
+                }
+            } catch (e) {
+                console.log('Failed to sync universal API to user manager');
+            }
+            
+            setUniversalProviders(universalApiManager.getProviders());
+            setUniversalApiName('');
+            setUniversalApiUrl('');
+            setUniversalApiKey('');
+
+            // Discover available models from the new provider
+            try {
+                const response = await fetch('/api/universal-discover', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        baseUrl: provider.baseUrl,
+                        apiKey: provider.apiKey,
+                        providerId: provider.id,
+                        providerName: provider.name,
+                    }),
+                });
+                if (!response.ok) throw new Error(`模型发现失败: HTTP ${response.status}`);
+                const data = await response.json();
+                if (data.success && data.models) {
+                    setDiscoveredModels(prev => [...prev, ...data.models]);
+                }
+            } catch (err) {
+                console.error('Model discovery failed:', err);
+            }
+        } catch (error) {
+            console.error('Failed to add universal API:', error);
+        }
+    };
+
+    const handleToggleUniversalApi = (providerId: string, isEnabled: boolean) => {
+        if (!universalApiManager) return;
+        
+        universalApiManager.updateProvider(providerId, { isEnabled });
+        setUniversalProviders(universalApiManager.getProviders());
+        
+        // 同步启用/禁用状态到用户管理器
+        try {
+            const userMgr = UserManagerCore.getInstance();
+            const provider = universalApiManager.getProviders().find(p => p.id === providerId);
+            if (provider) {
+                const matchingKey = userMgr.getApiKeys().find(k => k.key === provider.apiKey);
+                if (matchingKey) {
+                    userMgr.updateApiKey(matchingKey.id, { isEnabled });
+                }
+            }
+        } catch (e) {
+            console.log('Failed to sync toggle to user manager');
+        }
+    };
+
+    const handleDeleteUniversalApi = (providerId: string) => {
+        if (!universalApiManager) return;
+        
+        if (confirm('确定要删除这个API吗？')) {
+            // 先获取provider信息用于同步删除
+            const provider = universalApiManager.getProviders().find(p => p.id === providerId);
+            universalApiManager.deleteProvider(providerId);
+            setUniversalProviders(universalApiManager.getProviders());
+            
+            // 同步删除到用户管理器
+            if (provider) {
+                try {
+                    const userMgr = UserManagerCore.getInstance();
+                    const matchingKey = userMgr.getApiKeys().find(k => k.key === provider.apiKey);
+                    if (matchingKey) {
+                        userMgr.deleteApiKey(matchingKey.id);
+                    }
+                } catch (e) {
+                    console.log('Failed to sync deletion to user manager');
+                }
+            }
+        }
+    };
+
     // 动态槽位 - 根据已有图片数量决定显示哪些槽位
     const filledCount = referenceImages.filter(Boolean).length;
     const imageSlots = referenceImages.length < MAX_REF_IMAGES
@@ -1058,7 +1197,8 @@ export function GenerationPanel(
                                         }`}
                                     >
                                         {/* Thumbnail */}
-                                        <NextImage unoptimized width={1} height={1}                                             src={marker.url}
+                                        <img
+                                            src={marker.url}
                                             alt=""
                                             className="w-5 h-5 rounded object-cover flex-shrink-0"
                                         />
@@ -1231,7 +1371,7 @@ export function GenerationPanel(
                                         >
                                             <div className="flex items-center gap-2">
                                                 {template.thumbnail ? (
-                                                    <NextImage unoptimized width={1} height={1} src={template.thumbnail} alt={template.name} className={`w-7 h-7 rounded object-cover flex-shrink-0 ${mc ? 'border border-gray-200' : 'border border-white/[0.08]'}`} />
+                                                    <img src={template.thumbnail} alt={template.name} className={`w-7 h-7 rounded object-cover flex-shrink-0 ${mc ? 'border border-gray-200' : 'border border-white/[0.08]'}`} />
                                                 ) : (
                                                     <FileText className={`w-3.5 h-3.5 flex-shrink-0 ${mc ? 'text-gray-400' : 'text-gold-muted/50'}`} />
                                                 )}
@@ -1263,7 +1403,7 @@ export function GenerationPanel(
                                             }}
                                         >
                                             <div className={`rounded-lg shadow-2xl overflow-hidden border ${mc ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-white/[0.12]'}`}>
-                                                <NextImage unoptimized width={1} height={1} src={tpl.thumbnail} alt={tpl.name} className="w-40 h-40 object-cover" />
+                                                <img src={tpl.thumbnail} alt={tpl.name} className="w-40 h-40 object-cover" />
                                                 <div className={`px-2 py-1 text-[10px] truncate ${mc ? 'text-gray-600' : 'text-gold-muted'}`}>{tpl.name}</div>
                                             </div>
                                         </div>,
@@ -1405,7 +1545,7 @@ export function GenerationPanel(
                                         <div className="flex items-center gap-2 p-1.5">
                                             {/* 缩略图 + 序号锚点 */}
                                             <div className="relative w-12 h-12 flex-shrink-0 rounded overflow-hidden group">
-                                                <NextImage unoptimized width={1} height={1} src={img} className="w-full h-full object-cover" alt="" />
+                                                <img src={img} className="w-full h-full object-cover" alt="" />
                                                 {/* 序号锚点标签 #1, #2, #3... */}
                                                 <span className={`absolute top-0 left-0 text-[10px] font-bold px-1 py-0 rounded-br leading-tight ${
                                                     mc ? 'bg-indigo-500 text-white' : 'bg-gold/90 text-black'
@@ -1513,7 +1653,7 @@ export function GenerationPanel(
                                             {ref.number}
                                         </span>
                                         <div className="w-9 h-9 rounded overflow-hidden border border-gold/40 shrink-0">
-                                            <NextImage unoptimized width={1} height={1} src={ref.url} className="w-full h-full object-cover" alt="" />
+                                            <img src={ref.url} className="w-full h-full object-cover" alt="" />
                                         </div>
                                         <input
                                             type="text"
@@ -1743,7 +1883,7 @@ export function GenerationPanel(
                         setUniversalProviders(universalApiManager.getProviders());
                     }
                 }}
-                onProviderUpdated={() => {
+                onProviderUpdated={(provider) => {
                     if (universalApiManager) {
                         setUniversalProviders(universalApiManager.getProviders());
                         const providers = universalApiManager.getProviders();

@@ -1,61 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
-import {
-  buildShotPlanSystemPrompt,
-  initShotFromPlan,
-  parseShotPlanFullResponse,
-  type VideoCharacter,
-  type VideoProp,
-  type VideoScene,
-  type VideoShotPlan,
-} from '@/lib/video-director/continuity';
-import { findProviderForFeature, type ApiProvider } from '@/lib/server-api-config';
+import { buildShotPlanSystemPrompt, parseShotPlanFullResponse } from '@/lib/video-director/continuity';
+import { findProviderForFeature } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-type JsonRecord = Record<string, unknown>;
-
-function asRecord(value: unknown): JsonRecord | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? value as JsonRecord
-    : undefined;
-}
-
-function getString(record: JsonRecord | undefined, key: string): string | undefined {
-  const value = record?.[key];
-  return typeof value === 'string' ? value : undefined;
-}
-
-function getNumber(record: JsonRecord | undefined, key: string): number | undefined {
-  const value = record?.[key];
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
-}
-
-function getProviderFallbackModel(provider: ApiProvider): string | undefined {
-  const providerRecord = provider as unknown as JsonRecord;
-  return getString(providerRecord, 'defaultChatModel');
-}
-
-function getChatResponseText(data: unknown): string | undefined {
-  const root = asRecord(data);
-  const choices = root?.choices;
-  const firstChoice = Array.isArray(choices) ? asRecord(choices[0]) : undefined;
-  const message = asRecord(firstChoice?.message);
-  return getString(message, 'content') ?? getString(firstChoice, 'text');
-}
-
-function getErrorMessage(error: unknown): string | undefined {
-  return error instanceof Error ? error.message : getString(asRecord(error), 'message');
-}
-
 async function callChatLLM(messages: { role: string; content: string }[], temperature = 0.7, maxTokens = 4000): Promise<string | null> {
   const chatProvider = await findProviderForFeature('chat');
   if (!chatProvider) return null;
-  const chatModels = chatProvider.selectedModels || [];
-  const chatModel = chatModels[0] || getProviderFallbackModel(chatProvider);
-  const baseUrl = chatProvider.baseUrl.replace(/\/$/, '');
-  const apiKey = chatProvider.apiKey;
+  const chatModels: string[] = (chatProvider as any)?.selectedModels || [];
+  const chatModel = chatModels[0] || (chatProvider as any)?.defaultChatModel;
+  const baseUrl = String((chatProvider as any).baseUrl || (chatProvider as any).base_url || '').replace(/\/$/, '');
+  const apiKey = String((chatProvider as any).apiKey || (chatProvider as any).api_key || '');
   if (!baseUrl || !apiKey || !chatModel) return null;
   try {
     const endpoint = baseUrl.endsWith('/chat/completions')
@@ -72,7 +29,9 @@ async function callChatLLM(messages: { role: string; content: string }[], temper
       }),
     }, false, 50000);
     if (!resp.ok) return null;
-    return getChatResponseText(await resp.json()) ?? null;
+    const data = await resp.json() as any;
+    const text = data?.choices?.[0]?.message?.content || data?.choices?.[0]?.text || '';
+    return typeof text === 'string' ? text : null;
   } catch (e) {
     console.warn('[shot-plan] LLM call failed:', e);
     return null;
@@ -86,29 +45,29 @@ async function callChatLLM(messages: { role: string; content: string }[], temper
  */
 export async function POST(req: NextRequest) {
   try {
-    const body = asRecord(await req.json());
-    const storyIdea = (getString(body, 'storyIdea') ?? getString(body, 'story') ?? getString(body, 'prompt') ?? '').trim();
-    const totalDur = getNumber(body, 'duration') || 10;
-    const n = Math.max(2, Math.min(10, getNumber(body, 'shotCount') || Math.min(6, Math.ceil(totalDur / 4))));
-    const style = getString(body, 'style') ?? getString(body, 'directorStyle') ?? 'cinematic';
-    const aspectRatio = getString(body, 'aspectRatio') ?? '16:9';
+    const body = await req.json();
+    const storyIdea: string = String(body.storyIdea || body.story || body.prompt || '').trim();
+    const totalDur = Number(body.duration) || 10;
+    const n = Math.max(2, Math.min(10, Number(body.shotCount) || Math.min(6, Math.ceil(totalDur / 4))));
+    const style = String(body.style || body.directorStyle || 'cinematic');
+    const aspectRatio = String(body.aspectRatio || '16:9');
     if (!storyIdea) return NextResponse.json({ error: '请输入故事梗概' }, { status: 400 });
 
     const systemPrompt = buildShotPlanSystemPrompt(totalDur, n, style, aspectRatio);
     const perShotDur = Math.max(3, Math.min(10, Math.round(totalDur / n)));
     const userPrompt = `故事/想法：\n${storyIdea}\n\n请输出 JSON：包含 shots[]（${n}个镜头）、characters[]（人物）、scenes[]（场景）、props[]（关键道具，没有就返回空数组）。每个镜头必须包含 title/purpose/shotSize/cameraMotion/actionBeat/lighting/audioCues/prompt/duration/aspectRatio/continuityNotes/characterIds/sceneId/propIds。`;
 
-    let shots: VideoShotPlan[] = [];
-    let characters: VideoCharacter[] = [];
-    let scenes: VideoScene[] = [];
-    let propsArr: VideoProp[] = [];
+    let shots: any[] = [];
+    let characters: any[] = [];
+    let scenes: any[] = [];
+    let propsArr: any[] = [];
     let totalDuration = totalDur;
     let usedModel = '';
 
     try {
       const chatProvider = await findProviderForFeature('chat');
-      const chatModels = chatProvider?.selectedModels || [];
-      usedModel = chatModels[0] || (chatProvider ? getProviderFallbackModel(chatProvider) : '') || '';
+      const chatModels: string[] = (chatProvider as any)?.selectedModels || [];
+      usedModel = chatModels[0] || (chatProvider as any)?.defaultChatModel || '';
       const llmText = await callChatLLM([
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
@@ -116,7 +75,7 @@ export async function POST(req: NextRequest) {
       if (llmText) {
         const parsed = parseShotPlanFullResponse(llmText, perShotDur, aspectRatio);
         if (parsed.shots.length > 0) {
-          shots = parsed.shots.slice(0, n).map((s, i) => ({
+          shots = parsed.shots.slice(0, n).map((s: any, i: number) => ({
             ...s,
             id: `shot-${Date.now()}-${i}`,
             index: i,
@@ -126,7 +85,7 @@ export async function POST(req: NextRequest) {
           characters = parsed.characters;
           scenes = parsed.scenes;
           propsArr = parsed.props;
-          totalDuration = shots.reduce((total, shot) => total + (Number(shot.duration) || perShotDur), 0);
+          totalDuration = shots.reduce((a: number, s: any) => a + (Number(s.duration) || perShotDur), 0);
           return NextResponse.json({
             success: true,
             shots,
@@ -153,7 +112,7 @@ export async function POST(req: NextRequest) {
     for (let i = 0; i < segCount; i++) {
       const chunk = parts.slice(i * chunkSize, (i + 1) * chunkSize).join('，');
       const dur = Math.round(totalDur / segCount);
-      shots.push(initShotFromPlan({
+      shots.push({
         id: `shot-${Date.now()}-${i}`,
         index: i,
         title: `镜头 ${i + 1}`,
@@ -178,12 +137,13 @@ export async function POST(req: NextRequest) {
         thumbnailUrl: '',
         videoUrl: '',
         status: 'planned',
-      }));
+        retakeSuggestions: [],
+      });
     }
-    totalDuration = shots.reduce((total, shot) => total + shot.duration, 0);
+    totalDuration = shots.reduce((a: number, s: any) => a + s.duration, 0);
     return NextResponse.json({ success: true, shots, characters, scenes, props: propsArr, totalDuration, fallback: true });
-  } catch (err: unknown) {
+  } catch (err: any) {
     console.error('[video/director/shot-plan] error:', err);
-    return NextResponse.json({ error: getErrorMessage(err) || '分镜规划失败' }, { status: 500 });
+    return NextResponse.json({ error: err?.message || '分镜规划失败' }, { status: 500 });
   }
 }

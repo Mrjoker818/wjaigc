@@ -11,7 +11,7 @@ import { consumeCredits, refundCredits } from '@/lib/credits';
 import { identifyImageSubject } from '@/lib/identify-subject';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { validateApiInputs } from '@/lib/api-validator';
-import { logOperation, logError, OP_ACTIONS } from '@/lib/op-log';
+import { logOperation, logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
 
 // ─── Persist result image to local server ───
 async function persistResultImage(imageUrl: string): Promise<string> {
@@ -817,8 +817,12 @@ async function submitRefineToApi(
 }
 
 // ─── Handle API response: extract directImageUrls or remoteTaskId ───
-async function handleApiResponse(result: unknown, compatProfile: ReturnType<typeof resolveCompatProfile>, taskId: string, _params: { imageUrl: string; prompt: string; model: string; provider: ApiProvider; aspectRatio: string; quality?: string }): Promise<{ directImageUrls?: string[]; remoteTaskId?: string }> {
-  void _params;
+async function handleApiResponse(
+  result: unknown,
+  compatProfile: ReturnType<typeof resolveCompatProfile>,
+  taskId: string,
+  _params: { imageUrl: string; prompt: string; model: string; provider: ApiProvider; aspectRatio: string; quality?: string }
+): Promise<{ directImageUrls?: string[]; remoteTaskId?: string }> {
   const parsed = parseResponseForProfile(result as Record<string, unknown>, compatProfile);
   console.log(`[refine-engine] Parsed response for taskId=${taskId}: directImageUrls=${parsed.directImageUrls?.length || 0}, taskIds=${parsed.taskIds?.length || 0}`);
 
@@ -867,7 +871,7 @@ async function handleApiResponse(result: unknown, compatProfile: ReturnType<type
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
   let deductedCredits = 0;
-  let sessionUser: Awaited<ReturnType<typeof getSessionUser>> = null;
+  let sessionUser: any = null;
   const refineModel = '';
   const refineProviderId = '';
   try {

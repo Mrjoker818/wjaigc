@@ -17,7 +17,9 @@ import {
   ratioToSize,
   validateVideoDuration,
   type VideoGenerateParams,
+  type VideoCompatProfile,
 } from '@/lib/video-api';
+import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { buildDirectorPrompt, type VideoDirectorMode } from '@/lib/video-director';
 import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits, refundCredits } from '@/lib/credits';
@@ -27,18 +29,10 @@ import { recordVideoTaskRemotePolling, recordVideoTaskSubmitted, recordVideoTask
 
 export const maxDuration = 300; // 5 min timeout
 
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : '视频生成请求失败';
-}
-
-function getErrorName(error: unknown): string | undefined {
-  return error instanceof Error ? error.name : undefined;
-}
-
 export async function POST(request: NextRequest) {
   const opTimer = startTimer();
   let deductedCredits = 0;
-  let sessionUser: Awaited<ReturnType<typeof getSessionUser>> = null;
+  let sessionUser: any = null;
   try {
     // 积分扣除（按模型差异化扣分）
     const body = await request.json();
@@ -232,7 +226,7 @@ export async function POST(request: NextRequest) {
     let finalNegativePrompt = negativePrompt;
     if (useDirector !== false) { // 默认启用
       try {
-        const refs: NonNullable<Parameters<typeof buildDirectorPrompt>[0]['references']> = [];
+        const refs: Array<{ id: string; url: string; role: any; weight?: number }> = [];
         if (resolvedImageUrl) refs.push({ id: 'first', url: resolvedImageUrl, role: 'first-frame' });
         if (resolvedLastFrameUrl) refs.push({ id: 'last', url: resolvedLastFrameUrl, role: 'last-frame' });
         (resolvedRefs || []).forEach((u: string, i: number) => refs.push({ id: `ref${i}`, url: u, role: 'style' }));
@@ -356,7 +350,7 @@ export async function POST(request: NextRequest) {
           if (isEndpointNotFound || isModelNotFound || response.status === 503) {
             // Rebuild request body in OpenAI images/generations format
             const fallbackUrl = req.url.replace('/v1/video/generations', '/v1/images/generations');
-            const fallbackBody: Record<string, unknown> = {
+            const fallbackBody: Record<string, any> = {
               model,
               prompt,
               n: 1,
@@ -451,8 +445,8 @@ export async function POST(request: NextRequest) {
           remoteTaskId: submitResult.taskId,
           usedImagesEndpoint,
         }).catch((error) => console.warn('[video/generate] Cloud task remote ID persistence failed:', error));
-      } catch (err: unknown) {
-        const errorMsg = getErrorName(err) === 'AbortError' ? '提交超时，请稍后重试' : getErrorMessage(err);
+      } catch (err: any) {
+        const errorMsg = err.name === 'AbortError' ? '提交超时，请稍后重试' : (err.message || '提交视频生成任务失败');
         updateTaskProgress(taskId, { status: 'failed', error: errorMsg, progress: 0 });
         void recordVideoTaskTerminal(taskId, { status: 'failed', error: errorMsg })
           .catch((error) => console.warn('[video/generate] Cloud task failure persistence failed:', error));
@@ -470,7 +464,7 @@ export async function POST(request: NextRequest) {
         features: modelInfo.features,
       } : null,
     });
-  } catch (err: unknown) {
+  } catch (err: any) {
     console.error('[video/generate] Error:', err);
     // 记录操作日志 - 视频生成失败
     logError(OP_ACTIONS.VIDEO_GENERATE, err, {
@@ -482,11 +476,11 @@ export async function POST(request: NextRequest) {
     // 退款：视频生成失败时退还积分
     if (deductedCredits > 0 && sessionUser) {
       try {
-        await refundCredits(sessionUser.id, deductedCredits, `视频生成失败退款: ${getErrorMessage(err).substring(0, 100)}`);
+        await refundCredits(sessionUser.id, deductedCredits, `视频生成失败退款: ${(err.message || '').substring(0, 100)}`);
       } catch (refundErr) { console.error('[video/generate] Refund failed:', refundErr); }
     }
     return NextResponse.json(
-      { error: getErrorMessage(err) },
+      { error: err.message || '视频生成请求失败' },
       { status: 500 },
     );
   }
@@ -496,6 +490,8 @@ export async function POST(request: NextRequest) {
  * GET /api/video/generate - 获取支持的视频模型列表信息
  */
 export async function GET() {
+  const deductedCredits = 0;
+  const sessionUser: any = null;
   try {
     return NextResponse.json({
       defaultRatios: ['1:1', '4:3', '16:9', '9:16', '21:9'],

@@ -87,7 +87,7 @@ export function AudioPlayer({
         await audio.play();
         setIsPlaying(true);
       }
-    } catch {
+    } catch (e) {
       setError('播放失败');
     }
   };
@@ -170,7 +170,7 @@ export function AudioPlayer({
       {/* 文本内容（如果有） */}
       {text && (
         <div className="text-sm text-muted-foreground mb-3 line-clamp-2">
-          &ldquo;{text.slice(0, 100)}&rdquo;
+          "{text.slice(0, 100)}"
         </div>
       )}
 

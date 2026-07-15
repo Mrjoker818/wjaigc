@@ -6,22 +6,6 @@ import * as path from 'path';
 
 export const dynamic = 'force-dynamic';
 
-interface StorageDiagnosticResult {
-  dataRoot: string;
-  directories: Record<string, unknown>;
-  environment: Record<string, string>;
-  topLevel?: unknown;
-  topLevelError?: string;
-  spaceDir?: unknown;
-  wujieDataDir?: unknown;
-  spaceError?: string;
-  publicUploads?: unknown;
-}
-
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 export async function GET(request: NextRequest) {
   const admin = await requireAdminUser(request);
   if (!admin) {
@@ -30,7 +14,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const dataRoot = getServerDataRoot();
-    const results: StorageDiagnosticResult = {
+    const results: Record<string, any> = {
       dataRoot,
       directories: {},
       environment: {
@@ -48,8 +32,8 @@ export async function GET(request: NextRequest) {
         type: e.isDirectory() ? 'dir' : 'file',
         size: e.isFile() ? fs.statSync(path.join(dataRoot, e.name)).size : undefined,
       }));
-    } catch (e: unknown) {
-      results.topLevelError = getErrorMessage(e);
+    } catch (e: any) {
+      results.topLevelError = e.message;
     }
     
     // Check each subdirectory
@@ -89,8 +73,8 @@ export async function GET(request: NextRequest) {
         } else {
           results.directories[dir] = { exists: false };
         }
-      } catch (e: unknown) {
-        results.directories[dir] = { error: getErrorMessage(e) };
+      } catch (e: any) {
+        results.directories[dir] = { error: e.message };
       }
     }
     
@@ -114,8 +98,8 @@ export async function GET(request: NextRequest) {
           }));
         }
       }
-    } catch (e: unknown) {
-      results.spaceError = getErrorMessage(e);
+    } catch (e: any) {
+      results.spaceError = e.message;
     }
     
     // Check public/uploads
@@ -131,7 +115,7 @@ export async function GET(request: NextRequest) {
     } catch {}
     
     return NextResponse.json(results);
-  } catch (e: unknown) {
-    return NextResponse.json({ error: getErrorMessage(e) }, { status: 500 });
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }

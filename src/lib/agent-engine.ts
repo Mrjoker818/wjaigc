@@ -13,7 +13,7 @@
  * - 最大轮次限制防止死循环
  */
 
-import type { } from './task-registry';
+import type { TaskInfo } from './task-registry';
 
 // ─── 工具定义 ──────────────────────────────────────────────────────
 
