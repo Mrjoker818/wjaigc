@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { UniversalApiManager } from '@/lib/universal-api-manager';
 import { ApiProvider, PROVIDER_PRESETS, REQUEST_STYLES } from '@/lib/universal-api-types';
 import { X, Key, RefreshCw, Plus, Trash2, Eye, EyeOff, Check, AlertCircle, Link2, ChevronDown, ChevronUp, Image as ImageIcon, MessageSquare, Settings, Box } from 'lucide-react';
@@ -51,15 +51,7 @@ export function ThirdPartyModelDialog({
 
   const isGold = themeStyle === 'gold';
 
-  useEffect(() => {
-    if (isOpen) {
-      setProviders(manager.getProviders());
-      setActiveTab(defaultType);
-      resetForm();
-    }
-  }, [isOpen, defaultType, manager]);
-
-  const resetForm = () => {
+  const resetForm = useCallback(() => {
     setFormDisplayName('');
     setFormIsEnabled(true);
     setFormProvider('openai');
@@ -75,7 +67,15 @@ export function ThirdPartyModelDialog({
     setEditingProviderId(null);
     setShowAddForm(false);
     setModelSearch('');
-  };
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (isOpen) {
+      setProviders(manager.getProviders());
+      setActiveTab(defaultType);
+      resetForm();
+    }
+  }, [isOpen, defaultType, manager, resetForm]);
 
   const handleProviderPresetChange = (presetId: string) => {
     setFormProvider(presetId);

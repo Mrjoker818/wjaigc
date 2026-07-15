@@ -543,9 +543,6 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
     });
   }, []);
 
-  // Load projects
-  useEffect(() => { loadProjects(); }, []);
-
   // Load models from admin system
   useEffect(() => {
     fetch('/api/models?type=image')
@@ -607,6 +604,9 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
       }
     } catch { /* ignore */ }
   };
+
+  // Load projects after the loader is initialized.
+  useEffect(() => { void loadProjects(); }, [loadProjects]);
 
   const parseProject = (p: Record<string, unknown>): BrandProject => ({
     id: (p.id as string) || '',
