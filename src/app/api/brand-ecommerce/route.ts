@@ -117,21 +117,14 @@ interface ProductMaskResult {
  */
 async function generateProductMask(productImageUrl: string): Promise<ProductMaskResult | null> {
   try {
-    // Try RemoveBG via iopaint-client
-    const { removeBgFromUrl } = await import('@/lib/image-tools/iopaint-client');
-    const result = await removeBgFromUrl(productImageUrl, 'birefnet-general-lite');
-    if (result.success && result.maskUrl) {
-      // Read the mask image
-      let maskFetchUrl = result.maskUrl;
-      if (maskFetchUrl.startsWith('/api/serve-upload/')) {
-        maskFetchUrl = getInternalApiUrl(maskFetchUrl);
-      }
-      const maskResp = await fetch(maskFetchUrl, { signal: AbortSignal.timeout(30000) });
-      if (maskResp.ok) {
-        const maskBuffer = Buffer.from(await maskResp.arrayBuffer());
-        const meta = await sharp(maskBuffer).metadata();
-        return { maskBuffer, width: meta.width || 512, height: meta.height || 512 };
-      }
+    const { fetchImageBuffer } = await import('@/lib/fetch-image-buffer');
+    const { generateRembgMask } = await import('@/lib/image-tools/rembg-client');
+    const sourceBuffer = await fetchImageBuffer(productImageUrl);
+    const result = await generateRembgMask(sourceBuffer, 'birefnet-general');
+    if (result.success && result.maskBase64) {
+      const maskBuffer = Buffer.from(result.maskBase64, 'base64');
+      const meta = await sharp(maskBuffer).metadata();
+      return { maskBuffer, width: meta.width || 512, height: meta.height || 512 };
     }
 
     // Fallback: generate mask from image alpha or luminance

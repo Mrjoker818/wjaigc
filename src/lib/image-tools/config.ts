@@ -124,8 +124,10 @@ export const UPSCALE_TIMEOUT_MS = parseInt(
 
 /** Python 解释器路径（优先使用 /space 持久化虚拟环境，再检查项目 .venv，最后回退系统 python3） */
 const SPACE_VENV_PYTHON = '/space/python-venv/bin/python3';
-const VENV_PYTHON = path.join(process.cwd(), '.venv', 'bin', 'python3');
-const SYSTEM_PYTHON = 'python3';
+const VENV_PYTHON = process.platform === 'win32'
+  ? path.join(process.cwd(), '.venv', 'Scripts', 'python.exe')
+  : path.join(process.cwd(), '.venv', 'bin', 'python3');
+const SYSTEM_PYTHON = process.platform === 'win32' ? 'python' : 'python3';
 const VENV_EXISTS = (() => {
   try {
     accessSync(VENV_PYTHON);

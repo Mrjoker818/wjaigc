@@ -8,6 +8,12 @@ import path from 'path';
 import { validateApiInputs } from '@/lib/api-validator';
 import { logOperation, logError, OP_ACTIONS } from '@/lib/op-log';
 import { recordThreeDTaskSubmitted } from '@/lib/cloud-task-persistence';
+import {
+  THREE_D_SUBMISSION_TIMEOUT_MS,
+  TRIPO_UPLOAD_CONCURRENCY,
+  TRIPO_UPLOAD_TIMEOUT_MS,
+  mapWithConcurrency,
+} from '@/lib/three-d-task-performance';
 
 /**
  * Image-to-3D API route
@@ -531,7 +537,10 @@ async function fetchImageAsBuffer(url: string): Promise<Buffer> {
     }
   }
   // Remote URL
-  const resp = await fetch(url);
+  const resp = await fetch(url, { signal: AbortSignal.timeout(TRIPO_UPLOAD_TIMEOUT_MS) });
+  if (!resp.ok) {
+    throw new Error(`Unable to download 3D source image: HTTP ${resp.status}`);
+  }
   const arrayBuf = await resp.arrayBuffer();
   return Buffer.from(arrayBuf);
 }
@@ -556,7 +565,13 @@ async function uploadImageTo302Tripo(
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}` },
     body: formData,
+    signal: AbortSignal.timeout(TRIPO_UPLOAD_TIMEOUT_MS),
   });
+
+  if (!uploadResp.ok) {
+    const errorText = await uploadResp.text().catch(() => '');
+    throw new Error(`302.ai Tripo upload failed: HTTP ${uploadResp.status} ${errorText.slice(0, 200)}`);
+  }
 
   const uploadResult = await uploadResp.json() as Record<string, unknown>;
   console.log(`[image-to-3d] 302.ai upload response:`, JSON.stringify(uploadResult).substring(0, 300));
@@ -799,28 +814,6 @@ function typeLabel(type: string): string {
   return labels[type] || '3D Model';
 }
 
-function buildPlaceholderAsset(request: ImageTo3DRequest): string {
-  const gltf = {
-    asset: { version: '2.0', generator: 'UnboundAI Placeholder' },
-    scene: 0,
-    materials: [{ name: 'placeholder', pbrMetallicRoughness: { baseColorFactor: [0.8, 0.7, 0.2, 1] } }],
-    meshes: [{ name: 'placeholder-mesh', primitives: [{ attributes: { POSITION: 0 }, material: 0 }] }],
-    accessors: [{ type: 'VEC3', componentType: 5126, count: 3, max: [1, 1, 1], min: [-1, -1, -1] }],
-    bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: 36 }],
-    buffers: [{ uri: 'data:application/octet-stream;base64,AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', byteLength: 36 }],
-    extensions: {
-      type: request.type,
-      quality: request.quality,
-      texture: request.texture,
-      format: request.format,
-      note: 'Connect a 3D API or local model service to replace this placeholder with a real mesh asset.',
-    },
-    scenes: [{ nodes: [0] }],
-    nodes: [{ name: `${typeLabel(request.type)} Preview Node` }],
-  };
-  return `data:model/gltf+json;charset=utf-8,${encodeURIComponent(JSON.stringify(gltf, null, 2))}`;
-}
-
 function buildPreviewSvg(request: ImageTo3DRequest, note?: string): string {
   const label = typeLabel(request.type);
   const qualityLabel = request.quality.charAt(0).toUpperCase() + request.quality.slice(1);
@@ -917,23 +910,21 @@ async function tryExternalRequest(request: ImageTo3DRequest): Promise<{
       console.log('[image-to-3d] Using 302.ai Tripo3D upload→submit flow');
 
       // Step 1: Upload images to get file_tokens
-      const fileTokens: string[] = [];
-      const imagesToUpload: Array<{ data: Buffer; name: string }> = [];
-
-      if (compressedRequest.mode === 'multi-image' && compressedRequest.images?.length) {
-        for (const img of compressedRequest.images) {
-          const buf = await fetchImageAsBuffer(img.url);
-          imagesToUpload.push({ data: buf, name: `image_${img.view || 'view'}.png` });
-        }
-      } else if (compressedRequest.imageUrl) {
-        const buf = await fetchImageAsBuffer(compressedRequest.imageUrl);
-        imagesToUpload.push({ data: buf, name: 'image.png' });
-      }
-
-      for (const img of imagesToUpload) {
-        const token = await uploadImageTo302Tripo(img.data, img.name, apiKey, baseUrl);
-        fileTokens.push(token);
-      }
+      const imageSources = compressedRequest.mode === 'multi-image' && compressedRequest.images?.length
+        ? compressedRequest.images.map((img) => ({ url: img.url, name: `image_${img.view || 'view'}.png` }))
+        : compressedRequest.imageUrl
+          ? [{ url: compressedRequest.imageUrl, name: 'image.png' }]
+          : [];
+      const imagesToUpload = await mapWithConcurrency(
+        imageSources,
+        TRIPO_UPLOAD_CONCURRENCY,
+        async (image) => ({ data: await fetchImageAsBuffer(image.url), name: image.name }),
+      );
+      const fileTokens = await mapWithConcurrency(
+        imagesToUpload,
+        TRIPO_UPLOAD_CONCURRENCY,
+        (image) => uploadImageTo302Tripo(image.data, image.name, apiKey, baseUrl),
+      );
 
       if (fileTokens.length === 0) {
         console.error('[image-to-3d] No images to upload for 302.ai Tripo');
@@ -996,7 +987,7 @@ async function tryExternalRequest(request: ImageTo3DRequest): Promise<{
   const requestBody = await buildRequestBody(compressedRequest);
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 180000); // 180s timeout - 3D task submission can be slow for large images
+  const timeout = setTimeout(() => controller.abort(), THREE_D_SUBMISSION_TIMEOUT_MS);
 
   try {
     console.log('[image-to-3d] Provider type:', providerType, 'Endpoint:', endpoint, 'Model:', compressedRequest.provider?.model, 'Version:', compressedRequest.version || (compressedRequest.provider?.model?.toLowerCase().includes('lite') ? 'rapid' : 'pro'));
@@ -1181,17 +1172,11 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const note = body.backend === 'api'
-      ? 'No live 3D API response yet; generated a configurable task preview.'
-      : 'Local 3D endpoint is not running or not reachable; generated a local-model preview.';
-
-    return NextResponse.json({
-      success: true,
-      backend: body.backend,
-      assetUrl: buildPlaceholderAsset(body),
-      previewImageUrl: buildPreviewSvg(body, note),
-      note,
-    });
+    throw new Error(
+      body.backend === 'api'
+        ? '3D provider did not accept the task. Check the provider endpoint, model, and API credentials.'
+        : 'Local 3D endpoint did not accept the task. Check that the local model service is running.',
+    );
   } catch (error) {
     console.error('[image-to-3d] Fatal error:', error);
     const durationMs = Date.now() - startTime;

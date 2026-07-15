@@ -21,7 +21,7 @@ import { getModelParamType } from './canvas-generation-group';
 export type NodeType =
   | 'input-image' | 'input-text' | 'input-param' | 'input-video' | 'audio-input'
   | 'ai-generate' | 'ai-edit' | 'ai-retouch' | 'ai-upscale' | 'ai-removebg' | 'ai-vectorize' | 'ai-style-transfer' | 'ai-color-adjust' | 'ai-analyze'
-  | 'ai-font-design' | 'ai-refine-engine' | 'ai-brand-ecommerce' | 'ai-segment' | 'ai-multi-angle' | 'ai-3d-model' | 'ai-panorama'
+  | 'ai-font-design' | 'ai-refine-engine' | 'ai-human-repair' | 'ai-brand-ecommerce' | 'ai-segment' | 'ai-multi-angle' | 'ai-3d-model' | 'ai-panorama'
   | 'ai-video-generate' | 'ai-video-i2v'
   | 'ai-llm' | 'ai-audio'
   | 'video-speed-change' | 'video-filter' | 'video-concat' | 'video-trim'
@@ -78,7 +78,7 @@ export function getNodeCategory(type: NodeType): NodeCategory {
 export function isImageGeneratingNode(type: NodeType): boolean {
   return [
     'ai-generate', 'ai-edit', 'ai-retouch', 'ai-upscale', 'ai-removebg',
-    'ai-font-design', 'ai-refine-engine', 'ai-brand-ecommerce', 'ai-segment',
+    'ai-font-design', 'ai-refine-engine', 'ai-human-repair', 'ai-brand-ecommerce', 'ai-segment',
     'ai-multi-angle', 'ai-3d-model', 'ai-style-transfer', 'ai-color-adjust',
     'ai-vectorize', 'storyboard-sequence', 'ai-panorama', 'manual-color-adjust',
   ].includes(type);
@@ -116,6 +116,7 @@ export const NODE_TYPE_LABELS: Record<NodeType, string> = {
   'ai-retouch': 'AI修图',
   'ai-font-design': '字境大师',
   'ai-refine-engine': '精修引擎',
+  'ai-human-repair': '人物智能修复',
   'ai-brand-ecommerce': '品牌电商',
   'ai-segment': '元素分层',
   'ai-multi-angle': '多角度生成',
@@ -169,6 +170,7 @@ export const NODE_TYPE_ICONS: Record<NodeType, string> = {
   'ai-retouch': 'Wand2',
   'ai-font-design': 'Type',
   'ai-refine-engine': 'Sparkles',
+  'ai-human-repair': 'UserRoundCheck',
   'ai-brand-ecommerce': 'ShoppingBag',
   'ai-segment': 'Layers',
   'ai-multi-angle': 'Rotate3d',
@@ -328,6 +330,7 @@ export const NODE_TEMPLATES: { type: NodeType; category: NodeCategory; label: st
   { type: 'ai-analyze', category: 'ai', label: 'AI分析', desc: '图像内容分析' },
   { type: 'ai-font-design', category: 'ai', label: '字境大师', desc: 'AI字体设计与生成' },
   { type: 'ai-refine-engine', category: 'ai', label: '精修引擎', desc: '产品商业级精修' },
+  { type: 'ai-human-repair', category: 'ai', label: '人物智能修复', desc: '人脸、手部与身体局部保护修复' },
   { type: 'ai-brand-ecommerce', category: 'ai', label: '品牌电商', desc: '电商视觉内容生成' },
   { type: 'ai-segment', category: 'ai', label: '元素分层', desc: '智能分层+PSD导出' },
   { type: 'ai-multi-angle', category: 'ai', label: '多角度生成', desc: '多视角旋转生成' },
@@ -760,6 +763,15 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
     ], defaultValue: 'white' });
     fields.push({ key: 'aspectRatio', label: '画面比例', type: 'select', options: SHARED_ASPECT_RATIOS, defaultValue: '1:1' });
     fields.push({ key: 'quality', label: '图片质量', type: 'select', options: [{ label: '自动', value: 'auto' }], defaultValue: 'auto' });
+  }
+
+  if (type === 'ai-human-repair') {
+    fields.push({ key: 'model', label: '图像编辑模型', type: 'model-select', modelFilter: 'image' });
+    fields.push({ key: 'targetTypes', label: '修复部位', type: 'select', options: [
+      { label: '自动检测异常区域', value: 'auto' }, { label: '仅人脸', value: 'face' }, { label: '仅手部', value: 'hands' }, { label: '人脸和手部', value: 'face_hands' }, { label: '全人物', value: 'all' },
+    ], defaultValue: 'auto' });
+    fields.push({ key: 'candidateCount', label: '候选数量', type: 'number', min: 1, max: 4, defaultValue: 2 });
+    fields.push({ key: 'strength', label: '修复强度', type: 'slider', min: 20, max: 100, step: 5, defaultValue: 70 });
   }
 
   if (type === 'ai-brand-ecommerce') {
@@ -1707,6 +1719,37 @@ export function buildNodeExecutionRequest(
         endpoint: '/api/edit',
         method: 'POST',
         body: refineBody,
+      };
+    }
+
+    case 'ai-human-repair': {
+      const targetTypes = String(config.targetTypes || 'auto');
+      const targetIds = targetTypes === 'face' ? ['face_01']
+        : targetTypes === 'hands' ? ['left_hand_01', 'right_hand_01']
+          : targetTypes === 'face_hands' ? ['face_01', 'left_hand_01', 'right_hand_01']
+            : targetTypes === 'all' ? ['face_01', 'left_hand_01', 'right_hand_01', 'body_01', 'feet_01', 'hair_01', 'clothes_01', 'interaction_01']
+              : [];
+      return {
+        endpoint: '/api/human/repair',
+        method: 'POST',
+        body: {
+          imageId: config.imageId || config.imageUrl || '',
+          imageUrl: config.imageUrl || '',
+          targetIds,
+          candidateCount: Number(config.candidateCount) || 2,
+          model: config.model || '',
+          providerId: config.providerId || '',
+          mode: config.model ? 'auto' : 'mock',
+          options: {
+            strength: Math.max(0.2, Math.min(1, Number(config.strength || 70) / 100)),
+            lockIdentity: true,
+            lockHair: true,
+            lockClothes: true,
+            lockPose: true,
+            lockBackground: true,
+            protectTextLogoProduct: true,
+          },
+        },
       };
     }
 

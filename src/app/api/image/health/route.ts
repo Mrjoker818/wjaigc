@@ -3,7 +3,8 @@
 // ============================================================
 
 import { NextResponse } from 'next/server';
-import { checkIOPaintHealth, REMOVEBG_MODELS, ERASE_MODELS } from '@/lib/image-tools/iopaint-client';
+import { checkLocalEraseHealth, ERASE_MODELS } from '@/lib/image-tools/local-erase-client';
+import { checkRembgHealth, REMBG_CPU_MODELS } from '@/lib/image-tools/rembg-client';
 import { LOCAL_AI_ENABLED, IOPAINT_MODELS_DIR } from '@/lib/image-tools/config';
 import { isOnnxUpscaleAvailable } from '@/lib/image-tools/upscayl';
 import fs from 'fs';
@@ -17,6 +18,10 @@ function checkEraseModels(): Record<string, { available: boolean; path: string; 
   const models: Record<string, { available: boolean; path: string; size?: number; error?: string }> = {};
   for (const m of ERASE_MODELS) {
     const primaryFile = m.files[0]; // 第一个文件为主文件
+    if (!primaryFile) {
+      models[m.id] = { available: true, path: 'builtin' };
+      continue;
+    }
     // 查找模型文件: 先查 root 目录，再查 hub/checkpoints/ 子目录
     let modelPath = path.join(modelsDir, primaryFile);
     if (!fs.existsSync(modelPath)) {
@@ -53,13 +58,14 @@ function checkPythonScripts(): { erase: boolean; removebg: boolean } {
   const scriptsDir = path.join(process.cwd(), 'scripts');
   return {
     erase: fs.existsSync(path.join(scriptsDir, 'iopaint_erase.py')),
-    removebg: fs.existsSync(path.join(scriptsDir, 'iopaint_removebg.py')),
+    removebg: fs.existsSync(path.join(scriptsDir, 'rembg_remove_background.py')),
   };
 }
 
 export async function GET() {
-  const [iopaint, onnxStatus] = await Promise.all([
-    checkIOPaintHealth(),
+  const [localErase, rembg, onnxStatus] = await Promise.all([
+    checkLocalEraseHealth(),
+    checkRembgHealth(),
     isOnnxUpscaleAvailable(),
   ]);
 
@@ -69,11 +75,11 @@ export async function GET() {
 
   return NextResponse.json({
     localAiEnabled: LOCAL_AI_ENABLED,
-    iopaint: {
-      available: iopaint.available,
-      baseUrl: iopaint.baseUrl,
-      model: iopaint.model,
-      error: iopaint.error,
+    localErase: {
+      available: localErase.available,
+      baseUrl: localErase.baseUrl,
+      model: localErase.model,
+      error: localErase.error,
     },
     lamaModel: {
       available: lamaModelInfo.available,
@@ -91,8 +97,10 @@ export async function GET() {
     })),
     removebg: {
       scriptAvailable: scripts.removebg,
+      available: rembg.available,
+      error: rembg.error,
       modelAutoDownload: true,
-      supportedModels: REMOVEBG_MODELS.map(m => ({ id: m.id, label: m.label, group: m.group, recommended: 'recommended' in m ? m.recommended : false, description: m.description, size: m.size })),
+      supportedModels: REMBG_CPU_MODELS.map(m => ({ id: m.id, label: m.label, recommended: 'recommended' in m && m.recommended, description: m.description, size: m.size })),
     },
     scripts: {
       erase: scripts.erase,

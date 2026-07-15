@@ -15,15 +15,18 @@ import path from 'path';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import { isS3Available, uploadImageToS3 } from '@/lib/s3-storage';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
-import { eraseWithLama, generateRemoveBgMask, DEFAULT_REMOVEBG_MODEL, VALID_ERASE_MODELS, REMOVEBG_MODELS } from '@/lib/image-tools/iopaint-client';
+import { eraseWithLama, VALID_ERASE_MODELS } from '@/lib/image-tools/local-erase-client';
 import { LOCAL_AI_ENABLED } from '@/lib/image-tools/config';
 import { postProcessAIRemoveBG, postProcessLocalRemoveBG } from '@/lib/remove-bg-postprocess';
+import { DEFAULT_REMBG_MODEL, generateRembgMask, isRembgCpuModel } from '@/lib/image-tools/rembg-client';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { fetchImageBuffer } from '@/lib/fetch-image-buffer';
 import { consumeCredits, refundCredits } from '@/lib/credits';
 import { validateImageUrl } from '@/lib/input-validation';
 import { enhanceViaAI } from '@/lib/quality-enhance';
 import { recordImageTaskSubmitted, recordImageTaskTerminal } from '@/lib/cloud-task-persistence';
+import { is302AiUpscaleBaseUrl, resolve302UpscaleModelId } from '@/lib/302-upscale-models';
+import { buildDisplayDecomposePrompt, buildDisplayDecomposeRequestBody, normalizeDisplayDecomposeRatio } from '@/lib/display-decompose';
 
 const SUPPORTED_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
 
@@ -382,7 +385,7 @@ async function createLocalEraseInpaint(
 export const maxDuration = 1800; // 30分钟 - token link等慢速API生图可达260s+
 export const dynamic = 'force-dynamic';
 
-type EditAction = 'inpaint' | 'outpaint' | 'remove_background' | 'removebg' | 'upscale' | 'multi_angle';
+type EditAction = 'inpaint' | 'outpaint' | 'remove_background' | 'removebg' | 'upscale' | 'multi_angle' | 'display_decompose';
 
 interface EditRequest {
   action: EditAction;
@@ -409,6 +412,7 @@ interface EditRequest {
   removeBgModel?: string; // IOPaint RemoveBG model: isnet-general-use / u2net / u2netp / silueta
   originalPrompt?: string; // 原图的生成提示词, 用于多角度场景上下文
   upscaleMode?: 'cpu' | 'ai'; // 放大模式: CPU本地 / AI云端
+  upscaleModel?: string; // 302.AI 原生放大模型
   outputFormat?: 'png' | 'jpg' | 'webp'; // 输出格式
   compression?: number; // 压缩质量 (0-100)
   engine?: 'auto' | 'ai' | 'local' | 'cpu'; // 引擎选择: 智能自动/云端AI/本地算法
@@ -1155,48 +1159,6 @@ async function submit302aiUpscaleV6Task(
 }
 
 /**
- * 检测是否为302.AI超级放大模型（AI想象放大）
- * 关键词: 302-super-upscale, super-upscale-v2
- */
-function is302aiSuperUpscaleModel(model: string): boolean {
-  const lowerModel = model.toLowerCase();
-  return (
-    lowerModel.includes('302-super-upscale') ||
-    lowerModel.includes('super-upscale-v2') ||
-    lowerModel === 'super-upscale' ||
-    lowerModel === 'super-upscale-v2'
-  );
-}
-
-/**
- * 检测是否为302.AI普通放大模型（Upscale-V6）
- * 关键词: 302-upscale, upscale-v6, upscale-v5
- */
-function is302aiUpscaleV6Model(model: string): boolean {
-  const lowerModel = model.toLowerCase();
-  return (
-    lowerModel.includes('upscale-v6') ||
-    lowerModel.includes('upscale-v5') ||
-    lowerModel.includes('302-upscale') ||
-    (lowerModel.includes('upscale') && !lowerModel.includes('super'))
-  );
-}
-
-/**
- * 检测是否为302.AI放大模型（包含超级放大和普通放大）
- */
-function is302aiUpscaleModel(model: string): boolean {
-  return is302aiSuperUpscaleModel(model) || is302aiUpscaleV6Model(model);
-}
-
-/**
- * 检测API baseUrl是否为302.AI
- */
-function is302aiBaseUrl(baseUrl: string): boolean {
-  return baseUrl.includes('api.302.ai') || baseUrl.includes('302.ai');
-}
-
-/**
  * 自动尝试提交图像任务 - 遍历候选模型直到成功
  * 遇到 ModelCapabilityError 时自动切换下一个候选模型
  */
@@ -1451,7 +1413,7 @@ export async function POST(request: NextRequest) {
     const engineMode = (enginePref === 'ai' || enginePref === 'local' || enginePref === 'cpu') ? enginePref : 'auto';
 
     // ★ 输入校验
-    if (!action || !['erase', 'mask', 'upscale', 'extend', 'removebg', 'inpaint', 'outpaint', 'remove_background', 'multi_angle'].includes(action)) {
+    if (!action || !['erase', 'mask', 'upscale', 'extend', 'removebg', 'inpaint', 'outpaint', 'remove_background', 'multi_angle', 'display_decompose'].includes(action)) {
       return NextResponse.json({ success: false, error: '缺少或无效的 action 参数' }, { status: 400 });
     }
     if (imageUrl) {
@@ -1701,6 +1663,81 @@ export async function POST(request: NextRequest) {
       throw new Error(`File not found: ${url} (searched ${searchPaths.join(', ')}, fetch: ${fetchUrl})`);
     };
 
+    if (action === 'display_decompose') {
+      const decomposeAspectRatio = normalizeDisplayDecomposeRatio(aspectRatio);
+      const displayDecomposePrompt = buildDisplayDecomposePrompt(prompt);
+      const imageBase64 = await resolveImageToBase64(imageUrl).catch((error) => {
+        console.warn('[display-decompose] Failed to resolve image as base64, using original URL:', error);
+        return '';
+      });
+      const result = await autoTrySubmitImageTask(candidateModels, (candidateModel) => ({
+        ...buildDisplayDecomposeRequestBody({
+          model: candidateModel,
+          imageUrl,
+          aspectRatio: decomposeAspectRatio,
+          extraPrompt: prompt,
+        }),
+        ...(imageBase64 ? { image: imageBase64 } : {}),
+      }), '美陈拆解', '/images/generations');
+
+      if (result.directUrl) {
+        return NextResponse.json({
+          success: true,
+          imageUrl: result.directUrl,
+          action,
+          prompt: displayDecomposePrompt,
+          aspectRatio: decomposeAspectRatio,
+          usedModel: result.usedModel,
+          engine: 'ai-display-decompose',
+          source: 'image-edit:display-decompose',
+          qualityLevel: 'display-material-board',
+        });
+      }
+
+      if (result.taskId) {
+        const decomposeCandidate = candidateModels.find(candidate => candidate.model === result.usedModel) || candidateModels[0];
+        registerTask(result.taskId, 'display-decompose', '美陈拆解', sessionUser?.id);
+        void recordImageTaskSubmitted({
+          taskId: result.taskId,
+          userId: sessionUser?.id,
+          type: 'display-decompose',
+          providerId: effectiveProviderId,
+          model: result.usedModel || decomposeCandidate?.model,
+          label: '美陈拆解',
+        }).catch(error => console.warn('[image-edit] 美陈拆解云端任务记录创建失败:', error));
+        updateTaskProgress(result.taskId, {
+          status: 'processing',
+          progress: 10,
+          result: {
+            usedModel: result.usedModel || decomposeCandidate?.model,
+            apiBaseUrl: decomposeCandidate?.apiBaseUrl,
+            apiKey: decomposeCandidate?.apiKey,
+            advancedParams: decomposeCandidate?.advancedParams,
+            engine: 'ai-display-decompose',
+            source: 'image-edit:display-decompose',
+            qualityLevel: 'display-material-board',
+            aspectRatio: decomposeAspectRatio,
+          },
+        });
+        return NextResponse.json({
+          success: true,
+          taskId: result.taskId,
+          action,
+          prompt: displayDecomposePrompt,
+          aspectRatio: decomposeAspectRatio,
+          usedModel: result.usedModel,
+          engine: 'ai-display-decompose',
+          source: 'image-edit:display-decompose',
+          qualityLevel: 'display-material-board',
+        });
+      }
+
+      return NextResponse.json({
+        success: false,
+        error: '美陈拆解请求未返回结果，请检查图像模型是否支持参考图生成。',
+      }, { status: 502 });
+    }
+
     if (action === 'multi_angle') {
       // ============================================================
       // 多角度 (Multi-Angle) v8
@@ -1946,6 +1983,16 @@ export async function POST(request: NextRequest) {
         engineMode === 'ai' ? 'ai'
         : engineMode === 'local' || engineMode === 'cpu' ? 'cpu'
         : (body.upscaleMode as 'auto' | 'ai' | 'cpu') || 'auto';
+      const requested302UpscaleModel = body.upscaleModel
+        ? resolve302UpscaleModelId(body.upscaleModel)
+        : null;
+
+      if (body.upscaleModel && !requested302UpscaleModel) {
+        return NextResponse.json({
+          success: false,
+          error: '仅支持 302 Super-Upscale V2 和 302 Upscale V6',
+        }, { status: 400 });
+      }
 
       // 本地CPU放大的内部实现（复用原逻辑）
       const runLocalCpuUpscale = async () => {
@@ -2083,9 +2130,18 @@ export async function POST(request: NextRequest) {
       let aiError: Error | null = null;
 
       // Step 0: 302.AI 专用放大端点（如果有302.AI放大模型）
-      const aiUpscaler302Candidates = specialUpscalerCandidates.filter(c => 
-        is302aiUpscaleModel(c.model) || is302aiBaseUrl(c.apiBaseUrl)
-      );
+      const aiUpscaler302Candidates = specialUpscalerCandidates.filter(c => {
+        const modelId = resolve302UpscaleModelId(c.model);
+        return Boolean(modelId) && is302AiUpscaleBaseUrl(c.apiBaseUrl)
+          && (!requested302UpscaleModel || modelId === requested302UpscaleModel);
+      });
+
+      if (requested302UpscaleModel && aiUpscaler302Candidates.length === 0) {
+        return NextResponse.json({
+          success: false,
+          error: `未找到已启用的 302.AI 放大模型：${requested302UpscaleModel}`,
+        }, { status: 400 });
+      }
       
       if (aiUpscaler302Candidates.length > 0) {
         console.log(`[image-edit] upscale: detected ${aiUpscaler302Candidates.length} 302.AI upscale models`);
@@ -2098,7 +2154,8 @@ export async function POST(request: NextRequest) {
             let aiResult302: { directUrl?: string; width?: number; height?: number; usedModel?: string } | null = null;
             
             // 根据模型类型选择不同的适配器
-            if (is302aiSuperUpscaleModel(c.model)) {
+            const modelId = resolve302UpscaleModelId(c.model);
+            if (modelId === '302-super-upscale-v2') {
               // Super-Upscale-V2: AI想象放大，支持高级参数
               aiResult302 = await submit302aiUpscaleTask(
                 c.apiBaseUrl,
@@ -2111,7 +2168,7 @@ export async function POST(request: NextRequest) {
                 ' high quality, highly detailed, high resolution, sharp',
                 negativePrompt,
               );
-            } else if (is302aiUpscaleV6Model(c.model)) {
+            } else if (modelId === '302-upscale-v6') {
               // Upscale-V6: 普通放大，无AI想象，价格更便宜
               aiResult302 = await submit302aiUpscaleV6Task(
                 c.apiBaseUrl,
@@ -2139,6 +2196,13 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      if (requested302UpscaleModel && !aiResult) {
+        return NextResponse.json({
+          success: false,
+          error: `302.AI 放大失败：${aiError?.message || requested302UpscaleModel}`,
+        }, { status: 502 });
+      }
+
       // Step A: 先用专用upscaler模型尝试（如果有，且302.AI未成功）
       // 注意: 专用upscaler模型API通常限制最大边长2048，需要先放大到2048边长
       // 如果原图已超过2048，直接跳过专用模型，使用通用模型
@@ -2149,7 +2213,7 @@ export async function POST(request: NextRequest) {
       // 同时排除302.AI模型（已在上一步处理）
       const supportedUpscalerCandidates = specialUpscalerCandidates.filter(c => {
         // 302.AI模型已在上一步处理，跳过
-        if (is302aiUpscaleModel(c.model) || is302aiBaseUrl(c.apiBaseUrl)) {
+        if (resolve302UpscaleModelId(c.model) && is302AiUpscaleBaseUrl(c.apiBaseUrl)) {
           return false;
         }
         // PearAPI不支持/images/edits端点，直接排除
@@ -2403,10 +2467,43 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === 'removebg' || action === 'remove_background') {
+      if (engineMode !== 'ai') {
+        const rembgModel = isRembgCpuModel(body.removeBgModel || '')
+          ? body.removeBgModel!
+          : DEFAULT_REMBG_MODEL;
+
+        try {
+          const sourceBuffer = await fetchImageBuffer(imageUrl);
+          const rembgResult = await generateRembgMask(sourceBuffer, rembgModel);
+          if (rembgResult.success && rembgResult.rgbaBase64) {
+            const result = await postProcessLocalRemoveBG(rembgResult.rgbaBase64, rembgResult.maskBase64);
+            if (result) {
+              return NextResponse.json({
+                success: true,
+                imageUrl: result.imageUrl,
+                maskUrl: result.maskUrl,
+                action,
+                engine: 'rembg-cpu',
+                usedModel: rembgResult.model || rembgModel,
+              });
+            }
+          }
+          if (engineMode === 'cpu') {
+            return NextResponse.json({ success: false, error: rembgResult.error || 'rembg CPU 去背景失败' }, { status: 502 });
+          }
+          console.warn('[remove_background] rembg CPU failed, trying explicitly configured AI fallback:', rembgResult.error);
+        } catch (error) {
+          if (engineMode === 'cpu') {
+            return NextResponse.json({ success: false, error: error instanceof Error ? error.message : 'rembg CPU 去背景失败' }, { status: 502 });
+          }
+          console.warn('[remove_background] rembg CPU error, trying explicitly configured AI fallback:', error);
+        }
+      }
+
       const bgSize = aspectRatio ? findClosestAspectRatio(aspectRatio) : '1:1';
       const imageBase64ForBg = await resolveImageToBase64(imageUrl).catch(() => null);
       
-      // ─── 云端API优先路径1：专用removebg模型 + 通用image模型 ───
+      // rembg CPU 不可用时，自动模式才使用云端模型作为备用路径。
       // 支持background:'transparent'参数的AI模型（GPT-Image/Flux等），直接返回透明PNG
       // candidateModels已经在上方被重新排序：专用模型优先，通用模型在后
       const removeBgPrompt = [
@@ -2488,7 +2585,7 @@ export async function POST(request: NextRequest) {
           });
         }
       } catch (bgErr) {
-        console.warn('[remove_background] AI remove background failed, falling back to local IOPaint:', bgErr instanceof Error ? bgErr.message : bgErr);
+        console.warn('[remove_background] AI remove background fallback failed:', bgErr instanceof Error ? bgErr.message : bgErr);
       }
       } // end if (engineMode !== 'local')
 
@@ -2499,51 +2596,6 @@ export async function POST(request: NextRequest) {
           model: '',
         });
         return NextResponse.json({ error: 'AI 移除背景失败，已配置的模型均不可用。请检查API密钥或切换到本地/自动模式。' }, { status: 502 });
-      }
-
-      // ─── AI路径全部失败 → 降级到本地IOPaint RemoveBG ───
-      // 本地模型（BiRefNet/u2net/silueta）生成黑白蒙版 → 应用到原图 → 真正透明PNG
-      if (LOCAL_AI_ENABLED && !aiSuccess) {
-        try {
-          console.log(`[remove_background] Trying local IOPaint RemoveBG as fallback...`);
-          const sourceBuffer = await fetchImageBuffer(imageUrl);
-          
-          const validRemoveBgModels: readonly string[] = REMOVEBG_MODELS.map(m => m.id);
-          const rmbgModelName: string = validRemoveBgModels.includes(body.removeBgModel || '') ? body.removeBgModel! : DEFAULT_REMOVEBG_MODEL;
-          console.log(`[remove_background] Using RemoveBG model: ${rmbgModelName}`);
-          
-          // 限时 60 秒：RemoveBG 首次使用时可能需要下载模型（100MB+）
-          const IOPAINT_REMOVEBG_TIMEOUT = 60000;
-          
-          // 流程：本地模型生成蒙版+应用 → Python端完成所有处理 → RGBA PNG
-          const maskResult = await Promise.race([
-            generateRemoveBgMask(sourceBuffer, rmbgModelName),
-            new Promise<null>((resolve) => setTimeout(() => {
-              console.log(`[remove_background] Mask generation timed out after ${IOPAINT_REMOVEBG_TIMEOUT}ms`);
-              resolve(null);
-            }, IOPAINT_REMOVEBG_TIMEOUT)),
-          ]);
-          
-          if (maskResult && maskResult.success && maskResult.rgbaBase64) {
-            console.log(`[remove_background] Local RGBA result generated (model: ${maskResult.model}), saving...`);
-            const removeBgResult = await postProcessLocalRemoveBG(maskResult.rgbaBase64, maskResult.maskBase64);
-            if (removeBgResult) {
-              console.log(`[remove_background] Local RemoveBG succeeded: ${removeBgResult.imageUrl}, mask: ${removeBgResult.maskUrl || 'N/A'}`);
-              return NextResponse.json({
-                success: true,
-                imageUrl: removeBgResult.imageUrl,
-                maskUrl: removeBgResult.maskUrl || '',
-                action,
-                engine: 'local-removebg',
-              });
-            }
-            console.log(`[remove_background] postProcessLocalRemoveBG failed, falling back to simple edge detection`);
-          } else {
-            console.log(`[remove_background] Mask generation ${maskResult ? 'succeeded but no rgbaBase64' : 'failed/timed out'}, falling back to simple edge detection`);
-          }
-        } catch (rmbgErr) {
-          console.warn(`[remove_background] IOPaint RemoveBG error:`, rmbgErr instanceof Error ? rmbgErr.message : rmbgErr);
-        }
       }
 
       // ─── 所有路径均失败 → 本地透明化兜底（秒级完成） ───
@@ -3435,4 +3487,3 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: errMsg }, { status: 500 });
   }
 }
-

@@ -8,6 +8,7 @@ import { fetchWithV1Retry, shouldSkipV1Retry } from './api-helpers';
 import { getModelDisplayName } from './model-name-map';
 import { getServerSystemDir } from './server-data-root';
 import { dbGetApiProviders, dbUpsertApiProvider, dbDeleteApiProvider } from './db-storage';
+import { get302UpscaleModelsForProvider, resolve302UpscaleModelId } from './302-upscale-models';
 
 const SYSTEM_DIR = getServerSystemDir();
 const CONFIG_PATH = path.join(SYSTEM_DIR, 'api-providers.json');
@@ -477,6 +478,15 @@ export async function discoverModelsForCredentials(
   modelType: ApiKind,
 ): Promise<{ success: boolean; models: ModelInfo[]; message: string; latencyMs: number }> {
   const startedAt = Date.now();
+  const known302UpscaleModels = get302UpscaleModelsForProvider(baseUrl, modelType);
+  if (known302UpscaleModels.length > 0) {
+    return {
+      success: true,
+      models: known302UpscaleModels,
+      message: '302.AI 放大模型已加载：Super-Upscale V2、Upscale V6',
+      latencyMs: Date.now() - startedAt,
+    };
+  }
   const probeProvider: ApiProvider = {
     id: 'probe',
     name: 'probe',
@@ -702,10 +712,8 @@ export async function addApiProvider(input: AddProviderInput): Promise<ApiProvid
         mid.includes('real-esrgan') || mid.includes('realesrgan') ||
         mid.includes('seedvr') || mid.includes('swinir') ||
         mid.includes('gfpgan') || mid.includes('esrgan');
-      // 302.AI专用放大模型（super-upscale-v2 / upscale-v6 / upscale-v5）
-      const is302Upscale = mid.includes('super-upscale') ||
-        mid.includes('upscale-v6') || mid.includes('upscale-v5') ||
-        mid.includes('302-upscale') || mid.includes('302-super');
+      // 302.AI 原生端点只允许两个已验证的模型。
+      const is302Upscale = Boolean(resolve302UpscaleModelId(mid));
       return isUpscaler || is302Upscale;
     });
     // upscaler类型：只勾选匹配的模型，不要fallback到全部模型（避免勾选大量无关模型）

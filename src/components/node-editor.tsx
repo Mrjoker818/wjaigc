@@ -3129,7 +3129,7 @@ const NodeCard = React.memo(function NodeCard({ node, isSelected, isHovered, exe
   // 图片URL: 优先执行结果, 其次节点配置(input-image节点)
   const hasImageOutput = (execResult?.output?.imageUrl || node.config?.imageUrl) as string | undefined;
   // 画布模式专用节点标记
-  const isCanvasFeature = ['ai-font-design', 'ai-refine-engine', 'ai-brand-ecommerce', 'ai-segment', 'ai-multi-angle', 'ai-3d-model'].includes(node.type);
+  const isCanvasFeature = ['ai-font-design', 'ai-refine-engine', 'ai-human-repair', 'ai-brand-ecommerce', 'ai-segment', 'ai-multi-angle', 'ai-3d-model'].includes(node.type);
   const isCollapsed = collapsedNodes?.has(node.id) ?? false;
 
   // P0: input-text 节点内嵌功能状态
@@ -3734,7 +3734,7 @@ const NodeCard = React.memo(function NodeCard({ node, isSelected, isHovered, exe
       {/* 画布模式专用标记 (右上角小徽章) */}
       {isCanvasFeature && !isCondition && (
         <div className="absolute top-[3px] right-2 w-6 h-6 flex items-center justify-center rounded-full text-[7px] font-bold z-10" style={{ background: color, color: T.badgeText, opacity: 0.8 }}>
-          {node.type === 'ai-font-design' ? '字' : node.type === 'ai-refine-engine' ? '精' : node.type === 'ai-brand-ecommerce' ? '品' : node.type === 'ai-segment' ? '层' : node.type === 'ai-multi-angle' ? '角' : '3D'}
+          {node.type === 'ai-font-design' ? '字' : node.type === 'ai-refine-engine' ? '精' : node.type === 'ai-human-repair' ? '人' : node.type === 'ai-brand-ecommerce' ? '品' : node.type === 'ai-segment' ? '层' : node.type === 'ai-multi-angle' ? '角' : '3D'}
         </div>
       )}
 
@@ -3797,7 +3797,7 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
   const cat = getNodeCategory(node.type);
   const color = NODE_TYPE_COLORS[cat];
   const fields = getNodePropertyFields(node.type);
-  const isCanvasFeature = ['ai-font-design', 'ai-refine-engine', 'ai-brand-ecommerce', 'ai-segment', 'ai-multi-angle', 'ai-3d-model'].includes(node.type);
+  const isCanvasFeature = ['ai-font-design', 'ai-refine-engine', 'ai-human-repair', 'ai-brand-ecommerce', 'ai-segment', 'ai-multi-angle', 'ai-3d-model'].includes(node.type);
 
   const renderField = (field: PropertyField) => {
     const externalValue = node.config?.[field.key] ?? (node as unknown as Record<string, unknown>)[field.key] ?? field.defaultValue ?? '';

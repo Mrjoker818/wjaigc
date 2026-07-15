@@ -17,6 +17,19 @@ interface StreamRequest {
   model?: string;
 }
 
+function splitProviderSelection(selection?: string): { providerId?: string; model?: string } {
+  if (!selection) return {};
+  if (selection.startsWith('admin-3d::')) {
+    const parts = selection.split('::');
+    return {
+      providerId: parts[1] || undefined,
+      model: parts.slice(2).join('::').trim() || undefined,
+    };
+  }
+  const [providerId, ...modelParts] = selection.split('::');
+  return { providerId: providerId || undefined, model: modelParts.join('::').trim() || undefined };
+}
+
 export async function GET(request: NextRequest) {
   try {
     // Verify session
@@ -25,8 +38,9 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const taskId = searchParams.get('taskId');
     const mode = (searchParams.get('mode') as StreamRequest['mode']) || 'single-image';
-    const providerId = searchParams.get('providerId');
-    const model = searchParams.get('model') || '';
+    const providerId = searchParams.get('providerId') || undefined;
+    const selected = splitProviderSelection(providerId);
+    const model = searchParams.get('model') || selected.model || '';
 
     if (!taskId) {
       return new Response('Missing taskId', { status: 400 });
@@ -34,8 +48,8 @@ export async function GET(request: NextRequest) {
 
     // Resolve provider
     const providers = await getApiProviders();
-    let provider = providerId
-      ? providers.find(p => p.id === providerId && p.isEnabled)
+    let provider = selected.providerId
+      ? providers.find(p => p.id === selected.providerId && p.isEnabled)
       : null;
     if (!provider && model) {
       provider = await findProviderForModel(model, '3d');

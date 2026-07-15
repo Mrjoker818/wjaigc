@@ -3,6 +3,7 @@ import { findProviderForModel, getApiProviders, normalizeApiBaseUrl } from '@/li
 import { getSessionUser } from '@/lib/server-auth';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { recordThreeDTaskTerminal } from '@/lib/cloud-task-persistence';
+import { THREE_D_POLL_REQUEST_TIMEOUT_MS } from '@/lib/three-d-task-performance';
 
 // Filter sensitive fields (apiKey, secret, token, password) from response data before sending to client
 function filterSensitiveFields(obj: unknown): unknown {
@@ -224,7 +225,7 @@ export async function POST(request: NextRequest) {
     const fetchOptions: RequestInit = {
       method: config.method,
       headers,
-      signal: AbortSignal.timeout(30000), // 30s timeout per poll request
+      signal: AbortSignal.timeout(THREE_D_POLL_REQUEST_TIMEOUT_MS),
     };
     if (config.body && config.method === 'POST') {
       fetchOptions.body = JSON.stringify(config.body);
