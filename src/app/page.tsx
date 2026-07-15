@@ -4118,7 +4118,7 @@ function CanvasApp() {
       )}
 
       {/* Right Panel - with vertical collapse strip */}
-      <div className={`fixed top-0 right-0 bottom-0 z-30 flex transition-all duration-300 ease-in-out ${panelCollapsed ? '' : ''}`} style={{ width: panelCollapsed ? '20px' : '480px' }}>
+      <div className={`fixed top-0 right-0 bottom-0 z-30 flex transition-all duration-300 ease-in-out ${panelCollapsed ? '' : ''}`} style={{ width: panelCollapsed ? '20px' : 'min(480px, 100vw)' }}>
         {/* Vertical collapse strip */}
         <button
           onClick={() => setPanelCollapsed(prev => !prev)}

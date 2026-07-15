@@ -163,7 +163,7 @@ export default function HumanRepairPanel({ isMonochrome = false, onClose, onAddI
   }, [onAddImage]);
 
   return (
-    <div className={`fixed inset-y-8 right-8 z-[80] w-[440px] max-w-[calc(100vw-2rem)] overflow-y-auto border shadow-2xl ${panelClass}`} data-modal="human-repair">
+    <div className={`fixed left-1/2 top-1/2 z-[80] w-[440px] max-h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border shadow-2xl ${panelClass}`} data-modal="human-repair">
       <div className="sticky top-0 z-10 flex items-center justify-between border-b border-inherit px-4 py-3 backdrop-blur bg-inherit">
         <div className="flex items-center gap-2"><UserRoundCheck size={18} /><div><div className="text-sm font-semibold">人物精修大师 Ultimate</div><div className={`text-xs ${subduedClass}`}>局部修复 · 原图保护 · 候选版本</div></div></div>
         <button aria-label="关闭人物精修大师" onClick={onClose} className="p-1.5"><X size={18} /></button>

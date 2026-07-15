@@ -34,6 +34,8 @@ export interface LayerPanelProps {
   position?: 'left' | 'right';
   /** 面板宽度 */
   width?: number;
+  /** 是否以画布中央浮窗显示 */
+  floating?: boolean;
 }
 
 /** 图层项组件 */
@@ -231,6 +233,7 @@ export function LayerPanel({
   onClose,
   position = 'right',
   width = 220,
+  floating = false,
 }: LayerPanelProps) {
   // 按zIndex排序（高zIndex在上面）
   const sortedImages = useMemo(() => {
@@ -336,11 +339,18 @@ export function LayerPanel({
   }, [images, sortedImages, onReorder]);
 
   const positionClass = position === 'left' ? 'left-0' : 'right-0';
+  const placementClass = floating
+    ? 'fixed left-1/2 top-1/2 h-[min(70dvh,620px)] max-h-[calc(100dvh-2rem)] -translate-x-1/2 -translate-y-1/2 rounded-lg shadow-2xl'
+    : `absolute ${positionClass} top-12 bottom-14`;
+  const themeClass = isMonochrome
+    ? floating ? 'bg-gray-50 border border-gray-200' : 'bg-gray-50 border-r border-gray-200'
+    : floating ? 'bg-[#0a0a0a] border border-gold/10' : 'bg-[#0a0a0a] border-r border-gold/10';
 
   return (
     <div
-      className={`absolute ${positionClass} top-12 bottom-14 z-[80] flex flex-col ${isMonochrome ? 'bg-gray-50 border-r border-gray-200' : 'bg-[#0a0a0a] border-r border-gold/10'}`}
+      className={`${placementClass} z-[80] flex flex-col ${themeClass}`}
       style={{ width }}
+      data-popup={floating ? 'layer-panel' : undefined}
     >
       {/* 标题栏 */}
       <div className={`flex items-center justify-between px-3 py-2 border-b ${isMonochrome ? 'border-gray-200' : 'border-gold/10'}`}>
@@ -376,6 +386,15 @@ export function LayerPanel({
               <Unlock className={`w-3.5 h-3.5 ${isMonochrome ? 'text-gray-400' : 'text-muted-foreground'}`} />
             )}
           </button>
+          {onClose && (
+            <button
+              onClick={onClose}
+              className={`p-1 rounded transition-colors ${isMonochrome ? 'hover:bg-gray-100' : 'hover:bg-white/5'}`}
+              title="关闭图层"
+            >
+              <X className={`w-3.5 h-3.5 ${isMonochrome ? 'text-gray-500' : 'text-muted-foreground'}`} />
+            </button>
+          )}
         </div>
       </div>
 

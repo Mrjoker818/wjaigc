@@ -40,6 +40,7 @@ import {
 } from '@/lib/three-d-task-performance';
 import { THREE_O_TWO_UPSCALE_MODELS, type ThreeOhTwoUpscaleModelId } from '@/lib/302-upscale-models';
 import { DISPLAY_DECOMPOSE_SUPPORTED_RATIOS, type DisplayDecomposeRatio } from '@/lib/display-decompose';
+import { getCenteredFloatingPanelPosition } from '@/lib/floating-panel-position';
 import OhMyPrompt from '@/components/oh-my-prompt';
 import { CanvasHelpModal } from '@/components/canvas/CanvasHelpModal';
 import dynamic from 'next/dynamic';
@@ -5310,11 +5311,12 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       setShowCanvasGenerator(false);
       return;
     }
-    // Set initial panel position (right side of viewport)
-    const container = canvasRef.current?.getBoundingClientRect();
-    const panelX = container ? Math.min(container.right - 440, window.innerWidth - 440) : window.innerWidth - 440;
-    const panelY = container ? container.top + 60 : 60;
-    setCanvasGenPanelPos({ x: Math.max(10, panelX), y: Math.max(10, panelY) });
+    setCanvasGenPanelPos(getCenteredFloatingPanelPosition({
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      panelWidth: 420,
+      panelHeight: 720,
+    }));
     setCanvasGenMinimized(false);
     setShowCanvasGenerator(true);
     setCanvasGenPrompt('');
@@ -13653,7 +13655,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           const img = images.find(i => i.id === editImageId);
           if (!img) return null;
           return (
-            <div className="fixed top-24 right-4 z-[65] w-80 bg-[#1a1a1a] rounded-xl shadow-2xl border border-[#333] overflow-hidden" data-popup="video-extract">
+            <div className="fixed left-1/2 top-1/2 z-[65] w-80 max-w-[calc(100vw-2rem)] max-h-[calc(100dvh-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-[#333] bg-[#1a1a1a] shadow-2xl" data-popup="video-extract">
               <div className="px-4 py-3 bg-[#111] border-b border-[#333] flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-white flex items-center gap-2">
                   <Film size={16} className="text-[#d4af37]" />
@@ -13963,7 +13965,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
         {/* ====== AI 视频配音面板 ====== */}
         {showVideoDubPanel && videoDubTarget && (
-          <div className="fixed top-20 right-4 z-[85] w-[420px] bg-card rounded-xl shadow-xl border border-border overflow-hidden">
+          <div className="fixed left-1/2 top-1/2 z-[85] w-[420px] max-w-[calc(100vw-2rem)] max-h-[calc(100dvh-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-border bg-card shadow-xl">
             <div className="bg-primary/10 px-4 py-3 flex items-center justify-between border-b border-border">
               <h3 className="font-semibold text-foreground flex items-center gap-2">
                 <Volume2 className="w-4 h-4 text-primary" />
@@ -15032,7 +15034,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             style={{
               left: canvasGenPanelPos.x,
               top: canvasGenPanelPos.y,
-              width: 420,
+              width: 'min(420px, calc(100vw - 2rem))',
+              maxHeight: 'calc(100dvh - 2rem)',
+              overflowY: 'auto',
               backgroundColor: isMonochrome ? '#fff' : '#1a1a1a',
               border: canvasGenDragging
                 ? `2px solid ${isMonochrome ? '#2563eb' : '#d4af37'}`
@@ -15462,6 +15466,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       {showLayerPanel && (
         <Suspense fallback={null}>
           <LayerPanel
+            floating
             images={images}
             selectedIds={Array.from(selectedIds)}
             isMonochrome={isMonochrome}
@@ -15495,6 +15500,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       {showVersionHistory && versionHistoryManager && (
         <Suspense fallback={null}>
           <VersionHistoryPanel
+            floating
             manager={versionHistoryManager}
             isMonochrome={isMonochrome}
             onRestore={(nodeId) => {
@@ -15517,7 +15523,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         data-toolbar="bottom-toolbar"
         onMouseEnter={() => setBottomBarHovered(true)}
         onMouseLeave={() => setBottomBarHovered(false)}
-        className={`absolute bottom-5 left-1/2 -translate-x-1/2 z-50 rounded-full px-2.5 py-1.5 flex items-center transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${isMonochrome ? 'bg-white/95 border border-gray-200 shadow-lg' : 'bg-[#1a1a1a]/95 border border-white/[0.08] shadow-2xl backdrop-blur-md'} ${bottomBarHovered ? (isMonochrome ? 'shadow-xl' : 'shadow-2xl ring-1 ring-white/[0.06]') : ''}`}
+        className={`absolute bottom-5 left-1/2 -translate-x-1/2 z-50 flex max-w-[calc(100%-2rem)] items-center overflow-x-auto rounded-full px-2.5 py-1.5 transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${isMonochrome ? 'bg-white/95 border border-gray-200 shadow-lg' : 'bg-[#1a1a1a]/95 border border-white/[0.08] shadow-2xl backdrop-blur-md'} ${bottomBarHovered ? (isMonochrome ? 'shadow-xl' : 'shadow-2xl ring-1 ring-white/[0.06]') : ''}`}
       >
         {/* ── Center: Main function buttons (always visible) ── */}
         <button
@@ -15581,9 +15587,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
         {/* ── Right: Feature buttons (collapsible) ── */}
         <div
-          className={`flex items-center transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${
-            bottomBarHovered ? 'max-w-[900px] opacity-100 ml-1.5 overflow-visible' : 'max-w-0 opacity-0 ml-0 overflow-hidden'
-          }`}
+          className="flex items-center ml-1.5 shrink-0"
         >
           <div className={`w-px h-5 mr-1.5 ${separatorCls}`} />
 
