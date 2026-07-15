@@ -84,8 +84,8 @@ export async function POST(req: NextRequest) {
       success: true,
       ...result,
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('[story-assets/plan] error:', err);
-    return NextResponse.json({ error: err?.message || '规划失败' }, { status: 500 });
+    return NextResponse.json({ error: err instanceof Error ? err.message : '规划失败' }, { status: 500 });
   }
 }

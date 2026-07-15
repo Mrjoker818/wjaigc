@@ -4,6 +4,20 @@ import { findProviderForFeature } from '@/lib/server-api-config';
 
 export const maxDuration = 30;
 
+interface ChatCompletionResponse {
+  choices?: Array<{ message?: { content?: string } }>;
+}
+
+function chatCompletionText(value: unknown): string {
+  const data = value as ChatCompletionResponse;
+  const content = data.choices?.[0]?.message?.content;
+  return typeof content === 'string' ? content.trim() : '';
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
 /** 按导演风格自适应温度：电影感/音乐视频需要更高创意度，纪录片/商业需要更精确 */
 const STYLE_TEMPERATURE: Record<string, number> = {
   cinematic: 0.85,
@@ -86,11 +100,11 @@ export async function POST(req: NextRequest) {
     let llmText = '';
     try {
       const chatProvider = await findProviderForFeature('chat');
-      const chatModels: string[] = (chatProvider as any)?.selectedModels || [];
-      const chatModel = chatModels[0] || (chatProvider as any)?.defaultChatModel;
+      const chatModels = chatProvider?.selectedModels ?? [];
+      const chatModel = chatModels[0];
       if (chatProvider && chatModel) {
-        const baseUrl = String((chatProvider as any).baseUrl || (chatProvider as any).base_url || '').replace(/\/$/, '');
-        const apiKey = String((chatProvider as any).apiKey || (chatProvider as any).api_key || '');
+        const baseUrl = chatProvider.baseUrl.replace(/\/$/, '');
+        const apiKey = chatProvider.apiKey;
         if (baseUrl && apiKey) {
           // 自动处理 /v1 前缀
           const url = baseUrl.endsWith('/chat/completions')
@@ -111,8 +125,8 @@ export async function POST(req: NextRequest) {
             signal: AbortSignal.timeout(40000),
           });
           if (resp.ok) {
-            const data = await resp.json();
-            const text: string = data?.choices?.[0]?.message?.content?.trim?.() || '';
+            const data = await resp.json() as unknown;
+            const text = chatCompletionText(data);
             if (text && text.length > 20) {
               llmText = text.replace(/^```[a-z]*\n?/i, '').replace(/```$/i, '').trim();
             }
@@ -140,10 +154,10 @@ export async function POST(req: NextRequest) {
       mode,
       rawText: finalText,
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('[video/director/prompt] error:', err);
     return NextResponse.json(
-      { error: err?.message || '导演增强失败' },
+      { error: errorMessage(err, 'Director prompt enhancement failed') },
       { status: 500 }
     );
   }

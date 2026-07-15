@@ -259,7 +259,7 @@ function TransformControlsWrapper({ meshRef, mode, objId, onTransformChange }: {
   objId: string;
   onTransformChange: (id: string, position: [number, number, number], rotation: [number, number, number], scale: [number, number, number]) => void;
 }) {
-  const controlsRef = useRef<any>(null);
+  const controlsRef = useRef<React.ComponentRef<typeof TransformControls> | null>(null);
 
   useEffect(() => {
     if (controlsRef.current && meshRef.current) {
@@ -268,7 +268,10 @@ function TransformControlsWrapper({ meshRef, mode, objId, onTransformChange }: {
   }, [meshRef]);
 
   useEffect(() => {
-    const controls = controlsRef.current;
+    const controls = controlsRef.current as unknown as {
+      addEventListener: (event: 'objectChange', listener: () => void) => void;
+      removeEventListener: (event: 'objectChange', listener: () => void) => void;
+    } | null;
     if (!controls) return;
     const callback = () => {
       if (meshRef.current) {

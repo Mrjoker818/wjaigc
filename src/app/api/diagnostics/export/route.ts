@@ -11,11 +11,15 @@ import { existsSync } from 'fs';
 import { requireAdminUser } from '@/lib/server-auth';
 
 // 动态导入JSZip
-let JSZip: any;
-async function getJSZip() {
+interface JSZipConstructor {
+  new (): import('jszip');
+}
+
+let JSZip: JSZipConstructor | null = null;
+async function getJSZip(): Promise<JSZipConstructor> {
   if (!JSZip) {
     const mod = await import('jszip');
-    JSZip = mod.default;
+    JSZip = mod.default as unknown as JSZipConstructor;
   }
   return JSZip;
 }
@@ -151,7 +155,7 @@ export async function GET(req: NextRequest) {
     // 生成zip
     const zipBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
     
-    return new NextResponse(zipBuffer, {
+    return new NextResponse(new Uint8Array(zipBuffer), {
       headers: {
         'Content-Type': 'application/zip',
         'Content-Disposition': `attachment; filename="wujie-diagnostics-${timestamp}.zip"`,

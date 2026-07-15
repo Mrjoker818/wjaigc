@@ -87,7 +87,7 @@ export function VersionHistoryPanel({
   }, []);
 
   // 渲染单个节点行
-  const renderNodeRow = useCallback((node: VersionNode, depth: number, isExpanded: boolean, isCurrent: boolean, isInPath: boolean, hasChildren: boolean, children: VersionNode[]) => {
+  const renderNodeRow = useCallback(function renderNodeRow(node: VersionNode, depth: number, isExpanded: boolean, isCurrent: boolean, isInPath: boolean, hasChildren: boolean, children: VersionNode[]) {
     const nodeBgClass = isCurrent
       ? isMonochrome ? 'bg-blue-100 border-blue-300' : 'bg-gold/10 border-gold/30'
       : isInPath

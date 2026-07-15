@@ -871,7 +871,7 @@ async function handleApiResponse(
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
   let deductedCredits = 0;
-  let sessionUser: any = null;
+  let sessionUser: import('@/lib/user-types').User | null = null;
   const refineModel = '';
   const refineProviderId = '';
   try {

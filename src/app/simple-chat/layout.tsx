@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Script from 'next/script';
 import { Providers } from './providers';
 
 export const metadata: Metadata = {
@@ -13,8 +14,9 @@ export default function SimpleChatLayout({
 }) {
   return (
     <html lang="zh-CN" data-theme="dark" suppressHydrationWarning>
-      <head>
-        <script
+      <Script
+          id="simple-chat-theme"
+          strategy="beforeInteractive"
           dangerouslySetInnerHTML={{
             __html: `
               (function() {
@@ -31,8 +33,7 @@ export default function SimpleChatLayout({
               })();
             `,
           }}
-        />
-      </head>
+      />
       <body className="antialiased" suppressHydrationWarning>
         <Providers>{children}</Providers>
       </body>

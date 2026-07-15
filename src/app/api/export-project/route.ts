@@ -26,6 +26,14 @@ interface FileEntry {
   size: number;
 }
 
+function toResponseStream(stream: Readable): ReadableStream<Uint8Array> {
+  return Readable.toWeb(stream) as ReadableStream<Uint8Array>;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 /**
  * Walk directory and collect files matching include/exclude rules
  */
@@ -191,7 +199,7 @@ export async function GET(request: NextRequest) {
 
       const filename = `${scopeLabels[scope] || 'project'}-${new Date().toISOString().slice(0, 10)}.tar.gz`;
 
-      return new NextResponse(stream as any, {
+      return new NextResponse(toResponseStream(stream), {
         headers: {
           'Content-Type': 'application/gzip',
           'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
@@ -199,10 +207,10 @@ export async function GET(request: NextRequest) {
           'X-Export-File-Count': String(fileCount),
         },
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('[export-project] Export failed:', error);
       return NextResponse.json(
-        { error: `Export failed: ${error.message}` },
+        { error: `Export failed: ${errorMessage(error)}` },
         { status: 500 }
       );
     }
@@ -263,7 +271,7 @@ export async function POST(request: NextRequest) {
     const filename = `${scopeLabels[scope] || 'project'}-${new Date().toISOString().slice(0,10)}.tar.gz`;
     
     // Return streaming response
-    return new NextResponse(stream as any, {
+    return new NextResponse(toResponseStream(stream), {
       headers: {
         'Content-Type': 'application/gzip',
         'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
@@ -271,10 +279,10 @@ export async function POST(request: NextRequest) {
         'X-Export-File-Count': String(fileCount),
       },
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[export-project] Export failed:', error);
     return NextResponse.json(
-      { error: `Export failed: ${error.message}` },
+      { error: `Export failed: ${errorMessage(error)}` },
       { status: 500 }
     );
   }

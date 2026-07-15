@@ -66,8 +66,8 @@ export async function POST(request: NextRequest) {
       stats: { lines, chars, originalSize: file.size },
       filename: file.name,
     });
-  } catch (e: any) {
-    return Response.json({ error: `文件解析失败: ${e.message}` }, { status: 500 });
+  } catch (e: unknown) {
+    return Response.json({ error: `文件解析失败: ${e instanceof Error ? e.message : '未知错误'}` }, { status: 500 });
   }
 }
 

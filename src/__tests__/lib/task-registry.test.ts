@@ -12,6 +12,7 @@ import {
   getTaskInfo,
   isTaskCancelled,
   cancelTask,
+  getActiveTaskCount,
   MAX_CONCURRENT_PER_USER,
   MAX_TASKS,
 } from '@/lib/task-registry';
@@ -76,6 +77,31 @@ describe('task-registry 模块', () => {
       updateTaskProgress(id, { label: 'DALL-E 3 生成' });
       const task = getTaskInfo(id);
       expect(task?.label).toBe('DALL-E 3 生成');
+    });
+
+    it('releases a user queue slot when a task reaches a terminal state', () => {
+      const userId = `terminal-user-${uniqueId()}`;
+      const id = uniqueId();
+      registerTask(id, 'generate', '图像生成', userId);
+
+      expect(getActiveTaskCount(userId)).toBe(1);
+      updateTaskProgress(id, { status: 'completed', progress: 100 });
+
+      expect(getActiveTaskCount(userId)).toBe(0);
+    });
+
+    it('does not reduce active capacity when cancelling a task that was only queued', () => {
+      const userId = `queued-user-${uniqueId()}`;
+      for (let index = 0; index < MAX_CONCURRENT_PER_USER; index += 1) {
+        registerTask(uniqueId(), 'generate', '图像生成', userId);
+      }
+      const queuedId = uniqueId();
+      registerTask(queuedId, 'generate', '图像生成', userId);
+
+      expect(getActiveTaskCount(userId)).toBe(MAX_CONCURRENT_PER_USER);
+      cancelTask(queuedId);
+
+      expect(getActiveTaskCount(userId)).toBe(MAX_CONCURRENT_PER_USER);
     });
   });
 

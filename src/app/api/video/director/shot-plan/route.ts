@@ -1,18 +1,36 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { buildShotPlanSystemPrompt, parseShotPlanFullResponse } from '@/lib/video-director/continuity';
+import { buildShotPlanSystemPrompt, parseShotPlanFullResponse, type VideoCharacter, type VideoProp, type VideoScene, type VideoShotPlan } from '@/lib/video-director/continuity';
 import { findProviderForFeature } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
+interface ChatProviderConfig {
+  selectedModels?: string[];
+  defaultChatModel?: string;
+  baseUrl?: string;
+  base_url?: string;
+  apiKey?: string;
+  api_key?: string;
+}
+
+interface ChatCompletionResponse {
+  choices?: Array<{ message?: { content?: unknown }; text?: unknown }>;
+}
+
+function getChatProviderConfig(provider: unknown): ChatProviderConfig {
+  return provider !== null && typeof provider === 'object' ? provider as ChatProviderConfig : {};
+}
+
 async function callChatLLM(messages: { role: string; content: string }[], temperature = 0.7, maxTokens = 4000): Promise<string | null> {
   const chatProvider = await findProviderForFeature('chat');
   if (!chatProvider) return null;
-  const chatModels: string[] = (chatProvider as any)?.selectedModels || [];
-  const chatModel = chatModels[0] || (chatProvider as any)?.defaultChatModel;
-  const baseUrl = String((chatProvider as any).baseUrl || (chatProvider as any).base_url || '').replace(/\/$/, '');
-  const apiKey = String((chatProvider as any).apiKey || (chatProvider as any).api_key || '');
+  const config = getChatProviderConfig(chatProvider);
+  const chatModels = config.selectedModels || [];
+  const chatModel = chatModels[0] || config.defaultChatModel;
+  const baseUrl = String(config.baseUrl || config.base_url || '').replace(/\/$/, '');
+  const apiKey = String(config.apiKey || config.api_key || '');
   if (!baseUrl || !apiKey || !chatModel) return null;
   try {
     const endpoint = baseUrl.endsWith('/chat/completions')
@@ -29,8 +47,8 @@ async function callChatLLM(messages: { role: string; content: string }[], temper
       }),
     }, false, 50000);
     if (!resp.ok) return null;
-    const data = await resp.json() as any;
-    const text = data?.choices?.[0]?.message?.content || data?.choices?.[0]?.text || '';
+    const data = await resp.json() as ChatCompletionResponse;
+    const text = data.choices?.[0]?.message?.content || data.choices?.[0]?.text || '';
     return typeof text === 'string' ? text : null;
   } catch (e) {
     console.warn('[shot-plan] LLM call failed:', e);
@@ -57,17 +75,17 @@ export async function POST(req: NextRequest) {
     const perShotDur = Math.max(3, Math.min(10, Math.round(totalDur / n)));
     const userPrompt = `故事/想法：\n${storyIdea}\n\n请输出 JSON：包含 shots[]（${n}个镜头）、characters[]（人物）、scenes[]（场景）、props[]（关键道具，没有就返回空数组）。每个镜头必须包含 title/purpose/shotSize/cameraMotion/actionBeat/lighting/audioCues/prompt/duration/aspectRatio/continuityNotes/characterIds/sceneId/propIds。`;
 
-    let shots: any[] = [];
-    let characters: any[] = [];
-    let scenes: any[] = [];
-    let propsArr: any[] = [];
+    let shots: VideoShotPlan[] = [];
+    let characters: VideoCharacter[] = [];
+    let scenes: VideoScene[] = [];
+    let propsArr: VideoProp[] = [];
     let totalDuration = totalDur;
     let usedModel = '';
 
     try {
       const chatProvider = await findProviderForFeature('chat');
-      const chatModels: string[] = (chatProvider as any)?.selectedModels || [];
-      usedModel = chatModels[0] || (chatProvider as any)?.defaultChatModel || '';
+      const config = getChatProviderConfig(chatProvider);
+      usedModel = config.selectedModels?.[0] || config.defaultChatModel || '';
       const llmText = await callChatLLM([
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
@@ -75,7 +93,7 @@ export async function POST(req: NextRequest) {
       if (llmText) {
         const parsed = parseShotPlanFullResponse(llmText, perShotDur, aspectRatio);
         if (parsed.shots.length > 0) {
-          shots = parsed.shots.slice(0, n).map((s: any, i: number) => ({
+          shots = parsed.shots.slice(0, n).map((s, i) => ({
             ...s,
             id: `shot-${Date.now()}-${i}`,
             index: i,
@@ -85,7 +103,7 @@ export async function POST(req: NextRequest) {
           characters = parsed.characters;
           scenes = parsed.scenes;
           propsArr = parsed.props;
-          totalDuration = shots.reduce((a: number, s: any) => a + (Number(s.duration) || perShotDur), 0);
+          totalDuration = shots.reduce((total, shot) => total + (Number(shot.duration) || perShotDur), 0);
           return NextResponse.json({
             success: true,
             shots,
@@ -126,6 +144,7 @@ export async function POST(req: NextRequest) {
         prompt: chunk,
         duration: dur,
         aspectRatio,
+        references: [],
         setting: '',
         continuityNotes: i > 0 ? ['保持上一镜头尾帧人物/场景一致'] : [],
         characterIds: [],
@@ -137,13 +156,15 @@ export async function POST(req: NextRequest) {
         thumbnailUrl: '',
         videoUrl: '',
         status: 'planned',
-        retakeSuggestions: [],
+        diagnosis: null,
+        retakeCount: 0,
+        error: undefined,
       });
     }
-    totalDuration = shots.reduce((a: number, s: any) => a + s.duration, 0);
+    totalDuration = shots.reduce((total, shot) => total + shot.duration, 0);
     return NextResponse.json({ success: true, shots, characters, scenes, props: propsArr, totalDuration, fallback: true });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('[video/director/shot-plan] error:', err);
-    return NextResponse.json({ error: err?.message || '分镜规划失败' }, { status: 500 });
+    return NextResponse.json({ error: err instanceof Error ? err.message : '分镜规划失败' }, { status: 500 });
   }
 }

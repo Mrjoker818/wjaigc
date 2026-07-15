@@ -8,6 +8,33 @@ import type {
 import type { VideoReferenceBinding as RefBinding } from './prompt-compiler';
 import type { FailureDiagnosis } from './retake-diagnosis';
 
+type JsonRecord = Record<string, unknown>;
+
+function asJsonRecord(value: unknown): JsonRecord {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as JsonRecord
+    : {};
+}
+
+function asJsonRecords(value: unknown): JsonRecord[] {
+  return Array.isArray(value) ? value.map(asJsonRecord).filter((item) => Object.keys(item).length > 0) : [];
+}
+
+function asStrings(value: unknown): string[] {
+  return Array.isArray(value) ? value.map((item) => String(item)) : [];
+}
+
+function parseJsonObject(text: string): JsonRecord {
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start < 0 || end < 0) return {};
+  try {
+    return asJsonRecord(JSON.parse(text.slice(start, end + 1)));
+  } catch {
+    return {};
+  }
+}
+
 // 镜头状态
 export type ShotStatus = 'planned' | 'submitted' | 'generating' | 'completed' | 'ready' | 'failed' | 'accepted' | 'diagnosing';
 
@@ -415,16 +442,11 @@ export function parseShotPlanResponse(text: string, defaultDuration = 5, default
   let cleaned = text.trim();
   const fenceMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (fenceMatch) cleaned = fenceMatch[1].trim();
-  // 找到第一个 { 和最后一个 }
-  const start = cleaned.indexOf('{');
-  const end = cleaned.lastIndexOf('}');
-  if (start < 0 || end < 0) return [];
-  const jsonStr = cleaned.slice(start, end + 1);
+  if (!cleaned.includes('{')) return [];
   try {
-    const obj = JSON.parse(jsonStr);
-    const shots = Array.isArray(obj) ? obj : obj.shots;
-    if (!Array.isArray(shots)) return [];
-    return shots.map((s: any, i: number) =>
+    const obj = parseJsonObject(cleaned);
+    const shots = asJsonRecords(obj.shots);
+    return shots.map((s, i) =>
       initShotFromPlan({
         id: `shot-${Date.now()}-${i}`,
         index: i,
@@ -438,7 +460,7 @@ export function parseShotPlanResponse(text: string, defaultDuration = 5, default
         prompt: String(s.prompt ?? ''),
         duration: Number(s.duration) || defaultDuration,
         aspectRatio: String(s.aspectRatio ?? defaultAspectRatio),
-        continuityNotes: Array.isArray(s.continuityNotes) ? s.continuityNotes.map((n: any) => String(n)) : [],
+        continuityNotes: asStrings(s.continuityNotes),
         firstFrameFromPrev: i > 0,
         status: 'planned',
       }),
@@ -461,15 +483,10 @@ export function parseShotPlanFullResponse(text: string, defaultDuration = 5, def
   let cleaned = text.trim();
   const fenceMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (fenceMatch) cleaned = fenceMatch[1].trim();
-  const start = cleaned.indexOf('{');
-  const end = cleaned.lastIndexOf('}');
-  let obj: any = {};
-  if (start >= 0 && end >= 0) {
-    try { obj = JSON.parse(cleaned.slice(start, end + 1)); } catch { obj = {}; }
-  }
-  const rawShots: any[] = Array.isArray(obj) ? obj : Array.isArray(obj.shots) ? obj.shots : [];
+  const obj = parseJsonObject(cleaned);
+  const rawShots = asJsonRecords(obj.shots);
   const ts = Date.now();
-  const shots: VideoShotPlan[] = rawShots.map((s: any, i: number) =>
+  const shots: VideoShotPlan[] = rawShots.map((s, i) =>
     initShotFromPlan({
       id: `shot-${ts}-${i}`,
       index: i,
@@ -485,12 +502,12 @@ export function parseShotPlanFullResponse(text: string, defaultDuration = 5, def
       duration: Number(s.duration) || defaultDuration,
       aspectRatio: String(s.aspectRatio ?? defaultAspectRatio),
       setting: String(s.setting ?? s.location ?? s.scene ?? ''),
-      continuityNotes: Array.isArray(s.continuityNotes) ? s.continuityNotes.map((n: any) => String(n)) : [],
-      characterIds: Array.isArray(s.characterIds) ? s.characterIds.map((x: any) => String(x)) : [],
+      continuityNotes: asStrings(s.continuityNotes),
+      characterIds: asStrings(s.characterIds),
       sceneId: s.sceneId != null ? String(s.sceneId) : undefined,
       firstFrameFromPrev: i > 0,
       status: 'planned',
-    } as any),
+    }),
   );
   const characters = parseShotPlanCharactersFromObj(obj, ts);
   const scenes = parseShotPlanScenesFromObj(obj, shots, ts);
@@ -515,16 +532,16 @@ export function parseShotPlanCharacters(text: string): VideoCharacter[] {
   const end = cleaned.lastIndexOf('}');
   if (start < 0 || end < 0) return [];
   try {
-    const obj = JSON.parse(cleaned.slice(start, end + 1));
+    const obj = parseJsonObject(cleaned);
     return parseShotPlanCharactersFromObj(obj, Date.now());
   } catch {
     return [];
   }
 }
 
-function parseShotPlanCharactersFromObj(obj: any, ts: number): VideoCharacter[] {
-  const arr = Array.isArray(obj.characters) ? obj.characters : [];
-  return arr.map((c: any, i: number) => {
+function parseShotPlanCharactersFromObj(obj: JsonRecord, ts: number): VideoCharacter[] {
+  const arr = asJsonRecords(obj.characters);
+  return arr.map((c, i) => {
     const appearance = String(
       c.appearance ?? c.looks ?? c.appearancePrompt ?? c.visualPrompt ?? c.description ?? ''
     );
@@ -538,7 +555,7 @@ function parseShotPlanCharactersFromObj(obj: any, ts: number): VideoCharacter[] 
     const sidePrompt = String(
       c.sidePrompt ?? c.sideImagePrompt ?? `character design reference sheet, ${baseFront}, side view, neutral pose, pure white background, studio lighting, high detail, sharp focus, no text, no watermark`,
     );
-    const keywords = Array.isArray(c.keywords) ? c.keywords.map((k: any) => String(k)).slice(0, 8) : [];
+    const keywords = asStrings(c.keywords).slice(0, 8);
     return {
       id: String(c.id ?? `char-${ts}-${i}`),
       name: String(c.name ?? `角色${i + 1}`).slice(0, 20),
@@ -568,17 +585,12 @@ export function parseShotPlanScenes(text: string, shots: VideoShotPlan[]): Video
   let cleaned = text.trim();
   const fenceMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (fenceMatch) cleaned = fenceMatch[1].trim();
-  const start = cleaned.indexOf('{');
-  const end = cleaned.lastIndexOf('}');
-  let obj: any = {};
-  if (start >= 0 && end >= 0) {
-    try { obj = JSON.parse(cleaned.slice(start, end + 1)); } catch { obj = {}; }
-  }
+  const obj = parseJsonObject(cleaned);
   return parseShotPlanScenesFromObj(obj, shots, Date.now());
 }
 
-function parseShotPlanScenesFromObj(obj: any, shots: VideoShotPlan[], ts: number): VideoScene[] {
-  let parsed: any[] = Array.isArray(obj.scenes) ? obj.scenes : [];
+function parseShotPlanScenesFromObj(obj: JsonRecord, shots: VideoShotPlan[], ts: number): VideoScene[] {
+  const parsed: JsonRecord[] = asJsonRecords(obj.scenes);
   // 若 LLM 没返回 scenes，根据 shots 自动派生
   if (parsed.length === 0 && shots.length > 0) {
     const seen = new Set<string>();
@@ -597,7 +609,7 @@ function parseShotPlanScenesFromObj(obj: any, shots: VideoShotPlan[], ts: number
       });
     });
   }
-  return parsed.map((s: any, i: number) => {
+  return parsed.map((s, i) => {
     const description = String(s.description ?? s.desc ?? '');
     const location = String(s.location ?? s.place ?? s.setting ?? '');
     const lighting = String(s.lighting ?? s.lightingHint ?? '');
@@ -608,8 +620,8 @@ function parseShotPlanScenesFromObj(obj: any, shots: VideoShotPlan[], ts: number
       (baseScene ? `cinematic establishing shot, ${baseScene}, wide angle, atmospheric, high detail, movie still, no text, no watermark, sharp focus` : ''),
     );
     let forShotIds: Array<string | number> = [];
-    if (Array.isArray(s.forShotIds)) forShotIds = s.forShotIds;
-    else if (s.shotIndex != null) forShotIds = [s.shotIndex];
+    if (Array.isArray(s.forShotIds)) forShotIds = s.forShotIds.filter((item): item is string | number => typeof item === 'string' || typeof item === 'number');
+    else if (typeof s.shotIndex === 'string' || typeof s.shotIndex === 'number') forShotIds = [s.shotIndex];
     return {
       id: String(s.id ?? `scene-${ts}-${i}`),
       shotId: s.shotId != null ? String(s.shotId) : undefined,
@@ -636,21 +648,16 @@ export function parseShotPlanProps(text: string, shots: VideoShotPlan[]): VideoP
   let cleaned = text.trim();
   const fenceMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (fenceMatch) cleaned = fenceMatch[1].trim();
-  const start = cleaned.indexOf('{');
-  const end = cleaned.lastIndexOf('}');
-  let obj: any = {};
-  if (start >= 0 && end >= 0) {
-    try { obj = JSON.parse(cleaned.slice(start, end + 1)); } catch { obj = {}; }
-  }
+  const obj = parseJsonObject(cleaned);
   return parseShotPlanPropsFromObj(obj, shots, Date.now());
 }
 
-function parseShotPlanPropsFromObj(obj: any, shots: VideoShotPlan[], ts: number): VideoProp[] {
-  let arr: any[] = Array.isArray(obj.props) ? obj.props : [];
+function parseShotPlanPropsFromObj(obj: JsonRecord, shots: VideoShotPlan[], ts: number): VideoProp[] {
+  const arr: JsonRecord[] = asJsonRecords(obj.props);
   // 从 scenes[].keyProps 派生兜底 props
-  if (arr.length === 0 && Array.isArray(obj.scenes)) {
+  if (arr.length === 0) {
     const seen = new Set<string>();
-    (obj.scenes as any[]).forEach((sc: any, sIdx: number) => {
+    asJsonRecords(obj.scenes).forEach((sc, sIdx) => {
       const kp = String(sc.keyProps ?? '').trim();
       if (!kp) return;
       kp.split(/[,，、;；/]/).map(x => x.trim()).filter(Boolean).forEach((name, i) => {
@@ -670,7 +677,7 @@ function parseShotPlanPropsFromObj(obj: any, shots: VideoShotPlan[], ts: number)
       });
     });
   }
-  return arr.map((p: any, i: number) => {
+  return arr.map((p, i) => {
     const description = String(p.description ?? p.desc ?? '');
     const material = String(p.material ?? '');
     const color = String(p.color ?? '');
@@ -680,8 +687,7 @@ function parseShotPlanPropsFromObj(obj: any, shots: VideoShotPlan[], ts: number)
       p.propPrompt ?? p.imagePrompt ??
       (base ? `object design sheet, isolated prop, ${base}, clear silhouette, studio lighting, white background, high detail, no text, no watermark, sharp focus` : ''),
     );
-    const forShotIds = Array.isArray(p.shotIds) ? p.shotIds.map((x: any) => String(x)) :
-      Array.isArray(p.forShotIds) ? p.forShotIds.map((x: any) => String(x)) : [];
+    const forShotIds = asStrings(p.shotIds).length > 0 ? asStrings(p.shotIds) : asStrings(p.forShotIds);
     return {
       id: String(p.id ?? `prop-${ts}-${i}`),
       name: String(p.name ?? `道具${i + 1}`).slice(0, 20),
@@ -822,22 +828,17 @@ export function parseStoryAssetsResponse(text: string): StoryAssetsPlanResult {
   let cleaned = text.trim();
   const fenceMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (fenceMatch) cleaned = fenceMatch[1].trim();
-  const start = cleaned.indexOf('{');
-  const end = cleaned.lastIndexOf('}');
-  let obj: any = {};
-  if (start >= 0 && end >= 0) {
-    try { obj = JSON.parse(cleaned.slice(start, end + 1)); } catch { obj = {}; }
-  }
-  const arr: any[] = Array.isArray(obj.prompts) ? obj.prompts : [];
-  const prompts: StoryAssetGenTask[] = arr.map((p: any, i: number) => ({
+  const obj = parseJsonObject(cleaned);
+  const arr = asJsonRecords(obj.prompts);
+  const prompts: StoryAssetGenTask[] = arr.map((p, i) => ({
     id: String(p.id ?? `asset-${Date.now()}-${i}`),
-    type: (['character-front', 'character-side', 'scene', 'prop'].includes(p.type) ? p.type : 'prop') as StoryAssetGenTask['type'],
+    type: (['character-front', 'character-side', 'scene', 'prop'].includes(String(p.type)) ? String(p.type) : 'prop') as StoryAssetGenTask['type'],
     name: String(p.name ?? `资产${i + 1}`),
     targetId: p.targetId != null ? String(p.targetId) : undefined,
     prompt: String(p.prompt ?? ''),
     negativePrompt: p.negativePrompt != null ? String(p.negativePrompt) : undefined,
     aspectRatio: p.aspectRatio != null ? String(p.aspectRatio) : undefined,
-    referenceUrls: Array.isArray(p.referenceUrls) ? p.referenceUrls.map((u: any) => String(u)) : [],
+    referenceUrls: asStrings(p.referenceUrls),
   })).filter(t => t.prompt.length > 5);
   return { prompts, totalImages: prompts.length };
 }

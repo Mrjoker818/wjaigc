@@ -466,7 +466,7 @@ export default function PromptTemplatePanel({
               <div className={`text-center py-12 ${mc ? 'text-gray-400' : 'text-gold-muted/50'}`}>
                 <FileText className="w-12 h-12 mx-auto mb-3 opacity-50" />
                 <p className="text-sm">暂无模板</p>
-                <p className="text-xs mt-1 opacity-60">点击"新建"创建你的第一个模板</p>
+                <p className="text-xs mt-1 opacity-60">点击“新建”创建你的第一个模板</p>
               </div>
             ) : (
               filteredTemplates.map(template => (

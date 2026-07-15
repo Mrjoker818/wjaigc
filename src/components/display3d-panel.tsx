@@ -1216,7 +1216,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                         ) : (
                           <div className="flex-1 flex flex-col items-center justify-center text-xs py-8" style={{ color: textMuted }}>
                             <Camera size={28} className="mb-2 opacity-20" />
-                            请在"输出视角选择"中勾选视角
+                            请在“输出视角选择”中勾选视角
                           </div>
                         )}
                       </div>
@@ -1346,7 +1346,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                         <li><b style={{ color: textPrimary }}>场景设置</b>：选择展陈类型（快闪店/展会展位/商超堆头/橱窗陈列/打卡装置/产品展示台/商场美陈）和空间尺寸（长×宽×高 mm）</li>
                         <li><b style={{ color: textPrimary }}>环境与尺寸</b>：设定场地环境（商场中庭/展馆/门店/户外/超市）、预算、材质风格、灯光氛围、人群氛围、品牌主色、重点展示产品</li>
                       </ol>
-                      <p className="mt-2" style={{ color: textMuted }}>然后在"输出视角选择"中勾选需要的视角，设置分辨率/格式/质量，点击"生成展陈方案"即可。</p>
+                      <p className="mt-2" style={{ color: textMuted }}>然后在“输出视角选择”中勾选需要的视角，设置分辨率/格式/质量，点击“生成展陈方案”即可。</p>
                     </section>
                     <section>
                       <h3 className="text-sm font-semibold mb-1.5" style={{ color: textAccent }}>右侧预览区</h3>

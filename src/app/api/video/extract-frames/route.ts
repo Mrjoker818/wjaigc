@@ -138,9 +138,11 @@ export async function POST(req: NextRequest) {
       videoInfo,
       mode,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[video/extract-frames] 抽帧失败:', error);
-    const msg = error?.stderr || error?.message || String(error);
+    const msg = error instanceof Error && 'stderr' in error && typeof (error as Error & { stderr?: unknown }).stderr === 'string'
+      ? (error as Error & { stderr: string }).stderr
+      : error instanceof Error ? error.message : String(error);
     return NextResponse.json(
       { error: '视频抽帧失败: ' + msg.slice(0, 500) },
       { status: 500 }

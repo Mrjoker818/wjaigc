@@ -26,13 +26,19 @@ import { consumeCredits, refundCredits } from '@/lib/credits';
 import { logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
 import { validateApiInputs } from '@/lib/api-validator';
 import { recordVideoTaskRemotePolling, recordVideoTaskSubmitted, recordVideoTaskTerminal } from '@/lib/cloud-task-persistence';
+import type { User } from '@/lib/user-types';
+import type { VideoReferenceBinding } from '@/lib/video-director/prompt-compiler';
 
 export const maxDuration = 300; // 5 min timeout
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
 
 export async function POST(request: NextRequest) {
   const opTimer = startTimer();
   let deductedCredits = 0;
-  let sessionUser: any = null;
+  let sessionUser: User | null = null;
   try {
     // 积分扣除（按模型差异化扣分）
     const body = await request.json();
@@ -226,7 +232,7 @@ export async function POST(request: NextRequest) {
     let finalNegativePrompt = negativePrompt;
     if (useDirector !== false) { // 默认启用
       try {
-        const refs: Array<{ id: string; url: string; role: any; weight?: number }> = [];
+        const refs: VideoReferenceBinding[] = [];
         if (resolvedImageUrl) refs.push({ id: 'first', url: resolvedImageUrl, role: 'first-frame' });
         if (resolvedLastFrameUrl) refs.push({ id: 'last', url: resolvedLastFrameUrl, role: 'last-frame' });
         (resolvedRefs || []).forEach((u: string, i: number) => refs.push({ id: `ref${i}`, url: u, role: 'style' }));
@@ -350,7 +356,7 @@ export async function POST(request: NextRequest) {
           if (isEndpointNotFound || isModelNotFound || response.status === 503) {
             // Rebuild request body in OpenAI images/generations format
             const fallbackUrl = req.url.replace('/v1/video/generations', '/v1/images/generations');
-            const fallbackBody: Record<string, any> = {
+            const fallbackBody: Record<string, string | number> = {
               model,
               prompt,
               n: 1,
@@ -445,8 +451,10 @@ export async function POST(request: NextRequest) {
           remoteTaskId: submitResult.taskId,
           usedImagesEndpoint,
         }).catch((error) => console.warn('[video/generate] Cloud task remote ID persistence failed:', error));
-      } catch (err: any) {
-        const errorMsg = err.name === 'AbortError' ? '提交超时，请稍后重试' : (err.message || '提交视频生成任务失败');
+      } catch (err: unknown) {
+        const errorMsg = err instanceof Error && err.name === 'AbortError'
+          ? '提交超时，请稍后重试'
+          : errorMessage(err, '提交视频生成任务失败');
         updateTaskProgress(taskId, { status: 'failed', error: errorMsg, progress: 0 });
         void recordVideoTaskTerminal(taskId, { status: 'failed', error: errorMsg })
           .catch((error) => console.warn('[video/generate] Cloud task failure persistence failed:', error));
@@ -464,7 +472,7 @@ export async function POST(request: NextRequest) {
         features: modelInfo.features,
       } : null,
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('[video/generate] Error:', err);
     // 记录操作日志 - 视频生成失败
     logError(OP_ACTIONS.VIDEO_GENERATE, err, {
@@ -476,11 +484,11 @@ export async function POST(request: NextRequest) {
     // 退款：视频生成失败时退还积分
     if (deductedCredits > 0 && sessionUser) {
       try {
-        await refundCredits(sessionUser.id, deductedCredits, `视频生成失败退款: ${(err.message || '').substring(0, 100)}`);
+        await refundCredits(sessionUser.id, deductedCredits, `视频生成失败退款: ${errorMessage(err, '').substring(0, 100)}`);
       } catch (refundErr) { console.error('[video/generate] Refund failed:', refundErr); }
     }
     return NextResponse.json(
-      { error: err.message || '视频生成请求失败' },
+      { error: errorMessage(err, '视频生成请求失败') },
       { status: 500 },
     );
   }
@@ -490,8 +498,6 @@ export async function POST(request: NextRequest) {
  * GET /api/video/generate - 获取支持的视频模型列表信息
  */
 export async function GET() {
-  const deductedCredits = 0;
-  const sessionUser: any = null;
   try {
     return NextResponse.json({
       defaultRatios: ['1:1', '4:3', '16:9', '9:16', '21:9'],

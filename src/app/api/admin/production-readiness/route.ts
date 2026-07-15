@@ -13,6 +13,30 @@ interface ProviderReadiness {
   issues: string[];
 }
 
+interface SecurityReadiness {
+  status: CheckStatus;
+  issues: string[];
+}
+
+function getSecurityReadiness(): SecurityReadiness {
+  if (process.env.COZE_PROJECT_ENV !== 'PROD') {
+    return { status: 'pass', issues: [] };
+  }
+
+  const issues: string[] = [];
+  const authSecret = process.env.WUJIE_AUTH_SECRET || process.env.NEXTAUTH_SECRET;
+  const adminPassword = process.env.WUJIE_ADMIN_PASSWORD;
+
+  if (!authSecret?.trim() || authSecret === 'change-me') {
+    issues.push('Missing WUJIE_AUTH_SECRET or NEXTAUTH_SECRET');
+  }
+  if (!adminPassword?.trim() || adminPassword === 'change-me') {
+    issues.push('Missing WUJIE_ADMIN_PASSWORD');
+  }
+
+  return { status: issues.length > 0 ? 'fail' : 'pass', issues };
+}
+
 export async function GET(request: NextRequest) {
   const admin = await requireAdminUser(request);
   if (!admin) {
@@ -60,10 +84,12 @@ export async function GET(request: NextRequest) {
     warnings: readiness.filter(provider => provider.status === 'warn').length,
     failures: readiness.filter(provider => provider.status === 'fail').length,
   };
+  const security = getSecurityReadiness();
 
   return NextResponse.json({
-    success: database.status !== 'fail',
+    success: database.status !== 'fail' && security.status !== 'fail',
     database,
+    security,
     summary,
     providers: readiness,
   });

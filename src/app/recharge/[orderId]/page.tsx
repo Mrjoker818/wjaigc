@@ -456,7 +456,7 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
 
           {hasGoneToPay && (
             <p className="text-white/25 text-xs text-center mt-3">
-              付款完成后点击"我已完成付款"，管理员审核通过后积分将到账
+              付款完成后点击“我已完成付款”，管理员审核通过后积分将到账
             </p>
           )}
 

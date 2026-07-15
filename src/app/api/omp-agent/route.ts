@@ -232,7 +232,7 @@ function parseSSETextToJSON(text: string): Record<string, unknown> {
 
 export async function POST(request: NextRequest) {
   let deductedCredits = 0;
-  let sessionUser: any = null;
+  let sessionUser: import('@/lib/user-types').User | null = null;
   try {
     // 鉴权：要求 Web 登录态 或 桌面端 Token 二选一（P0 修复：防止未授权盗刷）
     sessionUser = await getSessionUser(request).catch(() => null);

@@ -189,4 +189,18 @@ describe('video workflow requests', () => {
       },
     });
   });
+
+  it('ignores malformed video URL collections instead of sending a string as a concat payload', () => {
+    const node = makeNode('compose', 'video-compose');
+    node.config = { videoUrl: '/uploads/source.mp4', videoUrls: 'not-an-array' };
+
+    expect(buildNodeExecutionRequest(node, {})).toMatchObject({
+      endpoint: '/api/video/tools',
+      body: {
+        action: 'trim',
+        videoUrl: '/uploads/source.mp4',
+        videoUrls: undefined,
+      },
+    });
+  });
 });

@@ -1,20 +1,4 @@
-/**
- * 任务事件 SSE 客户端 + 取消功能
- *
- * 使用方式：
- *   import { taskEventsClient } from '@/lib/task-events-client';
- *
- *   // 连接SSE（自动重连）
- *   taskEventsClient.connect();
- *
- *   // 监听任务事件
- *   taskEventsClient.onTaskEvent((event) => { ... });
- *
- *   // 取消任务
- *   await taskEventsClient.cancelTask(taskId);
- */
-
-import type { TaskInfo, TaskType } from './task-registry';
+import type { TaskInfo } from './task-registry';
 
 export interface TaskEvent {
   taskId: string;
@@ -24,68 +8,31 @@ export interface TaskEvent {
 
 type TaskEventHandler = (event: TaskEvent) => void;
 
-class TaskEventsClient {
+interface SessionResponse {
+  success?: boolean;
+  user?: { id?: string } | null;
+}
+
+export class TaskEventsClient {
   private eventSource: EventSource | null = null;
-  private handlers: Set<TaskEventHandler> = new Set();
+  private handlers = new Set<TaskEventHandler>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 30; // ★ 提高重连次数（FaaS 平台可能频繁断开 SSE）
+  private readonly maxReconnectAttempts = 30;
   private connected = false;
+  private connecting = false;
+  private connectionGeneration = 0;
 
-  /** 连接SSE */
   connect(): void {
-    if (this.eventSource) return; // 已连接
+    if (this.eventSource || this.reconnectTimer || this.connecting) return;
 
-    try {
-      const base = this.getBaseUrl();
-      // 从 localStorage 获取当前用户 ID，用于 EventSource 认证（无法携带 header）
-      let userId = '';
-      try {
-        userId = localStorage.getItem('unbounded_ai_current_user') || '';
-      } catch {
-        // localStorage 可能不可用
-      }
-      const url = userId 
-        ? `${base}/api/task-events?userId=${encodeURIComponent(userId)}`
-        : `${base}/api/task-events`;
-      this.eventSource = new EventSource(url);
-
-      this.eventSource.onopen = () => {
-        this.connected = true;
-        this.reconnectAttempts = 0; // ★ 重置重连计数器
-        console.info('[TaskEventsClient] SSE connected');
-      };
-
-      this.eventSource.onmessage = (e) => {
-        // 跳过 SSE 心跳注释行（`:heartbeat`）和心跳 data 行
-        if (!e.data || e.data === 'heartbeat') return;
-        try {
-          const event = JSON.parse(e.data) as TaskEvent;
-          this.handlers.forEach(h => {
-            try { h(event); } catch { /* handler error */ }
-          });
-        } catch {
-          // ignore parse errors
-        }
-      };
-
-      this.eventSource.onerror = () => {
-        this.connected = false;
-        this.eventSource?.close();
-        this.eventSource = null;
-        // ★ FaaS 平台会定期断开 SSE 连接（~4分钟），这是正常行为，立即重连
-        if (this.reconnectAttempts === 0) {
-          console.info('[TaskEventsClient] SSE disconnected, reconnecting...');
-        }
-        this.scheduleReconnect();
-      };
-    } catch {
-      this.scheduleReconnect();
-    }
+    this.connecting = true;
+    const generation = this.connectionGeneration;
+    void this.openAfterSessionCheck(generation);
   }
 
-  /** 断开SSE */
   disconnect(): void {
+    this.connectionGeneration++;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -93,54 +40,102 @@ class TaskEventsClient {
     this.eventSource?.close();
     this.eventSource = null;
     this.connected = false;
+    this.connecting = false;
     this.reconnectAttempts = 0;
   }
 
-  /** 是否已连接 */
   isConnected(): boolean {
     return this.connected;
   }
 
-  /** 注册事件处理器 */
   onTaskEvent(handler: TaskEventHandler): () => void {
     this.handlers.add(handler);
-    return () => { this.handlers.delete(handler); };
+    return () => this.handlers.delete(handler);
   }
 
-  /** 取消任务 */
   async cancelTask(taskId: string): Promise<{ success: boolean; message?: string }> {
     try {
-      const base = this.getBaseUrl();
-      const resp = await fetch(`${base}/api/cancel-task`, {
+      const response = await fetch(`${this.getBaseUrl()}/api/cancel-task`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ taskId }),
       });
-      return await resp.json();
-    } catch (err) {
-      console.error('[TaskEventsClient] cancelTask error:', err);
-      return { success: false, message: '取消请求失败' };
+      return await response.json();
+    } catch (error) {
+      console.error('[TaskEventsClient] cancelTask error:', error);
+      return { success: false, message: 'Failed to cancel task' };
+    }
+  }
+
+  private async openAfterSessionCheck(generation: number): Promise<void> {
+    const authenticated = await this.hasAuthenticatedSession();
+    this.connecting = false;
+
+    if (generation !== this.connectionGeneration || this.eventSource) return;
+    if (!authenticated) return;
+
+    try {
+      this.eventSource = new EventSource(`${this.getBaseUrl()}/api/task-events`);
+      this.eventSource.onopen = () => {
+        this.connected = true;
+        this.reconnectAttempts = 0;
+      };
+      this.eventSource.onmessage = (event) => {
+        if (!event.data || event.data === 'heartbeat') return;
+        try {
+          const taskEvent = JSON.parse(event.data) as TaskEvent;
+          this.handlers.forEach((handler) => {
+            try {
+              handler(taskEvent);
+            } catch {
+              // A consumer error must not break the shared event stream.
+            }
+          });
+        } catch {
+          // Ignore malformed SSE payloads from intermediaries.
+        }
+      };
+      this.eventSource.onerror = () => {
+        this.connected = false;
+        this.eventSource?.close();
+        this.eventSource = null;
+        this.scheduleReconnect();
+      };
+    } catch {
+      this.scheduleReconnect();
+    }
+  }
+
+  private async hasAuthenticatedSession(): Promise<boolean> {
+    try {
+      const response = await fetch(`${this.getBaseUrl()}/api/auth/me`, {
+        credentials: 'include',
+        cache: 'no-store',
+      });
+      if (!response.ok) return false;
+      const payload = await response.json() as SessionResponse;
+      return payload.success === true && Boolean(payload.user?.id);
+    } catch {
+      return false;
     }
   }
 
   private getBaseUrl(): string {
     if (typeof window !== 'undefined') {
-      // 浏览器环境：使用当前域名
       return `${window.location.protocol}//${window.location.host}`;
     }
     return '';
   }
 
   private scheduleReconnect(): void {
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) return;
-    // 指数退避：2s → 4s → 8s → 16s → 30s（最大）
-    const delay = Math.min(2000 * Math.pow(2, this.reconnectAttempts), 30000);
+    if (this.reconnectAttempts >= this.maxReconnectAttempts || this.reconnectTimer) return;
+    const delay = Math.min(2_000 * 2 ** this.reconnectAttempts, 30_000);
     this.reconnectAttempts++;
     this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
       this.connect();
     }, delay);
   }
 }
 
-// 全局单例
 export const taskEventsClient = new TaskEventsClient();

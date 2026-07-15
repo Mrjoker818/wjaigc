@@ -24,7 +24,7 @@ interface TestResult {
 }
 
 async function testProvider(
-  provider: { id: string; name: string; displayName?: string; baseUrl?: string; apiKey?: string; modelType?: string; selectedModels?: string[]; advancedParams?: any; requestStyle?: string; isEnabled?: boolean }
+  provider: { id: string; name: string; displayName?: string; baseUrl?: string; apiKey?: string; modelType?: string; selectedModels?: string[]; advancedParams?: unknown; requestStyle?: string; isEnabled?: boolean }
 ): Promise<TestResult> {
   const { id, name, baseUrl = '', apiKey = '', modelType = 'unknown', selectedModels = [], advancedParams, requestStyle } = provider;
   const displayName = provider.displayName || name;
@@ -33,7 +33,13 @@ async function testProvider(
   const cleanBaseUrl = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
   let profile: ReturnType<typeof resolveCompatProfile> | null = null;
   try {
-    profile = resolveCompatProfile({ baseUrl: cleanBaseUrl, requestStyle, advancedParams });
+    profile = resolveCompatProfile({
+      baseUrl: cleanBaseUrl,
+      requestStyle,
+      advancedParams: advancedParams && typeof advancedParams === 'object' && !Array.isArray(advancedParams)
+        ? advancedParams as Record<string, string>
+        : undefined,
+    });
   } catch { /* ignore */ }
 
   const headers: Record<string, string> = {

@@ -4,6 +4,11 @@ import { execSql } from '@/lib/db-client';
 
 export const dynamic = 'force-dynamic';
 
+interface CreditSummaryRow { total_balance?: unknown; total_recharged?: unknown; total_consumed?: unknown; total_users?: unknown; avg_per_user?: unknown; }
+interface CreditDistributionRow { image_consumed?: unknown; chat_consumed?: unknown; video_consumed?: unknown; other_consumed?: unknown; }
+interface CreditUserRow { user_id: string; name?: string; balance?: unknown; total_recharged?: unknown; total_used?: unknown; }
+interface CreditTransactionRow { user_id: string; user?: string; amount?: unknown; desc?: string; created_at?: unknown; }
+
 export async function GET(request: NextRequest) {
   try {
     const admin = await requireAdminUser(request);
@@ -45,8 +50,8 @@ export async function GET(request: NextRequest) {
       ),
     ]);
 
-    const summary = (summaryRes.rows as any[])[0] || {};
-    const dist = (distributionRes.rows as any[])[0] || {};
+    const summary = ((summaryRes.rows as CreditSummaryRow[])[0] || {});
+    const dist = ((distributionRes.rows as CreditDistributionRow[])[0] || {});
     const totalConsumed = Number(summary.total_consumed) || 1;
 
     const distribution = [
@@ -56,7 +61,7 @@ export async function GET(request: NextRequest) {
       { label: '其他', value: Number(dist.other_consumed) || 0, color: '#a1a1aa', pct: `${Math.round((Number(dist.other_consumed) || 0) / totalConsumed * 100)}%` },
     ];
 
-    const topUsers = (topUsersRes.rows as any[]).map(r => ({
+    const topUsers = (topUsersRes.rows as unknown as CreditUserRow[]).map(r => ({
       userId: r.user_id,
       name: r.name || r.user_id,
       consumed: Number(r.total_used) || 0,
@@ -65,9 +70,9 @@ export async function GET(request: NextRequest) {
       totalRecharged: Number(r.total_recharged) || 0,
     }));
 
-    const recentTransactions = (recentTxRes.rows as any[]).map(r => ({
+    const recentTransactions = (recentTxRes.rows as unknown as CreditTransactionRow[]).map(r => ({
       user: r.user || r.user_id,
-      type: r.amount > 0 ? 'recharge' : (r.desc || '').includes('生图') || (r.desc || '').includes('生成') ? 'image' : (r.desc || '').includes('视频') ? 'video' : (r.desc || '').includes('聊天') || (r.desc || '').includes('chat') ? 'chat' : 'other',
+      type: Number(r.amount) > 0 ? 'recharge' : (r.desc || '').includes('生图') || (r.desc || '').includes('生成') ? 'image' : (r.desc || '').includes('视频') ? 'video' : (r.desc || '').includes('聊天') || (r.desc || '').includes('chat') ? 'chat' : 'other',
       amount: Number(r.amount) || 0,
       desc: r.desc || '-',
       time: new Date(Number(r.created_at)).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }),

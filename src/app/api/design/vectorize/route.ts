@@ -752,7 +752,7 @@ function sanitizeSvgForAI(svg: string): string {
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
   let deductedCredits = 0;
-  let sessionUser: any = null;
+  let sessionUser: import('@/lib/user-types').User | null = null;
   let selectedMode = '';
   const engineUsed = '';
   try {

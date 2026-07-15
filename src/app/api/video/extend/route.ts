@@ -25,10 +25,14 @@ import { recordVideoTaskRemotePolling, recordVideoTaskSubmitted, recordVideoTask
 
 export const maxDuration = 300; // 5 min timeout
 
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
   let deductedCredits = 0;
-  let sessionUser: any = null;
+  let sessionUser: import('@/lib/user-types').User | null = null;
   const model = '';
   const providerId = '';
   try {
@@ -366,8 +370,10 @@ export async function POST(request: NextRequest) {
           remoteTaskId: submitResult.taskId,
           usedImagesEndpoint,
         }).catch((error) => console.warn('[video/extend] Cloud task remote ID persistence failed:', error));
-      } catch (err: any) {
-        const errorMsg = err.name === 'AbortError' ? '提交超时，请稍后重试' : (err.message || '提交视频延长任务失败');
+      } catch (err: unknown) {
+        const errorMsg = err instanceof Error && err.name === 'AbortError'
+          ? '提交超时，请稍后重试'
+          : errorMessage(err, '提交视频延长任务失败');
         updateTaskProgress(taskId, { status: 'failed', error: errorMsg, progress: 0 });
         void recordVideoTaskTerminal(taskId, { status: 'failed', error: errorMsg })
           .catch((error) => console.warn('[video/extend] Cloud task failure persistence failed:', error));
@@ -394,7 +400,7 @@ export async function POST(request: NextRequest) {
         features: modelInfo.features,
       } : null,
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('[video/extend] Error:', err);
     // 操作日志记录错误
     logError(OP_ACTIONS.VIDEO_EXTEND, err, {
@@ -407,11 +413,11 @@ export async function POST(request: NextRequest) {
     // 退款：视频延长失败时退还积分
     if (deductedCredits > 0 && sessionUser) {
       try {
-        await refundCredits(sessionUser.id, deductedCredits, `视频延长失败退款: ${(err.message || '').substring(0, 100)}`);
+        await refundCredits(sessionUser.id, deductedCredits, `视频延长失败退款: ${errorMessage(err, '').substring(0, 100)}`);
       } catch (refundErr) { console.error('[video/extend] Refund failed:', refundErr); }
     }
     return NextResponse.json(
-      { error: err.message || '视频延长请求失败' },
+      { error: errorMessage(err, '视频延长请求失败') },
       { status: 500 },
     );
   }

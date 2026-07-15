@@ -27,7 +27,7 @@ interface ChatTaskContext {
 export async function POST(request: NextRequest) {
   const opTimer = startTimer();
   let deductedCredits = 0;
-  let sessionUser: any = null;
+  let sessionUser: import('@/lib/user-types').User | null = null;
   try {
     const authResult = await requireApiAuthOrReject(request);
     if (authResult instanceof NextResponse) return authResult;

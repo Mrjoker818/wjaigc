@@ -1500,6 +1500,21 @@ export function getNodeInputs(
  * 构建节点执行请求体
  * 根据节点类型映射到对应的API端点和参数
  */
+function getConfigString(config: Record<string, unknown>, key: string, fallback = ''): string {
+  const value = config[key];
+  return typeof value === 'string' ? value : fallback;
+}
+
+function getConfigNumber(config: Record<string, unknown>, key: string, fallback = 0): number {
+  const value = Number(config[key]);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function getConfigStringArray(config: Record<string, unknown>, key: string): string[] {
+  const value = config[key];
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
 export function buildNodeExecutionRequest(
   node: WorkflowNode,
   inputs: Record<string, unknown>
@@ -2043,10 +2058,10 @@ export function buildNodeExecutionRequest(
 
     // ─── AI LLM 文案策划节点 ───
     case 'ai-llm': {
-      const sysPrompt = (config as any).systemPrompt || '你是专业的创意文案策划师，请根据用户需求撰写高质量的创意文案。';
-      const userPrompt = (config as any).prompt || (config as any).text || '';
-      const refImage = (config as any).imageUrl || '';
-      const model = (config as any).model || '';
+      const sysPrompt = getConfigString(config, 'systemPrompt', '你是专业的创意文案策划师，请根据用户需求撰写高质量的创意文案。');
+      const userPrompt = getConfigString(config, 'prompt') || getConfigString(config, 'text');
+      const refImage = getConfigString(config, 'imageUrl');
+      const model = getConfigString(config, 'model');
       return {
         endpoint: '/api/chat',
         method: 'POST',
@@ -2071,18 +2086,18 @@ export function buildNodeExecutionRequest(
 
     // ─── 参数化色彩调整节点（非AI重绘，纯参数） ───
     case 'manual-color-adjust': {
-      const imageUrl = (config as any).imageUrl || '';
+      const imageUrl = getConfigString(config, 'imageUrl');
       return {
         endpoint: '/api/image/color-adjust',
         method: 'POST',
         body: {
           imageUrl,
           params: {
-            brightness: Number((config as any).brightness) || 0,
-            contrast: Number((config as any).contrast) || 0,
-            saturation: Number((config as any).saturation) || 0,
-            temperature: Number((config as any).temperature) || 0,
-            hue: Number((config as any).hue) || 0,
+            brightness: getConfigNumber(config, 'brightness'),
+            contrast: getConfigNumber(config, 'contrast'),
+            saturation: getConfigNumber(config, 'saturation'),
+            temperature: getConfigNumber(config, 'temperature'),
+            hue: getConfigNumber(config, 'hue'),
           }
         }
       };
@@ -2090,39 +2105,39 @@ export function buildNodeExecutionRequest(
 
     // ─── 音频生成节点（TTS） ───
     case 'ai-audio': {
-      const text = (config as any).text || '';
+      const text = getConfigString(config, 'text');
       return {
         endpoint: '/api/audio/generate',
         method: 'POST',
         body: {
           text,
-          voice: (config as any).voice || 'zh-CN-XiaoxiaoNeural',
-          speed: Number((config as any).speed) || 1.0,
+          voice: getConfigString(config, 'voice', 'zh-CN-XiaoxiaoNeural'),
+          speed: getConfigNumber(config, 'speed', 1.0),
         }
       };
     }
 
     // ─── 视频抽帧节点 ───
     case 'video-extract-frames': {
-      const videoUrl = (config as any).videoUrl || '';
+      const videoUrl = getConfigString(config, 'videoUrl');
       return {
         endpoint: '/api/video/tools',
         method: 'POST',
         body: {
           action: 'extract-frames',
           videoUrl,
-          mode: (config as any).mode || 'uniform',
-          count: Number((config as any).count || (config as any).frameCount) || 8,
-          fps: Number((config as any).fps) || 1,
+          mode: getConfigString(config, 'mode', 'uniform'),
+          count: getConfigNumber(config, 'count') || getConfigNumber(config, 'frameCount', 8),
+          fps: getConfigNumber(config, 'fps', 1),
         }
       };
     }
 
     // ─── 视频合成节点（视频+音频/多视频拼接） ───
     case 'video-compose': {
-      const videoUrl = (config as any).videoUrl || '';
-      const audioUrl = (config as any).audioUrl || '';
-      const videoUrls = (config as any).videoUrls || [];
+      const videoUrl = getConfigString(config, 'videoUrl');
+      const audioUrl = getConfigString(config, 'audioUrl');
+      const videoUrls = getConfigStringArray(config, 'videoUrls');
       return {
         endpoint: '/api/video/tools',
         method: 'POST',
@@ -2131,21 +2146,21 @@ export function buildNodeExecutionRequest(
           videoUrl: videoUrls.length ? '' : videoUrl,
           videoUrls: videoUrls.length ? videoUrls : undefined,
           audioUrl,
-          volume: Number((config as any).volume) || 1.0,
+          volume: getConfigNumber(config, 'volume', 1.0),
         }
       };
     }
 
     // ─── 720全景图节点 ───
     case 'ai-panorama': {
-      const refImage = (config as any).imageUrl || '';
-      const prompt = (config as any).prompt || '360度全景环境图';
+      const refImage = getConfigString(config, 'imageUrl');
+      const prompt = getConfigString(config, 'prompt', '360度全景环境图');
       return {
         endpoint: '/api/generate',
         method: 'POST',
         body: {
           prompt: prompt + ', 360 degree panorama, equirectangular projection, spherical panorama, seamless',
-          model: (config as any).model || '',
+          model: getConfigString(config, 'model'),
           aspectRatio: '2:1',
           n: 1,
           imageUrl: refImage || undefined,

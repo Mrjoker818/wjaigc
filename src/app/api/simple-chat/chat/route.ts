@@ -20,6 +20,14 @@ interface KnowledgeItem {
   content: string;
 }
 
+type ChatContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string; detail: 'auto' } };
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
 export async function POST(request: NextRequest) {
   const body = await request.json() as {
     messages?: { role: string; content: string; images?: string[] }[];
@@ -102,9 +110,10 @@ export async function POST(request: NextRequest) {
           enhancedSystemPrompt += `\n\n(联网搜索未找到相关结果，请基于已有知识回答)`;
         }
       }
-    } catch (e: any) {
-      console.error('Web search failed:', e.message);
-      enhancedSystemPrompt += `\n\n(联网搜索暂时不可用: ${e.message})`;
+    } catch (e: unknown) {
+      const message = errorMessage(e, 'Web search unavailable');
+      console.error('Web search failed:', message);
+      enhancedSystemPrompt += `\n\n(联网搜索暂时不可用: ${message})`;
     }
   }
 
@@ -112,7 +121,7 @@ export async function POST(request: NextRequest) {
   const fullMessages = [
     { role: 'system', content: enhancedSystemPrompt },
     ...messages.map((m) => {
-      const parts: any[] = [{ type: 'text', text: m.content }];
+      const parts: ChatContentPart[] = [{ type: 'text', text: m.content }];
       if (m.images && m.images.length > 0) {
         for (const img of m.images) {
           parts.push({
@@ -151,7 +160,7 @@ export async function POST(request: NextRequest) {
         const apiUrl = `${baseUrl}/chat/completions`;
 
         // 添加工具定义
-        const tools: any[] = [
+        const tools: Record<string, unknown>[] = [
           {
             type: 'function',
             function: {
@@ -303,15 +312,15 @@ export async function POST(request: NextRequest) {
                   attempts++;
                 }
               }
-            } catch (e: any) {
-              send({ type: 'tool_status', tool: 'generating_image', status: 'failed', label: `图片生成失败: ${e.message}` });
+            } catch (e: unknown) {
+              send({ type: 'tool_status', tool: 'generating_image', status: 'failed', label: `图片生成失败: ${errorMessage(e, '未知错误')}` });
             }
           }
         }
 
         send({ type: 'done' });
-      } catch (e: any) {
-        send({ type: 'error', error: e.message || '未知错误' });
+      } catch (e: unknown) {
+        send({ type: 'error', error: errorMessage(e, '未知错误') });
       }
       controller.close();
     },

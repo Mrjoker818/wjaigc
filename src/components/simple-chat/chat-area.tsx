@@ -627,8 +627,8 @@ export default function ChatArea({
       link.download = `${data.title || '演示文稿'}.pptx`;
       link.click();
       window.URL.revokeObjectURL(url);
-    } catch (e: any) {
-      alert(`解析失败：${e.message}`);
+    } catch (e: unknown) {
+      alert(`解析失败：${e instanceof Error ? e.message : '未知错误'}`);
     } finally {
       setDownloadingPptx(false);
     }

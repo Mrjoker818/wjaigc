@@ -697,7 +697,7 @@ export async function POST(request: NextRequest) {
           }, { status: 200 });
         }
 
-        let videoAdvancedParams = (regResult.advancedParams || regResult.providerAdvancedParams) as Record<string, any> | undefined;
+        let videoAdvancedParams = (regResult.advancedParams || regResult.providerAdvancedParams) as Record<string, unknown> | undefined;
         
         // 检查提交时是否使用了 images 端点，以便轮询也用对应端点
         const usedImagesEndpoint = regResult.usedImagesEndpoint as boolean | undefined;
@@ -713,7 +713,7 @@ export async function POST(request: NextRequest) {
           } = await import('@/lib/video-api');
 
           const pollReq = buildVideoPollRequest(
-            (videoProfile || 'rest-generic') as any,
+            (videoProfile || 'rest-generic') as import('@/lib/video-api').VideoCompatProfile,
             vBaseUrl,
             vApiKey || '',
             thirdPartyTaskId,
@@ -777,7 +777,7 @@ export async function POST(request: NextRequest) {
 
           const pollData = await pollResp.json();
           const videoResult = parseVideoPollResponse(
-            (videoProfile || 'rest-generic') as any,
+            (videoProfile || 'rest-generic') as import('@/lib/video-api').VideoCompatProfile,
             pollData,
           );
 

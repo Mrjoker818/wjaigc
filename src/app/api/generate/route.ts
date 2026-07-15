@@ -110,7 +110,7 @@ export async function POST(request: NextRequest) {
   if (authResult instanceof NextResponse) return authResult;
   try {
     let deductedCredits = 0;
-    let sessionUser: any = null;
+    let sessionUser: import('@/lib/user-types').User | null = null;
     const body = await request.json();
     // quality 需要在后续被模型别名的 resolutionTier 覆盖，所以单独用 let 声明
     const {
@@ -139,7 +139,7 @@ export async function POST(request: NextRequest) {
       resolution, // GPT-Image系列分辨率档位参数（1K/2K/4K）
     } = body;
     // quality 默认值 '1K'，后续可能被模型别名 resolutionTier 覆盖
-    let quality: string = (body as any).quality || '1K';
+    let quality: string = typeof body.quality === 'string' ? body.quality : '1K';
     // resolution 默认值 '2K'（仅GPT-Image系列使用）
     const resolutionTier: string = resolution || '2K';
     // 诊断日志：显示接收到的参考图参数
@@ -341,7 +341,7 @@ export async function POST(request: NextRequest) {
             headers: {
               'Content-Type': 'application/json',
               'x-internal-request': 'true',
-              'x-internal-user-id': sessionUser?.userId || 'system',
+              'x-internal-user-id': sessionUser?.id || 'system',
             },
             body: JSON.stringify(backgroundBody),
             signal: AbortSignal.timeout(600000), // 10分钟超时
@@ -2141,7 +2141,10 @@ export async function POST(request: NextRequest) {
         const isRetryable = singleError instanceof Error && (singleError as Error & { retryable?: boolean }).retryable;
         
         // ★ 智能重试: 识别 CF 524/504 超时，同模型重试后再切换备选模型
-        const errorClassify = classifyApiError(errMsg, singleError instanceof Error ? (singleError as any).status : undefined);
+        const errorStatus = singleError instanceof Error && typeof (singleError as Error & { status?: unknown }).status === 'number'
+          ? (singleError as Error & { status: number }).status
+          : undefined;
+        const errorClassify = classifyApiError(errMsg, errorStatus);
         const isCloudflareTimeout = errorClassify.category === 'cloudflare_timeout';
         const isSizeError = errorClassify.category === 'invalid_size';
         

@@ -233,6 +233,63 @@ interface VideoGenerationPanelProps {
   onClose?: () => void;
 }
 
+type VideoModelOption = {
+  id: string;
+  modelId: string;
+  name: string;
+  providerId: string;
+  providerName: string;
+  region: 'cn' | 'global';
+  features: VideoModelInfo['features'];
+};
+
+type StoryCharacterPayload = VideoCharacter & {
+  looks?: string;
+  appearancePrompt?: string;
+  outfit?: string;
+  clothing?: string;
+  hairstyle?: string;
+  frontImagePrompt?: string;
+  sideImagePrompt?: string;
+};
+
+type StoryScenePayload = VideoScene & {
+  place?: string;
+  setting?: string;
+  environmentPrompt?: string;
+  sceneImageUrl?: string;
+};
+
+type StoryPropPayload = VideoProp & {
+  imagePrompt?: string;
+  shotIds?: Array<string | number>;
+};
+
+type StoryShotPayload = Partial<VideoShotPlan> & {
+  shot_size?: string;
+  camera_movement?: string;
+  camera_move?: string;
+  action_beat?: string;
+  audio_cues?: string;
+  sound?: string;
+  compiledPrompt?: string;
+  continuity_notes?: string[];
+  description?: string;
+};
+
+interface ShotPlanApiResponse {
+  success?: boolean;
+  error?: string;
+  shots?: StoryShotPayload[];
+  characters?: VideoCharacter[];
+  scenes?: VideoScene[];
+  props?: VideoProp[];
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
+
 // 比例图形预览组件
 function RatioPreview({ ratio, className = '' }: { ratio: string; className?: string }) {
   const parseRatio = (r: string): [number, number] => {
@@ -463,7 +520,7 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
   };
 
   // 合并服务器模型与内置注册表
-  const [videoModels, setVideoModels] = useState<{ id: string; modelId: string; name: string; providerId: string; providerName: string; region: 'cn' | 'global'; features: VideoModelInfo['features'] }[]>([]);
+  const [videoModels, setVideoModels] = useState<VideoModelOption[]>([]);
 
   // ref 保持最新 shotPlans，供异步循环读取不被闭包冻结
   const shotPlansRef = useRef<VideoShotPlan[]>(shotPlans);
@@ -578,10 +635,10 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
           providerId,
           providerName: sm.providerName || registry?.provider || '',
           region: (registry?.region || 'cn') as 'cn' | 'global',
-          features: registry?.features || inferFallbackFeatures(sm.id),
+          features: Array.isArray(registry?.features) ? inferFallbackFeatures(sm.id) : inferFallbackFeatures(sm.id),
         };
       });
-      setVideoModels(merged as any);
+      setVideoModels(merged);
       if (merged.length > 0 && !model) {
         setModel(merged[0].id);
       }
@@ -614,18 +671,21 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
           const merged = vModels.map(sm => {
             const modelId = sm.id.includes('::') ? sm.id.split('::').pop()! : sm.id;
             const providerId = sm.providerId || (sm.id.includes('::') ? sm.id.split('::')[0] : '');
-            const registry: any = VIDEO_MODEL_REGISTRY[modelId as keyof typeof VIDEO_MODEL_REGISTRY];
+            const registry = VIDEO_MODEL_REGISTRY[modelId as keyof typeof VIDEO_MODEL_REGISTRY];
             return {
               id: providerId ? `${providerId}::${modelId}` : modelId,
               modelId,
               name: sm.name || registry?.name || modelId,
               providerId,
-              providerName: sm.providerName || registry?.provider || '',
-              region: (registry?.region || 'cn') as 'cn' | 'global',
-              features: registry?.features || inferFallbackFeatures(sm.id),
+          providerName: sm.providerName || registry?.provider || '',
+          region: registry?.features.region || 'cn',
+          features: {
+            ...registry?.features,
+            aspectRatios: registry?.features.aspectRatios || registry?.features.ratios,
+          },
             };
           });
-          setVideoModels(merged as any);
+          setVideoModels(merged);
           if (merged.length > 0 && !model) {
             setModel(merged[0].id);
           }
@@ -820,36 +880,38 @@ Rules:
             shotCount: forcedMin || targetShotCount,
           }),
         });
-        const data = await res.json();
+        const data = await res.json() as ShotPlanApiResponse;
         if (!res.ok || !data.success) throw new Error(data.error || '分镜规划失败');
         return data;
       };
 
-      let planData: any = await makeCall('');
-      let shotsRaw: any[] | null = Array.isArray(planData.shots) ? planData.shots : null;
-      const rawCharacters: any[] = Array.isArray(planData.characters) ? planData.characters : [];
-      const rawScenes: any[] = Array.isArray(planData.scenes) ? planData.scenes : [];
-      const rawProps: any[] = Array.isArray(planData.props) ? planData.props : [];
+      let planData = await makeCall('');
+      let shotsRaw = planData.shots || null;
+      const rawCharacters = planData.characters || [];
+      const rawScenes = planData.scenes || [];
+      const rawProps = planData.props || [];
       // 镜头数过少时追加约束再试一次
       if (!shotsRaw || shotsRaw.length < 2) {
         try {
           planData = await makeCall('。请至少拆分为3个镜头，每个镜头明确景别、运镜、光线、声音和连续性备注；同时完整返回 characters（人物）、scenes（场景）、props（关键道具）三类资产。', Math.max(targetShotCount, 3));
-          shotsRaw = Array.isArray(planData.shots) ? planData.shots : null;
-          if (Array.isArray(planData.characters) && planData.characters.length > 0) { rawCharacters.splice(0, rawCharacters.length, ...planData.characters); }
-          if (Array.isArray(planData.scenes) && planData.scenes.length > 0) { rawScenes.splice(0, rawScenes.length, ...planData.scenes); }
-          if (Array.isArray(planData.props) && planData.props.length > 0) { rawProps.splice(0, rawProps.length, ...planData.props); }
+          shotsRaw = planData.shots || null;
+          if (planData.characters && planData.characters.length > 0) { rawCharacters.splice(0, rawCharacters.length, ...planData.characters); }
+          if (planData.scenes && planData.scenes.length > 0) { rawScenes.splice(0, rawScenes.length, ...planData.scenes); }
+          if (planData.props && planData.props.length > 0) { rawProps.splice(0, rawProps.length, ...planData.props); }
         } catch { /* 重试失败沿用首次结果 */ }
       }
       if (!shotsRaw || shotsRaw.length < 1) throw new Error('分镜规划失败：返回为空');
 
-      const normalizeShot = (s: any, idx: number): VideoShotPlan => ({
+      const normalizeShot = (s: StoryShotPayload, idx: number): VideoShotPlan => {
+        const legacyCamera = typeof s.camera === 'string' ? s.camera : '';
+        return {
         id: s.id || `shot-${Date.now()}-${idx}`,
         index: idx,
         title: s.title || `镜头 ${idx + 1}`,
         purpose: s.purpose || '',
         shotSize: s.shotSize || s.shot_size || '中景',
-        cameraMove: s.cameraMove || s.cameraMotion || s.camera_movement || s.camera_move || s.camera || '',
-        cameraMotion: s.cameraMotion || s.cameraMove || s.camera_movement || s.camera_move || s.camera || '',
+        cameraMove: s.cameraMove || s.cameraMotion || s.camera_movement || s.camera_move || legacyCamera,
+        cameraMotion: s.cameraMotion || s.cameraMove || s.camera_movement || s.camera_move || legacyCamera,
         actionBeat: s.actionBeat || s.action_beat || s.description || '',
         lighting: s.lighting || '',
         audioCues: s.audioCues || s.audio_cues || s.sound || '',
@@ -874,7 +936,8 @@ Rules:
         error: undefined,
         videoUrl: undefined,
         thumbnailUrl: undefined,
-      });
+        };
+      };
       const plans = shotsRaw.map(normalizeShot);
       setShotPlans(plans);
       shotPlansRef.current = plans;
@@ -883,7 +946,7 @@ Rules:
       const charList: VideoCharacter[] = Array.isArray(planData.characters) ? planData.characters : [];
       const sceneList: VideoScene[] = Array.isArray(planData.scenes) ? planData.scenes : [];
       const propList: VideoProp[] = Array.isArray(planData.props) ? planData.props : [];
-      setProductionCharacters(charList.map((c: any, i: number) => ({
+      setProductionCharacters((charList as StoryCharacterPayload[]).map((c, i) => ({
         id: c.id || `char-${now}-${i}`,
         name: String(c.name || `角色${i + 1}`).slice(0, 20),
         role: String(c.role || ''),
@@ -897,15 +960,15 @@ Rules:
         accessories: String(c.accessories || ''),
         frontPrompt: String(c.frontPrompt || c.frontImagePrompt || ''),
         sidePrompt: String(c.sidePrompt || c.sideImagePrompt || ''),
-        keywords: Array.isArray(c.keywords) ? c.keywords.map((k: any) => String(k)).slice(0, 8) : [],
+        keywords: Array.isArray(c.keywords) ? c.keywords.map(String).slice(0, 8) : [],
         imageUrlFront: String(c.frontImageUrl || c.imageUrlFront || c.frontUrl || ''),
         imageUrlSide: String(c.sideImageUrl || c.imageUrlSide || c.sideUrl || ''),
         status: (c.frontImageUrl || c.imageUrlFront) ? 'completed' : 'pending',
       } as VideoCharacter)));
-      setProductionScenes(sceneList.map((s: any, i: number) => ({
+      setProductionScenes((sceneList as StoryScenePayload[]).map((s, i) => ({
         id: s.id || `scene-${now}-${i}`,
         shotId: s.shotId != null ? String(s.shotId) : undefined,
-        forShotIds: Array.isArray(s.forShotIds) ? s.forShotIds.map((x: any) => String(x)) : [],
+        forShotIds: Array.isArray(s.forShotIds) ? s.forShotIds.map(String) : [],
         name: String(s.name || `场景${i + 1}`).slice(0, 30),
         description: String(s.description || ''),
         location: String(s.location || s.place || s.setting || ''),
@@ -919,7 +982,7 @@ Rules:
         imageUrl: String(s.imageUrl || s.sceneImageUrl || ''),
         status: s.imageUrl ? 'completed' : 'pending',
       } as VideoScene)));
-      setProductionProps(propList.map((p: any, i: number) => ({
+      setProductionProps((propList as StoryPropPayload[]).map((p, i) => ({
         id: p.id || `prop-${now}-${i}`,
         name: String(p.name || `道具${i + 1}`).slice(0, 20),
         role: String(p.role || ''),
@@ -929,7 +992,7 @@ Rules:
         scale: String(p.scale || ''),
         propPrompt: String(p.propPrompt || p.imagePrompt || ''),
         imageUrl: String(p.imageUrl || ''),
-        forShotIds: Array.isArray(p.shotIds) ? p.shotIds.map((x: any) => String(x)) : (Array.isArray(p.forShotIds) ? p.forShotIds.map((x: any) => String(x)) : []),
+        forShotIds: Array.isArray(p.shotIds) ? p.shotIds.map(String) : (Array.isArray(p.forShotIds) ? p.forShotIds.map(String) : []),
         sceneId: p.sceneId != null ? String(p.sceneId) : undefined,
         status: p.imageUrl ? 'completed' : 'pending',
       } as VideoProp)));
@@ -960,7 +1023,7 @@ Rules:
       let sceneFrameUrl: string | undefined;
       const matchedScene = productionScenes.find(s => {
         if (s.shotId === shotId) return true;
-        const forIds = (s as any).forShotIds;
+        const forIds = s.forShotIds;
         if (Array.isArray(forIds) && (forIds.includes(shotId) || (shotIdx >= 0 && forIds.includes(shotIdx)))) return true;
         return false;
       });
@@ -1036,9 +1099,8 @@ Rules:
       // 先注册等待器，确保父组件 notify 时 resolver 已就绪
       const waitPromise = waitForShotTask(shotId, 15 * 60 * 1000);
 
-      let result: any;
       try {
-        result = await onVideoGenerate({
+        await onVideoGenerate({
           prompt: shotPrompt,
           mode: firstFrameForThis ? 'image2video-first' : 'text2video',
           model: pureModelId,
@@ -1067,11 +1129,11 @@ Rules:
           directorStyle,
           shotId,
         });
-      } catch (submitErr: any) {
+      } catch (submitErr: unknown) {
         const resolver = shotTaskResolversRef.current.get(shotId);
         if (resolver) {
           if (resolver.timer) clearTimeout(resolver.timer);
-          resolver.reject(submitErr instanceof Error ? submitErr : new Error(submitErr?.message || '提交失败'));
+          resolver.reject(new Error(getErrorMessage(submitErr, '提交失败')));
           shotTaskResolversRef.current.delete(shotId);
         }
         throw submitErr;
@@ -1088,11 +1150,11 @@ Rules:
           progress: 100,
           error: undefined,
         } : s));
-      } catch (waitErr: any) {
-        setShotPlans(prev => prev.map(s => s.id === shotId ? { ...s, status: 'failed' as const, error: waitErr?.message || '生成失败' } : s));
+      } catch (waitErr: unknown) {
+        setShotPlans(prev => prev.map(s => s.id === shotId ? { ...s, status: 'failed' as const, error: getErrorMessage(waitErr, '生成失败') } : s));
       }
-    } catch (err: any) {
-      setShotPlans(prev => prev.map(s => s.id === shotId ? { ...s, status: 'failed' as const, error: err?.message || '生成失败' } : s));
+    } catch (err: unknown) {
+      setShotPlans(prev => prev.map(s => s.id === shotId ? { ...s, status: 'failed' as const, error: getErrorMessage(err, '生成失败') } : s));
     } finally {
       setCurrentGeneratingShotId(null);
     }
@@ -1105,7 +1167,7 @@ Rules:
   // === AI 制片流水线：角色卡 & 场景图（state 声明在文件前部统一管理） ===
   // 调用图像生成 API 生成单张图片（使用后端默认图像模型）
   const generateSingleImage = useCallback(async (imgPrompt: string, size?: string): Promise<string> => {
-    const body: Record<string, any> = { prompt: imgPrompt, n: 1 };
+    const body: Record<string, unknown> = { prompt: imgPrompt, n: 1 };
     if (size) body.size = size;
     else body.size = '1024x1024';
     const resp = await fetch('/api/generate', {
@@ -1190,8 +1252,8 @@ Rules:
       if (autoInjectAssets) {
         addTypedReference(url, view === 'front' ? 'character-front' : 'character-side');
       }
-    } catch (err: any) {
-      setProductionCharacters(prev => prev.map(c => c.id === charId ? { ...c, status: 'failed' as const, error: err?.message || '生成失败' } : c));
+    } catch (err: unknown) {
+      setProductionCharacters(prev => prev.map(c => c.id === charId ? { ...c, status: 'failed' as const, error: getErrorMessage(err, '生成失败') } : c));
     }
   }, [productionCharacters, generateSingleImage, persistImageUrl, autoInjectAssets, addTypedReference]);
 
@@ -1219,8 +1281,8 @@ Rules:
       if (autoInjectAssets) {
         addTypedReference(url, 'scene');
       }
-    } catch (err: any) {
-      setProductionScenes(prev => prev.map(s => s.id === sceneId ? { ...s, status: 'failed' as const, error: err?.message || '生成失败' } : s));
+    } catch (err: unknown) {
+      setProductionScenes(prev => prev.map(s => s.id === sceneId ? { ...s, status: 'failed' as const, error: getErrorMessage(err, '生成失败') } : s));
     }
   }, [productionScenes, shotPlans, aspectRatio, directorStyle, generateSingleImage, persistImageUrl, autoInjectAssets, addTypedReference]);
 
@@ -1244,8 +1306,8 @@ Rules:
       if (autoInjectAssets) {
         addTypedReference(url, 'scene'); // 道具作为 scene 类型参考注入（video-api 支持多参考图）
       }
-    } catch (err: any) {
-      setProductionProps(prev => prev.map(p => p.id === propId ? { ...p, status: 'failed' as const, error: err?.message || '生成失败' } : p));
+    } catch (err: unknown) {
+      setProductionProps(prev => prev.map(p => p.id === propId ? { ...p, status: 'failed' as const, error: getErrorMessage(err, '生成失败') } : p));
     }
   }, [productionProps, generateSingleImage, persistImageUrl, autoInjectAssets, addTypedReference]);
 
@@ -1325,7 +1387,7 @@ Rules:
       shotPlans.forEach((s, idx) => idToIdx.set(s.id, idx));
       setProductionScenes(scenes.map((s, i) => {
         let shotId = s.shotId;
-        const forShotIds = (s as any).forShotIds;
+        const forShotIds = s.forShotIds;
         if (!shotId && Array.isArray(forShotIds)) {
           const sid = forShotIds[0];
           if (typeof sid === 'number' && shotPlans[sid]) shotId = shotPlans[sid].id;
@@ -1386,7 +1448,7 @@ Rules:
           onError?.('AI 未识别出角色/场景/道具，请用更具体的描述再试');
           return;
         }
-        setProductionCharacters(charList.map((c: any, i: number) => ({
+        setProductionCharacters((charList as StoryCharacterPayload[]).map((c, i) => ({
           id: c.id || `char-${now}-${i}`,
           name: String(c.name || `角色${i + 1}`).slice(0, 20),
           role: String(c.role || ''),
@@ -1398,15 +1460,15 @@ Rules:
           accessories: String(c.accessories || ''),
           frontPrompt: String(c.frontPrompt || c.appearancePrompt || ''),
           sidePrompt: String(c.sidePrompt || ''),
-          keywords: Array.isArray(c.keywords) ? c.keywords.map((k: any) => String(k)).slice(0, 8) : [],
+          keywords: Array.isArray(c.keywords) ? c.keywords.map(String).slice(0, 8) : [],
           imageUrlFront: String(c.frontImageUrl || c.imageUrlFront || ''),
           imageUrlSide: String(c.sideImageUrl || c.imageUrlSide || ''),
           status: 'pending',
         } as VideoCharacter)));
-        setProductionScenes(sceneList.map((s: any, i: number) => ({
+        setProductionScenes((sceneList as StoryScenePayload[]).map((s, i) => ({
           id: s.id || `scene-${now}-${i}`,
           shotId: s.shotId != null ? String(s.shotId) : undefined,
-          forShotIds: Array.isArray(s.forShotIds) ? s.forShotIds.map((x: any) => String(x)) : [],
+          forShotIds: Array.isArray(s.forShotIds) ? s.forShotIds.map(String) : [],
           name: String(s.name || `场景${i + 1}`).slice(0, 30),
           description: String(s.description || ''),
           location: String(s.location || s.setting || ''),
@@ -1420,7 +1482,7 @@ Rules:
           imageUrl: String(s.imageUrl || ''),
           status: 'pending',
         } as VideoScene)));
-        setProductionProps(propList.map((p: any, i: number) => ({
+        setProductionProps((propList as StoryPropPayload[]).map((p, i) => ({
           id: p.id || `prop-${now}-${i}`,
           name: String(p.name || `道具${i + 1}`).slice(0, 20),
           role: String(p.role || ''),
@@ -1430,12 +1492,12 @@ Rules:
           scale: String(p.scale || ''),
           propPrompt: String(p.propPrompt || p.imagePrompt || ''),
           imageUrl: String(p.imageUrl || ''),
-          forShotIds: Array.isArray(p.shotIds) ? p.shotIds.map((x: any) => String(x)) : (Array.isArray(p.forShotIds) ? p.forShotIds.map((x: any) => String(x)) : []),
+          forShotIds: Array.isArray(p.shotIds) ? p.shotIds.map(String) : (Array.isArray(p.forShotIds) ? p.forShotIds.map(String) : []),
           sceneId: p.sceneId != null ? String(p.sceneId) : undefined,
           status: 'pending',
         } as VideoProp)));
-      } catch (err: any) {
-        onError?.(err?.message || '资产规划失败');
+      } catch (err: unknown) {
+        onError?.(getErrorMessage(err, '资产规划失败'));
         return;
       } finally {
         setIsBuildingProduction(false);
@@ -1475,7 +1537,7 @@ Rules:
         const latest = shotPlansRef.current.find(s => s.id === shot.id);
         if (!latest || latest.status === 'failed') break;
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('[shot-plan] 批量生成失败', err);
     } finally {
       setIsGeneratingAllShots(false);
@@ -1648,7 +1710,7 @@ Rules:
         negativePrompt: negativePrompt.trim() || undefined,
         // 多镜头参数
         multiShotScenes: mode === 'multi-shot'
-          ? (shotPlans.length > 0 ? shotPlans : multiShotScenes.filter(s => s.prompt.trim())) as any
+          ? (shotPlans.length > 0 ? shotPlans : multiShotScenes.filter(s => s.prompt.trim()))
           : undefined,
         chainContinuity: mode === 'multi-shot' ? chainContinuity : undefined,
         useGlobalReferences: mode === 'multi-shot' && useGlobalReferences ? true : undefined,
@@ -2002,7 +2064,7 @@ Rules:
                         onClick={() => {
                           setPrompt(prev => prev ? `${prev}, ${t.prompt}` : t.prompt);
                           if (t.aspectRatio) setAspectRatio(t.aspectRatio);
-                          if (t.duration && availableDurations.includes(t.duration as any)) setDuration(t.duration);
+                          if (t.duration && availableDurations.includes(t.duration)) setDuration(t.duration);
                           if (t.cameraControl) setCameraControl({ ...t.cameraControl, intensity: t.cameraControl.intensity || 50 });
                         }}
                         className="px-2 py-1.5 rounded-md text-[10.5px] text-left transition-all cursor-pointer hover:scale-[1.02] leading-tight"
@@ -2286,7 +2348,7 @@ Rules:
                 <div>
                   <label className={labelClass}>延长时长</label>
                   <div className="flex gap-1.5">
-                    {[3, 5, 8, 10].filter(d => availableDurations.includes(d as any)).map(d => (
+                    {[3, 5, 8, 10].filter(d => availableDurations.includes(d)).map(d => (
                       <button
                         key={d}
                         onClick={() => setExtendDuration(d)}
@@ -2659,7 +2721,7 @@ Rules:
                         </div>
                         <div className="grid grid-cols-3 gap-1.5">
                           {productionScenes.map(scene => {
-                            const shotIdx = (scene as any).forShotIds && (scene as any).forShotIds.length > 0 ? (scene as any).forShotIds[0] : undefined;
+                            const shotIdx = scene.forShotIds?.[0];
                             const shotForScene = typeof shotIdx === 'number' ? shotPlans[shotIdx] : (scene.shotId ? shotPlans.find(s => s.id === scene.shotId || s.sceneId === scene.id) : undefined);
                             const sceneDesc = scene.description || scene.location || scene.name;
                             const isGen = scene.status === 'generating' || scene.generating;
@@ -2696,8 +2758,8 @@ Rules:
                         <div className="grid grid-cols-3 gap-1.5">
                           {productionProps.map(prop => {
                             const propDesc = prop.description || prop.name;
-                            const isGen = prop.status === 'generating' || (prop as any).generating;
-                            const isFail = prop.status === 'failed' || !!(prop as any).error;
+                            const isGen = prop.status === 'generating' || prop.generating;
+                            const isFail = prop.status === 'failed' || Boolean(prop.error);
                             return (
                               <div key={prop.id} className="rounded-md overflow-hidden relative" style={{ background: inputBg, border: `1px solid ${borderColor}` }}>
                                 <div className="aspect-square relative flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.3)' }}>
@@ -2708,7 +2770,7 @@ Rules:
                                 </div>
                                 <div className="p-1">
                                   <div className="text-[9px] font-medium truncate" style={{ color: textColor }} title={prop.name}>{prop.name}</div>
-                                  {(prop as any).error && <div className="text-[8px] text-red-400 truncate">{(prop as any).error}</div>}
+                                  {prop.error && <div className="text-[8px] text-red-400 truncate">{prop.error}</div>}
                                 </div>
                               </div>
                             );
@@ -2717,7 +2779,7 @@ Rules:
                       </div>
                     )}
 
-                    {(productionCharacters.some(c => c.imageUrlFront || (c as any).frontUrl) || productionScenes.some(s => s.imageUrl) || productionProps.some(p => p.imageUrl)) && (
+                    {(productionCharacters.some(c => c.imageUrlFront || c.frontUrl) || productionScenes.some(s => s.imageUrl) || productionProps.some(p => p.imageUrl)) && (
                       <div className="mt-2 pt-2" style={{ borderTop: `1px dashed ${borderColor}` }}>
                         <div className="text-[9px] flex items-start gap-1" style={{ color: subTextColor }}>
                           <CheckCircle2 className="w-3 h-3 mt-0.5 shrink-0" style={{ color: '#10b981' }} />
@@ -3061,7 +3123,7 @@ Rules:
                     <Plus className="w-3 h-3" />添加镜头
                   </button>
                 )}
-                {!prompt.trim() && <p className="text-[10px] mt-2" style={{ color: subTextColor }}>💡 先在上方"视频描述"输入故事梗概，再点击"AI分镜规划"</p>}
+                {!prompt.trim() && <p className="text-[10px] mt-2" style={{ color: subTextColor }}>💡 先在上方“视频描述”输入故事梗概，再点击“AI分镜规划”</p>}
               </CollapsibleSection>
             )}
 

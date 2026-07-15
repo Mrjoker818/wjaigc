@@ -303,8 +303,8 @@ function AgentEnhanceTab({ initialPrompt, onInsertPrompt, onClose, floating }: A
         setStreamingText(partial);
       });
       setMessages(prev => [...prev, { role: 'assistant', content: result }]);
-    } catch (e: any) {
-      if (e.name !== 'AbortError') {
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || e.name !== 'AbortError') {
         setMessages(prev => [...prev, { role: 'assistant', content: '优化失败，请重试' }]);
       }
     } finally {

@@ -18,6 +18,10 @@ const request = () => new NextRequest('http://localhost/api/admin/production-rea
 describe('GET /api/admin/production-readiness', () => {
   beforeEach(() => {
     Object.values(mocks).forEach(mock => mock.mockReset());
+    delete process.env.COZE_PROJECT_ENV;
+    delete process.env.WUJIE_AUTH_SECRET;
+    delete process.env.NEXTAUTH_SECRET;
+    delete process.env.WUJIE_ADMIN_PASSWORD;
   });
 
   it('rejects non-admin callers before reading cloud configuration', async () => {
@@ -51,5 +55,25 @@ describe('GET /api/admin/production-readiness', () => {
       { id: 'video-no-model', name: 'Video API', modelType: 'video', status: 'warn', issues: ['No selected model'] },
     ]);
     expect(JSON.stringify(data)).not.toContain('private-key');
+  });
+
+  it('fails production readiness when authentication secrets are missing', async () => {
+    process.env.COZE_PROJECT_ENV = 'PROD';
+    mocks.requireAdminUser.mockResolvedValue({ id: 'admin-1', role: 'admin' });
+    mocks.ensureCloudTaskTables.mockResolvedValue(undefined);
+    mocks.getApiProviders.mockResolvedValue([]);
+
+    const response = await GET(request());
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data.success).toBe(false);
+    expect(data.security).toEqual({
+      status: 'fail',
+      issues: expect.arrayContaining([
+        'Missing WUJIE_AUTH_SECRET or NEXTAUTH_SECRET',
+        'Missing WUJIE_ADMIN_PASSWORD',
+      ]),
+    });
   });
 });

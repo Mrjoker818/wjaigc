@@ -278,7 +278,7 @@ export async function POST(request: NextRequest) {
   const authResult = await requireApiAuthOrReject(request);
   if (authResult instanceof NextResponse) return authResult;
   let deductedCredits = 0;
-  let sessionUser: any = null;
+  let sessionUser: import('@/lib/user-types').User | null = null;
   try {
     const {
       image,         // base64 data URL（客户端已转换）

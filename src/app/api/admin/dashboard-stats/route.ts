@@ -5,6 +5,14 @@ import { getApiProviders } from '@/lib/server-api-config';
 
 export const dynamic = 'force-dynamic';
 
+interface DashboardProviderView {
+  name: string;
+  selected_models?: string[];
+  selectedModels?: string[];
+  balance?: number | string | null;
+  balanceCurrency?: string;
+}
+
 export async function GET(request: NextRequest) {
   try {
     const admin = await requireAdminUser(request);
@@ -17,7 +25,8 @@ export async function GET(request: NextRequest) {
 
     // Enrich with real provider status
     const providers = await getApiProviders();
-    const providerStatus = providers.map((p: any) => ({
+    const providerViews = providers as DashboardProviderView[];
+    const providerStatus = providerViews.map((p) => ({
       name: p.name,
       calls24h: 0, // No per-provider call tracking yet
       failRate: 0,
@@ -26,7 +35,7 @@ export async function GET(request: NextRequest) {
 
     // Build model rank from providers' selected models
     const modelRank: Array<{ name: string; calls: number; successRate: number }> = [];
-    providers.forEach((p: any) => {
+    providerViews.forEach((p) => {
       const models: string[] = p.selected_models || p.selectedModels || [];
       models.forEach((m: string) => {
         modelRank.push({ name: m, calls: 0, successRate: 99.0 });
@@ -35,12 +44,12 @@ export async function GET(request: NextRequest) {
 
     // Build alerts from providers with issues
     const alerts: Array<{ type: string; severity: string; items: Array<{ name: string; value: string }> }> = [];
-    const lowBalance = providers.filter((p: any) => p.balance !== undefined && p.balance !== null && Number(p.balance) < 10);
+    const lowBalance = providerViews.filter((p) => p.balance !== undefined && p.balance !== null && Number(p.balance) < 10);
     if (lowBalance.length > 0) {
       alerts.push({
         type: 'balance',
         severity: 'warning',
-        items: lowBalance.map((p: any) => ({ name: p.name, value: `${p.balanceCurrency || '$'}${Number(p.balance).toFixed(2)}` })),
+        items: lowBalance.map((p) => ({ name: p.name, value: `${p.balanceCurrency || '$'}${Number(p.balance).toFixed(2)}` })),
       });
     }
 

@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
 
     // 兼容多种参数命名：failureType / issueType / issue
     const issueKey = String(failureType || issueType || issue || 'generic');
-    const diagnosis = diagnoseFailure(issueKey as any);
+    const diagnosis = diagnoseFailure(issueKey as Parameters<typeof diagnoseFailure>[0]);
 
     // retakeSuggestions 顶层数组返回，便于前端直接迭代
     const retakeSuggestions = Array.isArray(diagnosis?.retakeSuggestions)
@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
         ? '当前版本基于失败类型查表返回静态建议；视频内容分析在后续版本接入。'
         : undefined,
     });
-  } catch (err: any) {
-    return NextResponse.json({ error: err?.message || '诊断失败' }, { status: 500 });
+  } catch (err: unknown) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : '诊断失败' }, { status: 500 });
   }
 }

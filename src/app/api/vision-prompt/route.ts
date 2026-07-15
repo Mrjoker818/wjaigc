@@ -249,7 +249,7 @@ function buildChatEndpoint(baseUrl: string, _providerPreset?: string): string {
 
 export async function POST(request: NextRequest) {
   let deductedCredits = 0;
-  let sessionUser: any = null;
+  let sessionUser: import('@/lib/user-types').User | null = null;
   try {
     const {
       imageUrl,

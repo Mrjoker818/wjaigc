@@ -13,7 +13,7 @@ import { logOperation, logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
 // ★ 字境大师任务结果独立存储（防HMR丢失task-registry状态）
 const fontDesignResults = new Map<string, {
   status: 'completed' | 'failed';
-  result?: any;
+  result?: unknown;
   error?: string;
   updatedAt: number;
 }>();
@@ -107,7 +107,7 @@ function buildUserSettingsSuffix(params: {
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
   let deductedCredits = 0;
-  let sessionUser: any = null;
+  let sessionUser: import('@/lib/user-types').User | null = null;
   const selectedModel = '';
   const providerIdUsed = '';
   try {

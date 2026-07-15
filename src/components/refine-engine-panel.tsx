@@ -659,7 +659,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
 
             {onAddImage && !sourceImage && (
               <p className="text-xs text-center" style={{ color: textMutedColor }}>
-                选中画布图片后，可通过图片工具栏的"精修引擎"按钮直接打开
+                选中画布图片后，可通过图片工具栏的“精修引擎”按钮直接打开
               </p>
             )}
           </div>
@@ -1346,7 +1346,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
               <div className="flex flex-col items-center justify-center py-10 gap-3">
                 <Scan size={36} style={{ color: textMutedColor }} />
                 <p className="text-sm" style={{ color: textSubColor }}>暂无精修结果</p>
-                <p className="text-xs" style={{ color: textMutedColor }}>请在"精修设置"中配置参数后开始精修</p>
+                <p className="text-xs" style={{ color: textMutedColor }}>请在“精修设置”中配置参数后开始精修</p>
               </div>
             )}
           </div>

@@ -10,7 +10,7 @@ import {
   updateApiProvider,
 } from '@/lib/server-api-config';
 import { requireAdminUser } from '@/lib/server-auth';
-import type { ApiProvider } from '@/lib/universal-api-types';
+import type { ApiKind, ApiProvider } from '@/lib/universal-api-types';
 
 export const dynamic = 'force-dynamic';
 
@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
           const result = await discoverModelsForCredentials(
             existing.baseUrl,
             existing.apiKey,
-            (existing.modelType || 'image') as any,
+            (existing.modelType || 'image') as ApiKind,
           );
           return NextResponse.json(result);
         }
@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
       const result = await discoverModelsForCredentials(
         String(body.baseUrl || ''),
         String(body.apiKey || ''),
-        (body.modelType || 'image') as any,
+        (body.modelType || 'image') as ApiKind,
       );
       return NextResponse.json(result);
     }

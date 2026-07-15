@@ -29,6 +29,18 @@ interface MultiUserData {
   userData: Record<string, UserData>; // userId -> UserData
 }
 
+interface SnapshotProject {
+  id?: string;
+  projectId?: string;
+  name?: string;
+  canvasImages?: unknown[];
+  updatedAt?: number;
+}
+
+interface SnapshotUserData {
+  projects?: SnapshotProject[];
+}
+
 export class UserManager {
   private static instance: UserManager;
   private multiUserData: MultiUserData | null = null;
@@ -343,10 +355,10 @@ export class UserManager {
       // 检测异常：如果某个项目从≥N张掉到0，标记，用快照数据修复
       let needRestore = false;
       let restoreSnapshot: unknown = null;
-      for (const [uid, ud] of Object.entries(this.multiUserData.userData as Record<string, any>)) {
+      for (const [uid, ud] of Object.entries(this.multiUserData.userData as unknown as Record<string, SnapshotUserData>)) {
         const projects = ud?.projects || [];
         for (const proj of projects) {
-          const pid = proj.id || proj.projectId;
+          const pid = typeof proj.id === 'string' ? proj.id : typeof proj.projectId === 'string' ? proj.projectId : '';
           if (!pid) continue;
           const current = (proj.canvasImages || []).length;
           const last = this.lastProjectImageCounts.get(pid) || 0;
@@ -548,8 +560,9 @@ export class UserManager {
       // 字段名兼容：服务器/本地数据可能使用 'images'（旧字段名）或 'canvasImages'（新字段名）
       // 统一归一化为 canvasImages
       for (const p of serverProjects) {
-        if (!p.canvasImages && (p as any).images) {
-          p.canvasImages = (p as any).images;
+        const legacyImages = (p as Project & { images?: Project['canvasImages'] }).images;
+        if (!p.canvasImages && legacyImages) {
+          p.canvasImages = legacyImages;
         }
         // 确保canvasImages是数组
         if (!Array.isArray(p.canvasImages)) {
@@ -557,16 +570,18 @@ export class UserManager {
         }
       }
       for (const p of userData.projects) {
-        if (!p.canvasImages && (p as any).images) {
-          p.canvasImages = (p as any).images;
+        const legacyImages = (p as Project & { images?: Project['canvasImages'] }).images;
+        if (!p.canvasImages && legacyImages) {
+          p.canvasImages = legacyImages;
         }
         if (!Array.isArray(p.canvasImages)) {
           p.canvasImages = [];
         }
       }
       for (const p of localProjectsFiltered) {
-        if (!p.canvasImages && (p as any).images) {
-          p.canvasImages = (p as any).images;
+        const legacyImages = (p as Project & { images?: Project['canvasImages'] }).images;
+        if (!p.canvasImages && legacyImages) {
+          p.canvasImages = legacyImages;
         }
         if (!Array.isArray(p.canvasImages)) {
           p.canvasImages = [];
@@ -1076,12 +1091,13 @@ export class UserManager {
 
   private createDemoProjects(): Project[] {
     const now = Date.now();
-    const sampleImages = [
+    const sampleImages: Project['canvasImages'] = [
       {
         id: 'demo-1',
         url: 'https://images.unsplash.com/photo-1682687220742-aba13b6e50ba?w=800&q=80',
         prompt: '美丽的山景，日落时分',
         x: 100, y: 100, width: 400, height: 300,
+        originalWidth: 400, originalHeight: 300, rotation: 0, zIndex: 1,
         createdAt: now - 60000,
         mediaType: 'image' as const,
       },
@@ -1090,6 +1106,7 @@ export class UserManager {
         url: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800&q=80',
         prompt: '阿尔卑斯山脉，雪峰',
         x: 550, y: 200, width: 400, height: 267,
+        originalWidth: 400, originalHeight: 267, rotation: 0, zIndex: 2,
         createdAt: now - 30000,
         mediaType: 'image' as const,
       },
@@ -1099,7 +1116,7 @@ export class UserManager {
         id: 'demo-project',
         userId: this.currentUserId || 'demo',
         name: '示例项目',
-        canvasImages: sampleImages as any,
+        canvasImages: sampleImages,
         createdAt: now,
         updatedAt: now,
         settings: {},

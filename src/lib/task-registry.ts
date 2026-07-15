@@ -151,6 +151,7 @@ export function updateTaskProgress(
 
   // ★ 任务进入终态（completed/failed/cancelled）时，清理 cancelledTasks 中的记录
   const TERMINAL_STATUSES: TaskStatus[] = ['completed', 'failed', 'cancelled'];
+  const reachedTerminalState = TERMINAL_STATUSES.includes(task.status) && !TERMINAL_STATUSES.includes(oldStatus);
   if (TERMINAL_STATUSES.includes(task.status)) {
     cancelledTasks.delete(taskId);
   }
@@ -167,6 +168,10 @@ export function updateTaskProgress(
   } else {
     emitEvent('updated', task);
   }
+
+  if (reachedTerminalState) {
+    releaseQueueSlot(taskId);
+  }
 }
 
 /** 获取任务信息 */
@@ -179,13 +184,6 @@ export function cancelTask(taskId: string): boolean {
   if (cancelledTasks.has(taskId)) return true;
   cancelledTasks.add(taskId);
   updateTaskProgress(taskId, { status: 'cancelled' });
-
-  // ★ 释放排队槽位：取消的任务不应再占用并发位置
-  const task = taskRegistry.get(taskId);
-  if (task) {
-    releaseQueueSlot(taskId);
-  }
-
   return true;
 }
 
@@ -305,6 +303,18 @@ export function getTaskUserId(taskId: string): string | undefined {
 export function releaseQueueSlot(taskId: string): void {
   const userId = taskUserMap.get(taskId);
   if (!userId) return;
+
+  const queue = userQueues.get(userId);
+  const queuedIndex = queue?.indexOf(taskId) ?? -1;
+  if (queuedIndex >= 0 && queue) {
+    queue.splice(queuedIndex, 1);
+    if (queue.length === 0) userQueues.delete(userId);
+    else {
+      queue.forEach((id, index) => updateTaskProgress(id, { queuePosition: index + 1 }));
+    }
+    taskUserMap.delete(taskId);
+    return;
+  }
 
   const currentCount = userActiveCount.get(userId) || 0;
   if (currentCount > 0) {

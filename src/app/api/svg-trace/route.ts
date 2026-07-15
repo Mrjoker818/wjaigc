@@ -410,9 +410,11 @@ async function runVTracer(
 
 // ─── WASM VTracer (Node.js native, no Python dependency) ─────
 
-let wasmVtracerModule: any = null;
+type WasmVtracerModule = Awaited<typeof import('wasm_vtracer')>;
 
-async function getWasmVtracer(): Promise<any> {
+let wasmVtracerModule: WasmVtracerModule | null = null;
+
+async function getWasmVtracer(): Promise<WasmVtracerModule> {
   if (wasmVtracerModule) return wasmVtracerModule;
   try {
     const vtracer = await import('wasm_vtracer');
@@ -2005,7 +2007,7 @@ async function tryDesignVectorizeFallback(req: NextRequest, imageUrl: string, mo
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
   let deductedCredits = 0;
-  let sessionUser: any = null;
+  let sessionUser: import('@/lib/user-types').User | null = null;
   let selectedMode = '';
   try {
     const body: TraceRequest = await req.json();

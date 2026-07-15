@@ -91,7 +91,7 @@ export async function POST(request: NextRequest) {
               snippet: item.snippet || '',
             }));
             allResults.push({ step: step.step, query: step.query, items });
-          } catch (e: any) {
+          } catch {
             allResults.push({ step: step.step, query: step.query, items: [] });
           }
         }
@@ -187,8 +187,8 @@ ${searchContext}
 
         send({ type: 'citations', citations });
         send({ type: 'done' });
-      } catch (e: any) {
-        send({ type: 'error', error: e.message || 'Deep Research 失败' });
+      } catch (e: unknown) {
+        send({ type: 'error', error: e instanceof Error ? e.message : 'Deep Research 失败' });
       }
       controller.close();
     },

@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { toast } from 'sonner';
-import AdminTabs from './admin-tabs';
+import AdminTabs, { type AdminGroup as AdminTabsGroup, type AdminProvider as AdminTabsProvider, type AdminUser as AdminTabsUser } from './admin-tabs';
 import DataManagerTab from './data-manager-tab';
 import DesktopAdminTab from './desktop-admin-tab';
 import UserSettingsTab from './user-settings-tab';
@@ -38,7 +38,68 @@ type ProjectFilter = 'all' | 'recent' | 'starred';
 type AssetSubTab = 'images' | 'prompts' | 'brands';
 type ApiKind = 'general' | 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler' | 'removebg' | 'universal' | 'audio';
 type UserPermissionKey = 'image' | 'chat' | 'threeD' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler' | 'removebg' | 'audio';
-type AdminProvider = ApiProvider & { apiKeyPreview?: string };
+type AdminProvider = ApiProvider & { apiKeyPreview?: string; displayName?: string; compatProfile?: string };
+type DashboardImage = CanvasImage & { negativePrompt?: string; _projectId?: string };
+
+interface ApiBalanceEntry { providerId?: string; balance?: number | string; currency?: string; remainingQuota?: number | string; error?: string; }
+interface ApiBalanceResponse { success?: boolean; error?: string; balances?: ApiBalanceEntry[]; }
+interface VerifyProtocolResponse { success?: boolean; detected?: string; summary?: string; message?: string; profile?: { id?: string }; tests?: Array<{ name: string; status: string; detail: string }>; }
+interface ConnectorHealth {
+  success?: boolean;
+  name?: string;
+  version?: string;
+  authRequired?: boolean;
+  capabilities?: Record<string, boolean>;
+  hosts?: { photoshopCep?: boolean; illustratorCep?: boolean };
+}
+interface ConnectorPreflight { success?: boolean; recommended?: { defaultRenderMode?: string }; checks?: Record<string, unknown>[]; renderModes?: Record<string, unknown>[]; }
+interface ConnectorStatus {
+  dcc: ConnectorHealth | null;
+  dccPreflight: ConnectorPreflight | null;
+  dccTemplates: Record<string, unknown>[];
+  creative: ConnectorHealth | null;
+  psTemplates: Record<string, unknown>[];
+  aiTemplates: Record<string, unknown>[];
+  loading: boolean;
+  error?: string;
+}
+function errorMessage(error: unknown, fallback: string): string { return error instanceof Error ? error.message : fallback; }
+function objectValue(value: unknown): Record<string, unknown> | null { return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null; }
+function connectorHealth(value: unknown): ConnectorHealth | null {
+  const data = objectValue(value);
+  if (!data) return null;
+  return {
+    success: typeof data.success === 'boolean' ? data.success : undefined,
+    name: typeof data.name === 'string' ? data.name : undefined,
+    version: typeof data.version === 'string' ? data.version : undefined,
+    authRequired: typeof data.authRequired === 'boolean' ? data.authRequired : undefined,
+    capabilities: objectValue(data.capabilities) as Record<string, boolean> | undefined,
+    hosts: (() => {
+      const hosts = objectValue(data.hosts);
+      return hosts ? {
+        photoshopCep: typeof hosts.photoshopCep === 'boolean' ? hosts.photoshopCep : undefined,
+        illustratorCep: typeof hosts.illustratorCep === 'boolean' ? hosts.illustratorCep : undefined,
+      } : undefined;
+    })(),
+  };
+}
+function connectorPreflight(value: unknown): ConnectorPreflight | null {
+  const data = objectValue(value);
+  if (!data) return null;
+  return {
+    success: typeof data.success === 'boolean' ? data.success : undefined,
+    recommended: objectValue(data.recommended) as ConnectorPreflight['recommended'],
+    checks: Array.isArray(data.checks) ? data.checks.filter((item): item is Record<string, unknown> => objectValue(item) !== null) : [],
+    renderModes: Array.isArray(data.renderModes) ? data.renderModes.filter((item): item is Record<string, unknown> => objectValue(item) !== null) : [],
+  };
+}
+function connectorTemplates(value: unknown): Record<string, unknown>[] {
+  const data = objectValue(value);
+  return Array.isArray(data?.templates) ? data.templates.filter((item): item is Record<string, unknown> => objectValue(item) !== null) : [];
+}
+function providerModelOptions(models: string[] | undefined, providerId: string): Array<{ id: string; name: string; providerId: string }> {
+  return (models ?? []).map((model) => ({ id: model, name: model, providerId }));
+}
 
 const apiKindLabels: Record<ApiKind, string> = {
   general: '通用模型',
@@ -114,16 +175,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     updateConfig?: Record<string, unknown>;
   }>({ devices: [], backups: [], resources: [], records: [] });
   const [desktopAdminLoading, setDesktopAdminLoading] = useState(false);
-  const [connectorStatus, setConnectorStatus] = useState<{
-    dcc: Record<string, unknown> | null;
-    dccPreflight: Record<string, unknown> | null;
-    dccTemplates: Record<string, unknown>[];
-    creative: Record<string, unknown> | null;
-    psTemplates: Record<string, unknown>[];
-    aiTemplates: Record<string, unknown>[];
-    loading: boolean;
-    error?: string;
-  }>({ dcc: null, dccPreflight: null, dccTemplates: [], creative: null, psTemplates: [], aiTemplates: [], loading: false });
+  const [connectorStatus, setConnectorStatus] = useState<ConnectorStatus>({ dcc: null, dccPreflight: null, dccTemplates: [], creative: null, psTemplates: [], aiTemplates: [], loading: false });
   const [projectFilter, setProjectFilter] = useState<ProjectFilter>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [assetTab, setAssetTab] = useState<AssetSubTab>('images');
@@ -545,7 +597,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   }, []);
 
   // Copy full image info (prompt + params)
-  const handleCopyImageInfo = useCallback((img: any) => {
+  const handleCopyImageInfo = useCallback((img: DashboardImage) => {
     const parts: string[] = [];
     if (img.prompt) parts.push(img.prompt);
     if (img.negativePrompt) parts.push(`反向提示词: ${img.negativePrompt}`);
@@ -561,7 +613,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   }, []);
 
   // Make same: open project and inject params
-  const handleMakeSame = useCallback((img: any) => {
+  const handleMakeSame = useCallback((img: DashboardImage) => {
     const projectId = img._projectId;
     if (projectId) {
       const mgr = UserManager.getInstance();
@@ -895,15 +947,15 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     setEditingProviderId(null);
   }, []);
 
-  const editApiProvider = useCallback((p: ApiProvider) => {
+  const editApiProvider = useCallback((p: AdminProvider) => {
     setEditingProviderId(p.id);
     setApiName(p.name);
-    setApiDisplayName((p as any).displayName || '');
+    setApiDisplayName(p.displayName || '');
     setApiBaseUrl(p.baseUrl);
     setApiKey(''); // Don't pre-fill key for security; user can enter new key to update
     setApiModel('');
     setApiKind((p.modelType as ApiKind) || 'image');
-    setCompatProfile((p as any).compatProfile || 'auto');
+    setCompatProfile(p.compatProfile || 'auto');
     setSelectedModels(p.selectedModels || []);
     setDiscoveredModels(p.discoveredModels || []);
     setAdvancedParams(p.advancedParams ? Object.entries(p.advancedParams).map(([key, value]) => ({ key, value: String(value) })) : []);
@@ -934,7 +986,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
           advancedParams: Object.keys(advParams).length > 0 ? advParams : undefined,
         }),
       });
-      const data = await res.json();
+      const data = await res.json() as VerifyProtocolResponse;
       // 后端返回 tests 数组，提取各端点状态
       const tests: Array<{ name: string; status: string; detail: string }> = data.tests || [];
       const checks = {
@@ -949,8 +1001,8 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
         message: data.summary || data.message,
         tests,
       });
-    } catch (e: any) {
-      setDrawerVerifyResult({ success: false, message: e?.message || '验证失败' });
+    } catch (e: unknown) {
+      setDrawerVerifyResult({ success: false, message: errorMessage(e, '验证失败') });
     } finally {
       setIsVerifyingDrawer(false);
     }
@@ -976,20 +1028,20 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
           advancedParams: Object.keys(advParams).length > 0 ? advParams : undefined,
         }),
       });
-      const data = await tempRes.json();
+      const data = await tempRes.json() as ApiBalanceResponse;
       if (data.success !== false && data.balances?.[0]) {
         const bal = data.balances[0];
         setDrawerBalanceResult({
           success: true,
           message: bal.error ? `查询完成：${bal.error}` : '余额查询成功',
-          balance: bal.balance ?? undefined,
+          balance: bal.balance === undefined ? undefined : Number(bal.balance),
           currency: bal.currency,
         });
       } else {
         setDrawerBalanceResult({ success: false, message: data.error || '当前API暂不支持余额查询或密钥无效' });
       }
-    } catch (e: any) {
-      setDrawerBalanceResult({ success: false, message: e?.message || '查询失败' });
+    } catch (e: unknown) {
+      setDrawerBalanceResult({ success: false, message: errorMessage(e, '查询失败') });
     } finally {
       setIsQueryingBalanceDrawer(false);
     }
@@ -1018,10 +1070,10 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
           modelCount: d.models?.length || 0,
         }
       }));
-    } catch (e: any) {
+    } catch (e: unknown) {
       setProviderTestStatus(prev => ({
         ...prev,
-        [p.id]: { testing: false, success: false, message: `连接失败: ${e.message}`, modelCount: 0 }
+        [p.id]: { testing: false, success: false, message: `连接失败: ${errorMessage(e, '未知错误')}`, modelCount: 0 }
       }));
     } finally {
       setTestingProviderId(null);
@@ -1041,8 +1093,8 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       });
       const data = await res.json();
       setProviderVerifyStatus(prev => ({ ...prev, [p.id]: { verifying: false, result: { success: data.success !== false, summary: data.summary || '', tests: data.tests || [] } } }));
-    } catch (e: any) {
-      setProviderVerifyStatus(prev => ({ ...prev, [p.id]: { verifying: false, result: { success: false, summary: `验证失败: ${e.message}`, tests: [] } } }));
+    } catch (e: unknown) {
+      setProviderVerifyStatus(prev => ({ ...prev, [p.id]: { verifying: false, result: { success: false, summary: `验证失败: ${errorMessage(e, '未知错误')}`, tests: [] } } }));
     }
   }, []);
 
@@ -1056,14 +1108,14 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ providerId: p.id }),
       });
-      const data = await res.json();
-      const balInfo = data.balances?.find((b: any) => b.providerId === p.id);
+      const data = await res.json() as ApiBalanceResponse;
+      const balInfo = data.balances?.find((balance) => balance.providerId === p.id);
       const msg = balInfo
         ? (balInfo.error ? balInfo.error : `余额查询成功：${balInfo.balance ?? '未知'} ${balInfo.currency || ''}${balInfo.remainingQuota != null ? `，剩余额度 ${balInfo.remainingQuota}` : ''}`)
         : (data.error || '未找到余额信息');
       setProviderBalanceStatus(prev => ({ ...prev, [p.id]: { loading: false, message: msg } }));
-    } catch (e: any) {
-      setProviderBalanceStatus(prev => ({ ...prev, [p.id]: { loading: false, message: `查询失败: ${e.message}` } }));
+    } catch (e: unknown) {
+      setProviderBalanceStatus(prev => ({ ...prev, [p.id]: { loading: false, message: `查询失败: ${errorMessage(e, '未知错误')}` } }));
     }
   }, []);
 
@@ -1795,12 +1847,12 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
         fetch('/api/creative/templates?host=illustrator').then(r => r.json()).catch(() => ({ templates: [] })),
       ]);
       setConnectorStatus({
-        dcc: dccHealth,
-        dccPreflight: dccPreflight,
-        dccTemplates: Array.isArray(dccTpl?.templates) ? dccTpl.templates : [],
-        creative: creativeHealth,
-        psTemplates: Array.isArray(psTpl?.templates) ? psTpl.templates : [],
-        aiTemplates: Array.isArray(aiTpl?.templates) ? aiTpl.templates : [],
+        dcc: connectorHealth(dccHealth),
+        dccPreflight: connectorPreflight(dccPreflight),
+        dccTemplates: connectorTemplates(dccTpl),
+        creative: connectorHealth(creativeHealth),
+        psTemplates: connectorTemplates(psTpl),
+        aiTemplates: connectorTemplates(aiTpl),
         loading: false,
       });
     } catch (e) {
@@ -2387,11 +2439,27 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
         {['overview', 'audit', 'users', 'groups', 'credits', 'settings'].includes(activeTab) && isAdmin && (
           <AdminTabs
             activeTab={activeTab}
-            adminUsers={adminUsers.map(u => ({
-              ...u,
-              apiPermissions: u.apiPermissions as Record<string, boolean> | undefined,
-            })) as any}
-            adminGroups={adminGroups as any}
+            adminUsers={adminUsers.map((u): AdminTabsUser => ({
+              id: u.id,
+              name: u.name,
+              role: u.role ?? 'user',
+              status: u.status ?? 'active',
+              email: u.email,
+              createdAt: u.createdAt,
+              apiPermissions: u.apiPermissions,
+              productType: u.productType,
+              chatModels: u.chatModels,
+              imageModels: u.imageModels,
+              dailyTokenLimit: u.dailyTokenLimit,
+              monthlyTokenLimit: u.monthlyTokenLimit,
+              dailyImageLimit: u.dailyImageLimit,
+              groupId: u.groupId,
+            }))}
+            adminGroups={adminGroups.map((group): AdminTabsGroup => ({
+              ...group,
+              created_at: String(group.created_at),
+              updated_at: String(group.updated_at),
+            }))}
             onRefreshAdmin={refreshAdmin}
             onCreateUser={async (name: string, password: string, email?: string, groupId?: string) => {
               const res = await fetch('/api/admin/users', {
@@ -2415,12 +2483,12 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
             onResetPassword={async (userId: string, newPassword: string) => {
               await fetch('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ action: 'update', userId, updates: { password: newPassword.trim() } }) });
             }}
-            onToggleUser={async (user: any) => {
+            onToggleUser={async (user: AdminTabsUser) => {
               await fetch('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ action: 'update', userId: user.id, updates: { status: user.status === 'disabled' ? 'active' : 'disabled' } }) });
               await refreshAdmin();
               window.dispatchEvent(new Event('wujie-admin-users-updated'));
             }}
-            onDeleteUser={(user: any) => {
+            onDeleteUser={(user: AdminTabsUser) => {
               if (user.role === 'admin') return;
               setConfirmDlg({
                 open: true, title: '删除用户', message: `确定删除用户 ${user.name} 吗？该用户的本地项目数据会一并移除。`,
@@ -2433,7 +2501,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 onCancel: () => setConfirmDlg(prev => ({ ...prev, open: false })),
               });
             }}
-            onToggleUserPermission={async (user: any, key: any) => {
+            onToggleUserPermission={async (user: AdminTabsUser, key: string) => {
               const current: Record<string, boolean> = {
                 image: user.apiPermissions?.image ?? true, chat: user.apiPermissions?.chat ?? true,
                 threeD: user.apiPermissions?.threeD ?? true,
@@ -2451,12 +2519,22 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               await fetch('/api/credits/admin/recharge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ userId, amount, description }) });
               await refreshAdmin();
             }}
-            providers={providers.map(p => ({
-              id: p.id, name: p.name, displayName: p.displayName, baseUrl: p.baseUrl, apiKey: p.apiKey,
-              modelType: p.modelType ?? 'general', isEnabled: p.isEnabled ?? true,
-              balance: p.balance, selectedModels: p.selectedModels,
-              discoveredModels: p.discoveredModels, advancedParams: p.advancedParams,
-            })) as any}
+            providers={providers.map((p): AdminTabsProvider => ({
+              id: p.id,
+              name: p.name,
+              base_url: p.baseUrl,
+              api_key: p.apiKey,
+              model_type: p.modelType ?? p.type,
+              selected_models: p.selectedModels ?? [],
+              discovered_models: (p.discoveredModels ?? []).map((model) => model.id),
+              isEnabled: p.isEnabled,
+              balance: p.balance?.amount,
+              balanceCurrency: p.balance?.currency,
+              compatProfile: p.compatProfile,
+              advancedParams: p.advancedParams,
+              modelType: p.modelType,
+              selectedModels: p.selectedModels,
+            }))}
             onTabChange={(tab: string) => { setActiveTab(tab as TabType); }}
             onOpenApiManager={() => { setActiveTab('apis'); }}
             onUpdateUserGroup={async (userId: string, groupId: string) => {
@@ -2467,8 +2545,8 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               await fetch('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ action: 'update', userId, updates: { chatModels, imageModels } }) });
               await refreshAdmin();
             }}
-            adminChatModels={providers.filter(p => p.modelType === 'chat' || p.modelType === 'universal' || p.modelType === 'general').flatMap(p => (p.selectedModels || []).map((m: any) => ({ id: typeof m === 'string' ? m : m.id || m, name: typeof m === 'string' ? m : m.name || m.id || m, providerId: p.id })))}
-            adminImageModels={providers.filter(p => p.modelType === 'image').flatMap(p => (p.selectedModels || []).map((m: any) => ({ id: typeof m === 'string' ? m : m.id || m, name: typeof m === 'string' ? m : m.name || m.id || m, providerId: p.id })))}
+            adminChatModels={providers.filter(p => p.modelType === 'chat' || p.modelType === 'universal' || p.modelType === 'general').flatMap(p => providerModelOptions(p.selectedModels, p.id))}
+            adminImageModels={providers.filter(p => p.modelType === 'image').flatMap(p => providerModelOptions(p.selectedModels, p.id))}
           />
         )}
 
@@ -2560,7 +2638,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                               <span key={pt} className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{pt === 'canvas' ? '无限画布' : '智能对话'}</span>
                             )) : <span className="text-[10px] text-muted-foreground">未设置</span>}
                             <span className="text-[11px] text-muted-foreground ml-2">积分配额：{group.credit_quota || '无限制'}</span>
-                            <span className="text-[10px] text-muted-foreground ml-2">用户数：{adminUsers.filter(u => (u as any).groupId === group.id).length}</span>
+                            <span className="text-[10px] text-muted-foreground ml-2">用户数：{adminUsers.filter(u => u.groupId === group.id).length}</span>
                           </div>
                         </div>
                         <div className="flex items-center gap-1">
@@ -2900,7 +2978,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               <div className="text-center py-12 text-muted-foreground">
                 <Server className="w-10 h-10 mx-auto mb-3 opacity-30" />
                 <p className="text-sm">暂无API提供商</p>
-                <p className="text-xs mt-1">点击上方"添加 API"按钮添加</p>
+                <p className="text-xs mt-1">点击上方“添加 API”按钮添加</p>
               </div>
             )}
 
@@ -3140,7 +3218,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                             </div>
                             {modelSearchQuery && (
                               <p className="text-xs text-muted-foreground mt-1.5">
-                                筛选结果: {filteredModels.length} 个模型匹配 "{modelSearchQuery}"
+                                筛选结果: {filteredModels.length} 个模型匹配 “{modelSearchQuery}”
                               </p>
                             )}
                           </div>
@@ -3369,7 +3447,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                   <div className="flex justify-between"><span className={textSecondary}>服务名</span><span className={textPrimary}>{String(connectorStatus.dcc?.name || '-')}</span></div>
                   <div className="flex justify-between"><span className={textSecondary}>版本</span><span className={textPrimary}>{String(connectorStatus.dcc?.version || '-')}</span></div>
                   <div className="flex justify-between"><span className={textSecondary}>模板数</span><span className={textPrimary}>{connectorStatus.dccTemplates.length}</span></div>
-                  <div className="flex justify-between"><span className={textSecondary}>推荐渲染模式</span><span className={textPrimary}>{String((connectorStatus.dccPreflight as any)?.recommended?.defaultRenderMode || '-')}</span></div>
+                  <div className="flex justify-between"><span className={textSecondary}>推荐渲染模式</span><span className={textPrimary}>{connectorStatus.dccPreflight?.recommended?.defaultRenderMode || '-'}</span></div>
                 </div>
                 <h3 className={`text-xs font-semibold ${textPrimary} mb-2 mt-3`}>DCC 提示词模板</h3>
                 <div className="space-y-1.5 max-h-48 overflow-y-auto">
@@ -3394,8 +3472,8 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                   </span>
                 </div>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs mb-3">
-                  <div className="flex justify-between"><span className={textSecondary}>Photoshop</span><span className={(connectorStatus.creative as any)?.hosts?.photoshopCep ? 'text-emerald-500' : 'text-red-500'}>{(connectorStatus.creative as any)?.hosts?.photoshopCep ? '已启用' : '未启用'}</span></div>
-                  <div className="flex justify-between"><span className={textSecondary}>Illustrator</span><span className={(connectorStatus.creative as any)?.hosts?.illustratorCep ? 'text-emerald-500' : 'text-red-500'}>{(connectorStatus.creative as any)?.hosts?.illustratorCep ? '已启用' : '未启用'}</span></div>
+                  <div className="flex justify-between"><span className={textSecondary}>Photoshop</span><span className={connectorStatus.creative?.hosts?.photoshopCep ? 'text-emerald-500' : 'text-red-500'}>{connectorStatus.creative?.hosts?.photoshopCep ? '已启用' : '未启用'}</span></div>
+                  <div className="flex justify-between"><span className={textSecondary}>Illustrator</span><span className={connectorStatus.creative?.hosts?.illustratorCep ? 'text-emerald-500' : 'text-red-500'}>{connectorStatus.creative?.hosts?.illustratorCep ? '已启用' : '未启用'}</span></div>
                   <div className="flex justify-between"><span className={textSecondary}>版本</span><span className={textPrimary}>{String(connectorStatus.creative?.version || '-')}</span></div>
                   <div className="flex justify-between"><span className={textSecondary}>鉴权</span><span className={textPrimary}>{connectorStatus.creative?.authRequired ? '开启' : '免鉴权'}</span></div>
                 </div>
@@ -3445,7 +3523,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               <div className={`${softClass} rounded-xl p-4 border ${isDark ? 'border-white/10' : 'border-gray-200'}`}>
                 <h2 className={`font-semibold mb-3 ${textPrimary} flex items-center gap-2`}><Shield size={16} className={accentClass} /> DCC 预飞检查（Preflight）</h2>
                 <div className="space-y-2 text-xs">
-                  {(Array.isArray(connectorStatus.dccPreflight?.checks) ? (connectorStatus.dccPreflight as any).checks : []).map((c: Record<string, unknown>) => (
+                  {(connectorStatus.dccPreflight?.checks ?? []).map((c) => (
                     <div key={String(c.id)} className="flex items-center justify-between">
                       <span className={textPrimary}>{String(c.label)}</span>
                       <span className={`px-2 py-0.5 rounded-full text-[10px] ${String(c.status) === 'pass' ? 'bg-emerald-500/15 text-emerald-500' : 'bg-sky-500/15 text-sky-500'}`}>{String(c.status)}</span>
@@ -3453,7 +3531,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                   ))}
                   <h3 className={`text-xs font-semibold ${textPrimary} mt-3 mb-1`}>渲染模式</h3>
                   <div className="grid grid-cols-2 gap-1.5">
-                    {(Array.isArray(connectorStatus.dccPreflight?.renderModes) ? (connectorStatus.dccPreflight as any).renderModes : []).map((m: Record<string, unknown>) => (
+                    {(connectorStatus.dccPreflight?.renderModes ?? []).map((m) => (
                       <div key={String(m.id)} className={`text-[11px] p-1.5 rounded ${isDark ? 'bg-white/5' : 'bg-gray-100'}`}>
                         <div className={`${textPrimary} font-medium`}>{String(m.name)}</div>
                         <div className={`${textSecondary} line-clamp-1`}>{String(m.description)}</div>
