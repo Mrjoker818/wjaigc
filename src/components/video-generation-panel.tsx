@@ -1814,7 +1814,7 @@ Rules:
       }
     };
     input.click();
-  }, [onError]);
+  }, [addTypedReference, onError]);
 
   // === 主题颜色 ===
   const isGold = themeStyle === 'gold';

@@ -1770,7 +1770,7 @@ ${contextInfo}
       }
     }
     closeContextMenu();
-  }, [contextMenu?.type, contextMenu?.nodeId, contextMenu?.x, contextMenu?.y, closeContextMenu, setWf, clipboard, wf.nodes, wf.connections, selectedNodeIds]);
+  }, [contextMenu, closeContextMenu, setWf, clipboard, wf.nodes, wf.connections, selectedNodeIds]);
 
   // ─── 执行工作流 ───
 
