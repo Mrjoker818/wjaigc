@@ -121,6 +121,17 @@ interface ImageModel {
   providerName: string;
 }
 
+function safeParseJSON<T>(str: string | null | undefined, fallback: T): T {
+  if (!str) return fallback;
+  try { return JSON.parse(str); } catch { return fallback; }
+}
+
+function parseProject(p: Record<string, unknown>): BrandProject {
+  return {
+    id: (p.id as string) || '', projectName: (p.project_name as string) || (p.projectName as string) || '', brandName: (p.brand_name as string) || (p.brandName as string) || '', industry: (p.industry as string) || '', projectType: (p.project_type as string) || (p.projectType as string) || '', keywords: safeParseJSON<string[]>(p.keywords as string, []), targetAudience: (p.target_audience as string) || (p.targetAudience as string) || '', tone: (p.tone as string) || '', description: (p.description as string) || '', logoUrl: (p.logo_url as string) || (p.logoUrl as string) || '', productUrl: (p.product_url as string) || (p.productUrl as string) || '', ipUrl: (p.ip_url as string) || (p.ipUrl as string) || '', referenceUrls: safeParseJSON<string[]>(p.reference_urls as string || p.referenceUrls as string, []), brandDna: safeParseJSON<BrandDNA | null>(p.brand_dna as string || p.brandDna as string, null), creativeDirections: safeParseJSON<CreativeDirection[]>(p.creative_directions as string || p.creativeDirections as string, []), kvImageUrl: normalizeBrandFactoryImageUrl((p.kv_image_url as string) || (p.kvImageUrl as string) || '') || '', batchResults: safeParseJSON<Array<{item: string; imageUrl: string}>>(p.batch_results as string || p.batchResults as string, []), consistencyScores: safeParseJSON<{overall: number; details: Record<string, number>} | null>(p.consistency_scores as string || p.consistencyScores as string, null), status: (p.status as string) === 'active' ? 'active' : (p.status as string) === 'completed' ? 'completed' : 'draft', isArchived: Boolean(p.is_archived ?? p.isArchived ?? false), createdAt: (p.created_at as string) || (p.createdAt as string) || '', updatedAt: (p.updated_at as string) || (p.updatedAt as string) || '',
+  };
+}
+
 /* ========== CONSTANTS ========== */
 
 const PROJECT_TYPES = [
@@ -594,7 +605,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
       .catch(() => {});
   }, []);
 
-  const loadProjects = async () => {
+  const loadProjects = useCallback(async () => {
     try {
       const res = await fetch('/api/brand-factory');
       const data = await res.json();
@@ -603,40 +614,10 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
         setProjects(parsed);
       }
     } catch { /* ignore */ }
-  };
+  }, []);
 
   // Load projects after the loader is initialized.
   useEffect(() => { void loadProjects(); }, [loadProjects]);
-
-  const parseProject = (p: Record<string, unknown>): BrandProject => ({
-    id: (p.id as string) || '',
-    projectName: (p.project_name as string) || (p.projectName as string) || '',
-    brandName: (p.brand_name as string) || (p.brandName as string) || '',
-    industry: (p.industry as string) || '',
-    projectType: (p.project_type as string) || (p.projectType as string) || '',
-    keywords: safeParseJSON<string[]>(p.keywords as string, []),
-    targetAudience: (p.target_audience as string) || (p.targetAudience as string) || '',
-    tone: (p.tone as string) || '',
-    description: (p.description as string) || '',
-    logoUrl: (p.logo_url as string) || (p.logoUrl as string) || '',
-    productUrl: (p.product_url as string) || (p.productUrl as string) || '',
-    ipUrl: (p.ip_url as string) || (p.ipUrl as string) || '',
-    referenceUrls: safeParseJSON<string[]>(p.reference_urls as string || p.referenceUrls as string, []),
-    brandDna: safeParseJSON<BrandDNA | null>(p.brand_dna as string || p.brandDna as string, null),
-    creativeDirections: safeParseJSON<CreativeDirection[]>(p.creative_directions as string || p.creativeDirections as string, []),
-    kvImageUrl: normalizeBrandFactoryImageUrl((p.kv_image_url as string) || (p.kvImageUrl as string) || '') || '',
-    batchResults: safeParseJSON<Array<{item: string; imageUrl: string}>>(p.batch_results as string || p.batchResults as string, []),
-    consistencyScores: safeParseJSON<{overall: number; details: Record<string, number>} | null>(p.consistency_scores as string || p.consistencyScores as string, null),
-    status: (p.status as string) === 'active' ? 'active' : (p.status as string) === 'completed' ? 'completed' : 'draft',
-    isArchived: Boolean(p.is_archived ?? p.isArchived ?? false),
-    createdAt: (p.created_at as string) || (p.createdAt as string) || '',
-    updatedAt: (p.updated_at as string) || (p.updatedAt as string) || '',
-  });
-
-  function safeParseJSON<T>(str: string | null | undefined, fallback: T): T {
-    if (!str) return fallback;
-    try { return JSON.parse(str); } catch { return fallback; }
-  }
 
   // === API calls (pass model info) ===
   const apiCall = async (action: string, body: Record<string, unknown> = {}) => {

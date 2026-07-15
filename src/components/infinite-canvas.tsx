@@ -1050,6 +1050,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [groupDragOffset, setGroupDragOffset] = useState({ x: 0, y: 0 });
   const groupDragReadyRef = useRef(false);
   const groupDragTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const removeRefFromGroupRef = useRef<(groupId: string, imageId: string) => void>(() => {});
+  const exitEditModeRef = useRef<() => void>(() => {});
 
   // 同步groups到父组件
   useEffect(() => {
@@ -3191,7 +3193,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
               }
             } else if (!isInside && gGroup.sourceImageIds.includes(imgId)) {
               // ── Drag OUT: remove image from this group ──
-              removeRefFromGroup(gGroup.id, imgId);
+              removeRefFromGroupRef.current(gGroup.id, imgId);
             }
           }
         }
@@ -3724,6 +3726,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       }).filter(g => g.refImages.length > 0);
     });
   }, []);
+  useEffect(() => { removeRefFromGroupRef.current = removeRefFromGroup; }, [removeRefFromGroup]);
+
 
   useCallback((groupId: string, updates: Partial<GenGroupToolbar>) => {
         setGenGroups(prev => prev.map(g => {
@@ -6335,7 +6339,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       '正在提交放大任务...'
     );
     setIsEditProcessing(true);
-    exitEditMode();
+    exitEditModeRef.current();
     try {
       const modelInfo = getCurrentModel();
       // Determine actual engine for upscale from preference
@@ -7587,6 +7591,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     setStrokesVersion(v => v + 1);
     currentStrokeRef.current = [];
   }, []);
+  useEffect(() => { exitEditModeRef.current = exitEditMode; }, [exitEditMode]);
+
 
   // Edit confirm for erase/mask/expand/crop
   const handleEditConfirm = useCallback(async () => {

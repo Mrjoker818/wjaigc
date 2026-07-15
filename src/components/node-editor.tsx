@@ -872,6 +872,9 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, canvasI
   const [historyIndex, setHistoryIndex] = useState(-1);
   const historyIndexRef = useRef(-1);
   const isUndoRedoRef = useRef(false);
+  const handleCascadeRunRef = useRef<(nodeId: string) => Promise<void>>(async () => {});
+  const handleDeleteNodeRef = useRef<(nodeId: string) => void>(() => {});
+  const getPortPositionLocalRef = useRef<(node: WorkflowNode, port: NodePort) => { x: number; y: number } | null>(() => null);
 
   // P2: 画布助手 (节点感知)
   const [, setAssistantMessages] = useState<{ role: 'user' | 'assistant'; content: string; suggestions?: { text: string; action: string }[] }[]>([]);
@@ -1018,7 +1021,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, canvasI
             switch (detectedOperation) {
               case 'execute':
                 // 执行当前选中的节点（级联执行选中节点的下游链路）
-                handleCascadeRun(node.id);
+                void handleCascadeRunRef.current(node.id);
                 operationResult = `已触发执行节点 "${node.label}"，请在工作流执行面板查看进度。`;
                 break;
               case 'add': {
@@ -1054,7 +1057,7 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, canvasI
               }
               case 'delete': {
                 const nodeLabel = node.label;
-                handleDeleteNode(node.id);
+                handleDeleteNodeRef.current(node.id);
                 setSelectedNodeIds(new Set());
                 operationResult = `已删除节点 "${nodeLabel}" 及其所有连线。`;
                 break;
@@ -1265,6 +1268,8 @@ ${contextInfo}
     }));
     setSelectedNodeIds(prev => { const next = new Set(prev); next.delete(nodeId); return next; });
   }, [setWf]);
+  useEffect(() => { handleDeleteNodeRef.current = handleDeleteNode; }, [handleDeleteNode]);
+
 
   // 从内容面板拖拽图片到画布 → 创建 input-image 节点
   const handleCanvasImageDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
@@ -1358,6 +1363,8 @@ ${contextInfo}
       });
     } catch (e) { console.error('Cascade run failed:', e); }
   }, [wf.connections, wf.nodes]);
+  useEffect(() => { handleCascadeRunRef.current = handleCascadeRun; }, [handleCascadeRun]);
+
 
   // P0: 节点字段变更（用于节点上直接编辑）
   const handleNodeFieldChange = useCallback((nodeId: string, field: string, value: unknown) => {
@@ -1506,7 +1513,7 @@ ${contextInfo}
     if (port.direction !== 'out') return;
     const node = wf.nodes.find(n => n.id === nodeId);
     if (!node) return;
-    const pos = getPortPositionLocal(node, port);
+    const pos = getPortPositionLocalRef.current(node, port);
     if (!pos) return;
     setDraggingConn({ fromNodeId: nodeId, fromPortId: port.id, fromX: pos.x, fromY: pos.y, toX: pos.x, toY: pos.y, portType: port.type });
   }, [wf.nodes]);
@@ -2142,6 +2149,8 @@ ${contextInfo}
     }
     return result;
   }, []);
+  useEffect(() => { getPortPositionLocalRef.current = getPortPositionLocal; }, [getPortPositionLocal]);
+
 
   // ─── 高亮连线 (选中节点时高亮上下游) ───
 

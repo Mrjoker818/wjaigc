@@ -657,6 +657,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
   const sceneHistoryRef = useRef<{ objects: SceneObject[]; lights: SceneLight[] }[]>([]);
   const sceneHistoryIdxRef = useRef(-1);
   const isUndoRedoRef = useRef(false); // 防止 undo/redo 操作自身记录历史
+  const loadSceneListRef = useRef<() => Promise<void>>(async () => {});
 
   const pushSceneHistory = useCallback((objs: SceneObject[], lts: SceneLight[]) => {
     if (isUndoRedoRef.current) return;
@@ -1255,7 +1256,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
             body: JSON.stringify({ action: 'saveScreenshot', sceneId: data.sceneId, screenshotData: screenshot }),
           });
         }
-        loadSceneList();
+        void loadSceneListRef.current();
       }
     } catch (err) {
       console.error('Save scene error:', err);
@@ -1272,6 +1273,10 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
       }
     } catch { /* ignore */ }
   }, []);
+
+  useEffect(() => {
+    loadSceneListRef.current = loadSceneList;
+  }, [loadSceneList]);
 
   // Load scene by id
   const loadSceneById = useCallback(async (id: string) => {

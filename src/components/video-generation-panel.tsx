@@ -457,6 +457,7 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
   const shotTaskResolversRef = useRef<Map<string, { resolve: (r: ShotVideoResult) => void; reject: (e: unknown) => void; timer: ReturnType<typeof setTimeout> }>>(new Map());
   useRef<Map<string, string>>(new Map()); // shotId -> taskId
   const autoDiagnoseFiredRef = useRef<Set<string>>(new Set());
+  const diagnoseFailedRef = useRef<(shot: VideoShotPlan) => Promise<void>>(async () => {});
 
   // === 失败诊断 ===
   const handleDiagnoseFailed = async (shot: VideoShotPlan) => {
@@ -493,6 +494,10 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
       onError?.(e instanceof Error ? e.message : '诊断失败');
     }
   };
+
+  useEffect(() => {
+    diagnoseFailedRef.current = handleDiagnoseFailed;
+  });
 
   // 合并服务器模型与内置注册表
   const [videoModels, setVideoModels] = useState<{ id: string; modelId: string; name: string; providerId: string; providerName: string; region: 'cn' | 'global'; features: VideoModelInfo['features'] }[]>([]);
@@ -562,10 +567,10 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
       if (shot.status === 'failed' && shot.error && !autoDiagnoseFiredRef.current.has(shot.id)) {
         autoDiagnoseFiredRef.current.add(shot.id);
         setDiagnoseOpen(shot.id);
-        handleDiagnoseFailed(shot).catch(() => {});
+        diagnoseFailedRef.current(shot).catch(() => {});
       }
     });
-  }, [shotPlans, autoDiagnoseOnFail, handleDiagnoseFailed]);
+  }, [shotPlans, autoDiagnoseOnFail]);
 
   // 自动从服务器加载视频模型（如果未通过 props 传入）
   useEffect(() => {

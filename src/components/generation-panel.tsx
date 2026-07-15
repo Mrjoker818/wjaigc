@@ -612,7 +612,7 @@ export function GenerationPanel(
     const handleGenerateRef = useRef(handleGenerate);
     useEffect(() => {
         handleGenerateRef.current = handleGenerate;
-    }, [handleGenerate]);
+    });
     useEffect(() => {
         const handleTriggerGenerate = () => {
             handleGenerateRef.current();

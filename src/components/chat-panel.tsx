@@ -2755,22 +2755,6 @@ IP角色设计规范：
       }
     }, [model]);
 
-  useEffect(() => {
-    loadServerModels();
-    // 页面重新可见时刷新模型列表（用户可能刚从管理面板切回）
-    // 不使用定时刷新，避免刷新时重置用户当前选择的模型
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        loadServerModels();
-        loadImageModels();
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibility);
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibility);
-    };
-  }, [loadServerModels]);
-
   // 从服务器加载可用图像模型（用于聊天中生图）
   const loadImageModels = useCallback(async () => {
     try {
@@ -2800,6 +2784,18 @@ IP角色设计规范：
       // 静默失败
     }
   }, []);
+
+  useEffect(() => {
+    loadServerModels();
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        loadServerModels();
+        loadImageModels();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [loadImageModels, loadServerModels]);
 
   // 初始化图像模型选择（从localStorage读取，与图像生成面板同步）
   useEffect(() => {
