@@ -7,12 +7,8 @@ export type { ApiProvider, ModelInfo, ApiBalanceInfo, ApiKind };
 import { fetchWithV1Retry, shouldSkipV1Retry } from './api-helpers';
 import { getModelDisplayName } from './model-name-map';
 import { getServerSystemDir } from './server-data-root';
-<<<<<<< HEAD
-import { dbGetApiProviders, dbUpsertApiProvider, dbDeleteApiProvider, dbDeleteStaleProviders } from './db-storage';
-=======
 import { dbGetApiProviders, dbUpsertApiProvider, dbDeleteApiProvider } from './db-storage';
 import { get302UpscaleModelsForProvider, resolve302UpscaleModelId } from './302-upscale-models';
->>>>>>> 41e7dd04083fba557192a82b01f13084d231af10
 
 const SYSTEM_DIR = getServerSystemDir();
 const CONFIG_PATH = path.join(SYSTEM_DIR, 'api-providers.json');
@@ -526,22 +522,22 @@ export async function discoverModelsForCredentials(
       try {
         const errorData = await response.json();
         const errorMsg = errorData?.error?.message || errorData?.message || `${response.status} ${response.statusText}`;
-        return { 
+        return {
           success: isReachable, // 4xx means API is reachable even if /models failed
-          models: [], 
-          message: isReachable 
-            ? `API 可达但模型列表不可用（${errorMsg}），生成功能可能正常` 
-            : errorMsg, 
-          latencyMs 
+          models: [],
+          message: isReachable
+            ? `API 可达但模型列表不可用（${errorMsg}），生成功能可能正常`
+            : errorMsg,
+          latencyMs
         };
       } catch {
-        return { 
-          success: isReachable, 
-          models: [], 
-          message: isReachable 
+        return {
+          success: isReachable,
+          models: [],
+          message: isReachable
             ? `API 可达但模型列表不可用（HTTP ${response.status}），生成功能可能正常`
-            : `HTTP ${response.status}: API 返回了非 JSON 响应，请检查 Base URL 是否正确`, 
-          latencyMs 
+            : `HTTP ${response.status}: API 返回了非 JSON 响应，请检查 Base URL 是否正确`,
+          latencyMs
         };
       }
     }

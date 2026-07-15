@@ -1,17 +1,12 @@
 import { describe, it, expect } from 'vitest';
-<<<<<<< HEAD
-import { topologicalSort } from '@/lib/workflow-engine';
-import type { WorkflowNode, WorkflowConnection } from '@/lib/workflow-engine';
-=======
-import { evaluateWorkflowCondition, getNodePropertyFields, resolveControlOutputPorts, resolveGroupOutput, resolveInlineSubgraph, resolveWorkflowIterations, shouldSkipNodeForInactiveBranches, topologicalSort } from '@/lib/workflow-engine';
+import { buildNodeExecutionRequest, evaluateWorkflowCondition, getNodePropertyFields, resolveControlOutputPorts, resolveGroupOutput, resolveInlineSubgraph, resolveWorkflowIterations, shouldSkipNodeForInactiveBranches, topologicalSort } from '@/lib/workflow-engine';
 import type { NodeType, WorkflowNode, WorkflowConnection } from '@/lib/workflow-engine';
->>>>>>> 41e7dd04083fba557192a82b01f13084d231af10
 
 /** 创建最小合法 WorkflowNode */
 function makeNode(id: string, type: string = 'input-text'): WorkflowNode {
   return {
     id,
-    type: type as any,
+    type: type as NodeType,
     label: id,
     x: 0,
     y: 0,
@@ -175,5 +170,23 @@ describe('control node semantics', () => {
     const subgraph = makeNode('subgraph', 'subgraph');
     subgraph.config = { subgraph: { nodes: [{ id: 'only-node' }], connections: [{ fromNodeId: 'missing', toNodeId: 'only-node' }] } };
     expect(resolveInlineSubgraph(subgraph)).toBeNull();
+  });
+});
+
+describe('video workflow requests', () => {
+  it('uses the upstream video input and preserves the configured trim duration', () => {
+    const node = makeNode('trim', 'video-trim');
+    node.config = { startTime: 2, endTime: 8, duration: 6 };
+
+    expect(buildNodeExecutionRequest(node, { videoUrl: '/uploads/source.mp4' })).toMatchObject({
+      endpoint: '/api/video/tools',
+      body: {
+        action: 'trim',
+        videoUrl: '/uploads/source.mp4',
+        startTime: 2,
+        endTime: 8,
+        duration: 6,
+      },
+    });
   });
 });

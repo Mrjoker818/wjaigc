@@ -2028,6 +2028,7 @@ export function buildNodeExecutionRequest(
           videoUrl: config.videoUrl || inputs.videoUrl || '',
           startTime: Number(config.startTime) || 0,
           endTime: Number(config.endTime) || 0,
+          duration: Number(config.duration) || 5,
         }
       };
 
@@ -2036,7 +2037,6 @@ export function buildNodeExecutionRequest(
     case 'parallel':
     case 'input-param':
     case 'output-image':
-    case 'output-video':
     case 'subgraph':
     case 'group':
       return null;
@@ -2132,22 +2132,6 @@ export function buildNodeExecutionRequest(
           videoUrls: videoUrls.length ? videoUrls : undefined,
           audioUrl,
           volume: Number((config as any).volume) || 1.0,
-        }
-      };
-    }
-
-    // ─── 视频裁剪 ───
-    case 'video-trim': {
-      const videoUrl = (config as any).videoUrl || '';
-      return {
-        endpoint: '/api/video/tools',
-        method: 'POST',
-        body: {
-          action: 'trim',
-          videoUrl,
-          startTime: Number((config as any).startTime) || 0,
-          endTime: Number((config as any).endTime) || 0,
-          duration: Number((config as any).duration) || 5,
         }
       };
     }

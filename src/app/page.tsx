@@ -10,18 +10,18 @@ import { IncrementalHistoryManager } from '@/lib/canvas-incremental-history';
 import { TreeHistoryManager, type VersionNode } from '@/lib/canvas-tree-history';
 import { createAutoConnection, type ConnectionRelationType } from '@/lib/canvas-connections';
 import { GenerationPanel, GenerationParams, CtrlRefSelection } from '@/components/generation-panel';
-import VideoGenerationPanel, { VideoGenerateParams, type VideoGenerationPanelHandle } from '@/components/video-generation-panel';
+import VideoGenerationPanel, { type VideoGenerationPanelHandle } from '@/components/video-generation-panel';
 import { ImagePreview } from '@/components/image-preview';
 import { ChatPanel } from '@/components/chat-panel';
 import { PromptEquation } from '@/components/prompt-equation';
 
 import { Toaster } from '@/components/ui/sonner';
 import { toast } from 'sonner';
-import { Image as ImageIcon, MessageSquare, Sparkles, GitBranch, CircleDot, ChevronLeft, ChevronRight, Film, X, Bell } from 'lucide-react';
+import { Image as ImageIcon, MessageSquare, Sparkles, ChevronLeft, ChevronRight, X, Bell } from 'lucide-react';
 import NodeEditor from '@/components/node-editor';
 import WorkflowHub from '@/components/workflow-hub';
 import DashboardView from '@/components/dashboard/dashboard-view';
-import { createDemoWorkflow, type Workflow } from '@/lib/workflow-engine';
+import { type Workflow } from '@/lib/workflow-engine';
 import { ImageEditor } from '@/components/image-editor';
 import { LoginPanel } from '@/components/dashboard/login-panel';
 import { ProjectDataPanel } from '@/components/project-data-panel';
@@ -116,7 +116,7 @@ function CanvasApp() {
   // ====== Tree History (Version History Panel) ======
   // 树状版本历史，支持分支和任意节点回溯
   const treeHistoryRef = useRef<TreeHistoryManager>(new TreeHistoryManager({ maxNodes: 50 }));
-  const [treeHistoryNodes, setTreeHistoryNodes] = useState<VersionNode[]>([]);
+  const [, ] = useState<VersionNode[]>([]);
 
   // P2-1: 画布连线状态
   const [canvasConnections, setCanvasConnections] = useState<import('@/lib/canvas-connections').CanvasConnection[]>([]);
@@ -172,7 +172,7 @@ function CanvasApp() {
     prevImagesRef.current = result;
     setImagesRaw(result);
   }, []);
-  const [activeGenerationCount, setActiveGenerationCount] = useState(0);
+  const [, setActiveGenerationCount] = useState(0);
   const [previewImage, setPreviewImage] = useState<CanvasImage | null>(null);
   const [themeStyle, setThemeStyle] = useState<ThemeStyle>('gold');
   const themeStyleRef = useRef(themeStyle);
@@ -244,12 +244,12 @@ function CanvasApp() {
       skipHistoryRef.current = false;
       console.error('加载项目失败:', e);
     }
-  }, []);
+  }, [setImages]);
 
   const [appMode, setAppMode] = useState<'canvas' | 'node' | 'workflow-hub' | 'dashboard'>('canvas');
   const [pendingModeSwitch, setPendingModeSwitch] = useState<'node' | 'workflow-hub' | 'dashboard' | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const router = useRouter();
+  useRouter();
   const searchParams = useSearchParams();
 
   const [showProjectData, setShowProjectData] = useState(false);
@@ -265,7 +265,7 @@ function CanvasApp() {
     quality?: string;
   } | null>(null);
   const [initialGroups, setInitialGroups] = useState<ImageGroup[]>([]);
-  const [viewState, setViewState] = useState<{ offsetX: number; offsetY: number; zoom: number } | null>(null);
+  const [, setViewState] = useState<{ offsetX: number; offsetY: number; zoom: number } | null>(null);
   const viewStateRef = useRef<{ offsetX: number; offsetY: number; zoom: number } | null>(null);
   const [ctrlRefSelections, setCtrlRefSelections] = useState<CtrlRefSelection[]>([]);
   // Alt+Click inline reference markers (displayed as numbered tags in the prompt textarea)
@@ -367,9 +367,6 @@ function CanvasApp() {
         const response = await fetch('/api/auth/me', { cache: 'no-store', credentials: 'include' });
         const data = await response.json() as { success?: boolean; user?: User | null };
         if (!cancelled && data.success && data.user) {
-          // ★ 智能对话用户：也进入工作台（dashboard），工作台已支持智能对话入口
-          // 不再直接跳转到 /simple-chat
-          const productType = data.user.productType || '';
 
           const userMgr = UserManagerCore.getInstance();
           const hydratedUser = await userMgr.upsertUserFromServer(data.user);
@@ -379,7 +376,7 @@ function CanvasApp() {
 
           // 检查 URL 中是否有 projectId 参数（从工作台跳转过来）
           const projectId = searchParams.get('projectId');
-          
+
           if (projectId) {
             // ★ 初始化加载项目：跳过 diff 记录，防止 Ctrl+Z 撤销到空画布
             skipHistoryRef.current = true;
@@ -483,7 +480,7 @@ function CanvasApp() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [searchParams, setImages]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [ohMyPromptOpen, setOhMyPromptOpen] = useState(false);
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
@@ -518,7 +515,7 @@ function CanvasApp() {
         return newUrl ? { ...img, url: newUrl } : img;
       }));
     });
-  }, []);
+  }, [setImages]);
 
   // 从 simple-chat 传来的图片桥接
   useEffect(() => {
@@ -646,7 +643,7 @@ function CanvasApp() {
     }
 
     return () => { cancelled = true; };
-  }, [images]);
+  }, [images, setImages]);
 
   // ★ 追踪图片删除：当 images 减少时，记录被删除的 ID，5 秒后自动清除
   const prevImageIdsRef2 = useRef<Set<string>>(new Set());
@@ -801,14 +798,14 @@ function CanvasApp() {
           }, null, 2),
           metadata: { projectId: currentProject.id, imageCount: persistableCanvasImages.length },
         });
-      } catch (e) {
+      } catch {
         // 静默失败，不影响用户体验
       }
     }, 1000);
     return () => {
       if (autoSaveRef.current) clearTimeout(autoSaveRef.current);
     };
-  }, [images, currentProject, currentUser?.id]);
+  }, [images, currentProject, currentUser?.id, setImages]);
 
   // 页面关闭/刷新前同步保存（localStorage + sendBeacon到服务器）
   // 使用 ref 避免每次 images 变化都重建 beforeunload 监听器
@@ -1066,7 +1063,7 @@ function CanvasApp() {
       } catch { /* best effort */ serverSyncMergeRef.current = false; skipHistoryRef.current = false; }
     });
     return () => { if (typeof unsubscribe === 'function') unsubscribe(); };
-  }, [currentUser, currentProject?.id]);
+  }, [currentUser, currentProject?.id, setImages]);
 
   // ★ 异步持久化 data:/blob: URL：页面加载后自动检测并持久化临时 URL
   // 解决刷新后图片消失的问题：data: URL 在 normalizeImageUrls 中不再被清空，
@@ -1193,14 +1190,14 @@ function CanvasApp() {
         createdAt: Date.now(),
       }]);
     }
-    
+
     try {
       // 开始处理 - 提交任务
-      
+
       // 检查是否使用第三方模型
       const isThirdParty = !!(params as GenerationParams & { universalBaseUrl?: string }).universalBaseUrl;
       const apiEndpoint = isThirdParty ? '/api/universal-generate' : '/api/generate';
-      
+
       // 提交生成请求（带超时保护，避免网络异常导致无限等待）
       // 超时需匹配后端 maxDuration (600s=10分钟)，部分第三方API出图可达90秒+
       const submitController = new AbortController();
@@ -1248,7 +1245,7 @@ function CanvasApp() {
       // === 直接返回模式：API 直接返回图片URL ===
       if (data.mode === 'direct') {
         const { imageUrls, model, prompt: enhancedPrompt, originalPrompt, category, style, modelName, providerName, apiBaseUrl } = data;
-        
+
         // 并行持久化所有需要持久化的图片URL（跳过已经是本地路径的URL）
         const savedUrls = await Promise.all(imageUrls.map(async (imageUrl: string) => {
           // 已经是本地路径（serve-upload/本地文件），无需再次持久化
@@ -1358,7 +1355,7 @@ function CanvasApp() {
         // 移除多余的占位框（outputCount > imageUrls.length 时）
         const usedPlaceholderIds = new Set(placeholderIds.slice(0, imageUrls.length));
         setImages(prev => prev.filter(img => !img.isProcessingPlaceholder || !placeholderIds.includes(img.id) || usedPlaceholderIds.has(img.id)));
-        
+
         toast.success('生成完成', {
           description: `${data.modelName || model} 已生成 ${imageUrls.length} 张图片`,
           className: themeStyle === 'monochrome' ? 'bg-white border border-blue-200 text-gray-900' : 'bg-[#141414] border border-[#d4af37]/30 text-white',
@@ -1369,8 +1366,8 @@ function CanvasApp() {
 
       // === 轮询模式：API返回任务ID，前端轮询结果 ===
       if (data.mode === 'polling') {
-        const { taskIds, estimatedTime, prompt: enhancedPrompt, originalPrompt, category, style, modelName: pollingModelName, providerName: pollingProviderName, apiBaseUrl: pollingApiBaseUrl } = data;
-        
+        const { taskIds, estimatedTime, prompt: enhancedPrompt, modelName: pollingModelName, providerName: pollingProviderName, apiBaseUrl: pollingApiBaseUrl } = data;
+
         // 自适应轮询间隔策略（优化版）
         // 前期更快探测，后期适度延长避免浪费请求
         const getPollInterval = (pollCount: number, estTime: number) => {
@@ -1638,7 +1635,7 @@ function CanvasApp() {
             } catch (pollError) {
               consecutiveErrors++;
               console.error(`Poll error (consecutive: ${consecutiveErrors}):`, pollError);
-              
+
               if (consecutiveErrors >= 5) {
                 toast.error('轮询失败', {
                   description: '连续多次查询失败，请检查网络连接',
@@ -1895,7 +1892,7 @@ function CanvasApp() {
     } finally {
       setActiveGenerationCount(prev => Math.max(0, prev - 1));
     }
-  }, []);
+  }, [setImages, stabilizeCanvasImages, themeStyle]);
 
   // 添加参考图到画布
   const handleAddToCanvas = useCallback(async (imageUrl: string) => {
@@ -1935,7 +1932,7 @@ function CanvasApp() {
       description: '参考图已成功添加到画布',
       className: 'bg-[#141414] border-[#2a2a2a] text-white',
     });
-  }, [stabilizeCanvasImages]); // 使用 latestImagesRef/currentUserRef 避免 images 闭包
+  }, [setImages, stabilizeCanvasImages]); // 使用 latestImagesRef/currentUserRef 避免 images 闭包
 
   // 自动排列布局：横向顶对齐，间距10px，超出视口宽度换行
   const autoLayoutImages = useCallback((existingImages: CanvasImage[], newImages: CanvasImage[]): CanvasImage[] => {
@@ -2023,14 +2020,14 @@ function CanvasApp() {
   // 添加多张图片到画布（自动排列布局）
   const handleAddImages = useCallback(async (imageUrls: string[], sourceImageId?: string, meta?: { modelName?: string; apiProvider?: string; relationType?: ConnectionRelationType }) => {
     const newImages: CanvasImage[] = [];
-    
+
     // Find source image for positioning if provided
     const sourceImg = sourceImageId ? images.find(img => img.id === sourceImageId) : null;
-    
+
     // ★ 确定模型信息：优先使用 meta 参数，其次从源图继承
     const effectiveModelName = meta?.modelName || sourceImg?.modelName || '';
     const effectiveApiProvider = meta?.apiProvider || sourceImg?.apiProvider || '';
-    
+
     for (let i = 0; i < imageUrls.length; i++) {
       let rawUrl = imageUrls[i];
       // 将 blob: URL 转为 data URL（blob: 在页面刷新后失效）
@@ -2046,7 +2043,7 @@ function CanvasApp() {
           rawUrl = dataUrl;
         } catch { /* conversion failed, keep blob URL */ }
       }
-      
+
       // 将 data: URL 和外部 HTTP URL 持久化到服务器（避免数据丢失和外部 URL 过期）
       if (rawUrl.startsWith('data:') || rawUrl.startsWith('http')) {
         try {
@@ -2069,7 +2066,7 @@ function CanvasApp() {
           console.warn('[handleAddImages] save-image failed, keeping original URL:', err);
         }
       }
-      
+
       // 跳过已存在的图片
       if (images.some(img => img.url === rawUrl) || newImages.some(img => img.url === rawUrl)) {
         continue;
@@ -2077,12 +2074,12 @@ function CanvasApp() {
       // 先获取图片真实尺寸
       const { width: natW, height: natH } = await loadCanvasImageSize(rawUrl);
       const displaySize = getCanvasImageDisplaySize(natW, natH);
-      
+
       const tempId = `ref-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       // If source image exists, position generated images to its right
       const offsetX = sourceImg ? sourceImg.x + sourceImg.width + 30 : 0;
       const offsetY = sourceImg ? sourceImg.y + i * (displaySize.height + 20) : 0;
-      
+
       newImages.push({
         id: tempId,
         url: rawUrl,
@@ -2100,7 +2097,7 @@ function CanvasApp() {
         ...(effectiveApiProvider ? { apiProvider: effectiveApiProvider } : {}),
       });
     }
-    
+
     if (newImages.length > 0) {
       if (sourceImg) {
         // Direct placement next to source image
@@ -2148,7 +2145,7 @@ function CanvasApp() {
         className: 'bg-[#141414] border-[#2a2a2a] text-white',
       });
     }
-  }, [images, autoLayoutImages, stabilizeCanvasImages, currentUser?.id]);
+  }, [images, currentUser?.id, setImages, autoLayoutImages, stabilizeCanvasImages]);
 
   // 提取图片关键词
   const handleExtractPrompt = useCallback(async (imageUrl: string) => {
@@ -2192,205 +2189,204 @@ function CanvasApp() {
       });
     }
     return null;
-  }, []);
+  }, [setImages, themeStyle]);
 
-  const handleGenerateVariation = useCallback(async (params: GenerationParams & { originalImage: CanvasImage }) => {
-    // 如果有原图，使用原图作为参考
-    if (params.originalImage.url) {
-      params.referenceImages = [params.originalImage.url];
-      params.referenceMode = 'style';
-    }
+  useCallback(async (params: GenerationParams & { originalImage: CanvasImage }) => {
+        // 如果有原图，使用原图作为参考
+        if (params.originalImage.url) {
+          params.referenceImages = [params.originalImage.url];
+          params.referenceMode = 'style';
+        }
 
-    setActiveGenerationCount(prev => prev + 1);
-    const outputCount = params.outputCount || 1;
-    
-    try {
-      
-      const response = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...params, userId: currentUserRef.current?.id, submitOnly: true }),      });
+        setActiveGenerationCount(prev => prev + 1);
 
-      const data = await response.json();
+        try {
 
-      // === 新模式：前端轮询 ===
-      if (data.success && data.mode === 'polling') {
-        const { taskIds, estimatedTime, prompt: enhancedPrompt } = data;
-        
-        const getPollInterval = (pollCount: number, estTime: number) => {
-          // 优化：更激进的初始轮询
-          const baseInterval = estTime <= 20 ? 300 : estTime <= 60 ? 500 : 800;
-          if (pollCount > 50) return baseInterval + 2000;
-          if (pollCount > 30) return baseInterval + 1000;
-          if (pollCount > 15) return baseInterval + 300;
-          return baseInterval;
-        };
+          const response = await fetch('/api/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...params, userId: currentUserRef.current?.id, submitOnly: true }),      });
 
-        // ★ 每个任务独立计算超时：避免串行任务时前期任务消耗掉后期任务的时间预算
-        // 全局最大时间：预估时间 * 5 + 120秒，最少180秒，最多1800秒（30分钟）
-        // 单任务最大时间：预估时间 * 4 + 120秒，最少120秒，最多600秒（10分钟）
-        const globalMaxPollTime = Math.min(1800, Math.max(180, estimatedTime * 5 + 120)) * 1000;
-        const perTaskMaxPollTime = Math.min(600, Math.max(120, estimatedTime * 4 + 120)) * 1000;
-        const globalStartTime = Date.now();
+          const data = await response.json();
 
-        const completedImages: Array<{ id: string; url: string; prompt: string; model?: string; quality?: string; aspectRatio?: string; stylePreset?: string; category?: string; size?: string; sourceUrl?: string; modelName?: string; apiProvider?: string }> = [];        let consecutiveErrors = 0;
+          // === 新模式：前端轮询 ===
+          if (data.success && data.mode === 'polling') {
+            const { taskIds, estimatedTime, prompt: enhancedPrompt } = data;
 
-        for (let taskIdx = 0; taskIdx < taskIds.length; taskIdx++) {
-          const currentTaskId = taskIds[taskIdx];
-          let pollCount = 0;
-          let taskCompleted = false;
-          const taskStartTime = Date.now(); // ★ 每个任务独立的开始时间
+            const getPollInterval = (pollCount: number, estTime: number) => {
+              // 优化：更激进的初始轮询
+              const baseInterval = estTime <= 20 ? 300 : estTime <= 60 ? 500 : 800;
+              if (pollCount > 50) return baseInterval + 2000;
+              if (pollCount > 30) return baseInterval + 1000;
+              if (pollCount > 15) return baseInterval + 300;
+              return baseInterval;
+            };
 
-          while (!taskCompleted && isMountedRef.current) {
-            const taskElapsed = Date.now() - taskStartTime;
-            const globalElapsed = Date.now() - globalStartTime;
-            if (taskElapsed > perTaskMaxPollTime || globalElapsed > globalMaxPollTime) {
-              toast.error('生成超时', {
-                description: `已等待${Math.round(taskElapsed / 1000)}秒，请尝试降低分辨率或简化提示词后重试`,
-                className: 'bg-[#141414] border border-red-900 text-white',
-              });
-              break;
-            }
+            // ★ 每个任务独立计算超时：避免串行任务时前期任务消耗掉后期任务的时间预算
+            // 全局最大时间：预估时间 * 5 + 120秒，最少180秒，最多1800秒（30分钟）
+            // 单任务最大时间：预估时间 * 4 + 120秒，最少120秒，最多600秒（10分钟）
+            const globalMaxPollTime = Math.min(1800, Math.max(180, estimatedTime * 5 + 120)) * 1000;
+            const perTaskMaxPollTime = Math.min(600, Math.max(120, estimatedTime * 4 + 120)) * 1000;
+            const globalStartTime = Date.now();
 
-            const interval = getPollInterval(pollCount, estimatedTime);
-            // ★ SSE加速：同时等待定时器和SSE完成事件
-            await Promise.race([
-              new Promise(resolve => setTimeout(resolve, interval)),
-              new Promise(resolve => {
-                if (!taskEventsClient.isConnected()) { resolve(undefined); return; }
-                const unsub = taskEventsClient.onTaskEvent(event => {
-                  if (event.taskId === currentTaskId && ['completed', 'failed', 'cancelled'].includes(event.type)) {
-                    unsub();
-                    resolve(undefined);
+            const completedImages: Array<{ id: string; url: string; prompt: string; model?: string; quality?: string; aspectRatio?: string; stylePreset?: string; category?: string; size?: string; sourceUrl?: string; modelName?: string; apiProvider?: string }> = [];        let consecutiveErrors = 0;
+
+            for (let taskIdx = 0; taskIdx < taskIds.length; taskIdx++) {
+              const currentTaskId = taskIds[taskIdx];
+              let pollCount = 0;
+              let taskCompleted = false;
+              const taskStartTime = Date.now(); // ★ 每个任务独立的开始时间
+
+              while (!taskCompleted && isMountedRef.current) {
+                const taskElapsed = Date.now() - taskStartTime;
+                const globalElapsed = Date.now() - globalStartTime;
+                if (taskElapsed > perTaskMaxPollTime || globalElapsed > globalMaxPollTime) {
+                  toast.error('生成超时', {
+                    description: `已等待${Math.round(taskElapsed / 1000)}秒，请尝试降低分辨率或简化提示词后重试`,
+                    className: 'bg-[#141414] border border-red-900 text-white',
+                  });
+                  break;
+                }
+
+                const interval = getPollInterval(pollCount, estimatedTime);
+                // ★ SSE加速：同时等待定时器和SSE完成事件
+                await Promise.race([
+                  new Promise(resolve => setTimeout(resolve, interval)),
+                  new Promise(resolve => {
+                    if (!taskEventsClient.isConnected()) { resolve(undefined); return; }
+                    const unsub = taskEventsClient.onTaskEvent(event => {
+                      if (event.taskId === currentTaskId && ['completed', 'failed', 'cancelled'].includes(event.type)) {
+                        unsub();
+                        resolve(undefined);
+                      }
+                    });
+                    setTimeout(() => { unsub(); resolve(undefined); }, interval + 2000);
+                  })
+                ]);
+                pollCount++;
+
+                try {
+                  const pollResponse = await fetch('/api/poll-task', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ taskId: currentTaskId, model: params.model, providerId: params.providerId, userId: currentUserRef.current?.id }),
+                  });
+
+                  const pollData = await pollResponse.json();
+
+                  if (!pollData.success && !pollData.retryable) {
+                    toast.error('生成失败', {
+                      description: pollData.error || '任务执行失败',
+                      className: 'bg-[#141414] border border-red-900 text-white',
+                    });
+                    taskCompleted = true;
+                    break;
                   }
-                });
-                setTimeout(() => { unsub(); resolve(undefined); }, interval + 2000);
-              })
-            ]);
-            pollCount++;
 
-            try {
-              const pollResponse = await fetch('/api/poll-task', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ taskId: currentTaskId, model: params.model, providerId: params.providerId, userId: currentUserRef.current?.id }),
-              });
-
-              const pollData = await pollResponse.json();
-
-              if (!pollData.success && !pollData.retryable) {
-                toast.error('生成失败', {
-                  description: pollData.error || '任务执行失败',
-                  className: 'bg-[#141414] border border-red-900 text-white',
-                });
-                taskCompleted = true;
-                break;
-              }
-
-              const completedImageUrl2 = (pollData.imageUrl || pollData.result?.imageUrl || (pollData.result?.image as Record<string, unknown>)?.url || (pollData.result?.images as Array<Record<string, unknown>>)?.[0]?.url) as string | undefined;
-              if (pollData.status === 'completed' && completedImageUrl2) {
-                const imageUrl = completedImageUrl2;
-                completedImages.push({
-                  id: `${Date.now()}-${taskIdx}`,
-                  url: imageUrl,
-                  prompt: enhancedPrompt || params.prompt,
-                  model: params.model,
-                  quality: params.quality,
-                  aspectRatio: params.aspectRatio,
-                  stylePreset: params.stylePreset,
-                  category: (params.imageCategory && params.imageCategory !== 'none') ? params.imageCategory : ((params.productCategory && params.productCategory !== 'none') ? params.productCategory : undefined),
-                  size: params.size,
-                  sourceUrl: imageUrl,
-                  modelName: pollData.modelName || '',
-                  apiProvider: pollData.providerName || '',
-                });
-                taskCompleted = true;
-                consecutiveErrors = 0;
-              } else if (pollData.status === 'failed' || pollData.status === 'cancelled') {
-                toast.error('生成失败', {
-                  description: pollData.error || '任务失败',
-                  className: 'bg-[#141414] border border-red-900 text-white',
-                });
-                taskCompleted = true;
-              } else {
-                consecutiveErrors = 0;
-              }
-            } catch (pollError) {
-              consecutiveErrors++;
-              if (consecutiveErrors >= 5) {
-                toast.error('轮询失败', {
-                  description: '连续多次查询失败，请检查网络',
-                  className: 'bg-[#141414] border border-red-900 text-white',
-                });
-                taskCompleted = true;
+                  const completedImageUrl2 = (pollData.imageUrl || pollData.result?.imageUrl || (pollData.result?.image as Record<string, unknown>)?.url || (pollData.result?.images as Array<Record<string, unknown>>)?.[0]?.url) as string | undefined;
+                  if (pollData.status === 'completed' && completedImageUrl2) {
+                    const imageUrl = completedImageUrl2;
+                    completedImages.push({
+                      id: `${Date.now()}-${taskIdx}`,
+                      url: imageUrl,
+                      prompt: enhancedPrompt || params.prompt,
+                      model: params.model,
+                      quality: params.quality,
+                      aspectRatio: params.aspectRatio,
+                      stylePreset: params.stylePreset,
+                      category: (params.imageCategory && params.imageCategory !== 'none') ? params.imageCategory : ((params.productCategory && params.productCategory !== 'none') ? params.productCategory : undefined),
+                      size: params.size,
+                      sourceUrl: imageUrl,
+                      modelName: pollData.modelName || '',
+                      apiProvider: pollData.providerName || '',
+                    });
+                    taskCompleted = true;
+                    consecutiveErrors = 0;
+                  } else if (pollData.status === 'failed' || pollData.status === 'cancelled') {
+                    toast.error('生成失败', {
+                      description: pollData.error || '任务失败',
+                      className: 'bg-[#141414] border border-red-900 text-white',
+                    });
+                    taskCompleted = true;
+                  } else {
+                    consecutiveErrors = 0;
+                  }
+                } catch {
+                  consecutiveErrors++;
+                  if (consecutiveErrors >= 5) {
+                    toast.error('轮询失败', {
+                      description: '连续多次查询失败，请检查网络',
+                      className: 'bg-[#141414] border border-red-900 text-white',
+                    });
+                    taskCompleted = true;
+                  }
+                }
               }
             }
+
+            if (completedImages.length > 0) {
+              const originalImg = params.originalImage;
+              const newImages: CanvasImage[] = completedImages.map((img) => ({
+                id: img.id,
+                url: img.url,
+                prompt: img.prompt,
+                model: img.model,
+                quality: img.quality,
+                aspectRatio: img.aspectRatio,
+                stylePreset: img.stylePreset,
+                category: img.category,
+                size: img.size,
+                x: 0,
+                y: 0,
+                width: originalImg.width,
+                height: originalImg.height,
+                originalWidth: originalImg.originalWidth,
+                originalHeight: originalImg.originalHeight,
+                modelName: img.modelName,
+                apiProvider: img.apiProvider,
+                createdAt: Date.now(),
+              }));
+
+              setImages(prev => {
+                const laidOut = autoLayoutImages(prev, newImages);
+                stabilizeCanvasImages(laidOut.map(img => ({ id: img.id, url: img.url })));
+                return [...prev, ...laidOut];
+              });
+
+              toast.success(`变体生成成功`, {
+                description: `已生成 ${completedImages.length} 张变体图片`,
+                className: 'bg-[#141414] border-[#2a2a2a] text-white',
+              });
+              try { UserManagerCore.getInstance().recordUsage('image'); } catch { /* non-blocking */ }
+            }
+
+          // === 旧模式兼容 ===
+          } else if (data.success && data.images) {
+            const newImageUrls: string[] = data.images.map((img: { id: string; url: string; prompt: string }) => img.url);
+
+            await handleAddImages(newImageUrls);
+
+            toast.success(`变体生成成功`, {
+              description: `已生成 ${data.images.length} 张变体图片`,
+              className: 'bg-[#141414] border-[#2a2a2a] text-white',
+            });
+            try { UserManagerCore.getInstance().recordUsage('image'); } catch { /* non-blocking */ }
+          } else {
+            toast.error('生成失败', {
+              description: data.error || '未知错误',
+              className: 'bg-[#141414] border border-red-900 text-white',
+            });
           }
-        }
-
-        if (completedImages.length > 0) {
-          const originalImg = params.originalImage;
-          const newImages: CanvasImage[] = completedImages.map((img) => ({
-            id: img.id,
-            url: img.url,
-            prompt: img.prompt,
-            model: img.model,
-            quality: img.quality,
-            aspectRatio: img.aspectRatio,
-            stylePreset: img.stylePreset,
-            category: img.category,
-            size: img.size,
-            x: 0,
-            y: 0,
-            width: originalImg.width,
-            height: originalImg.height,
-            originalWidth: originalImg.originalWidth,
-            originalHeight: originalImg.originalHeight,
-            modelName: img.modelName,
-            apiProvider: img.apiProvider,
-            createdAt: Date.now(),
-          }));
-
-          setImages(prev => {
-            const laidOut = autoLayoutImages(prev, newImages);
-            stabilizeCanvasImages(laidOut.map(img => ({ id: img.id, url: img.url })));
-            return [...prev, ...laidOut];
+        } catch (error) {
+          console.error('Variation generation error:', error);
+          toast.error('生成失败', {
+            description: '网络错误，请重试',
+            className: 'bg-[#141414] border border-red-900 text-white',
           });
-
-          toast.success(`变体生成成功`, {
-            description: `已生成 ${completedImages.length} 张变体图片`,
-            className: 'bg-[#141414] border-[#2a2a2a] text-white',
-          });
-          try { UserManagerCore.getInstance().recordUsage('image'); } catch { /* non-blocking */ }
+        } finally {
+          setActiveGenerationCount(prev => Math.max(0, prev - 1));
         }
-
-      // === 旧模式兼容 ===
-      } else if (data.success && data.images) {
-        const newImageUrls: string[] = data.images.map((img: { id: string; url: string; prompt: string }) => img.url);
-
-        await handleAddImages(newImageUrls);
-
-        toast.success(`变体生成成功`, {
-          description: `已生成 ${data.images.length} 张变体图片`,
-          className: 'bg-[#141414] border-[#2a2a2a] text-white',
-        });
-        try { UserManagerCore.getInstance().recordUsage('image'); } catch { /* non-blocking */ }
-      } else {
-        toast.error('生成失败', {
-          description: data.error || '未知错误',
-          className: 'bg-[#141414] border border-red-900 text-white',
-        });
-      }
-    } catch (error) {
-      console.error('Variation generation error:', error);
-      toast.error('生成失败', {
-        description: '网络错误，请重试',
-        className: 'bg-[#141414] border border-red-900 text-white',
-      });
-    } finally {
-      setActiveGenerationCount(prev => Math.max(0, prev - 1));
-    }
-  }, []);
+      }, [autoLayoutImages, handleAddImages, setImages, stabilizeCanvasImages]);
 
   const handlePreview = useCallback((image: CanvasImage) => {
     setPreviewImage(image);
@@ -2428,7 +2424,7 @@ function CanvasApp() {
     directorStyle?: string;
     compiledPrompt?: string;
     compiledNegative?: string;
-    shotPlan?: any[];
+    shotPlan?: unknown[];
     shotId?: string;
     shotIndex?: number;
     directorMode?: boolean;
@@ -2825,981 +2821,6 @@ function CanvasApp() {
       const videoPollStartTime = Date.now();
       const pollVideoResult = async (attempt = 0): Promise<void> => {
         if (hasDirectVideoPollingTimedOut(attempt, Date.now() - videoPollStartTime)) {
-<<<<<<< HEAD
-          setImages(prev => prev.filter(img => img.id !== phId));
-          toast.error('视频生成超时', { description: '已超过最大等待时间', className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
-          setActiveGenerationCount(prev => Math.max(0, prev - 1));
-          return;
-        }
-        // 渐进式间隔：1s → 1.5s → 2s → 3s（视频生成通常较慢，间隔不宜过短）
-        const getVideoPollInterval = (a: number) => {
-          if (a < 3) return 1000;    // 前3次：1秒（快速检测早期完成）
-          if (a < 8) return 1500;    // 3-8次：1.5秒
-          if (a < 20) return 2000;   // 8-20次：2秒
-          return 3000;               // 20次后：3秒
-        };
-
-        try {
-          // 首次轮询立即执行（不等待间隔），后续轮询SSE加速 + 渐进间隔
-          if (attempt > 0) {
-            // SSE加速：同时等待SSE事件和定时器，哪个先到用哪个
-            const ssePromise = new Promise<void>((resolve) => {
-              let resolved = false;
-              const handler = (event: { taskId?: string; task?: { status?: string } }) => {
-                if (event.taskId === taskId && !resolved) {
-                  resolved = true;
-                  unsub();
-                  resolve();
-                }
-              };
-              const unsub = taskEventsClient.onTaskEvent(handler);
-              // 5秒后移除监听，避免内存泄漏
-              setTimeout(() => {
-                if (!resolved) { resolved = true; unsub(); resolve(); }
-              }, 5000);
-            });
-
-            const pollPromise = (async () => {
-              const interval = getVideoPollInterval(attempt);
-              await new Promise(r => setTimeout(r, interval));
-            })();
-
-            await Promise.race([ssePromise, pollPromise]);
-          }
-
-          const pollRes = await fetch('/api/poll-task', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ taskId, model: params.model, providerId: params.providerId }),
-          });
-          const pollData = await pollRes.json();
-
-          if (pollData.status === 'completed') {
-            if (!isMountedRef.current) return; // 组件已卸载，停止轮询
-            const rawVideoUrl = pollData.videoUrl || pollData.url;
-            const rawThumbnailUrl = pollData.thumbnailUrl || pollData.url;
-            if (rawVideoUrl) {
-              // ★ 持久化远程URL到本地，防止过期后图片/视频消失
-              const [stableThumbnail, stableVideo] = await Promise.all([
-                awaitStableImageUrl(rawThumbnailUrl, 30000, { isVideo: false }),
-                awaitStableImageUrl(rawVideoUrl, 120000, { isVideo: true }),
-              ]);
-              if (!isMountedRef.current) return; // 持久化期间组件可能卸载
-              setImages(prev => prev.map(img =>
-                img.id === phId ? {
-                  ...img,
-                  url: stableThumbnail || '',
-                  videoUrl: stableVideo,
-                  videoDuration: params.duration,
-                  mediaType: 'video' as const,
-                  originalWidth: pollData.width || 1920,
-                  originalHeight: pollData.height || 1080,
-                  isProcessingPlaceholder: false,
-                  processing: undefined,
-                  prompt: params.prompt,
-                  modelName: params.model,
-                  apiProvider: params.providerId || undefined,
-                } as CanvasImage : img
-              ));
-              // Track video usage
-              try { UserManagerCore.getInstance().recordUsage('video'); } catch {}
-              // 通知视频面板回填镜头结果（用于多镜头尾帧接力串行流水线）
-              try {
-                const shotId = (params as any).shotId;
-                if (shotId && videoPanelRef.current?.notifyShotVideoGenerated) {
-                  videoPanelRef.current.notifyShotVideoGenerated({
-                    shotId,
-                    videoUrl: stableVideo || rawVideoUrl,
-                    thumbnailUrl: stableThumbnail || rawThumbnailUrl || undefined,
-                  });
-                }
-              } catch {}
-            } else {
-              setImages(prev => prev.filter(img => img.id !== phId));
-              toast.error('视频生成失败', { description: '未获取到视频地址', className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
-            }
-            setActiveGenerationCount(prev => Math.max(0, prev - 1));
-          } else if (pollData.status === 'failed') {
-            setImages(prev => prev.filter(img => img.id !== phId));
-            toast.error('视频生成失败', { description: pollData.error || '未知错误', className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
-            setActiveGenerationCount(prev => Math.max(0, prev - 1));
-            // 通知视频面板：shot 失败（解开 waitForShotTask 的等待）
-            try {
-              const shotId = (params as any).shotId;
-              if (shotId && videoPanelRef.current?.notifyShotVideoFailed) {
-                videoPanelRef.current.notifyShotVideoFailed({ shotId, error: pollData.error || '视频生成失败' });
-              }
-            } catch {}
-          } else {
-            // 更新进度，继续轮询
-            const progress = pollData.progress || 0;
-            setImages(prev => prev.map(img =>
-              img.id === phId ? {
-                ...img,
-                processing: { ...img.processing, progress: Math.max(10, progress), status: 'processing' as const, label: pollData.label || '视频生成中' },
-              } as CanvasImage : img
-            ));
-            // 递归继续轮询
-            if (isMountedRef.current) pollVideoResult(attempt + 1);
-          }
-        } catch {
-          // 轮询错误，继续尝试
-          if (isMountedRef.current) pollVideoResult(attempt + 1);
-        }
-      };
-
-      // 立即开始第一次轮询（不等待间隔）
-      pollVideoResult(0);
-
-    } catch (err: unknown) {
-      const errorMsg = err instanceof Error ? err.message : '视频生成失败';
-      setImages(prev => prev.filter(img => img.id !== phId));
-      toast.error('视频生成失败', {
-        description: errorMsg,
-        className: themeStyle === 'monochrome'
-          ? 'bg-white border border-gray-200 text-gray-900'
-          : 'bg-[#141414] border-[#2a2a2a] text-white',
-      });
-      setActiveGenerationCount(prev => Math.max(0, prev - 1));
-    }
-  }, [themeStyle]);
-
-  const handleAnalyzeImage = useCallback(async (imageData: string): Promise<string> => {
-    try {
-      const response = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: imageData, category: 'general' }),
-      });
-      
-      const data = await response.json();
-      
-      if (data.success && data.prompt) {
-        return data.prompt;
-      } else {
-        throw new Error(data.error || '分析失败');
-      }
-    } catch (error) {
-      console.error('Image analysis error:', error);
-      throw error;
-    }
-  }, []);
-
-  // 图片融合
-  const handleFusion = useCallback(async (params: {
-    prompt: string;
-    aspectRatio: string;
-    quality: string;
-    count: number;
-    referenceImages: string[];
-  }) => {
-    setActiveGenerationCount(prev => prev + 1);
-    const outputCount = params.count || 1;
-    
-    try {
-      const ratioToSize: Record<string, string> = {
-        '1:1': '1024x1024',
-        '4:3': '1366x1024',
-        '3:4': '1024x1366',
-        '16:9': '1820x1024',
-        '9:16': '1024x1820',
-        '3:2': '1536x1024',
-        '2:3': '1024x1536',
-      };
-
-      const size = ratioToSize[params.aspectRatio] || '1024x1024';
-      
-      // 根据画质添加提示词后缀
-      let qualityPrompt = '';
-      switch (params.quality) {
-        case 'ultra': qualityPrompt = ', ultra detailed, extremely high quality'; break;
-        case '2k': qualityPrompt = ', 2K resolution, high detail'; break;
-        case '4k': qualityPrompt = ', 4K resolution, ultra detailed'; break;
-        case 'hd': qualityPrompt = ', high quality, detailed'; break;
-        default: qualityPrompt = ', high quality';
-      }
-      
-      const fullPrompt = params.prompt + qualityPrompt;
-      
-      // ★ 获取当前选择的模型和提供商
-      const currentModelRaw = typeof window !== 'undefined' ? localStorage.getItem('wujie_selected_model') : null;
-      let fusionModel: string | undefined;
-      let fusionProviderId: string | undefined;
-      if (currentModelRaw) {
-        try {
-          const wsm = JSON.parse(currentModelRaw);
-          fusionModel = wsm.model;
-          fusionProviderId = wsm.providerId;
-        } catch {}
-      }
-
-      const response = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: fullPrompt,
-          size,
-          model: fusionModel,
-          providerId: fusionProviderId,
-          referenceImages: params.referenceImages,
-          referenceMode: 'blend',
-          imageCategory: 'general',
-          productCategory: 'none',
-          aspectRatio: params.aspectRatio,
-          stylePreset: 'auto',
-          outputCount: params.count,
-          submitOnly: true,
-          userId: currentUser?.id,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!data.success || !data.taskIds || data.taskIds.length === 0) {
-        toast.error('融合失败', {
-          description: data.error || '提交任务失败',
-          className: 'bg-[#141414] border border-red-900 text-white',
-        });
-        setActiveGenerationCount(prev => Math.max(0, prev - 1));
-        return;
-      }
-
-      const newImageUrls: string[] = [];
-
-      for (let i = 0; i < data.taskIds.length; i++) {
-        const taskId = data.taskIds[i];
-        let pollAttempts = 0;
-        const maxAttempts = 180;
-
-        while (pollAttempts < maxAttempts) {
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          pollAttempts++;
-
-          try {
-            const pollRes = await fetch('/api/poll-task', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ taskId, model: fusionModel, providerId: fusionProviderId }),
-            });
-            const pollData = await pollRes.json();
-
-            if (pollData.status === 'completed') {
-              const resultUrl = pollData.imageUrl || pollData.result?.url || pollData.result?.imageUrl || pollData.result?.image?.url || (pollData.result?.images && pollData.result.images[0]?.url) || (pollData.images && pollData.images[0]?.url);
-              if (resultUrl) {
-                newImageUrls.push(resultUrl);
-              }
-              break;
-            } else if (pollData.status === 'failed') {
-              console.error('融合任务失败:', pollData.error);
-              break;
-            }
-          } catch (pollErr) {
-            console.error('轮询错误:', pollErr);
-          }
-        }
-      }
-
-      if (newImageUrls.length > 0) {
-        await handleAddImages(newImageUrls);
-
-        toast.success('融合成功', {
-          description: `已生成 ${newImageUrls.length} 张融合图片`,
-          className: themeStyle === 'monochrome' ? 'bg-white border-blue-500 text-gray-900' : 'bg-[#141414] border-[#d4af37] text-white',
-        });
-      } else {
-        toast.error('融合失败', {
-          description: '生成超时或失败，请重试',
-          className: 'bg-[#141414] border border-red-900 text-white',
-        });
-      }
-    } catch (error) {
-      console.error('Fusion error:', error);
-      toast.error('融合失败', {
-        description: '网络错误，请重试',
-        className: 'bg-[#141414] border border-red-900 text-white',
-      });
-    } finally {
-      setActiveGenerationCount(prev => Math.max(0, prev - 1));
-    }
-  }, []);
-
-  // 画布Ctrl+点击参考图片选择
-  const handleCanvasReferenceSelect = useCallback((image: CanvasImage) => {
-    setCtrlRefSelections(prev => {
-      const exists = prev.find(r => r.id === image.id);
-      if (exists) {
-        // 取消选择 - 移除并重新编号
-        const filtered = prev.filter(r => r.id !== image.id);
-        return filtered.map((r, i) => ({ ...r, number: i + 1 }));
-      }
-      // 添加新选择，分配编号
-      return [...prev, { url: image.url, id: image.id, number: prev.length + 1, keyword: '' }];
-    });
-  }, []);
-
-  // 更新参考图片关键词
-  const handleUpdateCtrlRefKeyword = useCallback((id: string, keyword: string) => {
-    setCtrlRefSelections(prev => prev.map(r => r.id === id ? { ...r, keyword } : r));
-  }, []);
-
-  // 移除单个参考选择
-  const handleRemoveCtrlRef = useCallback((id: string) => {
-    setCtrlRefSelections(prev => {
-      const filtered = prev.filter(r => r.id !== id);
-      return filtered.map((r, i) => ({ ...r, number: i + 1 }));
-    });
-  }, []);
-
-  // Alt+Click 标记参考图 - 添加到创意描述文本框的数字标记
-  const handleAltMarkReference = useCallback((image: CanvasImage) => {
-    setAltRefMarkers(prev => {
-      const exists = prev.find(r => r.id === image.id);
-      if (exists) {
-        // 已标记则取消标记
-        const filtered = prev.filter(r => r.id !== image.id);
-        return filtered.map((r, i) => ({ ...r, number: i + 1 }));
-      }
-      // 添加新标记
-      return [...prev, { id: image.id, url: image.url, number: prev.length + 1 }];
-    });
-  }, []);
-
-  // 移除单个 Alt 标记
-  const handleRemoveAltRefMarker = useCallback((id: string) => {
-    setAltRefMarkers(prev => {
-      const filtered = prev.filter(r => r.id !== id);
-      return filtered.map((r, i) => ({ ...r, number: i + 1 }));
-    });
-  }, []);
-
-  // 融合生成
-  const handleFusionGenerate = useCallback((refs: CtrlRefSelection[], fusionPrompt: string) => {
-    const refKeywords = refs.map(r => r.keyword).filter(Boolean);
-    // 构建融合提示词：清晰描述参考图关系 + 融合目标
-    let combinedPrompt = '';
-    if (refKeywords.length > 0) {
-      combinedPrompt += refs.map((r) => `[参考${r.number}: ${r.keyword}]`).join(' ');
-    }
-    if (fusionPrompt) {
-      combinedPrompt += (combinedPrompt ? ' → ' : '') + fusionPrompt;
-    }
-    if (!combinedPrompt) {
-      combinedPrompt = '将参考图片融合成统一、完整的创意构图';
-    }
-    // 同时设置参考图片
-    const refUrls = refs.map(r => r.url);
-    // 调用生成 - 使用支持图生图的 Gemini 模型
-    handleGenerate({
-      prompt: combinedPrompt,
-      size: '1024x1024',
-      referenceImages: refUrls,
-      referenceMode: 'fusion' as const,
-      imageCategory: 'none',
-      productCategory: 'none',
-      aspectRatio: '1:1',
-      stylePreset: 'none',
-      outputCount: 1,
-      model: 'gemini-2.5-flash-image-preview',
-      quality: '1K',
-    });
-  }, [handleGenerate]);
-
-  // 一键提取关键词（从画布图片提取）
-  const handleExtractKeywords = useCallback(async (image: { id: string; url: string }) => {
-    try {
-      // 使用管理员配置的视觉模型（与"灵感提示词"功能共用模型选择逻辑）
-      let visionModel = '';
-      let providerId: string | undefined;
-      let providerPreset: string | undefined;
-
-      // Priority 1: Use the currently selected chat model
-      if (currentChatModelInfo) {
-        if (currentChatModelInfo.providerId) {
-          visionModel = currentChatModelInfo.model;
-          providerId = currentChatModelInfo.providerId;
-          providerPreset = currentChatModelInfo.providerPreset;
-        } else {
-          visionModel = currentChatModelInfo.model;
-        }
-      }
-
-      // Priority 2: Fallback - search for a vision-capable model (chat + VLM)
-      if (!visionModel) {
-        try {
-          // Search both chat and VLM model types
-          const [chatRes, vlmRes] = await Promise.all([
-            fetch('/api/models?type=chat').then(r => r.json()).catch(() => ({ providers: [], models: [] })),
-            fetch('/api/models?type=vlm').then(r => r.json()).catch(() => ({ providers: [], models: [] })),
-          ]);
-          const providers = [
-            ...(Array.isArray(chatRes.providers) ? chatRes.providers : []),
-            ...(Array.isArray(vlmRes.providers) ? vlmRes.providers : []),
-          ];
-          const models = [
-            ...(Array.isArray(chatRes.models) ? chatRes.models : []),
-            ...(Array.isArray(vlmRes.models) ? vlmRes.models : []),
-          ];
-          const visionModelPatterns = [
-            /gpt-4o/i, /gpt-4-turbo/i, /gpt-4\./i, /gpt-5/i,
-            /claude-3/i, /claude-4/i, /claude-3\.5/i,
-            /gemini/i,
-            /qwen-vl/i, /qwen2-vl/i, /qwen2\.5-vl/i, /qvq/i,
-            /glm-4v/i, /glm-4\.6v/i,
-            /internvl/i, /llava/i, /cogvlm/i, /doubao/i, /seed/i,
-          ];
-          const foundModel = models.find((model: { id?: string; name?: string; providerId?: string }) => {
-            const haystack = `${model.id || ''} ${model.name || ''}`;
-            return visionModelPatterns.some(pat => pat.test(haystack));
-          });
-          if (foundModel?.id) {
-            const provider = providers.find((item: { id?: string; providerPreset?: string }) => item.id === foundModel.providerId);
-            visionModel = foundModel.id;
-            providerId = foundModel.providerId;
-            providerPreset = provider?.providerPreset;
-          }
-        } catch {}
-      }
-
-      if (!visionModel) {
-        toast.error('未找到支持图片理解的模型', {
-          description: '请在智能对话面板中选择一个支持视觉的模型',
-          className: 'bg-[#141414] border border-red-900 text-white',
-        });
-        return;
-      }
-
-      const response = await fetch('/api/vision-prompt', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          imageUrl: image.url,
-          model: visionModel,
-          providerId,
-          providerPreset,
-          userId: currentUser?.id,
-        }),
-      });
-
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.error || `API 调用失败: ${response.status}`);
-      }
-
-      const result = await response.json();
-      const prompt = result?.data?.bilingual || result?.data?.english || result?.data?.chinese || result?.prompt || '';
-
-      if (prompt) {
-        // 直接填充到图像生成面板的提示词输入框
-        setExternalPrompt(prompt);
-        toast.success('关键词已提取并填入描述区', {
-          description: prompt.substring(0, 80) + (prompt.length > 80 ? '...' : ''),
-          className: themeStyle === 'monochrome' ? 'bg-white border-blue-500 text-gray-900' : 'bg-[#141414] border-[#d4af37] text-white',
-        });
-      } else {
-        toast.error('提取结果为空', {
-          description: '模型未返回有效关键词',
-          className: 'bg-[#141414] border border-red-900 text-white',
-        });
-      }
-    } catch (error) {
-      console.error('Extract keywords error:', error);
-      toast.error('提取失败', {
-        description: '关键词提取失败，请重试',
-        className: 'bg-[#141414] border border-red-900 text-white',
-      });
-    }
-  }, [currentChatModelInfo, currentUser, themeStyle]);
-
-  // 提示词大师 - 从chat-panel传递到generation-panel
-  const [externalPrompt, setExternalPrompt] = useState<string | undefined>(undefined);
-  const [externalReferenceImage, setExternalReferenceImage] = useState<{ url: string; description?: string } | null>(null);
-
-  // Oh My Prompt - Vision Prompt handler
-  const handleVisionPrompt = useCallback(async (imageUrl: string) => {
-    // Use the same model/API as the chat panel (智能对话)
-    let visionModel = '';
-    let providerId: string | undefined;
-    let providerPreset: string | undefined;
-
-    // Priority 1: Use the currently selected chat model from ChatPanel
-    if (currentChatModelInfo) {
-      if (currentChatModelInfo.providerId) {
-        // Third-party chat model
-        visionModel = currentChatModelInfo.model;
-        providerId = currentChatModelInfo.providerId;
-
-
-        providerPreset = currentChatModelInfo.providerPreset;
-      } else {
-        // Server-managed model
-        visionModel = currentChatModelInfo.model;
-      }
-    }
-
-    // Priority 2: Fallback - search for a vision-capable model from server-managed providers
-    if (!visionModel) {
-      try {
-        const response = await fetch('/api/models?type=chat', { cache: 'no-store' });
-        const data = await response.json();
-        const providers = Array.isArray(data.providers) ? data.providers : [];
-        const models = Array.isArray(data.models) ? data.models : [];
-
-        const visionModelPatterns = [
-          /gpt-4o/i, /gpt-4-turbo/i, /gpt-4\./i,
-          /claude-3/i, /claude-4/i, /claude-3\.5/i,
-          /gemini/i,
-          /qwen-vl/i, /qwen2-vl/i, /qwen2\.5-vl/i, /qvq/i,
-          /glm-4v/i, /glm-4\.6v/i,
-          /internvl/i, /llava/i, /cogvlm/i, /moondream/i, /kosmos/i, /fuyu/i,
-        ];
-
-        const foundModel = models.find((model: { id?: string; name?: string; providerId?: string }) => {
-          const haystack = `${model.id || ''} ${model.name || ''}`;
-          return visionModelPatterns.some(pat => pat.test(haystack));
-        });
-
-        if (foundModel?.id) {
-          const provider = providers.find((item: { id?: string; providerPreset?: string }) => item.id === foundModel.providerId);
-          visionModel = foundModel.id;
-          providerId = foundModel.providerId;
-          providerPreset = provider?.providerPreset;
-        } else {
-          for (const provider of providers as Array<{ id?: string; selectedModels?: string[]; providerPreset?: string }>) {
-            const found = provider.selectedModels?.find((modelId: string) => visionModelPatterns.some(pat => pat.test(modelId)));
-            if (found) {
-              visionModel = found;
-              providerId = provider.id;
-              providerPreset = provider.providerPreset;
-              break;
-            }
-          }
-        }
-      } catch {}
-    }
-
-    if (!visionModel) {
-      toast.error('未找到支持图片理解的模型', {
-        description: '请在智能对话面板中选择一个支持视觉的模型',
-        className: 'bg-[#141414] border border-red-900 text-white',
-      });
-      return;
-    }
-
-    setIsVisionAnalyzing(true);
-    try {
-      toast.info('正在分析图片...', {
-        description: '灵感提示词库正在生成双语提示词',
-        className: themeStyle === 'monochrome' ? 'bg-white border-blue-500 text-gray-900' : 'bg-[#141414] border-[#d4af37] text-white',
-        duration: 5000,
-      });
-
-      const response = await fetch('/api/vision-prompt', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          imageUrl,
-          model: visionModel,
-              providerId,
-
-
-          providerPreset,
-          userId: currentUser?.id,
-        }),
-      });
-
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.error || `API 调用失败: ${response.status}`);
-      }
-
-      const result = await response.json();
-
-      if (result.success && result.data) {
-        const data = result.data;
-        // Store structured vision result for OhMyPrompt component
-        setVisionResult(data);
-
-        // Build bilingual prompt string
-        let promptText = '';
-        if (data.zh?.prompt) {
-          promptText += `【中文提示词】${data.zh.prompt}`;
-        }
-        if (data.en?.prompt) {
-          promptText += `${promptText ? '\n' : ''}【英文提示词】${data.en.prompt}`;
-        }
-        if (data.zh_style_tags?.length || data.en_style_tags?.length) {
-          const zhTags = data.zh_style_tags?.length ? data.zh_style_tags.join(', ') : '';
-          const enTags = data.en_style_tags?.length ? data.en_style_tags.join(', ') : '';
-          promptText += `\n【风格标签】${zhTags}${enTags ? ' | ' + enTags : ''}`;
-        }
-        if (!promptText && data.raw) {
-          promptText = data.raw;
-        }
-
-        if (promptText) {
-          setExternalPrompt(promptText);
-          toast.success('提示词生成成功', {
-            description: data.zh?.title || data.en?.title || '双语提示词已生成',
-            className: themeStyle === 'monochrome' ? 'bg-white border-blue-500 text-gray-900' : 'bg-[#141414] border-[#d4af37] text-white',
-          });
-        } else {
-          toast.warning('分析结果为空', {
-            description: '模型未能生成有效的提示词',
-            className: 'bg-[#141414] border border-yellow-900 text-white',
-          });
-        }
-      } else {
-        throw new Error(result.error || '分析失败');
-      }
-    } catch (error) {
-      console.error('Vision prompt error:', error);
-      toast.error('图片分析失败', {
-        description: error instanceof Error ? error.message : '请重试',
-        className: 'bg-[#141414] border border-red-900 text-white',
-      });
-    } finally {
-      setIsVisionAnalyzing(false);
-    }
-  }, [currentChatModelInfo]);
-
-  // 右键提取关键词 - 打开oh-my-prompt识词面板并显示进度
-  const handleCanvasExtractKeywords = useCallback((image: { id: string; url: string }) => {
-    // 打开oh-my-prompt面板并自动触发识词
-    setOhMyPromptOpen(true);
-    setVisionPromptEnabled(true);
-    // 显示提取中提示
-    toast.loading('正在识别图片关键词...', {
-      className: themeStyle === 'monochrome' ? 'bg-white border-blue-500 text-gray-900' : 'bg-[#141414] border-[#d4af37] text-white',
-    });
-    // 调用识词API
-    handleVisionPrompt(image.url);
-  }, [handleVisionPrompt, themeStyle]);
-
-  const handleAddToPrompt = useCallback((optimizedPrompt: string) => {
-    setExternalPrompt(optimizedPrompt);
-    setActivePanel('generate');
-  }, []);
-
-  const handleExternalPromptConsumed = useCallback(() => {
-    setExternalPrompt(undefined);
-  }, []);
-
-  // AI聊天中的图像生成回调 - 当AI建议生成图片时直接触发
-  const handleChatGenerateImage = useCallback((prompt: string, outputCount?: number, aspectRatio?: string, quality?: string) => {
-    // 从 wujie_selected_model 读取当前选择的图像生成模型（与 generation-panel 同步）
-    let model = '';
-    let providerId: string | undefined;
-    try {
-      const rawModel = localStorage.getItem('wujie_selected_model');
-      if (rawModel) {
-        const modelInfo = JSON.parse(rawModel);
-        model = modelInfo.model || '';
-        providerId = modelInfo.providerId || undefined;
-      }
-      // 备用：从 userData 读取
-      if (!model) {
-        const currentUserId = localStorage.getItem('unbounded_ai_current_user');
-        const raw = localStorage.getItem('unbounded_ai_user_data');
-        if (raw && currentUserId) {
-          const data = JSON.parse(raw);
-          const selectedModel = data?.userData?.[currentUserId]?.selectedModel;
-          if (selectedModel) {
-            if (selectedModel.includes('::')) {
-              const parts = selectedModel.split('::');
-              providerId = parts[0];
-              model = parts.slice(1).join('::');
-            } else {
-              model = selectedModel;
-            }
-          }
-        }
-      }
-    } catch { /* fallback */ }
-    
-    if (!model) {
-      toast.error('未选择图像生成模型', {
-        description: '请先在图像生成面板中选择模型',
-        className: 'bg-[#141414] border border-yellow-900 text-white',
-      });
-      return;
-    }
-
-    // 调用 handleGenerate 执行实际的图像生成
-    handleGenerate({
-      prompt: prompt,
-      outputCount: outputCount || 1,
-      aspectRatio: aspectRatio || '1:1',
-      size: '',
-      referenceImages: [],
-      referenceMode: 'style',
-      imageCategory: '',
-      productCategory: '',
-      stylePreset: '',
-      quality: quality || 'standard',
-      model: model,
-      providerId: providerId,
-    });
-  }, [handleGenerate]);
-
-  // 适配 InfiniteCanvas 的简单回调函数
-  const handleCanvasGenerateVariation = useCallback((image: CanvasImage) => {
-    setExternalReferenceImage({ url: image.url, description: image.prompt || '' });
-  }, []);
-
-  const handleCanvasFusion = useCallback((images: CanvasImage[]) => {
-    handleFusion({
-      prompt: '',
-      aspectRatio: '1:1',
-      quality: 'standard',
-      count: 1,
-      referenceImages: images.map(img => img.url)
-    });
-  }, [handleFusion]);
-
-  // Canvas img2img handler - reuses handleGenerate for reliable submission + polling
-  // Language-based image editing handler
-  const handleEditImage = useCallback((image: CanvasImage | null) => {
-    setEditingImage(image);
-    setShowImageEditor(true);
-  }, []);
-
-  const handleEditCancel = useCallback(() => {
-    setShowImageEditor(false);
-    setEditingImage(null);
-  }, []);
-
-  // Add image to favorites
-  // localStorage 兜底：数据库不可用时用本地存储
-  const getLocalFavorites = useCallback((): FavoriteItem[] => {
-    try {
-      const raw = localStorage.getItem('wujie-favorites-local');
-      return raw ? JSON.parse(raw) : [];
-    } catch { return []; }
-  }, []);
-
-  const saveLocalFavorites = useCallback((items: FavoriteItem[]) => {
-    try { localStorage.setItem('wujie-favorites-local', JSON.stringify(items)); } catch { /* ignore */ }
-  }, []);
-
-  const handleAddToFavorites = useCallback(async (image: CanvasImage) => {
-    if (!currentUser) {
-      toast.error('请先登录后再收藏');
-      return;
-    }
-    const userId = currentUser.id || currentUser.name;
-    const currentModel = localStorage.getItem('wujie-current-image-model') || '';
-    const currentProvider = localStorage.getItem('wujie-current-api-provider') || '';
-    const favData = {
-      userId,
-      username: currentUser.name || '',
-      imageUrl: image.url,
-      prompt: image.prompt || '',
-      negativePrompt: image.negativePrompt || '',
-      model: currentModel,
-      modelName: currentModel,
-      aspectRatio: image.width && image.height ? `${image.width}:${image.height}` : '',
-      imageWidth: image.width,
-      imageHeight: image.height,
-      originalWidth: image.originalWidth,
-      originalHeight: image.originalHeight,
-      apiProvider: currentProvider,
-      sourceType: 'generated',
-    };
-    try {
-      const res = await fetch('/api/favorites', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(favData),
-      });
-      const data = await res.json();
-      if (data.success) {
-        toast.success(data.message || '已添加到收藏夹');
-        // 同步到本地缓存
-        const local = getLocalFavorites();
-        if (!local.find(f => f.image_url === image.url)) {
-          local.unshift({
-            id: data.id || Date.now(),
-            user_id: userId,
-            username: favData.username,
-            image_url: image.url,
-            prompt: favData.prompt,
-            negative_prompt: favData.negativePrompt,
-            model: favData.model,
-            model_name: favData.modelName,
-            aspect_ratio: favData.aspectRatio,
-            quality: '',
-            image_width: favData.imageWidth || 0,
-            image_height: favData.imageHeight || 0,
-            original_width: favData.originalWidth || 0,
-            original_height: favData.originalHeight || 0,
-            api_provider: favData.apiProvider,
-            api_base_url: '',
-            source_type: 'generated',
-            created_at: Date.now(),
-          });
-          saveLocalFavorites(local);
-        }
-      } else {
-        // API返回错误 → localStorage兜底
-        const local = getLocalFavorites();
-        if (!local.find(f => f.image_url === image.url)) {
-          local.unshift({
-            id: Date.now(),
-            user_id: userId,
-            username: favData.username,
-            image_url: image.url,
-            prompt: favData.prompt,
-            negative_prompt: favData.negativePrompt,
-            model: favData.model,
-            model_name: favData.modelName,
-            aspect_ratio: favData.aspectRatio,
-            quality: '',
-            image_width: favData.imageWidth || 0,
-            image_height: favData.imageHeight || 0,
-            original_width: favData.originalWidth || 0,
-            original_height: favData.originalHeight || 0,
-            api_provider: favData.apiProvider,
-            api_base_url: '',
-            source_type: 'generated',
-            created_at: Date.now(),
-          });
-          saveLocalFavorites(local);
-        }
-        toast.success('已添加到收藏夹（本地）');
-      }
-    } catch (err) {
-      // 网络错误 → localStorage兜底
-      console.error('[Favorites] add error, falling back to localStorage:', err);
-      const local = getLocalFavorites();
-      if (!local.find(f => f.image_url === image.url)) {
-        local.unshift({
-          id: Date.now(),
-          user_id: userId,
-          username: favData.username,
-          image_url: image.url,
-          prompt: favData.prompt,
-          negative_prompt: favData.negativePrompt,
-          model: favData.model,
-          model_name: favData.modelName,
-          aspect_ratio: favData.aspectRatio,
-          quality: '',
-          image_width: favData.imageWidth || 0,
-          image_height: favData.imageHeight || 0,
-          original_width: favData.originalWidth || 0,
-          original_height: favData.originalHeight || 0,
-          api_provider: favData.apiProvider,
-          api_base_url: '',
-          source_type: 'generated',
-          created_at: Date.now(),
-        });
-        saveLocalFavorites(local);
-      }
-      toast.success('已添加到收藏夹（本地）');
-    }
-  }, [currentUser, getLocalFavorites, saveLocalFavorites]);
-
-  // Workflow state for node mode
-  const [nodeWorkflow, setNodeWorkflow] = useState<Workflow | null>(null);
-
-  // Mode switching - early return for non-canvas modes
-  if (appMode === 'node') {
-    return (
-      <NodeEditor
-        workflow={nodeWorkflow}
-        onBack={() => setAppMode('canvas')}
-        onWorkflowChange={setNodeWorkflow}
-        onOpenWorkflowHub={() => setAppMode('workflow-hub')}
-        canvasImages={images.map(img => ({ id: img.id, url: img.url, name: img.prompt?.slice(0, 30) || '图片', description: img.prompt || '', width: img.width, height: img.height }))}
-        themeStyle={themeStyle}
-        onAddImages={(urls, meta) => handleAddImages(urls, undefined, meta)}
-      />
-    );
-  }
-  if (appMode === 'workflow-hub') {
-    return <WorkflowHub onBack={() => setAppMode('canvas')} onEditWorkflow={(wf) => { setNodeWorkflow(wf); setAppMode('node'); }} themeStyle={themeStyle} />;
-  }
-
-  if (appMode === 'dashboard') {
-    return (
-      <>
-      <DashboardView
-        key={currentUser?.id || 'no-user'}
-        isMonochrome={themeStyle === 'monochrome'}
-        user={currentUser!}
-        onOpenProject={(project) => {
-          setAppMode('canvas');
-          loadProjectById(project.id);
-        }}
-        onSetFavoriteParams={(params) => {
-          setFavoriteParams(params);
-        }}
-        onNewProject={async () => {
-          try {
-            const mgr = UserManagerCore.getInstance();
-            const newProject = await mgr.createProject('未命名项目');
-            loadProjectById(newProject.id);
-            setAppMode('canvas');
-          } catch (e) {
-            console.error('创建项目失败:', e);
-          }
-        }}
-        onLogout={async () => {
-          // 退出前同步保存当前项目数据
-          try {
-            if (currentProject && images.length > 0) {
-              const mgr = UserManagerCore.getInstance();
-              const urlMapping: Record<string, string> = {};
-              const nonPersistent = images.filter(img => img.url.startsWith('data:') || img.url.startsWith('blob:'));
-              if (nonPersistent.length > 0) {
-                const results = await Promise.allSettled(nonPersistent.map(async (img) => {
-                  let urlToSave = img.url;
-                  if (urlToSave.startsWith('blob:')) {
-                    try {
-                      const resp = await fetch(urlToSave);
-                      const blob = await resp.blob();
-                      urlToSave = await new Promise<string>((resolve) => {
-                        const reader = new FileReader();
-                        reader.onloadend = () => resolve(reader.result as string);
-                        reader.readAsDataURL(blob);
-                      });
-                    } catch { return null; }
-                  }
-                  const saveResp = await fetch('/api/save-image', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ imageUrl: urlToSave, userId: currentUser?.id, sourceUrl: img.url }),
-                  });
-                  const saveData = await saveResp.json();
-                  if (saveData.success && saveData.url) return { original: img.url, persisted: saveData.url };
-                  return null;
-                }));
-                for (const r of results) {
-                  if (r.status === 'fulfilled' && r.value) urlMapping[r.value.original] = r.value.persisted;
-                }
-              }
-              const persistableCanvasImages = images
-                .map(img => ({
-                  id: img.id,
-                  url: urlMapping[img.url] || img.url,
-                  x: img.x, y: img.y, width: img.width, height: img.height,
-                  originalWidth: img.originalWidth || img.width * 2,
-                  originalHeight: img.originalHeight || img.height * 2,
-                  rotation: 0, zIndex: 0, createdAt: img.createdAt || Date.now(),
-                  prompt: img.prompt || '', modifyPrompt: img.modifyPrompt || '',
-                  model: img.model || '', quality: img.quality || '',
-                  aspectRatio: img.aspectRatio || '', stylePreset: img.stylePreset || '',
-                  category: img.category || '', size: img.size || '',
-                  groupId: img.groupId || '', threeDModelUrl: img.threeDModelUrl || '',
-                  threeDModelUrls: img.threeDModelUrls || undefined,
-                  modelName: img.modelName || '', apiProvider: img.apiProvider || '',
-                  apiBaseUrl: img.apiBaseUrl || '',
-                  sourceUrl: img.sourceUrl || '',
-                  generatedFromImageId: img.generatedFromImageId || '',
-                  svgDataUrl: img.svgDataUrl || '',
-                  svgUrl: img.svgUrl || '',
-                  mediaType: img.mediaType || '',
-                  videoUrl: img.videoUrl || '',
-=======
           setImages(prev => prev.filter(img => img.id !== phId));
           toast.error('视频生成超时', { description: '已超过最大等待时间', className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
           setActiveGenerationCount(prev => Math.max(0, prev - 1));
@@ -3945,9 +2966,9 @@ function CanvasApp() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image: imageData, category: 'general' }),
       });
-      
+
       const data = await response.json();
-      
+
       if (data.success && data.prompt) {
         return data.prompt;
       } else {
@@ -3968,7 +2989,7 @@ function CanvasApp() {
     referenceImages: string[];
   }) => {
     setActiveGenerationCount(prev => prev + 1);
-    
+
     try {
       const ratioToSize: Record<string, string> = {
         '1:1': '1024x1024',
@@ -3981,7 +3002,7 @@ function CanvasApp() {
       };
 
       const size = ratioToSize[params.aspectRatio] || '1024x1024';
-      
+
       // 根据画质添加提示词后缀
       let qualityPrompt = '';
       switch (params.quality) {
@@ -3991,9 +3012,9 @@ function CanvasApp() {
         case 'hd': qualityPrompt = ', high quality, detailed'; break;
         default: qualityPrompt = ', high quality';
       }
-      
+
       const fullPrompt = params.prompt + qualityPrompt;
-      
+
       // ★ 获取当前选择的模型和提供商
       const currentModelRaw = typeof window !== 'undefined' ? localStorage.getItem('wujie_selected_model') : null;
       let fusionModel: string | undefined;
@@ -4488,7 +3509,7 @@ function CanvasApp() {
         }
       }
     } catch { /* fallback */ }
-    
+
     if (!model) {
       toast.error('未选择图像生成模型', {
         description: '请先在图像生成面板中选择模型',
@@ -4773,7 +3794,6 @@ function CanvasApp() {
                   svgUrl: img.svgUrl || '',
                   mediaType: img.mediaType || '',
                   videoUrl: img.videoUrl || '',
->>>>>>> 41e7dd04083fba557192a82b01f13084d231af10
                   videoDuration: img.videoDuration || undefined,
                   videoThumbnailUrl: img.videoThumbnailUrl || '',
                   isProcessingPlaceholder: img.isProcessingPlaceholder || false,
@@ -5195,8 +4215,8 @@ function CanvasApp() {
                     onError={(error: string) => {
                       toast.error('生成失败', {
                         description: error,
-                        className: themeStyle === 'monochrome' 
-                          ? 'bg-white border border-gray-200 text-gray-900' 
+                        className: themeStyle === 'monochrome'
+                          ? 'bg-white border border-gray-200 text-gray-900'
                           : 'bg-[#141414] border-[#2a2a2a] text-white',
                       });
                       setActiveGenerationCount(prev => Math.max(0, prev - 1));
@@ -5252,14 +4272,17 @@ function CanvasApp() {
         <VideoGenerationPanel
           ref={videoPanelRef}
           floating
-          onVideoGenerate={handleVideoGenerate as any}
+          onVideoGenerate={async (params) => {
+            await handleVideoGenerate(params);
+            return {};
+          }}
           onAddImages={(urls: string[]) => handleAddImages(urls)}
           onClose={() => setShowVideoPanel(false)}
           onError={(error: string) => {
             toast.error('视频生成失败', {
               description: error,
-              className: themeStyle === 'monochrome' 
-                ? 'bg-white border border-gray-200 text-gray-900' 
+              className: themeStyle === 'monochrome'
+                ? 'bg-white border border-gray-200 text-gray-900'
                 : 'bg-[#141414] border-[#2a2a2a] text-white',
             });
           }}
@@ -5270,11 +4293,11 @@ function CanvasApp() {
       )}
 
       {/* Toast */}
-      <Toaster 
-        position="top-center" 
+      <Toaster
+        position="top-center"
         toastOptions={{
-          className: themeStyle === 'monochrome' 
-            ? 'bg-white border border-gray-200 text-gray-900 shadow-lg shadow-gray-200/50' 
+          className: themeStyle === 'monochrome'
+            ? 'bg-white border border-gray-200 text-gray-900 shadow-lg shadow-gray-200/50'
             : 'bg-[#1a1a1a] border border-[#2a2a2a] text-white shadow-lg shadow-black/30',
           style: {
             borderRadius: '12px',
@@ -5287,6 +4310,7 @@ function CanvasApp() {
       {authChecked && !currentUser && (
         <LoginPanel
           onLogin={async (user, productType) => {
+            void productType;
             // 智能对话用户：进入工作台，工作台已支持智能对话入口
             // 关键：先清除旧用户的所有状态，防止数据跨用户泄露
             setCurrentProject(null);
@@ -5304,8 +4328,8 @@ function CanvasApp() {
             } catch { /* non-blocking */ }
             toast.success('登录成功', {
               description: `欢迎回来，${user.name}`,
-              className: themeStyle === 'monochrome' 
-                ? 'bg-white border border-gray-200 text-gray-900' 
+              className: themeStyle === 'monochrome'
+                ? 'bg-white border border-gray-200 text-gray-900'
                 : 'bg-[#141414] border border-[#2a2a2a] text-white',
             });
             // 登录成功后进入工作台
@@ -5409,8 +4433,15 @@ function CanvasApp() {
             const canvasModelsStr = localStorage.getItem('wujie_canvas_gen_models');
             if (canvasModelsStr) {
               try {
-                const canvasModels = JSON.parse(canvasModelsStr);
-                const match = canvasModels.find((m: any) => m.id === img.model && m.providerName === img.apiProvider);
+                const canvasModels: unknown = JSON.parse(canvasModelsStr);
+                const match = Array.isArray(canvasModels)
+                  ? canvasModels.find((entry): entry is { id: string; providerName?: string; providerId?: string } =>
+                    typeof entry === 'object' && entry !== null &&
+                    typeof (entry as { id?: unknown }).id === 'string' &&
+                    (entry as { id: string; providerName?: string }).id === img.model &&
+                    (entry as { providerName?: string }).providerName === img.apiProvider,
+                  )
+                  : undefined;
                 if (match?.providerId) {
                   modelValue = `${match.providerId}::${img.model}`;
                 }

@@ -1,10 +1,10 @@
 /**
  * 工作流执行 API
  * POST /api/workflow/execute
- * 
+ *
  * 执行工作流：DAG拓扑排序 → 逐节点调度 → API调用 → 真实数据传递
  * 支持: start(启动) / status(查询) / cancel(取消)
- * 
+ *
  * P0: 连线语义类型约束 + 节点间真实数据传递 + 画布模式专用节点
  * P0升级: 串行等待执行 — 上游节点失败时跳过下游节点
  */
@@ -221,14 +221,10 @@ export async function POST(request: NextRequest) {
       if (!exec) {
         return NextResponse.json({ error: '执行实例不存在或已过期' }, { status: 404 });
       }
-<<<<<<< HEAD
-      const retryNode = (body.nodes || []).find((n: any) => n.id === nodeId);
-=======
       if (exec.userId && exec.userId !== auth.userId) {
         return NextResponse.json({ error: '无权重试该执行记录' }, { status: 403 });
       }
       const retryNode = (body.nodes || []).find((node: WorkflowNode) => node.id === nodeId);
->>>>>>> 41e7dd04083fba557192a82b01f13084d231af10
       if (!retryNode) {
         return NextResponse.json({ error: '节点不存在' }, { status: 404 });
       }
@@ -271,17 +267,11 @@ export async function POST(request: NextRequest) {
         exec.results[nodeId] = { nodeId, status: 'success', output: data, durationMs: 0 };
         await persistWorkflowExecution(executionId, exec);
         return NextResponse.json({ success: true, nodeId, output: data });
-<<<<<<< HEAD
-      } catch (err: any) {
-        exec.results[nodeId] = { nodeId, status: 'failed', error: err?.message || String(err), durationMs: 0 };
-        return NextResponse.json({ success: false, nodeId, error: err?.message || String(err) });
-=======
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
         exec.results[nodeId] = { nodeId, status: 'failed', error: message, durationMs: 0 };
         await persistWorkflowExecution(executionId, exec);
         return NextResponse.json({ success: false, nodeId, error: message });
->>>>>>> 41e7dd04083fba557192a82b01f13084d231af10
       }
     }
 

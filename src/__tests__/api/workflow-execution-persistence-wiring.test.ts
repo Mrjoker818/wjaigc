@@ -13,7 +13,7 @@ describe('workflow execution persistence wiring', () => {
     expect(source).toContain("type: 'workflow'");
     expect(source).toContain('persistWorkflowExecution');
     expect(source).toContain('auth.userId');
-    expect(source).toContain('execState.currentNodeId = node.id;\n    await persistWorkflowExecution(executionId, execState);');
-    expect(source).toContain('await persistWorkflowExecution(executionId, execState);\n        continue;');
+    expect(source).toMatch(/execState\.currentNodeId = node\.id;\r?\n    await persistWorkflowExecution\(executionId, execState\);/);
+    expect(source).toMatch(/await persistWorkflowExecution\(executionId, execState\);\r?\n        continue;/);
   });
 });
