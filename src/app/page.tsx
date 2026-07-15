@@ -3700,6 +3700,7 @@ function CanvasApp() {
     return (
       <NodeEditor
         workflow={nodeWorkflow}
+        userId={currentUser?.id}
         onBack={() => setAppMode('canvas')}
         onWorkflowChange={setNodeWorkflow}
         onOpenWorkflowHub={() => setAppMode('workflow-hub')}
@@ -3710,7 +3711,7 @@ function CanvasApp() {
     );
   }
   if (appMode === 'workflow-hub') {
-    return <WorkflowHub onBack={() => setAppMode('canvas')} onEditWorkflow={(wf) => { setNodeWorkflow(wf); setAppMode('node'); }} themeStyle={themeStyle} />;
+    return <WorkflowHub userId={currentUser?.id} onBack={() => setAppMode('canvas')} onEditWorkflow={(wf) => { setNodeWorkflow(wf); setAppMode('node'); }} themeStyle={themeStyle} />;
   }
 
   if (appMode === 'dashboard') {

@@ -7,7 +7,6 @@
 
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
-import { createReadStream } from 'node:fs';
 import zlib from 'node:zlib';
 
 // ============ 最小 PNG 生成 (1×1 白色 = 67 bytes, 16×16 彩色测试图) ============
@@ -95,7 +94,6 @@ const MOCK_RESPONSES = {
   },
   
   'POST /v1/images/generations': (body) => {
-    const size = body.size || '1024x1024';
     const n = body.n || 1;
     const images = [];
     for (let i = 0; i < n; i++) {
@@ -113,7 +111,7 @@ const MOCK_RESPONSES = {
     };
   },
 
-  'POST /v1/images/edits': (body) => {
+  'POST /v1/images/edits': () => {
     return {
       created: Math.floor(Date.now() / 1000),
       data: [{
@@ -155,7 +153,7 @@ const MOCK_RESPONSES = {
   },
 
   // ---------- Gemini ----------
-  'POST /v1beta/models/:generateContent': (body) => {
+  'POST /v1beta/models/:generateContent': () => {
     return {
       candidates: [{
         content: {
@@ -171,7 +169,7 @@ const MOCK_RESPONSES = {
 
   // ---------- Video APIs ----------
   // Dashscope (Kling)
-  'POST /v1/services/aigc/video-generation/generation': (body) => {
+  'POST /v1/services/aigc/video-generation/generation': () => {
     return {
       output: { task_id: `mock-video-${randomUUID().slice(0, 8)}`, task_status: 'PENDING' },
       request_id: randomUUID().slice(0, 8)
@@ -188,7 +186,7 @@ const MOCK_RESPONSES = {
   },
 
   // Volcengine (Seedance/Doubao)
-  'POST /api/v3/contents/generations/tasks/submit': (body) => {
+  'POST /api/v3/contents/generations/tasks/submit': () => {
     return { id: `mock-video-${randomUUID().slice(0, 8)}`, status: 'queued' };
   },
   'GET /api/v3/contents/generations/tasks/:taskId': () => {
@@ -196,7 +194,7 @@ const MOCK_RESPONSES = {
   },
 
   // Minimax (Hailuo)
-  'POST /v1/video_generation': (body) => {
+  'POST /v1/video_generation': () => {
     return { task_id: `mock-video-${randomUUID().slice(0, 8)}`, status: 'pending' };
   },
   'GET /v1/query/video_generation_task': () => {
@@ -204,7 +202,7 @@ const MOCK_RESPONSES = {
   },
 
   // Fal
-  'POST /v1/fal/queue/submit': (body) => {
+  'POST /v1/fal/queue/submit': () => {
     return { request_id: `mock-${randomUUID().slice(0, 8)}`, status: 'IN_QUEUE' };
   },
   'GET /v1/fal/queue/:requestId/status': () => {
@@ -215,7 +213,7 @@ const MOCK_RESPONSES = {
   },
 
   // Vidu
-  'POST /v1/video/generate': (body) => {
+  'POST /v1/video/generate': () => {
     return { data: { task_id: `mock-video-${randomUUID().slice(0, 8)}` } };
   },
   'GET /v1/video/status': () => {
@@ -223,12 +221,12 @@ const MOCK_RESPONSES = {
   },
 
   // ---------- IOPaint ----------
-  'POST /api/paint': (body) => {
+  'POST /api/paint': () => {
     return { image: TEST_PNG_BASE64 };
   },
 
   // ---------- PearAPI ----------
-  'POST /api/photo-enhancer': (body) => {
+  'POST /api/photo-enhancer': () => {
     return {
       output_url: `http://localhost:${serverPort}/mock-image.png`,
       status: 'success'
@@ -236,7 +234,7 @@ const MOCK_RESPONSES = {
   },
 
   // ---------- 3D API ----------
-  'POST /v1/3d/generate': (body) => {
+  'POST /v1/3d/generate': () => {
     return { task_id: `mock-3d-${randomUUID().slice(0, 8)}`, status: 'pending' };
   },
   'GET /v1/3d/status': () => {
@@ -244,7 +242,7 @@ const MOCK_RESPONSES = {
   },
 
   // ---------- RemoveBG ----------
-  'POST /api/removebg': (body) => {
+  'POST /api/removebg': () => {
     return { data: TEST_PNG_BASE64 };
   },
 };

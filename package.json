@@ -12,7 +12,8 @@
     "lint:build": "eslint . --quiet",
     "validate": "pnpm run --parallel '/^(ts-check|lint:build)$/'",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "perf:check": "node scripts/benchmark-ui-interactions.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.958.0",

@@ -40,6 +40,7 @@ const ModelViewer3D = dynamic(() => import('@/components/model-viewer-3d'), { ss
 const VideoPlayer = dynamic(() => import('@/components/video-player'), { ssr: false });
 const VideoEditPanel = dynamic(() => import('@/components/video-edit-panel').then(m => ({ default: m.VideoEditPanel })), { ssr: false });
 const VideoCompareDialog = dynamic(() => import('@/components/video-compare-dialog'), { ssr: false });
+const MultiAngleSpherePreview = dynamic(() => import('@/components/canvas/MultiAngleSpherePreview').then(m => ({ default: m.MultiAngleSpherePreview })), { ssr: false });
 
 const PsdLayerEditor = lazy(() => import('@/components/psd-editor/PsdLayerEditor'));
 const AgentEditor = lazy(() => import('@/components/agent-editor').then(m => ({ default: m.AgentEditor })));
@@ -61,225 +62,6 @@ const Display3DPanel = lazy(() => import('@/components/display3d-panel'));
 // P1: 图层面板 + 版本历史面板
 const LayerPanel = lazy(() => import('@/components/layer-panel').then(m => ({ default: m.LayerPanel })));
 const VersionHistoryPanel = lazy(() => import('@/components/version-history-panel').then(m => ({ default: m.VersionHistoryPanel })));
-
-/* ====== Multi-Angle Sphere Preview (Canvas 2D) ====== */
-function MultiAngleSpherePreview({
-  imageUrl,
-  rotation,
-  tilt,
-  zoom,
-  isMonochrome,
-}: {
-  imageUrl: string;
-  rotation: number;
-  tilt: number;
-  zoom: number;
-  isMonochrome: boolean;
-}) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const imgDataRef = useRef<ImageData | null>(null);
-  const imgLoadingRef = useRef(false);
-
-  // Preload image pixel data
-  useEffect(() => {
-    if (imgLoadingRef.current) return;
-    imgLoadingRef.current = true;
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      const maxDim = 256;
-      const scale = Math.min(maxDim / img.width, maxDim / img.height, 1);
-      const w = Math.floor(img.width * scale);
-      const h = Math.floor(img.height * scale);
-      const offscreen = document.createElement('canvas');
-      offscreen.width = w;
-      offscreen.height = h;
-      const octx = offscreen.getContext('2d');
-      if (!octx) { imgLoadingRef.current = false; return; }
-      octx.drawImage(img, 0, 0, w, h);
-      try {
-        imgDataRef.current = octx.getImageData(0, 0, w, h);
-      } catch {
-        imgDataRef.current = null;
-      }
-      imgLoadingRef.current = false;
-    };
-    img.onerror = () => { imgLoadingRef.current = false; };
-    img.src = imageUrl;
-    return () => {
-      // Cancel pending image load on cleanup to prevent stale updates
-      img.onload = null;
-      img.onerror = null;
-      img.src = '';
-      imgLoadingRef.current = false;
-    };
-  }, [imageUrl]);
-
-  // Render sphere on canvas
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const W = canvas.width;
-    const H = canvas.height;
-    const R = Math.min(W, H) * 0.38;
-
-    ctx.clearRect(0, 0, W, H);
-
-    // Dark bg
-    ctx.fillStyle = isMonochrome ? '#f9fafb' : '#0d0d0d';
-    ctx.fillRect(0, 0, W, H);
-
-    const imgData = imgDataRef.current;
-    const yaw = (rotation / 90) * Math.PI * 0.5;  // -PI/2 to PI/2
-    const pitch = -(tilt / 60) * Math.PI * 0.5;   // negated: positive tilt = looking up (仰视)
-    const camDist = 2.5 / (zoom === 0 ? 0.7 : zoom === 2 ? 1.5 : 1.0);
-    void camDist;  // 特写=0.7, 标准=1.0, 广角=1.5
-
-    if (!imgData) {
-      // Draw placeholder sphere
-      ctx.beginPath();
-      ctx.arc(W / 2, H / 2, R, 0, Math.PI * 2);
-      ctx.strokeStyle = '#d4af37';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-      ctx.fillStyle = isMonochrome ? '#e5e7eb' : '#1a1a1a';
-      ctx.fill();
-      ctx.fillStyle = isMonochrome ? '#9ca3af' : '#555';
-      ctx.font = '11px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('加载中...', W / 2, H / 2 + 4);
-      return;
-    }
-
-    const srcW = imgData.width;
-    const srcH = imgData.height;
-    const src = imgData.data;
-    const cx = W / 2;
-    const cy = H / 2;
-
-    // Low-res rendering for performance
-    const scale = 0.4;
-    const rW = Math.floor(W * scale);
-    const rH = Math.floor(H * scale);
-    const rR = R * scale;
-    const rCx = rW / 2;
-    const rCy = rH / 2;
-
-    const outImg = ctx.createImageData(rW, rH);
-    const out = outImg.data;
-
-    const rR2 = rR * rR;
-
-    for (let py = 0; py < rH; py++) {
-      for (let px = 0; px < rW; px++) {
-        const dx = px - rCx;
-        const dy = py - rCy;
-        const d2 = dx * dx + dy * dy;
-        if (d2 > rR2) continue;
-
-        const dz = Math.sqrt(rR2 - d2);
-        // Normalize to unit sphere
-        const nx = dx / rR;
-        const ny = -dy / rR;
-        const nz = dz / rR;
-
-        // Apply inverse rotation (yaw then pitch)
-        const cosY = Math.cos(-yaw), sinY = Math.sin(-yaw);
-        const rx = nx * cosY + nz * sinY;
-        const rz2 = -nx * sinY + nz * cosY;
-        const cosP = Math.cos(-pitch), sinP = Math.sin(-pitch);
-        const ry = ny * cosP - rz2 * sinP;
-        const rz = ny * sinP + rz2 * cosP;
-
-        // Spherical to UV (equirectangular)
-        const u = Math.atan2(rx, rz) / (2 * Math.PI) + 0.5;
-        const v = Math.asin(Math.max(-1, Math.min(1, ry))) / Math.PI + 0.5;
-
-        // Sample texture
-        let sx = Math.floor(u * srcW);
-        const sy = Math.floor((1 - v) * srcH);
-        if (sx < 0) sx += srcW;
-        if (sx >= srcW) sx -= srcW;
-        const si = (Math.min(sy, srcH - 1) * srcW + sx) * 4;
-
-        // Diffuse lighting
-        const lightDir = { x: 0.3, y: 0.5, z: 0.8 };
-        const len = Math.sqrt(lightDir.x ** 2 + lightDir.y ** 2 + lightDir.z ** 2);
-        const lx = lightDir.x / len, ly = lightDir.y / len, lz = lightDir.z / len;
-        const diffuse = Math.max(0.15, nx * lx + ny * ly + nz * lz);
-
-        const idx = (py * rW + px) * 4;
-        out[idx] = Math.min(255, Math.round(src[si] * diffuse));
-        out[idx + 1] = Math.min(255, Math.round(src[si + 1] * diffuse));
-        out[idx + 2] = Math.min(255, Math.round(src[si + 2] * diffuse));
-        out[idx + 3] = 255;
-      }
-    }
-
-    // Draw low-res to offscreen, then scale up
-    const offCanvas = document.createElement('canvas');
-    offCanvas.width = rW;
-    offCanvas.height = rH;
-    const offCtx = offCanvas.getContext('2d');
-    if (offCtx) offCtx.putImageData(outImg, 0, 0);
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(offCanvas, 0, 0, rW, rH, 0, 0, W, H);
-
-    // Gold grid lines
-    ctx.strokeStyle = 'rgba(212,175,55,0.15)';
-    ctx.lineWidth = 1;
-    // Equator
-    ctx.beginPath();
-    ctx.ellipse(cx, cy, R, R * Math.abs(Math.cos(pitch)) * 0.3, 0, 0, Math.PI * 2);
-    ctx.stroke();
-    // Meridian
-    ctx.beginPath();
-    ctx.ellipse(cx, cy, R * Math.abs(Math.cos(yaw)) * 0.3, R, 0, 0, Math.PI * 2);
-    ctx.stroke();
-
-    // Camera indicator dot
-    const dotX = cx + Math.sin(yaw) * R * 0.85;
-    const dotY = cy - Math.sin(pitch) * R * 0.6;
-    ctx.beginPath();
-    ctx.arc(dotX, dotY, 5, 0, Math.PI * 2);
-    ctx.fillStyle = '#d4af37';
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(212,175,55,0.5)';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(dotX, dotY, 10, 0, Math.PI * 2);
-    ctx.stroke();
-
-    // Outer ring
-    ctx.beginPath();
-    ctx.arc(cx, cy, R + 2, 0, Math.PI * 2);
-    ctx.strokeStyle = 'rgba(212,175,55,0.2)';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-
-  }, [imageUrl, rotation, tilt, zoom, isMonochrome]);
-
-  return (
-    <div className="w-full h-full flex items-center justify-center relative">
-      <canvas
-        ref={canvasRef}
-        width={260}
-        height={196}
-        className="rounded-xl"
-        style={{ width: '100%', height: '100%' }}
-      />
-      <div className={`absolute bottom-2 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full text-xs ${isMonochrome ? 'bg-white/80 text-gray-500 border border-gray-200' : 'bg-black/60 text-muted-foreground border border-white/10'}`}>
-        {Math.abs(rotation) < 10 && Math.abs(tilt) < 10 ? '正面' :
-         rotation > 60 ? '左侧' : rotation < -60 ? '右侧' :
-         tilt > 25 ? '仰视' : tilt < -25 ? '俯视' : '斜视'}
-      </div>
-    </div>
-  );
-}
 
 export interface ImageGroup {
   id: string;
@@ -1048,6 +830,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [groupDragTarget, setGroupDragTarget] = useState<string | null>(null);
   const [groupDragStart, setGroupDragStart] = useState({ x: 0, y: 0 });
   const [groupDragOffset, setGroupDragOffset] = useState({ x: 0, y: 0 });
+  const groupDragOffsetRef = useRef({ x: 0, y: 0 });
+  const groupDragRafRef = useRef<number | null>(null);
   const groupDragReadyRef = useRef(false);
   const groupDragTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const removeRefFromGroupRef = useRef<(groupId: string, imageId: string) => void>(() => {});
@@ -1324,6 +1108,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const brushScaleRef = useRef<{ x: number; y: number }>({ x: 1, y: 1 });
   const brushStrokesRef = useRef<{ x: number; y: number }[]>([]); // Screen-space points for live preview
   const [brushStrokes, setBrushStrokes] = useState<{ x: number; y: number }[]>([]); // For re-render
+  const brushRafRef = useRef<number | null>(null);
   const [isDraggingRegion, setIsDraggingRegion] = useState(false);
 
   // Upscale state
@@ -1682,6 +1467,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [genGroupDragTarget, setGenGroupDragTarget] = useState<string | null>(null);
   const [genGroupDragStart, setGenGroupDragStart] = useState({ x: 0, y: 0 });
   const [genGroupDragOffset, setGenGroupDragOffset] = useState({ x: 0, y: 0 });
+  const genGroupDragOffsetRef = useRef({ x: 0, y: 0 });
+  const genGroupDragRafRef = useRef<number | null>(null);
   const genGroupDragReadyRef = useRef(false);
   const genGroupDragTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // HexCube 六面体组状态
@@ -1690,6 +1477,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [hexCubeDragTarget, setHexCubeDragTarget] = useState<string | null>(null);
   const [hexCubeDragStart, setHexCubeDragStart] = useState({ x: 0, y: 0 });
   const [hexCubeDragOffset, setHexCubeDragOffset] = useState({ x: 0, y: 0 });
+  const hexCubeDragOffsetRef = useRef({ x: 0, y: 0 });
+  const hexCubeDragRafRef = useRef<number | null>(null);
   const hexCubeDragReadyRef = useRef(false);
   const hexCubeDragTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [hexCube3dDragging, setHexCube3dDragging] = useState(false);
@@ -2781,7 +2570,12 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           const clampedScreenX = clampedX * zoom + viewOffset.x;
           const clampedScreenY = clampedY * zoom + viewOffset.y;
           brushStrokesRef.current.push({ x: clampedScreenX, y: clampedScreenY });
-          setBrushStrokes([...brushStrokesRef.current]);
+          if (brushRafRef.current === null) {
+            brushRafRef.current = requestAnimationFrame(() => {
+              brushRafRef.current = null;
+              setBrushStrokes([...brushStrokesRef.current]);
+            });
+          }
         }
         return;
       }
@@ -2949,20 +2743,38 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     if (groupDragTarget && groupDragReadyRef.current) {
       const offsetX = canvasPos.x - groupDragStart.x;
       const offsetY = canvasPos.y - groupDragStart.y;
-      setGroupDragOffset({ x: offsetX, y: offsetY });
+      groupDragOffsetRef.current = { x: offsetX, y: offsetY };
+      if (groupDragRafRef.current === null) {
+        groupDragRafRef.current = requestAnimationFrame(() => {
+          groupDragRafRef.current = null;
+          setGroupDragOffset(groupDragOffsetRef.current);
+        });
+      }
     }
 
     // GenGroup drag: only allow after long press (genGroupDragReadyRef)
     if (genGroupDragTarget && genGroupDragReadyRef.current) {
       const offsetX = canvasPos.x - genGroupDragStart.x;
       const offsetY = canvasPos.y - genGroupDragStart.y;
-      setGenGroupDragOffset({ x: offsetX, y: offsetY });
+      genGroupDragOffsetRef.current = { x: offsetX, y: offsetY };
+      if (genGroupDragRafRef.current === null) {
+        genGroupDragRafRef.current = requestAnimationFrame(() => {
+          genGroupDragRafRef.current = null;
+          setGenGroupDragOffset(genGroupDragOffsetRef.current);
+        });
+      }
     }
     // HexCube drag (screen coordinates for floating panel)
     if (hexCubeDragTarget && hexCubeDragReadyRef.current) {
       const offsetX = e.clientX - hexCubeDragStart.x;
       const offsetY = e.clientY - hexCubeDragStart.y;
-      setHexCubeDragOffset({ x: offsetX, y: offsetY });
+      hexCubeDragOffsetRef.current = { x: offsetX, y: offsetY };
+      if (hexCubeDragRafRef.current === null) {
+        hexCubeDragRafRef.current = requestAnimationFrame(() => {
+          hexCubeDragRafRef.current = null;
+          setHexCubeDragOffset(hexCubeDragOffsetRef.current);
+        });
+      }
     }
   }, [annotationMode, annotationRegionStart, editMode, screenToCanvas, isMiddlePanning, isPanning, boxSelectStart, resizingImage, resizeCorner, dragTarget, groupDragTarget, genGroupDragTarget, hexCubeDragTarget, annotations, images, annotationBrushSize, zoom, viewOffset.x, viewOffset.y, handleEditMouseMove, panStart.x, panStart.y, resizeStart.x, resizeStart.w, resizeStart.h, resizeStart.imgX, resizeStart.imgY, dragStart.x, dragStart.y, groupDragStart.x, groupDragStart.y, genGroupDragStart.x, genGroupDragStart.y, hexCubeDragStart.x, hexCubeDragStart.y]);
 
@@ -2980,6 +2792,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       brushDrawingAnnIdRef.current = null;
       brushCanvasRef.current = null;
       brushCtxRef.current = null;
+      if (brushRafRef.current !== null) {
+        cancelAnimationFrame(brushRafRef.current);
+        brushRafRef.current = null;
+      }
       brushStrokesRef.current = [];
       setBrushStrokes([]);
       // Focus the annotation input
@@ -3213,15 +3029,21 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
     // Group drag finish
     if (groupDragTarget) {
-      if (groupDragReadyRef.current && (groupDragOffset.x !== 0 || groupDragOffset.y !== 0)) {
+      const groupOffset = groupDragOffsetRef.current;
+      if (groupDragReadyRef.current && (groupOffset.x !== 0 || groupOffset.y !== 0)) {
         // Move all images in the group by the drag offset
         onImagesChange(images.map(img => {
           if (img.groupId === groupDragTarget) {
-            return { ...img, x: img.x + groupDragOffset.x, y: img.y + groupDragOffset.y };
+            return { ...img, x: img.x + groupOffset.x, y: img.y + groupOffset.y };
           }
           return img;
         }));
       }
+      if (groupDragRafRef.current !== null) {
+        cancelAnimationFrame(groupDragRafRef.current);
+        groupDragRafRef.current = null;
+      }
+      groupDragOffsetRef.current = { x: 0, y: 0 };
       setGroupDragTarget(null);
       setGroupDragOffset({ x: 0, y: 0 });
       groupDragReadyRef.current = false;
@@ -3233,9 +3055,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
     // GenGroup drag finish
     if (genGroupDragTarget) {
-      if (genGroupDragReadyRef.current && (genGroupDragOffset.x !== 0 || genGroupDragOffset.y !== 0)) {
-        const dx = genGroupDragOffset.x;
-        const dy = genGroupDragOffset.y;
+      const genGroupOffset = genGroupDragOffsetRef.current;
+      if (genGroupDragReadyRef.current && (genGroupOffset.x !== 0 || genGroupOffset.y !== 0)) {
+        const dx = genGroupOffset.x;
+        const dy = genGroupOffset.y;
         // Move all reference images in the gen group
         const updatedImages = images.map(img => {
           const ref = genGroupsRef.current.find(g => g.id === genGroupDragTarget)?.sourceImageIds.includes(img.id);
@@ -3267,6 +3090,11 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           return g;
         }));
       }
+      if (genGroupDragRafRef.current !== null) {
+        cancelAnimationFrame(genGroupDragRafRef.current);
+        genGroupDragRafRef.current = null;
+      }
+      genGroupDragOffsetRef.current = { x: 0, y: 0 };
       setGenGroupDragTarget(null);
       setGenGroupDragOffset({ x: 0, y: 0 });
       genGroupDragReadyRef.current = false;
@@ -3277,15 +3105,21 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     }
 
     // HexCube drag end (convert screen offset to canvas offset)
-    if (hexCubeDragTarget && hexCubeDragReadyRef.current && hexCubeDragOffset.x !== 0 && hexCubeDragOffset.y !== 0) {
+    const hexCubeOffset = hexCubeDragOffsetRef.current;
+    if (hexCubeDragTarget && hexCubeDragReadyRef.current && (hexCubeOffset.x !== 0 || hexCubeOffset.y !== 0)) {
       setHexCubeGroups(prev => prev.map(g => {
         if (g.id === hexCubeDragTarget) {
-          return { ...g, position: { x: g.position.x + hexCubeDragOffset.x / zoom, y: g.position.y + hexCubeDragOffset.y / zoom } };
+          return { ...g, position: { x: g.position.x + hexCubeOffset.x / zoom, y: g.position.y + hexCubeOffset.y / zoom } };
         }
         return g;
       }));
     }
     if (hexCubeDragTarget) {
+      if (hexCubeDragRafRef.current !== null) {
+        cancelAnimationFrame(hexCubeDragRafRef.current);
+        hexCubeDragRafRef.current = null;
+      }
+      hexCubeDragOffsetRef.current = { x: 0, y: 0 };
       setHexCubeDragTarget(null);
       setHexCubeDragOffset({ x: 0, y: 0 });
       hexCubeDragReadyRef.current = false;
@@ -3296,7 +3130,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     }
 
     mouseDownOnImageRef.current = false;
-  }, [annotationRegionStart, annotationMode, isDraggingRegion, annotationRegionCurrent, editMode, isMiddlePanning, isPanning, boxSelectStart, boxSelectEnd, resizingImage, resizePreview, dragTarget, groupDragTarget, genGroupDragTarget, hexCubeDragTarget, hexCubeDragOffset.x, hexCubeDragOffset.y, hitTestImage, images, annotationTool, screenToCanvas, handleEditMouseUp, genGroups, onImagesChange, dragOffset.x, dragOffset.y, selectedIds, groupDragOffset.x, groupDragOffset.y, genGroupDragOffset.x, genGroupDragOffset.y, zoom]);
+  }, [annotationRegionStart, annotationMode, isDraggingRegion, annotationRegionCurrent, editMode, isMiddlePanning, isPanning, boxSelectStart, boxSelectEnd, resizingImage, resizePreview, dragTarget, groupDragTarget, genGroupDragTarget, hexCubeDragTarget, hitTestImage, images, annotationTool, screenToCanvas, handleEditMouseUp, genGroups, onImagesChange, dragOffset.x, dragOffset.y, selectedIds, zoom]);
 
   const handleMouseLeave = useCallback(() => {
     if (editMode !== 'none') {

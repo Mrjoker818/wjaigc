@@ -2,7 +2,9 @@ import path from 'path';
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
-  // outputFileTracingRoot: path.resolve(__dirname),
+  turbopack: {
+    root: path.resolve(__dirname),
+  },
   /* config options here */
   allowedDevOrigins: ['*.dev.coze.site', '127.0.0.1', 'localhost'],
   images: {

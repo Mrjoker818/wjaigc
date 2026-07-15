@@ -171,20 +171,6 @@ async function cleanupMockProviders() {
   console.log(`  ✅ 已清理 ${cleaned}/${registeredProviderIds.length} 个Mock提供商`);
 }
 
-async function pollTask(taskId) {
-  const start = Date.now();
-  while (Date.now() - start < CONFIG.pollTimeout) {
-    try {
-      const r = await request('POST', `${CONFIG.target}/api/poll-task`, { taskId });
-      if (r.json?.status === 'completed' || r.json?.status === 'failed' || r.json?.status === 'cancelled') {
-        return r.json;
-      }
-    } catch {}
-    await new Promise(r => setTimeout(r, CONFIG.pollInterval));
-  }
-  return null;
-}
-
 // ============== 测试断言 ==============
 
 function assert(testName, condition, message = '') {
@@ -728,7 +714,7 @@ async function main() {
     console.log('  📝 部分测试可能因缺少认证而失败\n');
   }
 
-  const ctx = { token: '', cookie: CONFIG.authCookie || '', loggedIn: !!CONFIG.authCookie, lastTaskId: null };
+  const ctx = { token, cookie: CONFIG.authCookie || '', loggedIn: !!token || !!CONFIG.authCookie, lastTaskId: null };
 
   // Step 4: 注册Mock提供商
   if (ctx.loggedIn && mockAvailable) {

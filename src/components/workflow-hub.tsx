@@ -1,59 +1,12 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   Workflow,
   createEmptyWorkflow
 } from '@/lib/workflow-engine';
 
 // ==================== 双主题 ====================
-
-// ==================== Mock 数据 ====================
-
-const MOCK_WORKFLOWS: Workflow[] = [
-  {
-    id: 'wf-1', name: '人像精修流程', version: 'v2.1', status: 'idle',
-    nodes: [], connections: [], createdAt: Date.now() - 86400000 * 7, updatedAt: Date.now() - 3600000,
-    description: '一键完成人像修图：移除背景→调色→无损放大',
-    thumbnailUrl: '', favorited: true,
-    stats: { totalRuns: 89, avgDurationMs: 12400, successRate: 0.96 },
-  },
-  {
-    id: 'wf-2', name: '产品图批量处理', version: 'v1.3', status: 'idle',
-    nodes: [], connections: [], createdAt: Date.now() - 86400000 * 14, updatedAt: Date.now() - 86400000 * 2,
-    description: '批量处理电商产品图：白底合成→调色→多尺寸导出',
-    thumbnailUrl: '', favorited: false,
-    stats: { totalRuns: 234, avgDurationMs: 8200, successRate: 0.94 },
-  },
-  {
-    id: 'wf-3', name: 'AI创意海报', version: 'v1.0', status: 'idle',
-    nodes: [], connections: [], createdAt: Date.now() - 86400000 * 3, updatedAt: Date.now() - 86400000,
-    description: 'AI生成创意海报：Agent自动决策风格→生成→排版',
-    thumbnailUrl: '', favorited: true,
-    stats: { totalRuns: 12, avgDurationMs: 32000, successRate: 0.83 },
-  },
-  {
-    id: 'wf-4', name: '矢量Logo生成', version: 'v1.2', status: 'idle',
-    nodes: [], connections: [], createdAt: Date.now() - 86400000 * 5, updatedAt: Date.now() - 43200000,
-    description: '生成Logo→矢量化→多格式导出',
-    thumbnailUrl: '', favorited: false,
-    stats: { totalRuns: 56, avgDurationMs: 15600, successRate: 0.91 },
-  },
-  {
-    id: 'wf-5', name: '动漫风格转换', version: 'v1.1', status: 'idle',
-    nodes: [], connections: [], createdAt: Date.now() - 86400000 * 10, updatedAt: Date.now() - 172800000,
-    description: '将照片转为动漫风格：风格分析→条件分支→生成',
-    thumbnailUrl: '', favorited: true,
-    stats: { totalRuns: 178, avgDurationMs: 9800, successRate: 0.97 },
-  },
-  {
-    id: 'wf-6', name: '证件照处理', version: 'v3.0', status: 'idle',
-    nodes: [], connections: [], createdAt: Date.now() - 86400000 * 30, updatedAt: Date.now() - 7200000,
-    description: '证件照自动化：移除背景→白底合成→调色→1寸/2寸裁切',
-    thumbnailUrl: '', favorited: true,
-    stats: { totalRuns: 567, avgDurationMs: 6400, successRate: 0.99 },
-  },
-];
 
 const MOCK_TEMPLATES = [
   { id: 'tpl-1', name: 'AI修图大师', author: 'Mr.joker', users: 1234, rating: 4.8, desc: '智能识别图片内容，自动选择最佳修图方案', tags: ['agent', 'condition', 'loop'] as const },
@@ -157,6 +110,7 @@ interface WorkflowHubProps {
   onEditWorkflow: (wf: Workflow) => void;
   onRunWorkflow?: (wf: Workflow) => void;
   themeStyle?: 'gold' | 'monochrome';
+  userId?: string;
 }
 
 const hubThemes: Record<string, Record<string, string>> = {
@@ -202,13 +156,48 @@ const hubThemes: Record<string, Record<string, string>> = {
   },
 };
 
-export default function WorkflowHub({ onBack, onEditWorkflow, onRunWorkflow, themeStyle = 'gold' }: WorkflowHubProps) {
+export default function WorkflowHub({ onBack, onEditWorkflow, onRunWorkflow, themeStyle = 'gold', userId }: WorkflowHubProps) {
   const T = hubThemes[themeStyle];
-  const [workflows, setWorkflows] = useState(MOCK_WORKFLOWS);
+  const [workflows, setWorkflows] = useState<Workflow[]>([]);
+  const [workflowsLoading, setWorkflowsLoading] = useState(false);
+  const [workflowsError, setWorkflowsError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState('全部');
   const [shareUrl] = useState('https://wujie.ai/wf/share/abc123');
   const [copied, setCopied] = useState(false);
+
+  const loadWorkflows = useCallback(async () => {
+    if (!userId) {
+      setWorkflows([]);
+      return;
+    }
+    setWorkflowsLoading(true);
+    setWorkflowsError(null);
+    try {
+      const response = await fetch('/api/workflow/save');
+      if (!response.ok) throw new Error('加载工作流失败');
+      const data = await response.json() as { workflows?: Workflow[] };
+      setWorkflows(Array.isArray(data.workflows) ? data.workflows : []);
+    } catch {
+      setWorkflowsError('工作流加载失败，请重试');
+    } finally {
+      setWorkflowsLoading(false);
+    }
+  }, [userId]);
+
+  useEffect(() => {
+    void loadWorkflows();
+  }, [loadWorkflows]);
+
+  const persistWorkflow = useCallback(async (workflow: Workflow): Promise<boolean> => {
+    if (!userId) return false;
+    const response = await fetch('/api/workflow/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, workflow }),
+    });
+    return response.ok;
+  }, [userId]);
 
   const filtered = workflows.filter(wf =>
     !search || wf.name.includes(search) || wf.description?.includes(search)
@@ -228,8 +217,16 @@ export default function WorkflowHub({ onBack, onEditWorkflow, onRunWorkflow, the
   }, [workflows, onEditWorkflow, onRunWorkflow]);
 
   const handleToggleFav = useCallback((id: string) => {
-    setWorkflows(prev => prev.map(wf => wf.id === id ? { ...wf, favorited: !wf.favorited } : wf));
-  }, []);
+    const current = workflows.find(workflow => workflow.id === id);
+    if (!current) return;
+    const updated = { ...current, favorited: !current.favorited, updatedAt: Date.now() };
+    setWorkflows(prev => prev.map(workflow => workflow.id === id ? updated : workflow));
+    void persistWorkflow(updated).then(saved => {
+      if (!saved) setWorkflows(prev => prev.map(workflow => workflow.id === id ? current : workflow));
+    }).catch(() => {
+      setWorkflows(prev => prev.map(workflow => workflow.id === id ? current : workflow));
+    });
+  }, [persistWorkflow, workflows]);
 
   const handleCreate = useCallback(() => {
     const wf = createEmptyWorkflow('新工作流');
@@ -309,7 +306,12 @@ export default function WorkflowHub({ onBack, onEditWorkflow, onRunWorkflow, the
                 className="w-40 rounded-md px-2.5 py-1 text-xs focus:outline-none" style={{ backgroundColor: T.cardBg, border: `1px solid ${T.border}`, color: T.primaryText }} />
             </div>
             <div className="grid grid-cols-2 gap-4">
-              {filtered.map(wf => (
+              {workflowsLoading && <p className="col-span-2 text-sm" style={{ color: T.dimText }}>正在加载工作流...</p>}
+              {!workflowsLoading && workflowsError && <p className="col-span-2 text-sm" style={{ color: '#f85149' }}>{workflowsError}</p>}
+              {!workflowsLoading && !workflowsError && filtered.length === 0 && (
+                <p className="col-span-2 text-sm" style={{ color: T.dimText }}>暂无工作流，点击“新建工作流”开始创建。</p>
+              )}
+              {!workflowsLoading && !workflowsError && filtered.map(wf => (
                 <WorkflowCard key={wf.id} wf={wf} onEdit={handleEdit} onRun={handleRun} onToggleFav={handleToggleFav} theme={T} />
               ))}
             </div>

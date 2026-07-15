@@ -551,6 +551,7 @@ const WORKFLOW_PRESETS: WorkflowPreset[] = [
 
 interface NodeEditorProps {
   workflow?: WorkflowData | null;
+  userId?: string;
   onBack?: () => void;
   onWorkflowChange?: (wf: WorkflowData | null) => void;
   onOpenWorkflowHub?: () => void;
@@ -710,7 +711,7 @@ const nodeThemes = {
 
 // 底部内容面板 - 显示项目图片，支持拖拽到画布创建节点
 
-export default function NodeEditor({ workflow, onBack, onWorkflowChange, canvasImages, themeStyle = 'gold', onAddImages }: NodeEditorProps) {
+export default function NodeEditor({ workflow, userId, onBack, onWorkflowChange, canvasImages, themeStyle = 'gold', onAddImages }: NodeEditorProps) {
   const T = nodeThemes[themeStyle];
   // CSS自定义属性，供Tailwind中 var(--ne-xxx) 引用
   const neVars = {
@@ -779,6 +780,8 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, canvasI
   // 拖动状态使用ref避免每次mousemove触发重渲染导致闪烁
   const draggingNodeRef = useRef<string | null>(null);
   const dragOffsetRef = useRef({ x: 0, y: 0 });
+  const nodeDragPositionRef = useRef<{ id: string; x: number; y: number } | null>(null);
+  const nodeDragRafRef = useRef<number | null>(null);
   const isDraggingRef = useRef(false); // 标记正在拖动，跳过历史快照
   const [draggingConn, setDraggingConn] = useState<DraggingConn | null>(null);
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 0.8 });
@@ -1546,6 +1549,13 @@ ${contextInfo}
 
   // ─── 画布交互 ───
 
+  const applyNodeDragPosition = useCallback((position: { id: string; x: number; y: number }) => {
+    setWf(prev => ({
+      ...prev,
+      nodes: prev.nodes.map(node => node.id === position.id ? { ...node, x: position.x, y: position.y } : node),
+    }));
+  }, [setWf]);
+
   const handleCanvasMouseDown = useCallback((e: React.MouseEvent) => {
     if (e.button === 1 || (e.button === 0 && e.altKey)) {
       // 中键或Alt+左键 = 平移
@@ -1579,10 +1589,14 @@ ${contextInfo}
       const my = (e.clientY - canvasRect.top - vp.y) / vp.zoom;
       const nodeId = draggingNodeRef.current;
       const offset = dragOffsetRef.current;
-      setWf(prev => ({
-        ...prev,
-        nodes: prev.nodes.map(n => n.id === nodeId ? { ...n, x: mx - offset.x, y: my - offset.y } : n),
-      }));
+      nodeDragPositionRef.current = { id: nodeId, x: mx - offset.x, y: my - offset.y };
+      if (nodeDragRafRef.current === null) {
+        nodeDragRafRef.current = requestAnimationFrame(() => {
+          nodeDragRafRef.current = null;
+          const position = nodeDragPositionRef.current;
+          if (position) applyNodeDragPosition(position);
+        });
+      }
     } else if (draggingConn) {
       const canvasRect = canvasContainerRef.current?.getBoundingClientRect();
       if (!canvasRect) return;
@@ -1599,11 +1613,19 @@ ${contextInfo}
       const my = (e.clientY - canvasRect.top - vp.y) / vp.zoom;
       setBoxSelect(prev => prev ? { ...prev, endX: mx, endY: my } : null);
     }
-  }, [isPanning, draggingConn, boxSelect, panStart.vx, panStart.x, panStart.vy, panStart.y, setWf]);
+  }, [applyNodeDragPosition, isPanning, draggingConn, boxSelect, panStart.vx, panStart.x, panStart.vy, panStart.y]);
 
   const handleCanvasMouseUp = useCallback(() => {
     setIsPanning(false);
     if (draggingNodeRef.current) {
+      if (nodeDragRafRef.current !== null) {
+        cancelAnimationFrame(nodeDragRafRef.current);
+        nodeDragRafRef.current = null;
+      }
+      if (nodeDragPositionRef.current) {
+        applyNodeDragPosition(nodeDragPositionRef.current);
+      }
+      nodeDragPositionRef.current = null;
       // 拖动结束：标记结束，记录一次历史快照，通知外部
       draggingNodeRef.current = null;
       isDraggingRef.current = false;
@@ -1650,7 +1672,7 @@ ${contextInfo}
     }
     setBoxSelect(null);
     isBoxSelectingRef.current = false;
-  }, [boxSelect, setWf, onWorkflowChange, wf.nodes]);
+  }, [applyNodeDragPosition, boxSelect, setWf, onWorkflowChange, wf.nodes]);
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
@@ -1951,7 +1973,7 @@ ${contextInfo}
   const handleSaveWorkflow = useCallback(async () => {
     setSaveStatus('saving');
     try {
-      const userId = localStorage.getItem('wujie_user_id') || 'anonymous';
+      if (!userId) throw new Error('未登录');
       const res = await fetch('/api/workflow/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1963,7 +1985,7 @@ ${contextInfo}
       setSaveStatus('error');
       setTimeout(() => setSaveStatus('idle'), 2000);
     }
-  }, [wf]);
+  }, [userId, wf]);
 
   // ─── 图片上传 ───
 
