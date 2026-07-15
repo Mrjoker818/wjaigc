@@ -7205,7 +7205,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       if (data.taskId) {
         // Async task - need to poll for result
         updateProcessingFrame(placeholderId, { progress: 25, status: '3D 任务已提交，等待 AI 生成...' });
-        const maxAttempts = 300; // 最多轮询300次（600秒，兼容token link等慢速API）
+        const maxAttempts = 1440; // 最多轮询1440次（7200秒/120分钟，兼容3D等超慢速API）
         for (let i = 0; i < maxAttempts; i++) {
           // 动态更新进度和状态
           const elapsed = (i + 1) * 5;
