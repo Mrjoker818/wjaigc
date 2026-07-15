@@ -29,7 +29,7 @@ echo "可用模型: lama (默认) / anime-lama / zits / mat / fcf / ldm / manga 
 echo ""
 echo "注意：如使用 Python 子进程模式（推荐），无需启动此服务"
 echo "  擦除: 自动调用 scripts/iopaint_erase.py"
-echo "  去背景: 自动调用 scripts/iopaint_removebg.py"
+echo "  去背景: 使用独立 rembg CPU 引擎（scripts/rembg_remove_background.py）"
 
 iopaint start \
   --model="$MODEL" \

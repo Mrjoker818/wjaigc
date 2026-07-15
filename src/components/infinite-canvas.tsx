@@ -10,9 +10,15 @@ import {
   Move, ZoomIn, ZoomOut, Maximize2, Hand, Info,
   FileText, X, ChevronDown, ArrowUpFromLine, Eraser,
   Scissors, Wand2, Expand, Layers, Paintbrush,
+<<<<<<< HEAD
   Check, MousePointer2, BoxSelect, Upload, Eye, Sparkles,
   RotateCcw, Minus, Type, GitMerge, GitBranch, Wrench, ChevronRight,
   Settings, Palette, Users, HelpCircle, Box as BoxIcon, Camera, ImagePlus, SlidersHorizontal, Shield, FolderOpen, Contrast, Minimize2, Frame, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, MoreHorizontal, Brush, ShoppingBag, Scan, GripVertical, Building2, FileImage, Workflow, LayoutGrid, LayoutDashboard, ChevronsRight, ChevronsLeft, Boxes, MessageCircle, Play, Pause, Package, Store, Globe, Volume2, Loader2, Film, Mic2, Music, FileVideo
+=======
+  Check, MousePointer2, Upload, Sparkles,
+  RotateCcw, Minus, GitMerge, GitBranch,
+  Settings, Palette, Users, HelpCircle, Box as BoxIcon, Camera, ImagePlus, Shield, FolderOpen, Contrast, PenTool, Pencil, Settings2, ChevronUp, Bot, Heart, ShoppingBag, Scan, GripVertical, Building2, FileImage, Workflow, LayoutGrid, LayoutDashboard, ChevronsRight, ChevronsLeft, Boxes, MessageCircle, Play, Pause, Package, Store, Globe, Volume2, Loader2, Film, UserRoundCheck
+>>>>>>> 41e7dd04083fba557192a82b01f13084d231af10
 } from 'lucide-react';
 import type { CanvasAnnotation, AnnotationRegion, AnnotationTool, AnnotationExecutionResult } from '@/lib/canvas-annotation';
 import { createAnnotation, hitTestAnnotationTarget, buildAnnotationPrompt, mergeAnnotationsForImage, ANNOTATION_COLORS, ANNOTATION_COLORS_MONO, computeAnnotationRegion, BRUSH_COLOR_PALETTE, applyMergedAnnotationExecutionResult } from '@/lib/canvas-annotation';
@@ -29,7 +35,20 @@ import { getHexCubeInitialPosition } from '@/lib/hex-cube-position';
 import { buildHexCubeGenerationInput } from '@/lib/hex-cube-generation';
 import { resolveRefineEngineInitialImageUrl } from '@/lib/refine-engine-image';
 import { translateApiError } from '@/lib/api-error-translator';
+<<<<<<< HEAD
 import { APP_VERSION_LABEL } from '@/config/app-meta';
+=======
+import { } from '@/config/app-meta';
+import { shouldSuspendCanvasVirtualization } from '@/lib/canvas-pan-virtualization';
+import { applyCanvasGenerationResults } from '@/lib/canvas-generation-results';
+import {
+  THREE_D_POLL_INTERVAL_MS,
+  THREE_D_TASK_TIMEOUT_MS,
+  isMeshyThreeDProvider,
+} from '@/lib/three-d-task-performance';
+import { THREE_O_TWO_UPSCALE_MODELS, type ThreeOhTwoUpscaleModelId } from '@/lib/302-upscale-models';
+import { DISPLAY_DECOMPOSE_SUPPORTED_RATIOS, type DisplayDecomposeRatio } from '@/lib/display-decompose';
+>>>>>>> 41e7dd04083fba557192a82b01f13084d231af10
 import OhMyPrompt from '@/components/oh-my-prompt';
 import { CanvasHelpModal } from '@/components/canvas/CanvasHelpModal';
 import dynamic from 'next/dynamic';
@@ -38,6 +57,7 @@ const ModelViewer3D = dynamic(() => import('@/components/model-viewer-3d'), { ss
 const VideoPlayer = dynamic(() => import('@/components/video-player'), { ssr: false });
 const VideoEditPanel = dynamic(() => import('@/components/video-edit-panel').then(m => ({ default: m.VideoEditPanel })), { ssr: false });
 const VideoCompareDialog = dynamic(() => import('@/components/video-compare-dialog'), { ssr: false });
+const MultiAngleSpherePreview = dynamic(() => import('@/components/canvas/MultiAngleSpherePreview').then(m => ({ default: m.MultiAngleSpherePreview })), { ssr: false });
 
 const PsdLayerEditor = lazy(() => import('@/components/psd-editor/PsdLayerEditor'));
 const AgentEditor = lazy(() => import('@/components/agent-editor').then(m => ({ default: m.AgentEditor })));
@@ -46,6 +66,7 @@ import { type CanvasConnection, type ConnectionRelationType, createAutoConnectio
 import { EngineSelectDialog, type EditEngine } from '@/components/engine-select-dialog';
 const BrandEcommercePanel = lazy(() => import('@/components/brand-ecommerce-panel').then(m => ({ default: m.BrandEcommercePanel })));
 const RefineEnginePanel = lazy(() => import('@/components/refine-engine-panel'));
+const HumanRepairPanel = lazy(() => import('@/components/human-repair-panel'));
 const FontDesignPanel = lazy(() => import('@/components/font-design-panel'));
 const BrandFactoryPanel = lazy(() => import('@/components/brand-factory-panel'));
 const LogoSkillPanel = lazy(() => import('@/components/logo-skill-panel'));
@@ -60,6 +81,7 @@ const Display3DPanel = lazy(() => import('@/components/display3d-panel'));
 const LayerPanel = lazy(() => import('@/components/layer-panel').then(m => ({ default: m.LayerPanel })));
 const VersionHistoryPanel = lazy(() => import('@/components/version-history-panel').then(m => ({ default: m.VersionHistoryPanel })));
 
+<<<<<<< HEAD
 /* ====== Multi-Angle Sphere Preview (Canvas 2D) ====== */
 function MultiAngleSpherePreview({
   imageUrl,
@@ -279,6 +301,8 @@ function MultiAngleSpherePreview({
   );
 }
 
+=======
+>>>>>>> 41e7dd04083fba557192a82b01f13084d231af10
 export interface ImageGroup {
   id: string;
   name: string;
@@ -632,6 +656,8 @@ export function InfiniteCanvas({
   // Refine engine state
   const [showRefineEngine, setShowRefineEngine] = useState(false);
   const [refineEngineImageUrl, setRefineEngineImageUrl] = useState<string>('');
+  const [showHumanRepair, setShowHumanRepair] = useState(false);
+  const [humanRepairImageUrl, setHumanRepairImageUrl] = useState<string>('');
   const [agentSelectingImage, setAgentSelectingImage] = useState(false);
 
   // Font design state
@@ -1031,6 +1057,8 @@ export function InfiniteCanvas({
   const [groupDragTarget, setGroupDragTarget] = useState<string | null>(null);
   const [groupDragStart, setGroupDragStart] = useState({ x: 0, y: 0 });
   const [groupDragOffset, setGroupDragOffset] = useState({ x: 0, y: 0 });
+  const groupDragOffsetRef = useRef({ x: 0, y: 0 });
+  const groupDragRafRef = useRef<number | null>(null);
   const groupDragReadyRef = useRef(false);
   const groupDragTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -1231,7 +1259,7 @@ export function InfiniteCanvas({
     if (typeof window !== 'undefined') {
       try { const saved = localStorage.getItem('wujie_toolbar_order'); if (saved) return JSON.parse(saved); } catch {}
     }
-    return ['放大','移除背景','SVG智能描摹','擦除','蒙版','调色','编辑元素','多角度','图转3D工厂','扩展','裁切','全景生成','精修引擎','语言修图','Agent编排','下载'];
+    return ['放大','移除背景','SVG智能描摹','美陈拆解','擦除','蒙版','调色','编辑元素','多角度','图转3D工厂','扩展','裁切','全景生成','精修引擎','人物精修大师','语言修图','Agent编排','下载'];
   });
   const [toolbarHiddenItems, setToolbarHiddenItems] = useState<Set<string>>(() => {
     if (typeof window !== 'undefined') {
@@ -1318,6 +1346,7 @@ export function InfiniteCanvas({
   const brushScaleRef = useRef<{ x: number; y: number }>({ x: 1, y: 1 });
   const brushStrokesRef = useRef<{ x: number; y: number }[]>([]); // Screen-space points for live preview
   const [brushStrokes, setBrushStrokes] = useState<{ x: number; y: number }[]>([]); // For re-render
+  const brushRafRef = useRef<number | null>(null);
   const [isDraggingRegion, setIsDraggingRegion] = useState(false);
 
   // Upscale state
@@ -1328,6 +1357,7 @@ export function InfiniteCanvas({
   const [upscalePreset, setUpscalePreset] = useState<'2k' | '4k' | '8k'>('2k');
   const [showUpscalePresetMenu, setShowUpscalePresetMenu] = useState(false);
   const [upscaleMode, setUpscaleMode] = useState<'lossless' | 'ai'>('lossless'); // 无损放大 / AI放大
+  const [selected302UpscaleModel, setSelected302UpscaleModel] = useState<ThreeOhTwoUpscaleModelId>('302-super-upscale-v2');
   // Engine preference for tools: auto/ai/local (persisted in localStorage)
   const getEnginePref = (key: string): 'auto' | 'ai' | 'local' => {
     try { const v = localStorage.getItem(`wujie_engine_${key}`); if (v === 'ai' || v === 'local' || v === 'auto') return v; } catch {}
@@ -1359,8 +1389,16 @@ export function InfiniteCanvas({
     if (!showSvgTracePanel) svgTraceFixedPosRef.current = null;
   }, [showSvgTracePanel]);
   const [svgTraceBwThreshold, setSvgTraceBwThreshold] = useState(50);
+<<<<<<< HEAD
   const [svgTraceBwTurdSize, setSvgTraceBwTurdSize] = useState(2);
   const [svgTraceBwInvert, setSvgTraceBwInvert] = useState(false);
+=======
+  const [svgTraceBwTurdSize, ] = useState(2);
+  const [svgTraceBwInvert, ] = useState(false);
+  const [showDisplayDecomposePanel, setShowDisplayDecomposePanel] = useState(false);
+  const [displayDecomposeRatio, setDisplayDecomposeRatio] = useState<DisplayDecomposeRatio>('16:9');
+  const [displayDecomposeProcessing, setDisplayDecomposeProcessing] = useState(false);
+>>>>>>> 41e7dd04083fba557192a82b01f13084d231af10
 
   // Check ONNX upscale availability on mount
   useEffect(() => {
@@ -1457,7 +1495,7 @@ export function InfiniteCanvas({
   }, [videoDubTarget, dubText, dubVoice, dubSpeed, onAddImages]);
 
   // Whether any floating panel is open (used to auto-hide connections & image toolbar)
-  const anyPanelOpen = showSvgTracePanel || showAgentEditor || showBrandEcommerce || showFontDesign || showBrandFactory || showSceneStudio || showBrandPackaging || showDisplay3D || showVideoEditPanel || showCanvasGenerator || showRefineEngine || showLogoSkill || showAiPsd || showStickerAssistant || showVideoDubPanel;
+  const anyPanelOpen = showSvgTracePanel || showAgentEditor || showBrandEcommerce || showFontDesign || showBrandFactory || showSceneStudio || showBrandPackaging || showDisplay3D || showVideoEditPanel || showCanvasGenerator || showRefineEngine || showHumanRepair || showLogoSkill || showAiPsd || showStickerAssistant || showVideoDubPanel;
 
   // Video tools handler
   const handleVideoTool = async (action: 'to-gif' | 'extract-cover' | 'compress' | 'extract-frame', image: CanvasImage, timestamp?: number) => {
@@ -1634,7 +1672,7 @@ export function InfiniteCanvas({
   // Erase model selection (LaMa / ZITS / Anime-Lama)
   const [eraseModelId, setEraseModelId] = useState<string>('lama');
   // RemoveBG model selection
-  const [removeBgModelId, setRemoveBgModelId] = useState<string>('u2net');
+  const [removeBgModelId, setRemoveBgModelId] = useState<string>('birefnet-general');
   // RemoveBG model picker dialog
   const [showRemoveBgPicker, setShowRemoveBgPicker] = useState(false);
   // Floating window canvas zoom/pan
@@ -1676,6 +1714,8 @@ export function InfiniteCanvas({
   const [genGroupDragTarget, setGenGroupDragTarget] = useState<string | null>(null);
   const [genGroupDragStart, setGenGroupDragStart] = useState({ x: 0, y: 0 });
   const [genGroupDragOffset, setGenGroupDragOffset] = useState({ x: 0, y: 0 });
+  const genGroupDragOffsetRef = useRef({ x: 0, y: 0 });
+  const genGroupDragRafRef = useRef<number | null>(null);
   const genGroupDragReadyRef = useRef(false);
   const genGroupDragTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // HexCube 六面体组状态
@@ -1684,6 +1724,8 @@ export function InfiniteCanvas({
   const [hexCubeDragTarget, setHexCubeDragTarget] = useState<string | null>(null);
   const [hexCubeDragStart, setHexCubeDragStart] = useState({ x: 0, y: 0 });
   const [hexCubeDragOffset, setHexCubeDragOffset] = useState({ x: 0, y: 0 });
+  const hexCubeDragOffsetRef = useRef({ x: 0, y: 0 });
+  const hexCubeDragRafRef = useRef<number | null>(null);
   const hexCubeDragReadyRef = useRef(false);
   const hexCubeDragTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [hexCube3dDragging, setHexCube3dDragging] = useState(false);
@@ -2775,7 +2817,12 @@ export function InfiniteCanvas({
           const clampedScreenX = clampedX * zoom + viewOffset.x;
           const clampedScreenY = clampedY * zoom + viewOffset.y;
           brushStrokesRef.current.push({ x: clampedScreenX, y: clampedScreenY });
-          setBrushStrokes([...brushStrokesRef.current]);
+          if (brushRafRef.current === null) {
+            brushRafRef.current = requestAnimationFrame(() => {
+              brushRafRef.current = null;
+              setBrushStrokes([...brushStrokesRef.current]);
+            });
+          }
         }
         return;
       }
@@ -2944,20 +2991,38 @@ export function InfiniteCanvas({
     if (groupDragTarget && groupDragReadyRef.current) {
       const offsetX = canvasPos.x - groupDragStart.x;
       const offsetY = canvasPos.y - groupDragStart.y;
-      setGroupDragOffset({ x: offsetX, y: offsetY });
+      groupDragOffsetRef.current = { x: offsetX, y: offsetY };
+      if (groupDragRafRef.current === null) {
+        groupDragRafRef.current = requestAnimationFrame(() => {
+          groupDragRafRef.current = null;
+          setGroupDragOffset(groupDragOffsetRef.current);
+        });
+      }
     }
 
     // GenGroup drag: only allow after long press (genGroupDragReadyRef)
     if (genGroupDragTarget && genGroupDragReadyRef.current) {
       const offsetX = canvasPos.x - genGroupDragStart.x;
       const offsetY = canvasPos.y - genGroupDragStart.y;
-      setGenGroupDragOffset({ x: offsetX, y: offsetY });
+      genGroupDragOffsetRef.current = { x: offsetX, y: offsetY };
+      if (genGroupDragRafRef.current === null) {
+        genGroupDragRafRef.current = requestAnimationFrame(() => {
+          genGroupDragRafRef.current = null;
+          setGenGroupDragOffset(genGroupDragOffsetRef.current);
+        });
+      }
     }
     // HexCube drag (screen coordinates for floating panel)
     if (hexCubeDragTarget && hexCubeDragReadyRef.current) {
       const offsetX = e.clientX - hexCubeDragStart.x;
       const offsetY = e.clientY - hexCubeDragStart.y;
-      setHexCubeDragOffset({ x: offsetX, y: offsetY });
+      hexCubeDragOffsetRef.current = { x: offsetX, y: offsetY };
+      if (hexCubeDragRafRef.current === null) {
+        hexCubeDragRafRef.current = requestAnimationFrame(() => {
+          hexCubeDragRafRef.current = null;
+          setHexCubeDragOffset(hexCubeDragOffsetRef.current);
+        });
+      }
     }
   }, [editMode, isPanning, isMiddlePanning, panStart, boxSelectStart, isLongPressing, resizingImage, resizeCorner, images, dragTarget, dragStart, resizeStart, screenToCanvas, onImagesChange, handleEditMouseMove, groupDragTarget, groupDragStart, genGroupDragTarget, genGroupDragStart, hexCubeDragTarget, hexCubeDragStart, annotationMode, annotationTool, annotationBrushSize, brushDrawingAnnId, annotations, hitTestImage, annotationRegionStart]);
 
@@ -2975,6 +3040,10 @@ export function InfiniteCanvas({
       brushDrawingAnnIdRef.current = null;
       brushCanvasRef.current = null;
       brushCtxRef.current = null;
+      if (brushRafRef.current !== null) {
+        cancelAnimationFrame(brushRafRef.current);
+        brushRafRef.current = null;
+      }
       brushStrokesRef.current = [];
       setBrushStrokes([]);
       // Focus the annotation input
@@ -3208,15 +3277,21 @@ export function InfiniteCanvas({
 
     // Group drag finish
     if (groupDragTarget) {
-      if (groupDragReadyRef.current && (groupDragOffset.x !== 0 || groupDragOffset.y !== 0)) {
+      const groupOffset = groupDragOffsetRef.current;
+      if (groupDragReadyRef.current && (groupOffset.x !== 0 || groupOffset.y !== 0)) {
         // Move all images in the group by the drag offset
         onImagesChange(images.map(img => {
           if (img.groupId === groupDragTarget) {
-            return { ...img, x: img.x + groupDragOffset.x, y: img.y + groupDragOffset.y };
+            return { ...img, x: img.x + groupOffset.x, y: img.y + groupOffset.y };
           }
           return img;
         }));
       }
+      if (groupDragRafRef.current !== null) {
+        cancelAnimationFrame(groupDragRafRef.current);
+        groupDragRafRef.current = null;
+      }
+      groupDragOffsetRef.current = { x: 0, y: 0 };
       setGroupDragTarget(null);
       setGroupDragOffset({ x: 0, y: 0 });
       groupDragReadyRef.current = false;
@@ -3228,9 +3303,10 @@ export function InfiniteCanvas({
 
     // GenGroup drag finish
     if (genGroupDragTarget) {
-      if (genGroupDragReadyRef.current && (genGroupDragOffset.x !== 0 || genGroupDragOffset.y !== 0)) {
-        const dx = genGroupDragOffset.x;
-        const dy = genGroupDragOffset.y;
+      const genGroupOffset = genGroupDragOffsetRef.current;
+      if (genGroupDragReadyRef.current && (genGroupOffset.x !== 0 || genGroupOffset.y !== 0)) {
+        const dx = genGroupOffset.x;
+        const dy = genGroupOffset.y;
         // Move all reference images in the gen group
         const updatedImages = images.map(img => {
           const ref = genGroupsRef.current.find(g => g.id === genGroupDragTarget)?.sourceImageIds.includes(img.id);
@@ -3262,6 +3338,11 @@ export function InfiniteCanvas({
           return g;
         }));
       }
+      if (genGroupDragRafRef.current !== null) {
+        cancelAnimationFrame(genGroupDragRafRef.current);
+        genGroupDragRafRef.current = null;
+      }
+      genGroupDragOffsetRef.current = { x: 0, y: 0 };
       setGenGroupDragTarget(null);
       setGenGroupDragOffset({ x: 0, y: 0 });
       genGroupDragReadyRef.current = false;
@@ -3272,15 +3353,21 @@ export function InfiniteCanvas({
     }
 
     // HexCube drag end (convert screen offset to canvas offset)
-    if (hexCubeDragTarget && hexCubeDragReadyRef.current && hexCubeDragOffset.x !== 0 && hexCubeDragOffset.y !== 0) {
+    const hexCubeOffset = hexCubeDragOffsetRef.current;
+    if (hexCubeDragTarget && hexCubeDragReadyRef.current && (hexCubeOffset.x !== 0 || hexCubeOffset.y !== 0)) {
       setHexCubeGroups(prev => prev.map(g => {
         if (g.id === hexCubeDragTarget) {
-          return { ...g, position: { x: g.position.x + hexCubeDragOffset.x / zoom, y: g.position.y + hexCubeDragOffset.y / zoom } };
+          return { ...g, position: { x: g.position.x + hexCubeOffset.x / zoom, y: g.position.y + hexCubeOffset.y / zoom } };
         }
         return g;
       }));
     }
     if (hexCubeDragTarget) {
+      if (hexCubeDragRafRef.current !== null) {
+        cancelAnimationFrame(hexCubeDragRafRef.current);
+        hexCubeDragRafRef.current = null;
+      }
+      hexCubeDragOffsetRef.current = { x: 0, y: 0 };
       setHexCubeDragTarget(null);
       setHexCubeDragOffset({ x: 0, y: 0 });
       hexCubeDragReadyRef.current = false;
@@ -3291,7 +3378,11 @@ export function InfiniteCanvas({
     }
 
     mouseDownOnImageRef.current = false;
+<<<<<<< HEAD
   }, [editMode, isPanning, isMiddlePanning, boxSelectStart, boxSelectEnd, dragTarget, dragOffset, images, selectedIds, zoom, viewOffset, onImagesChange, handleEditMouseUp, groupDragTarget, groupDragOffset, genGroupDragTarget, genGroupDragOffset, hexCubeDragTarget, hexCubeDragOffset, resizingImage, resizePreview, annotationMode, annotationTool, annotationRegionStart, annotationRegionCurrent, isDraggingRegion, brushDrawingAnnId, annotations, annotationBrushSize]);
+=======
+  }, [annotationRegionStart, annotationMode, isDraggingRegion, annotationRegionCurrent, editMode, isMiddlePanning, isPanning, boxSelectStart, boxSelectEnd, resizingImage, resizePreview, dragTarget, groupDragTarget, genGroupDragTarget, hexCubeDragTarget, hitTestImage, images, annotationTool, screenToCanvas, handleEditMouseUp, genGroups, onImagesChange, dragOffset.x, dragOffset.y, selectedIds, zoom]);
+>>>>>>> 41e7dd04083fba557192a82b01f13084d231af10
 
   const handleMouseLeave = useCallback(() => {
     if (editMode !== 'none') {
@@ -4667,53 +4758,6 @@ export function InfiniteCanvas({
     }
     return selectedImageData;
   }, [editImageId, images, selectedImageData]);
-
-  const loadImageAsDataUrl = useCallback(async (url: string): Promise<{ dataUrl: string; width: number; height: number }> => {
-    const image = new Image();
-    image.crossOrigin = 'anonymous';
-    await new Promise<void>((resolve, reject) => {
-      image.onload = () => resolve();
-      image.onerror = () => reject(new Error('Failed to load image'));
-      image.src = url;
-    });
-    const width = image.naturalWidth || image.width || 1024;
-    const height = image.naturalHeight || image.height || 1024;
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('Canvas context unavailable');
-    ctx.drawImage(image, 0, 0, width, height);
-    return { dataUrl: canvas.toDataURL('image/png'), width, height };
-  }, []);
-
-  const makeSvgDataUrl = useCallback((svg: string) => {
-    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-  }, []);
-
-  const renderEditElementsPreview = useCallback(async (img: CanvasImage): Promise<string> => {
-    const source = await loadImageAsDataUrl(img.url);
-    const width = source.width;
-    const height = source.height;
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
-  <defs>
-    <filter id="blur"><feGaussianBlur stdDeviation="${Math.max(8, width / 80)}"/></filter>
-    <linearGradient id="veil" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffffff" stop-opacity="0.88"/><stop offset="1" stop-color="#f5f5f5" stop-opacity="0.96"/></linearGradient>
-  </defs>
-  <image href="${source.dataUrl}" x="0" y="0" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice" filter="url(#blur)" opacity="0.46"/>
-  <rect width="100%" height="100%" fill="url(#veil)"/>
-  <image href="${source.dataUrl}" x="${Math.round(width * 0.08)}" y="${Math.round(height * 0.08)}" width="${Math.round(width * 0.36)}" height="${Math.round(height * 0.36)}" preserveAspectRatio="xMidYMid meet" opacity="0.88"/>
-  <g font-family="Arial, sans-serif">
-    <text x="${Math.round(width * 0.52)}" y="${Math.round(height * 0.18)}" font-size="${Math.max(24, Math.round(width / 22))}" font-weight="700" fill="#111827">元素编辑副本</text>
-    <text x="${Math.round(width * 0.52)}" y="${Math.round(height * 0.25)}" font-size="${Math.max(13, Math.round(width / 58))}" fill="#6b7280">已创建语义图层工作区：背景、主体、文字、装饰</text>
-    ${['背景层 / Background', '主体层 / Subject', '文字候选 / Text', '装饰与特效 / Deco'].map((label, i) => {
-      const y = Math.round(height * (0.36 + i * 0.12));
-      return `<rect x="${Math.round(width * 0.52)}" y="${y}" width="${Math.round(width * 0.36)}" height="${Math.round(height * 0.075)}" rx="14" fill="#ffffff" stroke="#e5e7eb"/><circle cx="${Math.round(width * 0.55)}" cy="${y + Math.round(height * 0.038)}" r="${Math.max(5, Math.round(width / 120))}" fill="#d4af37"/><text x="${Math.round(width * 0.58)}" y="${y + Math.round(height * 0.048)}" font-size="${Math.max(12, Math.round(width / 64))}" fill="#111827">${label}</text>`;
-    }).join('')}
-  </g>
-</svg>`;
-    return makeSvgDataUrl(svg);
-  }, [loadImageAsDataUrl, makeSvgDataUrl]);
 
   // 3D model name to friendly Chinese label mapping
   const get3DModelLabel = useCallback((modelId: string): string => {
@@ -6418,7 +6462,9 @@ export function InfiniteCanvas({
     try {
       const modelInfo = getCurrentModel();
       // Determine actual engine for upscale from preference
-      const actualEngine: 'auto'|'ai'|'local'|'cpu' = upscaleEnginePref === 'local' ? 'cpu' : (upscaleEnginePref === 'ai' ? 'ai' : 'auto');
+      const actualEngine: 'auto'|'ai'|'local'|'cpu' = upscaleMode === 'ai'
+        ? 'ai'
+        : (upscaleEnginePref === 'local' ? 'cpu' : 'auto');
       updateProcessingFrame(placeholderId, { progress: 8, status: actualEngine === 'cpu' ? '正在使用本地 Real-ESRGAN 放大...' : actualEngine === 'ai' ? '正在提交到 AI 模型...' : '正在选择最优放大引擎...' });
       // ★ 放大操作可能耗时较长（如108s），设置5分钟超时与后端直接模式600s对齐
       const upscaleController = new AbortController();
@@ -6454,6 +6500,7 @@ export function InfiniteCanvas({
               originalWidth: origW,
               originalHeight: origH,
               upscaleMode: actualEngine === 'ai' ? 'ai' : 'auto',
+              upscaleModel: upscaleMode === 'ai' ? selected302UpscaleModel : undefined,
               engine: actualEngine,
             }),
             signal: upscaleController.signal,
@@ -6604,7 +6651,11 @@ export function InfiniteCanvas({
     }
     setIsEditProcessing(false);
     setActiveTool('none');
+<<<<<<< HEAD
   }, [selectedImageData, upscalePreset, upscaleMode, upscaleActualW, upscaleActualH, getApiKey, getCurrentModel, pollForResult, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, awaitStableImageUrl, getUpscaleTargetDimensions]);
+=======
+  }, [getActiveImageData, upscaleActualW, upscaleActualH, getUpscaleTargetDimensions, upscalePreset, createProcessingFrameRightOf, getCurrentModel, upscaleEnginePref, updateProcessingFrame, upscaleMode, selected302UpscaleModel, upscaylSelectedModel, getCurrentProviderId, removeProcessingFrame, pollForResult, completeProcessingFrame]);
+>>>>>>> 41e7dd04083fba557192a82b01f13084d231af10
 
   // Engine selection helper: if pref saved, run directly; else open dialog
   const triggerWithEngine = useCallback((tool: 'upscale'|'removebg'|'svg'|'segment', doExecute: (engine: 'auto'|'ai'|'local') => void) => {
@@ -6816,6 +6867,90 @@ export function InfiniteCanvas({
     }
     setIsEditProcessing(false);
   }, [selectedImageData, getApiKey, getCurrentModel, pollForResult, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, onImagesChange]);
+
+  const handleOpenDisplayDecompose = useCallback(() => {
+    const image = getActiveImageData();
+    if (!image) return;
+    setEditImageId(image.id);
+    setShowDisplayDecomposePanel(true);
+    setShowToolbarCustomize(false);
+  }, [getActiveImageData]);
+
+  const handleDisplayDecomposeConfirm = useCallback(async () => {
+    const image = getActiveImageData();
+    if (!image || displayDecomposeProcessing) return;
+
+    const [ratioWidth, ratioHeight] = displayDecomposeRatio.split(':').map(Number);
+    const maxSide = Math.max(image.width, image.height);
+    const frameWidth = Math.max(120, ratioWidth >= ratioHeight ? maxSide : Math.round(maxSide * ratioWidth / ratioHeight));
+    const frameHeight = Math.max(120, ratioWidth >= ratioHeight ? Math.round(maxSide * ratioHeight / ratioWidth) : maxSide);
+    const placeholderId = createProcessingFrameRightOf(
+      image,
+      '美陈拆解',
+      frameWidth,
+      frameHeight,
+      '正在识别美陈元素...'
+    );
+
+    setShowDisplayDecomposePanel(false);
+    setDisplayDecomposeProcessing(true);
+    setIsEditProcessing(true);
+    try {
+      const modelInfo = getCurrentModel();
+      updateProcessingFrame(placeholderId, { progress: 12, status: '正在提交美陈拆解任务...' });
+      const response = await fetch('/api/image-edit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'display_decompose',
+          imageUrl: image.url,
+          aspectRatio: displayDecomposeRatio,
+          model: modelInfo.model,
+          providerId: modelInfo.providerId || getCurrentProviderId(),
+          prompt: image.prompt || image.modifyPrompt || '',
+        }),
+      });
+      const data = await response.json().catch(() => ({})) as {
+        success?: boolean;
+        error?: string;
+        imageUrl?: string;
+        taskId?: string;
+        usedModel?: string;
+      };
+      if (!response.ok || data.success === false) {
+        throw new Error(translateErrorFrontend(data.error || `美陈拆解失败 (${response.status})`));
+      }
+
+      updateProcessingFrame(placeholderId, { progress: 24, status: 'AI 正在拆解物料与设计元素...' });
+      const resultUrl = data.imageUrl || (data.taskId
+        ? await pollForResult(data.taskId, data.usedModel || modelInfo.model, (progress, status) => {
+          updateProcessingFrame(placeholderId, { progress, status });
+        })
+        : null);
+      if (!resultUrl) throw new Error(lastPollErrorRef.current || '美陈拆解超时，请重试');
+
+      updateProcessingFrame(placeholderId, { progress: 96, status: '正在载入美陈拆解板...' });
+      const stableUrl = await awaitStableImageUrl(resultUrl);
+      completeProcessingFrame(placeholderId, stableUrl, frameWidth, frameHeight, {
+        originalWidth: Math.round(frameWidth),
+        originalHeight: Math.round(frameHeight),
+        prompt: '美陈拆解',
+        modifyPrompt: `美陈拆解 / 元素物料板 / ${displayDecomposeRatio}`,
+        modelName: data.usedModel || modelInfo.apiDisplayName || modelInfo.model,
+        apiProvider: modelInfo.providerName || '',
+      }, 'edit');
+      toast.success('美陈拆解完成');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '美陈拆解失败';
+      updateProcessingFrame(placeholderId, { progress: -1, status: `美陈拆解失败：${message}`, error: message });
+      setTimeout(() => removeProcessingFrame(placeholderId), 5000);
+      toast.error(message);
+    } finally {
+      setDisplayDecomposeProcessing(false);
+      setIsEditProcessing(false);
+      setActiveTool('none');
+    }
+  }, [getActiveImageData, displayDecomposeProcessing, displayDecomposeRatio, createProcessingFrameRightOf, getCurrentModel, getCurrentProviderId, updateProcessingFrame, pollForResult, completeProcessingFrame, removeProcessingFrame]);
 
   // 3. SVG智能描摹 - Sharp + VTracer (彩色) / ImageMagick + Potrace (黑白) / Sharp (压缩/缩略图)
   const handleOpenSvgTrace = useCallback(() => {
@@ -7227,9 +7362,10 @@ export function InfiniteCanvas({
     }
 
     setThreeDProgress('正在创建 3D 转换任务...');
+    let placeholderId = '';
     try {
       const sourceImage = img || selectedImageData;
-      const placeholderId = sourceImage
+      placeholderId = sourceImage
         ? createProcessingFrameRightOf(sourceImage, '图转3D中', sourceImage.width, sourceImage.height, '正在创建图转3D任务...')
         : createProcessingFrameRightOf({ x: 100, y: 100, width: 300, height: 200 } as any, '图转3D中', 300, 200, '正在创建文生3D任务...');
       updateProcessingFrame(placeholderId, { progress: 16, status: '正在提交3D转换参数...' });
@@ -7270,26 +7406,105 @@ export function InfiniteCanvas({
       console.log('[3D] API response:', JSON.stringify(data).slice(0, 500));
       if (!data.success) {
         alert(translateErrorFrontend(data.error || '图生 3D 任务创建失败'));
+        removeProcessingFrame(placeholderId);
         setThreeDProgress(null);
         return;
       }
 
       let previewUrl: string | null = null;
       let threeDModelUrls: Record<string, string> | undefined;
+      let completedAssetUrl = data.assetUrl || '';
 
       if (data.taskId) {
-        // Async task - need to poll for result
+        // Meshy sends completion events; the normal bounded poll remains the
+        // compatibility path for every provider and the fallback for SSE.
         updateProcessingFrame(placeholderId, { progress: 25, status: '3D 任务已提交，等待 AI 生成...' });
-        const maxAttempts = 300; // 最多轮询300次（600秒，兼容token link等慢速API）
-        for (let i = 0; i < maxAttempts; i++) {
-          // 动态更新进度和状态
-          const elapsed = (i + 1) * 5;
-          const progressVal = Math.min(90, 25 + Math.round((i / maxAttempts) * 65));
+        type ThreeDStreamResult = {
+          assetUrl?: string;
+          previewImageUrl?: string;
+          modelUrls?: Record<string, string>;
+          error?: string;
+        };
+        let streamSource: EventSource | null = null;
+        const streamTerminalResult = { current: null as ThreeDStreamResult | null };
+        let streamWake: (() => void) | null = null;
+        const wakeStreamWaiter = () => {
+          const wake = streamWake;
+          streamWake = null;
+          wake?.();
+        };
+        const handleMeshyStreamPayload = (rawPayload: string) => {
+          try {
+            const payload = JSON.parse(rawPayload) as Record<string, unknown>;
+            const status = String(payload.status || payload.state || '').toLowerCase();
+            const progress = Number(payload.progress);
+            if (Number.isFinite(progress) && progress > 0) {
+              updateProcessingFrame(placeholderId, {
+                progress: Math.min(90, Math.max(25, Math.round(progress * 0.9))),
+                status: `AI 正在生成 3D 模型... ${Math.round(progress)}%`,
+              });
+            }
+            const modelUrls = (payload.model_urls || payload.modelUrls) as Record<string, string> | undefined;
+            const assetUrl = String(payload.assetUrl || payload.model_url || payload.glb_url || modelUrls?.glb || modelUrls?.obj || '');
+            const previewImageUrl = String(payload.previewImageUrl || payload.preview_url || payload.thumbnail_url || '');
+            if (['completed', 'succeeded', 'done'].includes(status) && assetUrl) {
+              streamTerminalResult.current = { assetUrl, previewImageUrl, modelUrls };
+              wakeStreamWaiter();
+            } else if (['failed', 'error', 'cancelled'].includes(status)) {
+              streamTerminalResult.current = { error: String(payload.error || payload.message || '3D 生成失败') };
+              wakeStreamWaiter();
+            }
+          } catch {
+            // Ignore malformed upstream events and retain normal polling.
+          }
+        };
+
+        if (threeDBackend === 'api' && isMeshyThreeDProvider(provider)) {
+          const streamParams = new URLSearchParams({
+            taskId: data.taskId,
+            providerId: threeDProviderId,
+            mode: threeDMode,
+            model: provider?.model || '',
+          });
+          streamSource = new EventSource(`/api/image-to-3d/meshy-stream?${streamParams.toString()}`);
+          const onStreamEvent = (event: MessageEvent<string>) => handleMeshyStreamPayload(event.data);
+          streamSource.onmessage = onStreamEvent;
+          for (const eventName of ['progress', 'completed', 'failed', 'error']) {
+            streamSource.addEventListener(eventName, onStreamEvent as EventListener);
+          }
+          streamSource.onerror = () => {
+            streamSource?.close();
+            streamSource = null;
+            wakeStreamWaiter();
+          };
+        }
+
+        const taskStartedAt = Date.now();
+        let pollAttempt = 0;
+        while (Date.now() - taskStartedAt < THREE_D_TASK_TIMEOUT_MS) {
+          const elapsed = Math.floor((Date.now() - taskStartedAt) / 1000);
+          const progressVal = Math.min(90, 25 + Math.round((elapsed / (THREE_D_TASK_TIMEOUT_MS / 1000)) * 65));
           updateProcessingFrame(placeholderId, {
             progress: progressVal,
             status: `AI 正在生成 3D 模型... 已等待 ${elapsed}s`
           });
-          await new Promise(r => setTimeout(r, 5000));
+          await Promise.race([
+            new Promise<void>(resolve => setTimeout(resolve, THREE_D_POLL_INTERVAL_MS)),
+            new Promise<void>(resolve => { streamWake = resolve; }),
+          ]);
+
+          if (streamTerminalResult.current?.error) {
+            alert(translateErrorFrontend(streamTerminalResult.current.error));
+            removeProcessingFrame(placeholderId);
+            setThreeDProgress(null);
+            return;
+          }
+          if (streamTerminalResult.current?.assetUrl) {
+            previewUrl = streamTerminalResult.current.previewImageUrl || streamTerminalResult.current.assetUrl;
+            completedAssetUrl = streamTerminalResult.current.assetUrl;
+            threeDModelUrls = streamTerminalResult.current.modelUrls;
+            break;
+          }
           try {
             const pollRes = await fetch('/api/poll-3d-task', {
               method: 'POST',
@@ -7297,7 +7512,10 @@ export function InfiniteCanvas({
               body: JSON.stringify({
                 taskId: data.taskId,
                 version: threeDVersion,
+                mode: threeDMode,
+                providerId: threeDProviderId,
                 provider: {
+                  id: provider?.id,
                   apiKey: provider?.apiKey,
                   baseUrl: provider?.baseUrl,
                   providerPreset: provider?.providerPreset,
@@ -7307,15 +7525,22 @@ export function InfiniteCanvas({
               }),
             });
             const pollData = await pollRes.json();
-            console.log(`[3D] Poll ${i + 1}:`, JSON.stringify(pollData).slice(0, 300));
+            pollAttempt++;
+            console.log(`[3D] Poll ${pollAttempt}:`, JSON.stringify(pollData).slice(0, 300));
 
             if (pollData.status === 'running' || pollData.status === 'pending') {
-              // 仍在运行，继续轮询
+              if (typeof pollData.progress === 'number' && pollData.progress > 0) {
+                updateProcessingFrame(placeholderId, {
+                  progress: Math.min(90, Math.max(25, Math.round(pollData.progress * 0.9))),
+                  status: `AI 正在生成 3D 模型... ${Math.round(pollData.progress)}%`,
+                });
+              }
               continue;
             }
 
             if ((pollData.status === 'completed' || pollData.status === 'succeeded') && (pollData.assetUrl || pollData.modelUrls)) {
               previewUrl = pollData.previewImageUrl || pollData.assetUrl || (pollData.modelUrls && Object.values(pollData.modelUrls)[0]) || '';
+              completedAssetUrl = pollData.assetUrl || (pollData.modelUrls && Object.values(pollData.modelUrls)[0]) || '';
               threeDModelUrls = pollData.modelUrls;
               break;
             }
@@ -7329,6 +7554,7 @@ export function InfiniteCanvas({
             console.error('[3D] Poll error:', pollErr);
           }
         }
+        streamSource?.close();
         if (!previewUrl) {
           alert('3D 生成超时，请稍后重试');
           removeProcessingFrame(placeholderId);
@@ -7339,14 +7565,13 @@ export function InfiniteCanvas({
         // Synchronous result - got asset URL directly
         previewUrl = data.previewImageUrl || data.assetUrl;
       } else {
-        // No taskId and no assetUrl - fallback
-        previewUrl = data.previewImageUrl || (img ? await renderEditElementsPreview(img) : '');
+        throw new Error('3D service returned neither a task ID nor a model asset.');
       }
 
       updateProcessingFrame(placeholderId, { progress: 94, status: '正在载入 3D 预览...' });
       // Pick first available model URL from modelUrls (format-agnostic), then fallback
       const firstModelEntry = threeDModelUrls ? Object.values(threeDModelUrls).find((v: string) => v && typeof v === 'string') as string | undefined : undefined;
-      const threeDAssetUrl = firstModelEntry || data.assetUrl || '';
+      const threeDAssetUrl = firstModelEntry || completedAssetUrl || '';
       completeProcessingFrame(placeholderId, previewUrl || '', img?.width || 1024, img?.height || 1024, {
         originalWidth: img?.originalWidth || Math.round(img?.width || 1024),
         originalHeight: img?.originalHeight || Math.round(img?.height || 1024),
@@ -7362,10 +7587,15 @@ export function InfiniteCanvas({
       setThreeDProgress(null);
     } catch (e) {
       console.error('Image to 3D failed:', e);
+      if (placeholderId) removeProcessingFrame(placeholderId);
       alert('图生 3D 调用失败，请检查 API 或本地模型服务');
       setThreeDProgress(null);
     }
+<<<<<<< HEAD
   }, [selectedImageData, getThreeDProviders, threeDProviderId, threeDBackend, threeDMode, threeDMultiImages, threeDPrompt, threeDType, threeDQuality, threeDTexture, threeDFormat, threeDEnablePBR, threeDFaceCount, threeDPose, threeDLocalEndpoint, threeDLocalModel, renderEditElementsPreview, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, removeProcessingFrame]);
+=======
+  }, [getActiveImageData, threeDSingleImageUrl, selectedImageData, threeDMode, threeDPrompt, threeDMultiImages, getCurrentModel, getThreeDProviders, threeDBackend, threeDProviderId, createProcessingFrameRightOf, updateProcessingFrame, threeDType, threeDQuality, threeDTexture, threeDFormat, threeDEnablePBR, threeDFaceCount, threeDPose, threeDLocalEndpoint, threeDLocalModel, completeProcessingFrame, removeProcessingFrame]);
+>>>>>>> 41e7dd04083fba557192a82b01f13084d231af10
 
   // 4. ERASE - floating window mode
   const handleOpenErase = useCallback(() => {
@@ -8217,16 +8447,17 @@ export function InfiniteCanvas({
 
   // Action toolbar items with distinct monochrome colors
   const monoColors: Record<string, string> = {
-    '放大': 'text-blue-600', '移除背景': 'text-pink-500', 'SVG智能描摹': 'text-blue-500',
+    '放大': 'text-blue-600', '移除背景': 'text-pink-500', 'SVG智能描摹': 'text-blue-500', '美陈拆解': 'text-emerald-500',
     '擦除': 'text-orange-500', '蒙版': 'text-violet-500', '编辑元素': 'text-cyan-500',
     '多角度': 'text-teal-500', '图转3D工厂': 'text-indigo-500', '扩展': 'text-amber-500',
-    '裁切': 'text-rose-500', '精修引擎': 'text-violet-500', '语言修图': 'text-sky-500', 'Agent编排': 'text-fuchsia-500',
+    '裁切': 'text-rose-500', '精修引擎': 'text-violet-500', '人物精修大师': 'text-emerald-500', '语言修图': 'text-sky-500', 'Agent编排': 'text-fuchsia-500',
     '下载': 'text-gray-600',
   };
   const imageActions = [
     { icon: <ZoomIn size={14} className={isMonochrome ? monoColors['放大'] : ''} />, label: '放大', desc: '智能补细节放大，变大变高清，不改内容', action: handleOpenUpscale },
     { icon: <Eraser size={14} className={isMonochrome ? monoColors['移除背景'] : ''} />, label: '移除背景', desc: '一键删除背景，只剩透明底主体', action: () => setShowRemoveBgPicker(true) },
     { icon: <PenTool size={14} className={isMonochrome ? monoColors['SVG智能描摹'] : ''} />, label: 'SVG智能描摹', desc: '矢量描摹/压缩/缩略图', action: handleOpenSvgTrace },
+    { icon: <LayoutGrid size={14} className={isMonochrome ? monoColors['美陈拆解'] : ''} />, label: '美陈拆解', desc: '拆出美陈物料与设计元素，生成平面陈列板', action: handleOpenDisplayDecompose },
     { icon: <Paintbrush size={14} className={isMonochrome ? monoColors['擦除'] : ''} />, label: '擦除', desc: '涂抹消除，自动无缝补全画面', action: handleOpenErase },
     { icon: <Wand2 size={14} className={isMonochrome ? monoColors['蒙版'] : ''} />, label: '蒙版', desc: '精准遮罩控制，只改露出的区域', action: handleOpenMask },
     { icon: <Palette size={14} className={isMonochrome ? '' : 'text-pink-500'} />, label: '调色', desc: '亮度/对比度/饱和度/色温/色相参数调节', action: handleOpenColorAdjust },
@@ -8236,6 +8467,7 @@ export function InfiniteCanvas({
     { icon: <Expand size={14} className={isMonochrome ? monoColors['扩展'] : ''} />, label: '扩展', desc: '向四周延伸画面，自动补齐背景', action: handleOpenExpand },
     { icon: <Scissors size={14} className={isMonochrome ? monoColors['裁切'] : ''} />, label: '裁切', desc: '自由/预设比例裁切', action: handleOpenCrop },
     { icon: <Scan size={14} className={isMonochrome ? monoColors['精修引擎'] : ''} />, label: '精修引擎', desc: '产品精修：标准/专家模式，AI商业级修图', action: () => { setRefineEngineImageUrl(resolveRefineEngineInitialImageUrl(selectedImageData, selectedImage)); setShowRefineEngine(true); } },
+    { icon: <UserRoundCheck size={14} className={isMonochrome ? monoColors['精修引擎'] : ''} />, label: '人物精修大师', desc: '人物、人脸、手部局部智能修复', action: () => { const image = selectedImageData || selectedImage; setHumanRepairImageUrl(image?.url || ''); setShowHumanRepair(true); } },
     { icon: <Pencil size={14} className={isMonochrome ? monoColors['语言修图'] : ''} />, label: '语言修图', desc: '用自然语言描述修改图片', action: () => { if (selectedImage) onEditImage?.(selectedImage); else onEditImage?.(null); } },
     { icon: <Bot size={14} className={isMonochrome ? monoColors['Agent编排'] : ''} />, label: 'Agent编排', desc: '智能编排多工具编辑图片', action: () => { const img = selectedImageData || selectedImage; if (img) { setAgentEditImage(img); } else { setAgentEditImage(null); } setShowAgentEditor(true); } },
     { icon: <Globe size={14} className={isMonochrome ? 'text-emerald-500' : 'text-emerald-400'} />, label: '全景生成', desc: '生成720°全景图', action: () => handleGeneratePanorama() },
@@ -8248,12 +8480,16 @@ export function InfiniteCanvas({
   // 确保新增的工具项（localStorage中可能没有）也能显示
   const allActionLabels = imageActions.map(a => a.label);
   const fullOrder = [...toolbarItemOrder].filter(label => allActionLabels.includes(label));
+  if (!fullOrder.includes('美陈拆解')) {
+    const svgIndex = fullOrder.findIndex(label => label === 'SVG智能描摹');
+    if (svgIndex >= 0) fullOrder.splice(svgIndex + 1, 0, '美陈拆解');
+  }
   for (const label of allActionLabels) {
     if (!fullOrder.includes(label)) fullOrder.push(label);
   }
   // 根据媒体类型过滤可用工具
   const getAvailableToolsByMediaType = (mediaType?: 'image' | 'video' | '3d'): string[] => {
-    const imageTools = ['放大', '移除背景', 'SVG智能描摹', '擦除', '蒙版', '调色', '编辑元素', '多角度', '图转3D工厂', '扩展', '裁切', '全景生成', '精修引擎', '语言修图', 'Agent编排', '下载'];
+    const imageTools = ['放大', '移除背景', 'SVG智能描摹', '美陈拆解', '擦除', '蒙版', '调色', '编辑元素', '多角度', '图转3D工厂', '扩展', '裁切', '全景生成', '精修引擎', '人物精修大师', '语言修图', 'Agent编排', '下载'];
     const videoTools = ['视频抽帧', 'AI配音', '下载'];
     const model3DTools = ['下载'];
     
@@ -8489,7 +8725,9 @@ export function InfiniteCanvas({
     { label: '删除', shortcut: 'Delete', action: () => { const deletingIds = selectedIds; onImagesChange(images.filter(i => !deletingIds.has(i.id))); setSelectedIds(new Set()); selectImage(null); if (editImageId && deletingIds.has(editImageId)) { setEditImageId(null); setEditMode('none'); } } },
     { label: '发送参考图', action: () => { const img = selectedImageData; if (img) onGenerateVariation(img); } },
     { label: '提取关键词', action: () => { const img = selectedImageData; if (img) onExtractKeywords(img); } },
+    { label: '美陈拆解', action: handleOpenDisplayDecompose },
     { label: '语言修图', action: () => { const img = selectedImageData; if (img) onEditImage?.(img); else onEditImage?.(null); } },
+    { label: '人物精修大师', action: () => { const img = selectedImageData; setHumanRepairImageUrl(img?.url || ''); setShowHumanRepair(true); } },
     { label: 'Agent编排', action: () => { const img = selectedImageData; if (img) { setAgentEditImage(img); setShowAgentEditor(true); } } },
     ...(selectedImageData?.mediaType !== 'video' ? [{ label: '生成720全景图', action: () => { handleGeneratePanorama(selectedImageData ?? undefined); } }] : []),
     { label: '发送到聊天修改', action: () => { const img = selectedImageData; if (img && onSendToChat) onSendToChat(img); } },
@@ -10776,6 +11014,24 @@ export function InfiniteCanvas({
                     </div>
                   )}
                 </div>
+                {upscaleMode === 'ai' && (
+                  <select
+                    aria-label="302 AI 放大模型"
+                    value={selected302UpscaleModel}
+                    onChange={(e) => setSelected302UpscaleModel(e.target.value as ThreeOhTwoUpscaleModelId)}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    className={`h-7 max-w-44 border px-2 text-xs outline-none ${
+                      isMonochrome
+                        ? 'border-gray-300 bg-white text-gray-700'
+                        : 'border-[#454545] bg-[#252525] text-text-bright'
+                    }`}
+                    title="302.AI 放大模型"
+                  >
+                    {THREE_O_TWO_UPSCALE_MODELS.map(model => (
+                      <option key={model.id} value={model.id}>{model.displayName}</option>
+                    ))}
+                  </select>
+                )}
                 <div className={panelDividerClass} />
                 {/* Upscale mode selector: 无损放大 / AI放大 */}
                 <div className="flex items-center gap-0.5">
@@ -10829,6 +11085,61 @@ export function InfiniteCanvas({
             </div>
           );
         })()}
+
+        {showDisplayDecomposePanel && (
+          <div
+            className={`fixed top-24 right-4 z-[190] w-72 rounded-lg border shadow-2xl ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#17171b] border-white/[0.12]'}`}
+            data-popup="display-decompose"
+            onMouseDown={event => event.stopPropagation()}
+            onWheel={event => event.stopPropagation()}
+          >
+            <div className={`flex items-center justify-between px-3 py-2.5 border-b ${isMonochrome ? 'border-gray-100' : 'border-white/[0.1]'}`}>
+              <div className={`flex items-center gap-2 text-sm font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>
+                <LayoutGrid size={15} className={isMonochrome ? 'text-emerald-600' : 'text-gold'} />
+                美陈拆解
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDisplayDecomposePanel(false)}
+                className={`p-1 rounded ${isMonochrome ? 'text-gray-400 hover:bg-gray-100 hover:text-gray-700' : 'text-gold-muted hover:bg-white/10 hover:text-white'}`}
+                title="关闭"
+              >
+                <X size={15} />
+              </button>
+            </div>
+            <div className="p-3">
+              <div className="grid grid-cols-3 gap-1.5">
+                {DISPLAY_DECOMPOSE_SUPPORTED_RATIOS.map(ratio => (
+                  <button
+                    key={ratio}
+                    type="button"
+                    onClick={() => setDisplayDecomposeRatio(ratio)}
+                    className={`h-8 rounded border text-xs font-medium transition-colors ${
+                      displayDecomposeRatio === ratio
+                        ? isMonochrome ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-gold/70 bg-gold/20 text-gold'
+                        : isMonochrome ? 'border-gray-200 bg-gray-50 text-gray-600 hover:bg-gray-100' : 'border-white/[0.1] bg-white/5 text-gold-muted hover:bg-white/10'
+                    }`}
+                  >
+                    {ratio}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={handleDisplayDecomposeConfirm}
+                disabled={displayDecomposeProcessing}
+                className={`mt-3 flex h-9 w-full items-center justify-center gap-2 rounded text-xs font-semibold transition-colors ${
+                  displayDecomposeProcessing
+                    ? isMonochrome ? 'bg-gray-100 text-gray-400' : 'bg-white/5 text-gold-muted/50'
+                    : isMonochrome ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-gold text-black hover:bg-gold/90'
+                }`}
+              >
+                <Sparkles size={14} />
+                {displayDecomposeProcessing ? '拆解中...' : '生成拆解板'}
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* ====== SVG智能描摹 FLOATING PANEL ====== */}
         {showSvgTracePanel && (() => {
@@ -11616,10 +11927,9 @@ export function InfiniteCanvas({
         {/* ====== REMOVE BACKGROUND MODEL PICKER ====== */}
         {showRemoveBgPicker && (() => {
           const removeBgModels: Array<{ id: string; label: string; description: string; size: string; recommended?: boolean }> = [
-            { id: 'u2net', label: 'U2Net 通用', description: '主体保留最完整，通用推荐', size: '176MB', recommended: true },
-            { id: 'isnet-general-use', label: 'ISNet 高精度', description: '精度高但蒙版偏紧', size: '170MB' },
-            { id: 'silueta', label: 'Silueta 人像', description: '轻量人像去背景', size: '45MB' },
-            { id: 'u2netp', label: 'U2Net 轻量', description: '极轻量快速备选', size: '4.5MB' },
+            { id: 'birefnet-general', label: 'BiRefNet 通用', description: '完整通用模型，优先保留主体和细节', size: '约 1GB', recommended: true },
+            { id: 'birefnet-portrait', label: 'BiRefNet 人像', description: '针对头发和人物边缘优化', size: '约 1GB' },
+            { id: 'birefnet-massive', label: 'BiRefNet Massive', description: '复杂主体优先，CPU 处理时间更长', size: '约 1GB+' },
           ];
           return (
             <div className="fixed inset-0 z-[200] flex items-center justify-center" onMouseDown={(e) => e.stopPropagation()}>
@@ -14107,6 +14417,19 @@ export function InfiniteCanvas({
           </Suspense>
         )}
 
+        {showHumanRepair && (
+          <Suspense fallback={null}>
+            <HumanRepairPanel
+              isMonochrome={isMonochrome}
+              initialImageUrl={humanRepairImageUrl}
+              onClose={() => setShowHumanRepair(false)}
+              onAddImage={(url: string, meta?: { modelName?: string; apiProvider?: string }) => {
+                onAddImages?.([url], undefined, meta);
+              }}
+            />
+          </Suspense>
+        )}
+
         {/* ====== FONT DESIGN PANEL ====== */}
         {showFontDesign && (
           <Suspense fallback={null}>
@@ -15660,6 +15983,16 @@ export function InfiniteCanvas({
           >
             <Scan className={`h-4 w-4 ${mIcon.scan}`} />
             <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">精修引擎</span>
+          </button>
+
+          <button
+            aria-label="人物精修大师"
+            onClick={() => { setHumanRepairImageUrl(selectedImageData?.url || selectedImage?.url || ''); setShowHumanRepair(true); }}
+            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-emerald-600 hover:text-emerald-500 hover:bg-emerald-50' : 'text-emerald-300 hover:text-emerald-200 hover:bg-emerald-400/10'}`}
+            title="人物精修大师"
+          >
+            <UserRoundCheck className="h-4 w-4" />
+            <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">人物精修</span>
           </button>
 
           {/* Font Design */}

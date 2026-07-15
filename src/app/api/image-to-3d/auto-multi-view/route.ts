@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForFeature } from '@/lib/server-api-config';
 import { validateApiInputs } from '@/lib/api-validator';
+import { AUTO_MULTI_VIEW_IMAGE_CONCURRENCY, mapWithConcurrency } from '@/lib/three-d-task-performance';
 
 /**
  * Auto Multi-View to 3D API
@@ -63,8 +64,8 @@ export async function POST(request: NextRequest) {
     const generatedImages: Array<{ url: string; view: string; label: string }> = [];
     const errors: string[] = [];
 
-    // Generate images sequentially to avoid rate limiting
-    for (const vp of viewPrompts) {
+    // Two concurrent requests cut the wait while remaining conservative with provider rate limits.
+    await mapWithConcurrency(viewPrompts, AUTO_MULTI_VIEW_IMAGE_CONCURRENCY, async (vp) => {
       try {
         const imagePrompt = `${prompt}${vp.suffix}, white background, product photography, consistent style and lighting`;
         
@@ -93,7 +94,7 @@ export async function POST(request: NextRequest) {
           const errText = await response.text().catch(() => '');
           errors.push(`${vp.label}生成失败: ${response.status}`);
           console.error(`[auto-multi-view] Image generation failed for ${vp.view}:`, response.status, errText);
-          continue;
+          return;
         }
 
         const result = await response.json();
@@ -112,7 +113,7 @@ export async function POST(request: NextRequest) {
         errors.push(`${vp.label}生成异常: ${err instanceof Error ? err.message : 'Unknown'}`);
         console.error(`[auto-multi-view] Image generation error for ${vp.view}:`, err);
       }
-    }
+    });
 
     if (generatedImages.length === 0) {
       return NextResponse.json({

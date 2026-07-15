@@ -3,6 +3,7 @@ import { findProviderForModel, getApiProviders, normalizeApiBaseUrl } from '@/li
 import { getSessionUser } from '@/lib/server-auth';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { recordThreeDTaskTerminal } from '@/lib/cloud-task-persistence';
+<<<<<<< HEAD
 
 // Filter sensitive fields (apiKey, secret, token, password) from response data before sending to client
 function filterSensitiveFields(obj: unknown): unknown {
@@ -225,6 +226,239 @@ export async function POST(request: NextRequest) {
     const response = await fetch(config.endpoint, fetchOptions);
     console.log('[poll-3d-task] Response status:', response.status);
 
+=======
+import { THREE_D_POLL_REQUEST_TIMEOUT_MS } from '@/lib/three-d-task-performance';
+
+// Filter sensitive fields (apiKey, secret, token, password) from response data before sending to client
+function filterSensitiveFields(obj: unknown): unknown {
+  if (!obj || typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) return obj.map(filterSensitiveFields);
+  const SENSITIVE_KEYS = ['apikey', 'api_key', 'secret', 'token', 'password', 'authorization', 'credential'];
+  const filtered: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+    if (SENSITIVE_KEYS.some(k => key.toLowerCase().includes(k))) {
+      filtered[key] = '[FILTERED]';
+    } else if (typeof value === 'object' && value !== null) {
+      filtered[key] = filterSensitiveFields(value);
+    } else {
+      filtered[key] = value;
+    }
+  }
+  return filtered;
+}
+
+/**
+ * Poll 3D task status API
+ * For async 3D generation APIs (Hunyuan3D, Meshy, Tripo, etc.) that return task IDs
+ */
+
+interface PollRequest {
+  taskId: string;
+  version?: 'rapid' | 'pro'; // 混元3D: rapid=极速版, pro=专业版
+  mode?: 'single-image' | 'multi-image' | 'text-to-3d'; // 生成模式
+  provider: {
+    id?: string;
+    name?: string;
+    baseUrl?: string;
+    apiKey?: string;
+    model?: string;
+    providerPreset?: string;
+  };
+}
+
+type ProviderType = 'hunyuan3d' | 'meshy' | 'tripo' | 'rodin' | 'generic';
+
+function detectProviderType(provider: PollRequest['provider']): ProviderType {
+  const modelName = (provider.model || '').toLowerCase();
+  const providerName = (provider.name || '').toLowerCase();
+  const providerPreset = (provider.providerPreset || '').toLowerCase();
+  const endpoint = (provider.baseUrl || '').toLowerCase();
+
+  if (modelName.includes('hunyuan') || providerPreset.includes('hunyuan') || providerName.includes('hunyuan')) return 'hunyuan3d';
+  if (providerPreset === 'meshy' || providerName.includes('meshy') || endpoint.includes('meshy')) return 'meshy';
+  if (modelName.includes('tripo') || providerPreset === 'tripo' || providerName.includes('tripo') || endpoint.includes('tripo')) return 'tripo';
+  if (providerPreset === 'rodin' || providerName.includes('rodin') || providerPreset === 'deemos' || providerName.includes('deemos')) return 'rodin';
+  return 'generic';
+}
+
+interface PollConfig {
+  endpoint: string;
+  method: string;
+  body?: Record<string, unknown>;
+}
+
+function buildPollConfig(request: PollRequest): PollConfig | undefined {
+  const baseUrl = normalizeApiBaseUrl(request.provider.baseUrl?.replace(/\/+$/, '') || '');
+  if (!baseUrl) return undefined;
+
+  const providerType = detectProviderType(request.provider);
+
+  switch (providerType) {
+    case 'hunyuan3d': {
+      const modelName = (request.provider.model || '').toLowerCase();
+      const isRapid = modelName.includes('lite') || modelName.includes('rapid') || modelName.includes('quick') || modelName.includes('极速') || request.version === 'rapid';
+
+      // 302.ai style polling - try both POST with body and GET with query param
+      // 302.ai wraps Tencent's API; uses path parameter format for polling
+      // Correct format: GET /tencent/hunyuan3d/rapid-job/{JobId}
+      if (baseUrl.includes('302.ai') || baseUrl.includes('302ai')) {
+        if (isRapid) {
+          return {
+            endpoint: `${baseUrl}/tencent/hunyuan3d/rapid-job/${request.taskId}`,
+            method: 'GET',
+          };
+        }
+        return {
+          endpoint: `${baseUrl}/tencent/hunyuan3d/pro-job/${request.taskId}`,
+          method: 'GET',
+        };
+      }
+      // Generic hunyuan3d - try GET with path parameter
+      const jobPath = isRapid ? 'rapid-job' : 'pro-job';
+      return {
+        endpoint: `${baseUrl}/hunyuan3d/${jobPath}/${request.taskId}`,
+        method: 'GET',
+      };
+    }
+
+    case 'meshy': {
+      // Meshy: multi-image-to-3d / text-to-3d / image-to-3d use same poll pattern
+      if (request.mode === 'text-to-3d') {
+        return {
+          endpoint: `${baseUrl}/text-to-3d/${request.taskId}`,
+          method: 'GET',
+        };
+      }
+      if (request.mode === 'multi-image') {
+        return {
+          endpoint: `${baseUrl}/multi-image-to-3d/${request.taskId}`,
+          method: 'GET',
+        };
+      }
+      return {
+        endpoint: `${baseUrl}/image-to-3d/${request.taskId}`,
+        method: 'GET',
+      };
+    }
+
+    case 'tripo':
+      // 302.ai routes Tripo through /tripo3d/v2/openapi/task/{id}
+      if (baseUrl.includes('302.ai') || baseUrl.includes('302ai')) {
+        return {
+          endpoint: `${baseUrl.replace(/\/v\d+$/, '')}/tripo3d/v2/openapi/task/${request.taskId}`,
+          method: 'GET',
+        };
+      }
+      return {
+        endpoint: `${baseUrl.replace(/\/v\d+$/, '')}/v2/openapi/task/${request.taskId}`,
+        method: 'GET',
+      };
+
+    case 'rodin':
+      return {
+        endpoint: `${baseUrl.replace(/\/v\d+$/, '')}/api/generation/status/${request.taskId}`,
+        method: 'GET',
+      };
+
+    default:
+      return {
+        endpoint: `${baseUrl}/tasks/${request.taskId}`,
+        method: 'GET',
+      };
+  }
+}
+
+function splitProviderSelection(selection?: string): { providerId?: string; model?: string } {
+  if (!selection) return {};
+
+  // Handle admin-3d::providerId::modelId format
+  if (selection.startsWith('admin-3d::')) {
+    const parts = selection.split('::');
+    if (parts.length >= 3) {
+      return {
+        providerId: parts[1] || undefined,
+        model: parts.slice(2).join('::').trim() || undefined,
+      };
+    }
+    if (parts.length === 2) {
+      return { model: parts[1].trim() || undefined };
+    }
+    return {};
+  }
+
+  const [providerId, ...modelParts] = selection.split('::');
+  const model = modelParts.join('::').trim();
+  return {
+    providerId: providerId || undefined,
+    model: model || undefined,
+  };
+}
+
+async function resolvePollRequest(body: PollRequest & { providerId?: string }): Promise<PollRequest | null> {
+  const selection = splitProviderSelection(body.providerId || body.provider?.id);
+  const rawSelectedModel = body.provider?.model || selection.model;
+  const { apiModelName: selectedModel } = normalizeModelForApi(rawSelectedModel || '');
+  const providers = await getApiProviders();
+  const byId = selection.providerId ? providers.find(item => item.id === selection.providerId && item.isEnabled) : null;
+  const byModel = !byId && selectedModel ? await findProviderForModel(selectedModel, '3d') : null;
+  const provider = byId || byModel;
+  if (!provider) return null;
+
+  return {
+    ...body,
+    provider: {
+      id: provider.id,
+      name: provider.displayName || provider.name,
+      baseUrl: provider.baseUrl,
+      apiKey: provider.apiKey,
+      model: selectedModel || provider.selectedModel || provider.selectedModels?.[0],
+      providerPreset: provider.providerPreset || body.provider?.providerPreset,
+    },
+  };
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await resolvePollRequest(await request.json() as PollRequest & { providerId?: string });
+    // Verify session (getSessionUser throws on unauthenticated)
+    await getSessionUser(request);
+    if (!body) {
+      return NextResponse.json({ success: false, error: '请先在管理员系统配置可用的 3D 模型' }, { status: 400 });
+    }
+    if (!body.taskId || !body.provider?.baseUrl) {
+      return NextResponse.json({ success: false, error: 'Missing taskId or provider info' }, { status: 400 });
+    }
+    if (!body.provider.apiKey) {
+      return NextResponse.json({ success: false, error: '请先在管理员系统配置可用的 3D 模型' }, { status: 400 });
+    }
+
+    const config = buildPollConfig(body);
+    if (!config) {
+      return NextResponse.json({ success: false, error: 'Could not build poll config' }, { status: 400 });
+    }
+
+    console.log('[poll-3d-task] Polling:', config.endpoint, 'method:', config.method, 'for task:', body.taskId);
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (body.provider.apiKey) {
+      headers['Authorization'] = `Bearer ${body.provider.apiKey}`;
+    }
+
+    const fetchOptions: RequestInit = {
+      method: config.method,
+      headers,
+      signal: AbortSignal.timeout(THREE_D_POLL_REQUEST_TIMEOUT_MS),
+    };
+    if (config.body && config.method === 'POST') {
+      fetchOptions.body = JSON.stringify(config.body);
+    }
+
+    const response = await fetch(config.endpoint, fetchOptions);
+    console.log('[poll-3d-task] Response status:', response.status);
+
+>>>>>>> 41e7dd04083fba557192a82b01f13084d231af10
     if (!response.ok) {
       const errorText = await response.text().catch(() => '');
       console.error('[poll-3d-task] Error:', response.status, errorText.slice(0, 500));

@@ -551,6 +551,7 @@ const WORKFLOW_PRESETS: WorkflowPreset[] = [
 
 interface NodeEditorProps {
   workflow?: WorkflowData | null;
+  userId?: string;
   onBack?: () => void;
   onWorkflowChange?: (wf: WorkflowData | null) => void;
   onOpenWorkflowHub?: () => void;
@@ -716,6 +717,7 @@ function ContentPanel({ canvasImages, onDragImage, themeStyle }: { canvasImages?
   const T = nodeThemes[themeStyle as keyof typeof nodeThemes];
   const stripRef = useRef<HTMLDivElement>(null);
 
+<<<<<<< HEAD
   const handleDragStart = (e: React.DragEvent, url: string) => {
     e.dataTransfer.setData('text/uri-list', url);
     e.dataTransfer.setData('text/plain', url);
@@ -820,6 +822,9 @@ function ContentPanel({ canvasImages, onDragImage, themeStyle }: { canvasImages?
 }
 
 export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenWorkflowHub, canvasImages, themeStyle = 'gold', onAddImages }: NodeEditorProps) {
+=======
+export default function NodeEditor({ workflow, userId, onBack, onWorkflowChange, canvasImages, themeStyle = 'gold', onAddImages }: NodeEditorProps) {
+>>>>>>> 41e7dd04083fba557192a82b01f13084d231af10
   const T = nodeThemes[themeStyle];
   // CSS自定义属性，供Tailwind中 var(--ne-xxx) 引用
   const neVars = {
@@ -888,6 +893,8 @@ export default function NodeEditor({ workflow, onBack, onWorkflowChange, onOpenW
   // 拖动状态使用ref避免每次mousemove触发重渲染导致闪烁
   const draggingNodeRef = useRef<string | null>(null);
   const dragOffsetRef = useRef({ x: 0, y: 0 });
+  const nodeDragPositionRef = useRef<{ id: string; x: number; y: number } | null>(null);
+  const nodeDragRafRef = useRef<number | null>(null);
   const isDraggingRef = useRef(false); // 标记正在拖动，跳过历史快照
   const [draggingConn, setDraggingConn] = useState<DraggingConn | null>(null);
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 0.8 });
@@ -1648,6 +1655,13 @@ ${contextInfo}
 
   // ─── 画布交互 ───
 
+  const applyNodeDragPosition = useCallback((position: { id: string; x: number; y: number }) => {
+    setWf(prev => ({
+      ...prev,
+      nodes: prev.nodes.map(node => node.id === position.id ? { ...node, x: position.x, y: position.y } : node),
+    }));
+  }, [setWf]);
+
   const handleCanvasMouseDown = useCallback((e: React.MouseEvent) => {
     if (e.button === 1 || (e.button === 0 && e.altKey)) {
       // 中键或Alt+左键 = 平移
@@ -1681,10 +1695,14 @@ ${contextInfo}
       const my = (e.clientY - canvasRect.top - vp.y) / vp.zoom;
       const nodeId = draggingNodeRef.current;
       const offset = dragOffsetRef.current;
-      setWf(prev => ({
-        ...prev,
-        nodes: prev.nodes.map(n => n.id === nodeId ? { ...n, x: mx - offset.x, y: my - offset.y } : n),
-      }));
+      nodeDragPositionRef.current = { id: nodeId, x: mx - offset.x, y: my - offset.y };
+      if (nodeDragRafRef.current === null) {
+        nodeDragRafRef.current = requestAnimationFrame(() => {
+          nodeDragRafRef.current = null;
+          const position = nodeDragPositionRef.current;
+          if (position) applyNodeDragPosition(position);
+        });
+      }
     } else if (draggingConn) {
       const canvasRect = canvasContainerRef.current?.getBoundingClientRect();
       if (!canvasRect) return;
@@ -1701,11 +1719,23 @@ ${contextInfo}
       const my = (e.clientY - canvasRect.top - vp.y) / vp.zoom;
       setBoxSelect(prev => prev ? { ...prev, endX: mx, endY: my } : null);
     }
+<<<<<<< HEAD
   }, [isPanning, panStart, draggingConn, boxSelect]);
+=======
+  }, [applyNodeDragPosition, isPanning, draggingConn, boxSelect, panStart.vx, panStart.x, panStart.vy, panStart.y]);
+>>>>>>> 41e7dd04083fba557192a82b01f13084d231af10
 
   const handleCanvasMouseUp = useCallback(() => {
     setIsPanning(false);
     if (draggingNodeRef.current) {
+      if (nodeDragRafRef.current !== null) {
+        cancelAnimationFrame(nodeDragRafRef.current);
+        nodeDragRafRef.current = null;
+      }
+      if (nodeDragPositionRef.current) {
+        applyNodeDragPosition(nodeDragPositionRef.current);
+      }
+      nodeDragPositionRef.current = null;
       // 拖动结束：标记结束，记录一次历史快照，通知外部
       draggingNodeRef.current = null;
       isDraggingRef.current = false;
@@ -1752,7 +1782,11 @@ ${contextInfo}
     }
     setBoxSelect(null);
     isBoxSelectingRef.current = false;
+<<<<<<< HEAD
   }, [wf, historyIndex, boxSelect]);
+=======
+  }, [applyNodeDragPosition, boxSelect, setWf, onWorkflowChange, wf.nodes]);
+>>>>>>> 41e7dd04083fba557192a82b01f13084d231af10
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
@@ -2052,7 +2086,7 @@ ${contextInfo}
   const handleSaveWorkflow = useCallback(async () => {
     setSaveStatus('saving');
     try {
-      const userId = localStorage.getItem('wujie_user_id') || 'anonymous';
+      if (!userId) throw new Error('未登录');
       const res = await fetch('/api/workflow/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2064,7 +2098,7 @@ ${contextInfo}
       setSaveStatus('error');
       setTimeout(() => setSaveStatus('idle'), 2000);
     }
-  }, [wf]);
+  }, [userId, wf]);
 
   // ─── 图片上传 ───
 
@@ -3210,7 +3244,7 @@ const NodeCard = React.memo(function NodeCard({ node, isSelected, isHighlighted,
   // 图片URL: 优先执行结果, 其次节点配置(input-image节点)
   const hasImageOutput = (execResult?.output?.imageUrl || node.config?.imageUrl) as string | undefined;
   // 画布模式专用节点标记
-  const isCanvasFeature = ['ai-font-design', 'ai-refine-engine', 'ai-brand-ecommerce', 'ai-segment', 'ai-multi-angle', 'ai-3d-model'].includes(node.type);
+  const isCanvasFeature = ['ai-font-design', 'ai-refine-engine', 'ai-human-repair', 'ai-brand-ecommerce', 'ai-segment', 'ai-multi-angle', 'ai-3d-model'].includes(node.type);
   const isCollapsed = collapsedNodes?.has(node.id) ?? false;
 
   // P0: input-text 节点内嵌功能状态
@@ -3831,7 +3865,7 @@ const NodeCard = React.memo(function NodeCard({ node, isSelected, isHighlighted,
       {/* 画布模式专用标记 (右上角小徽章) */}
       {isCanvasFeature && !isCondition && (
         <div className="absolute top-[3px] right-2 w-6 h-6 flex items-center justify-center rounded-full text-[7px] font-bold z-10" style={{ background: color, color: T.badgeText, opacity: 0.8 }}>
-          {node.type === 'ai-font-design' ? '字' : node.type === 'ai-refine-engine' ? '精' : node.type === 'ai-brand-ecommerce' ? '品' : node.type === 'ai-segment' ? '层' : node.type === 'ai-multi-angle' ? '角' : '3D'}
+          {node.type === 'ai-font-design' ? '字' : node.type === 'ai-refine-engine' ? '精' : node.type === 'ai-human-repair' ? '人' : node.type === 'ai-brand-ecommerce' ? '品' : node.type === 'ai-segment' ? '层' : node.type === 'ai-multi-angle' ? '角' : '3D'}
         </div>
       )}
 
@@ -3894,7 +3928,7 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
   const cat = getNodeCategory(node.type);
   const color = NODE_TYPE_COLORS[cat];
   const fields = getNodePropertyFields(node.type);
-  const isCanvasFeature = ['ai-font-design', 'ai-refine-engine', 'ai-brand-ecommerce', 'ai-segment', 'ai-multi-angle', 'ai-3d-model'].includes(node.type);
+  const isCanvasFeature = ['ai-font-design', 'ai-refine-engine', 'ai-human-repair', 'ai-brand-ecommerce', 'ai-segment', 'ai-multi-angle', 'ai-3d-model'].includes(node.type);
 
   const renderField = (field: PropertyField) => {
     const externalValue = node.config?.[field.key] ?? (node as unknown as Record<string, unknown>)[field.key] ?? field.defaultValue ?? '';

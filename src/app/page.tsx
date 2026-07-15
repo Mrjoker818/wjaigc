@@ -2825,6 +2825,7 @@ function CanvasApp() {
       const videoPollStartTime = Date.now();
       const pollVideoResult = async (attempt = 0): Promise<void> => {
         if (hasDirectVideoPollingTimedOut(attempt, Date.now() - videoPollStartTime)) {
+<<<<<<< HEAD
           setImages(prev => prev.filter(img => img.id !== phId));
           toast.error('视频生成超时', { description: '已超过最大等待时间', className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
           setActiveGenerationCount(prev => Math.max(0, prev - 1));
@@ -3798,6 +3799,981 @@ function CanvasApp() {
                   svgUrl: img.svgUrl || '',
                   mediaType: img.mediaType || '',
                   videoUrl: img.videoUrl || '',
+=======
+          setImages(prev => prev.filter(img => img.id !== phId));
+          toast.error('视频生成超时', { description: '已超过最大等待时间', className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
+          setActiveGenerationCount(prev => Math.max(0, prev - 1));
+          return;
+        }
+        // 渐进式间隔：1s → 1.5s → 2s → 3s（视频生成通常较慢，间隔不宜过短）
+        const getVideoPollInterval = (a: number) => {
+          if (a < 3) return 1000;    // 前3次：1秒（快速检测早期完成）
+          if (a < 8) return 1500;    // 3-8次：1.5秒
+          if (a < 20) return 2000;   // 8-20次：2秒
+          return 3000;               // 20次后：3秒
+        };
+
+        try {
+          // 首次轮询立即执行（不等待间隔），后续轮询SSE加速 + 渐进间隔
+          if (attempt > 0) {
+            // SSE加速：同时等待SSE事件和定时器，哪个先到用哪个
+            const ssePromise = new Promise<void>((resolve) => {
+              let resolved = false;
+              const handler = (event: { taskId?: string; task?: { status?: string } }) => {
+                if (event.taskId === taskId && !resolved) {
+                  resolved = true;
+                  unsub();
+                  resolve();
+                }
+              };
+              const unsub = taskEventsClient.onTaskEvent(handler);
+              // 5秒后移除监听，避免内存泄漏
+              setTimeout(() => {
+                if (!resolved) { resolved = true; unsub(); resolve(); }
+              }, 5000);
+            });
+
+            const pollPromise = (async () => {
+              const interval = getVideoPollInterval(attempt);
+              await new Promise(r => setTimeout(r, interval));
+            })();
+
+            await Promise.race([ssePromise, pollPromise]);
+          }
+
+          const pollRes = await fetch('/api/poll-task', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ taskId, model: params.model, providerId: params.providerId }),
+          });
+          const pollData = await pollRes.json();
+
+          if (pollData.status === 'completed') {
+            if (!isMountedRef.current) return; // 组件已卸载，停止轮询
+            const rawVideoUrl = pollData.videoUrl || pollData.url;
+            const rawThumbnailUrl = pollData.thumbnailUrl || pollData.url;
+            if (rawVideoUrl) {
+              // ★ 持久化远程URL到本地，防止过期后图片/视频消失
+              const [stableThumbnail, stableVideo] = await Promise.all([
+                awaitStableImageUrl(rawThumbnailUrl, 30000, { isVideo: false }),
+                awaitStableImageUrl(rawVideoUrl, 120000, { isVideo: true }),
+              ]);
+              if (!isMountedRef.current) return; // 持久化期间组件可能卸载
+              setImages(prev => prev.map(img =>
+                img.id === phId ? {
+                  ...img,
+                  url: stableThumbnail || '',
+                  videoUrl: stableVideo,
+                  videoDuration: params.duration,
+                  mediaType: 'video' as const,
+                  originalWidth: pollData.width || 1920,
+                  originalHeight: pollData.height || 1080,
+                  isProcessingPlaceholder: false,
+                  processing: undefined,
+                  prompt: params.prompt,
+                  modelName: params.model,
+                  apiProvider: params.providerId || undefined,
+                } as CanvasImage : img
+              ));
+              // Track video usage
+              try { UserManagerCore.getInstance().recordUsage('video'); } catch {}
+              // 通知视频面板回填镜头结果（用于多镜头尾帧接力串行流水线）
+              try {
+                const shotId = params.shotId;
+                if (shotId && videoPanelRef.current?.notifyShotVideoGenerated) {
+                  videoPanelRef.current.notifyShotVideoGenerated({
+                    shotId,
+                    videoUrl: stableVideo || rawVideoUrl,
+                    thumbnailUrl: stableThumbnail || rawThumbnailUrl || undefined,
+                  });
+                }
+              } catch {}
+            } else {
+              setImages(prev => prev.filter(img => img.id !== phId));
+              toast.error('视频生成失败', { description: '未获取到视频地址', className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
+            }
+            setActiveGenerationCount(prev => Math.max(0, prev - 1));
+          } else if (pollData.status === 'failed') {
+            setImages(prev => prev.filter(img => img.id !== phId));
+            toast.error('视频生成失败', { description: pollData.error || '未知错误', className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
+            setActiveGenerationCount(prev => Math.max(0, prev - 1));
+            // 通知视频面板：shot 失败（解开 waitForShotTask 的等待）
+            try {
+                const shotId = params.shotId;
+              if (shotId && videoPanelRef.current?.notifyShotVideoFailed) {
+                videoPanelRef.current.notifyShotVideoFailed({ shotId, error: pollData.error || '视频生成失败' });
+              }
+            } catch {}
+          } else {
+            // 更新进度，继续轮询
+            const progress = pollData.progress || 0;
+            setImages(prev => prev.map(img =>
+              img.id === phId ? {
+                ...img,
+                processing: { ...img.processing, progress: Math.max(10, progress), status: 'processing' as const, label: pollData.label || '视频生成中' },
+              } as CanvasImage : img
+            ));
+            // 递归继续轮询
+            if (isMountedRef.current) pollVideoResult(attempt + 1);
+          }
+        } catch {
+          // 轮询错误，继续尝试
+          if (isMountedRef.current) pollVideoResult(attempt + 1);
+        }
+      };
+
+      // 立即开始第一次轮询（不等待间隔）
+      pollVideoResult(0);
+
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : '视频生成失败';
+      setImages(prev => prev.filter(img => img.id !== phId));
+      toast.error('视频生成失败', {
+        description: errorMsg,
+        className: themeStyle === 'monochrome'
+          ? 'bg-white border border-gray-200 text-gray-900'
+          : 'bg-[#141414] border-[#2a2a2a] text-white',
+      });
+      setActiveGenerationCount(prev => Math.max(0, prev - 1));
+    }
+  }, [setImages, themeStyle]);
+
+  const handleAnalyzeImage = useCallback(async (imageData: string): Promise<string> => {
+    try {
+      const response = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: imageData, category: 'general' }),
+      });
+      
+      const data = await response.json();
+      
+      if (data.success && data.prompt) {
+        return data.prompt;
+      } else {
+        throw new Error(data.error || '分析失败');
+      }
+    } catch (error) {
+      console.error('Image analysis error:', error);
+      throw error;
+    }
+  }, []);
+
+  // 图片融合
+  const handleFusion = useCallback(async (params: {
+    prompt: string;
+    aspectRatio: string;
+    quality: string;
+    count: number;
+    referenceImages: string[];
+  }) => {
+    setActiveGenerationCount(prev => prev + 1);
+    
+    try {
+      const ratioToSize: Record<string, string> = {
+        '1:1': '1024x1024',
+        '4:3': '1366x1024',
+        '3:4': '1024x1366',
+        '16:9': '1820x1024',
+        '9:16': '1024x1820',
+        '3:2': '1536x1024',
+        '2:3': '1024x1536',
+      };
+
+      const size = ratioToSize[params.aspectRatio] || '1024x1024';
+      
+      // 根据画质添加提示词后缀
+      let qualityPrompt = '';
+      switch (params.quality) {
+        case 'ultra': qualityPrompt = ', ultra detailed, extremely high quality'; break;
+        case '2k': qualityPrompt = ', 2K resolution, high detail'; break;
+        case '4k': qualityPrompt = ', 4K resolution, ultra detailed'; break;
+        case 'hd': qualityPrompt = ', high quality, detailed'; break;
+        default: qualityPrompt = ', high quality';
+      }
+      
+      const fullPrompt = params.prompt + qualityPrompt;
+      
+      // ★ 获取当前选择的模型和提供商
+      const currentModelRaw = typeof window !== 'undefined' ? localStorage.getItem('wujie_selected_model') : null;
+      let fusionModel: string | undefined;
+      let fusionProviderId: string | undefined;
+      if (currentModelRaw) {
+        try {
+          const wsm = JSON.parse(currentModelRaw);
+          fusionModel = wsm.model;
+          fusionProviderId = wsm.providerId;
+        } catch {}
+      }
+
+      const response = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: fullPrompt,
+          size,
+          model: fusionModel,
+          providerId: fusionProviderId,
+          referenceImages: params.referenceImages,
+          referenceMode: 'blend',
+          imageCategory: 'general',
+          productCategory: 'none',
+          aspectRatio: params.aspectRatio,
+          stylePreset: 'auto',
+          outputCount: params.count,
+          submitOnly: true,
+          userId: currentUser?.id,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!data.success || !data.taskIds || data.taskIds.length === 0) {
+        toast.error('融合失败', {
+          description: data.error || '提交任务失败',
+          className: 'bg-[#141414] border border-red-900 text-white',
+        });
+        setActiveGenerationCount(prev => Math.max(0, prev - 1));
+        return;
+      }
+
+      const newImageUrls: string[] = [];
+
+      for (let i = 0; i < data.taskIds.length; i++) {
+        const taskId = data.taskIds[i];
+        let pollAttempts = 0;
+        const maxAttempts = 180;
+
+        while (pollAttempts < maxAttempts) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          pollAttempts++;
+
+          try {
+            const pollRes = await fetch('/api/poll-task', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ taskId, model: fusionModel, providerId: fusionProviderId }),
+            });
+            const pollData = await pollRes.json();
+
+            if (pollData.status === 'completed') {
+              const resultUrl = pollData.imageUrl || pollData.result?.url || pollData.result?.imageUrl || pollData.result?.image?.url || (pollData.result?.images && pollData.result.images[0]?.url) || (pollData.images && pollData.images[0]?.url);
+              if (resultUrl) {
+                newImageUrls.push(resultUrl);
+              }
+              break;
+            } else if (pollData.status === 'failed') {
+              console.error('融合任务失败:', pollData.error);
+              break;
+            }
+          } catch (pollErr) {
+            console.error('轮询错误:', pollErr);
+          }
+        }
+      }
+
+      if (newImageUrls.length > 0) {
+        await handleAddImages(newImageUrls);
+
+        toast.success('融合成功', {
+          description: `已生成 ${newImageUrls.length} 张融合图片`,
+          className: themeStyle === 'monochrome' ? 'bg-white border-blue-500 text-gray-900' : 'bg-[#141414] border-[#d4af37] text-white',
+        });
+      } else {
+        toast.error('融合失败', {
+          description: '生成超时或失败，请重试',
+          className: 'bg-[#141414] border border-red-900 text-white',
+        });
+      }
+    } catch (error) {
+      console.error('Fusion error:', error);
+      toast.error('融合失败', {
+        description: '网络错误，请重试',
+        className: 'bg-[#141414] border border-red-900 text-white',
+      });
+    } finally {
+      setActiveGenerationCount(prev => Math.max(0, prev - 1));
+    }
+  }, [currentUser?.id, handleAddImages, themeStyle]);
+
+  // 画布Ctrl+点击参考图片选择
+  const handleCanvasReferenceSelect = useCallback((image: CanvasImage) => {
+    setCtrlRefSelections(prev => {
+      const exists = prev.find(r => r.id === image.id);
+      if (exists) {
+        // 取消选择 - 移除并重新编号
+        const filtered = prev.filter(r => r.id !== image.id);
+        return filtered.map((r, i) => ({ ...r, number: i + 1 }));
+      }
+      // 添加新选择，分配编号
+      return [...prev, { url: image.url, id: image.id, number: prev.length + 1, keyword: '' }];
+    });
+  }, []);
+
+  // 更新参考图片关键词
+  const handleUpdateCtrlRefKeyword = useCallback((id: string, keyword: string) => {
+    setCtrlRefSelections(prev => prev.map(r => r.id === id ? { ...r, keyword } : r));
+  }, []);
+
+  // 移除单个参考选择
+  const handleRemoveCtrlRef = useCallback((id: string) => {
+    setCtrlRefSelections(prev => {
+      const filtered = prev.filter(r => r.id !== id);
+      return filtered.map((r, i) => ({ ...r, number: i + 1 }));
+    });
+  }, []);
+
+  // Alt+Click 标记参考图 - 添加到创意描述文本框的数字标记
+  const handleAltMarkReference = useCallback((image: CanvasImage) => {
+    setAltRefMarkers(prev => {
+      const exists = prev.find(r => r.id === image.id);
+      if (exists) {
+        // 已标记则取消标记
+        const filtered = prev.filter(r => r.id !== image.id);
+        return filtered.map((r, i) => ({ ...r, number: i + 1 }));
+      }
+      // 添加新标记
+      return [...prev, { id: image.id, url: image.url, number: prev.length + 1 }];
+    });
+  }, []);
+
+  // 移除单个 Alt 标记
+  const handleRemoveAltRefMarker = useCallback((id: string) => {
+    setAltRefMarkers(prev => {
+      const filtered = prev.filter(r => r.id !== id);
+      return filtered.map((r, i) => ({ ...r, number: i + 1 }));
+    });
+  }, []);
+
+  // 融合生成
+  const handleFusionGenerate = useCallback((refs: CtrlRefSelection[], fusionPrompt: string) => {
+    const refKeywords = refs.map(r => r.keyword).filter(Boolean);
+    // 构建融合提示词：清晰描述参考图关系 + 融合目标
+    let combinedPrompt = '';
+    if (refKeywords.length > 0) {
+      combinedPrompt += refs.map((r) => `[参考${r.number}: ${r.keyword}]`).join(' ');
+    }
+    if (fusionPrompt) {
+      combinedPrompt += (combinedPrompt ? ' → ' : '') + fusionPrompt;
+    }
+    if (!combinedPrompt) {
+      combinedPrompt = '将参考图片融合成统一、完整的创意构图';
+    }
+    // 同时设置参考图片
+    const refUrls = refs.map(r => r.url);
+    // 调用生成 - 使用支持图生图的 Gemini 模型
+    handleGenerate({
+      prompt: combinedPrompt,
+      size: '1024x1024',
+      referenceImages: refUrls,
+      referenceMode: 'fusion' as const,
+      imageCategory: 'none',
+      productCategory: 'none',
+      aspectRatio: '1:1',
+      stylePreset: 'none',
+      outputCount: 1,
+      model: 'gemini-2.5-flash-image-preview',
+      quality: '1K',
+    });
+  }, [handleGenerate]);
+
+  // 一键提取关键词（从画布图片提取）
+  useCallback(async (image: { id: string; url: string }) => {
+        try {
+          // 使用管理员配置的视觉模型（与"灵感提示词"功能共用模型选择逻辑）
+          let visionModel = '';
+          let providerId: string | undefined;
+          let providerPreset: string | undefined;
+
+          // Priority 1: Use the currently selected chat model
+          if (currentChatModelInfo) {
+            if (currentChatModelInfo.providerId) {
+              visionModel = currentChatModelInfo.model;
+              providerId = currentChatModelInfo.providerId;
+              providerPreset = currentChatModelInfo.providerPreset;
+            } else {
+              visionModel = currentChatModelInfo.model;
+            }
+          }
+
+          // Priority 2: Fallback - search for a vision-capable model (chat + VLM)
+          if (!visionModel) {
+            try {
+              // Search both chat and VLM model types
+              const [chatRes, vlmRes] = await Promise.all([
+                fetch('/api/models?type=chat').then(r => r.json()).catch(() => ({ providers: [], models: [] })),
+                fetch('/api/models?type=vlm').then(r => r.json()).catch(() => ({ providers: [], models: [] })),
+              ]);
+              const providers = [
+                ...(Array.isArray(chatRes.providers) ? chatRes.providers : []),
+                ...(Array.isArray(vlmRes.providers) ? vlmRes.providers : []),
+              ];
+              const models = [
+                ...(Array.isArray(chatRes.models) ? chatRes.models : []),
+                ...(Array.isArray(vlmRes.models) ? vlmRes.models : []),
+              ];
+              const visionModelPatterns = [
+                /gpt-4o/i, /gpt-4-turbo/i, /gpt-4\./i, /gpt-5/i,
+                /claude-3/i, /claude-4/i, /claude-3\.5/i,
+                /gemini/i,
+                /qwen-vl/i, /qwen2-vl/i, /qwen2\.5-vl/i, /qvq/i,
+                /glm-4v/i, /glm-4\.6v/i,
+                /internvl/i, /llava/i, /cogvlm/i, /doubao/i, /seed/i,
+              ];
+              const foundModel = models.find((model: { id?: string; name?: string; providerId?: string }) => {
+                const haystack = `${model.id || ''} ${model.name || ''}`;
+                return visionModelPatterns.some(pat => pat.test(haystack));
+              });
+              if (foundModel?.id) {
+                const provider = providers.find((item: { id?: string; providerPreset?: string }) => item.id === foundModel.providerId);
+                visionModel = foundModel.id;
+                providerId = foundModel.providerId;
+                providerPreset = provider?.providerPreset;
+              }
+            } catch {}
+          }
+
+          if (!visionModel) {
+            toast.error('未找到支持图片理解的模型', {
+              description: '请在智能对话面板中选择一个支持视觉的模型',
+              className: 'bg-[#141414] border border-red-900 text-white',
+            });
+            return;
+          }
+
+          const response = await fetch('/api/vision-prompt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              imageUrl: image.url,
+              model: visionModel,
+              providerId,
+              providerPreset,
+              userId: currentUser?.id,
+            }),
+          });
+
+          if (!response.ok) {
+            const errData = await response.json().catch(() => ({}));
+            throw new Error(errData.error || `API 调用失败: ${response.status}`);
+          }
+
+          const result = await response.json();
+          const prompt = result?.data?.bilingual || result?.data?.english || result?.data?.chinese || result?.prompt || '';
+
+          if (prompt) {
+            // 直接填充到图像生成面板的提示词输入框
+            setExternalPrompt(prompt);
+            toast.success('关键词已提取并填入描述区', {
+              description: prompt.substring(0, 80) + (prompt.length > 80 ? '...' : ''),
+              className: themeStyle === 'monochrome' ? 'bg-white border-blue-500 text-gray-900' : 'bg-[#141414] border-[#d4af37] text-white',
+            });
+          } else {
+            toast.error('提取结果为空', {
+              description: '模型未返回有效关键词',
+              className: 'bg-[#141414] border border-red-900 text-white',
+            });
+          }
+        } catch (error) {
+          console.error('Extract keywords error:', error);
+          toast.error('提取失败', {
+            description: '关键词提取失败，请重试',
+            className: 'bg-[#141414] border border-red-900 text-white',
+          });
+        }
+      }, [currentChatModelInfo, currentUser, themeStyle]);
+
+  // 提示词大师 - 从chat-panel传递到generation-panel
+  const [externalPrompt, setExternalPrompt] = useState<string | undefined>(undefined);
+  const [externalReferenceImage, setExternalReferenceImage] = useState<{ url: string; description?: string } | null>(null);
+
+  // Oh My Prompt - Vision Prompt handler
+  const handleVisionPrompt = useCallback(async (imageUrl: string) => {
+    // Use the same model/API as the chat panel (智能对话)
+    let visionModel = '';
+    let providerId: string | undefined;
+    let providerPreset: string | undefined;
+
+    // Priority 1: Use the currently selected chat model from ChatPanel
+    if (currentChatModelInfo) {
+      if (currentChatModelInfo.providerId) {
+        // Third-party chat model
+        visionModel = currentChatModelInfo.model;
+        providerId = currentChatModelInfo.providerId;
+
+
+        providerPreset = currentChatModelInfo.providerPreset;
+      } else {
+        // Server-managed model
+        visionModel = currentChatModelInfo.model;
+      }
+    }
+
+    // Priority 2: Fallback - search for a vision-capable model from server-managed providers
+    if (!visionModel) {
+      try {
+        const response = await fetch('/api/models?type=chat', { cache: 'no-store' });
+        const data = await response.json();
+        const providers = Array.isArray(data.providers) ? data.providers : [];
+        const models = Array.isArray(data.models) ? data.models : [];
+
+        const visionModelPatterns = [
+          /gpt-4o/i, /gpt-4-turbo/i, /gpt-4\./i,
+          /claude-3/i, /claude-4/i, /claude-3\.5/i,
+          /gemini/i,
+          /qwen-vl/i, /qwen2-vl/i, /qwen2\.5-vl/i, /qvq/i,
+          /glm-4v/i, /glm-4\.6v/i,
+          /internvl/i, /llava/i, /cogvlm/i, /moondream/i, /kosmos/i, /fuyu/i,
+        ];
+
+        const foundModel = models.find((model: { id?: string; name?: string; providerId?: string }) => {
+          const haystack = `${model.id || ''} ${model.name || ''}`;
+          return visionModelPatterns.some(pat => pat.test(haystack));
+        });
+
+        if (foundModel?.id) {
+          const provider = providers.find((item: { id?: string; providerPreset?: string }) => item.id === foundModel.providerId);
+          visionModel = foundModel.id;
+          providerId = foundModel.providerId;
+          providerPreset = provider?.providerPreset;
+        } else {
+          for (const provider of providers as Array<{ id?: string; selectedModels?: string[]; providerPreset?: string }>) {
+            const found = provider.selectedModels?.find((modelId: string) => visionModelPatterns.some(pat => pat.test(modelId)));
+            if (found) {
+              visionModel = found;
+              providerId = provider.id;
+              providerPreset = provider.providerPreset;
+              break;
+            }
+          }
+        }
+      } catch {}
+    }
+
+    if (!visionModel) {
+      toast.error('未找到支持图片理解的模型', {
+        description: '请在智能对话面板中选择一个支持视觉的模型',
+        className: 'bg-[#141414] border border-red-900 text-white',
+      });
+      return;
+    }
+
+    setIsVisionAnalyzing(true);
+    try {
+      toast.info('正在分析图片...', {
+        description: '灵感提示词库正在生成双语提示词',
+        className: themeStyle === 'monochrome' ? 'bg-white border-blue-500 text-gray-900' : 'bg-[#141414] border-[#d4af37] text-white',
+        duration: 5000,
+      });
+
+      const response = await fetch('/api/vision-prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageUrl,
+          model: visionModel,
+              providerId,
+
+
+          providerPreset,
+          userId: currentUser?.id,
+        }),
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || `API 调用失败: ${response.status}`);
+      }
+
+      const result = await response.json();
+
+      if (result.success && result.data) {
+        const data = result.data;
+        // Store structured vision result for OhMyPrompt component
+        setVisionResult(data);
+
+        // Build bilingual prompt string
+        let promptText = '';
+        if (data.zh?.prompt) {
+          promptText += `【中文提示词】${data.zh.prompt}`;
+        }
+        if (data.en?.prompt) {
+          promptText += `${promptText ? '\n' : ''}【英文提示词】${data.en.prompt}`;
+        }
+        if (data.zh_style_tags?.length || data.en_style_tags?.length) {
+          const zhTags = data.zh_style_tags?.length ? data.zh_style_tags.join(', ') : '';
+          const enTags = data.en_style_tags?.length ? data.en_style_tags.join(', ') : '';
+          promptText += `\n【风格标签】${zhTags}${enTags ? ' | ' + enTags : ''}`;
+        }
+        if (!promptText && data.raw) {
+          promptText = data.raw;
+        }
+
+        if (promptText) {
+          setExternalPrompt(promptText);
+          toast.success('提示词生成成功', {
+            description: data.zh?.title || data.en?.title || '双语提示词已生成',
+            className: themeStyle === 'monochrome' ? 'bg-white border-blue-500 text-gray-900' : 'bg-[#141414] border-[#d4af37] text-white',
+          });
+        } else {
+          toast.warning('分析结果为空', {
+            description: '模型未能生成有效的提示词',
+            className: 'bg-[#141414] border border-yellow-900 text-white',
+          });
+        }
+      } else {
+        throw new Error(result.error || '分析失败');
+      }
+    } catch (error) {
+      console.error('Vision prompt error:', error);
+      toast.error('图片分析失败', {
+        description: error instanceof Error ? error.message : '请重试',
+        className: 'bg-[#141414] border border-red-900 text-white',
+      });
+    } finally {
+      setIsVisionAnalyzing(false);
+    }
+  }, [currentChatModelInfo, currentUser?.id, themeStyle]);
+
+  // 右键提取关键词 - 打开oh-my-prompt识词面板并显示进度
+  const handleCanvasExtractKeywords = useCallback((image: { id: string; url: string }) => {
+    // 打开oh-my-prompt面板并自动触发识词
+    setOhMyPromptOpen(true);
+    setVisionPromptEnabled(true);
+    // 显示提取中提示
+    toast.loading('正在识别图片关键词...', {
+      className: themeStyle === 'monochrome' ? 'bg-white border-blue-500 text-gray-900' : 'bg-[#141414] border-[#d4af37] text-white',
+    });
+    // 调用识词API
+    handleVisionPrompt(image.url);
+  }, [handleVisionPrompt, themeStyle]);
+
+  const handleAddToPrompt = useCallback((optimizedPrompt: string) => {
+    setExternalPrompt(optimizedPrompt);
+    setActivePanel('generate');
+  }, []);
+
+  const handleExternalPromptConsumed = useCallback(() => {
+    setExternalPrompt(undefined);
+  }, []);
+
+  // AI聊天中的图像生成回调 - 当AI建议生成图片时直接触发
+  const handleChatGenerateImage = useCallback((prompt: string, outputCount?: number, aspectRatio?: string, quality?: string) => {
+    // 从 wujie_selected_model 读取当前选择的图像生成模型（与 generation-panel 同步）
+    let model = '';
+    let providerId: string | undefined;
+    try {
+      const rawModel = localStorage.getItem('wujie_selected_model');
+      if (rawModel) {
+        const modelInfo = JSON.parse(rawModel);
+        model = modelInfo.model || '';
+        providerId = modelInfo.providerId || undefined;
+      }
+      // 备用：从 userData 读取
+      if (!model) {
+        const currentUserId = localStorage.getItem('unbounded_ai_current_user');
+        const raw = localStorage.getItem('unbounded_ai_user_data');
+        if (raw && currentUserId) {
+          const data = JSON.parse(raw);
+          const selectedModel = data?.userData?.[currentUserId]?.selectedModel;
+          if (selectedModel) {
+            if (selectedModel.includes('::')) {
+              const parts = selectedModel.split('::');
+              providerId = parts[0];
+              model = parts.slice(1).join('::');
+            } else {
+              model = selectedModel;
+            }
+          }
+        }
+      }
+    } catch { /* fallback */ }
+    
+    if (!model) {
+      toast.error('未选择图像生成模型', {
+        description: '请先在图像生成面板中选择模型',
+        className: 'bg-[#141414] border border-yellow-900 text-white',
+      });
+      return;
+    }
+
+    // 调用 handleGenerate 执行实际的图像生成
+    handleGenerate({
+      prompt: prompt,
+      outputCount: outputCount || 1,
+      aspectRatio: aspectRatio || '1:1',
+      size: '',
+      referenceImages: [],
+      referenceMode: 'style',
+      imageCategory: '',
+      productCategory: '',
+      stylePreset: '',
+      quality: quality || 'standard',
+      model: model,
+      providerId: providerId,
+    });
+  }, [handleGenerate]);
+
+  // 适配 InfiniteCanvas 的简单回调函数
+  const handleCanvasGenerateVariation = useCallback((image: CanvasImage) => {
+    setExternalReferenceImage({ url: image.url, description: image.prompt || '' });
+  }, []);
+
+  const handleCanvasFusion = useCallback((images: CanvasImage[]) => {
+    handleFusion({
+      prompt: '',
+      aspectRatio: '1:1',
+      quality: 'standard',
+      count: 1,
+      referenceImages: images.map(img => img.url)
+    });
+  }, [handleFusion]);
+
+  // Canvas img2img handler - reuses handleGenerate for reliable submission + polling
+  // Language-based image editing handler
+  const handleEditImage = useCallback((image: CanvasImage | null) => {
+    setEditingImage(image);
+    setShowImageEditor(true);
+  }, []);
+
+  const handleEditCancel = useCallback(() => {
+    setShowImageEditor(false);
+    setEditingImage(null);
+  }, []);
+
+  // Add image to favorites
+  // localStorage 兜底：数据库不可用时用本地存储
+  const getLocalFavorites = useCallback((): FavoriteItem[] => {
+    try {
+      const raw = localStorage.getItem('wujie-favorites-local');
+      return raw ? JSON.parse(raw) : [];
+    } catch { return []; }
+  }, []);
+
+  const saveLocalFavorites = useCallback((items: FavoriteItem[]) => {
+    try { localStorage.setItem('wujie-favorites-local', JSON.stringify(items)); } catch { /* ignore */ }
+  }, []);
+
+  const handleAddToFavorites = useCallback(async (image: CanvasImage) => {
+    if (!currentUser) {
+      toast.error('请先登录后再收藏');
+      return;
+    }
+    const userId = currentUser.id || currentUser.name;
+    const currentModel = localStorage.getItem('wujie-current-image-model') || '';
+    const currentProvider = localStorage.getItem('wujie-current-api-provider') || '';
+    const favData = {
+      userId,
+      username: currentUser.name || '',
+      imageUrl: image.url,
+      prompt: image.prompt || '',
+      negativePrompt: image.negativePrompt || '',
+      model: currentModel,
+      modelName: currentModel,
+      aspectRatio: image.width && image.height ? `${image.width}:${image.height}` : '',
+      imageWidth: image.width,
+      imageHeight: image.height,
+      originalWidth: image.originalWidth,
+      originalHeight: image.originalHeight,
+      apiProvider: currentProvider,
+      sourceType: 'generated',
+    };
+    try {
+      const res = await fetch('/api/favorites', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(favData),
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success(data.message || '已添加到收藏夹');
+        // 同步到本地缓存
+        const local = getLocalFavorites();
+        if (!local.find(f => f.image_url === image.url)) {
+          local.unshift({
+            id: data.id || Date.now(),
+            user_id: userId,
+            username: favData.username,
+            image_url: image.url,
+            prompt: favData.prompt,
+            negative_prompt: favData.negativePrompt,
+            model: favData.model,
+            model_name: favData.modelName,
+            aspect_ratio: favData.aspectRatio,
+            quality: '',
+            image_width: favData.imageWidth || 0,
+            image_height: favData.imageHeight || 0,
+            original_width: favData.originalWidth || 0,
+            original_height: favData.originalHeight || 0,
+            api_provider: favData.apiProvider,
+            api_base_url: '',
+            source_type: 'generated',
+            created_at: Date.now(),
+          });
+          saveLocalFavorites(local);
+        }
+      } else {
+        // API返回错误 → localStorage兜底
+        const local = getLocalFavorites();
+        if (!local.find(f => f.image_url === image.url)) {
+          local.unshift({
+            id: Date.now(),
+            user_id: userId,
+            username: favData.username,
+            image_url: image.url,
+            prompt: favData.prompt,
+            negative_prompt: favData.negativePrompt,
+            model: favData.model,
+            model_name: favData.modelName,
+            aspect_ratio: favData.aspectRatio,
+            quality: '',
+            image_width: favData.imageWidth || 0,
+            image_height: favData.imageHeight || 0,
+            original_width: favData.originalWidth || 0,
+            original_height: favData.originalHeight || 0,
+            api_provider: favData.apiProvider,
+            api_base_url: '',
+            source_type: 'generated',
+            created_at: Date.now(),
+          });
+          saveLocalFavorites(local);
+        }
+        toast.success('已添加到收藏夹（本地）');
+      }
+    } catch (err) {
+      // 网络错误 → localStorage兜底
+      console.error('[Favorites] add error, falling back to localStorage:', err);
+      const local = getLocalFavorites();
+      if (!local.find(f => f.image_url === image.url)) {
+        local.unshift({
+          id: Date.now(),
+          user_id: userId,
+          username: favData.username,
+          image_url: image.url,
+          prompt: favData.prompt,
+          negative_prompt: favData.negativePrompt,
+          model: favData.model,
+          model_name: favData.modelName,
+          aspect_ratio: favData.aspectRatio,
+          quality: '',
+          image_width: favData.imageWidth || 0,
+          image_height: favData.imageHeight || 0,
+          original_width: favData.originalWidth || 0,
+          original_height: favData.originalHeight || 0,
+          api_provider: favData.apiProvider,
+          api_base_url: '',
+          source_type: 'generated',
+          created_at: Date.now(),
+        });
+        saveLocalFavorites(local);
+      }
+      toast.success('已添加到收藏夹（本地）');
+    }
+  }, [currentUser, getLocalFavorites, saveLocalFavorites]);
+
+  // Workflow state for node mode
+  const [nodeWorkflow, setNodeWorkflow] = useState<Workflow | null>(null);
+
+  // Mode switching - early return for non-canvas modes
+  if (appMode === 'node') {
+    return (
+      <NodeEditor
+        workflow={nodeWorkflow}
+        userId={currentUser?.id}
+        onBack={() => setAppMode('canvas')}
+        onWorkflowChange={setNodeWorkflow}
+        onOpenWorkflowHub={() => setAppMode('workflow-hub')}
+        canvasImages={images.map(img => ({ id: img.id, url: img.url, name: img.prompt?.slice(0, 30) || '图片', description: img.prompt || '', width: img.width, height: img.height }))}
+        themeStyle={themeStyle}
+        onAddImages={(urls, meta) => handleAddImages(urls, undefined, meta)}
+      />
+    );
+  }
+  if (appMode === 'workflow-hub') {
+    return <WorkflowHub userId={currentUser?.id} onBack={() => setAppMode('canvas')} onEditWorkflow={(wf) => { setNodeWorkflow(wf); setAppMode('node'); }} themeStyle={themeStyle} />;
+  }
+
+  if (appMode === 'dashboard') {
+    return (
+      <>
+      <DashboardView
+        key={currentUser?.id || 'no-user'}
+        isMonochrome={themeStyle === 'monochrome'}
+        user={currentUser!}
+        onOpenProject={(project) => {
+          setAppMode('canvas');
+          loadProjectById(project.id);
+        }}
+        onSetFavoriteParams={(params) => {
+          setFavoriteParams(params);
+        }}
+        onNewProject={async () => {
+          try {
+            const mgr = UserManagerCore.getInstance();
+            const newProject = await mgr.createProject('未命名项目');
+            loadProjectById(newProject.id);
+            setAppMode('canvas');
+          } catch (e) {
+            console.error('创建项目失败:', e);
+          }
+        }}
+        onLogout={async () => {
+          // 退出前同步保存当前项目数据
+          try {
+            if (currentProject && images.length > 0) {
+              const mgr = UserManagerCore.getInstance();
+              const urlMapping: Record<string, string> = {};
+              const nonPersistent = images.filter(img => img.url.startsWith('data:') || img.url.startsWith('blob:'));
+              if (nonPersistent.length > 0) {
+                const results = await Promise.allSettled(nonPersistent.map(async (img) => {
+                  let urlToSave = img.url;
+                  if (urlToSave.startsWith('blob:')) {
+                    try {
+                      const resp = await fetch(urlToSave);
+                      const blob = await resp.blob();
+                      urlToSave = await new Promise<string>((resolve) => {
+                        const reader = new FileReader();
+                        reader.onloadend = () => resolve(reader.result as string);
+                        reader.readAsDataURL(blob);
+                      });
+                    } catch { return null; }
+                  }
+                  const saveResp = await fetch('/api/save-image', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ imageUrl: urlToSave, userId: currentUser?.id, sourceUrl: img.url }),
+                  });
+                  const saveData = await saveResp.json();
+                  if (saveData.success && saveData.url) return { original: img.url, persisted: saveData.url };
+                  return null;
+                }));
+                for (const r of results) {
+                  if (r.status === 'fulfilled' && r.value) urlMapping[r.value.original] = r.value.persisted;
+                }
+              }
+              const persistableCanvasImages = images
+                .map(img => ({
+                  id: img.id,
+                  url: urlMapping[img.url] || img.url,
+                  x: img.x, y: img.y, width: img.width, height: img.height,
+                  originalWidth: img.originalWidth || img.width * 2,
+                  originalHeight: img.originalHeight || img.height * 2,
+                  rotation: 0, zIndex: 0, createdAt: img.createdAt || Date.now(),
+                  prompt: img.prompt || '', modifyPrompt: img.modifyPrompt || '',
+                  model: img.model || '', quality: img.quality || '',
+                  aspectRatio: img.aspectRatio || '', stylePreset: img.stylePreset || '',
+                  category: img.category || '', size: img.size || '',
+                  groupId: img.groupId || '', threeDModelUrl: img.threeDModelUrl || '',
+                  threeDModelUrls: img.threeDModelUrls || undefined,
+                  modelName: img.modelName || '', apiProvider: img.apiProvider || '',
+                  apiBaseUrl: img.apiBaseUrl || '',
+                  sourceUrl: img.sourceUrl || '',
+                  generatedFromImageId: img.generatedFromImageId || '',
+                  svgDataUrl: img.svgDataUrl || '',
+                  svgUrl: img.svgUrl || '',
+                  mediaType: img.mediaType || '',
+                  videoUrl: img.videoUrl || '',
+>>>>>>> 41e7dd04083fba557192a82b01f13084d231af10
                   videoDuration: img.videoDuration || undefined,
                   videoThumbnailUrl: img.videoThumbnailUrl || '',
                   isProcessingPlaceholder: img.isProcessingPlaceholder || false,

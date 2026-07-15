@@ -56,7 +56,7 @@ async function downloadImage(sourceUrl) {
     }
 
     return null;
-  } catch (e) {
+  } catch {
     return null;
   }
 }

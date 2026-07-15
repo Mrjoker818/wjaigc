@@ -71,12 +71,17 @@ export async function POST(request: NextRequest) {
  */
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
-    const userId = searchParams.get('userId');
-
-    if (!userId) {
-      return NextResponse.json({ error: '缺少 userId' }, { status: 400 });
+    const user = await getAuthUser(request);
+    if (!user) {
+      return NextResponse.json({ error: '未登录，请先登录' }, { status: 401 });
     }
+
+    const { searchParams } = new URL(request.url);
+    const requestedUserId = searchParams.get('userId');
+    if (requestedUserId && requestedUserId !== user.id) {
+      return NextResponse.json({ error: '无权读取其他用户的工作流' }, { status: 403 });
+    }
+    const userId = user.id;
 
     // 从用户数据 API 加载所有工作流
     const loadRes = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/user-data/sync?userId=${encodeURIComponent(userId)}&prefix=workflow_`);

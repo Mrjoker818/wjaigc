@@ -21,7 +21,7 @@ import { getModelParamType } from './canvas-generation-group';
 export type NodeType =
   | 'input-image' | 'input-text' | 'input-param' | 'input-video' | 'audio-input'
   | 'ai-generate' | 'ai-edit' | 'ai-retouch' | 'ai-upscale' | 'ai-removebg' | 'ai-vectorize' | 'ai-style-transfer' | 'ai-color-adjust' | 'ai-analyze'
-  | 'ai-font-design' | 'ai-refine-engine' | 'ai-brand-ecommerce' | 'ai-segment' | 'ai-multi-angle' | 'ai-3d-model' | 'ai-panorama'
+  | 'ai-font-design' | 'ai-refine-engine' | 'ai-human-repair' | 'ai-brand-ecommerce' | 'ai-segment' | 'ai-multi-angle' | 'ai-3d-model' | 'ai-panorama'
   | 'ai-video-generate' | 'ai-video-i2v'
   | 'ai-llm' | 'ai-audio'
   | 'video-speed-change' | 'video-filter' | 'video-concat' | 'video-trim'
@@ -78,7 +78,7 @@ export function getNodeCategory(type: NodeType): NodeCategory {
 export function isImageGeneratingNode(type: NodeType): boolean {
   return [
     'ai-generate', 'ai-edit', 'ai-retouch', 'ai-upscale', 'ai-removebg',
-    'ai-font-design', 'ai-refine-engine', 'ai-brand-ecommerce', 'ai-segment',
+    'ai-font-design', 'ai-refine-engine', 'ai-human-repair', 'ai-brand-ecommerce', 'ai-segment',
     'ai-multi-angle', 'ai-3d-model', 'ai-style-transfer', 'ai-color-adjust',
     'ai-vectorize', 'storyboard-sequence', 'ai-panorama', 'manual-color-adjust',
   ].includes(type);
@@ -116,6 +116,7 @@ export const NODE_TYPE_LABELS: Record<NodeType, string> = {
   'ai-retouch': 'AI修图',
   'ai-font-design': '字境大师',
   'ai-refine-engine': '精修引擎',
+  'ai-human-repair': '人物智能修复',
   'ai-brand-ecommerce': '品牌电商',
   'ai-segment': '元素分层',
   'ai-multi-angle': '多角度生成',
@@ -169,6 +170,7 @@ export const NODE_TYPE_ICONS: Record<NodeType, string> = {
   'ai-retouch': 'Wand2',
   'ai-font-design': 'Type',
   'ai-refine-engine': 'Sparkles',
+  'ai-human-repair': 'UserRoundCheck',
   'ai-brand-ecommerce': 'ShoppingBag',
   'ai-segment': 'Layers',
   'ai-multi-angle': 'Rotate3d',
@@ -328,6 +330,7 @@ export const NODE_TEMPLATES: { type: NodeType; category: NodeCategory; label: st
   { type: 'ai-analyze', category: 'ai', label: 'AI分析', desc: '图像内容分析' },
   { type: 'ai-font-design', category: 'ai', label: '字境大师', desc: 'AI字体设计与生成' },
   { type: 'ai-refine-engine', category: 'ai', label: '精修引擎', desc: '产品商业级精修' },
+  { type: 'ai-human-repair', category: 'ai', label: '人物智能修复', desc: '人脸、手部与身体局部保护修复' },
   { type: 'ai-brand-ecommerce', category: 'ai', label: '品牌电商', desc: '电商视觉内容生成' },
   { type: 'ai-segment', category: 'ai', label: '元素分层', desc: '智能分层+PSD导出' },
   { type: 'ai-multi-angle', category: 'ai', label: '多角度生成', desc: '多视角旋转生成' },
@@ -582,7 +585,7 @@ export interface PropertyField {
   max?: number;
   step?: number;
   defaultValue?: unknown;
-  modelFilter?: 'image' | 'chat' | '3d' | 'vector' | 'segment' | 'video'; // model-select 字段过滤模型类型
+  modelFilter?: 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video'; // model-select 字段过滤模型类型
   placeholder?: string;
   hint?: string; // 字段提示文字
 }
@@ -762,6 +765,15 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
     fields.push({ key: 'quality', label: '图片质量', type: 'select', options: [{ label: '自动', value: 'auto' }], defaultValue: 'auto' });
   }
 
+  if (type === 'ai-human-repair') {
+    fields.push({ key: 'model', label: '图像编辑模型', type: 'model-select', modelFilter: 'image' });
+    fields.push({ key: 'targetTypes', label: '修复部位', type: 'select', options: [
+      { label: '自动检测异常区域', value: 'auto' }, { label: '仅人脸', value: 'face' }, { label: '仅手部', value: 'hands' }, { label: '人脸和手部', value: 'face_hands' }, { label: '全人物', value: 'all' },
+    ], defaultValue: 'auto' });
+    fields.push({ key: 'candidateCount', label: '候选数量', type: 'number', min: 1, max: 4, defaultValue: 2 });
+    fields.push({ key: 'strength', label: '修复强度', type: 'slider', min: 20, max: 100, step: 5, defaultValue: 70 });
+  }
+
   if (type === 'ai-brand-ecommerce') {
     fields.push({ key: 'model', label: '生图模型', type: 'model-select', modelFilter: 'image' });
     fields.push({ key: 'templateType', label: '模板类型', type: 'select', options: [
@@ -784,7 +796,7 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
   }
 
   if (type === 'ai-segment') {
-    fields.push({ key: 'model', label: '分层模型', type: 'model-select', modelFilter: 'segment' });
+    fields.push({ key: 'model', label: '分层模型', type: 'model-select', modelFilter: 'layer' });
     fields.push({ key: 'exportFormat', label: '导出格式', type: 'select', options: [
       { label: 'PSD (Pro)', value: 'psd-pro' }, { label: 'PSD (Studio)', value: 'psd-studio' },
       { label: 'SVG', value: 'svg' }, { label: '仅分层', value: 'layers-only' }
@@ -835,6 +847,7 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
   if (type === 'condition-switch') {
     fields.push({ key: 'cases', label: '分支数量', type: 'number', min: 2, max: 8, defaultValue: 3 });
     fields.push({ key: 'expression', label: '匹配表达式', type: 'textarea', placeholder: '如: result.category' });
+    fields.push({ key: 'caseValues', label: '分支匹配值', type: 'textarea', placeholder: '每行一个值，对应分支1、分支2...' });
   }
   if (type.startsWith('loop-')) {
     fields.push({ key: 'loopCount', label: '循环次数', type: 'number', min: 1, max: 100, defaultValue: 3 });
@@ -846,9 +859,19 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
     fields.push({ key: 'itemsSource', label: '数据源', type: 'select', options: [
       { label: '上游输出', value: 'upstream' }, { label: '手动列表', value: 'manual' }
     ], defaultValue: 'upstream' });
+    fields.push({ key: 'items', label: '手动列表', type: 'textarea', placeholder: '每行一个项目，或输入 JSON 数组', hint: '仅在数据源为手动列表时使用' });
   }
   if (type === 'parallel') {
     fields.push({ key: 'channels', label: '并行通道数', type: 'number', min: 2, max: 8, defaultValue: 2 });
+  }
+  if (type === 'subgraph') {
+    fields.push({
+      key: 'subgraph',
+      label: '内联子工作流 JSON',
+      type: 'textarea',
+      placeholder: '{"nodes": [], "connections": []}',
+      hint: '可粘贴已导出的子工作流；执行前会校验节点、连线和最大规模。',
+    });
   }
 
   // ─── Agent节点 ───
@@ -1116,6 +1139,202 @@ export interface WorkflowExecution {
   error?: string;
 }
 
+function getPathValue(source: Record<string, unknown>, path: string): unknown {
+  return path.split('.').reduce<unknown>((value, key) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+    return (value as Record<string, unknown>)[key];
+  }, source);
+}
+
+function parseConditionValue(raw: string, context: Record<string, unknown>): unknown {
+  const value = raw.trim();
+  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+    return value.slice(1, -1);
+  }
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  if (value === 'null') return null;
+  const numeric = Number(value);
+  if (value && Number.isFinite(numeric)) return numeric;
+  return getPathValue(context, value);
+}
+
+/** Safely evaluate the limited comparison grammar exposed by workflow condition fields. */
+export function evaluateWorkflowCondition(expression: string, context: Record<string, unknown>): boolean {
+  const trimmed = expression.trim();
+  if (!trimmed) return false;
+  const negatedPath = trimmed.match(/^!\s*([A-Za-z_$][\w$]*(?:\.[\w$]+)*)$/);
+  if (negatedPath) return !getPathValue(context, negatedPath[1]);
+
+  const comparison = trimmed.match(/^([A-Za-z_$][\w$]*(?:\.[\w$]+)*)\s*(===|!==|==|!=|>=|<=|>|<|includes)\s*(.+)$/);
+  if (!comparison) return Boolean(getPathValue(context, trimmed));
+
+  const [, leftPath, operator, rawRight] = comparison;
+  const left = getPathValue(context, leftPath);
+  const right = parseConditionValue(rawRight, context);
+  switch (operator) {
+    case '===': return left === right;
+    case '!==': return left !== right;
+    case '==': return left == right; // Supports legacy workflow values stored as strings.
+    case '!=': return left != right;
+    case '>': return typeof left === 'number' && typeof right === 'number' && left > right;
+    case '>=': return typeof left === 'number' && typeof right === 'number' && left >= right;
+    case '<': return typeof left === 'number' && typeof right === 'number' && left < right;
+    case '<=': return typeof left === 'number' && typeof right === 'number' && left <= right;
+    case 'includes': return (typeof left === 'string' && typeof right === 'string' && left.includes(right)) || (Array.isArray(left) && left.includes(right));
+    default: return false;
+  }
+}
+
+/** Resolve the output ports that may propagate data after a control node runs. */
+export function resolveControlOutputPorts(node: WorkflowNode, inputs: Record<string, unknown>): string[] {
+  if (node.type === 'condition-if') {
+    const expression = String(inputs.condition || node.config.condition || node.condition || '');
+    return [evaluateWorkflowCondition(expression, inputs) ? 'out-true' : 'out-false'];
+  }
+  if (node.type === 'condition-switch') {
+    const expression = String(inputs.expression || node.config.expression || '');
+    const value = getPathValue(inputs, expression);
+    const count = Math.max(2, Math.min(8, Number(node.config.cases) || 3));
+    const caseValues = String(node.config.caseValues || '').split('\n').map(item => item.trim()).filter(Boolean);
+    const configuredIndex = caseValues.findIndex(item => item === String(value));
+    const numericIndex = typeof value === 'number' && Number.isInteger(value) ? value - 1 : -1;
+    const index = configuredIndex >= 0 ? configuredIndex : numericIndex >= 0 && numericIndex < count ? numericIndex : 0;
+    return [`out-${index + 1}`];
+  }
+  if (node.type === 'parallel') {
+    const requestedChannels = Math.max(1, Number(node.config.channels) || 2);
+    return node.ports
+      .filter(port => port.direction === 'out' && /^out-\d+$/.test(port.id))
+      .slice(0, requestedChannels)
+      .map(port => port.id);
+  }
+  return [];
+}
+
+export interface WorkflowIteration {
+  index: number;
+  total: number;
+  item: unknown;
+}
+
+export interface InlineSubgraph {
+  nodes: WorkflowNode[];
+  connections: WorkflowConnection[];
+}
+
+const MAX_INLINE_SUBGRAPH_NODES = 100;
+const MAX_INLINE_SUBGRAPH_CONNECTIONS = 300;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isInlineWorkflowNode(value: unknown): value is WorkflowNode {
+  return isRecord(value)
+    && typeof value.id === 'string'
+    && typeof value.type === 'string'
+    && typeof value.label === 'string'
+    && typeof value.x === 'number'
+    && typeof value.y === 'number'
+    && typeof value.width === 'number'
+    && typeof value.height === 'number'
+    && Array.isArray(value.ports)
+    && isRecord(value.config);
+}
+
+function isInlineWorkflowConnection(value: unknown): value is WorkflowConnection {
+  return isRecord(value)
+    && typeof value.id === 'string'
+    && typeof value.fromNodeId === 'string'
+    && typeof value.fromPortId === 'string'
+    && typeof value.toNodeId === 'string'
+    && typeof value.toPortId === 'string'
+    && typeof value.type === 'string';
+}
+
+/** Returns a safe inline workflow definition configured on a subgraph node. */
+export function resolveInlineSubgraph(node: WorkflowNode): InlineSubgraph | null {
+  if (node.type !== 'subgraph') return null;
+  const rawCandidate = node.config.subgraph ?? node.config.inlineWorkflow;
+  let candidate: unknown = rawCandidate;
+  if (typeof rawCandidate === 'string') {
+    try {
+      candidate = JSON.parse(rawCandidate) as unknown;
+    } catch {
+      return null;
+    }
+  }
+  if (!isRecord(candidate) || !Array.isArray(candidate.nodes) || !Array.isArray(candidate.connections)) return null;
+  if (candidate.nodes.length === 0 || candidate.nodes.length > MAX_INLINE_SUBGRAPH_NODES || candidate.connections.length > MAX_INLINE_SUBGRAPH_CONNECTIONS) return null;
+  if (!candidate.nodes.every(isInlineWorkflowNode) || !candidate.connections.every(isInlineWorkflowConnection)) return null;
+
+  const nodes = candidate.nodes.map(item => ({ ...item, config: { ...item.config }, ports: [...item.ports] }));
+  const connections = candidate.connections.map(item => ({ ...item }));
+  const ids = new Set(nodes.map(item => item.id));
+  if (ids.size !== nodes.length || connections.some(item => !ids.has(item.fromNodeId) || !ids.has(item.toNodeId))) return null;
+  return { nodes, connections };
+}
+
+/** Group nodes are visual containers and must preserve the data stream unchanged. */
+export function resolveGroupOutput(inputs: Record<string, unknown>): Record<string, unknown> {
+  return { ...inputs };
+}
+
+function parseLoopItems(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== 'string') return [];
+  const trimmed = value.trim();
+  if (!trimmed) return [];
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (Array.isArray(parsed)) return parsed;
+  } catch { /* A newline-delimited list is also supported. */ }
+  return trimmed.split(/\r?\n|,/).map(item => item.trim()).filter(Boolean);
+}
+
+/** Build a bounded, deterministic iteration plan for each loop node type. */
+export function resolveWorkflowIterations(node: WorkflowNode, inputs: Record<string, unknown>): WorkflowIteration[] {
+  const limit = Math.max(1, Math.min(100, Number(inputs.loopCount || node.config.loopCount) || 1));
+  if (node.type === 'loop-while') {
+    const expression = String(inputs.condition || node.config.condition || node.condition || '');
+    if (!evaluateWorkflowCondition(expression, inputs)) return [];
+  }
+
+  let items: unknown[];
+  if (node.type === 'loop-each') {
+    const result = inputs.result;
+    const resultItems = result && typeof result === 'object' && !Array.isArray(result)
+      ? (result as Record<string, unknown>).items
+      : undefined;
+    items = parseLoopItems(node.config.itemsSource === 'manual' ? node.config.items : inputs.items ?? inputs.imageUrls ?? resultItems);
+    if (items.length === 0) items = Array.from({ length: limit }, (_, index) => index + 1);
+  } else {
+    items = Array.from({ length: limit }, (_, index) => index + 1);
+  }
+
+  return items.slice(0, limit).map((item, index, list) => ({ index: index + 1, total: list.length, item }));
+}
+
+function hasActiveControlPort(result: ExecutionResult | undefined, portId: string): boolean | null {
+  const activePorts = result?.output?.activePorts;
+  if (!Array.isArray(activePorts)) return null;
+  return activePorts.includes(portId);
+}
+
+/** Returns true when every incoming conditional branch explicitly excludes the target node. */
+export function shouldSkipNodeForInactiveBranches(
+  node: WorkflowNode,
+  connections: WorkflowConnection[],
+  results: Map<string, ExecutionResult>,
+): boolean {
+  const branchConnections = connections.filter(connection => {
+    if (connection.toNodeId !== node.id) return false;
+    return hasActiveControlPort(results.get(connection.fromNodeId), connection.fromPortId) !== null;
+  });
+  return branchConnections.length > 0 && branchConnections.every(connection => hasActiveControlPort(results.get(connection.fromNodeId), connection.fromPortId) === false);
+}
+
 /**
  * DAG拓扑排序
  * 按依赖关系排序节点，保证上游节点先于下游节点执行
@@ -1204,8 +1423,10 @@ export function getNodeInputs(
     if (blockedInputs.has(conn.id)) continue;
     const upstreamResult = results.get(conn.fromNodeId);
     if (!upstreamResult?.output) continue;
+    if (hasActiveControlPort(upstreamResult, conn.fromPortId) === false) continue;
 
     const upstreamOutput = upstreamResult.output;
+    if (!inputs.result && Object.keys(upstreamOutput).length > 0) inputs.result = upstreamOutput;
 
     // P0: 记录上游节点的imageUrl到映射
     if (upstreamOutput.imageUrl) {
@@ -1490,6 +1711,37 @@ export function buildNodeExecutionRequest(
         endpoint: '/api/edit',
         method: 'POST',
         body: refineBody,
+      };
+    }
+
+    case 'ai-human-repair': {
+      const targetTypes = String(config.targetTypes || 'auto');
+      const targetIds = targetTypes === 'face' ? ['face_01']
+        : targetTypes === 'hands' ? ['left_hand_01', 'right_hand_01']
+          : targetTypes === 'face_hands' ? ['face_01', 'left_hand_01', 'right_hand_01']
+            : targetTypes === 'all' ? ['face_01', 'left_hand_01', 'right_hand_01', 'body_01', 'feet_01', 'hair_01', 'clothes_01', 'interaction_01']
+              : [];
+      return {
+        endpoint: '/api/human/repair',
+        method: 'POST',
+        body: {
+          imageId: config.imageId || config.imageUrl || '',
+          imageUrl: config.imageUrl || '',
+          targetIds,
+          candidateCount: Number(config.candidateCount) || 2,
+          model: config.model || '',
+          providerId: config.providerId || '',
+          mode: config.model ? 'auto' : 'mock',
+          options: {
+            strength: Math.max(0.2, Math.min(1, Number(config.strength || 70) / 100)),
+            lockIdentity: true,
+            lockHair: true,
+            lockClothes: true,
+            lockPose: true,
+            lockBackground: true,
+            protectTextLogoProduct: true,
+          },
+        },
       };
     }
 

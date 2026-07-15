@@ -528,8 +528,8 @@ export async function postProcessAIRemoveBG(
     // 策略4: 用本地 rembg 生成蒙版（使用高质量模型，最后兜底）
     // 关键改进：用原图 RGB + rembg 蒙版，而不是 rembg 的 RGBA 输出
     console.log('[postProcessAIRemoveBG] Using rembg to generate mask from original image');
-    const { generateRemoveBgMask } = await import('./image-tools/iopaint-client');
-    const maskResult = await generateRemoveBgMask(origBuffer, 'isnet-general-use');
+    const { generateRembgMask } = await import('./image-tools/rembg-client');
+    const maskResult = await generateRembgMask(origBuffer, 'birefnet-general');
     
     if (!maskResult || !maskResult.success || !maskResult.maskBase64) {
       console.log('[postProcessAIRemoveBG] Failed to generate mask with rembg');
@@ -590,10 +590,10 @@ export async function postProcessAIRemoveBG(
  */
 export async function generateRembgMask(
   imageBuffer: Buffer,
-  model: string = 'u2net'
+  model: string = 'birefnet-general'
 ): Promise<string | null> {
   try {
-    const { generateRemoveBgMask: clientGenMask } = await import('./image-tools/iopaint-client');
+    const { generateRembgMask: clientGenMask } = await import('./image-tools/rembg-client');
     const result = await clientGenMask(imageBuffer, model);
     return result?.maskBase64 || null;
   } catch (err) {

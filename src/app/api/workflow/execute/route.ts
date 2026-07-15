@@ -14,6 +14,12 @@ import { requireApiAuth } from '@/lib/api-auth';
 import {
   topologicalSort,
   getNodeInputs,
+  evaluateWorkflowCondition,
+  resolveGroupOutput,
+  resolveInlineSubgraph,
+  resolveControlOutputPorts,
+  resolveWorkflowIterations,
+  shouldSkipNodeForInactiveBranches,
   buildNodeExecutionRequest,
   replaceLoopVariables,
   type WorkflowNode,
@@ -25,16 +31,23 @@ import { findProviderForModel, findProviderForFeature, findProviderById } from '
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { validateApiInputs } from '@/lib/api-validator';
 import { logError, OP_ACTIONS } from '@/lib/op-log';
+import { createCloudTask, getCloudTaskForUser, updateCloudTask } from '@/lib/cloud-task-storage';
 
-// 内存中的执行状态
-const executionCache = new Map<string, {
-  status: 'running' | 'completed' | 'failed' | 'cancelled';
+type WorkflowExecutionStatus = 'running' | 'completed' | 'failed' | 'cancelled';
+
+interface WorkflowExecutionState {
+  status: WorkflowExecutionStatus;
   results: Record<string, ExecutionResult>;
   currentNodeId: string | null;
   startedAt: number;
   completedAt: number | null;
   error?: string;
-}>();
+  userId?: string;
+  totalNodes: number;
+}
+
+// 内存中的执行状态
+const executionCache = new Map<string, WorkflowExecutionState>();
 
 // 30分钟后自动清理
 const CLEANUP_MS = 30 * 60 * 1000;
@@ -48,6 +61,56 @@ const wfCleanupTimer = setInterval(() => {
 }, 5 * 60 * 1000);
 if (wfCleanupTimer && typeof wfCleanupTimer === 'object' && 'unref' in wfCleanupTimer) {
   wfCleanupTimer.unref();
+}
+
+function toCloudWorkflowStatus(status: WorkflowExecutionStatus): 'processing' | 'completed' | 'failed' | 'cancelled' {
+  return status === 'running' ? 'processing' : status;
+}
+
+function fromCloudWorkflowStatus(status: string): WorkflowExecutionStatus {
+  return status === 'processing' || status === 'queued' || status === 'pending' ? 'running'
+    : status === 'completed' || status === 'cancelled' ? status
+      : 'failed';
+}
+
+async function persistWorkflowExecution(executionId: string, execState: WorkflowExecutionState): Promise<void> {
+  if (!execState.userId) return;
+  try {
+    await updateCloudTask(executionId, {
+      status: toCloudWorkflowStatus(execState.status),
+      progress: execState.status === 'running'
+        ? Math.min(99, Math.round((Object.keys(execState.results).length / Math.max(execState.totalNodes, 1)) * 100))
+        : 100,
+      label: execState.currentNodeId ? `执行节点 ${execState.currentNodeId}` : '工作流执行',
+      result: {
+        currentNodeId: execState.currentNodeId,
+        results: execState.results,
+        startedAt: execState.startedAt,
+        completedAt: execState.completedAt,
+      },
+      error: execState.error,
+    });
+  } catch (error) {
+    console.warn('[Workflow] 执行状态持久化失败:', error);
+  }
+}
+
+function hydrateInlineSubgraphInputs(nodes: WorkflowNode[], parentInputs: Record<string, unknown>): WorkflowNode[] {
+  return nodes.map(node => {
+    if (!node.type.startsWith('input-') && node.type !== 'audio-input') return node;
+    return { ...node, config: { ...parentInputs, ...node.config } };
+  });
+}
+
+function collectInlineSubgraphOutput(
+  nodes: WorkflowNode[],
+  connections: WorkflowConnection[],
+  results: Record<string, ExecutionResult>,
+): Record<string, unknown> {
+  const sourceIds = new Set(connections.map(connection => connection.fromNodeId));
+  return nodes
+    .filter(node => !sourceIds.has(node.id))
+    .reduce<Record<string, unknown>>((output, node) => ({ ...output, ...(results[node.id]?.output || {}) }), {});
 }
 
 /**
@@ -69,7 +132,10 @@ function getFeatureForNodeType(type: NodeType): 'imageEdit' | 'chat' | 'vectoriz
 }
 
 export async function POST(request: NextRequest) {
-  await requireApiAuth(request);
+  const auth = await requireApiAuth(request);
+  if (!auth.authenticated && process.env.MANDATORY_API_AUTH === 'true') {
+    return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+  }
   try {
     const body = await request.json();
     // 输入校验
@@ -89,7 +155,25 @@ export async function POST(request: NextRequest) {
       }
       const exec = executionCache.get(executionId);
       if (!exec) {
+        if (auth.userId) {
+          const persisted = await getCloudTaskForUser(executionId, auth.userId);
+          if (persisted?.type === 'workflow') {
+            const result = persisted.result || {};
+            return NextResponse.json({
+              executionId,
+              status: fromCloudWorkflowStatus(persisted.status),
+              currentNodeId: result.currentNodeId || null,
+              results: result.results || {},
+              startedAt: result.startedAt || persisted.createdAt,
+              completedAt: result.completedAt || (persisted.status === 'processing' ? null : persisted.updatedAt),
+              error: persisted.error,
+            });
+          }
+        }
         return NextResponse.json({ error: '执行记录不存在' }, { status: 404 });
+      }
+      if (exec.userId && exec.userId !== auth.userId) {
+        return NextResponse.json({ error: '无权访问该执行记录' }, { status: 403 });
       }
       return NextResponse.json({
         executionId,
@@ -108,9 +192,18 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: '缺少 executionId' }, { status: 400 });
       }
       const exec = executionCache.get(executionId);
+      if (exec?.userId && exec.userId !== auth.userId) {
+        return NextResponse.json({ error: '无权取消该执行记录' }, { status: 403 });
+      }
       if (exec && exec.status === 'running') {
         exec.status = 'cancelled';
         exec.completedAt = Date.now();
+        await persistWorkflowExecution(executionId, exec);
+      } else if (auth.userId) {
+        const persisted = await getCloudTaskForUser(executionId, auth.userId);
+        if (persisted?.type === 'workflow') {
+          await updateCloudTask(executionId, { status: 'cancelled', progress: 100, error: '用户取消执行' });
+        }
       }
       return NextResponse.json({ executionId, status: 'cancelled' });
     }
@@ -128,7 +221,14 @@ export async function POST(request: NextRequest) {
       if (!exec) {
         return NextResponse.json({ error: '执行实例不存在或已过期' }, { status: 404 });
       }
+<<<<<<< HEAD
       const retryNode = (body.nodes || []).find((n: any) => n.id === nodeId);
+=======
+      if (exec.userId && exec.userId !== auth.userId) {
+        return NextResponse.json({ error: '无权重试该执行记录' }, { status: 403 });
+      }
+      const retryNode = (body.nodes || []).find((node: WorkflowNode) => node.id === nodeId);
+>>>>>>> 41e7dd04083fba557192a82b01f13084d231af10
       if (!retryNode) {
         return NextResponse.json({ error: '节点不存在' }, { status: 404 });
       }
@@ -139,6 +239,7 @@ export async function POST(request: NextRequest) {
         if (!req) {
           // 纯逻辑节点：直接成功
           exec.results[nodeId] = { nodeId, status: 'success', output: { ...nodeInputs, _type: retryNode.type }, durationMs: 0 };
+          await persistWorkflowExecution(executionId, exec);
           return NextResponse.json({ success: true, nodeId, output: { ...nodeInputs, _type: retryNode.type } });
         }
         // 获取 API 凭证
@@ -168,10 +269,19 @@ export async function POST(request: NextRequest) {
         }
         const data = await apiRes.json();
         exec.results[nodeId] = { nodeId, status: 'success', output: data, durationMs: 0 };
+        await persistWorkflowExecution(executionId, exec);
         return NextResponse.json({ success: true, nodeId, output: data });
+<<<<<<< HEAD
       } catch (err: any) {
         exec.results[nodeId] = { nodeId, status: 'failed', error: err?.message || String(err), durationMs: 0 };
         return NextResponse.json({ success: false, nodeId, error: err?.message || String(err) });
+=======
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        exec.results[nodeId] = { nodeId, status: 'failed', error: message, durationMs: 0 };
+        await persistWorkflowExecution(executionId, exec);
+        return NextResponse.json({ success: false, nodeId, error: message });
+>>>>>>> 41e7dd04083fba557192a82b01f13084d231af10
       }
     }
 
@@ -185,21 +295,34 @@ export async function POST(request: NextRequest) {
     }
 
     const executionIdNew = `exec-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const execState: {
-      status: 'running' | 'completed' | 'failed' | 'cancelled';
-      results: Record<string, ExecutionResult>;
-      currentNodeId: string | null;
-      startedAt: number;
-      completedAt: number | null;
-      error?: string;
-    } = {
+    const execState: WorkflowExecutionState = {
       status: 'running',
       results: {},
       currentNodeId: null,
       startedAt: Date.now(),
       completedAt: null,
+      userId: auth.userId,
+      totalNodes: nodes.length,
     };
     executionCache.set(executionIdNew, execState);
+
+    if (auth.userId) {
+      try {
+        await createCloudTask({
+          id: executionIdNew,
+          userId: auth.userId,
+          type: 'workflow',
+          status: 'processing',
+          progress: 0,
+          label: '工作流执行',
+          result: { currentNodeId: null, results: {}, startedAt: execState.startedAt, completedAt: null },
+          createdAt: execState.startedAt,
+          updatedAt: execState.startedAt,
+        });
+      } catch (error) {
+        console.warn('[Workflow] 创建持久化执行记录失败:', error);
+      }
+    }
 
     // 异步执行工作流
     executeWorkflow(executionIdNew, execState, nodes, connections || []).catch(err => {
@@ -207,6 +330,7 @@ export async function POST(request: NextRequest) {
       execState.status = 'failed';
       execState.error = err instanceof Error ? err.message : String(err);
       execState.completedAt = Date.now();
+      void persistWorkflowExecution(executionIdNew, execState);
     });
 
     return NextResponse.json({
@@ -232,16 +356,10 @@ export async function POST(request: NextRequest) {
  */
 async function executeWorkflow(
   executionId: string,
-  execState: {
-    status: 'running' | 'completed' | 'failed' | 'cancelled';
-    results: Record<string, ExecutionResult>;
-    currentNodeId: string | null;
-    startedAt: number;
-    completedAt: number | null;
-    error?: string;
-  },
+  execState: WorkflowExecutionState,
   nodes: WorkflowNode[],
   connections: WorkflowConnection[],
+  depth = 0,
 ) {
   console.log(`[Workflow] 开始执行 ${executionId}, ${nodes.length} 个节点`);
 
@@ -301,7 +419,20 @@ async function executeWorkflow(
       continue;
     }
 
+    if (shouldSkipNodeForInactiveBranches(node, connections, resultMap)) {
+      const result: ExecutionResult = {
+        nodeId: node.id,
+        status: 'skipped',
+        error: '条件分支未命中',
+        durationMs: 0,
+      };
+      resultMap.set(node.id, result);
+      execState.results[node.id] = result;
+      continue;
+    }
+
     execState.currentNodeId = node.id;
+    await persistWorkflowExecution(executionId, execState);
     const nodeStart = Date.now();
 
     // P1: 循环计数器变量 — 获取当前循环上下文
@@ -380,6 +511,9 @@ async function executeWorkflow(
       // 逻辑节点/输出节点不需要外部API调用
       if (!req) {
         const outputData: Record<string, unknown> = { ...inputs, _type: node.type };
+        if (node.type === 'condition-if' || node.type === 'condition-switch' || node.type === 'parallel') {
+          outputData.activePorts = resolveControlOutputPorts(node, inputs);
+        }
         // input-text 节点: text/contentEditable → prompt 映射，供下游节点读取
         if (node.type === 'input-text') {
           const textValue = outputData.textContent || outputData.text;
@@ -392,11 +526,37 @@ async function executeWorkflow(
         if (node.type === 'input-image' && !outputData.imageUrl && node.config.imageUrl) {
           outputData.imageUrl = node.config.imageUrl;
         }
-        // P1: loop-for 节点 — 设置循环上下文供下游使用
-        if (node.type === 'loop-for') {
-          const loopCount = Math.max(1, Math.min(100, Number(node.config.loopCount) || 1));
-          outputData.loopCount = loopCount;
+        if (node.type === 'group') {
+          Object.assign(outputData, resolveGroupOutput(inputs));
+        }
+        if (node.type === 'subgraph') {
+          if (depth >= 3) throw new Error('子图嵌套深度不能超过 3 层');
+          const inlineSubgraph = resolveInlineSubgraph(node);
+          if (!inlineSubgraph) throw new Error('子图配置无效：需要合法的 nodes 和 connections');
+          const childState: WorkflowExecutionState = {
+            status: 'running',
+            results: {},
+            currentNodeId: null,
+            startedAt: Date.now(),
+            completedAt: null,
+            totalNodes: inlineSubgraph.nodes.length,
+          };
+          const childNodes = hydrateInlineSubgraphInputs(inlineSubgraph.nodes, inputs);
+          await executeWorkflow(`${executionId}:${node.id}`, childState, childNodes, inlineSubgraph.connections, depth + 1);
+          if (childState.status !== 'completed') {
+            throw new Error(childState.error || '子图执行失败');
+          }
+          Object.assign(outputData, collectInlineSubgraphOutput(childNodes, inlineSubgraph.connections, childState.results));
+          outputData.subgraphResults = childState.results;
+          outputData.subgraphDepth = depth + 1;
+        }
+        const isLoopNode = node.type === 'loop-for' || node.type === 'loop-each' || node.type === 'loop-while';
+        const loopIterations = isLoopNode ? resolveWorkflowIterations(node, inputs) : [];
+        if (isLoopNode) {
+          outputData.loopCount = loopIterations.length;
           outputData._loopNodeId = node.id;
+          // Loop bodies run below; the normal DAG pass may only continue through out-done.
+          outputData.activePorts = ['out-done'];
         }
         const result: ExecutionResult = {
           nodeId: node.id,
@@ -407,18 +567,69 @@ async function executeWorkflow(
         resultMap.set(node.id, result);
         execState.results[node.id] = result;
 
-        // P1: loop-for 节点 — 迭代执行下游节点
-        if (node.type === 'loop-for') {
-          const loopCount = Math.max(1, Math.min(100, Number(node.config.loopCount) || 1));
-          // 找到直接下游节点
-          const downstreamNodes = sorted.filter(n =>
-            connections.some(c => c.fromNodeId === node.id && c.toNodeId === n.id)
+        if (node.type === 'parallel') {
+          const activePorts = new Set(Array.isArray(outputData.activePorts) ? outputData.activePorts : []);
+          const parallelTargetIds = new Set(
+            connections
+              .filter(connection => connection.fromNodeId === node.id && activePorts.has(connection.fromPortId))
+              .map(connection => connection.toNodeId),
           );
-          for (let loopIdx = 1; loopIdx <= loopCount; loopIdx++) {
-            loopContextStack.push({ loopNodeId: node.id, index: loopIdx, total: loopCount });
+          const parallelBranches = sorted.filter(candidate => {
+            if (!parallelTargetIds.has(candidate.id)) return false;
+            const incoming = connections.filter(connection => connection.toNodeId === candidate.id);
+            return incoming.every(connection => connection.fromNodeId === node.id || resultMap.has(connection.fromNodeId));
+          });
+          const branchStates = await Promise.all(parallelBranches.map(async branch => {
+            const branchInputs = getNodeInputs(branch, connections, resultMap);
+            const branchNode = { ...branch, config: { ...branch.config, ...inputs, ...branchInputs } };
+            const branchState: WorkflowExecutionState = {
+              status: 'running',
+              results: {},
+              currentNodeId: null,
+              startedAt: Date.now(),
+              completedAt: null,
+              totalNodes: 1,
+            };
+            await executeWorkflow(`${executionId}:${node.id}:${branch.id}`, branchState, [branchNode], [], depth);
+            return { nodeId: branch.id, state: branchState };
+          }));
+          const parallelResults: Record<string, ExecutionResult> = {};
+          for (const branch of branchStates) {
+            const branchResult = branch.state.results[branch.nodeId];
+            if (!branchResult) continue;
+            parallelResults[branch.nodeId] = branchResult;
+            resultMap.set(branch.nodeId, branchResult);
+            execState.results[branch.nodeId] = branchResult;
+          }
+          outputData.parallelResults = parallelResults;
+        }
+
+        if (isLoopNode) {
+          const outgoing = connections.filter(connection => connection.fromNodeId === node.id);
+          const explicitLoopBody = outgoing.filter(connection => connection.fromPortId === 'out-loop');
+          const loopBodyConnections = explicitLoopBody.length > 0
+            ? explicitLoopBody
+            : outgoing.filter(connection => connection.fromPortId !== 'out-done');
+          const loopBodyIds = new Set(loopBodyConnections.map(connection => connection.toNodeId));
+          const downstreamNodes = sorted.filter(candidate => loopBodyIds.has(candidate.id));
+          let lastLoopOutput: Record<string, unknown> | undefined;
+          for (const loopIteration of loopIterations) {
+            if (node.type === 'loop-while' && loopIteration.index > 1) {
+              const condition = String(inputs.condition || node.config.condition || node.condition || '');
+              if (!evaluateWorkflowCondition(condition, {
+                ...inputs,
+                result: lastLoopOutput ?? inputs.result,
+              })) {
+                break;
+              }
+            }
+            loopContextStack.push({ loopNodeId: node.id, index: loopIteration.index, total: loopIteration.total });
             for (const dsNode of downstreamNodes) {
               if ((execState.status as string) === 'cancelled') break;
               const dsInputs = getNodeInputs(dsNode, connections, resultMap);
+              dsInputs._loopItem = loopIteration.item;
+              dsInputs._loopIndex = loopIteration.index;
+              dsInputs._loopTotal = loopIteration.total;
               // P1: 对下游输入应用循环变量替换
               const loopCtx = loopContextStack[loopContextStack.length - 1];
               for (const key of Object.keys(dsInputs)) {
@@ -490,9 +701,10 @@ async function executeWorkflow(
                     const dsResult = {
                       nodeId: dsNode.id,
                       status: 'success' as const,
-                      output: { ...dsData, _type: dsNode.type, _loopIteration: loopIdx },
+                      output: { ...dsData, _type: dsNode.type, _loopIteration: loopIteration.index, _loopItem: loopIteration.item },
                       durationMs: Date.now() - nodeStart,
                     } as ExecutionResult;
+                    lastLoopOutput = dsResult.output;
                     resultMap.set(dsNode.id, dsResult);
                     execState.results[dsNode.id] = dsResult;
                   }
@@ -505,6 +717,7 @@ async function executeWorkflow(
             if ((execState.status as string) === 'cancelled') break;
           }
         }
+        await persistWorkflowExecution(executionId, execState);
         continue;
       }
 
@@ -697,6 +910,7 @@ async function executeWorkflow(
       execState.results[node.id] = result;
       console.error(`[Workflow] 节点 ${node.label} 异常:`, err);
     }
+    await persistWorkflowExecution(executionId, execState);
   }
 
   // 3. 完成
@@ -706,6 +920,7 @@ async function executeWorkflow(
   // 判断是否有失败节点
   const hasFailure = Object.values(execState.results).some(r => r.status === 'failed');
   execState.status = hasFailure ? 'failed' : 'completed';
+  await persistWorkflowExecution(executionId, execState);
 
   console.log(`[Workflow] 执行完成 ${executionId}: ${execState.status}`);
 }

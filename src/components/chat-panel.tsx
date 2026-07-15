@@ -32,6 +32,8 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
 
+const CHAT_RENDER_WINDOW = 80;
+
 interface ChatSkill {
   id: string;
   name: string;
@@ -1129,6 +1131,8 @@ function extractPromptForGeneration(content: string): string {
 
 export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, canvasImages = [], selectedCanvasImage, onChatModelChange, onSuggestionAction, onGenerateImage, brandDna, onInjectBrandDna, chatInitialImage, onChatInitialImageConsumed, chatTabOpen, onChatTabOpenChange, onNavigateToImage }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
+  const [showFullHistory, setShowFullHistory] = useState(false);
+  const visibleMessages = useMemo(() => showFullHistory ? messages : messages.slice(-CHAT_RENDER_WINDOW), [messages, showFullHistory]);
   const messagesRef = useRef<Message[]>(messages);
   messagesRef.current = messages;
   const [input, setInput] = useState('');
@@ -2789,6 +2793,14 @@ IP角色设计规范：
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
+  const messageListRef = useRef<HTMLDivElement>(null);
+  const shouldStickToBottomRef = useRef(true);
+  const autoScrollRafRef = useRef<number | null>(null);
+
+  const handleMessageListScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
+    const element = event.currentTarget;
+    shouldStickToBottomRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 100;
+  }, []);
 
   // Select a prompt template from / trigger
   const selectPromptTemplate = useCallback((template: PromptTemplate) => {
@@ -3135,13 +3147,20 @@ IP角色设计规范：
 
   // 自动滚动到底部 — 仅在用户已在底部附近时才跟随滚动，避免思考时强制回滚
   useEffect(() => {
-    const container = chatContainerRef.current;
-    if (!container) return;
-    // 判断用户是否在底部附近（100px 内视为"在底部"）
-    const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
-    if (isNearBottom) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
+    if (!shouldStickToBottomRef.current || autoScrollRafRef.current !== null) return;
+    autoScrollRafRef.current = requestAnimationFrame(() => {
+      autoScrollRafRef.current = null;
+      const container = messageListRef.current;
+      if (container && shouldStickToBottomRef.current) {
+        container.scrollTop = container.scrollHeight;
+      }
+    });
+    return () => {
+      if (autoScrollRafRef.current !== null) {
+        cancelAnimationFrame(autoScrollRafRef.current);
+        autoScrollRafRef.current = null;
+      }
+    };
   }, [messages]);
 
   // 自动调整textarea高度
@@ -5174,7 +5193,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
         )}
 
         {/* Messages - 精致设计 */}
-        <div className={`flex-1 min-h-0 overflow-y-auto p-3 space-y-3 ${isGold ? 'bg-[#090909]' : 'bg-gray-50/50'}`}>
+        <div ref={messageListRef} onScroll={handleMessageListScroll} className={`flex-1 min-h-0 overflow-y-auto p-3 space-y-3 ${isGold ? 'bg-[#090909]' : 'bg-gray-50/50'}`}>
           {messages.length === 0 && pendingImages.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center">
               {(() => {
@@ -5281,7 +5300,17 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               })()}
             </div>
           ) : (
-            messages.map(message => (
+            <>
+              {!showFullHistory && messages.length > CHAT_RENDER_WINDOW && (
+                <button
+                  type="button"
+                  onClick={() => setShowFullHistory(true)}
+                  className={`mx-auto block px-2 py-1 text-xs ${isGold ? 'text-gold-muted hover:text-gold' : 'text-blue-500 hover:text-blue-600'}`}
+                >
+                  显示早期消息 ({messages.length - CHAT_RENDER_WINDOW})
+                </button>
+              )}
+            {visibleMessages.map(message => (
               <div
                 key={message.id}
                 className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
@@ -5643,7 +5672,8 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                   </div>
                 )}
               </div>
-            ))
+            ))}
+            </>
           )}
           {/* 思考中加载指示器 — 当有工具执行步骤时隐藏，避免与工具步骤重叠 */}
           {isLoading && !(messages.length > 0 && messages[messages.length - 1].role === 'assistant' && messages[messages.length - 1].toolExecutions && messages[messages.length - 1].toolExecutions!.length > 0) && (
