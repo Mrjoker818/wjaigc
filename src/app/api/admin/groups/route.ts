@@ -1,19 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dbReadGroups, dbWriteGroup, dbDeleteGroup } from '@/lib/db-storage';
-import { isRootAdminUser, requireAdminUser } from '@/lib/server-auth';
+import { requireAdminUser } from '@/lib/server-auth';
 import type { User } from '@/lib/user-types';
 import { dbAddAuditLog } from '@/lib/db-storage';
 
 export const dynamic = 'force-dynamic';
 
-async function requireRootAdmin(request: NextRequest): Promise<User | null> {
-  const responseUser = await requireAdminUser(request);
-  return isRootAdminUser(responseUser) ? responseUser : null;
+async function requireAdmin(request: NextRequest): Promise<User | null> {
+  return requireAdminUser(request);
 }
 
 export async function GET(request: NextRequest) {
   try {
-    const admin = await requireRootAdmin(request);
+    const admin = await requireAdmin(request);
     if (!admin) {
       return NextResponse.json({ success: false, error: 'Admin access required' }, { status: 403 });
     }
@@ -26,7 +25,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const admin = await requireRootAdmin(request);
+  const admin = await requireAdmin(request);
   if (!admin) {
     return NextResponse.json({ success: false, error: 'Admin access required' }, { status: 403 });
   }

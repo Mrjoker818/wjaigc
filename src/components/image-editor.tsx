@@ -111,6 +111,16 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   const isMonochrome = themeStyle === 'monochrome';
   const [isMinimized, setIsMinimized] = useState(false);
 
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !event.defaultPrevented) {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [onClose]);
+
   // 面板容器
   const thPanel = isMonochrome
     ? 'bg-white border-gray-200'

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser as getAuthUser } from '@/lib/server-auth';
+import { dbGetUserData, dbListUserData, dbSetUserData } from '@/lib/db-storage';
 
 /**
  * POST /api/workflow/save
@@ -35,18 +36,10 @@ export async function POST(request: NextRequest) {
     workflow.updatedAt = Date.now();
 
     // 保存到用户数据 API
-    const saveRes = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/user-data/sync`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        userId,
-        dataKey: `workflow_${workflow.id}`,
-        dataValue: JSON.stringify(workflow),
-      }),
-    });
+    const saved = await dbSetUserData(user.id, `workflow_${workflow.id}`, workflow);
 
-    if (!saveRes.ok) {
-      const errData = await saveRes.json().catch(() => ({}));
+    if (!saved) {
+      const errData = { storage: 'write-failed' };
       console.error('[Workflow Save] 保存失败:', errData);
       return NextResponse.json({ error: '保存失败' }, { status: 500 });
     }
@@ -84,25 +77,18 @@ export async function GET(request: NextRequest) {
     const userId = user.id;
 
     // 从用户数据 API 加载所有工作流
-    const loadRes = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/user-data/sync?userId=${encodeURIComponent(userId)}&prefix=workflow_`);
+    const dataKeys = await dbListUserData(userId);
+    const workflowKeys = dataKeys.filter(({ dataKey }) => dataKey.startsWith('workflow_'));
 
-    if (!loadRes.ok) {
-      return NextResponse.json({ workflows: [] });
-    }
-
-    const data = await loadRes.json();
-    const workflows: unknown[] = [];
+    const workflows = (await Promise.all(workflowKeys.map(async ({ dataKey }) => {
+      const value = await dbGetUserData(userId, dataKey);
+      if (typeof value === 'string') {
+        try { return JSON.parse(value); } catch { return null; }
+      }
+      return value;
+    }))).filter((workflow): workflow is Record<string, unknown> => Boolean(workflow && typeof workflow === 'object'));
 
     // 解析存储的工作流
-    if (data.data && typeof data.data === 'object') {
-      for (const [, value] of Object.entries(data.data as Record<string, string>)) {
-        try {
-          if (typeof value === 'string' && value.startsWith('{')) {
-            workflows.push(JSON.parse(value));
-          }
-        } catch { /* skip invalid */ }
-      }
-    }
 
     return NextResponse.json({ workflows });
 

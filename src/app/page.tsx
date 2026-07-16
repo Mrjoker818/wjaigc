@@ -283,9 +283,21 @@ function CanvasApp() {
   const [showVideoPanel, setShowVideoPanel] = useState(false);
 
   useEffect(() => {
-    const openVideoPanel = () => setShowVideoPanel(true);
+    const openVideoPanel = () => {
+      setShowImageEditor(false);
+      setShowVideoPanel(true);
+    };
     window.addEventListener('wujie:open-video-panel', openVideoPanel);
     return () => window.removeEventListener('wujie:open-video-panel', openVideoPanel);
+  }, []);
+
+  useEffect(() => {
+    const closeExternalToolPanels = () => {
+      setShowImageEditor(false);
+      setShowVideoPanel(false);
+    };
+    window.addEventListener('wujie:canvas-tool-opened', closeExternalToolPanels);
+    return () => window.removeEventListener('wujie:canvas-tool-opened', closeExternalToolPanels);
   }, []);
 
   // Chat panel integration states
@@ -3563,8 +3575,16 @@ function CanvasApp() {
   // Canvas img2img handler - reuses handleGenerate for reliable submission + polling
   // Language-based image editing handler
   const handleEditImage = useCallback((image: CanvasImage | null) => {
+    window.dispatchEvent(new Event('wujie:close-canvas-tool-panels'));
+    setShowVideoPanel(false);
     setEditingImage(image);
     setShowImageEditor(true);
+  }, []);
+
+  const handleOpenVideoPanel = useCallback(() => {
+    window.dispatchEvent(new Event('wujie:close-canvas-tool-panels'));
+    setShowImageEditor(false);
+    setShowVideoPanel(true);
   }, []);
 
   const handleEditCancel = useCallback(() => {
@@ -4072,15 +4092,7 @@ function CanvasApp() {
           connections={canvasConnections}
           onConnectionsChange={setCanvasConnections}
           versionHistoryManager={treeHistoryRef.current}
-          onOpenVideoPanel={() => {
-            // 如果面板已打开（可能正在生成中），先关闭再打开，支持多任务并发
-            if (showVideoPanel) {
-              setShowVideoPanel(false);
-              setTimeout(() => setShowVideoPanel(true), 50);
-            } else {
-              setShowVideoPanel(true);
-            }
-          }}
+          onOpenVideoPanel={handleOpenVideoPanel}
         />
       </div>
 

@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import Script from 'next/script';
 import { Providers } from './providers';
 
 export const metadata: Metadata = {
@@ -12,31 +11,5 @@ export default function SimpleChatLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return (
-    <html lang="zh-CN" data-theme="dark" suppressHydrationWarning>
-      <Script
-          id="simple-chat-theme"
-          strategy="beforeInteractive"
-          dangerouslySetInnerHTML={{
-            __html: `
-              (function() {
-                try {
-                  var theme = localStorage.getItem('simple-chat-theme');
-                  if (!theme) {
-                    theme = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
-                  }
-                  document.documentElement.setAttribute('data-theme', theme);
-                  if (theme === 'light') {
-                    document.documentElement.classList.add('theme-monochrome');
-                  }
-                } catch(e) {}
-              })();
-            `,
-          }}
-      />
-      <body className="antialiased" suppressHydrationWarning>
-        <Providers>{children}</Providers>
-      </body>
-    </html>
-  );
+  return <Providers>{children}</Providers>;
 }

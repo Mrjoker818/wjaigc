@@ -76,23 +76,33 @@ interface AddProviderInput {
   isDefault?: boolean;
 }
 
-export type PublicApiProvider = Omit<ApiProvider, 'apiKey'> & {
-  apiKey?: '';
-  apiKeyPreview: string;
-};
-
-function maskKey(apiKey: string): string {
-  if (!apiKey) return '';
-  if (apiKey.length <= 10) return `${apiKey.slice(0, 2)}***`;
-  return `${apiKey.slice(0, 6)}...${apiKey.slice(-4)}`;
-}
+export type PublicApiProvider = Omit<ApiProvider,
+  'apiKey' | 'balanceUsername' | 'balancePassword' | 'advancedParams' | 'balance'
+>;
 
 export function sanitizeProvider(provider: ApiProvider): PublicApiProvider {
-  const { apiKey: _apiKey, ...rest } = provider;
+  // This object is returned by unauthenticated model discovery endpoints.
+  // An allow-list prevents future credential fields leaking through a rest spread.
   return {
-    ...rest,
-    apiKey: '',
-    apiKeyPreview: maskKey(_apiKey),
+    id: provider.id,
+    name: provider.name,
+    baseUrl: provider.baseUrl,
+    isEnabled: provider.isEnabled,
+    type: provider.type,
+    createdAt: provider.createdAt,
+    updatedAt: provider.updatedAt,
+    ...(provider.modelType ? { modelType: provider.modelType } : {}),
+    ...(provider.displayName ? { displayName: provider.displayName } : {}),
+    ...(provider.providerPreset ? { providerPreset: provider.providerPreset } : {}),
+    ...(provider.requestStyle ? { requestStyle: provider.requestStyle } : {}),
+    ...(provider.selectedModel ? { selectedModel: provider.selectedModel } : {}),
+    ...(provider.selectedModels ? { selectedModels: provider.selectedModels } : {}),
+    ...(provider.isRelay !== undefined ? { isRelay: provider.isRelay } : {}),
+    ...(provider.connectionStatus ? { connectionStatus: provider.connectionStatus } : {}),
+    ...(provider.lastTestedAt ? { lastTestedAt: provider.lastTestedAt } : {}),
+    ...(provider.discoveredModels ? { discoveredModels: provider.discoveredModels } : {}),
+    ...(provider.isDefault !== undefined ? { isDefault: provider.isDefault } : {}),
+    ...(provider.sortOrder !== undefined ? { sortOrder: provider.sortOrder } : {}),
   };
 }
 

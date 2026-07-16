@@ -1855,7 +1855,7 @@ Rules:
 
   // 浮动面板样式（纵向布局，标题栏 + 内容上下堆叠）
   const floatingWrapperClass = floating
-    ? `fixed z-50 flex flex-col rounded-2xl shadow-2xl overflow-hidden ${
+    ? `fixed z-[210] flex flex-col rounded-2xl shadow-2xl overflow-hidden ${
         isMonochrome ? 'bg-white border border-gray-200' : 'bg-[#141418] border border-white/[0.08]'
       }`
     : 'flex flex-col min-h-full';

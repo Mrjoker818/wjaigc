@@ -4,6 +4,7 @@ import {
   deleteManagedUser,
   isRootAdminUser,
   listManagedUsers,
+  repairDuplicateUserIds,
   requireAdminUser,
   updateManagedUser,
 } from '@/lib/server-auth';
@@ -12,14 +13,13 @@ import { dbListUserData, dbGetUserData, dbDeleteUserData, dbAddAuditLog } from '
 
 export const dynamic = 'force-dynamic';
 
-async function requireRootAdmin(request: NextRequest): Promise<User | null> {
-  const responseUser = await requireAdminUser(request);
-  return isRootAdminUser(responseUser) ? responseUser : null;
+async function requireAdmin(request: NextRequest): Promise<User | null> {
+  return requireAdminUser(request);
 }
 
 export async function GET(request: NextRequest) {
   try {
-    const admin = await requireRootAdmin(request);
+    const admin = await requireAdmin(request);
     if (!admin) {
       return NextResponse.json({ success: false, error: 'Admin access required' }, { status: 403 });
     }
@@ -59,14 +59,14 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const admin = await requireRootAdmin(request);
+  const admin = await requireAdmin(request);
   if (!admin) {
     return NextResponse.json({ success: false, error: 'Admin access required' }, { status: 403 });
   }
 
   try {
     const body = await request.json() as {
-      action?: 'create' | 'update' | 'delete' | 'list-data' | 'get-data' | 'delete-data' | 'listUserData' | 'getUserData' | 'deleteUserData';
+      action?: 'create' | 'update' | 'delete' | 'repair-duplicate-ids' | 'list-data' | 'get-data' | 'delete-data' | 'listUserData' | 'getUserData' | 'deleteUserData';
       userId?: string;
       name?: string;
       password?: string;
@@ -76,6 +76,15 @@ export async function POST(request: NextRequest) {
       key?: string;
       groupId?: string;
     };
+
+    if (body.action === 'repair-duplicate-ids') {
+      if (!isRootAdminUser(admin)) {
+        return NextResponse.json({ success: false, error: 'Root admin access required' }, { status: 403 });
+      }
+      const result = await repairDuplicateUserIds();
+      await dbAddAuditLog({ user_id: admin.id, user_name: admin.name, action: 'user_repair_duplicate_ids', target_type: 'user', target_id: null, detail: `Repaired ${result.repaired} duplicate user ID records`, ip_address: null, created_at: Date.now() });
+      return NextResponse.json({ success: true, ...result });
+    }
 
     if (body.action === 'create') {
       const user = await createManagedUser({
@@ -108,7 +117,11 @@ export async function POST(request: NextRequest) {
         ...(body.updates?.dailyImageLimit !== undefined ? { dailyImageLimit: Number(body.updates.dailyImageLimit) || undefined } : {}),
         ...(body.updates?.groupId !== undefined ? { groupId: String(body.updates.groupId || '') || undefined } : {}),
       });
-      await dbAddAuditLog({ user_id: admin.id, user_name: admin.name, action: 'user_update', target_type: 'user', target_id: body.userId, detail: `更新用户 ${body.userId}: ${JSON.stringify(body.updates)}`, ip_address: null, created_at: Date.now() });
+      const auditUpdates = { ...body.updates };
+      if (auditUpdates.password) {
+        auditUpdates.password = '[REDACTED]';
+      }
+      await dbAddAuditLog({ user_id: admin.id, user_name: admin.name, action: 'user_update', target_type: 'user', target_id: body.userId, detail: `更新用户 ${body.userId}: ${JSON.stringify(auditUpdates)}`, ip_address: null, created_at: Date.now() });
       return NextResponse.json({ success: Boolean(user), user });
     }
 

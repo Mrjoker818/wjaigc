@@ -9,6 +9,8 @@ const appPageSource = readSource('src/app/page.tsx');
 const humanRepairSource = readSource('src/components/human-repair-panel.tsx');
 const layerPanelSource = readSource('src/components/layer-panel.tsx');
 const versionHistorySource = readSource('src/components/version-history-panel.tsx');
+const imageEditorSource = readSource('src/components/image-editor.tsx');
+const videoPanelSource = readSource('src/components/video-generation-panel.tsx');
 
 describe('canvas toolbar floating windows', () => {
   it('centers the canvas generator and video utility panels when opened', () => {
@@ -34,14 +36,25 @@ describe('canvas toolbar floating windows', () => {
     expect(canvasSource).toContain('<VersionHistoryPanel\n            floating');
   });
 
-  it('keeps every bottom-toolbar action in a stable, horizontally reachable layout', () => {
+  it('keeps core canvas controls visible while the extended bottom-toolbar tools can collapse', () => {
     expect(canvasSource).toContain('max-w-[calc(100%-2rem)]');
     expect(canvasSource).toContain('overflow-x-auto');
-    expect(canvasSource).toContain('flex items-center ml-1.5 shrink-0');
-    expect(canvasSource).not.toContain("bottomBarHovered ? 'max-w-[900px] opacity-100 ml-1.5 overflow-visible' : 'max-w-0 opacity-0 ml-0 overflow-hidden'");
+    expect(canvasSource).toContain('[scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden');
+    expect(canvasSource).toContain("bottomBarHovered ? 'max-w-[900px] opacity-100 ml-1.5 overflow-visible' : 'max-w-0 opacity-0 ml-0 overflow-hidden'");
   });
 
   it('keeps the right panel collapse control inside a narrow viewport', () => {
     expect(appPageSource).toContain("panelCollapsed ? '20px' : 'min(480px, 100vw)'");
+  });
+
+  it('opens one bottom-toolbar tool at a time and allows Escape to close external editors', () => {
+    expect(canvasSource).toContain('const closeCanvasToolPanels = useCallback');
+    expect(canvasSource).toContain('onClickCapture={closeCanvasToolPanels}');
+    expect(canvasSource).toContain("new Event('wujie:canvas-tool-opened')");
+    expect(canvasSource).toContain("window.addEventListener('wujie:close-canvas-tool-panels'");
+    expect(appPageSource).toContain("window.addEventListener('wujie:canvas-tool-opened'");
+    expect(appPageSource).toContain("new Event('wujie:close-canvas-tool-panels')");
+    expect(imageEditorSource).toContain("if (event.key === 'Escape' && !event.defaultPrevented)");
+    expect(videoPanelSource).toContain('fixed z-[210]');
   });
 });

@@ -7,6 +7,7 @@ import type { NextRequest } from 'next/server';
 import type { User } from './user-types';
 import { ensureUserDataDirs, getUserDataDir } from './server-user-storage';
 import { getServerSystemDir, getServerUsersDir } from './server-data-root';
+import { isDatabaseConfigured } from './db-client';
 import { dbReadUsers, dbWriteUsers, dbDeleteUser, dbDeleteUserData } from './db-storage';
 
 /** Normalize api_permissions: PostgreSQL JSONB may return as string or object */
@@ -515,6 +516,60 @@ type ManagedUserUpdates = Partial<Pick<User, 'name' | 'email' | 'status' | 'apiP
 export async function listManagedUsers(): Promise<User[]> {
   const file = await readStore();
   return file.users.map(publicUser);
+}
+
+export async function repairDuplicateUserIds(): Promise<{ repaired: number; users: User[] }> {
+  const file = await readStore();
+  const usersById = new Map<string, StoredUser[]>();
+  for (const user of file.users) {
+    const users = usersById.get(user.id) || [];
+    users.push(user);
+    usersById.set(user.id, users);
+  }
+
+  const duplicateIds = [...usersById.entries()]
+    .filter(([, users]) => users.length > 1)
+    .map(([id]) => id);
+  if (duplicateIds.length === 0) {
+    return { repaired: 0, users: file.users.map(publicUser) };
+  }
+
+  const assignedIds = new Set(file.users.map(user => user.id));
+  const now = Date.now();
+  let sequence = 0;
+  let repaired = 0;
+
+  for (const duplicateId of duplicateIds) {
+    const users = usersById.get(duplicateId) || [];
+    // Preserve the root administrator ID so existing administrator data remains attached.
+    const retained = users.find(user => user.name === DEFAULT_ADMIN_NAME) || users[0];
+    for (const user of users) {
+      if (user === retained) continue;
+
+      let nextId = safeId(`repaired_${user.name}_${now}_${++sequence}`, user.name);
+      while (assignedIds.has(nextId)) {
+        nextId = safeId(`repaired_${user.name}_${now}_${++sequence}`, user.name);
+      }
+      assignedIds.add(nextId);
+      user.id = nextId;
+      user.storageFolder = storageFolder(nextId);
+      user.updatedAt = now;
+      repaired += 1;
+    }
+  }
+
+  // Old IDs may have been duplicated in legacy databases without a unique constraint.
+  if (isDatabaseConfigured()) {
+    for (const duplicateId of duplicateIds) {
+      const deleted = await dbDeleteUser(duplicateId);
+      if (!deleted) {
+        throw new Error(`Failed to remove duplicate user ID: ${duplicateId}`);
+      }
+    }
+  }
+  await writeStore(file);
+
+  return { repaired, users: file.users.map(publicUser) };
 }
 
 export async function createManagedUser(input: {

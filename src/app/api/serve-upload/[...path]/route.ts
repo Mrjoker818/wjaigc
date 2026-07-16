@@ -172,6 +172,10 @@ function getContentType(ext: string): string {
   return ext === '.png' ? 'image/png'
     : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
     : ext === '.webp' ? 'image/webp'
+    : ext === '.gif' ? 'image/gif'
+    : ext === '.mp4' ? 'video/mp4'
+    : ext === '.webm' ? 'video/webm'
+    : ext === '.mov' ? 'video/quicktime'
     : ext === '.svg' ? 'image/svg+xml'
     : 'application/octet-stream';
 }

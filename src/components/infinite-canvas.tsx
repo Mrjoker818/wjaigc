@@ -1008,6 +1008,11 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [showVideoExtractPanel, setShowVideoExtractPanel] = useState(false);
   const [videoExtractFrameCount, setVideoExtractFrameCount] = useState(12);
   const [videoExtractProcessing, setVideoExtractProcessing] = useState(false);
+  const [showPsdEditor, setShowPsdEditor] = useState(false);
+  const [psdEditorImageUrl, setPsdEditorImageUrl] = useState<string>('');
+  const [, ] = useState<PsdLayerItem[]>([]);
+  const [psdEditorMode, setPsdEditorMode] = useState<'basic' | 'standard' | 'advanced' | 'studio'>('standard');
+  const [showRemoveBgPicker, setShowRemoveBgPicker] = useState(false);
   // 即梦风格方向性扩展：上下左右独立 padding（像素值，基于原始图片尺寸）
   const [expandPadding, setExpandPadding] = useState({ top: 0, right: 0, bottom: 0, left: 0 });
   // 拖拽控制点状态
@@ -1304,7 +1309,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   }, [videoDubTarget, dubText, dubVoice, dubSpeed, onAddImages]);
 
   // Whether any floating panel is open (used to auto-hide connections & image toolbar)
-  const anyPanelOpen = showSvgTracePanel || showAgentEditor || showBrandEcommerce || showFontDesign || showBrandFactory || showSceneStudio || showBrandPackaging || showDisplay3D || showVideoEditPanel || showCanvasGenerator || showRefineEngine || showHumanRepair || showLogoSkill || showAiPsd || showStickerAssistant || showVideoDubPanel;
+  const localMediaToolWindowOpen = showRemoveBgPicker || showDisplayDecomposePanel || show3DModal || showVideoExtractPanel || showPsdEditor;
+  const anyPanelOpen = showSvgTracePanel || showAgentEditor || showBrandEcommerce || showFontDesign || showBrandFactory || showSceneStudio || showBrandPackaging || showDisplay3D || showVideoEditPanel || showCanvasGenerator || showRefineEngine || showHumanRepair || showLogoSkill || showAiPsd || showStickerAssistant || showVideoDubPanel || localMediaToolWindowOpen;
 
   // Video tools handler
   const handleVideoTool = async (action: 'to-gif' | 'extract-cover' | 'compress' | 'extract-frame', image: CanvasImage, timestamp?: number) => {
@@ -1381,13 +1387,30 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       });
 
       const result = await response.json();
-      if (result.success) {
-        console.log(`[video-tool] ${action} success:`, result.data);
-      } else {
-        console.error(`[video-tool] ${action} failed:`, result.error);
+      if (!response.ok || !result.success) throw new Error(result.error || '视频处理失败');
+
+      if (action === 'to-gif' && typeof result.gifUrl === 'string') {
+        onAddImages([result.gifUrl], image.id, { modelName: 'video-to-gif', apiProvider: 'local' });
+        toast.success('GIF 已添加到画布');
+        return;
+      }
+      if (action === 'compress' && typeof result.videoUrl === 'string') {
+        const compressedVideo: CanvasImage = {
+          ...image,
+          id: `compressed-video-${Date.now()}`,
+          url: typeof result.thumbnailUrl === 'string' ? result.thumbnailUrl : image.url,
+          videoUrl: result.videoUrl,
+          mediaType: 'video',
+          x: image.x + image.width + 30,
+          createdAt: Date.now(),
+          generatedFromImageId: image.id,
+        };
+        onImagesChange([...imagesRef.current, compressedVideo]);
+        toast.success('压缩视频已添加到画布');
       }
     } catch (error) {
       console.error(`[video-tool] ${action} error:`, error);
+      toast.error(error instanceof Error ? error.message : '视频处理失败');
     }
   };
 
@@ -1442,7 +1465,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
   // Download popup
   const [showDownloadPopup, setShowDownloadPopup] = useState(false);
-  const [downloadFormat, setDownloadFormat] = useState<'png' | 'svg' | '3d'>('png');
+  const [downloadFormat, setDownloadFormat] = useState<'png' | 'svg' | '3d' | 'video'>('png');
   const [threeDDownloadFormat, setThreeDDownloadFormat] = useState('');
   const [svgMode, setSvgMode] = useState<'pro' | 'studio'>('pro');
   const [downloadProgress, setDownloadProgress] = useState<string | null>(null);
@@ -1480,14 +1503,41 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     }
   }, [downloadFormat]);
 
-  // PSD Layer Editor
-  const [showPsdEditor, setShowPsdEditor] = useState(false);
-  const [psdEditorImageUrl, setPsdEditorImageUrl] = useState<string>('');
-  const [, ] = useState<PsdLayerItem[]>([]);
-  const [psdEditorMode, setPsdEditorMode] = useState<'basic' | 'standard' | 'advanced' | 'studio'>('standard');
-
   // Misc
   const [showHelpModal, setShowHelpModal] = useState<'instructions' | 'changelog' | null>(null);
+
+  const closeCanvasToolPanels = useCallback(() => {
+    setShowAgentEditor(false);
+    setShowBrandEcommerce(false);
+    setShowSvgTracePanel(false);
+    setShowRefineEngine(false);
+    setShowHumanRepair(false);
+    setShowFontDesign(false);
+    setShowBrandFactory(false);
+    setShowLogoSkill(false);
+    setShowAiPsd(false);
+    setShowStickerAssistant(false);
+    setShowSceneStudio(false);
+    setShowBrandPackaging(false);
+    setShowDisplay3D(false);
+    setShowCanvasGenerator(false);
+    setShowVideoExtractPanel(false);
+    setShowPsdEditor(false);
+    setShowRemoveBgPicker(false);
+    setShowDisplayDecomposePanel(false);
+    setShow3DModal(false);
+    setShow3DViewer(false);
+    setShowVideoEditPanel(false);
+    setShowVideoDubPanel(false);
+    setShowLayerPanel(false);
+    setShowVersionHistory(false);
+    window.dispatchEvent(new Event('wujie:canvas-tool-opened'));
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener('wujie:close-canvas-tool-panels', closeCanvasToolPanels);
+    return () => window.removeEventListener('wujie:close-canvas-tool-panels', closeCanvasToolPanels);
+  }, [closeCanvasToolPanels]);
 
   // Edit mode drawing - strokes stored in canvas coordinates
   const [editStrokes, setEditStrokes] = useState<{ x: number; y: number; reverse: boolean }[][]>([]);
@@ -1500,8 +1550,6 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [eraseModelId, setEraseModelId] = useState<string>('lama');
   // RemoveBG model selection
   const [removeBgModelId, setRemoveBgModelId] = useState<string>('birefnet-general');
-  // RemoveBG model picker dialog
-  const [showRemoveBgPicker, setShowRemoveBgPicker] = useState(false);
   // Floating window canvas zoom/pan
   const [editCanvasZoom, setEditCanvasZoom] = useState(1);
   const [editCanvasPan, setEditCanvasPan] = useState({ x: 0, y: 0 });
@@ -7614,9 +7662,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
   // 8. DOWNLOAD - popup with PNG/SVG/PSD
   const handleOpenDownload = useCallback(() => {
+    setDownloadFormat(getActiveImageData()?.mediaType === 'video' ? 'video' : 'png');
     setShowDownloadPopup(true);
     setActiveTool('download');
-  }, []);
+  }, [getActiveImageData]);
 
   // Edit mode handlers
   const exitEditMode = useCallback(() => {
@@ -7995,6 +8044,25 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
   const handleDownloadImage = async (image: CanvasImage, format: string = 'png') => {
     try {
+      if (format === 'video') {
+        if (image.mediaType !== 'video' || !image.videoUrl) throw new Error('当前素材没有可下载的视频文件');
+        setDownloadProgress('正在准备视频下载...');
+        const response = await fetch(`/api/video/download?url=${encodeURIComponent(image.videoUrl)}`);
+        if (!response.ok) throw new Error(`视频下载失败: ${response.status}`);
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = generateSafeFilename(image.prompt || 'video', 'mp4');
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        setDownloadProgress(null);
+        setShowDownloadPopup(false);
+        setActiveTool('none');
+        return;
+      }
       if (format === '3d') {
         setDownloadProgress('正在下载3D模型...');
         const modelUrls = image.threeDModelUrls || {};
@@ -8204,7 +8272,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     { icon: <Globe size={14} className={isMonochrome ? 'text-emerald-500' : 'text-emerald-400'} />, label: '全景生成', desc: '生成720°全景图', action: () => handleGeneratePanorama() },
     { icon: <Film size={14} className={isMonochrome ? 'text-purple-500' : 'text-purple-400'} />, label: '视频抽帧', desc: '从视频中提取帧图片', action: () => { const img = selectedImageData; if (img?.mediaType === 'video') { setEditImageId(img.id); setVideoExtractFrameCount(12); setVideoExtractProcessing(false); setShowVideoExtractPanel(true); } else { toast.error('请先选中视频文件'); } } },
     { icon: <Volume2 size={14} className={isMonochrome ? 'text-orange-500' : 'text-orange-400'} />, label: 'AI配音', desc: '为视频添加AI配音', action: () => { const img = selectedImageData; if (img?.mediaType === 'video') { setVideoDubTarget(img); setShowVideoDubPanel(true); } else toast.error('请先选中视频文件'); } },
-    { icon: <Download size={14} className={isMonochrome ? monoColors['下载'] : ''} />, label: '下载', desc: 'PNG/SVG/PSD下载', action: handleOpenDownload },
+    { icon: <FileImage size={14} className={isMonochrome ? 'text-emerald-600' : 'text-emerald-400'} />, label: '转 GIF', desc: '将视频转换为 GIF 动图', action: () => { const img = selectedImageData; if (img?.mediaType === 'video') handleVideoTool('to-gif', img); else toast.error('请先选中视频文件'); } },
+    { icon: <Package size={14} className={isMonochrome ? 'text-sky-600' : 'text-sky-400'} />, label: '视频压缩', desc: '压缩视频并保留可播放副本', action: () => { const img = selectedImageData; if (img?.mediaType === 'video') handleVideoTool('compress', img); else toast.error('请先选中视频文件'); } },
+    { icon: <Download size={14} className={isMonochrome ? monoColors['下载'] : ''} />, label: '下载', desc: '导出当前素材', action: handleOpenDownload },
   ];
 
   // 根据 toolbarItemOrder 和 toolbarHiddenItems 过滤/排序工具栏
@@ -8221,7 +8291,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   // 根据媒体类型过滤可用工具
   const getAvailableToolsByMediaType = (mediaType?: 'image' | 'video' | '3d'): string[] => {
     const imageTools = ['放大', '移除背景', 'SVG智能描摹', '美陈拆解', '擦除', '蒙版', '调色', '编辑元素', '多角度', '图转3D工厂', '扩展', '裁切', '全景生成', '精修引擎', '人物精修大师', '语言修图', 'Agent编排', '下载'];
-    const videoTools = ['视频抽帧', 'AI配音', '下载'];
+    const videoTools = ['视频抽帧', 'AI配音', '转 GIF', '视频压缩', '下载'];
     const model3DTools = ['下载'];
 
     if (mediaType === 'video') return videoTools;
@@ -10809,7 +10879,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
         {showDisplayDecomposePanel && (
           <div
-            className={`fixed top-24 right-4 z-[190] w-72 rounded-lg border shadow-2xl ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#17171b] border-white/[0.12]'}`}
+            className={`fixed left-1/2 top-1/2 z-[190] w-72 max-w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 rounded-lg border shadow-2xl ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#17171b] border-white/[0.12]'}`}
             data-popup="display-decompose"
             onMouseDown={event => event.stopPropagation()}
             onWheel={event => event.stopPropagation()}
@@ -12990,11 +13060,13 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
                 {/* Format Selection */}
                 <div className="flex flex-col gap-1">
-                  {[
-                    { format: 'png' as const, label: 'PNG 格式', desc: '位图格式，无损画质' },
-                    { format: 'svg' as const, label: 'SVG 格式', desc: '矢量图形，可无损缩放' },
-                    ...(selectedImageData?.threeDModelUrl ? [{ format: '3d' as const, label: '3D 模型', desc: '下载3D模型文件' }] : []),
-                  ].map(item => (
+                  {(selectedImageData?.mediaType === 'video'
+                    ? [{ format: 'video' as const, label: 'MP4 视频', desc: '下载当前视频文件' }]
+                    : [
+                        { format: 'png' as const, label: 'PNG 格式', desc: '位图格式，无损画质' },
+                        { format: 'svg' as const, label: 'SVG 格式', desc: '矢量图形，可无损缩放' },
+                        ...(selectedImageData?.threeDModelUrl ? [{ format: '3d' as const, label: '3D 模型', desc: '下载3D模型文件' }] : []),
+                      ]).map(item => (
                     <button
                       key={item.format}
                       onClick={() => setDownloadFormat(item.format)}
@@ -13763,7 +13835,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                           action: 'extract-frames',
                           videoUrl: img.videoUrl,
                           mode: videoExtractMode,
-                          frameCount: videoExtractMode === 'uniform' ? videoExtractFrameCount : videoExtractMode === 'fps' ? 0 : 0,
+                          frameCount: videoExtractFrameCount,
                           fps: videoExtractMode === 'fps' ? 1 : undefined,
                         }),
                       });
@@ -13799,7 +13871,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           <VideoEditPanel
             isOpen={showVideoEditPanel}
             videoUrl={videoEditTarget.videoUrl || videoEditTarget.url}
-            thumbnailUrl={videoEditTarget.videoThumbnailUrl}
+            thumbnailUrl={videoEditTarget.videoThumbnailUrl || videoEditTarget.url}
             originalPrompt={videoEditTarget.prompt}
             themeStyle={isMonochrome ? 'monochrome' : 'gold'}
             selectedVideoModel={videoEditTarget.modelName || ''}
@@ -13815,7 +13887,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                     prompt: params.prompt,
                     model: params.model || undefined,
                     providerId: params.providerId || undefined,
-                    imageUrl: params.videoUrl,
+                    imageUrl: params.thumbnailUrl || videoEditTarget.url,
                     mode: 'image2video',
                   }),
                 });
@@ -15571,7 +15643,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         data-toolbar="bottom-toolbar"
         onMouseEnter={() => setBottomBarHovered(true)}
         onMouseLeave={() => setBottomBarHovered(false)}
-        className={`absolute bottom-5 left-1/2 -translate-x-1/2 z-50 flex max-w-[calc(100%-2rem)] items-center overflow-x-auto rounded-full px-2.5 py-1.5 transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${isMonochrome ? 'bg-white/95 border border-gray-200 shadow-lg' : 'bg-[#1a1a1a]/95 border border-white/[0.08] shadow-2xl backdrop-blur-md'} ${bottomBarHovered ? (isMonochrome ? 'shadow-xl' : 'shadow-2xl ring-1 ring-white/[0.06]') : ''}`}
+        className={`absolute bottom-5 left-1/2 -translate-x-1/2 z-50 flex max-w-[calc(100%-2rem)] items-center overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden rounded-full px-2.5 py-1.5 transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${isMonochrome ? 'bg-white/95 border border-gray-200 shadow-lg' : 'bg-[#1a1a1a]/95 border border-white/[0.08] shadow-2xl backdrop-blur-md'} ${bottomBarHovered ? (isMonochrome ? 'shadow-xl' : 'shadow-2xl ring-1 ring-white/[0.06]') : ''}`}
       >
         {/* ── Center: Main function buttons (always visible) ── */}
         <button
@@ -15635,7 +15707,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
         {/* ── Right: Feature buttons (collapsible) ── */}
         <div
-          className="flex items-center ml-1.5 shrink-0"
+          onClickCapture={closeCanvasToolPanels}
+          className={`flex items-center transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${
+            bottomBarHovered ? 'max-w-[900px] opacity-100 ml-1.5 overflow-visible' : 'max-w-0 opacity-0 ml-0 overflow-hidden'
+          }`}
         >
           <div className={`w-px h-5 mr-1.5 ${separatorCls}`} />
 

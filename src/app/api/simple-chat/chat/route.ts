@@ -49,6 +49,19 @@ export async function POST(request: NextRequest) {
   const imageModel = body.imageModel || model;
   const imageProviderId = body.imageProviderId || providerId;
 
+  const user = await getSessionUser(request);
+  if (!user) {
+    return Response.json({ error: 'Authentication required' }, { status: 401 });
+  }
+
+  const productTypes = (user.productType || '').split(',').map(type => type.trim()).filter(Boolean);
+  if (user.role !== 'admin' && (
+    user.apiPermissions?.chat === false ||
+    (productTypes.length > 0 && !productTypes.includes('chat'))
+  )) {
+    return Response.json({ error: 'You are not authorized to use intelligent chat' }, { status: 403 });
+  }
+
   // 查找提供商
   const provider = await findProviderForModel(model, 'chat' as ApiKind, providerId || undefined);
   if (!provider) {
@@ -56,8 +69,7 @@ export async function POST(request: NextRequest) {
   }
 
   // 模型权限校验：非管理员用户需检查 chatModels 授权列表
-  const user = await getSessionUser(request);
-  if (user && user.role !== 'admin') {
+  if (user.role !== 'admin') {
     const allowed = user.chatModels;
     if (allowed && allowed.length > 0 && !allowed.includes(model)) {
       return Response.json({ error: '您没有权限使用此模型，请联系管理员' }, { status: 403 });

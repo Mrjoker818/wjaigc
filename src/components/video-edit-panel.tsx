@@ -19,6 +19,7 @@ interface VideoEditPanelProps {
   /** 编辑提交回调 */
   onEdit: (params: {
     videoUrl: string;
+    thumbnailUrl?: string;
     prompt: string;
     duration?: number;
     model?: string;
@@ -122,6 +123,7 @@ export function VideoEditPanel({
     try {
       await onEdit({
         videoUrl,
+        thumbnailUrl: thumbnailUrl || undefined,
         prompt: editPrompt.trim(),
         model: selectedVideoModel,
         providerId: selectedVideoProviderId,

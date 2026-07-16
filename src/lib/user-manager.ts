@@ -517,9 +517,16 @@ export class UserManager {
         return false;
       }
       const data = await res.json() as { success: boolean; value?: unknown };
-      if (!data.success || data.value === undefined || data.value === null) {
+      if (!data.success) {
         console.warn('[Sync] loadProjectsFromServer: unsuccessful response', data);
         return false;
+      }
+
+      if (data.value === undefined || data.value === null) {
+        // A missing record is a valid first-login state, not a failed sync.
+        this._serverSyncReady = true;
+        await this.syncToServer();
+        return true;
       }
 
       // value 可能是字符串（需要 JSON.parse）或已解析的对象
