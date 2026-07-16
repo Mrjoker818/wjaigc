@@ -41,6 +41,7 @@ import {
 import { THREE_O_TWO_UPSCALE_MODELS, type ThreeOhTwoUpscaleModelId } from '@/lib/302-upscale-models';
 import { DISPLAY_DECOMPOSE_SUPPORTED_RATIOS, type DisplayDecomposeRatio } from '@/lib/display-decompose';
 import { getCenteredFloatingPanelPosition } from '@/lib/floating-panel-position';
+import { DEFAULT_IMAGE_TOOLBAR_ITEM_ORDER, normalizeImageToolbarPreferences } from '@/lib/image-toolbar-preferences';
 import OhMyPrompt from '@/components/oh-my-prompt';
 import { CanvasHelpModal } from '@/components/canvas/CanvasHelpModal';
 import dynamic from 'next/dynamic';
@@ -1080,18 +1081,23 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   }, []);
   const [showToolbarCustomize, setShowToolbarCustomize] = useState(false);
   // 工具栏自定义排序/可见性（从 localStorage 读取）
-  const [toolbarItemOrder, setToolbarItemOrder] = useState<string[]>(() => {
-    if (typeof window !== 'undefined') {
-      try { const saved = localStorage.getItem('wujie_toolbar_order'); if (saved) return JSON.parse(saved); } catch {}
+  const [toolbarPreferences] = useState(() => {
+    if (typeof window === 'undefined') {
+      return { order: [...DEFAULT_IMAGE_TOOLBAR_ITEM_ORDER], hidden: [] };
     }
-    return ['放大','移除背景','SVG智能描摹','美陈拆解','擦除','蒙版','调色','编辑元素','多角度','图转3D工厂','扩展','裁切','全景生成','精修引擎','人物精修大师','语言修图','Agent编排','下载'];
-  });
-  const [toolbarHiddenItems, setToolbarHiddenItems] = useState<Set<string>>(() => {
-    if (typeof window !== 'undefined') {
-      try { const saved = localStorage.getItem('wujie_toolbar_hidden'); if (saved) return new Set(JSON.parse(saved)); } catch {}
+    try {
+      return normalizeImageToolbarPreferences(
+        JSON.parse(localStorage.getItem('wujie_toolbar_order') || 'null'),
+        JSON.parse(localStorage.getItem('wujie_toolbar_hidden') || 'null')
+      );
+    } catch {
+      return { order: [...DEFAULT_IMAGE_TOOLBAR_ITEM_ORDER], hidden: [] };
     }
-    return new Set<string>();
   });
+  const [toolbarItemOrder, setToolbarItemOrder] = useState<string[]>(toolbarPreferences.order);
+  const [toolbarHiddenItems, setToolbarHiddenItems] = useState<Set<string>>(
+    () => new Set(toolbarPreferences.hidden)
+  );
 
   // 持久化工具栏自定义设置
   useEffect(() => {
