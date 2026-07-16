@@ -204,6 +204,7 @@ const MODE_LABELS: Record<string, string> = {
 // AI image models respond best to authoritative, concise camera direction statements
 function angleToViewDescription(azimuth: number, elevation: number): string {
   const a = ((azimuth % 360) + 360) % 360;
+  const e = Math.max(-90, Math.min(90, elevation));
 
   // ── Horizontal: determine 8 cardinal + intercardinal directions ──
   let horizName = '';
@@ -239,23 +240,39 @@ function angleToViewDescription(azimuth: number, elevation: number): string {
   let vertName = '';
   let vertDetail = '';
   let vertCn = ''; // Chinese description for models that understand Chinese better
-  if (elevation <= 5) {
+  if (e < -80) {
+    vertName = 'extreme worm-eye';
+    vertDetail = 'camera directly below the product, looking sharply upward, underside and bottom edges are dominant';
+    vertCn = '极低角仰视，镜头在产品正下方强烈向上拍摄，底面和下缘为主要可见面';
+  } else if (e < -50) {
+    vertName = 'dramatic low angle';
+    vertDetail = 'camera well below the product, looking upward, underside and lower edges are clearly visible';
+    vertCn = '强仰视角度，镜头明显低于产品向上拍摄，可清晰看到底面和下缘';
+  } else if (e < -20) {
+    vertName = 'low angle';
+    vertDetail = 'camera below the product, shooting upward, lower surfaces and vertical scale become visible';
+    vertCn = '仰视角度，镜头低于产品向上拍摄，底面和垂直尺度可见';
+  } else if (e < -5) {
+    vertName = 'slightly low angle';
+    vertDetail = 'camera slightly below the product, looking gently upward';
+    vertCn = '微仰视，镜头略低于产品并轻微向上拍摄';
+  } else if (e <= 5) {
     vertName = 'eye-level';
     vertDetail = 'camera at subject height, straight-on view, no tilt';
     vertCn = '平视角度，镜头与产品同高';
-  } else if (elevation <= 20) {
+  } else if (e <= 20) {
     vertName = 'slightly elevated';
     vertDetail = 'camera slightly above the product, shooting downward at a gentle angle, can see a bit of the top surface';
     vertCn = '略俯视，镜头略高于产品，微微向下拍摄，可见少许顶面';
-  } else if (elevation <= 40) {
+  } else if (e <= 40) {
     vertName = 'high angle';
     vertDetail = 'camera clearly above the product, shooting downward, top surface of the product is visible';
     vertCn = '俯视角度，镜头高于产品向下拍摄，产品顶面可见';
-  } else if (elevation <= 60) {
+  } else if (e <= 60) {
     vertName = 'steep overhead';
     vertDetail = 'camera well above the product, steep downward angle, top surface is the dominant visible face';
     vertCn = '大俯视角度，镜头在产品上方大幅向下拍摄，顶面为主要可见面';
-  } else if (elevation <= 80) {
+  } else if (e <= 80) {
     vertName = 'near top-down';
     vertDetail = 'camera nearly directly above the product, almost top-down view, mainly seeing the top surface';
     vertCn = '接近正俯视，镜头几乎在产品正上方，主要看到顶面';
@@ -273,7 +290,7 @@ function angleToViewDescription(azimuth: number, elevation: number): string {
   result += `. ${vertCn}`;
 
   // Add composition emphasis for specific angle ranges
-  if (elevation > 15 && horizName.includes('front')) {
+  if (e > 15 && horizName.includes('front')) {
     result += ', top surface and front face both visible / 可同时看到顶面和正面';
   }
   if (horizName.includes('right') && !horizName.includes('back')) {
@@ -284,8 +301,10 @@ function angleToViewDescription(azimuth: number, elevation: number): string {
   }
 
   // Add a very explicit camera direction instruction that AI models cannot misinterpret
-  if (elevation > 5) {
+  if (e > 5) {
     result += '. IMPORTANT: The camera is ABOVE the product looking DOWN, do NOT generate a low-angle looking-up shot / 重要：镜头在产品上方向下拍摄，不要生成仰视角度';
+  } else if (e < -5) {
+    result += '. IMPORTANT: The camera is BELOW the product looking UP, do NOT generate a high-angle top-down shot / 重要：镜头在产品下方向上拍摄，不要生成俯视角度';
   }
 
   return result;

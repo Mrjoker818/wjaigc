@@ -1675,8 +1675,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       const dx = event.clientX - drag.startX;
       const dy = event.clientY - drag.startY;
       setMultiAngleRotation(Math.round(clampMultiAngleValue(drag.startRotation + dx * 0.55, -90, 90)));
-      // Invert dy: drag down → look down (俯视, negative tilt), drag up → look up (仰视, positive tilt)
-      setMultiAngleTilt(Math.round(clampMultiAngleValue(drag.startTilt - dy * 0.55, -30, 60)));
+      // Drag up raises the camera for a high-angle view; drag down lowers it for a low-angle view.
+      setMultiAngleTilt(Math.round(clampMultiAngleValue(drag.startTilt - dy * 0.55, -90, 90)));
     };
     const handleUp = () => {
       multiAngleDragRef.current = null;
@@ -6987,7 +6987,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         completeProcessingFrame(placeholderId, stableUrl, img.width, img.height, {
           originalWidth: img.originalWidth || Math.round(img.width),
           originalHeight: img.originalHeight || Math.round(img.height),
-          modifyPrompt: `AI视角变换 / ${multiAngleMode === 'image' ? '相机环绕(Orbit)' : '相机位移(Dolly)'} / 水平${multiAngleRotation >= 0 ? '右转' : '左转'}${Math.abs(multiAngleRotation)}°(露出${multiAngleRotation >= 0 ? '左' : '右'}侧) / ${multiAngleTilt === 0 ? '平视' : multiAngleTilt > 0 ? `仰视${multiAngleTilt}°` : `俯视${Math.abs(multiAngleTilt)}°`} / ${['特写', '标准', '广角'][multiAngleZoom]}`,
+          modifyPrompt: `AI视角变换 / ${multiAngleMode === 'image' ? '相机环绕(Orbit)' : '相机位移(Dolly)'} / 水平${multiAngleRotation >= 0 ? '右转' : '左转'}${Math.abs(multiAngleRotation)}°(露出${multiAngleRotation >= 0 ? '左' : '右'}侧) / ${multiAngleTilt === 0 ? '平视' : multiAngleTilt > 0 ? `俯视${multiAngleTilt}°` : `仰视${Math.abs(multiAngleTilt)}°`} / ${['特写', '标准', '广角'][multiAngleZoom]}`,
           modelName: modelInfo.apiDisplayName || modelInfo.model,
           apiProvider: modelInfo.providerName || '',
         }, 'variant');
@@ -7010,7 +7010,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       completeProcessingFrame(placeholderId, stableUrl, img.width, img.height, {
         originalWidth: img.originalWidth || Math.round(img.width),
         originalHeight: img.originalHeight || Math.round(img.height),
-        modifyPrompt: `AI视角变换 / ${multiAngleMode === 'image' ? '相机环绕(Orbit)' : '相机位移(Dolly)'} / 水平${multiAngleRotation >= 0 ? '右转' : '左转'}${Math.abs(multiAngleRotation)}°(露出${multiAngleRotation >= 0 ? '左' : '右'}侧) / ${multiAngleTilt === 0 ? '平视' : multiAngleTilt > 0 ? `仰视${multiAngleTilt}°` : `俯视${Math.abs(multiAngleTilt)}°`} / ${['特写', '标准', '广角'][multiAngleZoom]}`,
+        modifyPrompt: `AI视角变换 / ${multiAngleMode === 'image' ? '相机环绕(Orbit)' : '相机位移(Dolly)'} / 水平${multiAngleRotation >= 0 ? '右转' : '左转'}${Math.abs(multiAngleRotation)}°(露出${multiAngleRotation >= 0 ? '左' : '右'}侧) / ${multiAngleTilt === 0 ? '平视' : multiAngleTilt > 0 ? `俯视${multiAngleTilt}°` : `仰视${Math.abs(multiAngleTilt)}°`} / ${['特写', '标准', '广角'][multiAngleZoom]}`,
         modelName: modelInfo.apiDisplayName || modelInfo.model,
         apiProvider: modelInfo.providerName || '',
       }, 'variant');
@@ -12861,8 +12861,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                       {/* Perspective hint label */}
                       <div className={`absolute bottom-2 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full text-xs ${isMonochrome ? 'bg-white/80 text-gray-500 border border-gray-200' : 'bg-black/60 text-muted-foreground border border-white/10'}`}>
                         {Math.abs(multiAngleRotation) < 5 && Math.abs(multiAngleTilt) < 5 ? '正面' :
-                         multiAngleTilt > 40 ? '强仰视' : multiAngleTilt > 20 ? '仰视' : multiAngleTilt > 5 ? '微仰视' :
-                         multiAngleTilt < -20 ? '强俯视' : multiAngleTilt < -5 ? '俯视' :
+                         multiAngleTilt > 40 ? '强俯视' : multiAngleTilt > 20 ? '俯视' : multiAngleTilt > 5 ? '微俯视' :
+                         multiAngleTilt < -20 ? '强仰视' : multiAngleTilt < -5 ? '仰视' :
                          multiAngleRotation > 60 ? '左侧面' : multiAngleRotation > 30 ? '左侧' : multiAngleRotation > 10 ? '微左侧' :
                          multiAngleRotation < -60 ? '右侧面' : multiAngleRotation < -30 ? '右侧' : multiAngleRotation < -10 ? '微右侧' :
                          '正面'}
@@ -12889,8 +12889,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                 {([
                   { label: '旋转', value: multiAngleRotation, min: -90, max: 90, step: 1, onChange: setMultiAngleRotation,
                     desc: multiAngleRotation === 0 ? '正面' : multiAngleRotation > 0 ? `左转${Math.abs(multiAngleRotation)}°（露出左侧）` : `右转${Math.abs(multiAngleRotation)}°（露出右侧）` },
-                  { label: multiAngleMode === 'camera' ? '俯仰' : '倾斜', value: multiAngleTilt, min: -30, max: 60, step: 1, onChange: setMultiAngleTilt,
-                    desc: multiAngleTilt === 0 ? '平视' : multiAngleTilt > 0 ? `仰视${Math.abs(multiAngleTilt)}°` : `俯视${Math.abs(multiAngleTilt)}°` },
+                  { label: '垂直视角', value: multiAngleTilt, min: -90, max: 90, step: 1, onChange: setMultiAngleTilt,
+                    desc: multiAngleTilt === 0 ? '平视' : multiAngleTilt > 0 ? `俯视${Math.abs(multiAngleTilt)}°` : `仰视${Math.abs(multiAngleTilt)}°` },
                 ]).map(item => (
                   <div key={item.label} className="space-y-1">
                     <div className="flex items-center justify-between">

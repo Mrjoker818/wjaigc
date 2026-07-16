@@ -115,7 +115,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
   const [selectedLighting, setSelectedLighting] = useState('soft_studio');
   const [selectedViewAngle, setSelectedViewAngle] = useState('front');
   const [customAzimuth, setCustomAzimuth] = useState(30);   // 水平方位角 0-360°
-  const [customElevation, setCustomElevation] = useState(15); // 垂直仰角 -90° ~ +90°
+  const [customElevation, setCustomElevation] = useState(0); // 垂直视角：-90° 仰视 ~ +90° 俯视
   const [showAnglePicker, setShowAnglePicker] = useState(false);
   const [productName, setProductName] = useState('');
   const [customMaterial, setCustomMaterial] = useState('');
@@ -954,26 +954,27 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                       <span className="text-xs font-mono" style={{ color: accentColor }}>{customElevation}°</span>
                     </div>
                     <input
-                      type="range" min={0} max={90} step={5}
+                      type="range" min={-90} max={90} step={5}
                       value={customElevation}
                       onChange={e => setCustomElevation(Number(e.target.value))}
                       className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
-                      style={{ background: `linear-gradient(to right, ${accentColor}30, ${accentColor} ${customElevation / 90 * 100}%, ${borderColorLight} ${customElevation / 90 * 100}%, ${borderColorLight})` }}
+                      style={{ background: `linear-gradient(to right, ${accentColor}30, ${accentColor} ${(customElevation + 90) / 180 * 100}%, ${borderColorLight} ${(customElevation + 90) / 180 * 100}%, ${borderColorLight})` }}
                     />
                     <div className="flex justify-between text-[9px]" style={{ color: textMutedColor }}>
-                      <span>0° 平视</span><span>45° 半俯</span><span>90° 正俯</span>
+                      <span>-90° 仰视</span><span>0° 平视</span><span>90° 俯视</span>
                     </div>
                   </div>
 
                   {/* Quick angle presets */}
                   <div className="flex flex-wrap gap-1.5">
                     {[
-                      { label: '正面微仰', az: 0, el: 15 },
+                      { label: '正面微仰', az: 0, el: -15 },
                       { label: '左侧45°', az: 270, el: 10 },
                       { label: '右侧45°', az: 90, el: 10 },
                       { label: '3/4视角', az: 35, el: 20 },
                       { label: '俯视30°', az: 0, el: 30 },
                       { label: '俯视60°', az: 0, el: 60 },
+                      { label: '低角仰视45°', az: 0, el: -45 },
                       { label: '斜后45°', az: 210, el: 15 },
                       { label: '全俯视', az: 0, el: 90 },
                     ].map(preset => (

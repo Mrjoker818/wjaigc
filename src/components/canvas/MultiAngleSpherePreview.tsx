@@ -74,7 +74,7 @@ export function MultiAngleSpherePreview({
 
     const imageData = imgDataRef.current;
     const yaw = (rotation / 90) * Math.PI * 0.5;
-    const pitch = -(tilt / 60) * Math.PI * 0.5;
+    const pitch = -(tilt / 90) * Math.PI * 0.5;
     const cameraDistance = 2.5 / (zoom === 0 ? 0.7 : zoom === 2 ? 1.5 : 1.0);
     void cameraDistance;
 
@@ -186,7 +186,7 @@ export function MultiAngleSpherePreview({
     <div className="w-full h-full flex items-center justify-center relative">
       <canvas ref={canvasRef} width={260} height={196} className="rounded-xl" style={{ width: '100%', height: '100%' }} />
       <div className={`absolute bottom-2 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full text-xs ${isMonochrome ? 'bg-white/80 text-gray-500 border border-gray-200' : 'bg-black/60 text-muted-foreground border border-white/10'}`}>
-        {Math.abs(rotation) < 10 && Math.abs(tilt) < 10 ? '正面' : rotation > 60 ? '左侧' : rotation < -60 ? '右侧' : tilt > 25 ? '仰视' : tilt < -25 ? '俯视' : '斜视'}
+        {Math.abs(rotation) < 10 && Math.abs(tilt) < 10 ? '正面' : rotation > 60 ? '左侧' : rotation < -60 ? '右侧' : tilt > 25 ? '俯视' : tilt < -25 ? '仰视' : '斜视'}
       </div>
     </div>
   );
