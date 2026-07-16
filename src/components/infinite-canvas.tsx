@@ -1412,6 +1412,24 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [threeDProgress, setThreeDProgress] = useState<string | null>(null);
   const [admin3DModels, setAdmin3DModels] = useState<Array<{ id: string; name: string; baseUrl: string; apiKey: string; model?: string; providerPreset?: string; providerName: string; advancedParams?: Record<string, string> }>>([]);
 
+  const close3DModal = useCallback(() => {
+    setShow3DModal(false);
+    setActiveTool('none');
+    setThreeDProgress(null);
+    setThreeDMultiImages([]);
+  }, []);
+
+  useEffect(() => {
+    const handle3DModalKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && show3DModal && !threeDProgress) {
+        event.preventDefault();
+        close3DModal();
+      }
+    };
+    window.addEventListener('keydown', handle3DModalKeyDown);
+    return () => window.removeEventListener('keydown', handle3DModalKeyDown);
+  }, [close3DModal, show3DModal, threeDProgress]);
+
   // Crop state
   const [, setCropLeft] = useState(0);
   const [, setCropTop] = useState(0);
@@ -13066,8 +13084,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
               onWheel={(e) => e.stopPropagation()}
               onClick={(e) => {
                 if (e.target === e.currentTarget && !threeDProgress) {
-                  setShow3DModal(false);
-                  setActiveTool('none');
+                  close3DModal();
                 }
               }}
             >
@@ -13082,7 +13099,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                     </div>
                   </div>
                   <button
-                    onClick={() => { if (!threeDProgress) { setShow3DModal(false); setActiveTool('none'); } }}
+                    onClick={() => { if (!threeDProgress) close3DModal(); }}
                     className={`p-1.5 rounded-lg ${isMonochrome ? 'text-gray-400 hover:bg-gray-100' : 'text-[#777] hover:bg-[#252525]'}`}
                     disabled={!!threeDProgress}
                   >
@@ -13490,7 +13507,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                 {/* Footer */}
                 <div className={`flex items-center justify-end gap-2 px-4 py-3 border-t ${isMonochrome ? 'border-gray-100' : 'border-white/[0.14]'}`}>
                   <button
-                    onClick={() => { setShow3DModal(false); setActiveTool('none'); setThreeDProgress(null); setThreeDMultiImages([]); }}
+                    onClick={close3DModal}
                     className={panelCancelBtnClass}
                     disabled={!!threeDProgress}
                   >

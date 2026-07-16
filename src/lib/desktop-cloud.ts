@@ -6,7 +6,7 @@ import { authenticateUser, listManagedUsers } from './server-auth';
 import type { User } from './user-types';
 import type { ApiProvider } from './universal-api-types';
 import { dbAddAuditLog, dbGetSystemSetting, dbSetSystemSetting } from './db-storage';
-import { execSql } from './db-client';
+import { execSql, isDatabaseConfigured } from './db-client';
 
 export const UPDATE_CONFIG_CATEGORY = 'desktop-update-config';
 export const UPDATE_FILE_CATEGORY = 'desktop-update-file';
@@ -311,6 +311,7 @@ function rowToBackup(row: Record<string, unknown>): CloudBackup {
 }
 
 export async function listResources(options?: { type?: string; enabledOnly?: boolean }): Promise<CloudResource[]> {
+  if (!isDatabaseConfigured()) return [];
   await ensureDesktopTables();
   const params: unknown[] = [];
   const clauses: string[] = [];
@@ -395,6 +396,7 @@ export async function createBackup(input: {
 }
 
 export async function listBackups(options?: { userId?: string; category?: string; limit?: number; admin?: boolean }): Promise<CloudBackup[]> {
+  if (!isDatabaseConfigured()) return [];
   await ensureDesktopTables();
   const params: unknown[] = [];
   const clauses: string[] = [];
@@ -432,6 +434,7 @@ export function emptyDesktopUpdateConfig(): DesktopUpdateConfig {
 }
 
 export async function readDesktopUpdateConfig(): Promise<DesktopUpdateConfig> {
+  if (!isDatabaseConfigured()) return emptyDesktopUpdateConfig();
   const raw = await dbGetSystemSetting('desktop_update_config');
   const config = asObject(raw);
   return {
@@ -538,6 +541,7 @@ export async function upsertDesktopDevice(input: {
 }
 
 export async function listDesktopDevices(): Promise<Record<string, unknown>[]> {
+  if (!isDatabaseConfigured()) return [];
   await ensureDesktopTables();
   const result = await execSql('SELECT * FROM wujie_desktop_devices ORDER BY last_seen_at DESC LIMIT 1000');
   return result.rows;
@@ -582,6 +586,7 @@ export async function addGenerationRecord(input: {
 }
 
 export async function listGenerationRecords(options?: { userId?: string; limit?: number }): Promise<Record<string, unknown>[]> {
+  if (!isDatabaseConfigured()) return [];
   await ensureDesktopTables();
   const params: unknown[] = [];
   const clauses: string[] = [];

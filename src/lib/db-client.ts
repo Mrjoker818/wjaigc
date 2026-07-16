@@ -7,10 +7,14 @@ import { Pool, PoolConfig } from 'pg';
 
 let pool: Pool | null = null;
 
+export function isDatabaseConfigured(): boolean {
+  return Boolean(process.env.DATABASE_URL || process.env.PGDATABASE_URL);
+}
+
 export function getPool(): Pool {
   if (!pool) {
     const connectionString = process.env.DATABASE_URL || process.env.PGDATABASE_URL;
-    if (!connectionString) {
+    if (!isDatabaseConfigured() || !connectionString) {
       throw new Error('[db-client] No DATABASE_URL or PGDATABASE_URL environment variable set');
     }
     const config: PoolConfig = {

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/server-auth';
 import { dbGetCredits, dbAdjustCredits, dbGetCreditTransactions, dbGetAllCredits, dbInitCredits } from '@/lib/db-storage';
-import { execSql } from '@/lib/db-client';
+import { execSql, isDatabaseConfigured } from '@/lib/db-client';
 import { CREDITS_TO_CNY, CNY_TO_CREDITS, IMAGE_MODEL_CREDITS, VIDEO_MODEL_CREDITS, CHAT_MODEL_CREDITS, RECHARGE_PACKAGES, getModelPricingInfo } from '@/lib/credits';
 
 type RechargeOrder = {
@@ -46,6 +46,9 @@ export async function GET(request: NextRequest) {
 
     // Admin: get self-confirmed orders for audit (auto-credited, admin can reverse fraudulent ones)
     if (action === 'audit-orders' && isAdmin) {
+      if (!isDatabaseConfigured()) {
+        return NextResponse.json({ success: true, orders: [], storageUnavailable: true });
+      }
       try {
         const status = searchParams.get('status') || 'all';
         let statusFilter = '';
@@ -85,6 +88,9 @@ export async function GET(request: NextRequest) {
 
     // Admin: get pending orders for confirmation
     if (action === 'pending-orders' && isAdmin) {
+      if (!isDatabaseConfigured()) {
+        return NextResponse.json({ success: true, orders: [], storageUnavailable: true });
+      }
       try {
         const result = await execSql(
           `SELECT o.id, o.user_id, o.amount, o.price_cny, o.bonus, o.payment_method, o.payment_status, o.created_at, o.submitted_at, o.expires_at, u.name as user_name
@@ -519,6 +525,9 @@ export async function POST(request: NextRequest) {
 
     // ===== User: My orders =====
     if (action === 'my-orders' && user) {
+      if (!isDatabaseConfigured()) {
+        return NextResponse.json({ success: true, orders: [], storageUnavailable: true });
+      }
       try {
         const res = await execSql(
           'SELECT * FROM wujie_recharge_orders WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20',

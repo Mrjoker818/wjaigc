@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminUser } from '@/lib/server-auth';
-import { execSql } from '@/lib/db-client';
+import { execSql, isDatabaseConfigured } from '@/lib/db-client';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,11 +9,35 @@ interface CreditDistributionRow { image_consumed?: unknown; chat_consumed?: unkn
 interface CreditUserRow { user_id: string; name?: string; balance?: unknown; total_recharged?: unknown; total_used?: unknown; }
 interface CreditTransactionRow { user_id: string; user?: string; amount?: unknown; desc?: string; created_at?: unknown; }
 
+function emptyCreditsOverview() {
+  return {
+    success: true,
+    totalBalance: 0,
+    totalRecharged: 0,
+    totalConsumed: 0,
+    totalUsers: 0,
+    avgPerUser: 0,
+    distribution: [
+      { label: '图像生成', value: 0, color: '#d4af37', pct: '0%' },
+      { label: 'AI 对话', value: 0, color: '#22c55e', pct: '0%' },
+      { label: '视频生成', value: 0, color: '#3b82f6', pct: '0%' },
+      { label: '其他', value: 0, color: '#a1a1aa', pct: '0%' },
+    ],
+    topUsers: [],
+    recentTransactions: [],
+    storageUnavailable: true,
+  };
+}
+
 export async function GET(request: NextRequest) {
   try {
     const admin = await requireAdminUser(request);
     if (!admin) {
       return NextResponse.json({ success: false, error: 'Admin access required' }, { status: 403 });
+    }
+
+    if (!isDatabaseConfigured()) {
+      return NextResponse.json(emptyCreditsOverview());
     }
 
     // Aggregate credit stats

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { execSql } from '@/lib/db-client';
+import { execSql, isDatabaseConfigured } from '@/lib/db-client';
 import { dbGetSystemSetting, dbSetSystemSetting } from '@/lib/db-storage';
 import { decodeQrFromUrl, isPaymentLink } from '@/lib/qr-decode';
 
@@ -15,6 +15,13 @@ export async function GET(
     const { orderId } = await params;
     if (!orderId) {
       return NextResponse.json({ success: false, error: '缺少订单号' }, { status: 400 });
+    }
+
+    if (!isDatabaseConfigured()) {
+      return NextResponse.json(
+        { success: false, error: '订单服务暂不可用，请稍后再试', storageUnavailable: true },
+        { status: 503 },
+      );
     }
 
     // Get order
