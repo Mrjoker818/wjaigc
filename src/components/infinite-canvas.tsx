@@ -4741,6 +4741,22 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     return results;
   }, [admin3DModels]);
 
+  const activeThreeDProvider = useMemo(
+    () => getThreeDProviders().find(provider => provider.id === threeDProviderId),
+    [getThreeDProviders, threeDProviderId],
+  );
+  const activeThreeDProviderSignature = [
+    activeThreeDProvider?.name,
+    activeThreeDProvider?.providerPreset,
+    activeThreeDProvider?.model,
+  ].filter(Boolean).join(' ').toLowerCase();
+  const isTripoProvider = activeThreeDProviderSignature.includes('tripo');
+  const is302TripoProvider = isTripoProvider && /302(?:\.ai|ai)/i.test(activeThreeDProvider?.baseUrl || '');
+  const isRodinProvider = activeThreeDProviderSignature.includes('rodin');
+  const isKnownNativeThreeDProvider = /meshy|tripo|hunyuan|rodin/.test(activeThreeDProviderSignature);
+  const supportsThreeDFaceCount = !is302TripoProvider && !isRodinProvider;
+  const supportsThreeDPose = activeThreeDProviderSignature.includes('meshy') || !isKnownNativeThreeDProvider;
+
   // 3D provider capabilities configuration
   const threeDCapabilities = useMemo((): {
     qualities: { value: string; label: string }[];
@@ -4798,7 +4814,14 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         textures: [{ value: '1k', label: '1K' }, { value: '2k', label: '2K' }, { value: '4k', label: '4K' }],
         formats: [{ value: 'glb', label: 'GLB' }, { value: 'obj', label: 'OBJ' }],
       },
+      'tripo-302': {
+        qualities: [{ value: 'standard', label: 'Standard' }],
+        textures: [{ value: 'none', label: '无纹理' }, { value: '1k', label: '1K' }, { value: '2k', label: '2K' }, { value: '4k', label: '4K' }],
+        formats: [{ value: 'glb', label: 'GLB' }, { value: 'obj', label: 'OBJ' }, { value: 'usdz', label: 'USDZ' }, { value: 'stl', label: 'STL' }],
+      },
     };
+
+    if (is302TripoProvider) return capMap['tripo-302'];
 
     // Match by preset name (case-insensitive partial match)
     const presetLower = preset.toLowerCase();
@@ -4831,7 +4854,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     }
 
     return defaultCap;
-  }, [getThreeDProviders, threeDProviderId, threeDBackend]);
+  }, [getThreeDProviders, threeDProviderId, threeDBackend, is302TripoProvider]);
 
   // Auto-reset quality/texture/format when capabilities change
   useEffect(() => {
@@ -7866,7 +7889,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             imageUrl: currentEditImg.url,
             expandPadding: { top: pad.top, right: pad.right, bottom: pad.bottom, left: pad.left },
             aspectRatio: `${targetW}:${targetH}`,
-            prompt: editPrompt || 'Naturally extend the image beyond its original borders. Fill the new areas with content that seamlessly continues the existing scene, maintaining consistent style, lighting, perspective and color palette.',
+            prompt: editPrompt.trim(),
             model: modelInfo.model,
             providerId: modelInfo.providerId || getCurrentProviderId(),
           }),
@@ -13477,21 +13500,29 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                     </div>
                     <div>
                       <label className={panelSmallLabelClass}>面数</label>
-                      <select value={threeDFaceCount} onChange={(e) => setThreeDFaceCount(Number(e.target.value))} className={`mt-1 w-full px-2 py-2 rounded-lg text-xs border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900' : 'bg-[#0a0a0a]/90 border-white/[0.14] text-white'}`}>
-                        <option value={3000}>低 (3K)</option>
-                        <option value={10000}>中 (10K)</option>
-                        <option value={30000}>标准 (30K)</option>
-                        <option value={100000}>高 (100K)</option>
-                        <option value={500000}>极高 (500K)</option>
-                      </select>
+                      {supportsThreeDFaceCount ? (
+                        <select value={threeDFaceCount} onChange={(e) => setThreeDFaceCount(Number(e.target.value))} className={`mt-1 w-full px-2 py-2 rounded-lg text-xs border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900' : 'bg-[#0a0a0a]/90 border-white/[0.14] text-white'}`}>
+                          <option value={3000}>低 (3K)</option>
+                          <option value={10000}>中 (10K)</option>
+                          <option value={30000}>标准 (30K)</option>
+                          <option value={100000}>高 (100K)</option>
+                          <option value={500000}>极高 (500K)</option>
+                        </select>
+                      ) : (
+                        <div title="当前模型接口未提供面数参数" className={`mt-1 w-full px-2 py-2 rounded-lg text-xs border ${isMonochrome ? 'bg-gray-100 border-gray-200 text-gray-400' : 'bg-[#0a0a0a]/60 border-white/[0.08] text-[#666]'}`}>由模型质量控制</div>
+                      )}
                     </div>
                     <div>
                       <label className={panelSmallLabelClass}>姿态</label>
-                      <select value={threeDPose} onChange={(e) => setThreeDPose(e.target.value as '' | 'a-pose' | 't-pose')} className={`mt-1 w-full px-2 py-2 rounded-lg text-xs border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900' : 'bg-[#0a0a0a]/90 border-white/[0.14] text-white'}`}>
-                        <option value="">无</option>
-                        <option value="a-pose">A-Pose</option>
-                        <option value="t-pose">T-Pose</option>
-                      </select>
+                      {supportsThreeDPose ? (
+                        <select value={threeDPose} onChange={(e) => setThreeDPose(e.target.value as '' | 'a-pose' | 't-pose')} className={`mt-1 w-full px-2 py-2 rounded-lg text-xs border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900' : 'bg-[#0a0a0a]/90 border-white/[0.14] text-white'}`}>
+                          <option value="">无</option>
+                          <option value="a-pose">A-Pose</option>
+                          <option value="t-pose">T-Pose</option>
+                        </select>
+                      ) : (
+                        <div title="当前模型接口不支持姿态参数" className={`mt-1 w-full px-2 py-2 rounded-lg text-xs border ${isMonochrome ? 'bg-gray-100 border-gray-200 text-gray-400' : 'bg-[#0a0a0a]/60 border-white/[0.08] text-[#666]'}`}>当前模型不支持</div>
+                      )}
                     </div>
                   </div>
 

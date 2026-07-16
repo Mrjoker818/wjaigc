@@ -802,8 +802,9 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                           if (az < 0) az += 360;
                           let el = Math.sqrt(dx * dx + dy * dy) / r * 90;
                           if (el > 90) el = 90;
+                          const elevationSign = customElevation < 0 ? -1 : 1;
                           setCustomAzimuth(Math.round(az));
-                          setCustomElevation(Math.round(el));
+                          setCustomElevation(Math.round(el) * elevationSign);
                         };
                         updateAngle(e.clientX, e.clientY);
                         const onMove = (ev: MouseEvent) => { updateAngle(ev.clientX, ev.clientY); };

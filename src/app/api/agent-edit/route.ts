@@ -360,7 +360,7 @@ export async function POST(request: NextRequest) {
                   'x-internal-request': 'true',
                   'x-internal-user-id': sessionUser?.id || 'system',
                 },
-                body: JSON.stringify({ imageUrl: finalImageUrl, action: 'removebg' }),
+                body: JSON.stringify({ imageUrl: finalImageUrl, action: 'removebg', model: imageModel, providerId: imageProviderId, engine: imageModel ? 'ai' : 'auto' }),
               });
               const rbData = await rbResp.json();
               if (rbData.success && rbData.imageUrl) {

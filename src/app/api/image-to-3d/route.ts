@@ -447,6 +447,13 @@ function buildMeshyBody(request: ImageTo3DRequest): Record<string, unknown> {
   return body;
 }
 
+function resolveTripoFaceLimit(request: ImageTo3DRequest): number {
+  const fallback = request.quality === 'ultra' ? 20000 : 10000;
+  const requested = Number(request.faceCount);
+  if (!Number.isFinite(requested) || requested <= 0) return fallback;
+  return Math.min(Math.max(Math.round(requested), 100), 500000);
+}
+
 function buildTripoBody(request: ImageTo3DRequest): Record<string, unknown> {
   if (request.mode === 'text-to-3d' && request.prompt) {
     // Tripo文生3D
@@ -454,7 +461,7 @@ function buildTripoBody(request: ImageTo3DRequest): Record<string, unknown> {
       prompt: request.prompt,
       type: 'text_to_model',
       settings: {
-        face_limit: request.quality === 'ultra' ? 20000 : 10000,
+        face_limit: resolveTripoFaceLimit(request),
         texture_resolution: request.texture === '4k' ? 4096 : 2048,
         model_format: request.format,
       },
@@ -467,7 +474,7 @@ function buildTripoBody(request: ImageTo3DRequest): Record<string, unknown> {
       images: request.images.map(img => img.url),
       type: 'multi_image_to_model',
       settings: {
-        face_limit: request.quality === 'ultra' ? 20000 : 10000,
+        face_limit: resolveTripoFaceLimit(request),
         texture_resolution: request.texture === '4k' ? 4096 : 2048,
         model_format: request.format,
       },
@@ -478,7 +485,7 @@ function buildTripoBody(request: ImageTo3DRequest): Record<string, unknown> {
     file: { type: 'image', data: request.imageUrl },
     type: 'image_to_model',
     settings: {
-      face_limit: request.quality === 'ultra' ? 20000 : 10000,
+      face_limit: resolveTripoFaceLimit(request),
       texture_resolution: request.texture === '4k' ? 4096 : 2048,
       model_format: request.format,
     },
