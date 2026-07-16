@@ -26,6 +26,16 @@ export function resolveCanvasCullingOffset(
   return isPanning || isMiddlePanning ? panViewportOffset : committedOffset;
 }
 
+/** Use the same offset for React renders and direct rAF transform previews. */
+export function resolveCanvasRenderOffset(
+  committedOffset: CanvasViewportOffset,
+  panViewportOffset: CanvasViewportOffset,
+  isPanning: boolean,
+  isMiddlePanning: boolean,
+): CanvasViewportOffset {
+  return resolveCanvasCullingOffset(committedOffset, panViewportOffset, isPanning, isMiddlePanning);
+}
+
 /** Keep the path between the committed and sampled viewports mounted during panning. */
 export function resolveCanvasCullingBounds(
   committedOffset: CanvasViewportOffset,

@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { validateApiInputs } from '@/lib/api-validator';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
 // POST /api/export/to-canvas - 发送结果到无限画布
 export async function POST(request: NextRequest) {
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult instanceof NextResponse) return authResult;
   try {
     const body = await request.json();
     // 输入校验

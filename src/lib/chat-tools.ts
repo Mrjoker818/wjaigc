@@ -1,4 +1,5 @@
 import { calculateActualPixels } from './canvas-generation-group';
+import { getInternalRequestHeaders } from './api-auth';
 
 // 服务器端口，所有服务器间 fetch 调用统一使用 localhost + 此端口
 const SERVER_PORT = process.env.DEPLOY_RUN_PORT || '5000';
@@ -235,6 +236,32 @@ export const CHAT_TOOLS = [
 
 // ============ Tool Execution ============
 
+export function validateChatToolCall(toolName: string, args: Record<string, unknown>): string | null {
+  const tool = CHAT_TOOLS.find(candidate => candidate.function.name === toolName);
+  if (!tool) return `Unknown tool: ${toolName}`;
+
+  const parameters = tool.function.parameters as unknown as {
+    properties: Record<string, { type?: string; enum?: string[] }>;
+    required?: string[];
+  };
+  for (const required of parameters.required || []) {
+    const value = args[required];
+    if (value === undefined || value === null || (typeof value === 'string' && !value.trim())) {
+      return `Missing required parameter: ${required}`;
+    }
+  }
+  for (const [name, definition] of Object.entries(parameters.properties)) {
+    const value = args[name];
+    if (value === undefined || value === null) continue;
+    const typeMatches = definition.type === 'array' ? Array.isArray(value) : typeof value === definition.type;
+    if (!typeMatches) return `Invalid parameter type for ${name}`;
+    if (definition.enum && (typeof value !== 'string' || !definition.enum.includes(value))) {
+      return `Invalid value for ${name}`;
+    }
+  }
+  return null;
+}
+
 export interface ToolCallResult {
   success: boolean;
   data?: Record<string, unknown>;
@@ -268,8 +295,19 @@ export async function executeToolCall(
     projectId?: string;
     sessionId?: string;
     messageId?: string;
+    allowedTools?: string[];
   }
 ): Promise<ToolCallResult> {
+  if (context.allowedTools && !context.allowedTools.includes(toolName)) {
+    const error = `Tool is not allowed for this agent: ${toolName}`;
+    return { success: false, error, resultText: `Tool validation failed: ${error}` };
+  }
+
+  const validationError = validateChatToolCall(toolName, args);
+  if (validationError) {
+    return { success: false, error: validationError, resultText: `Tool validation failed: ${validationError}` };
+  }
+
   switch (toolName) {
     case 'generate_image':
       return executeGenerateImage(args, context);
@@ -331,8 +369,7 @@ async function executeGenerateImage(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-internal-request': 'true',
-        'x-internal-user-id': context.userId,
+        ...getInternalRequestHeaders(context.userId),
       },
       body: JSON.stringify({
         prompt: negativePrompt ? `${prompt} [negative: ${negativePrompt}]` : prompt,
@@ -422,8 +459,7 @@ async function executeEditImage(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-internal-request': 'true',
-        'x-internal-user-id': context.userId,
+        ...getInternalRequestHeaders(context.userId),
       },
       body: JSON.stringify({
         image: imageUrl,
@@ -497,8 +533,7 @@ async function executeImg2Img(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-internal-request': 'true',
-        'x-internal-user-id': context.userId,
+        ...getInternalRequestHeaders(context.userId),
       },
       body: JSON.stringify({
         prompt: fullPrompt,
@@ -559,8 +594,7 @@ async function executeRemoveBg(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-internal-request': 'true',
-        'x-internal-user-id': context.userId,
+        ...getInternalRequestHeaders(context.userId),
       },
       body: JSON.stringify({
         action: 'removebg',
@@ -609,8 +643,7 @@ async function executeUpscale(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-internal-request': 'true',
-        'x-internal-user-id': context.userId,
+        ...getInternalRequestHeaders(context.userId),
       },
       body: JSON.stringify({
         action: 'upscale',
@@ -662,8 +695,7 @@ async function executeGenerateVideo(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-internal-request': 'true',
-        'x-internal-user-id': context.userId,
+        ...getInternalRequestHeaders(context.userId),
       },
       body: JSON.stringify({
         prompt,
@@ -779,8 +811,7 @@ async function executeExtendCanvas(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-internal-request': 'true',
-        'x-internal-user-id': context.userId,
+        ...getInternalRequestHeaders(context.userId),
       },
       body: JSON.stringify({
         action: 'extend',

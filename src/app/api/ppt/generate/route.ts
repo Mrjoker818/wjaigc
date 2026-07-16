@@ -1,4 +1,5 @@
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 // PPTX 主题配色
 const THEMES: Record<string, {
@@ -56,6 +57,8 @@ interface PptGenerateRequest {
 }
 
 export async function POST(request: NextRequest) {
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult instanceof NextResponse) return authResult;
   try {
     const body = (await request.json()) as PptGenerateRequest;
     const { slides = [], theme = 'tech-blue', title = '演示文稿', author = '无界AI' } = body;

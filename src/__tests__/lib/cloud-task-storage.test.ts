@@ -5,8 +5,10 @@ const { execSql } = vi.hoisted(() => ({ execSql: vi.fn() }));
 vi.mock('@/lib/db-client', () => ({ execSql }));
 
 import {
+  claimCloudTaskLease,
   createCloudTask,
   getCloudTaskForUser,
+  getCloudTaskForUserByIdempotencyKey,
   listCloudTasks,
   getCloudTaskProviderSummary,
   updateCloudTask,
@@ -19,7 +21,7 @@ describe('cloud-task-storage', () => {
   });
 
   it('creates a task with cloud recovery context', async () => {
-    await createCloudTask({
+    const created = await createCloudTask({
       id: 'task-create',
       userId: 'user-a',
       type: 'generate',
@@ -43,6 +45,26 @@ describe('cloud-task-storage', () => {
       'image-model-a',
       'remote-a',
     ]));
+    expect(created).toBe(true);
+  });
+
+  it('reports an idempotency-key conflict instead of treating it as a new task', async () => {
+    execSql.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+
+    const created = await createCloudTask({
+      id: 'task-duplicate',
+      userId: 'user-a',
+      type: 'generate',
+      status: 'processing',
+      progress: 5,
+      idempotencyKey: 'retry-key-1',
+      createdAt: 100,
+      updatedAt: 100,
+    });
+
+    const insert = execSql.mock.calls.find(([sql]) => String(sql).includes('INSERT INTO cloud_tasks'));
+    expect(insert?.[0]).toContain('ON CONFLICT DO NOTHING');
+    expect(created).toBe(false);
   });
 
   it('updates a task terminal status with result and credit state', async () => {
@@ -103,5 +125,35 @@ describe('cloud-task-storage', () => {
     const select = execSql.mock.calls.find(([sql]) => String(sql).includes('GROUP BY provider_id'));
     expect(select?.[0]).toContain("status IN ('failed', 'timeout', 'cancelled')");
     expect(select?.[0]).not.toContain('result');
+  });
+
+  it('claims an expired-or-unclaimed task lease atomically', async () => {
+    execSql.mockResolvedValueOnce({
+      rows: [{ id: 'task-lease', lease_owner: 'worker-a', lease_expires_at: 5000, attempt_count: 2 }],
+      rowCount: 1,
+    });
+
+    const lease = await claimCloudTaskLease('task-lease', 'worker-a', 4000, 1000);
+
+    const update = execSql.mock.calls.find(([sql]) => String(sql).includes('lease_expires_at'));
+    expect(update?.[0]).toContain("status IN ('queued', 'pending', 'processing')");
+    expect(update?.[0]).toContain('lease_expires_at < $');
+    expect(update?.[1]).toEqual(expect.arrayContaining(['task-lease', 'worker-a', 5000, 1000]));
+    expect(lease).toEqual({ taskId: 'task-lease', owner: 'worker-a', expiresAt: 5000, attemptCount: 2 });
+  });
+
+  it('does not claim a task when another worker holds a live lease', async () => {
+    execSql.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+
+    await expect(claimCloudTaskLease('task-live', 'worker-b', 4000, 1000)).resolves.toBeNull();
+  });
+
+  it('finds an existing task by owner and idempotency key', async () => {
+    execSql.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+    await getCloudTaskForUserByIdempotencyKey('user-a', 'retry-key-1');
+
+    const select = execSql.mock.calls.find(([sql]) => String(sql).includes('idempotency_key'));
+    expect(select?.[0]).toContain('user_id = $1 AND idempotency_key = $2');
+    expect(select?.[1]).toEqual(['user-a', 'retry-key-1']);
   });
 });

@@ -639,6 +639,7 @@ async function handleAgentStream(
                   userId,
                   imageModel: imageModel || '',
                   imageProviderId: imageProviderId || '',
+                  allowedTools: availableTools.map(tool => tool.function.name),
                   ...taskContext,
                 }),
                 new Promise<ToolCallResult>((_, reject) =>
@@ -756,6 +757,7 @@ async function handleNonStreamAgentLoop(
         userId,
         imageModel: imgModel,
         imageProviderId: imgProviderId,
+        allowedTools: availableTools.map(tool => tool.function.name),
         ...taskContext,
       });
 

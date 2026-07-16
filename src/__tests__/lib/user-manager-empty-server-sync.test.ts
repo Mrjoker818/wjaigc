@@ -11,4 +11,8 @@ describe('UserManager server project sync', () => {
     expect(source).toContain("this._serverSyncReady = true;");
     expect(source).toContain("await this.syncToServer();");
   });
+
+  it('retries transient unsuccessful sync payloads before reporting a failure', () => {
+    expect(source).toMatch(/if \(!data\.success\) \{[\s\S]{0,300}retryCount > 0/);
+  });
 });

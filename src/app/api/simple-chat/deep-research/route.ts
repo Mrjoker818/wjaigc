@@ -1,7 +1,8 @@
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel } from '@/lib/server-api-config';
 import type { ApiKind } from '@/lib/server-api-config';
 import { SearchClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 interface ResearchStep {
   step: number;
@@ -10,6 +11,8 @@ interface ResearchStep {
 }
 
 export async function POST(request: NextRequest) {
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult instanceof NextResponse) return authResult;
   const body = await request.json() as {
     query: string;
     model?: string;

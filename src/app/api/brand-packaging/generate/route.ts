@@ -4,12 +4,15 @@ import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile 
 import { buildPackagingRenderPrompt } from '@/lib/packaging-prompts';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
-import { getSessionUser } from '@/lib/server-auth';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { calculateActualPixelsFromRatio } from '@/lib/calculate-pixels';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { validateApiInputs } from '@/lib/api-validator';
 
 export async function POST(request: NextRequest) {
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult instanceof NextResponse) return authResult;
+
   try {
     const body = await request.json();
     // 输入校验
@@ -103,9 +106,8 @@ export async function POST(request: NextRequest) {
     const { body: adjustedBody } = adjustRequestForProfile(rawBody, profile);
 
     // Register task
-    const sessionUser = await getSessionUser(request).catch(() => null);
     const taskId = `pkg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    registerTask(taskId, 'packaging', `品牌包装: ${brandName || productName}`, sessionUser?.id);
+    registerTask(taskId, 'packaging', `品牌包装: ${brandName || productName}`, authResult.userId);
 
     // Start async generation with provider fallback
     (async () => {

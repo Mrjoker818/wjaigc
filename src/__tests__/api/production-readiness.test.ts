@@ -3,11 +3,23 @@ import { NextRequest } from 'next/server';
 
 const mocks = vi.hoisted(() => ({
   requireAdminUser: vi.fn(),
+  getProductionAuthConfigurationIssues: vi.fn(),
+  getProductionPaymentConfigurationIssues: vi.fn(),
+  getTaskEventTransportReadinessIssue: vi.fn(),
   getApiProviders: vi.fn(),
   ensureCloudTaskTables: vi.fn(),
 }));
 
-vi.mock('@/lib/server-auth', () => ({ requireAdminUser: mocks.requireAdminUser }));
+vi.mock('@/lib/server-auth', () => ({
+  requireAdminUser: mocks.requireAdminUser,
+  getProductionAuthConfigurationIssues: mocks.getProductionAuthConfigurationIssues,
+}));
+vi.mock('@/lib/payment-config', () => ({
+  getProductionPaymentConfigurationIssues: mocks.getProductionPaymentConfigurationIssues,
+}));
+vi.mock('@/lib/task-event-transport', () => ({
+  getTaskEventTransportReadinessIssue: mocks.getTaskEventTransportReadinessIssue,
+}));
 vi.mock('@/lib/server-api-config', () => ({ getApiProviders: mocks.getApiProviders }));
 vi.mock('@/lib/cloud-task-storage', () => ({ ensureCloudTaskTables: mocks.ensureCloudTaskTables }));
 
@@ -18,6 +30,9 @@ const request = () => new NextRequest('http://localhost/api/admin/production-rea
 describe('GET /api/admin/production-readiness', () => {
   beforeEach(() => {
     Object.values(mocks).forEach(mock => mock.mockReset());
+    mocks.getProductionAuthConfigurationIssues.mockReturnValue([]);
+    mocks.getProductionPaymentConfigurationIssues.mockReturnValue([]);
+    mocks.getTaskEventTransportReadinessIssue.mockReturnValue(null);
     delete process.env.COZE_PROJECT_ENV;
     delete process.env.WUJIE_AUTH_SECRET;
     delete process.env.NEXTAUTH_SECRET;
@@ -58,10 +73,13 @@ describe('GET /api/admin/production-readiness', () => {
   });
 
   it('fails production readiness when authentication secrets are missing', async () => {
-    process.env.COZE_PROJECT_ENV = 'PROD';
     mocks.requireAdminUser.mockResolvedValue({ id: 'admin-1', role: 'admin' });
     mocks.ensureCloudTaskTables.mockResolvedValue(undefined);
     mocks.getApiProviders.mockResolvedValue([]);
+    mocks.getProductionAuthConfigurationIssues.mockReturnValue([
+      'Missing WUJIE_AUTH_SECRET or NEXTAUTH_SECRET',
+      'Missing WUJIE_ADMIN_PASSWORD',
+    ]);
 
     const response = await GET(request());
     const data = await response.json();
@@ -75,5 +93,36 @@ describe('GET /api/admin/production-readiness', () => {
         'Missing WUJIE_ADMIN_PASSWORD',
       ]),
     });
+  });
+
+  it('reports a missing payment token secret as a production security failure', async () => {
+    mocks.requireAdminUser.mockResolvedValue({ id: 'admin-1', role: 'admin' });
+    mocks.ensureCloudTaskTables.mockResolvedValue(undefined);
+    mocks.getApiProviders.mockResolvedValue([]);
+    mocks.getProductionPaymentConfigurationIssues.mockReturnValue([
+      'Missing PAYMENT_TOKEN_SECRET',
+    ]);
+
+    const response = await GET(request());
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data.success).toBe(false);
+    expect(data.security).toEqual({
+      status: 'fail',
+      issues: ['Missing PAYMENT_TOKEN_SECRET'],
+    });
+  });
+
+  it('reports persistent-polling task event transport as a non-blocking warning', async () => {
+    mocks.requireAdminUser.mockResolvedValue({ id: 'admin-1', role: 'admin' });
+    mocks.ensureCloudTaskTables.mockResolvedValue(undefined);
+    mocks.getApiProviders.mockResolvedValue([]);
+    mocks.getTaskEventTransportReadinessIssue.mockReturnValue('Shared task event backend is not configured; clients use durable task polling across instances.');
+
+    const data = await (await GET(request())).json();
+
+    expect(data.success).toBe(true);
+    expect(data.taskEvents).toEqual({ status: 'warn', issue: expect.stringContaining('durable task polling') });
   });
 });

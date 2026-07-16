@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForFeature } from '@/lib/server-api-config';
 import { AI_BUILD_PROMPT, AI_BUILD_REFINE_PROMPT, parseAIBuildResponse, createWorkflowFromAIResult } from '@/lib/workflow-engine';
 import { validateApiInputs } from '@/lib/api-validator';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 /** 调用LLM获取响应 (复用SSE/JSON双模式解析) */
 async function callLLM(
@@ -64,6 +65,8 @@ async function callLLM(
 }
 
 export async function POST(request: NextRequest) {
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult instanceof NextResponse) return authResult;
   try {
     const body = await request.json();
     // 输入校验

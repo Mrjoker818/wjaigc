@@ -43,6 +43,11 @@ describe('canvas toolbar floating windows', () => {
     expect(canvasSource).toContain("bottomBarHovered ? 'max-w-[900px] opacity-100 ml-1.5 overflow-visible' : 'max-w-0 opacity-0 ml-0 overflow-hidden'");
   });
 
+  it('isolates bottom-toolbar pointer input from canvas interactions', () => {
+    expect(canvasSource).toContain('data-toolbar="bottom-toolbar"');
+    expect(canvasSource).toContain('onMouseDown={(event) => event.stopPropagation()}');
+  });
+
   it('keeps the right panel collapse control inside a narrow viewport', () => {
     expect(appPageSource).toContain("panelCollapsed ? '20px' : 'min(480px, 100vw)'");
   });

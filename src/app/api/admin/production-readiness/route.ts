@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ensureCloudTaskTables } from '@/lib/cloud-task-storage';
 import { getApiProviders } from '@/lib/server-api-config';
-import { requireAdminUser } from '@/lib/server-auth';
+import { getProductionPaymentConfigurationIssues } from '@/lib/payment-config';
+import { getProductionAuthConfigurationIssues, requireAdminUser } from '@/lib/server-auth';
+import { getTaskEventTransportReadinessIssue } from '@/lib/task-event-transport';
 
 type CheckStatus = 'pass' | 'warn' | 'fail';
 
@@ -19,20 +21,10 @@ interface SecurityReadiness {
 }
 
 function getSecurityReadiness(): SecurityReadiness {
-  if (process.env.COZE_PROJECT_ENV !== 'PROD') {
-    return { status: 'pass', issues: [] };
-  }
-
-  const issues: string[] = [];
-  const authSecret = process.env.WUJIE_AUTH_SECRET || process.env.NEXTAUTH_SECRET;
-  const adminPassword = process.env.WUJIE_ADMIN_PASSWORD;
-
-  if (!authSecret?.trim() || authSecret === 'change-me') {
-    issues.push('Missing WUJIE_AUTH_SECRET or NEXTAUTH_SECRET');
-  }
-  if (!adminPassword?.trim() || adminPassword === 'change-me') {
-    issues.push('Missing WUJIE_ADMIN_PASSWORD');
-  }
+  const issues = [
+    ...getProductionAuthConfigurationIssues(),
+    ...getProductionPaymentConfigurationIssues(),
+  ];
 
   return { status: issues.length > 0 ? 'fail' : 'pass', issues };
 }
@@ -85,11 +77,16 @@ export async function GET(request: NextRequest) {
     failures: readiness.filter(provider => provider.status === 'fail').length,
   };
   const security = getSecurityReadiness();
+  const taskEventIssue = getTaskEventTransportReadinessIssue();
+  const taskEvents = taskEventIssue
+    ? { status: 'warn' as const, issue: taskEventIssue }
+    : { status: 'pass' as const, issue: null };
 
   return NextResponse.json({
     success: database.status !== 'fail' && security.status !== 'fail',
     database,
     security,
+    taskEvents,
     summary,
     providers: readiness,
   });

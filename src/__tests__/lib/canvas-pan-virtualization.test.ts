@@ -4,6 +4,7 @@ import {
   PAN_VIEWPORT_SYNC_INTERVAL_MS,
   resolveCanvasCullingBounds,
   resolveCanvasCullingOffset,
+  resolveCanvasRenderOffset,
   shouldSuspendCanvasVirtualization,
 } from '@/lib/canvas-pan-virtualization';
 
@@ -30,6 +31,22 @@ describe('canvas pan virtualization', () => {
 
     expect(PAN_VIEWPORT_SYNC_INTERVAL_MS).toBeLessThanOrEqual(100);
     expect(PAN_VIEWPORT_SYNC_INTERVAL_MS).toBeGreaterThanOrEqual(16);
+  });
+
+  it('keeps the render transform aligned with the sampled pan offset during an active pan', () => {
+    expect(resolveCanvasRenderOffset(
+      { x: 100, y: 80 },
+      { x: 480, y: 360 },
+      true,
+      false,
+    )).toEqual({ x: 480, y: 360 });
+
+    expect(resolveCanvasRenderOffset(
+      { x: 100, y: 80 },
+      { x: 480, y: 360 },
+      false,
+      false,
+    )).toEqual({ x: 100, y: 80 });
   });
 
   it('uses a bounded larger overscan buffer during panning', () => {

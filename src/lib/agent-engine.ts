@@ -65,6 +65,8 @@ export interface AgentContext {
   videoUrl?: string;
   /** 用户 ID（用于 API Key 查找） */
   userId?: string;
+  /** Explicit allowlist for tools available to this task. */
+  allowedTools?: string[];
   /** 模型名 */
   model?: string;
   /** 最大循环轮次 */
@@ -117,11 +119,12 @@ export function getAllTools(): ToolDefinition[] {
 }
 
 /** 获取工具描述（供 LLM function calling 使用） */
-export function getToolsForLLM(): Array<{
+export function getToolsForLLM(allowedTools?: readonly string[]): Array<{
   type: 'function';
   function: { name: string; description: string; parameters: { type: string; properties: Record<string, unknown>; required: string[] } };
 }> {
-  return getAllTools().map(tool => ({
+  const allowed = allowedTools ? new Set(allowedTools) : null;
+  return getAllTools().filter(tool => !allowed || allowed.has(tool.name)).map(tool => ({
     type: 'function' as const,
     function: {
       name: tool.name,
@@ -142,6 +145,27 @@ export function getToolsForLLM(): Array<{
 }
 
 // ─── Agent 循环 ────────────────────────────────────────────────────
+
+function validateToolArguments(tool: ToolDefinition, args: Record<string, unknown>): string | null {
+  for (const parameter of tool.parameters) {
+    const value = args[parameter.name];
+    if (parameter.required && (value === undefined || value === null || (typeof value === 'string' && !value.trim()))) {
+      return `Missing required parameter: ${parameter.name}`;
+    }
+    if (value === undefined || value === null) continue;
+
+    const typeMatches = parameter.type === 'array'
+      ? Array.isArray(value)
+      : parameter.type === 'object'
+        ? typeof value === 'object' && !Array.isArray(value)
+        : typeof value === parameter.type;
+    if (!typeMatches) return `Invalid parameter type for ${parameter.name}`;
+    if (parameter.enum && (typeof value !== 'string' || !parameter.enum.includes(value))) {
+      return `Invalid value for ${parameter.name}`;
+    }
+  }
+  return null;
+}
 
 const DEFAULT_MAX_ROUNDS = 5;
 
@@ -167,10 +191,11 @@ export async function executeAgentLoop(
   let currentRound = 0;
   let consecutiveFailures = 0;
   const maxRounds = context.maxRounds || DEFAULT_MAX_ROUNDS;
-  const tools = getToolsForLLM();
+  const allowedTools = context.allowedTools ? new Set(context.allowedTools) : null;
+  const tools = getToolsForLLM(context.allowedTools);
 
   // 系统消息
-  const systemMessage = buildSystemPrompt(context);
+  const systemMessage = buildSystemPrompt(context, context.allowedTools);
 
   // 消息历史
   const messages: Array<{ role: string; content: string }> = [
@@ -227,6 +252,13 @@ export async function executeAgentLoop(
     // 执行每个工具调用
     const allResults: string[] = [];
     for (const toolCall of llmResponse.toolCalls) {
+      if (allowedTools && !allowedTools.has(toolCall.name)) {
+        const result = `Tool "${toolCall.name}" is not allowed for this task`;
+        allResults.push(result);
+        steps.push({ round: currentRound, toolName: toolCall.name, params: toolCall.arguments, result, success: false });
+        consecutiveFailures++;
+        continue;
+      }
       const tool = getTool(toolCall.name);
       if (!tool) {
         allResults.push(`工具 "${toolCall.name}" 不存在`);
@@ -251,6 +283,20 @@ export async function executeAgentLoop(
       }
 
       context.onProgress?.({ round: currentRound, step: 'executing', detail: `执行 ${tool.name}...` });
+
+      const argumentError = validateToolArguments(tool, toolCall.arguments);
+      if (argumentError) {
+        allResults.push(argumentError);
+        steps.push({
+          round: currentRound,
+          toolName: toolCall.name,
+          params: toolCall.arguments,
+          result: argumentError,
+          success: false,
+        });
+        consecutiveFailures++;
+        continue;
+      }
 
       try {
         const result = await tool.execute(toolCall.arguments, context);
@@ -326,8 +372,10 @@ export async function executeAgentLoop(
 
 // ─── 系统提示词 ────────────────────────────────────────────────────
 
-function buildSystemPrompt(context: AgentContext): string {
+function buildSystemPrompt(context: AgentContext, allowedTools?: readonly string[]): string {
+  const allowed = allowedTools ? new Set(allowedTools) : null;
   const toolDescriptions = getAllTools()
+    .filter(tool => !allowed || allowed.has(tool.name))
     .map(t => `- ${t.name}: ${t.description}`)
     .join('\n');
 

@@ -6,9 +6,13 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { dbGetTask, dbGetFilesByTask } from '@/lib/ai-psd/storage';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
+import { canAccessAiPsdTask, dbGetTask, dbGetFilesByTask } from '@/lib/ai-psd/storage';
 
 export async function GET(request: NextRequest) {
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult instanceof NextResponse) return authResult;
+
   try {
     const taskId = request.nextUrl.searchParams.get('taskId');
     if (!taskId) {
@@ -17,6 +21,9 @@ export async function GET(request: NextRequest) {
 
     const task = await dbGetTask(taskId);
     if (!task) {
+      return NextResponse.json({ error: '任务不存在' }, { status: 404 });
+    }
+    if (!canAccessAiPsdTask(task, authResult.userId, authResult.userRole)) {
       return NextResponse.json({ error: '任务不存在' }, { status: 404 });
     }
 

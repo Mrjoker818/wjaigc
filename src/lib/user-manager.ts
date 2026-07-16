@@ -518,6 +518,10 @@ export class UserManager {
       }
       const data = await res.json() as { success: boolean; value?: unknown };
       if (!data.success) {
+        if (retryCount > 0) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          return this.loadProjectsFromServer(retryCount - 1);
+        }
         console.warn('[Sync] loadProjectsFromServer: unsuccessful response', data);
         return false;
       }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { VIDEO_DIRECTOR_SYSTEM_PROMPT, buildDirectorUserMessage, parseDirectorResponse, type VideoDirectorMode, type DirectorStyle } from '@/lib/video-director/prompt-compiler';
 import { findProviderForFeature } from '@/lib/server-api-config';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 export const maxDuration = 30;
 
@@ -29,6 +30,8 @@ const STYLE_TEMPERATURE: Record<string, number> = {
 };
 
 export async function POST(req: NextRequest) {
+  const authResult = await requireApiAuthOrReject(req);
+  if (authResult instanceof NextResponse) return authResult;
   try {
     const body = await req.json();
     const {

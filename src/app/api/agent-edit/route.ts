@@ -3,7 +3,10 @@ import { findProviderForFeature, findProviderById, findProviderForModel } from '
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import { fetchWithV1Retry, getInternalApiUrl } from '@/lib/api-helpers';
-import { requireApiAuthOrReject } from '@/lib/api-auth';
+import { getInternalRequestHeaders, requireApiAuthOrReject } from '@/lib/api-auth';
+import { canAccessAgentTask } from '@/lib/agent-task-access';
+import { recordAgentTaskProgress, recordAgentTaskSubmitted, recordAgentTaskTerminal } from '@/lib/agent-task-persistence';
+import { getCloudTaskForUser } from '@/lib/cloud-task-storage';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
 import { calculateActualPixelsFromRatio } from '@/lib/canvas-generation-group';
 import { executeAgentLoop, getToolsForLLM, type AgentContext, type AgentResult } from '@/lib/agent-engine';
@@ -17,11 +20,23 @@ import { logOperation, logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
 export const runtime = 'nodejs';
 export const maxDuration = 600;
 
+const MAX_AGENT_EDIT_ROUNDS = 8;
+const AGENT_EDIT_ALLOWED_TOOLS = [
+  'image_edit',
+  'generate_image',
+  'remove_background',
+  'upscale',
+  'svg_trace',
+  'generate_video',
+  'extend_video',
+];
+
 // ─── 本地任务存储 ──────────────────────────────────────────────────
 // 由于 Next.js dev 模式下不同路由的内存不共享，
 // 在本文件内维护独立的任务状态存储，供 GET 查询使用
 interface LocalTaskInfo {
-  status: 'processing' | 'completed' | 'failed' | 'cancelled';
+  userId: string;
+  status: 'processing' | 'completed' | 'failed' | 'cancelled' | 'timeout';
   progress: number;
   label: string;
   result?: Record<string, unknown>;
@@ -128,6 +143,7 @@ export async function POST(request: NextRequest) {
 
     // 注册任务到本地存储
     localTaskStore.set(taskId, {
+      userId: authResult.userId,
       status: 'processing',
       progress: 5,
       label: 'Agent 分析中',
@@ -135,12 +151,32 @@ export async function POST(request: NextRequest) {
     });
 
     // 异步执行（后台处理）— 使用 after() 确保响应返回后 IIFE 仍可运行
+    try {
+      const created = await recordAgentTaskSubmitted({
+        taskId,
+        userId: authResult.userId,
+        providerId: typeof providerId === 'string' ? providerId : undefined,
+        model: typeof pureModel === 'string' ? pureModel : undefined,
+        label: 'Agent processing',
+      });
+      if (!created) {
+        return NextResponse.json({ success: false, error: 'Agent task could not be created. Please retry.' }, { status: 503 });
+      }
+      void recordAgentTaskProgress(taskId, 5, 'Agent processing');
+    } catch (error) {
+      console.warn('[agent-edit] persistent task creation failed:', error);
+      return NextResponse.json({ success: false, error: 'Agent task storage is temporarily unavailable. Please retry.' }, { status: 503 });
+    }
+
     after(async () => {
       const EDIT_GLOBAL_TIMEOUT_MS = 5 * 60 * 1000;
       const timeout = setTimeout(() => {
         const task = localTaskStore.get(taskId);
         if (task && task.status === 'processing') {
-          localTaskStore.set(taskId, { ...task, status: 'failed', error: '任务超时', progress: 100 });
+          localTaskStore.set(taskId, { ...task, status: 'timeout', error: 'Agent task timed out', progress: 0 });
+          void recordAgentTaskTerminal(taskId, {
+            status: 'timeout', error: 'Agent task timed out',
+          }).catch(error => console.warn('[agent-edit] timeout persistence failed:', error));
         }
       }, EDIT_GLOBAL_TIMEOUT_MS);
 
@@ -156,8 +192,12 @@ export async function POST(request: NextRequest) {
         if (!chatProvider || isCancelled()) {
           if (!chatProvider) {
             localTaskStore.set(taskId, {
+              userId: authResult.userId,
               status: 'failed', error: '未配置聊天模型，请在管理员面板添加 LLM 模型', progress: 100, label: '失败', createdAt: Date.now(),
             });
+            void recordAgentTaskTerminal(taskId, {
+              status: 'failed', error: 'No chat model is configured for Agent execution',
+            }).catch(error => console.warn('[agent-edit] terminal persistence failed:', error));
           }
           return;
         }
@@ -165,6 +205,8 @@ export async function POST(request: NextRequest) {
         const chatModel = chatProvider.selectedModels?.[0] || pureModel || 'gpt-4o';
 
         // 构建 Agent 上下文
+        const requestedRounds = typeof maxRounds === 'number' ? Math.trunc(maxRounds) : 5;
+        const boundedMaxRounds = Math.min(Math.max(requestedRounds || 5, 1), MAX_AGENT_EDIT_ROUNDS);
         const context: AgentContext = {
           taskId,
           userPrompt: prompt,
@@ -172,7 +214,8 @@ export async function POST(request: NextRequest) {
           imagePrompt: imagePrompt || '',
           maskDataUrl,
           model: chatModel,
-          maxRounds: maxRounds || 5,
+          maxRounds: boundedMaxRounds,
+          allowedTools: AGENT_EDIT_ALLOWED_TOOLS,
           currentRound: 0,
           contextHistory: [],
           onProgress: (info) => {
@@ -180,6 +223,10 @@ export async function POST(request: NextRequest) {
             const task = localTaskStore.get(taskId);
             if (!task || task.status !== 'processing') return;
             const progress = Math.min(95, 10 + (info.round / (context.maxRounds || 5)) * 80);
+            const progressLabel = `Agent round ${info.round}: ${info.step}`;
+            void recordAgentTaskProgress(taskId, progress, progressLabel).catch(error => {
+              console.warn('[agent-edit] progress persistence failed:', error);
+            });
             localTaskStore.set(taskId, {
               ...task,
               progress,
@@ -339,8 +386,7 @@ export async function POST(request: NextRequest) {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',
-                  'x-internal-request': 'true',
-                  'x-internal-user-id': sessionUser?.id || 'system',
+                  ...getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user'),
                 },
                 body: JSON.stringify({ imageUrl: finalImageUrl, scale: step.params.scale || '2', outputFormat: 'png' }),
               });
@@ -357,8 +403,7 @@ export async function POST(request: NextRequest) {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',
-                  'x-internal-request': 'true',
-                  'x-internal-user-id': sessionUser?.id || 'system',
+                  ...getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user'),
                 },
                 body: JSON.stringify({ imageUrl: finalImageUrl, action: 'removebg', model: imageModel, providerId: imageProviderId, engine: imageModel ? 'ai' : 'auto' }),
               });
@@ -375,8 +420,7 @@ export async function POST(request: NextRequest) {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',
-                  'x-internal-request': 'true',
-                  'x-internal-user-id': sessionUser?.id || 'system',
+                  ...getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user'),
                 },
                 body: JSON.stringify({ imageUrl: finalImageUrl, mode: step.params.mode || 'color', quality: step.params.quality || 'balanced' }),
               });
@@ -393,8 +437,7 @@ export async function POST(request: NextRequest) {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',
-                  'x-internal-request': 'true',
-                  'x-internal-user-id': sessionUser?.id || 'system',
+                  ...getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user'),
                 },
                 body: JSON.stringify({
                   prompt: String(step.params.prompt || prompt),
@@ -433,8 +476,7 @@ export async function POST(request: NextRequest) {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',
-                  'x-internal-request': 'true',
-                  'x-internal-user-id': sessionUser?.id || 'system',
+                  ...getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user'),
                 },
                 body: JSON.stringify({
                   prompt: String(step.params.prompt || prompt),
@@ -477,8 +519,7 @@ export async function POST(request: NextRequest) {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',
-                  'x-internal-request': 'true',
-                  'x-internal-user-id': sessionUser?.id || 'system',
+                  ...getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user'),
                 },
                 body: JSON.stringify({
                   videoUrl: String(step.params.videoUrl || context.videoUrl || ''),
@@ -527,8 +568,7 @@ export async function POST(request: NextRequest) {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
-                'x-internal-request': 'true',
-                'x-internal-user-id': sessionUser?.id || 'system',
+                ...getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user'),
               },
               body: JSON.stringify({ imageData: finalImageUrl }),
             });
@@ -548,7 +588,11 @@ export async function POST(request: NextRequest) {
         }
 
         if (result.success) {
+          void recordAgentTaskTerminal(taskId, {
+            status: 'completed', imageUrl: persistedImageUrl, steps: result.steps, finalResponse: result.finalResponse,
+          }).catch(error => console.warn('[agent-edit] terminal persistence failed:', error));
           localTaskStore.set(taskId, {
+            userId: authResult.userId,
             status: 'completed',
             progress: 100,
             label: '完成',
@@ -560,8 +604,13 @@ export async function POST(request: NextRequest) {
             createdAt: localTaskStore.get(taskId)?.createdAt || Date.now(),
           });
         } else {
+          void recordAgentTaskTerminal(taskId, {
+            status: 'failed', imageUrl: persistedImageUrl, steps: result.steps, finalResponse: result.finalResponse,
+            error: translateApiError(result.error || result.finalResponse || 'Agent execution failed'),
+          }).catch(error => console.warn('[agent-edit] terminal persistence failed:', error));
           // Agent 执行失败（LLM 调用失败、工具执行失败等）
           localTaskStore.set(taskId, {
+            userId: authResult.userId,
             status: 'failed',
             progress: 100,
             label: '失败',
@@ -580,6 +629,9 @@ export async function POST(request: NextRequest) {
         const task = localTaskStore.get(taskId);
         if (task && task.status === 'processing') {
           localTaskStore.set(taskId, { ...task, status: 'failed', error: translateApiError(errMsg), progress: 100 });
+          void recordAgentTaskTerminal(taskId, {
+            status: 'failed', error: translateApiError(errMsg),
+          }).catch(error => console.warn('[agent-edit] terminal persistence failed:', error));
         }
       } finally {
         clearTimeout(timeout);
@@ -623,15 +675,37 @@ export async function POST(request: NextRequest) {
  * 查询任务状态: /api/agent-edit?taskId=xxx
  */
 export async function GET(request: NextRequest) {
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult instanceof NextResponse) return authResult;
+
   const { searchParams } = new URL(request.url);
   const taskId = searchParams.get('taskId');
   const action = searchParams.get('action');
 
+  if (taskId && action !== 'cancel' && !localTaskStore.has(taskId)) {
+    const persisted = await getCloudTaskForUser(taskId, authResult.userId);
+    if (persisted) {
+      return NextResponse.json({
+        success: persisted.status === 'completed',
+        status: persisted.status,
+        progress: persisted.progress,
+        label: persisted.label,
+        result: persisted.result,
+        error: persisted.error,
+      });
+    }
+  }
+
   if (taskId && action === 'cancel') {
     // 取消任务
     const task = localTaskStore.get(taskId);
+    if (!task || !canAccessAgentTask(task.userId, authResult.userId, authResult.userRole)) {
+      return NextResponse.json({ success: false, error: 'Task not found or access denied' }, { status: 404 });
+    }
     if (task && task.status === 'processing') {
       localTaskStore.set(taskId, { ...task, status: 'cancelled', error: '任务已取消' });
+      void recordAgentTaskTerminal(taskId, { status: 'cancelled', error: 'Task cancelled by user' })
+        .catch(error => console.warn('[agent-edit] cancellation persistence failed:', error));
       return NextResponse.json({ success: true, status: 'cancelled' });
     }
     return NextResponse.json({ success: false, error: '任务不存在或无法取消' });
@@ -640,7 +714,7 @@ export async function GET(request: NextRequest) {
   if (taskId) {
     // 查询任务状态
     const task = localTaskStore.get(taskId);
-    if (!task) {
+    if (!task || !canAccessAgentTask(task.userId, authResult.userId, authResult.userRole)) {
       return NextResponse.json({
         success: false,
         status: 'not_found',

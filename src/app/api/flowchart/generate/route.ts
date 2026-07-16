@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 interface FlowchartRequest {
   title: string;
@@ -91,6 +92,8 @@ function escapeAttr(s: string): string {
 }
 
 export async function POST(request: Request) {
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult instanceof NextResponse) return authResult;
   try {
     const body: FlowchartRequest = await request.json();
     const { title, mermaid } = body;

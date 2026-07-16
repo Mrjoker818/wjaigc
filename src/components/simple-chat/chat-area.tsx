@@ -891,8 +891,7 @@ export default function ChatArea({
       </header>
 
       {/* Agent Bar */}
-      {(project.agents.length > 0 || activeAgent) && (
-        <div className="flex items-center gap-2 px-4 py-1.5 border-b border-border bg-muted/30 shrink-0">
+      <div className="flex items-center gap-2 px-4 py-1.5 border-b border-border bg-muted/30 shrink-0">
           <Bot className="w-4 h-4 text-muted-foreground" />
           <span className="text-xs text-muted-foreground">Agent:</span>
           {activeAgent ? (
@@ -907,8 +906,7 @@ export default function ChatArea({
           <button onClick={() => setShowAgentPanel(!showAgentPanel)} className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1">
             <Settings className="w-3 h-3" /> 管理
           </button>
-        </div>
-      )}
+      </div>
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-6">
@@ -1082,6 +1080,10 @@ export default function ChatArea({
               <button onClick={() => setShowSkillPanel(!showSkillPanel)}
                 className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors" title="Skill">
                 <BookOpen className="w-4 h-4" />
+              </button>
+              <button onClick={() => setShowAgentPanel(true)}
+                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors" title="Agent 模式">
+                <Bot className="w-4 h-4" />
               </button>
               <button onClick={() => document.getElementById('chat-file-upload')?.click()}
                 className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors" title="上传图片">

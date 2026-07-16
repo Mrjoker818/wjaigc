@@ -28,4 +28,12 @@ describe('simple chat document and theme contract', () => {
 
     expect(auth).toContain('isDatabaseConfigured()');
   });
+
+  it('keeps the standalone smart-chat Agent entry available before an Agent exists', async () => {
+    const chatArea = await source('src/components/simple-chat/chat-area.tsx');
+
+    expect(chatArea).toContain('title="Agent 模式"');
+    expect(chatArea).toContain('onClick={() => setShowAgentPanel(true)}');
+    expect(chatArea).not.toContain("{(project.agents.length > 0 || activeAgent) && (");
+  });
 });

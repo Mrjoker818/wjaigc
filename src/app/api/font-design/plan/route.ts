@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForFeature } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { validateApiInputs } from '@/lib/api-validator';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 export const maxDuration = 120;
 export const dynamic = 'force-dynamic';
@@ -411,6 +412,8 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult instanceof NextResponse) return authResult;
   try {
     const body = await request.json();
     // 输入校验

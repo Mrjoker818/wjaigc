@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { getTaskInfo } from '@/lib/task-registry';
 import { findProviderForModel } from '@/lib/server-api-config';
 import { resolveCompatProfile, parseResponseForProfile } from '@/lib/api-compatibility';
@@ -6,6 +7,9 @@ import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 
 export async function GET(request: NextRequest) {
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult instanceof NextResponse) return authResult;
+
   try {
     const taskId = request.nextUrl.searchParams.get('taskId');
     if (!taskId) {
@@ -14,6 +18,9 @@ export async function GET(request: NextRequest) {
 
     const task = getTaskInfo(taskId);
     if (!task) {
+      return NextResponse.json({ error: '任务不存在' }, { status: 404 });
+    }
+    if (authResult.userRole !== 'admin' && task.userId !== authResult.userId) {
       return NextResponse.json({ error: '任务不存在' }, { status: 404 });
     }
 

@@ -8,6 +8,7 @@ echo "=========================================="
 
 PROMPT="一只可爱的橘色猫咪在阳光下打盹"
 SIZE="1024x1024"
+: "${INTERNAL_API_SECRET:=${WUJIE_AUTH_SECRET:-}}"
 
 # 只测试几个代表性模型
 TESTS=(
@@ -33,6 +34,7 @@ test_model() {
     -H "Content-Type: application/json" \
     -H "x-internal-request: true" \
     -H "x-internal-user-id: admin-test" \
+    -H "x-wujie-internal-secret: ${INTERNAL_API_SECRET}" \
     -d "{\"prompt\": \"$PROMPT\", \"model\": \"$model\", \"size\": \"$SIZE\", \"submitOnly\": true}" \
     --max-time 15)
   
@@ -55,6 +57,7 @@ test_model() {
       -H "Content-Type: application/json" \
       -H "x-internal-request: true" \
       -H "x-internal-user-id: admin-test" \
+      -H "x-wujie-internal-secret: ${INTERNAL_API_SECRET}" \
       -d "{\"taskId\": \"$taskId\", \"model\": \"$model\"}" \
       --max-time 10)
     

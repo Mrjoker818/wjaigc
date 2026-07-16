@@ -11,6 +11,14 @@
 import { execSql } from '../db-client';
 import type { AiPsdTask, AiPsdTaskStatus, StyleTag } from './types';
 
+export function canAccessAiPsdTask(
+  task: Pick<AiPsdTask, 'userId'>,
+  userId: string,
+  userRole: string,
+): boolean {
+  return userRole === 'admin' || task.userId === userId;
+}
+
 // ─── 建表 ────────────────────────────────────────────────────────────
 
 let tableEnsured = false;

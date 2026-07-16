@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { buildShotPlanSystemPrompt, parseShotPlanFullResponse, type VideoCharacter, type VideoProp, type VideoScene, type VideoShotPlan } from '@/lib/video-director/continuity';
 import { findProviderForFeature } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -62,6 +63,8 @@ async function callChatLLM(messages: { role: string; content: string }[], temper
  * body: { storyIdea, duration, shotCount?, style?, aspectRatio? }
  */
 export async function POST(req: NextRequest) {
+  const authResult = await requireApiAuthOrReject(req);
+  if (authResult instanceof NextResponse) return authResult;
   try {
     const body = await req.json();
     const storyIdea: string = String(body.storyIdea || body.story || body.prompt || '').trim();

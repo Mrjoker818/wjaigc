@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import fs from 'fs';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 const DATA_DIR = path.join(process.env.COZE_WORKSPACE_PATH || '/workspace/projects', 'scene-studio-data');
 
@@ -17,6 +18,8 @@ function ensureDir() {
 
 // GET: list scenes or get single scene
 export async function GET(request: NextRequest) {
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult instanceof NextResponse) return authResult;
   try {
     ensureDir();
     const { searchParams } = new URL(request.url);
@@ -59,6 +62,8 @@ export async function GET(request: NextRequest) {
 
 // POST: save/delete scene or screenshot
 export async function POST(request: NextRequest) {
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult instanceof NextResponse) return authResult;
   try {
     ensureDir();
     const body = await request.json();

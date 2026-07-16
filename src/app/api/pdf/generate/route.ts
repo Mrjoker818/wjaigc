@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PDFDocument, rgb, StandardFonts, degrees } from 'pdf-lib';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 interface PdfRequest {
   title: string;
@@ -138,6 +139,8 @@ async function buildMarkdownPdf(content: string, themeName: string): Promise<Uin
 }
 
 export async function POST(req: NextRequest) {
+  const authResult = await requireApiAuthOrReject(req);
+  if (authResult instanceof NextResponse) return authResult;
   try {
     const body: PdfRequest = await req.json();
     const { type, title } = body;

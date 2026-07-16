@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 /**
  * POST /api/ppt/template/upload
  * 解析用户上传的 .pptx 文件，提取母版信息和幻灯片结构作为模板参考
  */
 export async function POST(req: NextRequest) {
+  const authResult = await requireApiAuthOrReject(req);
+  if (authResult instanceof NextResponse) return authResult;
   try {
     const formData = await req.formData();
     const file = formData.get('file') as File | null;

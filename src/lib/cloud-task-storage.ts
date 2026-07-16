@@ -21,6 +21,17 @@ export interface CloudTask {
   creditStatus: CloudTaskCreditStatus;
   createdAt: number;
   updatedAt: number;
+  leaseOwner?: string;
+  leaseExpiresAt?: number;
+  attemptCount?: number;
+  idempotencyKey?: string;
+}
+
+export interface CloudTaskLease {
+  taskId: string;
+  owner: string;
+  expiresAt: number;
+  attemptCount: number;
 }
 
 export interface CreateCloudTaskInput extends Omit<CloudTask, 'label' | 'result' | 'error' | 'creditStatus'> {
@@ -82,6 +93,10 @@ export async function ensureCloudTaskTables(): Promise<void> {
       result JSONB DEFAULT '{}'::jsonb,
       error TEXT DEFAULT '',
       credit_status TEXT NOT NULL DEFAULT 'pending',
+      lease_owner TEXT DEFAULT '',
+      lease_expires_at BIGINT DEFAULT 0,
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      idempotency_key TEXT DEFAULT '',
       created_at BIGINT NOT NULL,
       updated_at BIGINT NOT NULL
     )
@@ -90,22 +105,27 @@ export async function ensureCloudTaskTables(): Promise<void> {
   await execSql("ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS project_id TEXT DEFAULT ''");
   await execSql("ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS session_id TEXT DEFAULT ''");
   await execSql("ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS message_id TEXT DEFAULT ''");
+  await execSql("ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS lease_owner TEXT DEFAULT ''");
+  await execSql('ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS lease_expires_at BIGINT DEFAULT 0');
+  await execSql('ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0');
+  await execSql("ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS idempotency_key TEXT DEFAULT ''");
+  await execSql("CREATE UNIQUE INDEX IF NOT EXISTS idx_cloud_tasks_user_idempotency ON cloud_tasks(user_id, idempotency_key) WHERE idempotency_key <> ''");
   await execSql('CREATE INDEX IF NOT EXISTS idx_cloud_tasks_user_created ON cloud_tasks(user_id, created_at DESC)');
   await execSql('CREATE INDEX IF NOT EXISTS idx_cloud_tasks_status_updated ON cloud_tasks(status, updated_at DESC)');
   await execSql('CREATE INDEX IF NOT EXISTS idx_cloud_tasks_chat_recovery ON cloud_tasks(user_id, project_id, session_id, updated_at DESC)');
   tablesEnsured = true;
 }
 
-export async function createCloudTask(input: CreateCloudTaskInput): Promise<void> {
+export async function createCloudTask(input: CreateCloudTaskInput): Promise<boolean> {
   await ensureCloudTaskTables();
-  await execSql(`
+  const result = await execSql(`
     INSERT INTO cloud_tasks (
       id, user_id, project_id, session_id, message_id, type, status, provider_id, model, remote_task_id,
-      progress, label, result, error, credit_status, created_at, updated_at
+      progress, label, result, error, credit_status, idempotency_key, created_at, updated_at
     ) VALUES (
       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-      $11, $12, $13, $14, $15, $16, $17
-    ) ON CONFLICT (id) DO NOTHING
+      $11, $12, $13, $14, $15, $16, $17, $18
+    ) ON CONFLICT DO NOTHING
   `, [
     input.id,
     input.userId,
@@ -122,9 +142,11 @@ export async function createCloudTask(input: CreateCloudTaskInput): Promise<void
     JSON.stringify(input.result || {}),
     input.error || '',
     input.creditStatus || 'pending',
+    input.idempotencyKey || '',
     input.createdAt,
     input.updatedAt,
   ]);
+  return (result.rowCount ?? 0) > 0;
 }
 
 export async function updateCloudTask(taskId: string, input: UpdateCloudTaskInput): Promise<void> {
@@ -145,11 +167,48 @@ export async function updateCloudTask(taskId: string, input: UpdateCloudTaskInpu
   await execSql(`UPDATE cloud_tasks SET ${sets.join(', ')} WHERE id = $1`, params);
 }
 
+/** Atomically claim a recoverable task so only one application instance polls it. */
+export async function claimCloudTaskLease(
+  taskId: string,
+  owner: string,
+  ttlMs: number,
+  now: number = Date.now(),
+): Promise<CloudTaskLease | null> {
+  await ensureCloudTaskTables();
+  const expiresAt = now + Math.max(1_000, ttlMs);
+  const result = await execSql(`
+    UPDATE cloud_tasks
+    SET lease_owner = $2,
+        lease_expires_at = $3,
+        attempt_count = attempt_count + 1,
+        updated_at = $4
+    WHERE id = $1
+      AND status IN ('queued', 'pending', 'processing')
+      AND (lease_owner = $2 OR lease_expires_at = 0 OR lease_expires_at < $4)
+    RETURNING id, lease_owner, lease_expires_at, attempt_count
+  `, [taskId, owner, expiresAt, now]);
+  const row = result.rows[0];
+  if (!row) return null;
+  return {
+    taskId: String(row.id),
+    owner: String(row.lease_owner),
+    expiresAt: Number(row.lease_expires_at),
+    attemptCount: Number(row.attempt_count),
+  };
+}
+
 export async function getCloudTaskForUser(taskId: string, userId: string): Promise<CloudTask | null> {
   await ensureCloudTaskTables();
   const result = await execSql('SELECT * FROM cloud_tasks WHERE id = $1 AND user_id = $2', [taskId, userId]);
   if (result.rows.length === 0) return null;
   return rowToCloudTask(result.rows[0]);
+}
+
+export async function getCloudTaskForUserByIdempotencyKey(userId: string, idempotencyKey: string): Promise<CloudTask | null> {
+  if (!idempotencyKey) return null;
+  await ensureCloudTaskTables();
+  const result = await execSql('SELECT * FROM cloud_tasks WHERE user_id = $1 AND idempotency_key = $2', [userId, idempotencyKey]);
+  return result.rows.length > 0 ? rowToCloudTask(result.rows[0]) : null;
 }
 
 export async function listCloudTasks(filters: CloudTaskListFilters = {}): Promise<CloudTask[]> {
@@ -219,6 +278,10 @@ function rowToCloudTask(row: Record<string, unknown>): CloudTask {
     creditStatus: (row.credit_status as CloudTaskCreditStatus) || 'pending',
     createdAt: Number(row.created_at || 0),
     updatedAt: Number(row.updated_at || 0),
+    leaseOwner: String(row.lease_owner || '') || undefined,
+    leaseExpiresAt: Number(row.lease_expires_at || 0) || undefined,
+    attemptCount: Number(row.attempt_count || 0) || undefined,
+    idempotencyKey: String(row.idempotency_key || '') || undefined,
   };
 }
 

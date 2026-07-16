@@ -14,20 +14,36 @@
 import { NextRequest, NextResponse } from 'next/server';
 import QRCode from 'qrcode';
 import crypto from 'crypto';
-import { dbGetSystemSetting } from '@/lib/db-storage';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
+import { getProductionPaymentConfigurationIssues, loadPaymentConfig } from '@/lib/payment-config';
 
 const TOKEN_TTL_MS = 60_000; // 60 秒有效期
+const DEVELOPMENT_PAYMENT_TOKEN_SECRET = crypto.randomBytes(48).toString('base64url');
 
-/** HMAC 密钥：优先环境变量，否则用固定种子（生产环境必须设置环境变量） */
-function getHmacSecret(): string {
-  return process.env.PAYMENT_TOKEN_SECRET || 'wujie-payment-hmac-secret-v2-default';
+export class PaymentTokenConfigurationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PaymentTokenConfigurationError';
+  }
+}
+
+/** HMAC 密钥：生产环境必须显式配置；开发环境仅使用进程内随机密钥。 */
+export function getPaymentTokenSecret(): string {
+  const configured = process.env.PAYMENT_TOKEN_SECRET?.trim();
+  if (configured && configured.length >= 32) return configured;
+
+  if (getProductionPaymentConfigurationIssues().length > 0) {
+    throw new PaymentTokenConfigurationError('Production payment token secret is not configured. Set PAYMENT_TOKEN_SECRET to at least 32 random characters.');
+  }
+
+  return DEVELOPMENT_PAYMENT_TOKEN_SECRET;
 }
 
 /** 生成 HMAC 签名令牌 */
 function signToken(data: { realQrUrl: string; method: string; expiresAt: number }): string {
   const payload = Buffer.from(JSON.stringify(data)).toString('base64url');
   const signature = crypto
-    .createHmac('sha256', getHmacSecret())
+    .createHmac('sha256', getPaymentTokenSecret())
     .update(payload)
     .digest('base64url');
   return `${payload}.${signature}`;
@@ -43,7 +59,7 @@ export function verifyToken(token: string): { realQrUrl: string; method: string;
     const signature = token.slice(dotIndex + 1);
 
     const expectedSig = crypto
-      .createHmac('sha256', getHmacSecret())
+      .createHmac('sha256', getPaymentTokenSecret())
       .update(payload)
       .digest('base64url');
 
@@ -60,15 +76,6 @@ export function verifyToken(token: string): { realQrUrl: string; method: string;
   }
 }
 
-/** 读取收款码配置 */
-async function getPaymentConfig() {
-  try {
-    const raw = await dbGetSystemSetting('payment_config');
-    if (!raw) return null;
-    return typeof raw === 'string' ? JSON.parse(raw) : raw;
-  } catch { return null; }
-}
-
 /** 获取完整的跳转 URL（扫码后访问） */
 function getRedirectUrl(token: string): string {
   let domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
@@ -80,6 +87,18 @@ function getRedirectUrl(token: string): string {
 }
 
 export async function GET(request: NextRequest) {
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult instanceof NextResponse) return authResult;
+
+  try {
+    getPaymentTokenSecret();
+  } catch (error) {
+    if (error instanceof PaymentTokenConfigurationError) {
+      return NextResponse.json({ success: false, error: '支付服务签名密钥未配置' }, { status: 503 });
+    }
+    throw error;
+  }
+
   const { searchParams } = new URL(request.url);
   const method = searchParams.get('method'); // wechat | alipay
 
@@ -87,10 +106,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ success: false, error: '无效的支付方式' }, { status: 400 });
   }
 
-  const config = await getPaymentConfig();
-  if (!config) {
-    return NextResponse.json({ success: false, error: '未配置收款码' }, { status: 404 });
-  }
+  const config = await loadPaymentConfig();
 
   const enabledKey = `${method}Enabled` as 'wechatEnabled' | 'alipayEnabled';
   const qrKey = `${method}QrUrl` as 'wechatQrUrl' | 'alipayQrUrl';

@@ -1,4 +1,5 @@
 #!/bin/bash
+: "${INTERNAL_API_SECRET:=${WUJIE_AUTH_SECRET:-}}"
 # 测试Gemini系列模型生图时间
 
 echo "=========================================="
@@ -30,6 +31,7 @@ test_model() {
     -H "Content-Type: application/json" \
     -H "x-internal-request: true" \
     -H "x-internal-user-id: admin-test" \
+    -H "x-wujie-internal-secret: ${INTERNAL_API_SECRET}" \
     -d "{\"prompt\": \"$PROMPT\", \"model\": \"$model\", \"size\": \"$SIZE\", \"submitOnly\": true}" \
     --max-time 15)
   
@@ -50,6 +52,7 @@ test_model() {
       -H "Content-Type: application/json" \
       -H "x-internal-request: true" \
       -H "x-internal-user-id: admin-test" \
+      -H "x-wujie-internal-secret: ${INTERNAL_API_SECRET}" \
       -d "{\"taskId\": \"$taskId\", \"model\": \"$model\"}" \
       --max-time 10)
     

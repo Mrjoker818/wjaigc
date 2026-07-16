@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 import {
   Document, Packer, Paragraph, TextRun,
   HeadingLevel, Table, TableRow, TableCell,
@@ -22,6 +23,8 @@ interface WordRequest {
 }
 
 export async function POST(request: NextRequest) {
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult instanceof NextResponse) return authResult;
   try {
     const body: WordRequest = await request.json();
     const { title = "文档", author = "无界AI", sections = [] } = body;

@@ -43,20 +43,58 @@ function parseJsonArray(val: unknown): string[] | undefined {
 
 const SYSTEM_DIR = getServerSystemDir();
 const USERS_PATH = path.join(SYSTEM_DIR, 'users.json');
+const AUTH_SECRET_PATH = path.join(SYSTEM_DIR, 'auth-secret');
 
 export const WUJIE_SESSION_COOKIE = 'wujie_session';
 export const WUJIE_SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
 
 const DEFAULT_ADMIN_NAME = process.env.WUJIE_ADMIN_USERNAME || 'Mr.joker';
-let _defaultAdminPasswordWarned = false;
-const DEFAULT_ADMIN_PASSWORD = process.env.WUJIE_ADMIN_PASSWORD || (() => {
-  // Security warning: using hardcoded default password. Set WUJIE_ADMIN_PASSWORD env var for production!
-  if (process.env.COZE_PROJECT_ENV === 'PROD' && !_defaultAdminPasswordWarned) {
-    _defaultAdminPasswordWarned = true;
-    console.warn('[SECURITY] WUJIE_ADMIN_PASSWORD not set! Using default password in production. (This warning is logged once)');
+const LEGACY_STABLE_AUTH_SECRET = 'wujie-ai-stable-auth-secret-fallback-2024';
+
+export class AuthConfigurationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AuthConfigurationError';
   }
-  return 'dongdong851212';
-})();
+}
+
+function isProductionRuntime(): boolean {
+  return process.env.COZE_PROJECT_ENV?.trim().toUpperCase() === 'PROD'
+    || process.env.NODE_ENV === 'production';
+}
+
+function configuredValue(value: string | undefined): string | null {
+  const normalized = value?.trim();
+  if (!normalized || normalized === 'change-me') return null;
+  return normalized;
+}
+
+function configuredAuthSecret(): string | null {
+  const secret = configuredValue(process.env.WUJIE_AUTH_SECRET)
+    || configuredValue(process.env.NEXTAUTH_SECRET);
+  return secret && secret.length >= 32 ? secret : null;
+}
+
+function configuredAdminBootstrapPassword(): string | null {
+  return configuredValue(process.env.WUJIE_ADMIN_PASSWORD);
+}
+
+export function getProductionAuthConfigurationIssues(): string[] {
+  if (!isProductionRuntime()) return [];
+
+  const issues: string[] = [];
+  if (!configuredAuthSecret()) issues.push('Missing WUJIE_AUTH_SECRET or NEXTAUTH_SECRET');
+  if (!configuredAdminBootstrapPassword()) issues.push('Missing WUJIE_ADMIN_PASSWORD');
+  return issues;
+}
+
+function requireAdminBootstrapPassword(): string {
+  const password = configuredAdminBootstrapPassword();
+  if (password) return password;
+
+  const prefix = isProductionRuntime() ? 'Production administrator' : 'Administrator';
+  throw new AuthConfigurationError(`${prefix} bootstrap password is not configured. Set WUJIE_ADMIN_PASSWORD before creating the initial administrator.`);
+}
 
 type StoredUser = Omit<User, 'password'> & {
   passwordHash: string;
@@ -105,7 +143,7 @@ async function authSecret(): Promise<string> {
   if (_authSecretCache) return _authSecretCache.value;
 
   // Priority: env var → DB stored secret → hardcoded fallback
-  const envSecret = process.env.WUJIE_AUTH_SECRET || process.env.NEXTAUTH_SECRET;
+  const envSecret = configuredAuthSecret();
   if (envSecret) {
     _authSecretCache = { value: envSecret, warned: false };
     // Persist to DB so future deployments can recover even without env var
@@ -119,16 +157,20 @@ async function authSecret(): Promise<string> {
     return envSecret;
   }
 
+  if (isProductionRuntime()) {
+    throw new AuthConfigurationError('Production authentication secret is not configured. Set WUJIE_AUTH_SECRET or NEXTAUTH_SECRET to at least 32 random characters.');
+  }
+
   // Try to recover from DB (persists across redeployments)
   try {
     const { dbGetSystemSetting, dbSetSystemSetting } = await import('./db-storage');
     const dbSecret = await dbGetSystemSetting('auth_secret') as string | null;
-    if (dbSecret) {
+    if (dbSecret && dbSecret !== LEGACY_STABLE_AUTH_SECRET && dbSecret.length >= 32) {
       _authSecretCache = { value: dbSecret, warned: false };
       return dbSecret;
     }
     // No env var and no DB secret → first deployment with fallback, persist it
-    const fallback = 'wujie-ai-stable-auth-secret-fallback-2024';
+    const fallback = crypto.randomBytes(48).toString('base64url');
     await dbSetSystemSetting('auth_secret', fallback);
     _authSecretCache = { value: fallback, warned: false };
     if (process.env.COZE_PROJECT_ENV === 'PROD' && !_authSecretCache.warned) {
@@ -140,13 +182,18 @@ async function authSecret(): Promise<string> {
     // DB not available, use fallback
   }
 
-  const fallback = 'wujie-ai-stable-auth-secret-fallback-2024';
-  _authSecretCache = { value: fallback, warned: false };
+  try {
+    const fileSecret = (await readFile(AUTH_SECRET_PATH, 'utf8')).trim();
+    if (fileSecret.length >= 32) {
+      _authSecretCache = { value: fileSecret, warned: false };
+      return fileSecret;
+    }
+  } catch { /* create a local secret below */ }
 
-  if (process.env.COZE_PROJECT_ENV === 'PROD' && !_authSecretCache.warned) {
-    _authSecretCache.warned = true;
-    console.warn('[SECURITY] WUJIE_AUTH_SECRET/NEXTAUTH_SECRET not set! Using default secret. Set env var for production. (This warning is logged once per process)');
-  }
+  const fallback = crypto.randomBytes(48).toString('base64url');
+  _authSecretCache = { value: fallback, warned: false };
+  await mkdir(SYSTEM_DIR, { recursive: true });
+  await writeFile(AUTH_SECRET_PATH, fallback, { encoding: 'utf8', mode: 0o600 });
   return fallback;
 }
 
@@ -158,6 +205,7 @@ async function authSecret(): Promise<string> {
  */
 const LEGACY_AUTH_SECRETS = [
   'wujie-local-session-secret', // Original fallback (pre-v3.0)
+  LEGACY_STABLE_AUTH_SECRET,
 ];
 
 function hashPasswordWithSecret(password: string, secret: string): string {
@@ -255,8 +303,9 @@ async function writeStore(file: StoredUsersFile): Promise<void> {
   // Write to file (backward compatible)
   await mkdir(SYSTEM_DIR, { recursive: true });
   await writeFile(USERS_PATH, JSON.stringify(data, null, 2), 'utf8');
-  // Safety: ensure we don't lose DB users that aren't in the current write list
-  try {
+  if (isDatabaseConfigured()) {
+    // Safety: ensure we don't lose DB users that aren't in the current write list
+    try {
     const dbUsers = await dbReadUsers();
     const writeUserIds = new Set(data.users.map(u => u.id));
     const missingFromWrite = (dbUsers || []).filter(u => !writeUserIds.has(u.id) && u.name !== DEFAULT_ADMIN_NAME);
@@ -290,11 +339,11 @@ async function writeStore(file: StoredUsersFile): Promise<void> {
         console.error('[auth] Failed to re-write users file after DB supplement:', rewriteErr);
       }
     }
-  } catch {
-    // DB check failed, proceed with write (UPSERT is safe)
-  }
-  // Write to database (persistent) - uses UPSERT to prevent data loss
-  await dbWriteUsers(data.users.map(u => ({
+    } catch {
+      // DB check failed, proceed with write (UPSERT is safe)
+    }
+    // Write to database (persistent) - uses UPSERT to prevent data loss
+    await dbWriteUsers(data.users.map(u => ({
     id: u.id,
     name: u.name,
     passwordHash: u.passwordHash,
@@ -314,15 +363,28 @@ async function writeStore(file: StoredUsersFile): Promise<void> {
     email: u.email || null,
     createdAt: u.createdAt || Date.now(),
     updatedAt: u.updatedAt || Date.now(),
-  })));
+    })));
+  }
 }
 
 async function readStore(): Promise<StoredUsersFile> {
   let file: StoredUsersFile;
   let usedFallback = false;
 
-  // Try database first (persistent across deployments)
-  try {
+  if (!isDatabaseConfigured()) {
+    try {
+      const raw = await readFile(USERS_PATH, 'utf8');
+      const parsed = JSON.parse(raw) as StoredUsersFile;
+      file = {
+        users: Array.isArray(parsed.users) ? parsed.users.map(normalizeStoredUser) : [],
+        updatedAt: parsed.updatedAt || Date.now(),
+      };
+    } catch {
+      file = { users: [], updatedAt: Date.now() };
+    }
+  } else {
+    // Try database first (persistent across deployments)
+    try {
     const dbUsers = await dbReadUsers();
     if (dbUsers && dbUsers.length > 0) {
       file = {
@@ -351,7 +413,7 @@ async function readStore(): Promise<StoredUsersFile> {
     } else {
       throw new Error('No users in DB');
     }
-  } catch (dbError) {
+    } catch (dbError) {
     // Fallback to file system
     usedFallback = true;
     console.warn('[auth] DB read failed, falling back to file system:', dbError instanceof Error ? dbError.message : dbError);
@@ -402,6 +464,7 @@ async function readStore(): Promise<StoredUsersFile> {
       // DB retry also failed, proceed with file system data only
     }
   }
+  }
 
   const now = Date.now();
   const adminIndex = file.users.findIndex(user => user.name === DEFAULT_ADMIN_NAME);
@@ -409,7 +472,7 @@ async function readStore(): Promise<StoredUsersFile> {
     file.users.unshift({
       id: 'admin_mr_joker',
       name: DEFAULT_ADMIN_NAME,
-      passwordHash: await hashPassword(DEFAULT_ADMIN_PASSWORD),
+      passwordHash: await hashPassword(requireAdminBootstrapPassword()),
       role: 'admin',
       status: 'active',
       apiPermissions: defaultApiPermissions(),
@@ -448,7 +511,7 @@ export async function authenticateUser(input: {
   const isDefaultAdmin = name === DEFAULT_ADMIN_NAME;
 
   if (index === -1) {
-    if (!isDefaultAdmin || password !== DEFAULT_ADMIN_PASSWORD) return null;
+    if (!isDefaultAdmin || password !== requireAdminBootstrapPassword()) return null;
 
     const role: 'admin' | 'user' = isDefaultAdmin ? 'admin' : 'user';
     const id = safeId(input.profile?.id, isDefaultAdmin ? 'admin_mr_joker' : name);
@@ -484,8 +547,7 @@ export async function authenticateUser(input: {
 
   const currentSecret = await authSecret();
   const { matched: passwordMatches, needsMigration } = verifyPassword(password, user.passwordHash, currentSecret);
-  const adminBootstrapMatches = isDefaultAdmin && password === DEFAULT_ADMIN_PASSWORD;
-  if (!passwordMatches && !adminBootstrapMatches) return null;
+  if (!passwordMatches) return null;
 
   // If password matched via a legacy secret, re-hash with current secret (auto-migration)
   const newPasswordHash = needsMigration ? await hashPassword(password) : (passwordMatches ? user.passwordHash : await hashPassword(password));

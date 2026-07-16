@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ensureUserDataDirs } from '@/lib/server-user-storage';
-import { authenticateUser, createSessionToken, WUJIE_SESSION_COOKIE, WUJIE_SESSION_TTL_SECONDS } from '@/lib/server-auth';
+import { AuthConfigurationError, authenticateUser, createSessionToken, WUJIE_SESSION_COOKIE, WUJIE_SESSION_TTL_SECONDS } from '@/lib/server-auth';
 import type { User } from '@/lib/user-types';
 import { validateApiInputs } from '@/lib/api-validator';
 
@@ -47,6 +47,12 @@ export async function POST(request: NextRequest) {
     });
     return response;
   } catch (error) {
+    if (error instanceof AuthConfigurationError) {
+      return NextResponse.json({
+        success: false,
+        error: error.message,
+      }, { status: 503 });
+    }
     return NextResponse.json({
       success: false,
       error: error instanceof Error ? error.message : 'Login failed',

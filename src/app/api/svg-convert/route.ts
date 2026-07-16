@@ -4,6 +4,7 @@ import { writeFile, readFile, unlink } from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import { validateApiInputs } from '@/lib/api-validator';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -15,6 +16,8 @@ interface ConvertRequest {
 }
 
 export async function POST(request: NextRequest) {
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult instanceof NextResponse) return authResult;
   try {
     const body = await request.json() as ConvertRequest;
     // 输入校验

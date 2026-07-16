@@ -67,6 +67,7 @@ export async function POST(request: NextRequest) {
 
     const task: AiPsdTask = {
       id: taskId,
+      userId: authResult.userId,
       generationMode: generationMode as GenerationMode,
       prompt: prompt || '',
       title: title || undefined,

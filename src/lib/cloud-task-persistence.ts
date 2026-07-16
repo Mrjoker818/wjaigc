@@ -17,6 +17,7 @@ interface ImageTaskSubmission {
   model?: string;
   label?: string;
   persist?: boolean;
+  idempotencyKey?: string;
 }
 
 interface ImageTaskTerminal {
@@ -67,11 +68,11 @@ interface ThreeDTaskTerminal {
   creditStatus?: CloudTaskCreditStatus;
 }
 
-export async function recordImageTaskSubmitted(input: ImageTaskSubmission): Promise<void> {
-  if (input.persist === false) return;
+export async function recordImageTaskSubmitted(input: ImageTaskSubmission): Promise<boolean> {
+  if (input.persist === false) return true;
 
   const now = Date.now();
-  await createCloudTask({
+  return createCloudTask({
     id: input.taskId,
     userId: input.userId || 'anonymous',
     projectId: input.projectId,
@@ -84,6 +85,7 @@ export async function recordImageTaskSubmitted(input: ImageTaskSubmission): Prom
     remoteTaskId: input.taskId,
     progress: 5,
     label: input.label || '生成图片',
+    idempotencyKey: input.idempotencyKey,
     createdAt: now,
     updatedAt: now,
   });

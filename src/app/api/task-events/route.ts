@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { subscribeToTaskEvents, type TaskEvent } from '@/lib/task-registry';
+import { getTaskEventTransport } from '@/lib/task-event-transport';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,12 +17,13 @@ export async function GET(request: NextRequest): Promise<Response> {
   if (authResult instanceof Response) return authResult;
 
   const currentUserId = authResult.userId;
+  const transport = getTaskEventTransport();
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
     start(controller) {
       try {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'connected', timestamp: Date.now() })}\n\n`));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'connected', transport, timestamp: Date.now() })}\n\n`));
       } catch {
         return;
       }

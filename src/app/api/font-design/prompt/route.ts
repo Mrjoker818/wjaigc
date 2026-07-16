@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { validateApiInputs } from '@/lib/api-validator';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 import {
   buildJimengPrompt, buildBlackOnWhitePrompt, buildTransparentLogoPrompt,
   SCENE_MAP,
@@ -8,6 +9,8 @@ import {
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult instanceof NextResponse) return authResult;
   try {
     const body = await request.json();
     // 输入校验

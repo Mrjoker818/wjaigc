@@ -1,50 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { dbGetSystemSetting, dbSetSystemSetting } from '@/lib/db-storage';
+import { dbSetSystemSetting } from '@/lib/db-storage';
 import { getSessionUser } from '@/lib/server-auth';
+import { loadPaymentConfig, PAYMENT_CONFIG_KEY, type QrPaymentConfig } from '@/lib/payment-config';
 import { uploadImageToS3, isS3Available } from '@/lib/s3-storage';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import { decodeQrFromUrl, isPaymentLink } from '@/lib/qr-decode';
 import path from 'path';
 import fs from 'fs';
-
-/** 个人收款码支付配置 */
-interface QrPaymentConfig {
-  wechatQrUrl: string;      // 微信收款码图片URL
-  alipayQrUrl: string;      // 支付宝收款码图片URL
-  wechatPayLink: string;    // 微信支付链接（从收款码解码，如 wxp://xxx）
-  alipayPayLink: string;    // 支付宝支付链接（从收款码解码，如 https://qr.alipay.com/xxx）
-  wechatEnabled: boolean;   // 是否启用微信收款
-  alipayEnabled: boolean;   // 是否启用支付宝收款
-  confirmMode: 'manual';    // 确认模式：仅手动（管理员确认到账）
-  note?: string;            // 给用户的付款备注提示（如"请备注您的用户名"）
-}
-
-const CONFIG_KEY = 'payment_config';
-
-function getDefaultConfig(): QrPaymentConfig {
-  return {
-    wechatQrUrl: '',
-    alipayQrUrl: '',
-    wechatPayLink: '',
-    alipayPayLink: '',
-    wechatEnabled: false,
-    alipayEnabled: false,
-    confirmMode: 'manual',
-    note: '付款时请备注您的用户名，方便管理员确认',
-  };
-}
-
-async function loadConfig(): Promise<QrPaymentConfig> {
-  const defaultCfg = getDefaultConfig();
-  try {
-    const dbVal = await dbGetSystemSetting(CONFIG_KEY);
-    if (dbVal) {
-      const dbCfg = typeof dbVal === 'string' ? JSON.parse(dbVal) : dbVal;
-      return { ...defaultCfg, ...dbCfg };
-    }
-  } catch { /* ignore */ }
-  return defaultCfg;
-}
 
 /** GET：获取支付配置（管理员） */
 export async function GET(request: NextRequest) {
@@ -52,7 +14,7 @@ export async function GET(request: NextRequest) {
   if (!user) return NextResponse.json({ success: false, error: '未登录' }, { status: 401 });
   if (user.role !== 'admin') return NextResponse.json({ success: false, error: '需要管理员权限' }, { status: 403 });
 
-  const cfg = await loadConfig();
+  const cfg = await loadPaymentConfig();
   const canAcceptPayments = (cfg.wechatEnabled && (!!cfg.wechatQrUrl || !!cfg.wechatPayLink)) || (cfg.alipayEnabled && (!!cfg.alipayQrUrl || !!cfg.alipayPayLink));
 
   return NextResponse.json({
@@ -74,7 +36,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const currentCfg = await loadConfig();
+    const currentCfg: QrPaymentConfig = await loadPaymentConfig();
 
     // 更新收款码配置
     if (body.wechatQrUrl !== undefined) currentCfg.wechatQrUrl = body.wechatQrUrl;
@@ -145,7 +107,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    await dbSetSystemSetting(CONFIG_KEY, JSON.stringify(currentCfg));
+    await dbSetSystemSetting(PAYMENT_CONFIG_KEY, JSON.stringify(currentCfg));
 
     const canAcceptPayments = (currentCfg.wechatEnabled && !!(currentCfg.wechatQrUrl || currentCfg.wechatPayLink)) || (currentCfg.alipayEnabled && !!(currentCfg.alipayQrUrl || currentCfg.alipayPayLink));
 

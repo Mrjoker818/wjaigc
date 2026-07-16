@@ -18,6 +18,7 @@ import { execSql } from '@/lib/db-client';
 import path from 'path';
 import fs from 'fs';
 import { validateApiInputs } from '@/lib/api-validator';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 interface MissingImage {
   filename: string;
@@ -164,6 +165,8 @@ async function recoverImage(localPath: string): Promise<{ success: boolean; meth
 }
 
 export async function POST(request: NextRequest) {
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult instanceof NextResponse) return authResult;
   try {
     const { searchParams } = new URL(request.url);
     const action = searchParams.get('action') || 'scan';
@@ -334,7 +337,9 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult instanceof NextResponse) return authResult;
   return NextResponse.json({
     info: 'Image Recovery API',
     usage: {

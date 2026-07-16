@@ -888,12 +888,12 @@ export async function detectAndRecoverOrphanedUsers(): Promise<OrphanedUser[]> {
       // Try to extract username from user_id (format: user_{timestamp}_{random})
       const userName = userId.replace(/^user_\d+_/, '') || userId;
 
-      // Create a placeholder user record with known temporary password
-      // Use the same authSecret logic as server-auth.ts (inlined to avoid circular dependency)
+      // Keep recovered accounts disabled with a random, unrecoverable password.
+      // An administrator must reset the password before re-enabling the account.
       try {
         const crypto = await import('crypto');
-        const secret = process.env.WUJIE_AUTH_SECRET || process.env.NEXTAUTH_SECRET || 'wujie-ai-stable-auth-secret-fallback-2024';
-        const tempPassword = 'wujie_reset_2024';
+        const secret = process.env.WUJIE_AUTH_SECRET || process.env.NEXTAUTH_SECRET || crypto.randomBytes(32).toString('base64url');
+        const tempPassword = crypto.randomBytes(48).toString('base64url');
         const tempPasswordHash = crypto.createHash('sha256')
           .update(`${secret}:${tempPassword}`)
           .digest('hex');
@@ -901,13 +901,12 @@ export async function detectAndRecoverOrphanedUsers(): Promise<OrphanedUser[]> {
         const now = Date.now();
         await execSql(
           `INSERT INTO wujie_users (id, name, password_hash, role, status, api_permissions, storage_folder, created_at, updated_at)
-           VALUES ($1, $2, $3, 'user', 'active', '[]', $4, $5, $5)
+           VALUES ($1, $2, $3, 'user', 'disabled', '[]', $4, $5, $5)
            ON CONFLICT (id) DO NOTHING`,
           [userId, userName, tempPasswordHash, `user_${userName}`, now]
         );
         recovered = true;
-        console.warn(`[db-storage] Recovered orphaned user: ${userId} (name: ${userName})`);
-        console.warn(`[db-storage] Temporary password: ${tempPassword} — User should change password after login`);
+        console.warn(`[db-storage] Recovered orphaned user as disabled: ${userId} (name: ${userName})`);
       } catch (err) {
         console.error(`[db-storage] Failed to recover orphaned user ${userId}:`, err);
       }

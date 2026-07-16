@@ -1,4 +1,5 @@
 #!/bin/bash
+: "${INTERNAL_API_SECRET:=${WUJIE_AUTH_SECRET:-}}"
 # 图像模型生图时间测试脚本
 # 测试各供应商的图像模型实际生图时间
 
@@ -46,6 +47,7 @@ test_model() {
     -H "Content-Type: application/json" \
     -H "x-internal-request: true" \
     -H "x-internal-user-id: admin-test" \
+    -H "x-wujie-internal-secret: ${INTERNAL_API_SECRET}" \
     -d "{
       \"prompt\": \"$PROMPT\",
       \"model\": \"$model\",
@@ -82,6 +84,7 @@ test_model() {
       -H "Content-Type: application/json" \
       -H "x-internal-request: true" \
       -H "x-internal-user-id: admin-test" \
+      -H "x-wujie-internal-secret: ${INTERNAL_API_SECRET}" \
       -d "{\"taskId\": \"$taskId\", \"model\": \"$model\"}" \
       --max-time 10)
     

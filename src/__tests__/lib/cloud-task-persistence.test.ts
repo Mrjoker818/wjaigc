@@ -21,12 +21,12 @@ import {
 
 describe('cloud-task-persistence', () => {
   beforeEach(() => {
-    createCloudTask.mockReset().mockResolvedValue(undefined);
+    createCloudTask.mockReset().mockResolvedValue(true);
     updateCloudTask.mockReset().mockResolvedValue(undefined);
   });
 
   it('records an image submission without storing provider credentials', async () => {
-    await recordImageTaskSubmitted({
+    const created = await recordImageTaskSubmitted({
       taskId: 'remote-task-1',
       userId: 'user-a',
       providerId: 'provider-a',
@@ -44,6 +44,17 @@ describe('cloud-task-persistence', () => {
       remoteTaskId: 'remote-task-1',
     }));
     expect(JSON.stringify(createCloudTask.mock.calls[0][0])).not.toContain('apiKey');
+    expect(created).toBe(true);
+  });
+
+  it('propagates an idempotency collision to the submitter', async () => {
+    createCloudTask.mockResolvedValue(false);
+
+    await expect(recordImageTaskSubmitted({
+      taskId: 'remote-task-duplicate',
+      userId: 'user-a',
+      idempotencyKey: 'retry-key-1',
+    })).resolves.toBe(false);
   });
 
   it('preserves the editing task type for recovery and filtering', async () => {

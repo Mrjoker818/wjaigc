@@ -3,6 +3,7 @@ import { getSessionUser } from '@/lib/server-auth';
 import { dbGetCredits, dbAdjustCredits, dbGetCreditTransactions, dbGetAllCredits, dbInitCredits } from '@/lib/db-storage';
 import { execSql, isDatabaseConfigured } from '@/lib/db-client';
 import { CREDITS_TO_CNY, CNY_TO_CREDITS, IMAGE_MODEL_CREDITS, VIDEO_MODEL_CREDITS, CHAT_MODEL_CREDITS, RECHARGE_PACKAGES, getModelPricingInfo } from '@/lib/credits';
+import { getPaymentStatus } from '@/lib/payment-config';
 
 type RechargeOrder = {
   order_id: string;
@@ -253,9 +254,8 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: false, error: '不支持的支付方式' }, { status: 400 });
       }
 
-      // Check payment QR code is configured
-      const paymentStatusResp = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/credits/payment-status`);
-      const paymentStatusData = await paymentStatusResp.json();
+      // Read server-side payment configuration directly, without a loopback HTTP request.
+      const paymentStatusData = await getPaymentStatus();
       if (!paymentStatusData.canRecharge) {
         return NextResponse.json({
           success: false,

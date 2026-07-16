@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForFeature } from '@/lib/server-api-config';
 import { validateApiInputs } from '@/lib/api-validator';
 import { AUTO_MULTI_VIEW_IMAGE_CONCURRENCY, mapWithConcurrency } from '@/lib/three-d-task-performance';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 /**
  * Auto Multi-View to 3D API
@@ -19,6 +20,8 @@ import { AUTO_MULTI_VIEW_IMAGE_CONCURRENCY, mapWithConcurrency } from '@/lib/thr
  * - provider: { apiKey, baseUrl, advancedParams }
  */
 export async function POST(request: NextRequest) {
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult instanceof NextResponse) return authResult;
   try {
     const body = await request.json();
     // 输入校验

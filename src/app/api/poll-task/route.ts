@@ -21,7 +21,7 @@ import { unwrapFontDesignTaskResult } from '@/lib/font-design-task-result';
 import { isPendingLocalAsyncGenerateTask } from '@/lib/async-generate-task';
 import { enhanceViaAI } from '@/lib/quality-enhance';
 import { buildRecoveredTaskContext, recordImageTaskTerminal, recordVideoTaskTerminal } from '@/lib/cloud-task-persistence';
-import { getCloudTaskForUser } from '@/lib/cloud-task-storage';
+import { claimCloudTaskLease, getCloudTaskForUser } from '@/lib/cloud-task-storage';
 import { getCompletedVideoTaskResult } from '@/lib/video-task-result';
 import { resolveVideoCompatProfile } from '@/lib/video-api';
 
@@ -33,6 +33,8 @@ export const dynamic = 'force-dynamic';
 const completedTaskCache = new Map<string, { imageUrl: string; maskUrl?: string; modelName?: string; providerName?: string; timestamp: number }>();
 const FAILED_CACHE = Symbol('failed');
 const failedTaskCache = new Map<string, { error: string; timestamp: number }>();
+const TASK_RECOVERY_LEASE_MS = 30_000;
+const TASK_RECOVERY_WORKER_ID = process.env.WUJIE_WORKER_ID || `poll-task-${process.pid}`;
 
 // 定期清理过期缓存（5分钟以上的缓存清除）
 const MAX_CACHE_SIZE = 1000;
@@ -536,6 +538,20 @@ export async function POST(request: NextRequest) {
         }
 
         const recovery = buildRecoveredTaskContext(persistedTask);
+        const lease = await claimCloudTaskLease(
+          recovery.taskId,
+          TASK_RECOVERY_WORKER_ID,
+          TASK_RECOVERY_LEASE_MS,
+        );
+        if (!lease) {
+          return NextResponse.json({
+            success: true,
+            status: persistedTask.status,
+            progress: persistedTask.progress,
+            label: persistedTask.label || '任务正由其他实例恢复',
+            recoveryPending: true,
+          }, { status: 200 });
+        }
         const recovered = registerTask(recovery.taskId, recovery.type as TaskType, recovery.label, recovery.userId);
         const recoveredProvider = recovery.providerId
           ? await findProviderById(recovery.providerId)

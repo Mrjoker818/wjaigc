@@ -23,6 +23,7 @@ import { buildDirectionSystemPrompt, buildDirectionUserMessage, parseDirectionRe
 import { selectPlatformPrompts, getBestGenerationPrompt } from '@/modules/brand-factory/logo-generator-core/platformPromptSelector';
 import type { SanbaoInput } from '@/modules/brand-factory/logo-generator-core/sanbaoInputAdapter';
 import type { TargetPlatform, OutputLayout } from '@/modules/brand-factory/logo-generator-core/platformPromptSelector';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 // ─── GET: 默认配置 ─────────────────────────────────────────────────
 
@@ -59,6 +60,8 @@ export async function GET() {
 // ─── POST: 操作处理 ─────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
+  const authResult = await requireApiAuthOrReject(req);
+  if (authResult instanceof NextResponse) return authResult;
   try {
     const body = await req.json();
     const action = body.action as string;

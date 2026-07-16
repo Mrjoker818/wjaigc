@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { performOnnxUpscale, isOnnxUpscaleAvailable } from '@/lib/image-tools/upscayl';
 import { validateApiInputs } from '@/lib/api-validator';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 // /api/upscayl - 向后兼容的无损放大 API（已迁移到 ONNX CPU）
 // 不再依赖 upscayl GPU (Vulkan)，使用 ONNX Real-ESRGAN CPU 放大
@@ -18,6 +19,8 @@ export async function GET() {
 
 // POST: 执行放大
 export async function POST(request: NextRequest) {
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult instanceof NextResponse) return authResult;
   try {
     const body = await request.json();
     // 输入校验

@@ -1,5 +1,6 @@
 import 'server-only';
 
+import crypto from 'crypto';
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import { getDesktopAuth, tokenFromHeader } from './desktop-cloud';
@@ -17,19 +18,54 @@ import type { User } from './user-types';
 
 /**
  * Get request user from cookie or desktop/connector Bearer token.
- * Supports: session cookie, Authorization header, x-wujie-connector-token header, internal request headers.
+ * Supports: session cookie, Authorization header, x-wujie-connector-token header, verified internal request headers.
  */
+
+function getInternalApiSecret(): string | null {
+  const secret = (
+    process.env.INTERNAL_API_SECRET
+    || process.env.WUJIE_AUTH_SECRET
+    || process.env.NEXTAUTH_SECRET
+    || ''
+  ).trim();
+  return secret.length >= 32 ? secret : null;
+}
+
+function secretsMatch(received: string, expected: string): boolean {
+  const receivedBuffer = Buffer.from(received);
+  const expectedBuffer = Buffer.from(expected);
+  return receivedBuffer.length === expectedBuffer.length
+    && crypto.timingSafeEqual(receivedBuffer, expectedBuffer);
+}
+
+/** Build authenticated headers for server-to-server API calls within this application. */
+export function getInternalRequestHeaders(userId: string, userRole: 'user' | 'admin' = 'user'): Record<string, string> {
+  const secret = getInternalApiSecret();
+  if (!secret) {
+    throw new Error('Internal API authentication secret is not configured');
+  }
+
+  return {
+    'x-internal-request': 'true',
+    'x-internal-user-id': userId,
+    'x-internal-user-role': userRole,
+    'x-wujie-internal-secret': secret,
+  };
+}
+
 export async function getRequestUser(request: Request | NextRequest): Promise<{
   user: User;
   source: 'cookie' | 'desktop-token' | 'internal';
 } | null> {
-  // 1. Internal service request (x-internal-request header) - highest priority
-  // Trust the userId passed in header without database verification (internal service-to-service call)
+  // 1. Internal service request (x-internal-request header) - highest priority.
+  // The caller must also prove possession of a server-only shared secret.
   const isInternal = request.headers.get('x-internal-request') === 'true';
   const internalUserId = request.headers.get('x-internal-user-id');
   const internalUserRoleRaw = request.headers.get('x-internal-user-role') || 'user';
   const internalUserRole: 'user' | 'admin' = internalUserRoleRaw === 'admin' ? 'admin' : 'user';
-  if (isInternal && internalUserId) {
+  const internalSecret = getInternalApiSecret();
+  const receivedInternalSecret = request.headers.get('x-wujie-internal-secret') || '';
+  if (isInternal && internalUserId && internalSecret && secretsMatch(receivedInternalSecret, internalSecret)) {
     // Directly return authenticated user from internal header (no DB lookup needed)
     return {
       user: {

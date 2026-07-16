@@ -30,7 +30,7 @@ import { buildHexCubeGenerationInput } from '@/lib/hex-cube-generation';
 import { resolveRefineEngineInitialImageUrl } from '@/lib/refine-engine-image';
 import { translateApiError } from '@/lib/api-error-translator';
 import { } from '@/config/app-meta';
-import { getCanvasViewportMarginFactor, PAN_VIEWPORT_SYNC_INTERVAL_MS, resolveCanvasCullingBounds } from '@/lib/canvas-pan-virtualization';
+import { getCanvasViewportMarginFactor, PAN_VIEWPORT_SYNC_INTERVAL_MS, resolveCanvasCullingBounds, resolveCanvasRenderOffset } from '@/lib/canvas-pan-virtualization';
 import { CanvasSpatialIndex } from '@/lib/canvas-spatial-index';
 import { applyCanvasGenerationResults } from '@/lib/canvas-generation-results';
 import {
@@ -530,6 +530,12 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     isMiddlePanning,
   ), [viewOffset, panViewportOffset, zoom, canvasSize, isPanning, isMiddlePanning]);
   const viewportMarginFactor = getCanvasViewportMarginFactor(isPanning, isMiddlePanning);
+  const canvasRenderOffset = resolveCanvasRenderOffset(
+    viewOffset,
+    panViewportOffset,
+    isPanning,
+    isMiddlePanning,
+  );
 
   const visibleImages = useMemo(() => {
     if (canvasSize.width === 0 || canvasSize.height === 0) return images;
@@ -8951,7 +8957,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         )}
 
         {/* Canvas images */}
-        <div ref={canvasTransformRef} style={{ transform: `translate(${viewOffset.x}px, ${viewOffset.y}px) scale(${zoom})`, transformOrigin: '0 0', willChange: 'transform', contain: 'layout style' }}>
+        <div ref={canvasTransformRef} style={{ transform: `translate(${canvasRenderOffset.x}px, ${canvasRenderOffset.y}px) scale(${zoom})`, transformOrigin: '0 0', willChange: 'transform', contain: 'layout style' }}>
           {/* Image Groups */}
           {groups.map(group => {
             const groupImages = images.filter(img => img.groupId === group.id);
@@ -15641,6 +15647,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         {/* Floating pill toolbar - semi-collapsed, expand on hover */}
       <div
         data-toolbar="bottom-toolbar"
+        onMouseDown={(event) => event.stopPropagation()}
         onMouseEnter={() => setBottomBarHovered(true)}
         onMouseLeave={() => setBottomBarHovered(false)}
         className={`absolute bottom-5 left-1/2 -translate-x-1/2 z-50 flex max-w-[calc(100%-2rem)] items-center overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden rounded-full px-2.5 py-1.5 transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${isMonochrome ? 'bg-white/95 border border-gray-200 shadow-lg' : 'bg-[#1a1a1a]/95 border border-white/[0.08] shadow-2xl backdrop-blur-md'} ${bottomBarHovered ? (isMonochrome ? 'shadow-xl' : 'shadow-2xl ring-1 ring-white/[0.06]') : ''}`}

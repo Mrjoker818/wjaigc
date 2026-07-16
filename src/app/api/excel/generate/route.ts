@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import ExcelJS from "exceljs";
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 // --- Types ---
 interface ExcelSheet {
@@ -26,6 +27,8 @@ const THEME_COLORS: Record<string, { headerBg: string; headerFg: string; border:
 };
 
 export async function POST(request: NextRequest) {
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult instanceof NextResponse) return authResult;
   try {
     const body: ExcelRequest = await request.json();
     const { title = "工作簿", sheets = [] } = body;

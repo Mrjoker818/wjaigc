@@ -6,7 +6,7 @@ import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { identifyImageSubject } from '@/lib/identify-subject';
 import { logOperation, logError, startTimer, OP_ACTIONS, sanitizeRequestData } from '@/lib/op-log';
 
-import { requireApiAuthOrReject } from '@/lib/api-auth';
+import { getInternalRequestHeaders, requireApiAuthOrReject } from '@/lib/api-auth';
 import { translateApiError } from '@/lib/api-error-translate';
 import { classifyApiError, type ClassifiedError, isCloudflareTimeoutError, translateApiError as translateApiErrorV2 } from '@/lib/api-error-translator';
 import { detectInvalidSizeError, repairSize, classifyImageModelFamily } from '@/lib/size-auto-repair';
@@ -20,6 +20,7 @@ import { consumeCredits } from '@/lib/credits';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, stripEditsOnlyFields, isEditsEndpointRejected, type ApiCompatProfile, resolveProfileForModel, isGeminiImageModel, isNanoBananaModel, buildGeminiChatImageRequest, parseGeminiChatImageResponse, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
 import { registerTask, updateTaskProgress, isTaskCancelled, getTaskInfo } from '@/lib/task-registry';
 import { recordImageTaskSubmitted, recordImageTaskTerminal } from '@/lib/cloud-task-persistence';
+import { getCloudTaskForUserByIdempotencyKey } from '@/lib/cloud-task-storage';
 import { persistRemoteImage } from '@/lib/s3-storage';
 import { calculateActualPixelsFromRatio } from '@/lib/calculate-pixels';
 import { RESOLUTION_TIER_MODELS, QUALITY_LEVEL_MODELS, getModelParamType, ModelParamType } from '@/lib/canvas-generation-group';
@@ -293,25 +294,51 @@ export async function POST(request: NextRequest) {
     // ★ submitOnly 模式：立即注册任务并返回 taskId，后台执行实际生成
     // 解决 chat-tools 调用 /api/generate 时因第三方 API 响应慢（2-11分钟）导致 120s 超时的问题
     if (submitOnly) {
+      const idempotencyKey = request.headers.get('idempotency-key')?.trim() || '';
+      if (idempotencyKey) {
+        const existing = await getCloudTaskForUserByIdempotencyKey(authResult.userId, idempotencyKey);
+        if (existing) {
+          return NextResponse.json({ success: true, taskId: existing.id, taskIds: [existing.id], reused: true });
+        }
+      }
       const asyncTaskId = `async-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      registerTask(asyncTaskId, 'generate-async', '生成图片', userId);
       // Persist the client-facing outer task before the background request starts.
       // A provider can fail before it returns a remote task ID.
       try {
         // Return the client task ID only after its recovery record is durable.
-        await recordImageTaskSubmitted({
+        const taskCreated = await recordImageTaskSubmitted({
           taskId: asyncTaskId,
-          userId,
+          userId: authResult.userId,
           projectId: typeof projectId === 'string' ? projectId : undefined,
           sessionId: typeof sessionId === 'string' ? sessionId : undefined,
           messageId: typeof messageId === 'string' ? messageId : undefined,
           providerId: effectiveProviderId,
           model,
           label: '生成图片',
+          idempotencyKey: idempotencyKey || undefined,
         });
+        if (!taskCreated) {
+          const existing = idempotencyKey
+            ? await getCloudTaskForUserByIdempotencyKey(authResult.userId, idempotencyKey)
+            : null;
+          if (existing) {
+            return NextResponse.json({ success: true, taskId: existing.id, taskIds: [existing.id], reused: true });
+          }
+          return NextResponse.json({
+            success: false,
+            error: '任务创建发生冲突，请使用相同请求键重试',
+            retryable: true,
+          }, { status: 503 });
+        }
       } catch (error) {
         console.warn('[generate] submitOnly cloud task creation failed:', error);
+        return NextResponse.json({
+          success: false,
+          error: '任务暂时无法持久化，请稍后重试',
+          retryable: true,
+        }, { status: 503 });
       }
+      registerTask(asyncTaskId, 'generate-async', '生成图片', userId);
       const recordSubmitOnlyTerminal = (input: Parameters<typeof recordImageTaskTerminal>[1]) => {
         void recordImageTaskTerminal(asyncTaskId, input)
           .catch(error => console.warn('[generate] submitOnly cloud task terminal update failed:', error));
@@ -340,8 +367,7 @@ export async function POST(request: NextRequest) {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'x-internal-request': 'true',
-              'x-internal-user-id': sessionUser?.id || 'system',
+              ...getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user'),
             },
             body: JSON.stringify(backgroundBody),
             signal: AbortSignal.timeout(600000), // 10分钟超时
