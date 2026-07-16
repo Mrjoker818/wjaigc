@@ -5027,10 +5027,6 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
             {/* Agent模式开关 */}
             <button
               onClick={() => {
-                if (!isChatModelReady) {
-                  setShowThirdPartyDialog(true);
-                  return;
-                }
                 setIsAgentMode((enabled) => !enabled);
               }}
               className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-all shrink-0 ${

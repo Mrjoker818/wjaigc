@@ -475,6 +475,7 @@ async function readStore(): Promise<StoredUsersFile> {
       passwordHash: await hashPassword(requireAdminBootstrapPassword()),
       role: 'admin',
       status: 'active',
+      productType: 'canvas,chat',
       apiPermissions: defaultApiPermissions(),
       storageFolder: storageFolder('admin_mr_joker'),
       createdAt: now,
@@ -487,6 +488,7 @@ async function readStore(): Promise<StoredUsersFile> {
       ...admin,
       role: 'admin',
       status: admin.status || 'active',
+      productType: admin.productType || 'canvas,chat',
       apiPermissions: admin.apiPermissions || defaultApiPermissions(),
       storageFolder: storageFolder(admin.id),
     };

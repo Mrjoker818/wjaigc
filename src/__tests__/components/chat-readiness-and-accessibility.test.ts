@@ -6,11 +6,12 @@ const chatSource = readFileSync(resolve(process.cwd(), 'src/components/chat-pane
 const displaySource = readFileSync(resolve(process.cwd(), 'src/components/display3d-panel.tsx'), 'utf8');
 
 describe('chat readiness and panel accessibility', () => {
-  it('requires a configured chat model before enabling Agent or sending messages', () => {
+  it('requires a configured chat model before sending messages without opening configuration when Agent is selected', () => {
     expect(chatSource).toContain('const [isAgentMode, setIsAgentMode] = useState(false);');
     expect(chatSource).toContain('const availableChatModels = useMemo(() => {');
     expect(chatSource).toContain('const isChatModelReady = availableChatModels.some((candidate) => candidate.id === model);');
     expect(chatSource).toContain('if (!isChatModelReady) {\n      setShowThirdPartyDialog(true);\n      return;\n    }');
+    expect(chatSource).toContain('onClick={() => {\n                setIsAgentMode((enabled) => !enabled);\n              }}');
     expect(chatSource).toContain('disabled={!input.trim() || isLoading || !isChatModelReady}');
   });
 

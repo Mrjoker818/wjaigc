@@ -63,4 +63,25 @@ describe.sequential('server authentication production security', () => {
       warnSpy.mockRestore();
     }
   });
+
+  it('authorizes a newly bootstrapped administrator for the canvas product', async () => {
+    temporaryDataDir = await mkdtemp(path.join(os.tmpdir(), 'wujie-auth-test-'));
+    process.env.COZE_PROJECT_ENV = 'PROD';
+    process.env.WUJIE_DATA_DIR = temporaryDataDir;
+    process.env.WUJIE_AUTH_SECRET = 'test-production-auth-secret-at-least-32-characters';
+    process.env.WUJIE_ADMIN_USERNAME = 'bootstrap-admin';
+    process.env.WUJIE_ADMIN_PASSWORD = 'bootstrap-password';
+
+    const { authenticateUser } = await import('@/lib/server-auth');
+
+    await expect(authenticateUser({
+      name: 'bootstrap-admin',
+      password: 'bootstrap-password',
+      productType: 'canvas',
+    })).resolves.toMatchObject({
+      name: 'bootstrap-admin',
+      role: 'admin',
+      productType: 'canvas,chat',
+    });
+  });
 });
