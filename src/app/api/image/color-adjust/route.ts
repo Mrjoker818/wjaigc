@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import sharp from 'sharp';
-import { join } from 'path';
-import { writeFile, mkdir } from 'fs/promises';
-import { existsSync } from 'fs';
 import { validateApiInputs } from '@/lib/api-validator';
+import { fetchImageBuffer } from '@/lib/fetch-image-buffer';
+import { saveImageFile } from '@/lib/server-data-root';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -46,27 +45,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '缺少 imageUrl 参数' }, { status: 400 });
     }
 
-    // 1. 下载或读取图片
+    // 1. 读取图片，兼容 data URL、外链和持久化 serve-upload 路径。
     let imageBuffer: Buffer;
-    if (imageUrl.startsWith('data:')) {
-      const base64 = imageUrl.split(',')[1];
-      imageBuffer = Buffer.from(base64, 'base64');
-    } else if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
-      const resp = await fetch(imageUrl);
-      if (!resp.ok) {
-        return NextResponse.json({ error: '无法下载图片' }, { status: 400 });
-      }
-      const arrayBuffer = await resp.arrayBuffer();
-      imageBuffer = Buffer.from(arrayBuffer);
-    } else {
-      // 本地路径
-      const localPath = join(process.cwd(), 'public', imageUrl.replace(/^\//, ''));
-      if (existsSync(localPath)) {
-        const { readFile } = await import('fs/promises');
-        imageBuffer = await readFile(localPath);
-      } else {
-        return NextResponse.json({ error: '图片不存在' }, { status: 400 });
-      }
+    try {
+      imageBuffer = await fetchImageBuffer(imageUrl);
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : '无法读取图片' },
+        { status: 400 },
+      );
     }
 
     // 2. 标准化参数
@@ -140,16 +127,9 @@ export async function POST(req: NextRequest) {
       outputBuffer = await pipeline.jpeg({ quality: 92 }).toBuffer();
     }
 
-    // 5. 保存到 serve-upload 目录
-    const uploadDir = join(process.cwd(), 'public', 'api', 'serve-upload', 'color-adjust');
-    if (!existsSync(uploadDir)) {
-      await mkdir(uploadDir, { recursive: true });
-    }
+    // 5. 保存到持久化数据目录，避免云端重部署或只读应用目录导致结果丢失
     const filename = `ca_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${isTransparent ? 'png' : 'jpg'}`;
-    const outputPath = join(uploadDir, filename);
-    await writeFile(outputPath, outputBuffer);
-
-    const resultUrl = `/api/serve-upload/color-adjust/${filename}`;
+    const resultUrl = saveImageFile(outputBuffer, filename, 'color-adjust');
 
     return NextResponse.json({
       success: true,
