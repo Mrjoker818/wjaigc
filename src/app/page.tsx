@@ -571,6 +571,7 @@ function CanvasApp() {
 
   // 自动保存画布图片到当前项目
   const autoSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastAutoSaveSignatureRef = useRef<string | null>(null);
   // 项目切换中标记：防止自动保存回调用旧闭包数据覆盖刚保存的新数据
   const switchingProjectRef = useRef(false);
   // 服务器同步合并中标记：防止自动保存用旧闭包数据覆盖刚从服务器合并的新数据
@@ -665,7 +666,7 @@ function CanvasApp() {
     prevImageIdsRef2.current = currentIds;
   }, [images]);
   useEffect(() => {
-    if (!currentProject) return;
+    if (!currentProject?.id) return;
     // 项目切换进行中时，跳过自动保存，避免旧闭包数据覆盖
     if (switchingProjectRef.current) return;
     // 服务器同步合并中，跳过自动保存，避免旧闭包数据覆盖刚合并的服务器数据
@@ -675,8 +676,11 @@ function CanvasApp() {
     autoSaveRef.current = setTimeout(async () => {
       // 二次检查：定时器触发时如果正在切换项目，也跳过
       if (switchingProjectRef.current) return;
+      const project = currentProjectRef.current;
+      if (!project) return;
       // 验证用户一致性：使用 ref 获取最新 userId 避免闭包过期
-      if (!currentUserRef.current?.id) return;
+      const userId = currentUserRef.current?.id;
+      if (!userId) return;
       try {
         // 先将 data:/blob: URL 持久化到服务器
         const urlMapping: Record<string, string> = {};
@@ -700,10 +704,10 @@ function CanvasApp() {
                   });
                 } catch { return null; }
               }
-              const saveResp = await fetch('/api/save-image', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ imageUrl: urlToSave, userId: currentUser?.id, sourceUrl: img.url }),
+                const saveResp = await fetch('/api/save-image', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ imageUrl: urlToSave, userId, sourceUrl: img.url }),
               });
               const saveData = await saveResp.json();
               if (saveData.success && saveData.url) {
@@ -771,27 +775,33 @@ function CanvasApp() {
           }))
           .filter(img => img.url || img.videoUrl || img.svgDataUrl || shouldPersistProcessingPlaceholder(img)) as PersistableCanvasImage[];
         const updatedMeta = {
-          ...(currentProject.metadata || {}),
+          ...(project.metadata || {}),
           groups: groupsRef.current,
           viewState: viewStateRef.current,
         };
+        const saveSignature = JSON.stringify({
+          projectId: project.id,
+          images: persistableCanvasImages,
+          metadata: updatedMeta,
+        });
+        if (lastAutoSaveSignatureRef.current === saveSignature) return;
+
         const autoSaveMgr = UserManagerCore.getInstance();
-        autoSaveMgr.updateProject(currentProject.id, {
+        autoSaveMgr.updateProject(project.id, {
           canvasImages: persistableCanvasImages,
           metadata: updatedMeta,
         });
-        // 同步更新 React 状态，确保后续自动保存使用最新 metadata
-        setCurrentProject(prev => prev ? { ...prev, canvasImages: persistableCanvasImages, metadata: updatedMeta, updatedAt: Date.now() } : prev);
+        lastAutoSaveSignatureRef.current = saveSignature;
         recordUserData({
-          userId: currentUser?.id,
+          userId,
           area: 'projects',
           type: 'autosave',
-          filename: `${currentProject.id}.json`,
+          filename: `${project.id}.json`,
           content: JSON.stringify({
-            projectId: currentProject.id,
+            projectId: project.id,
             canvasImages: persistableCanvasImages,
             metadata: {
-              ...(currentProject.metadata || {}),
+              ...(project.metadata || {}),
               groups: groupsRef.current,
             },
             savedAt: Date.now(),
@@ -805,7 +815,7 @@ function CanvasApp() {
     return () => {
       if (autoSaveRef.current) clearTimeout(autoSaveRef.current);
     };
-  }, [images, currentProject, currentUser?.id, setImages]);
+  }, [images, currentProject?.id, currentUser?.id, setImages]);
 
   // 页面关闭/刷新前同步保存（localStorage + sendBeacon到服务器）
   // 使用 ref 避免每次 images 变化都重建 beforeunload 监听器
@@ -4118,13 +4128,14 @@ function CanvasApp() {
       )}
 
       {/* Right Panel - with vertical collapse strip */}
-      <div className={`fixed top-0 right-0 bottom-0 z-30 flex transition-all duration-300 ease-in-out ${panelCollapsed ? '' : ''}`} style={{ width: panelCollapsed ? '20px' : 'min(480px, 100vw)' }}>
+      <div className={`fixed top-0 right-0 bottom-0 z-[70] flex transition-all duration-300 ease-in-out ${panelCollapsed ? '' : ''}`} style={{ width: panelCollapsed ? '20px' : 'min(480px, 100vw)' }}>
         {/* Vertical collapse strip */}
         <button
           onClick={() => setPanelCollapsed(prev => !prev)}
           className={`w-5 flex items-center justify-center cursor-pointer transition-all duration-200 shrink-0 ${themeStyle === 'monochrome' ? 'bg-gray-100 hover:bg-gray-200 border-r border-gray-200' : 'bg-[#0F1117] hover:bg-[#1a1d26] border-r border-white/[0.06]'}`}
           style={{ borderRadius: '4px 0 0 4px' }}
           title={panelCollapsed ? '展开面板' : '收起面板'}
+          aria-label={panelCollapsed ? '展开面板' : '收起面板'}
         >
           {panelCollapsed ? (
             <ChevronLeft size={14} className={themeStyle === 'monochrome' ? 'text-gray-500' : 'text-gold-muted'} />

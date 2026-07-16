@@ -666,10 +666,20 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
             <span className="text-sm font-medium" style={{ color: textAccent }}>3D 展陈系统 Pro</span>
           </div>
           <div className="flex items-center gap-1">
-            <button className={`w-7 h-7 flex items-center justify-center rounded transition-colors ${isMonochrome ? 'hover:bg-gray-200' : 'hover:bg-white/10'}`} onClick={() => setIsMinimized(!isMinimized)}>
+            <button
+              className={`w-7 h-7 flex items-center justify-center rounded transition-colors ${isMonochrome ? 'hover:bg-gray-200' : 'hover:bg-white/10'}`}
+              onClick={() => setIsMinimized(!isMinimized)}
+              aria-label={isMinimized ? '展开 3D 展陈系统' : '最小化 3D 展陈系统'}
+              title={isMinimized ? '展开' : '最小化'}
+            >
               {isMinimized ? <Maximize2 size={14} style={{ color: textMuted }} /> : <Minus size={14} style={{ color: textMuted }} />}
             </button>
-            <button className={`w-7 h-7 flex items-center justify-center rounded transition-colors ${isMonochrome ? 'hover:bg-red-100' : 'hover:bg-red-500/30'}`} onClick={onClose}>
+            <button
+              className={`w-7 h-7 flex items-center justify-center rounded transition-colors ${isMonochrome ? 'hover:bg-red-100' : 'hover:bg-red-500/30'}`}
+              onClick={onClose}
+              aria-label="关闭 3D 展陈系统"
+              title="关闭"
+            >
               <X size={14} style={{ color: textMuted }} />
             </button>
           </div>

@@ -24,7 +24,7 @@ import {
   Settings, Upload, X, Check, AlertCircle, Loader2, BoxSelect, Group,
   Search, ScanSearch,
   ArrowLeft, LayoutGrid, Sparkles, Rotate3d, Box, ShoppingBag,
-  Copy, Clipboard, Film, Bookmark, BookmarkPlus, GitCompare, Grid3X3, ArrowLeftFromLine, ImagePlus, BookOpen, Blocks, FolderOpen, ScrollText, MousePointer2, Maximize2,
+  Copy, Clipboard, Film, Bookmark, BookmarkPlus, GitCompare, Grid3X3, ArrowLeftFromLine, ImagePlus, BookOpen, Blocks, FolderOpen, ScrollText, MousePointer2,
   CopyPlus, Unlink, Shuffle, Paintbrush, Video, FileVideo, FileText,
   Mic, Volume2, Music, Camera, Clapperboard, Scissors as CutIcon, Globe, AudioLines, Brain,
 } from 'lucide-react';
@@ -814,9 +814,9 @@ export default function NodeEditor({ workflow, userId, onBack, onWorkflowChange,
 
   // AI建图状态
   const [aiBuildInput, setAiBuildInput] = useState('');
-  const [, setAiBuildLoading] = useState(false);
-  const [, setAiBuildError] = useState<string | null>(null);
-  const [, setAiBuildOpen] = useState(false);
+  const [aiBuildLoading, setAiBuildLoading] = useState(false);
+  const [aiBuildError, setAiBuildError] = useState<string | null>(null);
+  const [aiBuildOpen, setAiBuildOpen] = useState(false);
 
   // P1: 执行日志
   const [execLogs, setExecLogs] = useState<{ time: number; nodeId: string; label: string; status: string; message: string; duration?: number; nodeType?: string }[]>([]);
@@ -845,6 +845,19 @@ export default function NodeEditor({ workflow, userId, onBack, onWorkflowChange,
   const [clipboard, setClipboard] = useState<{ nodes: WorkflowNode[]; connections: WorkflowConnection[] } | null>(null);
   // 右键菜单状态
   const [contextMenu, setContextMenu] = useState<{ type: 'canvas' | 'node'; x: number; y: number; nodeId?: string } | null>(null);
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 767px)');
+    const applyMobileLayout = () => {
+      if (!media.matches) return;
+      setShowLeftPanel(false);
+      setShowContentStrip(false);
+    };
+
+    applyMobileLayout();
+    media.addEventListener('change', applyMobileLayout);
+    return () => media.removeEventListener('change', applyMobileLayout);
+  }, []);
 
   // P2: 提示词库 - 使用统一的提示词模板系统
   const [, setPromptSnippets] = useState<PromptSnippet[]>(() => {
@@ -1454,6 +1467,12 @@ ${contextInfo}
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable) return;
+
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'l') {
+        e.preventDefault();
+        setAiBuildOpen(true);
+        return;
+      }
 
       // Ctrl+C / Cmd+C 复制选中节点（支持多选）
       if ((e.metaKey || e.ctrlKey) && e.key === 'c' && selectedNodeIds.size > 0) {
@@ -2072,7 +2091,7 @@ ${contextInfo}
 
   // ─── AI自然语言建图 ───
 
-  useCallback(async () => {
+  const handleAiBuild = useCallback(async () => {
         if (!aiBuildInput.trim()) return;
         setAiBuildLoading(true);
         setAiBuildError(null);
@@ -2088,6 +2107,7 @@ ${contextInfo}
             setSelectedNodeIds(new Set());
             setSidebarTab('nodes');
             setAiBuildInput('');
+            setAiBuildOpen(false);
           } else {
             setAiBuildError(data.error || 'AI建图失败，请重试');
           }
@@ -2225,9 +2245,9 @@ ${contextInfo}
       {/* 全局图片上传 (foreignObject内input.click()不可靠, 统一由外部触发) */}
       <input ref={imageFileInputRef} type="file" accept="image/*" className="hidden" onChange={handleGlobalImageUpload} />
       {/* ═══ 顶部工具栏 - 全宽, 与原型对齐 ═══ */}
-      <header className="bg-card h-12 flex items-center justify-between px-3 border-b border-border/20 z-50 shrink-0" role="toolbar" aria-label="工作流工具栏">
+      <header className="bg-card h-12 flex items-center justify-between gap-3 overflow-x-auto px-3 border-b border-border/20 z-50 shrink-0" role="toolbar" aria-label="工作流工具栏">
         {/* 左侧：工作流操作 */}
-        <div className="flex items-center gap-1" role="group" aria-label="工作流操作">
+        <div className="flex min-w-max items-center gap-1" role="group" aria-label="工作流操作">
           {onBack && (
             <button onClick={onBack} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted text-sm transition-colors cursor-pointer" title="返回画布 (Esc)" aria-label="返回画布">
               <ArrowLeft size={16} />
@@ -2297,7 +2317,7 @@ ${contextInfo}
           )}
         </div>
         {/* 右侧：工作流信息 + 缩放控制 + 面板切换 */}
-        <div className="flex items-center gap-1" role="group" aria-label="视图控制">
+        <div className="flex min-w-max items-center gap-1" role="group" aria-label="视图控制">
           {/* 工作流名称 + 统计 */}
           <span className="text-sm font-semibold text-primary mr-1">{wf.name}</span>
           <span className="text-[11px] text-muted-foreground mr-2">{wf.nodes.length} 节点 · {wf.connections.length} 连线</span>
@@ -2334,10 +2354,10 @@ ${contextInfo}
       </header>
 
       {/* ═══ 主体三栏布局 - 与原型对齐 ═══ */}
-      <div className="flex flex-1 min-h-0">
+      <div className="relative flex flex-1 min-h-0">
       {/* ═══ 左侧节点库面板 - 与原型对齐: w-64, 搜索+分类列表 ═══ */}
       {showLeftPanel && (
-      <aside className="w-64 shrink-0 bg-card border-r border-border/20 flex flex-col overflow-hidden">
+      <aside className="absolute inset-y-0 left-0 z-40 flex w-[min(18rem,85vw)] shrink-0 flex-col overflow-hidden border-r border-border/20 bg-card shadow-2xl md:relative md:z-auto md:w-64 md:shadow-none">
         {/* 搜索框 */}
         <div className="p-3 sticky top-0 z-10 bg-card border-b border-border/10">
           <div className="relative">
@@ -2757,10 +2777,9 @@ ${contextInfo}
       </div>{/* 主画布 end */}
 
       {/* ═══ 右侧属性面板 - 与原型对齐: w-72, 始终可见 ═══ */}
-      <aside className="w-72 shrink-0 bg-card border-l border-border/20 flex flex-col overflow-hidden">
+      <aside className="hidden md:flex w-72 shrink-0 bg-card border-l border-border/20 flex-col overflow-hidden">
         <div className="flex items-center justify-between px-4 h-11 border-b border-border/10">
           <span className="text-[11px] uppercase tracking-[0.12em] font-bold text-muted-foreground">节点属性</span>
-          <button className="text-muted-foreground hover:text-foreground cursor-pointer"><Maximize2 size={12} /></button>
         </div>
         <div className="flex-1 overflow-y-auto">
           {selectedNode ? (
@@ -2788,7 +2807,7 @@ ${contextInfo}
       <div className="shrink-0 border-t border-border/20 bg-card">
         {/* 内容条 */}
         {showContentStrip && (
-        <div className="border-b border-border/10">
+        <div className="hidden border-b border-border/10 md:block">
           <div className="flex items-center justify-between px-4 h-8">
             <div className="flex items-center gap-2">
               <FolderOpen size={12} className="text-primary" />
@@ -2853,6 +2872,63 @@ ${contextInfo}
         </div>
         )}
       </div>
+      {aiBuildOpen && (
+        <div
+          className="fixed inset-0 z-[220] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="ai-build-title"
+          onClick={() => setAiBuildOpen(false)}
+        >
+          <div
+            data-modal
+            className="w-full max-w-xl rounded-lg border border-border bg-card p-5 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mb-4 flex items-center justify-between gap-4">
+              <div>
+                <h2 id="ai-build-title" className="text-base font-semibold text-foreground">AI 建图</h2>
+                <p className="mt-1 text-xs text-muted-foreground">描述目标工作流，系统会生成可继续编辑的节点与连线。</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAiBuildOpen(false)}
+                className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                aria-label="关闭 AI 建图"
+                title="关闭"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <textarea
+              autoFocus
+              value={aiBuildInput}
+              onChange={(event) => setAiBuildInput(event.target.value)}
+              placeholder="例如：上传商品图，生成电商主图，放大后导出 PNG"
+              className="min-h-32 w-full resize-y rounded border border-border bg-muted px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary"
+            />
+            {aiBuildError && <p className="mt-2 text-xs text-destructive" role="alert">{aiBuildError}</p>}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setAiBuildOpen(false)}
+                className="rounded px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleAiBuild()}
+                disabled={!aiBuildInput.trim() || aiBuildLoading}
+                className="rounded bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-opacity disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {aiBuildLoading ? '生成中...' : '生成工作流'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 图片预览弹窗 */}
       {imagePreviewUrl && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center" onClick={() => setImagePreviewUrl(null)}>

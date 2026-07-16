@@ -1177,7 +1177,7 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, c
   }, [model, onChatModelChange]);
   const [systemPrompt, setSystemPrompt] = useState('');
   const [isThinkingMode, setIsThinkingMode] = useState(false);
-  const [isAgentMode, setIsAgentMode] = useState(true); // 默认开启Agent模式，即梦体验
+  const [isAgentMode, setIsAgentMode] = useState(false);
   const [agentSteps, setAgentSteps] = useState<Array<{id: string; tool: string; status: 'pending'|'running'|'done'|'error'; result?: string; startTime?: number}>>([]);
   const [isLoading, setIsLoading] = useState(false);
   const thinkingStartTimeRef = useRef<number>(0);
@@ -1204,11 +1204,23 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, c
   const [thirdPartyChatModels, setThirdPartyChatModels] = useState<{id: string; name: string; provider: string; providerId: string}[]>([]);
   // 服务器端发现的模型
   const [discoveredChatModels, setDiscoveredChatModels] = useState<{id: string; name: string; provider: string; providerId: string; description?: string; isDefault?: boolean}[]>([]);
+  const availableChatModels = useMemo(() => {
+    const uniqueModels = new Map<string, typeof discoveredChatModels[number]>();
+    [...discoveredChatModels, ...thirdPartyChatModels].forEach((candidate) => {
+      if (!uniqueModels.has(candidate.id)) uniqueModels.set(candidate.id, candidate);
+    });
+    return Array.from(uniqueModels.values());
+  }, [discoveredChatModels, thirdPartyChatModels]);
+  const isChatModelReady = availableChatModels.some((candidate) => candidate.id === model);
   // 图像模型选择（用于聊天中生图）
   const [imageModel, setImageModel] = useState('');
   const [imageModelProviderId, setImageModelProviderId] = useState('');
   const [discoveredImageModels, setDiscoveredImageModels] = useState<{id: string; name: string; provider: string; providerId: string}[]>([]);
   const [showImageModelSelector, setShowImageModelSelector] = useState(false);
+
+  useEffect(() => {
+    if (!isChatModelReady) setIsAgentMode(false);
+  }, [isChatModelReady]);
 
   // Resolve providerId to human-readable display name
   const providerDisplayName = useCallback((pid: string | undefined): string => {
@@ -3319,6 +3331,11 @@ IP角色设计规范：
       return;
     }
 
+    if (!isChatModelReady) {
+      setShowThirdPartyDialog(true);
+      return;
+    }
+
     if (overrideText) {
       // When triggered by suggestion click, ensure input field is cleared
     }
@@ -4456,7 +4473,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       setIsLoading(false);
       abortControllerRef.current = null;
     }
-  }, [input, isLoading, messages, model, systemPrompt, isThinkingMode, saveSession, persistMessageUpdate, pendingImages, allAgents, activeMentions, brandDna, tuneContextString, activeSkill, skillParamValues, onAddImages, currentSessionId, projectId]);
+  }, [input, isLoading, isChatModelReady, messages, model, systemPrompt, isThinkingMode, saveSession, persistMessageUpdate, pendingImages, allAgents, activeMentions, brandDna, tuneContextString, activeSkill, skillParamValues, onAddImages, currentSessionId, projectId]);
 
   // Lovart 风格 Skill 调用：点击 Skill 直接创建对话并自动发送，AI 按 Skill 方法论引导用户
   const handleUseSkill = useCallback((skill: ChatSkill) => {
@@ -4934,8 +4951,8 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               <SelectContent position="popper" side="bottom" sideOffset={4} className={themeClasses.bg}>
                 {(() => {
                   // Group discovered server models by provider
-                  const grouped: Record<string, typeof discoveredChatModels> = {};
-                  discoveredChatModels.forEach(m => {
+                  const grouped: Record<string, typeof availableChatModels> = {};
+                  availableChatModels.forEach(m => {
                     const key = m.provider || '管理员配置';
                     if (!grouped[key]) grouped[key] = [];
                     grouped[key].push(m);
@@ -4956,32 +4973,8 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                     </div>
                   ));
                 })()}
-                {thirdPartyChatModels.length > 0 && (
-                  <>
-                    {(() => {
-                      // Group third-party chat models by provider name
-                      const grouped: Record<string, typeof thirdPartyChatModels> = {};
-                      thirdPartyChatModels.forEach(m => {
-                        const key = m.provider || '未知';
-                        if (!grouped[key]) grouped[key] = [];
-                        grouped[key].push(m);
-                      });
-                      return Object.entries(grouped).map(([providerName, models]) => (
-                        <div key={providerName}>
-                          <div className={`px-2 py-0.5 text-xs font-semibold ${themeClasses.textMuted} border-t ${themeClasses.border} mt-1 pt-2`}>
-                            {providerName}
-                          </div>
-                          {models.map(m => (
-                            <SelectItem key={m.id} value={m.id} className={themeClasses.text}>
-                              <div className="flex flex-col w-full">
-                                <span className="font-medium text-xs">{m.name}</span>
-                              </div>
-                            </SelectItem>
-                          ))}
-                        </div>
-                      ));
-                    })()}
-                  </>
+                {availableChatModels.length === 0 && (
+                  <div className={`px-3 py-2 text-xs ${themeClasses.textMuted}`}>暂无可用聊天模型</div>
                 )}
               </SelectContent>
             </Select>
@@ -5033,7 +5026,13 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
 
             {/* Agent模式开关 */}
             <button
-              onClick={() => setIsAgentMode(!isAgentMode)}
+              onClick={() => {
+                if (!isChatModelReady) {
+                  setShowThirdPartyDialog(true);
+                  return;
+                }
+                setIsAgentMode((enabled) => !enabled);
+              }}
               className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-all shrink-0 ${
                 isAgentMode
                   ? isGold
@@ -5043,7 +5042,8 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                     ? 'text-gold-muted/50 hover:text-gold-muted border border-transparent hover:border-white/[0.08]'
                     : 'text-gray-400 hover:text-gray-600 border border-transparent hover:border-gray-200'
               }`}
-              title={isAgentMode ? 'Agent模式已开启：描述需求自动调用工具生成成品' : '点击开启Agent模式：自然语言自动生图/修图/配音'}
+              title={!isChatModelReady ? '请先配置聊天模型' : isAgentMode ? 'Agent模式已开启：描述需求自动调用工具生成成品' : '点击开启Agent模式：自然语言自动生图/修图/配音'}
+              aria-pressed={isAgentMode}
             >
               <Zap size={13} className={isAgentMode ? 'animate-pulse' : ''} />
               Agent
@@ -6074,9 +6074,9 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
             <div className="flex-1" />
             <button
               onClick={() => handleSend()}
-              disabled={!input.trim() || isLoading}
+              disabled={!input.trim() || isLoading || !isChatModelReady}
               className={`shrink-0 h-7 px-2 rounded-md flex items-center justify-center text-[11px] font-medium transition-all ${
-                !input.trim() || isLoading
+                !input.trim() || isLoading || !isChatModelReady
                   ? isGold
                     ? 'bg-white/[0.03] text-white/20 cursor-not-allowed'
                     : 'bg-gray-50 text-gray-300 cursor-not-allowed'
@@ -6084,7 +6084,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                     ? 'bg-gold text-black hover:opacity-90 shadow-md shadow-gold/20'
                     : 'bg-blue-500 text-white hover:bg-blue-600 shadow-md'
               }`}
-              title="发送"
+              title={isChatModelReady ? '发送' : '请先配置聊天模型'}
             >
               <Send size={14} />
               {isLoading && <Loader2 size={10} className="animate-spin ml-1" />}
