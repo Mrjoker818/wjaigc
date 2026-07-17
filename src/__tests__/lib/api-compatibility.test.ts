@@ -10,6 +10,11 @@ import {
 import {
   getProviderAspectRatios,
   getProviderPixelSizingOption,
+  getModelParamType,
+  normalizeImageGenerationSelection,
+  shouldPreserveProviderAutoSize,
+  getQualityLevelOptions,
+  getResolutionTierOptions,
 } from '@/lib/canvas-generation-group';
 
 describe('provider request contracts', () => {
@@ -29,6 +34,30 @@ describe('provider request contracts', () => {
   it('hides the undocumented auto aspect ratio for 4SAPI while preserving it for APImart', () => {
     expect(getProviderAspectRatios('gpt-image-2', '4SAPI')).not.toContain('auto');
     expect(getProviderAspectRatios('gpt-image-2', 'APImart')).toContain('auto');
+  });
+
+  it('uses the documented 302 GPT Image contract instead of generic GPT Image defaults', () => {
+    expect(getProviderAspectRatios('gpt-image-1.5', '302.ai')).toEqual(['auto', '1:1', '3:2', '2:3']);
+    expect(getModelParamType('gpt-image-1.5', '302.ai')).toBe('quality');
+    expect(getResolutionTierOptions('gpt-image-1.5', '302.ai')).toEqual([]);
+    expect(getQualityLevelOptions('gpt-image-1.5', '302.ai')).toEqual(['auto', 'low', 'medium', 'high']);
+  });
+
+  it('normalizes stale selections to the active provider model capability', () => {
+    expect(normalizeImageGenerationSelection('gpt-image-1.5', '302.ai', {
+      aspectRatio: '16:9',
+      quality: '1K',
+      resolution: '4K',
+    })).toEqual({
+      aspectRatio: 'auto',
+      quality: 'auto',
+      resolution: '',
+    });
+  });
+
+  it('only preserves the automatic size token for providers that document it', () => {
+    expect(shouldPreserveProviderAutoSize('gpt-image-1.5', '302.ai')).toBe(true);
+    expect(shouldPreserveProviderAutoSize('gpt-image-1.5', '4sapi')).toBe(false);
   });
 
   it('uses the visible 4S resolution control for pixel size previews', () => {

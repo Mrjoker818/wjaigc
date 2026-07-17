@@ -1012,6 +1012,12 @@ function CanvasApp() {
                 // ★ 关键修复：保留本地的位置信息（x, y, width, height）
                 // 用户可能在本地拖动了图片，但服务器还没同步到最新位置
                 // 优先使用本地的位置数据，避免图片"回位"
+                // A project sync can arrive after the local task has completed.
+                // The stale server placeholder must never put the completed image back into processing.
+                if (localImg && !localImg.isProcessingPlaceholder && localImg.url) {
+                  enriched.isProcessingPlaceholder = false;
+                  enriched.processing = undefined;
+                }
                 if (localImg) {
                   if (localImg.x !== undefined) enriched.x = localImg.x;
                   if (localImg.y !== undefined) enriched.y = localImg.y;

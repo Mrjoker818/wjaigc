@@ -13,7 +13,11 @@ import {
 } from '@/lib/workflow-engine';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import { computePortPosition } from '@/lib/node-port-position';
-import { MODEL_QUALITIES, MODEL_ASPECT_RATIOS } from '@/lib/canvas-generation-group';
+import {
+  getProviderAspectRatios,
+  getQualityLevelOptions,
+  getResolutionTierOptions,
+} from '@/lib/canvas-generation-group';
 import { getPromptTemplates, searchTemplates, addPromptTemplate } from '@/lib/prompt-templates';
 import {
   Image as ImageIcon, Type, SlidersHorizontal, Wand2, Pencil, Maximize, Scissors,
@@ -4023,18 +4027,26 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
       case 'select': {
         // 动态解析 quality 和 aspectRatio 选项
         let dynamicOptions = field.options;
+        const selectedModelId = String(node.config?.model || '');
+        const selectedProviderId = String(node.config?.providerId || '');
+        const selectedModel = models.find(model =>
+          model.id === selectedModelId && (!selectedProviderId || model.providerId === selectedProviderId),
+        );
+        const providerHint = `${selectedProviderId} ${selectedModel?.provider || ''}`;
         if (field.key === 'quality' && node.config?.model) {
-          const modelId = String(node.config.model);
-          const modelKey = Object.keys(MODEL_QUALITIES).find(k => modelId.includes(k));
-          const qualities = modelKey ? MODEL_QUALITIES[modelKey as keyof typeof MODEL_QUALITIES] : [];
+          const qualities = getQualityLevelOptions(selectedModelId, providerHint);
           if (qualities.length > 0) {
             dynamicOptions = qualities.map(q => ({ value: q, label: q }));
           }
         }
+        if (field.key === 'resolution' && node.config?.model) {
+          const resolutionTiers = getResolutionTierOptions(selectedModelId, providerHint);
+          if (resolutionTiers.length > 0) {
+            dynamicOptions = resolutionTiers.map(tier => ({ value: tier, label: tier }));
+          }
+        }
         if (field.key === 'aspectRatio' && node.config?.model) {
-          const modelId = String(node.config.model);
-          const modelKey = Object.keys(MODEL_ASPECT_RATIOS).find(k => modelId.includes(k));
-          const ratios = modelKey ? MODEL_ASPECT_RATIOS[modelKey as keyof typeof MODEL_ASPECT_RATIOS] : [];
+          const ratios = getProviderAspectRatios(selectedModelId, providerHint);
           if (ratios.length > 0) {
             dynamicOptions = ratios.map(r => ({ value: r, label: r }));
           }
@@ -4111,16 +4123,19 @@ function PropertyPanel({ node, models, modelsLoading, onUpdate, onDelete, onImag
               }
               // 模型变更时，动态更新 quality 和 aspectRatio 为新模型的默认值
               if (selectedModelId) {
-                const supportedQualities = MODEL_QUALITIES[selectedModelId as keyof typeof MODEL_QUALITIES] || [];
-                // 尝试找到匹配的模型配置
-                const modelKey = Object.keys(MODEL_QUALITIES).find(k => selectedModelId.includes(k));
-                const qualities = modelKey ? MODEL_QUALITIES[modelKey as keyof typeof MODEL_QUALITIES] : supportedQualities;
+                const selectedModel = models.find(model =>
+                  model.id === selectedModelId && (!selectedProviderId || model.providerId === selectedProviderId),
+                );
+                const providerHint = `${selectedProviderId} ${selectedModel?.provider || ''}`;
+                const qualities = getQualityLevelOptions(selectedModelId, providerHint);
                 if (qualities.length > 0) {
                   configUpdate.quality = qualities[0];
                 }
-                const supportedRatios = MODEL_ASPECT_RATIOS[selectedModelId as keyof typeof MODEL_ASPECT_RATIOS] || [];
-                const ratioKey = Object.keys(MODEL_ASPECT_RATIOS).find(k => selectedModelId.includes(k));
-                const ratios = ratioKey ? MODEL_ASPECT_RATIOS[ratioKey as keyof typeof MODEL_ASPECT_RATIOS] : supportedRatios;
+                const resolutionTiers = getResolutionTierOptions(selectedModelId, providerHint);
+                if (resolutionTiers.length > 0) {
+                  configUpdate.resolution = resolutionTiers[0];
+                }
+                const ratios = getProviderAspectRatios(selectedModelId, providerHint);
                 if (ratios.length > 0) {
                   configUpdate.aspectRatio = ratios[0];
                 }

@@ -10,7 +10,7 @@ import { UserManager as UserManagerCore } from '@/lib/user-manager';
 import { ThirdPartyModelDialog } from '@/components/third-party-model-dialog';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import { getPromptTemplates, PromptTemplate, searchTemplates } from '@/lib/prompt-templates';
-import { MODEL_ASPECT_RATIOS as SHARED_MODEL_ASPECT_RATIOS, MODEL_QUALITIES as SHARED_MODEL_QUALITIES, QUALITY_DISPLAY_NAMES as SHARED_QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE as SHARED_QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS as SHARED_ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS as SHARED_DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES as SHARED_DEFAULT_QUALITIES, findModelConfig as sharedFindModelConfig, calculateActualPixels as sharedCalculateActualPixels, ModelParamType, getModelParamType, getResolutionTierOptions, getQualityLevelOptions, getDefaultParamValue, getProviderAspectRatios, getProviderPixelSizingOption, RESOLUTION_TIER_DISPLAY_NAMES, QUALITY_LEVEL_DISPLAY_NAMES, RESOLUTION_TIER_MODELS, QUALITY_LEVEL_MODELS } from '@/lib/canvas-generation-group';
+import { MODEL_ASPECT_RATIOS as SHARED_MODEL_ASPECT_RATIOS, MODEL_QUALITIES as SHARED_MODEL_QUALITIES, QUALITY_DISPLAY_NAMES as SHARED_QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE as SHARED_QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS as SHARED_ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS as SHARED_DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES as SHARED_DEFAULT_QUALITIES, findModelConfig as sharedFindModelConfig, calculateActualPixels as sharedCalculateActualPixels, ModelParamType, getModelParamType, getResolutionTierOptions, getQualityLevelOptions, getDefaultParamValue, getProviderAspectRatios, getProviderPixelSizingOption, shouldPreserveProviderAutoSize, RESOLUTION_TIER_DISPLAY_NAMES, QUALITY_LEVEL_DISPLAY_NAMES, RESOLUTION_TIER_MODELS, QUALITY_LEVEL_MODELS } from '@/lib/canvas-generation-group';
 
 export interface GenerationParams {
     prompt: string;
@@ -416,10 +416,13 @@ export function GenerationPanel(
         const pureModelId = model.includes('::') ? model.split('::').pop()! : model;
         if (!pureModelId) return;
 
+        const providerId = model.includes('::') ? model.split('::')[0] : '';
+        const providerName = discoveredModels.find(item => item.id === pureModelId && item.providerId === providerId)?.providerName || '';
+        const providerHint = `${providerId} ${providerName}`;
         const lower = pureModelId.toLowerCase();
-        const paramType = getModelParamType(pureModelId);
-        const resolutionTiers = getResolutionTierOptions(pureModelId);
-        const qualityLevels = getQualityLevelOptions(pureModelId);
+        const paramType = getModelParamType(pureModelId, providerHint);
+        const resolutionTiers = getResolutionTierOptions(pureModelId, providerHint);
+        const qualityLevels = getQualityLevelOptions(pureModelId, providerHint);
 
         // 分辨率默认值：优先按后缀推断
         let defaultResolution = resolutionTiers[0] || '2K';
@@ -440,9 +443,7 @@ export function GenerationPanel(
         setQuality(defaultQuality);
 
         // 画面比例：重置为新模型支持的首个比例
-        const providerId = model.includes('::') ? model.split('::')[0] : '';
-        const providerName = discoveredModels.find(item => item.id === pureModelId && item.providerId === providerId)?.providerName || '';
-        const supportedRatios = getProviderAspectRatios(pureModelId, `${providerId} ${providerName}`);
+        const supportedRatios = getProviderAspectRatios(pureModelId, providerHint);
         if (supportedRatios.length > 0 && !supportedRatios.includes(aspectRatio)) {
             setAspectRatio(supportedRatios[0]);
         }
@@ -507,16 +508,17 @@ export function GenerationPanel(
 
     // 获取当前模型支持的质量
     const getSupportedQualities = useCallback(() => {
-        const paramType = getModelParamType(pureModelId);
+        const paramType = getModelParamType(pureModelId, selectedProviderHint);
         if (paramType === 'quality') {
-            return getQualityLevelOptions(pureModelId);
+            return getQualityLevelOptions(pureModelId, selectedProviderHint);
         }
         // 'resolution' or 'both': return resolution tier options
-        return getResolutionTierOptions(pureModelId);
-    }, [pureModelId]);
+        return getResolutionTierOptions(pureModelId, selectedProviderHint);
+    }, [pureModelId, selectedProviderHint]);
 
     // 尺寸映射 — 使用 calculateActualPixels 综合考虑模型+比例+质量
     const getModelSize = useCallback((ratio: string): string => {
+        if (ratio === 'auto' && shouldPreserveProviderAutoSize(pureModelId, selectedProviderHint)) return 'auto';
         const sizingOption = getProviderPixelSizingOption(selectedProviderHint, quality, resolution);
         const modelSize = sharedCalculateActualPixels(ratio, sizingOption, pureModelId);
         if (modelSize) return modelSize.replace('×', 'x');
@@ -608,7 +610,7 @@ export function GenerationPanel(
             stylePreset,
             outputCount,
             quality,
-            resolution: getModelParamType(pureModelId) === 'both' ? resolution : undefined, // GPT-Image系列分辨率档位
+            resolution: getModelParamType(pureModelId, selectedProviderHint) === 'both' ? resolution : undefined, // GPT-Image系列分辨率档位
             model: pureModelId,
             providerId: compositeProviderId,
             referenceCategories: Object.fromEntries(
@@ -1118,9 +1120,10 @@ export function GenerationPanel(
                             const supportedRatios = getProviderAspectRatios(newPureModelId, `${newProviderId} ${newProviderName}`);
                             setAspectRatio(supportedRatios[0]);
                             // 动态获取模型支持的分辨率/质量选项
-                            const paramType = getModelParamType(newPureModelId);
-                            const resolutionTiers = getResolutionTierOptions(newPureModelId);
-                            const qualityLevels = getQualityLevelOptions(newPureModelId);
+                            const providerHint = `${newProviderId} ${newProviderName}`;
+                            const paramType = getModelParamType(newPureModelId, providerHint);
+                            const resolutionTiers = getResolutionTierOptions(newPureModelId, providerHint);
+                            const qualityLevels = getQualityLevelOptions(newPureModelId, providerHint);
                             const mlower = newPureModelId.toLowerCase();
                             // 按后缀推断默认分辨率
                             let defaultResolution = resolutionTiers[0] || '1K';
@@ -1719,12 +1722,14 @@ export function GenerationPanel(
                                       className="border currentColor rounded-[1px]"
                                       style={{
                                         width: (() => {
-                                          const [w] = ratio.split(':').map(Number);
+                                      if (ratio === 'auto') return 12;
+                                      const [w] = ratio.split(':').map(Number);
                                           const h = ratio.split(':').map(Number)[1];
                                           const maxDim = 16;
                                           return Math.max(6, (w / Math.max(w, h)) * maxDim);
                                         })(),
                                         height: (() => {
+                                          if (ratio === 'auto') return 12;
                                           const [w, h] = ratio.split(':').map(Number);
                                           const maxDim = 16;
                                           return Math.max(6, (h / Math.max(w, h)) * maxDim);
@@ -1733,7 +1738,7 @@ export function GenerationPanel(
                                         opacity: aspectRatio === ratio ? 1 : 0.5,
                                       }}
                                     />
-                                    <span className="text-xs">{ratio}</span>
+                                    <span className="text-xs">{ratio === 'auto' ? '智能' : ratio}</span>
                                     {/* 方案A：画面比例不再显示像素尺寸，像素由API根据模型类型和质量参数决定 */}
                                 </div>
                             </button>
@@ -1745,9 +1750,9 @@ export function GenerationPanel(
                 {/* ★ 关键修复：paramType === 'both' 时显示分辨率档位 + 生成质量两个独立行 */}
                 {(() => {
                     const pureModelId = model.includes('::') ? model.split('::').pop()! : model;
-                    const paramType = getModelParamType(pureModelId);
-                    const resolutionTiers = getResolutionTierOptions(pureModelId);
-                    const qualityLevels = getQualityLevelOptions(pureModelId);
+                    const paramType = getModelParamType(pureModelId, selectedProviderHint);
+                    const resolutionTiers = getResolutionTierOptions(pureModelId, selectedProviderHint);
+                    const qualityLevels = getQualityLevelOptions(pureModelId, selectedProviderHint);
                     const showResolutions = resolutionTiers.length > 1;
                     const showQuality = qualityLevels.length > 1;
 

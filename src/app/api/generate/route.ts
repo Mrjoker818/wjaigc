@@ -23,7 +23,7 @@ import { recordImageTaskSubmitted, recordImageTaskTerminal } from '@/lib/cloud-t
 import { getCloudTaskForUserByIdempotencyKey } from '@/lib/cloud-task-storage';
 import { persistRemoteImage } from '@/lib/s3-storage';
 import { calculateActualPixelsFromRatio } from '@/lib/calculate-pixels';
-import { RESOLUTION_TIER_MODELS, QUALITY_LEVEL_MODELS, getModelParamType, ModelParamType } from '@/lib/canvas-generation-group';
+import { RESOLUTION_TIER_MODELS, QUALITY_LEVEL_MODELS, getModelParamType, getProviderAspectRatios, normalizeImageGenerationSelection, ModelParamType } from '@/lib/canvas-generation-group';
 
 // 直接模式（OpenAI兼容API返回图片需60-120秒）
 // 异步模式（返回task_id只需几秒）两者共存，取较大值
@@ -54,20 +54,18 @@ interface ModelConfig {
 }
 
 // 通用支持的尺寸列表
-const COMMON_SIZES = ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'];
-
 /**
  * 根据模型ID和兼容性档案动态推断模型配置
  * - 不依赖任何硬编码的模型列表
  * - 根据模型名称关键词智能推断能力
  * - 所有管理员添加的 API 都可自动适配
  */
-function inferModelConfig(modelId: string, profile: ApiCompatProfile, providerName?: string): ModelConfig {
+function inferModelConfig(modelId: string, profile: ApiCompatProfile, providerName?: string, providerHint = ''): ModelConfig {
   const id = (modelId || '').toLowerCase();
 
   // ★ 使用核心配置中的模型列表判断参数类型（保持与 UI 一致）
   // 核心改进：不再简单依赖关键词匹配，而是使用规范化的模型能力表
-  const paramTypeFromConfig = getModelParamType(modelId);
+  const paramTypeFromConfig = getModelParamType(modelId, providerHint);
   const paramType: ModelConfig['paramType'] = paramTypeFromConfig;
 
   // 根据模型名称推断是否支持图生图
@@ -98,7 +96,7 @@ function inferModelConfig(modelId: string, profile: ApiCompatProfile, providerNa
     name: providerName || modelId,
     modelId,
     paramType,
-    supportedSizes: COMMON_SIZES,
+    supportedSizes: getProviderAspectRatios(modelId, providerHint),
     supportsImageToImage,
     maxN: 4,
     estimatedTime,
@@ -127,6 +125,7 @@ export async function POST(request: NextRequest) {
       productCategory, 
       stylePreset, 
       outputCount,
+      n: requestedN,
       model: rawModel = 'gemini-2.5-flash-image-preview',
       userId: requestUserId,
       strength,
@@ -140,9 +139,12 @@ export async function POST(request: NextRequest) {
       resolution, // GPT-Image系列分辨率档位参数（1K/2K/4K）
     } = body;
     // quality 默认值 '1K'，后续可能被模型别名 resolutionTier 覆盖
+    // Canvas-era callers use `n`; the current panels use `outputCount`.
+    // Normalize them before task fan-out so every entry point has identical behavior.
+    const requestedOutputCount = outputCount ?? requestedN;
     let quality: string = typeof body.quality === 'string' ? body.quality : '1K';
     // resolution 默认值 '2K'（仅GPT-Image系列使用）
-    const resolutionTier: string = resolution || '2K';
+    let resolutionTier: string = resolution || '2K';
     // 诊断日志：显示接收到的参考图参数
     console.log(`[generate] model=${rawModel}, providerId=${providerId}, referenceImages.length=${referenceImages?.length || 0}, referenceMode=${referenceMode}`);
     // 必填参数校验
@@ -150,7 +152,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: '请输入创意描述（prompt）' }, { status: 400 });
     }
     // 尺寸校验
-    if (requestedPixelSize && !/^\d+x\d+$/.test(requestedPixelSize)) {
+    if (requestedPixelSize && requestedPixelSize !== 'auto' && !/^\d+x\d+$/.test(requestedPixelSize)) {
       return NextResponse.json({ success: false, error: '尺寸格式无效，应为 宽x高（如 1024x1024）' }, { status: 400 });
     }
     // 参考图URL校验（过滤空字符串元素，避免前端删除后残留空元素）
@@ -679,7 +681,8 @@ export async function POST(request: NextRequest) {
       console.log(`[generate] 模型规范化: "${rawModelId}" → "${model}" (在提供商列表中精确匹配: ${providerModels.some(m => String(m).toLowerCase() === rawModelId.toLowerCase()) ? '是' : '否'})`);
     }
     
-    let modelConfig = inferModelConfig(model, initialProfile, provider?.displayName);
+    const providerHint = `${provider?.id || effectiveProviderId} ${provider?.displayName || provider?.name || ''} ${provider?.baseUrl || apiBaseUrl}`;
+    let modelConfig = inferModelConfig(model, initialProfile, provider?.displayName, providerHint);
 
     // 构建备选模型列表（排除当前模型，优先管理员配置的模型）
     const candidateModels: { modelId: string; apiKey: string; baseUrl: string; providerId: string; displayName: string; advancedParams?: Record<string, string> }[] = [];
@@ -706,7 +709,7 @@ export async function POST(request: NextRequest) {
         serverApiKey = fallback.apiKey;
         apiBaseUrl = normalizeApiBaseUrl(fallback.baseUrl);
         const fallbackProfile = resolveCompatProfile({ baseUrl: fallback.baseUrl, advancedParams: fallback.advancedParams });
-        modelConfig = inferModelConfig(fallback.modelId, fallbackProfile, fallback.displayName);
+        modelConfig = inferModelConfig(fallback.modelId, fallbackProfile, fallback.displayName, `${fallback.providerId} ${fallback.displayName} ${fallback.baseUrl}`);
         provider = {
           id: fallback.providerId,
           name: fallback.displayName,
@@ -930,10 +933,22 @@ export async function POST(request: NextRequest) {
     }
 
     // 验证尺寸是否支持
-    const requestedSize = aspectRatio || '1:1';
+    // Normalize stale state before a request reaches the provider. This covers
+    // old browser state and workflow payloads as well as the current UI.
+    const activeProviderHint = `${provider?.id || effectiveProviderId} ${provider?.displayName || provider?.name || ''} ${provider?.baseUrl || apiBaseUrl}`;
+    const normalizedSelection = normalizeImageGenerationSelection(modelConfig.modelId, activeProviderHint, {
+      aspectRatio: aspectRatio || '1:1',
+      quality,
+      resolution: resolutionTier,
+    });
+    let requestedSize = normalizedSelection.aspectRatio;
+    quality = normalizedSelection.quality;
+    resolutionTier = normalizedSelection.resolution;
     
     // 设置生成数量 - 不受模型maxN限制，因为我们逐个提交任务(n=1)
-    const totalCount = outputCount && outputCount >= 1 ? Math.min(outputCount, 10) : 1;
+    const totalCount = typeof requestedOutputCount === "number" && Number.isFinite(requestedOutputCount) && requestedOutputCount >= 1
+      ? Math.min(Math.floor(requestedOutputCount), 10)
+      : 1;
 
     // 判断 URL 是否使用私有 IP（10.x / 172.16-31.x / 192.168.x / 127.x）
     const isPrivateIp = (urlStr: string): boolean => {
@@ -1011,7 +1026,7 @@ export async function POST(request: NextRequest) {
       };
 
       // 像素辅助字段（仅当有像素尺寸时添加）
-      if (pixelSize) {
+      if (pixelSize && /^\d+x\d+$/.test(pixelSize)) {
         requestBody.width = parseInt(pixelSize.split('x')[0]);
         requestBody.height = parseInt(pixelSize.split('x')[1]);
         requestBody.size_px = pixelSize;
@@ -2223,7 +2238,7 @@ export async function POST(request: NextRequest) {
           for (let ci = 0; ci < candidateModels.length; ci++) {
             const candidate = candidateModels[ci];
             const candidateProfile = resolveCompatProfile({ baseUrl: candidate.baseUrl, advancedParams: candidate.advancedParams });
-            const candidateConfig = inferModelConfig(candidate.modelId, candidateProfile, candidate.displayName);
+            const candidateConfig = inferModelConfig(candidate.modelId, candidateProfile, candidate.displayName, `${candidate.providerId} ${candidate.displayName} ${candidate.baseUrl}`);
             
             try {
               console.log(`尝试备选模型 ${candidate.modelId} (${ci + 1}/${candidateModels.length})...`);

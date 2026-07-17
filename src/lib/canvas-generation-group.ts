@@ -485,7 +485,26 @@ export const SHARED_ASPECT_RATIOS = [
 ];
 
 /** 判断模型的参数类型 */
-export function getModelParamType(modelId: string): ModelParamType {
+function is302Provider(providerHint = ''): boolean {
+    return /(?:^|\s|\.)302(?:\.ai)?(?:\s|$)|api\.302\.ai/i.test(providerHint);
+}
+
+function is302GptImage(modelId: string, providerHint = ''): boolean {
+    return is302Provider(providerHint) && /^gpt-image-1(?:\.5|-mini)?$/i.test(modelId.trim());
+}
+
+/** The 302 GPT Image contract explicitly accepts `size: auto`. */
+export function shouldPreserveProviderAutoSize(modelId: string, providerHint = ''): boolean {
+    return is302GptImage(modelId, providerHint);
+}
+
+/**
+ * Returns the parameter semantics for a model as exposed by the selected provider.
+ * Model names alone are not sufficient: compatible gateways can deliberately omit
+ * fields supported by the upstream model.
+ */
+export function getModelParamType(modelId: string, providerHint = ''): ModelParamType {
+    if (is302GptImage(modelId, providerHint)) return 'quality';
     const normalizedId = modelId.toLowerCase();
     
     // GPT-Image系列始终支持 both（resolution + quality）
@@ -607,14 +626,20 @@ function mergeParamOptions(modelId: string, desiredType: ModelParamType, existin
  *    - 其他 → 无档位
  * 返回：{ type: 'resolution'|'quality'|'both'|'none', options: string[], defaultOption: string }
  */
-export function inferModelParamCapability(modelId: string): { type: ModelParamType; options: string[]; defaultOption: string } {
+export function inferModelParamCapability(modelId: string, providerHint = ''): { type: ModelParamType; options: string[]; defaultOption: string } {
     const id = (modelId || '').toLowerCase();
     if (!id) return { type: 'none', options: [], defaultOption: '' };
+
+    // 302 documents GPT Image 1/1.5/mini with fixed pixel sizes and a quality
+    // field only. Do not surface the generic gateway resolution tiers here.
+    if (is302GptImage(modelId, providerHint)) {
+        return { type: 'quality', options: ['auto', 'low', 'medium', 'high'], defaultOption: 'auto' };
+    }
 
     // 1. 优先查MODEL_QUALITIES
     if (MODEL_QUALITIES[modelId]) {
         const opts = [...MODEL_QUALITIES[modelId]]; // copy to avoid mutation
-        const type = getModelParamType(modelId);
+        const type = getModelParamType(modelId, providerHint);
         // ★ 关键修复：MODEL_QUALITIES 中的选项可能不完整（如 gpt-image-2 只有质量值但 type=both），
         // 需要根据 getModelParamType 的结果补充缺失的档位选项
         return mergeParamOptions(modelId, type, opts);
@@ -728,27 +753,27 @@ export function inferModelParamCapability(modelId: string): { type: ModelParamTy
 }
 
 /** 获取模型支持的分辨率档位选项（智能兜底） */
-export function getResolutionTierOptions(modelId: string): string[] {
-    const cap = inferModelParamCapability(modelId);
+export function getResolutionTierOptions(modelId: string, providerHint = ''): string[] {
+    const cap = inferModelParamCapability(modelId, providerHint);
     if (cap.type === 'resolution' || cap.type === 'both') return cap.options.filter(isResolutionTier);
     return [];
 }
 
 /** 获取模型支持的质量级别选项（智能兜底） */
-export function getQualityLevelOptions(modelId: string): string[] {
-    const cap = inferModelParamCapability(modelId);
+export function getQualityLevelOptions(modelId: string, providerHint = ''): string[] {
+    const cap = inferModelParamCapability(modelId, providerHint);
     if (cap.type === 'quality' || cap.type === 'both') return cap.options.filter(o => !isResolutionTier(o));
     return [];
 }
 
 /** 综合获取模型的"质量"选项（兼容旧接口） */
-export function getQualityOptions(modelId: string): string[] {
-    return inferModelParamCapability(modelId).options;
+export function getQualityOptions(modelId: string, providerHint = ''): string[] {
+    return inferModelParamCapability(modelId, providerHint).options;
 }
 
 /** 获取模型默认档位值（模型名带4k时默认4K） */
-export function getDefaultParamValue(modelId: string): string {
-    return inferModelParamCapability(modelId).defaultOption;
+export function getDefaultParamValue(modelId: string, providerHint = ''): string {
+    return inferModelParamCapability(modelId, providerHint).defaultOption;
 }
 
 /** 判断值是否是分辨率档位 */
@@ -1049,6 +1074,7 @@ export function findModelConfig<T>(map: Record<string, T>, modelId: string): T |
 
 /** Provider-specific UI rules keep documented parameters selectable and visible. */
 export function getProviderAspectRatios(modelId: string, providerHint = ''): string[] {
+    if (is302GptImage(modelId, providerHint)) return ['auto', '1:1', '3:2', '2:3'];
     const ratios = findModelConfig(MODEL_ASPECT_RATIOS, modelId) || DEFAULT_ASPECT_RATIOS;
     return /4sapi/i.test(providerHint) ? ratios.filter(ratio => ratio !== 'auto') : ratios;
 }
@@ -1060,6 +1086,38 @@ export function getProviderPixelSizingOption(
     resolution: string,
 ): string {
     return /4sapi/i.test(providerHint) ? resolution || quality : quality;
+}
+
+export interface ImageGenerationSelection {
+    aspectRatio: string;
+    quality: string;
+    resolution?: string;
+}
+
+/**
+ * Keeps stale UI state, workflow payloads, and direct API callers inside the
+ * capability set of the selected provider model.
+ */
+export function normalizeImageGenerationSelection(
+    modelId: string,
+    providerHint: string,
+    selection: ImageGenerationSelection,
+): Required<ImageGenerationSelection> {
+    const aspectRatios = getProviderAspectRatios(modelId, providerHint);
+    const qualities = getQualityLevelOptions(modelId, providerHint);
+    const resolutionTiers = getResolutionTierOptions(modelId, providerHint);
+
+    return {
+        aspectRatio: aspectRatios.includes(selection.aspectRatio)
+            ? selection.aspectRatio
+            : (aspectRatios[0] || '1:1'),
+        quality: qualities.length === 0 || qualities.includes(selection.quality)
+            ? selection.quality
+            : qualities[0],
+        resolution: resolutionTiers.includes(selection.resolution || '')
+            ? selection.resolution || ''
+            : (resolutionTiers[0] || ''),
+    };
 }
 
 // ============ 工具函数 ============
