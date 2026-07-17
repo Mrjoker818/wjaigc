@@ -12,4 +12,13 @@ describe('node editor drag throttling', () => {
     expect(source).toContain('if (nodeDragRafRef.current === null)');
     expect(source).toContain('applyNodeDragPosition(nodeDragPositionRef.current)');
   });
+
+  it('uses compositor previews and viewport culling for pan-heavy workflows', () => {
+    expect(source).toContain('const updateNodePanPreview = useCallback');
+    expect(source).toContain('const visibleNodes = useMemo');
+    expect(source).toContain('const visibleConnections = useMemo');
+    expect(source).toContain('visibleConnections.map(conn =>');
+    expect(source).toContain('visibleNodes.map(node =>');
+    expect(source).not.toContain('setViewport(v => ({ ...v, x: panStart.vx');
+  });
 });

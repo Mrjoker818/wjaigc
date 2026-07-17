@@ -470,6 +470,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   // View state
   const [viewOffset, setViewOffset] = useState({ x: initialViewState?.offsetX ?? 0, y: initialViewState?.offsetY ?? 0 });
   const [zoom, setZoom] = useState(initialViewState?.zoom ?? 1);
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
   const [isPanning, setIsPanning] = useState(false);
   const [isMiddlePanning, setIsMiddlePanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
@@ -579,6 +581,14 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
   const updatePanPreview = useCallback((offset: { x: number; y: number }) => {
     panPreviewOffsetRef.current = offset;
+    if (panRafRef.current === null) {
+      panRafRef.current = requestAnimationFrame(() => {
+        panRafRef.current = null;
+        const el = canvasTransformRef.current;
+        const preview = panPreviewOffsetRef.current;
+        if (el) el.style.transform = `translate(${preview.x}px, ${preview.y}px) scale(${zoomRef.current})`;
+      });
+    }
     const now = performance.now();
     if (now - panViewportSyncAtRef.current >= PAN_VIEWPORT_SYNC_INTERVAL_MS) {
       panViewportSyncAtRef.current = now;
@@ -2742,14 +2752,6 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       const mx = e.clientX - middlePanStartRef.current.x;
       const my = e.clientY - middlePanStartRef.current.y;
       updatePanPreview({ x: mx, y: my });
-      if (panRafRef.current) cancelAnimationFrame(panRafRef.current);
-      panRafRef.current = requestAnimationFrame(() => {
-        const el = canvasTransformRef.current;
-        if (el) {
-          el.style.transform = `translate(${mx}px, ${my}px) scale(${zoom})`;
-        }
-        panRafRef.current = null;
-      });
       return;
     }
 
@@ -2758,14 +2760,6 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       const newX = e.clientX - panStart.x;
       const newY = e.clientY - panStart.y;
       updatePanPreview({ x: newX, y: newY });
-      if (panRafRef.current) cancelAnimationFrame(panRafRef.current);
-      panRafRef.current = requestAnimationFrame(() => {
-        const el = canvasTransformRef.current;
-        if (el) {
-          el.style.transform = `translate(${newX}px, ${newY}px) scale(${zoom})`;
-        }
-        panRafRef.current = null;
-      });
       return;
     }
 

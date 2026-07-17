@@ -1,7 +1,7 @@
 'use client';
 
 import NextImage from 'next/image';
-import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useLayoutEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import {
   WorkflowNode, WorkflowConnection, Workflow as WorkflowData, NodeType, NodeCategory,
@@ -19,6 +19,11 @@ import {
   getResolutionTierOptions,
 } from '@/lib/canvas-generation-group';
 import { getPromptTemplates, searchTemplates, addPromptTemplate } from '@/lib/prompt-templates';
+import {
+  getVisibleWorkflowNodeIds,
+  resolveWorkflowCullingBounds,
+  selectVisibleWorkflowConnections,
+} from '@/lib/node-canvas-virtualization';
 import {
   Image as ImageIcon, Type, SlidersHorizontal, Wand2, Pencil, Maximize, Scissors,
   PenTool, Palette, Sun, GitBranch, GitMerge, Repeat, RefreshCw, Layers,
@@ -791,6 +796,15 @@ export default function NodeEditor({ workflow, userId, onBack, onWorkflowChange,
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 0.8 });
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0, vx: 0, vy: 0 });
+  const nodeViewportTransformRef = useRef<HTMLDivElement>(null);
+  const svgViewportTransformRef = useRef<SVGGElement>(null);
+  const nodePanPreviewRef = useRef(viewport);
+  const nodePanRafRef = useRef<number | null>(null);
+  const nodePanViewportSyncAtRef = useRef(0);
+  const [nodePanViewport, setNodePanViewport] = useState(viewport);
+  const nodeWheelDeltaRef = useRef(0);
+  const nodeWheelRafRef = useRef<number | null>(null);
+  const [nodeViewportSize, setNodeViewportSize] = useState({ width: 0, height: 0 });
   const [sidebarTab, setSidebarTab] = useState<'nodes' | 'props' | 'ai-build' | 'presets' | 'prompts' | 'assistant' | 'material' | 'prompt'>('nodes');
   const [searchQuery, setSearchQuery] = useState('');
   const [executionId, setExecutionId] = useState<string | null>(null);
@@ -1154,6 +1168,73 @@ ${contextInfo}
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef(viewport);
   viewportRef.current = viewport; // 始终保持最新值，避免拖动时stale closure
+
+  useEffect(() => {
+    const container = canvasContainerRef.current;
+    if (!container) return;
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) {
+        setNodeViewportSize({ width: entry.contentRect.width, height: entry.contentRect.height });
+      }
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+
+  const applyNodeViewportPreview = useCallback((nextViewport: { x: number; y: number; zoom: number }) => {
+    const htmlTransform = `translate(${nextViewport.x}px, ${nextViewport.y}px) scale(${nextViewport.zoom})`;
+    if (nodeViewportTransformRef.current) nodeViewportTransformRef.current.style.transform = htmlTransform;
+    if (svgViewportTransformRef.current) {
+      svgViewportTransformRef.current.setAttribute('transform', `translate(${nextViewport.x}, ${nextViewport.y}) scale(${nextViewport.zoom})`);
+    }
+  }, []);
+
+  const updateNodePanPreview = useCallback((nextViewport: { x: number; y: number; zoom: number }) => {
+    nodePanPreviewRef.current = nextViewport;
+    if (nodePanRafRef.current === null) {
+      nodePanRafRef.current = requestAnimationFrame(() => {
+        nodePanRafRef.current = null;
+        applyNodeViewportPreview(nodePanPreviewRef.current);
+      });
+    }
+
+    const now = performance.now();
+    if (now - nodePanViewportSyncAtRef.current >= 80) {
+      nodePanViewportSyncAtRef.current = now;
+      setNodePanViewport(nextViewport);
+    }
+  }, [applyNodeViewportPreview]);
+
+  const nodeRenderViewport = isPanning ? nodePanViewport : viewport;
+  const nodeById = useMemo(() => new Map(wf.nodes.map(node => [node.id, node])), [wf.nodes]);
+  const nodeCullingBounds = useMemo(() => resolveWorkflowCullingBounds(
+    viewport,
+    nodePanViewport,
+    nodeViewportSize,
+    isPanning,
+  ), [viewport, nodePanViewport, nodeViewportSize, isPanning]);
+  const pinnedNodeIds = useMemo(() => new Set(selectedNodeIds), [selectedNodeIds]);
+  const visibleNodeIds = useMemo(() => getVisibleWorkflowNodeIds(
+    wf.nodes,
+    nodeCullingBounds,
+    pinnedNodeIds,
+    draggingNodeRef.current,
+  ), [wf.nodes, nodeCullingBounds, pinnedNodeIds, isPanning]);
+  const visibleNodes = useMemo(() => wf.nodes.filter(node => visibleNodeIds.has(node.id)), [wf.nodes, visibleNodeIds]);
+  const visibleConnections = useMemo(
+    () => selectVisibleWorkflowConnections(wf.connections, visibleNodeIds),
+    [wf.connections, visibleNodeIds],
+  );
+
+  useLayoutEffect(() => {
+    if (isPanning) applyNodeViewportPreview(nodePanPreviewRef.current);
+  }, [applyNodeViewportPreview, isPanning, nodePanViewport]);
+
+  useEffect(() => () => {
+    if (nodePanRafRef.current !== null) cancelAnimationFrame(nodePanRafRef.current);
+    if (nodeWheelRafRef.current !== null) cancelAnimationFrame(nodeWheelRafRef.current);
+  }, []);
+
   const { models, loading: modelsLoading } = useModelList();
   const chatModels = useMemo(() => models.filter(m => m.type === 'chat'), [models]);
   const imageModels = useMemo(() => models.filter(m => m.type === 'image'), [models]);
@@ -1180,13 +1261,13 @@ ${contextInfo}
     const m = new Map<string, string>();
     for (const c of wf.connections) {
       if (c.type === 'image' || c.type === 'data') {
-        const upNode = wf.nodes.find(n => n.id === c.fromNodeId);
+        const upNode = nodeById.get(c.fromNodeId);
         const url = (upNode?.config?.imageUrl as string) || (execResults[c.fromNodeId]?.output?.imageUrl as string);
         if (url) m.set(c.toNodeId, url);
       }
     }
     return m;
-  }, [wf.connections, wf.nodes, execResults]);
+  }, [wf.connections, nodeById, execResults]);
 
   // 框选状态
   const [boxSelect, setBoxSelect] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null);
@@ -1583,6 +1664,8 @@ ${contextInfo}
     if (e.button === 1 || (e.button === 0 && e.altKey)) {
       // 中键或Alt+左键 = 平移
       const vp = viewportRef.current;
+      nodePanPreviewRef.current = vp;
+      setNodePanViewport(vp);
       setIsPanning(true);
       setPanStart({ x: e.clientX, y: e.clientY, vx: vp.x, vy: vp.y });
     } else if (e.button === 0 && !draggingConn) {
@@ -1603,7 +1686,11 @@ ${contextInfo}
 
   const handleCanvasMouseMove = useCallback((e: React.MouseEvent) => {
     if (isPanning) {
-      setViewport(v => ({ ...v, x: panStart.vx + (e.clientX - panStart.x), y: panStart.vy + (e.clientY - panStart.y) }));
+      updateNodePanPreview({
+        x: panStart.vx + (e.clientX - panStart.x),
+        y: panStart.vy + (e.clientY - panStart.y),
+        zoom: viewportRef.current.zoom,
+      });
     } else if (draggingNodeRef.current) {
       const canvasRect = canvasContainerRef.current?.getBoundingClientRect();
       if (!canvasRect) return;
@@ -1636,9 +1723,19 @@ ${contextInfo}
       const my = (e.clientY - canvasRect.top - vp.y) / vp.zoom;
       setBoxSelect(prev => prev ? { ...prev, endX: mx, endY: my } : null);
     }
-  }, [applyNodeDragPosition, isPanning, draggingConn, boxSelect, panStart.vx, panStart.x, panStart.vy, panStart.y]);
+  }, [applyNodeDragPosition, isPanning, draggingConn, boxSelect, panStart.vx, panStart.x, panStart.vy, panStart.y, updateNodePanPreview]);
 
   const handleCanvasMouseUp = useCallback(() => {
+    if (isPanning) {
+      if (nodePanRafRef.current !== null) {
+        cancelAnimationFrame(nodePanRafRef.current);
+        nodePanRafRef.current = null;
+      }
+      const finalViewport = nodePanPreviewRef.current;
+      applyNodeViewportPreview(finalViewport);
+      setNodePanViewport(finalViewport);
+      setViewport(finalViewport);
+    }
     setIsPanning(false);
     if (draggingNodeRef.current) {
       if (nodeDragRafRef.current !== null) {
@@ -1695,12 +1792,22 @@ ${contextInfo}
     }
     setBoxSelect(null);
     isBoxSelectingRef.current = false;
-  }, [applyNodeDragPosition, boxSelect, setWf, onWorkflowChange, wf.nodes]);
+  }, [applyNodeDragPosition, applyNodeViewportPreview, boxSelect, isPanning, setWf, onWorkflowChange, wf.nodes]);
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
-    const factor = e.deltaY > 0 ? 0.92 : 1.08;
-    setViewport(v => ({ ...v, zoom: Math.max(0.15, Math.min(3, v.zoom * factor)) }));
+    nodeWheelDeltaRef.current += e.deltaY;
+    if (nodeWheelRafRef.current !== null) return;
+    nodeWheelRafRef.current = requestAnimationFrame(() => {
+      nodeWheelRafRef.current = null;
+      const delta = nodeWheelDeltaRef.current;
+      nodeWheelDeltaRef.current = 0;
+      const factor = Math.exp(-delta * 0.0015);
+      setViewport(current => ({
+        ...current,
+        zoom: Math.max(0.15, Math.min(3, current.zoom * factor)),
+      }));
+    });
   }, []);
 
   // ─── 右键菜单 ───
@@ -2463,11 +2570,11 @@ ${contextInfo}
                 <polygon points="0 0, 8 3, 0 6" fill={T.connColor} />
               </marker>
             </defs>
-            <g transform={`translate(${viewport.x}, ${viewport.y}) scale(${viewport.zoom})`}>
+            <g ref={svgViewportTransformRef} transform={`translate(${nodeRenderViewport.x}, ${nodeRenderViewport.y}) scale(${nodeRenderViewport.zoom})`}>
               {/* 连线 */}
-              {wf.connections.map(conn => {
-                const fromNode = wf.nodes.find(n => n.id === conn.fromNodeId);
-                const toNode = wf.nodes.find(n => n.id === conn.toNodeId);
+              {visibleConnections.map(conn => {
+                const fromNode = nodeById.get(conn.fromNodeId);
+                const toNode = nodeById.get(conn.toNodeId);
                 if (!fromNode || !toNode) return null;
                 const fromPort = fromNode.ports.find(p => p.id === conn.fromPortId);
                 const toPort = toNode.ports.find(p => p.id === conn.toPortId);
@@ -2512,7 +2619,7 @@ ${contextInfo}
                               </circle>
                             </>
                           )}
-                          {(conn.type !== 'any' && (isHighlighted || viewport.zoom > 0.6)) && (
+                          {(conn.type !== 'any' && (isHighlighted || nodeRenderViewport.zoom > 0.6)) && (
                             <text x={(from.x + to.x) / 2} y={(from.y + to.y) / 2 - 6} textAnchor="middle" fill={isBlocked ? '#666' : color} fontSize={10} fillOpacity={isBlocked ? 0.4 : 0.7} className="pointer-events-none">
                               {isBlocked ? 'blocked' : conn.type}
                             </text>
@@ -2568,14 +2675,17 @@ ${contextInfo}
 
           {/* HTML节点层 (z-index:2, 绝对定位div元素, 与原型对齐) */}
           <div
+            ref={nodeViewportTransformRef}
             className="absolute inset-0"
             style={{
               zIndex: 2,
-              transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`,
+              transform: `translate(${nodeRenderViewport.x}px, ${nodeRenderViewport.y}px) scale(${nodeRenderViewport.zoom})`,
               transformOrigin: '0 0',
+              willChange: 'transform',
+              contain: 'layout style',
             }}
           >
-            {wf.nodes.map(node => (
+            {visibleNodes.map(node => (
               <NodeCard
                 key={node.id}
                 node={node}
