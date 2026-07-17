@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import { getDesktopAuth, tokenFromHeader } from './desktop-cloud';
-import { getSessionUser } from './server-auth';
+import { getAuthSecretForInternalRequests, getSessionUser } from './server-auth';
 import type { User } from './user-types';
 
 /**
@@ -21,14 +21,14 @@ import type { User } from './user-types';
  * Supports: session cookie, Authorization header, x-wujie-connector-token header, verified internal request headers.
  */
 
-function getInternalApiSecret(): string | null {
+async function getInternalApiSecret(): Promise<string> {
   const secret = (
     process.env.INTERNAL_API_SECRET
     || process.env.WUJIE_AUTH_SECRET
     || process.env.NEXTAUTH_SECRET
     || ''
   ).trim();
-  return secret.length >= 32 ? secret : null;
+  return secret.length >= 32 ? secret : getAuthSecretForInternalRequests();
 }
 
 function secretsMatch(received: string, expected: string): boolean {
@@ -39,11 +39,8 @@ function secretsMatch(received: string, expected: string): boolean {
 }
 
 /** Build authenticated headers for server-to-server API calls within this application. */
-export function getInternalRequestHeaders(userId: string, userRole: 'user' | 'admin' = 'user'): Record<string, string> {
-  const secret = getInternalApiSecret();
-  if (!secret) {
-    throw new Error('Internal API authentication secret is not configured');
-  }
+export async function getInternalRequestHeaders(userId: string, userRole: 'user' | 'admin' = 'user'): Promise<Record<string, string>> {
+  const secret = await getInternalApiSecret();
 
   return {
     'x-internal-request': 'true',
@@ -63,7 +60,7 @@ export async function getRequestUser(request: Request | NextRequest): Promise<{
   const internalUserId = request.headers.get('x-internal-user-id');
   const internalUserRoleRaw = request.headers.get('x-internal-user-role') || 'user';
   const internalUserRole: 'user' | 'admin' = internalUserRoleRaw === 'admin' ? 'admin' : 'user';
-  const internalSecret = getInternalApiSecret();
+  const internalSecret = await getInternalApiSecret();
   const receivedInternalSecret = request.headers.get('x-wujie-internal-secret') || '';
   if (isInternal && internalUserId && internalSecret && secretsMatch(receivedInternalSecret, internalSecret)) {
     // Directly return authenticated user from internal header (no DB lookup needed)

@@ -369,7 +369,7 @@ async function executeGenerateImage(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...getInternalRequestHeaders(context.userId),
+        ...(await getInternalRequestHeaders(context.userId)),
       },
       body: JSON.stringify({
         prompt: negativePrompt ? `${prompt} [negative: ${negativePrompt}]` : prompt,
@@ -459,7 +459,7 @@ async function executeEditImage(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...getInternalRequestHeaders(context.userId),
+        ...(await getInternalRequestHeaders(context.userId)),
       },
       body: JSON.stringify({
         image: imageUrl,
@@ -533,7 +533,7 @@ async function executeImg2Img(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...getInternalRequestHeaders(context.userId),
+        ...(await getInternalRequestHeaders(context.userId)),
       },
       body: JSON.stringify({
         prompt: fullPrompt,
@@ -594,7 +594,7 @@ async function executeRemoveBg(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...getInternalRequestHeaders(context.userId),
+        ...(await getInternalRequestHeaders(context.userId)),
       },
       body: JSON.stringify({
         action: 'removebg',
@@ -643,7 +643,7 @@ async function executeUpscale(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...getInternalRequestHeaders(context.userId),
+        ...(await getInternalRequestHeaders(context.userId)),
       },
       body: JSON.stringify({
         action: 'upscale',
@@ -695,7 +695,7 @@ async function executeGenerateVideo(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...getInternalRequestHeaders(context.userId),
+        ...(await getInternalRequestHeaders(context.userId)),
       },
       body: JSON.stringify({
         prompt,
@@ -811,7 +811,7 @@ async function executeExtendCanvas(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...getInternalRequestHeaders(context.userId),
+        ...(await getInternalRequestHeaders(context.userId)),
       },
       body: JSON.stringify({
         action: 'extend',

@@ -369,7 +369,7 @@ export async function POST(request: NextRequest) {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              ...getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user'),
+              ...(await getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user')),
             },
             body: JSON.stringify(backgroundBody),
             signal: AbortSignal.timeout(600000), // 10分钟超时

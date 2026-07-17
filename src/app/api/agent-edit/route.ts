@@ -387,7 +387,7 @@ export async function POST(request: NextRequest) {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',
-                  ...getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user'),
+                  ...(await getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user')),
                 },
                 body: JSON.stringify({ imageUrl: finalImageUrl, scale: step.params.scale || '2', outputFormat: 'png' }),
               });
@@ -404,7 +404,7 @@ export async function POST(request: NextRequest) {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',
-                  ...getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user'),
+                  ...(await getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user')),
                 },
                 body: JSON.stringify({ imageUrl: finalImageUrl, action: 'removebg', model: imageModel, providerId: imageProviderId, engine: imageModel ? 'ai' : 'auto' }),
               });
@@ -421,7 +421,7 @@ export async function POST(request: NextRequest) {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',
-                  ...getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user'),
+                  ...(await getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user')),
                 },
                 body: JSON.stringify({ imageUrl: finalImageUrl, mode: step.params.mode || 'color', quality: step.params.quality || 'balanced' }),
               });
@@ -438,7 +438,7 @@ export async function POST(request: NextRequest) {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',
-                  ...getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user'),
+                  ...(await getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user')),
                 },
                 body: JSON.stringify({
                   prompt: String(step.params.prompt || prompt),
@@ -477,7 +477,7 @@ export async function POST(request: NextRequest) {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',
-                  ...getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user'),
+                  ...(await getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user')),
                 },
                 body: JSON.stringify({
                   prompt: String(step.params.prompt || prompt),
@@ -520,7 +520,7 @@ export async function POST(request: NextRequest) {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',
-                  ...getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user'),
+                  ...(await getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user')),
                 },
                 body: JSON.stringify({
                   videoUrl: String(step.params.videoUrl || context.videoUrl || ''),
@@ -569,7 +569,7 @@ export async function POST(request: NextRequest) {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
-                ...getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user'),
+                ...(await getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user')),
               },
               body: JSON.stringify({ imageData: finalImageUrl }),
             });

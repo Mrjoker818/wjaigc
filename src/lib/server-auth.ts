@@ -199,6 +199,14 @@ async function authSecret(): Promise<string> {
 }
 
 /**
+ * Returns the same secret used to sign sessions so internal API calls remain
+ * authenticated when a preview deployment restores its secret from storage.
+ */
+export async function getAuthSecretForInternalRequests(): Promise<string> {
+  return authSecret();
+}
+
+/**
  * Legacy auth secrets used in previous deployments.
  * When a user's password hash doesn't match the current secret,
  * we try these legacy secrets. If matched, the hash is auto-migrated
