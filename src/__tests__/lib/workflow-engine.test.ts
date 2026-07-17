@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildNodeExecutionRequest, evaluateWorkflowCondition, getNodePropertyFields, resolveControlOutputPorts, resolveGroupOutput, resolveInlineSubgraph, resolveWorkflowIterations, shouldSkipNodeForInactiveBranches, topologicalSort } from '@/lib/workflow-engine';
+import { buildNodeExecutionRequest, evaluateWorkflowCondition, getNodeInputs, getNodePropertyFields, resolveControlOutputPorts, resolveGroupOutput, resolveInlineSubgraph, resolveWorkflowIterations, shouldSkipNodeForInactiveBranches, topologicalSort } from '@/lib/workflow-engine';
 import type { NodeType, WorkflowNode, WorkflowConnection } from '@/lib/workflow-engine';
 
 /** 创建最小合法 WorkflowNode */
@@ -76,9 +76,26 @@ describe('topologicalSort', () => {
   it('环检测返回空数组或抛出异常', () => {
     const nodes = [makeNode('A'), makeNode('B')];
     const edges = [makeConn('e1', 'A', 'B'), makeConn('e2', 'B', 'A')];
-    // 环存在时，函数应返回空数组或抛异常
-    const result = topologicalSort(nodes, edges);
-    expect(Array.isArray(result)).toBe(true);
+    expect(() => topologicalSort(nodes, edges)).toThrow('circular dependency');
+  });
+});
+
+describe('workflow inputs', () => {
+  it('preserves every upstream image instead of silently overwriting earlier inputs', () => {
+    const target = makeNode('target', 'ai-generate');
+    const connections = [
+      { ...makeConn('first', 'source-a', target.id), type: 'image' as const },
+      { ...makeConn('second', 'source-b', target.id), type: 'image' as const },
+    ];
+    const results = new Map([
+      ['source-a', { nodeId: 'source-a', status: 'success' as const, output: { imageUrl: '/a.png' }, durationMs: 0 }],
+      ['source-b', { nodeId: 'source-b', status: 'success' as const, output: { imageUrl: '/b.png' }, durationMs: 0 }],
+    ]);
+
+    expect(getNodeInputs(target, connections, results)).toMatchObject({
+      imageUrl: '/a.png',
+      imageUrls: ['/a.png', '/b.png'],
+    });
   });
 });
 

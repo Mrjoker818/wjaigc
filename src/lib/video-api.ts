@@ -334,7 +334,8 @@ function inferVideoModelFromKeywords(modelId: string): VideoModelInfo | null {
 
   // ====== 家族特征推断 ======
   // Kling (可灵): 完整首尾帧/多参考/延长/音效/运镜/运动笔刷
-  const isKling = lower.includes('kling') || lower.includes('dashscope') || lower.includes('wanx') || lower.includes('通义');
+  const isKling = lower.includes('kling') || lower.includes('可灵');
+  const isWanx = lower.includes('wanx') || lower.includes('wan2') || lower.includes('wan-') || lower.includes('万相');
   // Seedance/豆包: 完整特征
   const isSeedance = lower.includes('seedance') || lower.includes('doubao') || lower.includes('volcengine') || lower.includes('ark') || lower.includes('豆包');
   // Minimax/海螺
@@ -365,6 +366,8 @@ function inferVideoModelFromKeywords(modelId: string): VideoModelInfo | null {
   if (isKling) {
     profile = 'dashscope'; region = 'cn';
     name = lower.includes('v3.5') || lower.includes('v3-5') ? '可灵 V3.5' : lower.includes('omni') ? '可灵 V3 Omni' : lower.includes('v3') ? '可灵 V3' : lower.includes('v2') ? '可灵 V2' : lower.includes('v2.6') ? '可灵 2.6' : '可灵';
+  } else if (isWanx) {
+    profile = 'rest-generic'; region = 'cn'; name = '通义万相';
   } else if (isSeedance) {
     profile = 'volcengine-ark'; region = 'cn';
     name = lower.includes('3.0') ? 'Seedance 3.0' : lower.includes('2.3') ? 'Seedance 2.3' : lower.includes('2.0') ? 'Seedance 2.0' : lower.includes('1.0') ? 'Seedance 1.0 Pro' : 'Seedance';
@@ -1681,6 +1684,24 @@ export function getVideoPixelSize(aspectRatio: string, resolution: string = '108
   };
 }
 
+export const PLATFORM_VIDEO_MAX_DURATION_SECONDS = 15;
+
+export function getPlatformVideoDurations(durations: number[]): number[] {
+  return Array.from(new Set(durations))
+    .filter((duration) => Number.isInteger(duration) && duration > 0 && duration <= PLATFORM_VIDEO_MAX_DURATION_SECONDS)
+    .sort((left, right) => left - right);
+}
+
+export function clampVideoDurationToAllowed(duration: number, allowedDurations: number[]): number {
+  const allowed = getPlatformVideoDurations(allowedDurations);
+
+  if (allowed.length === 0) return Math.min(Math.max(Math.round(duration) || 5, 1), PLATFORM_VIDEO_MAX_DURATION_SECONDS);
+
+  return allowed.reduce((nearest, candidate) => {
+    return Math.abs(candidate - duration) < Math.abs(nearest - duration) ? candidate : nearest;
+  });
+}
+
 /**
  * Validates a single-clip duration only when the model matches a maintained
  * capability contract. Unknown administrator-defined models remain pass-through.
@@ -1689,7 +1710,7 @@ export function validateVideoDuration(
   modelId: string,
   duration: number,
 ): { valid: true } | { valid: false; allowedDurations: number[] } {
-  if (!Number.isInteger(duration) || duration <= 0) {
+  if (!Number.isInteger(duration) || duration <= 0 || duration > PLATFORM_VIDEO_MAX_DURATION_SECONDS) {
     return { valid: false, allowedDurations: [] };
   }
 
@@ -1705,9 +1726,10 @@ export function validateVideoDuration(
     }
   }
 
-  if (!registered || registered.features.durations.includes(duration)) {
+  const allowedDurations = registered ? getPlatformVideoDurations(registered.features.durations) : [];
+  if (!registered || allowedDurations.includes(duration)) {
     return { valid: true };
   }
 
-  return { valid: false, allowedDurations: registered.features.durations };
+  return { valid: false, allowedDurations };
 }

@@ -15,7 +15,7 @@ const NUMBER_KEYS = new Set([
 const BOOLEAN_KEYS = new Set(['videoGenerationEnabled', '3dModelEnabled', 'announcementEnabled']);
 const NUMBER_RANGES: Record<string, [number, number]> = {
   initialCredits: [0, 100_000],
-  maxVideoDuration: [1, 600],
+  maxVideoDuration: [1, 15],
   imageMaxSizeMB: [1, 100],
 };
 

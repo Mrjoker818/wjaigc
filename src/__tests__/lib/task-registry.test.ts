@@ -13,6 +13,8 @@ import {
   isTaskCancelled,
   cancelTask,
   getActiveTaskCount,
+  waitForQueueSlot,
+  cleanupExpiredTasks,
   MAX_CONCURRENT_PER_USER,
   MAX_TASKS,
 } from '@/lib/task-registry';
@@ -112,14 +114,13 @@ describe('task-registry 模块', () => {
       expect(isTaskCancelled(id)).toBe(false);
     });
 
-    it('取消后状态为cancelled（终态清理后isTaskCancelled可能为false，但任务状态正确）', () => {
+    it('keeps the cancellation signal available to an in-flight worker', () => {
       const id = uniqueId();
       registerTask(id, 'generate', '图像生成');
       cancelTask(id);
-      // cancelTask内部: add到cancelledTasks → updateTaskProgress(cancelled) → 终态清理delete
-      // 所以isTaskCancelled可能返回false，但任务状态一定是cancelled
       const task = getTaskInfo(id);
       expect(task?.status).toBe('cancelled');
+      expect(isTaskCancelled(id)).toBe(true);
     });
 
     it('不存在的任务返回false', () => {
@@ -170,6 +171,23 @@ describe('task-registry 模块', () => {
 
     it('MAX_TASKS 为正数', () => {
       expect(MAX_TASKS).toBeGreaterThan(0);
+    });
+  });
+
+  describe('queue lifecycle', () => {
+    it('resolves a queued waiter when stale task cleanup evicts the task', async () => {
+      const userId = `cleanup-user-${uniqueId()}`;
+      for (let index = 0; index < MAX_CONCURRENT_PER_USER; index += 1) {
+        registerTask(uniqueId(), 'generate', '图像生成', userId);
+      }
+      const queuedId = uniqueId();
+      registerTask(queuedId, 'generate', '图像生成', userId);
+
+      const waiting = waitForQueueSlot(queuedId, 10_000);
+      cleanupExpiredTasks(Date.now() + 2 * 60 * 60 * 1000 + 1);
+
+      await expect(waiting).resolves.toBe(false);
+      expect(getTaskInfo(queuedId)).toBeUndefined();
     });
   });
 });

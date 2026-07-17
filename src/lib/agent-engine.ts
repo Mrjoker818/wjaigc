@@ -13,8 +13,6 @@
  * - 最大轮次限制防止死循环
  */
 
-import type { TaskInfo } from './task-registry';
-
 // ─── 工具定义 ──────────────────────────────────────────────────────
 
 export interface ToolParameter {
@@ -77,6 +75,8 @@ export interface AgentContext {
   contextHistory: Array<{ role: 'tool' | 'assistant'; content: string; toolName?: string }>;
   /** 进度回调 */
   onProgress?: (info: { round: number; step: string; detail?: string }) => void;
+  /** Allows the owning route to stop planning when its task is cancelled. */
+  isCancelled?: () => boolean;
 }
 
 // ─── Agent 执行结果 ────────────────────────────────────────────────
@@ -216,6 +216,15 @@ export async function executeAgentLoop(
   messages.push({ role: 'user', content: userContent });
 
   while (currentRound < maxRounds) {
+    if (context.isCancelled?.()) {
+      return {
+        success: false,
+        output: context.imageUrl,
+        steps,
+        error: 'Task cancelled',
+        finalResponse: 'Task cancelled',
+      };
+    }
     currentRound++;
     context.currentRound = currentRound;
 
@@ -252,6 +261,15 @@ export async function executeAgentLoop(
     // 执行每个工具调用
     const allResults: string[] = [];
     for (const toolCall of llmResponse.toolCalls) {
+      if (context.isCancelled?.()) {
+        return {
+          success: false,
+          output: context.imageUrl,
+          steps,
+          error: 'Task cancelled',
+          finalResponse: 'Task cancelled',
+        };
+      }
       if (allowedTools && !allowedTools.has(toolCall.name)) {
         const result = `Tool "${toolCall.name}" is not allowed for this task`;
         allResults.push(result);
@@ -488,7 +506,7 @@ registerTool({
   parameters: [
     { name: 'prompt', type: 'string', description: '视频内容描述，描述想要生成的视频画面和动态效果', required: true },
     { name: 'mode', type: 'string', description: '生成模式: text2video=纯文字生成, image2video=图片转视频', enum: ['text2video', 'image2video'] },
-    { name: 'duration', type: 'string', description: '视频时长(秒)', enum: ['5', '10'] },
+    { name: 'duration', type: 'string', description: '视频时长(秒)', enum: ['5', '10', '15'] },
     { name: 'aspect_ratio', type: 'string', description: '画面比例', enum: ['16:9', '9:16', '1:1', '4:3', '3:4'] },
   ],
   execute: async (params) => {
@@ -504,7 +522,7 @@ registerTool({
   description: '延长视频时长，在现有视频末尾继续生成内容。适用于需要更长视频的场景。需要提供原始视频URL。',
   parameters: [
     { name: 'prompt', type: 'string', description: '延续内容的描述，描述视频后续的画面发展' },
-    { name: 'duration', type: 'string', description: '延长的时长(秒)', enum: ['5', '10'] },
+    { name: 'duration', type: 'string', description: '延长的时长(秒)', enum: ['5', '10', '15'] },
   ],
   execute: async (params) => {
     return {

@@ -49,4 +49,14 @@ describe('admin runtime settings', () => {
     expect(response.status).toBe(400);
     expect(mocks.dbSetSystemSetting).not.toHaveBeenCalled();
   });
+
+  it('rejects a video duration above the 15 second platform maximum', async () => {
+    const response = await POST(new NextRequest('http://localhost/api/admin/settings', {
+      method: 'POST',
+      body: JSON.stringify({ maxVideoDuration: 16 }),
+    }));
+
+    expect(response.status).toBe(400);
+    expect(mocks.dbSetSystemSetting).not.toHaveBeenCalled();
+  });
 });

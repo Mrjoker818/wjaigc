@@ -56,4 +56,15 @@ describe('agent engine governance', () => {
       expect.objectContaining({ toolName, success: false, result: expect.stringContaining('Missing required parameter') }),
     ]));
   });
+
+  it('stops before calling the LLM when its task has been cancelled', async () => {
+    const context = createContext('agent-cancelled');
+    context.isCancelled = () => true;
+    const llmCall = vi.fn();
+
+    const result = await executeAgentLoop(context, llmCall);
+
+    expect(llmCall).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ success: false, error: 'Task cancelled' });
+  });
 });

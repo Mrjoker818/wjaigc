@@ -3,14 +3,14 @@
 import { useState, useEffect, useCallback, useRef, forwardRef, useImperativeHandle, type ReactNode } from 'react';
 import * as React from 'react';
 import {
-  Play, Video, ImagePlus, Clock, Settings2,
+  Play, Video, ImagePlus, Settings2,
   ChevronDown, ChevronUp, Loader2, Sparkles, Volume2, VolumeX,
   Upload, X, AlertCircle, Info, FastForward, Users, Plus, Paintbrush, Film, Palette, Images,
   History, RotateCcw, Languages, GripVertical, Minus, Maximize2, ChevronRight, CheckCircle2,
   Clapperboard, SlidersHorizontal, Mountain, ImageIcon, User, RefreshCw, Package
 } from 'lucide-react';
 import MotionBrushCanvas, { type MotionBrushResult, type MotionBrushCanvasHandle } from './motion-brush-canvas';
-import { inferVideoModelFeatures, VIDEO_MODEL_REGISTRY, type MotionBrushParams, type CameraControlParams, type VideoGenerateParams as VideoApiGenerateParams } from '@/lib/video-api';
+import { clampVideoDurationToAllowed, getPlatformVideoDurations, inferVideoModelFeatures, VIDEO_MODEL_REGISTRY, type MotionBrushParams, type CameraControlParams, type VideoGenerateParams as VideoApiGenerateParams } from '@/lib/video-api';
 import {
   buildContinuationPrompt,
   parseShotPlanCharacters,
@@ -703,7 +703,8 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
 
   // 动态可选比例
   const availableRatios = currentFeatures?.aspectRatios || ['1:1', '4:3', '16:9', '9:16'];
-  const availableDurations = currentFeatures?.durations || [5, 10];
+  const platformDurations = getPlatformVideoDurations(currentFeatures?.durations || [5, 10]);
+  const availableDurations = platformDurations.length > 0 ? platformDurations : [5, 10];
   const availableResolutions = currentFeatures?.resolutions || ['720p', '1080p'];
 
   // 首尾帧开关（图生视频模式内可展开尾帧）
@@ -1773,7 +1774,7 @@ Rules:
   const reuseHistoryEntry = useCallback((entry: VideoHistoryEntry) => {
     setPrompt(entry.prompt);
     setAspectRatio(entry.aspectRatio);
-    setDuration(entry.duration);
+    setDuration(clampVideoDurationToAllowed(entry.duration, availableDurations));
     if (entry.firstFrameUrl) {
       setFirstFrame(entry.firstFrameUrl);
     }
@@ -1781,7 +1782,7 @@ Rules:
       setLastFrame(entry.lastFrameUrl);
       if (!showLastFrame) setShowLastFrame(true);
     }
-  }, [showLastFrame]);
+  }, [availableDurations, showLastFrame]);
 
   // 清空历史记录
   const clearHistory = useCallback(() => {
@@ -2390,21 +2391,23 @@ Rules:
               </div>
               <div>
                 <label className={labelClass}>视频时长</label>
-                <div className="grid grid-cols-4 gap-1">
-                  {availableDurations.map(d => (
-                    <button
-                      key={d}
-                      onClick={() => setDuration(d)}
-                      className="flex items-center justify-center gap-0.5 px-1 py-1.5 rounded-md text-[10.5px] font-medium transition-all cursor-pointer whitespace-nowrap"
-                      style={{
-                        background: duration === d ? (isGold ? 'rgba(212,175,55,0.18)' : 'rgba(59,130,246,0.18)') : inputBg,
-                        color: duration === d ? accentColor : subTextColor,
-                        border: `1px solid ${duration === d ? accentColor : borderColor}`,
-                      }}
-                    >
-                      <Clock className="w-2.5 h-2.5" />{d}s
-                    </button>
-                  ))}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-[10.5px] font-medium" style={{ color: subTextColor }}>
+                    <span>{availableDurations[0]}s</span>
+                    <span style={{ color: accentColor }}>{duration}s</span>
+                    <span>{availableDurations[availableDurations.length - 1]}s</span>
+                  </div>
+                  <input
+                    aria-label="视频时长"
+                    className="w-full accent-current cursor-pointer"
+                    max={Math.max(availableDurations.length - 1, 0)}
+                    min={0}
+                    onChange={(event) => setDuration(availableDurations[Number(event.target.value)])}
+                    step={1}
+                    style={{ accentColor }}
+                    type="range"
+                    value={Math.max(availableDurations.indexOf(duration), 0)}
+                  />
                 </div>
               </div>
               <div>

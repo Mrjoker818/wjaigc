@@ -105,7 +105,7 @@ export async function compressAndSave(
       const resp = await fetch('/api/save-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageData: source }),
+        body: JSON.stringify({ imageUrl: source }),
       });
       const data = await resp.json();
       return data.url || source;
@@ -119,7 +119,7 @@ export async function compressAndSave(
   const resp = await fetch('/api/save-image', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ imageData: result.dataUrl }),
+    body: JSON.stringify({ imageUrl: result.dataUrl }),
   });
   const data = await resp.json();
   return data.url || result.dataUrl;

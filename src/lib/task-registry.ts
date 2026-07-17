@@ -46,8 +46,11 @@ export interface TaskEvent {
 
 interface GlobalTaskStore {
   registry: Map<string, TaskInfo>;
-  cancelled: Set<string>;
+  cancelled: Map<string, number>;
   eventBus: EventEmitter;
+  userQueues: Map<string, string[]>;
+  userActiveCount: Map<string, number>;
+  taskUserMap: Map<string, string>;
 }
 
 function getGlobalTaskStore(): GlobalTaskStore {
@@ -55,8 +58,11 @@ function getGlobalTaskStore(): GlobalTaskStore {
   if (!(globalThis as Record<string, unknown>)[key]) {
     (globalThis as Record<string, unknown>)[key] = {
       registry: new Map<string, TaskInfo>(),
-      cancelled: new Set<string>(),
+      cancelled: new Map<string, number>(),
       eventBus: new EventEmitter(),
+      userQueues: new Map<string, string[]>(),
+      userActiveCount: new Map<string, number>(),
+      taskUserMap: new Map<string, string>(),
     };
     ((globalThis as Record<string, unknown>)[key] as GlobalTaskStore).eventBus.setMaxListeners(200);
   }
@@ -66,6 +72,9 @@ function getGlobalTaskStore(): GlobalTaskStore {
 const taskRegistry = getGlobalTaskStore().registry;
 const cancelledTasks = getGlobalTaskStore().cancelled;
 const taskEventBus = getGlobalTaskStore().eventBus;
+const userQueues = getGlobalTaskStore().userQueues;
+const userActiveCount = getGlobalTaskStore().userActiveCount;
+const taskUserMap = getGlobalTaskStore().taskUserMap;
 
 // ─── 任务操作 ─────────────────────────────────────────────────────────
 
@@ -78,6 +87,7 @@ const taskEventBus = getGlobalTaskStore().eventBus;
  */
 export function registerTask(taskId: string, type: TaskType, label?: string, userId?: string): TaskInfo {
   const effectiveUserId = userId || 'anonymous';
+  cancelledTasks.delete(taskId);
 
   const task: TaskInfo = {
     taskId,
@@ -93,7 +103,7 @@ export function registerTask(taskId: string, type: TaskType, label?: string, use
   evictOldestTerminalTasks();
 
   // ★ 自动接入排队机制
-  const queuePos = enqueueTask(taskId, effectiveUserId);
+  enqueueTask(taskId, effectiveUserId);
   // enqueueTask 内部已通过 updateTaskProgress 更新了 status 和 queuePosition
   // 这里需要回读最新状态
   const updated = taskRegistry.get(taskId);
@@ -145,6 +155,10 @@ export function updateTaskProgress(
   const task = taskRegistry.get(taskId);
   if (!task) return;
 
+  if (task.status === 'cancelled' && update.status && update.status !== 'cancelled') {
+    return;
+  }
+
   const oldStatus = task.status;
   const oldProgress = task.progress;
   Object.assign(task, { ...update, updatedAt: Date.now() });
@@ -152,7 +166,7 @@ export function updateTaskProgress(
   // ★ 任务进入终态（completed/failed/cancelled）时，清理 cancelledTasks 中的记录
   const TERMINAL_STATUSES: TaskStatus[] = ['completed', 'failed', 'cancelled'];
   const reachedTerminalState = TERMINAL_STATUSES.includes(task.status) && !TERMINAL_STATUSES.includes(oldStatus);
-  if (TERMINAL_STATUSES.includes(task.status)) {
+  if (task.status === 'completed' || task.status === 'failed') {
     cancelledTasks.delete(taskId);
   }
 
@@ -182,7 +196,7 @@ export function getTaskInfo(taskId: string): TaskInfo | undefined {
 /** 取消任务 */
 export function cancelTask(taskId: string): boolean {
   if (cancelledTasks.has(taskId)) return true;
-  cancelledTasks.add(taskId);
+  cancelledTasks.set(taskId, Date.now());
   updateTaskProgress(taskId, { status: 'cancelled' });
   return true;
 }
@@ -235,11 +249,9 @@ export const TASK_TTL_MS = 30 * 60 * 1000;
 const defaultQueueConfig: QueueConfig = { maxConcurrent: MAX_CONCURRENT_PER_USER, perUser: true };
 
 // 每个用户的排队队列
-const userQueues = new Map<string, string[]>();  // userId → [taskId, ...]
+// Queue state is stored with the global registry above so HMR cannot reset capacity.
 // 当前每用户活跃任务数
-const userActiveCount = new Map<string, number>();
 // ★ 任务→用户映射，用于取消/完成时释放槽位
-const taskUserMap = new Map<string, string>();
 
 /** 将任务加入排队 */
 export function enqueueTask(taskId: string, userId: string, config?: Partial<QueueConfig>): number {
@@ -358,44 +370,51 @@ function evictOldestTerminalTasks(): void {
   const excess = taskRegistry.size - MAX_TASKS;
   for (let i = 0; i < Math.min(excess, terminalEntries.length); i++) {
     const id = terminalEntries[i][0];
+    releaseQueueSlot(id);
     taskRegistry.delete(id);
     cancelledTasks.delete(id);
   }
+}
+
+/** Remove expired tasks without leaving queue waiters or capacity behind. */
+export function cleanupExpiredTasks(now: number = Date.now()): void {
+  const activeStatuses: TaskStatus[] = ['pending', 'processing', 'queued'];
+  const expiredTasks: Array<[string, TaskInfo]> = [];
+  for (const entry of taskRegistry) {
+    const [, task] = entry;
+    const age = now - task.updatedAt;
+    const isTerminal = !activeStatuses.includes(task.status);
+    const isZombie = age > 2 * 60 * 60 * 1000;
+    const isExpiredTerminal = isTerminal && age > TASK_TTL_MS;
+    if (isZombie || isExpiredTerminal) expiredTasks.push(entry);
+  }
+
+  // Remove queued zombies first. Otherwise releasing an expired active task
+  // can promote another expired queued task into a live slot.
+  expiredTasks.sort(([, left], [, right]) => Number(left.status !== 'queued') - Number(right.status !== 'queued'));
+  for (const [id, task] of expiredTasks) {
+    const isTerminal = !activeStatuses.includes(task.status);
+
+    // Emit cancellation before deletion so a queued waiter resolves immediately.
+    if (!isTerminal) cancelTask(id);
+    else releaseQueueSlot(id);
+
+    taskRegistry.delete(id);
+    cancelledTasks.delete(id);
+  }
+
+  // Unknown IDs may be cancelled after a restart. Bound their recovery marker.
+  for (const [id, cancelledAt] of cancelledTasks) {
+    if (now - cancelledAt > TASK_TTL_MS) cancelledTasks.delete(id);
+  }
+  evictOldestTerminalTasks();
 }
 
 // 定期清理过期任务（>30分钟）
 // ★ 只清理终态任务（completed/failed/cancelled），避免误删仍在处理的任务
 if (typeof setInterval !== 'undefined') {
   const cleanupTimer = setInterval(() => {
-    const now = Date.now();
-    const ACTIVE_STATUSES: TaskStatus[] = ['pending', 'processing', 'queued'];
-    for (const [id, task] of taskRegistry) {
-      // 仅清理超时的终态任务，或超时极久(>2h)的活跃任务（防僵尸）
-      const isOld = now - task.updatedAt > TASK_TTL_MS;
-      const isTerminal = !ACTIVE_STATUSES.includes(task.status);
-      const isZombie = now - task.updatedAt > 2 * 60 * 60 * 1000; // 2小时
-      if ((isOld && isTerminal) || isZombie) {
-        // 释放队列槽位（防止用户并发数永久减少）
-        const userId = taskUserMap.get(id);
-        if (userId) {
-          // 终态任务：如果 taskUserMap 中仍有映射，说明之前未正确释放（历史泄露），也需递减
-          if (ACTIVE_STATUSES.includes(task.status) || isTerminal) {
-            const currentCount = userActiveCount.get(userId) || 0;
-            if (currentCount > 0) userActiveCount.set(userId, currentCount - 1);
-          }
-        }
-        taskUserMap.delete(id);
-        taskRegistry.delete(id);
-        cancelledTasks.delete(id);
-        // 从排队队列中也移除
-        for (const [, queue] of userQueues) {
-          const idx = queue.indexOf(id);
-          if (idx !== -1) queue.splice(idx, 1);
-        }
-      }
-    }
-    // 淘汰超出上限的旧任务
-    evictOldestTerminalTasks();
+    cleanupExpiredTasks();
   }, 5 * 60 * 1000);
   // 不阻止进程退出
   if (cleanupTimer && typeof cleanupTimer === 'object' && 'unref' in cleanupTimer) {

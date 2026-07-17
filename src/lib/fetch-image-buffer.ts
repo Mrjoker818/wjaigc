@@ -8,6 +8,39 @@ import fsSync from 'fs';
 import fs from 'fs/promises';
 import path from 'path';
 
+export function normalizeLocalImagePath(url: string): string {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(url);
+  } catch {
+    throw new Error('Unsafe local image path');
+  }
+
+  const pathname = decoded.split(/[?#]/, 1)[0];
+  if (!pathname.startsWith('/') || pathname.includes('\\') || pathname.includes('\0')) {
+    throw new Error('Unsafe local image path');
+  }
+
+  const relativePath = pathname
+    .replace(/^\/api\/serve-upload\//, '')
+    .replace(/^\/+/, '');
+  const segments = relativePath.split('/');
+  if (!relativePath || segments.some(segment => !segment || segment === '.' || segment === '..')) {
+    throw new Error('Unsafe local image path');
+  }
+  return segments.join('/');
+}
+
+function resolveInsideDirectory(root: string, relativePath: string): string {
+  const resolvedRoot = path.resolve(root);
+  const resolvedPath = path.resolve(resolvedRoot, relativePath);
+  const relative = path.relative(resolvedRoot, resolvedPath);
+  if (relative === '' || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error('Unsafe local image path');
+  }
+  return resolvedPath;
+}
+
 /**
  * Fetch an image as a Buffer from various URL types:
  * - data:image/...;base64,...
@@ -27,31 +60,16 @@ export async function fetchImageBuffer(url: string): Promise<Buffer> {
   }
   // local path (e.g., /api/serve-upload/xxx, /uploads/xxx)
   if (url.startsWith('/')) {
-    // Sanitize path to prevent directory traversal attacks
-    // ★ 先 decodeURIComponent 再过滤，防止 %2e%2e%2f 绕过
-    const decoded = decodeURIComponent(url);
-    const sanitizedUrl = decoded.replace(/\.\./g, '').replace(/\/\//g, '/');
-    // Strip /api/serve-upload/ prefix to get the actual file path
-    // e.g., /api/serve-upload/uploads/gen-xxx.png → uploads/gen-xxx.png
-    const relativePath = sanitizedUrl.replace(/^\/api\/serve-upload\//, '').replace(/^\//, '');
+    const relativePath = normalizeLocalImagePath(url);
     const workspacePath = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
-    // 1. Try local public directory (dev)
-    const localPath = path.normalize(path.join(workspacePath, 'public', sanitizedUrl));
-    const allowedPublicDir = path.normalize(path.join(workspacePath, 'public'));
-    if (localPath.startsWith(allowedPublicDir) && fsSync.existsSync(localPath)) return await fs.readFile(localPath);
-    // 2. Try persistent data directory (using stripped path for correct resolution)
+    const localPath = resolveInsideDirectory(path.join(workspacePath, 'public'), relativePath);
+    if (fsSync.existsSync(localPath)) return await fs.readFile(localPath);
     const { getServerDataRoot } = await import('@/lib/server-data-root');
     const dataRoot = await getServerDataRoot();
-    const normalizedDataRoot = path.normalize(dataRoot);
-    // Try with stripped /api/serve-upload/ prefix (correct mapping)
-    const persistentPath = path.normalize(path.join(dataRoot, relativePath));
-    if (persistentPath.startsWith(normalizedDataRoot) && fsSync.existsSync(persistentPath)) return await fs.readFile(persistentPath);
-    // Fallback: try exact sanitizedUrl under dataRoot (for other path patterns)
-    const fallbackPath = path.normalize(path.join(dataRoot, sanitizedUrl.replace(/^\//, '')));
-    if (fallbackPath.startsWith(normalizedDataRoot) && fsSync.existsSync(fallbackPath)) return await fs.readFile(fallbackPath);
-    // Try uploads/ prefix under dataRoot (legacy pattern)
-    const uploadPath = path.normalize(path.join(dataRoot, 'uploads', path.basename(sanitizedUrl)));
-    if (uploadPath.startsWith(normalizedDataRoot) && fsSync.existsSync(uploadPath)) return await fs.readFile(uploadPath);
+    const persistentPath = resolveInsideDirectory(dataRoot, relativePath);
+    if (fsSync.existsSync(persistentPath)) return await fs.readFile(persistentPath);
+    const uploadPath = resolveInsideDirectory(path.join(dataRoot, 'uploads'), path.basename(relativePath));
+    if (fsSync.existsSync(uploadPath)) return await fs.readFile(uploadPath);
     // 3. Try S3 object storage fallback (short timeout, try both 'images/' and 'uploads/' prefixes)
     const { isS3Available, downloadImageFromS3 } = await import('@/lib/s3-storage');
     if (isS3Available()) {

@@ -11,7 +11,7 @@
  * - 节点自动布局
  */
 
-import { MODEL_QUALITIES, QUALITY_TO_SIZE, MODEL_ASPECT_RATIOS, SHARED_ASPECT_RATIOS, calculateActualPixels } from './canvas-generation-group';
+import { SHARED_ASPECT_RATIOS, calculateActualPixels } from './canvas-generation-group';
 
 /** getModelParamType: 判断模型的参数类型（resolution/quality/both/none） */
 import { getModelParamType } from './canvas-generation-group';
@@ -1373,13 +1373,11 @@ export function topologicalSort(nodes: WorkflowNode[], connections: WorkflowConn
     }
   }
 
-  // 如果有环，记录警告并追加剩余节点（降级处理）
+  // A cyclic workflow has no valid execution order. Returning a partial order
+  // would make downstream nodes execute with missing or stale inputs.
   if (sorted.length < nodes.length) {
     const cycleNodeIds = nodes.filter(n => !sorted.find(s => s.id === n.id)).map(n => n.id);
-    console.warn('[workflow-engine] 检测到循环依赖，节点:', cycleNodeIds.join(', '), '— 这些节点可能在执行时阻塞');
-    for (const node of nodes) {
-      if (!sorted.find(n => n.id === node.id)) sorted.push(node);
-    }
+    throw new Error(`Workflow contains circular dependency: ${cycleNodeIds.join(', ')}`);
   }
 
   return sorted;
@@ -1416,6 +1414,20 @@ export function getNodeInputs(
 
   // 从上游连线中获取输入 (按端口类型映射)
   const incomingConns = connections.filter(c => c.toNodeId === node.id);
+  const appendImageInputs = (output: Record<string, unknown>): void => {
+    const candidates = [
+      typeof output.imageUrl === 'string' ? output.imageUrl : undefined,
+      ...(Array.isArray(output.imageUrls) ? output.imageUrls.filter((url): url is string => typeof url === 'string') : []),
+    ].filter((url): url is string => Boolean(url));
+    if (candidates.length === 0) return;
+
+    const current = Array.isArray(inputs.imageUrls)
+      ? inputs.imageUrls.filter((url): url is string => typeof url === 'string')
+      : (typeof inputs.imageUrl === 'string' ? [inputs.imageUrl] : []);
+    const imageUrls = Array.from(new Set([...current, ...candidates]));
+    inputs.imageUrls = imageUrls;
+    if (!inputs.imageUrl) inputs.imageUrl = imageUrls[0];
+  };
   // P1: 输入引用阻断 — 获取被阻断的连接ID列表
   const blockedInputs = new Set<string>(Array.isArray(node.config?.blockedInputs) ? node.config.blockedInputs as string[] : []);
   for (const conn of incomingConns) {
@@ -1437,9 +1449,7 @@ export function getNodeInputs(
     switch (conn.type) {
       case 'image':
         // 图片连线: 优先传递imageUrl
-        if (upstreamOutput.imageUrl) inputs.imageUrl = upstreamOutput.imageUrl;
-        // 多图URL传递
-        if (Array.isArray(upstreamOutput.imageUrls) && upstreamOutput.imageUrls.length > 0) inputs.imageUrls = upstreamOutput.imageUrls;
+        appendImageInputs(upstreamOutput);
         break;
       case 'prompt':
         // 提示词连线: 传递prompt/text/textContent
@@ -1454,8 +1464,7 @@ export function getNodeInputs(
         break;
       case 'data':
         // 数据连线: 传递所有输出
-        if (upstreamOutput.imageUrl) inputs.imageUrl = upstreamOutput.imageUrl;
-        if (Array.isArray(upstreamOutput.imageUrls) && upstreamOutput.imageUrls.length > 0) inputs.imageUrls = upstreamOutput.imageUrls;
+        appendImageInputs(upstreamOutput);
         if (upstreamOutput.prompt || upstreamOutput.text) {
           inputs.prompt = inputs.prompt || upstreamOutput.prompt || upstreamOutput.text;
         }
@@ -1464,8 +1473,7 @@ export function getNodeInputs(
         break;
       default: {
         // any类型: 智能推断
-        if (upstreamOutput.imageUrl) inputs.imageUrl = upstreamOutput.imageUrl;
-        if (Array.isArray(upstreamOutput.imageUrls) && upstreamOutput.imageUrls.length > 0) inputs.imageUrls = upstreamOutput.imageUrls;
+        appendImageInputs(upstreamOutput);
         // 提示词传递: 支持prompt/text/textContent三种键名
         const defaultPrompt = upstreamOutput.prompt || upstreamOutput.text || upstreamOutput.textContent;
         if (defaultPrompt) {
@@ -2202,7 +2210,6 @@ export function autoLayoutWorkflow(wf: Workflow): Workflow {
   }
 
   // BFS分层
-  const nodeMap = new Map(wf.nodes.map(n => [n.id, n]));
   for (const node of sorted) {
     let maxLevel = 0;
     // 找所有上游节点
@@ -2403,7 +2410,6 @@ export function createWorkflowFromAIResult(
   wf.description = result.description;
 
   // 创建节点 (自动布局)
-  const H_GAP = 280;
   const V_GAP = 120;
   const START_X = 80;
   const START_Y = 80;
@@ -2720,7 +2726,7 @@ export function parseComfyUIWorkflow(json: string): Workflow | null {
         const toWujieId = nodeIdMap.get(comfyId);
         if (!toWujieId) continue;
 
-        for (const [inputName, inputValue] of Object.entries(nd.inputs)) {
+        for (const [, inputValue] of Object.entries(nd.inputs)) {
           if (Array.isArray(inputValue) && typeof inputValue[0] === 'string' && typeof inputValue[1] === 'number') {
             const fromWujieId = nodeIdMap.get(inputValue[0]);
             if (!fromWujieId) continue;

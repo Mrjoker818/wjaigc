@@ -6,7 +6,7 @@
  * 异步提交 + 轮询模式，复用 task-registry
  */
 
-import { logOperation, logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
+import { logOperation, logError, OP_ACTIONS } from '@/lib/op-log';
 import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForFeature, findProviderForModel, findProviderById } from '@/lib/server-api-config';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
@@ -18,10 +18,12 @@ import {
   parseVideoSubmitResponse,
   resolveVideoCompatProfile,
   getVideoModelInfo,
+  validateVideoDuration,
   type VideoGenerateParams,
 } from '@/lib/video-api';
 import { buildDirectorPrompt, type DirectorStyle } from '@/lib/video-director';
 import { recordVideoTaskRemotePolling, recordVideoTaskSubmitted, recordVideoTaskTerminal } from '@/lib/cloud-task-persistence';
+import { getRuntimeSettings } from '@/lib/runtime-settings';
 
 export const maxDuration = 300; // 5 min timeout
 
@@ -37,6 +39,10 @@ export async function POST(request: NextRequest) {
   const providerId = '';
   try {
     const body = await request.json();
+    const runtimeSettings = await getRuntimeSettings();
+    if (!runtimeSettings.videoGenerationEnabled) {
+      return NextResponse.json({ error: 'Video generation is currently disabled by the administrator' }, { status: 403 });
+    }
     // 输入校验
     const _validationError = validateApiInputs(body, {
         videoUrl: 'videoUrl',
@@ -75,6 +81,20 @@ export async function POST(request: NextRequest) {
     if (model.includes('::')) {
       pureModel = model.split('::').pop()!;
       console.log(`[video/extend] Stripped provider prefix from model: "${model}" → "${pureModel}"`);
+    }
+
+    const parsedExtendDuration = Number(extendDuration);
+    if (parsedExtendDuration > runtimeSettings.maxVideoDuration) {
+      return NextResponse.json({ error: `Video duration exceeds the ${runtimeSettings.maxVideoDuration}s platform limit` }, { status: 400 });
+    }
+    const durationValidation = validateVideoDuration(pureModel, parsedExtendDuration);
+    if (!durationValidation.valid) {
+      return NextResponse.json({
+        error: durationValidation.allowedDurations.length > 0
+          ? `Model ${pureModel} only supports ${durationValidation.allowedDurations.join('/')} second video segments`
+          : 'Video duration must be a positive integer at or below the platform limit',
+        allowedDurations: durationValidation.allowedDurations,
+      }, { status: 400 });
     }
 
     // 1. 查找视频 API 提供商

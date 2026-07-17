@@ -16,7 +16,7 @@ import { isTaskCancelled as isRegistryCancelled } from '@/lib/task-registry';
 import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits, refundCredits } from '@/lib/credits';
 import { validateApiInputs } from '@/lib/api-validator';
-import { logOperation, logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
+import { logError, OP_ACTIONS } from '@/lib/op-log';
 export const runtime = 'nodejs';
 export const maxDuration = 600;
 
@@ -218,6 +218,7 @@ export async function POST(request: NextRequest) {
           allowedTools: AGENT_EDIT_ALLOWED_TOOLS,
           currentRound: 0,
           contextHistory: [],
+          isCancelled,
           onProgress: (info) => {
             if (isCancelled()) return;
             const task = localTaskStore.get(taskId);
@@ -953,7 +954,7 @@ async function performImageEdit(
       const effectiveQuality = qualityFromFrontend || '1K';
       const effectiveAspectRatio = aspectRatioFromFrontend || '1:1';
       const dynamicSize = calculateActualPixelsFromRatio(effectiveAspectRatio, effectiveQuality, imageModel) || '2048x2048';
-      const { body: genBody, endpoint: _resolvedEp } = adjustRequestForProfile(
+      const { body: genBody } = adjustRequestForProfile(
         {
           model: imageModel,
           prompt: editPrompt,

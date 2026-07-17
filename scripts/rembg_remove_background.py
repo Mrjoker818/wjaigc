@@ -12,11 +12,24 @@ ALLOWED_MODELS = {
     'birefnet-massive',
 }
 DEFAULT_MODEL = 'birefnet-general'
+MAX_PROCESSING_EDGE = 2048
 
 
 def emit(payload):
     sys.stdout.write(json.dumps(payload))
     sys.stdout.flush()
+
+
+def resize_for_processing(source):
+    width, height = source.size
+    longest_edge = max(width, height)
+    if longest_edge <= MAX_PROCESSING_EDGE:
+        return source
+    scale = MAX_PROCESSING_EDGE / longest_edge
+    return source.resize(
+        (max(1, round(width * scale)), max(1, round(height * scale))),
+        Image.Resampling.LANCZOS,
+    )
 
 
 def main():
@@ -38,15 +51,19 @@ def main():
         from rembg import new_session, remove
 
         source = Image.open(io.BytesIO(base64.b64decode(image_base64))).convert('RGBA')
+        original_size = source.size
+        processing_source = resize_for_processing(source)
         session = new_session(model_name)
         result = remove(
-            source,
+            processing_source,
             session=session,
             alpha_matting=True,
             alpha_matting_foreground_threshold=240,
             alpha_matting_background_threshold=10,
             alpha_matting_erode_size=10,
         ).convert('RGBA')
+        if result.size != original_size:
+            result = result.resize(original_size, Image.Resampling.LANCZOS)
 
         rgba = io.BytesIO()
         result.save(rgba, format='PNG')

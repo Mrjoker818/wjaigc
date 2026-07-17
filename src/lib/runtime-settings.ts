@@ -22,7 +22,7 @@ export async function getRuntimeSettings(): Promise<{
   return {
     initialCredits: numberSetting(initialCredits, 0, 0, 100_000),
     imageMaxSizeMB: numberSetting(imageMaxSizeMB, 20, 1, 100),
-    maxVideoDuration: numberSetting(maxVideoDuration, 30, 1, 600),
+    maxVideoDuration: numberSetting(maxVideoDuration, 15, 1, 15),
     videoGenerationEnabled: String(videoEnabled ?? 'true') !== 'false',
     threeDModelEnabled: String(threeDEnabled ?? 'true') !== 'false',
   };
