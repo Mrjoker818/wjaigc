@@ -768,6 +768,7 @@ export default function NodeEditor({ workflow, userId, onBack, onWorkflowChange,
     });
   }, [broadcastWorkflow]);
   const wf = wfRaw;
+  const [workflowSyncRevision, setWorkflowSyncRevision] = useState(0);
 
   // BroadcastChannel 接收端
   useEffect(() => {
@@ -1298,7 +1299,7 @@ ${contextInfo}
       lastEmittedRef.current = wf;
       onWorkflowChangeRef.current?.(wf);
     }
-  }, [wf]);
+  }, [wf, workflowSyncRevision]);
 
   // ─── 节点操作 ───
 
@@ -1766,10 +1767,10 @@ ${contextInfo}
           historyIndexRef.current = newIdx;
           return newIdx;
         });
-        // 拖动结束后通知外部
-        onWorkflowChange?.(currentWf);
         return currentWf; // 不修改状态，只是读取最新值
       });
+      // 让外部同步由 effect 在本次拖拽状态提交后执行，避免在状态更新器中触发父组件更新。
+      setWorkflowSyncRevision(revision => revision + 1);
     }
     setDraggingConn(null);
     // 完成框选：选中框内所有节点
@@ -1792,7 +1793,7 @@ ${contextInfo}
     }
     setBoxSelect(null);
     isBoxSelectingRef.current = false;
-  }, [applyNodeDragPosition, applyNodeViewportPreview, boxSelect, isPanning, setWf, onWorkflowChange, wf.nodes]);
+  }, [applyNodeDragPosition, applyNodeViewportPreview, boxSelect, isPanning, setWf, wf.nodes]);
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();

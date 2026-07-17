@@ -21,4 +21,11 @@ describe('node editor drag throttling', () => {
     expect(source).toContain('visibleNodes.map(node =>');
     expect(source).not.toContain('setViewport(v => ({ ...v, x: panStart.vx');
   });
+
+  it('defers parent workflow synchronization until after node drag state updates render', () => {
+    expect(source).toContain('const [workflowSyncRevision, setWorkflowSyncRevision] = useState(0)');
+    expect(source).toContain('setWorkflowSyncRevision(revision => revision + 1)');
+    expect(source).toContain('}, [wf, workflowSyncRevision]);');
+    expect(source).not.toContain('onWorkflowChange?.(currentWf);');
+  });
 });
