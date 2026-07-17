@@ -176,6 +176,8 @@ export const PROFILE_OPENAI: ApiCompatProfile = {
   supportsInputFidelity: true,
   pollMode: 'none',
   pollPathTemplate: '',
+  // OpenAI-compatible image APIs accept `size`; these are internal hints only.
+  includeDerivedPixelHints: false,
 };
 
 /**

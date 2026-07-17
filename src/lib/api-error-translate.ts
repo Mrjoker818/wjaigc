@@ -51,8 +51,10 @@ export function translateApiError(rawMsg: string): string {
     return 'API 上游服务认证异常，请稍后重试或更换模型';
   }
   // 不支持的画面比例
-  if (msg.includes('ratio or price') || msg.includes('not configured')
-    || msg.includes('aspect ratio is not in the allowed') || msg.includes('invalid aspect ratio')
+  if (msg.includes('ratio or price') || msg.includes('not configured')) {
+    return '当前供应商尚未配置该模型的价格或规格映射，请联系管理员检查模型配置';
+  }
+  if (msg.includes('aspect ratio is not in the allowed') || msg.includes('invalid aspect ratio')
     || msg.includes('not a valid size') || msg.includes('宽高比不在允许')) {
     return '当前模型不支持此画面比例，请尝试切换到标准比例';
   }

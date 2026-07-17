@@ -9,4 +9,8 @@ describe('generate provider capability wiring', () => {
     expect(source).toContain('getModelParamType(modelId, providerHint)');
     expect(source).toContain('supportedSizes: getProviderAspectRatios(modelId, providerHint)');
   });
+
+  it('passes the model-filtered request through the provider compatibility layer', () => {
+    expect(source).toContain('adjustRequestForProfile(filteredBody, profile');
+  });
 });

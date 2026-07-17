@@ -1403,7 +1403,7 @@ export async function POST(request: NextRequest) {
       // ★ 图片编辑模式(erase/mask/outpaint)：hasImage=true → 使用 editEndpoint(/images/edits)
       const hasImageFlag = !!requestBody.image;
       const hasRefImagesFlag = accessibleReferenceImages.length > 0;
-      const { body: adjustedBody, endpoint } = adjustRequestForProfile(requestBody, profile, {
+      const { body: adjustedBody, endpoint } = adjustRequestForProfile(filteredBody, profile, {
         hasImage: hasImageFlag,
         hasReferenceImages: hasRefImagesFlag,
       });

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   PROFILE_APIMART,
   PROFILE_4SAPI,
+  PROFILE_OPENAI,
   adjustRequestForProfile,
   resolveProviderPixelSize,
   resolveProfileForModel,
@@ -117,6 +118,23 @@ describe('provider request contracts', () => {
       size_px: '2048x1152',
     }, PROFILE_APIMART);
 
+    expect(body).not.toHaveProperty('width');
+    expect(body).not.toHaveProperty('height');
+    expect(body).not.toHaveProperty('size_px');
+  });
+
+  it('does not leak internal pixel hints to OpenAI-compatible image APIs', () => {
+    const { body } = adjustRequestForProfile({
+      model: 'gpt-image-2',
+      prompt: 'A product photograph',
+      n: 1,
+      size: '1024x1024',
+      width: 1024,
+      height: 1024,
+      size_px: '1024x1024',
+    }, PROFILE_OPENAI);
+
+    expect(body).toMatchObject({ model: 'gpt-image-2', n: 1, size: '1024x1024' });
     expect(body).not.toHaveProperty('width');
     expect(body).not.toHaveProperty('height');
     expect(body).not.toHaveProperty('size_px');
