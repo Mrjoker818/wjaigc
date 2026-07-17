@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForModel, getApiProviders, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits, refundCredits } from '@/lib/credits';
+import { getRuntimeSettings } from '@/lib/runtime-settings';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import fsSync from 'fs';
 import path from 'path';
@@ -1071,6 +1072,10 @@ export async function POST(request: NextRequest) {
   const finalModel = '';
   const finalProviderId = '';
   try {
+    const runtimeSettings = await getRuntimeSettings();
+    if (!runtimeSettings.threeDModelEnabled) {
+      return NextResponse.json({ success: false, error: '3D generation is currently disabled by the administrator' }, { status: 403 });
+    }
     const body = await resolveServerProvider(await request.json() as ImageTo3DRequest);
     // 输入校验
     const _validationError = validateApiInputs(body as unknown as Record<string, unknown>, {

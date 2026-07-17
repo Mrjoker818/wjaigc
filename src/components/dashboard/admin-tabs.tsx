@@ -42,6 +42,7 @@ export interface AdminProvider {
   isEnabled: boolean; balance?: number; balanceCurrency?: string;
   compatProfile?: string; advancedParams?: Record<string, unknown>;
   modelType?: string;
+  displayName?: string;
   selectedModels?: string[];
 }
 
@@ -255,6 +256,9 @@ export default function AdminTabs(props: AdminTabsProps) {
   const [creditSubTab, setCreditSubTab] = useState('user-credits');
   const [creditSearch, setCreditSearch] = useState('');
   const [creditSort, setCreditSort] = useState('balance');
+  const [modelCreditRules, setModelCreditRules] = useState<Record<string, number>>({});
+  const [modelCreditCatalog, setModelCreditCatalog] = useState<Array<{ providerId: string; providerName: string; model: string; modelType: string; credits: number; unit: string; source: string }>>([]);
+  const [pricingSaving, setPricingSaving] = useState(false);
 
   /* ── Audit state ── */
   const [auditLogs, setAuditLogs] = useState<AuditLogView[]>([]);
@@ -305,6 +309,17 @@ export default function AdminTabs(props: AdminTabsProps) {
     } catch {}
   }, []);
 
+  const loadModelCreditPricing = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/credits/pricing');
+      if (!res.ok) return;
+      const data = await res.json();
+      const catalog = data.models || [];
+      setModelCreditCatalog(catalog);
+      setModelCreditRules(Object.fromEntries(catalog.map((item: { model: string; credits: number }) => [item.model, item.credits])));
+    } catch { /* retain the current editable values */ }
+  }, []);
+
   const loadSystemSettings = useCallback(async () => {
     try {
       const res = await fetch('/api/admin/settings');
@@ -319,9 +334,9 @@ export default function AdminTabs(props: AdminTabsProps) {
   useEffect(() => {
     if (activeTab === 'overview') loadDashboardStats();
     if (activeTab === 'audit') loadAuditLogs();
-    if (activeTab === 'credits') loadCreditsOverview();
+    if (activeTab === 'credits') { loadCreditsOverview(); loadModelCreditPricing(); }
     if (activeTab === 'settings') loadSystemSettings();
-  }, [activeTab, loadDashboardStats, loadAuditLogs, loadCreditsOverview, loadSystemSettings]);
+  }, [activeTab, loadDashboardStats, loadAuditLogs, loadCreditsOverview, loadModelCreditPricing, loadSystemSettings]);
 
   /* ── Filtered users ── */
   const filteredUsers = useMemo(() => {
@@ -1003,7 +1018,7 @@ export default function AdminTabs(props: AdminTabsProps) {
     // Get users with real credit data from the credits overview API
     const co = creditsOverview;
     const creditTabs = ['pending-orders', 'user-credits', 'consumption', 'statistics', 'packages'];
-    const creditTabLabels: Record<string, string> = { 'pending-orders': '充值订单', 'user-credits': '用户积分', consumption: '消耗明细', statistics: '统计分析', packages: '套餐管理' };
+    const creditTabLabels: Record<string, string> = { 'pending-orders': '充值订单', 'user-credits': '用户积分', consumption: '消耗明细', statistics: '统计分析', packages: '模型计费' };
 
     // Use credit overview topUsers (real data from DB) filtered by search
     const creditUsers = (() => {
@@ -1183,18 +1198,31 @@ export default function AdminTabs(props: AdminTabsProps) {
         {creditSubTab === 'packages' && (
           <div className="bg-card rounded-lg shadow-card p-5 border border-border/50">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-base font-semibold text-foreground">积分定价配置</h2>
-              <button className="bg-primary/10 text-primary px-3 py-1.5 rounded-md text-xs font-medium hover:bg-primary/20 transition-all">+ 新增套餐</button>
+              <div>
+                <h2 className="text-base font-semibold text-foreground">模型积分规则</h2>
+                <p className="mt-1 text-xs text-muted-foreground">按已启用模型计费。视频规则为每秒，其余规则为每次调用或每张图片。</p>
+              </div>
+              <button
+                disabled={pricingSaving}
+                onClick={async () => {
+                  setPricingSaving(true);
+                  try {
+                    const res = await fetch('/api/admin/credits/pricing', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ modelCredits: modelCreditRules }) });
+                    if (!res.ok) throw new Error();
+                    await loadModelCreditPricing();
+                  } catch { alert('保存模型积分规则失败'); } finally { setPricingSaving(false); }
+                }}
+                className="bg-primary text-primary-foreground px-3 py-1.5 rounded-md text-xs font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors"
+              >{pricingSaving ? '保存中...' : '保存规则'}</button>
             </div>
-            <div className="space-y-3">
-              {(providers || []).filter(p => (p.model_type || p.modelType) === 'video').slice(0, 8).map((p, i) => (
-                <div key={i} className="flex items-center gap-4 p-3 bg-muted/30 rounded-lg">
-                  <span className="text-sm font-medium text-foreground min-w-[120px] truncate">{p.name}</span>
-                  <div className="flex-1 text-xs text-muted-foreground">图像模型</div>
-                  <input type="number" placeholder="积分/次" className="w-24 h-8 px-2 rounded-md bg-background border border-border text-sm text-foreground text-center focus:outline-none focus:ring-2 focus:ring-primary/30" />
-                </div>
-              ))}
-              {providers.filter(p => (p.model_type || p.modelType) === 'image').length === 0 && <div className="py-8 text-center text-sm text-muted-foreground">暂无图像模型，请先在API管理中添加</div>}
+            <div className="overflow-x-auto border border-border/60 rounded-md">
+              <table className="w-full min-w-[700px] text-sm">
+                <thead className="bg-muted/50 text-xs text-muted-foreground"><tr><th className="px-3 py-2 text-left font-medium">供应商</th><th className="px-3 py-2 text-left font-medium">模型</th><th className="px-3 py-2 text-left font-medium">计费单位</th><th className="px-3 py-2 text-right font-medium">积分</th></tr></thead>
+                <tbody className="divide-y divide-border/60">
+                  {modelCreditCatalog.map(item => <tr key={`${item.providerId}:${item.model}`}><td className="px-3 py-2 text-muted-foreground">{item.providerName}</td><td className="px-3 py-2 font-mono text-xs text-foreground">{item.model}</td><td className="px-3 py-2 text-xs text-muted-foreground">{item.unit === 'per-second' ? '每秒' : item.unit === 'per-image' ? '每张' : '每次'}</td><td className="px-3 py-2 text-right"><input aria-label={`${item.model} 积分`} type="number" min="0" max="100000" value={modelCreditRules[item.model] ?? item.credits} onChange={event => setModelCreditRules(prev => ({ ...prev, [item.model]: Math.max(0, Math.floor(Number(event.target.value) || 0)) }))} className="h-8 w-24 rounded-md border border-border bg-background px-2 text-right text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30" /></td></tr>)}
+                  {modelCreditCatalog.length === 0 && <tr><td colSpan={4} className="px-3 py-8 text-center text-sm text-muted-foreground">暂无已启用模型，请先在 API 管理中配置模型。</td></tr>}
+                </tbody>
+              </table>
             </div>
           </div>
         )}
@@ -1232,7 +1260,8 @@ export default function AdminTabs(props: AdminTabsProps) {
       video_extend: '视频延长', chat: 'AI 聊天', workflow_execute: '工作流执行',
       image_to_3d: '图片转3D', svg_trace: 'SVG描摹', agent_edit: 'Agent编排',
       segment_elements: '元素分层', font_design: '字境大师', vectorize: '矢量化',
-      optimize_prompt: '提示词优化', vision_prompt: '图片识词',
+      optimize_prompt: '提示词优化', vision_prompt: '图片识词', refine_engine: '人物精修',
+      file_upload: '文件上传', credit_operation: '积分操作', post_api_request: '接口请求',
     };
     const actionColors: Record<string, string> = {
       user_create: 'bg-green-500/15 text-green-500', user_delete: 'bg-destructive/15 text-destructive',
@@ -1242,6 +1271,7 @@ export default function AdminTabs(props: AdminTabsProps) {
       image_upscale: 'bg-cyan-500/15 text-cyan-500', image_remove_bg: 'bg-teal-500/15 text-teal-500',
       lang_edit: 'bg-violet-500/15 text-violet-500', video_generate: 'bg-orange-500/15 text-orange-500',
       chat: 'bg-indigo-500/15 text-indigo-500', workflow_execute: 'bg-pink-500/15 text-pink-500',
+      file_upload: 'bg-slate-500/15 text-slate-500', credit_operation: 'bg-amber-500/15 text-amber-600',
     };
     const levelIcons: Record<string, { icon: typeof AlertTriangle; color: string; label: string }> = {
       error: { icon: AlertTriangle, color: 'text-destructive', label: '错误' },
@@ -1484,6 +1514,62 @@ export default function AdminTabs(props: AdminTabsProps) {
   }
 
   /* ── Render: Settings Tab ── */
+  if (activeTab === 'settings') {
+    const value = (key: string) => String(systemSettings[key] ?? '');
+    const updateSetting = (key: string, next: string) => {
+      setSystemSettings(previous => ({ ...previous, [key]: next }));
+      setSettingsDirty(true);
+    };
+    const toggle = (key: string, label: string) => {
+      const enabled = value(key) !== 'false';
+      return <button type="button" role="switch" aria-checked={enabled} aria-label={label} onClick={() => updateSetting(key, enabled ? 'false' : 'true')} className={`relative h-6 w-11 rounded-full transition-colors ${enabled ? 'bg-primary' : 'bg-muted'}`}><span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${enabled ? 'translate-x-5' : 'translate-x-0.5'}`} /></button>;
+    };
+    const numeric = (key: string, label: string, unit: string, min: number, max: number) => <label className="flex items-center justify-between gap-4 py-3"><span className="text-sm text-foreground">{label}</span><span className="flex items-center gap-2"><input aria-label={label} type="number" min={min} max={max} value={value(key)} onChange={event => updateSetting(key, event.target.value)} className="h-9 w-28 rounded-md border border-border bg-background px-2 text-right text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30" /><span className="w-8 text-xs text-muted-foreground">{unit}</span></span></label>;
+
+    return (
+      <div className="flex h-full flex-col">
+        <div className="border-b border-border px-6 py-5">
+          <h1 className="text-xl font-semibold text-foreground">系统设置</h1>
+          <p className="mt-1 text-sm text-muted-foreground">仅显示已接入运行时的控制项。保存后会在下一次相应请求中生效。</p>
+        </div>
+        <div className="flex-1 overflow-y-auto px-6 py-5">
+          <div className="mx-auto grid max-w-5xl gap-5 lg:grid-cols-2">
+            <section className="border border-border bg-card p-5 rounded-lg">
+              <h2 className="text-sm font-semibold text-foreground">用户与资源</h2>
+              <p className="mt-1 text-xs text-muted-foreground">新建用户和上传文件会读取这些规则。</p>
+              <div className="mt-3 divide-y divide-border/60">
+                {numeric('initialCredits', '新用户初始积分', '积分', 0, 100000)}
+                {numeric('imageMaxSizeMB', '图片上传上限', 'MB', 1, 100)}
+              </div>
+            </section>
+            <section className="border border-border bg-card p-5 rounded-lg">
+              <h2 className="text-sm font-semibold text-foreground">生成权限</h2>
+              <p className="mt-1 text-xs text-muted-foreground">关闭后对应接口会拒绝新任务，不影响已有任务。</p>
+              <div className="mt-3 divide-y divide-border/60">
+                <div className="flex items-center justify-between gap-4 py-3"><span className="text-sm text-foreground">视频生成</span>{toggle('videoGenerationEnabled', '视频生成')}</div>
+                <div className="flex items-center justify-between gap-4 py-3"><span className="text-sm text-foreground">3D 模型生成</span>{toggle('3dModelEnabled', '3D 模型生成')}</div>
+                {numeric('maxVideoDuration', '视频最长时长', '秒', 1, 600)}
+              </div>
+            </section>
+            <section className="border border-border bg-card p-5 rounded-lg lg:col-span-2">
+              <div className="flex items-center justify-between gap-4"><div><h2 className="text-sm font-semibold text-foreground">系统公告</h2><p className="mt-1 text-xs text-muted-foreground">公告接口会根据开关与到期时间实时返回内容。</p></div>{toggle('announcementEnabled', '启用系统公告')}</div>
+              <div className="mt-4 grid gap-3 md:grid-cols-[180px_1fr]">
+                <select aria-label="公告展示方式" value={value('announcementType') || 'banner'} onChange={event => updateSetting('announcementType', event.target.value)} className="h-9 rounded-md border border-border bg-background px-3 text-sm text-foreground"><option value="banner">顶部横幅</option><option value="popup">弹窗</option><option value="sidebar">侧边通知</option></select>
+                <input aria-label="公告到期时间" type="datetime-local" value={value('announcementExpiry')} onChange={event => updateSetting('announcementExpiry', event.target.value)} className="h-9 rounded-md border border-border bg-background px-3 text-sm text-foreground" />
+              </div>
+              <textarea aria-label="公告内容" value={value('announcement')} onChange={event => updateSetting('announcement', event.target.value)} rows={5} placeholder="输入需要向用户展示的公告内容" className="mt-3 w-full resize-y rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30" />
+            </section>
+          </div>
+        </div>
+        <div className="flex items-center justify-between border-t border-border bg-card px-6 py-3">
+          <span className={`text-sm ${settingsDirty ? 'text-amber-500' : 'text-muted-foreground'}`}>{settingsDirty ? '有未保存的更改' : '所有修改已保存'}</span>
+          <div className="flex items-center gap-2"><button type="button" onClick={() => void loadSystemSettings()} className="h-9 rounded-md border border-border px-3 text-sm text-foreground hover:bg-muted">重置</button><button type="button" onClick={() => void handleSaveSettings()} disabled={!settingsDirty} className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"><Save className="h-4 w-4" />保存设置</button></div>
+        </div>
+        {settingsSaved && <div className="fixed right-6 top-6 z-[60] rounded-md border border-emerald-500/30 bg-emerald-500/15 px-4 py-3 text-sm text-emerald-600">设置已保存</div>}
+      </div>
+    );
+  }
+
   if (activeTab === 'settings') {
     const imageModelOpts = (providers || []).filter(p => (p.model_type || p.modelType) === 'image').flatMap(p => (p.selected_models || p.selectedModels || []).map(m => ({ value: `${p.id}::${m}`, label: m })));
     const chatModelOpts = (providers || []).filter(p => (p.model_type || p.modelType) === 'chat').flatMap(p => (p.selected_models || p.selectedModels || []).map(m => ({ value: `${p.id}::${m}`, label: m })));

@@ -28,6 +28,7 @@ import { validateApiInputs } from '@/lib/api-validator';
 import { recordVideoTaskRemotePolling, recordVideoTaskSubmitted, recordVideoTaskTerminal } from '@/lib/cloud-task-persistence';
 import type { User } from '@/lib/user-types';
 import type { VideoReferenceBinding } from '@/lib/video-director/prompt-compiler';
+import { getRuntimeSettings } from '@/lib/runtime-settings';
 
 export const maxDuration = 300; // 5 min timeout
 
@@ -42,6 +43,10 @@ export async function POST(request: NextRequest) {
   try {
     // 积分扣除（按模型差异化扣分）
     const body = await request.json();
+    const runtimeSettings = await getRuntimeSettings();
+    if (!runtimeSettings.videoGenerationEnabled) {
+      return NextResponse.json({ error: 'Video generation is currently disabled by the administrator' }, { status: 403 });
+    }
     // 输入校验
     const _validationError = validateApiInputs(body, {
         prompt: 'optionalPrompt',
@@ -93,6 +98,9 @@ export async function POST(request: NextRequest) {
     }
     const effectiveProviderId = providerId || extractedProviderId || '';
     const parsedDuration = Number(duration);
+    if (parsedDuration > runtimeSettings.maxVideoDuration) {
+      return NextResponse.json({ error: `Video duration exceeds the ${runtimeSettings.maxVideoDuration}s platform limit` }, { status: 400 });
+    }
     const durationValidation = validateVideoDuration(pureModel, parsedDuration);
     if (!durationValidation.valid) {
       const allowed = durationValidation.allowedDurations;

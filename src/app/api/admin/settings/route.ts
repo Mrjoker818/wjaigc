@@ -5,17 +5,44 @@ import { dbGetSystemSetting, dbSetSystemSetting, dbAddAuditLog } from '@/lib/db-
 export const dynamic = 'force-dynamic';
 
 const ALL_SETTING_KEYS = [
-  'platformName', 'openRegistration', 'initialCredits', 'defaultUserRole',
-  'ipWhitelist', 'sessionTimeout', 'passwordExpiryDays', 'maxConcurrentTasks',
-  'storageQuotaMB', 'maxUploadMB', 'maxVideoDuration', 'imageMaxSizeMB', 'imageMaxEdge',
-  'defaultImageModel', 'defaultChatModel', 'defaultVideoModel', 'videoGenerationEnabled', '3dModelEnabled',
+  'initialCredits', 'maxVideoDuration', 'imageMaxSizeMB', 'videoGenerationEnabled', '3dModelEnabled',
   'announcementEnabled', 'announcementType', 'announcementExpiry', 'announcement',
 ];
 
 const NUMBER_KEYS = new Set([
-  'initialCredits', 'sessionTimeout', 'passwordExpiryDays', 'maxConcurrentTasks',
-  'storageQuotaMB', 'maxUploadMB', 'maxVideoDuration', 'imageMaxSizeMB', 'imageMaxEdge',
+  'initialCredits', 'maxVideoDuration', 'imageMaxSizeMB',
 ]);
+const BOOLEAN_KEYS = new Set(['videoGenerationEnabled', '3dModelEnabled', 'announcementEnabled']);
+const NUMBER_RANGES: Record<string, [number, number]> = {
+  initialCredits: [0, 100_000],
+  maxVideoDuration: [1, 600],
+  imageMaxSizeMB: [1, 100],
+};
+
+function normalizeSetting(key: string, value: unknown): string {
+  if (NUMBER_KEYS.has(key)) {
+    const numeric = Number(value);
+    const [min, max] = NUMBER_RANGES[key];
+    if (!Number.isInteger(numeric) || numeric < min || numeric > max) {
+      throw new Error(`${key} must be an integer between ${min} and ${max}`);
+    }
+    return String(numeric);
+  }
+  if (BOOLEAN_KEYS.has(key)) {
+    if (typeof value !== 'boolean') throw new Error(`${key} must be boolean`);
+    return String(value);
+  }
+  if (key === 'announcementType' && !['banner', 'popup', 'sidebar'].includes(String(value))) {
+    throw new Error('announcementType is invalid');
+  }
+  if (key === 'announcement' && String(value).length > 500) {
+    throw new Error('announcement is too long');
+  }
+  if (key === 'announcementExpiry' && String(value) && Number.isNaN(Date.parse(String(value)))) {
+    throw new Error('announcementExpiry is invalid');
+  }
+  return String(value);
+}
 
 // GET: Read system settings
 export async function GET(request: NextRequest) {
@@ -50,10 +77,22 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
 
     const saves: Promise<unknown>[] = [];
+    const updatedKeys: string[] = [];
     for (const [key, value] of Object.entries(body)) {
       if (ALL_SETTING_KEYS.includes(key) && value !== undefined) {
-        saves.push(dbSetSystemSetting(key, String(value)));
+        let normalized: string;
+        try {
+          normalized = normalizeSetting(key, value);
+        } catch (error) {
+          return NextResponse.json({ success: false, error: error instanceof Error ? error.message : 'Invalid setting value' }, { status: 400 });
+        }
+        saves.push(dbSetSystemSetting(key, normalized));
+        updatedKeys.push(key);
       }
+    }
+
+    if (updatedKeys.length === 0) {
+      return NextResponse.json({ success: false, error: 'No supported settings supplied' }, { status: 400 });
     }
 
     await Promise.all(saves);
@@ -63,7 +102,7 @@ export async function POST(request: NextRequest) {
       await dbAddAuditLog({
         user_id: admin.id || 'system',
         user_name: admin.name || null,
-        action: 'settings_update',
+        action: 'system_update',
         target_type: 'system',
         target_id: 'settings',
         detail: `更新系统设置: ${Object.keys(body).join(', ')}`,

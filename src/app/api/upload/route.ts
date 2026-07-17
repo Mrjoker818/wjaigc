@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { existsSync } from 'fs';
 import { getSessionUser as getAuthUser } from '@/lib/server-auth';
+import { getRuntimeSettings } from '@/lib/runtime-settings';
 
 export async function POST(request: NextRequest) {
   try {
@@ -28,9 +29,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Only image files are allowed' }, { status: 400 });
     }
 
-    // Validate file size (max 20MB)
-    if (file.size > 20 * 1024 * 1024) {
-      return NextResponse.json({ error: 'File too large (max 20MB)' }, { status: 400 });
+    const runtimeSettings = await getRuntimeSettings();
+    const maxBytes = runtimeSettings.imageMaxSizeMB * 1024 * 1024;
+    if (file.size > maxBytes) {
+      return NextResponse.json({ error: `File too large (max ${runtimeSettings.imageMaxSizeMB}MB)` }, { status: 400 });
     }
 
     const bytes = await file.arrayBuffer();

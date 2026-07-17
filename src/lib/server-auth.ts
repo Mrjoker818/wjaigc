@@ -8,7 +8,8 @@ import type { User } from './user-types';
 import { ensureUserDataDirs, getUserDataDir } from './server-user-storage';
 import { getServerSystemDir, getServerUsersDir } from './server-data-root';
 import { isDatabaseConfigured } from './db-client';
-import { dbReadUsers, dbWriteUsers, dbDeleteUser, dbDeleteUserData } from './db-storage';
+import { dbReadUsers, dbWriteUsers, dbDeleteUser, dbDeleteUserData, dbInitCredits } from './db-storage';
+import { getRuntimeSettings } from './runtime-settings';
 
 /** Normalize api_permissions: PostgreSQL JSONB may return as string or object */
 function normalizeApiPermissions(val: unknown): User['apiPermissions'] {
@@ -689,6 +690,8 @@ export async function createManagedUser(input: {
   file.users.unshift(user);
   await writeStore(file);
   await ensureUserDataDirs(user.id);
+  const runtimeSettings = await getRuntimeSettings();
+  await dbInitCredits(user.id, runtimeSettings.initialCredits);
   return publicUser(user);
 }
 

@@ -25,6 +25,11 @@ export const IMAGE_MODEL_CREDITS: Record<string, { credits: number; label: strin
     label: 'GPT Image 2C',
     quality: { low: 30, medium: 40, high: 70 },
   },
+  'gpt-image-1.5': {
+    credits: 35,
+    label: 'GPT Image 1.5',
+    quality: { low: 10, medium: 35, high: 100 },
+  },
 
   // --- 豆包/字节跳动 Seedream ---
   'seedream-3-0': {
@@ -46,14 +51,18 @@ export const IMAGE_MODEL_CREDITS: Record<string, { credits: number; label: strin
     label: '豆包 Seedream 3.0 Lite',
   },
   'seedream-4-5': {
-    credits: 10, // ¥0.06-0.10/张
+    credits: 30, // Reference cost: Volcengine Ark public pricing, with platform margin.
     label: 'Seedream 4.5',
-    quality: { standard: 10, hd: 16 },
+    quality: { standard: 30, hd: 45 },
   },
   'doubao-seedream-4-5': {
-    credits: 10,
+    credits: 30,
     label: '豆包 Seedream 4.5',
-    quality: { standard: 10, hd: 16 },
+    quality: { standard: 30, hd: 45 },
+  },
+  'seedream-5-lite': {
+    credits: 28,
+    label: 'Seedream 5 Lite',
   },
 
   // --- 快手可灵 ---
@@ -70,27 +79,29 @@ export const IMAGE_MODEL_CREDITS: Record<string, { credits: number; label: strin
 
   // --- Google Gemini ---
   'gemini-2.5-flash-image': {
-    credits: 4, // Flash级别定价很低
+    credits: 40,
     label: 'Gemini Flash 图片',
   },
   'gemini-3-pro-image-preview': {
-    credits: 20, // Pro级别
+    credits: 140,
     label: 'Gemini Pro 图片',
+    quality: { standard: 140, hd: 250 },
   },
   'gemini-3.1-flash-image-preview': {
-    credits: 6,
+    credits: 70,
     label: 'Gemini 3.1 Flash 图片',
+    quality: { standard: 70, hd: 160 },
   },
   'nano-banana': {
-    credits: 4,
+    credits: 40,
     label: 'Nano Banana',
   },
   'nano-banana-pro': {
-    credits: 20,
+    credits: 140,
     label: 'Nano Banana Pro',
   },
   'nano-banana-2': {
-    credits: 6,
+    credits: 70,
     label: 'Nano Banana 2',
   },
 

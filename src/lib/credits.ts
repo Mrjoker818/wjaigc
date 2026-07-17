@@ -19,6 +19,7 @@ import {
   IMAGE_MODEL_CREDITS, VIDEO_MODEL_CREDITS, CHAT_MODEL_CREDITS,
   OTHER_OPERATION_CREDITS, CREDITS_TO_CNY,
 } from './credits-constants';
+import { loadCreditPricingConfig, resolveConfiguredCreditCost } from './credit-pricing';
 
 // ========== 查找模型积分消耗 ==========
 
@@ -158,6 +159,23 @@ export function calculateCreditCost(
   return getOtherOperationCredits(operation);
 }
 
+export async function calculateConfiguredCreditCost(
+  operation: CreditOperation | string,
+  model?: string,
+  options?: { quality?: string; durationSeconds?: number },
+): Promise<number> {
+  if (!model) return calculateCreditCost(operation, model, options);
+  const config = await loadCreditPricingConfig();
+  if (operation === 'video_generate' || operation === 'video_extend') {
+    const fallbackPerSecond = getVideoModelCreditsPerSecond(model);
+    const perSecond = resolveConfiguredCreditCost(config, model, fallbackPerSecond);
+    return perSecond * Math.max(1, options?.durationSeconds || 5);
+  }
+  const fallback = calculateCreditCost(operation, model, options);
+  const configured = resolveConfiguredCreditCost(config, model, fallback);
+  return configured;
+}
+
 /**
  * Get the display label for an operation type
  */
@@ -206,7 +224,7 @@ export async function consumeCredits(
   model?: string,
   options?: { quality?: string; durationSeconds?: number }
 ): Promise<{ success: boolean; balance: number; cost: number; message?: string }> {
-  const cost = customAmount ?? calculateCreditCost(operation, model, options);
+  const cost = customAmount ?? await calculateConfiguredCreditCost(operation, model, options);
   if (cost <= 0) return { success: true, balance: 0, cost: 0 };
 
   try {
@@ -289,7 +307,7 @@ export async function checkCredits(
   model?: string,
   options?: { quality?: string; durationSeconds?: number }
 ): Promise<{ sufficient: boolean; balance: number; cost: number }> {
-  const cost = customAmount ?? calculateCreditCost(operation, model, options);
+  const cost = customAmount ?? await calculateConfiguredCreditCost(operation, model, options);
   if (cost <= 0) return { sufficient: true, balance: 0, cost: 0 };
 
   try {

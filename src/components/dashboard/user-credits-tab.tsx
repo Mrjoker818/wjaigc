@@ -27,6 +27,7 @@ interface PaymentStatus {
   canRecharge: boolean;
   methods: string[];
   qrUrls: { wechat: string; alipay: string };
+  payLinks?: { wechat: string; alipay: string };
   note: string;
   status: { wechat: boolean; alipay: boolean };
 }
@@ -58,6 +59,8 @@ export default function UserCreditsTab({
     paymentMethod: string;
     note: string;
     payLink?: string;
+    paymentQrUrl?: string;
+    paymentPageUrl?: string;
   } | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [orderQuerying, setOrderQuerying] = useState(false);
@@ -133,22 +136,6 @@ export default function UserCreditsTab({
     }
   };
 
-  // 获取当前支付链接
-  const getCurrentPayLink = async (): Promise<string | null> => {
-    try {
-      const res = await fetch('/api/credits/payment-status');
-      const data = await res.json();
-      if (data.success && data.payLinks) {
-        return paymentMethod === 'wechat'
-          ? data.payLinks.wechat || null
-          : data.payLinks.alipay || null;
-      }
-    } catch (err) {
-      console.error('Get pay link error:', err);
-    }
-    return null;
-  };
-
   // 创建充值订单并直接支付
   const handleCreateOrder = async () => {
     const rechargeAmount = isCustomAmount ? customAmount : selectedPackage;
@@ -163,9 +150,6 @@ export default function UserCreditsTab({
 
     try {
       setConfirming(true);
-      // 先获取支付链接
-      const payLink = await getCurrentPayLink();
-
       const res = await fetch('/api/credits', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -184,7 +168,9 @@ export default function UserCreditsTab({
           bonusCredits: data.bonusCredits,
           paymentMethod: data.paymentMethod || paymentMethod,
           note: data.note,
-          payLink: payLink || undefined,
+          payLink: data.payLink || undefined,
+          paymentQrUrl: data.paymentQrUrl || undefined,
+          paymentPageUrl: data.paymentPageUrl || undefined,
         });
         onToast?.('订单创建成功，请点击立即支付');
       } else {
@@ -391,6 +377,13 @@ export default function UserCreditsTab({
                     </div>
                   </div>
 
+                  {orderInfo.paymentQrUrl && (
+                    <div className="flex flex-col items-center gap-2 rounded-md border border-border/60 bg-background p-4">
+                      <img src={orderInfo.paymentQrUrl} alt="支付二维码" className="h-44 w-44 rounded-md bg-white p-2" />
+                      <p className="text-center text-xs text-muted-foreground">请使用 {orderInfo.paymentMethod === 'wechat' ? '微信' : '支付宝'} 扫码支付；支付完成后提交审核。</p>
+                    </div>
+                  )}
+
                   {/* 立即支付按钮 - 主支付方式（方案A：隐藏收款码，直接跳转支付链接） */}
                   {orderInfo.payLink ? (
                     <div className="space-y-3">
@@ -430,11 +423,13 @@ export default function UserCreditsTab({
                         <p>PC端用户：点击按钮后请用手机扫描浏览器显示的二维码</p>
                       </div>
                     </div>
+                  ) : orderInfo.paymentQrUrl ? (
+                    <div className={`${cardBg} p-3 text-center text-xs text-muted-foreground`}>当前收款方式为扫码支付，支付后请点击下方“我已完成支付”。</div>
                   ) : (
                     <div className={`${cardBg} p-4 text-center`}>
                       <AlertCircle className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
-                      <p className="text-sm text-muted-foreground">支付链接未配置</p>
-                      <p className="text-xs text-muted-foreground mt-1">请联系管理员配置{orderInfo.paymentMethod === 'wechat' ? '微信' : '支付宝'}支付链接</p>
+                      <p className="text-sm text-muted-foreground">收款方式暂未配置</p>
+                      <p className="text-xs text-muted-foreground mt-1">请联系管理员配置{orderInfo.paymentMethod === 'wechat' ? '微信' : '支付宝'}收款二维码或支付链接</p>
                     </div>
                   )}
 

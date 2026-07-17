@@ -270,7 +270,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     totalUsage: number; dailyUsage: number;
     lastUpdated: string; error?: string; endpoint?: string;
   }>>([]);
-  const [cloudTasks, setCloudTasks] = useState<Array<{ id: string; userId: string; type: string; status: string; providerId?: string; model?: string; progress: number; label?: string; error?: string; updatedAt: number }>>([]);
+  const [cloudTasks, setCloudTasks] = useState<Array<{ id: string; userId: string; type: string; status: string; providerId?: string; providerName?: string; model?: string; progress: number; label?: string; error?: string; updatedAt: number }>>([]);
   const [cloudTasksLoading, setCloudTasksLoading] = useState(false);
   const [providerTaskSummary, setProviderTaskSummary] = useState<Record<string, { total: number; processing: number; failed: number }>>({});
   const [productionReadiness, setProductionReadiness] = useState<{
@@ -2772,7 +2772,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                     const isFailed = ['failed', 'timeout', 'cancelled'].includes(task.status);
                     const isCompleted = task.status === 'completed';
                     return <div key={task.id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 px-4 py-2.5 hover:bg-muted/40">
-                      <div className="min-w-0"><div className="flex items-center gap-2"><span className="text-xs font-medium text-foreground truncate">{task.label || task.type}</span><span className={`text-[10px] px-1.5 py-0.5 rounded ${isFailed ? 'bg-destructive/15 text-destructive' : isCompleted ? 'bg-emerald-500/15 text-emerald-500' : 'bg-primary/10 text-primary'}`}>{task.status}</span></div><div className="mt-1 text-[10px] text-muted-foreground truncate">{task.providerId || '未标记供应商'} · {task.model || '未标记模型'}{task.error ? ` · ${task.error}` : ''}</div></div>
+                      <div className="min-w-0"><div className="flex items-center gap-2"><span className="text-xs font-medium text-foreground truncate">{task.label || task.type}</span><span className={`text-[10px] px-1.5 py-0.5 rounded ${isFailed ? 'bg-destructive/15 text-destructive' : isCompleted ? 'bg-emerald-500/15 text-emerald-500' : 'bg-primary/10 text-primary'}`}>{task.status}</span></div><div className="mt-1 text-[10px] text-muted-foreground truncate">{task.providerName || task.providerId || '未标记供应商'} · {task.model || '未标记模型'}{task.error ? ` · ${task.error}` : ''}</div></div>
                       <div className="text-right text-[10px] text-muted-foreground"><div>{task.progress}%</div><div className="mt-1">{new Date(task.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div></div>
                     </div>;
                   })}
@@ -3645,13 +3645,13 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
           <div className="h-full overflow-y-auto p-6">
             <div className="flex items-center justify-between mb-6">
               <div>
-                <h1 className={`text-xl font-bold ${textPrimary}`}>收款码配置</h1>
-                <p className={`text-sm ${textSecondary}`}>上传微信/支付宝个人收款码，用户扫码付款后自助确认，积分自动到账</p>
+                <h1 className={`text-xl font-bold ${textPrimary}`}>人工收款审核</h1>
+                <p className={`text-sm ${textSecondary}`}>上传微信或支付宝收款码；用户付款后提交订单，管理员确认到账后发放积分</p>
               </div>
               <div className="flex items-center gap-2">
                 {paymentStatus.wechat && <span className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-green-500/15 text-green-400"><CheckCircle2 size={12}/> 微信已配置</span>}
                 {paymentStatus.alipay && <span className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-blue-500/15 text-blue-400"><CheckCircle2 size={12}/> 支付宝已配置</span>}
-                {!paymentConfig.wechatPayLink && !paymentConfig.alipayPayLink && <span className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-red-500/15 text-red-400"><AlertTriangle size={12}/> 未配置支付链接，充值不可用</span>}
+                {!paymentStatus.wechat && !paymentStatus.alipay && <span className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-red-500/15 text-red-400"><AlertTriangle size={12}/> 未配置收款码或支付链接</span>}
               </div>
             </div>
 
@@ -3670,14 +3670,14 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 </div>
                 <div className="space-y-3">
                   <div>
-                    <label className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>微信支付链接 <span className="text-red-400">*必填</span></label>
+                    <label className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>微信支付链接（可选）</label>
                     <input
                       className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`}
                       placeholder="wxp://xxxxx 微信收款链接，用户点击后直接跳转付款"
                       value={paymentConfig.wechatPayLink || ''}
                       onChange={e => setPaymentConfig(prev => ({ ...prev, wechatPayLink: e.target.value }))}
                     />
-                    <p className={`text-[10px] ${textSecondary} mt-1`}>⚠️ 微信个人收款码无复制链接功能。请保存收款码图片后上传，系统将自动解码提取支付链接</p>
+                    <p className={`text-[10px] ${textSecondary} mt-1`}>收款码可独立使用；填写链接仅用于移动端一键跳转，系统会尝试从上传图片中自动识别。</p>
                   </div>
                   <div>
                     <label className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>收款码图片URL（备用）</label>
@@ -3715,11 +3715,11 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                                 console.warn('⚠️ 解码成功但不是支付链接:', decoded.substring(0, 30));
                                 alert('解码成功，但检测到的不是微信支付链接。\n已解码内容: ' + decoded.substring(0, 50));
                               } else {
-                                alert('⚠️ 无法识别收款码中的链接，请手动填写支付链接');
+                                alert('未识别到支付链接，但收款码仍可用于人工审核充值。');
                               }
                             } catch (decodeErr) {
                               console.error('解码失败:', decodeErr);
-                              alert('⚠️ 自动解码失败，请手动填写支付链接');
+                              alert('自动识别支付链接失败，但收款码仍可用于人工审核充值。');
                             }
                           } else {
                             alert('上传失败：' + (data.error || '未知错误'));
@@ -3751,14 +3751,14 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 </div>
                 <div className="space-y-3">
                   <div>
-                    <label className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>支付宝支付链接 <span className="text-red-400">*必填</span></label>
+                    <label className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>支付宝支付链接（可选）</label>
                     <input
                       className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`}
                       placeholder="https://qr.alipay.com/xxxxx 支付宝收款链接，用户点击后直接跳转付款"
                       value={paymentConfig.alipayPayLink || ''}
                       onChange={e => setPaymentConfig(prev => ({ ...prev, alipayPayLink: e.target.value }))}
                     />
-                    <p className={`text-[10px] ${textSecondary} mt-1`}>⚠️ 支付宝个人收款码无复制链接功能。请保存收款码图片后上传，系统将自动解码提取支付链接</p>
+                    <p className={`text-[10px] ${textSecondary} mt-1`}>收款码可独立使用；填写链接仅用于移动端一键跳转，系统会尝试从上传图片中自动识别。</p>
                   </div>
                   <div>
                     <label className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>收款码图片URL（备用）</label>
@@ -3796,11 +3796,11 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                                 console.warn('⚠️ 解码成功但不是支付链接:', decoded.substring(0, 30));
                                 alert('解码成功，但检测到的不是支付宝支付链接。\n已解码内容: ' + decoded.substring(0, 50));
                               } else {
-                                alert('⚠️ 无法识别收款码中的链接，请手动填写支付链接');
+                                alert('未识别到支付链接，但收款码仍可用于人工审核充值。');
                               }
                             } catch (decodeErr) {
                               console.error('解码失败:', decodeErr);
-                              alert('⚠️ 自动解码失败，请手动填写支付链接');
+                              alert('自动识别支付链接失败，但收款码仍可用于人工审核充值。');
                             }
                           } else {
                             alert('上传失败：' + (data.error || '未知错误'));

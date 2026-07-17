@@ -1448,16 +1448,16 @@ export async function dbGetCredits(userId: string): Promise<DbCredits | null> {
   }
 }
 
-export async function dbInitCredits(userId: string): Promise<DbCredits | null> {
+export async function dbInitCredits(userId: string, initialBalance = 0): Promise<DbCredits | null> {
   try {
     const id = `credits_${userId}_${Date.now()}`;
     const now = Date.now();
     const result = await execSql(
       `INSERT INTO wujie_credits (id, user_id, balance, total_recharged, total_used, created_at, updated_at)
-       VALUES ($1, $2, 0, 0, 0, $3, $4)
+       VALUES ($1, $2, $3, $3, 0, $4, $4)
        ON CONFLICT (user_id) DO UPDATE SET updated_at = EXCLUDED.updated_at
        RETURNING *`,
-      [id, userId, now, now]
+      [id, userId, Math.max(0, Math.floor(initialBalance)), now]
     );
     return (result.rows as unknown as DbCredits[])[0] || null;
   } catch (e) {

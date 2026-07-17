@@ -4,6 +4,7 @@ import { dbGetCredits, dbAdjustCredits, dbGetCreditTransactions, dbGetAllCredits
 import { execSql, isDatabaseConfigured } from '@/lib/db-client';
 import { CREDITS_TO_CNY, CNY_TO_CREDITS, IMAGE_MODEL_CREDITS, VIDEO_MODEL_CREDITS, CHAT_MODEL_CREDITS, RECHARGE_PACKAGES, getModelPricingInfo } from '@/lib/credits';
 import { getPaymentStatus } from '@/lib/payment-config';
+import { loadCreditPricingConfig, resolveConfiguredCreditCost } from '@/lib/credit-pricing';
 
 type RechargeOrder = {
   order_id: string;
@@ -182,6 +183,8 @@ export async function GET(request: NextRequest) {
       credits = await dbInitCredits(effectiveUserId);
     }
 
+    const creditPricing = await loadCreditPricingConfig();
+
     return NextResponse.json({
       success: true,
       credits: credits ? {
@@ -194,13 +197,22 @@ export async function GET(request: NextRequest) {
         creditsToCNY: CREDITS_TO_CNY,
         cnyToCredits: CNY_TO_CREDITS,
         imageModels: Object.fromEntries(
-          Object.entries(IMAGE_MODEL_CREDITS).map(([k, v]) => [k, { credits: v.credits, label: v.label, cny: (v.credits * CREDITS_TO_CNY).toFixed(2) }])
+          Object.entries(IMAGE_MODEL_CREDITS).map(([k, v]) => {
+            const credits = resolveConfiguredCreditCost(creditPricing, k, v.credits);
+            return [k, { credits, label: v.label, cny: (credits * CREDITS_TO_CNY).toFixed(2) }];
+          })
         ),
         videoModels: Object.fromEntries(
-          Object.entries(VIDEO_MODEL_CREDITS).map(([k, v]) => [k, { creditsPerSecond: v.creditsPerSecond, label: v.label, cnyPerSecond: (v.creditsPerSecond * CREDITS_TO_CNY).toFixed(2) }])
+          Object.entries(VIDEO_MODEL_CREDITS).map(([k, v]) => {
+            const creditsPerSecond = resolveConfiguredCreditCost(creditPricing, k, v.creditsPerSecond);
+            return [k, { creditsPerSecond, label: v.label, cnyPerSecond: (creditsPerSecond * CREDITS_TO_CNY).toFixed(2) }];
+          })
         ),
         chatModels: Object.fromEntries(
-          Object.entries(CHAT_MODEL_CREDITS).map(([k, v]) => [k, { creditsPerCall: v.creditsPerCall, label: v.label, cny: (v.creditsPerCall * CREDITS_TO_CNY).toFixed(2) }])
+          Object.entries(CHAT_MODEL_CREDITS).map(([k, v]) => {
+            const creditsPerCall = resolveConfiguredCreditCost(creditPricing, k, v.creditsPerCall);
+            return [k, { creditsPerCall, label: v.label, cny: (creditsPerCall * CREDITS_TO_CNY).toFixed(2) }];
+          })
         ),
         rechargePackages: RECHARGE_PACKAGES,
       },
@@ -293,6 +305,7 @@ export async function POST(request: NextRequest) {
 
       // Return order info with QR code URL
       const qrUrl = method === 'wechat' ? paymentStatusData.qrUrls?.wechat : paymentStatusData.qrUrls?.alipay;
+      const payLink = method === 'wechat' ? paymentStatusData.payLinks?.wechat : paymentStatusData.payLinks?.alipay;
 
       return NextResponse.json({
         success: true,
@@ -303,6 +316,9 @@ export async function POST(request: NextRequest) {
         paymentMethod: method,
         expiresAt,
         qrUrl,
+        paymentQrUrl: qrUrl ? `/api/credits/payment-qr?method=${method}` : '',
+        payLink: payLink || '',
+        paymentPageUrl: `/recharge/${orderId}`,
         note: paymentStatusData.note || '',
       });
     }
