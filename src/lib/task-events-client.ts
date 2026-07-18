@@ -108,7 +108,7 @@ export class TaskEventsClient {
 
   private async hasAuthenticatedSession(): Promise<boolean> {
     try {
-      const response = await fetch(`${this.getBaseUrl()}/api/auth/me`, {
+      const response = await fetch(`${this.getBaseUrl()}/api/session`, {
         credentials: 'include',
         cache: 'no-store',
       });

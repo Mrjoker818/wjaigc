@@ -2,7 +2,7 @@
 
 ## 2026-07-18 最新云端结论：不通过
 
-云端地址目前可达，但真实已登录会话刷新后仍被认证遮罩阻塞，P1 登录/会话恢复链路没有通过真实浏览器验收。因为用户无法操作图像生成、项目保存或下载，本轮不得执行付费生成，也不能将本版本判定为有条件通过或通过。证据已归档至 `test-results/screenshots/cloud-p1-auth-overlay-still-blocking-after-0290bdc-20260718.png` 和对应 Console JSON。
+云端地址目前可达，但真实已登录会话刷新后仍被认证遮罩阻塞，P1 登录/会话恢复链路没有通过真实浏览器验收。最新复现已确认当前 Chrome 客户端会拦截 `/api/*/auth/me` 并返回 `ERR_BLOCKED_BY_CLIENT`；本地已迁移到 `/api/session`，尚待云端部署复验。因为用户无法操作图像生成、项目保存或下载，本轮不得执行付费生成，也不能将本版本判定为有条件通过或通过。证据已归档至 `test-results/screenshots/cloud-p1-image-model-options-empty-after-auth-20260718.png` 和对应 Console JSON。
 
 本地已针对认证仍等待项目同步的根因完成二次最小修复，并通过行为回归、类型检查、Lint、全量单元测试和生产构建。该本地结果不能替代云端真实 Chrome 验证；发布结论继续为不通过，直到遮罩消失并完成 P0 真实链路复验。
 

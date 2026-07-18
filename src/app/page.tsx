@@ -379,7 +379,7 @@ function CanvasApp() {
     let cancelled = false;
     const initCurrentUser = async () => {
       try {
-        const response = await fetch('/api/auth/me', {
+        const response = await fetch('/api/session', {
           cache: 'no-store',
           credentials: 'include',
           signal: AbortSignal.timeout(AUTH_BOOTSTRAP_TIMEOUT_MS),

@@ -41,7 +41,7 @@ export default function SimpleChatPage() {
 
   // Auth
   useEffect(() => {
-    fetch('/api/auth/me').then(r => r.json()).then(data => {
+    fetch('/api/session').then(r => r.json()).then(data => {
       if (data.success && data.user) {
         setUser(data.user);
         setShowLogin(false);

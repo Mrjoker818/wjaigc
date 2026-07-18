@@ -31,7 +31,7 @@ describe('TaskEventsClient', () => {
     new TaskEventsClient().connect();
 
     await vi.waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith('/api/auth/me', expect.objectContaining({ credentials: 'include' }));
+      expect(fetchMock).toHaveBeenCalledWith('/api/session', expect.objectContaining({ credentials: 'include' }));
     });
     expect(MockEventSource.instances).toHaveLength(0);
   });

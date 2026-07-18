@@ -3,6 +3,19 @@ import path from 'path';
 import { describe, expect, it } from 'vitest';
 
 describe('authentication bootstrap project sync', () => {
+  it('uses a neutral session endpoint so browser client filters cannot block authentication bootstrap', () => {
+    const pageSource = readFileSync(path.resolve(process.cwd(), 'src/app/page.tsx'), 'utf8');
+    const taskEventsSource = readFileSync(path.resolve(process.cwd(), 'src/lib/task-events-client.ts'), 'utf8');
+    const simpleChatSource = readFileSync(path.resolve(process.cwd(), 'src/app/simple-chat/page.tsx'), 'utf8');
+    const sessionRouteSource = readFileSync(path.resolve(process.cwd(), 'src/app/api/session/route.ts'), 'utf8');
+
+    expect(pageSource).toContain("fetch('/api/session'");
+    expect(taskEventsSource).toContain('/api/session');
+    expect(simpleChatSource).toContain("fetch('/api/session')");
+    expect(sessionRouteSource).toContain("export { GET } from '@/app/api/auth/me/route';");
+    expect(sessionRouteSource).toContain("export const dynamic = 'force-dynamic';");
+  });
+
   it('bounds the authenticated-session probe so a hung response cannot keep the UI blocked', () => {
     const source = readFileSync(path.resolve(process.cwd(), 'src/app/page.tsx'), 'utf8');
 

@@ -146,6 +146,12 @@
 
 新增证据：`test-results/screenshots/cloud-p1-auth-overlay-still-blocking-after-69da406-20260718.png`、`test-results/console/cloud-p1-auth-overlay-still-blocking-after-69da406-20260718.json`。必须在包含本次修复的新云端构建中复验遮罩消失，之后才可提交真实生成任务。
 
+### 2026-07-18 Chrome 客户端拦截复现与第四次修复
+
+`wujie_session` Cookie 在云端预览域名中仍有效（未读取 Cookie 内容），但在同一已登录 Chrome 中直接访问 `/api/auth/me` 与 `/api/connector/auth/me` 都稳定返回 `net::ERR_BLOCKED_BY_CLIENT`。随后画布页面固定显示“正在验证身份...”，模型下拉框为空；底层组件虽渲染，但遮罩使其不可操作。这说明此前的 8 秒超时并不能规避当前浏览器客户端对认证路径的拦截。
+
+最小修复：新增同源只读 `/api/session`，直接复用既有会话处理器；画布认证、独立智能对话页与任务 SSE 的会话预检全部改用该中性路径。先红后绿：`auth-bootstrap-project-sync-contract.test.ts` 与 `task-events-client.test.ts` 定向 7/7 通过。待完整门禁和云端 Chrome 部署复验后才可关闭 BUG-20260718-016。新增证据：`test-results/screenshots/cloud-p1-image-model-options-empty-after-auth-20260718.png`、`test-results/console/cloud-p1-image-model-options-empty-after-auth-20260718.json`。
+
 ## 2026-07-18 云端部署复验结案补充
 
 | Bug ID | 云端复验 | 结果 | 证据 | 结案范围 |
