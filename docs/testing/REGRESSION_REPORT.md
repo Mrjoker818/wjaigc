@@ -96,3 +96,11 @@
 ## 当前结论
 
 已执行 Chrome 已登录会话的真实 P0 操作，并保留截图和 Console 证据；不能将其替代为独立凭据驱动的 Chromium、Firefox、WebKit 和移动 Chromium 全链路。首轮删除持久化异常在第二次隔离实测中未复现，尚不具备稳定缺陷的证据；文件选择器/下载、独立登录及跨浏览器完整链路仍未获得可审计证据，因此发布结论仍为不通过。
+
+## 2026-07-18 云端独立普通用户会话复验（已部署）
+
+| 环境 | Git Commit | 浏览器 | 流程 | 结果 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| `https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9.dev.coze.site/` | `8248852`（含此前 `bb91262`） | Chromium、Firefox、WebKit、移动 Chromium | 无限画布入口登录 → 仪表盘 → 刷新保持会话 → 退出登录 | 4/4 通过。每个浏览器均收到包含用户 ID 的成功登录响应；刷新后仍为已登录状态；退出后回到“选择入口”；Console 无 error，Network 无普通用户对 `/api/admin/user-folder` 的 401。 | `test-results/screenshots/p0-auth-session-{chromium,firefox,webkit,mobile-chromium}.png`；对应 `console/`、`network/` JSON；归档 ID `20260718-p0-auth-session-cloud-green` 下的 video/trace/screenshot；`playwright-report/index.html` |
+
+该项关闭 BUG-20260718-005 和 BUG-20260718-006 的云端部署验证缺口，但不覆盖原生文件上传、真实付费图像生成、下载与项目恢复的独立账号全链路。
