@@ -10,6 +10,7 @@
 | 同上 | 刷新、从仪表盘重新打开最新项目 | 通过：项目中保留 1 张生成图；资产数由 174 增至 175 | `cloud-p0-before-reload-20260718.png` |
 | 同上 | 选中图片后键盘 `Delete` | 通过：图片计数由 1 变为 0 | Chrome DOM 记录 |
 | 同上 | 上传、鼠标拖动、节点工具栏点击下载 | 未验证为业务通过：Chrome 扩展拒绝 `filechooser.setFiles`；拖动未改变 DOM 几何；下载点击未产生扩展可观察到的 download event。均已归档，不能用作产品失败或通过结论。 | `cloud-p0-upload-filechooser-blocked-20260718.png`、`cloud-p0-node-move-20260718.png`、`cloud-p0-download-state-20260718.png` |
+| 同上 | 匿名 `POST /api/workflow/execute`（`action=status`） | 不通过：返回 `404 {"error":"执行记录不存在"}`，预期为先拒绝认证的 `401` | 终端 HTTP 探针，2026-07-18 |
 
 ## 执行记录
 

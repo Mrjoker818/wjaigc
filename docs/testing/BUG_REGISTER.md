@@ -6,6 +6,7 @@
 | --- | --- | --- | --- | --- |
 | BUG-20260718-001 | P2 | Chrome 自动化适配 | 已定位，非业务代码缺陷 | 云端图片顶部工具栏的 `删除` DOM 绑定为 `onImagesChange(images.filter(...))`；Chrome 扩展自动化执行该按钮点击两次均命中相邻的“美陈拆解”。同一已选图片执行键盘 `Delete` 后图片数量从 1 变为 0，证明应用删除逻辑正常。此现象记录为浏览器自动化坐标/缩放适配风险，不能作为产品删除功能失败。截图：`test-results/screenshots/cloud-p0-delete-opens-display-decompose-20260718.png`。 |
 | BUG-20260718-002 | P2 | 云端控制台质量 | 待后续处理 | 云端开发预览出现 React hydration mismatch 与 `DashboardView` 缺少列表 key 的 Console Error。当前不阻断已验证的生成、持久化与键盘删除，但不满足“零未处理 Console Error”发布门禁。证据：`test-results/console/cloud-p0-20260718.json`。 |
+| BUG-20260718-003 | P1 | 工作流执行鉴权 | 云端未部署 | GitHub `16c5900` 已包含 `requireApiAuthOrReject` 修复；但对当前预览地址匿名 `POST /api/workflow/execute`（`action=status`、虚拟 `executionId`）仍返回 `404 {"error":"执行记录不存在"}`。业务查询仍在认证前执行，发布阻断保持。 |
 
 ## 规则
 
