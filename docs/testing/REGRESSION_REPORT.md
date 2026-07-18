@@ -35,6 +35,13 @@
 | 同上 | 粘贴 256×256 PNG，选择 `豆包5.0Lite`、`1:1`、`x1` 后发起真实生成 | 通过：任务完成后仅有 256×256 上传图和 2048×2048 生成图 | `cloud-delete-repro-before-reload-20260718.png` |
 | 同上 | 返回项目列表并重新打开显示“2 张图片”的刚创建项目 | 未复现删除回流：DOM 仅包含 256×256 上传图与 2048×2048 生成图；32×32 已删除图未出现 | `cloud-delete-repro-after-reopen-20260718.png`、`cloud-delete-repro-after-reopen-20260718.json` |
 
+## 2026-07-18 原生上传与下载控制通道复验
+
+| 环境 | 操作 | 结果 | 证据 |
+| --- | --- | --- | --- |
+| 当前预览地址，Chrome 已登录管理员会话 | 底部“图片上传”选择无敏感 48×32 PNG | 未验证为产品失败：按钮已触发原生选择链路，但控制通道在 `fileChooser.setFiles` 阶段返回 `Not allowed`，尚未到达上传业务请求 | `cloud-p0-native-upload-not-allowed-20260718.png`、`cloud-p0-native-upload-not-allowed-20260718.json` |
+| 同上 | 选中真实生成结果，展开图片工具栏并点击“下载” | 未验证为产品失败：下载按钮真实点击后，控制通道 10 秒内没有收到 `download` 事件；不能把“未观察到事件”推导为下载未执行 | `cloud-p0-download-event-not-observed-20260718.png`、`cloud-p0-download-event-not-observed-20260718.json` |
+
 ## 执行记录
 
 | 时间 | Git Commit | 版本 | 地址 | 浏览器 | 套件 | 结果 | 证据 |
