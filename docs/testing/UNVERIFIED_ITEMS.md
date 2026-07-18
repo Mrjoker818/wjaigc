@@ -1,5 +1,14 @@
 # 未验证项目
 
+## 2026-07-19 Current cloud blocker
+
+- Environment: `https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9.dev.coze.site/`; commit `1713ab6`.
+- Evidence: the first `doctor` probe saw `/api/auth/me` return `502`, but the preview recovered to `200`. In the subsequent logged-in Chrome run, the deployed `1713ab6` bundle loaded, same-origin `/api/session` returned an authenticated user, but the visible `正在验证身份...` overlay remained. The reload trace had no application session request and the document had no React hydration attachment. Screenshot and console evidence are archived as `cloud-p1-auth-overlay-1713ab6-deployment-check-20260719` under `test-results/`.
+- Impact: the real logged-in P0 flow cannot be operated in Chrome. Login/session refresh, native upload, canvas operations, paid generation, task terminal state, persistence/reload, download, and logout cannot be marked passed from this environment.
+- Required release action: diagnose and restore cloud client hydration, then rerun `doctor` until it has no failed checks and execute the authorized real-browser P0 journey with screenshot, video, trace, console, and network evidence.
+
+- Independent confirmation: unauthenticated Chromium failed the no-write `p0-login-ui-contract` at the first “选择入口” assertion. This run has no credentials and made no business API request; its failure is a real cloud-client regression, not a substitute for the still-required logged-in P0 journey. Archived evidence ID: `20260719-cloud-anonymous-hydration-failure`.
+
 ## 2026-07-18 最新阻塞
 
 - 已登录 Chrome 中 `/api/auth/me` 和 `/api/connector/auth/me` 均稳定被客户端拦截为 `ERR_BLOCKED_BY_CLIENT`；会话 Cookie 仍存在。页面因而持续显示 `正在验证身份...`，底层界面渲染不等于用户可操作。

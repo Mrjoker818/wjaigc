@@ -1,5 +1,20 @@
 # 缺陷登记册
 
+## INFRA-20260719-001: Cloud preview transient backend unavailability
+
+| Field | Record |
+| --- | --- |
+| Severity | P1 release blocker |
+| Module | Cloud preview deployment / backend connectivity |
+| Environment | `https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9.dev.coze.site/`, 2026-07-19 Asia/Shanghai, commit `1713ab6` |
+| Reproduction | Run `pnpm run doctor -- --url=https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9.dev.coze.site/`; request preview root directly. |
+| Expected | Auth health endpoint and preview UI are reachable for logged-in P0 validation. |
+| Actual | First probe: `/api/auth/me` returned HTTP `502`; root returned `{ "detail": "无法连接到后端服务" }`. A later probe recovered to `200`. |
+| Evidence | Doctor output and direct HTTP response from this run. |
+| Root cause | Not yet attributable from the application repository; retained as a deployment reliability observation. |
+| Code change | None. |
+| Regression result | Do not close until repeated deployment probes are stable. The active user-facing blocker is recorded separately in BUG-20260718-016. |
+
 ## 2026-07-18 BUG-20260718-014：云端管理数据失败被伪装成空数据
 
 | 字段 | 记录 |
@@ -165,6 +180,18 @@
 首次部署后云端遮罩仍存在，进一步确认无项目入口在状态提交前仍同步调用 `UserManagerCore.getInstance()`；当前用户的大型本地画布缓存可使该初始化阻塞 React 对 `authChecked` 的提交。将调用包进 `setTimeout(0)` 后，真实 Chrome 仍在 12 秒内保持遮罩，证明依赖同一认证 effect 的事件循环时序不足以构成通过证据。缓存水合被拆至独立 effect 后，Chrome 网络记录仍没有应用自身的 `/api/session` 请求；认证请求超时后的失败分支还会同步执行 `UserManagerCore.getInstance().logout()`，同样会在 `setAuthChecked(true)` 前卡住。
 
 修复：无 `projectId` 的正常入口立即使用服务端用户设置 `currentUser`、`authChecked` 和工作台视图，不在认证 effect 中创建 `UserManagerCore`。新增独立的已认证后 effect，待工作台实际渲染后再创建管理器并水合项目缓存；认证失败时也先设置未登录 UI 与 `authChecked`，再在独立 effect 中异步清理本地会话。带 `projectId` 的恢复流程仍保持原有完整水合语义。先红后绿：`auth-bootstrap-project-sync-contract.test.ts` 新增“无项目会话先可交互、缓存水合和失败清理均位于独立认证后 effect”约束；与 `auth-session`、用户同步测试共 9/9 通过，类型检查通过。待完整门禁与云端 Chrome 部署复验。新增云端证据：`test-results/screenshots/cloud-p1-auth-after-fetch-race-20260719.png`。
+
+### 2026-07-19 已部署复验：客户端水合仍未开始
+
+提交 `1713ab6` 已由云端 `src_app_page_tsx_1gecvfk._.js` 资源确认包含本次认证清理代码；页面和所有已观察到的 Next chunk 均返回 `200`。已登录 Chrome 中，直接同源调用 `/api/session` 返回 `200`、`success: true` 且含用户 ID。尽管接口与补丁均可用，页面仍保留一个可见的“正在验证身份...”遮罩；刷新网络记录没有应用自身的 `/api/session` 请求，DOM 也没有 React hydration attachment。该证据表明本次阻塞位于云端客户端启动/水合阶段，而不是会话 API、项目同步或本地缓存清理。
+
+本轮不进行猜测性业务代码改动。下一步必须先针对“页面 bundle 成功加载但 React 水合未开始”建立最小、可自动验证的复现路径，或获取云端运行时的启动日志；在此之前 BUG-20260718-016 保持 P1 未关闭。证据：`test-results/screenshots/cloud-p1-auth-overlay-1713ab6-deployment-check-20260719.png`、`test-results/console/cloud-p1-auth-overlay-1713ab6-deployment-check-20260719.json`。
+
+### 2026-07-19 独立匿名 Chromium 最小复现
+
+使用云端地址运行 `E2E_BASE_URL=<preview> pnpm exec playwright test tests/e2e/p0-login-ui-contract.spec.ts --project=chromium`，不使用账号、不给服务端写入数据。测试在等待“选择入口”5 秒后失败；失败截图仍是“正在验证身份...”。Playwright 的可访问性快照显示完整服务端渲染的无限画布、工具栏与生成面板，但没有登录入口；网络证据只记录字体请求，没有应用 `/api/*` 请求；Console 仅有 Coze Console Bridge 的 parent-origin 警告以及 `[HMR] connected`。这稳定证明故障不依赖当前已登录 Chrome 会话，也不是 API 返回业务失败。
+
+失败产物已通过 `pnpm test:artifacts` 归档，ID 为 `20260719-cloud-anonymous-hydration-failure`，包含截图、视频与 Trace；运行时原始附件仍保留在 `.playwright-output/`。此失败测试必须保持可见，直到云端匿名入口和已登录会话均完成水合并通过后才可关闭 BUG-20260718-016。
 
 ## 2026-07-18 云端部署复验结案补充
 

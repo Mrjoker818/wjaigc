@@ -1,5 +1,19 @@
 # 发布就绪报告
 
+## 2026-07-19 Current deployment verification: NOT APPROVED
+
+Verification target: `https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9.dev.coze.site/`
+Git commit: `1713ab6 fix: unblock auth failure cleanup`
+Verification time: 2026-07-19 Asia/Shanghai
+
+The first deployment probe was transiently unavailable: `/api/auth/me` returned HTTP `502` and the preview root returned `{ "detail": "无法连接到后端服务" }`. A subsequent probe recovered: both the preview root and `/api/auth/me` returned HTTP `200`. A fresh `doctor` then completed with `3 passed / 9 local-environment warnings / 0 failed`; those warnings are intentionally not production health evidence. The transient failure remains a deployment-risk signal but is not the active product defect.
+
+The active P1 defect was reproduced in the logged-in Chrome session after the recovery. The deployed page bundle contains the `1713ab6` auth-cleanup marker, all page chunks returned `200`, and direct same-origin `/api/session` returned `{ success: true, hasUser: true }`. Despite that, the browser still displayed one visible `正在验证身份...` overlay, React hydration was absent from the document, and the reload network trace contained no application session request. Evidence: `test-results/screenshots/cloud-p1-auth-overlay-1713ab6-deployment-check-20260719.png` and `test-results/console/cloud-p1-auth-overlay-1713ab6-deployment-check-20260719.json`.
+
+An independent anonymous Chromium regression run also failed before any login or write operation: `tests/e2e/p0-login-ui-contract.spec.ts` could not find “选择入口” within 5 seconds. Its page snapshot contained the server-rendered canvas but only the authentication overlay was visible; network evidence contained no application API request. The failure has archived screenshot, video, and trace evidence under the `20260719-cloud-anonymous-hydration-failure` run ID. This confirms a cloud client-startup defect and keeps P1 at one unresolved issue.
+
+Local quality gates do not substitute for this failed cloud verification, but were rerun on the same commit: `pnpm test:regression` passed 91 files / 431 tests, `pnpm ts-check` passed, and `pnpm lint --quiet` passed. The local doctor also reported nine expected local-environment warnings for production secrets, database, object storage, and provider keys. Because the logged-in cloud UI remains non-interactive, the P0 real-browser journey (login through download) remains unverified and this release is **not approved**.
+
 ## 2026-07-18 最新云端结论：不通过
 
 云端地址目前可达，但真实已登录会话刷新后仍被认证遮罩阻塞，P1 登录/会话恢复链路没有通过真实浏览器验收。页面内 `/api/session` 已验证返回当前登录用户，Chrome 刷新时却没有记录应用自身的会话请求；失败分支同步创建本地缓存管理器是新的阻塞点。本地已将管理器创建、缓存水合及失败清理都拆至认证 UI 提交后的独立 effect，尚待云端部署复验。因为用户无法操作图像生成、项目保存或下载，本轮不得执行付费生成，也不能将本版本判定为有条件通过或通过。证据已归档至 `test-results/screenshots/cloud-p1-auth-after-fetch-race-20260719.png`。
