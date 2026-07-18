@@ -941,7 +941,7 @@ export async function POST(request: NextRequest) {
       quality,
       resolution: resolutionTier,
     });
-    let requestedSize = normalizedSelection.aspectRatio;
+    const requestedSize = normalizedSelection.aspectRatio;
     quality = normalizedSelection.quality;
     resolutionTier = normalizedSelection.resolution;
     

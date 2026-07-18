@@ -1,0 +1,59 @@
+name: Quality gate
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm doctor
+      - run: pnpm ts-check
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm test:api
+      - run: pnpm test:regression
+      - run: pnpm build
+
+  real-p0-e2e:
+    needs: quality
+    runs-on: ubuntu-latest
+    environment: real-e2e
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium firefox webkit
+      - run: pnpm test:e2e:p0
+        env:
+          E2E_BASE_URL: ${{ secrets.E2E_BASE_URL }}
+          E2E_TEST_USERNAME: ${{ secrets.E2E_TEST_USERNAME }}
+          E2E_TEST_PASSWORD: ${{ secrets.E2E_TEST_PASSWORD }}
+          E2E_TEST_PROJECT_ID: ${{ secrets.E2E_TEST_PROJECT_ID }}
+          E2E_GENERATION_MODEL: ${{ secrets.E2E_GENERATION_MODEL }}
+          E2E_ENABLE_PAID_GENERATION: ${{ secrets.E2E_ENABLE_PAID_GENERATION }}
+      - run: pnpm test:artifacts
+        if: always()
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p0-e2e-evidence
+          path: |
+            playwright-report/
+            test-results/

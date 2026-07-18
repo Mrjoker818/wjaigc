@@ -13,6 +13,13 @@
     "validate": "pnpm run --parallel '/^(ts-check|lint:build)$/'",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:api": "vitest run src/__tests__/api",
+    "test:regression": "vitest run src/__tests__/components src/__tests__/lib",
+    "test:e2e": "playwright test",
+    "test:e2e:p0": "playwright test tests/e2e/p0-core.spec.ts",
+    "test:artifacts": "node scripts/collect-playwright-artifacts.mjs",
+    "test:inventory": "node scripts/generate-function-inventory.mjs",
+    "doctor": "node scripts/doctor.mjs",
     "perf:check": "node scripts/benchmark-ui-interactions.mjs",
     "human:virtual-test": "tsx scripts/human-ai-engine-virtual-test.ts",
     "human:smoke-test": "tsx scripts/human-ai-engine-smoke-test.ts"
@@ -107,6 +114,7 @@
     "zod": "^4.3.5"
   },
   "devDependencies": {
+    "@playwright/test": "1.60.0",
     "@react-dev-inspector/babel-plugin": "^2.0.1",
     "@react-dev-inspector/middleware": "^2.0.1",
     "@tailwindcss/postcss": "^4",

@@ -20,7 +20,13 @@ const ACTION_BY_PATH: Array<[string, string]> = [
 
 export function shouldAuditClientRequest(pathname: string, method: string): boolean {
   const normalizedMethod = method.toUpperCase();
-  if (pathname === '/api/activity' || pathname.startsWith('/api/task-events') || pathname.startsWith('/api/poll-')) return false;
+  if (
+    pathname === '/api/activity'
+    || pathname.startsWith('/api/auth/')
+    || pathname.startsWith('/api/connector/auth/')
+    || pathname.startsWith('/api/task-events')
+    || pathname.startsWith('/api/poll-')
+  ) return false;
   return normalizedMethod !== 'GET' && normalizedMethod !== 'HEAD' && pathname.startsWith('/api/');
 }
 

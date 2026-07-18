@@ -44,6 +44,9 @@ const eslintConfig = defineConfig([
     // Build artifacts:
     'server.js',
     'dist/**',
+    // Generated Playwright reports and captured evidence contain third-party bundled code.
+    'playwright-report/**',
+    'test-results/**',
     // Script files (CommonJS):
     'scripts/**/*.js',
     // User assets (upgrade packages etc):

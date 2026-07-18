@@ -10,7 +10,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { getInternalApiUrl } from '@/lib/api-helpers';
-import { requireApiAuth } from '@/lib/api-auth';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 import {
   topologicalSort,
   getNodeInputs,
@@ -132,10 +132,8 @@ function getFeatureForNodeType(type: NodeType): 'imageEdit' | 'chat' | 'vectoriz
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await requireApiAuth(request);
-  if (!auth.authenticated && process.env.MANDATORY_API_AUTH === 'true') {
-    return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
-  }
+  const auth = await requireApiAuthOrReject(request);
+  if (auth instanceof NextResponse) return auth;
   try {
     const body = await request.json();
     // 输入校验

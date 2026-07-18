@@ -11,6 +11,7 @@ describe('operation audit routing', () => {
   it('avoids self-logging and high-frequency read polling', () => {
     expect(shouldAuditClientRequest('/api/activity', 'POST')).toBe(false);
     expect(shouldAuditClientRequest('/api/task-events?taskId=abc', 'GET')).toBe(false);
+    expect(shouldAuditClientRequest('/api/auth/logout', 'POST')).toBe(false);
     expect(shouldAuditClientRequest('/api/generate', 'POST')).toBe(true);
     expect(shouldAuditClientRequest('/api/generate', 'GET')).toBe(false);
   });

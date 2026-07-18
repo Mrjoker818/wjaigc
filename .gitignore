@@ -129,3 +129,6 @@ assets/
 # Preview files
 .preview
 .codegraph
+/.playwright-output/
+playwright-report/
+test-results/
