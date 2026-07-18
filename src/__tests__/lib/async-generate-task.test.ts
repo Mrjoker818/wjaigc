@@ -31,6 +31,20 @@ describe('isPendingLocalAsyncGenerateTask', () => {
     })).toBe(false);
   });
 
+  it('marks a recovered async task with a provider task id for remote polling', () => {
+    const shouldPollRemote = (asyncGenerateTask as typeof asyncGenerateTask & {
+      shouldPollRemoteAsyncGenerateTask?: (task: unknown) => boolean;
+    }).shouldPollRemoteAsyncGenerateTask;
+
+    expect(shouldPollRemote).toBeTypeOf('function');
+    expect(shouldPollRemote?.({
+      taskId: 'async-local-1',
+      type: 'generate-async',
+      status: 'processing',
+      result: { remoteTaskId: 'provider-task-1' },
+    })).toBe(true);
+  });
+
   it('recovers a legacy outer task from its persisted submission payload before provider polling', () => {
     const recover = (asyncGenerateTask as typeof asyncGenerateTask & {
       isRecoverableSubmitOnlySubmission?: (task: unknown) => boolean;

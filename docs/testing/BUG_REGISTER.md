@@ -93,6 +93,28 @@
 
 每个缺陷先有稳定复现与证据，再做最小范围修复；修复后必须保留失败回归用例并执行模块和全量回归。严重级别：P0（安全/数据/核心不可用/错误扣费）、P1（核心链路失败）、P2（特定场景功能问题）、P3（UI/文案/轻微交互）。
 
+## 2026-07-18 BUG-20260718-015：已恢复的图像任务被本地任务分支永久拦截
+
+| 字段 | 记录 |
+| --- | --- |
+| 等级 / 模块 | P1 / 无限画布图像生成、任务恢复、积分结算 |
+| 环境 / 前置条件 | 云端预览 `https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9.dev.coze.site/`；Chrome 已登录 `Mr.joker / 管理员`；`api_1778430731224_533e09a::doubao-seedream-5-0-lite`、`1:1`、`x1`。 |
+| 稳定复现 | 真正提交一张付费 Lite 图像后，画布持续显示 `processing 10%` 超过 5 分钟；刷新页面后回到项目列表，进行中任务未在当前画布自动呈现终态。 |
+| 根因 | `/api/poll-task` 恢复分支已将供应商真实任务 ID 持久化到 `generate-async` 包装任务，但下游 `LOCAL_TASK_TYPES` 将所有 `generate-async` 直接返回本地进度，阻止后续对供应商的真实轮询。 |
+| 修复 | 新增 `shouldPollRemoteAsyncGenerateTask`：仅无真实远端任务 ID 的包装任务走本地等待；已恢复并含真实远端 ID 的任务继续进入通用供应商轮询、终态持久化与积分路径。 |
+| 回归 | 先红后绿：`async-generate-task.test.ts` 和 `poll-task-recovery-lease-contract.test.ts` 新增断言，修复前 2 项失败、修复后定向 19/19 通过；`pnpm test:api` 36 文件 / 89 用例、`pnpm test`、`pnpm ts-check`、`pnpm lint --quiet` 均通过。 |
+| 证据 / 状态 | `test-results/screenshots/cloud-p1-lite-generation-stuck-after-cloud-update-20260718.png`、`test-results/console/cloud-p1-lite-generation-stuck-after-cloud-update-20260718.json`。本地修复待推送和云端同步后的真实付费任务复验；不得关闭。 |
+
+## 2026-07-18 INFRA-20260718-008：默认生产构建超时
+
+| 字段 | 记录 |
+| --- | --- |
+| 等级 / 模块 | P1 / 发布构建门禁 |
+| 复现 | 当前依赖升级后的 `pnpm build` 在 244 秒内没有产生完成结果，命令由测试超时终止。 |
+| 影响 | 未获得当前工作树的默认生产构建成功证据，不能作为可发布版本。 |
+| 根因 / 修复 | `build` 脚本把依赖安装和构建混为同一步，安装阶段阻塞后从未进入 Next 构建。新增 `build-command-contract.test.ts`，并将脚本改为纯 `next build`；依赖安装应在构建前显式执行。 |
+| 回归 / 状态 | 先红后绿：脚本契约修复前失败、修复后通过；`pnpm build` 在 85.2 秒完成 97 个页面，退出码 0。构建仍有 5 条 Turbopack NFT 动态文件追踪 warning 与 2 条 Node 本地存储路径 warning，未阻断但需后续收敛。 |
+
 ## 2026-07-18 云端部署复验结案补充
 
 | Bug ID | 云端复验 | 结果 | 证据 | 结案范围 |

@@ -19,7 +19,7 @@ import { getRefineResult } from '@/app/api/refine-engine/route';
 import { getBrandResult } from '@/app/api/brand-ecommerce/route';
 import { getFontDesignResult } from '@/app/api/font-design/generate-image/route';
 import { unwrapFontDesignTaskResult } from '@/lib/font-design-task-result';
-import { isPendingLocalAsyncGenerateTask, isRecoverableSubmitOnlySubmission } from '@/lib/async-generate-task';
+import { isPendingLocalAsyncGenerateTask, isRecoverableSubmitOnlySubmission, shouldPollRemoteAsyncGenerateTask } from '@/lib/async-generate-task';
 import { enhanceViaAI } from '@/lib/quality-enhance';
 import { buildRecoveredTaskContext, recordImageTaskTerminal, recordVideoTaskTerminal } from '@/lib/cloud-task-persistence';
 import { claimCloudTaskLease, getCloudTaskForUser, refundCloudTaskCredits, updateCloudTask } from '@/lib/cloud-task-storage';
@@ -1039,7 +1039,7 @@ export async function POST(request: NextRequest) {
       // 只有纯本地任务（edit/agent-edit）才由后端自行更新 registry，直接返回
       // ★ refine-engine/brand-ecommerce 使用远端 API（APImart等），需要远程轮询
       const LOCAL_TASK_TYPES = ['edit', 'agent-edit', 'brand-ecommerce', 'generate-async'];
-      if (LOCAL_TASK_TYPES.includes(registryTask.type)) {
+      if (LOCAL_TASK_TYPES.includes(registryTask.type) && !shouldPollRemoteAsyncGenerateTask(registryTask)) {
         // 纯本地任务：由后端自行更新 registry，直接返回当前状态
         // ★ 增量结果：将 partialResults 传递给前端
         const response: Record<string, unknown> = {

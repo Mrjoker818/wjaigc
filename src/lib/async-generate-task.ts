@@ -43,3 +43,12 @@ export function isPendingLocalAsyncGenerateTask(task: AsyncGenerateTaskSnapshot)
   const remoteTaskId = getRemoteTaskId(task.result);
   return !remoteTaskId || remoteTaskId === task.taskId;
 }
+
+/**
+ * A recovered submitOnly wrapper becomes a provider-backed task as soon as
+ * durable storage contains the real provider task ID. It must then use the
+ * normal provider polling path instead of the local wrapper early return.
+ */
+export function shouldPollRemoteAsyncGenerateTask(task: AsyncGenerateTaskSnapshot): boolean {
+  return task.type === 'generate-async' && !isPendingLocalAsyncGenerateTask(task);
+}

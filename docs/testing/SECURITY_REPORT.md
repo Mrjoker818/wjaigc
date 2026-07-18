@@ -1,5 +1,11 @@
 # 安全测试报告
 
+## 2026-07-18 生产依赖复扫
+
+`pnpm audit --prod --json --registry=https://registry.npmjs.org` 已归档至 `test-results/npm-audit-prod-final-20260718.json`：`0 critical / 0 high / 5 moderate / 1 low`。本轮升级了 Next、相关 AWS SDK、OpenAI/Coze SDK 等生产依赖，并对间接依赖使用精确覆盖；对应版本锁定由 `dependency-security-contract.test.ts` 保护。
+
+剩余中低风险依赖涉及构建工具链、ExcelJS 间接依赖与 Next 的 PostCSS 路径，尚未盲目跨主版本强制覆盖。它们不构成“无风险”结论，发布前仍应在干净环境复扫并完成构建门禁。
+
 生成时间：2026-07-17
 基线：`da4c37e` 加本轮未提交修改
 范围：Next.js 16 / React 19 / TypeScript 路由、认证、文件与代理、支付/积分、客户端存储和依赖审计。未对非本项目外部系统进行攻击性测试。

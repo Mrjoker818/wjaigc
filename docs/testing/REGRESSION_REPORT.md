@@ -175,3 +175,15 @@
 ## 2026-07-18 云端健康检查复验
 
 `pnpm run doctor -- --url=https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9.dev.coze.site/` 最终结果为 `3 passed / 9 warnings / 0 failed`，其中远程 `/api/auth/me` 返回 200。首次同命令出现 `fetch failed` 后，DNS 解析与 `curl -I` 均返回正常，未修改代码再次执行即通过，记录为瞬时终端网络连通波动，而非已确认应用缺陷。9 项警告均是本地未注入云端密钥、数据库、对象存储和发布安全变量；该检查不证明云端依赖健康，也不解除 P0 原生上传、真实生成、保存恢复和下载的验证缺口。
+
+## 2026-07-18 submitOnly 远端恢复分流回归
+
+| 项目 | 结果 |
+| --- | --- |
+| RED | 恢复后的 `generate-async` 含 `remoteTaskId` 时，帮助器不存在且本地任务早返回未排除它；定向 2 项断言失败。 |
+| GREEN | `shouldPollRemoteAsyncGenerateTask` 明确区分本地包装任务与供应商任务；定向 3 文件 / 19 用例通过。 |
+| API 回归 | `pnpm test:api`：36 文件 / 89 用例通过。 |
+| 全量回归 | `pnpm test`：退出码 0；本机无数据库连接的回退日志保留为未验证事项。 |
+| 静态门禁 | `pnpm ts-check`、`pnpm lint --quiet`、`git diff --check`：退出码 0。 |
+| 构建 | 首次超时已定位为构建脚本内的隐式安装。脚本修复后 `pnpm build` 于 85.2 秒完成 97 个页面，退出码 0；仍有 5 条 Turbopack NFT 警告与 2 条 Node 本地存储路径警告。 |
+| 云端 | 当前云端仍可复现 `processing 10%`；修复尚未部署，不得以本地回归替代真实验证。 |

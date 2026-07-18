@@ -37,4 +37,12 @@ describe('poll-task recovery lease contract', () => {
 
     expect(source.indexOf("creditStatus: persistedTask.creditCost && persistedTask.creditCost > 0 ? 'charged' : 'not-applicable'", completed)).toBeGreaterThan(completed);
   });
+
+  it('does not treat a recovered generate-async task with a remote task id as local-only work', () => {
+    const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/poll-task/route.ts'), 'utf8');
+    const localTaskGate = source.indexOf('if (LOCAL_TASK_TYPES.includes(registryTask.type)');
+
+    expect(localTaskGate).toBeGreaterThan(-1);
+    expect(source.slice(localTaskGate, localTaskGate + 220)).toContain('!shouldPollRemoteAsyncGenerateTask(registryTask)');
+  });
 });
