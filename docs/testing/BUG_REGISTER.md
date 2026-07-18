@@ -11,6 +11,10 @@
 | 回归 | 先红后绿：`src/__tests__/lib/resumed-task-polling.test.ts` 2/2 通过；`pnpm ts-check` 与 `pnpm lint --quiet` 通过。 |
 | 证据 / 状态 | `test-results/screenshots/cloud-p1-recovery-f9-processing-stall-20260718.png`、`test-results/network/cloud-p1-recovery-f9-network-20260718.json`、`test-results/console/cloud-p1-recovery-f9-processing-stall-20260718.json`。待推送和云端终态复验，未关闭。 |
 
+### 云端复验更新（`c7ee167`）
+
+恢复同一任务后，浏览器连续发出至少 3 次 `/api/poll-task`，证明“仅轮询一次”已修复；但每次均收到 `502 {"detail":"无法连接到后端服务"}`，页面保持 `processing 10%`。这是云端网关到后端服务的可用性阻塞，尚不能判定供应商结果、任务终态或退款。证据：`test-results/screenshots/cloud-p1-recovery-c7ee167-gateway-502-20260718.png`、`test-results/network/cloud-p1-recovery-c7ee167-gateway-502-20260718.json`、`test-results/console/cloud-p1-recovery-c7ee167-gateway-502-20260718.json`。
+
 ## 2026-07-18 BUG-20260718-011：重开画布后任务无法恢复
 
 | 字段 | 记录 |

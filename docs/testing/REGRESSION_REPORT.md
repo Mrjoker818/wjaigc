@@ -6,6 +6,12 @@
 - 随后页面保持 `processing 10%`，网络未再出现 `/api/poll-task`。已稳定定位为恢复 effect 被自身 `images` 进度更新清理；登记为 BUG-20260718-012。
 - 证据：`test-results/screenshots/cloud-p1-recovery-f9-processing-stall-20260718.png`、`test-results/network/cloud-p1-recovery-f9-network-20260718.json`、`test-results/console/cloud-p1-recovery-f9-processing-stall-20260718.json`。
 
+## 2026-07-18 `c7ee167` 云端恢复复验
+
+- 同一已扣费历史任务重新打开后，页面从持久化的 `processing 10%` 继续轮询，并连续产生 3 次 `/api/poll-task` 请求，证明 BUG-20260718-012 的轮询生命周期修复已在云端生效。
+- 三次请求都返回 `502 {"detail":"无法连接到后端服务"}`；页面正确保留任务，不伪造成功或失败结果。该云端后端连通性阻塞使任务终态、结果保存和积分补偿无法验证。
+- 证据：`test-results/screenshots/cloud-p1-recovery-c7ee167-gateway-502-20260718.png`、`test-results/network/cloud-p1-recovery-c7ee167-gateway-502-20260718.json`、`test-results/console/cloud-p1-recovery-c7ee167-gateway-502-20260718.json`。
+
 ## 2026-07-18 重开画布任务恢复回归
 
 - 云端复现表明：重新打开项目后，真实待处理占位框保持 `submitting 5%`，且没有 `/api/poll-task` 请求。
