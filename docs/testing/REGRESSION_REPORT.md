@@ -27,6 +27,14 @@
 | 同上 | 选择生成结果并点击“下载” | 未验证：按钮被真实点击，但 Chrome 控制层未给出 download event，不能作为下载通过或失败 | Chrome DOM，控制层 download event 为 `not-observed` |
 | 同上 | 账户菜单退出登录 | 通过：回到“选择入口”；Console 无 `/api/activity` 或 401，但仍有 `DashboardView` key 警告 | `cloud-p0-real-logout-20260718.png`、`cloud-p0-real-logout-20260718.json` |
 
+## 2026-07-18 删除状态第二次隔离复现
+
+| 环境 | 操作 | 结果 | 证据 |
+| --- | --- | --- | --- |
+| 当前预览地址，Chrome 已登录管理员会话 | 新建第 9 个隔离项目；粘贴 32×32 PNG 后按 `Delete` | 通过：删除后画布无该图片 | Chrome DOM；后续复核图片清单 |
+| 同上 | 粘贴 256×256 PNG，选择 `豆包5.0Lite`、`1:1`、`x1` 后发起真实生成 | 通过：任务完成后仅有 256×256 上传图和 2048×2048 生成图 | `cloud-delete-repro-before-reload-20260718.png` |
+| 同上 | 返回项目列表并重新打开显示“2 张图片”的刚创建项目 | 未复现删除回流：DOM 仅包含 256×256 上传图与 2048×2048 生成图；32×32 已删除图未出现 | `cloud-delete-repro-after-reopen-20260718.png`、`cloud-delete-repro-after-reopen-20260718.json` |
+
 ## 执行记录
 
 | 时间 | Git Commit | 版本 | 地址 | 浏览器 | 套件 | 结果 | 证据 |
@@ -38,7 +46,7 @@
 | 2026-07-17 | 本地未提交测试改进 | `2.5.0` | `https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9-5000.dev.coze.site/` | Chromium/Firefox/WebKit/移动 Chromium | P0-AUTH-ENTRY-001 匿名登录入口 | 通过，4/4 | 以单 worker 顺序执行。四个浏览器均完成“选择入口→无限画布→登录表单”；截图、视频、Trace、Console、Network 和 JUnit 已归档。首轮并发下 Chromium 的失败证据保留为隔离风险，未登记为稳定产品 Bug |
 | 2026-07-17 | 本地未提交修复 | `2.5.0` | 本地源码 | 操作审计单元回归 | 退出后审计 401 | 通过 | 先增加 `/api/auth/logout` 不应触发客户端审计的失败断言，再排除认证端点；`pnpm exec vitest run src/__tests__/lib/operation-audit.test.ts` 为 2/2 通过。云端实测仍待部署后复验 |
 | 2026-07-17 | `da4c37e` 云端版本 | `3.9.0` | `https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9-5000.dev.coze.site/` | Chromium | P0-AUTH-001 真实登录 | 阻塞 | 在隔离浏览器输入历史临时账号后，`POST /api/auth/login` 返回 401，页面显示登录失败。Trace、视频、截图、Console 和 Network 已归档；不将无效凭据误报为应用通过或代码缺陷 |
-| 2026-07-18 | `258d510` | `3.9.0` | `https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9.dev.coze.site/` | Chrome（用户完成登录） | P0 画布、生成、恢复、退出 | 部分通过且发现 P1 | 真实粘贴上传、移动、缩放、生成、刷新恢复、退出通过；文件选择器与下载为控制层未验证；删除节点回流登记为 BUG-20260718-004 |
+| 2026-07-18 | `258d510` | `3.9.0` | `https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9.dev.coze.site/` | Chrome（用户完成登录） | P0 画布、生成、恢复、退出 | 部分通过；删除异常待独立复验 | 真实粘贴上传、移动、缩放、生成、刷新恢复、退出通过；文件选择器与下载为控制层未验证。首轮删除回流异常在第二个全新隔离项目中未复现，保留为 BUG-20260718-004 观察项 |
 
 ## 基线校验
 
@@ -56,4 +64,4 @@
 
 ## 当前结论
 
-已执行 Chrome 已登录会话的真实 P0 操作，并保留截图和 Console 证据；不能将其替代为独立凭据驱动的 Chromium、Firefox、WebKit 和移动 Chromium 全链路。当前 P0 存在删除持久化 P1，且文件选择器/下载仍未获得可审计的独立浏览器证据，因此发布结论仍为不通过。
+已执行 Chrome 已登录会话的真实 P0 操作，并保留截图和 Console 证据；不能将其替代为独立凭据驱动的 Chromium、Firefox、WebKit 和移动 Chromium 全链路。首轮删除持久化异常在第二次隔离实测中未复现，尚不具备稳定缺陷的证据；文件选择器/下载、独立登录及跨浏览器完整链路仍未获得可审计证据，因此发布结论仍为不通过。
