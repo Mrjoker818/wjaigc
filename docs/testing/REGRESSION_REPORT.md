@@ -104,3 +104,7 @@
 | `https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9.dev.coze.site/` | `8248852`（含此前 `bb91262`） | Chromium、Firefox、WebKit、移动 Chromium | 无限画布入口登录 → 仪表盘 → 刷新保持会话 → 退出登录 | 4/4 通过。每个浏览器均收到包含用户 ID 的成功登录响应；刷新后仍为已登录状态；退出后回到“选择入口”；Console 无 error，Network 无普通用户对 `/api/admin/user-folder` 的 401。 | `test-results/screenshots/p0-auth-session-{chromium,firefox,webkit,mobile-chromium}.png`；对应 `console/`、`network/` JSON；归档 ID `20260718-p0-auth-session-cloud-green` 下的 video/trace/screenshot；`playwright-report/index.html` |
 
 该项关闭 BUG-20260718-005 和 BUG-20260718-006 的云端部署验证缺口，但不覆盖原生文件上传、真实付费图像生成、下载与项目恢复的独立账号全链路。
+
+## 2026-07-18 云端健康检查复验
+
+`pnpm run doctor -- --url=https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9.dev.coze.site/` 最终结果为 `3 passed / 9 warnings / 0 failed`，其中远程 `/api/auth/me` 返回 200。首次同命令出现 `fetch failed` 后，DNS 解析与 `curl -I` 均返回正常，未修改代码再次执行即通过，记录为瞬时终端网络连通波动，而非已确认应用缺陷。9 项警告均是本地未注入云端密钥、数据库、对象存储和发布安全变量；该检查不证明云端依赖健康，也不解除 P0 原生上传、真实生成、保存恢复和下载的验证缺口。
