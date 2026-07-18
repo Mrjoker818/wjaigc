@@ -33,14 +33,19 @@ describe('authentication bootstrap project sync', () => {
     expect(source).toContain('signal: AbortSignal.timeout(PROJECT_SYNC_TIMEOUT_MS)');
   });
 
-  it('does not perform a second blocking project sync during the same authentication bootstrap', () => {
+  it('makes a no-project authenticated session interactive before client cache hydration', () => {
     const source = readFileSync(path.resolve(process.cwd(), 'src/app/page.tsx'), 'utf8');
-    const hydratedUser = source.indexOf('const hydratedUser = await userMgr.upsertUserFromServer(data.user);');
-    const projectId = source.indexOf('const projectId = searchParams.get(\'projectId\');', hydratedUser);
+    const projectId = source.indexOf('const projectId = searchParams.get(\'projectId\');');
+    const noProjectBranch = source.indexOf('if (!projectId) {', projectId);
+    const setSessionUser = source.indexOf('setCurrentUser(data.user);', noProjectBranch);
+    const setChecked = source.indexOf('setAuthChecked(true);', setSessionUser);
+    const backgroundHydration = source.indexOf('void userMgr.upsertUserFromServer(data.user)', setChecked);
 
-    expect(hydratedUser).toBeGreaterThan(-1);
-    expect(projectId).toBeGreaterThan(hydratedUser);
-    expect(source.slice(hydratedUser, projectId)).not.toContain('await userMgr.loadProjectsFromServer()');
+    expect(projectId).toBeGreaterThan(-1);
+    expect(noProjectBranch).toBeGreaterThan(projectId);
+    expect(setSessionUser).toBeGreaterThan(noProjectBranch);
+    expect(setChecked).toBeGreaterThan(setSessionUser);
+    expect(backgroundHydration).toBeGreaterThan(setChecked);
   });
 
   it('starts project sync in the background after the local user session is ready', () => {

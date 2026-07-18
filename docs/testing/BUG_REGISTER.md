@@ -158,6 +158,12 @@
 
 修复：新增 `fetchSessionPayload`，通过独立计时器将“请求 + JSON 解析”整体置入 `Promise.race`，超时时主动 abort 并拒绝，确保页面必然关闭认证加载态。画布、独立智能对话页和 SSE 会话预检共用该实现。先红后绿：新增 `auth-session.test.ts` 用永久悬挂的 `fetch` 复现，定向 8/8 与类型检查通过。云端仍需同步此修复并以 Chrome 重新验证。新增证据：`test-results/screenshots/cloud-p1-auth-overlay-no-session-network-before-fetch-race-20260718.png`、`test-results/console/cloud-p1-auth-overlay-no-session-network-before-fetch-race-20260718.json`。
 
+### 2026-07-19 客户端缓存水合解耦
+
+部署会话超时修复后，页面内 `/api/session` 在当前 Chrome 中可真实返回 `200` 且包含已登录用户，但遮罩仍存在。认证路径仍在首次渲染前 `await userMgr.upsertUserFromServer(data.user)`；这把仅用于本地项目缓存的水合置于会话可操作性之前。
+
+修复：无 `projectId` 的正常入口立即使用服务端用户设置 `currentUser`、`authChecked` 和工作台视图，再后台执行 `upsertUserFromServer`。带 `projectId` 的恢复流程仍保持原有完整水合语义。先红后绿：`auth-bootstrap-project-sync-contract.test.ts` 新增“无项目会话先可交互、后水合”约束；与 `auth-session`、用户同步测试共 8/8 通过，类型检查通过。待完整门禁与云端 Chrome 部署复验。新增云端证据：`test-results/screenshots/cloud-p1-auth-after-fetch-race-20260719.png`。
+
 ## 2026-07-18 云端部署复验结案补充
 
 | Bug ID | 云端复验 | 结果 | 证据 | 结案范围 |

@@ -381,12 +381,25 @@ function CanvasApp() {
         if (!cancelled && data.success && data.user) {
 
           const userMgr = UserManagerCore.getInstance();
+          const projectId = searchParams.get('projectId');
+          if (!projectId) {
+            setCurrentUser(data.user);
+            setAuthChecked(true);
+            setAppMode('dashboard');
+            void userMgr.upsertUserFromServer(data.user)
+              .then((hydratedUser) => {
+                if (!cancelled) setCurrentUser(hydratedUser);
+              })
+              .catch((error: unknown) => {
+                console.warn('[auth] background client hydration failed', error);
+              });
+            return;
+          }
+
           const hydratedUser = await userMgr.upsertUserFromServer(data.user);
           setCurrentUser(hydratedUser);
 
           // 检查 URL 中是否有 projectId 参数（从工作台跳转过来）
-          const projectId = searchParams.get('projectId');
-
           if (projectId) {
             // ★ 初始化加载项目：跳过 diff 记录，防止 Ctrl+Z 撤销到空画布
             skipHistoryRef.current = true;
