@@ -35,17 +35,22 @@ describe('authentication bootstrap project sync', () => {
 
   it('makes a no-project authenticated session interactive before client cache hydration', () => {
     const source = readFileSync(path.resolve(process.cwd(), 'src/app/page.tsx'), 'utf8');
+    const authInitializer = source.indexOf('const initCurrentUser = async () => {');
     const projectId = source.indexOf('const projectId = searchParams.get(\'projectId\');');
     const noProjectBranch = source.indexOf('if (!projectId) {', projectId);
-    const setSessionUser = source.indexOf('setCurrentUser(data.user);', noProjectBranch);
+    const setSessionUser = source.indexOf('setCurrentUser(sessionUser);', noProjectBranch);
     const setChecked = source.indexOf('setAuthChecked(true);', setSessionUser);
-    const backgroundHydration = source.indexOf('void userMgr.upsertUserFromServer(data.user)', setChecked);
+    const backgroundHydration = source.indexOf('setTimeout(() => {', setChecked);
+    const deferredManagerHydration = source.indexOf('void UserManagerCore.getInstance().upsertUserFromServer(sessionUser)', backgroundHydration);
+    const managerInitialization = source.indexOf('const userMgr = UserManagerCore.getInstance();', authInitializer);
 
     expect(projectId).toBeGreaterThan(-1);
     expect(noProjectBranch).toBeGreaterThan(projectId);
     expect(setSessionUser).toBeGreaterThan(noProjectBranch);
     expect(setChecked).toBeGreaterThan(setSessionUser);
     expect(backgroundHydration).toBeGreaterThan(setChecked);
+    expect(deferredManagerHydration).toBeGreaterThan(backgroundHydration);
+    expect(managerInitialization).toBeGreaterThan(noProjectBranch);
   });
 
   it('starts project sync in the background after the local user session is ready', () => {

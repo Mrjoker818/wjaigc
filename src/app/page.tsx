@@ -379,24 +379,28 @@ function CanvasApp() {
       try {
         const data = await fetchSessionPayload() as { success?: boolean; user?: User | null };
         if (!cancelled && data.success && data.user) {
+          const sessionUser = data.user;
 
-          const userMgr = UserManagerCore.getInstance();
           const projectId = searchParams.get('projectId');
           if (!projectId) {
-            setCurrentUser(data.user);
+            setCurrentUser(sessionUser);
             setAuthChecked(true);
             setAppMode('dashboard');
-            void userMgr.upsertUserFromServer(data.user)
-              .then((hydratedUser) => {
-                if (!cancelled) setCurrentUser(hydratedUser);
-              })
-              .catch((error: unknown) => {
-                console.warn('[auth] background client hydration failed', error);
-              });
+            setTimeout(() => {
+              if (cancelled) return;
+              void UserManagerCore.getInstance().upsertUserFromServer(sessionUser)
+                .then((hydratedUser) => {
+                  if (!cancelled) setCurrentUser(hydratedUser);
+                })
+                .catch((error: unknown) => {
+                  console.warn('[auth] background client hydration failed', error);
+                });
+            }, 0);
             return;
           }
 
-          const hydratedUser = await userMgr.upsertUserFromServer(data.user);
+          const userMgr = UserManagerCore.getInstance();
+          const hydratedUser = await userMgr.upsertUserFromServer(sessionUser);
           setCurrentUser(hydratedUser);
 
           // 检查 URL 中是否有 projectId 参数（从工作台跳转过来）
