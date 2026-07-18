@@ -385,8 +385,6 @@ function CanvasApp() {
           const userMgr = UserManagerCore.getInstance();
           const hydratedUser = await userMgr.upsertUserFromServer(data.user);
           setCurrentUser(hydratedUser);
-          // 确保从服务器加载最新项目数据（跨设备同步保障）
-          await userMgr.loadProjectsFromServer();
 
           // 检查 URL 中是否有 projectId 参数（从工作台跳转过来）
           const projectId = searchParams.get('projectId');

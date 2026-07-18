@@ -5,6 +5,7 @@ import { APP_VERSION_LABEL } from '@/config/app-meta';
 const STORAGE_KEY = 'unbounded_ai_user_data';
 const CURRENT_USER_KEY = 'unbounded_ai_current_user';
 const DEFAULT_ADMIN_NAME = 'Mr.joker';
+const PROJECT_SYNC_TIMEOUT_MS = 8_000;
 // Default admin password is no longer stored in client code for security.
 // The server handles authentication; client sends the password the user types.
 
@@ -498,7 +499,7 @@ export class UserManager {
   }
 
   /** 从服务器加载当前用户的项目数据 */
-  async loadProjectsFromServer(retryCount = 2): Promise<boolean> {
+  async loadProjectsFromServer(retryCount = 1): Promise<boolean> {
     if (!this.currentUserId || !this.multiUserData) return false;
     const userData = this.multiUserData.userData[this.currentUserId];
     if (!userData) return false;
@@ -506,6 +507,7 @@ export class UserManager {
     try {
       const res = await fetch('/api/user-data/sync?key=projects', {
         credentials: 'include',
+        signal: AbortSignal.timeout(PROJECT_SYNC_TIMEOUT_MS),
       });
       if (!res.ok) {
         console.warn('[Sync] loadProjectsFromServer: server returned', res.status);

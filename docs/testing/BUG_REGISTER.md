@@ -115,6 +115,17 @@
 | 根因 / 修复 | `build` 脚本把依赖安装和构建混为同一步，安装阶段阻塞后从未进入 Next 构建。新增 `build-command-contract.test.ts`，并将脚本改为纯 `next build`；依赖安装应在构建前显式执行。 |
 | 回归 / 状态 | 先红后绿：脚本契约修复前失败、修复后通过；`pnpm build` 在 85.2 秒完成 97 个页面，退出码 0。构建仍有 5 条 Turbopack NFT 动态文件追踪 warning 与 2 条 Node 本地存储路径 warning，未阻断但需后续收敛。 |
 
+## 2026-07-18 BUG-20260718-016：认证初始化被项目同步无限阻塞
+
+| 字段 | 记录 |
+| --- | --- |
+| 等级 / 模块 | P1 / 云端首页、会话恢复、项目同步 |
+| 稳定复现 | 云端 Chrome 预览页刷新后，完整画布已渲染但固定身份遮罩“正在验证身份...”在 30 秒内不消失，用户无法操作。此前页面还出现过 `Internal Server Error`；同一时段无 Cookie 的远程 `/api/auth/me` 健康探针可返回 200。 |
+| 根因 | 会话成功后 `upsertUserFromServer` 串行等待项目同步；该同步请求无超时，且页面启动阶段再次等待同一同步。任何云端同步请求挂起都会使 `authChecked` 永远为 false。 |
+| 修复 | 项目同步请求使用 8 秒 `AbortSignal.timeout`、默认只重试一次；认证启动移除第二次阻塞式同步。失败仍保留既有本地项目回退和 30 秒周期同步。 |
+| 回归 | 先红后绿：新增 `auth-bootstrap-project-sync-contract.test.ts` 两项断言。定向 5/5、全量 127 文件 / 515 用例、`pnpm ts-check`、`pnpm lint --quiet`、`pnpm build`（97 页面）均通过。 |
+| 状态 | 本地修复待推送和云端 Chrome 刷新复验；不能因页面底层 DOM 已出现而标记为通过。证据：`cloud-p0-auth-verification-stuck-20260718.png`、同名 Console JSON。 |
+
 ## 2026-07-18 云端部署复验结案补充
 
 | Bug ID | 云端复验 | 结果 | 证据 | 结案范围 |
