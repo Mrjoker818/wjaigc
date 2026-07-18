@@ -1,5 +1,11 @@
 # 回归测试报告
 
+## 2026-07-18 构建网络依赖回归
+
+- 修复前，`pnpm build` 因 `next/font/google` 拉取 Geist 字体失败而退出码为 1，错误链为 `fonts.gstatic.com` 请求失败后 Turbopack 内部字体模块无法解析。
+- 新增 `root-layout-font-contract.test.ts`，先失败再通过，约束根布局不得重新引入 `next/font/google`。
+- 修复后 `pnpm build` 退出码 0，完成 97 个静态页面生成；`pnpm ts-check` 与 `pnpm lint --quiet` 均通过。
+
 ## 2026-07-18 云端恢复终态与高频轮询复验
 
 - 历史真实任务 `async-1784362294335-88ydio` 已返回 `completed / 100%` 和生成图片地址；画布重开后保留结果。积分概览新增且仅新增一条 `-6` 的 Lite 消费流水，确认恢复路径没有重复结算。

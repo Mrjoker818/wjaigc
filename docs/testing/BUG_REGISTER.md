@@ -1,5 +1,16 @@
 # 缺陷登记册
 
+## 2026-07-18 INFRA-20260718-007：生产构建依赖外部 Google 字体网络
+
+| 字段 | 记录 |
+| --- | --- |
+| 等级 / 模块 | P1 / 构建与部署可靠性 |
+| 稳定复现 | `pnpm build` 在请求 `fonts.gstatic.com` 的 Geist 字体失败后，Turbopack 报字体内部模块无法解析，生产构建退出码为 1。 |
+| 根因 | `src/app/layout.tsx` 使用 `next/font/google`，把全局字体加载绑定到构建时外部网络；而项目 CSS 已有完整本地系统字体回退链。 |
+| 修复 | 移除远程 Geist 导入及变量注入，根布局保留 `antialiased`，继续使用 `globals.css` 的中英文字体栈。 |
+| 回归 | 先红后绿：新增 `root-layout-font-contract.test.ts`，修复前断言失败；修复后通过。`pnpm ts-check`、`pnpm lint --quiet` 通过，`pnpm build` 于 2026-07-18 退出码 0。 |
+| 状态 | 本地已修复并验证；待随本次提交推送。 |
+
 ## 2026-07-18 BUG-20260718-013：SSE 断开时图像生成轮询绕过节流
 
 | 字段 | 记录 |

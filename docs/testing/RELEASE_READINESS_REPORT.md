@@ -4,7 +4,7 @@
 
 云端 502 阻塞已解除，历史已扣费任务已完成、结果可见且只结算一次；但新真实任务 `async-1784381325092-zkypoi` 仍处于 `processing / 10%`，尚无终态、结果持久化和刷新恢复证据。另已稳定复现 P1 BUG-20260718-013：SSE 断开会让图像轮询绕过 800ms 节流，造成约 76–269ms 的高频 `/api/poll-task` 请求。修复和回归测试已在本地完成，尚未同步云端复验。因此当前发布结论保持 **不通过**。
 
-本次提交前本地 `pnpm test`、`pnpm ts-check`、`pnpm lint --quiet` 与 `git diff --check` 已通过。`pnpm build` 未通过：构建机无法请求 `https://fonts.gstatic.com/.../geist...woff2`，继而 Turbopack 报字体内部模块无法解析。该外部网络/构建环境问题未通过删除字体引用或跳过构建掩盖，仍是本地发布验证阻塞项。
+本次提交前本地 `pnpm test`、`pnpm ts-check`、`pnpm lint --quiet` 与 `git diff --check` 已通过。此前 `pnpm build` 会因 `next/font/google` 请求 Geist 字体失败而中断；该依赖现已移除，回归测试先红后绿，`pnpm build` 已在本地完整通过。此项本地构建阻塞已解除，不改变仍未关闭的云端 P1 结论。
 
 ## 2026-07-18 当前结论：不通过
 
