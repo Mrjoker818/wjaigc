@@ -4,6 +4,8 @@ import { collectBrowserEvidence, saveBrowserEvidence } from '../helpers/evidence
 const username = process.env.E2E_TEST_USERNAME;
 const password = process.env.E2E_TEST_PASSWORD;
 const projectId = process.env.E2E_TEST_PROJECT_ID;
+// The UI displays duplicate model labels across providers. Keep the provider
+// identity in the test input so it cannot silently select a different vendor.
 const model = process.env.E2E_GENERATION_MODEL;
 const paidGenerationApproved = process.env.E2E_ENABLE_PAID_GENERATION === 'true';
 const uploadedImage = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
@@ -16,6 +18,9 @@ function requireRealEnvironment(): void {
     ['E2E_GENERATION_MODEL', model],
   ].filter(([, value]) => !value).map(([name]) => name);
   if (missing.length > 0) throw new Error(`Real P0 E2E environment is required. Missing: ${missing.join(', ')}`);
+  if (!model!.includes('::')) {
+    throw new Error('E2E_GENERATION_MODEL must use the exact providerId::modelId option value, not a duplicate display label.');
+  }
   if (!paidGenerationApproved) throw new Error('Real generation is intentionally blocked. Set E2E_ENABLE_PAID_GENERATION=true only after an authorized credit-consuming test run is approved.');
 }
 
@@ -62,7 +67,7 @@ test.describe('P0 real user journey', () => {
       const prompt = page.getByPlaceholder('描述你想要创建的图像... (输入 / 使用模板)');
       await prompt.fill('P0 real browser regression test: a single red geometric cube on a clean white background');
       const modelLabel = page.getByText('图像模型', { exact: true });
-      await modelLabel.locator('..').getByRole('combobox').selectOption({ label: model! });
+      await modelLabel.locator('..').getByRole('combobox').selectOption({ value: model! });
       const generationResponse = page.waitForResponse((response) => response.url().includes('/api/generate') && response.request().method() === 'POST');
       await page.getByRole('button', { name: '开始生成' }).click();
       const response = await generationResponse;

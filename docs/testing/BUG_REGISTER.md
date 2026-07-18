@@ -22,6 +22,12 @@
 | BUG-20260718-005 | 新建的独立普通账号，以 `canvas` 产品入口完成登录、刷新与退出 | 已修复并云端通过，四浏览器 4/4 通过 | 归档 ID `20260718-p0-auth-session-cloud-green`；`test-results/screenshots/p0-auth-session-*.png`；同名 Console/Network JSON；`playwright-report/index.html` | 默认 `canvas,chat` 产品权限已在云端生效；不代表旧账号的显式权限配置被迁移。 |
 | BUG-20260718-006 | 同一独立普通账号完成登录、刷新与退出，并审查 Console/Network | 已修复并云端通过，四浏览器 4/4 通过 | 同上；Network 未出现 `/api/admin/user-folder` 401，Console 无 error | 普通用户会话不再调用管理员目录端点；不替代其他业务模块的权限回归。 |
 
+## 2026-07-18 测试基础设施风险
+
+| ID | 等级 | 模块 | 状态 | 根因、修复与回归 |
+| --- | --- | --- | --- | --- |
+| INFRA-20260718-001 | P1 | P0 真实图像生成 E2E | 已修复，真实生成待授权执行 | 云端图像模型下拉框中存在跨供应商的同名显示标签，原用例使用 `selectOption({ label })`，可能静默选择 FHL、虚宝或其他同名提供商，导致测试结果不能证明目标供应商。修复为只接受精确的 `providerId::modelId` 选项值并使用 `selectOption({ value })`；非复合值立即失败。`pnpm ts-check` 与 `pnpm exec playwright test tests/e2e/p0-core.spec.ts --list` 于 2026-07-18 通过。 |
+
 ## 当前登记
 
 | Bug ID | 级别 | 模块 | 状态 | 复现与证据 | 根因/修复 | 回归结果 |

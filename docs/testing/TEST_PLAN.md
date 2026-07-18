@@ -5,6 +5,7 @@
 - 测试地址由 `E2E_BASE_URL` 指定，禁止对非授权的外部系统做攻击性测试。远程健康检查命令为 `pnpm run doctor -- --url=https://deployment.example`。
 - 仅使用真实登录账户、真实项目和真实模型提供商；测试账户凭据只通过环境变量注入，不写入仓库或报告。
 - 生成会产生供应商计费，必须在授权后才设置 `E2E_ENABLE_PAID_GENERATION=true`。
+- `E2E_GENERATION_MODEL` 必须填写图像模型下拉框的精确选项值 `providerId::modelId`，不得填写可重复的显示名；执行前需确认该提供商不是已声明跳过的 FHL 或虚宝。
 - Playwright 不使用固定长等待：上传、生成和恢复均等待网络响应、元素数量或任务结果。
 
 ## P0用例
