@@ -1,5 +1,17 @@
 # 缺陷登记册
 
+## 2026-07-18 BUG-20260718-011：重开画布后任务无法恢复
+
+| 字段 | 记录 |
+| --- | --- |
+| 等级 / 模块 | P1 / 无限画布图像生成恢复 |
+| 稳定复现 | Chrome 云端项目刷新并重新打开后，真实待处理占位框保持 `submitting 5%`，浏览器没有发出 `/api/poll-task` 请求。 |
+| 根因 | 占位框未持久化后端返回的 `taskId`；生成请求也未传递 `projectId`，因此恢复 API 无法关联旧云端任务和画布。 |
+| 修复 | 首轮轮询前持久化每个 `taskId`；提交携带 `projectId`；恢复接口仅返回脱敏字段；旧无归属任务仅在提示词和规范化模型完全一致且唯一时绑定。 |
+| 安全约束 | 歧义、缺少提示词或模型、失败、取消的任务均不猜测或绑定。 |
+| 回归 | 先红后绿：`canvas-task-placeholders.test.ts`、`legacy-task-recovery.test.ts`、`page-task-placeholder-persistence-contract.test.ts`、`task-recovery-route-contract.test.ts`；全量 121 文件 / 504 用例通过。 |
+| 证据 / 状态 | `test-results/screenshots/cloud-p1-recovery-not-resumed-20260718.png`、`test-results/console/cloud-p1-recovery-not-resumed-20260718.json`。本地修复已验证，待云端部署复验。 |
+
 ## 2026-07-18 BUG-20260718-010：submitOnly 恢复任务类型错误
 
 | 字段 | 记录 |

@@ -4,7 +4,8 @@ import { useState, useCallback, useRef, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { getResumedTaskPollingOutcome, RESUMED_TASK_MAX_POLL_ATTEMPTS } from '@/lib/resumed-task-polling';
 import { hasDirectVideoPollingTimedOut } from '@/lib/video-task-polling';
-import { shouldPersistProcessingPlaceholder } from '@/lib/canvas-task-placeholders';
+import { applyTaskIdsToProcessingPlaceholders, shouldPersistProcessingPlaceholder } from '@/lib/canvas-task-placeholders';
+import { findUniqueLegacyTaskMatch, type RecoverableLegacyTask } from '@/lib/legacy-task-recovery';
 import { InfiniteCanvas, CanvasImage, ImageGroup } from '@/components/infinite-canvas';
 import { IncrementalHistoryManager } from '@/lib/canvas-incremental-history';
 import { TreeHistoryManager, type VersionNode } from '@/lib/canvas-tree-history';
@@ -597,6 +598,59 @@ function CanvasApp() {
   currentUserRef.current = currentUser;
 
   const resumedTaskIdsRef = useRef<Set<string>>(new Set());
+  const legacyRecoveryAttemptedRef = useRef<Set<string>>(new Set());
+  const legacyRecoveryInFlightRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!currentProject?.id) return;
+
+    const placeholders = images.filter((image) => (
+      image.isProcessingPlaceholder
+      && !image.processing?.taskId
+      && Boolean(image.prompt?.trim())
+      && Boolean(image.model?.trim())
+    ));
+    const keys = placeholders
+      .map((image) => `${currentProject.id}:${image.id}`)
+      .filter((key) => !legacyRecoveryAttemptedRef.current.has(key) && !legacyRecoveryInFlightRef.current.has(key));
+    if (keys.length === 0) return;
+
+    keys.forEach((key) => legacyRecoveryInFlightRef.current.add(key));
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch(`/api/tasks/recover?projectId=${encodeURIComponent(currentProject.id)}&includeLegacyUnassigned=1`);
+        const data = await response.json() as { success?: boolean; tasks?: RecoverableLegacyTask[] };
+        if (!response.ok || !data.success || !Array.isArray(data.tasks) || cancelled) return;
+
+        const keyByImageId = new Map(placeholders.map((image) => [image.id, `${currentProject.id}:${image.id}`]));
+        setImages((current) => current.map((image) => {
+          const match = findUniqueLegacyTaskMatch(image, data.tasks || []);
+          if (!match || !image.processing) return image;
+          const key = keyByImageId.get(image.id);
+          if (key) legacyRecoveryAttemptedRef.current.add(key);
+          return {
+            ...image,
+            model: image.model || match.model,
+            apiProvider: image.apiProvider || match.providerId,
+            processing: {
+              ...image.processing,
+              taskId: match.id,
+              status: 'processing',
+              progress: Math.max(image.processing.progress || 0, match.progress || 10),
+              label: match.label || '已恢复，等待生成',
+            },
+          };
+        }));
+      } catch {
+        // The next render retries a failed recovery fetch; do not guess a task ID.
+      } finally {
+        keys.forEach((key) => legacyRecoveryInFlightRef.current.delete(key));
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [currentProject?.id, images, setImages]);
+
   useEffect(() => {
     let cancelled = false;
     const pending = images.filter((image) => image.isProcessingPlaceholder && image.processing?.taskId);
@@ -1237,7 +1291,7 @@ function CanvasApp() {
         response = await fetch(apiEndpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...params, userId: currentUserRef.current?.id, submitOnly: true }),
+          body: JSON.stringify({ ...params, userId: currentUserRef.current?.id, projectId: currentProject?.id, submitOnly: true }),
           signal: submitController.signal,
         });
       } finally {
@@ -1395,6 +1449,9 @@ function CanvasApp() {
       // === 轮询模式：API返回任务ID，前端轮询结果 ===
       if (data.mode === 'polling') {
         const { taskIds, estimatedTime, prompt: enhancedPrompt, modelName: pollingModelName, providerName: pollingProviderName, apiBaseUrl: pollingApiBaseUrl } = data;
+
+        // Persist task IDs before the first poll so an autosave/reload can resume them.
+        setImages((previous) => applyTaskIdsToProcessingPlaceholders(previous, placeholderIds, taskIds));
 
         // 自适应轮询间隔策略（优化版）
         // 前期更快探测，后期适度延长避免浪费请求
