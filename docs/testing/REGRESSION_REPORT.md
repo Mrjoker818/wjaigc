@@ -65,11 +65,11 @@
 ## 基线校验
 
 - `pnpm run doctor -- --url=https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9.dev.coze.site/`：3 项通过、9 项警告、0 项失败。警告均为本机未注入生产密钥、数据库、对象存储及模型凭据；仅证明 `/api/auth/me` 可达，不能据此推导云端数据库、对象存储、登录或模型数据链路健康。
-- `pnpm ts-check`：通过。
+- `pnpm ts-check`：2026-07-18 当前提交通过（退出码 0）。
 - `pnpm exec playwright test tests/e2e/p0-core.spec.ts --list`：4个浏览器项目均已发现测试用例。
-- `pnpm lint`：首次为 1 error / 929 warnings；修复 P0生成路由的 `prefer-const` 后，`pnpm lint --quiet` 通过。warning 仍是历史存量，未被隐藏或清除。
-- `pnpm test`：117 个测试文件、483 个测试通过；本机无数据库时出现预期回退日志，因此数据库链路仍未验证。
-- `pnpm build`：通过，耗时约 127 秒。
+- `pnpm lint`：首次为 1 error / 929 warnings；修复 P0生成路由的 `prefer-const` 后，2026-07-18 `pnpm lint --quiet` 再次通过。warning 仍是历史存量，未被隐藏或清除；Babel 对超大 `infinite-canvas.tsx` 的样式降级提示不属于 ESLint error。
+- `pnpm test`：2026-07-18 运行结果为 117 个测试文件、483 个测试通过；本机无数据库时出现预期回退日志，因此数据库链路仍未验证。
+- `pnpm build`：2026-07-18 通过，耗时 78.7 秒。构建提示本地 `data` 目录不会在重部署后持久化，并有 Node `--localstorage-file` 无有效路径的 warning；两者未导致构建失败，但需在云端部署环境单独验证。
 - 工作流鉴权修复后复验（2026-07-17）：`pnpm ts-check`、`pnpm lint --quiet`、`pnpm test`（117 个测试文件、483 个测试）以及 `pnpm build` 均通过；最新生产构建耗时 76 秒。2026-07-18 云端匿名 HTTP 探针也返回预期 401。该结果不能替代真实账号、存储和模型调用验证。
 - `pnpm audit --prod --json`：未验证，镜像端点不存在、官方端点超时，详见 `SECURITY_REPORT.md`。
 - 本轮新增回归：`pnpm exec vitest run src/__tests__/lib/operation-audit.test.ts` 为 2/2 通过；`pnpm lint --quiet`（排除自动生成 Playwright 报告后）与 `pnpm ts-check` 通过；`pnpm test` 为 117 个测试文件、483 个测试通过。测试环境没有数据库连接，因此输出中的本地存储回退日志不能作为数据库链路证据。
