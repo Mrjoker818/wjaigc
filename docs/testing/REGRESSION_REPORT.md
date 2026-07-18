@@ -64,8 +64,7 @@
 
 ## 基线校验
 
-- `npm run doctor`：2项通过、10项警告、0项失败。警告均为本机未注入生产密钥、数据库、对象存储及模型凭据，不能据此推导云端健康。
-- `pnpm run doctor -- --url=https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9-5000.dev.coze.site`：3项通过、9项警告、0项失败；仅证明 `/api/auth/me` 可达，不证明登录或数据链路通过。
+- `pnpm run doctor -- --url=https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9.dev.coze.site/`：3 项通过、9 项警告、0 项失败。警告均为本机未注入生产密钥、数据库、对象存储及模型凭据；仅证明 `/api/auth/me` 可达，不能据此推导云端数据库、对象存储、登录或模型数据链路健康。
 - `pnpm ts-check`：通过。
 - `pnpm exec playwright test tests/e2e/p0-core.spec.ts --list`：4个浏览器项目均已发现测试用例。
 - `pnpm lint`：首次为 1 error / 929 warnings；修复 P0生成路由的 `prefer-const` 后，`pnpm lint --quiet` 通过。warning 仍是历史存量，未被隐藏或清除。

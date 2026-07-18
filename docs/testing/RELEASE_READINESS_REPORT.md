@@ -17,7 +17,7 @@
 - 已发现的云端 P1 工作流匿名执行授权问题已部署并复验：是。
 - Chromium、Firefox、WebKit和移动Chromium核心流程均有证据：当前否。
 - 登录、上传、生成、保存/刷新恢复、下载、退出均完成真实验证：当前否；删除状态第二轮通过，但仍需独立浏览器重复验证。
-- `npm run doctor` 无关键失败：待执行。
+- `pnpm run doctor -- --url=https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9.dev.coze.site/`：3 项通过、9 项本地环境警告、0 项失败；该结果只证明部署地址的 `/api/auth/me` 可达，不能证明云端数据库、对象存储和模型密钥健康。
 - 静态与构建回归：`pnpm ts-check`、`pnpm lint --quiet`、`pnpm test`（483/483）和修复后的 `pnpm build` 已通过；这不是 P0 业务验收的替代证据。
 - `test-results/`、`playwright-report/` 完整产物存在：基础目录已建立，真实报告待执行。
 
