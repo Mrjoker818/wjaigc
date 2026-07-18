@@ -876,7 +876,6 @@ export class UserManager {
     }
 
     this.saveData();
-    void this.ensureServerFolder(nextUser.id);
     return nextUser;
   }
 
@@ -914,20 +913,7 @@ export class UserManager {
 
     this.currentUserId = user.id;
     this.saveData();
-    void this.ensureServerFolder(user.id);
     return user;
-  }
-
-  private async ensureServerFolder(userId: string): Promise<void> {
-    try {
-      await fetch('/api/admin/user-folder', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId }),
-      });
-    } catch {
-      // Local folder creation is best-effort in the browser runtime.
-    }
   }
 
   createUser(name: string, email?: string, password: string = '123456'): User {
@@ -968,7 +954,6 @@ export class UserManager {
     this.currentUserId = user.id;
 
     this.saveData();
-    void this.ensureServerFolder(user.id);
     return user;
   }
 

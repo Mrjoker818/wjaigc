@@ -9,6 +9,15 @@
 
 云端结论仍为未验证：修复仅影响部署后的新建用户，必须在云端同步后创建新的隔离测试用户，并运行四浏览器真实登录/刷新/退出回归。现有测试账号在修复部署前创建，不能用于证明默认权限已生效。
 
+## 2026-07-18 普通用户会话 Console 回归
+
+| 环境 | 操作 | 结果 | 证据 |
+| --- | --- | --- | --- |
+| 云端预览、修复后新建的普通用户 | Chromium、Firefox、WebKit 与移动 Chromium 执行登录 → 刷新 → 退出 | 身份链路均成功；Firefox 全通过。Chromium、WebKit 和移动 Chromium因两次 `POST /api/admin/user-folder` 返回 401 而被 Console 门禁阻断 | `test-results/console/p0-auth-session-*.json`、`test-results/network/p0-auth-session-*.json`、`.playwright-output/` 中的截图、录像和 Trace |
+| 本地隔离测试 | 普通用户调用 `UserManager.upsertUserFromServer` | 修复前访问管理员端点；修复后仅访问 `/api/user-data/sync?key=projects` | `pnpm exec vitest run src/__tests__/lib/user-manager-admin-folder.test.ts`，1/1 通过 |
+
+云端同步此修复后，复用当前隔离账号重新执行四浏览器 `p0-auth-session`；只有四项目均无 Console error 后，才能关闭 BUG-20260718-006。
+
 ## 2026-07-18 云端 Chrome 已登录会话 P0 实测
 
 | 环境 | 操作 | 结果 | 证据 |
