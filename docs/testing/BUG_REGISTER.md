@@ -1,5 +1,22 @@
 # 缺陷登记册
 
+## 2026-07-18 BUG-20260718-013：SSE 断开时图像生成轮询绕过节流
+
+| 字段 | 记录 |
+| --- | --- |
+| 等级 / 模块 | P1 / 无限画布图像生成、任务轮询与积分安全 |
+| 环境 / 前置条件 | 云端预览、Chrome 已登录 `Mr.joker`；模型 `doubao-seedream-5-0-lite`，单张 `1:1` 任务 `async-1784381325092-zkypoi`。 |
+| 稳定复现 | 提交真实生成后，任务稳定处于 `processing / 10%`。网络证据记录至少 79 次 `POST /api/poll-task`，相邻请求间隔约 76–269ms；每次均为业务成功 JSON，但状态仍是 `processing`。 |
+| 预期 / 实际 | 预期在 SSE 断开时按模型估算时间执行正常轮询间隔（本任务应为 800ms），并仅在终态 SSE 事件到达时提前唤醒。实际为 SSE 未连接分支立即 resolve，循环跳过定时器，形成高频轮询。 |
+| 根因 | 两处图像生成循环均以 `Promise.race` 等待计时器或 SSE；当 `taskEventsClient.isConnected()` 为 false 时，SSE promise 同步完成，导致 race 立即返回。 |
+| 修复 | 两处循环统一调用 `waitForTaskPollInterval`。该帮助器在 SSE 未连接时只等待计时器，在连接时仅由匹配任务的 `completed`、`failed`、`cancelled` 事件提前结束。 |
+| 回归 | 先红后绿：新增 `src/__tests__/components/page-task-polling-wiring.test.ts`，修复前因页面未接入 helper 失败；修复后与 `src/__tests__/lib/task-polling-wait.test.ts` 共 3/3 通过。`pnpm ts-check`、`pnpm lint --quiet` 已通过；全量回归待本次提交前执行。 |
+| 证据 / 状态 | `test-results/screenshots/cloud-p1-generation-polling-busy-loop-20260718.png`、`test-results/network/cloud-p1-generation-polling-busy-loop-20260718.json`、`test-results/console/cloud-p1-generation-polling-busy-loop-20260718.json`。本地修复完成，待推送、云端同步及真实间隔复验；未关闭。 |
+
+### 云端恢复链路复验更新
+
+历史任务 `async-1784362294335-88ydio` 已由云端 `POST /api/poll-task` 返回 `completed / 100%`，并返回可访问的生成图地址；重新打开项目可见蓝色立方体结果。积分概览同时出现一次 `-6` 的 `doubao-seedream-5-0-lite` 流水，余额和累计消耗各精确变化 6。该证据关闭 BUG-20260718-010、BUG-20260718-011 与 BUG-20260718-012 的“历史任务恢复、持续轮询和单次结算”范围；不替代 BUG-20260718-013 的节流复验，也不替代新任务的终态验证。
+
 ## 2026-07-18 BUG-20260718-012：恢复任务仅轮询一次
 
 | 字段 | 记录 |

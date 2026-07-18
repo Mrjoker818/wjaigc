@@ -1,5 +1,13 @@
 # 回归测试报告
 
+## 2026-07-18 云端恢复终态与高频轮询复验
+
+- 历史真实任务 `async-1784362294335-88ydio` 已返回 `completed / 100%` 和生成图片地址；画布重开后保留结果。积分概览新增且仅新增一条 `-6` 的 Lite 消费流水，确认恢复路径没有重复结算。
+- 新提交的真实任务 `async-1784381325092-zkypoi` 已产生一条新的 `-6` 流水，但任务监控当前仍为 `processing / 10%`；这不是结果丢失的证据，终态、结果入画布和刷新恢复仍待验证。
+- 对该新任务已稳定捕获 SSE 断开时的轮询节流缺陷：至少 79 次 `POST /api/poll-task` 以约 76–269ms 间隔返回 `processing`。登记为 BUG-20260718-013。
+- 本地已以先红后绿测试接入 `waitForTaskPollInterval`：`page-task-polling-wiring.test.ts` 与 `task-polling-wait.test.ts` 共 3/3 通过，`pnpm ts-check`、`pnpm lint --quiet` 通过。云端尚未同步本修复，不能据此声称云端已修复。
+- 证据：`test-results/screenshots/cloud-p1-recovery-c7ee167-completed-20260718.png`、`test-results/screenshots/cloud-p1-new-task-processing-20260718.png`、`test-results/screenshots/cloud-p1-generation-polling-busy-loop-20260718.png` 及同名 network/console JSON。
+
 ## 2026-07-18 `f9a2835` 云端恢复复验
 
 - 云端 Chrome 已登录会话重新打开最新项目后，`/api/tasks/recover` 返回历史任务 `async-1784362294335-88ydio`，首次 `/api/poll-task` 返回业务成功 `processing / 10%`，证明 BUG-20260718-010 与 BUG-20260718-011 的恢复匹配和供应商重新提交路径已生效。
