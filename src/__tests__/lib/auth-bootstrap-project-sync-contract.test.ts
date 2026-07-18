@@ -3,6 +3,13 @@ import path from 'path';
 import { describe, expect, it } from 'vitest';
 
 describe('authentication bootstrap project sync', () => {
+  it('bounds the authenticated-session probe so a hung response cannot keep the UI blocked', () => {
+    const source = readFileSync(path.resolve(process.cwd(), 'src/app/page.tsx'), 'utf8');
+
+    expect(source).toContain('const AUTH_BOOTSTRAP_TIMEOUT_MS = 8_000;');
+    expect(source).toContain("signal: AbortSignal.timeout(AUTH_BOOTSTRAP_TIMEOUT_MS)");
+  });
+
   it('bounds project sync requests so authentication cannot wait indefinitely', () => {
     const source = readFileSync(path.resolve(process.cwd(), 'src/lib/user-manager.ts'), 'utf8');
 

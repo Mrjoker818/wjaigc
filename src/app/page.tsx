@@ -60,6 +60,7 @@ import { APP_FULL_VERSION_LABEL, APP_NAME } from '@/config/app-meta';
 
 type ThemeStyle = 'gold' | 'monochrome';
 type ActivePanel = 'generate' | 'video' | 'chat';
+const AUTH_BOOTSTRAP_TIMEOUT_MS = 8_000;
 
 
 function recordUserData(input: {
@@ -378,7 +379,11 @@ function CanvasApp() {
     let cancelled = false;
     const initCurrentUser = async () => {
       try {
-        const response = await fetch('/api/auth/me', { cache: 'no-store', credentials: 'include' });
+        const response = await fetch('/api/auth/me', {
+          cache: 'no-store',
+          credentials: 'include',
+          signal: AbortSignal.timeout(AUTH_BOOTSTRAP_TIMEOUT_MS),
+        });
         const data = await response.json() as { success?: boolean; user?: User | null };
         if (!cancelled && data.success && data.user) {
 

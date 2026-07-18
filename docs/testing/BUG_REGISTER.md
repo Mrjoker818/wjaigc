@@ -138,6 +138,14 @@
 
 回归：先新增失败约束，再通过 `auth-bootstrap-project-sync-contract.test.ts` 和 `user-manager-admin-folder.test.ts` 的 5 项定向测试；其中包含“同步 Promise 未解决时登录立即返回”的行为测试。`pnpm ts-check`、`pnpm lint --quiet`、全量 `pnpm test` 与 `pnpm build` 均已通过。此修复仍必须在云端 Chrome 中复验遮罩消失后，才可关闭 BUG-20260718-016。
 
+### 2026-07-18 云端部署后二次复现与第三次修复
+
+云端静态资源已确认含认证与项目同步解耦补丁，但已登录 Chrome 刷新后认证遮罩仍连续约 21 秒可见。控制台仍只有 Coze Console Bridge parent-origin 警告，未给出应用异常；这证明项目同步不是唯一阻塞点。
+
+进一步根因：认证初始化最先调用的 `/api/auth/me` 没有超时。即使后续同步不再阻塞，只要该请求或响应体停住，`authChecked` 永远不会置为完成。修复为认证探针加入 8 秒 `AbortSignal.timeout`，保留现有 catch 分支的会话清理和登录页降级。新增失败回归 `bounds the authenticated-session probe so a hung response cannot keep the UI blocked`，修复后 `auth-bootstrap-project-sync-contract.test.ts` 4/4、`pnpm ts-check` 和 `pnpm lint --quiet` 通过。
+
+新增证据：`test-results/screenshots/cloud-p1-auth-overlay-still-blocking-after-69da406-20260718.png`、`test-results/console/cloud-p1-auth-overlay-still-blocking-after-69da406-20260718.json`。必须在包含本次修复的新云端构建中复验遮罩消失，之后才可提交真实生成任务。
+
 ## 2026-07-18 云端部署复验结案补充
 
 | Bug ID | 云端复验 | 结果 | 证据 | 结案范围 |
