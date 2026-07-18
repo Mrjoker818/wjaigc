@@ -31,4 +31,28 @@ describe('user login server synchronization', () => {
     expect(requestedUrls).toContain('/api/user-data/sync?key=projects');
     expect(requestedUrls).not.toContain('/api/admin/user-folder');
   });
+
+  it('makes the signed-in user available before a pending project sync resolves', async () => {
+    const { UserManager } = await import('@/lib/user-manager');
+    const manager = UserManager.getInstance();
+    let resolveSync: ((value: boolean) => void) | undefined;
+    const syncSpy = vi.spyOn(manager, 'loadProjectsFromServer').mockImplementation(() => new Promise<boolean>(resolve => {
+      resolveSync = resolve;
+    }));
+
+    await expect(manager.upsertUserFromServer({
+      id: 'pending-sync-user',
+      name: 'pending-sync-user',
+      role: 'user',
+      status: 'active',
+      createdAt: 1,
+      updatedAt: 1,
+    })).resolves.toMatchObject({ id: 'pending-sync-user' });
+
+    expect(syncSpy).toHaveBeenCalledOnce();
+    expect(manager.getUser()).toMatchObject({ id: 'pending-sync-user' });
+
+    resolveSync?.(true);
+    await Promise.resolve();
+  });
 });

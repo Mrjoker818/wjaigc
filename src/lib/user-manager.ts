@@ -499,9 +499,9 @@ export class UserManager {
   }
 
   /** 从服务器加载当前用户的项目数据 */
-  async loadProjectsFromServer(retryCount = 1): Promise<boolean> {
-    if (!this.currentUserId || !this.multiUserData) return false;
-    const userData = this.multiUserData.userData[this.currentUserId];
+  async loadProjectsFromServer(retryCount = 1, expectedUserId: string | null = this.currentUserId): Promise<boolean> {
+    if (!expectedUserId || !this.multiUserData) return false;
+    const userData = this.multiUserData.userData[expectedUserId];
     if (!userData) return false;
 
     try {
@@ -509,12 +509,13 @@ export class UserManager {
         credentials: 'include',
         signal: AbortSignal.timeout(PROJECT_SYNC_TIMEOUT_MS),
       });
+      if (this.currentUserId !== expectedUserId) return false;
       if (!res.ok) {
         console.warn('[Sync] loadProjectsFromServer: server returned', res.status);
         // 重试：登录后 session cookie 可能尚未生效
         if (retryCount > 0) {
           await new Promise(r => setTimeout(r, 1000));
-          return this.loadProjectsFromServer(retryCount - 1);
+          return this.loadProjectsFromServer(retryCount - 1, expectedUserId);
         }
         return false;
       }
@@ -522,7 +523,7 @@ export class UserManager {
       if (!data.success) {
         if (retryCount > 0) {
           await new Promise(resolve => setTimeout(resolve, 1000));
-          return this.loadProjectsFromServer(retryCount - 1);
+          return this.loadProjectsFromServer(retryCount - 1, expectedUserId);
         }
         console.warn('[Sync] loadProjectsFromServer: unsuccessful response', data);
         return false;
@@ -555,7 +556,7 @@ export class UserManager {
       }
 
       // 【数据隔离】过滤掉不属于当前用户的项目（防御性检查，防止跨用户数据泄漏）
-      const currentUserId = this.currentUserId;
+      const currentUserId = expectedUserId;
       // 严格用户隔离：仅保留当前用户的项目
       // - 有 userId 的项目必须匹配当前用户
       // - 无 userId 的旧数据（历史遗留）补上当前用户ID后保留
@@ -799,7 +800,7 @@ export class UserManager {
       console.error('[Sync] loadProjectsFromServer error:', error);
       if (retryCount > 0) {
         await new Promise(r => setTimeout(r, 1000));
-        return this.loadProjectsFromServer(retryCount - 1);
+        return this.loadProjectsFromServer(retryCount - 1, expectedUserId);
       }
       return false;
     }
@@ -869,13 +870,19 @@ export class UserManager {
       this.serverSyncTimer = null;
     }
     this._serverSyncReady = false;
-    const loadSuccess = await this.loadProjectsFromServer();
-
-    // 如果服务器加载失败但有本地数据，恢复本地项目防止用户看到空画布
-    if (!loadSuccess && existingLocalProjects.length > 0) {
-      this.multiUserData.userData[nextUser.id].projects = existingLocalProjects;
-      this.notifyProjectsChanged();
-    }
+    const syncUserId = nextUser.id;
+    void this.loadProjectsFromServer(1, syncUserId).then(loadSuccess => {
+      // Do not let a delayed sync for a previous account change the next account's data.
+      if (!loadSuccess && this.currentUserId === syncUserId && existingLocalProjects.length > 0) {
+        const activeUserData = this.multiUserData?.userData[syncUserId];
+        if (activeUserData) {
+          activeUserData.projects = existingLocalProjects;
+          this.notifyProjectsChanged();
+        }
+      }
+    }).catch(error => {
+      console.error('[Sync] background project sync error:', error);
+    });
 
     this.saveData();
     return nextUser;

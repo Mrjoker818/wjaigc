@@ -126,6 +126,18 @@
 | 回归 | 先红后绿：新增 `auth-bootstrap-project-sync-contract.test.ts` 两项断言。定向 5/5、全量 127 文件 / 515 用例、`pnpm ts-check`、`pnpm lint --quiet`、`pnpm build`（97 页面）均通过。 |
 | 状态 | 本地修复待推送和云端 Chrome 刷新复验；不能因页面底层 DOM 已出现而标记为通过。证据：`cloud-p0-auth-verification-stuck-20260718.png`、同名 Console JSON。 |
 
+### 2026-07-18 云端复验更新
+
+真实 Chrome 已登录会话在部署预览地址刷新后仍显示固定遮罩 `正在验证身份...`。针对该明确 UI 状态连续等待约 21 秒仍未完成；底层无限画布和生成面板虽已渲染，所有操作仍被遮罩阻止。控制台仅包含 Coze Console Bridge 的 parent-origin 警告，未出现应用 JavaScript error。Chrome CDP 网络观察通道未捕获认证或项目同步请求，不能据此判断接口成功或失败。该结果不能关闭 BUG-20260718-016，也不能进行会消耗积分的生成测试。
+
+新增证据：`test-results/screenshots/cloud-p1-auth-overlay-still-blocking-after-0290bdc-20260718.png` 与 `test-results/console/cloud-p1-auth-overlay-still-blocking-after-0290bdc-20260718.json`。需要确认云端实际构建包含 Git 提交 `0290bdc`，随后重新执行已登录 Chrome 复验。
+
+### 2026-07-18 本地二次修复
+
+根因进一步收敛为：即便同步请求设置了超时，`upsertUserFromServer()` 仍同步等待它完成，认证遮罩仍会受项目同步、重试或响应体读取阻塞。修复将项目同步改为后台启动，保留 8 秒请求上限，并给后台结果增加账户 ID 防护，防止延迟的旧账户同步覆盖当前账户。画布登录回调中重复的同步等待已移除。
+
+回归：先新增失败约束，再通过 `auth-bootstrap-project-sync-contract.test.ts` 和 `user-manager-admin-folder.test.ts` 的 5 项定向测试；其中包含“同步 Promise 未解决时登录立即返回”的行为测试。`pnpm ts-check`、`pnpm lint --quiet`、全量 `pnpm test` 与 `pnpm build` 均已通过。此修复仍必须在云端 Chrome 中复验遮罩消失后，才可关闭 BUG-20260718-016。
+
 ## 2026-07-18 云端部署复验结案补充
 
 | Bug ID | 云端复验 | 结果 | 证据 | 结案范围 |

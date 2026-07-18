@@ -4398,11 +4398,6 @@ function CanvasApp() {
             setImages([]);
             latestImagesRef.current = []; // 立即清除 ref，防止 onProjectsChanged 用旧图片覆盖新用户数据
             setCurrentUser(user);
-            // 加载项目数据后跳转到工作台
-            try {
-              const userMgr = UserManagerCore.getInstance();
-              await userMgr.loadProjectsFromServer();
-            } catch { /* non-blocking */ }
             toast.success('登录成功', {
               description: `欢迎回来，${user.name}`,
               className: themeStyle === 'monochrome'

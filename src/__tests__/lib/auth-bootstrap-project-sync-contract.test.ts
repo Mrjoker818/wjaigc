@@ -7,7 +7,7 @@ describe('authentication bootstrap project sync', () => {
     const source = readFileSync(path.resolve(process.cwd(), 'src/lib/user-manager.ts'), 'utf8');
 
     expect(source).toContain('const PROJECT_SYNC_TIMEOUT_MS = 8_000;');
-    expect(source).toContain('async loadProjectsFromServer(retryCount = 1)');
+    expect(source).toContain('async loadProjectsFromServer(');
     expect(source).toContain('signal: AbortSignal.timeout(PROJECT_SYNC_TIMEOUT_MS)');
   });
 
@@ -19,5 +19,15 @@ describe('authentication bootstrap project sync', () => {
     expect(hydratedUser).toBeGreaterThan(-1);
     expect(projectId).toBeGreaterThan(hydratedUser);
     expect(source.slice(hydratedUser, projectId)).not.toContain('await userMgr.loadProjectsFromServer()');
+  });
+
+  it('starts project sync in the background after the local user session is ready', () => {
+    const source = readFileSync(path.resolve(process.cwd(), 'src/lib/user-manager.ts'), 'utf8');
+    const start = source.indexOf('async upsertUserFromServer(');
+    const end = source.indexOf('  private getCurrentUserData()', start);
+    const method = source.slice(start, end);
+
+    expect(method).toContain('void this.loadProjectsFromServer(1, syncUserId).then(');
+    expect(method).not.toContain('await this.loadProjectsFromServer()');
   });
 });
