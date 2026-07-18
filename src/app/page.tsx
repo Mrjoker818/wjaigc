@@ -57,12 +57,10 @@ import { User, Project, ImageGroupData, CanvasImage as PersistableCanvasImage } 
 import { UserManager as UserManagerCore } from '@/lib/user-manager';
 import { toStableImageUrl, awaitStableImageUrl } from '@/lib/stable-image-url';
 import { APP_FULL_VERSION_LABEL, APP_NAME } from '@/config/app-meta';
+import { fetchSessionPayload } from '@/lib/auth-session';
 
 type ThemeStyle = 'gold' | 'monochrome';
 type ActivePanel = 'generate' | 'video' | 'chat';
-const AUTH_BOOTSTRAP_TIMEOUT_MS = 8_000;
-
-
 function recordUserData(input: {
   userId?: string;
   area: 'images' | 'chat' | 'projects' | 'uploads' | 'layers' | 'exports' | '3d';
@@ -379,12 +377,7 @@ function CanvasApp() {
     let cancelled = false;
     const initCurrentUser = async () => {
       try {
-        const response = await fetch('/api/session', {
-          cache: 'no-store',
-          credentials: 'include',
-          signal: AbortSignal.timeout(AUTH_BOOTSTRAP_TIMEOUT_MS),
-        });
-        const data = await response.json() as { success?: boolean; user?: User | null };
+        const data = await fetchSessionPayload() as { success?: boolean; user?: User | null };
         if (!cancelled && data.success && data.user) {
 
           const userMgr = UserManagerCore.getInstance();

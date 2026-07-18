@@ -152,6 +152,12 @@
 
 最小修复：新增同源只读 `/api/session`，直接复用既有会话处理器；画布认证、独立智能对话页与任务 SSE 的会话预检全部改用该中性路径。先红后绿：`auth-bootstrap-project-sync-contract.test.ts` 与 `task-events-client.test.ts` 定向 7/7 通过。待完整门禁和云端 Chrome 部署复验后才可关闭 BUG-20260718-016。新增证据：`test-results/screenshots/cloud-p1-image-model-options-empty-after-auth-20260718.png`、`test-results/console/cloud-p1-image-model-options-empty-after-auth-20260718.json`。
 
+### 2026-07-18 会话请求悬挂根因与第五次修复
+
+云端已部署 `/api/session` 且静态前端资源已引用该路径，但已登录 Chrome 刷新后遮罩仍持续存在。Chrome CDP 记录到主页和静态资源请求，却没有任何页面内 `/api/*` 会话请求；运行时资源记录也为空。结合此前 `ERR_BLOCKED_BY_CLIENT`，这证明当前浏览器环境可在请求到达网络层前令 `fetch` 长期悬挂，单独使用 `AbortSignal.timeout` 不能保证 Promise 结算。
+
+修复：新增 `fetchSessionPayload`，通过独立计时器将“请求 + JSON 解析”整体置入 `Promise.race`，超时时主动 abort 并拒绝，确保页面必然关闭认证加载态。画布、独立智能对话页和 SSE 会话预检共用该实现。先红后绿：新增 `auth-session.test.ts` 用永久悬挂的 `fetch` 复现，定向 8/8 与类型检查通过。云端仍需同步此修复并以 Chrome 重新验证。新增证据：`test-results/screenshots/cloud-p1-auth-overlay-no-session-network-before-fetch-race-20260718.png`、`test-results/console/cloud-p1-auth-overlay-no-session-network-before-fetch-race-20260718.json`。
+
 ## 2026-07-18 云端部署复验结案补充
 
 | Bug ID | 云端复验 | 结果 | 证据 | 结案范围 |

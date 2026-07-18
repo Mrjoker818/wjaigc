@@ -1,4 +1,5 @@
 import type { TaskInfo } from './task-registry';
+import { fetchSessionPayload } from './auth-session';
 
 export interface TaskEvent {
   taskId: string;
@@ -108,12 +109,7 @@ export class TaskEventsClient {
 
   private async hasAuthenticatedSession(): Promise<boolean> {
     try {
-      const response = await fetch(`${this.getBaseUrl()}/api/session`, {
-        credentials: 'include',
-        cache: 'no-store',
-      });
-      if (!response.ok) return false;
-      const payload = await response.json() as SessionResponse;
+      const payload = await fetchSessionPayload(fetch, undefined, `${this.getBaseUrl()}/api/session`) as SessionResponse;
       return payload.success === true && Boolean(payload.user?.id);
     } catch {
       return false;

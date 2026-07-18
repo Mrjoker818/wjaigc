@@ -10,6 +10,7 @@ import {
   PRESET_SKILLS, PresetSkill
 } from "@/components/simple-chat/simple-chat-types";
 import { User } from "@/lib/user-types";
+import { fetchSessionPayload } from "@/lib/auth-session";
 
 function generateId() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36); }
 
@@ -41,7 +42,7 @@ export default function SimpleChatPage() {
 
   // Auth
   useEffect(() => {
-    fetch('/api/session').then(r => r.json()).then(data => {
+    fetchSessionPayload().then(data => {
       if (data.success && data.user) {
         setUser(data.user);
         setShowLogin(false);

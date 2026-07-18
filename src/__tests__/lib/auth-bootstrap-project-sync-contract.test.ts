@@ -9,9 +9,9 @@ describe('authentication bootstrap project sync', () => {
     const simpleChatSource = readFileSync(path.resolve(process.cwd(), 'src/app/simple-chat/page.tsx'), 'utf8');
     const sessionRouteSource = readFileSync(path.resolve(process.cwd(), 'src/app/api/session/route.ts'), 'utf8');
 
-    expect(pageSource).toContain("fetch('/api/session'");
-    expect(taskEventsSource).toContain('/api/session');
-    expect(simpleChatSource).toContain("fetch('/api/session')");
+    expect(pageSource).toContain('fetchSessionPayload()');
+    expect(taskEventsSource).toContain('fetchSessionPayload(fetch, undefined');
+    expect(simpleChatSource).toContain('fetchSessionPayload()');
     expect(sessionRouteSource).toContain("export { GET } from '@/app/api/auth/me/route';");
     expect(sessionRouteSource).toContain("export const dynamic = 'force-dynamic';");
   });
@@ -19,8 +19,10 @@ describe('authentication bootstrap project sync', () => {
   it('bounds the authenticated-session probe so a hung response cannot keep the UI blocked', () => {
     const source = readFileSync(path.resolve(process.cwd(), 'src/app/page.tsx'), 'utf8');
 
-    expect(source).toContain('const AUTH_BOOTSTRAP_TIMEOUT_MS = 8_000;');
-    expect(source).toContain("signal: AbortSignal.timeout(AUTH_BOOTSTRAP_TIMEOUT_MS)");
+    expect(source).toContain('fetchSessionPayload()');
+    const authSessionSource = readFileSync(path.resolve(process.cwd(), 'src/lib/auth-session.ts'), 'utf8');
+    expect(authSessionSource).toContain('const AUTH_SESSION_TIMEOUT_MS = 8_000;');
+    expect(authSessionSource).toContain('Promise.race([requestPromise, timeoutPromise])');
   });
 
   it('bounds project sync requests so authentication cannot wait indefinitely', () => {
