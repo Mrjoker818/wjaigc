@@ -5,8 +5,8 @@
 | ID | 等级 | 模块 | 状态 | 证据与结论 |
 | --- | --- | --- | --- | --- |
 | BUG-20260718-001 | P2 | Chrome 自动化适配 | 已定位，非业务代码缺陷 | 云端图片顶部工具栏的 `删除` DOM 绑定为 `onImagesChange(images.filter(...))`；Chrome 扩展自动化执行该按钮点击两次均命中相邻的“美陈拆解”。同一已选图片执行键盘 `Delete` 后图片数量从 1 变为 0，证明应用删除逻辑正常。此现象记录为浏览器自动化坐标/缩放适配风险，不能作为产品删除功能失败。截图：`test-results/screenshots/cloud-p0-delete-opens-display-decompose-20260718.png`。 |
-| BUG-20260718-002 | P2 | 云端控制台质量 | 待后续处理 | 云端开发预览出现 React hydration mismatch 与 `DashboardView` 缺少列表 key 的 Console Error。当前不阻断已验证的生成、持久化与键盘删除，但不满足“零未处理 Console Error”发布门禁。证据：`test-results/console/cloud-p0-20260718.json`。 |
-| BUG-20260718-003 | P1 | 工作流执行鉴权 | 云端未部署 | GitHub `16c5900` 已包含 `requireApiAuthOrReject` 修复；但对当前预览地址匿名 `POST /api/workflow/execute`（`action=status`、虚拟 `executionId`）仍返回 `404 {"error":"执行记录不存在"}`。业务查询仍在认证前执行，发布阻断保持。 |
+| BUG-20260718-002 | P2 | 云端控制台质量 | 待后续处理 | 云端开发预览出现 React hydration mismatch 与 `DashboardView` 缺少列表 key 的 Console Error。当前不阻断已验证的生成、持久化、键盘删除和退出，但不满足“零未处理 Console Error”发布门禁。Hydration 信息的来源是 Coze Console Bridge，不能在无独立浏览器复现前归因为产品；`DashboardView` key 警告需后续修复。证据：`test-results/console/cloud-p0-logout-20260718.json`。 |
+| BUG-20260718-003 | P1 | 工作流执行鉴权 | 已修复并在云端复验 | GitHub `16c5900` 的 `requireApiAuthOrReject` 已部署。对当前预览地址匿名 `POST /api/workflow/execute`（`action=status`、虚拟 `executionId`）返回 `401 {"error":"Authentication required"}`；认证已先于业务查询执行。 |
 
 ## 规则
 
@@ -17,8 +17,8 @@
 | Bug ID | 级别 | 模块 | 状态 | 复现与证据 | 根因/修复 | 回归结果 |
 | --- | --- | --- | --- | --- | --- | --- |
 | BUG-20260717-001 | P1 | 节点编辑器 | 已修复，待云端回归 | 真实Chrome拖动节点后 React 报错“Cannot update a component while rendering a different component”；提交 `da4c37e` 前本地复现 | `setWf` updater 中同步调用父组件状态更新；改为 revision effect 延迟同步 | 云端拖动复测无 React warning；仍需纳入本轮统一证据 |
-| BUG-20260717-002 | P1 | 工作流执行授权 | 本地已修复，云端待部署 | 云端匿名 `POST /api/workflow/execute`（`action=status`、虚构 executionId）返回 `400 {"error":"缺少 executionId"}`，证明认证检查未先于业务参数检查执行 | `src/app/api/workflow/execute/route.ts` 改用 `requireApiAuthOrReject`；`high-risk-route-auth-contract.test.ts` 先失败后通过 | 目标测试、`pnpm ts-check`、`pnpm lint --quiet`、483/483 测试及生产构建通过；云端仍须部署并复验匿名请求固定返回 401 |
-| BUG-20260717-003 | P2 | 退出登录后的操作审计 | 本地已修复，云端待部署 | 四浏览器匿名入口实测的 Console/Network 证据中，`POST /api/auth/logout` 后出现 `POST /api/activity` 的 401；根因是全局 fetch 审计在会话清除后仍记录退出请求 | `shouldAuditClientRequest('/api/auth/logout', 'POST')` 先失败；排除 `/api/auth/` 和 `/api/connector/auth/` 的客户端二次审计，避免无会话审计请求 | `operation-audit.test.ts` 通过；部署后需用真实账号完成退出并确认无 `/api/activity` 401 与 Console Error |
+| BUG-20260717-002 | P1 | 工作流执行授权 | 已修复并云端通过 | 云端匿名 `POST /api/workflow/execute`（`action=status`、虚构 executionId）此前返回 `400 {"error":"缺少 executionId"}`，证明认证检查未先于业务参数检查执行 | `src/app/api/workflow/execute/route.ts` 改用 `requireApiAuthOrReject`；`high-risk-route-auth-contract.test.ts` 先失败后通过 | 目标测试、`pnpm ts-check`、`pnpm lint --quiet`、483/483 测试及生产构建通过；2026-07-18 云端匿名请求固定返回 401 |
+| BUG-20260717-003 | P2 | 退出登录后的操作审计 | 云端实测通过，仍有独立浏览器回归项 | 四浏览器匿名入口实测的 Console/Network 证据中，`POST /api/auth/logout` 后出现 `POST /api/activity` 的 401；根因是全局 fetch 审计在会话清除后仍记录退出请求 | `shouldAuditClientRequest('/api/auth/logout', 'POST')` 先失败；排除 `/api/auth/` 和 `/api/connector/auth/` 的客户端二次审计，避免无会话审计请求 | `operation-audit.test.ts` 通过；2026-07-18 已登录云端会话退出后页面回到“选择入口”，归档 Console 未见 `/api/activity` 或 401；仍需独立浏览器 Network trace 作为正式多浏览器回归证据 |
 | INFRA-20260717-001 | P1 | 多浏览器E2E | 已排除 | 安装阶段曾提示 Windows WebKit 运行库缺失 | 随后 `pnpm test:e2e:p0` 已实际启动 WebKit 项目并执行到环境前置检查，说明该提示未阻断当前浏览器启动 | 不作为发布阻塞；WebKit真实业务流程仍待凭据后验证 |
 | INFRA-20260717-002 | P1 | Chrome上传自动化 | 待定位 | 已登录云端项目中，底部“图片上传”按钮与 `filechooser` 事件未在自动化控制时建立连接；直接定位的文件输入为隐藏元素 | 可能是Chrome扩展会话对原生文件选择器的限制，也可能是入口事件链未触发；尚未有稳定业务缺陷复现 | Playwright独立浏览器真实环境运行后，再判断为产品缺陷或自动化适配缺陷 |
 | INFRA-20260717-003 | P1 | 依赖漏洞扫描 | 阻塞 | `pnpm audit --prod --json` 的镜像审计端点不存在；官方端点请求超时 | 注册表/网络不可用，未获得漏洞清单 | 恢复可用审计端点后重新扫描；不得视为零漏洞 |

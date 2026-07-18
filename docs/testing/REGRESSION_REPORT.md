@@ -10,7 +10,8 @@
 | 同上 | 刷新、从仪表盘重新打开最新项目 | 通过：项目中保留 1 张生成图；资产数由 174 增至 175 | `cloud-p0-before-reload-20260718.png` |
 | 同上 | 选中图片后键盘 `Delete` | 通过：图片计数由 1 变为 0 | Chrome DOM 记录 |
 | 同上 | 上传、鼠标拖动、节点工具栏点击下载 | 未验证为业务通过：Chrome 扩展拒绝 `filechooser.setFiles`；拖动未改变 DOM 几何；下载点击未产生扩展可观察到的 download event。均已归档，不能用作产品失败或通过结论。 | `cloud-p0-upload-filechooser-blocked-20260718.png`、`cloud-p0-node-move-20260718.png`、`cloud-p0-download-state-20260718.png` |
-| 同上 | 匿名 `POST /api/workflow/execute`（`action=status`） | 不通过：返回 `404 {"error":"执行记录不存在"}`，预期为先拒绝认证的 `401` | 终端 HTTP 探针，2026-07-18 |
+| 同上 | 匿名 `POST /api/workflow/execute`（`action=status`） | 通过：返回 `401 {"error":"Authentication required"}`，认证在业务查询前被拒绝 | 终端 HTTP 探针，2026-07-18，部署后复验 |
+| 同上 | 已登录会话退出登录 | 通过：执行退出后进入“选择入口”，页面显示“请联系管理员创建新账户并授权对应功能”；归档 Console 未见 `/api/activity` 或 401 | `cloud-p0-logout-20260718.png`、`cloud-p0-logout-20260718.json` |
 
 ## 执行记录
 
@@ -33,7 +34,7 @@
 - `pnpm lint`：首次为 1 error / 929 warnings；修复 P0生成路由的 `prefer-const` 后，`pnpm lint --quiet` 通过。warning 仍是历史存量，未被隐藏或清除。
 - `pnpm test`：117 个测试文件、483 个测试通过；本机无数据库时出现预期回退日志，因此数据库链路仍未验证。
 - `pnpm build`：通过，耗时约 127 秒。
-- 工作流鉴权修复后复验（2026-07-17）：`pnpm ts-check`、`pnpm lint --quiet`、`pnpm test`（117 个测试文件、483 个测试）以及 `pnpm build` 均通过；最新生产构建耗时 76 秒。该结果仅证明静态、单元/集成与构建回归通过，不能替代真实账号、存储和模型调用验证。
+- 工作流鉴权修复后复验（2026-07-17）：`pnpm ts-check`、`pnpm lint --quiet`、`pnpm test`（117 个测试文件、483 个测试）以及 `pnpm build` 均通过；最新生产构建耗时 76 秒。2026-07-18 云端匿名 HTTP 探针也返回预期 401。该结果不能替代真实账号、存储和模型调用验证。
 - `pnpm audit --prod --json`：未验证，镜像端点不存在、官方端点超时，详见 `SECURITY_REPORT.md`。
 - 本轮新增回归：`pnpm exec vitest run src/__tests__/lib/operation-audit.test.ts` 为 2/2 通过；`pnpm lint --quiet`（排除自动生成 Playwright 报告后）与 `pnpm ts-check` 通过；`pnpm test` 为 117 个测试文件、483 个测试通过。测试环境没有数据库连接，因此输出中的本地存储回退日志不能作为数据库链路证据。
 - 证据留存复验：Playwright 临时输出已移至 `.playwright-output/`，执行 `E2E_RUN_ID=20260717-p0-auth-entry` 的四浏览器匿名入口用例后，归档脚本新增 12 个视频/Trace/截图文件；`test-results/` 同时保留此前 Chromium 登录失败的证据，未再被新运行清空。
