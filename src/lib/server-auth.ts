@@ -679,7 +679,7 @@ export async function createManagedUser(input: {
     passwordHash: await hashPassword(password),
     role: 'user',
     status: 'active',
-    productType: input.productType || undefined,
+    productType: input.productType === undefined ? 'canvas,chat' : input.productType || undefined,
     groupId: input.groupId || undefined,
     chatModels: input.chatModels || undefined,
     imageModels: input.imageModels || undefined,

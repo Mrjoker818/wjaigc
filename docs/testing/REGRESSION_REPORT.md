@@ -1,5 +1,14 @@
 # 回归测试报告
 
+## 2026-07-18 新建用户画布登录回归
+
+| 环境 | 操作 | 结果 | 证据 |
+| --- | --- | --- | --- |
+| 云端预览、管理员已登录会话 | 管理员“添加用户”创建启用的普通用户；以无限画布入口提交用户名、密码与 `productType=canvas` | 失败，稳定返回 `401`；同一凭据在不传产品入口时返回 `200`，确认不是用户名或密码错误 | `cloud-e2e-account-created-20260718.png`、`p0-auth-session-{chromium,firefox,webkit,mobile-chromium}.json`、Playwright trace/video |
+| 本地隔离存储 | `createManagedUser` 后以 `productType=canvas` 调用 `authenticateUser` | 修复前返回 `null`；修复后通过，返回普通用户及 `productType: canvas,chat` | `pnpm exec vitest run src/__tests__/lib/server-auth-production-security.test.ts`，4/4 通过 |
+
+云端结论仍为未验证：修复仅影响部署后的新建用户，必须在云端同步后创建新的隔离测试用户，并运行四浏览器真实登录/刷新/退出回归。现有测试账号在修复部署前创建，不能用于证明默认权限已生效。
+
 ## 2026-07-18 云端 Chrome 已登录会话 P0 实测
 
 | 环境 | 操作 | 结果 | 证据 |

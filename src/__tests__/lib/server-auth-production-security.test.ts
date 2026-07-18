@@ -84,4 +84,29 @@ describe.sequential('server authentication production security', () => {
       productType: 'canvas,chat',
     });
   });
+
+  it('authorizes a newly created managed user for the canvas product by default', async () => {
+    temporaryDataDir = await mkdtemp(path.join(os.tmpdir(), 'wujie-auth-test-'));
+    process.env.COZE_PROJECT_ENV = 'DEV';
+    process.env.WUJIE_DATA_DIR = temporaryDataDir;
+    process.env.WUJIE_AUTH_SECRET = 'test-development-auth-secret-at-least-32-characters';
+    process.env.WUJIE_ADMIN_USERNAME = 'bootstrap-admin';
+    process.env.WUJIE_ADMIN_PASSWORD = 'bootstrap-password';
+
+    const { authenticateUser, createManagedUser } = await import('@/lib/server-auth');
+    await createManagedUser({
+      name: 'canvas-user',
+      password: 'canvas-user-password',
+    });
+
+    await expect(authenticateUser({
+      name: 'canvas-user',
+      password: 'canvas-user-password',
+      productType: 'canvas',
+    })).resolves.toMatchObject({
+      name: 'canvas-user',
+      role: 'user',
+      productType: 'canvas,chat',
+    });
+  });
 });
