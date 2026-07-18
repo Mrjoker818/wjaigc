@@ -43,6 +43,17 @@ describe('generate submitOnly idempotency contract', () => {
     expect(source).toContain('(!registryTask || shouldResumeExistingAsync) && sessionUser');
   });
 
+  it('recovers legacy persisted submitOnly work from its payload even when an earlier release stored the wrong task type', () => {
+    const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/poll-task/route.ts'), 'utf8');
+    const recovery = source.indexOf('const requiresSubmissionRecovery =');
+    const lease = source.indexOf('const lease = await claimCloudTaskLease', recovery);
+    const legacyTypeGate = source.indexOf("persistedTask.type === 'generate-async'", recovery);
+
+    expect(recovery).toBeGreaterThan(0);
+    expect(lease).toBeGreaterThan(recovery);
+    expect(legacyTypeGate === -1 || legacyTypeGate > lease).toBe(true);
+  });
+
   it('does not start an untracked in-process worker unless an operator explicitly enables local compatibility mode', () => {
     const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/generate/route.ts'), 'utf8');
 
@@ -54,6 +65,15 @@ describe('generate submitOnly idempotency contract', () => {
     const persisted = source.indexOf('const taskCreated = await recordImageTaskSubmitted');
 
     expect(source.indexOf('creditCost: deductedCredits,', persisted)).toBeGreaterThan(persisted);
+  });
+
+  it('persists submitOnly work as generate-async so recovery never polls the local wrapper id at the provider', () => {
+    const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/generate/route.ts'), 'utf8');
+    const branch = source.indexOf('if (submitOnly)');
+    const persisted = source.indexOf('const taskCreated = await recordImageTaskSubmitted', branch);
+    const taskType = source.indexOf("type: 'generate-async',", persisted);
+
+    expect(taskType).toBeGreaterThan(persisted);
   });
 
   it('deducts credits before a submitOnly task is persisted and returned', () => {

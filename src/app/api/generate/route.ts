@@ -355,6 +355,7 @@ export async function POST(request: NextRequest) {
           messageId: typeof messageId === 'string' ? messageId : undefined,
           providerId: effectiveProviderId,
           model,
+          type: 'generate-async',
           label: '生成图片',
           idempotencyKey: idempotencyKey || undefined,
           submissionPayload,

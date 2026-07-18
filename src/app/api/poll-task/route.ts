@@ -563,8 +563,7 @@ export async function POST(request: NextRequest) {
         const persistedResult = (persistedTask.result as Record<string, unknown>) || {};
         const submissionPayload = persistedResult.submissionPayload;
         const remoteTaskId = recovery.remoteTaskId;
-        const requiresSubmissionRecovery = persistedTask.type === 'generate-async'
-          && remoteTaskId === persistedTask.id
+        const requiresSubmissionRecovery = remoteTaskId === persistedTask.id
           && submissionPayload
           && typeof submissionPayload === 'object'
           && !Array.isArray(submissionPayload);
@@ -582,7 +581,12 @@ export async function POST(request: NextRequest) {
             recoveryPending: true,
           }, { status: 200 });
         }
-        const recovered = registerTask(recovery.taskId, recovery.type as TaskType, recovery.label, recovery.userId);
+        const recovered = registerTask(
+          recovery.taskId,
+          (requiresSubmissionRecovery ? 'generate-async' : recovery.type) as TaskType,
+          recovery.label,
+          recovery.userId,
+        );
         const recoveredProvider = recovery.providerId
           ? await findProviderById(recovery.providerId)
           : recovery.model ? await findProviderForModel(recovery.model) : null;

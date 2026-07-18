@@ -7,7 +7,7 @@ describe('poll-task recovery lease contract', () => {
     const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/poll-task/route.ts'), 'utf8');
     const recoveryStart = source.indexOf('const recovery = buildRecoveredTaskContext');
     const leaseClaim = source.indexOf('claimCloudTaskLease(', recoveryStart);
-    const register = source.indexOf('registerTask(recovery.taskId', recoveryStart);
+    const register = source.indexOf('const recovered = registerTask(', recoveryStart);
 
     expect(recoveryStart).toBeGreaterThan(-1);
     expect(leaseClaim).toBeGreaterThan(recoveryStart);
