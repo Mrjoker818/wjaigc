@@ -1,5 +1,17 @@
 # 缺陷登记册
 
+## 2026-07-18 BUG-20260718-014：云端管理数据失败被伪装成空数据
+
+| 字段 | 记录 |
+| --- | --- |
+| 等级 / 模块 | P1 / 云端后端可用性、管理员 API 管理与任务监控 |
+| 稳定复现 | 当前 Chrome 已登录管理员会话中，项目列表仍显示 11 个项目和 182 张图片，但 API 管理显示 0 个供应商、0 个用户、任务监控为空。点击“刷新列表”和“刷新自检”后状态不变。Console 连续记录项目同步 `500/502`。 |
+| 实际影响 | 当前无法安全提交真实模型任务、确认已有任务终态或验证积分。原 UI 将所有失败清空成“暂无API提供商 / 暂无云端任务记录”，会误导管理员认为配置被删除。 |
+| 根因 | `DashboardView` 对 `/api/admin/apis`、`/api/admin/cloud-tasks` 和 `/api/admin/production-readiness` 的非 2xx / 业务失败 / 网络异常均清空数据或置空，未保留错误状态；云端后端的实际 500/502 仍需部署环境恢复。 |
+| 修复 | 新增三类加载错误状态及重试入口，保留已加载数据。供应商、任务监控与发布自检在失败时明确显示 HTTP/业务/网络错误，不再伪装为空数据。 |
+| 回归 | 先红后绿：新增 `dashboard-admin-load-error-contract.test.ts`。目标测试、`pnpm ts-check`、`pnpm lint --quiet` 通过；全量回归和构建待本次提交前执行。 |
+| 证据 / 状态 | `test-results/screenshots/cloud-p1-provider-config-zero-20260718.png`、`test-results/console/cloud-p1-provider-config-zero-20260718.json`。本地可观测性修复完成；云端 500/502 为外部 P1 阻塞，未关闭。 |
+
 ## 2026-07-18 INFRA-20260718-007：生产构建依赖外部 Google 字体网络
 
 | 字段 | 记录 |

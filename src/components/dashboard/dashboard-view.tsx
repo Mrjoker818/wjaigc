@@ -208,6 +208,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
   // ─── Admin: API management state ───
   const [providers, setProviders] = useState<AdminProvider[]>([]);
+  const [providersLoadError, setProvidersLoadError] = useState<string | null>(null);
   const [apiName, setApiName] = useState('');
   const [apiDisplayName, setApiDisplayName] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
@@ -272,6 +273,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   }>>([]);
   const [cloudTasks, setCloudTasks] = useState<Array<{ id: string; userId: string; type: string; status: string; providerId?: string; providerName?: string; model?: string; progress: number; label?: string; error?: string; updatedAt: number }>>([]);
   const [cloudTasksLoading, setCloudTasksLoading] = useState(false);
+  const [cloudTasksError, setCloudTasksError] = useState<string | null>(null);
   const [providerTaskSummary, setProviderTaskSummary] = useState<Record<string, { total: number; processing: number; failed: number }>>({});
   const [productionReadiness, setProductionReadiness] = useState<{
     success: boolean;
@@ -280,6 +282,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     providers: Array<{ id: string; name: string; modelType: string; status: 'pass' | 'warn' | 'fail'; issues: string[] }>;
   } | null>(null);
   const [productionReadinessLoading, setProductionReadinessLoading] = useState(false);
+  const [productionReadinessLoadError, setProductionReadinessLoadError] = useState<string | null>(null);
   // API management UI state
   const [apiFilterType, setApiFilterType] = useState<ApiKind | 'all'>('all');
   const [apiFilterStatus, setApiFilterStatus] = useState<'all' | 'enabled' | 'disabled'>('all');
@@ -797,10 +800,15 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
           // 过滤掉无效的空记录（名称或URL为空）
           const validProviders = (data.providers || []).filter((p: AdminProvider) => p.name && p.baseUrl);
           setProviders(validProviders);
+          setProvidersLoadError(null);
         }
-        else setProviders([]);
+        else {
+          setProvidersLoadError(data.error || '服务未返回供应商配置');
+        }
+      } else {
+        setProvidersLoadError(`HTTP ${response.status}`);
       }
-    } catch { setProviders([]); }
+    } catch (error) { setProvidersLoadError(errorMessage(error, '网络请求失败')); }
     try {
       const gRes = await fetch('/api/admin/groups', { cache: 'no-store', credentials: 'include' });
       if (gRes.ok) {
@@ -824,9 +832,14 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     setCloudTasksLoading(true);
     try {
       const response = await fetch('/api/admin/cloud-tasks?limit=20', { cache: 'no-store', credentials: 'include' });
-      const data = await response.json();
-      setCloudTasks(response.ok && data.success && Array.isArray(data.tasks) ? data.tasks : []);
-    } catch { setCloudTasks([]); }
+      const data = await response.json().catch(() => ({}));
+      if (response.ok && data.success && Array.isArray(data.tasks)) {
+        setCloudTasks(data.tasks);
+        setCloudTasksError(null);
+      } else {
+        setCloudTasksError(data.error || `HTTP ${response.status}`);
+      }
+    } catch (error) { setCloudTasksError(errorMessage(error, '网络请求失败')); }
     finally { setCloudTasksLoading(false); }
   }, []);
 
@@ -843,9 +856,14 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     setProductionReadinessLoading(true);
     try {
       const response = await fetch('/api/admin/production-readiness', { cache: 'no-store', credentials: 'include' });
-      const data = await response.json();
-      setProductionReadiness(response.ok && data.database && data.summary && Array.isArray(data.providers) ? data : null);
-    } catch { setProductionReadiness(null); }
+      const data = await response.json().catch(() => ({}));
+      if (response.ok && data.database && data.summary && Array.isArray(data.providers)) {
+        setProductionReadiness(data);
+        setProductionReadinessLoadError(null);
+      } else {
+        setProductionReadinessLoadError(data.error || `HTTP ${response.status}`);
+      }
+    } catch (error) { setProductionReadinessLoadError(errorMessage(error, '网络请求失败')); }
     finally { setProductionReadinessLoading(false); }
   }, []);
 
@@ -2745,7 +2763,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 <div className="flex items-center gap-2"><ShieldCheck className="w-4 h-4 text-primary" /><div><h2 className="text-sm font-semibold text-foreground">发布前自检</h2><p className="text-[11px] text-muted-foreground">只检查云端数据库与已启用供应商配置，不调用供应商</p></div></div>
                 <button onClick={() => void refreshProductionReadiness()} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer" title="刷新自检"><RefreshCw className={`w-3.5 h-3.5 ${productionReadinessLoading ? 'animate-spin' : ''}`} /></button>
               </div>
-              {productionReadinessLoading && !productionReadiness ? <div className="px-4 py-5 text-xs text-muted-foreground">正在检查云端配置...</div> : !productionReadiness ? <div className="px-4 py-5 text-xs text-muted-foreground">尚未读取发布前自检结果</div> : (
+              {productionReadinessLoading && !productionReadiness ? <div className="px-4 py-5 text-xs text-muted-foreground">正在检查云端配置...</div> : productionReadinessLoadError ? <div role="alert" className="px-4 py-4 text-xs text-destructive flex items-center justify-between gap-3"><span>发布前自检加载失败：{productionReadinessLoadError}</span><button onClick={() => void refreshProductionReadiness()} className="shrink-0 underline underline-offset-2">重试</button></div> : !productionReadiness ? <div className="px-4 py-5 text-xs text-muted-foreground">尚未读取发布前自检结果</div> : (
                 <div className="px-4 py-3">
                   <div className="flex flex-wrap items-center gap-2 text-[10px]">
                     <span className={`px-1.5 py-0.5 rounded ${productionReadiness.database.status === 'pass' ? 'bg-emerald-500/15 text-emerald-500' : 'bg-destructive/15 text-destructive'}`}>任务数据库 {productionReadiness.database.status === 'pass' ? '可用' : '异常'}</span>
@@ -2766,7 +2784,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 <div className="flex items-center gap-2"><ListChecks className="w-4 h-4 text-primary" /><div><h2 className="text-sm font-semibold text-foreground">云端任务监控</h2><p className="text-[11px] text-muted-foreground">最近任务状态与失败摘要</p></div></div>
                 <button onClick={() => void refreshCloudTasks()} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer" title="刷新任务"><RefreshCw className={`w-3.5 h-3.5 ${cloudTasksLoading ? 'animate-spin' : ''}`} /></button>
               </div>
-              {cloudTasks.length === 0 ? <div className="px-4 py-5 text-xs text-muted-foreground">{cloudTasksLoading ? '正在读取任务记录...' : '暂无云端任务记录'}</div> : (
+              {cloudTasksError ? <div role="alert" className="px-4 py-4 text-xs text-destructive flex items-center justify-between gap-3"><span>云端任务记录加载失败：{cloudTasksError}</span><button onClick={() => void refreshCloudTasks()} className="shrink-0 underline underline-offset-2">重试</button></div> : cloudTasks.length === 0 ? <div className="px-4 py-5 text-xs text-muted-foreground">{cloudTasksLoading ? '正在读取任务记录...' : '暂无云端任务记录'}</div> : (
                 <div className="divide-y divide-border">
                   {cloudTasks.slice(0, 8).map(task => {
                     const isFailed = ['failed', 'timeout', 'cancelled'].includes(task.status);
@@ -2974,7 +2992,14 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 </div>
               ))}
             </div>
-            {filteredProviders.length === 0 && (
+            {providersLoadError ? (
+              <div role="alert" className="text-center py-12 text-destructive">
+                <AlertTriangle className="w-10 h-10 mx-auto mb-3 opacity-70" />
+                <p className="text-sm">供应商配置加载失败</p>
+                <p className="text-xs mt-1">{providersLoadError}</p>
+                <button onClick={() => { void refreshAdmin(); }} className="mt-3 text-xs underline underline-offset-2">重试</button>
+              </div>
+            ) : filteredProviders.length === 0 && (
               <div className="text-center py-12 text-muted-foreground">
                 <Server className="w-10 h-10 mx-auto mb-3 opacity-30" />
                 <p className="text-sm">暂无API提供商</p>
