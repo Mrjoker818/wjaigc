@@ -304,6 +304,20 @@ export async function POST(request: NextRequest) {
         }
       }
       const asyncTaskId = `async-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      // The outer task is the billable request. Charge before persisting it so a
+      // resumed cloud worker inherits the exact amount already deducted.
+      if (sessionUser && !_skipCredits) {
+        const creditResult = await consumeCredits(sessionUser.id, 'image_generate', undefined, undefined, model || '', { quality });
+        if (!creditResult.success) {
+          return NextResponse.json({ error: creditResult.message || '积分不足' }, { status: 402 });
+        }
+        deductedCredits = creditResult.cost;
+      }
+      const refundSubmitOnlyCredits = async (reason: string) => {
+        if (deductedCredits <= 0 || !sessionUser) return;
+        const { refundCredits } = await import('@/lib/credits');
+        await refundCredits(sessionUser.id, deductedCredits, reason, asyncTaskId);
+      };
       // Keep only the request fields required to resume provider submission after
       // a cloud runtime releases this request. Provider credentials stay server-side.
       const submissionPayload: Record<string, unknown> = {
@@ -351,8 +365,10 @@ export async function POST(request: NextRequest) {
             ? await getCloudTaskForUserByIdempotencyKey(authResult.userId, idempotencyKey)
             : null;
           if (existing) {
+            await refundSubmitOnlyCredits(`图像生成任务冲突退款 (taskId: ${asyncTaskId})`);
             return NextResponse.json({ success: true, taskId: existing.id, taskIds: [existing.id], reused: true });
           }
+          await refundSubmitOnlyCredits(`图像生成任务创建失败退款 (taskId: ${asyncTaskId})`);
           return NextResponse.json({
             success: false,
             error: '任务创建发生冲突，请使用相同请求键重试',
@@ -361,6 +377,7 @@ export async function POST(request: NextRequest) {
         }
       } catch (error) {
         console.warn('[generate] submitOnly cloud task creation failed:', error);
+        await refundSubmitOnlyCredits(`图像生成任务持久化失败退款 (taskId: ${asyncTaskId})`);
         return NextResponse.json({
           success: false,
           error: '任务暂时无法持久化，请稍后重试',

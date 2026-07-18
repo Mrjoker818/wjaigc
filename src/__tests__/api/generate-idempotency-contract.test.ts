@@ -55,4 +55,15 @@ describe('generate submitOnly idempotency contract', () => {
 
     expect(source.indexOf('creditCost: deductedCredits,', persisted)).toBeGreaterThan(persisted);
   });
+
+  it('deducts credits before a submitOnly task is persisted and returned', () => {
+    const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/generate/route.ts'), 'utf8');
+    const branch = source.indexOf('if (submitOnly)');
+    const deduction = source.indexOf("const creditResult = await consumeCredits");
+    const persisted = source.indexOf('const taskCreated = await recordImageTaskSubmitted', branch);
+
+    expect(deduction).toBeGreaterThan(0);
+    expect(deduction).toBeGreaterThan(branch);
+    expect(persisted).toBeGreaterThan(deduction);
+  });
 });
