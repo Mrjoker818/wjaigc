@@ -19,4 +19,13 @@ describe('isPendingLocalAsyncGenerateTask', () => {
       status: 'processing',
     })).toBe(false);
   });
+
+  it('switches to provider polling after the durable outer task receives a remote task id', () => {
+    expect(isPendingLocalAsyncGenerateTask({
+      taskId: 'async-local-1',
+      type: 'generate-async',
+      status: 'processing',
+      result: { remoteTaskId: 'provider-task-1' },
+    })).toBe(false);
+  });
 });

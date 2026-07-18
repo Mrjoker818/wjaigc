@@ -54,3 +54,19 @@
 | requestId / taskId |  |
 | 根因 / 修复文件 / 修复方案 |  |
 | 新增测试 / 回归结果 |  |
+
+## 2026-07-18 云端生成恢复与积分补偿
+
+| 字段 | 记录 |
+| --- | --- |
+| Bug ID / 等级 | BUG-20260718-007 / P1 |
+| 模块 | 无限画布图像生成、`submitOnly` 云端任务恢复、积分 |
+| 环境 | 云端预览 `https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9.dev.coze.site/`；Chrome 已登录管理员会话；本地提交基线 `1bf1386` |
+| 稳定复现 | 新建隔离项目，选择精确值 `api_1778430731224_533e09a::doubao-seedream-5-0-lite`，比例 `1:1`、数量 `x1`，提交“红色玻璃立方体、白色背景”提示词。任务停在 `submitting 5%` 超过四分钟；刷新并从仪表盘重开项目后，同一占位任务仍停在该状态。 |
+| 预期 / 实际 | 预期任务必须进入供应商提交、完成或明确失败并完成积分结算。实际外层 `async-*` 任务已持久化，但请求结束后 fire-and-forget 内部请求在云端运行时未继续执行，导致没有供应商任务 ID、没有终态。 |
+| 证据 | `test-results/screenshots/cloud-p0-generation-stalled-20260718.png`；`test-results/console/cloud-p0-generation-stalled-20260718.json`。Console 仅有 Coze Console Bridge 警告，未将其误判为业务根因。 |
+| 根因 | `src/app/api/generate/route.ts` 在 `submitOnly` 返回后依赖进程内后台 fetch；`src/app/api/poll-task/route.ts` 将外层本地任务直接视为“继续处理中”，无法从持久化请求恢复实际供应商提交。积分成本只在内存任务中保存，重启后失败/取消没有可靠退款依据。 |
+| 修复文件 | `src/app/api/generate/route.ts`、`src/app/api/poll-task/route.ts`、`src/app/api/cancel-task/route.ts`、`src/lib/async-generate-task.ts`、`src/lib/cloud-task-persistence.ts`、`src/lib/cloud-task-storage.ts`。 |
+| 修复方式 | 持久化经白名单过滤的提交参数与实际积分成本；默认禁用不可靠的进程内后台 worker；首个轮询请求取得持久化租约后恢复一次供应商提交，随后改用真实供应商任务 ID 轮询；恢复提交、供应商失败、空结果和跨重启取消均按持久化成本退款。退款在同一数据库 CTE 中原子更新任务状态、余额和退款流水，任务的 `credit_status='pending'` 只能被结算一次。 |
+| 新增测试 | 先红后绿：`generate-idempotency-contract.test.ts`、`poll-task-recovery-lease-contract.test.ts`、`async-generate-task.test.ts`、`cloud-task-storage.test.ts`。定向 26/26 通过；全量 `pnpm test` 为 118 文件 / 494 测试通过；`pnpm ts-check`、全量 `pnpm lint --quiet` 与生产 `pnpm build` 均通过。 |
+| 当前状态 | 本地修复完成，待推送、云端同步后使用当前 Chrome 已登录账号再次执行真实付费生成、刷新恢复和取消退款验证。未完成此项前不得关闭本 BUG 或宣布发布通过。 |

@@ -11,6 +11,7 @@ import {
   getCloudTaskForUserByIdempotencyKey,
   listCloudTasks,
   getCloudTaskProviderSummary,
+  refundCloudTaskCredits,
   updateCloudTask,
 } from '@/lib/cloud-task-storage';
 
@@ -155,5 +156,20 @@ describe('cloud-task-storage', () => {
     const select = execSql.mock.calls.find(([sql]) => String(sql).includes('idempotency_key'));
     expect(select?.[0]).toContain('user_id = $1 AND idempotency_key = $2');
     expect(select?.[1]).toEqual(['user-a', 'retry-key-1']);
+  });
+
+  it('claims a pending cloud-task credit refund atomically by task id', async () => {
+    execSql.mockResolvedValueOnce({
+      rows: [{ user_id: 'user-a', credit_cost: 6, balance: 94 }],
+      rowCount: 1,
+    });
+
+    const refund = await refundCloudTaskCredits('task-refund-once', '图像生成失败退款');
+
+    const settlement = execSql.mock.calls.find(([sql]) => String(sql).includes('WITH refundable AS'));
+    expect(settlement).toBeDefined();
+    expect(settlement?.[0]).toContain("credit_status = 'pending'");
+    expect(settlement?.[0]).toContain("SET credit_status = 'refunded'");
+    expect(refund).toEqual({ refunded: true, creditCost: 6, balance: 94, userId: 'user-a' });
   });
 });

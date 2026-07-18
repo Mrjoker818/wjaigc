@@ -18,6 +18,8 @@ interface ImageTaskSubmission {
   label?: string;
   persist?: boolean;
   idempotencyKey?: string;
+  submissionPayload?: Record<string, unknown>;
+  creditCost?: number;
 }
 
 interface ImageTaskTerminal {
@@ -85,6 +87,8 @@ export async function recordImageTaskSubmitted(input: ImageTaskSubmission): Prom
     remoteTaskId: input.taskId,
     progress: 5,
     label: input.label || '生成图片',
+    result: input.submissionPayload ? { submissionPayload: input.submissionPayload } : undefined,
+    creditCost: input.creditCost,
     idempotencyKey: input.idempotencyKey,
     createdAt: now,
     updatedAt: now,

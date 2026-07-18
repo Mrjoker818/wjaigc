@@ -27,4 +27,32 @@ describe('generate submitOnly idempotency contract', () => {
     expect(reusedLookup).toBeGreaterThan(collision);
     expect(register).toBeGreaterThan(collision);
   });
+
+  it('persists a sanitized submission payload so cloud polling can resume a worker that was interrupted after the response', () => {
+    const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/generate/route.ts'), 'utf8');
+    const branch = source.indexOf('if (submitOnly)');
+    const persisted = source.indexOf('const taskCreated = await recordImageTaskSubmitted', branch);
+
+    expect(source.indexOf('submissionPayload,', persisted)).toBeGreaterThan(persisted);
+  });
+
+  it('routes an in-memory outer task without a provider id through the same durable recovery path', () => {
+    const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/poll-task/route.ts'), 'utf8');
+
+    expect(source).toContain('shouldResumeExistingAsync');
+    expect(source).toContain('(!registryTask || shouldResumeExistingAsync) && sessionUser');
+  });
+
+  it('does not start an untracked in-process worker unless an operator explicitly enables local compatibility mode', () => {
+    const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/generate/route.ts'), 'utf8');
+
+    expect(source).toContain("process.env.WUJIE_ENABLE_IN_PROCESS_ASYNC_WORKER === 'true'");
+  });
+
+  it('persists the deducted credit cost with a resumable submitOnly task', () => {
+    const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/generate/route.ts'), 'utf8');
+    const persisted = source.indexOf('const taskCreated = await recordImageTaskSubmitted');
+
+    expect(source.indexOf('creditCost: deductedCredits,', persisted)).toBeGreaterThan(persisted);
+  });
 });

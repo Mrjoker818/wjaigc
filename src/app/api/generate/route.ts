@@ -20,7 +20,7 @@ import { consumeCredits } from '@/lib/credits';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, stripEditsOnlyFields, isEditsEndpointRejected, type ApiCompatProfile, resolveProfileForModel, isGeminiImageModel, isNanoBananaModel, buildGeminiChatImageRequest, parseGeminiChatImageResponse, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
 import { registerTask, updateTaskProgress, isTaskCancelled, getTaskInfo } from '@/lib/task-registry';
 import { recordImageTaskSubmitted, recordImageTaskTerminal } from '@/lib/cloud-task-persistence';
-import { getCloudTaskForUserByIdempotencyKey } from '@/lib/cloud-task-storage';
+import { getCloudTaskForUserByIdempotencyKey, updateCloudTask } from '@/lib/cloud-task-storage';
 import { persistRemoteImage } from '@/lib/s3-storage';
 import { calculateActualPixelsFromRatio } from '@/lib/calculate-pixels';
 import { RESOLUTION_TIER_MODELS, QUALITY_LEVEL_MODELS, getModelParamType, getProviderAspectRatios, normalizeImageGenerationSelection, ModelParamType } from '@/lib/canvas-generation-group';
@@ -304,6 +304,31 @@ export async function POST(request: NextRequest) {
         }
       }
       const asyncTaskId = `async-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      // Keep only the request fields required to resume provider submission after
+      // a cloud runtime releases this request. Provider credentials stay server-side.
+      const submissionPayload: Record<string, unknown> = {
+        prompt,
+        aspectRatio,
+        size: requestedPixelSize,
+        referenceImages: accessibleReferenceImages,
+        referenceMode,
+        referenceCategories,
+        referenceStrengths,
+        referenceDescriptions,
+        imageCategory,
+        productCategory,
+        stylePreset,
+        outputCount: requestedOutputCount,
+        n: requestedN,
+        model,
+        providerId: effectiveProviderId,
+        strength,
+        quality,
+        resolution: resolutionTier,
+        projectId,
+        sessionId,
+        messageId,
+      };
       // Persist the client-facing outer task before the background request starts.
       // A provider can fail before it returns a remote task ID.
       try {
@@ -318,6 +343,8 @@ export async function POST(request: NextRequest) {
           model,
           label: '生成图片',
           idempotencyKey: idempotencyKey || undefined,
+          submissionPayload,
+          creditCost: deductedCredits,
         });
         if (!taskCreated) {
           const existing = idempotencyKey
@@ -341,6 +368,7 @@ export async function POST(request: NextRequest) {
         }, { status: 503 });
       }
       registerTask(asyncTaskId, 'generate-async', '生成图片', userId);
+      updateTaskProgress(asyncTaskId, { result: { submissionPayload } });
       const recordSubmitOnlyTerminal = (input: Parameters<typeof recordImageTaskTerminal>[1]) => {
         void recordImageTaskTerminal(asyncTaskId, input)
           .catch(error => console.warn('[generate] submitOnly cloud task terminal update failed:', error));
@@ -363,7 +391,8 @@ export async function POST(request: NextRequest) {
         // 使用解析后的可访问参考图 URL（而非原始相对路径或不可访问 URL）
         referenceImages: accessibleReferenceImages.length > 0 ? accessibleReferenceImages : undefined,
       };
-      (async () => {
+      if (process.env.WUJIE_ENABLE_IN_PROCESS_ASYNC_WORKER === 'true') {
+        (async () => {
         try {
           const bgRes = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/generate`, {
             method: 'POST',
@@ -431,6 +460,9 @@ export async function POST(request: NextRequest) {
               progress: 10,
               label: '生成中...',
               result: {
+                submissionPayload,
+                remoteTaskId: bgTaskIds[0],
+                remoteTaskIds: bgTaskIds,
                 usedModel: bgData.model,
                 modelName: bgData.modelName,
                 providerName: bgData.providerName,
@@ -440,6 +472,15 @@ export async function POST(request: NextRequest) {
                 advancedParams: bgData.advancedParams,
               }
             });
+            void updateCloudTask(asyncTaskId, {
+              remoteTaskId: bgTaskIds[0],
+              progress: 10,
+              result: {
+                submissionPayload,
+                remoteTaskId: bgTaskIds[0],
+                remoteTaskIds: bgTaskIds,
+              },
+            }).catch(error => console.warn('[generate] submitOnly remote task persistence failed:', error));
 
             // ★ 后台轮询：等待所有 bgTaskIds 完成，收集全部 imageUrl
             const bgPollModel = bgData.model || model;
@@ -642,7 +683,8 @@ export async function POST(request: NextRequest) {
             } catch (refundErr) { console.error('[generate] Refund failed:', refundErr); }
           }
         }
-      })();
+        })();
+      }
 
       // 立即返回，不等待后台完成
       return NextResponse.json({

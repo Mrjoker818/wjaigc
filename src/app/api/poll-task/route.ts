@@ -5,6 +5,7 @@ export const maxDuration = 1800; // 30分钟 - 支持长时间轮询慢速API（
 import { appendUserJsonl } from '@/lib/server-user-storage';
 import { findProviderForModel, findProviderById, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
+import { getInternalRequestHeaders } from '@/lib/api-auth';
 import { resolveCompatProfile, buildPollUrl, extractImageUrl, type ApiCompatProfile } from '@/lib/api-compatibility';
 import { postProcessAIRemoveBG } from '@/lib/remove-bg-postprocess';
 import { fetchImageBuffer } from '@/lib/fetch-image-buffer';
@@ -21,7 +22,7 @@ import { unwrapFontDesignTaskResult } from '@/lib/font-design-task-result';
 import { isPendingLocalAsyncGenerateTask } from '@/lib/async-generate-task';
 import { enhanceViaAI } from '@/lib/quality-enhance';
 import { buildRecoveredTaskContext, recordImageTaskTerminal, recordVideoTaskTerminal } from '@/lib/cloud-task-persistence';
-import { claimCloudTaskLease, getCloudTaskForUser } from '@/lib/cloud-task-storage';
+import { claimCloudTaskLease, getCloudTaskForUser, refundCloudTaskCredits, updateCloudTask } from '@/lib/cloud-task-storage';
 import { getCompletedVideoTaskResult } from '@/lib/video-task-result';
 import { resolveVideoCompatProfile } from '@/lib/video-api';
 
@@ -33,8 +34,24 @@ export const dynamic = 'force-dynamic';
 const completedTaskCache = new Map<string, { imageUrl: string; maskUrl?: string; modelName?: string; providerName?: string; timestamp: number }>();
 const FAILED_CACHE = Symbol('failed');
 const failedTaskCache = new Map<string, { error: string; timestamp: number }>();
-const TASK_RECOVERY_LEASE_MS = 30_000;
+const TASK_RECOVERY_LEASE_MS = 10 * 60_000;
 const TASK_RECOVERY_WORKER_ID = process.env.WUJIE_WORKER_ID || `poll-task-${process.pid}`;
+
+async function refundTaskCredits(
+  taskId: string,
+  creditCost: number | undefined,
+  reason: string,
+): Promise<'pending' | 'refunded' | 'not-applicable'> {
+  if (!creditCost || creditCost <= 0) return 'not-applicable';
+
+  try {
+    const refund = await refundCloudTaskCredits(taskId, reason);
+    return refund.refunded ? 'refunded' : 'pending';
+  } catch (error) {
+    console.error('[poll-task] Credit refund failed:', error);
+    return 'pending';
+  }
+}
 
 // 定期清理过期缓存（5分钟以上的缓存清除）
 const MAX_CACHE_SIZE = 1000;
@@ -506,7 +523,12 @@ export async function POST(request: NextRequest) {
 
     // ★ 检查 task-registry 中的任务
     let registryTask = getTaskInfo(taskId);
-    if (!registryTask && sessionUser) {
+    const shouldResumeExistingAsync = Boolean(
+      registryTask
+      && isPendingLocalAsyncGenerateTask(registryTask)
+      && (registryTask.result as Record<string, unknown> | undefined)?.submissionPayload,
+    );
+    if ((!registryTask || shouldResumeExistingAsync) && sessionUser) {
       const persistedTask = await getCloudTaskForUser(taskId, sessionUser.id);
       if (persistedTask) {
         if (persistedTask.status === 'completed' && persistedTask.result?.imageUrl) {
@@ -538,6 +560,14 @@ export async function POST(request: NextRequest) {
         }
 
         const recovery = buildRecoveredTaskContext(persistedTask);
+        const persistedResult = (persistedTask.result as Record<string, unknown>) || {};
+        const submissionPayload = persistedResult.submissionPayload;
+        const remoteTaskId = recovery.remoteTaskId;
+        const requiresSubmissionRecovery = persistedTask.type === 'generate-async'
+          && remoteTaskId === persistedTask.id
+          && submissionPayload
+          && typeof submissionPayload === 'object'
+          && !Array.isArray(submissionPayload);
         const lease = await claimCloudTaskLease(
           recovery.taskId,
           TASK_RECOVERY_WORKER_ID,
@@ -566,7 +596,9 @@ export async function POST(request: NextRequest) {
         updateTaskProgress(recovered.taskId, {
           status: 'processing',
           progress: recovery.progress,
+          creditCost: persistedTask.creditCost,
           result: {
+            submissionPayload: requiresSubmissionRecovery ? submissionPayload : undefined,
             remoteTaskId: recovery.remoteTaskId,
             ...(recovery.type.startsWith('video') ? {
               thirdPartyTaskId: recovery.remoteTaskId,
@@ -579,6 +611,88 @@ export async function POST(request: NextRequest) {
             modelName: recovery.model,
           },
         });
+        if (requiresSubmissionRecovery) {
+          try {
+            const resumed = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/generate`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                ...(await getInternalRequestHeaders(sessionUser.id, sessionUser.role === 'admin' ? 'admin' : 'user')),
+              },
+              body: JSON.stringify({
+                ...(submissionPayload as Record<string, unknown>),
+                submitOnly: false,
+                _skipCredits: true,
+                _skipCloudTaskPersistence: true,
+              }),
+              signal: AbortSignal.timeout(600000),
+            });
+            const resumedData = await resumed.json().catch(() => null) as Record<string, unknown> | null;
+            if (!resumed.ok || !resumedData?.success) {
+              throw new Error(typeof resumedData?.error === 'string' ? resumedData.error : `任务恢复提交失败 (${resumed.status})`);
+            }
+
+            const directImageUrls = [
+              ...(Array.isArray(resumedData.imageUrls) ? resumedData.imageUrls : []),
+              ...(Array.isArray(resumedData.directImageUrls) ? resumedData.directImageUrls : []),
+            ].filter((url): url is string => typeof url === 'string' && url.length > 0);
+            if (directImageUrls.length > 0) {
+              updateTaskProgress(recovered.taskId, {
+                status: 'completed',
+                progress: 100,
+                result: { imageUrl: directImageUrls[0], imageUrls: directImageUrls },
+              });
+              await recordImageTaskTerminal(recovered.taskId, {
+                status: 'completed',
+                imageUrl: directImageUrls[0],
+                creditStatus: persistedTask.creditCost && persistedTask.creditCost > 0 ? 'charged' : 'not-applicable',
+              });
+              return NextResponse.json({ success: true, status: 'completed', progress: 100, imageUrl: directImageUrls[0] }, { status: 200 });
+            }
+
+            const remoteTaskIds = Array.isArray(resumedData.taskIds)
+              ? resumedData.taskIds.filter((id): id is string => typeof id === 'string' && id.length > 0)
+              : [];
+            if (remoteTaskIds.length === 0) {
+              throw new Error('任务恢复未返回供应商任务 ID');
+            }
+
+            const recoveredResult = {
+              submissionPayload,
+              remoteTaskId: remoteTaskIds[0],
+              remoteTaskIds,
+              providerId: resumedData.providerId || recovery.providerId,
+              usedModel: resumedData.model || recovery.model,
+              modelName: resumedData.modelName || recovery.model,
+              providerName: resumedData.providerName,
+            };
+            updateTaskProgress(recovered.taskId, { status: 'processing', progress: 10, result: recoveredResult });
+            await updateCloudTask(recovered.taskId, {
+              remoteTaskId: remoteTaskIds[0],
+              progress: 10,
+              result: recoveredResult,
+            });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : '任务恢复提交失败';
+            let creditStatus: 'pending' | 'refunded' | 'not-applicable' = persistedTask.creditCost && persistedTask.creditCost > 0
+              ? 'pending'
+              : 'not-applicable';
+            if (persistedTask.creditCost && persistedTask.creditCost > 0 && persistedTask.creditStatus !== 'refunded') {
+              try {
+                const refund = await refundCloudTaskCredits(
+                  recovered.taskId,
+                  `图像生成恢复失败退款 (taskId: ${recovered.taskId})`,
+                );
+                creditStatus = refund.refunded ? 'refunded' : 'pending';
+              } catch (refundError) {
+                console.error('[poll-task] Resumed generation refund failed:', refundError);
+              }
+            }
+            updateTaskProgress(recovered.taskId, { status: 'failed', progress: 0, error: message });
+            await recordImageTaskTerminal(recovered.taskId, { status: 'failed', error: message, creditStatus });
+            return NextResponse.json({ success: false, status: 'failed', error: translateApiError(message), retryable: true }, { status: 200 });
+          }
+        }
         registryTask = getTaskInfo(taskId);
       }
     }
@@ -1642,8 +1756,13 @@ export async function POST(request: NextRequest) {
           || translateApiError(errorDetail)
           || '模型返回了文本而不是生成图像，请尝试重新措辞提示';
 
+        const creditStatus = await refundTaskCredits(
+          taskId,
+          regInfo?.creditCost,
+          `图像生成无结果退款 (taskId: ${taskId})`,
+        );
         updateTaskProgress(taskId, { status: 'failed', progress: 100, error: terminalError });
-        void recordImageTaskTerminal(taskId, { status: 'failed', error: terminalError });
+        await recordImageTaskTerminal(taskId, { status: 'failed', error: terminalError, creditStatus });
         failedTaskCache.set(taskId, { error: terminalError, timestamp: Date.now() });
         releaseQueueSlot(taskId);
         pollResult.status = 'failed';
@@ -1657,6 +1776,7 @@ export async function POST(request: NextRequest) {
         status: 'completed',
         imageUrl: typeof pollResult.imageUrl === 'string' ? pollResult.imageUrl : undefined,
         maskUrl,
+        creditStatus: regInfo?.creditCost && regInfo.creditCost > 0 ? 'charged' : 'not-applicable',
       }).catch(error => console.warn('[poll-task] 云端任务完成记录失败:', error));
 
       // ★ 将 cropInfo（蒙版修图需要）和 targetWidth/Height（扩展需要）等元数据附加到 pollResult
@@ -1690,10 +1810,16 @@ export async function POST(request: NextRequest) {
       const classifiedErr = classifyApiError(rawError);
       const translatedError = classifiedErr.friendlyMessage + (classifiedErr.suggestion ? ' — ' + classifiedErr.suggestion : '');
       const isCfTimeout = isCloudflareTimeoutError(rawError);
+      const creditStatus = await refundTaskCredits(
+        taskId,
+        getTaskInfo(taskId)?.creditCost,
+        `图像生成失败退款 (taskId: ${taskId})`,
+      );
       updateTaskProgress(taskId, { status: 'failed', error: translatedError });
-      void recordImageTaskTerminal(taskId, {
+      await recordImageTaskTerminal(taskId, {
         status: 'failed',
         error: translatedError,
+        creditStatus,
       }).catch(error => console.warn('[poll-task] 云端任务失败记录失败:', error));
       failedTaskCache.set(taskId, { error: translatedError, timestamp: Date.now() });
       releaseQueueSlot(taskId);
