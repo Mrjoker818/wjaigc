@@ -193,6 +193,14 @@
 
 失败产物已通过 `pnpm test:artifacts` 归档，ID 为 `20260719-cloud-anonymous-hydration-failure`，包含截图、视频与 Trace；运行时原始附件仍保留在 `.playwright-output/`。此失败测试必须保持可见，直到云端匿名入口和已登录会话均完成水合并通过后才可关闭 BUG-20260718-016。
 
+### 2026-07-19 本地同提交对照
+
+使用相同工作树与相同 `tests/e2e/p0-login-ui-contract.spec.ts`，在本地 `next dev --port 5012` 完成 Chromium、Firefox、WebKit 与移动 Chromium 的 4/4 通过（单 worker 串行，约 30.4 秒）。该对照不使用云端账号、API Key 或 Mock，证明当前源码的匿名认证入口在标准 Next 运行时能够完成客户端水合并显示登录界面。
+
+因此本 BUG 的当前归因收敛为：Coze 预览运行环境与页面客户端启动的集成问题。云端首页额外加载 `coze-space/page-editor-general-web`、Console Bridge、History Bridge 等注入脚本，而本地同一 Next 运行时不加载这些脚本。此差异是后续云端运行时日志/平台配置排查的首要方向；不得据此关闭 P1，也不得将本地通过结果替代云端验收。
+
+配置审计补充：当前地址为 `.dev.coze.site`，项目 `.coze` 的 `[dev]` 配置执行 `pnpm run dev`，即 `next dev -p 5000`；只有 `[deploy]` 配置才执行 `pnpm run build` 与 `pnpm run start`。所以本次已稳定复现的是**开发预览**客户端启动阻塞。正式部署必须另行给出可访问地址并从干净会话执行完整 P0 验收；开发预览恢复前也不能用于后续真实积分测试。
+
 ## 2026-07-18 云端部署复验结案补充
 
 | Bug ID | 云端复验 | 结果 | 证据 | 结案范围 |

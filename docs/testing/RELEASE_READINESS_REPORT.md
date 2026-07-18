@@ -12,6 +12,10 @@ The active P1 defect was reproduced in the logged-in Chrome session after the re
 
 An independent anonymous Chromium regression run also failed before any login or write operation: `tests/e2e/p0-login-ui-contract.spec.ts` could not find “选择入口” within 5 seconds. Its page snapshot contained the server-rendered canvas but only the authentication overlay was visible; network evidence contained no application API request. The failure has archived screenshot, video, and trace evidence under the `20260719-cloud-anonymous-hydration-failure` run ID. This confirms a cloud client-startup defect and keeps P1 at one unresolved issue.
 
+The same test passed against this same commit served locally by `next dev --port 5012` in Chromium, Firefox, WebKit, and mobile Chromium (4/4). This is a control result only: it narrows the defect to the Coze preview integration/runtime and does not replace the required cloud P0 evidence.
+
+The verified failing address is a `.dev.coze.site` development preview. Its `.coze` configuration runs `next dev`; the production deployment path separately runs `next build` and `next start`. A production deployment URL and clean-session P0 evidence are still required before any release conclusion can move beyond **not approved**.
+
 Local quality gates do not substitute for this failed cloud verification, but were rerun on the same commit: `pnpm test:regression` passed 91 files / 431 tests, `pnpm ts-check` passed, and `pnpm lint --quiet` passed. The local doctor also reported nine expected local-environment warnings for production secrets, database, object storage, and provider keys. Because the logged-in cloud UI remains non-interactive, the P0 real-browser journey (login through download) remains unverified and this release is **not approved**.
 
 ## 2026-07-18 最新云端结论：不通过

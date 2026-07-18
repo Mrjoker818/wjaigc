@@ -9,6 +9,10 @@
 
 - Independent confirmation: unauthenticated Chromium failed the no-write `p0-login-ui-contract` at the first “选择入口” assertion. This run has no credentials and made no business API request; its failure is a real cloud-client regression, not a substitute for the still-required logged-in P0 journey. Archived evidence ID: `20260719-cloud-anonymous-hydration-failure`.
 
+- Control result: the identical test passed against the same local commit on `http://127.0.0.1:5012` in Chromium, Firefox, WebKit, and mobile Chromium (4/4). This local result narrows, but does not resolve, the cloud-only startup failure.
+
+- Environment scope: the reproduced cloud address is a `.dev.coze.site` development preview that runs `next dev`. A separately accessible production deployment using the configured `build` and `start` commands remains unverified.
+
 ## 2026-07-18 最新阻塞
 
 - 已登录 Chrome 中 `/api/auth/me` 和 `/api/connector/auth/me` 均稳定被客户端拦截为 `ERR_BLOCKED_BY_CLIENT`；会话 Cookie 仍存在。页面因而持续显示 `正在验证身份...`，底层界面渲染不等于用户可操作。
