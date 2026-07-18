@@ -55,6 +55,20 @@ describe('authentication bootstrap project sync', () => {
     expect(postAuthManagerHydration).toBeGreaterThan(postAuthHydration);
   });
 
+  it('does not synchronously construct the local cache manager when session bootstrap fails', () => {
+    const source = readFileSync(path.resolve(process.cwd(), 'src/app/page.tsx'), 'utf8');
+    const authInitializer = source.indexOf('const initCurrentUser = async () => {');
+    const failureMarker = source.indexOf('shouldClearLocalSessionRef.current = true;', authInitializer);
+    const failureAuthChecked = source.indexOf('setAuthChecked(true);', failureMarker);
+    const localCacheClear = source.indexOf('Clear the local auth cache only after the unauthenticated UI has rendered.');
+    const deferredLogout = source.indexOf('then(() => UserManagerCore.getInstance().logout())', localCacheClear);
+
+    expect(failureMarker).toBeGreaterThan(authInitializer);
+    expect(failureAuthChecked).toBeGreaterThan(failureMarker);
+    expect(localCacheClear).toBeGreaterThan(failureAuthChecked);
+    expect(deferredLogout).toBeGreaterThan(localCacheClear);
+  });
+
   it('starts project sync in the background after the local user session is ready', () => {
     const source = readFileSync(path.resolve(process.cwd(), 'src/lib/user-manager.ts'), 'utf8');
     const start = source.indexOf('async upsertUserFromServer(');

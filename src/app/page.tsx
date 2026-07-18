@@ -485,13 +485,11 @@ function CanvasApp() {
         }
       } catch {}
 
-      try {
-        const userMgr = UserManagerCore.getInstance();
-        userMgr.logout();
-        if (cancelled) return;
+      if (!cancelled) {
+        shouldClearLocalSessionRef.current = true;
         setCurrentUser(null);
-      } catch {}
-      if (!cancelled) setAuthChecked(true);
+        setAuthChecked(true);
+      }
     };
     void initCurrentUser();
     return () => {
@@ -500,6 +498,7 @@ function CanvasApp() {
   }, [searchParams, setImages]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const cacheHydrationUserIdRef = useRef<string | null>(null);
+  const shouldClearLocalSessionRef = useRef(false);
 
   // Hydrate the local project cache only after the authenticated workspace has rendered.
   useEffect(() => {
@@ -520,6 +519,18 @@ function CanvasApp() {
       cancelled = true;
     };
   }, [authChecked, currentUser, searchParams]);
+
+  // Clear the local auth cache only after the unauthenticated UI has rendered.
+  useEffect(() => {
+    if (!authChecked || currentUser || !shouldClearLocalSessionRef.current) return;
+
+    shouldClearLocalSessionRef.current = false;
+    void Promise.resolve()
+      .then(() => UserManagerCore.getInstance().logout())
+      .catch((error: unknown) => {
+        console.warn('[auth] background local session cleanup failed', error);
+      });
+  }, [authChecked, currentUser]);
 
   const [ohMyPromptOpen, setOhMyPromptOpen] = useState(false);
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
