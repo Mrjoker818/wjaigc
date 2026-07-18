@@ -38,6 +38,10 @@
 
 构建脚本中的隐式安装超时已修复；当前 `pnpm build` 在 85.2 秒成功完成 97 个页面。虽然 `pnpm test`、`pnpm test:api`、`pnpm ts-check`、`pnpm lint --quiet` 已通过，且生产依赖审计为 `0 critical / 0 high / 5 moderate / 1 low`，但上述云端 P1 尚未部署复验，仍足以否决发布。结论保持 **不通过**。
 
+### 云端健康检查更新
+
+2026-07-18 对当前预览地址执行 `pnpm run doctor -- --url=https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9.dev.coze.site/`：本地检查为 `2 passed / 9 warnings`，但远程 `/api/auth/me` 返回 `502`，命令退出码为 1。云端后端可用性是当前 P1 阻塞，未恢复前不得执行或宣称通过任何登录、生成、积分或项目恢复的部署后验证。
+
 ## 2026-07-18 部署后 P1 复验
 
 `bb91262` 与 `8248852` 已在云端预览地址生效。独立普通账号的“登录 → 刷新保持会话 → 退出”在 Chromium、Firefox、WebKit 和移动 Chromium 4/4 通过，且 Console/Network 未出现普通用户访问 `/api/admin/user-folder` 的 401。因此 BUG-20260718-005、BUG-20260718-006 的 P1 修复已完成云端回归。
