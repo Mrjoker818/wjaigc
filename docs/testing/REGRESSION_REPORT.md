@@ -1,5 +1,11 @@
 # 回归测试报告
 
+## 2026-07-18 `f9a2835` 云端恢复复验
+
+- 云端 Chrome 已登录会话重新打开最新项目后，`/api/tasks/recover` 返回历史任务 `async-1784362294335-88ydio`，首次 `/api/poll-task` 返回业务成功 `processing / 10%`，证明 BUG-20260718-010 与 BUG-20260718-011 的恢复匹配和供应商重新提交路径已生效。
+- 随后页面保持 `processing 10%`，网络未再出现 `/api/poll-task`。已稳定定位为恢复 effect 被自身 `images` 进度更新清理；登记为 BUG-20260718-012。
+- 证据：`test-results/screenshots/cloud-p1-recovery-f9-processing-stall-20260718.png`、`test-results/network/cloud-p1-recovery-f9-network-20260718.json`、`test-results/console/cloud-p1-recovery-f9-processing-stall-20260718.json`。
+
 ## 2026-07-18 重开画布任务恢复回归
 
 - 云端复现表明：重新打开项目后，真实待处理占位框保持 `submitting 5%`，且没有 `/api/poll-task` 请求。

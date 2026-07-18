@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { getResumedTaskPollingOutcome, RESUMED_TASK_MAX_POLL_ATTEMPTS } from '@/lib/resumed-task-polling';
+import { getResumedTaskPollingOutcome, RESUMED_TASK_MAX_POLL_ATTEMPTS, shouldStartResumedTaskPolling } from '@/lib/resumed-task-polling';
 import { hasDirectVideoPollingTimedOut } from '@/lib/video-task-polling';
 import { applyTaskIdsToProcessingPlaceholders, shouldPersistProcessingPlaceholder } from '@/lib/canvas-task-placeholders';
 import { findUniqueLegacyTaskMatch, type RecoverableLegacyTask } from '@/lib/legacy-task-recovery';
@@ -598,6 +598,7 @@ function CanvasApp() {
   currentUserRef.current = currentUser;
 
   const resumedTaskIdsRef = useRef<Set<string>>(new Set());
+  const resumedTaskPollingGenerationRef = useRef(0);
   const legacyRecoveryAttemptedRef = useRef<Set<string>>(new Set());
   const legacyRecoveryInFlightRef = useRef<Set<string>>(new Set());
   useEffect(() => {
@@ -652,16 +653,26 @@ function CanvasApp() {
   }, [currentProject?.id, images, setImages]);
 
   useEffect(() => {
-    let cancelled = false;
+    resumedTaskPollingGenerationRef.current += 1;
+    resumedTaskIdsRef.current.clear();
+    return () => {
+      resumedTaskPollingGenerationRef.current += 1;
+    };
+  }, [currentProject?.id]);
+
+  useEffect(() => {
     const pending = images.filter((image) => image.isProcessingPlaceholder && image.processing?.taskId);
+    const pollingGeneration = resumedTaskPollingGenerationRef.current;
 
     for (const image of pending) {
       const taskId = image.processing?.taskId;
-      if (!taskId || resumedTaskIdsRef.current.has(taskId)) continue;
+      if (!taskId) continue;
+      const wasStarted = Boolean(taskId && resumedTaskIdsRef.current.has(taskId));
+      if (!shouldStartResumedTaskPolling({ taskId, status: image.processing?.status, wasStarted })) continue;
       resumedTaskIdsRef.current.add(taskId);
 
       void (async () => {
-        for (let attempt = 0; attempt < RESUMED_TASK_MAX_POLL_ATTEMPTS && !cancelled; attempt += 1) {
+        for (let attempt = 0; attempt < RESUMED_TASK_MAX_POLL_ATTEMPTS && pollingGeneration === resumedTaskPollingGenerationRef.current; attempt += 1) {
           try {
             const response = await fetch('/api/poll-task', {
               method: 'POST',
@@ -697,7 +708,7 @@ function CanvasApp() {
           await new Promise((resolve) => setTimeout(resolve, 3000));
         }
 
-        if (!cancelled) {
+        if (pollingGeneration === resumedTaskPollingGenerationRef.current) {
           const outcome = getResumedTaskPollingOutcome(RESUMED_TASK_MAX_POLL_ATTEMPTS, true);
           if (outcome) {
             setImages((current) => current.map((item) => item.id === image.id ? {
@@ -708,8 +719,6 @@ function CanvasApp() {
         }
       })();
     }
-
-    return () => { cancelled = true; };
   }, [images, setImages]);
 
   // ★ 追踪图片删除：当 images 减少时，记录被删除的 ID，5 秒后自动清除

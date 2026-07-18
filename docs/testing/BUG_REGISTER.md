@@ -1,5 +1,16 @@
 # 缺陷登记册
 
+## 2026-07-18 BUG-20260718-012：恢复任务仅轮询一次
+
+| 字段 | 记录 |
+| --- | --- |
+| 等级 / 模块 | P1 / 无限画布图像生成恢复 |
+| 稳定复现 | 云端 `f9a2835` 重新打开含 `async-1784362294335-88ydio` 的项目。恢复接口返回该任务后，首次 `/api/poll-task` 业务成功并返回 `processing / 10%`；页面随后保持 `processing 10%`，未继续发出 `/api/poll-task`。 |
+| 根因 | 恢复轮询 effect 依赖 `images`。首次轮询更新进度会触发 React 清理函数，将局部 `cancelled` 设为 true；任务 ID 已被记入已启动集合，新 effect 又跳过该任务，因此循环只执行一次。 |
+| 修复 | 使用项目级 generation token 作为唯一取消边界，不再因进度刷新取消轮询；任务 ID 集合仍保证同一任务只启动一个循环。 |
+| 回归 | 先红后绿：`src/__tests__/lib/resumed-task-polling.test.ts` 2/2 通过；`pnpm ts-check` 与 `pnpm lint --quiet` 通过。 |
+| 证据 / 状态 | `test-results/screenshots/cloud-p1-recovery-f9-processing-stall-20260718.png`、`test-results/network/cloud-p1-recovery-f9-network-20260718.json`、`test-results/console/cloud-p1-recovery-f9-processing-stall-20260718.json`。待推送和云端终态复验，未关闭。 |
+
 ## 2026-07-18 BUG-20260718-011：重开画布后任务无法恢复
 
 | 字段 | 记录 |
