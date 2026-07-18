@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { isPendingLocalAsyncGenerateTask } from '@/lib/async-generate-task';
+import * as asyncGenerateTask from '@/lib/async-generate-task';
+
+const { isPendingLocalAsyncGenerateTask } = asyncGenerateTask;
 
 describe('isPendingLocalAsyncGenerateTask', () => {
   it('keeps an outer submitOnly generation task on its local progress path', () => {
@@ -27,5 +29,20 @@ describe('isPendingLocalAsyncGenerateTask', () => {
       status: 'processing',
       result: { remoteTaskId: 'provider-task-1' },
     })).toBe(false);
+  });
+
+  it('recovers a legacy outer task from its persisted submission payload before provider polling', () => {
+    const recover = (asyncGenerateTask as typeof asyncGenerateTask & {
+      isRecoverableSubmitOnlySubmission?: (task: unknown) => boolean;
+    }).isRecoverableSubmitOnlySubmission;
+
+    expect(recover).toBeTypeOf('function');
+    expect(recover?.({
+      taskId: 'async-legacy-1',
+      type: 'generate',
+      status: 'processing',
+      remoteTaskId: 'async-legacy-1',
+      result: { submissionPayload: { prompt: 'recover this task' } },
+    })).toBe(true);
   });
 });

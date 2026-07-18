@@ -8,7 +8,7 @@
 | 稳定复现 | Chrome 已登录 `Mr.joker` 会话选择 `doubao-seedream-5-0-lite`、`1:1`、`x1`，提交“蓝色玻璃立方体”。外层任务 `async-1784362294335-88ydio` 保持 `submitting 5%`，连续 4 次 `/api/poll-task` 返回业务错误 `查询任务状态失败: 400`。 |
 | 实际 / 根因 | `submitOnly` 任务持久化时未传 `type: 'generate-async'`，恢复分支仅对该类型重新提交供应商任务；错误类型被当作普通远程任务，导致将本地 `async-*` 包装 ID 发给供应商轮询。 |
 | 修复 | `src/app/api/generate/route.ts` 明确持久化 `generate-async`；`src/app/api/poll-task/route.ts` 以“有恢复载荷且远程 ID 仍等于外层 ID”为恢复条件，并把旧记录兼容注册为 `generate-async`。 |
-| 回归 | 先红后绿：`src/__tests__/api/generate-idempotency-contract.test.ts` 9/9 通过；`pnpm ts-check` 通过；目标 ESLint 为 0 error / 36 个历史 warning。 |
+| 回归 | 先红后绿：`src/__tests__/lib/async-generate-task.test.ts`、`generate-idempotency-contract.test.ts` 与 `poll-task-recovery-lease-contract.test.ts` 共 17/17 通过；`pnpm ts-check` 通过；目标 ESLint 为 0 error / 36 个历史 warning。 |
 | 证据 / 状态 | `test-results/screenshots/cloud-p1-submitonly-credit-submitted-20260718.png`、`cloud-p1-submitonly-credit-poll-error-20260718.png`、`test-results/network/cloud-p1-submitonly-credit-poll-diagnostics-20260718.json`。待云端部署后恢复当前已扣费任务并复验新任务的 -6 流水，未关闭。 |
 
 ## 2026-07-18 云端 P0 真实验证补充

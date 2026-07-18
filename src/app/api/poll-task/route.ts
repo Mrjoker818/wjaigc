@@ -19,7 +19,7 @@ import { getRefineResult } from '@/app/api/refine-engine/route';
 import { getBrandResult } from '@/app/api/brand-ecommerce/route';
 import { getFontDesignResult } from '@/app/api/font-design/generate-image/route';
 import { unwrapFontDesignTaskResult } from '@/lib/font-design-task-result';
-import { isPendingLocalAsyncGenerateTask } from '@/lib/async-generate-task';
+import { isPendingLocalAsyncGenerateTask, isRecoverableSubmitOnlySubmission } from '@/lib/async-generate-task';
 import { enhanceViaAI } from '@/lib/quality-enhance';
 import { buildRecoveredTaskContext, recordImageTaskTerminal, recordVideoTaskTerminal } from '@/lib/cloud-task-persistence';
 import { claimCloudTaskLease, getCloudTaskForUser, refundCloudTaskCredits, updateCloudTask } from '@/lib/cloud-task-storage';
@@ -563,10 +563,12 @@ export async function POST(request: NextRequest) {
         const persistedResult = (persistedTask.result as Record<string, unknown>) || {};
         const submissionPayload = persistedResult.submissionPayload;
         const remoteTaskId = recovery.remoteTaskId;
-        const requiresSubmissionRecovery = remoteTaskId === persistedTask.id
-          && submissionPayload
-          && typeof submissionPayload === 'object'
-          && !Array.isArray(submissionPayload);
+        const requiresSubmissionRecovery = isRecoverableSubmitOnlySubmission({
+          taskId: persistedTask.id,
+          status: persistedTask.status,
+          remoteTaskId,
+          result: { submissionPayload },
+        });
         const lease = await claimCloudTaskLease(
           recovery.taskId,
           TASK_RECOVERY_WORKER_ID,
