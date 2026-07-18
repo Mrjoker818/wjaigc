@@ -103,6 +103,14 @@
 - 全量：`pnpm test` 通过，118 个测试文件、494 条测试；`pnpm lint --quiet` 与 `pnpm build` 通过。
 - 待验证：当前云端尚未包含本次未推送修改，真实 Chrome 生图、刷新恢复和取消退款必须在云端同步后重新执行并归档证据。
 
+### 2026-07-18 `9026dcc` 云端真实生成恢复复验
+
+| 环境 | Git Commit | 浏览器/账号 | 操作 | 结果 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| `https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9.dev.coze.site/` | `9026dcc` | Chrome，既有 `Mr.joker / 管理员` 登录会话 | 精确选择 `api_1778430731224_533e09a::doubao-seedream-5-0-lite`，`1:1`、`x1`，提交真实付费图像生成；刷新；从项目列表重开最新项目 | 通过：任务短暂显示 `submitting 5%` 后完成；项目卡片显示红色立方体缩略图；重开项目后结果图、提示词、模型/供应商标记及 `2048 × 2048` 尺寸均存在。 | `test-results/screenshots/cloud-p0-generation-stalled-after-9026dcc-20260718.png`、`test-results/screenshots/cloud-p0-generation-recovered-after-9026dcc-20260718.png`、`test-results/console/cloud-p0-generation-recovered-after-9026dcc-20260718.json` |
+
+说明：页面刷新会回到“我的项目”仪表盘；该导航行为不是任务丢失。没有在本次已成功任务上执行取消或构造供应商失败，因此退款原子性仍为未验证。
+
 已执行 Chrome 已登录会话的真实 P0 操作，并保留截图和 Console 证据；不能将其替代为独立凭据驱动的 Chromium、Firefox、WebKit 和移动 Chromium 全链路。首轮删除持久化异常在第二次隔离实测中未复现，尚不具备稳定缺陷的证据；文件选择器/下载、独立登录及跨浏览器完整链路仍未获得可审计证据，因此发布结论仍为不通过。
 
 ## 2026-07-18 云端独立普通用户会话复验（已部署）

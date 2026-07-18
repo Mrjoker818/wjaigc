@@ -70,3 +70,13 @@
 | 修复方式 | 持久化经白名单过滤的提交参数与实际积分成本；默认禁用不可靠的进程内后台 worker；首个轮询请求取得持久化租约后恢复一次供应商提交，随后改用真实供应商任务 ID 轮询；恢复提交、供应商失败、空结果和跨重启取消均按持久化成本退款。退款在同一数据库 CTE 中原子更新任务状态、余额和退款流水，任务的 `credit_status='pending'` 只能被结算一次。 |
 | 新增测试 | 先红后绿：`generate-idempotency-contract.test.ts`、`poll-task-recovery-lease-contract.test.ts`、`async-generate-task.test.ts`、`cloud-task-storage.test.ts`。定向 26/26 通过；全量 `pnpm test` 为 118 文件 / 494 测试通过；`pnpm ts-check`、全量 `pnpm lint --quiet` 与生产 `pnpm build` 均通过。 |
 | 当前状态 | 本地修复完成，待推送、云端同步后使用当前 Chrome 已登录账号再次执行真实付费生成、刷新恢复和取消退款验证。未完成此项前不得关闭本 BUG 或宣布发布通过。 |
+
+### 2026-07-18 云端复验更新（取代上表“当前状态”）
+
+`9026dcc` 已同步到云端预览。使用 Chrome 中已登录的 `Mr.joker / 管理员` 会话，以精确模型值 `api_1778430731224_533e09a::doubao-seedream-5-0-lite`、`1:1`、`x1` 真实提交“红色玻璃立方体”任务。UI 先显示 `submitting 5%`，随后真实结果写入项目；浏览器刷新进入项目列表后，最新项目卡片显示结果缩略图；重新进入项目可见同一结果图、原始提示词、`doubao-seedream-5-0-lite`、`APImart imgae` 与 `2048 × 2048` 元数据。证据：`test-results/screenshots/cloud-p0-generation-stalled-after-9026dcc-20260718.png`、`test-results/screenshots/cloud-p0-generation-recovered-after-9026dcc-20260718.png`、对应 `test-results/console/` JSON。
+
+BUG-20260718-007 的“任务恢复、完成和刷新恢复”范围已修复并云端通过；恢复失败退款和跨重启取消退款仍未验证，继续作为独立 P1 验证缺口，不能据此宣称积分补偿已通过。
+
+| Bug ID | 等级 | 模块 | 状态 | 稳定证据 | 后续动作 |
+| --- | --- | --- | --- | --- | --- |
+| BUG-20260718-008 | P2 | DashboardView / SSR hydration | 已复现，待 P0/P1 关闭后修复 | 同一 Chrome 会话刷新项目列表三次均出现 React `Each child in a list should have a unique key`（`DashboardView`）及 hydration mismatch；不影响本次生成完成，但违反“无未处理 Console Error”发布门禁。 | 建立最小复现测试后，修正列表 key 与服务端/客户端不稳定属性；在 Chromium、Firefox、WebKit 回归。 |
