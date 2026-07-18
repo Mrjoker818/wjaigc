@@ -13,6 +13,20 @@
 | 同上 | 匿名 `POST /api/workflow/execute`（`action=status`） | 通过：返回 `401 {"error":"Authentication required"}`，认证在业务查询前被拒绝 | 终端 HTTP 探针，2026-07-18，部署后复验 |
 | 同上 | 已登录会话退出登录 | 通过：执行退出后进入“选择入口”，页面显示“请联系管理员创建新账户并授权对应功能”；归档 Console 未见 `/api/activity` 或 401 | `cloud-p0-logout-20260718.png`、`cloud-p0-logout-20260718.json` |
 
+## 2026-07-18 云端 Chrome 第二轮 P0 实测
+
+| 环境 | 操作 | 结果 | 证据 |
+| --- | --- | --- | --- |
+| 当前预览地址，Chrome 已登录管理员会话 | 新建第 8 个隔离项目并刷新会话 | 通过：刷新后仍为管理员会话；项目数由 7 变为 8 | `cloud-p0-logged-in-project-20260718.png`、Chrome DOM |
+| 同上 | 底部“图片上传”→文件选择器写入 PNG | 未验证为业务失败：控制层返回 `Not allowed`，不能据此判断产品上传入口异常 | `cloud-p0-upload-filechooser-not-allowed-20260718.png`、`cloud-p0-upload-filechooser-not-allowed-20260718.json` |
+| 同上 | 剪贴板粘贴 1×1 与 256×256 无敏感 PNG | 通过：图片实际保存到画布；项目资产数最终由 175 增至 178 | `cloud-p0-paste-result-20260718.png`、刷新后 DOM 图片尺寸 |
+| 同上 | 选中 256×256 图片、拖动、缩小画布 | 通过：矩形从 `(704,175.5)` 移至 `(774,225.5)`；画布比例从 `200%` 变为 `167%` | Chrome DOM 记录 |
+| 同上 | 选中 1×1 图片后键盘 `Delete` | 即时 UI 通过但持久化不通过：DOM 图片数 1→0；后续异步操作后图片重新出现并在刷新后保留 | BUG-20260718-004，`cloud-p0-generation-submitted-20260718.png`、`cloud-p0-project-restored-20260718.png` |
+| 同上 | `豆包5.0Lite`，`1:1`、`x1`、最小中文提示词真实生成 | 通过：任务显示 `submitting 5%`，完成后回到画布，结果标注 `doubao-seedream-5-0-lite / APImart imgae / 2048×2048` | `cloud-p0-before-real-generation-20260718.png`、`cloud-p0-generation-submitted-20260718.png`、`cloud-p0-generation-after-wait-20260718.png` |
+| 同上 | 刷新后从“刚刚”创建的隔离项目重新打开 | 部分通过：三张图片均恢复，真实生成结果已持久化；同时证实已删除节点回流 | `cloud-p0-project-restored-20260718.png` |
+| 同上 | 选择生成结果并点击“下载” | 未验证：按钮被真实点击，但 Chrome 控制层未给出 download event，不能作为下载通过或失败 | Chrome DOM，控制层 download event 为 `not-observed` |
+| 同上 | 账户菜单退出登录 | 通过：回到“选择入口”；Console 无 `/api/activity` 或 401，但仍有 `DashboardView` key 警告 | `cloud-p0-real-logout-20260718.png`、`cloud-p0-real-logout-20260718.json` |
+
 ## 执行记录
 
 | 时间 | Git Commit | 版本 | 地址 | 浏览器 | 套件 | 结果 | 证据 |
@@ -24,6 +38,7 @@
 | 2026-07-17 | 本地未提交测试改进 | `2.5.0` | `https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9-5000.dev.coze.site/` | Chromium/Firefox/WebKit/移动 Chromium | P0-AUTH-ENTRY-001 匿名登录入口 | 通过，4/4 | 以单 worker 顺序执行。四个浏览器均完成“选择入口→无限画布→登录表单”；截图、视频、Trace、Console、Network 和 JUnit 已归档。首轮并发下 Chromium 的失败证据保留为隔离风险，未登记为稳定产品 Bug |
 | 2026-07-17 | 本地未提交修复 | `2.5.0` | 本地源码 | 操作审计单元回归 | 退出后审计 401 | 通过 | 先增加 `/api/auth/logout` 不应触发客户端审计的失败断言，再排除认证端点；`pnpm exec vitest run src/__tests__/lib/operation-audit.test.ts` 为 2/2 通过。云端实测仍待部署后复验 |
 | 2026-07-17 | `da4c37e` 云端版本 | `3.9.0` | `https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9-5000.dev.coze.site/` | Chromium | P0-AUTH-001 真实登录 | 阻塞 | 在隔离浏览器输入历史临时账号后，`POST /api/auth/login` 返回 401，页面显示登录失败。Trace、视频、截图、Console 和 Network 已归档；不将无效凭据误报为应用通过或代码缺陷 |
+| 2026-07-18 | `258d510` | `3.9.0` | `https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9.dev.coze.site/` | Chrome（用户完成登录） | P0 画布、生成、恢复、退出 | 部分通过且发现 P1 | 真实粘贴上传、移动、缩放、生成、刷新恢复、退出通过；文件选择器与下载为控制层未验证；删除节点回流登记为 BUG-20260718-004 |
 
 ## 基线校验
 
@@ -41,4 +56,4 @@
 
 ## 当前结论
 
-尚未执行本轮要求的全新 Playwright P0真实用户测试，不能将既往手动验证、构建或接口200状态等同于通过。执行完成后在此列出每个浏览器、每个用例和实际任务/下载证据。
+已执行 Chrome 已登录会话的真实 P0 操作，并保留截图和 Console 证据；不能将其替代为独立凭据驱动的 Chromium、Firefox、WebKit 和移动 Chromium 全链路。当前 P0 存在删除持久化 P1，且文件选择器/下载仍未获得可审计的独立浏览器证据，因此发布结论仍为不通过。

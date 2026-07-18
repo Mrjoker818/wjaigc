@@ -4,9 +4,10 @@
 
 | ID | 等级 | 模块 | 状态 | 证据与结论 |
 | --- | --- | --- | --- | --- |
-| BUG-20260718-001 | P2 | Chrome 自动化适配 | 已定位，非业务代码缺陷 | 云端图片顶部工具栏的 `删除` DOM 绑定为 `onImagesChange(images.filter(...))`；Chrome 扩展自动化执行该按钮点击两次均命中相邻的“美陈拆解”。同一已选图片执行键盘 `Delete` 后图片数量从 1 变为 0，证明应用删除逻辑正常。此现象记录为浏览器自动化坐标/缩放适配风险，不能作为产品删除功能失败。截图：`test-results/screenshots/cloud-p0-delete-opens-display-decompose-20260718.png`。 |
-| BUG-20260718-002 | P2 | 云端控制台质量 | 待后续处理 | 云端开发预览出现 React hydration mismatch 与 `DashboardView` 缺少列表 key 的 Console Error。当前不阻断已验证的生成、持久化、键盘删除和退出，但不满足“零未处理 Console Error”发布门禁。Hydration 信息的来源是 Coze Console Bridge，不能在无独立浏览器复现前归因为产品；`DashboardView` key 警告需后续修复。证据：`test-results/console/cloud-p0-logout-20260718.json`。 |
+| BUG-20260718-001 | P2 | Chrome 自动化适配 | 已定位，非业务代码缺陷 | 云端图片顶部工具栏的 `删除` DOM 绑定为 `onImagesChange(images.filter(...))`；Chrome 扩展自动化执行该按钮点击两次均命中相邻的“美陈拆解”。此现象记录为浏览器自动化坐标/缩放适配风险，不能作为产品删除功能失败。键盘 `Delete` 的即时删除已另由 BUG-20260718-004 跟踪其持久化回流问题。截图：`test-results/screenshots/cloud-p0-delete-opens-display-decompose-20260718.png`。 |
+| BUG-20260718-002 | P2 | 云端控制台质量 | 待后续处理 | 云端开发预览出现 React hydration mismatch 与 `DashboardView` 缺少列表 key 的 Console Error；账户菜单还显示“加入于 Invalid Date”。Hydration 信息来源于 Coze Console Bridge，不能在无独立浏览器复现前归因为产品；`DashboardView` key 和日期展示均需后续修复。证据：`test-results/console/cloud-p0-real-logout-20260718.json`。 |
 | BUG-20260718-003 | P1 | 工作流执行鉴权 | 已修复并在云端复验 | GitHub `16c5900` 的 `requireApiAuthOrReject` 已部署。对当前预览地址匿名 `POST /api/workflow/execute`（`action=status`、虚拟 `executionId`）返回 `401 {"error":"Authentication required"}`；认证已先于业务查询执行。 |
+| BUG-20260718-004 | P1 | 无限画布删除持久化 | 待稳定复现，发布阻断 | 在新建隔离项目中，先粘贴 1×1 PNG、选择后按 `Delete`，DOM 图片数从 1 变为 0；随后粘贴 256×256 PNG 并发起真实生成时，先前已删除的 1×1 图片再次出现。刷新后重新打开该项目，仍有 256×256、1×1 与 2048×2048 三张图片。预期删除后的节点不得被后续异步保存或任务完成回写恢复。证据：`cloud-p0-generation-submitted-20260718.png`、`cloud-p0-project-restored-20260718.png`。下一步：使用相同步骤在新隔离项目稳定复现，再先添加失败回归测试并定位竞争写入。 |
 
 ## 规则
 
