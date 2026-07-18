@@ -162,9 +162,9 @@
 
 部署会话超时修复后，页面内 `/api/session` 在当前 Chrome 中可真实返回 `200` 且包含已登录用户，但遮罩仍存在。认证路径仍在首次渲染前 `await userMgr.upsertUserFromServer(data.user)`；这把仅用于本地项目缓存的水合置于会话可操作性之前。
 
-首次部署后云端遮罩仍存在，进一步确认无项目入口在状态提交前仍同步调用 `UserManagerCore.getInstance()`；当前用户的大型本地画布缓存可使该初始化阻塞 React 对 `authChecked` 的提交。
+首次部署后云端遮罩仍存在，进一步确认无项目入口在状态提交前仍同步调用 `UserManagerCore.getInstance()`；当前用户的大型本地画布缓存可使该初始化阻塞 React 对 `authChecked` 的提交。将调用包进 `setTimeout(0)` 后，真实 Chrome 仍在 12 秒内保持遮罩，证明依赖同一认证 effect 的事件循环时序不足以构成通过证据。
 
-修复：无 `projectId` 的正常入口立即使用服务端用户设置 `currentUser`、`authChecked` 和工作台视图，把 `UserManagerCore` 的创建及 `upsertUserFromServer` 均延后到后台水合任务。带 `projectId` 的恢复流程仍保持原有完整水合语义。先红后绿：`auth-bootstrap-project-sync-contract.test.ts` 新增“无项目会话先可交互、后水合且延后管理器初始化”约束；与 `auth-session`、用户同步测试共 8/8 通过，类型检查通过。待完整门禁与云端 Chrome 部署复验。新增云端证据：`test-results/screenshots/cloud-p1-auth-after-fetch-race-20260719.png`。
+修复：无 `projectId` 的正常入口立即使用服务端用户设置 `currentUser`、`authChecked` 和工作台视图，不在认证 effect 中创建 `UserManagerCore`。新增独立的已认证后 effect，待工作台实际渲染后再创建管理器并水合项目缓存；带 `projectId` 的恢复流程仍保持原有完整水合语义。先红后绿：`auth-bootstrap-project-sync-contract.test.ts` 新增“无项目会话先可交互、缓存水合在独立已认证 effect 中”约束；与 `auth-session`、用户同步测试共 8/8 通过，类型检查通过。待完整门禁与云端 Chrome 部署复验。新增云端证据：`test-results/screenshots/cloud-p1-auth-after-fetch-race-20260719.png`。
 
 ## 2026-07-18 云端部署复验结案补充
 

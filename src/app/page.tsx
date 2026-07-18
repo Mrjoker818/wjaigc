@@ -386,16 +386,6 @@ function CanvasApp() {
             setCurrentUser(sessionUser);
             setAuthChecked(true);
             setAppMode('dashboard');
-            setTimeout(() => {
-              if (cancelled) return;
-              void UserManagerCore.getInstance().upsertUserFromServer(sessionUser)
-                .then((hydratedUser) => {
-                  if (!cancelled) setCurrentUser(hydratedUser);
-                })
-                .catch((error: unknown) => {
-                  console.warn('[auth] background client hydration failed', error);
-                });
-            }, 0);
             return;
           }
 
@@ -509,6 +499,28 @@ function CanvasApp() {
     };
   }, [searchParams, setImages]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const cacheHydrationUserIdRef = useRef<string | null>(null);
+
+  // Hydrate the local project cache only after the authenticated workspace has rendered.
+  useEffect(() => {
+    if (!authChecked || !currentUser || searchParams.get('projectId')) return;
+    if (cacheHydrationUserIdRef.current === currentUser.id) return;
+
+    cacheHydrationUserIdRef.current = currentUser.id;
+    let cancelled = false;
+    void UserManagerCore.getInstance().upsertUserFromServer(currentUser)
+      .then((hydratedUser) => {
+        if (!cancelled) setCurrentUser(hydratedUser);
+      })
+      .catch((error: unknown) => {
+        console.warn('[auth] background client hydration failed', error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authChecked, currentUser, searchParams]);
+
   const [ohMyPromptOpen, setOhMyPromptOpen] = useState(false);
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
   const currentProjectRef = useRef(currentProject);

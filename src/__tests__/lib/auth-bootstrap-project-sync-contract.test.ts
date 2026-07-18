@@ -40,17 +40,19 @@ describe('authentication bootstrap project sync', () => {
     const noProjectBranch = source.indexOf('if (!projectId) {', projectId);
     const setSessionUser = source.indexOf('setCurrentUser(sessionUser);', noProjectBranch);
     const setChecked = source.indexOf('setAuthChecked(true);', setSessionUser);
-    const backgroundHydration = source.indexOf('setTimeout(() => {', setChecked);
-    const deferredManagerHydration = source.indexOf('void UserManagerCore.getInstance().upsertUserFromServer(sessionUser)', backgroundHydration);
+    const noProjectReturn = source.indexOf('return;', setChecked);
     const managerInitialization = source.indexOf('const userMgr = UserManagerCore.getInstance();', authInitializer);
+    const postAuthHydration = source.indexOf('Hydrate the local project cache only after the authenticated workspace has rendered.');
+    const postAuthManagerHydration = source.indexOf('UserManagerCore.getInstance().upsertUserFromServer(currentUser)', postAuthHydration);
 
     expect(projectId).toBeGreaterThan(-1);
     expect(noProjectBranch).toBeGreaterThan(projectId);
     expect(setSessionUser).toBeGreaterThan(noProjectBranch);
     expect(setChecked).toBeGreaterThan(setSessionUser);
-    expect(backgroundHydration).toBeGreaterThan(setChecked);
-    expect(deferredManagerHydration).toBeGreaterThan(backgroundHydration);
-    expect(managerInitialization).toBeGreaterThan(noProjectBranch);
+    expect(noProjectReturn).toBeGreaterThan(setChecked);
+    expect(managerInitialization).toBeGreaterThan(noProjectReturn);
+    expect(postAuthHydration).toBeGreaterThan(managerInitialization);
+    expect(postAuthManagerHydration).toBeGreaterThan(postAuthHydration);
   });
 
   it('starts project sync in the background after the local user session is ready', () => {
