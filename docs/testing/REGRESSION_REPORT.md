@@ -42,6 +42,13 @@
 | 当前预览地址，Chrome 已登录管理员会话 | 底部“图片上传”选择无敏感 48×32 PNG | 未验证为产品失败：按钮已触发原生选择链路，但控制通道在 `fileChooser.setFiles` 阶段返回 `Not allowed`，尚未到达上传业务请求 | `cloud-p0-native-upload-not-allowed-20260718.png`、`cloud-p0-native-upload-not-allowed-20260718.json` |
 | 同上 | 选中真实生成结果，展开图片工具栏并点击“下载” | 未验证为产品失败：下载按钮真实点击后，控制通道 10 秒内没有收到 `download` 事件；不能把“未观察到事件”推导为下载未执行 | `cloud-p0-download-event-not-observed-20260718.png`、`cloud-p0-download-event-not-observed-20260718.json` |
 
+## 2026-07-18 已登录会话刷新与项目恢复复验
+
+| 环境 | 操作 | 结果 | 证据 |
+| --- | --- | --- | --- |
+| 当前预览地址，Chrome 已登录管理员会话 | 刷新页面并等待身份校验完成 | 通过：回到管理员仪表盘，显示 `Mr.joker / 管理员`、9 个项目和 180 张图片 | `cloud-p0-session-refresh-project-restore-20260718.png`、`cloud-p0-session-refresh-project-restore-20260718.json` |
+| 同上 | 打开刚创建且显示“2 张图片”的隔离项目 | 通过：恢复 256×256 上传图与 2048×2048 真实生成图 | `cloud-p0-session-refresh-project-restore-20260718.png`、`cloud-p0-session-refresh-project-restore-20260718.json` |
+
 ## 执行记录
 
 | 时间 | Git Commit | 版本 | 地址 | 浏览器 | 套件 | 结果 | 证据 |
