@@ -1,5 +1,13 @@
 # 回归测试报告
 
+## 2026-07-18 本地 P0 匿名入口跨浏览器回归
+
+- 环境：本地 Next.js 开发服务器 `http://127.0.0.1:5011`；未注入登录账号、模型密钥、数据库或云端支付配置。
+- 执行：`E2E_BASE_URL=http://127.0.0.1:5011 pnpm exec playwright test tests/e2e/p0-login-ui-contract.spec.ts`，Chromium、Firefox、WebKit 与移动 Chromium 串行执行。
+- 结果：4/4 通过。匿名访问者可进入首页、选择无限画布入口，并看到用户名和密码登录表单。
+- 证据：`test-results/screenshots/20260718-local-p0-login-contract__*`、`test-results/videos/20260718-local-p0-login-contract__*`、`test-results/traces/20260718-local-p0-login-contract__*`，以及更新后的 `playwright-report/`、`test-results/junit.xml`。
+- 范围限制：本结果只验证真实浏览器 UI 入口；不证明云端认证、文件上传、模型生成、项目恢复、下载或积分结算。那些项目继续列为未验证。
+
 ## 2026-07-18 云端管理数据可观测性回归
 
 - 云端实际管理员会话中，项目/资产仍可从本地状态显示，但供应商、用户和任务统计变为 0；刷新后不恢复。Console 同时记录项目同步 `500/502`，因此此状态不能解释为“没有配置”。
