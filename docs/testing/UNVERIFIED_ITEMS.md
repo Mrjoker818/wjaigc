@@ -234,6 +234,12 @@
 
 ### 2026-07-19 cloud availability blocker
 
+### 2026-07-19 Post-update recheck
+
+- Authentication entry is no longer the immediate blocker in the active `Mr.joker` session: the infinite canvas is interactive and includes the expected 19 bottom-toolbar entries.
+- The cloud P0 generation chain remains **unverified and failed at infrastructure level**: the real APImart request created a `submitting 5%` frame, then received HTTP 502 and produced no canvas asset. Project sync logged the same 502 class.
+- Do not treat the recovered UI as deployment acceptance. Repeat generation -> result -> save -> reload -> download only after `/api/generate` and project sync return business responses instead of gateway errors.
+
 ### 2026-07-19 latest cloud acceptance blockers
 
 - Selected-image deletion is **failed**, not unverified: the real Chrome click on `删除` opened `美陈拆解` and left the image in place. The deployed DOM shows only the occluded hover delete control; it did not expose the source's direct `selected-image-delete` action. A synchronized deployment plus delete -> reopen-project proof is required.

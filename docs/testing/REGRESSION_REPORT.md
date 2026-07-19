@@ -442,3 +442,9 @@ The synchronized source alone is insufficient. The cloud preview must restart us
 | Broader checks | Passed | `pnpm test:api`, `pnpm test:regression`, `pnpm lint --quiet`, `pnpm ts-check`, and `pnpm build` exited 0. |
 | Local browser entry | Passed | The current production build passed `p0-login-ui-contract.spec.ts` in Chromium, Firefox, WebKit, and mobile Chromium (4/4). |
 | Cloud closure | Pending | Current Coze 502 responses occur before application routing, so this response cannot be verified there yet. |
+
+## 2026-07-19 Cloud P0 recheck after update
+
+**Result: failed, backend availability remains the blocker.** The reported update restored an interactive signed-in canvas and all 19 bottom-toolbar entries, including `人物精修大师`. A real paid APImart generation was then attempted with the currently selected `豆包5.0Lite` model. The UI created a `submitting 5%` processing frame, but the frame disappeared without an image; Chrome recorded `[生成] API HTTP错误: 502 Object` at `2026-07-19T10:21:41.872Z`. The same console session also continued to show project-load and project-sync 502 warnings.
+
+This is stronger than a static page check but is **not** a successful P0 generation: no provider result, persisted asset, refresh recovery, or download was observed. No application code was changed from this gateway-only evidence. `BUG-20260719-041` remains P0 until a healthy Coze backend permits the exact replay.

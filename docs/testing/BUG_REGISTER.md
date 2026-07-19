@@ -755,3 +755,14 @@ BUG-20260718-007 的“任务恢复、完成和刷新恢复”范围已修复并
 | Actual | Clicking the only visible `删除` control retained the image and opened `美陈拆解`. `elementsFromPoint` at the delete button center identified the selected-image main toolbar's display-decompose action as the hit target. The cloud DOM did not expose the expected `selected-image-delete` control from the current source. |
 | Evidence | `test-results/screenshots/cloud-selected-delete-before-cca44cd-20260719.png`; `test-results/screenshots/cloud-selected-delete-after-cca44cd-20260719.png`; `test-results/console/cloud-selected-delete-dom-cca44cd-20260719.json`. |
 | Status | Failed cloud P1 acceptance. Do not close this issue until the deployed UI exposes an unoccluded delete action and deletion survives reopening the project. |
+
+### 2026-07-19 Cloud recheck after reported update (BUG-20260719-041 remains open)
+
+| Field | Detail |
+| --- | --- |
+| Git / preview | `origin/main` head `afa640d`; Coze preview `https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9.dev.coze.site/`; existing signed-in Chrome `Mr.joker` session. |
+| Reproduction | Open the interactive infinite canvas, retain the selected APImart `豆包5.0Lite` model, prompt `P0 regression test image: a single small red cube on a plain white background`, then click `开始生成`. |
+| Actual | The UI created a `submitting 5%` 800x800 processing frame, then removed it without a generated image. Chrome console recorded `[生成] API HTTP错误: 502 Object` at `2026-07-19T10:21:41.872Z`. Project load/sync also repeatedly logged server-returned 502 responses. |
+| Scope conclusion | The authenticated entry and canvas UI are interactive, so the prior authentication-overlay blocker is not reproduced in this session. The core server request path is still unavailable. This is a deployment/backend availability failure until Coze application/proxy logs identify the source; no source code change is justified by a gateway response alone. |
+| Evidence | Chrome screenshot and console transcript captured at `2026-07-19T10:21`; the screenshot shows the empty canvas after failed submission. |
+| Release impact | P0 remains open. Image result persistence, manipulation, save/reload, download, logout regression, video extraction, and public-media acceptance cannot be marked passed while same-origin core API calls return 502. |

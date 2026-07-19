@@ -189,3 +189,7 @@ Local production control evidence is positive: the current source starts under `
 The shared authentication layer additionally now converts unavailable internal-worker credentials into a normal 401 response. Local production evidence confirms anonymous `POST /api/generate` returns the expected 401 rather than 500. This source fix does not close the cloud release gate while the preview backend itself returns 502.
 
 The current production build also passed the anonymous P0 login-entry browser contract across Chromium, Firefox, WebKit, and mobile Chromium (4/4). This is local evidence only; the required authenticated cloud P0 chain remains blocked by Coze backend availability.
+
+## 2026-07-19 Cloud update recheck
+
+**Decision: NOT APPROVED.** The authenticated Chrome session now opens an interactive canvas, but a real authorized APImart image request still receives HTTP 502 before a provider result can be returned. Project synchronization logs the same failure. The platform must not be released until Coze backend/proxy logs explain and resolve this shared failure, then the full paid P0 flow is replayed with evidence.
