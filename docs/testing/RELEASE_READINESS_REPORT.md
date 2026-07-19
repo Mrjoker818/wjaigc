@@ -193,3 +193,7 @@ The current production build also passed the anonymous P0 login-entry browser co
 ## 2026-07-19 Cloud update recheck
 
 **Decision: NOT APPROVED.** The authenticated Chrome session now opens an interactive canvas, but a real authorized APImart image request still receives HTTP 502 before a provider result can be returned. Project synchronization logs the same failure. The platform must not be released until Coze backend/proxy logs explain and resolve this shared failure, then the full paid P0 flow is replayed with evidence.
+
+## 2026-07-19 Recovery checkpoint
+
+The Coze health endpoint has recovered: the deployment doctor now passes with `/api/auth/me` returning HTTP 200. This clears the previous backend-availability prerequisite, but it is not release approval. The available Chrome profile is currently signed out at the canvas login form and cannot provide an authenticated session without the saved password; therefore the required paid P0 flow has not been rerun.

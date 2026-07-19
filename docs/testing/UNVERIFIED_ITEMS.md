@@ -240,6 +240,11 @@
 - The cloud P0 generation chain remains **unverified and failed at infrastructure level**: the real APImart request created a `submitting 5%` frame, then received HTTP 502 and produced no canvas asset. Project sync logged the same 502 class.
 - Do not treat the recovered UI as deployment acceptance. Repeat generation -> result -> save -> reload -> download only after `/api/generate` and project sync return business responses instead of gateway errors.
 
+### 2026-07-19 Availability recovered; authenticated session required
+
+- Cloud health is no longer blocked by 502: the signed-out health probe to `/api/auth/me` returned HTTP 200 and `doctor` reported no failed checks.
+- The active Chrome session reached the `Mr.joker` login form after choosing the canvas entry. The username is present but no password is available to automation, so real paid P0 actions remain intentionally unverified rather than being replaced by anonymous or mocked tests.
+
 ### 2026-07-19 latest cloud acceptance blockers
 
 - Selected-image deletion is **failed**, not unverified: the real Chrome click on `删除` opened `美陈拆解` and left the image in place. The deployed DOM shows only the occluded hover delete control; it did not expose the source's direct `selected-image-delete` action. A synchronized deployment plus delete -> reopen-project proof is required.

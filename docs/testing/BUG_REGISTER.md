@@ -766,3 +766,11 @@ BUG-20260718-007 的“任务恢复、完成和刷新恢复”范围已修复并
 | Scope conclusion | The authenticated entry and canvas UI are interactive, so the prior authentication-overlay blocker is not reproduced in this session. The core server request path is still unavailable. This is a deployment/backend availability failure until Coze application/proxy logs identify the source; no source code change is justified by a gateway response alone. |
 | Evidence | Chrome screenshot and console transcript captured at `2026-07-19T10:21`; the screenshot shows the empty canvas after failed submission. |
 | Release impact | P0 remains open. Image result persistence, manipulation, save/reload, download, logout regression, video extraction, and public-media acceptance cannot be marked passed while same-origin core API calls return 502. |
+
+### 2026-07-19 Cloud availability recovery checkpoint
+
+| Field | Detail |
+| --- | --- |
+| Deployment health | `pnpm run doctor -- --url=https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9.dev.coze.site/` returned `3 passed / 9 warnings / 0 failed`; `/api/auth/me` responded HTTP 200. |
+| Browser state | The Chrome preview loads the canvas shell without 502 console errors, but the selected infinite-canvas entrance presents the `Mr.joker` login form. Its password field was not populated in the controllable browser session, so no credential guessing or paid action was attempted. |
+| Status | The backend availability portion of BUG-20260719-041 is recovered. Authenticated P0 generation, persistence, deletion, download, logout/relogin, and credit verification remain unverified until the existing test account is logged in. |
