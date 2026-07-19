@@ -17,4 +17,12 @@ describe('production build command', () => {
     expect(nextConfig).toContain("request === 'coze-coding-dev-sdk'");
     expect(readFileSync(path.resolve(process.cwd(), 'src/components/infinite-canvas.tsx'), 'utf8')).toContain("import('@/lib/vtracer-wasm-disabled')");
   });
+
+  it('keeps preview startup off the Turbopack HMR path', () => {
+    const packageJson = JSON.parse(readFileSync(path.resolve(process.cwd(), 'package.json'), 'utf8')) as {
+      scripts?: Record<string, string>;
+    };
+
+    expect(packageJson.scripts?.dev).toBe('next dev --webpack -p 5000');
+  });
 });

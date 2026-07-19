@@ -1,5 +1,11 @@
 # 未验证项目
 
+## 2026-07-19 Pending cloud acceptance after BUG-20260719-022
+
+- The local fix is verified in four Playwright browser projects, but the Coze preview has not yet synchronized this revision.
+- After synchronization, Chrome must reload the preview and prove that the authentication shell resolves, the login/dashboard is interactive, and a same-origin `/api/session` request occurs.
+- Paid P0 flows (upload, generation, task completion, save/reload, download, logout/relogin, and credits) remain unverified until the cloud startup acceptance passes.
+
 ## 2026-07-19 Coze Next Flight execution blocker
 
 - **P1 / INFRA-20260719-002:** Cloud preview inserts but does not execute Next Flight inline scripts. Authentication, upload, generation, persistence, download, and logout cannot be truthfully verified until Coze deployment/proxy behavior is corrected.

@@ -1,5 +1,11 @@
 # 发布就绪报告
 
+## 2026-07-19 Local authentication entry repair: NOT APPROVED FOR RELEASE
+
+Local regression confirms the anonymous login entry in Chromium, Firefox, WebKit, and mobile Chromium. The repair prevents the full canvas from mounting until a session user exists and forces the preview `pnpm dev` command onto Webpack rather than Turbopack.
+
+This is not release approval. The Coze preview still requires a post-sync Chrome validation, and all paid P0 flows remain unverified. Current release conclusion: **not approved**.
+
 ## 2026-07-19 Current deployment verification: NOT APPROVED
 
 Verification target: `https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9.dev.coze.site/`

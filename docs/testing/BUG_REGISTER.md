@@ -1,5 +1,19 @@
 # 缺陷登记册
 
+## BUG-20260719-022: Anonymous users mounted the full canvas before the login entry
+
+| Field | Record |
+| --- | --- |
+| Severity | P1 |
+| Module | Authentication bootstrap / canvas entry |
+| Environment | Local Webpack preview, commit pending after `ebfc699`; Chromium, Firefox, WebKit, and Pixel 7 emulation. |
+| Stable reproduction | Open `/` with no `wujie_session` cookie. `/api/session` returns `{ success: true, user: null }`. Before this repair, the complete canvas mounted before the login panel, so Firefox could not reach the entry within five seconds and the canvas toolbar was present to an anonymous visitor. |
+| Root cause | `LoginPanel` was rendered at the end of the workspace tree. Once `authChecked` became true, React had to mount the canvas and all heavyweight panels before committing the login layer. |
+| Fix | Return `LoginPanel` directly when `authChecked` is true and `currentUser` is absent. The workspace is now mounted only after a session user exists. |
+| Regression | `p0-login-ui-contract.spec.ts` now asserts both the entry and the absence of the `图像生成器` button before login. Playwright warms the server by waiting for a real homepage response, not a fixed sleep. |
+| Evidence | `test-results/screenshots/p0-login-ui-contract-{chromium,firefox,webkit,mobile-chromium}.png`, matching console/network JSON, Playwright video, trace, HTML report, and JUnit report. |
+| Result | Fixed locally: four browser projects passed. Cloud acceptance remains pending after GitHub synchronization. |
+
 ## INFRA-20260719-002: Coze preview renders Next Flight scripts without executing them
 
 | Field | Record |

@@ -4,6 +4,7 @@ const baseURL = process.env.E2E_BASE_URL || 'http://127.0.0.1:5000';
 
 export default defineConfig({
   testDir: './tests/e2e',
+  globalSetup: './tests/helpers/warmup-server.ts',
   // Playwright clears outputDir before every run; immutable evidence belongs in test-results.
   outputDir: './.playwright-output',
   fullyParallel: false,

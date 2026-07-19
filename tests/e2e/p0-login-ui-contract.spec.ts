@@ -7,7 +7,8 @@ test.describe('P0 login entry contract', () => {
     try {
       await page.goto('/', { waitUntil: 'domcontentloaded' });
       await expect(page.getByRole('heading', { name: '选择入口' })).toBeVisible();
-      await page.getByRole('button', { name: /无限画布/ }).first().click();
+      await expect(page.getByRole('button', { name: '图像生成器' })).toHaveCount(0);
+      await page.getByRole('button', { name: /无限画布/ }).click();
       await expect(page.getByRole('heading', { name: '登录' })).toBeVisible();
       await expect(page.getByPlaceholder('请输入用户名')).toBeVisible();
       await expect(page.getByPlaceholder('请输入密码')).toBeVisible();

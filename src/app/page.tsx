@@ -3821,6 +3821,25 @@ function CanvasApp() {
   // Workflow state for node mode
   const [nodeWorkflow, setNodeWorkflow] = useState<Workflow | null>(null);
 
+  const handleAnonymousLogin = async (user: User, productType: string) => {
+    void productType;
+    setCurrentProject(null);
+    incrementalHistoryRef.current.clear();
+    prevImagesRef.current = [];
+    skipHistoryRef.current = true;
+    setImages([]);
+    latestImagesRef.current = [];
+    setCurrentUser(user);
+    toast.success('登录成功', {
+      description: `欢迎回来，${user.name}`,
+      className: themeStyle === 'monochrome'
+        ? 'bg-white border border-gray-200 text-gray-900'
+        : 'bg-[#141414] border border-[#2a2a2a] text-white',
+    });
+    setAppMode('dashboard');
+    setTimeout(() => { skipHistoryRef.current = false; }, 100);
+  };
+
   // Keep the first client hydration small. The full workspace mounts only after
   // the bounded session check resolves, which avoids a blocked auth overlay in
   // injected development preview environments.
@@ -3832,6 +3851,26 @@ function CanvasApp() {
           <p className="text-white/60 text-sm">正在验证身份...</p>
         </div>
       </div>
+    );
+  }
+
+  // Do not mount the canvas or its generation controls before a user session
+  // has been established. Besides protecting the workspace, this keeps the
+  // anonymous entry route light enough for all supported browsers.
+  if (!currentUser) {
+    return (
+      <>
+        <LoginPanel onLogin={handleAnonymousLogin} />
+        <Toaster
+          position="top-center"
+          toastOptions={{
+            className: themeStyle === 'monochrome'
+              ? 'bg-white border border-gray-200 text-gray-900 shadow-lg shadow-gray-200/50'
+              : 'bg-[#1a1a1a] border border-[#2a2a2a] text-white shadow-lg shadow-black/30',
+            style: { borderRadius: '12px', fontSize: '13px' },
+          }}
+        />
+      </>
     );
   }
 
@@ -4438,35 +4477,6 @@ function CanvasApp() {
           },
         }}
       />
-
-      {/* Login Panel - shown when not authenticated */}
-      {authChecked && !currentUser && (
-        <LoginPanel
-          onLogin={async (user, productType) => {
-            void productType;
-            // 智能对话用户：进入工作台，工作台已支持智能对话入口
-            // 关键：先清除旧用户的所有状态，防止数据跨用户泄露
-            setCurrentProject(null);
-            // ★ 清空 undo 历史，防止旧用户的历史影响新用户
-            incrementalHistoryRef.current.clear();
-            prevImagesRef.current = [];
-            skipHistoryRef.current = true;
-            setImages([]);
-            latestImagesRef.current = []; // 立即清除 ref，防止 onProjectsChanged 用旧图片覆盖新用户数据
-            setCurrentUser(user);
-            toast.success('登录成功', {
-              description: `欢迎回来，${user.name}`,
-              className: themeStyle === 'monochrome'
-                ? 'bg-white border border-gray-200 text-gray-900'
-                : 'bg-[#141414] border border-[#2a2a2a] text-white',
-            });
-            // 登录成功后进入工作台
-            setAppMode('dashboard');
-            // ★ 延迟恢复历史记录（登录清空图片不需要记录到 undo）
-            setTimeout(() => { skipHistoryRef.current = false; }, 100);
-          }}
-        />
-      )}
 
       {/* Help Guide Modal */}
       <HelpGuide

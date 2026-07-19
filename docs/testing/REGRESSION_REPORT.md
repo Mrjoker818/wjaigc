@@ -1,5 +1,16 @@
 # 回归测试报告
 
+## 2026-07-19 Anonymous entry isolation and Webpack preview regression
+
+| Gate | Result |
+| --- | --- |
+| Browser E2E | Passed 4/4: Chromium, Firefox, WebKit, and mobile Chromium navigated from `/` to the canvas login form. |
+| Anonymous workspace isolation | Passed: the test explicitly verifies that `图像生成器` is absent before authentication. |
+| Test reliability | Passed: Playwright global setup warms the server by awaiting `GET /`; no test adds a fixed sleep or suppresses an asynchronous failure. |
+| Focused tests | Passed 12/12: auth-session, auth-bootstrap, and preview-build command contracts. |
+| Static gates | Passed: `pnpm ts-check` and `pnpm lint --quiet`. |
+| Cloud acceptance | Pending: the cloud preview must synchronize the new Webpack dev command and be retested in the existing Chrome session. |
+
 ## 2026-07-19 Cloud Next Flight execution blocker
 
 | Check | Result |
