@@ -1,5 +1,18 @@
 # 发布就绪报告
 
+## Current authoritative status - 2026-07-19
+
+| Gate | Current result | Evidence / next action |
+| --- | --- | --- |
+| Source baseline | `f2be40c` on `origin/main` | Includes the hover-toolbar deletion fix `e1e2176` and its source plus real-P0-script regression coverage. |
+| Cloud authentication | Passed | Real Chrome refresh, logout, saved-credential login, and dashboard restoration passed at `b906a15`. Earlier auth-overlay entries below are historical and do not override this result. |
+| Real paid generation | Passed for one x1 task | APImart `doubao-seedream-5-0-lite` completed with a real 800 x 800 canvas result and project reopen recovery. |
+| P1 project persistence | Open pending cloud recheck | The source regression makes logout await project sync, but the prior cloud asset-count regression must be repeated after the current bundle is synchronized. |
+| P1 image deletion | Open pending cloud recheck | Cloud reproduction proved that hover delete opened `美陈拆解`; source stacking fix and automated regression are pushed. Recheck delete plus reopen after sync. |
+| Native upload and download | Unverified | The active Chrome extension blocked native file injection before an application upload request and did not expose a download event. This is an automation limitation, not a product pass or fail. |
+| Local regression | Passed | `pnpm test:regression`: 92 files / 440 assertions; targeted lint and TypeScript checks pass. |
+| Release decision | **Not approved** | P0 upload/download evidence is incomplete and P1 cloud closure is still pending. |
+
 ## 2026-07-19 Cloud authentication acceptance completed: RELEASE STILL NOT APPROVED
 
 The cloud preview at commit `b906a15` passed a real Chrome refresh, logout, anonymous-entry, login, and dashboard-restoration flow. The previous P1 authentication startup blocker is closed.
