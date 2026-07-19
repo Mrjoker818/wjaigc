@@ -8,7 +8,7 @@
 - Evidence: `x-internal-call: true` and local-looking Host values bypassed session authentication before accepting multipart/data/remote media and storing it locally or in S3.
 - Impact: unowned storage writes and remote-media fetching through a privileged persistence route if an attacker can reach the endpoint through a proxy or local-origin path.
 - Fix: remove both caller-controlled bypasses and require `requireApiAuthOrReject` before parsing the request. Every direct server persistence caller now adds verified `getInternalRequestHeaders`; delayed worker persistence uses the explicit `system-save-image` internal identity, and request-scoped callers retain their signed-in user identity.
-- Verification: the red-first authorization/caller-inventory contract now passes. Focused compatibility regression passed 4 files / 37 assertions; API suite passed 44 files / 100 assertions; component/library regression, lint, and TypeScript checks passed.
+- Verification: the red-first authorization/caller-inventory contract now passes. A runtime persistence-helper regression verifies signed headers on data and remote image results. Focused compatibility regression passed 5 files / 39 assertions; API suite passed 44 files / 100 assertions; component/library regression, lint, and TypeScript checks passed.
 - Status: **fixed locally; cloud verification pending**. The release gate remains failed until anonymous rejection and authenticated generation/workflow/image/video/refinement persistence are verified in the synchronized cloud preview.
 
 ## 2026-07-19 P1 repair: upload authentication bypass
