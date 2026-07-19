@@ -12,7 +12,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyToken } from '../payment-qr/route';
+import { verifyPaymentToken } from '@/lib/payment-token';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import { downloadImageFromS3, resolveS3Key, deriveS3Key } from '@/lib/s3-storage';
 import path from 'path';
@@ -118,7 +118,7 @@ export async function GET(request: NextRequest) {
   }
 
   // 使用 HMAC 签名验证（无状态，服务器重启不丢失）
-  const tokenData = verifyToken(decodeURIComponent(token));
+  const tokenData = verifyPaymentToken(decodeURIComponent(token));
 
   if (!tokenData) {
     return new NextResponse(getExpiredHtml('二维码已失效，请重新获取'), {

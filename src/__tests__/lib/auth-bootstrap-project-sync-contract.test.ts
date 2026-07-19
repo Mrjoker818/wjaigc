@@ -33,10 +33,22 @@ describe('authentication bootstrap project sync', () => {
     expect(source).toContain('signal: AbortSignal.timeout(PROJECT_SYNC_TIMEOUT_MS)');
   });
 
+  it('does not restart authentication bootstrap when the search parameter object identity changes', () => {
+    const source = readFileSync(path.resolve(process.cwd(), 'src/app/page.tsx'), 'utf8');
+    const authInitializer = source.indexOf('const initCurrentUser = async () => {');
+    const authEffectEnd = source.indexOf('const [currentUser, setCurrentUser]', authInitializer);
+    const authEffect = source.slice(authInitializer, authEffectEnd);
+
+    expect(source).toContain("const initialProjectIdRef = useRef(searchParams.get('projectId'));");
+    expect(authEffect).toContain('const projectId = initialProjectIdRef.current;');
+    expect(authEffect).toContain('}, [setImages]);');
+    expect(authEffect).not.toContain('}, [searchParams, setImages]);');
+  });
+
   it('makes a no-project authenticated session interactive before client cache hydration', () => {
     const source = readFileSync(path.resolve(process.cwd(), 'src/app/page.tsx'), 'utf8');
     const authInitializer = source.indexOf('const initCurrentUser = async () => {');
-    const projectId = source.indexOf('const projectId = searchParams.get(\'projectId\');');
+    const projectId = source.indexOf('const projectId = initialProjectIdRef.current;');
     const noProjectBranch = source.indexOf('if (!projectId) {', projectId);
     const setSessionUser = source.indexOf('setCurrentUser(sessionUser);', noProjectBranch);
     const setChecked = source.indexOf('setAuthChecked(true);', setSessionUser);

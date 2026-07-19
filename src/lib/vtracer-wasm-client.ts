@@ -1,3 +1,5 @@
+'use client';
+
 /**
  * 前端 WebAssembly vtracer 封装模块
  * 

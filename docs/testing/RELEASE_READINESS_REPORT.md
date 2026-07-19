@@ -115,3 +115,13 @@ No P0 upload, image generation, persistence, download, or logout result is claim
 The source now contains a targeted `.coze` preview-runtime repair: build with `pnpm run build`, then run with `pnpm run start`. A regression contract was first observed failing against the old `next dev` configuration and is now green. Local lint, TypeScript, and production build gates are green. The release decision remains **not approved** until this configuration is synchronised to Coze and verified in the real logged-in browser.
 
 GitHub `main` was updated through `49684ed` on 2026-07-19. A three-minute endpoint poll immediately afterwards still observed the old Coze development runtime on the preview URL, so no false deployment claim is made. See `test-results/console/cloud-preview-runtime-poll-20260719.json`.
+
+The subsequent user-reported cloud update was also rechecked in Chrome. It still served the old HMR document and left the authentication overlay visible after 12 seconds. The release decision remains **not approved**; no paid action was performed after this failed entry check.
+
+### 2026-07-19 Source Release-Candidate Repair
+
+The authentication bootstrap effect previously depended on the `useSearchParams()` object identity and could cancel an in-flight session initialization. It now reads the initial project id from a ref and no longer restarts when the search-parameter object refreshes; a regression contract covers this case.
+
+`pnpm run build` now uses a verified Webpack production path, with server-only SDKs externalized to prevent incomplete assets and build-time runtime crashes. A clean build completed all 97 routes. A fresh Chromium production-server E2E run on port 5016 passed the anonymous entry-to-login flow. `pnpm test` (129 files / 523 tests), `pnpm lint --quiet`, `pnpm ts-check`, `pnpm run build`, and that Chromium E2E test passed.
+
+Release remains **not approved**: cloud synchronisation and the real logged-in P0 flow are still required.

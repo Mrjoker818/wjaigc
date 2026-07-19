@@ -6782,11 +6782,13 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     setShowSvgTracePanel(false);
     setIsSvgTraceProcessing(true);
     try {
-      // === WASM 引擎：前端直接转换，无需服务器 ===
-      if (svgTraceEngine === 'wasm-vtracer') {
+      // Client-side wasm_vtracer cannot be emitted safely by the production bundler.
+      // The server trace route uses the same engine with Python/ImageTracer fallbacks.
+      if (false && svgTraceEngine === 'wasm-vtracer') {
         try {
+          if (!img) throw new Error('No image selected for vectorization');
           updateProcessingFrame(placeholderId, { progress: 10, status: '正在加载 WASM 引擎...' });
-          const { vtracerWasmClient } = await import('@/lib/vtracer-wasm-client');
+          const { vtracerWasmClient } = await import('@/lib/vtracer-wasm-disabled');
 
           updateProcessingFrame(placeholderId, { progress: 20, status: `正在${modeLabel} (WASM)...` });
 
@@ -6798,15 +6800,17 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             max: { colorPrecision: 7, filterSpeckle: 4, maxColors: 128 },
           };
           const wasmPreset = WASM_PRESETS[svgTraceQualityPreset] || WASM_PRESETS.balanced;
-          const result = await vtracerWasmClient.convertImage(img.url, {
+          const wasmOptions: Parameters<typeof vtracerWasmClient.convertImage>[1] = {
             colorMode: svgTraceMode === 'bw' ? 'bw' : 'color',
             colorPrecision: wasmPreset.colorPrecision,
             filterSpeckle: wasmPreset.filterSpeckle,
-            ...(svgTraceCornerThreshold !== null ? { cornerThreshold: svgTraceCornerThreshold } : {}),
-            ...(svgTraceLengthThreshold !== null ? { lengthThreshold: svgTraceLengthThreshold } : {}),
-            ...(svgTraceHierarchical !== null ? { hierarchical: svgTraceHierarchical } : {}),
+            cornerThreshold: svgTraceCornerThreshold ?? undefined,
+            lengthThreshold: svgTraceLengthThreshold ?? undefined,
+            hierarchical: svgTraceHierarchical ?? undefined,
             maxColors: wasmPreset.maxColors,
-          });
+          };
+          const wasmImage = img!;
+          const result = await vtracerWasmClient.convertImage(wasmImage.url, wasmOptions);
 
           if (!result.success || !result.svg) {
             throw new Error(result.error || 'WASM 转换失败');
@@ -6836,9 +6840,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           }
 
           const engineLabel = `WASM·VTracer`;
-          completeProcessingFrame(placeholderId, displayUrl, img.width, img.height, {
-            originalWidth: img.originalWidth || Math.round(img.width),
-            originalHeight: img.originalHeight || Math.round(img.height),
+          completeProcessingFrame(placeholderId, displayUrl, wasmImage.width, wasmImage.height, {
+            originalWidth: wasmImage.originalWidth || Math.round(wasmImage.width),
+            originalHeight: wasmImage.originalHeight || Math.round(wasmImage.height),
             modifyPrompt: `${modeLabel} (${engineLabel})${result.pathCount ? '·' + result.pathCount + '路径' : ''}`,
             ...(svgUrl ? { svgUrl } : {}),
             svgDataUrl: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(result.svg)}`,
@@ -6852,7 +6856,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         } catch (wasmErr) {
           console.error('[svg-trace] WASM failed:', wasmErr);
           removeProcessingFrame(placeholderId);
-          alert(`WASM 矢量化失败: ${wasmErr instanceof Error ? wasmErr.message : '请重试'}`);
+          const message = String(wasmErr || '请重试');
+          alert(`WASM 矢量化失败: ${message}`);
           setIsSvgTraceProcessing(false);
           return;
         }

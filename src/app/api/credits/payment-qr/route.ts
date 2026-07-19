@@ -16,11 +16,12 @@ import QRCode from 'qrcode';
 import crypto from 'crypto';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { getProductionPaymentConfigurationIssues, loadPaymentConfig } from '@/lib/payment-config';
+import { createPaymentToken } from '@/lib/payment-token';
 
 const TOKEN_TTL_MS = 60_000; // 60 秒有效期
 const DEVELOPMENT_PAYMENT_TOKEN_SECRET = crypto.randomBytes(48).toString('base64url');
 
-export class PaymentTokenConfigurationError extends Error {
+class PaymentTokenConfigurationError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'PaymentTokenConfigurationError';
@@ -28,7 +29,7 @@ export class PaymentTokenConfigurationError extends Error {
 }
 
 /** HMAC 密钥：生产环境必须显式配置；开发环境仅使用进程内随机密钥。 */
-export function getPaymentTokenSecret(): string {
+function getPaymentTokenSecret(): string {
   const configured = process.env.PAYMENT_TOKEN_SECRET?.trim();
   if (configured && configured.length >= 32) return configured;
 
@@ -41,16 +42,11 @@ export function getPaymentTokenSecret(): string {
 
 /** 生成 HMAC 签名令牌 */
 function signToken(data: { realQrUrl: string; method: string; expiresAt: number }): string {
-  const payload = Buffer.from(JSON.stringify(data)).toString('base64url');
-  const signature = crypto
-    .createHmac('sha256', getPaymentTokenSecret())
-    .update(payload)
-    .digest('base64url');
-  return `${payload}.${signature}`;
+  return createPaymentToken(data);
 }
 
 /** 验证并解析 HMAC 签名令牌 */
-export function verifyToken(token: string): { realQrUrl: string; method: string; expiresAt: number } | null {
+function verifyToken(token: string): { realQrUrl: string; method: string; expiresAt: number } | null {
   try {
     const dotIndex = token.lastIndexOf('.');
     if (dotIndex === -1) return null;

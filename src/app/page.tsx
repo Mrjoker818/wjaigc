@@ -252,6 +252,9 @@ function CanvasApp() {
   const [authChecked, setAuthChecked] = useState(false);
   useRouter();
   const searchParams = useSearchParams();
+  // Authentication must not restart when Next refreshes the search-params object.
+  // Project changes inside the workspace use loadProjectById directly.
+  const initialProjectIdRef = useRef(searchParams.get('projectId'));
 
   const [showProjectData, setShowProjectData] = useState(false);
   const [navigateToImageId, setNavigateToImageId] = useState<string | null>(null);
@@ -381,7 +384,7 @@ function CanvasApp() {
         if (!cancelled && data.success && data.user) {
           const sessionUser = data.user;
 
-          const projectId = searchParams.get('projectId');
+          const projectId = initialProjectIdRef.current;
           if (!projectId) {
             setCurrentUser(sessionUser);
             setAuthChecked(true);
@@ -495,14 +498,14 @@ function CanvasApp() {
     return () => {
       cancelled = true;
     };
-  }, [searchParams, setImages]);
+  }, [setImages]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const cacheHydrationUserIdRef = useRef<string | null>(null);
   const shouldClearLocalSessionRef = useRef(false);
 
   // Hydrate the local project cache only after the authenticated workspace has rendered.
   useEffect(() => {
-    if (!authChecked || !currentUser || searchParams.get('projectId')) return;
+    if (!authChecked || !currentUser || initialProjectIdRef.current) return;
     if (cacheHydrationUserIdRef.current === currentUser.id) return;
 
     cacheHydrationUserIdRef.current = currentUser.id;
@@ -518,7 +521,7 @@ function CanvasApp() {
     return () => {
       cancelled = true;
     };
-  }, [authChecked, currentUser, searchParams]);
+  }, [authChecked, currentUser]);
 
   // Clear the local auth cache only after the unauthenticated UI has rendered.
   useEffect(() => {

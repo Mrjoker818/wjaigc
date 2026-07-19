@@ -127,3 +127,13 @@
 ### 2026-07-19 GitHub Push Does Not Synchronise Coze Preview
 
 `49684ed` and its two preceding evidence commits were pushed to `origin/main` successfully. A bounded three-minute poll of the preview root continued to return the old development runtime markers (`hmr-client`/`next-devtools`) on every successful `200` response. Evidence: `test-results/console/cloud-preview-runtime-poll-20260719.json`. GitHub push alone is therefore not deployment evidence; Coze-side sync or redeploy is required before any P0 result can be accepted.
+
+### 2026-07-19 User-Reported Cloud Update Recheck
+
+### 2026-07-19 Local Production Recheck
+
+- The source-side authentication bootstrap fix is locally verified, but its cloud deployment is not.
+- A clean Webpack production build and Chromium anonymous entry-to-login E2E run passed locally. The earlier port-5014 result is invalid because that port served a stale Turbopack process; the fresh port-5016 run passed.
+- Cloud logged-in upload, paid generation, save/reload, download, and logout remain unverified until this source revision is deployed and the auth overlay is absent.
+
+After the reported cloud update, the preview root still served the same `95618` byte development document with `next-devtools`, HMR, and all three injected bridge scripts. A fresh logged-in Chrome reload kept `正在验证身份...` visible after the 12-second condition wait, although the canvas controls had rendered behind it. Evidence: `test-results/screenshots/cloud-p0-auth-overlay-after-user-sync-20260719.png` and `test-results/console/cloud-p0-auth-overlay-after-user-sync-20260719.json`. No P0 upload or paid generation was attempted.

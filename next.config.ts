@@ -2,6 +2,33 @@ import path from 'path';
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
+  serverExternalPackages: [
+    'wasm_vtracer',
+    '@aws-sdk/client-s3',
+    '@aws-sdk/lib-storage',
+    '@langchain/core',
+    '@langchain/openai',
+    'coze-coding-dev-sdk',
+    'dotenv',
+  ],
+  webpack: (config, { isServer }) => {
+    if (isServer) {
+      config.externals.push(({ request }: { request?: string }, callback: (error?: Error | null, result?: string) => void) => {
+        if (
+          request?.startsWith('@aws-sdk/')
+          || request?.startsWith('@smithy/')
+          || request?.startsWith('@langchain/')
+          || request === 'coze-coding-dev-sdk'
+          || request === 'dotenv'
+        ) {
+          callback(null, `commonjs ${request}`);
+          return;
+        }
+        callback();
+      });
+    }
+    return config;
+  },
   turbopack: {
     root: path.resolve(__dirname),
   },
