@@ -1,4 +1,37 @@
 # 缺陷登记册
+## BUG-20260720-041: 已持久化的 4sapi 生图任务停在 processing 10%，画布没有任务占位反馈
+
+| Field | Record |
+| --- | --- |
+| Severity | P1, fixed locally; cloud acceptance pending |
+| Module | Infinite Canvas generation submit/poll/render chain; cloud task persistence and 4sapi provider execution |
+| Environment | Logged-in Coze Chrome preview, 2026-07-20 Asia/Shanghai; isolated new canvas project; model `4sapi 图像 / gpt-image-2`; 1:1, x1. |
+| Reproduction | Submit the simple paper-airplane prompt through the visible generation panel. The browser logs `[generation-panel] 提交生成请求`. A refresh of `API 管理 → 云端任务监控` shows two persisted `4sapi 图像 · gpt-image-2` tasks, each `processing / 10%`. |
+| Expected | The canvas immediately renders one processing placeholder per output, then receives progress and a completed/failed terminal state. Refreshing task monitor must advance the elapsed time/status while the job is active. |
+| Actual | There is no canvas processing placeholder, result, toast, or client terminal error. Across 16 condition-based monitor refreshes over 85 seconds, both task cards remained exactly `processing / 10%` and displayed an unchanged elapsed value. No further paid submissions were made. |
+| Evidence | `test-results/console/cloud-p0-generation-4sapi-observation-20260720.json`; browser task-monitor observations captured 2026-07-20; `test-results/screenshots/cloud-p0-generation-4sapi-state-20260720.png`. |
+| Root cause | `/api/generate` ran its optional in-process async worker as a bare IIFE. Unlike the project's other long-running Next routes, it did not use `after()`. In a cloud request lifecycle the wrapper task can therefore be persisted and remotely submitted, then lose its in-process continuation before it updates a terminal state. |
+| Fix | Schedule the explicitly enabled compatibility worker through Next `after(async () => ...)`, so the polling response can return immediately while the server keeps the background work alive. The durable recovery path remains the fallback for restarts. |
+| Regression | Red-first `generate-idempotency-contract.test.ts` failed because the route did not import/schedule `after`; it now passes together with `async-generate-task.test.ts`, `api-compatibility.test.ts` (28 assertions), TypeScript, and diff whitespace validation. |
+| Cloud acceptance | Pending. One non-FHL x1 task must progress to completed or failed, provide a visible canvas state, enter exactly one result or a clear retry path, and preserve/refund credits exactly once. |
+
+## BUG-20260720-040: 可选的 FHL Gemini 图像模型被错误提交到 images 端点
+
+| Field | Record |
+| --- | --- |
+| Severity | P1, fixed locally; cloud acceptance pending |
+| Module | Infinite Canvas → 图像生成 → 模型选择 / `/api/generate` provider compatibility mapping |
+| Environment | Logged-in Coze Chrome preview `https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9.dev.coze.site/`, 2026-07-20 Asia/Shanghai; UI version 3.9.0. |
+| Precondition | Create an isolated canvas project, leave output count at x1 and ratio at 1:1. |
+| Stable reproduction | Select `FHL图像模型 → Gemini 2.5 Flash Image`, enter `一只橙色纸飞机，纯白背景，简约产品摄影`, and click `开始生成`. The console reports task `async-1784480510971-fhe31g` as non-retryable after 6 seconds. |
+| Expected | A provider declared unavailable must be disabled/hidden with an actionable explanation. A selectable image model must be routed through the provider-compatible image-generation protocol, or rejected before credits/tasks are created. |
+| Actual | The task is accepted by the UI and then fails with `images endpoint requires an image model, got "gemini-2.5-flash-image"`. No generated image enters the canvas. |
+| Evidence | `test-results/screenshots/cloud-p0-generation-fhl-config-failure-20260720.png`; `test-results/console/cloud-p0-generation-fhl-config-failure-20260720.json`; browser console entry above. |
+| Root cause | `resolveProfileForModel()` recognized the FHL URL and returned its `/images/generations` profile before its Gemini-model branch could select the existing Chat Completions protocol. |
+| Fix | Add the FHL URL pattern to the existing Gemini image Chat Completions routing rule. Non-Gemini FHL models retain their FHL image profile. |
+| Regression | Red-first `api-compatibility.test.ts` failed with `expected 'fhl' to be 'gemini-image'`; it now passes as part of the 28 focused assertions and TypeScript check. |
+| Cloud acceptance | Pending: an FHL Gemini selection must no longer produce the previous images-endpoint error. Provider availability remains a configuration concern; while FHL is intentionally unavailable, the administrator should keep it disabled rather than exposing it as a usable model. |
+
 ## BUG-20260719-038: Public media route exposed private data-root files and active SVG content
 
 | Field | Record |
@@ -874,3 +907,23 @@ BUG-20260718-007 的“任务恢复、完成和刷新恢复”范围已修复并
 | Evidence | `test-results/network/cloud-health-502-after-213d61c-20260719.json`. |
 | Classification | Deployment/backend or proxy availability blocker. The request fails before the application can establish a session, so no code change is inferred from this observation. |
 | Required closure | Restore a healthy Coze preview and rerun the complete isolated-account P0 script starting from upload. |
+
+## BUG-20260720-042: Cloud recovery re-enabled a public legacy session-signing secret and disabled the doctor gate
+
+| Field | Detail |
+| --- | --- |
+| Severity / module | P0 / production authentication and deployment health gate |
+| Environment | GitHub and Coze commit `3a70a634`; real Chrome against the direct Coze application URL on 2026-07-20. |
+| Stable reproduction | Run `server-auth-production-security.test.ts` with production mode, no configured secret, no database secret, and no file secret: the restored source signed a session with the source-visible legacy constant. `package.json` also replaced `doctor` with an unconditional success command. |
+| Expected | Production must never sign sessions with a public constant, and `pnpm doctor` must execute the real health checker. Existing legacy password hashes may migrate without retaining the legacy value as the active session secret. |
+| Actual | The pre-fix security test resolved a valid session token instead of rejecting. The package-level doctor command always exited zero regardless of configuration. |
+| Root cause | The cloud recovery patch prioritized availability by accepting the persisted public legacy secret as the active HMAC key and by bypassing all doctor checks. |
+| Local fix | A persisted legacy secret is rotated to a random 48-byte value before any session is signed; legacy password hashes remain accepted once and migrate on successful login. Production with no recoverable/persistable secret still rejects authentication. `doctor` again runs `scripts/doctor.mjs`; Coze startup uses `--startup`, which keeps credential findings visible as warnings while still blocking unavailable database/runtime dependencies. |
+| Regression | Red-first results: 3 expected failures across production auth, package doctor, and startup mode. Green results: 31/31 focused auth/startup/generation compatibility assertions plus 11/11 legacy-rotation/internal-auth assertions. API 119/119, component/lib regression exit 0, TypeScript, lint, diff check, and production build also pass locally. |
+| Cloud acceptance | Pending. Deployment will invalidate sessions signed with the legacy key once; Chrome-saved credentials must then log in successfully, direct-domain refresh must retain the new session, and the production monitor must show no authentication configuration error. |
+
+### 2026-07-20 cloud recovery checkpoint for BUG-20260720-040/041
+
+- Coze reports deployed Git commit `3a70a634`, which does not contain the local FHL routing or Next `after()` generation-worker fixes.
+- Direct application URL login and direct-page reload retained the `Mr.joker` administrator session. Reloading the Coze editor wrapper and re-entering the canvas showed the login form again; direct navigation immediately recovered the authenticated dashboard. This is isolated to third-party iframe storage and is not counted as a direct-app login failure.
+- After clicking `API 管理 -> 刷新任务`, two 4sapi `gpt-image-2` records still showed `processing / 10%`; the FHL Gemini images-endpoint error was also still visible. Evidence: `test-results/screenshots/cloud-restored-task-monitor-3a70a634-20260720.png`, `test-results/screenshots/cloud-auth-refresh-session-loss-20260720.png`, and matching JSON under `test-results/console/`.

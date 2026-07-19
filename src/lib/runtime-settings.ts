@@ -8,13 +8,21 @@ function numberSetting(value: unknown, fallback: number, min: number, max: numbe
 export async function getRuntimeSettings(): Promise<{
   initialCredits: number;
   imageMaxSizeMB: number;
+  imageMaxEdge: number;
+  defaultImageModel: string;
+  defaultChatModel: string;
+  defaultVideoModel: string;
   maxVideoDuration: number;
   videoGenerationEnabled: boolean;
   threeDModelEnabled: boolean;
 }> {
-  const [initialCredits, imageMaxSizeMB, maxVideoDuration, videoEnabled, threeDEnabled] = await Promise.all([
+  const [initialCredits, imageMaxSizeMB, imageMaxEdge, defaultImageModel, defaultChatModel, defaultVideoModel, maxVideoDuration, videoEnabled, threeDEnabled] = await Promise.all([
     dbGetSystemSetting('initialCredits'),
     dbGetSystemSetting('imageMaxSizeMB'),
+    dbGetSystemSetting('imageMaxEdge'),
+    dbGetSystemSetting('defaultImageModel'),
+    dbGetSystemSetting('defaultChatModel'),
+    dbGetSystemSetting('defaultVideoModel'),
     dbGetSystemSetting('maxVideoDuration'),
     dbGetSystemSetting('videoGenerationEnabled'),
     dbGetSystemSetting('3dModelEnabled'),
@@ -22,6 +30,10 @@ export async function getRuntimeSettings(): Promise<{
   return {
     initialCredits: numberSetting(initialCredits, 0, 0, 100_000),
     imageMaxSizeMB: numberSetting(imageMaxSizeMB, 20, 1, 100),
+    imageMaxEdge: numberSetting(imageMaxEdge, 2048, 256, 8192),
+    defaultImageModel: String(defaultImageModel ?? ''),
+    defaultChatModel: String(defaultChatModel ?? ''),
+    defaultVideoModel: String(defaultVideoModel ?? ''),
     maxVideoDuration: numberSetting(maxVideoDuration, 15, 1, 15),
     videoGenerationEnabled: String(videoEnabled ?? 'true') !== 'false',
     threeDModelEnabled: String(threeDEnabled ?? 'true') !== 'false',

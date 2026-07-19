@@ -1526,6 +1526,16 @@ export default function AdminTabs(props: AdminTabsProps) {
     };
     const numeric = (key: string, label: string, unit: string, min: number, max: number) => <label className="flex items-center justify-between gap-4 py-3"><span className="text-sm text-foreground">{label}</span><span className="flex items-center gap-2"><input aria-label={label} type="number" min={min} max={max} value={value(key)} onChange={event => updateSetting(key, event.target.value)} className="h-9 w-28 rounded-md border border-border bg-background px-2 text-right text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30" /><span className="w-8 text-xs text-muted-foreground">{unit}</span></span></label>;
 
+    const modelSelect = (key: string, label: string, modelType: string) => {
+      const options = (providers || [])
+        .filter(provider => (provider.model_type || provider.modelType) === modelType)
+        .flatMap(provider => (provider.selected_models || provider.selectedModels || []).map(model => ({
+          value: `${provider.id}::${model}`,
+          label: `${model} (${provider.displayName || provider.name || provider.id})`,
+        })));
+      return <label className="block text-sm text-foreground"><span>{label}</span><select aria-label={label} value={value(key)} onChange={event => updateSetting(key, event.target.value)} className="mt-1 h-9 w-full rounded-md border border-border bg-background px-3 text-sm text-foreground"><option value="">使用提供商默认值</option>{options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>;
+    };
+
     return (
       <div className="flex h-full flex-col">
         <div className="border-b border-border px-6 py-5">
@@ -1540,6 +1550,7 @@ export default function AdminTabs(props: AdminTabsProps) {
               <div className="mt-3 divide-y divide-border/60">
                 {numeric('initialCredits', '新用户初始积分', '积分', 0, 100000)}
                 {numeric('imageMaxSizeMB', '图片上传上限', 'MB', 1, 100)}
+                {numeric('imageMaxEdge', '图片最大边长', 'px', 256, 8192)}
               </div>
             </section>
             <section className="border border-border bg-card p-5 rounded-lg">
@@ -1548,7 +1559,16 @@ export default function AdminTabs(props: AdminTabsProps) {
               <div className="mt-3 divide-y divide-border/60">
                 <div className="flex items-center justify-between gap-4 py-3"><span className="text-sm text-foreground">视频生成</span>{toggle('videoGenerationEnabled', '视频生成')}</div>
                 <div className="flex items-center justify-between gap-4 py-3"><span className="text-sm text-foreground">3D 模型生成</span>{toggle('3dModelEnabled', '3D 模型生成')}</div>
-                {numeric('maxVideoDuration', '视频最长时长', '秒', 1, 600)}
+                {numeric('maxVideoDuration', '视频最长时长', '秒', 1, 15)}
+              </div>
+            </section>
+            <section className="border border-border bg-card p-5 rounded-lg">
+              <h2 className="text-sm font-semibold text-foreground">默认模型</h2>
+              <p className="mt-1 text-xs text-muted-foreground">仅在用户尚未选择模型时使用，不会覆盖已有选择。</p>
+              <div className="mt-3 space-y-3">
+                {modelSelect('defaultImageModel', '默认图像模型', 'image')}
+                {modelSelect('defaultChatModel', '默认聊天模型', 'chat')}
+                {modelSelect('defaultVideoModel', '默认视频模型', 'video')}
               </div>
             </section>
             <section className="border border-border bg-card p-5 rounded-lg lg:col-span-2">

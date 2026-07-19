@@ -888,9 +888,10 @@ export function resolveProfileForModel(
     if (provider?.compatProfile === 'gemini-image' || provider?.advancedParams?.compatProfile === 'gemini-image') {
       return PROFILE_GEMINI_IMAGE;
     }
-    // For 4SAPI-like providers (detected by URL pattern), auto-switch to gemini-image profile
+    // For providers whose Gemini image models are served through chat/completions,
+    // auto-switch instead of sending them to /images/generations.
     const url = (provider?.baseUrl || '').toLowerCase();
-    if (url.includes('4sapi')) {
+    if (url.includes('4sapi') || url.includes('fhl.mom')) {
       return PROFILE_GEMINI_IMAGE;
     }
     // For other providers, keep the base profile (they may support Gemini on /images/generations)

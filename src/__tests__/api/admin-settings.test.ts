@@ -59,4 +59,14 @@ describe('admin runtime settings', () => {
     expect(response.status).toBe(400);
     expect(mocks.dbSetSystemSetting).not.toHaveBeenCalled();
   });
+
+  it('persists a valid maximum upload image edge', async () => {
+    const response = await POST(new NextRequest('http://localhost/api/admin/settings', {
+      method: 'POST',
+      body: JSON.stringify({ imageMaxEdge: 4096 }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.dbSetSystemSetting).toHaveBeenCalledWith('imageMaxEdge', '4096');
+  });
 });

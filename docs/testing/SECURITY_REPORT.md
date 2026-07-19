@@ -1,5 +1,12 @@
 # 安全测试报告
 
+## 2026-07-20 Production dependency audit
+
+- `pnpm audit --prod --json --registry=https://registry.npmjs.org` completed against 710 production dependencies.
+- Result: 0 critical, 0 high, 0 moderate, 0 low, and 0 informational vulnerabilities reported by the official npm registry.
+- The configured local `npmmirror` registry does not implement the audit endpoint, so the first audit invocation failed before dependency analysis. The official-registry result above is the authoritative audit evidence for this run.
+- This is a package-vulnerability result only. It does not close any cloud configuration, authentication, storage, or AI-provider acceptance item.
+
 ## 2026-07-19 P0 repair: public media route data disclosure and stored SVG execution
 
 ### SEC-018 / P0: Public media endpoint read private persistent files and served active SVG
@@ -223,6 +230,14 @@
 - Patched by lockfile-constrained overrides: `@babel/core` 7.29.6, `postcss` 8.5.20, `brace-expansion` 1.1.13 and 2.0.3. `drizzle-kit` was moved from production dependencies to development dependencies because application source imports `drizzle-orm`, not the CLI.
 - The dependency policy was red-tested first and is now green in `src/__tests__/lib/dependency-security-contract.test.ts` (2/2). Full `test:api` (50 files / 116 tests), `test:regression`, lint, TypeScript, and production build completed successfully after the lockfile update.
 - Remaining `uuid@8.3.2` is supplied through `exceljs@4.4.0`. The advisory affects `uuid` APIs `v3`, `v5`, and `v6` only when callers provide invalid external buffers; the installed ExcelJS code path uses `uuid.v4()`. It is retained as a documented moderate residual risk rather than forcing an incompatible major override into ExcelJS. Review it whenever ExcelJS publishes a compatible update or the application begins using affected UUID APIs.
+
+## 2026-07-20 P0 legacy authentication secret rotation
+
+- Commit `3a70a634` restored cloud login by allowing the source-visible legacy authentication constant to become the active production session-signing key and by falling back to it when no secret was available. That creates a session-forgery risk and failed the existing production security contract.
+- The local candidate no longer signs with that public value. When the database still contains it, the server generates a cryptographically random 48-byte replacement, persists it before signing, and keeps the legacy value only in password-hash migration logic. If persistence fails and no environment/file secret exists, production authentication fails closed.
+- `pnpm doctor` was also restored from an unconditional-success command. Coze startup now runs the real checker in `--startup` mode: secrets and bootstrap credentials remain visible warnings for an existing database-backed deployment, while database/runtime failures still stop startup. Strict `--production` release checks remain unchanged.
+- Red-green evidence: `server-auth-legacy-rotation.test.ts`, `server-auth-production-security.test.ts`, `doctor-production-auth-contract.test.ts`, and `coze-production-preview-contract.test.ts`.
+- Cloud closure is pending. The first deployment of this candidate may invalidate sessions signed by the legacy key; a fresh saved-credential login and direct-domain refresh are required before closing the P0 item.
 
 - 会话 cookie 在服务端认证层使用 HTTP-only、SameSite 和生产环境 Secure 配置。
 - `/api/proxy-3d-model` 需要认证，并对 URL 协议、私网地址和域名进行限制；`Access-Control-Allow-Origin: *` 仍需要结合真实跨域请求验证。

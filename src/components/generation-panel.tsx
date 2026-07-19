@@ -9,6 +9,7 @@ import { ApiProvider } from '@/lib/universal-api-types';
 import { UserManager as UserManagerCore } from '@/lib/user-manager';
 import { ThirdPartyModelDialog } from '@/components/third-party-model-dialog';
 import { getModelDisplayName } from '@/lib/model-name-map';
+import { selectInitialModel } from '@/lib/model-defaults';
 import { getPromptTemplates, PromptTemplate, searchTemplates } from '@/lib/prompt-templates';
 import { MODEL_ASPECT_RATIOS as SHARED_MODEL_ASPECT_RATIOS, MODEL_QUALITIES as SHARED_MODEL_QUALITIES, QUALITY_DISPLAY_NAMES as SHARED_QUALITY_DISPLAY_NAMES, QUALITY_TO_SIZE as SHARED_QUALITY_TO_SIZE, ASPECT_RATIO_TO_PIXELS as SHARED_ASPECT_RATIO_TO_PIXELS, DEFAULT_ASPECT_RATIOS as SHARED_DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES as SHARED_DEFAULT_QUALITIES, findModelConfig as sharedFindModelConfig, calculateActualPixels as sharedCalculateActualPixels, ModelParamType, getModelParamType, getResolutionTierOptions, getQualityLevelOptions, getDefaultParamValue, getProviderAspectRatios, getProviderPixelSizingOption, shouldPreserveProviderAutoSize, RESOLUTION_TIER_DISPLAY_NAMES, QUALITY_LEVEL_DISPLAY_NAMES, RESOLUTION_TIER_MODELS, QUALITY_LEVEL_MODELS } from '@/lib/canvas-generation-group';
 
@@ -860,7 +861,7 @@ export function GenerationPanel(
             const res = await fetch('/api/models?type=image', { signal });
             if (res.ok) {
                 const data = await res.json();
-                const serverModels: {id: string, providerId: string, providerName: string, is3DProvider?: boolean, displayLabel?: string, apiDisplayName?: string}[] = [];
+                const serverModels: {id: string, providerId: string, providerName: string, isDefault?: boolean, is3DProvider?: boolean, displayLabel?: string, apiDisplayName?: string}[] = [];
                 const providerMap = new Map<string, string>();
                 if (data.providers && Array.isArray(data.providers)) {
                     for (const p of data.providers) {
@@ -875,6 +876,7 @@ export function GenerationPanel(
                             id: m.id || m.name,
                             providerId: m.providerId || '',
                             providerName: providerMap.get(m.providerId) || m.providerId || '',
+                            isDefault: Boolean(m.isDefault),
                             is3DProvider: is3D,
                             displayLabel: is3D ? get3DModelLabel(m.id || m.name) : undefined,
                             apiDisplayName: m.name || '',
@@ -887,7 +889,10 @@ export function GenerationPanel(
                     // 仅在未选中模型时自动选择第一个；刷新列表时不改变当前选择
                     setModel(prev => {
                         if (!prev && serverModels.length > 0) {
-                            return `${serverModels[0].providerId}::${serverModels[0].id}`;
+                            return selectInitialModel('', serverModels.map(entry => ({
+                                id: `${entry.providerId}::${entry.id}`,
+                                isDefault: entry.isDefault,
+                            })));
                         }
                         // 刷新时保持当前选择不变，即使模型已不存在于列表中
                         // 用户可手动切换到其他模型

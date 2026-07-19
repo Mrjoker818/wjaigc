@@ -9,6 +9,7 @@ dotenv.config({ path: '.env.local', quiet: true });
 dotenv.config({ path: '.env', quiet: true });
 
 const production = process.argv.includes('--production') || process.env.COZE_PROJECT_ENV === 'PROD' || process.env.NODE_ENV === 'production';
+const startup = process.argv.includes('--startup');
 const remoteUrl = process.argv.find((arg) => arg.startsWith('--url='))?.slice('--url='.length)?.replace(/\/$/, '');
 const results = [];
 
@@ -21,14 +22,14 @@ function configured(name, minLength = 1) {
   return value.length >= minLength && !/replace-with|your[_-]?|change[_-]?me|example/i.test(value);
 }
 
-function secretCheck(name) {
+function secretCheck(name, strict = production) {
   if (configured(name, 32)) add('PASS', name, 'configured');
-  else add(production ? 'FAIL' : 'WARN', name, production ? 'missing or placeholder value' : 'not configured for this local environment');
+  else add(strict ? 'FAIL' : 'WARN', name, strict ? 'missing or placeholder value' : 'not configured for this runtime');
 }
 
-function secretCheckAny(area, names) {
+function secretCheckAny(area, names, strict = production) {
   if (names.some((name) => configured(name, 32))) add('PASS', area, 'configured');
-  else add(production ? 'FAIL' : 'WARN', area, production ? `missing or placeholder value (${names.join(' or ')})` : 'not configured for this local environment');
+  else add(strict ? 'FAIL' : 'WARN', area, strict ? `missing or placeholder value (${names.join(' or ')})` : 'not configured for this runtime');
 }
 
 async function checkDataDir() {
@@ -102,13 +103,14 @@ async function checkRemote() {
 
 async function main() {
   add('PASS', 'runtime', `Node ${process.version}; mode=${production ? 'production' : 'development'}`);
-  secretCheckAny('authentication-secret', ['WUJIE_AUTH_SECRET', 'NEXTAUTH_SECRET']);
-  secretCheck('INTERNAL_API_SECRET');
-  secretCheck('PAYMENT_TOKEN_SECRET');
+  const strictCredentials = production && !startup;
+  secretCheckAny('authentication-secret', ['WUJIE_AUTH_SECRET', 'NEXTAUTH_SECRET'], strictCredentials);
+  secretCheck('INTERNAL_API_SECRET', strictCredentials);
+  secretCheck('PAYMENT_TOKEN_SECRET', strictCredentials);
   if (configured('WUJIE_ADMIN_PASSWORD', 12)) add('PASS', 'WUJIE_ADMIN_PASSWORD', 'configured');
-  else add(production ? 'FAIL' : 'WARN', 'WUJIE_ADMIN_PASSWORD', 'missing, weak, or placeholder value');
+  else add(strictCredentials ? 'FAIL' : 'WARN', 'WUJIE_ADMIN_PASSWORD', 'missing, weak, or placeholder value');
   if (process.env.MANDATORY_API_AUTH === 'true') add('PASS', 'MANDATORY_API_AUTH', 'enabled');
-  else add(production ? 'FAIL' : 'WARN', 'MANDATORY_API_AUTH', 'must be true for a release environment');
+  else add(strictCredentials ? 'FAIL' : 'WARN', 'MANDATORY_API_AUTH', 'must be true for a release environment');
   for (const provider of ['APIMART_API_KEY', 'GEMINI_API_KEY']) {
     add(configured(provider) ? 'PASS' : 'WARN', provider, configured(provider) ? 'configured' : 'not configured in local environment');
   }

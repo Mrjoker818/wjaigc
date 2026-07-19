@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { appendUserJsonl } from '@/lib/server-user-storage';
 import { findProviderForModel, normalizeApiBaseUrl, findAllProvidersForType, findProviderById } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
@@ -410,7 +410,7 @@ export async function POST(request: NextRequest) {
         referenceImages: accessibleReferenceImages.length > 0 ? accessibleReferenceImages : undefined,
       };
       if (process.env.WUJIE_ENABLE_IN_PROCESS_ASYNC_WORKER === 'true') {
-        (async () => {
+        after(async () => {
         try {
           const bgRes = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/generate`, {
             method: 'POST',
@@ -701,7 +701,7 @@ export async function POST(request: NextRequest) {
             } catch (refundErr) { console.error('[generate] Refund failed:', refundErr); }
           }
         }
-        })();
+        });
       }
 
       // 立即返回，不等待后台完成

@@ -1,5 +1,23 @@
 # 回归测试报告
 
+## 2026-07-20 Cloud P0 generation evidence (not passed)
+
+- Real Chrome login → new isolated canvas project → model selection → prompt entry was exercised against the Coze preview.
+- `FHL图像模型 / Gemini 2.5 Flash Image / 1:1 / x1` entered a visible `生成中` state and then failed after six seconds: `images endpoint requires an image model, got "gemini-2.5-flash-image"`. Evidence is retained and the defect is P1 `BUG-20260720-040`.
+- A follow-up non-FHL `4sapi 图像 / Gpt Image 2` submission is durably visible in the administrator cloud-task monitor, but two task records remained `processing / 10%` through 16 condition-based refreshes over 85 seconds. The canvas has no processing placeholder or result. This is P1 `BUG-20260720-041`; persistence alone is not treated as a successful generation.
+- Therefore the cloud P0 chain “generation → terminal task state → image enters canvas → save/reload → download” remains incomplete and release approval is unchanged: **not approved**.
+
+## 2026-07-20 Local P1 repairs awaiting cloud acceptance
+
+- `BUG-20260720-040`: FHL Gemini image models are now routed to the existing `gemini-image` Chat Completions profile instead of FHL's incompatible images endpoint. The new regression first failed with profile `fhl`, then passed.
+- `BUG-20260720-041`: the submitOnly in-process worker now uses Next `after()` rather than a bare fire-and-forget IIFE, matching the project's other long-running routes and preserving work after the response lifecycle. The new source contract first failed, then passed.
+- Focused verification: 3 files / 28 assertions passed; `pnpm exec tsc -p tsconfig.json --noEmit`, `git diff --check`, and `pnpm build` passed. The production build compiled in 74 seconds, completed TypeScript validation, and generated all 97 static pages in approximately 161 seconds total. These local checks do not prove cloud deployment behavior.
+
+## 2026-07-20 Deployment health recheck
+
+- `pnpm run doctor -- --url=https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9.dev.coze.site/` completed with 3 passes, 9 local-environment warnings, and 0 failures. The cloud `/api/auth/me` health probe returned HTTP 200.
+- The warnings concern intentionally absent local release secrets, database and object-storage configuration. They do not establish that the cloud deployment has those values and do not replace authenticated browser acceptance.
+
 ## 2026-07-19 Public media isolation regression (local pass; cloud pending)
 
 - Red-first `public-media-access-contract.test.ts` documented four failures: no guard before data-root access, active SVG MIME, SVG upload acceptance, and unvalidated save-image ingress.
@@ -511,3 +529,16 @@ This replay supersedes the cloud closure portions of BUG-20260719-043 and BUG-20
 | Local source repair | Passed | Selected-image toolbar now uses `z-[80]` above the workspace `z-[70]`; `canvas-toolbar-floating-windows.test.ts` passes 8/8. |
 
 Cloud rerun is required after this revision is deployed. Generation, refresh recovery, download-file artifact, and logout portions of the same P0 script were intentionally not claimed after the delete assertion failed.
+
+## 2026-07-20 cloud recovery and local integration replay
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Cloud deployment health | Pass for availability | `pnpm run doctor -- --url=<direct-preview>` reported 3 pass / 9 local-environment warnings / 0 failures; `/api/auth/me` returned 200. |
+| Direct-domain login and refresh | Pass | Chrome logged in with its saved account, reached the 20-project / 207-asset dashboard, and retained the administrator session after direct-page reload. |
+| Coze editor iframe refresh | Environment-specific failure | Reloading the editor wrapper resets the embedded app to entrance selection; re-entering shows the login form. Direct navigation to the same app domain remains authenticated, isolating the result to third-party iframe storage. |
+| Existing generation tasks | Fail, P1 remains open | Two 4sapi `gpt-image-2` tasks remain `processing / 10%` after service recovery; the FHL Gemini images-endpoint failure remains visible because cloud commit `3a70a634` predates the local fixes. No additional paid task was submitted. |
+| Recovery-patch security | Red then green locally | The remote recovery patch caused the production no-secret test to issue a token and made `doctor` a no-op. Focused tests captured both regressions; local code now rotates a persisted public legacy secret, rejects an unrecoverable secret, restores the real doctor, and introduces a startup-only warning mode. |
+| Local verification | Pass for tested source | Focused 31/31 and 11/11; API 51 files / 119 tests; component/lib regression exit 0; TypeScript exit 0; ESLint exit 0; `git diff --check` exit 0; Next production build generated 97 pages and exited 0. |
+
+Release status remains **not approved** until the local candidate is deployed and the real image generation, canvas result, save/reload, and download chain reaches a terminal state.

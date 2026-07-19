@@ -4,6 +4,9 @@ import { describe, expect, it } from 'vitest';
 
 const cozeConfig = readFileSync(resolve(process.cwd(), '.coze'), 'utf8');
 const devSection = cozeConfig.match(/\[dev\]([\s\S]*?)(?=\n\[|$)/)?.[1] ?? '';
+const packageJson = JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf8')) as {
+  scripts?: Record<string, string>;
+};
 
 describe('Coze preview runtime contract', () => {
   it('fails the preview startup before exposing a production server with missing required secrets', () => {
@@ -16,7 +19,8 @@ describe('Coze preview runtime contract', () => {
     expect(buildScript).toContain('pnpm run build');
 
     const startScript = readFileSync(resolve(process.cwd(), 'scripts/coze-start.sh'), 'utf8');
-    expect(startScript).toContain('pnpm run doctor -- --production');
+    expect(packageJson.scripts?.doctor).toBe('node scripts/doctor.mjs');
+    expect(startScript).toContain('pnpm run doctor -- --startup');
     expect(startScript).toContain('exec pnpm run start');
   });
 });

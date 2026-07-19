@@ -60,6 +60,17 @@ describe('generate submitOnly idempotency contract', () => {
     expect(source).toContain("process.env.WUJIE_ENABLE_IN_PROCESS_ASYNC_WORKER === 'true'");
   });
 
+  it('schedules an enabled in-process worker with Next after so its response can return first', () => {
+    const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/generate/route.ts'), 'utf8');
+    const workerGate = source.indexOf("process.env.WUJIE_ENABLE_IN_PROCESS_ASYNC_WORKER === 'true'");
+    const response = source.indexOf("mode: 'polling'", workerGate);
+    const afterSchedule = source.indexOf('after(async () =>', workerGate);
+
+    expect(source).toContain("import { NextRequest, NextResponse, after } from 'next/server';");
+    expect(afterSchedule).toBeGreaterThan(workerGate);
+    expect(afterSchedule).toBeLessThan(response);
+  });
+
   it('persists the deducted credit cost with a resumable submitOnly task', () => {
     const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/generate/route.ts'), 'utf8');
     const persisted = source.indexOf('const taskCreated = await recordImageTaskSubmitted');

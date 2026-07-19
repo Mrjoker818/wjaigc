@@ -1,5 +1,11 @@
 # 未验证项目
 
+## 2026-07-20 P0 cloud generation continuation
+
+- Upload through the current attached Chrome channel remains unverified because `fileChooser.setFiles` is denied by the extension's local-file permission. This is an automation-environment limitation, not application pass/fail evidence.
+- A real FHL `gemini-2.5-flash-image` submission failed after six seconds with an incompatible `images` endpoint error. It is recorded as P1 `BUG-20260720-040`; FHL may be skipped for provider success validation, but the selectable-model failure remains a product defect.
+- Two real 4sapi `gpt-image-2` submissions reached the frontend `onGenerate` handler and are present in `API 管理 → 云端任务监控`, but both remained `processing / 10%` with no advancing task-card time through 85 seconds of condition-based polling. The canvas shows no processing placeholder, terminal state, or result. This is P1 `BUG-20260720-041`, not a successful generation. No additional paid submission may be made until task execution is diagnosed.
+
 ## 2026-07-19 New P0 cloud acceptance required: public media isolation
 
 - `BUG-20260719-038` / `SEC-018` is fixed locally but not yet deployed/accepted.
@@ -290,6 +296,14 @@
 - The current cloud health gate remains **unverified/blocked**: after the recovery notice, `/api/auth/me` again returned HTTP `502` to `pnpm run doctor -- --url=<preview>`.
 - The full local Vitest suite passed 147 files / 569 tests. This does not validate cloud database, storage, authentication, provider connectivity, or the paid P0 journey.
 - Do not close the remaining P0 upload-to-download chain until the health gate has no failures and the complete isolated-account Playwright replay can run to completion.
+
+## 2026-07-20 remaining acceptance gates after cloud recovery
+
+- **P0 authentication-secret rotation:** the local candidate rotates the persisted public legacy key. Cloud must deploy it, complete one saved-credential login after the one-time session invalidation, and retain that session across a direct application reload.
+- **P1 FHL routing:** cloud `3a70a634` still shows the old Gemini images-endpoint failure. The source regression is green, but cloud acceptance remains pending; FHL may remain skipped as an unavailable provider only when it is disabled from user selection.
+- **P1 4sapi terminal state:** two existing `gpt-image-2` tasks remain `processing / 10%`. Do not submit another paid task until the `after()` worker candidate is deployed. Closure requires one non-FHL x1 task to reach completed or failed, visible canvas feedback, exactly-once credit settlement, and save/reload recovery.
+- **Iframe preview storage:** the direct app retains login across reload, while the Coze editor iframe requires re-entry/login after wrapper reload. This is not accepted as proof of a direct-app auth defect; production acceptance must use the direct application URL.
+- **Native upload/download:** Chrome extension file injection and observable downloaded-file evidence remain environment-limited as previously recorded. They cannot be marked passed from source tests.
 
 ### 2026-07-19 Production preview follow-up
 

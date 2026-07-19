@@ -27,6 +27,15 @@ describe('provider request contracts', () => {
     expect(profile.id).toBe('4sapi');
   });
 
+  it('routes FHL Gemini image models through chat completions instead of its images endpoint', () => {
+    const profile = resolveProfileForModel('gemini-2.5-flash-image', {
+      baseUrl: 'https://www.fhl.mom',
+    });
+
+    expect(profile.id).toBe('gemini-image');
+    expect(profile.defaultEndpoint).toBe('/chat/completions');
+  });
+
   it('uses the selected 4S resolution tier instead of quality when calculating pixels', () => {
     expect(resolveProviderPixelSize('16:9', 'high', '2K', 'gpt-image-2', PROFILE_4SAPI))
       .toBe('2048x1152');

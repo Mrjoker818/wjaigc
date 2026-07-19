@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { existsSync } from 'fs';
+import sharp from 'sharp';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
+import { getImageDimensionValidationError } from '@/lib/image-dimensions';
 import { getRuntimeSettings } from '@/lib/runtime-settings';
 import { getSafeRasterImageExtension, validateSafeMediaFile } from '@/lib/media-validation';
 
@@ -28,6 +29,16 @@ export async function POST(request: NextRequest) {
     const safeMedia = validateSafeMediaFile(file, buffer);
     if (!safeMedia) {
       return NextResponse.json({ error: 'File content does not match image format' }, { status: 400 });
+    }
+
+    try {
+      const dimensionsError = getImageDimensionValidationError(
+        await sharp(buffer).metadata(),
+        runtimeSettings.imageMaxEdge,
+      );
+      if (dimensionsError) return NextResponse.json({ error: dimensionsError }, { status: 400 });
+    } catch {
+      return NextResponse.json({ error: 'Unable to read image dimensions' }, { status: 400 });
     }
 
     // Generate unique filename

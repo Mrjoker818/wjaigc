@@ -28,4 +28,30 @@ describe('production doctor authentication contract', () => {
     expect(result.stdout).toContain('[PASS] authentication-secret: configured');
     expect(result.stdout).not.toContain('WUJIE_AUTH_SECRET: missing or placeholder value');
   });
+
+  it('keeps credential findings visible but non-blocking during an existing Coze startup', () => {
+    const environment: NodeJS.ProcessEnv = {
+      ...process.env,
+      COZE_PROJECT_ENV: 'PROD',
+      NODE_ENV: 'production',
+    };
+    delete environment.WUJIE_AUTH_SECRET;
+    delete environment.NEXTAUTH_SECRET;
+    delete environment.INTERNAL_API_SECRET;
+    delete environment.PAYMENT_TOKEN_SECRET;
+    delete environment.WUJIE_ADMIN_PASSWORD;
+    delete environment.PGDATABASE_URL;
+    delete environment.DATABASE_URL;
+
+    const result = spawnSync(process.execPath, [resolve(process.cwd(), 'scripts/doctor.mjs'), '--startup'], {
+      cwd: process.cwd(),
+      env: environment,
+      encoding: 'utf8',
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain('[WARN] authentication-secret:');
+    expect(result.stdout).toContain('[WARN] WUJIE_ADMIN_PASSWORD:');
+    expect(result.stdout).toContain('[FAIL] database:');
+  });
 });

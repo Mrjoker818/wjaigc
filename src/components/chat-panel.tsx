@@ -23,6 +23,7 @@ import { UniversalApiManager } from '@/lib/universal-api-manager';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import type { CanvasImage } from '@/components/infinite-canvas';
 import { getModelDisplayName } from '@/lib/model-name-map';
+import { selectInitialModel } from '@/lib/model-defaults';
 import { getPromptTemplates, searchTemplates, type PromptTemplate } from '@/lib/prompt-templates';
 import { classifyIntent, ClassifiedIntent, IntentCategory } from '@/lib/intent-classifier';
 import { generateClarificationMessage, detectVagueScenarios, type ClarificationTemplate, type VagueScenario } from '@/lib/clarification-templates';
@@ -1137,7 +1138,7 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, c
   messagesRef.current = messages;
   const [input, setInput] = useState('');
   const [suggestedAgent, setSuggestedAgent] = useState<AgentDefinition | null>(null); // P2-10: auto-routing suggestion
-  const [model, setModel] = useState('gemini-3.1-pro-preview');
+  const [model, setModel] = useState('');
 
   // Sync current chat model info to parent for vision-prompt usage
   useEffect(() => {
@@ -2859,15 +2860,12 @@ IP角色设计规范：
           }
           setDiscoveredChatModels(models);
           // 如果有默认模型，自动选中
-          const defaultModel = models.find((m: {isDefault?: boolean}) => m.isDefault);
-          if (defaultModel && !model) {
-            setModel(defaultModel.id);
-          }
+          setModel(current => selectInitialModel(current, models));
         }
       } catch {
         // 静默失败
       }
-    }, [model]);
+    }, []);
 
   useEffect(() => {
     loadServerModels();

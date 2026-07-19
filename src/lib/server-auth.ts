@@ -165,14 +165,16 @@ async function authSecret(): Promise<string> {
   try {
     const { dbGetSystemSetting, dbSetSystemSetting } = await import('./db-storage');
     const dbSecret = await dbGetSystemSetting('auth_secret') as string | null;
-    // Accept the DB-persisted secret even when it is the legacy built-in one:
-    // existing password hashes were generated with it, so rejecting it would
-    // lock every account out. Warn to encourage env var rotation instead.
     if (dbSecret && dbSecret.length >= 32) {
-      _authSecretCache = { value: dbSecret, warned: false };
       if (dbSecret === LEGACY_STABLE_AUTH_SECRET) {
-        console.warn('[SECURITY] Recovered legacy built-in auth secret from database. Configure WUJIE_AUTH_SECRET to rotate; existing password hashes auto-migrate on next successful login.');
-      } else if (isProductionRuntime()) {
+        const rotatedSecret = crypto.randomBytes(48).toString('base64url');
+        await dbSetSystemSetting('auth_secret', rotatedSecret);
+        _authSecretCache = { value: rotatedSecret, warned: false };
+        console.warn('[SECURITY] Rotated the persisted legacy authentication secret. Existing password hashes migrate on next successful login.');
+        return rotatedSecret;
+      }
+      _authSecretCache = { value: dbSecret, warned: false };
+      if (isProductionRuntime()) {
         console.warn('[SECURITY] WUJIE_AUTH_SECRET/NEXTAUTH_SECRET not set; recovered auth secret from database. Set the env var to silence this warning.');
       }
       return dbSecret;
@@ -196,13 +198,7 @@ async function authSecret(): Promise<string> {
   } catch { /* create a local secret below */ }
 
   if (isProductionRuntime()) {
-    // Availability over hard failure: falling back to the legacy built-in
-    // secret keeps existing accounts (whose hashes were generated with it)
-    // able to sign in. A loud warning pushes operators to configure the env
-    // var; password hashes auto-migrate on next successful login.
-    console.error('[SECURITY] WUJIE_AUTH_SECRET/NEXTAUTH_SECRET not set and no persisted secret found. Falling back to legacy built-in secret to keep sign-in available. Configure the env var to rotate credentials.');
-    _authSecretCache = { value: LEGACY_STABLE_AUTH_SECRET, warned: false };
-    return LEGACY_STABLE_AUTH_SECRET;
+    throw new AuthConfigurationError('Production authentication secret is not configured. Set WUJIE_AUTH_SECRET or NEXTAUTH_SECRET to at least 32 random characters.');
   }
 
   const fallback = crypto.randomBytes(48).toString('base64url');

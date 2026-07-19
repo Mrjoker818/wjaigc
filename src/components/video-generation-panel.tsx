@@ -23,6 +23,7 @@ import type {
   VideoProp,
 } from '@/lib/video-director/continuity';
 import type { DirectorStyle, VideoReferenceBinding } from '@/lib/video-director/prompt-compiler';
+import { selectInitialModel } from '@/lib/model-defaults';
 
 // === 生成历史 ===
 interface VideoHistoryEntry {
@@ -226,7 +227,7 @@ interface VideoGenerationPanelProps {
   /** 当前画布选中的视频URL，自动用作视频延长源 */
   selectedVideoUrl?: string | null;
   /** 从 /api/models?type=video 加载的服务器端视频模型列表 */
-  serverVideoModels?: { id: string; name: string; providerId: string; providerName: string }[];
+  serverVideoModels?: { id: string; name: string; providerId: string; providerName: string; isDefault?: boolean }[];
   /** 是否以浮动弹窗模式显示 */
   floating?: boolean;
   /** 关闭浮动面板 */
@@ -634,13 +635,14 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
           name: sm.name || registry?.name || modelId,
           providerId,
           providerName: sm.providerName || registry?.provider || '',
+          isDefault: Boolean(sm.isDefault),
           region: (registry?.region || 'cn') as 'cn' | 'global',
           features: Array.isArray(registry?.features) ? inferFallbackFeatures(sm.id) : inferFallbackFeatures(sm.id),
         };
       });
       setVideoModels(merged);
       if (merged.length > 0 && !model) {
-        setModel(merged[0].id);
+        setModel(current => selectInitialModel(current, merged));
       }
       return;
     }
@@ -650,7 +652,7 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
         const res = await fetch('/api/models?type=video');
         if (res.ok) {
           const data = await res.json();
-          const vModels: { id: string; name: string; providerId: string; providerName: string }[] = [];
+          const vModels: Array<{ id: string; name: string; providerId: string; providerName: string; isDefault?: boolean }> = [];
           const providerMap = new Map<string, string>();
           if (data.providers && Array.isArray(data.providers)) {
             for (const p of data.providers) {
@@ -665,6 +667,7 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
                 name: m.name || m.id || '',
                 providerId: m.providerId || '',
                 providerName: providerMap.get(m.providerId) || m.providerId || '',
+                isDefault: Boolean(m.isDefault),
               });
             }
           }
@@ -677,17 +680,18 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
               modelId,
               name: sm.name || registry?.name || modelId,
               providerId,
-          providerName: sm.providerName || registry?.provider || '',
-          region: registry?.features.region || 'cn',
-          features: {
-            ...registry?.features,
-            aspectRatios: registry?.features.aspectRatios || registry?.features.ratios,
-          },
+              providerName: sm.providerName || registry?.provider || '',
+              isDefault: Boolean(sm.isDefault),
+              region: registry?.features.region || 'cn',
+              features: {
+                ...registry?.features,
+                aspectRatios: registry?.features.aspectRatios || registry?.features.ratios,
+              },
             };
           });
           setVideoModels(merged);
           if (merged.length > 0 && !model) {
-            setModel(merged[0].id);
+            setModel(current => selectInitialModel(current, merged));
           }
         }
       } catch {
