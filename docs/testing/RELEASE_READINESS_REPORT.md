@@ -4,7 +4,7 @@
 
 | Gate | Current result | Evidence / next action |
 | --- | --- | --- |
-| Source baseline | `73ccc02` on `origin/main`, plus a locally verified save-image internal-auth migration awaiting its dedicated commit | Includes the selected-image delete stacking repair plus recovery, local-service, SVG/video/cache/upload authorization guards. `save-image` is fixed locally and remains pending cloud acceptance. |
+| Source baseline | `4901d25` on `origin/main` | Includes the selected-image delete stacking repair plus recovery, local-service, SVG/video/cache/upload/save-image authorization guards. `save-image` is fixed locally and remains pending cloud acceptance. |
 | Cloud authentication | Passed | Real Chrome refresh, logout, saved-credential login, and dashboard restoration passed at `b906a15`. Earlier auth-overlay entries below are historical and do not override this result. |
 | Real paid generation | Passed for one x1 task | APImart `doubao-seedream-5-0-lite` completed with a real 800 x 800 canvas result and project reopen recovery. |
 | P1 project persistence | Open pending cloud recheck | The source regression makes logout await project sync, but the prior cloud asset-count regression must be repeated after the current bundle is synchronized. |

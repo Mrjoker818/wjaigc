@@ -6,7 +6,7 @@
 | --- | --- |
 | Severity | P1, fixed locally; cloud verification pending |
 | Module | `POST /api/save-image` and server-to-server image persistence callers |
-| Environment | Source baseline `73ccc02`, 2026-07-19 Asia/Shanghai. |
+| Environment | Source commit `4901d25`, 2026-07-19 Asia/Shanghai. |
 | Stable reproduction | The route bypassed session authentication for a request that provided `x-internal-call: true` or a Host beginning with `localhost`/`127.0.0.1`, before accepting multipart/data/remote image content and writing to local/S3 storage. |
 | Expected | Browser users must have a session. Internal callers must use `getInternalRequestHeaders` with the server-only shared secret; caller-controlled Host values and bare headers may not bypass authentication. |
 | Root cause | A legacy development shortcut was retained while server-side generation, Agent, workflow, brand/refine, scene, upscale, video, and quality-enhance paths called the HTTP persistence endpoint. |
