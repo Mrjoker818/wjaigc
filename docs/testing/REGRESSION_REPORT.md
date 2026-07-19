@@ -542,3 +542,10 @@ Cloud rerun is required after this revision is deployed. Generation, refresh rec
 | Local verification | Pass for tested source | Focused 31/31 and 11/11; API 51 files / 119 tests; component/lib regression exit 0; TypeScript exit 0; ESLint exit 0; `git diff --check` exit 0; Next production build generated 97 pages and exited 0. |
 
 Release status remains **not approved** until the local candidate is deployed and the real image generation, canvas result, save/reload, and download chain reaches a terminal state.
+
+## 2026-07-20 clean-clone CI integrity correction
+
+- GitHub run `29708635529` first exposed duplicate pnpm version declarations; the workflow now uses `packageManager` as the single source and a contract test guards it.
+- The next run `29708688779` reached TypeScript and exposed an ignored source route that local Windows tests could see but a clean clone could not. The root-level model asset ignores are now anchored, and `src/app/api/workflow/models/route.ts` is tracked.
+- Local evidence after the fix: source integrity 4/4, workflow model API 2/2, TypeScript exit 0, and `git check-ignore` confirms the route is no longer ignored.
+- Release remains blocked on a green GitHub quality run and subsequent Coze/Chrome acceptance.

@@ -80,8 +80,8 @@ Thumbs.db
 Desktop.ini
 
 # AI Models (large binary files)
-models/
-upscayl-models/
+/models/
+/upscayl-models/
 
 # Python virtual environment
 .venv/

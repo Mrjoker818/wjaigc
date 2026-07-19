@@ -32,4 +32,12 @@ describe('repository source integrity', () => {
     expect(packageJson.scripts?.postinstall).toContain('node scripts/prepare-tools.mjs');
     expect(existsSync(resolve(projectRoot, 'scripts/prepare-tools.mjs'))).toBe(true);
   });
+
+  it('limits binary model ignores to repository-root asset directories', () => {
+    const gitignore = readFileSync(resolve(projectRoot, '.gitignore'), 'utf8');
+    expect(gitignore).toContain('/models/');
+    expect(gitignore).toContain('/upscayl-models/');
+    expect(gitignore).not.toMatch(/^models\/$/m);
+    expect(gitignore).not.toMatch(/^upscayl-models\/$/m);
+  });
 });

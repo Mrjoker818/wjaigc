@@ -927,3 +927,16 @@ BUG-20260718-007 的“任务恢复、完成和刷新恢复”范围已修复并
 - Coze reports deployed Git commit `3a70a634`, which does not contain the local FHL routing or Next `after()` generation-worker fixes.
 - Direct application URL login and direct-page reload retained the `Mr.joker` administrator session. Reloading the Coze editor wrapper and re-entering the canvas showed the login form again; direct navigation immediately recovered the authenticated dashboard. This is isolated to third-party iframe storage and is not counted as a direct-app login failure.
 - After clicking `API 管理 -> 刷新任务`, two 4sapi `gpt-image-2` records still showed `processing / 10%`; the FHL Gemini images-endpoint error was also still visible. Evidence: `test-results/screenshots/cloud-restored-task-monitor-3a70a634-20260720.png`, `test-results/screenshots/cloud-auth-refresh-session-loss-20260720.png`, and matching JSON under `test-results/console/`.
+
+## BUG-20260720-043: Git ignored the workflow model API route and CI could not reproduce the local source tree
+
+| Field | Detail |
+| --- | --- |
+| Severity / module | P1 / workflow model selection and deployment integrity |
+| Environment | GitHub Actions run `29708688779` on commit `01b96d5`; Ubuntu runner TypeScript check. |
+| Stable reproduction | Clone the repository on a clean machine and run `pnpm ts-check`. The tracked `workflow-models.test.ts` imports `@/app/api/workflow/models/route`, but the route is absent from the Git tree. |
+| Expected | Every source file required by tests and production routes is tracked and available in a clean clone. Large binary model ignores must apply only to repository-root asset directories. |
+| Actual | Local Windows checks passed because `src/app/api/workflow/models/route.ts` existed on disk, while `.gitignore` rule `models/` silently excluded it. GitHub failed with TS2307 and cloud deployments lacked the endpoint. |
+| Root cause | An unanchored binary asset ignore pattern matched every nested directory named `models`. |
+| Fix | Anchor the binary directories as `/models/` and `/upscayl-models/`, add the workflow models route to Git, and add a source-integrity regression assertion. |
+| Regression | Red-first source-integrity assertion, then 4/4 source-integrity tests, 2/2 workflow-model API tests, and TypeScript pass locally. GitHub Actions rerun is required for closure. |
