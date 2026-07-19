@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, rm } from 'fs/promises';
+import { mkdtemp, mkdir, rm, writeFile } from 'fs/promises';
+import { createHash } from 'crypto';
 import os from 'os';
 import path from 'path';
 
@@ -22,7 +23,9 @@ afterEach(async () => {
 
 describe.sequential('server authentication production security', () => {
   it('refuses to sign a session when a production authentication secret is missing', async () => {
+    temporaryDataDir = await mkdtemp(path.join(os.tmpdir(), 'wujie-auth-test-'));
     process.env.COZE_PROJECT_ENV = 'PROD';
+    process.env.WUJIE_DATA_DIR = temporaryDataDir;
     delete process.env.WUJIE_AUTH_SECRET;
     delete process.env.NEXTAUTH_SECRET;
 
@@ -62,6 +65,50 @@ describe.sequential('server authentication production security', () => {
       errorSpy.mockRestore();
       warnSpy.mockRestore();
     }
+  });
+
+  it('authenticates an existing administrator with the persisted production secret after redeploy', async () => {
+    temporaryDataDir = await mkdtemp(path.join(os.tmpdir(), 'wujie-auth-test-'));
+    const systemDir = path.join(temporaryDataDir, 'system');
+    const persistedSecret = 'persisted-production-auth-secret-at-least-32-characters';
+    const password = 'existing-admin-password';
+
+    await mkdir(systemDir, { recursive: true });
+    await writeFile(path.join(systemDir, 'auth-secret'), persistedSecret, 'utf8');
+    await writeFile(path.join(systemDir, 'users.json'), JSON.stringify({
+      users: [{
+        id: 'admin_mr_joker',
+        name: 'Mr.joker',
+        passwordHash: createHash('sha256').update(`${persistedSecret}:${password}`).digest('hex'),
+        role: 'admin',
+        status: 'active',
+        productType: 'canvas,chat',
+        apiPermissions: { image: true, chat: true },
+        storageFolder: 'admin_mr_joker',
+        createdAt: 1,
+        updatedAt: 1,
+      }],
+      updatedAt: 1,
+    }), 'utf8');
+
+    process.env.COZE_PROJECT_ENV = 'PROD';
+    process.env.WUJIE_DATA_DIR = temporaryDataDir;
+    process.env.WUJIE_ADMIN_USERNAME = 'Mr.joker';
+    delete process.env.WUJIE_AUTH_SECRET;
+    delete process.env.NEXTAUTH_SECRET;
+    delete process.env.WUJIE_ADMIN_PASSWORD;
+
+    const { authenticateUser } = await import('@/lib/server-auth');
+
+    await expect(authenticateUser({
+      name: 'Mr.joker',
+      password,
+      productType: 'canvas',
+    })).resolves.toMatchObject({
+      id: 'admin_mr_joker',
+      name: 'Mr.joker',
+      role: 'admin',
+    });
   });
 
   it('authorizes a newly bootstrapped administrator for the canvas product', async () => {

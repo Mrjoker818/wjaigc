@@ -264,6 +264,28 @@ The minimal fix changes the `[dev]` runtime to `pnpm run build` followed by `pnp
 
 The subsequent Coze startup evidence reported `sh: 1: next: not found` while the `[dev]` section ran `pnpm run build` followed by `pnpm run start`. This invalidates the preceding runtime change as a deployment remedy: a preview build command cannot assume dependencies already exist. The corrected contract now installs the locked dependencies first with `pnpm install --frozen-lockfile`, then starts the development preview with `pnpm run dev`; the `[deploy]` section remains the only production `build` + `start` path. The revised contract test and a real `pnpm install --frozen-lockfile` completed successfully on the source workspace. Cloud adoption and an authenticated Chrome reload remain required before closing BUG-20260718-016.
 
+### BUG-20260719-017: Existing administrator rejected after redeploy when only a persisted auth secret exists
+
+| Field | Detail |
+| --- | --- |
+| Severity / module | P1 / authentication and deployment persistence |
+| Reproduction | Seed an active `Mr.joker` record and a valid `system/auth-secret`, set `COZE_PROJECT_ENV=PROD`, then omit `WUJIE_AUTH_SECRET` and `NEXTAUTH_SECRET`. Call `authenticateUser` with the matching password. |
+| Expected | Existing accounts continue authenticating from the protected persisted secret; a first production deployment without any secret remains blocked. |
+| Actual | `authSecret()` threw `Production authentication secret is not configured` before checking the persisted database/file secret, so the stored password hash was never verified. |
+| Root cause | The production guard introduced in `796d84e` preceded the recovery branches despite the code's stated redeploy persistence contract. |
+| Fix | Check environment, database and protected file secrets in that order; only throw after all three sources are absent. The known legacy static secret remains disallowed as a current signing secret. |
+| Regression | `server-auth-production-security.test.ts` was first red with the exact persisted-account scenario, then green. `auth-login-configuration.test.ts` stays green, preserving the 503 response for a genuinely unconfigured first deployment. |
+| Cloud status | Pending: the corrected source must be synchronised, then the existing Chrome `Mr.joker` account must complete a real login and refresh. |
+
+### BUG-20260719-018: Windows line endings caused a false canvas-toolbar regression failure
+
+| Field | Detail |
+| --- | --- |
+| Severity / module | P3 / regression test infrastructure |
+| Reproduction | Run `canvas-toolbar-floating-windows.test.ts` from a CRLF checkout. The production source is unchanged from `200a30b`, but LF-only multi-line string assertions fail. |
+| Root cause | The source reader compared raw file contents to LF-only literals without normalizing platform line endings. |
+| Fix / regression | Normalize CRLF to LF in the test reader. The targeted six assertions and the complete `pnpm test:regression` suite pass after the change. |
+
 ## 2026-07-18 云端生成恢复与积分补偿
 
 | 字段 | 记录 |

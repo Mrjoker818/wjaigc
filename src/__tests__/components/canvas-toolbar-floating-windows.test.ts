@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-const readSource = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
+const readSource = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8').replace(/\r\n/g, '\n');
 
 const canvasSource = readSource('src/components/infinite-canvas.tsx');
 const appPageSource = readSource('src/app/page.tsx');

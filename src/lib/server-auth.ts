@@ -158,11 +158,9 @@ async function authSecret(): Promise<string> {
     return envSecret;
   }
 
-  if (isProductionRuntime()) {
-    throw new AuthConfigurationError('Production authentication secret is not configured. Set WUJIE_AUTH_SECRET or NEXTAUTH_SECRET to at least 32 random characters.');
-  }
-
-  // Try to recover from DB (persists across redeployments)
+  // Recover a previously generated secret before rejecting a redeploy. New
+  // production instances still require an explicit secret when no persisted
+  // credential exists.
   try {
     const { dbGetSystemSetting, dbSetSystemSetting } = await import('./db-storage');
     const dbSecret = await dbGetSystemSetting('auth_secret') as string | null;
@@ -170,15 +168,12 @@ async function authSecret(): Promise<string> {
       _authSecretCache = { value: dbSecret, warned: false };
       return dbSecret;
     }
-    // No env var and no DB secret → first deployment with fallback, persist it
-    const fallback = crypto.randomBytes(48).toString('base64url');
-    await dbSetSystemSetting('auth_secret', fallback);
-    _authSecretCache = { value: fallback, warned: false };
-    if (process.env.COZE_PROJECT_ENV === 'PROD' && !_authSecretCache.warned) {
-      _authSecretCache.warned = true;
-      console.warn('[SECURITY] WUJIE_AUTH_SECRET/NEXTAUTH_SECRET not set! Using default secret. Set env var for production. (This warning is logged once per process)');
+    if (!isProductionRuntime()) {
+      const fallback = crypto.randomBytes(48).toString('base64url');
+      await dbSetSystemSetting('auth_secret', fallback);
+      _authSecretCache = { value: fallback, warned: false };
+      return fallback;
     }
-    return fallback;
   } catch {
     // DB not available, use fallback
   }
@@ -190,6 +185,10 @@ async function authSecret(): Promise<string> {
       return fileSecret;
     }
   } catch { /* create a local secret below */ }
+
+  if (isProductionRuntime()) {
+    throw new AuthConfigurationError('Production authentication secret is not configured. Set WUJIE_AUTH_SECRET or NEXTAUTH_SECRET to at least 32 random characters.');
+  }
 
   const fallback = crypto.randomBytes(48).toString('base64url');
   _authSecretCache = { value: fallback, warned: false };
