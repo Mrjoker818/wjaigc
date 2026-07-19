@@ -187,3 +187,5 @@ The source now also repairs batch video-frame storage with red-to-green regressi
 Local production control evidence is positive: the current source starts under `pnpm run start` and serves `/api/auth/me` with HTTP 200. The cloud outage is therefore not treated as proof that the source cannot serve API routes; Coze runtime/proxy logs remain required to identify the failed deployment component.
 
 The shared authentication layer additionally now converts unavailable internal-worker credentials into a normal 401 response. Local production evidence confirms anonymous `POST /api/generate` returns the expected 401 rather than 500. This source fix does not close the cloud release gate while the preview backend itself returns 502.
+
+The current production build also passed the anonymous P0 login-entry browser contract across Chromium, Firefox, WebKit, and mobile Chromium (4/4). This is local evidence only; the required authenticated cloud P0 chain remains blocked by Coze backend availability.

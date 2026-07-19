@@ -440,4 +440,5 @@ The synchronized source alone is insufficient. The cloud preview must restart us
 | Focused regression | Passed | `api-auth-internal-request.test.ts`: 5/5, including anonymous and forged internal identities when secret lookup fails. |
 | Production HTTP control | Passed | After a fresh production build, local anonymous `POST /api/generate` returned HTTP 401 and the expected JSON error. |
 | Broader checks | Passed | `pnpm test:api`, `pnpm test:regression`, `pnpm lint --quiet`, `pnpm ts-check`, and `pnpm build` exited 0. |
+| Local browser entry | Passed | The current production build passed `p0-login-ui-contract.spec.ts` in Chromium, Firefox, WebKit, and mobile Chromium (4/4). |
 | Cloud closure | Pending | Current Coze 502 responses occur before application routing, so this response cannot be verified there yet. |
