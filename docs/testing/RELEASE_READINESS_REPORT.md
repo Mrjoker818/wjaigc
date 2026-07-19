@@ -10,7 +10,8 @@
 | P1 project persistence | Open pending cloud recheck | The source regression makes logout await project sync, but the prior cloud asset-count regression must be repeated after the current bundle is synchronized. |
 | P1 image deletion | Open pending cloud recheck | Cloud reproduction proved that hover delete opened `美陈拆解`; source stacking fix and automated regression are pushed. Recheck delete plus reopen after sync. |
 | Native upload and download | Unverified | The active Chrome extension blocked native file injection before an application upload request and did not expose a download event. This is an automation limitation, not a product pass or fail. |
-| Local regression | Passed | Current `pnpm test:api`: 43 files / 98 assertions, including cache-image and upload authorization; `pnpm test:regression` exited 0; `pnpm ts-check` passed. Local database fallback logs are not production-health proof. |
+| Local regression | Passed | `pnpm test:api`: 43 files / 98 assertions; `pnpm test` and `pnpm test:regression` exited 0; `pnpm ts-check` and `pnpm lint --quiet` passed. Local database fallback logs are not production-health proof. |
+| Local production build | Passed | `pnpm build` completed in 141 seconds: webpack compilation, TypeScript, 97 static pages, and build traces passed. This does not prove the Coze preview has deployed the same bundle. |
 | Release decision | **Not approved** | P0 upload/download evidence is incomplete and P1 cloud closure is still pending. |
 
 ## 2026-07-19 Cloud authentication acceptance completed: RELEASE STILL NOT APPROVED
