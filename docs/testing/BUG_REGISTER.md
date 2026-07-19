@@ -496,4 +496,4 @@ BUG-20260718-007 的“任务恢复、完成和刷新恢复”范围已修复并
 | Evidence | `test-results/screenshots/cloud-p0-delete-opens-display-decompose-b906a15-20260719.png`; `test-results/console/cloud-p0-delete-opens-display-decompose-b906a15-20260719.json` |
 | Root cause | Equal stacking levels left the visually exposed delete control underneath the main image toolbar in the overlap area, so the pointer event reached display-decompose. |
 | Fix | `src/components/infinite-canvas.tsx`: raise only the image hover toolbar from `z-50` to `z-[60]`. |
-| Regression status | Source lint and TypeScript checks pass. A cloud Chrome recheck is required after the fix is synchronized; do not close this P1 before the actual delete action removes the image and the deletion survives a reopen. |
+| Regression status | `canvas-toolbar-floating-windows.test.ts` adds a contract that the hover toolbar uses `z-[60]`; 7/7 targeted assertions, source lint, and TypeScript checks pass. A cloud Chrome recheck is required after the fix is synchronized; do not close this P1 before the actual delete action removes the image and the deletion survives a reopen. |

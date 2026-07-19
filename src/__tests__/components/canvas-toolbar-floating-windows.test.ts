@@ -48,6 +48,11 @@ describe('canvas toolbar floating windows', () => {
     expect(canvasSource).toContain('onMouseDown={(event) => event.stopPropagation()}');
   });
 
+  it('keeps image hover quick actions above the main selected-image toolbar', () => {
+    expect(canvasSource).toContain('absolute -top-9 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-0.5');
+    expect(canvasSource).toContain('title="删除"');
+  });
+
   it('keeps the right panel collapse control inside a narrow viewport', () => {
     expect(appPageSource).toContain("panelCollapsed ? '20px' : 'min(480px, 100vw)'");
   });
