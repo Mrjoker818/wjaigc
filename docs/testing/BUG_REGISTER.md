@@ -1,5 +1,31 @@
 # 缺陷登记册
 
+## BUG-20260719-034: Expensive media and AI processing routes lacked an authentication boundary
+
+| Field | Record |
+| --- | --- |
+| Severity | P1, fixed locally; cloud verification pending |
+| Module | `POST /api/audio/generate`, `/api/image/color-adjust`, `/api/knowledge/extract-text`, `/api/layered-decompose`, `/api/scene-studio/generate`, `/api/video/extract-frame`, and `/api/video/extract-frames` |
+| Stable reproduction | The shared high-risk authorization contract was extended with the seven routes and failed, because every handler parsed untrusted request input before proving a request identity. The affected paths can call third-party TTS/image models, fetch remote media/documents, run Sharp or FFmpeg, write files, or start AI decomposition/generation. |
+| Expected | A browser user must have a session, or a server caller must provide the verified internal-request signature, before JSON parsing, remote fetches, file writes, FFmpeg, or model usage. |
+| Root cause | The endpoints had input validation but did not consistently use the common mandatory authentication boundary. |
+| Fix | Add `requireApiAuthOrReject` as the first operation of each POST handler, before `request.json()` and any resource-consuming work. |
+| Regression | `high-risk-route-auth-contract.test.ts` failed with exactly these seven route files and passes after the repair. Targeted contract suite: 3 files / 5 assertions passed; targeted ESLint and TypeScript checks passed. |
+| Cloud acceptance | Pending. For each user-facing path, verify a signed-in canvas user completes a normal operation without a new 401; anonymous calls must return 401 before input parsing or provider work. |
+
+## BUG-20260719-033: Project source and full-asset archives were anonymously downloadable
+
+| Field | Record |
+| --- | --- |
+| Severity | P0, fixed locally; cloud verification pending |
+| Module | `GET` and `POST /api/export-project` |
+| Stable reproduction | `GET /api/export-project?scope=full` or a POST body with `scope=full` reached `createTarGz` without an authenticated user. The `full` archive may include project source, configuration, user uploads, generated images, and exports. |
+| Expected | Only an administrator or verified internal administrator request may inspect archive metadata or create/download any project export. |
+| Root cause | The developer-oriented export endpoint was exposed without the existing administrator authorization helper. |
+| Fix | Both GET and POST call `requireAdminUser` before reading scope or creating an archive and return 403 otherwise. |
+| Regression | The red-first GET/POST source-order contract failed twice before the repair and passes afterward. A route-level test now calls both anonymous methods and proves each returns 403 before archive generation. Targeted suite: 3 files / 5 assertions passed. |
+| Cloud acceptance | Pending. An anonymous request and ordinary-user session must be rejected; an administrator needs a controlled successful export test without exposing it to non-administrators. |
+
 ## BUG-20260719-032: Image persistence route trusted forgeable local/internal headers
 
 | Field | Record |

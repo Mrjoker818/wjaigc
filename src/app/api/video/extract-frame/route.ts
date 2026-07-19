@@ -5,6 +5,7 @@ import { existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 // 视频抽帧：支持 first/last/at/N-grid 四种模式
 // POST body:
@@ -131,6 +132,9 @@ async function extractGridFrames(
 }
 
 export async function POST(req: Request) {
+  const authResult = await requireApiAuthOrReject(req);
+  if (authResult instanceof NextResponse) return authResult;
+
   try {
     const body = await req.json();
     const { videoUrl } = body || {};

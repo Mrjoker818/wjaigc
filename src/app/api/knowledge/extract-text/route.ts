@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 /**
  * POST /api/knowledge/extract-text
@@ -13,6 +14,9 @@ import os from 'os';
  */
 export async function POST(req: NextRequest) {
   const tmpPath: string | null = null;
+
+  const authResult = await requireApiAuthOrReject(req);
+  if (authResult instanceof NextResponse) return authResult;
 
   try {
     const body = await req.json();

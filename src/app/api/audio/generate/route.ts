@@ -8,6 +8,7 @@ import { getApiProviders } from '@/lib/server-api-config';
 import { writeFile, mkdir } from 'fs/promises';
 import path from 'path';
 import { randomUUID } from 'crypto';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -19,6 +20,9 @@ async function ensureDir() {
 }
 
 export async function POST(req: NextRequest) {
+  const authResult = await requireApiAuthOrReject(req);
+  if (authResult instanceof NextResponse) return authResult;
+
   try {
     const body = await req.json();
     const {

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 import path from 'path';
 import fs from 'fs';
 import sharp from 'sharp';
@@ -284,6 +285,9 @@ export async function GET() {
 
 // POST: 执行 RGBA 图层分解
 export async function POST(request: NextRequest) {
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult instanceof NextResponse) return authResult;
+
   try {
     const body = await request.json() as DecomposeRequest;
     // 输入校验

@@ -5,6 +5,7 @@ import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { createGzip } from 'zlib';
 import { spawn, execSync } from 'child_process';
+import { requireAdminUser } from '@/lib/server-auth';
 
 const PROJECT_ROOT = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
 
@@ -177,6 +178,11 @@ async function createTarGz(scope: string): Promise<{ stream: Readable; fileCount
  * POST /api/export-project — Download tar.gz (with JSON body)
  */
 export async function GET(request: NextRequest) {
+  const admin = await requireAdminUser(request);
+  if (!admin) {
+    return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+  }
+
   const scope = request.nextUrl.searchParams.get('scope');
 
   // If scope is specified, trigger download directly
@@ -249,6 +255,11 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const admin = await requireAdminUser(request);
+    if (!admin) {
+      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+    }
+
     const body = await request.json();
     const scope = body.scope || 'source-config';
     

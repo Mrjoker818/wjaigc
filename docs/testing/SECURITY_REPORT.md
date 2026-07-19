@@ -1,5 +1,27 @@
 # 安全测试报告
 
+## 2026-07-19 P0 repair: project archive export authorization
+
+### SEC-015 / P0: Anonymous callers could download source and full project archives
+
+- Location: `src/app/api/export-project/route.ts`
+- Evidence: both GET and POST accepted archive scopes, including `full`, and called the tar creation path without authentication.
+- Impact: source/configuration disclosure plus unauthorized access to uploaded/generated assets.
+- Fix: require an administrator before scope handling or archive creation in both methods.
+- Verification: red-first dual-method contract plus route-level anonymous GET/POST tests pass (3 files / 5 assertions).
+- Deployment status: fixed locally, cloud verification pending.
+
+## 2026-07-19 P1 repair: expensive media and AI route authorization
+
+### SEC-014 / P1: Anonymous callers could invoke TTS, image processing, document fetches, FFmpeg, and AI processing
+
+- Location: audio generation, color adjustment, knowledge extraction, layered decomposition, scene generation, and both video frame extraction routes.
+- Evidence: the high-risk route contract failed with exactly these seven handlers, each parsing JSON before identity verification.
+- Impact: unaccounted provider costs, CPU/disk use, remote-fetch exposure, and unowned output creation.
+- Fix: require the shared authenticated/internal-request gate before body parsing in all seven POST handlers.
+- Verification: the expanded red-first high-risk contract passes after the repair; targeted ESLint and TypeScript checks pass.
+- Deployment status: fixed locally, cloud verification pending.
+
 ## 2026-07-19 P1 repair: image persistence internal-auth migration
 
 ### SEC-013 / P1: Image persistence trusts caller-controlled local/internal headers

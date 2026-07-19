@@ -6,6 +6,7 @@ import { existsSync } from 'fs';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
 import { validateApiInputs } from '@/lib/api-validator';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 const execFileAsync = promisify(execFile);
 
@@ -20,6 +21,9 @@ type ExtractMode = 'fps' | 'keyframes' | 'uniform' | 'first-last';
  * Body: { videoUrl, mode: 'fps'|'keyframes'|'uniform'|'first-last', fps?, count? }
  */
 export async function POST(req: NextRequest) {
+  const authResult = await requireApiAuthOrReject(req);
+  if (authResult instanceof NextResponse) return authResult;
+
   try {
     const body = await req.json();
     // 输入校验

@@ -3,6 +3,7 @@ import sharp from 'sharp';
 import { validateApiInputs } from '@/lib/api-validator';
 import { fetchImageBuffer } from '@/lib/fetch-image-buffer';
 import { saveImageFile } from '@/lib/server-data-root';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -28,6 +29,9 @@ function normalizeRange(value: number | undefined, min: number, max: number, def
  * Body: { imageUrl, brightness, contrast, saturation, temperature, hue, highlights, shadows }
  */
 export async function POST(req: NextRequest) {
+  const authResult = await requireApiAuthOrReject(req);
+  if (authResult instanceof NextResponse) return authResult;
+
   try {
     const body = await req.json();
     // 输入校验

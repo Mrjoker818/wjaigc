@@ -2,11 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { calculateActualPixelsFromRatio } from '@/lib/calculate-pixels';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { validateApiInputs } from '@/lib/api-validator';
-import { getInternalRequestHeaders } from '@/lib/api-auth';
+import { getInternalRequestHeaders, requireApiAuthOrReject } from '@/lib/api-auth';
 import { persistResultImage } from '@/lib/persist-result-image';
 
 // POST: generate image from 3D scene
 export async function POST(request: NextRequest) {
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult instanceof NextResponse) return authResult;
+
   try {
     const body = await request.json();
     // 输入校验

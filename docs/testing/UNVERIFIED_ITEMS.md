@@ -2,6 +2,8 @@
 
 ## 2026-07-19 Current authoritative unverified state
 
+- `BUG-20260719-033` (P0 export archive authorization) and `BUG-20260719-034` (seven high-cost media/AI routes) are fixed locally but require cloud acceptance. Do not mark the deployment secure until anonymous rejection and normal signed-in use are both verified after synchronization.
+
 - `BUG-20260719-032` is fixed locally in `4901d25`: `POST /api/save-image` now requires verified authentication and all direct server persistence callers use signed internal-request headers. It remains unverified on cloud until anonymous rejection and authenticated image/workflow/video/refinement/upscale persistence are exercised against the synchronized deployment.
 - Fresh Chrome check after the reported cloud update still rendered the selected image as `absolute group z-10 z-20`, not the fixed `z-[60]`. The screenshot and console evidence are `test-results/screenshots/cloud-stale-z20-after-update-20260719.png` and `test-results/console/cloud-stale-z20-after-update-20260719.json`. The preview is therefore older than `ec149a3` and cannot be used to accept `4901d25`.
 
