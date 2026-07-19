@@ -1,5 +1,19 @@
 # 缺陷登记册
 
+## BUG-20260719-027: SVG tracing accepted unauthenticated expensive requests
+
+| Field | Record |
+| --- | --- |
+| Severity | P1, fixed locally; cloud verification pending |
+| Module | `POST /api/svg-trace` |
+| Environment | Source commit `0aef48b`, 2026-07-19 Asia/Shanghai. |
+| Stable reproduction | The handler parsed `imageUrl`, then proceeded into credit and vectorization setup without checking the request identity. The operation can fetch an image and run local/Python/WASM vectorization. |
+| Expected | A request must prove a user session or the application internal request signature before body processing and resource consumption. |
+| Root cause | SVG tracing had its own optional `getSessionUser` call solely for credits, but did not use the shared mandatory authentication gate. |
+| Fix | Add `requireApiAuthOrReject(req)` as the first operation in the POST handler. This keeps browser sessions and signed internal Agent calls working through the common authenticator. |
+| Regression | `svg-trace-auth-contract.test.ts` failed before the change and passes after it. Together with the high-risk route contract: 2 files / 2 assertions passed; ESLint error check and `pnpm ts-check` passed. |
+| Cloud acceptance | Pending deployment. An anonymous request must return 401 before any fetch or processing; signed-in SVG tracing needs a real-image success/failure result without a new auth error. |
+
 ## BUG-20260719-026: Local image-service startup route lacked authorization
 
 | Field | Record |

@@ -15,6 +15,7 @@ import { vectorizePipeline, type VectorizeEngine, type VectorizeQuality as Pipel
 import { analyzeWithSharp } from '@/lib/vectorize-analyzer';
 import { validateApiInputs } from '@/lib/api-validator';
 import { logOperation, logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -2005,6 +2006,9 @@ async function tryDesignVectorizeFallback(req: NextRequest, imageUrl: string, mo
 // ─── POST handler ──────────────────────────────────────
 
 export async function POST(req: NextRequest) {
+  const authResult = await requireApiAuthOrReject(req);
+  if (authResult instanceof NextResponse) return authResult;
+
   const startTime = Date.now();
   let deductedCredits = 0;
   let sessionUser: import('@/lib/user-types').User | null = null;

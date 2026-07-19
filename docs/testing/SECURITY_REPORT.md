@@ -1,5 +1,16 @@
 # 安全测试报告
 
+## 2026-07-19 P1 repair: SVG tracing request authentication
+
+### SEC-008 / P1: Anonymous callers could start SVG vectorization work
+
+- Location: `src/app/api/svg-trace/route.ts`
+- Evidence: the POST handler parsed user input and entered credit/vectorization preparation before any request identity check. Its existing session lookup was used only to decide whether to charge credits.
+- Impact: an unauthenticated caller could cause image retrieval and CPU-intensive vectorization without an accountable user.
+- Fix: make the shared authenticated/internal-request gate the first POST operation. Browser and signed internal Agent requests retain supported authentication paths.
+- Verification: handler-scoped regression test first failed and now passes. Together with the existing high-risk route contract: 2 files / 2 assertions passed; ESLint error check and TypeScript checks passed. This source file has 14 pre-existing ESLint warnings, none added by this repair.
+- Deployment status: fixed locally, cloud verification pending.
+
 ## 2026-07-19 P1 repair: local image service startup authorization
 
 ### SEC-007 / P1: Unauthenticated request could trigger a local image-service start
