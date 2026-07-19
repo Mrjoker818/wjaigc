@@ -4,14 +4,14 @@
 
 | Gate | Result |
 | --- | --- |
-| Source baseline | Code baseline `4901d25 fix: require signed authentication for image persistence`. It includes the selected-image delete stacking repair and eight high-risk API authorization regressions. |
+| Source baseline | Code baseline `6a89591 fix: protect export and media processing routes`. It includes the selected-image delete stacking repair, signed persistence, project archive protection, and the expanded high-risk API authorization regressions. |
 | API suite | Passed: `pnpm test:api` completed 44 files / 100 assertions, including cache-image, upload, and save-image authorization contracts. |
 | Full unit/component/API suite | Passed: `pnpm test` exited 0. Local DB fallback messages are expected by the exercised fallback contracts and do not demonstrate production database health. |
 | Component and library regression | Passed: `pnpm test:regression` completed with exit code 0. |
 | Type safety and lint | Passed: `pnpm ts-check` and `pnpm lint --quiet`. ESLint emitted no errors; Babel noted the oversized `infinite-canvas.tsx` transformation. |
 | Production build | Passed: `pnpm build` exited 0 after 141 seconds. Webpack compilation, TypeScript, 97 static pages, and build traces completed. |
 | Test-environment limitation | Local regression has no production database configuration. The server-auth fallback tests intentionally emit missing-database logs while exercising their degraded path; this is not cloud database-health evidence. |
-| Cloud acceptance | Pending: a fresh Chrome check after the reported update still served the older selected-image container class (`z-20`). It must synchronize `4901d25` or later before deletion, recovery, local-service, SVG, video, cache, upload, and save-image authorization checks can be closed. |
+| Cloud acceptance | Pending: a fresh Chrome check after the reported update still served the older selected-image container class (`z-20`). It must synchronize `6a89591` or later before deletion, recovery, archive export, local-service, SVG, video, cache, upload, save-image, and media/AI authorization checks can be closed. |
 | Release decision | **Not approved**. P0 upload/download evidence, cloud P1 acceptance, production database/storage/model health, and full multi-browser core E2E remain incomplete. |
 
 ### Cloud recheck after reported update
