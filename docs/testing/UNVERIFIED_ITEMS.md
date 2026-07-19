@@ -285,6 +285,12 @@
 - The same run found `BUG-20260719-045`: the right workspace panel blocks the selected-image delete click. A local source repair exists but must be deployed and rerun before delete can be accepted.
 - Generated-result download file creation remains unverified because the P0 script stopped at the delete failure before it reached the download stage.
 
+### 2026-07-19 latest cloud-health recheck
+
+- The current cloud health gate remains **unverified/blocked**: after the recovery notice, `/api/auth/me` again returned HTTP `502` to `pnpm run doctor -- --url=<preview>`.
+- The full local Vitest suite passed 147 files / 569 tests. This does not validate cloud database, storage, authentication, provider connectivity, or the paid P0 journey.
+- Do not close the remaining P0 upload-to-download chain until the health gate has no failures and the complete isolated-account Playwright replay can run to completion.
+
 ### 2026-07-19 Production preview follow-up
 
 - The next cloud deployment must run the new locked-install/build script and `next start`, not `next dev`.

@@ -449,6 +449,12 @@ The synchronized source alone is insufficient. The cloud preview must restart us
 
 This is stronger than a static page check but is **not** a successful P0 generation: no provider result, persisted asset, refresh recovery, or download was observed. No application code was changed from this gateway-only evidence. `BUG-20260719-041` remains P0 until a healthy Coze backend permits the exact replay.
 
+## 2026-07-19 Latest local baseline and cloud-health recheck
+
+- Local full suite: `pnpm test` and a silent confirmation run both exited 0; the latter reported **147 test files / 569 tests passed**.
+- Cloud health: immediately after the user-reported recovery, `pnpm run doctor -- --url=<preview>` still failed with `/api/auth/me` returning HTTP `502` (`2 passed / 9 local-environment warnings / 1 failed`).
+- Decision: the local suite establishes source regression health only. The required authenticated cloud P0 journey remains blocked, so no cloud login, upload, generation, persistence, download, or logout result is inferred from this run.
+
 ## 2026-07-19 Cloud login-secret regression
 
 | Check | Result | Evidence |

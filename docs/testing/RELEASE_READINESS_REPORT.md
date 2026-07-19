@@ -225,3 +225,7 @@ Release remains blocked because the native-upload step was stopped by the Chrome
 ## 2026-07-19 post-push cloud health check
 
 **Decision: NOT APPROVED.** After GitHub `main` advanced to `213d61c`, the Coze preview health check returned HTTP 502 for `/api/auth/me`; a direct read-only retry returned the same result. This blocks authenticated P0 replay before application behavior can be observed. Evidence: `test-results/network/cloud-health-502-after-213d61c-20260719.json`.
+
+## 2026-07-19 Latest recovery claim recheck
+
+**Decision: NOT APPROVED.** The local full Vitest baseline is green at **147 test files / 569 tests**, but the latest post-recovery deployment probe still reports `/api/auth/me` as HTTP `502`. The preview is therefore not eligible for the required real-browser P0 replay. This is a cloud runtime/proxy availability blocker, not evidence that an additional source patch should be guessed at or deployed.
