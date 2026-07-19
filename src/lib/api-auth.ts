@@ -60,34 +60,40 @@ export async function getRequestUser(request: Request | NextRequest): Promise<{
   const internalUserId = request.headers.get('x-internal-user-id');
   const internalUserRoleRaw = request.headers.get('x-internal-user-role') || 'user';
   const internalUserRole: 'user' | 'admin' = internalUserRoleRaw === 'admin' ? 'admin' : 'user';
-  const internalSecret = await getInternalApiSecret();
   const receivedInternalSecret = request.headers.get('x-wujie-internal-secret') || '';
-  if (isInternal && internalUserId && internalSecret && secretsMatch(receivedInternalSecret, internalSecret)) {
-    // Directly return authenticated user from internal header (no DB lookup needed)
-    return {
-      user: {
-        id: internalUserId,
-        name: 'internal-user',
-        role: internalUserRole,
-        status: 'active',
-        apiPermissions: {
-          image: true,
-          chat: true,
-          threeD: true,
-          imageEdit: true,
-          vectorize: true,
-          vlm: true,
-          layer: true,
-          video: true,
-          upscaler: true,
-          removebg: true,
-          audio: true,
-        },
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      },
-      source: 'internal',
-    };
+  if (isInternal && internalUserId) {
+    try {
+      const internalSecret = await getInternalApiSecret();
+      if (internalSecret && secretsMatch(receivedInternalSecret, internalSecret)) {
+        // Directly return authenticated user from internal header (no DB lookup needed)
+        return {
+          user: {
+            id: internalUserId,
+            name: 'internal-user',
+            role: internalUserRole,
+            status: 'active',
+            apiPermissions: {
+              image: true,
+              chat: true,
+              threeD: true,
+              imageEdit: true,
+              vectorize: true,
+              vlm: true,
+              layer: true,
+              video: true,
+              upscaler: true,
+              removebg: true,
+              audio: true,
+            },
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+          source: 'internal',
+        };
+      }
+    } catch {
+      // A missing internal secret is an authentication failure, not a route error.
+    }
   }
 
   // 2. Session cookie

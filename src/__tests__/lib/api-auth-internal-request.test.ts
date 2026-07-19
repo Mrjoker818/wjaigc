@@ -18,7 +18,7 @@ vi.mock('@/lib/desktop-cloud', () => ({
   tokenFromHeader: mocks.tokenFromHeader,
 }));
 
-import { getInternalRequestHeaders, getRequestUser } from '@/lib/api-auth';
+import { getInternalRequestHeaders, getRequestUser, requireApiAuthOrReject } from '@/lib/api-auth';
 
 const originalEnvironment = { ...process.env };
 
@@ -86,5 +86,33 @@ describe('internal request authentication', () => {
       source: 'internal',
       user: { id: 'worker-2', role: 'admin' },
     });
+  });
+
+  it('rejects an anonymous request when the internal auth secret is unavailable', async () => {
+    delete process.env.INTERNAL_API_SECRET;
+    delete process.env.WUJIE_AUTH_SECRET;
+    delete process.env.NEXTAUTH_SECRET;
+    mocks.getAuthSecretForInternalRequests.mockRejectedValue(new Error('auth secret unavailable'));
+
+    const request = new NextRequest('http://localhost/api/generate');
+
+    await expect(requireApiAuthOrReject(request)).resolves.toMatchObject({ status: 401 });
+  });
+
+  it('does not trust an internal identity request when its secret cannot be loaded', async () => {
+    delete process.env.INTERNAL_API_SECRET;
+    delete process.env.WUJIE_AUTH_SECRET;
+    delete process.env.NEXTAUTH_SECRET;
+    mocks.getAuthSecretForInternalRequests.mockRejectedValue(new Error('auth secret unavailable'));
+
+    const request = new NextRequest('http://localhost/api/generate', {
+      headers: {
+        'x-internal-request': 'true',
+        'x-internal-user-id': 'worker-3',
+        'x-wujie-internal-secret': 'forged',
+      },
+    });
+
+    await expect(requireApiAuthOrReject(request)).resolves.toMatchObject({ status: 401 });
   });
 });

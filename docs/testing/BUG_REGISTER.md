@@ -734,6 +734,19 @@ BUG-20260718-007 的“任务恢复、完成和刷新恢复”范围已修复并
 | Release impact | Blocks all cloud P0 validation that requires projects or model tasks: upload persistence, selection/delete, save/reload, download, and video extraction. |
 | Next action | Restore the Coze backend proxy/application service, verify `/api/auth/me` returns a valid authenticated response, then repeat the exact real-browser flow. |
 
+### BUG-20260719-042: Missing internal secret turned protected API requests into 500 errors
+
+| Field | Detail |
+| --- | --- |
+| Severity / module | P1 / shared API authentication |
+| Stable reproduction | Start the production build without `INTERNAL_API_SECRET`, `WUJIE_AUTH_SECRET`, or `NEXTAUTH_SECRET`, then send anonymous `POST /api/generate {}`. Before the repair, `getRequestUser()` resolved the internal-worker secret before checking whether the request was internal. The missing secret threw and the route returned 500. |
+| Expected | A request without a valid browser, desktop, or signed internal identity must receive the standard 401 rejection. Missing internal-worker credentials must not make public or anonymous requests throw. |
+| Root cause | The shared authenticator eagerly resolved the internal secret for every request, even though only requests carrying `x-internal-request` need it. |
+| Fix | Resolve the internal secret only for declared internal requests and treat lookup failure as unauthenticated. Browser-session and desktop-token checks remain available after a rejected internal attempt. |
+| Regression | Red-first `api-auth-internal-request.test.ts` failed with `auth secret unavailable`; it now passes 5/5, covering anonymous and forged-internal requests. `pnpm test:api`, `pnpm test:regression`, `pnpm lint --quiet`, `pnpm ts-check`, and `pnpm build` passed. |
+| Production evidence | A fresh local `pnpm run start` served anonymous `POST /api/generate` as HTTP 401 with `{"error":"Authentication required"}`. |
+| Cloud status | Pending. The Coze preview currently returns 502 before the route runs, so this must be rechecked after backend restoration. |
+
 ### BUG-20260719-024 cloud recheck update
 
 | Field | Detail |

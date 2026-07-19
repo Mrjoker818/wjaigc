@@ -431,3 +431,13 @@ The synchronized source alone is insufficient. The cloud preview must restart us
 | Deployment health gate | Failed | `pnpm run doctor -- --url=<preview>`: 2 passed / 9 warnings / 1 failed; `/api/auth/me` returned 502. |
 | Local production control | Passed | The same source started through `pnpm run start` on port 5000, and `GET /api/auth/me` returned HTTP 200. The local anonymous `POST /api/generate` remains intentionally unusable without configured production authentication. |
 | Consequence | Blocked | No business-level claim is made for delete, save/reload, download, public-media access, or video extraction because the preview backend did not reach the application. Evidence: `test-results/console/cloud-generate-502-a656fed-20260719.json`. |
+
+## 2026-07-19 Shared authentication unavailable-secret regression
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Red reproduction | Failed as expected | A missing internal-worker secret caused `requireApiAuthOrReject` to reject its Promise instead of returning the standard authentication response. |
+| Focused regression | Passed | `api-auth-internal-request.test.ts`: 5/5, including anonymous and forged internal identities when secret lookup fails. |
+| Production HTTP control | Passed | After a fresh production build, local anonymous `POST /api/generate` returned HTTP 401 and the expected JSON error. |
+| Broader checks | Passed | `pnpm test:api`, `pnpm test:regression`, `pnpm lint --quiet`, `pnpm ts-check`, and `pnpm build` exited 0. |
+| Cloud closure | Pending | Current Coze 502 responses occur before application routing, so this response cannot be verified there yet. |
