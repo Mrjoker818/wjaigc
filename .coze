@@ -9,9 +9,9 @@ appliedPatches = [
 
 [dev]
 build = [ "bash", "./scripts/coze-preview-build.sh" ]
-run = [ "pnpm", "run", "start" ]
+run = [ "bash", "./scripts/coze-start.sh" ]
 validate = [ "bash", "./scripts/validate.sh" ]
 
 [deploy]
 build = [ "pnpm", "run", "build" ]
-run = [ "pnpm", "run", "start" ]
+run = [ "bash", "./scripts/coze-start.sh" ]

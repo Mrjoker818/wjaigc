@@ -26,6 +26,11 @@ function secretCheck(name) {
   else add(production ? 'FAIL' : 'WARN', name, production ? 'missing or placeholder value' : 'not configured for this local environment');
 }
 
+function secretCheckAny(area, names) {
+  if (names.some((name) => configured(name, 32))) add('PASS', area, 'configured');
+  else add(production ? 'FAIL' : 'WARN', area, production ? `missing or placeholder value (${names.join(' or ')})` : 'not configured for this local environment');
+}
+
 async function checkDataDir() {
   const dataDir = path.resolve(process.env.WUJIE_DATA_DIR || './data');
   try {
@@ -97,7 +102,7 @@ async function checkRemote() {
 
 async function main() {
   add('PASS', 'runtime', `Node ${process.version}; mode=${production ? 'production' : 'development'}`);
-  secretCheck('WUJIE_AUTH_SECRET');
+  secretCheckAny('authentication-secret', ['WUJIE_AUTH_SECRET', 'NEXTAUTH_SECRET']);
   secretCheck('INTERNAL_API_SECRET');
   secretCheck('PAYMENT_TOKEN_SECRET');
   if (configured('WUJIE_ADMIN_PASSWORD', 12)) add('PASS', 'WUJIE_ADMIN_PASSWORD', 'configured');

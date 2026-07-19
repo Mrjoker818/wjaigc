@@ -448,3 +448,22 @@ The synchronized source alone is insufficient. The cloud preview must restart us
 **Result: failed, backend availability remains the blocker.** The reported update restored an interactive signed-in canvas and all 19 bottom-toolbar entries, including `人物精修大师`. A real paid APImart generation was then attempted with the currently selected `豆包5.0Lite` model. The UI created a `submitting 5%` processing frame, but the frame disappeared without an image; Chrome recorded `[生成] API HTTP错误: 502 Object` at `2026-07-19T10:21:41.872Z`. The same console session also continued to show project-load and project-sync 502 warnings.
 
 This is stronger than a static page check but is **not** a successful P0 generation: no provider result, persisted asset, refresh recovery, or download was observed. No application code was changed from this gateway-only evidence. `BUG-20260719-041` remains P0 until a healthy Coze backend permits the exact replay.
+
+## 2026-07-19 Cloud login-secret regression
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Browser autofill | Passed | The visible `Mr.joker` username and masked saved password were present in the Chrome login form. |
+| Login submission | Failed: P0 configuration | The real same-origin `POST /api/auth/login` response was HTTP `503 Service Unavailable`, not a client-side validation failure. |
+| Response classification | Confirmed | The JSON response identifies a missing `WUJIE_AUTH_SECRET` or `NEXTAUTH_SECRET`; no password was recorded in this report. |
+| Required follow-up | Blocked on Coze secret configuration | Restore the original secret if available, restart/redeploy, then repeat saved-credential login before resuming paid P0 tests. |
+
+## 2026-07-19 Authentication startup prevention gate
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Red configuration contract | Failed as expected | The existing `.coze` preview command invoked `pnpm run start` directly and had no startup health gate. |
+| Green configuration contract | Passed | Preview and deploy now invoke `scripts/coze-start.sh`; it runs `pnpm run doctor -- --production` before `exec pnpm run start`. |
+| TypeScript / shell syntax | Passed | `pnpm ts-check` and `bash -n scripts/coze-start.sh` exit successfully. |
+| Supported-secret compatibility | Passed | `doctor-production-auth-contract.test.ts` confirms that `NEXTAUTH_SECRET` is accepted when `WUJIE_AUTH_SECRET` is absent, matching server authentication behavior. |
+| Cloud closure | Pending | The active preview still returned 503 for the saved-credential login after the user-reported configuration repair, so the actual secret is not available to that runtime yet. |

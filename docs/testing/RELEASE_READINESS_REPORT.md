@@ -197,3 +197,11 @@ The current production build also passed the anonymous P0 login-entry browser co
 ## 2026-07-19 Recovery checkpoint
 
 The Coze health endpoint has recovered: the deployment doctor now passes with `/api/auth/me` returning HTTP 200. This clears the previous backend-availability prerequisite, but it is not release approval. The available Chrome profile is currently signed out at the canvas login form and cannot provide an authenticated session without the saved password; therefore the required paid P0 flow has not been rerun.
+
+## 2026-07-19 Login configuration regression
+
+**Decision: NOT APPROVED.** Chrome verified that the saved `Mr.joker` credentials are present in the form and were actually submitted. The cloud response is HTTP 503 from `/api/auth/login`, with a configuration error that neither `WUJIE_AUTH_SECRET` nor `NEXTAUTH_SECRET` is available. This is a P0 deployment configuration defect (`INFRA-20260719-003`), not a user-password failure.
+
+The cloud must restore the prior production authentication secret to preserve the existing password hash. A newly generated replacement secret alone may make the current stored account unverifiable; use an authorized administrator recovery/reset only if the former secret cannot be restored. No source fallback or secret-in-Git change is acceptable.
+
+An additional deployment guard now checks the required production environment before the Coze process starts. It prevents this exact missing-secret state from being presented as a seemingly healthy preview. This is not cloud closure: the currently running preview again returned 503 for the saved-credential login after the reported repair, so release remains **NOT APPROVED** until a synchronized guarded deployment completes the real refresh and login regression.

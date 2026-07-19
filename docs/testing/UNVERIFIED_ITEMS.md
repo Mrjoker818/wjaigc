@@ -252,6 +252,11 @@
 - Batch video extraction is **unverified** until a signed-in user extracts frames from a persisted uploaded or generated video and opens every returned frame URL.
 - The newest signed-in generation attempt also returned HTTP 502 before the provider was contacted. This prevents creation of a test image, so selection, move, resize, delete, persistence, and download cannot be exercised in this cloud run.
 
+### 2026-07-19 production login configuration blocker
+
+- `INFRA-20260719-003` is a confirmed P0 blocker: Chrome submitted the saved `Mr.joker` credentials and `/api/auth/login` returned HTTP 503 because the production authentication secret is missing. No authenticated cloud P0 test may be marked passed until Coze restores the secret and the existing account signs in successfully.
+- The source now has a startup health gate for this condition, but its cloud deployment is unverified. The preview currently still returns the same 503, so the saved-credential refresh/login/canvas path remains P0-unverified.
+
 - `pnpm run doctor -- --url=https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9.dev.coze.site/` reported `/api/auth/me` as HTTP 502 and exited 1.
 - Independent read-only probes for `/`, `/api/auth/me`, and `/api/session` each returned HTTP 502. Evidence: `test-results/network/cloud-health-502-20260719.json`.
 - Do not run login, paid generation, project persistence, or download regression until the preview returns a healthy root plus authenticated API responses.

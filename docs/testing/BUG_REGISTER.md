@@ -774,3 +774,27 @@ BUG-20260718-007 的“任务恢复、完成和刷新恢复”范围已修复并
 | Deployment health | `pnpm run doctor -- --url=https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9.dev.coze.site/` returned `3 passed / 9 warnings / 0 failed`; `/api/auth/me` responded HTTP 200. |
 | Browser state | The Chrome preview loads the canvas shell without 502 console errors, but the selected infinite-canvas entrance presents the `Mr.joker` login form. Its password field was not populated in the controllable browser session, so no credential guessing or paid action was attempted. |
 | Status | The backend availability portion of BUG-20260719-041 is recovered. Authenticated P0 generation, persistence, deletion, download, logout/relogin, and credit verification remain unverified until the existing test account is logged in. |
+
+### INFRA-20260719-003: Production authentication secret is absent from the Coze preview
+
+| Field | Detail |
+| --- | --- |
+| Severity / module | P0 / cloud authentication configuration |
+| Environment | Coze preview `https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9.dev.coze.site/`; Chrome saved `Mr.joker` credentials; 2026-07-19. |
+| Stable reproduction | Use the browser-autofilled `Mr.joker` credentials and submit the visible canvas login form. |
+| Expected | A configured production secret verifies the existing account and returns a session, or a credential error is returned when the credentials are invalid. |
+| Actual | `POST /api/auth/login` returns HTTP `503 Service Unavailable`. The JSON body says production authentication requires `WUJIE_AUTH_SECRET` or `NEXTAUTH_SECRET` with at least 32 random characters. |
+| Evidence | Chrome CDP response capture: request type `Fetch`, same-origin `/api/auth/login`, status `503`, JSON response; visual screenshot captured in the authenticated browser-control session. The only console warning was the Coze Console Bridge origin warning, not an application exception. |
+| Root cause | The deployed runtime has neither configured secret nor a recoverable persisted secret in its configured storage. This is an environment/persistence configuration failure, not an incorrect saved password or an autofill failure. |
+| Required remediation | Restore the exact prior production secret in Coze project secrets if it is available. If it is irretrievable, configure a new 32+ character secret and perform an authorized administrator-password reset/recovery; do not commit a secret or add a production fallback to source control. Ensure persistent database/storage is also retained across redeploys. |
+| Regression / closure | After deployment restart, submit the same Chrome-autofilled credentials. Closure requires a session-bearing success response, canvas entry with no login form, and the full authenticated P0 chain rerun. |
+
+### INFRA-20260719-003 prevention update
+
+| Field | Detail |
+| --- | --- |
+| Preventive change | `.coze` now starts both preview and deploy through `scripts/coze-start.sh`. The wrapper runs `pnpm run doctor -- --production` before `pnpm run start`. |
+| Intended behavior | A deployment without required production secrets fails during startup health validation instead of presenting a login page that later returns 503 or can leave the client in an authentication transition. |
+| Regression evidence | `src/__tests__/scripts/coze-production-preview-contract.test.ts` was red before the wrapper existed and green after it was wired. TypeScript and shell syntax checks pass. A local `pnpm run doctor -- --production` fails as expected when the required production secrets are absent. |
+| Compatibility evidence | `doctor-production-auth-contract.test.ts` was red when `doctor` accepted only `WUJIE_AUTH_SECRET`; it is green after accepting either supported production variable, `WUJIE_AUTH_SECRET` or `NEXTAUTH_SECRET`. |
+| Cloud closure | Still pending. Coze must apply the matching runtime secret configuration and successfully start this revision; then repeat refresh -> saved-credential login -> canvas entry. |
