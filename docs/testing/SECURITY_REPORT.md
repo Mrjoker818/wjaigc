@@ -210,6 +210,13 @@
 
 ## 正向检查
 
+## 2026-07-19 Dependency Audit Closure
+
+- The official production audit was rerun with `pnpm audit --prod --json --registry=https://registry.npmjs.org` after the lockfile update. Result: `0 critical / 0 high / 0 moderate / 0 low` across 710 production dependencies.
+- `exceljs@4.4.0` previously resolved `uuid@8.3.2`, which the official audit reported as `CVE-2026-41907` (moderate). `package.json` now constrains the transitive package through `pnpm.overrides.uuid: 11.1.1`; `pnpm-lock.yaml` and `pnpm why uuid` both resolve `exceljs -> uuid@11.1.1`.
+- The dependency contract was red first, then passed after the override. The GitHub Actions quality workflow now runs the same official production audit before the build gate, so new production advisories fail CI rather than being left to a manual sweep.
+- This closes the local dependency-audit verification gap only. Cloud security acceptance and the remaining explicitly listed application risks are still pending.
+
 ## 2026-07-19 Dependency Audit Remediation
 
 - `pnpm audit --prod --json --registry=https://registry.npmjs.org` now reports **0 critical, 0 high, 0 low, and 1 moderate** production vulnerability, down from 0 critical, 0 high, 1 low, and 5 moderate.

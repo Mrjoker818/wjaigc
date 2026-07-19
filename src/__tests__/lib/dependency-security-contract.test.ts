@@ -47,9 +47,12 @@ describe('production dependency security baseline', () => {
       lodash: '4.18.1',
       'minimatch@3.1.2': '3.1.4',
       postcss: '8.5.20',
+      uuid: '11.1.1',
       ws: '8.21.1',
     });
     expect(lockfileSource).toContain('ws@8.21.1:');
     expect(lockfileSource).not.toContain('ws@8.19.0:');
+    expect(lockfileSource).toContain('uuid@11.1.1:');
+    expect(lockfileSource).not.toContain('uuid@8.3.2:');
   });
 });

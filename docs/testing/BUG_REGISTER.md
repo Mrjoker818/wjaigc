@@ -798,3 +798,15 @@ BUG-20260718-007 的“任务恢复、完成和刷新恢复”范围已修复并
 | Regression evidence | `src/__tests__/scripts/coze-production-preview-contract.test.ts` was red before the wrapper existed and green after it was wired. TypeScript and shell syntax checks pass. A local `pnpm run doctor -- --production` fails as expected when the required production secrets are absent. |
 | Compatibility evidence | `doctor-production-auth-contract.test.ts` was red when `doctor` accepted only `WUJIE_AUTH_SECRET`; it is green after accepting either supported production variable, `WUJIE_AUTH_SECRET` or `NEXTAUTH_SECRET`. |
 | Cloud closure | Still pending. Coze must apply the matching runtime secret configuration and successfully start this revision; then repeat refresh -> saved-credential login -> canvas entry. |
+
+### SEC-20260719-001: Production dependency audit found vulnerable transitive UUID package
+
+| Field | Detail |
+| --- | --- |
+| Severity / module | P2 / production dependency chain `exceljs -> uuid` |
+| Stable reproduction | Run `pnpm audit --prod --json --registry=https://registry.npmjs.org` with the prior lockfile. It reports `uuid@8.3.2` as `CVE-2026-41907`, moderate severity. |
+| Expected | Production dependency audit returns no known production vulnerabilities, and CI enforces that same condition. |
+| Root cause | `exceljs@4.4.0` resolved the outdated transitive `uuid@8.3.2` package. |
+| Fix | Add `pnpm.overrides.uuid: 11.1.1`, regenerate `pnpm-lock.yaml`, and add the official production audit command to the GitHub Actions quality gate. |
+| Regression | `dependency-security-contract.test.ts` was red before the override and green after it. `pnpm why uuid` resolves `exceljs -> uuid@11.1.1`; the official production audit reports 0 vulnerabilities. |
+| Cloud status | Source/CI control fixed. Coze deployment verification remains part of the release gate. |
