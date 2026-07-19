@@ -1,4 +1,9 @@
 # 缺陷登记册
+## Deployment observation: 2026-07-19
+
+- The logged-in Coze Chrome preview was inspected again after a reported synchronization. Its visible feature entries and zero captured console errors show that it is functioning, but its selected image still renders `absolute group z-10 z-20` instead of the `z-[60]` required by the delete-toolbar correction in `ec149a3`.
+- This is deployment evidence, not a new source defect: retain BUG-20260719-024 as open pending cloud acceptance. Do not mark the delete regression passed until the preview runs `c702d01` or a descendant and the delete/reopen workflow is executed on that bundle.
+
 
 ## BUG-20260719-034: Expensive media and AI processing routes lacked an authentication boundary
 

@@ -2,9 +2,13 @@
 
 ## Current authoritative status - 2026-07-19
 
+### Latest cloud deployment probe
+
+The latest source baseline is `c702d01`. After the reported cloud synchronization, a real logged-in Chrome probe found the app interactive and free of captured console errors, with the restored feature entries visible. However, the selected image still has `absolute group z-10 z-20`, while the source fix requires `z-[60]`. The preview is therefore not running the required delete regression fix. Release status remains **not approved**; no destructive canvas check or security acceptance may be credited to this stale bundle.
+
 | Gate | Current result | Evidence / next action |
 | --- | --- | --- |
-| Source baseline | `6a89591` on `origin/main` | Includes the selected-image delete stacking repair plus recovery, archive export, local-service, SVG/video/cache/upload/save-image, and media/AI authorization guards. All remain pending cloud acceptance. |
+| Source baseline | `c702d01` on `origin/main` | Includes the selected-image delete stacking repair plus recovery, archive export, local-service, SVG/video/cache/upload/save-image, and media/AI authorization guards. All remain pending cloud acceptance. |
 | Cloud authentication | Passed | Real Chrome refresh, logout, saved-credential login, and dashboard restoration passed at `b906a15`. Earlier auth-overlay entries below are historical and do not override this result. |
 | Real paid generation | Passed for one x1 task | APImart `doubao-seedream-5-0-lite` completed with a real 800 x 800 canvas result and project reopen recovery. |
 | P1 project persistence | Open pending cloud recheck | The source regression makes logout await project sync, but the prior cloud asset-count regression must be repeated after the current bundle is synchronized. |

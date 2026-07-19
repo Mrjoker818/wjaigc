@@ -2,6 +2,13 @@
 
 ## 2026-07-19 Current authoritative unverified state
 
+### Latest cloud probe after the reported synchronization
+
+- Source of record is `c702d0125748d894486b3be1e824d4f8a4b10591` (`origin/main`). It contains the selected-image stacking correction from `ec149a3`, whose expected selected-image class is `z-[60]`.
+- A new real Chrome inspection of the logged-in Coze preview completed after the reported update. The application is interactive, shows the existing test image, and exposes the image toolbar, `美陈拆解`, and `人物精修大师`; the browser console contained zero error entries.
+- The same live DOM still reports the selected image container as `absolute group z-10 z-20`, rather than `z-[60]`. This is an authoritative version mismatch. Do not perform destructive delete acceptance or close BUG-20260719-024 on this preview. The on-screen Chrome capture and DOM probe were recorded on 2026-07-19 Asia/Shanghai.
+- Required deployment check: synchronize `c702d01` or a descendant, reload the existing signed-in preview, and confirm the exact `z-[60]` class before executing the selected-image delete plus project-reopen regression.
+
 - `BUG-20260719-033` (P0 export archive authorization) and `BUG-20260719-034` (seven high-cost media/AI routes) are fixed locally but require cloud acceptance. Do not mark the deployment secure until anonymous rejection and normal signed-in use are both verified after synchronization.
 
 - `BUG-20260719-032` is fixed locally in `4901d25`: `POST /api/save-image` now requires verified authentication and all direct server persistence callers use signed internal-request headers. It remains unverified on cloud until anonymous rejection and authenticated image/workflow/video/refinement/upscale persistence are exercised against the synchronized deployment.
