@@ -1,5 +1,17 @@
 # 回归测试报告
 
+## 2026-07-19 Root-layout hydration isolation (pending cloud verification)
+
+| Gate | Result |
+| --- | --- |
+| Cloud diagnostic before fix | Failed P1: the deployed shell stayed visible. All client chunks loaded successfully, but the browser issued zero `/api/session` or other application API requests in nine seconds. |
+| Regression first | A root-layout contract failed while `src/app/layout.tsx` declared `'use client'`; it passes after the document root is server-rendered and `OperationAuditClient` remains isolated as a client child. |
+| Local development E2E | Passed 4/4 in the same `next dev` mode used by the preview: Chromium, Firefox, WebKit, and mobile Chromium reached the login form. |
+| Local production gates | Passed: targeted contract (9 tests), TypeScript, lint, optimized build (97 routes), and full Vitest. |
+| Cloud acceptance | Pending synchronization of this revision. A signed-in Chrome reload must dismiss the auth shell and issue the expected session request before P0 paid generation can resume. |
+
+Cloud evidence is archived at `test-results/screenshots/cloud-p1-auth-shell-still-visible-after-5ff1845-20260719.png`, `test-results/console/cloud-p1-auth-shell-still-visible-after-5ff1845-20260719.json`, and `test-results/network/cloud-p1-auth-shell-network-after-5ff1845-20260719.json`.
+
 ## 2026-07-19 Auth-bootstrap hydration repair (pending cloud verification)
 
 | Gate | Result |

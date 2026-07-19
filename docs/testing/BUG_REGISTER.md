@@ -1,5 +1,17 @@
 # 缺陷登记册
 
+## BUG-20260719-021 update: cloud client does not start auth effect after shell-only deployment
+
+| Field | Record |
+| --- | --- |
+| Environment | Coze preview, logged-in Chrome session, source commit `5ff1845` deployed. |
+| New stable evidence | The new `auth-loading-shell` asset was present in the cloud bundle. After reload it remained visible for nine seconds. Chrome CDP recorded 113 network events: all required client chunks returned 200, no runtime exception or loading failure occurred, and zero application `/api/*` requests were issued. |
+| Conclusion | This is not the already-fixed unstable `useSearchParams` dependency loop. The authentication effect is not being committed at all in the injected preview runtime. |
+| Root cause under test | `src/app/layout.tsx` was a client root that hydrated the document `<html>` and `<body>`. Coze development preview injects bridge scripts at that document level, creating a hydration boundary vulnerable to external DOM injection before the application subtree mounts. |
+| Fix | Remove the unnecessary root `'use client'` directive. `OperationAuditClient` remains an explicitly imported client child, so request auditing is retained while the document root is server-rendered. |
+| Evidence | `test-results/screenshots/cloud-p1-auth-shell-still-visible-after-5ff1845-20260719.png`, `test-results/console/cloud-p1-auth-shell-still-visible-after-5ff1845-20260719.json`, and `test-results/network/cloud-p1-auth-shell-network-after-5ff1845-20260719.json`. |
+| Regression / acceptance | Red-first source contract now verifies a server root plus isolated audit client. Targeted contract, TypeScript, lint, local `next dev` Playwright 4/4, production build, and full Vitest passed before deployment. Cloud Chrome acceptance remains required after synchronization. |
+
 ## BUG-20260719-021: Auth loading shell remains visible after cloud session bootstrap
 
 | Field | Record |

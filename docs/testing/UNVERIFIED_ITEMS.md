@@ -1,5 +1,10 @@
 # 未验证项目
 
+## 2026-07-19 Root-layout hydration isolation
+
+- **P1 / BUG-20260719-021:** The server-rendered root layout has passed local development and production regression but requires a fresh cloud Chrome reload after synchronization. Success requires the authentication shell to disappear and `/api/session` to be requested.
+- **P1 / BUG-20260719-019:** Do not rerun the paid generation and logout/relogin persistence check until BUG-20260719-021 passes in cloud Chrome.
+
 ## 2026-07-19 Auth-bootstrap cloud acceptance
 
 - **P1 / BUG-20260719-021:** The local small-shell hydration repair is not cloud-verified. Required evidence is a fresh reload of the signed-in Chrome session where `正在验证身份...` disappears, followed by an interactive dashboard or canvas state.

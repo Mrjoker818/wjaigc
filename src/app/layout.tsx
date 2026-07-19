@@ -1,5 +1,3 @@
-'use client';
-
 import './globals.css';
 import { OperationAuditClient } from '@/components/operation-audit-client';
 

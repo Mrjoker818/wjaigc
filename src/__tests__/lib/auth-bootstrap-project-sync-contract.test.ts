@@ -102,4 +102,12 @@ describe('authentication bootstrap project sync', () => {
     expect(source).toContain('data-testid="auth-loading-shell"');
     expect(source).not.toContain('{!authChecked && (');
   });
+
+  it('keeps the document root server-rendered while isolating the client audit hook', () => {
+    const layout = readFileSync(path.resolve(process.cwd(), 'src/app/layout.tsx'), 'utf8');
+
+    expect(layout.trimStart()).not.toMatch(/^['\"]use client['\"];?/);
+    expect(layout).toContain("import { OperationAuditClient } from '@/components/operation-audit-client';");
+    expect(layout).toContain('<OperationAuditClient />');
+  });
 });
