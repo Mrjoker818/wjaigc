@@ -1,7 +1,7 @@
 # 无界AI功能盘点
 
-- 生成时间：2026-07-17T15:05:54.679Z
-- Git Commit：`da4c37e`
+- 生成时间：2026-07-19T12:55:17.727Z
+- Git Commit：`47c1056`
 - 软件版本：`2.5.0`
 - 工作目录：`J:\无界本地版\projects\_upstream-wjaigc-restore`
 - 盘点方法：源码路由、页面入口、组件、数据存储和依赖静态扫描；“已定位”不代表已通过真实验证。
@@ -10,7 +10,7 @@
 
 | 领域 | 现状 | 证据 |
 | --- | --- | --- |
-| 前端/后端 | Next.js 16.1.1 App Router + React 19.2.3 + TypeScript | `src/app`、`src/components` |
+| 前端/后端 | Next.js 16.2.10 App Router + React 19.2.3 + TypeScript | `src/app`、`src/components` |
 | UI/状态 | Tailwind 4、shadcn/Radix；React Hooks、localStorage、BroadcastChannel、用户数据同步 | `src/components`、`src/app/page.tsx` |
 | 数据库 | PostgreSQL（`pg`），`DATABASE_URL`/`PGDATABASE_URL` | `src/lib/db-client.ts`、`src/lib/db-storage.ts` |
 | 对象存储/上传 | S3兼容对象存储优先，服务器本地文件回退 | `src/app/api/upload/route.ts`、`src/app/api/save-image/route.ts` |
@@ -18,7 +18,7 @@
 | AI调用层 | 多提供商兼容层，OpenAI/Gemini兼容及管理员模型配置 | `src/lib/api-compatibility.ts`、`src/app/api/generate/route.ts` |
 | 异步任务 | 内存/云端任务注册、SSE推送，轮询回退、取消和恢复 | `src/lib/task-registry.ts`、`/api/task-events` |
 | 部署 | Coze云端/容器化；端口和域名由环境变量控制 | `Dockerfile`、`docker-compose.yml`、`.coze*` |
-| 日志/监控 | 操作审计、数据库审计；未发现Sentry依赖或GitHub Actions工作流 | `src/components/operation-audit-client.tsx`、`src/app/api/admin/audit` |
+| 日志/监控 | 操作审计、数据库审计；未发现Sentry依赖。GitHub Actions质量门禁已配置，但云端真实P0依赖仓库环境密钥 | `src/components/operation-audit-client.tsx`、`src/app/api/admin/audit`、`.github/workflows/quality.yml` |
 | 积分/支付 | 积分、充值订单、支付二维码/回调接口 | `/api/credits/*`、`wujie_recharge_orders` |
 
 ## 数据与关键依赖
@@ -55,7 +55,7 @@
 | AI引擎设置 | 画布底部“AI引擎设置” | / | src/components/ai-engine-settings.tsx | /api/admin/apis, /api/models | wujie_api_providers | 模型提供商 | 已定位，P1待测 | P1 |
 | 项目导出/文件下载 | 图片工具栏、项目菜单 | / | src/lib/psd-export.ts; src/lib/svg-export.ts | /api/export-project, /api/export/* | 用户数据/对象存储 | 浏览器下载 | 已定位，P0下载待测 | P0 |
 
-## API路由清单（163项）
+## API路由清单（164项）
 
 | 路由 | 方法 | 源文件 |
 | --- | --- | --- |
@@ -190,6 +190,7 @@
 | `/api/scene-studio/generate` | GET, POST | [src/app/api/scene-studio/generate/route.ts](../../src/app/api/scene-studio/generate/route.ts) |
 | `/api/segment-elements` | POST | [src/app/api/segment-elements/route.ts](../../src/app/api/segment-elements/route.ts) |
 | `/api/serve-upload/:path*` | GET | [src/app/api/serve-upload/[...path]/route.ts](../../src/app/api/serve-upload/[...path]/route.ts) |
+| `/api/session` | dynamic | [src/app/api/session/route.ts](../../src/app/api/session/route.ts) |
 | `/api/simple-chat/chat` | POST | [src/app/api/simple-chat/chat/route.ts](../../src/app/api/simple-chat/chat/route.ts) |
 | `/api/simple-chat/deep-research` | POST | [src/app/api/simple-chat/deep-research/route.ts](../../src/app/api/simple-chat/deep-research/route.ts) |
 | `/api/simple-chat/upload-file` | POST | [src/app/api/simple-chat/upload-file/route.ts](../../src/app/api/simple-chat/upload-file/route.ts) |

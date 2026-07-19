@@ -41,7 +41,7 @@
 - Cloud acceptance is **not current**. In the logged-in Chrome preview, the selected image container still rendered as `absolute group z-10 z-20`; clicking its visible `删除` control opened `美陈拆解`. This proves the preview has not loaded `04927ee` or any later commit, including `73ccc02`.
 - `BUG-20260719-024` remains P1 open until the synchronized cloud bundle deletes the selected image without opening `美陈拆解`, and the deletion survives reopening the project.
 - `BUG-20260719-025` through `BUG-20260719-031` are fixed locally but require cloud acceptance. They cover recovery, local service startup, SVG tracing, video operations/download, image caching, and file upload authorization.
-- `BUG-20260719-032` remains P1 open: `/api/save-image` still accepts a forgeable local/internal-header bypass. It has more than ten server-to-server callers that must first be migrated to the signed internal-request protocol; the route cannot be hardened by itself without breaking generation, workflow, image/video persistence, or refinement flows.
+- `BUG-20260719-032` is fixed locally: `/api/save-image` now requires a verified session or signed internal-request headers, and its direct server-side callers have been migrated. It remains P1 cloud-acceptance pending until anonymous rejection plus authenticated image/workflow/video/refinement/upscale persistence are exercised on the synchronized preview.
 - Native file chooser and download-event evidence remain unavailable through the attached Chrome-control channel. They are **unverified**, not passed or failed.
 - The release decision remains **not approved**. No historical pass entry below can override this section.
 

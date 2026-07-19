@@ -63,6 +63,14 @@ const featureTable = featureRows.map((row) => `| ${row.map((cell) => String(cell
 
 const markdown = `# 无界AI功能盘点\n\n- 生成时间：${generatedAt}\n- Git Commit：\`${commit}\`\n- 软件版本：\`${packageJson.version}\`\n- 工作目录：\`${root}\`\n- 盘点方法：源码路由、页面入口、组件、数据存储和依赖静态扫描；“已定位”不代表已通过真实验证。\n\n## 架构\n\n| 领域 | 现状 | 证据 |\n| --- | --- | --- |\n| 前端/后端 | Next.js ${packageJson.dependencies.next} App Router + React ${packageJson.dependencies.react} + TypeScript | \`src/app\`、\`src/components\` |\n| UI/状态 | Tailwind 4、shadcn/Radix；React Hooks、localStorage、BroadcastChannel、用户数据同步 | \`src/components\`、\`src/app/page.tsx\` |\n| 数据库 | PostgreSQL（\`pg\`），\`DATABASE_URL\`/\`PGDATABASE_URL\` | \`src/lib/db-client.ts\`、\`src/lib/db-storage.ts\` |\n| 对象存储/上传 | S3兼容对象存储优先，服务器本地文件回退 | \`src/app/api/upload/route.ts\`、\`src/app/api/save-image/route.ts\` |\n| 身份鉴权 | 签名 HTTP-only cookie \`wujie_session\`，7天会话 | \`src/lib/server-auth.ts\`、\`/api/auth/*\` |\n| AI调用层 | 多提供商兼容层，OpenAI/Gemini兼容及管理员模型配置 | \`src/lib/api-compatibility.ts\`、\`src/app/api/generate/route.ts\` |\n| 异步任务 | 内存/云端任务注册、SSE推送，轮询回退、取消和恢复 | \`src/lib/task-registry.ts\`、\`/api/task-events\` |\n| 部署 | Coze云端/容器化；端口和域名由环境变量控制 | \`Dockerfile\`、\`docker-compose.yml\`、\`.coze*\` |\n| 日志/监控 | 操作审计、数据库审计；未发现Sentry依赖或GitHub Actions工作流 | \`src/components/operation-audit-client.tsx\`、\`src/app/api/admin/audit\` |\n| 积分/支付 | 积分、充值订单、支付二维码/回调接口 | \`/api/credits/*\`、\`wujie_recharge_orders\` |\n\n## 数据与关键依赖\n\n主要表/逻辑存储：\`wujie_users\`、\`wujie_api_providers\`、\`wujie_user_data\`、\`wujie_system_settings\`、\`wujie_recharge_orders\`、\`wujie_brand_assets\`、\`wujie_user_groups\`及积分、审计和任务关联数据。关键环境变量包括数据库连接、认证/内部/支付密钥、对象存储配置、管理员账户、模型提供商密钥和本地AI工具配置；详细可执行检查由 \`npm run doctor\` 输出。\n\n## 功能矩阵\n\n| 功能 | 入口 | 路由 | 前端组件/逻辑 | 后端接口 | 数据表/状态 | 外部依赖 | 当前状态 | 风险 |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n${featureTable}\n\n## API路由清单（${routes.length}项）\n\n| 路由 | 方法 | 源文件 |\n| --- | --- | --- |\n${routeRows}\n\n## 自动化覆盖现状\n\n已有 Vitest 测试位于 \`src/__tests__\`。本次新增的真实浏览器P0套件位于 \`tests/e2e/p0-core.spec.ts\`，并配置 Chromium、Firefox、WebKit 和移动 Chromium。当前文件仅描述覆盖设计，测试通过与否以 \`docs/testing/REGRESSION_REPORT.md\` 和 \`test-results/\` 中的真实执行证据为准。\n`;
 
+const correctedMarkdown = markdown.replace(
+  '未发现Sentry依赖或GitHub Actions工作流',
+  '未发现Sentry依赖。GitHub Actions质量门禁已配置，但云端真实P0依赖仓库环境密钥',
+).replace(
+  '`src/components/operation-audit-client.tsx`、`src/app/api/admin/audit` |',
+  '`src/components/operation-audit-client.tsx`、`src/app/api/admin/audit`、`.github/workflows/quality.yml` |',
+);
+
 await mkdir(dirname(output), { recursive: true });
-await writeFile(output, markdown, 'utf8');
+await writeFile(output, correctedMarkdown, 'utf8');
 console.log(`Generated ${relative(root, output)} with ${routes.length} API routes at ${commit}.`);
