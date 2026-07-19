@@ -1,5 +1,15 @@
 # 安全测试报告
 
+## 2026-07-19 Open P1: image persistence internal-auth migration
+
+### SEC-013 / P1: Image persistence trusts caller-controlled local/internal headers
+
+- Location: `src/app/api/save-image/route.ts`
+- Evidence: `x-internal-call: true` and local-looking Host values bypass session authentication before accepting multipart/data/remote media and storing it locally or in S3.
+- Impact: unowned storage writes and remote-media fetching through a privileged persistence route if an attacker can reach the endpoint through a proxy or local-origin path.
+- Constraint: the route has many server-to-server callers. Most currently rely on the insecure shortcut and must be migrated to the signed `getInternalRequestHeaders` protocol before the boundary is enforced.
+- Status: **open**. A route-only authorization change is intentionally not applied because it would break real generation, workflow, image/video, and refinement persistence paths. The release gate remains failed until migration, red-first regression, full suite, and cloud acceptance are complete.
+
 ## 2026-07-19 P1 repair: upload authentication bypass
 
 ### SEC-012 / P1: Caller-controlled headers bypassed image-upload authentication

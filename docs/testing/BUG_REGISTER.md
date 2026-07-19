@@ -1,5 +1,18 @@
 # 缺陷登记册
 
+## BUG-20260719-032: Image persistence route trusts forgeable local/internal headers
+
+| Field | Record |
+| --- | --- |
+| Severity | P1, open |
+| Module | `POST /api/save-image` and server-to-server image persistence callers |
+| Environment | Source baseline `73ccc02`, 2026-07-19 Asia/Shanghai. |
+| Stable reproduction | The route bypasses session authentication for a request that provides `x-internal-call: true` or a Host beginning with `localhost`/`127.0.0.1`, before accepting multipart/data/remote image content and writing to local/S3 storage. |
+| Expected | Browser users must have a session. Internal callers must use `getInternalRequestHeaders` with the server-only shared secret; caller-controlled Host values and bare headers may not bypass authentication. |
+| Root cause | A legacy development shortcut was retained while many server routes began calling the HTTP persistence endpoint. Repository audit found direct callers in generation, Agent, workflow, brand/refine, scene, upscale, video, quality-enhance, and compatibility layers; most do not yet send signed internal headers. |
+| Required repair | Add a red-first route contract; migrate every listed server caller to the signed internal-request protocol with attributable identity; then replace the bypass with `requireApiAuthOrReject`. Run generation/workflow/video/refinement regression before cloud acceptance. |
+| Release status | P1 open. Do not enable a route-only guard until every internal caller is migrated; that would create a broad production regression. |
+
 ## BUG-20260719-031: Upload route trusted forgeable internal-call headers
 
 | Field | Record |
