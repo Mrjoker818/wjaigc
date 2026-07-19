@@ -9541,7 +9541,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                 {/* Hover toolbar - quick actions on image hover */}
                 {hoverToolbarImageId === image.id && editMode === 'none' && !dragTarget && !resizingImage && !compareSelecting && (
                   <div
-                    className="absolute -top-9 left-1/2 -translate-x-1/2 z-50 flex items-center gap-0.5 px-1 py-0.5 rounded-lg shadow-lg"
+                    className="absolute -top-9 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-0.5 px-1 py-0.5 rounded-lg shadow-lg"
                     style={{ fontSize: `${Math.max(10, 12 / zoom)}px` }}
                     onMouseEnter={() => keepHoverToolbar(image.id)}
                     onMouseLeave={() => hideHoverToolbar()}

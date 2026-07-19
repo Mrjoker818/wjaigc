@@ -483,3 +483,17 @@ BUG-20260718-007 的“任务恢复、完成和刷新恢复”范围已修复并
 | --- | --- | --- | --- | --- | --- |
 | BUG-20260718-008 | P2 | DashboardView / SSR hydration | 已复现，待 P0/P1 关闭后修复 | 同一 Chrome 会话刷新项目列表三次均出现 React `Each child in a list should have a unique key`（`DashboardView`）及 hydration mismatch；不影响本次生成完成，但违反“无未处理 Console Error”发布门禁。 | 建立最小复现测试后，修正列表 key 与服务端/客户端不稳定属性；在 Chromium、Firefox、WebKit 回归。 |
 | BUG-20260718-009 | P1 | 无限画布 `submitOnly` 图像计费 | 本地已修复，待云端付费回归 | Chrome 真实提交 `doubao-seedream-5-0-lite` 后生成结果已保存；积分规则页面明确该模型为每张 6 积分，但云端积分概览的最新流水仍停在 7 月 17 日，没有本次消费。静态数据流复现：`src/app/api/generate/route.ts` 在 `if (submitOnly)` 内持久化并返回任务，而 `consumeCredits` 位于该分支之后，无法执行。 | 将 `submitOnly` 的扣费放到同一分支内、持久化任务之前；将成本持久化到 `cloud_tasks`；持久化失败或并发冲突即时退款。先红后绿新增 `generate-idempotency-contract.test.ts`，定向 24/24 通过。云端同步后需以同一模型再跑一次，确认新增 -6 流水与余额变化。 |
+
+### BUG-20260719-024: Image hover-toolbar delete action is occluded by display-decompose action
+
+| Field | Detail |
+| --- | --- |
+| Severity / module | P1 / infinite canvas image selection and deletion |
+| Environment | Coze preview, logged-in `Mr.joker` session, source baseline `b906a15` |
+| Reproduction | Generate an image, reopen the persisted project, select the image, then click the visible hover-toolbar button whose title is `删除`. |
+| Expected | The selected image is removed from the canvas. |
+| Actual | The image remains. The `美陈拆解` panel opens instead. DOM bounds showed the delete button at `x=1013,y=197.5,w=24,h=24`, overlapping the main toolbar's `美陈拆解` action at `x=1001.43,y=190.5,w=82,h=28`; both used `z-50`. |
+| Evidence | `test-results/screenshots/cloud-p0-delete-opens-display-decompose-b906a15-20260719.png`; `test-results/console/cloud-p0-delete-opens-display-decompose-b906a15-20260719.json` |
+| Root cause | Equal stacking levels left the visually exposed delete control underneath the main image toolbar in the overlap area, so the pointer event reached display-decompose. |
+| Fix | `src/components/infinite-canvas.tsx`: raise only the image hover toolbar from `z-50` to `z-[60]`. |
+| Regression status | Source lint and TypeScript checks pass. A cloud Chrome recheck is required after the fix is synchronized; do not close this P1 before the actual delete action removes the image and the deletion survives a reopen. |
