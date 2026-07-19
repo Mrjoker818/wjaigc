@@ -1,5 +1,19 @@
 # 缺陷登记册
 
+## BUG-20260719-031: Upload route trusted forgeable internal-call headers
+
+| Field | Record |
+| --- | --- |
+| Severity | P1, fixed locally; cloud verification pending |
+| Module | `POST /api/upload` |
+| Environment | Source baseline `390a485`, 2026-07-19 Asia/Shanghai. |
+| Stable reproduction | The handler skipped session authentication whenever a request sent `x-internal-call: true` or a `Host` starting with `localhost`/`127.0.0.1`, then accepted multipart file content for persistent storage. |
+| Expected | Uploads require a signed-in user or the established signed internal-request protocol; a client-controlled Host or arbitrary header must never bypass authentication. |
+| Root cause | A legacy local-development shortcut bypassed the shared authorization layer. Repository search found browser upload callers only, so no server caller relies on the shortcut. |
+| Fix | Replace the bespoke bypass with `requireApiAuthOrReject(request)` before `formData()` parsing. |
+| Regression | `upload-auth-contract.test.ts` failed first because the bypass was present, then passed. It ran with cache-image and high-risk-route contracts: 3 files / 3 assertions passed; targeted ESLint error check and `pnpm ts-check` passed. |
+| Cloud acceptance | Pending deployment. An anonymous multipart POST must return 401 and a signed-in user must complete a real image upload. |
+
 ## BUG-20260719-030: Image cache proxy accepted unauthenticated remote-fetch requests
 
 | Field | Record |

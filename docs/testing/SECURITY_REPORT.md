@@ -1,5 +1,16 @@
 # 安全测试报告
 
+## 2026-07-19 P1 repair: upload authentication bypass
+
+### SEC-012 / P1: Caller-controlled headers bypassed image-upload authentication
+
+- Location: `src/app/api/upload/route.ts`
+- Evidence: `x-internal-call: true` or a local-looking `Host` header skipped session authentication before multipart parsing and file persistence.
+- Impact: a request routed through a proxy or exposed local endpoint could create unowned stored files without a user identity.
+- Fix: remove the legacy bypass and require the common authenticated/internal-request gate before parsing multipart data.
+- Verification: red-first authorization contract passes after the repair, together with cache/high-risk route contracts (3 files / 3 assertions); targeted ESLint error check and TypeScript checks passed.
+- Deployment status: fixed locally, cloud verification pending.
+
 ## 2026-07-19 P1 repair: image cache proxy authentication
 
 ### SEC-011 / P1: Anonymous callers could trigger remote image retrieval and storage

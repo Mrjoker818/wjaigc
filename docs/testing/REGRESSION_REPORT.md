@@ -5,7 +5,7 @@
 | Gate | Result |
 | --- | --- |
 | Source baseline | `04927ee fix: require authentication for video downloads` on `origin/main`. It includes the selected-image delete stacking repair and five new high-risk API authorization regressions. |
-| API suite | Passed: `pnpm test:api` completed 42 files / 97 assertions, including the new cache-image authorization contract. |
+| API suite | Passed: `pnpm test:api` completed 43 files / 98 assertions, including the cache-image and upload authorization contracts. |
 | Component and library regression | Passed: `pnpm test:regression` completed with exit code 0. |
 | Type safety | Passed: `pnpm ts-check`. |
 | Test-environment limitation | Local regression has no production database configuration. The server-auth fallback tests intentionally emit missing-database logs while exercising their degraded path; this is not cloud database-health evidence. |
