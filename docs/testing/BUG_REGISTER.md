@@ -1,5 +1,19 @@
 # 缺陷登记册
 
+## BUG-20260719-030: Image cache proxy accepted unauthenticated remote-fetch requests
+
+| Field | Record |
+| --- | --- |
+| Severity | P1, fixed locally; cloud verification pending |
+| Module | `POST /api/cache-image` |
+| Environment | Source baseline `f2ab701`, 2026-07-19 Asia/Shanghai. |
+| Stable reproduction | The route accepted an arbitrary validated `imageUrl`, then fetched and wrote the image to application/S3 storage without checking request identity. Both `ImagePreview` and `stable-image-url` call it from normal signed-in browser sessions. |
+| Expected | Only a signed-in user or a verified internal application request may invoke remote image caching. |
+| Root cause | The route had input and partial private-address checks but omitted the common API authorization boundary. |
+| Fix | Call `requireApiAuthOrReject(request)` before parsing `imageUrl`, validating it, or fetching remote content. |
+| Regression | `cache-image-auth-contract.test.ts` first failed because the guard was absent, then passed. It ran with SVG and video high-risk route contracts: 4 files / 4 assertions passed; targeted ESLint error check and `pnpm ts-check` passed. |
+| Cloud acceptance | Pending deployment. An anonymous POST must return 401 before URL parsing/fetching. A signed-in user must still be able to persist a provider result or cross-origin preview image. |
+
 ## BUG-20260719-029: Video download proxy lacked an authentication boundary
 
 | Field | Record |

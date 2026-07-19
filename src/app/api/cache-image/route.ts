@@ -6,12 +6,16 @@ import { getServerDataRoot } from '@/lib/server-data-root';
 import { uploadImageToS3, isS3Available } from '@/lib/s3-storage';
 import { saveImageDataMapping } from '@/lib/image-source-map';
 import { validateApiInputs } from '@/lib/api-validator';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
 const MAX_IMAGE_BYTES = 50 * 1024 * 1024; // 50MB — 4K PNG 可能 30MB+
 
 export async function POST(request: NextRequest) {
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult instanceof NextResponse) return authResult;
+
   try {
     const { imageUrl } = (await request.json()) as { imageUrl?: string };
     // 输入校验

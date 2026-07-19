@@ -5,12 +5,16 @@
 | Gate | Result |
 | --- | --- |
 | Source baseline | `04927ee fix: require authentication for video downloads` on `origin/main`. It includes the selected-image delete stacking repair and five new high-risk API authorization regressions. |
-| API suite | Passed: `pnpm test:api` completed 41 files / 96 assertions. |
+| API suite | Passed: `pnpm test:api` completed 42 files / 97 assertions, including the new cache-image authorization contract. |
 | Component and library regression | Passed: `pnpm test:regression` completed with exit code 0. |
 | Type safety | Passed: `pnpm ts-check`. |
 | Test-environment limitation | Local regression has no production database configuration. The server-auth fallback tests intentionally emit missing-database logs while exercising their degraded path; this is not cloud database-health evidence. |
 | Cloud acceptance | Pending: the preview still served the older selected-image container class (`z-20`) after the previous update. It must synchronize `04927ee` before deletion, recovery authorization, local-service authorization, SVG, video tool, and video-download checks can be closed. |
 | Release decision | **Not approved**. P0 upload/download evidence, cloud P1 acceptance, production database/storage/model health, and full multi-browser core E2E remain incomplete. |
+
+### Cloud recheck after reported update
+
+The Chrome cloud preview still returned the old selected-image ancestor class `absolute group z-10 z-20` and stable reproduction again showed `删除` opening the `美陈拆解` dialog. Evidence: `test-results/screenshots/cloud-p1-delete-opens-display-decompose-20260719.png` and `test-results/console/cloud-p1-delete-opens-display-decompose-20260719.json`. Therefore `BUG-20260719-024` remains **open**, and this preview must not be treated as running `04927ee` or later.
 
 ## 2026-07-19 Cloud P0 authentication regression: passed
 

@@ -1,5 +1,16 @@
 # 安全测试报告
 
+## 2026-07-19 P1 repair: image cache proxy authentication
+
+### SEC-011 / P1: Anonymous callers could trigger remote image retrieval and storage
+
+- Location: `src/app/api/cache-image/route.ts`
+- Evidence: the POST handler accepted `imageUrl`, passed it to remote `fetch`, then wrote the resulting bytes to the deployment filesystem and optional S3 backup without checking request identity.
+- Impact: anonymous outbound bandwidth, storage, and cache-key consumption. Existing URL validation did not compensate for the missing identity boundary.
+- Fix: enforce the shared authenticated/internal-request gate before JSON parsing, validation, or remote retrieval. Normal browser callers retain cookie-based authentication.
+- Verification: the new handler-order contract failed before the guard and then passed. Combined SVG/video/cache contracts passed: 4 files / 4 assertions; targeted ESLint error check and TypeScript checks passed.
+- Deployment status: fixed locally, cloud verification pending.
+
 ## 2026-07-19 P1 repair: video download proxy authentication
 
 ### SEC-010 / P1: Anonymous users could read allowed local videos or use the video proxy
