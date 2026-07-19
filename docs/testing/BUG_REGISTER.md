@@ -1,5 +1,17 @@
 # 缺陷登记册
 
+## BUG-20260719-021: Auth loading shell remains visible after cloud session bootstrap
+
+| Field | Record |
+| --- | --- |
+| Severity | P1 release blocker |
+| Module | `CanvasApp` authentication bootstrap in `src/app/page.tsx` |
+| Stable reproduction | Reload a signed-in Chrome session in the Coze preview. The complete canvas and toolbars render behind the unique `正在验证身份...` overlay, which remains visible after an explicit 12-second hidden-state wait. |
+| Root cause | The initial client hydration mounted the complete workspace while the bounded session request was unresolved. In the injected preview runtime this made the authentication state transition unreliable even though the current session code was deployed. |
+| Fix | Render only `data-testid="auth-loading-shell"` until `authChecked` resolves, then mount the canvas, dashboard, or login surface. Existing hook order and the eight-second session timeout are unchanged. |
+| Regression | The source contract was red before the guard and green after it. Local production Playwright passed 4/4 on Chromium, Firefox, WebKit, and mobile Chromium. Full Vitest passed 130 files / 528 tests; TypeScript, lint, and production build passed. |
+| Cloud acceptance | Pending. Reload the synchronized signed-in Chrome session and prove the loading shell disappears before any paid P0 action. Then repeat generate -> save -> logout -> Chrome-saved-credential relogin for BUG-20260719-019. |
+
 ## INFRA-20260719-001: Cloud preview transient backend unavailability
 
 | Field | Record |

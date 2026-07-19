@@ -1,5 +1,17 @@
 # 回归测试报告
 
+## 2026-07-19 Auth-bootstrap hydration repair (pending cloud verification)
+
+| Gate | Result |
+| --- | --- |
+| Regression first | A source contract asserting a pre-workspace `authChecked` gate failed before implementation and passes after it. |
+| Local production E2E | Passed 4/4: Chromium, Firefox, WebKit, and mobile Chromium all reach the anonymous login form through the real production server. |
+| Full test suite | Passed: 130 test files / 528 tests. |
+| Build quality gates | Passed: `pnpm ts-check`, `pnpm lint --quiet`, and `pnpm run build` (97 routes). |
+| Cloud P1 acceptance | Unverified until the synchronized preview reload proves `data-testid="auth-loading-shell"` disappears in the existing logged-in Chrome session. |
+
+The patch does not increase request timeouts or suppress errors. It limits the initial hydration tree to the authentication shell until the existing session check settles, then mounts the normal workspace. A cloud pass is required before this P1 can be closed or any P0 paid-generation flow resumes.
+
 ## 2026-07-18 本地 P0 匿名入口跨浏览器回归
 
 - 环境：本地 Next.js 开发服务器 `http://127.0.0.1:5011`；未注入登录账号、模型密钥、数据库或云端支付配置。

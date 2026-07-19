@@ -90,4 +90,16 @@ describe('authentication bootstrap project sync', () => {
     expect(method).toContain('void this.loadProjectsFromServer(1, syncUserId).then(');
     expect(method).not.toContain('await this.loadProjectsFromServer()');
   });
+
+  it('keeps the authenticated workspace out of the initial loading render', () => {
+    const source = readFileSync(path.resolve(process.cwd(), 'src/app/page.tsx'), 'utf8');
+    const workflowState = source.indexOf('const [nodeWorkflow, setNodeWorkflow] = useState<Workflow | null>(null);');
+    const authGate = source.indexOf('if (!authChecked) {', workflowState);
+    const workspaceReturn = source.indexOf('h-screen w-screen relative overflow-hidden', authGate);
+
+    expect(authGate).toBeGreaterThan(workflowState);
+    expect(workspaceReturn).toBeGreaterThan(authGate);
+    expect(source).toContain('data-testid="auth-loading-shell"');
+    expect(source).not.toContain('{!authChecked && (');
+  });
 });

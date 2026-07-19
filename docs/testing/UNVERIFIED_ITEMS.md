@@ -1,5 +1,10 @@
 # 未验证项目
 
+## 2026-07-19 Auth-bootstrap cloud acceptance
+
+- **P1 / BUG-20260719-021:** The local small-shell hydration repair is not cloud-verified. Required evidence is a fresh reload of the signed-in Chrome session where `正在验证身份...` disappears, followed by an interactive dashboard or canvas state.
+- **P1 / BUG-20260719-019:** Only after the auth-overlay check passes, execute an authorized generation, save/reload, logout, and Chrome-saved-credential relogin. Project and asset counts must remain unchanged after relogin.
+
 ## 2026-07-19 Current cloud blocker
 
 - Environment: `https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9.dev.coze.site/`; commit `1713ab6`.

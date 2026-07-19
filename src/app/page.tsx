@@ -3820,6 +3820,20 @@ function CanvasApp() {
   // Workflow state for node mode
   const [nodeWorkflow, setNodeWorkflow] = useState<Workflow | null>(null);
 
+  // Keep the first client hydration small. The full workspace mounts only after
+  // the bounded session check resolves, which avoids a blocked auth overlay in
+  // injected development preview environments.
+  if (!authChecked) {
+    return (
+      <div data-testid="auth-loading-shell" className="fixed inset-0 flex items-center justify-center bg-[#0a0a0a]">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-10 h-10 border-2 border-[#d4af37] border-t-transparent rounded-full animate-spin" />
+          <p className="text-white/60 text-sm">正在验证身份...</p>
+        </div>
+      </div>
+    );
+  }
+
   // Mode switching - early return for non-canvas modes
   if (appMode === 'node') {
     return (
@@ -4584,16 +4598,6 @@ function CanvasApp() {
         }}
         isMonochrome={themeStyle === 'monochrome'}
       />
-
-      {/* Auth loading overlay */}
-      {!authChecked && (
-        <div className="fixed inset-0 flex items-center justify-center z-[90] bg-[#0a0a0a]">
-          <div className="flex flex-col items-center gap-4">
-            <div className="w-10 h-10 border-2 border-[#d4af37] border-t-transparent rounded-full animate-spin" />
-            <p className="text-white/60 text-sm">正在验证身份...</p>
-          </div>
-        </div>
-      )}
 
     </div>
   );
