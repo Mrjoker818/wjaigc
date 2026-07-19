@@ -124,6 +124,8 @@
 
 | Coze production-preview runtime change | Pending cloud verification | Synchronise the `.coze` change, verify the preview reports a production build/server rather than HMR development runtime, then repeat the authenticated entry test. |
 
+| Coze preview dependency bootstrap correction | Pending cloud verification | Sync the corrected `[dev]` lifecycle (`pnpm install --frozen-lockfile` then `pnpm run dev`), verify no `next: not found` startup error, then execute the logged-in P0 entry test. |
+
 ### 2026-07-19 GitHub Push Does Not Synchronise Coze Preview
 
 `49684ed` and its two preceding evidence commits were pushed to `origin/main` successfully. A bounded three-minute poll of the preview root continued to return the old development runtime markers (`hmr-client`/`next-devtools`) on every successful `200` response. Evidence: `test-results/console/cloud-preview-runtime-poll-20260719.json`. GitHub push alone is therefore not deployment evidence; Coze-side sync or redeploy is required before any P0 result can be accepted.

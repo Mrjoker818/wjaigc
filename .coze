@@ -8,8 +8,8 @@ appliedPatches = [
 ]
 
 [dev]
-build = [ "pnpm", "run", "build" ]
-run = [ "pnpm", "run", "start" ]
+build = [ "pnpm", "install", "--frozen-lockfile" ]
+run = [ "pnpm", "run", "dev" ]
 validate = [ "bash", "./scripts/validate.sh" ]
 
 [deploy]

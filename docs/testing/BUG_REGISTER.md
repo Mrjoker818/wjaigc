@@ -260,6 +260,10 @@ The root-cause investigation found that `.coze` was introduced in `dc5983d` and 
 
 The minimal fix changes the `[dev]` runtime to `pnpm run build` followed by `pnpm run start`, matching the existing `[deploy]` server mode. `src/__tests__/scripts/coze-production-preview-contract.test.ts` was written first and failed against the old configuration, then passed after the change. `pnpm lint --quiet`, `pnpm ts-check`, and `pnpm run build` also passed. This is not a cloud closure: BUG-20260718-016 remains P1 until the synchronised preview completes a real Chrome reload without the authentication overlay.
 
+### 2026-07-19 Deployment configuration correction
+
+The subsequent Coze startup evidence reported `sh: 1: next: not found` while the `[dev]` section ran `pnpm run build` followed by `pnpm run start`. This invalidates the preceding runtime change as a deployment remedy: a preview build command cannot assume dependencies already exist. The corrected contract now installs the locked dependencies first with `pnpm install --frozen-lockfile`, then starts the development preview with `pnpm run dev`; the `[deploy]` section remains the only production `build` + `start` path. The revised contract test and a real `pnpm install --frozen-lockfile` completed successfully on the source workspace. Cloud adoption and an authenticated Chrome reload remain required before closing BUG-20260718-016.
+
 ## 2026-07-18 云端生成恢复与积分补偿
 
 | 字段 | 记录 |

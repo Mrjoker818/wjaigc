@@ -221,3 +221,11 @@ Artifacts: `test-results/screenshots/cloud-p0-auth-overlay-resumed-20260719.png`
 - Green: `.coze` now uses `pnpm run build` and `pnpm run start` for the cloud preview; the contract test passes.
 - Gates: `pnpm lint --quiet`, `pnpm ts-check`, and `pnpm run build` passed. The build produced 97 routes and retained three non-failing Next NFT tracing warnings for follow-up.
 - Required next evidence: a cloud sync, a fresh logged-in Chrome reload with no auth overlay, then the complete real P0 workflow.
+
+## 2026-07-19 Coze preview startup regression correction
+
+- New cloud evidence: the production-style `[dev]` change failed at startup with `sh: 1: next: not found` (exit code `1`).
+- Root cause: the preview build command invoked `next build` before the locked JavaScript dependencies had been installed.
+- Corrected source contract: `[dev]` now runs `pnpm install --frozen-lockfile` and `pnpm run dev`; `[deploy]` retains `pnpm run build` and `pnpm run start`.
+- Local evidence: `pnpm install --frozen-lockfile` completed successfully, including the optional post-install tool preparation; `coze-production-preview-contract.test.ts` passed.
+- Status: cloud deployment verification is still pending. The correction prevents the known configuration regression in source, but is not proof that the current Coze preview has adopted it.

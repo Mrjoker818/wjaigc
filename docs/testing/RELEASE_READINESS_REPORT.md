@@ -118,6 +118,10 @@ GitHub `main` was updated through `49684ed` on 2026-07-19. A three-minute endpoi
 
 The subsequent user-reported cloud update was also rechecked in Chrome. It still served the old HMR document and left the authentication overlay visible after 12 seconds. The release decision remains **not approved**; no paid action was performed after this failed entry check.
 
+## 2026-07-19 Coze startup correction
+
+Cloud startup evidence later showed that the attempted production-style preview configuration could fail before Next.js was installed (`next: not found`). The source has therefore been corrected so the Coze `[dev]` lifecycle installs the frozen dependency graph and runs `next dev`; only `[deploy]` uses the production build/server lifecycle. Local installation and the dedicated configuration regression test pass. This is a source-level prevention only: until the cloud preview is synchronised and exercised in the logged-in browser, the release decision remains **NOT APPROVED**.
+
 ### 2026-07-19 Source Release-Candidate Repair
 
 The authentication bootstrap effect previously depended on the `useSearchParams()` object identity and could cancel an in-flight session initialization. It now reads the initial project id from a ref and no longer restarts when the search-parameter object refreshes; a regression contract covers this case.
