@@ -349,3 +349,12 @@ The real cloud result refines BUG-20260719-019: starting a keepalive sync is ins
 | Evidence | Archived | `test-results/screenshots/cloud-p1-auth-overlay-after-4c0015b-20260719.png` and `test-results/console/cloud-p1-auth-overlay-after-4c0015b-20260719.json`. The captured warnings are from the injected Console Bridge, not an application JavaScript error. |
 
 The synchronized source alone is insufficient. The cloud preview must restart using the `[dev]` build script and `pnpm run start`; only then may the authenticated P0 generation, persistence, download, and logout flows continue.
+
+## 2026-07-19 Canvas hover-toolbar regression
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Cloud reproduction | Failed before fix | Clicking the visible image hover-toolbar `删除` control opened `美陈拆解` and retained the image because the controls overlapped at the same stacking level. |
+| Source regression | Passed | `pnpm test:regression` passed 92 files / 440 assertions, including the new `canvas-toolbar-floating-windows.test.ts` contract requiring the hover toolbar at `z-[60]`. |
+| Local quality checks | Passed | Targeted ESLint on `src/components/infinite-canvas.tsx` and `pnpm ts-check` both passed. |
+| Cloud closure | Pending synchronization | Re-run selection -> hover delete -> reopen project in Chrome after `cd8c90d` is active. The image must be removed, no `美陈拆解` panel may open, and deletion must persist. |
