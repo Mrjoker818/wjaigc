@@ -1,5 +1,19 @@
 # 缺陷登记册
 
+## BUG-20260719-029: Video download proxy lacked an authentication boundary
+
+| Field | Record |
+| --- | --- |
+| Severity | P1, fixed locally; cloud verification pending |
+| Module | `GET /api/video/download` |
+| Environment | Source commit `4cb699c`, 2026-07-19 Asia/Shanghai. |
+| Stable reproduction | The endpoint accepted a URL query and could read an allowed local file or proxy an external HTTPS response without checking the caller's identity. |
+| Expected | Video download and proxying are available only to authenticated users or verified internal callers. |
+| Root cause | The route implemented source/path checks but omitted the common API authentication layer. |
+| Fix | Add `requireApiAuthOrReject(request)` before reading `url` or touching local/remote media. |
+| Regression | `video-download-auth-contract.test.ts` failed before the change and passes afterward. It ran with media-toolbar video contracts: 2 files / 12 assertions passed; ESLint error check and `pnpm ts-check` passed. |
+| Cloud acceptance | Pending deployment. Verify anonymous=401 and a signed-in canvas user can still download an owned generated video. |
+
 ## BUG-20260719-028: Video post-production accepted unauthenticated FFmpeg work
 
 | Field | Record |

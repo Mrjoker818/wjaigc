@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { readFile } from 'fs/promises';
 import path from 'path';
 import { getServerDataRoot } from '@/lib/server-data-root';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -71,6 +72,9 @@ function getVideoContentType(url: string): string {
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult instanceof NextResponse) return authResult;
+
   const sourceUrl = request.nextUrl.searchParams.get('url') || '';
   if (!isAllowedVideoUrl(sourceUrl)) {
     return NextResponse.json({ error: '视频下载地址无效' }, { status: 400 });

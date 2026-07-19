@@ -1,5 +1,16 @@
 # 安全测试报告
 
+## 2026-07-19 P1 repair: video download proxy authentication
+
+### SEC-010 / P1: Anonymous users could read allowed local videos or use the video proxy
+
+- Location: `src/app/api/video/download/route.ts`
+- Evidence: the GET handler performed local file resolution or remote HTTPS fetches solely from the `url` query parameter, without a request identity check.
+- Impact: anonymous use of a media-proxy endpoint and potential access to otherwise unlinked local video paths.
+- Fix: enforce the shared authenticated/internal-request gate before reading query input or any file/network operation; existing source-path and private-network checks remain in place.
+- Verification: red-first route contract and media-toolbar video regression passed (2 files / 12 assertions); ESLint error check and TypeScript checks passed.
+- Deployment status: fixed locally, cloud verification pending.
+
 ## 2026-07-19 P1 repair: video post-production request authentication
 
 ### SEC-009 / P1: Anonymous callers could initiate FFmpeg processing
