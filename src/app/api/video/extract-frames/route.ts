@@ -3,10 +3,11 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { writeFile, mkdir, readFile, unlink } from 'fs/promises';
 import { existsSync } from 'fs';
-import { join } from 'path';
+import { join, relative, isAbsolute } from 'path';
 import { randomUUID } from 'crypto';
 import { isSafeVideoSource, validateApiInputs } from '@/lib/api-validator';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
+import { getServerDataRoot } from '@/lib/server-data-root';
 
 const execFileAsync = promisify(execFile);
 
@@ -14,6 +15,42 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
 
 type ExtractMode = 'fps' | 'keyframes' | 'uniform' | 'first-last';
+
+function resolveWithinDirectory(directory: string, requestedPath: string): string | null {
+  const resolved = join(directory, requestedPath);
+  const difference = relative(directory, resolved);
+  return difference && !difference.startsWith('..') && !isAbsolute(difference) ? resolved : null;
+}
+
+async function readPlatformVideo(videoUrl: string): Promise<Buffer | null> {
+  let pathname: string;
+  try {
+    pathname = new URL(videoUrl, 'http://localhost').pathname;
+  } catch {
+    return null;
+  }
+
+  const dataRoot = getServerDataRoot();
+  const candidates: string[] = [];
+  if (pathname.startsWith('/api/serve-upload/')) {
+    const requestedPath = pathname.slice('/api/serve-upload/'.length);
+    const uploadPath = resolveWithinDirectory(join(dataRoot, 'uploads'), requestedPath);
+    const legacyPath = resolveWithinDirectory(dataRoot, requestedPath);
+    if (uploadPath) candidates.push(uploadPath);
+    if (legacyPath) candidates.push(legacyPath);
+  } else if (pathname.startsWith('/uploads/')) {
+    const requestedPath = pathname.slice('/uploads/'.length);
+    const dataPath = resolveWithinDirectory(join(dataRoot, 'uploads'), requestedPath);
+    const publicPath = resolveWithinDirectory(join(process.cwd(), 'public', 'uploads'), requestedPath);
+    if (dataPath) candidates.push(dataPath);
+    if (publicPath) candidates.push(publicPath);
+  }
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return readFile(candidate);
+  }
+  return null;
+}
 
 /**
  * 视频抽帧 API
@@ -54,9 +91,9 @@ export async function POST(req: NextRequest) {
       if (!resp.ok) return NextResponse.json({ error: '视频下载失败' }, { status: 400 });
       videoBuffer = Buffer.from(await resp.arrayBuffer());
     } else {
-      const localPath = join(process.cwd(), 'public', videoUrl.replace(/^\//, ''));
-      if (!existsSync(localPath)) return NextResponse.json({ error: '视频文件不存在' }, { status: 400 });
-      videoBuffer = await readFile(localPath);
+      const localBuffer = await readPlatformVideo(videoUrl);
+      if (!localBuffer) return NextResponse.json({ error: '视频文件不存在' }, { status: 400 });
+      videoBuffer = localBuffer;
     }
     await writeFile(videoPath, videoBuffer);
 
@@ -100,8 +137,8 @@ export async function POST(req: NextRequest) {
     const { readdir } = await import('fs/promises');
     const frameFiles = (await readdir(frameDir)).filter(f => f.endsWith('.jpg')).sort();
 
-    // 4. 复制到 public 可访问目录
-    const uploadDir = join(process.cwd(), 'public', 'api', 'serve-upload', 'video-frames');
+    // 4. Copy frames into the persistent directory served by /api/serve-upload.
+    const uploadDir = join(getServerDataRoot(), 'uploads', 'video-frames');
     if (!existsSync(uploadDir)) await mkdir(uploadDir, { recursive: true });
     
     const frames: string[] = [];

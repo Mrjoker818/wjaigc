@@ -411,3 +411,13 @@ The synchronized source alone is insufficient. The cloud preview must restart us
 | Focused regression | Passed | `pnpm vitest run src/__tests__/lib/api-validator.test.ts src/__tests__/api/video-source-security-contract.test.ts src/__tests__/api/video-download-auth-contract.test.ts src/__tests__/api/video-tools-auth-contract.test.ts`: 4 files / 37 tests passed. |
 | TypeScript | Passed | `pnpm ts-check` passed after the shared validator was applied. |
 | Cloud closure | Pending synchronization | On the deployed preview, call each protected video route with a signed-in private/link-local URL and verify a 400 response before any outbound request; then exercise one valid provider video URL through the product UI. |
+
+## 2026-07-19 Persistent media and cloud acceptance recheck
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Batch video-frame storage regression | Passed locally | The new storage contract was red before the frame output was moved from `public/api/serve-upload` to `getServerDataRoot()/uploads/video-frames`; the persisted-source read contract was separately red and then green. |
+| API suite | Passed | `pnpm test:api`: 50 files / 116 tests. |
+| Component and library regression suite | Passed | `pnpm test:regression`: 93 files / 446 tests. |
+| Cloud selected-image deletion | Failed | A real click on `删除` opened `美陈拆解` and retained the image. Hit testing shows the main action toolbar covers the delete center. Evidence: `test-results/console/cloud-selected-delete-dom-cca44cd-20260719.json`. |
+| Cloud public-media and video validation probes | Unverified: backend unavailable | Same-origin probes for protected media and a loopback video URL each returned `502 {"detail":"无法连接到后端服务"}`. This neither proves nor disproves the deployed source fix. Evidence: `test-results/network/cloud-security-acceptance-blocked-cca44cd-20260719.json`. |

@@ -173,3 +173,9 @@ The authentication bootstrap effect previously depended on the `useSearchParams(
 `pnpm run build` now uses a verified Webpack production path, with server-only SDKs externalized to prevent incomplete assets and build-time runtime crashes. A clean build completed all 97 routes. A fresh Chromium production-server E2E run on port 5016 passed the anonymous entry-to-login flow. `pnpm test` (129 files / 523 tests), `pnpm lint --quiet`, `pnpm ts-check`, `pnpm run build`, and that Chromium E2E test passed.
 
 Release remains **not approved**: cloud synchronisation and the real logged-in P0 flow are still required.
+
+## 2026-07-19 Latest cloud acceptance result
+
+**Decision: Not approved.** The latest signed-in Chrome acceptance run found a live P1 deletion failure: the image delete control opens `美陈拆解` because the selected-image main toolbar receives the click. In the same run, public-media and video-security probes received Coze backend `502` responses, so their cloud behavior is unverified rather than passed.
+
+The source now also repairs batch video-frame storage with red-to-green regression coverage. Local `pnpm test:api` passed 50 files / 116 tests and `pnpm test:regression` passed 93 files / 446 tests. These checks do not override the failed cloud delete flow or the unavailable backend. Release requires a fresh synchronized cloud deployment, successful delete persistence, healthy backend responses, and the remaining P0 browser evidence.

@@ -706,3 +706,24 @@ BUG-20260718-007 的“任务恢复、完成和刷新恢复”范围已修复并
 | Root cause | URL policy was duplicated rather than shared; one code path did not include cloud-metadata/link-local address ranges. |
 | Fix | Added `isSafeVideoSource` to `src/lib/api-validator.ts`; it validates platform media paths, rejects traversal segments, and blocks loopback, RFC1918, zero, and link-local targets. Applied it to `/api/video/download`, `/api/video/tools`, `/api/video/extract-frame`, and `/api/video/extract-frames`. |
 | Regression | The focused suite failed first with five failures, then passed: 37 tests across the URL validator, downloader/tool authorization contracts, and new route-wide source-security contract. Cloud route verification remains pending deployment. |
+
+### BUG-20260719-040: Batch video frames were saved outside the media-serving storage contract
+
+| Field | Detail |
+| --- | --- |
+| Severity / module | P1 / video batch frame extraction |
+| Reproduction | Submit `/api/serve-upload/<video>` to `POST /api/video/extract-frames`. The route returned `/api/serve-upload/video-frames/<frame>.jpg` but wrote the frame into `public/api/serve-upload/video-frames`, a directory the serving route does not read. The same route only attempted to read relative video URLs from `public/`, missing persisted cloud media. |
+| Expected | Returned frame URLs and their source videos must resolve through the same persistent, authorization-protected media storage used by `/api/serve-upload`. |
+| Root cause | The route bypassed the shared data-root convention and mixed a Next static directory with API-served URLs. |
+| Fix | `extract-frames` now writes frames to `getServerDataRoot()/uploads/video-frames` and resolves `/api/serve-upload/` and `/uploads/` sources from the persistent data root before its legacy public fallback. |
+| Regression | The new contract was red for output storage, then red for persisted-source reads, and is green with 2 assertions. `pnpm test:api` passes 50 files / 116 tests; `pnpm test:regression` passes 93 files / 446 tests. |
+| Cloud status | Pending synchronization and a signed-in real video extraction run. |
+
+### BUG-20260719-024 cloud recheck update
+
+| Field | Detail |
+| --- | --- |
+| Environment | Coze preview, signed-in Chrome session, user-reported cloud update on 2026-07-19. |
+| Actual | Clicking the only visible `删除` control retained the image and opened `美陈拆解`. `elementsFromPoint` at the delete button center identified the selected-image main toolbar's display-decompose action as the hit target. The cloud DOM did not expose the expected `selected-image-delete` control from the current source. |
+| Evidence | `test-results/screenshots/cloud-selected-delete-before-cca44cd-20260719.png`; `test-results/screenshots/cloud-selected-delete-after-cca44cd-20260719.png`; `test-results/console/cloud-selected-delete-dom-cca44cd-20260719.json`. |
+| Status | Failed cloud P1 acceptance. Do not close this issue until the deployed UI exposes an unoccluded delete action and deletion survives reopening the project. |

@@ -20,6 +20,7 @@
 - Impact: an authenticated user could use video processing as an SSRF primitive against server-local or link-local services. Authentication reduces exposure but is not an adequate network boundary.
 - Fix: a shared `isSafeVideoSource` policy now admits only clean `/uploads/` or `/api/serve-upload/` paths and public HTTP(S) URLs, and all four downloader routes invoke it before network/file work.
 - Verification: red-first focused tests now pass (4 files / 37 assertions). The deployment acceptance probe remains required; no external system was subjected to attack testing.
+- Latest cloud status: the signed-in same-origin loopback probe returned Coze backend `502` before application handling. This is a deployment availability blocker, not a successful SSRF rejection; SEC-019 remains unverified in cloud.
 
 ## 2026-07-19 P1 repair: recharge order authorization and GET side effects
 
