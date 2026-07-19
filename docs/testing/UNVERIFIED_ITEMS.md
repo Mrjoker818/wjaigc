@@ -1,5 +1,10 @@
 # 未验证项目
 
+## 2026-07-19 Coze Next Flight execution blocker
+
+- **P1 / INFRA-20260719-002:** Cloud preview inserts but does not execute Next Flight inline scripts. Authentication, upload, generation, persistence, download, and logout cannot be truthfully verified until Coze deployment/proxy behavior is corrected.
+- **Acceptance prerequisite:** Existing signed-in Chrome must expose `window.__next_f`, React mount markers, a dismissed auth shell, and a real `/api/session` request after reload.
+
 ## 2026-07-19 First-commit router isolation
 
 - **P1 / BUG-20260719-021:** The third source-level remediation requires a cloud Chrome reload after synchronization. Passing evidence requires a real `/api/session` request and a dismissed authentication shell.

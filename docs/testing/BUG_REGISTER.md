@@ -1,5 +1,18 @@
 # 缺陷登记册
 
+## INFRA-20260719-002: Coze preview renders Next Flight scripts without executing them
+
+| Field | Record |
+| --- | --- |
+| Severity | P1 external deployment blocker |
+| Environment | Coze preview after GitHub commit `ea8575f` was confirmed in the served `src_app_page` chunk; authenticated Chrome session. |
+| Stable reproduction | Reload the preview. The six inline scripts containing `self.__next_f.push(...)` are present in the DOM, but `window.__next_f` is `undefined`, document/html/body contain no React mount markers, and no `/api/session` request occurs after nine seconds. |
+| Contrast control | The same source run locally with `next dev` has `window.__next_f` as an object, React markers on document/html/body, a dismissed auth shell, and `/api/session` requests in the same nine-second measurement window. |
+| Root cause | The preview layer is not executing the parser-provided Next Flight inline startup scripts. This occurs before `CanvasApp`, authentication effects, API calls, or provider logic can execute. The response also continues to expose Turbopack development-runtime assets despite `.coze` specifying locked install, build, and `next start`. |
+| Required external remediation | Redeploy/restart the Coze preview using the repository `.coze` `[dev]` build script plus `pnpm run start`, or correct the preview proxy so that the original Next HTML response is parser-executed rather than reinserted as inert DOM. |
+| Evidence | `test-results/screenshots/cloud-p1-flight-scripts-not-executed-after-ea8575f-20260719.png`, matching console and network JSON files. |
+| Release status | P1 remains open. Do not run paid generation, persistence, download, or logout regression until a Chrome reload has a React mount marker, `window.__next_f`, and a real `/api/session` request. |
+
 ## BUG-20260719-021 update 2: remove Next navigation subscriptions from the first client commit
 
 | Field | Record |

@@ -1,5 +1,15 @@
 # 回归测试报告
 
+## 2026-07-19 Cloud Next Flight execution blocker
+
+| Check | Result |
+| --- | --- |
+| Latest source adoption | Passed: the cloud `src_app_page` chunk contains `getInitialProjectId` and no longer imports `next/navigation`. |
+| Cloud client startup | Failed P1: six `self.__next_f.push(...)` scripts exist in DOM but `window.__next_f` is undefined; React has no mount markers and `/api/session` is never requested. |
+| Local contrast | Passed: the exact source under local `next dev` has an active Flight queue, React mount markers, a dismissed auth shell, and `/api/session` requests. |
+| Conclusion | The blocker is the Coze preview script-execution/deployment layer, before application authentication logic. |
+| Required acceptance | After cloud remediation, reload in existing Chrome session and require a Flight queue, React mount marker, hidden auth shell, and `/api/session` request before continuing P0 writes. |
+
 ## 2026-07-19 First-commit router isolation (pending cloud verification)
 
 | Gate | Result |
