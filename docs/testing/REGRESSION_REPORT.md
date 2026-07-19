@@ -467,3 +467,41 @@ This is stronger than a static page check but is **not** a successful P0 generat
 | TypeScript / shell syntax | Passed | `pnpm ts-check` and `bash -n scripts/coze-start.sh` exit successfully. |
 | Supported-secret compatibility | Passed | `doctor-production-auth-contract.test.ts` confirms that `NEXTAUTH_SECRET` is accepted when `WUJIE_AUTH_SECRET` is absent, matching server authentication behavior. |
 | Cloud closure | Pending | The active preview still returned 503 for the saved-credential login after the user-reported configuration repair, so the actual secret is not available to that runtime yet. |
+
+## 2026-07-19 Latest Chrome P0 replay
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Existing authenticated session | Passed at start | Dashboard opened as the existing administrator and showed 17 projects / 185 images. |
+| APImart generation | Passed once | One `doubao-seedream-5-0-lite` 1:1 result rendered in the canvas; source image was 2048x2048. Evidence: `test-results/screenshots/cloud-p0-generation-success-20260719.png`. |
+| Refresh -> reopen project | Failed, P1 | The generated image file loaded, but the canvas restored it as `processing 10%` with a cancel control. Evidence: `test-results/screenshots/cloud-p0-project-reopen-stale-task-20260719.png`. |
+| Logout | Passed | The account menu's `退出登录` action returned the browser to the signed-out entry screen. |
+| Chrome-saved-credential relogin | Failed, P1 | Chrome autofilled the existing credential but the real form submit stayed on the login view with a business failure message. No credential value was recorded. |
+| Cloud sync health | Failed | Console recorded repeated `syncToServer` / `loadProjectsFromServer` 404s and one logout-time fetch failure. |
+| Local auth control | Passed with environment warnings | Focused authentication tests passed 3 files / 7 tests. The local test environment intentionally lacks a database URL, so database-fallback warnings are expected and do not prove cloud storage health. |
+
+This replay adds real browser evidence but does not close the release gate. `BUG-20260719-043` and `BUG-20260719-044` must be closed before the P0 chain can be accepted.
+
+## 2026-07-19 Cloud recovery replay
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Cloud model generation | Passed | A real 1:1 APImart `doubao-seedream-5-0-lite` task completed to a visible 800 x 800 canvas image. |
+| Project save and reopen | Passed | Moving to the workbench raised the project count from 17 to 18; reopening the newest project restored the completed selectable image without a processing frame. Screenshot: `test-results/screenshots/cloud-p0-project-reopen-recovered-20260719.png`. |
+| Image deletion and persistence | Passed | Clicking the visible selected-image `删除` action returned the canvas to empty state. The global asset count fell from 186 to 185 after returning to the workbench. |
+| Logout, saved-credential relogin, refresh | Passed | The live account session signed out, then returned to the administrator dashboard after Chrome submitted its existing saved credential. Reloading the dashboard retained the session. No credential value was recorded. |
+| Native upload | Unverified | The browser-control host blocked `fileChooser.setFiles` before the app received a file; this needs a Playwright-runner or manual-browser replay. |
+| Download file artifact | Unverified | The download selection dialog opened and confirmation closed, but the browser-control host did not expose a download event or file path. |
+
+This replay supersedes the cloud closure portions of BUG-20260719-043 and BUG-20260719-044 for new projects only. It does not satisfy the full release gate because native upload and observable downloaded-file evidence remain outstanding.
+
+## 2026-07-19 Native upload P0 replay and toolbar regression
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Native file chooser upload | Passed through storage | The isolated Playwright account uploaded a 96 x 64 PNG. `/api/save-image` and the served media URL both returned 200. The original browser-control limitation was therefore an automation-host limitation, not an upload-path failure. |
+| Canvas image detection | Test repaired | The P0 test incorrectly queried nonexistent `[data-canvas]`; the rendered canvas uses `[data-canvas-viewport]`. The test now observes the real image element. |
+| Selected-image delete | Failed before source repair | The right workspace panel intercepted the delete control. Trace and screenshot are archived under `test-results/` with archive id `2026-07-19T14-12-33-269Z`. |
+| Local source repair | Passed | Selected-image toolbar now uses `z-[80]` above the workspace `z-[70]`; `canvas-toolbar-floating-windows.test.ts` passes 8/8. |
+
+Cloud rerun is required after this revision is deployed. Generation, refresh recovery, download-file artifact, and logout portions of the same P0 script were intentionally not claimed after the delete assertion failed.

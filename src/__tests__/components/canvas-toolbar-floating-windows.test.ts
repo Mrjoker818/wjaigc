@@ -58,6 +58,11 @@ describe('canvas toolbar floating windows', () => {
     expect(canvasSource).toContain('title="删除"');
   });
 
+  it('keeps selected-image actions above the open right workspace panel', () => {
+    expect(appPageSource).toContain('z-[70] flex transition-all');
+    expect(canvasSource).toContain('className="absolute z-[80] pointer-events-auto"');
+  });
+
   it('keeps the right panel collapse control inside a narrow viewport', () => {
     expect(appPageSource).toContain("panelCollapsed ? '20px' : 'min(480px, 100vw)'");
   });

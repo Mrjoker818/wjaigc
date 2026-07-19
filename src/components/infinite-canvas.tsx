@@ -10789,7 +10789,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
           return (
             <div
-              className="absolute z-50 pointer-events-auto"
+              className="absolute z-[80] pointer-events-auto"
               data-toolbar="edit-mode"
               style={{ left: panelX, top: panelY, transform: 'translate(-50%, -100%)' }}
               onMouseDown={(e) => e.stopPropagation()}

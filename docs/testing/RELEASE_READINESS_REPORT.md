@@ -205,3 +205,19 @@ The Coze health endpoint has recovered: the deployment doctor now passes with `/
 The cloud must restore the prior production authentication secret to preserve the existing password hash. A newly generated replacement secret alone may make the current stored account unverifiable; use an authorized administrator recovery/reset only if the former secret cannot be restored. No source fallback or secret-in-Git change is acceptable.
 
 An additional deployment guard now checks the required production environment before the Coze process starts. It prevents this exact missing-secret state from being presented as a seemingly healthy preview. This is not cloud closure: the currently running preview again returned 503 for the saved-credential login after the reported repair, so release remains **NOT APPROVED** until a synchronized guarded deployment completes the real refresh and login regression.
+
+## 2026-07-19 Current acceptance result
+
+**Decision: NOT APPROVED.** A real Chrome replay began in an existing authenticated administrator session and completed one paid APImart generation, but the required recovery and authentication gates then failed: reopening the saved project displayed the completed image as `processing 10%`, and logout followed by Chrome-autofilled login returned a business login failure. The same session logged repeated project-sync `404` responses.
+
+The source-side authentication contracts pass locally, and the source already contains task-recovery code. These facts do not substitute for cloud acceptance. `BUG-20260719-043` and `BUG-20260719-044` are open P1 blockers; all P0 items requiring another authenticated session remain unverified.
+
+## 2026-07-19 Cloud recovery replay update
+
+**Decision: NOT APPROVED.** The repaired cloud revision now passes real Chrome checks for image generation, project reopen without a stale processing placeholder, selected-image deletion, logout, saved-credential relogin, and refresh-session retention. This closes the live acceptance portions of `BUG-20260719-043` and `BUG-20260719-044` for newly-created projects.
+
+Release remains blocked because the native-upload step was stopped by the Chrome automation host before the app could receive a file, and the browser host did not expose a downloaded-file event after the UI confirmation. These two requirements are **unverified**, not passed. A separate P2 display issue (`加入于 Invalid Date`) was observed in the account menu and is recorded for later triage.
+
+## 2026-07-19 P0 native-upload replay update
+
+**Decision: NOT APPROVED.** A standalone Chromium Playwright run now proves that the native upload path reaches `/api/save-image` and returns a served media URL. It also found a new real P1: the right workspace panel intercepts the visible selected-image delete action. The local source repair and its focused regression test are complete, but the cloud does not yet include this revision. The P0 run must restart from upload after deployment; generation, recovery, download file artifact, and logout cannot be inferred from a run stopped at the failed delete assertion.

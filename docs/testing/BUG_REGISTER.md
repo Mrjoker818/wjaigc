@@ -810,3 +810,57 @@ BUG-20260718-007 的“任务恢复、完成和刷新恢复”范围已修复并
 | Fix | Add `pnpm.overrides.uuid: 11.1.1`, regenerate `pnpm-lock.yaml`, and add the official production audit command to the GitHub Actions quality gate. |
 | Regression | `dependency-security-contract.test.ts` was red before the override and green after it. `pnpm why uuid` resolves `exceljs -> uuid@11.1.1`; the official production audit reports 0 vulnerabilities. |
 | Cloud status | Source/CI control fixed. Coze deployment verification remains part of the release gate. |
+
+## 2026-07-19 Chrome P0 replay: new evidence
+
+### BUG-20260719-043: Saved-credential relogin fails after a successful cloud logout
+
+| Field | Detail |
+| --- | --- |
+| Severity / module | P1 / cloud authentication and session recovery |
+| Environment | Coze preview; Chrome session for the existing administrator account; source `49bf68e`; 2026-07-19 Asia/Shanghai. |
+| Stable reproduction | Start from the live dashboard, open the account menu, click `退出登录`, choose the canvas entry, allow Chrome to autofill the stored administrator credentials, then click `登录`. |
+| Expected | Logout clears the browser session, and submitting the stored valid credentials creates a new authenticated session and returns to the dashboard/canvas. |
+| Actual | Logout reaches the signed-out entry view, but the subsequent form submission remains on the login page with `登录失败，请检查用户名、密码或授权`. The test did not type or record any credential. |
+| Corroborating evidence | The same Chrome console session reports repeated `syncToServer` and `loadProjectsFromServer` `404` responses, plus a logout-time `syncToServer` fetch failure. Evidence: `test-results/screenshots/cloud-p0-saved-credential-login-failed-20260719.png`, `test-results/console/cloud-p0-saved-credential-login-failed-20260719.json`, and `test-results/network/cloud-p0-saved-credential-login-failed-20260719.json`. |
+| Root-cause status | Cloud-only deployment/configuration failure pending response-level/server logs. The current local source authentication contracts pass 7/7, including persisted-secret-after-redeploy behavior; do not replace or weaken authentication code without identifying the cloud response class. |
+| Release impact | P1 open. It blocks all remaining authenticated P0 acceptance work after logout, including upload, download, and repeat generation. |
+| Closure | Capture the actual cloud login response/status, restore the persistent authentication/user-data configuration as necessary, then repeat logout -> Chrome-autofill login -> canvas entry successfully. |
+
+### BUG-20260719-044: Persisted completed image reopens as a processing placeholder
+
+| Field | Detail |
+| --- | --- |
+| Severity / module | P1 / canvas task recovery and project persistence |
+| Environment | Same Coze preview and authenticated administrator session before logout; source `49bf68e`. |
+| Stable reproduction | Generate one APImart image successfully, reload to the dashboard, then reopen the project that contains the generated image. |
+| Expected | A persisted completed result reopens as a normal canvas image with no progress overlay and no active-task mode-switch warning. |
+| Actual | The 2048x2048 generated JPEG is present behind the frame, but the frame remains `isProcessingPlaceholder` visually: `已提交，等待生成`, `processing 10%`, and `取消`. No resume-polling request was observed after reopening. |
+| Evidence | `test-results/screenshots/cloud-p0-project-reopen-stale-task-20260719.png`; the saved generated-image evidence is `test-results/screenshots/cloud-p0-generation-success-20260719.png`. |
+| Root-cause status | The source contains task-id persistence and legacy recovery from `f9a2835`, with green regression coverage. The active preview bundle did not expose the matching recovery marker, so this is deployment-version/state evidence rather than justification for a duplicate source change. |
+| Release impact | P1 open. Project refresh recovery cannot be accepted while a completed result is presented as an active task. |
+| Closure | Deploy a bundle containing the recovery implementation, generate a new image, reload, reopen the project, and prove that the result is selectable without a processing overlay. |
+
+### 2026-07-19 Cloud recovery revalidation
+
+| Bug | Result | Evidence |
+| --- | --- | --- |
+| BUG-20260719-043 | Closed for the current cloud revision | Real Chrome replay: dashboard logout reached the signed-out entry, Chrome's saved credential was submitted without being read or changed, and the dashboard returned as the same administrator. A further browser reload retained the authenticated dashboard. |
+| BUG-20260719-044 | Closed for newly-created projects on the current cloud revision | A real APImart `doubao-seedream-5-0-lite` image completed, project count increased from 17 to 18, and reopening the latest project showed the selectable 800 x 800 image with no processing label, progress value, or cancel action. Screenshot: `test-results/screenshots/cloud-p0-project-reopen-recovered-20260719.png`. |
+| P0 upload | Unverified due to automation-host limitation | The `图片上传` control was invoked on a new blank canvas, but the Chrome control host rejected file-chooser injection with `Not allowed` before an application request was made. This is not recorded as an application upload failure. |
+| P0 download | Partially verified | The selected-image download dialog opened and its confirmation closed normally. The Chrome control host did not emit an observable download event, so downloaded-file existence remains unverified. |
+| P2 observation | Open | The account menu renders `加入于 Invalid Date` for the current administrator. It is outside this P0-only repair scope and needs a separately reproducible data/display investigation. |
+
+### BUG-20260719-045: Right workspace panel intercepts selected-image delete action
+
+| Field | Detail |
+| --- | --- |
+| Severity / module | P1 / infinite canvas selected-image toolbar |
+| Environment | Coze preview, isolated temporary P0 account, Chromium, 2026-07-19. |
+| Stable reproduction | Log in, create a project, use the native file chooser to upload a 96 x 64 PNG, select the uploaded image, then click `selected-image-delete` while the right image-generation workspace is open. |
+| Expected | The visible selected-image delete button receives the click and removes the image. |
+| Actual | Playwright records that the right workspace's `收起面板` button intercepts pointer events for `selected-image-delete`; the delete click times out. Upload itself succeeds: `/api/save-image` and the returned `/api/serve-upload/...png` both return 200. |
+| Root cause | The selected-image toolbar used `z-50`, below the open workspace panel's `z-[70]`. |
+| Fix | Raise the selected-image toolbar to `z-[80]` in `src/components/infinite-canvas.tsx`. Add a source regression contract proving it remains above the workspace panel. |
+| Regression | `pnpm exec vitest run src/__tests__/components/canvas-toolbar-floating-windows.test.ts` passes 8/8. Cloud verification is pending deployment of this source revision. |
+| Evidence | `test-results/screenshots/2026-07-19T14-12-33-269Z__p0-core-P0-real-user-journ-17238--reload-download-and-logout-chromium__test-failed-1.png`, archived trace/video, and `test-results/network/p0-real-user-journey-chromium.json`. |

@@ -273,6 +273,18 @@
 - A clean Webpack production build and Chromium anonymous entry-to-login E2E run passed locally. The earlier port-5014 result is invalid because that port served a stale Turbopack process; the fresh port-5016 run passed.
 - Cloud logged-in upload, paid generation, save/reload, download, and logout remain unverified until this source revision is deployed and the auth overlay is absent.
 
+### 2026-07-19 cloud recovery replay remaining items
+
+- Native image upload is still unverified. The cloud UI accepted the upload-button interaction, but the Chrome automation host rejected file chooser injection before a request was sent to the application. Repeat with a standalone Playwright runner or manual Chrome using a non-sensitive test PNG.
+- Download file creation is still unverified. The selected-image download dialog and confirmation action completed, but the host did not expose a `download` event or downloaded path. Repeat in an automation environment that captures browser downloads and retain the resulting file metadata.
+- The cloud login/reload, new-project result recovery, and selected-image delete paths are no longer listed as unverified: they passed in the real Chrome recovery replay.
+
+### 2026-07-19 native-upload replay correction
+
+- Native image upload is no longer unverified at the storage boundary: a standalone Chromium run used the file chooser, received HTTP 200 from `/api/save-image`, and loaded the returned `/api/serve-upload/...png` URL.
+- The same run found `BUG-20260719-045`: the right workspace panel blocks the selected-image delete click. A local source repair exists but must be deployed and rerun before delete can be accepted.
+- Generated-result download file creation remains unverified because the P0 script stopped at the delete failure before it reached the download stage.
+
 ### 2026-07-19 Production preview follow-up
 
 - The next cloud deployment must run the new locked-install/build script and `next start`, not `next dev`.
