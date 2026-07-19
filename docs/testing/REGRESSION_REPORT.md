@@ -272,3 +272,14 @@ The real cloud result refines BUG-20260719-019: starting a keepalive sync is ins
 | API suite | Passed | `pnpm test:api` completed with 36 test files and 89 tests passing. |
 | Local doctor | Passed with expected environment warnings | 2 passed, 10 warnings, 0 failed; the warnings identify absent local release secrets, provider keys, database, and object storage rather than production acceptance. |
 | Cloud P0/P1 acceptance | Unverified | The current cloud preview still reports a development runtime (`next-devtools` and Turbopack HMR in the document). Do not use these local results as cloud-release proof. |
+
+## 2026-07-19 Cloud resynchronization authentication check
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Preview health endpoint | Passed | `pnpm run doctor -- --url=<preview>` received HTTP 200 from `/api/auth/me`; doctor reported 3 passed, 9 local-environment warnings, 0 failed. |
+| Preview runtime | Failed release prerequisite | The cloud HTML still includes `next-devtools`, Turbopack HMR, and Coze Console Bridge scripts. The production preview configuration from `4c0015b` is not active. |
+| Authenticated Chrome reload | Failed (P1) | The full canvas rendered behind `正在验证身份...`; the unique overlay remained visible after an explicit hidden-state wait, so no write or paid action was attempted. |
+| Evidence | Archived | `test-results/screenshots/cloud-p1-auth-overlay-after-4c0015b-20260719.png` and `test-results/console/cloud-p1-auth-overlay-after-4c0015b-20260719.json`. The captured warnings are from the injected Console Bridge, not an application JavaScript error. |
+
+The synchronized source alone is insufficient. The cloud preview must restart using the `[dev]` build script and `pnpm run start`; only then may the authenticated P0 generation, persistence, download, and logout flows continue.
