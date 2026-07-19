@@ -221,3 +221,7 @@ Release remains blocked because the native-upload step was stopped by the Chrome
 ## 2026-07-19 P0 native-upload replay update
 
 **Decision: NOT APPROVED.** A standalone Chromium Playwright run now proves that the native upload path reaches `/api/save-image` and returns a served media URL. It also found a new real P1: the right workspace panel intercepts the visible selected-image delete action. The local source repair and its focused regression test are complete, but the cloud does not yet include this revision. The P0 run must restart from upload after deployment; generation, recovery, download file artifact, and logout cannot be inferred from a run stopped at the failed delete assertion.
+
+## 2026-07-19 post-push cloud health check
+
+**Decision: NOT APPROVED.** After GitHub `main` advanced to `213d61c`, the Coze preview health check returned HTTP 502 for `/api/auth/me`; a direct read-only retry returned the same result. This blocks authenticated P0 replay before application behavior can be observed. Evidence: `test-results/network/cloud-health-502-after-213d61c-20260719.json`.

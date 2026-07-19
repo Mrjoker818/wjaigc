@@ -864,3 +864,13 @@ BUG-20260718-007 的“任务恢复、完成和刷新恢复”范围已修复并
 | Fix | Raise the selected-image toolbar to `z-[80]` in `src/components/infinite-canvas.tsx`. Add a source regression contract proving it remains above the workspace panel. |
 | Regression | `pnpm exec vitest run src/__tests__/components/canvas-toolbar-floating-windows.test.ts` passes 8/8. Cloud verification is pending deployment of this source revision. |
 | Evidence | `test-results/screenshots/2026-07-19T14-12-33-269Z__p0-core-P0-real-user-journ-17238--reload-download-and-logout-chromium__test-failed-1.png`, archived trace/video, and `test-results/network/p0-real-user-journey-chromium.json`. |
+
+### 2026-07-19 post-push deployment health check
+
+| Field | Detail |
+| --- | --- |
+| Source state | GitHub `main` contains `213d61c`. |
+| Cloud observation | `pnpm run doctor -- --url=<preview>` failed because `/api/auth/me` returned HTTP 502. A direct read-only GET repeated the same 502 with an empty body. |
+| Evidence | `test-results/network/cloud-health-502-after-213d61c-20260719.json`. |
+| Classification | Deployment/backend or proxy availability blocker. The request fails before the application can establish a session, so no code change is inferred from this observation. |
+| Required closure | Restore a healthy Coze preview and rerun the complete isolated-account P0 script starting from upload. |
