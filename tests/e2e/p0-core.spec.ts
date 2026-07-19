@@ -55,6 +55,21 @@ test.describe('P0 real user journey', () => {
 
       const canvasImage = page.locator('main img, [data-canvas] img').last();
       await canvasImage.click();
+      await canvasImage.hover();
+      const hoverDelete = page.locator('button[title="删除"]');
+      await expect(hoverDelete).toHaveCount(1);
+      await hoverDelete.click();
+      await expect.poll(() => page.locator('main img, [data-canvas] img').count(), { timeout: 10_000 }).toBeLessThanOrEqual(beforeUpload);
+
+      // Upload once more so the movement and keyboard-delete checks remain
+      // independent from the hover-toolbar deletion regression above.
+      const secondFileChooser = page.waitForEvent('filechooser');
+      await page.getByRole('button', { name: '图片上传' }).click();
+      await (await secondFileChooser).setFiles({ name: 'p0-real-upload-second.png', mimeType: 'image/png', buffer: uploadedImage });
+      await expect.poll(() => page.locator('main img, [data-canvas] img').count(), { timeout: 30_000 }).toBeGreaterThan(beforeUpload);
+
+      const secondCanvasImage = page.locator('main img, [data-canvas] img').last();
+      await secondCanvasImage.click();
       await page.mouse.move(600, 420);
       await page.mouse.down();
       await page.mouse.move(660, 460, { steps: 8 });
