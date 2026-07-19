@@ -1,5 +1,16 @@
 # 安全测试报告
 
+## 2026-07-19 P0 repair: recovery operation authorization
+
+### SEC-006 / P0: Public fallback key protected destructive recovery operations
+
+- Location: `src/app/api/recover-images/route.ts`
+- Evidence: the route accepted any authenticated identity and a repository-visible literal recovery key before allowing scan, recovery, and S3 synchronization. Targeted `filename` input also reached recovery file handling without a traversal guard.
+- Impact: a normal signed-in user with the known key could initiate administrative restoration work and potentially access unintended filesystem paths.
+- Fix: recovery now requires an administrator role for both GET and POST. The legacy/shared key path was removed, and targeted recovery rejects absolute, drive-qualified, null-byte, and traversal paths.
+- Verification: `src/__tests__/api/recover-images-admin-contract.test.ts` failed first (3 failures) and passes after the repair. Combined with the high-risk authorization contract: 2 files / 4 assertions passed; targeted ESLint and TypeScript checks passed.
+- Deployment status: fixed locally, cloud verification pending. Do not mark this issue closed until an administrator and a non-administrator session are exercised against the deployed route.
+
 ## 2026-07-18 生产依赖复扫
 
 `pnpm audit --prod --json --registry=https://registry.npmjs.org` 已归档至 `test-results/npm-audit-prod-final-20260718.json`：`0 critical / 0 high / 5 moderate / 1 low`。本轮升级了 Next、相关 AWS SDK、OpenAI/Coze SDK 等生产依赖，并对间接依赖使用精确覆盖；对应版本锁定由 `dependency-security-contract.test.ts` 保护。

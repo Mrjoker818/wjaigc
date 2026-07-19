@@ -1,5 +1,19 @@
 # 缺陷登记册
 
+## BUG-20260719-025: Image recovery endpoint accepted a public fallback key
+
+| Field | Record |
+| --- | --- |
+| Severity | P0, fixed locally; cloud verification pending |
+| Module | `POST` / `GET` `/api/recover-images` |
+| Environment | Source commit `ec149a3`, 2026-07-19 Asia/Shanghai. |
+| Stable reproduction | The route required any authenticated user but then accepted the literal fallback recovery key `wujie-recovery-2024`. A caller with that public repository value could run scan, recovery, or S3 synchronization; `filename` was also passed to file operations without a traversal guard. |
+| Expected | Only an authenticated administrator or trusted internal administrator request can use recovery operations, and a targeted filename remains inside the recovery root. |
+| Root cause | Progressive API authentication was mistaken for administrator authorization, then supplemented with an insecure static shared key. |
+| Fix | Remove the fallback/key-based path. Both handlers now require `userRole === 'admin'`; targeted recovery rejects absolute, drive-qualified, null-byte, and traversal paths before file access. |
+| Regression | `recover-images-admin-contract.test.ts` was red with 3 failures before the change and green afterward. It verifies two administrator guards, absence of the public key/body key, and a traversal rejection contract. It ran with the high-risk authorization contract: 2 files / 4 assertions passed; targeted ESLint and `pnpm ts-check` passed. |
+| Cloud acceptance | Pending deployment of the next commit. A non-admin authenticated session must receive 403; the administrator session must receive 400 for `filename=../x`, without starting a recovery. |
+
 ## BUG-20260719-023: Logout synchronization records a transient client fetch error
 
 | Field | Record |

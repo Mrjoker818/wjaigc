@@ -17,7 +17,6 @@ import { getImageSourceUrl } from '@/lib/image-source-map';
 import { execSql } from '@/lib/db-client';
 import path from 'path';
 import fs from 'fs';
-import { validateApiInputs } from '@/lib/api-validator';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 interface MissingImage {
@@ -36,6 +35,16 @@ interface ScanResult {
   recoverable: number;
   unrecoverable: number;
   details: MissingImage[];
+}
+
+function isSafeRecoveryPath(value: string): boolean {
+  const normalized = value.replace(/\\/g, '/');
+  if (!normalized || normalized.includes('\0') || normalized.startsWith('/') || /^[a-zA-Z]:\//.test(normalized)) {
+    return false;
+  }
+
+  const resolved = path.posix.normalize(normalized);
+  return resolved !== '.' && resolved !== '..' && !resolved.startsWith('../');
 }
 
 async function scanMissingImages(): Promise<ScanResult> {
@@ -167,27 +176,13 @@ async function recoverImage(localPath: string): Promise<{ success: boolean; meth
 export async function POST(request: NextRequest) {
   const authResult = await requireApiAuthOrReject(request);
   if (authResult instanceof NextResponse) return authResult;
+  if (authResult.userRole !== 'admin') {
+    return NextResponse.json({ error: 'Administrator session required' }, { status: 403 });
+  }
   try {
     const { searchParams } = new URL(request.url);
     const action = searchParams.get('action') || 'scan';
     const targetFilename = searchParams.get('filename');
-    
-    // Verify admin access
-    const body = await request.json().catch(() => ({}));
-    // 输入校验
-    const _validationError = validateApiInputs(body, {
-        imageUrl: 'optionalImageUrl'
-    });
-    if (_validationError) {
-      return NextResponse.json({ error: _validationError }, { status: 400 });
-    }
-
-    const adminKey = body.adminKey || searchParams.get('adminKey');
-    
-    // Simple admin verification (using environment variable or first admin user)
-    if (adminKey !== process.env.ADMIN_RECOVERY_KEY && adminKey !== 'wujie-recovery-2024') {
-      return NextResponse.json({ error: 'Unauthorized. Provide adminKey.' }, { status: 401 });
-    }
     
     if (action === 'scan') {
       const scanResult = await scanMissingImages();
@@ -298,6 +293,9 @@ export async function POST(request: NextRequest) {
 
     if (action === 'recover') {
       if (targetFilename) {
+        if (!isSafeRecoveryPath(targetFilename)) {
+          return NextResponse.json({ error: 'Invalid recovery filename' }, { status: 400 });
+        }
         // Recover specific file
         const result = await recoverImage(targetFilename);
         return NextResponse.json({ filename: targetFilename, ...result });
@@ -340,6 +338,9 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   const authResult = await requireApiAuthOrReject(request);
   if (authResult instanceof NextResponse) return authResult;
+  if (authResult.userRole !== 'admin') {
+    return NextResponse.json({ error: 'Administrator session required' }, { status: 403 });
+  }
   return NextResponse.json({
     info: 'Image Recovery API',
     usage: {
@@ -348,6 +349,6 @@ export async function GET(request: NextRequest) {
       recoverOne: 'POST /api/recover-images?action=recover&filename=xxx',
       syncS3: 'POST /api/recover-images?action=sync-s3 (download all S3 images to local)',
     },
-    note: 'Requires adminKey parameter for authentication',
+    note: 'Requires an administrator session',
   });
 }
