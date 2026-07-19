@@ -239,6 +239,7 @@
 - Selected-image deletion is **failed**, not unverified: the real Chrome click on `删除` opened `美陈拆解` and left the image in place. The deployed DOM shows only the occluded hover delete control; it did not expose the source's direct `selected-image-delete` action. A synchronized deployment plus delete -> reopen-project proof is required.
 - Public-media authorization and video SSRF behavior are **unverified** in the latest preview because the Coze backend proxy returned `502` for all three same-origin probes. No inference about the source repair is made from a gateway error.
 - Batch video extraction is **unverified** until a signed-in user extracts frames from a persisted uploaded or generated video and opens every returned frame URL.
+- The newest signed-in generation attempt also returned HTTP 502 before the provider was contacted. This prevents creation of a test image, so selection, move, resize, delete, persistence, and download cannot be exercised in this cloud run.
 
 - `pnpm run doctor -- --url=https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9.dev.coze.site/` reported `/api/auth/me` as HTTP 502 and exited 1.
 - Independent read-only probes for `/`, `/api/auth/me`, and `/api/session` each returned HTTP 502. Evidence: `test-results/network/cloud-health-502-20260719.json`.

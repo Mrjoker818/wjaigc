@@ -421,3 +421,12 @@ The synchronized source alone is insufficient. The cloud preview must restart us
 | Component and library regression suite | Passed | `pnpm test:regression`: 93 files / 446 tests. |
 | Cloud selected-image deletion | Failed | A real click on `删除` opened `美陈拆解` and retained the image. Hit testing shows the main action toolbar covers the delete center. Evidence: `test-results/console/cloud-selected-delete-dom-cca44cd-20260719.json`. |
 | Cloud public-media and video validation probes | Unverified: backend unavailable | Same-origin probes for protected media and a loopback video URL each returned `502 {"detail":"无法连接到后端服务"}`. This neither proves nor disproves the deployed source fix. Evidence: `test-results/network/cloud-security-acceptance-blocked-cca44cd-20260719.json`. |
+
+## 2026-07-19 Cloud P0 generation availability recheck
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Signed-in image generation | Failed before model completion | APImart `豆包5.0Lite`, 1:1, x1 created a `submitting 5%` placeholder and then produced no image. Console recorded `[生成] API HTTP错误: 502`. |
+| Project synchronization | Failed | The cloud client recorded repeated `loadProjectsFromServer` and `syncToServer` 502 responses. |
+| Deployment health gate | Failed | `pnpm run doctor -- --url=<preview>`: 2 passed / 9 warnings / 1 failed; `/api/auth/me` returned 502. |
+| Consequence | Blocked | No business-level claim is made for delete, save/reload, download, public-media access, or video extraction because the preview backend did not reach the application. Evidence: `test-results/console/cloud-generate-502-a656fed-20260719.json`. |

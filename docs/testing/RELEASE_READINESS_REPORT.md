@@ -179,3 +179,7 @@ Release remains **not approved**: cloud synchronisation and the real logged-in P
 **Decision: Not approved.** The latest signed-in Chrome acceptance run found a live P1 deletion failure: the image delete control opens `美陈拆解` because the selected-image main toolbar receives the click. In the same run, public-media and video-security probes received Coze backend `502` responses, so their cloud behavior is unverified rather than passed.
 
 The source now also repairs batch video-frame storage with red-to-green regression coverage. Local `pnpm test:api` passed 50 files / 116 tests and `pnpm test:regression` passed 93 files / 446 tests. These checks do not override the failed cloud delete flow or the unavailable backend. Release requires a fresh synchronized cloud deployment, successful delete persistence, healthy backend responses, and the remaining P0 browser evidence.
+
+## 2026-07-19 Cloud backend availability regression
+
+**Decision remains: Not approved.** A newly authorized APImart image-generation run now fails before model completion with HTTP 502, while the same preview's project-sync calls and `/api/auth/me` health probe also return 502. This is recorded as P0 `BUG-20260719-041`. It prevents any credible cloud acceptance of image manipulation, project persistence, downloads, public-media isolation, or video extraction.

@@ -719,6 +719,20 @@ BUG-20260718-007 的“任务恢复、完成和刷新恢复”范围已修复并
 | Regression | The new contract was red for output storage, then red for persisted-source reads, and is green with 2 assertions. `pnpm test:api` passes 50 files / 116 tests; `pnpm test:regression` passes 93 files / 446 tests. |
 | Cloud status | Pending synchronization and a signed-in real video extraction run. |
 
+### BUG-20260719-041: Coze preview backend returned 502 for core authenticated operations
+
+| Field | Detail |
+| --- | --- |
+| Severity / module | P0 / cloud deployment availability |
+| Environment | Coze preview `https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9.dev.coze.site/`; signed-in Chrome session; GitHub `main` at `a656fed`. |
+| Stable reproduction | Open the cloud canvas, select APImart `豆包5.0Lite`, submit one 1:1 test generation. The UI creates a `submitting 5%` placeholder and then removes it without a result. `pnpm run doctor -- --url=<preview>` also receives HTTP 502 from `/api/auth/me`. |
+| Expected | Authenticated session, project synchronization, and image generation reach the deployed application and return business responses. |
+| Actual | Browser console records `[生成] API HTTP错误: 502`; project load and sync repeatedly report 502. The doctor health probe fails with `deployment-url: /api/auth/me responded 502`. No canvas image is created. |
+| Evidence | `test-results/screenshots/cloud-generate-502-a656fed-20260719.png`; `test-results/console/cloud-generate-502-a656fed-20260719.json`; doctor output from 2026-07-19. |
+| Root-cause status | Deployment/runtime unavailable before business behavior can be observed. This record does not attribute the 502 to a source defect without backend logs. |
+| Release impact | Blocks all cloud P0 validation that requires projects or model tasks: upload persistence, selection/delete, save/reload, download, and video extraction. |
+| Next action | Restore the Coze backend proxy/application service, verify `/api/auth/me` returns a valid authenticated response, then repeat the exact real-browser flow. |
+
 ### BUG-20260719-024 cloud recheck update
 
 | Field | Detail |
