@@ -104,3 +104,12 @@ P1 `BUG-20260718-007` 的任务恢复、真实生成和项目刷新恢复已通�
 发布结论仍为 **不通过**：恢复失败退款、跨重启取消退款、原生文件上传/下载、独立账号完整 P0 链路与跨浏览器完整核心流程仍无可审计证据；同时云端项目列表稳定报告 `DashboardView` key 与 hydration Console Error（P2），不满足“没有未处理 Console Error”的发布门禁。
 
 新增 P1 `BUG-20260718-009`：所有 `submitOnly` 图像请求在修复前绕过 `consumeCredits`，真实云端任务已成功但未生成模型规则对应的消费流水。本地已通过先红后绿回归修复，尚未部署验证；因此发布结论继续为 **不通过**。
+# 2026-07-19 Release Gate Update
+
+**Decision: Not approved.** The cloud development preview still fails the authenticated P0 entry gate. A successful diagnostic session API call cannot replace a real browser flow when the UI remains blocked by `正在验证身份...`.
+
+No P0 upload, image generation, persistence, download, or logout result is claimed for this resumed run. Release remains blocked by `BUG-20260718-016` until a fresh Chrome reload removes the overlay and the full P0 flow has archived evidence.
+
+## 2026-07-19 Pending Deployment Repair
+
+The source now contains a targeted `.coze` preview-runtime repair: build with `pnpm run build`, then run with `pnpm run start`. A regression contract was first observed failing against the old `next dev` configuration and is now green. Local lint, TypeScript, and production build gates are green. The release decision remains **not approved** until this configuration is synchronised to Coze and verified in the real logged-in browser.

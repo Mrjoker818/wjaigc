@@ -115,3 +115,11 @@
 | 依赖漏洞扫描 | 镜像审计端点不存在，官方审计端点超时 | P1 | 在可信网络/registry恢复后归档 `pnpm audit --prod --json` 结果 |
 | 云端匿名工作流拒绝 | 已验证 | 未带凭据的 `POST /api/workflow/execute` 已返回 `401 {"error":"Authentication required"}` | 无需解除；纳入后续全量 API 回归 |
 | 退出后的无控制台错误 | 部分验证 | 真实已登录会话退出后归档 Console 未见 `/api/activity` 或 401；但 `DashboardView` key 警告仍在，且尚无独立浏览器 Network trace | P2 / 发布门槛 | 修复 `DashboardView` key 警告，并以独立测试账号完成退出 Network/Console 多浏览器回归 |
+## 2026-07-19 Resume Blocker
+
+| Item | Status | Required evidence to clear |
+| --- | --- | --- |
+| BUG-20260718-016 cloud authentication initialization | P1 blocking | On a fresh cloud preview reload, capture a network request to `/api/session`, disappearance of the auth overlay, and an interactable canvas. |
+| P0 image upload, canvas manipulation, paid generation, save/reload, download, logout | Unverified in this run | Run the real logged-in Chrome flow after the authentication overlay is gone, preserving screenshot, trace, console, and network artifacts. |
+
+| Coze production-preview runtime change | Pending cloud verification | Synchronise the `.coze` change, verify the preview reports a production build/server rather than HMR development runtime, then repeat the authenticated entry test. |

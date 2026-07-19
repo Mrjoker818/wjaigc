@@ -8,8 +8,8 @@ appliedPatches = [
 ]
 
 [dev]
-build = [ "bash", "scripts/build-with-python-check.sh" ]
-run = [ "pnpm", "run", "dev" ]
+build = [ "pnpm", "run", "build" ]
+run = [ "pnpm", "run", "start" ]
 validate = [ "bash", "./scripts/validate.sh" ]
 
 [deploy]

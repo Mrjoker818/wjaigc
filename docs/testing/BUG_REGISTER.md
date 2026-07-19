@@ -241,6 +241,25 @@
 | 根因 / 修复文件 / 修复方案 |  |
 | 新增测试 / 回归结果 |  |
 
+## 2026-07-19 Resume Verification
+
+| Field | Evidence |
+| --- | --- |
+| Bug ID / severity | BUG-20260718-016 / P1 |
+| Environment | Coze development preview `https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9.dev.coze.site/`; logged-in Chrome session; source baseline `1713ab6` |
+| Reproduction | Reload the preview, wait on the visible `正在验证身份...` overlay, then inspect the rendered DOM and same-origin session response. |
+| Expected | Authentication initialization sends `/api/session`, then removes the overlay and permits canvas interaction. |
+| Actual | The complete SSR canvas is present behind the overlay. After a 12 second state wait, the overlay remains visible. CDP same-origin `/api/session` returns `200`, `success: true`, and a user, but the reload network trace contains no application `/api/session` request. |
+| Evidence | `test-results/screenshots/cloud-p0-auth-overlay-resumed-20260719.png`; `test-results/console/cloud-p0-auth-overlay-resumed-20260719.json` |
+| Scope decision | No business-code change in this run. The evidence does not yet isolate a source-level defect: the session endpoint and bundled UI are reachable, while the preview client does not execute the authentication initialization fetch. |
+| Regression status | Failed cloud P0 gate. Upload, generation, save/reload, download, and logout were not attempted because the overlay blocks user interaction. |
+
+### 2026-07-19 Deployment Runtime Fix Pending Cloud Verification
+
+The root-cause investigation found that `.coze` was introduced in `dc5983d` and explicitly ran the Coze preview with `pnpm run dev`. Its build phase only installed dependencies and did not create production output. The failing preview was the only environment that combined this development runtime with the three Coze-injected bridge scripts.
+
+The minimal fix changes the `[dev]` runtime to `pnpm run build` followed by `pnpm run start`, matching the existing `[deploy]` server mode. `src/__tests__/scripts/coze-production-preview-contract.test.ts` was written first and failed against the old configuration, then passed after the change. `pnpm lint --quiet`, `pnpm ts-check`, and `pnpm run build` also passed. This is not a cloud closure: BUG-20260718-016 remains P1 until the synchronised preview completes a real Chrome reload without the authentication overlay.
+
 ## 2026-07-18 云端生成恢复与积分补偿
 
 | 字段 | 记录 |

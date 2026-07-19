@@ -204,3 +204,20 @@
 | GREEN | 同步被限制为 8 秒、一次重试；认证启动不再进行重复等待。定向 3 文件 / 5 用例通过。 |
 | 全量门禁 | `pnpm test` 127 文件 / 515 用例、`pnpm ts-check`、`pnpm lint --quiet`、`pnpm build`（97 页面）退出码均为 0。 |
 | 云端 | 待同步后重新刷新已登录 Chrome，遮罩必须在最多两次有界同步后关闭，并保留项目/会话可用性。 |
+# 2026-07-19 Cloud Resume Regression Addendum
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Logged-in preview reload | Failed | Authentication overlay remains after a 12 second condition wait. |
+| Same-origin session API | Passed only as a diagnostic | CDP fetch returns `200`, `success: true`, and a user. It is not a substitute for the UI workflow. |
+| Application session request during reload | Failed | Captured network trace has no application `/api/session` request. |
+| P0 upload through logout | Blocked | The visible overlay prevents real user interaction. No paid generation was submitted. |
+
+Artifacts: `test-results/screenshots/cloud-p0-auth-overlay-resumed-20260719.png` and `test-results/console/cloud-p0-auth-overlay-resumed-20260719.json`.
+
+## 2026-07-19 Deployment Runtime Repair (Pending Cloud Sync)
+
+- Red: `src/__tests__/scripts/coze-production-preview-contract.test.ts` failed because the `[dev]` section used `pnpm run dev` and no production build.
+- Green: `.coze` now uses `pnpm run build` and `pnpm run start` for the cloud preview; the contract test passes.
+- Gates: `pnpm lint --quiet`, `pnpm ts-check`, and `pnpm run build` passed. The build produced 97 routes and retained three non-failing Next NFT tracing warnings for follow-up.
+- Required next evidence: a cloud sync, a fresh logged-in Chrome reload with no auth overlay, then the complete real P0 workflow.
