@@ -33,16 +33,18 @@ describe('authentication bootstrap project sync', () => {
     expect(source).toContain('signal: AbortSignal.timeout(PROJECT_SYNC_TIMEOUT_MS)');
   });
 
-  it('does not restart authentication bootstrap when the search parameter object identity changes', () => {
+  it('does not subscribe the auth bootstrap to Next router state during first hydration', () => {
     const source = readFileSync(path.resolve(process.cwd(), 'src/app/page.tsx'), 'utf8');
     const authInitializer = source.indexOf('const initCurrentUser = async () => {');
     const authEffectEnd = source.indexOf('const [currentUser, setCurrentUser]', authInitializer);
     const authEffect = source.slice(authInitializer, authEffectEnd);
 
-    expect(source).toContain("const initialProjectIdRef = useRef(searchParams.get('projectId'));");
+    expect(source).not.toContain("from 'next/navigation'");
+    expect(source).toContain('function getInitialProjectId(): string | null {');
+    expect(source).toContain('const initialProjectIdRef = useRef(getInitialProjectId());');
     expect(authEffect).toContain('const projectId = initialProjectIdRef.current;');
     expect(authEffect).toContain('}, [setImages]);');
-    expect(authEffect).not.toContain('}, [searchParams, setImages]);');
+    expect(authEffect).not.toContain('searchParams');
   });
 
   it('makes a no-project authenticated session interactive before client cache hydration', () => {

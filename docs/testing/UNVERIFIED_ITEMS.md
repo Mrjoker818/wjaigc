@@ -1,5 +1,10 @@
 # 未验证项目
 
+## 2026-07-19 First-commit router isolation
+
+- **P1 / BUG-20260719-021:** The third source-level remediation requires a cloud Chrome reload after synchronization. Passing evidence requires a real `/api/session` request and a dismissed authentication shell.
+- **P1 / BUG-20260719-019:** Authorized generation, persistence, and logout/relogin remain paused until the authentication acceptance check passes.
+
 ## 2026-07-19 Root-layout hydration isolation
 
 - **P1 / BUG-20260719-021:** The server-rendered root layout has passed local development and production regression but requires a fresh cloud Chrome reload after synchronization. Success requires the authentication shell to disappear and `/api/session` to be requested.

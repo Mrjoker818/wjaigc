@@ -1,5 +1,15 @@
 # 回归测试报告
 
+## 2026-07-19 First-commit router isolation (pending cloud verification)
+
+| Gate | Result |
+| --- | --- |
+| Cloud recheck after root-layout isolation | Failed P1: the shell was still visible after nine seconds; all application chunks loaded, but no `/api/session` request was observed. |
+| Regression first | The auth contract failed while the page imported `next/navigation`; it passes after removing the unused router hooks and reading `projectId` once from `window.location.search`. |
+| Local dev-browser coverage | Passed 4/4 in Chromium, Firefox, WebKit, and mobile Chromium against `next dev`. |
+| Full local gates | Passed: targeted 9-test contract, TypeScript, lint, production build (97 routes), and full Vitest. |
+| Cloud acceptance | Unverified until this revision is synchronized and a logged-in Chrome reload both requests `/api/session` and removes the auth shell. |
+
 ## 2026-07-19 Root-layout hydration isolation (pending cloud verification)
 
 | Gate | Result |

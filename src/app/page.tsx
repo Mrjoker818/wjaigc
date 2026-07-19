@@ -1,7 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect, Suspense } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { getResumedTaskPollingOutcome, RESUMED_TASK_MAX_POLL_ATTEMPTS, shouldStartResumedTaskPolling } from '@/lib/resumed-task-polling';
 import { hasDirectVideoPollingTimedOut } from '@/lib/video-task-polling';
 import { applyTaskIdsToProcessingPlaceholders, shouldPersistProcessingPlaceholder } from '@/lib/canvas-task-placeholders';
@@ -61,6 +60,12 @@ import { fetchSessionPayload } from '@/lib/auth-session';
 
 type ThemeStyle = 'gold' | 'monochrome';
 type ActivePanel = 'generate' | 'video' | 'chat';
+
+function getInitialProjectId(): string | null {
+  if (typeof window === 'undefined') return null;
+  return new URLSearchParams(window.location.search).get('projectId');
+}
+
 function recordUserData(input: {
   userId?: string;
   area: 'images' | 'chat' | 'projects' | 'uploads' | 'layers' | 'exports' | '3d';
@@ -250,11 +255,7 @@ function CanvasApp() {
   const [appMode, setAppMode] = useState<'canvas' | 'node' | 'workflow-hub' | 'dashboard'>('canvas');
   const [pendingModeSwitch, setPendingModeSwitch] = useState<'node' | 'workflow-hub' | 'dashboard' | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
-  useRouter();
-  const searchParams = useSearchParams();
-  // Authentication must not restart when Next refreshes the search-params object.
-  // Project changes inside the workspace use loadProjectById directly.
-  const initialProjectIdRef = useRef(searchParams.get('projectId'));
+  const initialProjectIdRef = useRef(getInitialProjectId());
 
   const [showProjectData, setShowProjectData] = useState(false);
   const [navigateToImageId, setNavigateToImageId] = useState<string | null>(null);
@@ -4604,13 +4605,5 @@ function CanvasApp() {
 }
 
 export default function Home() {
-  return (
-    <Suspense fallback={
-      <div className="fixed inset-0 flex items-center justify-center bg-[#0a0a0a]">
-        <div className="w-10 h-10 border-2 border-[#d4af37] border-t-transparent rounded-full animate-spin" />
-      </div>
-    }>
-      <CanvasApp />
-    </Suspense>
-  );
+  return <CanvasApp />;
 }

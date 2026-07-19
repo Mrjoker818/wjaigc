@@ -1,5 +1,16 @@
 # 缺陷登记册
 
+## BUG-20260719-021 update 2: remove Next navigation subscriptions from the first client commit
+
+| Field | Record |
+| --- | --- |
+| Environment | Coze preview, logged-in Chrome session, source commit `623e2d5` deployed. |
+| Stable reproduction | The root-layout isolation was present, but after reload the auth shell remained visible for nine seconds. Client chunks loaded and no runtime exception or loading failure occurred; no `/api/session` request was sent. |
+| Narrowed cause | The remaining first-render dependencies were an unused `useRouter()` call and `useSearchParams()` subscription inside `CanvasApp`. In the injected dev preview, that Next navigation subscription can prevent the client tree from committing, so no effect can begin the session request. |
+| Fix | Remove both Next navigation hooks from this initial path. `getInitialProjectId()` reads `window.location.search` exactly once into a ref; the first render remains the same auth shell on server and client. The obsolete `Suspense` wrapper is removed with the router subscription. |
+| Regression | Red-first auth contract now requires no `next/navigation` import, one-time browser query parsing, and an auth effect without `searchParams`. Targeted contract, TypeScript, lint, `next dev` Playwright 4/4, optimized build, and full Vitest passed locally. |
+| Cloud acceptance | Pending synchronization. Chrome must show an `/api/session` network request and a hidden auth shell before P0 generation, persistence, or logout tests are resumed. |
+
 ## BUG-20260719-021 update: cloud client does not start auth effect after shell-only deployment
 
 | Field | Record |
