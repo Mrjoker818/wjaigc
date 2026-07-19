@@ -9097,7 +9097,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             return (
               <div
                 key={image.id}
-                className={`absolute group z-10 ${isSelected ? 'z-20' : ''} ${editMode !== 'none' && editImageId !== image.id ? 'opacity-30' : ''}`}
+                className={`absolute group z-10 ${isSelected ? 'z-[60]' : ''} ${editMode !== 'none' && editImageId !== image.id ? 'opacity-30' : ''}`}
                 style={{
                   left: (resizingImage === image.id && resizePreview ? resizePreview.x : image.x) + (isDragging ? dragOffset.x : 0) + (isGroupDragging ? groupDragOffset.x : 0) + (isInDraggedGenGroup ? genGroupDragOffset.x : 0),
                   top: (resizingImage === image.id && resizePreview ? resizePreview.y : image.y) + (isDragging ? dragOffset.y : 0) + (isGroupDragging ? groupDragOffset.y : 0) + (isInDraggedGenGroup ? genGroupDragOffset.y : 0),

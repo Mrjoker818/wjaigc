@@ -50,6 +50,7 @@ describe('canvas toolbar floating windows', () => {
 
   it('keeps image hover quick actions above the main selected-image toolbar', () => {
     expect(canvasSource).toContain('absolute -top-9 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-0.5');
+    expect(canvasSource).toContain("className={`absolute group z-10 ${isSelected ? 'z-[60]' : ''}");
     expect(canvasSource).toContain('title="删除"');
   });
 
