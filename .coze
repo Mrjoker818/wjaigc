@@ -8,8 +8,8 @@ appliedPatches = [
 ]
 
 [dev]
-build = [ "pnpm", "install", "--frozen-lockfile" ]
-run = [ "pnpm", "run", "dev" ]
+build = [ "bash", "./scripts/coze-preview-build.sh" ]
+run = [ "pnpm", "run", "start" ]
 validate = [ "bash", "./scripts/validate.sh" ]
 
 [deploy]

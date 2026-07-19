@@ -253,3 +253,13 @@ Conclusion: this is an external preview availability blocker, not evidence for a
 | Local quality gates | Passed | Focused test: 3/3; `pnpm test:regression`: 92 files / 436 tests; `pnpm ts-check`; `pnpm lint --quiet`; `pnpm build`: 97 routes. |
 
 The real cloud result refines BUG-20260719-019: starting a keepalive sync is insufficient when logout invalidates the server session concurrently. The follow-up source fix is pending cloud deployment; the bug remains P1 until the same real-browser flow keeps the 184-asset count after relogin.
+
+## 2026-07-19 Production-preview bootstrap check
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Preview runtime contract | Passed | Red first against the `next dev` configuration; green after requiring locked install plus build and `next start`. |
+| Locked install and production build | Passed | `pnpm install --frozen-lockfile` and `pnpm run build` completed; build generated 97 routes. |
+| Focused P1 regression | Passed | 12 Vitest assertions for session timeout, bootstrap ordering, deployment configuration, and logout ordering. |
+| Anonymous production login entry | Passed | Playwright 4/4 across Chromium, Firefox, WebKit, and mobile Chromium. |
+| Cloud acceptance | Unverified | The cloud preview must synchronize this revision; the overlay and the project-persistence flow require real Chrome evidence. |

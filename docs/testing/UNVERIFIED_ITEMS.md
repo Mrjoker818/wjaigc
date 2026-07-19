@@ -173,4 +173,10 @@
 - A clean Webpack production build and Chromium anonymous entry-to-login E2E run passed locally. The earlier port-5014 result is invalid because that port served a stale Turbopack process; the fresh port-5016 run passed.
 - Cloud logged-in upload, paid generation, save/reload, download, and logout remain unverified until this source revision is deployed and the auth overlay is absent.
 
+### 2026-07-19 Production preview follow-up
+
+- The next cloud deployment must run the new locked-install/build script and `next start`, not `next dev`.
+- Required Chrome proof remains: reload the authenticated session, confirm the auth overlay is hidden, verify dashboard or canvas interaction, and repeat logout/relogin project persistence.
+- The local four-browser production result does not replace those cloud acceptance checks.
+
 After the reported cloud update, the preview root still served the same `95618` byte development document with `next-devtools`, HMR, and all three injected bridge scripts. A fresh logged-in Chrome reload kept `正在验证身份...` visible after the 12-second condition wait, although the canvas controls had rendered behind it. Evidence: `test-results/screenshots/cloud-p0-auth-overlay-after-user-sync-20260719.png` and `test-results/console/cloud-p0-auth-overlay-after-user-sync-20260719.json`. No P0 upload or paid generation was attempted.

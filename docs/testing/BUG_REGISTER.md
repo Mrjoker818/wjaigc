@@ -342,6 +342,14 @@ The minimal fix changes the `[dev]` runtime to `pnpm run build` followed by `pnp
 
 The subsequent Coze startup evidence reported `sh: 1: next: not found` while the `[dev]` section ran `pnpm run build` followed by `pnpm run start`. This invalidates the preceding runtime change as a deployment remedy: a preview build command cannot assume dependencies already exist. The corrected contract now installs the locked dependencies first with `pnpm install --frozen-lockfile`, then starts the development preview with `pnpm run dev`; the `[deploy]` section remains the only production `build` + `start` path. The revised contract test and a real `pnpm install --frozen-lockfile` completed successfully on the source workspace. Cloud adoption and an authenticated Chrome reload remain required before closing BUG-20260718-016.
 
+### 2026-07-19 Preview runtime follow-up
+
+The cloud home document was fetched again and the active `src_app_page_tsx_1gecvfk._.js` chunk contains the current `fetchSessionPayload()` and no-project `setAuthChecked(true)` code. The source is therefore deployed; the failing preview still runs `next dev` with Coze editor, Console Bridge, History Bridge, Next DevTools, and Turbopack/HMR injection.
+
+The corrected minimal deployment fix replaces the two separate dev commands with `scripts/coze-preview-build.sh`. It performs `pnpm install --frozen-lockfile` and then `pnpm run build`; the `[dev]` run command is `pnpm run start`. The configuration test was red before this change and green afterward. On the source workspace, the locked install, production build, `ts-check`, `lint --quiet`, and 12 focused auth/config/logout tests passed. The production server also passed the anonymous login-entry E2E in Chromium, Firefox, WebKit, and mobile Chromium (4/4).
+
+This is not a cloud closure. After synchronization, the existing Chrome session must reload without the authentication overlay and then repeat the project-persistence logout/relogin flow before BUG-20260718-016 or BUG-20260719-019 can close.
+
 ### BUG-20260719-017: Existing administrator rejected after redeploy when only a persisted auth secret exists
 
 | Field | Detail |
