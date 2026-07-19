@@ -1,5 +1,16 @@
 # 安全测试报告
 
+## 2026-07-19 P1 repair: recharge order authorization and GET side effects
+
+### SEC-017 / P1: Recharge order endpoint allowed anonymous and cross-user reads
+
+- Location: `GET /api/recharge/[orderId]`.
+- Evidence: the handler performed an order-ID-only database query and returned order metadata and `payLink` without session or ownership validation. Its QR fallback also wrote `payment_config` during a GET request.
+- Impact: order-status and amount disclosure to anyone who obtains an ID, payment-link disclosure, and a state-changing endpoint vulnerable to cross-site invocation.
+- Fix: require a valid session before database work; bind non-admin reads to `user_id`; retain explicit administrator access; never persist configuration from GET.
+- Verification: red-first ownership contract covers anonymous-before-DB rejection, owner-scoped SQL, and no GET write. Full API suite passed 47 files / 107 tests; regression suite passed 93 files / 442 tests; TypeScript and production build passed.
+- Deployment status: fixed locally; cloud verification pending. Verify 401/404/owner/admin behavior against the synchronized preview before closing the finding.
+
 ## 2026-07-19 P1 repair: professional upscale authorization
 
 ### SEC-016 / P1: Anonymous callers could trigger remote, local, and AI upscale processing

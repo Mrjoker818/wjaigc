@@ -9,6 +9,10 @@
 - The same session logged repeated `[Sync] loadProjectsFromServer: server returned 502` messages. The project may be visible from local state, but server persistence and reopen recovery are not accepted until that API succeeds during the deletion acceptance flow.
 - Next cloud acceptance sequence: reload, select the one-image test project, click the new selected-toolbar delete control, verify zero matching image elements and no decompose panel, then reopen the project and verify the deletion persisted.
 
+### New local P1 repair pending deployment
+
+- `BUG-20260719-037` protects `GET /api/recharge/[orderId]` from anonymous and cross-user reads and removes a payment-config write from GET. It requires cloud evidence for anonymous 401, foreign-user 404, owner page success, and administrator order review.
+
 - `BUG-20260719-035` (professional image upscale authorization) is fixed locally. Cloud acceptance must show anonymous `POST /api/image/upscale-pro` rejected before parsing a supplied URL, while an authenticated toolbar upscale can persist a result.
 
 ### Latest cloud probe after the reported synchronization

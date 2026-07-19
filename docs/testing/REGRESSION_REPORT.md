@@ -8,6 +8,12 @@
 - Full local verification: `pnpm test:api` passed 46 files / 104 tests; `pnpm test:regression` passed 93 files / 442 tests; `pnpm ts-check` and `pnpm build` passed. `pnpm lint` has 0 errors and 927 pre-existing warnings.
 - Cloud acceptance is pending a new deployment and must include deletion followed by project reopen. The observed project-sync 502 keeps persistence recovery unverified.
 
+## 2026-07-19 Recharge order authorization regression (local pass; cloud pending)
+
+- Red-first coverage caught three defects: anonymous order reads reached the database, non-admin SQL lacked `user_id`, and a GET-side QR fallback wrote payment configuration.
+- `recharge-order-ownership.test.ts` now proves anonymous requests fail before database use, normal users use an owner-constrained query, and owned order reads do not persist payment configuration.
+- Full local verification: API 47 files / 107 tests, component/library regression 93 files / 442 tests, TypeScript and production build passed. Lint remains 0 errors / 927 existing warnings.
+
 ## 2026-07-19 Current local regression: passed, cloud acceptance pending
 
 ### Latest local authorization regression

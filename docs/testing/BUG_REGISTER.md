@@ -1,4 +1,17 @@
 # 缺陷登记册
+## BUG-20260719-037: Recharge order detail endpoint exposed order data without ownership checks
+
+| Field | Record |
+| --- | --- |
+| Severity | P1, fixed locally; cloud verification pending |
+| Module | `GET /api/recharge/[orderId]` |
+| Stable reproduction | A request with any order ID reached `SELECT * FROM wujie_recharge_orders WHERE id = $1` without a session check, then returned amount, payment status, expiry, note, and payment link. When the configured direct link was absent, the same GET request decoded a QR URL and wrote payment configuration. |
+| Expected | Anonymous callers receive 401 before database/configuration access. Ordinary users can read only orders where `user_id` matches their session; administrators retain read access. GET must not mutate payment configuration. |
+| Root cause | The recharge page route was considered a public payment page even though normal order creation and status APIs already require a signed-in user and ownership. |
+| Fix | Authenticate before order parsing or database access; scope ordinary-user SQL by `user_id`; keep administrator lookup explicit; remove the payment-config write from the GET fallback. |
+| Regression | Red-first `recharge-order-ownership.test.ts` failed for anonymous access, missing ownership SQL, and a GET-side configuration write, then passed. Full API: 47 files / 107 tests; component/library regression: 93 files / 442 tests; TypeScript and production build passed. |
+| Cloud acceptance | Pending: anonymous order read must be 401, a different signed-in user must receive 404, the owner must load their recharge page, and an administrator must retain review access. |
+
 ## BUG-20260719-036: Selected-image delete activates the overlapping display-decompose action
 
 | Field | Record |

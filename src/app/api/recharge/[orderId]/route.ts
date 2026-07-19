@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { execSql, isDatabaseConfigured } from '@/lib/db-client';
-import { dbGetSystemSetting, dbSetSystemSetting } from '@/lib/db-storage';
+import { dbGetSystemSetting } from '@/lib/db-storage';
 import { decodeQrFromUrl, isPaymentLink } from '@/lib/qr-decode';
+import { getSessionUser } from '@/lib/server-auth';
 
 /**
  * GET /api/recharge/[orderId]
@@ -12,6 +13,11 @@ export async function GET(
   { params }: { params: Promise<{ orderId: string }> }
 ) {
   try {
+    const user = await getSessionUser(request);
+    if (!user) {
+      return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
+    }
+
     const { orderId } = await params;
     if (!orderId) {
       return NextResponse.json({ success: false, error: '缺少订单号' }, { status: 400 });
@@ -25,10 +31,12 @@ export async function GET(
     }
 
     // Get order
-    const result = await execSql(
-      'SELECT * FROM wujie_recharge_orders WHERE id = $1',
-      [orderId]
-    );
+    const result = user.role === 'admin'
+      ? await execSql('SELECT * FROM wujie_recharge_orders WHERE id = $1', [orderId])
+      : await execSql(
+        'SELECT * FROM wujie_recharge_orders WHERE id = $1 AND user_id = $2',
+        [orderId, user.id],
+      );
     if (result.rows.length === 0) {
       return NextResponse.json({ success: false, error: '订单不存在' }, { status: 404 });
     }
@@ -43,7 +51,6 @@ export async function GET(
     // Get admin payment config (note + pay link for payment)
     let note = '';
     let payLink = '';
-    let configSaved = false;
     try {
       const dbVal = await dbGetSystemSetting('payment_config');
       if (dbVal) {
@@ -69,14 +76,6 @@ export async function GET(
               if (decoded && isPaymentLink(decoded)) {
                 payLink = decoded;
                 console.log(`[recharge] Auto-decoded ${method} pay link: ${decoded.substring(0, 30)}...`);
-                // Save back to config for future use
-                const updatedConfig = { ...config };
-                if (method === 'wechat') updatedConfig.wechatPayLink = decoded;
-                else updatedConfig.alipayPayLink = decoded;
-                if (!configSaved) {
-                  await dbSetSystemSetting('payment_config', JSON.stringify(updatedConfig));
-                  configSaved = true;
-                }
               }
             } catch (decodeErr) {
               console.warn(`[recharge] Auto-decode failed for ${method}:`, decodeErr instanceof Error ? decodeErr.message : decodeErr);
