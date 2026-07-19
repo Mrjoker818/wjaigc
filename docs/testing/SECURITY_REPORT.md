@@ -1,5 +1,16 @@
 # 安全测试报告
 
+## 2026-07-19 P1 repair: video post-production request authentication
+
+### SEC-009 / P1: Anonymous callers could initiate FFmpeg processing
+
+- Location: `src/app/api/video/tools/route.ts`
+- Evidence: the public handler accepted action and video URL payloads, then downloaded media and invoked FFmpeg without an identity check.
+- Impact: anonymous callers could consume CPU, disk, temporary storage, and outbound bandwidth through video conversion operations.
+- Fix: apply the shared session/internal-request guard before JSON parsing.
+- Verification: red-first authorization contract passes after the repair; high-risk API and media-toolbar regression contracts also passed (3 files / 13 assertions). ESLint error check and TypeScript checks passed.
+- Deployment status: fixed locally, cloud verification pending.
+
 ## 2026-07-19 P1 repair: SVG tracing request authentication
 
 ### SEC-008 / P1: Anonymous callers could start SVG vectorization work

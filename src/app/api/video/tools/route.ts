@@ -8,6 +8,7 @@ import { tmpdir } from 'os';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { getServerDataRoot } from '@/lib/server-data-root';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 const execFileAsync = promisify(execFile);
 
@@ -148,6 +149,9 @@ async function createVideoThumbnail(videoPath: string, outputPath: string): Prom
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
+  const authResult = await requireApiAuthOrReject(req);
+  if (authResult instanceof NextResponse) return authResult;
+
   try {
     const body = await req.json();
     const { action, videoUrl, audioUrl, videoUrls, volume = 1.0 } = body;

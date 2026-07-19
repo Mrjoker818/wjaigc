@@ -1,5 +1,19 @@
 # 缺陷登记册
 
+## BUG-20260719-028: Video post-production accepted unauthenticated FFmpeg work
+
+| Field | Record |
+| --- | --- |
+| Severity | P1, fixed locally; cloud verification pending |
+| Module | `POST /api/video/tools` |
+| Environment | Source commit `c09bd79`, 2026-07-19 Asia/Shanghai. |
+| Stable reproduction | The POST handler parsed processing instructions and could download video, create temporary files, and invoke FFmpeg without checking request identity. |
+| Expected | Every video post-production action requires a signed-in user session or verified internal request before parsing the job body. |
+| Root cause | The route independently enforced URL and numeric constraints but omitted the shared API authentication gate. |
+| Fix | Add `requireApiAuthOrReject(req)` before the handler's `try` block and body parsing. |
+| Regression | `video-tools-auth-contract.test.ts` failed before the change and passes afterward. It ran with high-risk route and media-toolbar contracts: 3 files / 13 assertions passed; ESLint error check and `pnpm ts-check` passed. |
+| Cloud acceptance | Pending deployment. An anonymous request must return 401; an authenticated canvas user must retain video extraction/compression UI behavior. |
+
 ## BUG-20260719-027: SVG tracing accepted unauthenticated expensive requests
 
 | Field | Record |
