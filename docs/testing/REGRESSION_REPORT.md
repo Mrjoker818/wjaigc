@@ -1,5 +1,17 @@
 # 回归测试报告
 
+## 2026-07-19 Current local regression: passed, cloud acceptance pending
+
+| Gate | Result |
+| --- | --- |
+| Source baseline | `04927ee fix: require authentication for video downloads` on `origin/main`. It includes the selected-image delete stacking repair and five new high-risk API authorization regressions. |
+| API suite | Passed: `pnpm test:api` completed 41 files / 96 assertions. |
+| Component and library regression | Passed: `pnpm test:regression` completed with exit code 0. |
+| Type safety | Passed: `pnpm ts-check`. |
+| Test-environment limitation | Local regression has no production database configuration. The server-auth fallback tests intentionally emit missing-database logs while exercising their degraded path; this is not cloud database-health evidence. |
+| Cloud acceptance | Pending: the preview still served the older selected-image container class (`z-20`) after the previous update. It must synchronize `04927ee` before deletion, recovery authorization, local-service authorization, SVG, video tool, and video-download checks can be closed. |
+| Release decision | **Not approved**. P0 upload/download evidence, cloud P1 acceptance, production database/storage/model health, and full multi-browser core E2E remain incomplete. |
+
 ## 2026-07-19 Cloud P0 authentication regression: passed
 
 | Check | Result |
