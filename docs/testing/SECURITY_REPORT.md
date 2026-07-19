@@ -1,5 +1,16 @@
 # 安全测试报告
 
+## 2026-07-19 P1 repair: local image service startup authorization
+
+### SEC-007 / P1: Unauthenticated request could trigger a local image-service start
+
+- Location: `src/app/api/image/start-services/route.ts`
+- Evidence: the public POST handler reached the fixed `spawn('iopaint', ...)` operation without checking a session or role. No application caller uses this endpoint, so normal image editing is unaffected by restricting it.
+- Impact: an unauthenticated caller could consume server process and model resources or repeatedly trigger operational work.
+- Fix: require an authenticated request, then enforce the administrator role before the first service health check or process spawn.
+- Verification: the new contract test failed before the guard and passes after it. It ran with the existing high-risk API route contract: 2 files / 2 assertions passed; targeted ESLint and TypeScript checks passed.
+- Deployment status: fixed locally, cloud verification pending.
+
 ## 2026-07-19 P0 repair: recovery operation authorization
 
 ### SEC-006 / P0: Public fallback key protected destructive recovery operations

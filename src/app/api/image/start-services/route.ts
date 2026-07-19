@@ -3,11 +3,18 @@ import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import { IOPAINT_MODELS_DIR } from '@/lib/image-tools/config';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
 // Auto-start IOPaint and check Upscayl services
 export async function POST(request: NextRequest) {
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult instanceof NextResponse) return authResult;
+  if (authResult.userRole !== 'admin') {
+    return NextResponse.json({ error: 'Administrator session required' }, { status: 403 });
+  }
+
   const results: Record<string, { started: boolean; error?: string }> = {};
 
   // 1. Check and start IOPaint
@@ -71,7 +78,7 @@ export async function POST(request: NextRequest) {
               error: 'IOPaint 启动中，请稍后再试。如果持续失败，请检查 iopaint 是否已安装: pip install iopaint',
             };
           }
-        } catch (startErr) {
+        } catch {
           results.iopaint = {
             started: false,
             error: '无法启动 IOPaint，请确认已安装: pip install iopaint',

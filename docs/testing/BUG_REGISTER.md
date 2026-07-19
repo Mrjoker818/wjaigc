@@ -1,5 +1,19 @@
 # 缺陷登记册
 
+## BUG-20260719-026: Local image-service startup route lacked authorization
+
+| Field | Record |
+| --- | --- |
+| Severity | P1, fixed locally; cloud verification pending |
+| Module | `POST /api/image/start-services` |
+| Environment | Source commit `9a925a1`, 2026-07-19 Asia/Shanghai. |
+| Stable reproduction | The route accepted any POST request and could run `spawn('iopaint', ...)` to start a local AI service. Repository search found no user-facing caller, so it is an operations-only endpoint. |
+| Expected | Only an administrator session or authenticated trusted internal administrator request may initiate a server-local service. |
+| Root cause | The route was introduced as a health/start convenience endpoint without routing through the established API authentication layer. |
+| Fix | Add `requireApiAuthOrReject`, then enforce `userRole === 'admin'` before any health check or subprocess start. |
+| Regression | `image-start-services-auth-contract.test.ts` failed before the change and passes afterward. Together with the high-risk route contract: 2 files / 2 assertions passed; targeted ESLint and `pnpm ts-check` passed. |
+| Cloud acceptance | Pending deployment. Verify unauthenticated=401, ordinary user=403, administrator=200/503 without exposing process details. |
+
 ## BUG-20260719-025: Image recovery endpoint accepted a public fallback key
 
 | Field | Record |
