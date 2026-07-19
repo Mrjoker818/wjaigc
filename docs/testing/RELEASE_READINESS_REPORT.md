@@ -183,3 +183,5 @@ The source now also repairs batch video-frame storage with red-to-green regressi
 ## 2026-07-19 Cloud backend availability regression
 
 **Decision remains: Not approved.** A newly authorized APImart image-generation run now fails before model completion with HTTP 502, while the same preview's project-sync calls and `/api/auth/me` health probe also return 502. This is recorded as P0 `BUG-20260719-041`. It prevents any credible cloud acceptance of image manipulation, project persistence, downloads, public-media isolation, or video extraction.
+
+Local production control evidence is positive: the current source starts under `pnpm run start` and serves `/api/auth/me` with HTTP 200. The cloud outage is therefore not treated as proof that the source cannot serve API routes; Coze runtime/proxy logs remain required to identify the failed deployment component.

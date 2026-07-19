@@ -429,4 +429,5 @@ The synchronized source alone is insufficient. The cloud preview must restart us
 | Signed-in image generation | Failed before model completion | APImart `豆包5.0Lite`, 1:1, x1 created a `submitting 5%` placeholder and then produced no image. Console recorded `[生成] API HTTP错误: 502`. |
 | Project synchronization | Failed | The cloud client recorded repeated `loadProjectsFromServer` and `syncToServer` 502 responses. |
 | Deployment health gate | Failed | `pnpm run doctor -- --url=<preview>`: 2 passed / 9 warnings / 1 failed; `/api/auth/me` returned 502. |
+| Local production control | Passed | The same source started through `pnpm run start` on port 5000, and `GET /api/auth/me` returned HTTP 200. The local anonymous `POST /api/generate` remains intentionally unusable without configured production authentication. |
 | Consequence | Blocked | No business-level claim is made for delete, save/reload, download, public-media access, or video extraction because the preview backend did not reach the application. Evidence: `test-results/console/cloud-generate-502-a656fed-20260719.json`. |

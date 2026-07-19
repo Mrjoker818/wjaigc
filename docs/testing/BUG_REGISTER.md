@@ -730,6 +730,7 @@ BUG-20260718-007 的“任务恢复、完成和刷新恢复”范围已修复并
 | Actual | Browser console records `[生成] API HTTP错误: 502`; project load and sync repeatedly report 502. The doctor health probe fails with `deployment-url: /api/auth/me responded 502`. No canvas image is created. |
 | Evidence | `test-results/screenshots/cloud-generate-502-a656fed-20260719.png`; `test-results/console/cloud-generate-502-a656fed-20260719.json`; doctor output from 2026-07-19. |
 | Root-cause status | Deployment/runtime unavailable before business behavior can be observed. This record does not attribute the 502 to a source defect without backend logs. |
+| Local production control | On the same `a656fed` source tree, `pnpm run start` reached `Ready` on port 5000 and `GET /api/auth/me` returned HTTP 200 with `{"success":true,"user":null}`. This rules out a general Next production-route startup failure in the audited source; it does not replace cloud verification. |
 | Release impact | Blocks all cloud P0 validation that requires projects or model tasks: upload persistence, selection/delete, save/reload, download, and video extraction. |
 | Next action | Restore the Coze backend proxy/application service, verify `/api/auth/me` returns a valid authenticated response, then repeat the exact real-browser flow. |
 
