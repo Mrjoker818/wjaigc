@@ -2,6 +2,8 @@
 
 ## 2026-07-19 Current authoritative unverified state
 
+- `BUG-20260719-035` (professional image upscale authorization) is fixed locally. Cloud acceptance must show anonymous `POST /api/image/upscale-pro` rejected before parsing a supplied URL, while an authenticated toolbar upscale can persist a result.
+
 ### Latest cloud probe after the reported synchronization
 
 - Source of record is `c702d0125748d894486b3be1e824d4f8a4b10591` (`origin/main`). It contains the selected-image stacking correction from `ec149a3`, whose expected selected-image class is `z-[60]`.

@@ -8,8 +8,7 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionUser } from '@/lib/server-auth';
-import { getInternalRequestHeaders } from '@/lib/api-auth';
+import { getInternalRequestHeaders, requireApiAuthOrReject } from '@/lib/api-auth';
 
 // 允许最长5分钟（ONNX放大+AI精修可能较慢）
 export const maxDuration = 300;
@@ -948,6 +947,9 @@ async function persistResult(remoteUrl: string): Promise<string> {
 }
 
 export async function POST(request: NextRequest) {
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult instanceof NextResponse) return authResult;
+
   try {
     const body = await request.json() as UpscaleProRequest;
     // 输入校验

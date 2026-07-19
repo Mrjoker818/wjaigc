@@ -18,6 +18,7 @@ const highRiskRouteFiles = [
   'src/app/api/image-to-3d/auto-multi-view/route.ts',
   'src/app/api/image-to-3d/poll-post-process/route.ts',
   'src/app/api/image/color-adjust/route.ts',
+  'src/app/api/image/upscale-pro/route.ts',
   'src/app/api/knowledge/extract-text/route.ts',
   'src/app/api/layered-decompose/route.ts',
   'src/app/api/logo-skill/route.ts',

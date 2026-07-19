@@ -2,6 +2,11 @@
 
 ## 2026-07-19 Current local regression: passed, cloud acceptance pending
 
+### Latest local authorization regression
+
+- `BUG-20260719-035`: the professional upscale endpoint previously parsed an unauthenticated request and could initiate remote/local/AI processing. A red-first extension to `high-risk-route-auth-contract.test.ts` failed with exactly that route, then passed after the shared mandatory authorization check was made the first handler operation.
+- Focused high-risk contract, `pnpm lint --quiet`, and `pnpm ts-check` pass. The full regression suite must be repeated before release approval; cloud acceptance remains blocked on the preview serving the latest source bundle.
+
 | Gate | Result |
 | --- | --- |
 | Source baseline | Code baseline `6a89591 fix: protect export and media processing routes`. It includes the selected-image delete stacking repair, signed persistence, project archive protection, and the expanded high-risk API authorization regressions. |

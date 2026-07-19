@@ -1,4 +1,17 @@
 # 缺陷登记册
+## BUG-20260719-035: Professional image upscale accepted unauthenticated expensive work
+
+| Field | Record |
+| --- | --- |
+| Severity | P1, fixed locally; cloud verification pending |
+| Module | `POST /api/image/upscale-pro` |
+| Stable reproduction | Adding only this route to the shared high-risk authorization contract failed with the path as the sole missing authorization boundary. The handler called `request.json()` before any session or signed internal-request validation. |
+| Expected | Before accepting an image URL or starting cloud/local/AI upscale processing, require a signed-in user or verified internal request. |
+| Root cause | An unused `getSessionUser` import suggested an intended check, but no authentication call occurred in the handler. |
+| Fix | Replace the unused import with `requireApiAuthOrReject` and invoke it before the `try` block and `request.json()`. |
+| Regression | The red-first shared contract failed with exactly `src/app/api/image/upscale-pro/route.ts`, then passed. Targeted ESLint and TypeScript checks passed. |
+| Cloud acceptance | Pending. An anonymous request must receive 401 before media processing; an authenticated image-toolbar upscale must complete and persist without a 401. |
+
 ## Deployment observation: 2026-07-19
 
 - The logged-in Coze Chrome preview was inspected again after a reported synchronization. Its visible feature entries and zero captured console errors show that it is functioning, but its selected image still renders `absolute group z-10 z-20` instead of the `z-[60]` required by the delete-toolbar correction in `ec149a3`.

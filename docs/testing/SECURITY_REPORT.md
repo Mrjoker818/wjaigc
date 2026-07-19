@@ -1,5 +1,16 @@
 # 安全测试报告
 
+## 2026-07-19 P1 repair: professional upscale authorization
+
+### SEC-016 / P1: Anonymous callers could trigger remote, local, and AI upscale processing
+
+- Location: `POST /api/image/upscale-pro`.
+- Evidence: the route parsed the untrusted body before any authentication check, then could fetch a supplied image URL, invoke cloud upscalers or fal.ai, run local ONNX/Sharp work, trigger AI enhancement, and persist a result. The unused `getSessionUser` import did not protect the handler.
+- Impact: anonymous CPU/GPU/provider spending, remote-fetch abuse, and unowned output persistence.
+- Fix: use `requireApiAuthOrReject` as the first handler operation, before body parsing or processing.
+- Verification: the shared high-risk authorization contract was extended with this route, failed first with exactly this missing path, then passed. `pnpm lint --quiet` and `pnpm ts-check` passed.
+- Deployment status: fixed locally; cloud verification pending. Anonymous requests must return 401 before parsing `imageUrl`; a signed-in image-toolbar upscale must still finish and persist normally.
+
 ## 2026-07-19 P0 repair: project archive export authorization
 
 ### SEC-015 / P0: Anonymous callers could download source and full project archives
