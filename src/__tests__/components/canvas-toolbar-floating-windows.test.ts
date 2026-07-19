@@ -48,9 +48,13 @@ describe('canvas toolbar floating windows', () => {
     expect(canvasSource).toContain('onMouseDown={(event) => event.stopPropagation()}');
   });
 
-  it('keeps image hover quick actions above the main selected-image toolbar', () => {
+  it('keeps the selected-image delete action reachable without colliding with hover actions', () => {
     expect(canvasSource).toContain('absolute -top-9 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-0.5');
     expect(canvasSource).toContain("className={`absolute group z-10 ${isSelected ? 'z-[60]' : ''}");
+    expect(canvasSource).toContain("hoverToolbarImageId === image.id && editMode === 'none' && !isSelected &&");
+    expect(canvasSource).toContain('data-testid="selected-image-delete"');
+    expect(canvasSource).toContain('const deletingIds = new Set(selectedIds);');
+    expect(canvasSource).toContain('applyImageChanges(images.filter(i => !deletingIds.has(i.id)));');
     expect(canvasSource).toContain('title="删除"');
   });
 

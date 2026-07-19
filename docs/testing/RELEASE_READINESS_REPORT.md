@@ -2,6 +2,10 @@
 
 ## Current authoritative status - 2026-07-19
 
+### Latest cloud interaction result
+
+The latest logged-in Chrome probe confirms that the preview has advanced past the old `z-20` canvas bundle: the selected image renders `z-[60]`. It nevertheless fails the real selected-image deletion flow because the visible delete control is covered by the selected-image toolbar and opens `美陈拆解` instead. The local repair has passed red-first, API, regression, TypeScript, lint-error, and production-build checks, but it is not cloud-accepted yet. Repeated project-sync 502 logs also prevent project-persistence acceptance. Release status remains **not approved**.
+
 ### Latest cloud deployment probe
 
 The latest source baseline is `c702d01`. After the reported cloud synchronization, a real logged-in Chrome probe found the app interactive and free of captured console errors, with the restored feature entries visible. However, the selected image still has `absolute group z-10 z-20`, while the source fix requires `z-[60]`. The preview is therefore not running the required delete regression fix. Release status remains **not approved**; no destructive canvas check or security acceptance may be credited to this stale bundle.

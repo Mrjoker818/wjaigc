@@ -8338,6 +8338,17 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     onForceSave?.();
   };
 
+  const deleteSelectedImages = () => {
+    const deletingIds = new Set(selectedIds);
+    applyImageChanges(images.filter(i => !deletingIds.has(i.id)));
+    setSelectedIds(new Set());
+    selectImage(null);
+    if (editImageId && deletingIds.has(editImageId)) {
+      setEditImageId(null);
+      setEditMode('none');
+    }
+  };
+
   const imageContextMenuItems = selectedIds.size > 1 ? [
     ...(selectedIds.size === 2 ? [{ label: '图片对比', shortcut: '', action: () => {
       const selImgs = images.filter(i => selectedIds.has(i.id));
@@ -9539,7 +9550,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                   </div>
                 )}
                 {/* Hover toolbar - quick actions on image hover */}
-                {hoverToolbarImageId === image.id && editMode === 'none' && !dragTarget && !resizingImage && !compareSelecting && (
+                {hoverToolbarImageId === image.id && editMode === 'none' && !isSelected && !dragTarget && !resizingImage && !compareSelecting && (
                   <div
                     className="absolute -top-9 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-0.5 px-1 py-0.5 rounded-lg shadow-lg"
                     style={{ fontSize: `${Math.max(10, 12 / zoom)}px` }}
@@ -15023,6 +15034,21 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                   </div>
                 ))}
                 {/* 折叠/展开按钮 */}
+                <div className={`w-px h-4 ${isMonochrome ? 'bg-gray-200' : 'bg-white/[0.06]'}`} />
+                <button
+                  type="button"
+                  data-testid="selected-image-delete"
+                  aria-label="删除"
+                  title="删除"
+                  onClick={(e) => { e.stopPropagation(); deleteSelectedImages(); }}
+                  className={`flex items-center justify-center p-1.5 rounded-full transition-all ${
+                    isMonochrome
+                      ? 'text-red-500 hover:bg-red-50'
+                      : 'text-red-400 hover:bg-red-900/30 hover:text-red-300'
+                  }`}
+                >
+                  <Trash2 size={14} />
+                </button>
                 {hasMoreActions && (
                   <button
                     onClick={(e) => { e.stopPropagation(); setToolbarExpanded(!toolbarExpanded); }}

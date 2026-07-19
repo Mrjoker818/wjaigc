@@ -1,5 +1,13 @@
 # 回归测试报告
 
+## 2026-07-19 Selected-image delete regression (local pass; cloud fail before repair)
+
+- Real cloud reproduction: the logged-in preview loaded the `z-[60]` selected-image class, but clicking its visible delete button opened `美陈拆解` and did not remove the image.
+- Root-cause evidence: the delete element's center was covered by the selected-image toolbar; `elementFromPoint` returned the display-decompose control.
+- Red-first regression: `pnpm vitest run src/__tests__/components/canvas-toolbar-floating-windows.test.ts` failed before the repair and passed after it.
+- Full local verification: `pnpm test:api` passed 46 files / 104 tests; `pnpm test:regression` passed 93 files / 442 tests; `pnpm ts-check` and `pnpm build` passed. `pnpm lint` has 0 errors and 927 pre-existing warnings.
+- Cloud acceptance is pending a new deployment and must include deletion followed by project reopen. The observed project-sync 502 keeps persistence recovery unverified.
+
 ## 2026-07-19 Current local regression: passed, cloud acceptance pending
 
 ### Latest local authorization regression

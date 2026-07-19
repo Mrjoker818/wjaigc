@@ -2,6 +2,13 @@
 
 ## 2026-07-19 Current authoritative unverified state
 
+### Superseding cloud observation after the latest reported synchronization
+
+- The live logged-in Chrome preview now renders the selected image with `z-[60]`; the previous stale-`z-20` deployment observation is superseded.
+- A real destructive interaction still failed: clicking the unique selected-image delete button left the image in place and opened `美陈拆解`. DOM hit testing showed the overlapping selected-image toolbar received the click. This is registered as P1 `BUG-20260719-036` and is fixed only in the current local workspace pending a fresh cloud synchronization.
+- The same session logged repeated `[Sync] loadProjectsFromServer: server returned 502` messages. The project may be visible from local state, but server persistence and reopen recovery are not accepted until that API succeeds during the deletion acceptance flow.
+- Next cloud acceptance sequence: reload, select the one-image test project, click the new selected-toolbar delete control, verify zero matching image elements and no decompose panel, then reopen the project and verify the deletion persisted.
+
 - `BUG-20260719-035` (professional image upscale authorization) is fixed locally. Cloud acceptance must show anonymous `POST /api/image/upscale-pro` rejected before parsing a supplied URL, while an authenticated toolbar upscale can persist a result.
 
 ### Latest cloud probe after the reported synchronization

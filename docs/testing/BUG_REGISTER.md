@@ -1,4 +1,19 @@
 # 缺陷登记册
+## BUG-20260719-036: Selected-image delete activates the overlapping display-decompose action
+
+| Field | Record |
+| --- | --- |
+| Severity | P1, fixed locally; cloud verification pending |
+| Module | Infinite canvas selected-image toolbar |
+| Environment | Logged-in Coze Chrome preview, 2026-07-19 Asia/Shanghai; source baseline `44c7f8f`. |
+| Stable reproduction | Open the existing one-image test project, select the red-cube image, then click the unique visible `删除` button. The image remains and the `美陈拆解` panel opens instead. |
+| Expected | The selected-image delete affordance removes the selected image and saves the project. It must not invoke any image-processing action. |
+| Actual | `document.elementFromPoint()` at the semantic delete button's center resolves to the selected-image toolbar's `美陈拆解` button. The selected image has `z-[60]`, but the two independently rendered toolbars occupy the same anchor position. |
+| Root cause | The hover quick-action toolbar and selected-image toolbar overlapped. The hover delete stayed in the DOM while the selected toolbar captured pointer input. |
+| Fix | Hide hover quick actions while their image is selected; add an explicit, test-addressable delete control to the selected-image toolbar, using the existing persisted `applyImageChanges` path. |
+| Regression | Red-first `canvas-toolbar-floating-windows.test.ts` failed on the missing selected-state guard and delete action, then passed. Full API: 46 files / 104 tests; component/library regression: 93 files / 442 tests; TypeScript and production build passed. |
+| Cloud acceptance | Pending another synchronized cloud deployment: click delete, confirm no `美陈拆解` panel opens, confirm the image disappears, then reopen the project and confirm it remains deleted. |
+
 ## BUG-20260719-035: Professional image upscale accepted unauthenticated expensive work
 
 | Field | Record |
