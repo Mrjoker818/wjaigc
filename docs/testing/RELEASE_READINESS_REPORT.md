@@ -113,3 +113,5 @@ No P0 upload, image generation, persistence, download, or logout result is claim
 ## 2026-07-19 Pending Deployment Repair
 
 The source now contains a targeted `.coze` preview-runtime repair: build with `pnpm run build`, then run with `pnpm run start`. A regression contract was first observed failing against the old `next dev` configuration and is now green. Local lint, TypeScript, and production build gates are green. The release decision remains **not approved** until this configuration is synchronised to Coze and verified in the real logged-in browser.
+
+GitHub `main` was updated through `49684ed` on 2026-07-19. A three-minute endpoint poll immediately afterwards still observed the old Coze development runtime on the preview URL, so no false deployment claim is made. See `test-results/console/cloud-preview-runtime-poll-20260719.json`.
