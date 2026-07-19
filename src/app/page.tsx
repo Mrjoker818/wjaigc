@@ -3932,7 +3932,7 @@ function CanvasApp() {
             }
           } catch { /* save failed - non-blocking */ }
           const userMgr = UserManagerCore.getInstance();
-          userMgr.logout();
+          await userMgr.logout();
           setCurrentUser(null);
           setCurrentProject(null);
           // ★ 清空 undo 历史，防止退出登录后残留历史

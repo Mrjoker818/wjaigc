@@ -240,3 +240,16 @@ Artifacts: `test-results/screenshots/cloud-p0-auth-overlay-resumed-20260719.png`
 | Authenticated P0 persistence regression | Not executed | The cloud gateway/backend was unavailable. No login, paid generation, persistence, download, or logout action was attempted. |
 
 Conclusion: this is an external preview availability blocker, not evidence for a source-level change. It blocks the required real-browser regression for BUG-20260719-019 and BUG-20260719-021. The next valid run must first observe a healthy root response plus a valid authenticated session response, then repeat generate -> logout -> Chrome-saved-credential relogin with the full evidence set.
+
+## 2026-07-19 Real persistence regression recheck
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Preview availability | Recovered | Root, `/api/auth/me`, and `/api/session` returned 200; `doctor` reported 3 passed / 9 warnings / 0 failed. |
+| APImart image generation | Passed | One authorized `doubao-seedream-5-0-lite` x1 request reached the completed state with an 800 x 800 canvas image. |
+| Dashboard before logout | Passed | The new project and image raised the count to 15 projects / 184 assets. |
+| Logout and Chrome-saved-credential relogin | Failed (P1) | Authentication succeeded, but the count regressed to 15 projects / 183 assets. |
+| Source regression | Passed locally | A deferred project-sync test was red before the follow-up change and is green after `logout()` awaits the sync before sending `/api/auth/logout`. |
+| Local quality gates | Passed | Focused test: 3/3; `pnpm test:regression`: 92 files / 436 tests; `pnpm ts-check`; `pnpm lint --quiet`; `pnpm build`: 97 routes. |
+
+The real cloud result refines BUG-20260719-019: starting a keepalive sync is insufficient when logout invalidates the server session concurrently. The follow-up source fix is pending cloud deployment; the bug remains P1 until the same real-browser flow keeps the 184-asset count after relogin.

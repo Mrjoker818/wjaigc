@@ -83,6 +83,61 @@ describe('UserManager logout persistence', () => {
       .toEqual(expect.arrayContaining([expect.objectContaining({ id: 'generated-before-logout' })]));
   });
 
+  it('waits for the project sync before starting the server logout request', async () => {
+    let resolveProjectSync: ((response: Response) => void) | undefined;
+    const pendingProjectSync = new Promise<Response>((resolve) => {
+      resolveProjectSync = resolve;
+    });
+
+    fetchMock.mockReset();
+    fetchMock.mockImplementation((input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/user-data/sync?key=projects') {
+        return Promise.resolve(new Response(JSON.stringify({ success: true, value: [project] }), { status: 200 }));
+      }
+      if (url === '/api/user-data/sync' && init?.method === 'POST') {
+        return pendingProjectSync;
+      }
+      return Promise.resolve(new Response(JSON.stringify({ success: true }), { status: 200 }));
+    });
+
+    const { UserManager } = await import('@/lib/user-manager');
+    const manager = UserManager.getInstance();
+    await manager.upsertUserFromServer({
+      id: 'logout-sync-user',
+      name: 'logout-sync-user',
+      role: 'user',
+      status: 'active',
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    await manager.loadProjectsFromServer(0, 'logout-sync-user');
+    manager.updateProject(project.id, {
+      canvasImages: [{
+        id: 'generated-before-server-logout',
+        url: '/api/serve-upload/generated-before-server-logout.png',
+        x: 0,
+        y: 0,
+        width: 800,
+        height: 800,
+        originalWidth: 800,
+        originalHeight: 800,
+        rotation: 0,
+        zIndex: 0,
+        createdAt: 2,
+      }],
+    });
+
+    const logoutPromise = Promise.resolve(manager.logout());
+    const logoutCallsBeforeSync = fetchMock.mock.calls.filter(([url]) => String(url) === '/api/auth/logout');
+    expect(logoutCallsBeforeSync).toHaveLength(0);
+
+    resolveProjectSync?.(new Response(JSON.stringify({ success: true }), { status: 200 }));
+    await logoutPromise;
+    const logoutCallsAfterSync = fetchMock.mock.calls.filter(([url]) => String(url) === '/api/auth/logout');
+    expect(logoutCallsAfterSync).toHaveLength(1);
+  });
+
   it('allows a first project to sync when the server explicitly returns an empty project list', async () => {
     fetchMock.mockReset();
     fetchMock.mockImplementation((input: string | URL) => {

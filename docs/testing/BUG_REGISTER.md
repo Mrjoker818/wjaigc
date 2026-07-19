@@ -287,6 +287,18 @@
 | Regression | `src/__tests__/lib/user-manager-logout-sync.test.ts` was red before the change because no project-sync POST was sent. It is green after the change and asserts that the generated image is included in the submitted payload. |
 | Cloud status | Source fix complete. The issue remains P1 pending a synchronised cloud Chrome run that repeats generate -> logout -> relogin and verifies that the asset count remains unchanged. |
 
+#### 2026-07-19 real cloud recheck and root-cause refinement
+
+| Field | Detail |
+| --- | --- |
+| Reproduction | Cloud health recovered (`/`, `/api/auth/me`, and `/api/session` returned 200). In Chrome, create a new project, generate one APImart `doubao-seedream-5-0-lite` 1:1 image, confirm the dashboard reaches 15 projects / 184 assets, then log out and log in with the Chrome-saved credential. |
+| Actual | Relogin succeeded but the dashboard regressed to 15 projects / 183 assets. This is a stable real-user P1 reproduction, not an HTTP-only result. |
+| Evidence | `test-results/screenshots/cloud-p1-persistence-submit-20260719.png`, `cloud-p1-persistence-generated-20260719.png`, `cloud-p1-persistence-relogin-regression-20260719.png`, and matching console JSON files. |
+| Refined root cause | The first patch initiated `syncToServer(true)` but did not await it. `logout()` then immediately called `/api/auth/logout`; the remote session could be invalidated before the project-sync POST completed. |
+| Follow-up fix | `UserManager.logout()` is now asynchronous and awaits the authenticated project sync before sending server logout. The canvas logout handler awaits `userMgr.logout()` before clearing UI state. |
+| Permanent regression | `user-manager-logout-sync.test.ts` now holds the project-sync response pending and proves that `/api/auth/logout` cannot start until the sync resolves. It was red before the follow-up fix and green afterward. |
+| Current status | Source follow-up fix is locally verified but not yet cloud-verified. The tested cloud bundle cannot be proven to contain this follow-up commit; rerun the exact Chrome flow after sync before closing P1. |
+
 ### BUG-20260719-021: First project cannot sync after an explicit empty server project response
 
 | Field | Detail |

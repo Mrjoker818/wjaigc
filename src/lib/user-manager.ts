@@ -1526,24 +1526,27 @@ export class UserManager {
   /**
    * 退出登录 - 清除当前用户状态，取消待执行的同步任务
    */
-  logout(): void {
-    // Flush an update that is still waiting for the regular debounce while the session is valid.
-    void this.syncToServer(true);
-    // 取消待执行的同步定时器，防止切换用户后旧定时器将数据写入新用户
+  async logout(): Promise<void> {
+    // Cancel the delayed copy, then finish one authenticated sync before invalidating the session.
     if (this.serverSyncTimer) {
       clearTimeout(this.serverSyncTimer);
       this.serverSyncTimer = null;
     }
+    await this.syncToServer(true);
     this._serverSyncReady = false; // 重置同步状态，新用户登录后需重新加载
     this.currentUserId = null;
     if (this.canUseStorage()) {
       localStorage.removeItem(CURRENT_USER_KEY);
     }
     if (typeof window !== 'undefined') {
-      void fetch('/api/auth/logout', {
-        method: 'POST',
-        credentials: 'include',
-      }).catch(() => {});
+      try {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          credentials: 'include',
+        });
+      } catch {
+        // Local session cleanup must still complete if the logout endpoint is unavailable.
+      }
     }
   }
   async exportProjectToWujie(projectId: string): Promise<string> {

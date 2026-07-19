@@ -161,6 +161,12 @@
 - Independent read-only probes for `/`, `/api/auth/me`, and `/api/session` each returned HTTP 502. Evidence: `test-results/network/cloud-health-502-20260719.json`.
 - Do not run login, paid generation, project persistence, or download regression until the preview returns a healthy root plus authenticated API responses.
 
+### 2026-07-19 cloud persistence recheck
+
+- Availability recovered: the preview root, `/api/auth/me`, and `/api/session` each returned HTTP 200; `doctor` reported `3 passed / 9 warnings / 0 failed`.
+- The authorized real Chrome generation completed as one 800 x 800 APImart `doubao-seedream-5-0-lite` image. The dashboard reached 15 projects / 184 assets before logout.
+- P1 remains open: Chrome-saved-credential relogin returned 15 projects / 183 assets. The follow-up source fix now waits for project sync before server logout, but cloud proof is pending deployment and an exact repeat of this flow.
+
 ### 2026-07-19 Local Production Recheck
 
 - The source-side authentication bootstrap fix is locally verified, but its cloud deployment is not.
