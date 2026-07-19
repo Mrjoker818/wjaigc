@@ -8,6 +8,11 @@ import { saveImageDataMapping, getImageSourceUrl } from '@/lib/image-source-map'
 import { requireApiAuthOrReject } from '@/lib/api-auth';
 import sharp from 'sharp';
 import { validateApiInputs } from '@/lib/api-validator';
+import {
+  getSafeImageTypeFromDataUrl,
+  getSafeMediaTypeFromResponse,
+  validateSafeMediaFile,
+} from '@/lib/media-validation';
 
 /**
  * 将 base64 data URL 或远程图片 URL 保存到持久化目录，
@@ -50,9 +55,12 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ error: 'Image too large (max 20MB)' }, { status: 400 });
         }
 
-        const originalName = file.name || 'upload.png';
-        const ext = originalName.split('.').pop()?.toLowerCase() || 'png';
-        const filename = `upload-${timestamp}-${random}.${ext}`;
+        const safeMedia = validateSafeMediaFile(file, buffer);
+        if (!safeMedia) {
+          return NextResponse.json({ error: 'Unsupported or invalid image file' }, { status: 400 });
+        }
+
+        const filename = `upload-${timestamp}-${random}.${safeMedia.extension}`;
         const filePath = path.join(uploadDir, filename);
         await writeFile(filePath, buffer);
 
@@ -68,8 +76,7 @@ export async function POST(request: NextRequest) {
         // S3 backup
         let s3Key: string | null = null;
         if (isS3Available()) {
-          const fileContentType = file.type || 'image/png';
-          s3Key = await uploadImageToS3(buffer, filename, fileContentType);
+          s3Key = await uploadImageToS3(buffer, filename, safeMedia.mimeType);
           if (s3Key) console.log(`[save-image] S3 backup: ${s3Key}`);
         }
 
@@ -134,12 +141,12 @@ export async function POST(request: NextRequest) {
 
     // data:image/png;base64,... 格式
     if (imageUrl.startsWith('data:')) {
-      const match = imageUrl.match(/^data:image\/([\w+]+);base64,(.+)$/);
-      if (!match) {
+      const dataImageType = getSafeImageTypeFromDataUrl(imageUrl);
+      const match = imageUrl.match(/^data:image\/([\w+.-]+);base64,(.+)$/);
+      if (!match || !dataImageType) {
         return NextResponse.json({ error: 'Invalid data URL format' }, { status: 400 });
       }
 
-      const mimeType = match[1].replace('+xml', ''); // svg+xml -> svg
       const base64Data = match[2];
       const buffer = Buffer.from(base64Data, 'base64');
 
@@ -148,10 +155,15 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Image too large (max 20MB)' }, { status: 400 });
       }
 
+      const safeMedia = getSafeMediaTypeFromResponse(dataImageType.mimeType, buffer, isVideo);
+      if (!safeMedia || safeMedia.kind !== 'image') {
+        return NextResponse.json({ error: 'Invalid image content' }, { status: 400 });
+      }
+
       // ★ 后端压缩：大图自动缩放 + 智能格式选择（保留透明通道）
       let finalBuffer: Buffer = buffer;
-      let finalMimeType = mimeType;
-      if (shouldCompress && mimeType !== 'svg') {
+      let finalMimeType = safeMedia.extension;
+      if (shouldCompress) {
         try {
           const metadata = await sharp(buffer).metadata();
           // 检测是否真正有透明像素（而非仅 channels===4 或 hasAlpha 标记）
@@ -204,7 +216,7 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      const ext = finalMimeType === 'jpeg' ? 'jpg' : finalMimeType === 'svg' ? 'svg' : finalMimeType;
+      const ext = finalMimeType === 'jpeg' ? 'jpg' : finalMimeType;
       const filename = `gen-${timestamp}-${random}.${ext}`;
       const filePath = path.join(uploadDir, filename);
       await writeFile(filePath, finalBuffer);
@@ -218,7 +230,8 @@ export async function POST(request: NextRequest) {
       // 上传到 S3 对象存储（持久化，重部署不丢失）
       let s3Key: string | null = null;
       if (isS3Available()) {
-        s3Key = await uploadImageToS3(finalBuffer, filename, `image/${finalMimeType}`);
+        const s3ContentType = finalMimeType === 'jpeg' || finalMimeType === 'jpg' ? 'image/jpeg' : `image/${finalMimeType}`;
+        s3Key = await uploadImageToS3(finalBuffer, filename, s3ContentType);
         if (s3Key) {
           console.log(`[save-image] S3 backup: ${s3Key}`);
         }
@@ -252,15 +265,18 @@ export async function POST(request: NextRequest) {
         }
         const contentType = response.headers.get('content-type') || 'image/png';
         let buffer: Buffer = Buffer.from(await response.arrayBuffer());
-        const isLocalVideo = contentType.startsWith('video/') || isVideo;
+        const safeMedia = getSafeMediaTypeFromResponse(contentType, buffer, isVideo);
+        if (!safeMedia) {
+          return NextResponse.json({ error: 'Unsupported or invalid media content' }, { status: 400 });
+        }
+        const isLocalVideo = safeMedia.kind === 'video';
         if (buffer.length > (isLocalVideo ? 200 : 80) * 1024 * 1024) {
           return NextResponse.json({ error: `${isLocalVideo ? 'Video' : 'Image'} too large (max ${isLocalVideo ? '200MB' : '80MB'})` }, { status: 400 });
         }
 
         // ★ 本地视频直接原样保存
         if (isLocalVideo) {
-          const ctExt = contentType.split('/')[1]?.split(';')[0]?.trim().replace('quicktime', 'mov').replace('jpeg', 'jpg') || 'mp4';
-          const finalExt = ctExt === 'octet-stream' ? 'mp4' : ctExt;
+          const finalExt = safeMedia.extension;
           const filename = `video-${timestamp}-${random}.${finalExt}`;
           const filePath = path.join(uploadDir, filename);
           await writeFile(filePath, buffer);
@@ -269,7 +285,7 @@ export async function POST(request: NextRequest) {
           }
           let s3Key: string | null = null;
           if (isS3Available()) {
-            try { s3Key = await uploadImageToS3(buffer, filename, contentType); } catch {}
+            try { s3Key = await uploadImageToS3(buffer, filename, safeMedia.mimeType); } catch {}
           }
           return NextResponse.json({
             success: true,
@@ -282,8 +298,8 @@ export async function POST(request: NextRequest) {
         }
 
         // ★ 自动压缩：大图（>1MB）无透明像素的 PNG 自动转 JPEG，保留透明通道的用 PNG
-        let finalExt = contentType.split('/')[1]?.replace('jpeg', 'jpg').replace('svg+xml', 'svg') || 'png';
-        if (shouldCompress && buffer.length > 1024 * 1024 && !finalExt.includes('svg') && !finalExt.includes('gif')) {
+        let finalExt = safeMedia.extension;
+        if (shouldCompress && buffer.length > 1024 * 1024 && finalExt !== 'gif') {
           try {
             const metadata = await sharp(buffer).metadata();
             let reallyHasTransparency = false;
@@ -330,7 +346,7 @@ export async function POST(request: NextRequest) {
         // S3 backup
         let s3Key: string | null = null;
         if (isS3Available()) {
-          const s3ContentType = finalExt === 'jpg' ? 'image/jpeg' : finalExt === 'svg' ? 'image/svg+xml' : `image/${finalExt}`;
+          const s3ContentType = finalExt === 'jpg' ? 'image/jpeg' : `image/${finalExt}`;
           s3Key = await uploadImageToS3(buffer, filename, s3ContentType);
           if (s3Key) console.log(`[save-image] S3 backup: ${s3Key}`);
         }
@@ -366,6 +382,10 @@ export async function POST(request: NextRequest) {
           ? 'video/mp4'
           : rawContentType;
         let buffer: Buffer = Buffer.from(await response.arrayBuffer());
+        const safeMedia = getSafeMediaTypeFromResponse(contentType, buffer, isVideo);
+        if (!safeMedia) {
+          return NextResponse.json({ error: 'Unsupported or invalid media content' }, { status: 400 });
+        }
 
         // ★ 大小限制：视频 200MB / 图片 50MB
         const MAX_BYTES = isVideo ? 200 * 1024 * 1024 : 50 * 1024 * 1024;
@@ -374,18 +394,10 @@ export async function POST(request: NextRequest) {
         }
 
         // ★ 扩展名推断：视频优先
-        let finalExt: string;
-        if (isVideo || contentType.startsWith('video/')) {
-          const ctExt = contentType.split('/')[1]?.split(';')[0]?.trim();
-          if (ctExt === 'quicktime') finalExt = 'mov';
-          else if (ctExt === 'x-m4v' || ctExt === 'm4v') finalExt = 'm4v';
-          else finalExt = ctExt || 'mp4';
-        } else {
-          finalExt = contentType.split('/')[1]?.replace('jpeg', 'jpg').replace('svg+xml', 'svg') || 'png';
-        }
+        let finalExt = safeMedia.extension;
 
         // ★ 视频直接原样保存，不经过 sharp 压缩（sharp 不支持视频）
-        if (isVideo || contentType.startsWith('video/')) {
+        if (safeMedia.kind === 'video') {
           const filename = `video-${timestamp}-${random}.${finalExt}`;
           const filePath = path.join(uploadDir, filename);
           await writeFile(filePath, buffer);
@@ -400,7 +412,7 @@ export async function POST(request: NextRequest) {
           let s3Key: string | null = null;
           if (isS3Available()) {
             try {
-              s3Key = await uploadImageToS3(buffer, filename, contentType);
+              s3Key = await uploadImageToS3(buffer, filename, safeMedia.mimeType);
               if (s3Key) console.log(`[save-image] S3 backup video: ${s3Key} (${Math.round(buffer.length/1024/1024)}MB)`);
             } catch (s3Err) {
               console.warn('[save-image] S3 video backup failed:', s3Err);
@@ -426,7 +438,7 @@ export async function POST(request: NextRequest) {
         }
 
         // ★ 自动压缩：仅压缩超大图（>15MB），4K图片（通常5-12MB PNG）保持原始质量
-        if (buffer.length > 15 * 1024 * 1024 && !finalExt.includes('svg') && !finalExt.includes('gif')) {
+        if (buffer.length > 15 * 1024 * 1024 && finalExt !== 'gif') {
           try {
             const metadata = await sharp(buffer).metadata();
             // 检测是否真正有透明像素（而非仅 channels===4 或 hasAlpha 标记）

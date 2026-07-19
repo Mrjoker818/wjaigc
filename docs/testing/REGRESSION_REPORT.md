@@ -1,5 +1,12 @@
 # 回归测试报告
 
+## 2026-07-19 Public media isolation regression (local pass; cloud pending)
+
+- Red-first `public-media-access-contract.test.ts` documented four failures: no guard before data-root access, active SVG MIME, SVG upload acceptance, and unvalidated save-image ingress.
+- The repair blocks `system/` and `users/`, rejects non-media extensions, adds `nosniff`, makes legacy SVG attachment-only, and verifies supported media signatures before persistence.
+- Local verification: API 48 files / 112 tests; component/library regression exited 0; `pnpm ts-check` and `pnpm build` passed. `pnpm lint` reported 0 errors and 927 existing warnings.
+- Cloud acceptance remains required for anonymous private-path rejection, signed-in PNG upload, generated-image persistence, and SVG export download.
+
 ## 2026-07-19 Selected-image delete regression (local pass; cloud fail before repair)
 
 - Real cloud reproduction: the logged-in preview loaded the `z-[60]` selected-image class, but clicking its visible delete button opened `美陈拆解` and did not remove the image.

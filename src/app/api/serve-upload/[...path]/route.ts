@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import { downloadImageFromS3, getS3PresignedUrl, deriveS3Key, resolveS3Key } from '@/lib/s3-storage';
 import { getImageSourceUrl } from '@/lib/image-source-map';
+import { isAllowedPublicMediaExtension } from '@/lib/media-validation';
 import path from 'path';
 import fs from 'fs';
 
@@ -17,11 +18,15 @@ export async function GET(
     if (filePath.includes('..') || filePath.includes('\0') || pathParts.some(p => p === '..')) {
       return NextResponse.json({ error: 'Invalid path' }, { status: 400 });
     }
+
+    if (!isAllowedPublicMediaPath(pathParts)) {
+      return NextResponse.json({ error: 'File not found' }, { status: 404 });
+    }
     
     const dataRoot = getServerDataRoot();
     const possibleDirs = [
       path.join(dataRoot, 'uploads'),
-      dataRoot, // root level for subdirs like generate/, outpaint/, upscale/
+      dataRoot,
     ];
     
     // 1. 尝试从本地文件系统读取
@@ -35,12 +40,7 @@ export async function GET(
         const buffer = await fs.promises.readFile(fullPath);
         const ext = path.extname(filePath).toLowerCase();
         const contentType = getContentType(ext);
-        return new NextResponse(buffer, {
-          headers: {
-            'Content-Type': contentType,
-            'Cache-Control': 'public, max-age=86400',
-          },
-        });
+        return publicMediaResponse(buffer, contentType, ext);
       }
     }
     
@@ -60,12 +60,7 @@ export async function GET(
         fs.writeFileSync(path.join(destDir, path.basename(filePath)), buffer);
       } catch {}
       
-      return new NextResponse(buffer, {
-        headers: {
-          'Content-Type': contentType,
-          'Cache-Control': 'public, max-age=86400',
-        },
-      });
+      return publicMediaResponse(buffer, contentType, ext);
     }
     
     // 2. 本地文件不存在，尝试从 S3 下载
@@ -84,12 +79,7 @@ export async function GET(
         console.warn(`[serve-upload] Failed to cache S3 file locally:`, writeErr instanceof Error ? writeErr.message : writeErr);
       }
       
-      return new NextResponse(new Uint8Array(s3Buffer), {
-        headers: {
-          'Content-Type': contentType,
-          'Cache-Control': 'public, max-age=86400',
-        },
-      });
+      return publicMediaResponse(new Uint8Array(s3Buffer), contentType, ext);
     }
     
     // 3. S3 也没有，尝试从 sourceUrl（原始外部 URL）重新下载
@@ -139,12 +129,7 @@ export async function GET(
           }
           
           console.log(`[serve-upload] Recovered from sourceUrl: ${filePath} → ${sourceUrl}`);
-          return new NextResponse(buffer, {
-            headers: {
-              'Content-Type': contentType,
-              'Cache-Control': 'public, max-age=86400',
-            },
-          });
+          return publicMediaResponse(buffer, contentType, ext);
         }
       } catch (fetchErr) {
         console.warn(`[serve-upload] Failed to download from sourceUrl: ${sourceUrl}`, fetchErr instanceof Error ? fetchErr.message : fetchErr);
@@ -176,6 +161,33 @@ function getContentType(ext: string): string {
     : ext === '.mp4' ? 'video/mp4'
     : ext === '.webm' ? 'video/webm'
     : ext === '.mov' ? 'video/quicktime'
-    : ext === '.svg' ? 'image/svg+xml'
+    : ext === '.m4v' ? 'video/x-m4v'
+    : ext === '.avi' ? 'video/x-msvideo'
+    : ext === '.mkv' ? 'video/x-matroska'
+    : ext === '.glb' ? 'model/gltf-binary'
+    : ext === '.gltf' ? 'model/gltf+json'
+    : ext === '.obj' ? 'model/obj'
+    : ext === '.mtl' ? 'text/plain'
     : 'application/octet-stream';
+}
+
+function isAllowedPublicMediaPath(pathParts: string[]): boolean {
+  if (pathParts.length === 0 || pathParts.some((part) => !/^[a-zA-Z0-9._-]+$/.test(part))) {
+    return false;
+  }
+
+  const privateRoots = new Set(['system', 'users']);
+  if (privateRoots.has(pathParts[0].toLowerCase())) return false;
+
+  return isAllowedPublicMediaExtension(path.extname(pathParts[pathParts.length - 1]));
+}
+
+function publicMediaResponse(body: BodyInit, contentType: string, extension: string): NextResponse {
+  const headers: Record<string, string> = {
+    'Content-Type': contentType,
+    'Cache-Control': 'public, max-age=86400',
+    'X-Content-Type-Options': 'nosniff',
+  };
+  if (extension === '.svg') headers['Content-Disposition'] = 'attachment';
+  return new NextResponse(body, { headers });
 }

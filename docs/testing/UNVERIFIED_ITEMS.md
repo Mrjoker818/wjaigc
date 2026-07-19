@@ -1,5 +1,10 @@
 # 未验证项目
 
+## 2026-07-19 New P0 cloud acceptance required: public media isolation
+
+- `BUG-20260719-038` / `SEC-018` is fixed locally but not yet deployed/accepted.
+- Required cloud checks: anonymous requests to `/api/serve-upload/system/users.json` and `/api/serve-upload/system/api-providers.json` return 404 with no file body; signed-in PNG upload succeeds; a generated result persists and reloads; SVG trace/export downloads rather than rendering active SVG.
+
 ## 2026-07-19 Current authoritative unverified state
 
 ### Superseding cloud observation after the latest reported synchronization

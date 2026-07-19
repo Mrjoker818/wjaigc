@@ -1,4 +1,17 @@
 # 缺陷登记册
+## BUG-20260719-038: Public media route exposed private data-root files and active SVG content
+
+| Field | Record |
+| --- | --- |
+| Severity | P0, fixed locally; cloud verification pending |
+| Module | `GET /api/serve-upload/[...path]`, `POST /api/upload`, and `POST /api/save-image` |
+| Stable reproduction | The public file route searched both `{dataRoot}/uploads` and the whole `dataRoot`. Since user records and provider configuration are stored under `{dataRoot}/system`, requests such as `/api/serve-upload/system/users.json` and `/api/serve-upload/system/api-providers.json` reached local reads without authentication. The route also returned stored `.svg` files as `image/svg+xml`; upload/save-image accepted SVG or a multipart filename-derived extension. |
+| Expected | Only known media and 3D asset extensions may be public. `system/` and `users/` are never public. Uploaded image bytes must match a safe raster MIME allowlist, and existing SVG downloads must not execute as same-origin documents. |
+| Root cause | A compatibility fallback treated the entire persistent data directory as a public media root, while the persistence APIs trusted supplied MIME types and filename extensions. |
+| Fix | Validate public paths before any filesystem/S3/source-map operation; block private roots and non-media extensions; add `nosniff`; force legacy SVG to download as octet-stream attachment. A shared media validator now verifies JPEG/PNG/GIF/WebP/BMP/AVIF and supported video signatures, derives safe filenames, and is used by upload plus all save-image ingress paths. |
+| Regression | Red-first `public-media-access-contract.test.ts` failed on four security assertions, then passed. Full API: 48 files / 112 tests; component/library regression exited 0; TypeScript and production build passed. Lint: 0 errors, 927 historical warnings. |
+| Cloud acceptance | Pending: anonymous `system/users.json` and `system/api-providers.json` requests must return 404 without body disclosure; a normal PNG upload, a generated image persistence operation, and an SVG export download must remain usable. |
+
 ## BUG-20260719-037: Recharge order detail endpoint exposed order data without ownership checks
 
 | Field | Record |

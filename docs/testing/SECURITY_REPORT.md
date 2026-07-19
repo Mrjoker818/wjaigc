@@ -1,5 +1,16 @@
 # 安全测试报告
 
+## 2026-07-19 P0 repair: public media route data disclosure and stored SVG execution
+
+### SEC-018 / P0: Public media endpoint read private persistent files and served active SVG
+
+- Location: `GET /api/serve-upload/[...path]`, with writable inputs in `POST /api/upload` and `POST /api/save-image`.
+- Evidence: the route searched the entire data root after `uploads/`, while `system/users.json`, `system/api-providers.json`, and the auth secret reside under that root. It served unknown extensions as bytes and `.svg` as `image/svg+xml`. The two write paths accepted SVG or arbitrary multipart filename extensions.
+- Impact: unauthenticated disclosure of user/provider configuration and credentials stored in the persistent volume, plus same-origin stored-XSS through uploaded SVG.
+- Fix: reject non-media and private-root requests before storage access; preserve public image/video/3D assets; return legacy SVG only as a download with `X-Content-Type-Options: nosniff`; validate bytes and MIME types across direct upload, multipart persistence, data URLs, and fetched persistence inputs.
+- Verification: red-first public-media contract failed on route isolation, SVG response headers, upload SVG acceptance, and save-image validation. It now passes. Full API suite: 48 files / 112 tests; component/library suite exited 0; TypeScript and production build passed.
+- Deployment status: fixed locally; cloud verification pending. Do not treat the P0 as closed until anonymous private-path requests return 404 and normal PNG/generation/SVG-download flows are exercised on the synchronized preview.
+
 ## 2026-07-19 P1 repair: recharge order authorization and GET side effects
 
 ### SEC-017 / P1: Recharge order endpoint allowed anonymous and cross-user reads

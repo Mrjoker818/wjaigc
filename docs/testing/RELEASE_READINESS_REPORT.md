@@ -1,5 +1,9 @@
 # 发布就绪报告
 
+## 2026-07-19 New P0 local repair: public media isolation
+
+`BUG-20260719-038` / `SEC-018` is fixed in the local source only. It blocks anonymous reads of private persistent files through the public media route and prevents stored SVG from executing as same-origin content. Local API, regression, TypeScript, lint-error, and production-build gates pass. Release remains **not approved** until the cloud preview proves anonymous private-path requests are 404 and normal image persistence/export behavior remains intact.
+
 ## Current authoritative status - 2026-07-19
 
 ### Latest cloud interaction result
