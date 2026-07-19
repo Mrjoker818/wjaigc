@@ -210,6 +210,13 @@
 
 ## 正向检查
 
+## 2026-07-19 Dependency Audit Remediation
+
+- `pnpm audit --prod --json --registry=https://registry.npmjs.org` now reports **0 critical, 0 high, 0 low, and 1 moderate** production vulnerability, down from 0 critical, 0 high, 1 low, and 5 moderate.
+- Patched by lockfile-constrained overrides: `@babel/core` 7.29.6, `postcss` 8.5.20, `brace-expansion` 1.1.13 and 2.0.3. `drizzle-kit` was moved from production dependencies to development dependencies because application source imports `drizzle-orm`, not the CLI.
+- The dependency policy was red-tested first and is now green in `src/__tests__/lib/dependency-security-contract.test.ts` (2/2). Full `test:api` (50 files / 116 tests), `test:regression`, lint, TypeScript, and production build completed successfully after the lockfile update.
+- Remaining `uuid@8.3.2` is supplied through `exceljs@4.4.0`. The advisory affects `uuid` APIs `v3`, `v5`, and `v6` only when callers provide invalid external buffers; the installed ExcelJS code path uses `uuid.v4()`. It is retained as a documented moderate residual risk rather than forcing an incompatible major override into ExcelJS. Review it whenever ExcelJS publishes a compatible update or the application begins using affected UUID APIs.
+
 - 会话 cookie 在服务端认证层使用 HTTP-only、SameSite 和生产环境 Secure 配置。
 - `/api/proxy-3d-model` 需要认证，并对 URL 协议、私网地址和域名进行限制；`Access-Control-Allow-Origin: *` 仍需要结合真实跨域请求验证。
 - 已有测试覆盖支付路由、任务所有权、管理员用户审计和高风险路由授权的一部分场景。
