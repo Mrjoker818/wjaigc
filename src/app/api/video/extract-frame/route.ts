@@ -6,6 +6,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
+import { isSafeVideoSource } from '@/lib/api-validator';
 
 // 视频抽帧：支持 first/last/at/N-grid 四种模式
 // POST body:
@@ -140,6 +141,9 @@ export async function POST(req: Request) {
     const { videoUrl } = body || {};
     if (!videoUrl || typeof videoUrl !== 'string') {
       return NextResponse.json({ error: 'videoUrl 必填' }, { status: 400 });
+    }
+    if (!isSafeVideoSource(videoUrl)) {
+      return NextResponse.json({ error: '视频地址无效或不允许访问内网地址' }, { status: 400 });
     }
 
     // 解析 mode：兼容旧字段 frame

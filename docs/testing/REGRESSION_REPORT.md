@@ -402,3 +402,12 @@ The synchronized source alone is insufficient. The cloud preview must restart us
 | Source regression | Passed | `pnpm test:regression` passed 92 files / 440 assertions, including the new `canvas-toolbar-floating-windows.test.ts` contract requiring the hover toolbar at `z-[60]`. |
 | Local quality checks | Passed | Targeted ESLint on `src/components/infinite-canvas.tsx` and `pnpm ts-check` both passed. |
 | Cloud closure | Pending synchronization | Re-run selection -> hover delete -> reopen project in Chrome after `cd8c90d` is active. The image must be removed, no `美陈拆解` panel may open, and deletion must persist. |
+
+## 2026-07-19 Video source SSRF regression
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Red reproduction | Failed as expected | The generic `videoUrl` validation accepted loopback, cloud-metadata/link-local, and localhost sources; the new route contract found all four downloader routes outside the shared policy. |
+| Focused regression | Passed | `pnpm vitest run src/__tests__/lib/api-validator.test.ts src/__tests__/api/video-source-security-contract.test.ts src/__tests__/api/video-download-auth-contract.test.ts src/__tests__/api/video-tools-auth-contract.test.ts`: 4 files / 37 tests passed. |
+| TypeScript | Passed | `pnpm ts-check` passed after the shared validator was applied. |
+| Cloud closure | Pending synchronization | On the deployed preview, call each protected video route with a signed-in private/link-local URL and verify a 400 response before any outbound request; then exercise one valid provider video URL through the product UI. |

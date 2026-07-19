@@ -11,6 +11,16 @@
 - Verification: red-first public-media contract failed on route isolation, SVG response headers, upload SVG acceptance, and save-image validation. It now passes. Full API suite: 48 files / 112 tests; component/library suite exited 0; TypeScript and production build passed.
 - Deployment status: fixed locally; cloud verification pending. Do not treat the P0 as closed until anonymous private-path requests return 404 and normal PNG/generation/SVG-download flows are exercised on the synchronized preview.
 
+## 2026-07-19 P1 repair: video downloader SSRF policy convergence
+
+### SEC-019 / P1: Inconsistent video URL validation could reach private or link-local hosts
+
+- Locations: `src/lib/api-validator.ts`, `src/app/api/video/download/route.ts`, `src/app/api/video/tools/route.ts`, `src/app/api/video/extract-frame/route.ts`, and `src/app/api/video/extract-frames/route.ts`.
+- Evidence: red-first tests showed that `http://127.0.0.1`, `https://169.254.169.254`, `https://[fe80::1]`, and `https://localhost` passed the generic `videoUrl` validation. Selected authenticated endpoints then use those values in server-side `fetch` calls.
+- Impact: an authenticated user could use video processing as an SSRF primitive against server-local or link-local services. Authentication reduces exposure but is not an adequate network boundary.
+- Fix: a shared `isSafeVideoSource` policy now admits only clean `/uploads/` or `/api/serve-upload/` paths and public HTTP(S) URLs, and all four downloader routes invoke it before network/file work.
+- Verification: red-first focused tests now pass (4 files / 37 assertions). The deployment acceptance probe remains required; no external system was subjected to attack testing.
+
 ## 2026-07-19 P1 repair: recharge order authorization and GET side effects
 
 ### SEC-017 / P1: Recharge order endpoint allowed anonymous and cross-user reads

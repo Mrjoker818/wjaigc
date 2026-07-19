@@ -4,6 +4,10 @@
 
 `BUG-20260719-038` / `SEC-018` is fixed in the local source only. It blocks anonymous reads of private persistent files through the public media route and prevents stored SVG from executing as same-origin content. Local API, regression, TypeScript, lint-error, and production-build gates pass. Release remains **not approved** until the cloud preview proves anonymous private-path requests are 404 and normal image persistence/export behavior remains intact.
 
+## 2026-07-19 Security gate update
+
+**Decision remains: Not approved.** A P1 SSRF gap in video source handling has been repaired and covered by a red-first regression suite, but the source commit has not yet been verified in Coze. The P0 browser acceptance flow, protected-media checks, upload, download, and logout evidence remain required before release.
+
 ## Current authoritative status - 2026-07-19
 
 ### Latest cloud interaction result

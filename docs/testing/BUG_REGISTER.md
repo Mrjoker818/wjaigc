@@ -694,3 +694,15 @@ BUG-20260718-007 的“任务恢复、完成和刷新恢复”范围已修复并
 | Root cause | The first fix raised the hover toolbar itself, but its transformed image-container ancestor remained `z-20`. The main selected-image toolbar lives in a sibling `z-50` stacking context, so pointer events still reached display-decompose. |
 | Fix | `src/components/infinite-canvas.tsx`: retain the hover toolbar at `z-[60]` and raise the selected image container itself from `z-20` to `z-[60]`. |
 | Regression status | The new selected-container contract was red before the second fix and green afterward. `canvas-toolbar-floating-windows.test.ts` passes 7/7; targeted ESLint and TypeScript checks pass. `tests/e2e/p0-core.spec.ts` continues to exercise hover-delete before its existing canvas manipulation assertions. A cloud Chrome recheck is required after the fix is synchronized; do not close this P1 before the actual delete action removes the image and the deletion survives a reopen. |
+
+### BUG-20260719-039: Video source validation allowed SSRF targets in selected media routes
+
+| Field | Detail |
+| --- | --- |
+| Severity / module | P1 / video download, video tools, and video frame extraction |
+| Reproduction | Submit a signed-in video URL pointing to `127.0.0.1`, `169.254.169.254`, `[fe80::1]`, or `localhost`. Before the repair, the generic video validator accepted it; several video routes then fetched it server-side. |
+| Expected | User-controlled video URLs must be either a safe platform media path or a public HTTP(S) origin. Private, loopback, and link-local targets must be rejected before any fetch or file operation. |
+| Actual | The generic `videoUrl` branch checked only a prefix. Download and post-production routes each implemented incomplete, divergent private-host lists, while the single-frame extractor had no source guard. |
+| Root cause | URL policy was duplicated rather than shared; one code path did not include cloud-metadata/link-local address ranges. |
+| Fix | Added `isSafeVideoSource` to `src/lib/api-validator.ts`; it validates platform media paths, rejects traversal segments, and blocks loopback, RFC1918, zero, and link-local targets. Applied it to `/api/video/download`, `/api/video/tools`, `/api/video/extract-frame`, and `/api/video/extract-frames`. |
+| Regression | The focused suite failed first with five failures, then passed: 37 tests across the URL validator, downloader/tool authorization contracts, and new route-wide source-security contract. Cloud route verification remains pending deployment. |

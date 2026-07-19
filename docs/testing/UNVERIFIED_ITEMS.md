@@ -5,6 +5,11 @@
 - `BUG-20260719-038` / `SEC-018` is fixed locally but not yet deployed/accepted.
 - Required cloud checks: anonymous requests to `/api/serve-upload/system/users.json` and `/api/serve-upload/system/api-providers.json` return 404 with no file body; signed-in PNG upload succeeds; a generated result persists and reloads; SVG trace/export downloads rather than rendering active SVG.
 
+## 2026-07-19 P1 cloud acceptance required: video source SSRF guard
+
+- `BUG-20260719-039` / `SEC-019` is source-verified only. With an authenticated session, each of `/api/video/download`, `/api/video/tools`, `/api/video/extract-frame`, and `/api/video/extract-frames` must reject loopback and link-local URLs with `400` before work begins.
+- A valid provider-hosted video must then complete each applicable product operation, proving that the tightened source policy does not break supported video workflows.
+
 ## 2026-07-19 Current authoritative unverified state
 
 ### Superseding cloud observation after the latest reported synchronization

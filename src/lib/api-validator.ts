@@ -263,6 +263,36 @@ function isPrivateOrReservedHost(hostname: string): boolean {
   return false;
 }
 
+function isSafePlatformMediaPath(value: string): boolean {
+  if (!value.startsWith('/uploads/') && !value.startsWith('/api/serve-upload/')) return false;
+
+  try {
+    const pathname = decodeURIComponent(value.split(/[?#]/, 1)[0]);
+    const segments = pathname.split('/').filter(Boolean);
+    return segments.length > 1 && segments.every((segment) => segment !== '.' && segment !== '..');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Validates a user-controlled video location before the server downloads it.
+ * Only public HTTP(S) origins and platform media paths are accepted.
+ */
+export function isSafeVideoSource(value: unknown): value is string {
+  if (typeof value !== 'string' || !value.trim()) return false;
+  const url = value.trim();
+  if (url.length > 10_000) return false;
+  if (url.startsWith('/')) return isSafePlatformMediaPath(url);
+
+  try {
+    const parsed = new URL(url);
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && !isPrivateOrReservedHost(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
 function isValidMediaUrl(url: string): boolean {
   // 允许的协议和路径前缀
   if (url.startsWith('/uploads/') || url.startsWith('/api/') || url.startsWith('data:image/')) return true;
@@ -324,15 +354,11 @@ export function validateApiInputs(
       }
       case 'videoUrl': {
         if (!value || typeof value !== 'string') return `${field} 不能为空`;
-        const v = value as string;
-        if (!v.startsWith('http://') && !v.startsWith('https://') && !v.startsWith('/uploads/') && !v.startsWith('/api/')) return `${field} 格式不合法`;
+        if (!isSafeVideoSource(value)) return `${field} 格式不合法`;
         break;
       }
       case 'optionalVideoUrl': {
-        if (value && typeof value === 'string') {
-          const v = value as string;
-          if (!v.startsWith('http://') && !v.startsWith('https://') && !v.startsWith('/uploads/') && !v.startsWith('/api/')) return `${field} 格式不合法`;
-        }
+        if (value && !isSafeVideoSource(value)) return `${field} 格式不合法`;
         break;
       }
       case 'prompt': {

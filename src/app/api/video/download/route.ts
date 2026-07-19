@@ -3,27 +3,12 @@ import { readFile } from 'fs/promises';
 import path from 'path';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
+import { isSafeVideoSource } from '@/lib/api-validator';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
 
 const MAX_DOWNLOAD_BYTES = 150 * 1024 * 1024;
-
-function isAllowedVideoUrl(value: string): boolean {
-  if (value.startsWith('/')) return true;
-  try {
-    const parsed = new URL(value);
-    if (parsed.protocol !== 'https:') return false;
-    const host = parsed.hostname.toLowerCase();
-    return !(
-      host === 'localhost' || host === '::1' || host === '0.0.0.0' ||
-      host.endsWith('.local') || /^127\./.test(host) || /^10\./.test(host) ||
-      /^192\.168\./.test(host) || /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
-    );
-  } catch {
-    return false;
-  }
-}
 
 function resolveWithinDirectory(directory: string, relativePath: string): string | null {
   const resolved = path.resolve(directory, relativePath);
@@ -76,7 +61,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (authResult instanceof NextResponse) return authResult;
 
   const sourceUrl = request.nextUrl.searchParams.get('url') || '';
-  if (!isAllowedVideoUrl(sourceUrl)) {
+  if (!isSafeVideoSource(sourceUrl) || (!sourceUrl.startsWith('/') && !sourceUrl.startsWith('https://'))) {
     return NextResponse.json({ error: '视频下载地址无效' }, { status: 400 });
   }
 

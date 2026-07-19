@@ -156,6 +156,16 @@ describe('api-validator 模块', () => {
       expect(err).toBeTruthy();
     });
 
+    it.each([
+      'http://127.0.0.1:8080/video.mp4',
+      'https://169.254.169.254/latest/meta-data',
+      'https://[fe80::1]/video.mp4',
+      'https://localhost/video.mp4',
+    ])('videoUrl: blocks private and link-local addresses (%s)', (videoUrl) => {
+      const err = validateApiInputs({ videoUrl }, { videoUrl: 'videoUrl' });
+      expect(err).toBeTruthy();
+    });
+
     // --- id ---
     it('id: 缺失返回错误', () => {
       const err = validateApiInputs({}, { taskId: 'id' });

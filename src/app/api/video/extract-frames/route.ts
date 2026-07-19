@@ -5,7 +5,7 @@ import { writeFile, mkdir, readFile, unlink } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
-import { validateApiInputs } from '@/lib/api-validator';
+import { isSafeVideoSource, validateApiInputs } from '@/lib/api-validator';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 const execFileAsync = promisify(execFile);
@@ -38,6 +38,9 @@ export async function POST(req: NextRequest) {
 
     if (!videoUrl) {
       return NextResponse.json({ error: '缺少 videoUrl 参数' }, { status: 400 });
+    }
+    if (!isSafeVideoSource(videoUrl)) {
+      return NextResponse.json({ error: '视频地址无效或不允许访问内网地址' }, { status: 400 });
     }
 
     // 1. 下载视频到临时文件

@@ -9,6 +9,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
+import { isSafeVideoSource } from '@/lib/api-validator';
 
 const execFileAsync = promisify(execFile);
 
@@ -26,20 +27,8 @@ async function ensureDir(): Promise<void> {
 }
 
 function assertAllowedVideoSource(url: unknown): asserts url is string {
-  if (typeof url !== 'string' || !url.trim()) throw new Error('视频地址无效');
-  if (url.startsWith('/')) return;
-
-  const parsed = new URL(url);
-  if (parsed.protocol !== 'https:') throw new Error('仅支持 HTTPS 视频地址或本平台视频地址');
-  const host = parsed.hostname.toLowerCase();
-  const blockedHosts = new Set(['localhost', '::1', '0.0.0.0']);
-  if (
-    blockedHosts.has(host) || host.endsWith('.local') || /^127\./.test(host) ||
-    /^10\./.test(host) || /^192\.168\./.test(host) ||
-    /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
-  ) {
-    throw new Error('不允许合成内网视频地址');
-  }
+  if (!isSafeVideoSource(url)) throw new Error('视频地址无效或不允许访问内网地址');
+  if (!url.startsWith('/') && !url.startsWith('https://')) throw new Error('仅支持 HTTPS 视频地址或本平台视频地址');
 }
 
 function resolveWithinDirectory(directory: string, relativePath: string): string | null {
