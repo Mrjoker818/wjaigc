@@ -1,5 +1,11 @@
 # 发布就绪报告
 
+## 2026-07-19 Cloud authentication acceptance completed: RELEASE STILL NOT APPROVED
+
+The cloud preview at commit `b906a15` passed a real Chrome refresh, logout, anonymous-entry, login, and dashboard-restoration flow. The previous P1 authentication startup blocker is closed.
+
+Release remains not approved because the paid P0 journey (upload, generation, terminal-state handling, save/reload, download, and credits) has not been completed, and P2 `BUG-20260719-023` has an unresolved logout-sync console error.
+
 ## 2026-07-19 Local authentication entry repair: NOT APPROVED FOR RELEASE
 
 Local regression confirms the anonymous login entry in Chromium, Firefox, WebKit, and mobile Chromium. The repair prevents the full canvas from mounting until a session user exists and forces the preview `pnpm dev` command onto Webpack rather than Turbopack.

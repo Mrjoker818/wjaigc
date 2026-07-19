@@ -1,5 +1,16 @@
 # 回归测试报告
 
+## 2026-07-19 Cloud P0 authentication regression: passed
+
+| Check | Result |
+| --- | --- |
+| Authenticated refresh | Passed: `/api/session` responses were HTTP 200 and the existing Chrome session reached `我的项目`. |
+| Anonymous isolation | Passed: logout reached `选择入口`; the anonymous page contained zero `图像生成器` buttons. |
+| Login | Passed: the canvas login form accepted Chrome-stored credentials and restored the admin dashboard. |
+| Persistence | Passed for this flow: project/asset counters stayed at 15 / 183 across logout and relogin. |
+| Admin data | Passed after async completion: users 6, providers 14, templates 12. The corresponding admin APIs returned successful non-empty payloads. |
+| Residual | P2 BUG-20260719-023 remains: one caught project-sync fetch error was logged during logout despite successful final state. |
+
 ## 2026-07-19 Anonymous entry isolation and Webpack preview regression
 
 | Gate | Result |

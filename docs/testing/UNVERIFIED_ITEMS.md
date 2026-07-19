@@ -1,5 +1,11 @@
 # 未验证项目
 
+## 2026-07-19 Authentication cloud acceptance completed
+
+- Cloud authentication startup, logout, anonymous-entry isolation, login, and dashboard restoration are now verified on the existing Chrome account at commit `b906a15`.
+- Remaining P0 work is independent of authentication: native upload, image generation, terminal task state, save/reload recovery, download, and credits reconciliation still need cloud evidence.
+- P2 BUG-20260719-023 requires root-cause investigation; it does not invalidate the completed authentication evidence.
+
 ## 2026-07-19 Pending cloud acceptance after BUG-20260719-022
 
 - The local fix is verified in four Playwright browser projects, but the Coze preview has not yet synchronized this revision.

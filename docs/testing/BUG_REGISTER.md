@@ -1,5 +1,28 @@
 # 缺陷登记册
 
+## BUG-20260719-023: Logout synchronization records a transient client fetch error
+
+| Field | Record |
+| --- | --- |
+| Severity | P2, open |
+| Module | `UserManager.logout` project synchronization |
+| Environment | Coze cloud preview, Chrome, commit `b906a15`, 2026-07-19 Asia/Shanghai. |
+| Reproduction | In the authenticated dashboard, open the user menu and choose logout. `/api/auth/logout` returns 200 and the page reaches the anonymous entry, but Chrome records one caught `[Sync] syncToServer error: TypeError: Failed to fetch` from the console bridge. |
+| Evidence | `test-results/console/cloud-p0-auth-login-logout-relogin-b906a15-20260719.json`; matching network evidence. |
+| Confirmed facts | Project-sync responses recorded in the same flow returned 200. Relogin restored the same 15 projects and 183 images. |
+| Root cause | Not yet isolated. The browser error is emitted before the successful logout completion, so it must not be silenced or treated as an accepted success condition. |
+| Required next step | Reproduce with request-level timing and trace the failing `syncToServer` fetch boundary before any code change. |
+
+## BUG-20260719-021 closure: Cloud authentication startup and anonymous workspace isolation
+
+| Field | Record |
+| --- | --- |
+| Severity | P1, fixed and cloud-verified |
+| Verified commit | `b906a15 fix: isolate anonymous login from canvas startup` |
+| Cloud result | A signed-in refresh requested `/api/session` with HTTP 200 and returned to the dashboard. Logout reached the anonymous `选择入口`; the `图像生成器` button count was 0 before login. Canvas login and Chrome-stored-credential relogin restored the dashboard. |
+| Data check | Project and asset counters remained 15 and 183 before and after logout/relogin. Administrator counters settled to users 6, API providers 14, and templates 12; their APIs all returned successful non-empty payloads. |
+| Evidence | `test-results/screenshots/cloud-p0-auth-login-logout-relogin-b906a15-20260719.png`, matching console and network JSON. |
+
 ## BUG-20260719-022: Anonymous users mounted the full canvas before the login entry
 
 | Field | Record |
