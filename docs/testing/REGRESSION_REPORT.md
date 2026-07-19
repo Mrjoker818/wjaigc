@@ -263,3 +263,12 @@ The real cloud result refines BUG-20260719-019: starting a keepalive sync is ins
 | Focused P1 regression | Passed | 12 Vitest assertions for session timeout, bootstrap ordering, deployment configuration, and logout ordering. |
 | Anonymous production login entry | Passed | Playwright 4/4 across Chromium, Firefox, WebKit, and mobile Chromium. |
 | Cloud acceptance | Unverified | The cloud preview must synchronize this revision; the overlay and the project-persistence flow require real Chrome evidence. |
+
+## 2026-07-19 Full local regression after preview bootstrap change
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Full Vitest suite | Passed | `pnpm test` completed with 130 test files and 527 tests passing. |
+| API suite | Passed | `pnpm test:api` completed with 36 test files and 89 tests passing. |
+| Local doctor | Passed with expected environment warnings | 2 passed, 10 warnings, 0 failed; the warnings identify absent local release secrets, provider keys, database, and object storage rather than production acceptance. |
+| Cloud P0/P1 acceptance | Unverified | The current cloud preview still reports a development runtime (`next-devtools` and Turbopack HMR in the document). Do not use these local results as cloud-release proof. |
