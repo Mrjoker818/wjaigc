@@ -134,6 +134,27 @@
 
 ### 2026-07-19 User-Reported Cloud Update Recheck
 
+### 2026-07-19 Chrome authenticated-session recheck
+
+- The existing `Mr.joker` administrator account successfully reached the project dashboard, and a page reload retained the authenticated session without a visible login form or persistent authentication overlay.
+- The dashboard restored the `视频测试` project card and its `55 张图片` count. Opening that project exposed persisted canvas assets, provider/model metadata, image selection controls, and the canvas zoom/reset controls.
+- The Chrome console nevertheless recorded two `loadProjectsFromServer` timeout errors from the Coze Console Bridge during project reload. The application returned to the project dashboard rather than reopening the previously active canvas. Treat this as a recovery-path investigation item; do not classify it as a product defect until reproduced outside the injected-preview bridge context.
+- Native file selection remains unverified because the Chrome control channel rejected `fileChooser.setFiles(...)` with `Not allowed` before the application upload request. This is control-channel evidence, not a product-upload failure.
+- Evidence: `test-results/screenshots/cloud-auth-session-refresh-20260719.png` and `test-results/console/cloud-auth-session-refresh-20260719.json`.
+
+### 2026-07-19 APImart P0 generation run
+
+- Verified in real Chrome with the exact model value `api_1778430731224_533e09a::doubao-seedream-5-0-lite` displayed by the UI as `豆包5.0Lite · 来自 APImart imgae`.
+- One 1:1 generation progressed from `submitting 5%` to `processing 10%` and produced one `800 × 800` canvas image. After a reload, the dashboard counter rose from 13 projects / 183 assets to 14 projects / 184 assets; reopening the new project restored the same prompt, model and image dimensions.
+- Browser download was clicked from the selected-image toolbar, but the Chrome control channel did not surface a download event within 15 seconds and emitted no console error. Keep download as unverified until it is repeated in a browser environment with observable download events.
+- Native file upload remains unverified for the same control-channel limitation (`fileChooser.setFiles` was blocked before the application request).
+- Logout and Chrome-saved-credential relogin succeeded, but the asset count regressed from 184 to 183 while project count remained 14. This is now tracked as P1 `BUG-20260719-019`; it blocks P0 release closure.
+
+### 2026-07-19 persistence follow-up pending cloud verification
+
+- `BUG-20260719-019`: the source fix flushes the final project payload before logout. Repeat generate -> logout -> Chrome-saved-credential relogin and verify that project and asset counters do not change.
+- `BUG-20260719-021`: with an account that has no projects, create one project, refresh, and reopen it. This verifies the explicit empty-server-list path outside the mocked regression test.
+
 ### 2026-07-19 Local Production Recheck
 
 - The source-side authentication bootstrap fix is locally verified, but its cloud deployment is not.

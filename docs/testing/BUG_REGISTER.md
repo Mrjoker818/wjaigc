@@ -243,6 +243,60 @@
 
 ## 2026-07-19 Resume Verification
 
+### 2026-07-19 Cloud recovery observation (not a defect record yet)
+
+| Field | Evidence |
+| --- | --- |
+| Environment | Coze development preview, authenticated `Mr.joker` administrator Chrome session, source commit `6592e9b` |
+| Reproduction | Open a persisted image project, reload the page, then inspect the restored dashboard and browser console. |
+| Observed | Authentication persisted and the project card with its `55 张图片` count returned. The preview navigated to the project dashboard rather than restoring the active canvas. Two `loadProjectsFromServer` timeout errors were emitted by the Coze Console Bridge. |
+| Classification | Investigation only. The project data was present after reload, and the reported timeout source is a Coze-injected bridge. It is not yet a stable product defect or a basis for code changes. |
+| Evidence | `test-results/screenshots/cloud-auth-session-refresh-20260719.png`; `test-results/console/cloud-auth-session-refresh-20260719.json` |
+
+### BUG-20260719-019: Generated asset count regresses after logout and saved-credential relogin
+
+| Field | Detail |
+| --- | --- |
+| Severity / module | P1 / cloud project and asset persistence |
+| Environment | Coze development preview; Chrome session for `Mr.joker`; source commit `6592e9b` |
+| Reproduction | Create a new project; select `api_1778430731224_533e09a::doubao-seedream-5-0-lite` (APImart imgae); submit one 1:1 image; wait for the canvas result; reload and reopen the saved project; log out; log in again with Chrome-saved credentials. |
+| Expected | The persisted project and its generated asset remain consistent after a new authenticated session. The project and asset counters must not regress. |
+| Actual | The completed result initially increased dashboard counters from 13 projects / 183 assets to 14 projects / 184 assets. After logout and successful relogin, the dashboard still reported 14 projects but only 183 assets. No browser console error was reported. |
+| Evidence | `test-results/screenshots/cloud-p0-apimart-generation-success-20260719.png`; `test-results/screenshots/cloud-p0-relogin-asset-count-mismatch-20260719.png`; matching console JSON files. |
+| Root-cause status | Unresolved. Do not change business code until a source-level persistence contract test reproduces the counter/result divergence. |
+| Required regression | A failing integration test must cover creation, completed task persistence, fresh-session reload, project image count and asset-library count consistency. |
+
+### BUG-20260719-019 resolution update
+
+| Field | Detail |
+| --- | --- |
+| Root cause | `updateProject` used a two-second debounced server sync. `logout()` cancelled that timer and cleared the authenticated user without submitting the latest project payload. The dashboard could therefore show localStorage state before logout and stale server state after relogin. |
+| Fix | `UserManager.logout()` now starts an immediate, keepalive-enabled project sync while the session is still valid, then clears the timer and local session state. |
+| Regression | `src/__tests__/lib/user-manager-logout-sync.test.ts` was red before the change because no project-sync POST was sent. It is green after the change and asserts that the generated image is included in the submitted payload. |
+| Cloud status | Source fix complete. The issue remains P1 pending a synchronised cloud Chrome run that repeats generate -> logout -> relogin and verifies that the asset count remains unchanged. |
+
+### BUG-20260719-021: First project cannot sync after an explicit empty server project response
+
+| Field | Detail |
+| --- | --- |
+| Severity / module | P1 / project persistence for first-time users |
+| Reproduction | A logged-in user receives `{ success: true, value: [] }` from `/api/user-data/sync?key=projects`, creates a first project, and waits for the normal sync debounce. |
+| Actual | The empty-response branch returned success but left `_serverSyncReady` false, so the scheduled sync was blocked and the first project remained local-only. |
+| Fix | Mark a successfully loaded empty project list as server-sync-ready. The branch does not upload or overwrite data by itself. |
+| Regression | `src/__tests__/lib/user-manager-logout-sync.test.ts` was red with zero project-sync POSTs and is green after asserting that the first project is included in the POST payload. |
+| Cloud status | Pending real first-project save/reload verification after deployment. |
+
+### BUG-20260719-020: Account profile displays an invalid join date
+
+| Field | Detail |
+| --- | --- |
+| Severity / module | P3 / account profile UI |
+| Reproduction | Sign in as `Mr.joker`, open the profile menu from the dashboard avatar. |
+| Expected | A valid formatted account creation date, or an explicit unavailable-state message. |
+| Actual | The profile menu renders `加入于 Invalid Date`. |
+| Evidence | Chrome DOM snapshot from the authenticated P0 run on 2026-07-19. |
+| Root-cause status | Unresolved. Add a focused date-normalization test before changing the profile formatter. |
+
 | Field | Evidence |
 | --- | --- |
 | Bug ID / severity | BUG-20260718-016 / P1 |

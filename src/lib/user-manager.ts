@@ -484,6 +484,7 @@ export class UserManager {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
+        keepalive: immediate,
         body: JSON.stringify({ key: 'projects', value: projectsPayload }),
       });
       if (!syncRes.ok) {
@@ -552,6 +553,7 @@ export class UserManager {
 
       if (serverProjects.length === 0 && userData.projects.length === 0) {
         console.log('[Sync] loadProjectsFromServer: both local and server empty');
+        this._serverSyncReady = true;
         return true;
       }
 
@@ -1525,6 +1527,8 @@ export class UserManager {
    * 退出登录 - 清除当前用户状态，取消待执行的同步任务
    */
   logout(): void {
+    // Flush an update that is still waiting for the regular debounce while the session is valid.
+    void this.syncToServer(true);
     // 取消待执行的同步定时器，防止切换用户后旧定时器将数据写入新用户
     if (this.serverSyncTimer) {
       clearTimeout(this.serverSyncTimer);
