@@ -229,3 +229,14 @@ Artifacts: `test-results/screenshots/cloud-p0-auth-overlay-resumed-20260719.png`
 - Corrected source contract: `[dev]` now runs `pnpm install --frozen-lockfile` and `pnpm run dev`; `[deploy]` retains `pnpm run build` and `pnpm run start`.
 - Local evidence: `pnpm install --frozen-lockfile` completed successfully, including the optional post-install tool preparation; `coze-production-preview-contract.test.ts` passed.
 - Status: cloud deployment verification is still pending. The correction prevents the known configuration regression in source, but is not proof that the current Coze preview has adopted it.
+
+## 2026-07-19 Cloud availability recheck (commit `95b9afd`)
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Local API contract suite | Passed: 36 files / 89 tests | `pnpm test:api` exited 0 on the source workspace. This is local contract evidence only. |
+| Cloud doctor | Failed: 2 pass / 9 warnings / 1 failure | `pnpm run doctor -- --url=<preview>` received HTTP 502 from `/api/auth/me`. |
+| Independent read-only cloud probes | Failed | `/`, `/api/auth/me`, and `/api/session` each returned HTTP 502; see `test-results/network/cloud-health-502-20260719.json`. |
+| Authenticated P0 persistence regression | Not executed | The cloud gateway/backend was unavailable. No login, paid generation, persistence, download, or logout action was attempted. |
+
+Conclusion: this is an external preview availability blocker, not evidence for a source-level change. It blocks the required real-browser regression for BUG-20260719-019 and BUG-20260719-021. The next valid run must first observe a healthy root response plus a valid authenticated session response, then repeat generate -> logout -> Chrome-saved-credential relogin with the full evidence set.

@@ -155,6 +155,12 @@
 - `BUG-20260719-019`: the source fix flushes the final project payload before logout. Repeat generate -> logout -> Chrome-saved-credential relogin and verify that project and asset counters do not change.
 - `BUG-20260719-021`: with an account that has no projects, create one project, refresh, and reopen it. This verifies the explicit empty-server-list path outside the mocked regression test.
 
+### 2026-07-19 cloud availability blocker
+
+- `pnpm run doctor -- --url=https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9.dev.coze.site/` reported `/api/auth/me` as HTTP 502 and exited 1.
+- Independent read-only probes for `/`, `/api/auth/me`, and `/api/session` each returned HTTP 502. Evidence: `test-results/network/cloud-health-502-20260719.json`.
+- Do not run login, paid generation, project persistence, or download regression until the preview returns a healthy root plus authenticated API responses.
+
 ### 2026-07-19 Local Production Recheck
 
 - The source-side authentication bootstrap fix is locally verified, but its cloud deployment is not.

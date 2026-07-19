@@ -243,6 +243,18 @@
 
 ## 2026-07-19 Resume Verification
 
+### INFRA-20260719-002: Cloud preview root and authentication endpoints return HTTP 502
+
+| Field | Detail |
+| --- | --- |
+| Severity / module | P1 / Coze preview backend or gateway availability |
+| Environment | Preview URL `https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9.dev.coze.site/`; source commit `95b9afd` |
+| Reproduction | Run `pnpm run doctor -- --url=<preview>` and issue unauthenticated read-only GET requests to `/`, `/api/auth/me`, and `/api/session`. |
+| Actual | Doctor received HTTP 502 from `/api/auth/me`; each independent endpoint probe also returned HTTP 502. |
+| Evidence | `test-results/network/cloud-health-502-20260719.json` |
+| Scope decision | External deployment blocker. No source-level change is justified until the preview backend is reachable and the application request/response chain can be observed. |
+| Required recovery evidence | Root returns 200, `/api/auth/me` returns 200 or 401, `/api/session` returns a valid session response in the logged-in Chrome profile, then repeat P0 and BUG-20260719-019 browser regression. |
+
 ### 2026-07-19 Cloud recovery observation (not a defect record yet)
 
 | Field | Evidence |
