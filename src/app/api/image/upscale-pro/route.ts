@@ -9,6 +9,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/server-auth';
+import { getInternalRequestHeaders } from '@/lib/api-auth';
 
 // 允许最长5分钟（ONNX放大+AI精修可能较慢）
 export const maxDuration = 300;
@@ -931,7 +932,7 @@ async function persistResult(remoteUrl: string): Promise<string> {
       : 'http://localhost:5000';
     const persistResp = await fetch(`${baseUrl}/api/save-image`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(await getInternalRequestHeaders('system-save-image', 'admin')) },
       body: JSON.stringify({ imageUrl: remoteUrl, prefix: 'upscale-pro' }),
     });
     if (persistResp.ok) {

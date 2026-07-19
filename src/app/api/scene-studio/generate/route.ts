@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { calculateActualPixelsFromRatio } from '@/lib/calculate-pixels';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { validateApiInputs } from '@/lib/api-validator';
+import { getInternalRequestHeaders } from '@/lib/api-auth';
+import { persistResultImage } from '@/lib/persist-result-image';
 
 // POST: generate image from 3D scene
 export async function POST(request: NextRequest) {
@@ -81,7 +83,7 @@ export async function POST(request: NextRequest) {
     const effectiveModelName = normalizedModelName;
 
     // Check for gemini-image profile — use chat/completions endpoint
-    const { resolveProfileForModel, buildGeminiChatImageRequest, parseGeminiChatImageResponse, adjustRequestForProfile, parseResponseForProfile, tryChatCompletionsImageFallback, isChannelUnavailableError, persistResultImage } = await import('@/lib/api-compatibility');
+    const { resolveProfileForModel, buildGeminiChatImageRequest, parseGeminiChatImageResponse, adjustRequestForProfile, parseResponseForProfile, tryChatCompletionsImageFallback, isChannelUnavailableError } = await import('@/lib/api-compatibility');
     const profile = resolveProfileForModel(modelName, provider);
 
     // Calculate size based on aspect ratio and quality (user setting from panel)
@@ -213,7 +215,7 @@ export async function POST(request: NextRequest) {
             const persistedChatUrls = await Promise.all(chatImageUrls.map(async (url: string) => {
               if (url.startsWith('data:')) {
                 try {
-                  const saveRes = await fetch(`${baseUrl}/api/save-image`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imageData: url, subdir: 'generate' }) });
+                  const saveRes = await fetch(`${baseUrl}/api/save-image`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(await getInternalRequestHeaders('system-save-image', 'admin')) }, body: JSON.stringify({ imageData: url, subdir: 'generate' }) });
                   const saveData = await saveRes.json();
                   if (saveData.url) return saveData.url;
                 } catch (e) { /* ignore */ }

@@ -20,6 +20,7 @@
  *   const result   = parseResponseForProfile(apiResponse, profile);
  */
 
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -769,56 +770,6 @@ export async function tryChatCompletionsImageFallback(params: {
   } catch (err) {
     console.log(`[${requestIdPrefix}] /chat/completions fallback error: ${err}`);
     return null;
-  }
-}
-
-/**
- * Persist a result image URL to the local server filesystem.
- * Handles data: URLs, HTTP URLs, and already-persisted local paths.
- * Returns the persisted local URL or the original URL if persistence fails.
- */
-export async function persistResultImage(imageUrl: string): Promise<string> {
-  try {
-    if (imageUrl.startsWith('/api/serve-upload/') || imageUrl.startsWith('/uploads/')) {
-      return imageUrl;
-    }
-    const internalPort = process.env.DEPLOY_RUN_PORT || '5000';
-    const saveUrl = `http://localhost:${internalPort}/api/save-image`;
-
-    if (imageUrl.startsWith('data:')) {
-      const resp = await fetch(saveUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageUrl }),
-      });
-      if (resp.ok) {
-        const data = await resp.json();
-        if (data.url) return data.url;
-      }
-      return imageUrl;
-    }
-    if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
-      const imgResp = await fetch(imageUrl, { signal: AbortSignal.timeout(30000) });
-      if (imgResp.ok) {
-        const contentType = imgResp.headers.get('content-type') || 'image/png';
-        const buffer = Buffer.from(await imgResp.arrayBuffer());
-        const base64 = `data:${contentType};base64,${buffer.toString('base64')}`;
-        const resp = await fetch(saveUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ imageUrl: base64 }),
-        });
-        if (resp.ok) {
-          const data = await resp.json();
-          if (data.url) return data.url;
-        }
-      }
-      return imageUrl;
-    }
-    return imageUrl;
-  } catch (err) {
-    console.warn('[persistResultImage] Failed to persist result image:', err);
-    return imageUrl;
   }
 }
 

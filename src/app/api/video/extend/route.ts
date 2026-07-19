@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { findProviderForFeature, findProviderForModel, findProviderById } from '@/lib/server-api-config';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
 import { getSessionUser } from '@/lib/server-auth';
+import { getInternalRequestHeaders } from '@/lib/api-auth';
 import { consumeCredits, refundCredits } from '@/lib/credits';
 import { validateApiInputs } from '@/lib/api-validator';
 import {
@@ -317,7 +318,7 @@ export async function POST(request: NextRequest) {
           try {
             const persistRes = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/save-image`, {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 'Content-Type': 'application/json', ...(await getInternalRequestHeaders('system-save-image', 'admin')) },
               body: JSON.stringify({ imageUrl: finalVideoUrl, format: 'mp4' }),
               signal: AbortSignal.timeout(30000),
             });
@@ -332,7 +333,7 @@ export async function POST(request: NextRequest) {
             try {
               const persistRes = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/save-image`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', ...(await getInternalRequestHeaders('system-save-image', 'admin')) },
                 body: JSON.stringify({ imageUrl: finalImageUrl }),
                 signal: AbortSignal.timeout(30000),
               });

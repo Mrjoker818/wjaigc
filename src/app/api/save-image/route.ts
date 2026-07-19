@@ -5,7 +5,7 @@ import path from 'path';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import { uploadImageToS3, isS3Available } from '@/lib/s3-storage';
 import { saveImageDataMapping, getImageSourceUrl } from '@/lib/image-source-map';
-import { getSessionUser as getAuthUser } from '@/lib/server-auth';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 import sharp from 'sharp';
 import { validateApiInputs } from '@/lib/api-validator';
 
@@ -19,22 +19,10 @@ import { validateApiInputs } from '@/lib/api-validator';
  * 同时在 public/uploads/ 创建副本或符号链接以供 Next.js 静态服务
  */
 export async function POST(request: NextRequest) {
-  try {
-    // 认证检查：只有登录用户才能保存图片
-    // 服务端内部调用（来自 localhost 的请求）自动放行
-    const isInternalCall = request.headers.get('x-internal-call') === 'true' 
-      || request.headers.get('host')?.startsWith('localhost')
-      || request.headers.get('host')?.startsWith('127.0.0.1');
-    if (!isInternalCall) {
-      const user = await getAuthUser(request);
-      if (!user) {
-        return NextResponse.json(
-          { success: false, error: '未登录，请先登录' },
-          { status: 401 }
-        );
-      }
-    }
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult instanceof NextResponse) return authResult;
 
+  try {
     const contentType = request.headers.get('content-type') || '';
 
     // 支持 multipart/form-data 文件上传

@@ -1,17 +1,18 @@
 # 缺陷登记册
 
-## BUG-20260719-032: Image persistence route trusts forgeable local/internal headers
+## BUG-20260719-032: Image persistence route trusted forgeable local/internal headers
 
 | Field | Record |
 | --- | --- |
-| Severity | P1, open |
+| Severity | P1, fixed locally; cloud verification pending |
 | Module | `POST /api/save-image` and server-to-server image persistence callers |
 | Environment | Source baseline `73ccc02`, 2026-07-19 Asia/Shanghai. |
-| Stable reproduction | The route bypasses session authentication for a request that provides `x-internal-call: true` or a Host beginning with `localhost`/`127.0.0.1`, before accepting multipart/data/remote image content and writing to local/S3 storage. |
+| Stable reproduction | The route bypassed session authentication for a request that provided `x-internal-call: true` or a Host beginning with `localhost`/`127.0.0.1`, before accepting multipart/data/remote image content and writing to local/S3 storage. |
 | Expected | Browser users must have a session. Internal callers must use `getInternalRequestHeaders` with the server-only shared secret; caller-controlled Host values and bare headers may not bypass authentication. |
-| Root cause | A legacy development shortcut was retained while many server routes began calling the HTTP persistence endpoint. Repository audit found direct callers in generation, Agent, workflow, brand/refine, scene, upscale, video, quality-enhance, and compatibility layers; most do not yet send signed internal headers. |
-| Required repair | Add a red-first route contract; migrate every listed server caller to the signed internal-request protocol with attributable identity; then replace the bypass with `requireApiAuthOrReject`. Run generation/workflow/video/refinement regression before cloud acceptance. |
-| Release status | P1 open. Do not enable a route-only guard until every internal caller is migrated; that would create a broad production regression. |
+| Root cause | A legacy development shortcut was retained while server-side generation, Agent, workflow, brand/refine, scene, upscale, video, and quality-enhance paths called the HTTP persistence endpoint. |
+| Fix | Remove the caller-controlled bypass and require `requireApiAuthOrReject(request)` before body parsing. Migrate all direct server persistence callers to signed `getInternalRequestHeaders`; delayed background persistence uses the explicit internal worker identity `system-save-image` with administrator role, while request-scoped Agent/generation calls retain the authenticated user identity. The shared compatibility layer no longer imports server-only authentication; its server-side result persistence moved to `persist-result-image.ts`. |
+| Regression | The new red-first contract initially failed on the bypass and unsigned caller inventory. It now passes, including the no-bare-header check. Focused compatibility regression: 4 files / 37 assertions passed. Full API suite: 44 files / 100 assertions passed. Component/library regression, targeted ESLint error check, and TypeScript checks passed. |
+| Cloud acceptance | Pending. Verify anonymous `POST /api/save-image` is rejected before media parsing, then run a signed-in real image generation, workflow result persistence, video generation/extension, refinement, and upscale result save without new 401 failures. |
 
 ## BUG-20260719-031: Upload route trusted forgeable internal-call headers
 

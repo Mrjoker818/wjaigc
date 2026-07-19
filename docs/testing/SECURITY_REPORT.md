@@ -1,14 +1,15 @@
 # 安全测试报告
 
-## 2026-07-19 Open P1: image persistence internal-auth migration
+## 2026-07-19 P1 repair: image persistence internal-auth migration
 
 ### SEC-013 / P1: Image persistence trusts caller-controlled local/internal headers
 
 - Location: `src/app/api/save-image/route.ts`
-- Evidence: `x-internal-call: true` and local-looking Host values bypass session authentication before accepting multipart/data/remote media and storing it locally or in S3.
+- Evidence: `x-internal-call: true` and local-looking Host values bypassed session authentication before accepting multipart/data/remote media and storing it locally or in S3.
 - Impact: unowned storage writes and remote-media fetching through a privileged persistence route if an attacker can reach the endpoint through a proxy or local-origin path.
-- Constraint: the route has many server-to-server callers. Most currently rely on the insecure shortcut and must be migrated to the signed `getInternalRequestHeaders` protocol before the boundary is enforced.
-- Status: **open**. A route-only authorization change is intentionally not applied because it would break real generation, workflow, image/video, and refinement persistence paths. The release gate remains failed until migration, red-first regression, full suite, and cloud acceptance are complete.
+- Fix: remove both caller-controlled bypasses and require `requireApiAuthOrReject` before parsing the request. Every direct server persistence caller now adds verified `getInternalRequestHeaders`; delayed worker persistence uses the explicit `system-save-image` internal identity, and request-scoped callers retain their signed-in user identity.
+- Verification: the red-first authorization/caller-inventory contract now passes. Focused compatibility regression passed 4 files / 37 assertions; API suite passed 44 files / 100 assertions; component/library regression, lint, and TypeScript checks passed.
+- Status: **fixed locally; cloud verification pending**. The release gate remains failed until anonymous rejection and authenticated generation/workflow/image/video/refinement persistence are verified in the synchronized cloud preview.
 
 ## 2026-07-19 P1 repair: upload authentication bypass
 

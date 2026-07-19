@@ -10,7 +10,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { getInternalApiUrl } from '@/lib/api-helpers';
-import { requireApiAuthOrReject } from '@/lib/api-auth';
+import { getInternalRequestHeaders, requireApiAuthOrReject } from '@/lib/api-auth';
 import {
   topologicalSort,
   getNodeInputs,
@@ -957,7 +957,7 @@ async function executeAsyncTask(
         try {
           const saveResp = await fetch(getInternalApiUrl('/api/save-image'), {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...(await getInternalRequestHeaders('system-save-image', 'admin')) },
             body: JSON.stringify({ imageUrl: rawUrl }),
           });
           const saveData = await saveResp.json();
@@ -1060,7 +1060,7 @@ async function executeAsyncTask(
         try {
           const saveResp = await fetch(getInternalApiUrl('/api/save-image'), {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...(await getInternalRequestHeaders('system-save-image', 'admin')) },
             body: JSON.stringify({ imageUrl: rawUrl }),
           });
           const saveData = await saveResp.json();

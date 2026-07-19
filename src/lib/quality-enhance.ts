@@ -5,6 +5,11 @@
 
 import { findProviderForModel } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
+
+async function getSaveImageInternalHeaders(): Promise<Record<string, string>> {
+  const { getInternalRequestHeaders } = await import('@/lib/api-auth');
+  return getInternalRequestHeaders('system-save-image', 'admin');
+}
 import { calculateActualPixelsFromRatio } from './canvas-generation-group';
 
 /** 画质精修提示词 — 在放大后修复模糊、噪点、脏画面等问题 */
@@ -47,7 +52,7 @@ async function persistResult(remoteUrl: string): Promise<string> {
       : 'http://localhost:5000';
     const persistResp = await fetch(`${baseUrl}/api/save-image`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(await getSaveImageInternalHeaders()) },
       body: JSON.stringify({ imageUrl: remoteUrl, prefix: 'quality-enhance' }),
       signal: AbortSignal.timeout(30000),
     });

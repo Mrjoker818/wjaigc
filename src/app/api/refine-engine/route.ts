@@ -4,6 +4,7 @@ import type { ApiProvider } from '@/lib/universal-api-types';
 import { calculateActualPixelsFromRatio } from '@/lib/calculate-pixels';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, resolveProfileForModel, buildGeminiChatImageRequest, tryChatCompletionsImageFallback, parseGeminiChatImageResponse, isEditsEndpointRejected, stripEditsOnlyFields, isChannelUnavailableError } from '@/lib/api-compatibility';
 import { fetchWithV1Retry, getInternalApiUrl } from '@/lib/api-helpers';
+import { getInternalRequestHeaders } from '@/lib/api-auth';
 import { translateApiError } from '@/lib/api-error-translate';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
 import { getSessionUser } from '@/lib/server-auth';
@@ -22,7 +23,7 @@ async function persistResultImage(imageUrl: string): Promise<string> {
     if (imageUrl.startsWith('data:')) {
       const resp = await fetch(getInternalApiUrl('/api/save-image'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(await getInternalRequestHeaders('system-save-image', 'admin')) },
         body: JSON.stringify({ imageUrl }),
       });
       if (resp.ok) {
@@ -39,7 +40,7 @@ async function persistResultImage(imageUrl: string): Promise<string> {
         const base64 = `data:${contentType};base64,${buffer.toString('base64')}`;
         const resp = await fetch(getInternalApiUrl('/api/save-image'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...(await getInternalRequestHeaders('system-save-image', 'admin')) },
           body: JSON.stringify({ imageUrl: base64 }),
         });
         if (resp.ok) {

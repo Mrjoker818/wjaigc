@@ -15,7 +15,8 @@ import { findProviderForModel, findProviderForFeature, findProviderById } from '
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
-import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, buildPollUrl, extractImageUrl, tryChatCompletionsImageFallback, isChannelUnavailableError, persistResultImage } from '@/lib/api-compatibility';
+import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, buildPollUrl, extractImageUrl, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
+import { persistResultImage } from '@/lib/persist-result-image';
 import type { ApiCompatProfile } from '@/lib/api-compatibility';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import { dbGetUserData, dbSetUserData } from '@/lib/db-storage';

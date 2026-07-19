@@ -257,7 +257,7 @@ export async function POST(request: NextRequest) {
           try {
             const saveResp = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/save-image`, {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 'Content-Type': 'application/json', ...(await getInternalRequestHeaders('system-save-image', 'admin')) },
               body: JSON.stringify({ imageData: img }),
             });
             if (saveResp.ok) {
@@ -1030,7 +1030,7 @@ export async function POST(request: NextRequest) {
         // 通过 /api/save-image 持久化
         const saveResp = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/save-image`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...(await getInternalRequestHeaders('system-save-image', 'admin')) },
           body: JSON.stringify({
             imageData: `data:${contentType.includes('png') ? 'image/png' : contentType.includes('webp') ? 'image/webp' : 'image/jpeg'};base64,${buffer.toString('base64')}`,
           }),

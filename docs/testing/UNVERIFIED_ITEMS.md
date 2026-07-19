@@ -2,6 +2,8 @@
 
 ## 2026-07-19 Current authoritative unverified state
 
+- `BUG-20260719-032` is fixed locally after the previous baseline: `POST /api/save-image` now requires verified authentication and all direct server persistence callers use signed internal-request headers. It remains unverified on cloud until anonymous rejection and authenticated image/workflow/video/refinement/upscale persistence are exercised against the synchronized deployment.
+
 - Local source baseline: `73ccc02 fix: require authentication for uploads` on `origin/main`. Local API regression passes 43 files / 98 assertions; component/library regression and TypeScript checks pass.
 - Cloud acceptance is **not current**. In the logged-in Chrome preview, the selected image container still rendered as `absolute group z-10 z-20`; clicking its visible `删除` control opened `美陈拆解`. This proves the preview has not loaded `04927ee` or any later commit, including `73ccc02`.
 - `BUG-20260719-024` remains P1 open until the synchronized cloud bundle deletes the selected image without opening `美陈拆解`, and the deletion survives reopening the project.

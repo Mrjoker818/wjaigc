@@ -22,6 +22,7 @@ import {
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { buildDirectorPrompt, type VideoDirectorMode } from '@/lib/video-director';
 import { getSessionUser } from '@/lib/server-auth';
+import { getInternalRequestHeaders } from '@/lib/api-auth';
 import { consumeCredits, refundCredits } from '@/lib/credits';
 import { logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
 import { validateApiInputs } from '@/lib/api-validator';
@@ -200,7 +201,7 @@ export async function POST(request: NextRequest) {
           try {
             const saveResp = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/save-image`, {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 'Content-Type': 'application/json', ...(await getInternalRequestHeaders('system-save-image', 'admin')) },
               body: JSON.stringify({ imageData: imgUrl }),
             });
             if (saveResp.ok) {
