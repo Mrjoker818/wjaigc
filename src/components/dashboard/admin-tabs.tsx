@@ -246,6 +246,8 @@ export default function AdminTabs(props: AdminTabsProps) {
   const [resetPasswordUserId, setResetPasswordUserId] = useState<string | null>(null);
   const [resetPasswordValue, setResetPasswordValue] = useState('');
   const [resetPasswordConfirm, setResetPasswordConfirm] = useState('');
+  const [showResetPasswordValue, setShowResetPasswordValue] = useState(false);
+  const [showResetPasswordConfirm, setShowResetPasswordConfirm] = useState(false);
   const [resetPasswordError, setResetPasswordError] = useState('');
   const [resetPasswordLoading, setResetPasswordLoading] = useState(false);
 
@@ -983,6 +985,8 @@ export default function AdminTabs(props: AdminTabsProps) {
                         setResetPasswordUserId(detailUser.id);
                         setResetPasswordValue('');
                         setResetPasswordConfirm('');
+                        setShowResetPasswordValue(false);
+                        setShowResetPasswordConfirm(false);
                         setResetPasswordError('');
                         setShowResetPasswordDialog(true);
                       }}
@@ -1022,26 +1026,52 @@ export default function AdminTabs(props: AdminTabsProps) {
               </p>
               <div className="space-y-3">
                 <div>
-                  <label className="text-xs font-medium text-foreground mb-1 block">新密码</label>
-                  <input
-                    type="password"
-                    value={resetPasswordValue}
-                    onChange={e => { setResetPasswordValue(e.target.value); setResetPasswordError(''); }}
-                    placeholder="至少6个字符"
-                    disabled={resetPasswordLoading}
-                    className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
-                  />
+                  <label htmlFor="reset-new-password" className="text-xs font-medium text-foreground mb-1 block">新密码</label>
+                  <div className="relative">
+                    <input
+                      id="reset-new-password"
+                      type={showResetPasswordValue ? 'text' : 'password'}
+                      value={resetPasswordValue}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setResetPasswordValue(e.target.value); setResetPasswordError(''); }}
+                      placeholder="至少6个字符"
+                      disabled={resetPasswordLoading}
+                      className="w-full h-10 pl-3 pr-11 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowResetPasswordValue(value => !value)}
+                      disabled={resetPasswordLoading}
+                      aria-label={showResetPasswordValue ? '隐藏新密码' : '显示新密码'}
+                      aria-pressed={showResetPasswordValue}
+                      className="absolute inset-y-0 right-0 flex w-10 cursor-pointer items-center justify-center rounded-r-lg text-muted-foreground transition-colors hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {showResetPasswordValue ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-foreground mb-1 block">确认密码</label>
-                  <input
-                    type="password"
-                    value={resetPasswordConfirm}
-                    onChange={e => { setResetPasswordConfirm(e.target.value); setResetPasswordError(''); }}
-                    placeholder="再次输入新密码"
-                    disabled={resetPasswordLoading}
-                    className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
-                  />
+                  <label htmlFor="reset-confirm-password" className="text-xs font-medium text-foreground mb-1 block">确认密码</label>
+                  <div className="relative">
+                    <input
+                      id="reset-confirm-password"
+                      type={showResetPasswordConfirm ? 'text' : 'password'}
+                      value={resetPasswordConfirm}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setResetPasswordConfirm(e.target.value); setResetPasswordError(''); }}
+                      placeholder="再次输入新密码"
+                      disabled={resetPasswordLoading}
+                      className="w-full h-10 pl-3 pr-11 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowResetPasswordConfirm(value => !value)}
+                      disabled={resetPasswordLoading}
+                      aria-label={showResetPasswordConfirm ? '隐藏确认密码' : '显示确认密码'}
+                      aria-pressed={showResetPasswordConfirm}
+                      className="absolute inset-y-0 right-0 flex w-10 cursor-pointer items-center justify-center rounded-r-lg text-muted-foreground transition-colors hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {showResetPasswordConfirm ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                 </div>
                 {resetPasswordError && (
                   <div className="flex items-center gap-2 text-sm text-destructive bg-destructive/10 rounded-lg px-3 py-2">
