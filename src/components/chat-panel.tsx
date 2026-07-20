@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Bot, Send, Sparkles, Copy, Check, Trash2, Loader2, Eye, EyeOff, Wand2, User, Upload, X, Image as ImageIcon, Languages, Settings, Plug, Plus, History, FolderOpen, MessageSquare, Bookmark, BookmarkCheck, Lightbulb, Zap, ArrowRight, Palette, Target, Sliders, Download, AlertCircle, LocateFixed, RotateCcw, FileText, Cpu, ChevronRight, AtSign, ThumbsUp, ThumbsDown } from 'lucide-react';
+import { Bot, Send, Square, Sparkles, Copy, Check, Trash2, Loader2, Eye, EyeOff, Wand2, User, Upload, X, Image as ImageIcon, Languages, Settings, Plug, Plus, History, FolderOpen, MessageSquare, Bookmark, BookmarkCheck, Lightbulb, Zap, ArrowRight, Palette, Target, Sliders, Download, AlertCircle, LocateFixed, RotateCcw, FileText, Cpu, ChevronRight, AtSign, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { AgentBuilderDialog, type AgentDefinition, type AgentRecipe } from '@/components/chat/AgentBuilderDialog';
 import { toast } from 'sonner';
 import { extractTaskResultImageUrl } from '@/lib/task-result-url';
@@ -105,321 +105,252 @@ interface ChatSession {
   canvasImageIds?: string[];   // Canvas images referenced in this session
 }
 
-// Agent recipe: a single-step operation with domain-specific prompt strategy
-
-// Agent capability definition - extends the simple prompt-based agent
-// (AgentDefinition 和 AgentRecipe 类型已从 AgentBuilderDialog 导入)
 
 
+const AGENTS: AgentDefinition[] = [
+  {
+    id: 'product-design',
+    name: '产品设计',
+    nameEn: 'Product Design',
+    icon: '📦',
+    desc: '打造专业级产品渲染与包装视觉',
+    color: '#f39c12',
+    prompt: `你是一位顶级的工业设计师与产品视觉专家，擅长为消费品、电子产品、时尚单品打造高精度3D渲染图、产品包装及详情页视觉。你精通产品摄影美学、材质表现与商业视觉规律。
 
 核心任务：
-1. 瓶型概念设计：根据品牌调性，构思具有辨识度的瓶身造型（如方型、异型、仿生型）。
-2. 标签与版式：设计符合品牌层级的标签排版，包含字体、纹样与烫金工艺。
-3. 材质与工艺：推荐高端包装材质（如磨砂玻璃、电镀铝盖、特种纸、丝绒内衬）。
-4. 3D 渲染指导：提供用于 KeyShot / Blender 的高精度渲染参数。
-
-审美与技术标准：
-- 瓶型风格：追求"建筑感"与"雕塑感"的结合，拒绝平庸的圆柱体。善于从东方器物（如玉壶春瓶、梅瓶）和现代建筑中提取几何线条。
-- 材质表现：强调物理质感——玻璃的折射与高光、金属的拉丝与氧化、纸张的肌理与触感。必须使用 PBR 材质参数描述。
-- 光影逻辑：使用三点布光（主光/辅光/轮廓光），配合 HDRI 环境贴图，营造摄影棚级的渲染效果。常用 3000K 暖光突显酒液琥珀色。
-- 细节刻画：瓶盖螺纹、标签压纹、瓶底防滑纹等微观细节必须到位。
+1. 产品3D渲染：构建逼真的产品视觉，展现材质质感与设计细节。
+2. 包装设计：设计产品外包装、礼盒及零售陈列方案。
+3. 详情页视觉：规划电商详情页视觉层级、场景图与卖点图。
+4. 生活方式摄影：设计产品在真实使用场景中的生活方式图。
 
 输出规范：
-1. 设计理念（200字内）
-2. 瓶型描述（造型、比例、尺寸）
-3. 标签设计（字体、纹样、工艺）
-4. 材质方案（主色调、CMYK、推荐材质）
-5. 渲染参数（灯光、环境、相机角度）
-6. AI 渲染提示词：必须同时输出中文和英文两个版本，格式如下：
-【中文提示词】用中文描述画面的主体、场景、风格、色彩、光影、氛围等，100-200字
-【English Prompt】English prompt for Midjourney/DALL-E 3 with style, lighting, composition keywords`,
+1. 创意概念（100字内）
+2. 视觉方案说明（构图/光影/材质）
+3. AI 渲染提示词（中英双版本）`,
     tools: ['generate_image', 'edit_image', 'remove_bg', 'upscale', 'analyze_image'],
     recipes: [
-      { id: 'bottle-3d-render', name: '瓶型3D渲染', operationType: 'generate_image', promptTemplate: '3D product render of a premium liquor bottle, {style}, {material}, studio lighting, PBR materials, photorealistic, 8k', defaultParams: { aspectRatio: '3:4', quality: 'hd' } },
-      { id: 'label-design', name: '标签设计', operationType: 'generate_image', promptTemplate: 'Premium liquor label design, {brandStyle}, gold foil stamping, elegant typography, white background, flat design', defaultParams: { aspectRatio: '2:3', quality: 'hd' } },
-      { id: 'gift-box-render', name: '礼盒3D渲染', operationType: 'generate_image', promptTemplate: 'Luxury liquor gift box 3D render, {material}, velvet interior, magnetic closure, premium unboxing experience, 8k', defaultParams: { aspectRatio: '4:3', quality: 'hd' } },
+      { id: 'product-3d-render', name: '产品3D渲染', operationType: 'generate_image', promptTemplate: '3D product render, {productType}, {material}, studio lighting, clean background, photorealistic, 8k --ar 3:4', defaultParams: { aspectRatio: '3:4', quality: 'hd' } },
+      { id: 'lifestyle-shot', name: '生活方式图', operationType: 'generate_image', promptTemplate: 'Product lifestyle photography, {productType}, {scene}, natural lighting, editorial style, 8k --ar 16:9', defaultParams: { aspectRatio: '16:9', quality: 'hd' } },
+      { id: 'packaging-design', name: '包装设计', operationType: 'generate_image', promptTemplate: 'Premium product packaging design, {brand}, {colorScheme}, minimalist, white background, mockup style, 8k --ar 1:1', defaultParams: { aspectRatio: '1:1', quality: 'hd' } },
     ],
     defaultAspectRatio: '3:4',
     suggestedNextSteps: [
-      { label: '调整瓶型造型', action: 'edit_image', prefilledPrompt: '保持整体风格不变，调整瓶身造型为更流线型的设计' },
-      { label: '更换材质方案', action: 'generate_image', prefilledPrompt: '将瓶身材质更换为磨砂玻璃，保持原有造型' },
-      { label: '放大到8K', action: 'upscale' },
+      { label: '换个角度渲染', action: 'generate_image', prefilledPrompt: '从45度俯视角度重新渲染产品' },
+      { label: '调整材质', action: 'edit_image', prefilledPrompt: '将产品材质改为哑光质感，保持造型不变' },
+      { label: '移除背景', action: 'remove_bg' },
     ],
-    routingKeywords: ['酒', '酒瓶', '酒类', '包装', '瓶型', '瓶身', '标签', '礼盒', '白酒', '红酒', '洋酒', '威士忌', '茅台', '瓶装', '瓶盖', 'liquor', 'wine bottle', 'whiskey', 'packaging'],
-    skillIds: ['preset-product-packaging'],
+    routingKeywords: ['产品', '包装', '3D渲染', '电商图', '详情页', '产品摄影', '工业设计', '材质', 'product', 'packaging', '3d render', 'ecommerce'],
+    skillIds: ['preset-product-packaging', 'preset-mockup-showcase'],
   },
   {
-    id: 'brand-visuals',
+    id: 'brand-identity',
     name: '品牌视觉',
-    nameEn: 'Brand Visuals',
+    nameEn: 'Brand Identity',
     icon: '🎨',
-    desc: '管理 VI 规范与符号逻辑',
+    desc: '构建完整 VI 系统与品牌符号',
     color: '#5b8fb9',
-    prompt: `你是一位顶级的品牌视觉总监与 VI 系统架构师。专为酒类品牌构建从标识到应用的全套视觉识别系统。你擅长将品牌文化转化为视觉符号，并确保在所有触点上保持高度一致性。
+    prompt: `你是一位资深品牌视觉总监与VI系统架构师，擅长为各行业品牌构建从标识到应用的全套视觉识别系统。你能将品牌文化转化为视觉符号，确保在所有触点保持高度一致性。
 
 核心任务：
-1. 标识系统：设计品牌 Logo、辅助图形与吉祥物符号。
-2. 色彩体系：建立主色/辅色/点缀色的完整色彩规范。
+1. Logo设计：构思并设计品牌标识，包括主标志、辅助图形与使用规范。
+2. 色彩体系：建立主色/辅色/点缀色的完整色彩规范（含各色彩模式数值）。
 3. 字体系统：指定品牌中英文字体、排版层级与应用规则。
-4. 应用规范：制定包装、物料、数字端的视觉应用指南。
-
-审美与技术标准：
-- 符号逻辑：每个视觉符号必须有清晰的文化溯源与品牌关联。拒绝装饰性元素，追求"每一个图形都有叙事"。
-- 色彩科学：使用 PCCS 或 Munsell 色彩体系，确保色彩在不同材质和光环境下的准确性。
-- 排版秩序：建立严格的网格系统，所有版式遵循 8px 基准网格。
-- 品牌层级：区分高端线（极简留白）与大众线（丰富视觉），用视觉语言区分产品线。
+4. VI应用：制定名片、信封、PPT模板等物料的视觉规范。
 
 输出规范：
-1. 品牌视觉核心理念（100字内）
-2. 标志设计说明（构图逻辑、色彩含义、应用禁忌）
-3. 色彩系统（主色/辅色/点缀色，含 CMYK/HEX/Pantone）
-4. 字体方案（中文/英文/数字字体）
-5. 辅助图形系统（纹样来源、延展规则）
-6. AI 渲染提示词：必须同时输出中文和英文两个版本，格式如下：
-【中文提示词】用中文描述画面的主体、场景、风格、色彩、光影、氛围等，100-200字
-【English Prompt】English prompt for Midjourney/DALL-E 3 with style, lighting, composition keywords`,
+1. 品牌视觉核心理念
+2. Logo设计说明（构图逻辑/含义/禁区）
+3. 色彩方案（CMYK/HEX/Pantone）
+4. AI 渲染提示词（中英双版本）`,
     tools: ['generate_image', 'edit_image', 'remove_bg', 'upscale', 'analyze_image'],
     recipes: [
-      { id: 'logo-design', name: 'Logo设计', operationType: 'generate_image', promptTemplate: 'Brand logo design, {brandStyle}, minimalist, vector style, {colorScheme}, flat design on white background', defaultParams: { aspectRatio: '1:1', quality: 'hd' } },
-      { id: 'color-system', name: '色彩体系展示', operationType: 'generate_image', promptTemplate: 'Brand color palette presentation, {primaryColor} {secondaryColor} {accentColor}, professional color swatches, clean layout', defaultParams: { aspectRatio: '16:9', quality: 'standard' } },
-      { id: 'vi-mockup', name: 'VI应用效果图', operationType: 'generate_image', promptTemplate: 'Brand identity mockup, {brandStyle}, business card letterhead envelope, professional presentation, photorealistic', defaultParams: { aspectRatio: '16:9', quality: 'hd' } },
+      { id: 'logo-design', name: 'Logo设计', operationType: 'generate_image', promptTemplate: 'Brand logo design, {brandStyle}, minimalist, vector style, {colorScheme}, white background, flat design, professional --ar 1:1', defaultParams: { aspectRatio: '1:1', quality: 'hd' } },
+      { id: 'vi-mockup', name: 'VI应用效果', operationType: 'generate_image', promptTemplate: 'Brand identity mockup, {brandStyle}, business card letterhead packaging, professional presentation, photorealistic --ar 16:9', defaultParams: { aspectRatio: '16:9', quality: 'hd' } },
+      { id: 'brand-pattern', name: '品牌纹样', operationType: 'generate_image', promptTemplate: 'Brand pattern design, {brandStyle}, {colorScheme}, seamless tile, decorative, elegant --ar 1:1', defaultParams: { aspectRatio: '1:1', quality: 'standard' } },
     ],
     defaultAspectRatio: '1:1',
     suggestedNextSteps: [
-      { label: '优化Logo细节', action: 'edit_image', prefilledPrompt: '保持整体构图，优化Logo的线条流畅度和细节' },
+      { label: '优化Logo细节', action: 'edit_image', prefilledPrompt: '优化Logo的线条流畅度，保持整体构图不变' },
       { label: '生成VI应用场景', action: 'generate_image', prefilledPrompt: '将Logo应用到名片和信封上的效果图' },
       { label: '移除背景', action: 'remove_bg' },
     ],
-    routingKeywords: ['品牌', 'VI', '视觉识别', 'Logo', '标识', '色彩体系', '字体系统', '品牌规范', '品牌设计', '品牌形象', 'brand', 'logo', 'identity', 'visual system'],
+    routingKeywords: ['品牌', 'VI', '视觉识别', 'Logo', '标志', '色彩体系', '字体系统', '品牌规范', 'brand', 'logo', 'identity', 'visual system', 'vi'],
     skillIds: ['preset-logo-brand', 'preset-mockup-showcase', 'preset-business-card'],
-  },
-  {
-    id: 'spatial-exhibit',
-    name: '空间展演',
-    nameEn: 'Spatial Exhibit',
-    icon: '🏛️',
-    desc: '打造电影级展览空间叙事',
-    color: '#d4af37',
-    prompt: `你是一位顶级的展览展示建筑师与会展创意总监。专注于为高端酒类、科技、文化品牌提供大型展位、发布会会场、博物馆级展厅的全局方案。你擅长将品牌精神转化为立体的"空间叙事"，精通参数化结构、动态灯光系统及社交媒介传播规律。
-
-核心任务：
-1. 空间策展化：将展位视为一个可游走的"故事长卷"，规划合理的序厅、核心展示区、品鉴/洽谈区与尾厅。
-2. 动线逻辑规划：优化人流走向，利用视觉导引系统（Signage）与空间开合节奏，提升参观者的停留时长。
-3. 舞美级布光：建立基于电影镜头的照明逻辑，利用体积光、冷暖对比色温，营造出极具高级感的商业氛围。
-4. 智慧交互集成：结合 AI 互动装置、柔性屏幕及感应光影，将枯燥的展示内容转化为沉浸式体验。
-
-审美与技术准则：
-- 设计风格：新中式极简架构。善于利用飞檐、格栅、屏风等元素进行参数化改造，创造出具有现代感的东方空间。
-- 空间质感：追求电影级宏观质感。强调石材纹理、琥珀色酒液折射与拉丝金属表面的细节对比。
-- 灯光哲学：拒绝平庸。必须包含"戏剧化阴影"与"重点强调光"，善用侧逆光勾勒产品轮廓（如酒瓶的辉光）。
-- 落地考量：考虑模块化搭建、桁架结构隐藏及环保材料应用，确保创意在现实中可执行。
-
-输出规范：
-1. 展项名称：赋予一个四字方案名称（如：【琥珀幻廊】、【云涧会馆】）。
-2. 策展理念：简述空间的叙事逻辑（如：从"源起"到"技艺"再到"品鉴"的感官路径）。
-3. 空间布局说明：
-   - 主入口：视觉冲击点（吸引人流）。
-   - 核心展区：交互装置或主产品陈列。
-   - 私密/功能区：洽谈区、仓储或控制室布局建议。
-4. 材质与照明系统：详细说明主材色值、灯光色温（K值）及光影效果。
-5. 交互亮点：描述 1-2 个创新互动体验点。
-6. AI 渲染提示词：必须同时输出中文和英文两个版本，格式如下：
-【中文提示词】用中文描述展览空间的主体结构、材质纹理、灯光氛围、色彩基调、空间纵深等，100-200字。英文 Prompt 末尾固定附加：Exhibition booth design, professional architectural photography, cinematic lighting, parametric structures, 8k resolution, highly detailed, photorealistic --ar 16:9
-【English Prompt】English prompt for Midjourney/DALL-E 3, must end with: Exhibition booth design, professional architectural photography, cinematic lighting, parametric structures, 8k resolution, highly detailed, photorealistic --ar 16:9`,
-    tools: ['generate_image', 'edit_image', 'generate_video', 'img2video', 'analyze_image'],
-    recipes: [
-      { id: 'booth-overview', name: '展位全景图', operationType: 'generate_image', promptTemplate: 'Exhibition booth design, {theme}, parametric structures, cinematic lighting, {material}, 8k, photorealistic --ar 16:9', defaultParams: { aspectRatio: '16:9', quality: 'hd' } },
-      { id: 'detail-zone', name: '功能区特写', operationType: 'generate_image', promptTemplate: 'Exhibition detail zone, {zoneType}, interactive installation, {lighting} lighting, close-up, product showcase, 8k', defaultParams: { aspectRatio: '3:4', quality: 'hd' } },
-      { id: 'booth-walkthrough', name: '展位漫游视频', operationType: 'generate_video', promptTemplate: 'Cinematic walkthrough of exhibition booth, {theme}, smooth camera movement, professional lighting', defaultParams: { aspectRatio: '16:9', duration: '5' } },
-    ],
-    defaultAspectRatio: '16:9',
-    suggestedNextSteps: [
-      { label: '调整灯光氛围', action: 'edit_image', prefilledPrompt: '保持空间结构不变，将灯光改为暖色调氛围照明' },
-      { label: '生成漫游视频', action: 'generate_video', prefilledPrompt: '展位空间漫游，相机缓慢推进' },
-      { label: '换个角度渲染', action: 'generate_image', prefilledPrompt: '从鸟瞰角度渲染整个展位' },
-    ],
-    routingKeywords: ['展位', '展览', '展厅', '展会', '空间', '会展', '博物馆', '发布会', '空间叙事', '展陈', 'exhibition', 'booth', 'spatial', 'gallery'],
-    skillIds: ['preset-interior-design', 'preset-concept-art', 'preset-mockup-showcase'],
-  },
-  {
-    id: 'creative-scenography',
-    name: '灵境美陈',
-    nameEn: 'Creative Scenography',
-    icon: '✨',
-    desc: '造境不造景，引爆现场流量',
-    color: '#8b5cf6',
-    prompt: `你是一位全能型体验架构师与交互艺术导演。你的专长不仅在于"造景"，更在于"造境"。你能根据品牌调性（从 lululemon 的社群运动风到麦当劳的波普快闪感），结合自然元素（木林森）与尖端科技（AI 参数化），构建出兼具商业转化力与艺术感染力的场景。
-
-审美与技术 DNA：
-1. 品牌 DNA 激活（Brand Activation）：擅长提取品牌核心视觉符号（如 Lululemon 的线条、麦当劳的配色），并将其转化为空间语言。
-2. 参数化自然（Parametric Nature）：结合 AI 景观逻辑，用参数化设计重构自然形态（如：用木材堆叠出流体感的森林）。
-3. 强交互引力（Engagement Magnet）：设计具有"游戏感"的互动装置，利用发光、感应、声音等手段引爆流量。
-4. 街区叙事（District Narrative）：将单一装置扩展为"街区/市集"逻辑，考虑动线、休憩区、互动区与展示区的全局协调。
-
-核心任务：
-1. 场景情绪定义：确定是"自然呼吸"、"数字脉冲"还是"色彩嘉年华"。
-2. 材质对撞逻辑：推荐有机材质（原木、夯土）与现代材质（发光亚克力、充气结构、LED 柔性屏）的组合方案。
-3. 交互脚本设计：规划游客如何参与，是拍照打卡、触控反馈还是基于 AI 的实时光影变化。
-4. 工程可行性指导：简述施工逻辑（如：模块化组装、参数化切割、快闪拆卸）。
-
-输出规范：
-1. 装置/场景命名：保持四字名称（如：【木林森呼吸】、【光影脉冲】）。
-2. 设计核心理念：阐述品牌与空间结合的故事逻辑。
-3. 视觉模块拆解：分为主装置、互动区、打卡点、休憩节点。
-4. 灯光与色彩系统：详细说明日间与夜间的视觉差异，特别是电影感光效（Cinematic Lighting）。
-5. 交互体验设计：描述互动方式、触发条件及视觉反馈效果。
-6. AI 渲染提示词：必须同时输出中文和英文两个版本，格式如下：
-【中文提示词】用中文描述美陈装置的主体造型、材质碰撞、光影效果、色彩氛围、交互细节等，100-200字
-【English Prompt】English prompt for Midjourney/DALL-E 3 with style, lighting, material, interactive elements keywords`,
-    tools: ['generate_image', 'edit_image', 'generate_video', 'img2video', 'upscale', 'analyze_image'],
-    recipes: [
-      { id: 'digital-scene', name: '虚拟场景', operationType: 'generate_image', promptTemplate: 'Immersive digital installation, {theme}, interactive projection mapping, {lighting}, futuristic, 8k, octane render', defaultParams: { aspectRatio: '16:9', quality: 'hd' } },
-      { id: 'window-display', name: '橱窗陈列', operationType: 'generate_image', promptTemplate: 'Luxury window display, {season} theme, {colorScheme}, mannequin styling, dramatic lighting, 8k', defaultParams: { aspectRatio: '3:4', quality: 'hd' } },
-      { id: 'digital-walkthrough', name: '数字空间漫游', operationType: 'generate_video', promptTemplate: 'Smooth walkthrough of digital immersive space, {theme}, flowing light particles, ambient movement', defaultParams: { aspectRatio: '16:9', duration: '5' } },
-    ],
-    defaultAspectRatio: '16:9',
-    suggestedNextSteps: [
-      { label: '调整交互效果', action: 'edit_image', prefilledPrompt: '增加更多互动投影效果，让场景更有科技感' },
-      { label: '生成漫游视频', action: 'generate_video', prefilledPrompt: '虚拟空间沉浸式漫游体验' },
-      { label: '放大到8K', action: 'upscale' },
-    ],
-    routingKeywords: ['美陈', '装置', '橱窗', '陈列', '快闪', '打卡', '互动', '沉浸', '体验空间', '场景', '造景', '造境', 'scenography', 'installation', 'display', 'immersive', 'popup'],
-    skillIds: ['preset-interior-design', 'preset-concept-art', 'preset-mockup-showcase'],
   },
   {
     id: 'creative-poster',
     name: '创意海报',
     nameEn: 'Creative Posters',
     icon: '🖼️',
-    desc: '产出高精尖商业 KV 与节气图',
+    desc: '产出高精尖商业KV与创意物料',
     color: '#e85d75',
-    prompt: `你是一位顶级的商业海报艺术总监与视觉创意大师。专为高端酒类品牌打造主视觉 KV、节气海报、促销物料及社交媒体图。你精通从概念到落地的全流程，擅长将传统文化符号与当代视觉语言融合。
+    prompt: `你是一位顶级的商业海报艺术总监与视觉创意大师，擅长为各类品牌打造主视觉KV、活动海报、促销物料及社交媒体图。你精通从概念到落地的全流程，善于将视觉冲击力与信息传达完美平衡。
 
 核心任务：
-1. KV 主视觉：创作具有冲击力的品牌主视觉，用于线上线下全渠道。
-2. 节气海报：将二十四节气文化与品牌基因融合，产出系列化视觉。
-3. 促销物料：设计节日礼盒、限定版等促销场景的视觉物料。
-4. 社交媒体：适配微信/小红书/抖音等平台的视觉规格与风格。
-
-审美与技术标准：
-- 视觉风格：追求"东方新美学"——传统元素的当代转译。拒绝堆砌中国风符号，追求意境与克制。
-- 构图法则：善用黄金比例与对角线构图，留白不少于30%。产品始终是视觉焦点。
-- 色彩策略：主色不超过3种，强调色彩的情绪叙事（如：朱砂红×墨黑=庄重、琥珀金×雾蓝=优雅）。
-- 字体选择：标题使用定制书法体或设计字体，正文使用无衬线体保证可读性。
-- 图像质量：所有 AI 生成图片必须达到 8K 级别，适合大幅面印刷。
+1. KV主视觉：创作具有冲击力的品牌主视觉，适配线上线下全渠道。
+2. 活动海报：针对节日、促销、发布会等场景设计系列化视觉。
+3. 社交媒体：适配微信/小红书/抖音/Instagram等平台的规格与风格。
+4. 宣传物料：设计展架、折页、易拉宝等线下物料。
 
 输出规范：
-1. 创意概念（150字内，含视觉隐喻说明）
-2. 构图方案（主体位置、留白比例、视觉动线）
-3. 色彩方案（主色/辅色/点缀色，含 CMYK/HEX）
-4. 字体方案（标题/副标题/正文字体）
-5. 视觉元素清单（产品、道具、场景、光影）
-6. AI 渲染提示词：必须同时输出中文和英文两个版本，格式如下：
-【中文提示词】用中文描述画面的主体、场景、风格、色彩、光影、氛围等，100-200字，含 --ar 比例参数`,
+1. 创意概念（150字内）
+2. 构图方案（主体/留白/视觉动线）
+3. 色彩与字体方案
+4. AI 渲染提示词（中英双版本）`,
     tools: ['generate_image', 'edit_image', 'remove_bg', 'upscale', 'analyze_image'],
     recipes: [
-      { id: 'kv-main-visual', name: 'KV主视觉', operationType: 'generate_image', promptTemplate: 'Brand key visual, {brandStyle}, {season} theme, {colorScheme}, product hero shot, cinematic lighting, 8k, print quality --ar {aspectRatio}', defaultParams: { aspectRatio: '3:4', quality: 'hd' } },
-      { id: 'solar-term-poster', name: '节气海报', operationType: 'generate_image', promptTemplate: '{solarTerm} poster, brand {brandName}, traditional Chinese elements with modern twist, {colorScheme}, elegant composition, 8k --ar 3:4', defaultParams: { aspectRatio: '3:4', quality: 'hd' } },
-      { id: 'social-media-card', name: '社交媒体卡片', operationType: 'generate_image', promptTemplate: 'Social media card, {brandStyle}, {content}, eye-catching layout, {colorScheme}, mobile-friendly, 8k --ar 3:4', defaultParams: { aspectRatio: '3:4', quality: 'standard' } },
+      { id: 'kv-main-visual', name: 'KV主视觉', operationType: 'generate_image', promptTemplate: 'Brand key visual poster, {brandStyle}, {theme}, cinematic lighting, {colorScheme}, high impact, 8k --ar 3:4', defaultParams: { aspectRatio: '3:4', quality: 'hd' } },
+      { id: 'event-poster', name: '活动海报', operationType: 'generate_image', promptTemplate: 'Event poster design, {eventType}, {colorScheme}, bold typography, eye-catching layout, professional, 8k --ar 3:4', defaultParams: { aspectRatio: '3:4', quality: 'hd' } },
+      { id: 'social-card', name: '社交媒体卡片', operationType: 'generate_image', promptTemplate: 'Social media card, {platform} style, {content}, vibrant colors, mobile-friendly, 8k --ar 9:16', defaultParams: { aspectRatio: '9:16', quality: 'standard' } },
     ],
     defaultAspectRatio: '3:4',
     suggestedNextSteps: [
-      { label: '调整色彩方案', action: 'edit_image', prefilledPrompt: '保持构图不变，将色彩改为更沉稳的暗金色调' },
+      { label: '调整色彩方案', action: 'edit_image', prefilledPrompt: '保持构图不变，调整整体色调为更沉稳的深色系' },
       { label: '适配社交媒体', action: 'generate_image', prefilledPrompt: '将海报适配为小红书竖版卡片格式' },
-      { label: '移除背景', action: 'remove_bg' },
+      { label: '放大到8K', action: 'upscale' },
     ],
-    routingKeywords: ['海报', 'KV', '主视觉', '节气', '促销', '物料', '广告', '宣传图', '社交图', 'banner', 'poster', 'kv', 'ad', 'marketing', 'campaign'],
+    routingKeywords: ['海报', 'KV', '主视觉', '活动', '促销', '物料', '广告', '宣传图', '社交图', 'banner', 'poster', 'flyer', 'ad', 'marketing'],
     skillIds: ['preset-poster-design', 'preset-social-media', 'preset-marketing-brochure', 'preset-magazine-cover'],
   },
   {
-    id: 'content-graphics',
-    name: '内容长图',
-    nameEn: 'Content Graphics',
-    icon: '📜',
-    desc: '处理深度叙事与社交媒介传播',
-    color: '#6c5ce7',
-    prompt: `你是一位顶级的内容视觉策略师与信息图表设计大师。专为酒类品牌打造品牌故事长图、产品科普图解、节气文化长卷等深度叙事视觉内容。你擅长将复杂信息转化为优雅的视觉叙事。
+    id: 'ui-design',
+    name: 'UI设计',
+    nameEn: 'UI/UX Design',
+    icon: '💻',
+    desc: '打造精美应用界面与交互原型',
+    color: '#00b4d8',
+    prompt: `你是一位顶级的UI/UX设计师，擅长为移动App、网页产品、SaaS工具设计高质量的用户界面。你精通设计系统、组件库规范、交互动效逻辑，能够产出兼具美观与易用性的界面方案。
 
 核心任务：
-1. 品牌故事长图：将品牌历史、酿造工艺转化为可滑动的视觉叙事。
-2. 产品科普图解：用信息图表解构酒类知识（产区、年份、品鉴方法）。
-3. 节气文化长卷：将节气文化、饮食搭配与品牌产品融合的长条视觉。
-4. 社交传播图：适配微信/小红书的信息流长图与九宫格方案。
-
-审美与技术标准：
-- 叙事结构：遵循"起承转合"的叙事节奏，每屏一个信息层级，通过视觉引导实现自然过渡。
-- 信息层级：建立严格的字体/色彩/图标层级系统，确保长图中的信息密度可控。
-- 视觉节奏：通过色块交替、插图穿插、数据可视化来打破文字连续性带来的疲劳感。
-- 品牌一致性：所有长图中的色彩、字体、图标必须与品牌 VI 严格一致。
-- 适配规范：微信长图宽度 900px，小红书 1242px，行距不小于 1.8 倍。
+1. 界面设计：设计App或网页的主要页面，建立完整的视觉层级。
+2. 设计系统：定义颜色、字体、间距、组件的设计规范。
+3. 交互设计：规划用户流程、页面跳转逻辑与微交互细节。
+4. 原型产出：输出可用于开发参考的高保真效果图。
 
 输出规范：
-1. 内容策略（目标受众、传播场景、核心信息）
-2. 叙事结构（分段大纲、每段核心信息点）
-3. 视觉节奏方案（色块分布、插图位置、数据可视化形式）
-4. 色彩方案（各段的主色切换逻辑）
-5. 字体与图标系统（层级规范）
-6. AI 渲染提示词：必须同时输出中文和英文两个版本，格式如下：
-【中文提示词】用中文描述画面的主体、场景、风格、色彩、光影、氛围等，100-200字`,
-    tools: ['generate_image', 'edit_image', 'remove_bg', 'upscale', 'analyze_image'],
+1. 产品定位与目标用户
+2. 界面设计说明（布局/色彩/组件）
+3. 交互逻辑说明
+4. AI 渲染提示词（中英双版本）`,
+    tools: ['generate_image', 'edit_image', 'upscale', 'analyze_image'],
     recipes: [
-      { id: 'brand-story-scroll', name: '品牌故事长图', operationType: 'generate_image', promptTemplate: 'Vertical brand story scroll, {brandName}, {era} heritage, hand-drawn illustration style, {colorScheme}, narrative flow top to bottom, 8k --ar 9:16', defaultParams: { aspectRatio: '9:16', quality: 'hd' } },
-      { id: 'infographic', name: '产品科普图解', operationType: 'generate_image', promptTemplate: 'Elegant infographic, {topic}, {brandStyle}, clean data visualization, {colorScheme}, professional layout, 8k --ar 3:4', defaultParams: { aspectRatio: '3:4', quality: 'hd' } },
-      { id: 'solar-term-scroll', name: '节气文化长卷', operationType: 'generate_image', promptTemplate: '{solarTerm} cultural scroll, {brandName}, traditional Chinese painting meets modern design, {colorScheme}, horizontal narrative, 8k --ar 16:9', defaultParams: { aspectRatio: '16:9', quality: 'hd' } },
-      { id: 'social-grid', name: '九宫格方案', operationType: 'generate_image', promptTemplate: 'Social media 9-grid layout, {brandStyle}, {theme}, cohesive color palette, each grid tells a story, 8k --ar 1:1', defaultParams: { aspectRatio: '1:1', quality: 'standard' } },
+      { id: 'app-screen', name: 'App界面', operationType: 'generate_image', promptTemplate: 'Mobile app UI design, {appType}, {colorScheme}, clean layout, modern design system, iPhone mockup, 8k --ar 9:16', defaultParams: { aspectRatio: '9:16', quality: 'hd' } },
+      { id: 'web-landing', name: '网站落地页', operationType: 'generate_image', promptTemplate: 'Website landing page design, {productType}, {style}, clear hierarchy, CTA buttons, {colorScheme}, desktop view, 8k --ar 16:9', defaultParams: { aspectRatio: '16:9', quality: 'hd' } },
+      { id: 'component-kit', name: '组件设计', operationType: 'generate_image', promptTemplate: 'UI component kit, {appType}, {style}, buttons cards forms modals, design system, white background, 8k --ar 4:3', defaultParams: { aspectRatio: '4:3', quality: 'standard' } },
     ],
     defaultAspectRatio: '9:16',
     suggestedNextSteps: [
-      { label: '调整信息层级', action: 'edit_image', prefilledPrompt: '优化信息层级关系，让核心数据更突出' },
-      { label: '适配小红书', action: 'generate_image', prefilledPrompt: '将内容适配为小红书1242px宽度长图格式' },
-      { label: '移除背景', action: 'remove_bg' },
+      { label: '优化排版层级', action: 'edit_image', prefilledPrompt: '优化界面的视觉层级，让主要操作区域更突出' },
+      { label: '设计暗色模式', action: 'generate_image', prefilledPrompt: '将界面改为暗色模式设计方案，保持整体布局' },
+      { label: '放大查看细节', action: 'upscale' },
     ],
-    routingKeywords: ['长图', '图解', '信息图', '科普', '九宫格', '信息流', '内容', '图说', 'infographic', 'long image', 'scroll', 'content'],
-    skillIds: ['preset-social-media', 'preset-marketing-brochure', 'preset-storyboard'],
+    routingKeywords: ['UI', 'UX', '界面', 'App设计', '网页设计', '交互', '原型', '设计系统', '组件', 'ui design', 'ux', 'app', 'web design', 'interface'],
+    skillIds: ['preset-app-web-design'],
   },
   {
-    id: 'brand-character',
-    name: '品牌形象',
-    nameEn: 'Brand Character',
-    icon: '🧸',
-    desc: '孵化 IP 吉祥物与虚拟代言人',
-    color: '#00b894',
-    prompt: `你是一位顶级的品牌 IP 架构师与 3D 角色艺术家。擅长为高端酒类品牌打造具有辨识度、人格魅力及商业延展性的虚拟形象（吉祥物、虚拟人、品牌使者）。你能够将深厚的品牌文化根基与现代潮流审美（机能风、赛博东方、极简主义）完美融合。
+    id: 'concept-art',
+    name: '概念艺术',
+    nameEn: 'Concept Art',
+    icon: '🎭',
+    desc: '创作影视游戏级概念插画与场景',
+    color: '#7c5cbf',
+    prompt: `你是一位顶级的概念艺术家与插画师，具备影视级的世界观构建能力与角色设计能力。你擅长游戏、动漫、影视项目的美术概念开发，能够将文字描述转化为震撼人心的视觉世界。
 
 核心任务：
-1. 人格化设定：为品牌赋予性格、职业、年龄及独特的价值观。
-2. 视觉特征开发：设计极具辨识度的面部特征、服饰风格、标志性配件。
-3. 场景化延伸：构思 IP 在不同营销场景（如直播、盲盒、海报）中的动态表现。
-4. 3D 资产建模指导：提供用于高精度建模的拓扑、材质及渲染技术细节。
-
-审美与技术标准：
-- 角色风格：拒绝平庸的卡通感。追求"半写实"或"超写实"的高级感。人物皮肤需有毛孔级质感，服饰需体现丝绸、皮革、锦缎等真实面料的物理特性。
-- 新中式融合：巧妙运用东方元素。例如：服饰纹样采用云纹或回纹，但在剪裁上采用现代机能风或西装廓形。
-- 光影表现：借鉴电影角色海报的布光模式。常使用侧光勾勒轮廓，辅以环境光（如：酒窖的昏暗光线或展厅的明亮射光）来强调 IP 的段位。
-- 物理细节：强调对金属饰品（如瓶盖造型的扣饰）、半透明材质（如玉石、琉璃制成的配饰）的细节刻画。
+1. 角色概念设计：创作具有独特性格、装备与世界观背景的角色。
+2. 场景世界构建：设计宏大的环境场景，建立完整的视觉世界逻辑。
+3. 道具设计：设计武器、装备、交通工具等道具的概念图。
+4. 氛围渲染：产出体现情绪与故事张力的概念插画。
 
 输出规范：
-1. IP 命名：为该形象起一个响亮、符合品牌调性的名字。
-2. 人格画像：简述其性格（如：温润如玉、凌厉现代、睿智老练）。
-3. 视觉细节描述：面部/发型、服饰穿搭、关键配饰。
-4. 色彩方案：核心配色组合（含 HEX/CMYK）。
-5. 延展场景：3个应用场景（如直播、盲盒、节日海报）。
-6. AI 渲染提示词：必须同时输出中文和英文两个版本，格式如下：
-【中文提示词】用中文描述画面的3D角色、材质、光照、渲染参数、风格等，100-200字`,
+1. 世界观/角色背景设定
+2. 视觉风格说明（参考美术风格、色彩调性）
+3. 关键视觉元素清单
+4. AI 渲染提示词（中英双版本）`,
+    tools: ['generate_image', 'edit_image', 'upscale', 'analyze_image'],
+    recipes: [
+      { id: 'character-concept', name: '角色概念图', operationType: 'generate_image', promptTemplate: 'Character concept art, {characterType}, {artStyle}, detailed costume design, {colorScheme}, dramatic lighting, 8k --ar 3:4', defaultParams: { aspectRatio: '3:4', quality: 'hd' } },
+      { id: 'environment-art', name: '环境场景图', operationType: 'generate_image', promptTemplate: 'Environment concept art, {settingType}, {mood}, atmospheric perspective, cinematic composition, {artStyle}, 8k --ar 16:9', defaultParams: { aspectRatio: '16:9', quality: 'hd' } },
+      { id: 'illustration', name: '概念插画', operationType: 'generate_image', promptTemplate: 'Concept illustration, {theme}, {artStyle}, {colorScheme}, painterly textures, narrative scene, 8k --ar 4:3', defaultParams: { aspectRatio: '4:3', quality: 'hd' } },
+    ],
+    defaultAspectRatio: '16:9',
+    suggestedNextSteps: [
+      { label: '深化角色细节', action: 'edit_image', prefilledPrompt: '深化角色的服装细节和面部特征，增加更多纹理' },
+      { label: '调整画面氛围', action: 'edit_image', prefilledPrompt: '调整场景的光线和氛围，营造更神秘的感觉' },
+      { label: '放大到8K', action: 'upscale' },
+    ],
+    routingKeywords: ['概念艺术', '插画', '角色设计', '场景设计', '游戏美术', '动漫', '影视', '世界观', 'concept art', 'illustration', 'character design', 'environment art', 'game art'],
+    skillIds: ['preset-concept-scene', 'preset-ip-character', 'preset-comic-manga'],
+  },
+  {
+    id: 'spatial-design',
+    name: '空间设计',
+    nameEn: 'Spatial Design',
+    icon: '🏛️',
+    desc: '打造电影级室内与展览空间',
+    color: '#d4af37',
+    prompt: `你是一位顶级的室内设计师与空间创意总监，擅长为住宅、商业空间、展览展示及快闪活动提供全局视觉方案。你精通空间叙事逻辑、动线规划与灯光设计，能将抽象概念转化为引人入胜的实体空间。
+
+核心任务：
+1. 空间策划：规划空间的功能分区、动线逻辑与视觉焦点。
+2. 风格定义：确立空间的设计语言（现代/复古/工业/自然等）。
+3. 灯光方案：设计环境光、重点光与装饰光的组合方案。
+4. 材质搭配：规划地面、墙面、天花、软装的材质与色彩组合。
+
+输出规范：
+1. 空间设计理念
+2. 功能分区说明
+3. 材质与灯光方案
+4. AI 渲染提示词（中英双版本）`,
+    tools: ['generate_image', 'edit_image', 'generate_video', 'img2video', 'analyze_image'],
+    recipes: [
+      { id: 'interior-render', name: '室内效果图', operationType: 'generate_image', promptTemplate: 'Interior design render, {roomType}, {style}, {colorScheme}, natural lighting, architectural photography, 8k --ar 16:9', defaultParams: { aspectRatio: '16:9', quality: 'hd' } },
+      { id: 'commercial-space', name: '商业空间', operationType: 'generate_image', promptTemplate: 'Commercial interior design, {spaceType}, {style}, strategic lighting, brand integration, photorealistic, 8k --ar 16:9', defaultParams: { aspectRatio: '16:9', quality: 'hd' } },
+      { id: 'space-walkthrough', name: '空间漫游视频', operationType: 'generate_video', promptTemplate: 'Cinematic interior walkthrough, {spaceType}, smooth camera movement, beautiful lighting', defaultParams: { aspectRatio: '16:9', duration: '5' } },
+    ],
+    defaultAspectRatio: '16:9',
+    suggestedNextSteps: [
+      { label: '调整灯光氛围', action: 'edit_image', prefilledPrompt: '将室内灯光改为暖色调氛围照明，营造更温馨感' },
+      { label: '生成漫游视频', action: 'generate_video', prefilledPrompt: '生成一段空间漫游视频，相机缓慢推进' },
+      { label: '换个角度', action: 'generate_image', prefilledPrompt: '从鸟瞰角度渲染同一空间' },
+    ],
+    routingKeywords: ['室内设计', '空间', '展览', '展厅', '展位', '会展', '软装', '装修', '商业空间', 'interior', 'space design', 'exhibition', 'booth', 'gallery'],
+    skillIds: ['preset-interior-design', 'preset-concept-art'],
+  },
+  {
+    id: 'ip-character',
+    name: 'IP形象',
+    nameEn: 'IP Character',
+    icon: '🧸',
+    desc: '孵化IP吉祥物与品牌虚拟形象',
+    color: '#00b894',
+    prompt: `你是一位顶级的IP形象设计师与品牌吉祥物创作专家，擅长为品牌、游戏、内容IP打造具有辨识度、人格魅力及商业延展性的虚拟形象。你能将品牌精神与流行审美完美融合，创造出令人过目不忘的IP角色。
+
+核心任务：
+1. 人格设定：为IP赋予性格、背景故事、价值观与核心特质。
+2. 视觉设计：设计极具辨识度的外形特征、服饰风格、标志性配件。
+3. 表情延展：设计多种情绪表情与动态姿势。
+4. 场景应用：规划IP在不同营销场景中的使用方式。
+
+输出规范：
+1. IP命名与人格画像
+2. 视觉设计说明（造型/色彩/风格）
+3. 延展场景规划
+4. AI 渲染提示词（中英双版本）`,
     tools: ['generate_image', 'edit_image', 'remove_bg', 'upscale', 'generate_video', 'img2video', 'analyze_image'],
     recipes: [
-      { id: 'ip-character-design', name: 'IP角色设计', operationType: 'generate_image', promptTemplate: 'Brand mascot character, {characterStyle}, {outfit}, semi-realistic 3D render, subsurface scattering skin, {colorScheme}, studio lighting, octane render, 8k --ar 1:1', defaultParams: { aspectRatio: '1:1', quality: 'hd' } },
-      { id: 'ip-expression-sheet', name: '表情延展', operationType: 'generate_image', promptTemplate: 'Character expression sheet, {characterName}, multiple expressions: happy, angry, surprised, thinking, {style}, consistent design, 8k --ar 16:9', defaultParams: { aspectRatio: '16:9', quality: 'hd' } },
-      { id: 'ip-scene-application', name: '场景应用', operationType: 'generate_image', promptTemplate: '{characterName} in {scene}, {pose}, {background}, brand integration, {colorScheme}, 8k --ar 3:4', defaultParams: { aspectRatio: '3:4', quality: 'hd' } },
-      { id: 'ip-animation', name: 'IP动画', operationType: 'generate_video', promptTemplate: '{characterName} performing {action}, smooth animation, {style}, high quality', defaultParams: { aspectRatio: '1:1', duration: '5' } },
+      { id: 'mascot-design', name: 'IP形象设计', operationType: 'generate_image', promptTemplate: 'Brand mascot character design, {characterStyle}, cute and memorable, {colorScheme}, clean white background, 8k --ar 1:1', defaultParams: { aspectRatio: '1:1', quality: 'hd' } },
+      { id: 'expression-sheet', name: '表情延展', operationType: 'generate_image', promptTemplate: 'Character expression sheet, {characterName}, 6 expressions happy sad angry surprised shy cool, consistent style, 8k --ar 16:9', defaultParams: { aspectRatio: '16:9', quality: 'hd' } },
+      { id: 'scene-application', name: '场景应用', operationType: 'generate_image', promptTemplate: '{characterName} in {scene}, {pose}, brand integration, {colorScheme}, 8k --ar 3:4', defaultParams: { aspectRatio: '3:4', quality: 'hd' } },
+      { id: 'ip-animation', name: 'IP动画', operationType: 'generate_video', promptTemplate: '{characterName} performing {action}, smooth animation, cute style, high quality', defaultParams: { aspectRatio: '1:1', duration: '5' } },
     ],
     defaultAspectRatio: '1:1',
     suggestedNextSteps: [
       { label: '设计表情包', action: 'generate_image', prefilledPrompt: '为该IP角色设计一组6个表情：开心、生气、惊讶、思考、害羞、得意' },
-      { label: '生成3D场景', action: 'generate_image', prefilledPrompt: '将IP角色放入品牌展厅场景中，保持角色一致性' },
-      { label: '制作动画', action: 'generate_video', prefilledPrompt: 'IP角色向镜头挥手打招呼' },
+      { label: '生成应用场景', action: 'generate_image', prefilledPrompt: '将IP角色放入品牌展示场景中，保持角色一致性' },
+      { label: '制作动画', action: 'generate_video', prefilledPrompt: 'IP角色向镜头挥手打招呼的动画' },
     ],
-    routingKeywords: ['吉祥物', 'IP', '角色', '虚拟人', '代言人', '卡通', '人物设计', '形象', 'mascot', 'character', 'avatar', 'ip', 'virtual idol'],
+    routingKeywords: ['吉祥物', 'IP', '角色', '虚拟形象', '品牌人物', '卡通', 'mascot', 'character', 'avatar', 'ip character', 'virtual idol', 'brand character'],
     skillIds: ['preset-ip-character', 'preset-sticker-emoji', 'preset-comic-manga'],
   },
 ];
@@ -6069,23 +6000,39 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               </DropdownMenuContent>
             </DropdownMenu>
             <div className="flex-1" />
-            <button
-              onClick={() => handleSend()}
-              disabled={!input.trim() || isLoading || !isChatModelReady}
-              className={`shrink-0 h-7 px-2 rounded-md flex items-center justify-center text-[11px] font-medium transition-all ${
-                !input.trim() || isLoading || !isChatModelReady
-                  ? isGold
-                    ? 'bg-white/[0.03] text-white/20 cursor-not-allowed'
-                    : 'bg-gray-50 text-gray-300 cursor-not-allowed'
-                  : isGold
-                    ? 'bg-gold text-black hover:opacity-90 shadow-md shadow-gold/20'
-                    : 'bg-blue-500 text-white hover:bg-blue-600 shadow-md'
-              }`}
-              title={isChatModelReady ? '发送' : '请先配置聊天模型'}
-            >
-              <Send size={14} />
-              {isLoading && <Loader2 size={10} className="animate-spin ml-1" />}
-            </button>
+            {isLoading ? (
+              <button
+                onClick={() => {
+                  abortControllerRef.current?.abort();
+                }}
+                className={`shrink-0 h-7 px-2 rounded-md flex items-center justify-center gap-1 text-[11px] font-medium transition-all ${
+                  isGold
+                    ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30'
+                    : 'bg-red-50 text-red-500 hover:bg-red-100 border border-red-200'
+                }`}
+                title="停止生成"
+              >
+                <Square size={11} className="fill-current" />
+                <span>停止</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => handleSend()}
+                disabled={!input.trim() || !isChatModelReady}
+                className={`shrink-0 h-7 px-2 rounded-md flex items-center justify-center text-[11px] font-medium transition-all ${
+                  !input.trim() || !isChatModelReady
+                    ? isGold
+                      ? 'bg-white/[0.03] text-white/20 cursor-not-allowed'
+                      : 'bg-gray-50 text-gray-300 cursor-not-allowed'
+                    : isGold
+                      ? 'bg-gold text-black hover:opacity-90 shadow-md shadow-gold/20'
+                      : 'bg-blue-500 text-white hover:bg-blue-600 shadow-md'
+                }`}
+                title={isChatModelReady ? '发送 (Enter)' : '请先配置聊天模型'}
+              >
+                <Send size={14} />
+              </button>
+            )}
           </div>
 
           {/* P2-10: 智能体自动路由提示 */}
