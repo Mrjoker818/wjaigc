@@ -333,3 +333,9 @@ After the reported cloud update, the preview root still served the same `95618` 
 - Firefox, WebKit, mobile Chromium, GitHub `real-p0-e2e`, and full trace/video/network evidence remain incomplete. GitHub still requires the five real-E2E environment values.
 - Multi-output generation, cancellation, provider failure, timeout, credit compensation, and all P1/P2 business modules remain outside the completed portion of this P0 continuation.
 - Coze has not yet deployed GitHub `8fc8f25`: its current page bundle still contains the old argument-free `onForceSave` callback with the `images.length > 0` guard. Evidence: `test-results/network/cloud-deployment-probe-8fc8f25-20260720.json`.
+
+## 2026-07-20 gates after `632c59d` deployment recovery
+
+- The stale-deployment item above is superseded: the cloud bundle now contains the repaired post-change snapshot callback and the root plus authentication health routes return HTTP 200.
+- Signed-in Chrome acceptance is still unverified because the ChatGPT Chrome Extension control path timed out before exposing any tabs. Extension installation/enabled state, Chrome runtime, and native-host configuration all passed diagnostics; a fresh-profile-window retry also timed out.
+- Resume at the exact pending flow after restoring the extension connection: isolated project -> native/clipboard upload -> move -> resize -> delete -> real non-FHL x1 generation -> prove deleted source absent -> save -> reload -> reopen -> download non-empty artifact -> logout -> saved-credential relogin.

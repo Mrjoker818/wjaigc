@@ -591,3 +591,10 @@ Release status remains **not approved** until the local candidate is deployed an
 - The direct Coze URL is healthy at HTTP 200, but its page bundle `/\_next/static/chunks/app/page-34d326374e3ef124.js` still contains the pre-fix contract `onForceSave:()=> ... e.length>0 ... e.map(...)`.
 - This proves that the recovered cloud runtime has not rebuilt the `8fc8f25` source. Replaying the paid P0 generation against that bundle would only retest the already-proven old defect, so cloud acceptance remains pending a Coze pull and rebuild.
 - Machine-readable evidence: `test-results/network/cloud-deployment-probe-8fc8f25-20260720.json`.
+
+## 2026-07-20 `632c59d` deployment recovery
+
+- The direct Coze root now serves a new page bundle, `/\_next/static/chunks/app/page-d3f635c0ca8f5295.js`. The old argument-free `onForceSave` implementation is absent, and the deployed callback receives and persists the post-change image array without rejecting an empty canvas.
+- The root, `/api/auth/me`, and `/api/session` each returned HTTP 200. This closes the stale-deployment and anonymous-health prerequisites, but does not close `BUG-20260720-046` without a signed-in browser replay.
+- Chrome control could not continue: Chrome is running, the ChatGPT Chrome Extension is installed and enabled, and its native host manifest is correct, but listing existing tabs timed out twice and still timed out after opening a fresh window in the selected profile. No application result is inferred from this automation-host failure.
+- Evidence: `test-results/network/cloud-deployment-health-632c59d-20260720.json` and `test-results/console/chrome-control-blocked-after-632c59d-20260720.json`.

@@ -1,0 +1,15 @@
+{
+  "testedAt": "2026-07-20T10:02:08+08:00",
+  "deploymentUrl": "https://c3b2eda1-b7a7-4067-bc55-3cfb9c675bd9.dev.coze.site/",
+  "gitCommit": "632c59d922c23956ac7685084c47a27e3111ca90",
+  "pageBundle": "/_next/static/chunks/app/page-d3f635c0ca8f5295.js",
+  "pageBundleLength": 1608789,
+  "oldArgumentFreeForceSavePresent": false,
+  "newPostChangeSnapshotContractPresent": true,
+  "checks": {
+    "root": 200,
+    "/api/auth/me": 200,
+    "/api/session": 200
+  },
+  "result": "deployment-and-anonymous-health-pass"
+}

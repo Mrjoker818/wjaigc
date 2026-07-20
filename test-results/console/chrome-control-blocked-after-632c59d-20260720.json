@@ -1,0 +1,11 @@
+{
+  "testedAt": "2026-07-20T10:02:08+08:00",
+  "browser": "Google Chrome 150.0.7871.128",
+  "extensionInstalled": true,
+  "extensionEnabled": true,
+  "nativeHostManifestCorrect": true,
+  "chromeRunning": true,
+  "recoveryAttempt": "Opened a new Chrome window in the selected Default profile, waited two seconds, and retried the browser-client connection once.",
+  "result": "open-tabs-timeout",
+  "impact": "The signed-in Chrome P0 flow cannot be accepted or replaced by an anonymous browser session until the ChatGPT Chrome Extension connection is restored."
+}
