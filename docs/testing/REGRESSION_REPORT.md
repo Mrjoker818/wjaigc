@@ -549,3 +549,9 @@ Release status remains **not approved** until the local candidate is deployed an
 - The next run `29708688779` reached TypeScript and exposed an ignored source route that local Windows tests could see but a clean clone could not. The root-level model asset ignores are now anchored, and `src/app/api/workflow/models/route.ts` is tracked.
 - Local evidence after the fix: source integrity 4/4, workflow model API 2/2, TypeScript exit 0, and `git check-ignore` confirms the route is no longer ignored.
 - Release remains blocked on a green GitHub quality run and subsequent Coze/Chrome acceptance.
+
+### GitHub clean-run result for `513f6d0`
+
+- The `quality` job passed every step in a clean Ubuntu clone: install, production audit, doctor, TypeScript, ESLint, full tests, API tests, regression tests, and production build.
+- The required `real-p0-e2e` job failed before a browser test because the `real-e2e` GitHub environment has no configured secrets. The log showed all five variables empty and then attempted the local fallback URL.
+- The workflow now validates all five real-E2E inputs before browser installation and rejects any paid-generation flag other than `true`. This preserves the release block while producing an actionable error.

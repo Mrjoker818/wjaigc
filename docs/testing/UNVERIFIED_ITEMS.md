@@ -304,6 +304,7 @@
 - **P1 4sapi terminal state:** two existing `gpt-image-2` tasks remain `processing / 10%`. Do not submit another paid task until the `after()` worker candidate is deployed. Closure requires one non-FHL x1 task to reach completed or failed, visible canvas feedback, exactly-once credit settlement, and save/reload recovery.
 - **Iframe preview storage:** the direct app retains login across reload, while the Coze editor iframe requires re-entry/login after wrapper reload. This is not accepted as proof of a direct-app auth defect; production acceptance must use the direct application URL.
 - **Native upload/download:** Chrome extension file injection and observable downloaded-file evidence remain environment-limited as previously recorded. They cannot be marked passed from source tests.
+- **GitHub real P0 E2E:** the `real-e2e` environment currently has no `E2E_BASE_URL`, `E2E_TEST_USERNAME`, `E2E_TEST_PASSWORD`, `E2E_GENERATION_MODEL`, or `E2E_ENABLE_PAID_GENERATION` secret. Run `29708799251` therefore did not execute a browser assertion. Configure all five values, with the model in exact `providerId::modelId` form and paid authorization set to `true`, then rerun the workflow.
 
 ### 2026-07-19 Production preview follow-up
 

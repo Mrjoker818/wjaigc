@@ -36,6 +36,26 @@ jobs:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Validate real P0 E2E configuration
+        env:
+          E2E_BASE_URL: ${{ secrets.E2E_BASE_URL }}
+          E2E_TEST_USERNAME: ${{ secrets.E2E_TEST_USERNAME }}
+          E2E_TEST_PASSWORD: ${{ secrets.E2E_TEST_PASSWORD }}
+          E2E_GENERATION_MODEL: ${{ secrets.E2E_GENERATION_MODEL }}
+          E2E_ENABLE_PAID_GENERATION: ${{ secrets.E2E_ENABLE_PAID_GENERATION }}
+        run: |
+          missing=()
+          for name in E2E_BASE_URL E2E_TEST_USERNAME E2E_TEST_PASSWORD E2E_GENERATION_MODEL E2E_ENABLE_PAID_GENERATION; do
+            if [[ -z "${!name:-}" ]]; then missing+=("$name"); fi
+          done
+          if (( ${#missing[@]} > 0 )); then
+            echo "::error::Missing real-e2e environment secrets: ${missing[*]}"
+            exit 1
+          fi
+          if [[ "$E2E_ENABLE_PAID_GENERATION" != "true" ]]; then
+            echo "::error::E2E_ENABLE_PAID_GENERATION must be true for the required real generation flow"
+            exit 1
+          fi
       - run: pnpm exec playwright install --with-deps chromium firefox webkit
       - run: pnpm test:e2e:p0
         env:
