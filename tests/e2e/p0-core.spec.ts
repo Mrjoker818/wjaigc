@@ -248,7 +248,7 @@ test.describe('P0 real user journey', () => {
           if (!currentUserId || !data.userData?.[currentUserId]) return false;
           const projects = data.userData[currentUserId].projects || [];
           // Check if any project has canvas images with a URL
-          return projects.some((p: { canvasImages?: { url?: string }[] }) =>
+          return projects.some((p: { canvasImages?: { url?: string; isProcessingPlaceholder?: boolean }[] }) =>
             (p.canvasImages || []).some((img) => img.url && !img.isProcessingPlaceholder),
           );
         });
@@ -287,7 +287,7 @@ test.describe('P0 real user journey', () => {
         const projects = data.userData[currentUserId].projects || [];
         // Find the project with canvas images (the one we just generated into)
         const projWithImages = projects.find(
-          (p: { canvasImages?: { url?: string }[] }) =>
+          (p: { canvasImages?: { url?: string; isProcessingPlaceholder?: boolean }[] }) =>
             (p.canvasImages || []).some((img) => img.url && !img.isProcessingPlaceholder),
         );
         return projWithImages?.id || projects[0]?.id || null;
