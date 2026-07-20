@@ -564,3 +564,9 @@ Release status remains **not approved** until the local candidate is deployed an
 - Full local quality, clean GitHub CI, removal of the cloud-only patch, and direct Chrome P0 replay remain required before this regression can be closed.
 - Local source gates after the fix: TypeScript exit 0, ESLint quiet exit 0, API 119/119, component/lib 463/463, full Vitest exit 0, `git diff --check` exit 0, and the 97-route production build exit 0.
 - A fresh direct probe after the cloud recovery report still returned HTTP 502 for `/` and `/api/auth/me`. Chrome reconnection checks found the extension installed and enabled, but extension navigation to the preview was blocked by the browser client; no browser business assertion is claimed.
+
+### GitHub result for `ce62791`
+
+- Clean-clone `quality` job `88252005899` passed every step: frozen install, production audit, doctor, TypeScript, ESLint, full tests, API tests, component/lib regression, and production build.
+- `real-p0-e2e` job `88252346584` failed at `Validate real P0 E2E configuration`; browser installation and the P0 test were skipped. The workflow conclusion is therefore failure and does not provide cloud browser evidence.
+- The direct preview remained HTTP 502 after the workflow completed, so Coze synchronization and P0 replay are still blocked.

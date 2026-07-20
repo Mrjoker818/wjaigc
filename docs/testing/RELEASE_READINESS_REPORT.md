@@ -235,3 +235,5 @@ Release remains blocked because the native-upload step was stopped by the Chrome
 **Decision remains: NOT APPROVED.** The cloud was restored by a Coze-only commit that modifies an installed dependency, so the running environment is not reproducible from GitHub `main`. The official source candidate now normalizes PostgreSQL `sslmode=require` at both connection boundaries and has focused red-to-green evidence. Release still requires full local gates, a clean GitHub quality run, removal of the cloud-only `postinstall` patch, and complete direct-Chrome P0 acceptance.
 
 The local source gates are green, including the production build, but the post-recovery direct health check still returns HTTP 502. The deployment gate therefore remains failed even though the Coze editor is available.
+
+GitHub clean-clone quality is also green for `ce62791`, but the required real-P0 job failed its configuration preflight and did not launch a browser. **Decision remains: NOT APPROVED.**
