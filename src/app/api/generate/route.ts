@@ -471,6 +471,78 @@ export async function POST(request: NextRequest) {
           // 如果有异步 taskIds，后台轮询直到完成
           const bgTaskIds: string[] = bgData.taskIds || [];
           console.log(`[generate] submitOnly bgTaskIds check: bgTaskIds.length=${bgTaskIds.length}, bgTaskIds=${JSON.stringify(bgTaskIds)}`);
+
+          // ★ 关键修复：direct- 前缀的 taskId 表示生成已同步完成（直接模式），
+          // 不需要远端轮询。直接从 task-registry 获取结果并标记 asyncTaskId 为完成。
+          const directBgTaskIds = bgTaskIds.filter(id => id.startsWith('direct-'));
+          if (directBgTaskIds.length > 0) {
+            console.log(`[generate] submitOnly detected direct-mode bgTaskIds: ${JSON.stringify(directBgTaskIds)}`);
+            const directTask = getTaskInfo(directBgTaskIds[0]);
+            const directResult = directTask?.result as Record<string, unknown> | undefined;
+            const directImageUrl = directResult?.imageUrl as string | undefined;
+            if (directImageUrl) {
+              console.log(`[generate] submitOnly direct task already completed, imageUrl: ${directImageUrl.substring(0, 80)}`);
+              updateTaskProgress(asyncTaskId, {
+                status: 'completed',
+                progress: 100,
+                label: '生成完成',
+                result: {
+                  imageUrl: directImageUrl,
+                  usedModel: bgData.model || directResult?.usedModel,
+                  modelName: bgData.modelName || directResult?.modelName,
+                  providerName: bgData.providerName || directResult?.providerName,
+                  apiBaseUrl: bgData.apiBaseUrl || directResult?.apiBaseUrl,
+                  providerId: bgData.providerId || directResult?.providerId,
+                }
+              });
+              recordSubmitOnlyTerminal({
+                status: 'completed',
+                imageUrl: directImageUrl,
+                creditStatus: deductedCredits > 0 ? 'charged' : 'not-applicable',
+              });
+              return;
+            }
+            // 如果 direct task 还没完成，等待一下再检查
+            console.log(`[generate] submitOnly direct task not yet completed, waiting...`);
+            for (let waitI = 0; waitI < 10; waitI++) {
+              await new Promise(r => setTimeout(r, 1000));
+              const waitTask = getTaskInfo(directBgTaskIds[0]);
+              if (waitTask?.status === 'completed') {
+                const waitResult = waitTask.result as Record<string, unknown> | undefined;
+                const waitImageUrl = waitResult?.imageUrl as string | undefined;
+                if (waitImageUrl) {
+                  console.log(`[generate] submitOnly direct task completed after ${waitI + 1}s, imageUrl: ${waitImageUrl.substring(0, 80)}`);
+                  updateTaskProgress(asyncTaskId, {
+                    status: 'completed',
+                    progress: 100,
+                    label: '生成完成',
+                    result: {
+                      imageUrl: waitImageUrl,
+                      usedModel: bgData.model || waitResult?.usedModel,
+                      modelName: bgData.modelName || waitResult?.modelName,
+                      providerName: bgData.providerName || waitResult?.providerName,
+                      apiBaseUrl: bgData.apiBaseUrl || waitResult?.apiBaseUrl,
+                      providerId: bgData.providerId || waitResult?.providerId,
+                    }
+                  });
+                  recordSubmitOnlyTerminal({
+                    status: 'completed',
+                    imageUrl: waitImageUrl,
+                    creditStatus: deductedCredits > 0 ? 'charged' : 'not-applicable',
+                  });
+                  return;
+                }
+              }
+              if (waitTask?.status === 'failed') {
+                updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: '生成失败', label: '生成失败' });
+                recordSubmitOnlyTerminal({ status: 'failed', error: '生成失败', creditStatus: deductedCredits > 0 ? 'refunded' : 'not-applicable' });
+                return;
+              }
+            }
+            // 超时仍未完成，继续到下面的轮询逻辑
+            console.warn(`[generate] submitOnly direct task not completed after 10s, falling through to polling`);
+          }
+
           if (bgTaskIds.length > 0) {
             console.log(`[generate] submitOnly entering bgPoll loop for asyncTaskId=${asyncTaskId}, bgTaskId=${bgTaskIds[0]}`);
             updateTaskProgress(asyncTaskId, {

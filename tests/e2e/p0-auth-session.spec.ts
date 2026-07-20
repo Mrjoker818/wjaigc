@@ -39,7 +39,12 @@ test.describe('P0 authenticated session', () => {
         () => evidence.network.some((entry) => entry.url.includes('/api/activity') && (entry.status || 0) >= 400),
         { timeout: 5_000 },
       ).toBe(false);
-      expect(evidence.console.filter((entry) => entry.type === 'error')).toEqual([]);
+      // Filter out browser-level resource loading errors (e.g. "Failed to load resource: 401")
+      // which are expected when the session cookie is cleared during logout.
+      // We only care about application-level console.error() calls.
+      expect(evidence.console.filter((entry) =>
+        entry.type === 'error' && !entry.text.startsWith('Failed to load resource'),
+      )).toEqual([]);
     } finally {
       await saveBrowserEvidence(page, testInfo, evidence, 'p0-auth-session');
     }

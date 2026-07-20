@@ -397,17 +397,18 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   // ─── Load payment config & status (admin) ───
   // Load payment config (admin) and payment status (all users)
   useEffect(() => {
+    const ac = new AbortController();
     (async () => {
       try {
         // All users need payment status (for QR code display)
-        const statusRes = await fetch('/api/credits/payment-status');
+        const statusRes = await fetch('/api/credits/payment-status', { signal: ac.signal });
         if (statusRes.ok) {
           const statusData = await statusRes.json();
           if (statusData.success) setPaymentStatus(statusData.status);
         }
         // Admin also needs full config
         if (isAdmin) {
-          const configRes = await fetch('/api/credits/payment-config');
+          const configRes = await fetch('/api/credits/payment-config', { signal: ac.signal });
           if (configRes.ok) {
             const configData = await configRes.json();
             if (configData.success && configData.config) {
@@ -420,6 +421,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
         }
       } catch { /* ignore */ }
     })();
+    return () => ac.abort();
   }, [isAdmin]);
 
   // ─── QR Code countdown & auto-refresh (60s) ───
@@ -783,9 +785,9 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   }, [menuOpenId]);
 
   // ─── Admin: Data fetching ───
-  const refreshAdmin = useCallback(async () => {
+  const refreshAdmin = useCallback(async (signal?: AbortSignal) => {
     try {
-      const response = await fetch('/api/admin/users', { cache: 'no-store', credentials: 'include' });
+      const response = await fetch('/api/admin/users', { cache: 'no-store', credentials: 'include', signal });
       if (response.ok) {
         const data = await response.json();
         if (data.success && Array.isArray(data.users)) setAdminUsers(data.users);
@@ -793,7 +795,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       }
     } catch { setAdminUsers([]); }
     try {
-      const response = await fetch('/api/admin/apis', { cache: 'no-store', credentials: 'include' });
+      const response = await fetch('/api/admin/apis', { cache: 'no-store', credentials: 'include', signal });
       if (response.ok) {
         const data = await response.json();
         if (data.success) {
@@ -808,9 +810,9 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       } else {
         setProvidersLoadError(`HTTP ${response.status}`);
       }
-    } catch (error) { setProvidersLoadError(errorMessage(error, '网络请求失败')); }
+    } catch (error) { if (error instanceof DOMException && error.name === 'AbortError') return; setProvidersLoadError(errorMessage(error, '网络请求失败')); }
     try {
-      const gRes = await fetch('/api/admin/groups', { cache: 'no-store', credentials: 'include' });
+      const gRes = await fetch('/api/admin/groups', { cache: 'no-store', credentials: 'include', signal });
       if (gRes.ok) {
         const gData = await gRes.json();
         if (gData.success && Array.isArray(gData.groups)) setAdminGroups(gData.groups);
@@ -818,9 +820,9 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     } catch { /* ignore */ }
   }, []);
 
-  const refreshBalances = useCallback(async () => {
+  const refreshBalances = useCallback(async (signal?: AbortSignal) => {
     try {
-      const response = await fetch('/api/admin/api-balance', { credentials: 'include' });
+      const response = await fetch('/api/admin/api-balance', { credentials: 'include', signal });
       if (response.ok) {
         const data = await response.json();
         if (data.success) setApiBalances(data.balances || []);
@@ -1177,10 +1179,11 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   }, [selectedUserIds, refreshAdmin]);
 
   useEffect(() => {
-    if (isAdmin) {
-      void refreshAdmin();
-      void refreshBalances();
-    }
+    if (!isAdmin) return;
+    const controller = new AbortController();
+    void refreshAdmin(controller.signal);
+    void refreshBalances(controller.signal);
+    return () => controller.abort();
   }, [isAdmin, refreshAdmin, refreshBalances]);
 
   // ─── Load dashboard stats (admin overview) ───
