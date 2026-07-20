@@ -584,3 +584,10 @@ Release status remains **not approved** until the local candidate is deployed an
 - One authorized APImart `doubao-seedream-5-0-lite` 1:1 task reached a business terminal state and placed an 800 x 800 blue-cube result on the canvas. This closes the current non-FHL x1 generation terminal-state observation, but not the full P0 journey.
 - The same run found `BUG-20260720-046`: the deleted upload returned after generation. Red-first contract result was 1 failed / 8 passed; the local minimal repair is green at 9/9, TypeScript passes, and build ESLint passes. Cloud replay is pending deployment.
 - Native file-chooser upload and observable download-file creation remain unverified in Chrome because the control host blocks file injection and has not exposed a download artifact. Clipboard persistence is evidence for managed object-storage write/read, not a substitute for the native chooser requirement.
+
+### Deployment probe after GitHub `8fc8f25`
+
+- GitHub `main` and the local repair tree both resolve to `8fc8f255bb3886470a0a24ef98cdee72a1a772ae`.
+- The direct Coze URL is healthy at HTTP 200, but its page bundle `/\_next/static/chunks/app/page-34d326374e3ef124.js` still contains the pre-fix contract `onForceSave:()=> ... e.length>0 ... e.map(...)`.
+- This proves that the recovered cloud runtime has not rebuilt the `8fc8f25` source. Replaying the paid P0 generation against that bundle would only retest the already-proven old defect, so cloud acceptance remains pending a Coze pull and rebuild.
+- Machine-readable evidence: `test-results/network/cloud-deployment-probe-8fc8f25-20260720.json`.
