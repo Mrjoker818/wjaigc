@@ -45,4 +45,32 @@ describe('poll-task recovery lease contract', () => {
     expect(localTaskGate).toBeGreaterThan(-1);
     expect(source.slice(localTaskGate, localTaskGate + 220)).toContain('!shouldPollRemoteAsyncGenerateTask(registryTask)');
   });
+
+  it('resumes recovery-mode tasks immediately but never re-submits a live local-worker task', () => {
+    const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/poll-task/route.ts'), 'utf8');
+    const gateStart = source.indexOf('const shouldResumeExistingAsync');
+
+    expect(gateStart).toBeGreaterThan(-1);
+    const gateBody = source.slice(gateStart, gateStart + 400);
+    // The gate must branch on the payload workerMode: recovery-mode tasks resume
+    // immediately (poll-task is their only submitter), while a live local worker
+    // blocks recovery until it goes stale. Without this, every poll tick during
+    // the provider submission window re-posts /api/generate and bills again.
+    expect(gateBody).toContain('!isLocalWorkerMode || Date.now() - registryTask.updatedAt > SUBMISSION_STALE_MS');
+    expect(source).toContain("workerMode === 'local'");
+    // The stale threshold must exceed the 600s background submission timeout.
+    expect(source).toContain('const SUBMISSION_STALE_MS = 12 * 60_000');
+  });
+
+  it('does not let the same worker re-claim an unexpired recovery lease', () => {
+    const source = readFileSync(path.resolve(process.cwd(), 'src/lib/cloud-task-storage.ts'), 'utf8');
+    const claimStart = source.indexOf('export async function claimCloudTaskLease');
+    const claimEnd = source.indexOf('RETURNING id, lease_owner, lease_expires_at, attempt_count', claimStart);
+
+    expect(claimStart).toBeGreaterThan(-1);
+    expect(claimEnd).toBeGreaterThan(claimStart);
+    // A same-owner bypass (`lease_owner = $2`) lets every poll re-claim the lease
+    // and re-submit the provider task. It must not exist.
+    expect(source.slice(claimStart, claimEnd)).not.toContain('lease_owner = $2 OR');
+  });
 });

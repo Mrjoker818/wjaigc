@@ -91,6 +91,15 @@ export async function saveCreditPricingConfig(input: Pick<CreditPricingConfig, '
   return config;
 }
 
+/**
+ * Build a compound key for provider-specific model pricing.
+ * Format: "providerId::model" — allows same model from different providers to have different prices.
+ */
+export function buildPricingKey(providerId: string | undefined, model: string): string {
+  if (!providerId || !model) return model || '';
+  return `${providerId}::${model}`;
+}
+
 /** Resolve the configured credit cost for a model, optionally with quality tier and resolution. */
 export function resolveConfiguredCreditCost(
   config: CreditPricingConfig,
@@ -98,8 +107,23 @@ export function resolveConfiguredCreditCost(
   quality: string | undefined,
   resolution: string | undefined,
   fallback: number,
+  providerId?: string,
 ): number {
   if (!model) return fallback;
+
+  // Try provider-specific key first: "providerId::model"
+  if (providerId) {
+    const compoundKey = buildPricingKey(providerId, model);
+    const compoundEntry = config.modelCredits[compoundKey];
+    if (compoundEntry !== undefined) {
+      if (typeof compoundEntry === 'number') return compoundEntry;
+      if (quality && compoundEntry.quality?.[quality] !== undefined) return compoundEntry.quality[quality];
+      if (resolution && compoundEntry.resolution?.[resolution] !== undefined) return compoundEntry.resolution[resolution];
+      return compoundEntry.credits;
+    }
+  }
+
+  // Fall back to model-only key (backward compatibility)
   const entry = config.modelCredits[model];
   if (entry === undefined) return fallback;
 

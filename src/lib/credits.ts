@@ -168,17 +168,17 @@ export function calculateCreditCost(
 export async function calculateConfiguredCreditCost(
   operation: CreditOperation | string,
   model?: string,
-  options?: { quality?: string; resolution?: string; durationSeconds?: number },
+  options?: { quality?: string; resolution?: string; durationSeconds?: number; providerId?: string },
 ): Promise<number> {
   if (!model) return calculateCreditCost(operation, model, options);
   const config = await loadCreditPricingConfig();
   if (operation === 'video_generate' || operation === 'video_extend') {
     const fallbackPerSecond = getVideoModelCreditsPerSecond(model);
-    const perSecond = resolveConfiguredCreditCost(config, model, undefined, undefined, fallbackPerSecond);
+    const perSecond = resolveConfiguredCreditCost(config, model, undefined, undefined, fallbackPerSecond, options?.providerId);
     return perSecond * Math.max(1, options?.durationSeconds || 5);
   }
   const fallback = calculateCreditCost(operation, model, options);
-  const configured = resolveConfiguredCreditCost(config, model, options?.quality, options?.resolution, fallback);
+  const configured = resolveConfiguredCreditCost(config, model, options?.quality, options?.resolution, fallback, options?.providerId);
   return configured;
 }
 
@@ -228,7 +228,7 @@ export async function consumeCredits(
   customAmount?: number,
   description?: string,
   model?: string,
-  options?: { quality?: string; resolution?: string; durationSeconds?: number }
+  options?: { quality?: string; resolution?: string; durationSeconds?: number; providerId?: string }
 ): Promise<{ success: boolean; balance: number; cost: number; message?: string }> {
   const cost = customAmount ?? await calculateConfiguredCreditCost(operation, model, options);
   if (cost <= 0) return { success: true, balance: 0, cost: 0 };
@@ -311,7 +311,7 @@ export async function checkCredits(
   operation: CreditOperation | string,
   customAmount?: number,
   model?: string,
-  options?: { quality?: string; resolution?: string; durationSeconds?: number }
+  options?: { quality?: string; resolution?: string; durationSeconds?: number; providerId?: string }
 ): Promise<{ sufficient: boolean; balance: number; cost: number }> {
   const cost = customAmount ?? await calculateConfiguredCreditCost(operation, model, options);
   if (cost <= 0) return { sufficient: true, balance: 0, cost: 0 };

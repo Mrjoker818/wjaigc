@@ -538,15 +538,30 @@ export async function POST(request: NextRequest) {
 
     // ★ 检查 task-registry 中的任务
     let registryTask = getTaskInfo(taskId);
-    // ★ 防重复扣费：submitOnly 任务在后台 worker 向供应商提交期间（同步模型可能需
-    // 数十秒到数分钟）没有 remoteTaskId。此时每个轮询都命中恢复分支会重复调用
-    // /api/generate 并真实扣费。只有 worker 卡死（超过 SUBMISSION_STALE_MS 无更新）
-    // 才允许恢复提交；进行中的任务由下方 pending-local 早退返回 processing。
-    const shouldResumeExistingAsync = Boolean(
+    // ★ 防重复扣费：按 submissionPayload.workerMode 判断任务是否已有活着的提交者。
+    // - 'recovery'（默认）：本进程没有后台提交者，poll-task 就是唯一提交方，立即恢复提交；
+    //   租约（不允许 owner 自匹配重复 claim）保证租约期内只提交一次。
+    // - 'local'：after() 后台 worker 正在向供应商提交（同步模型可能需数十秒到数分钟），
+    //   窗口期内绝不能"恢复提交"——否则每次轮询都会重复发任务并真实扣费。
+    //   只有 worker 卡死（updatedAt 超过 SUBMISSION_STALE_MS 无更新，该阈值大于后台
+    //   提交 600s 超时）才允许恢复提交兜底。
+    const pendingLocalAsyncTask = Boolean(
       registryTask
       && isPendingLocalAsyncGenerateTask(registryTask)
-      && (registryTask.result as Record<string, unknown> | undefined)?.submissionPayload
-      && Date.now() - registryTask.updatedAt > SUBMISSION_STALE_MS,
+      && (registryTask.result as Record<string, unknown> | undefined)?.submissionPayload,
+    );
+    const pendingSubmissionPayload = pendingLocalAsyncTask && registryTask
+      ? (registryTask.result as Record<string, unknown>).submissionPayload
+      : undefined;
+    const isLocalWorkerMode = Boolean(
+      pendingSubmissionPayload
+      && typeof pendingSubmissionPayload === 'object'
+      && (pendingSubmissionPayload as Record<string, unknown>).workerMode === 'local',
+    );
+    const shouldResumeExistingAsync = Boolean(
+      pendingLocalAsyncTask
+      && registryTask
+      && (!isLocalWorkerMode || Date.now() - registryTask.updatedAt > SUBMISSION_STALE_MS),
     );
     if ((!registryTask || shouldResumeExistingAsync) && sessionUser) {
       const persistedTask = await getCloudTaskForUser(taskId, sessionUser.id);

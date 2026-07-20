@@ -324,15 +324,16 @@ export default function AdminTabs(props: AdminTabsProps) {
       const data = await res.json();
       const catalog = data.models || [];
       setModelCreditCatalog(catalog);
-      // Build rules: support both flat number and {credits, quality, resolution} objects
+      // Build rules with providerId::model compound keys
       const rules: Record<string, number | { credits: number; quality?: Record<string, number>; resolution?: Record<string, number> }> = {};
       for (const item of catalog) {
+        const key = `${item.providerId}::${item.model}`;
         const hasQuality = item.quality && Object.keys(item.quality).length > 0;
         const hasResolution = item.resolution && Object.keys(item.resolution).length > 0;
         if (hasQuality || hasResolution) {
-          rules[item.model] = { credits: item.credits, ...(hasQuality ? { quality: item.quality } : {}), ...(hasResolution ? { resolution: item.resolution } : {}) };
+          rules[key] = { credits: item.credits, ...(hasQuality ? { quality: item.quality } : {}), ...(hasResolution ? { resolution: item.resolution } : {}) };
         } else {
-          rules[item.model] = item.credits;
+          rules[key] = item.credits;
         }
       }
       setModelCreditRules(rules);
@@ -1401,13 +1402,14 @@ export default function AdminTabs(props: AdminTabsProps) {
                 <tbody className="divide-y divide-border/60">
                   {modelCreditCatalog.map(item => {
                     const tiers = item.quality ? Object.keys(item.quality).sort() : [];
-                    const currentRule = modelCreditRules[item.model];
+                    const compoundKey = `${item.providerId}::${item.model}`;
+                    const currentRule = modelCreditRules[compoundKey];
                     const baseCredits = typeof currentRule === 'number' ? currentRule : (currentRule?.credits ?? item.credits);
                     const qualityOverrides = (typeof currentRule === 'object' && currentRule?.quality) ? currentRule.quality : {};
                     const resolutionOverrides = (typeof currentRule === 'object' && currentRule?.resolution) ? currentRule.resolution : {};
                     const resTiers = ['1K', '2K', '4K'];
                     return (
-                      <tr key={`${item.providerId}:${item.model}`}>
+                      <tr key={compoundKey}>
                         <td className="px-3 py-2 text-muted-foreground">{item.providerName}</td>
                         <td className="px-3 py-2 font-mono text-xs text-foreground">{item.model}</td>
                         <td className="px-3 py-2 text-xs text-muted-foreground">{item.unit === 'per-second' ? '每秒' : item.unit === 'per-image' ? '每张' : '每次'}</td>
@@ -1419,11 +1421,11 @@ export default function AdminTabs(props: AdminTabsProps) {
                             onChange={event => {
                               const v = Math.max(0, Math.floor(Number(event.target.value) || 0));
                               setModelCreditRules(prev => {
-                                const existing = prev[item.model];
+                                const existing = prev[compoundKey];
                                 if (typeof existing === 'object') {
-                                  return { ...prev, [item.model]: { credits: v, ...(existing.quality ? { quality: existing.quality } : {}), ...(existing.resolution ? { resolution: existing.resolution } : {}) } };
+                                  return { ...prev, [compoundKey]: { credits: v, ...(existing.quality ? { quality: existing.quality } : {}), ...(existing.resolution ? { resolution: existing.resolution } : {}) } };
                                 }
-                                return { ...prev, [item.model]: v };
+                                return { ...prev, [compoundKey]: v };
                               });
                             }}
                             className="h-8 w-24 rounded-md border border-border bg-background px-2 text-right text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
@@ -1444,12 +1446,12 @@ export default function AdminTabs(props: AdminTabsProps) {
                                 onChange={event => {
                                   const v = Math.max(0, Math.floor(Number(event.target.value) || 0));
                                   setModelCreditRules(prev => {
-                                    const existing = prev[item.model];
+                                    const existing = prev[compoundKey];
                                     const base = typeof existing === 'number' ? existing : (existing?.credits ?? item.credits);
                                     const prevQuality = (typeof existing === 'object' && existing?.quality) ? existing.quality : {};
                                     const prevResolution = (typeof existing === 'object' && existing?.resolution) ? existing.resolution : {};
                                     const newQuality = { ...prevQuality, [tier]: v };
-                                    return { ...prev, [item.model]: { credits: base, quality: newQuality, ...(Object.keys(prevResolution).length > 0 ? { resolution: prevResolution } : {}) } };
+                                    return { ...prev, [compoundKey]: { credits: base, quality: newQuality, ...(Object.keys(prevResolution).length > 0 ? { resolution: prevResolution } : {}) } };
                                   });
                                 }}
                                 className={`h-8 w-24 rounded-md border bg-background px-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 ${isOverridden ? 'border-primary/50 text-primary' : 'border-border text-muted-foreground'}`}
@@ -1472,12 +1474,12 @@ export default function AdminTabs(props: AdminTabsProps) {
                                 onChange={event => {
                                   const v = Math.max(0, Math.floor(Number(event.target.value) || 0));
                                   setModelCreditRules(prev => {
-                                    const existing = prev[item.model];
+                                    const existing = prev[compoundKey];
                                     const base = typeof existing === 'number' ? existing : (existing?.credits ?? item.credits);
                                     const prevQuality = (typeof existing === 'object' && existing?.quality) ? existing.quality : {};
                                     const prevResolution = (typeof existing === 'object' && existing?.resolution) ? existing.resolution : {};
                                     const newResolution = { ...prevResolution, [rt]: v };
-                                    return { ...prev, [item.model]: { credits: base, ...(Object.keys(prevQuality).length > 0 ? { quality: prevQuality } : {}), resolution: newResolution } };
+                                    return { ...prev, [compoundKey]: { credits: base, ...(Object.keys(prevQuality).length > 0 ? { quality: prevQuality } : {}), resolution: newResolution } };
                                   });
                                 }}
                                 className={`h-8 w-24 rounded-md border bg-background px-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 ${isOverridden ? 'border-primary/50 text-primary' : 'border-border text-muted-foreground'}`}

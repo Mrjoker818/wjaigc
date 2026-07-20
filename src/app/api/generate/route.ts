@@ -307,7 +307,7 @@ export async function POST(request: NextRequest) {
       // The outer task is the billable request. Charge before persisting it so a
       // resumed cloud worker inherits the exact amount already deducted.
       if (sessionUser && !_skipCredits) {
-        const creditResult = await consumeCredits(sessionUser.id, 'image_generate', undefined, undefined, model || '', { quality });
+        const creditResult = await consumeCredits(sessionUser.id, 'image_generate', undefined, undefined, model || '', { quality, resolution, providerId: effectiveProviderId || undefined });
         if (!creditResult.success) {
           return NextResponse.json({ error: creditResult.message || '积分不足' }, { status: 402 });
         }
@@ -342,6 +342,10 @@ export async function POST(request: NextRequest) {
         projectId,
         sessionId,
         messageId,
+        // 提交者模式：'local' = 本进程 after() 后台 worker 负责向供应商提交；
+        // 'recovery' = 由 poll-task 的持久化恢复路径提交（默认，进程崩溃可恢复）。
+        // poll-task 据此判断内存中的 pending 任务是否已有活着的提交者，防止重复提交扣费。
+        workerMode: process.env.WUJIE_ENABLE_IN_PROCESS_ASYNC_WORKER === 'true' ? 'local' : 'recovery',
       };
       // Persist the client-facing outer task before the background request starts.
       // A provider can fail before it returns a remote task ID.
@@ -409,7 +413,7 @@ export async function POST(request: NextRequest) {
         // 使用解析后的可访问参考图 URL（而非原始相对路径或不可访问 URL）
         referenceImages: accessibleReferenceImages.length > 0 ? accessibleReferenceImages : undefined,
       };
-      if (process.env.WUJIE_ENABLE_IN_PROCESS_ASYNC_WORKER !== 'false') {
+      if (process.env.WUJIE_ENABLE_IN_PROCESS_ASYNC_WORKER === 'true') {
         after(async () => {
         try {
           const bgRes = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/generate`, {
@@ -876,7 +880,7 @@ export async function POST(request: NextRequest) {
     deductedCredits = 0;
     if (sessionUser && !_skipCredits) {
       const modelId = model || '';
-      const creditResult = await consumeCredits(sessionUser.id, 'image_generate', undefined, undefined, modelId, { quality });
+      const creditResult = await consumeCredits(sessionUser.id, 'image_generate', undefined, undefined, modelId, { quality, resolution: resolutionTier, providerId: effectiveProviderId || undefined });
       if (!creditResult.success) {
         return NextResponse.json({ error: creditResult.message || '积分不足' }, { status: 402 });
       }

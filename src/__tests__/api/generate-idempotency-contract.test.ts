@@ -36,6 +36,20 @@ describe('generate submitOnly idempotency contract', () => {
     expect(source.indexOf('submissionPayload,', persisted)).toBeGreaterThan(persisted);
   });
 
+  it('stamps the submission payload with the worker mode so polling knows who owns provider submission', () => {
+    const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/generate/route.ts'), 'utf8');
+    const payload = source.indexOf('const submissionPayload');
+    const persisted = source.indexOf('const taskCreated = await recordImageTaskSubmitted', payload);
+    const workerMode = source.indexOf('workerMode:', payload);
+
+    expect(payload).toBeGreaterThan(-1);
+    expect(persisted).toBeGreaterThan(payload);
+    expect(workerMode).toBeGreaterThan(payload);
+    expect(workerMode).toBeLessThan(persisted);
+    // Default is the durable recovery path; the in-process worker is opt-in only.
+    expect(source).toContain("workerMode: process.env.WUJIE_ENABLE_IN_PROCESS_ASYNC_WORKER === 'true' ? 'local' : 'recovery'");
+  });
+
   it('routes an in-memory outer task without a provider id through the same durable recovery path', () => {
     const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/poll-task/route.ts'), 'utf8');
 

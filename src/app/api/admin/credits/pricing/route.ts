@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminUser } from '@/lib/server-auth';
 import { getApiProviders } from '@/lib/server-api-config';
 import { getChatModelCredits, getImageModelCredits, getVideoModelCreditsPerSecond } from '@/lib/credits';
-import { loadCreditPricingConfig, saveCreditPricingConfig, type ModelCreditEntry } from '@/lib/credit-pricing';
+import { loadCreditPricingConfig, saveCreditPricingConfig, buildPricingKey, type ModelCreditEntry } from '@/lib/credit-pricing';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,7 +42,9 @@ export async function GET(request: NextRequest) {
     .flatMap(provider => (provider.selectedModels || []).map(model => {
       const modelType = provider.modelType || provider.type || 'image';
       const fallback = defaultCredits(modelType, model);
-      const configured = config.modelCredits[model];
+      const compoundKey = buildPricingKey(provider.id, model);
+      // Try provider-specific key first, then model-only key (backward compat)
+      const configured = config.modelCredits[compoundKey] ?? config.modelCredits[model];
       const refQuality = defaultQualityTiers(modelType, model);
       const refResolution = defaultResolutionTiers(modelType, model);
 
