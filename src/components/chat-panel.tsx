@@ -353,6 +353,137 @@ const AGENTS: AgentDefinition[] = [
     routingKeywords: ['吉祥物', 'IP', '角色', '虚拟形象', '品牌人物', '卡通', 'mascot', 'character', 'avatar', 'ip character', 'virtual idol', 'brand character'],
     skillIds: ['preset-ip-character', 'preset-sticker-emoji', 'preset-comic-manga'],
   },
+  {
+    id: 'liquor-brand-all',
+    name: '酒类品牌全案',
+    nameEn: 'Liquor Brand Studio',
+    icon: '🥃',
+    desc: '白酒/洋酒品牌从瓶型到空间的全链路视觉方案',
+    color: '#8b6914',
+    prompt: `你是一位深耕酒类行业的顶级创意总监，集瓶型包装设计、品牌VI系统、空间展演、沉浸式美陈、商业海报、内容长图、品牌IP形象七大专业能力于一身。你深刻理解白酒、洋酒、精酿、清酒等各品类的文化内涵、消费场景与审美语言，能够为酒类品牌提供从单一物料到全案视觉的完整解决方案。
+
+## 七大核心能力
+
+### 1. 瓶型与包装设计
+专注白酒瓶型、酒标、礼盒及配套包装的视觉创作。
+- 瓶型风格：古典陶瓷/现代极简/东方传统/西式晶莹
+- 礼盒设计：节庆限定/高端礼赠/IP联名款
+- 工艺表达：烫金/压纹/镂空/渐变/手绘插画风
+
+### 2. 品牌VI系统
+为酒类品牌构建完整视觉识别体系。
+- 标志体系：主标志/辅助图形/品牌图案
+- 色彩体系：主色/辅色（东方金/墨玉/赤朱/青花蓝等）
+- 应用规范：终端陈列/货架物料/促销物料
+
+### 3. 空间展演设计
+酒类品牌线下体验空间与展会展台的视觉方案。
+- 专卖店/品牌旗舰店设计
+- 展会展台/发布会现场搭建
+- 沉浸式体验馆与品鉴空间
+
+### 4. 沉浸式美陈装置
+打造具有话题性的品牌美陈与装置艺术。
+- 节日主题装置（春节/中秋/重阳等）
+- 零售终端陈列与氛围营造
+- 品牌联名装置艺术
+
+### 5. 商业KV与海报
+酒类品牌全年营销物料的视觉主创。
+- 品牌主视觉KV（节气/节日/新品上市）
+- 电商主图/详情页首图
+- 户外广告/电梯媒体/社交媒体图
+
+### 6. 内容长图与品牌故事
+将酒文化转化为可传播的视觉内容。
+- 品牌故事图文长图
+- 酿造工艺/原料产地视觉化呈现
+- 社交媒体套图（小红书/微信/抖音）
+
+### 7. 品牌IP与吉祥物
+孵化具有酒类文化属性的品牌IP。
+- 传统文化IP（神话人物/历史典故/生肖形象）
+- 现代化IP（品牌代言人/虚拟调酒师/萌化角色）
+- IP延展：表情包/周边衍生/联名授权
+
+## 工作方式
+1. **场景识别**：自动判断用户需求属于以上哪个方向
+2. **文化融合**：将东方酒文化与现代设计美学有机融合
+3. **方案产出**：给出创意概念 + 视觉说明 + AI渲染提示词（中英双版）
+4. **系列延展**：主动建议可延展的配套物料方向
+
+## 审美标准
+- 东方美学：水墨/金石/青花/漆艺/织锦等传统工艺美学语言
+- 现代高端：极简工业/奢华质感/光影戏剧性/材质对比
+- 情绪表达：节庆喜悦/岁月沉淀/文人雅趣/豪迈放达
+- 禁止俗气：避免廉价感、过度堆砌、色彩杂乱、比例失调`,
+    tools: ['generate_image', 'edit_image', 'remove_bg', 'upscale', 'generate_video', 'img2video', 'analyze_image'],
+    recipes: [
+      {
+        id: 'liquor-bottle-render',
+        name: '瓶型渲染',
+        operationType: 'generate_image',
+        promptTemplate: 'Premium liquor bottle product render, {bottleStyle}, {material}, studio lighting, white background, photorealistic, ultra detailed, 8k --ar 3:4',
+        defaultParams: { aspectRatio: '3:4', quality: 'hd' },
+      },
+      {
+        id: 'liquor-gift-box',
+        name: '礼盒包装',
+        operationType: 'generate_image',
+        promptTemplate: 'Luxury liquor gift box packaging design, {style}, {colorScheme}, gold foil embossing, elegant, traditional Chinese aesthetics, 8k --ar 3:4',
+        defaultParams: { aspectRatio: '3:4', quality: 'hd' },
+      },
+      {
+        id: 'liquor-kv-poster',
+        name: '品牌KV海报',
+        operationType: 'generate_image',
+        promptTemplate: 'Liquor brand key visual poster, {season} theme, {colorScheme}, cinematic lighting, dramatic atmosphere, Chinese aesthetics, 8k --ar 3:4',
+        defaultParams: { aspectRatio: '3:4', quality: 'hd' },
+      },
+      {
+        id: 'liquor-spatial',
+        name: '空间展演',
+        operationType: 'generate_image',
+        promptTemplate: 'Luxury liquor brand exhibition space, {spaceType}, immersive design, {colorScheme}, dramatic lighting, architectural photography, 8k --ar 16:9',
+        defaultParams: { aspectRatio: '16:9', quality: 'hd' },
+      },
+      {
+        id: 'liquor-installation',
+        name: '品牌装置',
+        operationType: 'generate_image',
+        promptTemplate: 'Liquor brand art installation, {festival} theme, {colorScheme}, immersive retail display, creative visual merchandising, 8k --ar 16:9',
+        defaultParams: { aspectRatio: '16:9', quality: 'hd' },
+      },
+      {
+        id: 'liquor-ip-character',
+        name: '品牌IP形象',
+        operationType: 'generate_image',
+        promptTemplate: 'Liquor brand mascot character, {characterStyle}, traditional Chinese elements, {colorScheme}, brand mascot design, white background, 8k --ar 1:1',
+        defaultParams: { aspectRatio: '1:1', quality: 'hd' },
+      },
+      {
+        id: 'liquor-content-graphic',
+        name: '内容长图',
+        operationType: 'generate_image',
+        promptTemplate: 'Liquor brand story infographic, {topic}, {colorScheme}, editorial design, elegant typography, WeChat article cover style, 8k --ar 3:4',
+        defaultParams: { aspectRatio: '3:4', quality: 'standard' },
+      },
+    ],
+    defaultAspectRatio: '3:4',
+    suggestedNextSteps: [
+      { label: '设计礼盒包装', action: 'generate_image', prefilledPrompt: '为该酒品设计一款节庆礼盒，要求高端大气，融合东方传统纹样' },
+      { label: '制作品牌海报', action: 'generate_image', prefilledPrompt: '基于产品特色制作一张节日主题KV海报，横版16:9' },
+      { label: '生成空间展演', action: 'generate_image', prefilledPrompt: '设计该品牌的沉浸式体验馆空间效果图' },
+      { label: '孵化品牌IP', action: 'generate_image', prefilledPrompt: '为该酒类品牌设计一个融合传统文化元素的品牌IP形象' },
+      { label: '放大到8K', action: 'upscale' },
+    ],
+    routingKeywords: [
+      '白酒', '洋酒', '精酿', '清酒', '葡萄酒', '威士忌', '白兰地', '茅台', '五粮液', '酱香', '浓香',
+      '酒瓶', '酒标', '酒盒', '礼盒', '酒类包装', '酒类品牌', '酒类VI', '酒类海报', '酒类展台',
+      'liquor', 'wine', 'whisky', 'spirits', 'baijiu', 'sake', 'brewery', 'distillery',
+    ],
+    skillIds: ['preset-product-packaging', 'preset-logo-brand', 'preset-poster-design', 'preset-interior-design', 'preset-ip-character', 'preset-marketing-brochure'],
+  },
 ];
 
 interface ChatPanelProps {
