@@ -555,3 +555,12 @@ Release status remains **not approved** until the local candidate is deployed an
 - The `quality` job passed every step in a clean Ubuntu clone: install, production audit, doctor, TypeScript, ESLint, full tests, API tests, regression tests, and production build.
 - The required `real-p0-e2e` job failed before a browser test because the `real-e2e` GitHub environment has no configured secrets. The log showed all five variables empty and then attempted the local fallback URL.
 - The workflow now validates all five real-E2E inputs before browser installation and rejects any paid-generation flag other than `true`. This preserves the release block while producing an actionable error.
+
+## 2026-07-20 PostgreSQL startup regression
+
+- Direct cloud checks after the GitHub synchronization returned HTTP 502 for both `/` and `/api/auth/me`; `doctor --url` recorded one deployment failure.
+- Coze recovered through local commit `b34e0b3`, which patched `node_modules/pg-connection-string` during `postinstall`. That recovery is environment drift and is not accepted as a source fix.
+- A source-level regression was captured before implementation: 4 failed / 2 passed. After explicit `uselibpqcompat=true` normalization in the application pool and doctor, the focused suite passed 6/6.
+- Full local quality, clean GitHub CI, removal of the cloud-only patch, and direct Chrome P0 replay remain required before this regression can be closed.
+- Local source gates after the fix: TypeScript exit 0, ESLint quiet exit 0, API 119/119, component/lib 463/463, full Vitest exit 0, `git diff --check` exit 0, and the 97-route production build exit 0.
+- A fresh direct probe after the cloud recovery report still returned HTTP 502 for `/` and `/api/auth/me`. Chrome reconnection checks found the extension installed and enabled, but extension navigation to the preview was blocked by the browser client; no browser business assertion is claimed.

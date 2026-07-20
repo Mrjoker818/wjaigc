@@ -32,6 +32,22 @@ function secretCheckAny(area, names, strict = production) {
   else add(strict ? 'FAIL' : 'WARN', area, strict ? `missing or placeholder value (${names.join(' or ')})` : 'not configured for this runtime');
 }
 
+function normalizePostgresConnectionString(connectionString) {
+  try {
+    const parsed = new URL(connectionString);
+    if (
+      parsed.searchParams.get('sslmode')?.toLowerCase() === 'require'
+      && !parsed.searchParams.has('uselibpqcompat')
+    ) {
+      parsed.searchParams.set('uselibpqcompat', 'true');
+      return parsed.toString();
+    }
+  } catch {
+    return connectionString;
+  }
+  return connectionString;
+}
+
 async function checkDataDir() {
   const dataDir = path.resolve(process.env.WUJIE_DATA_DIR || './data');
   try {
@@ -48,7 +64,8 @@ async function checkDatabase() {
     add(production ? 'FAIL' : 'WARN', 'database', 'PGDATABASE_URL or DATABASE_URL is not configured');
     return;
   }
-  const client = new Client({ connectionString, connectionTimeoutMillis: 5_000 });
+  const normalizedConnectionString = normalizePostgresConnectionString(connectionString);
+  const client = new Client({ connectionString: normalizedConnectionString, connectionTimeoutMillis: 5_000 });
   try {
     await client.connect();
     await client.query('SELECT 1 AS healthcheck');

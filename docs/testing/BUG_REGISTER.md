@@ -940,3 +940,17 @@ BUG-20260718-007 的“任务恢复、完成和刷新恢复”范围已修复并
 | Root cause | An unanchored binary asset ignore pattern matched every nested directory named `models`. |
 | Fix | Anchor the binary directories as `/models/` and `/upscayl-models/`, add the workflow models route to Git, and add a source-integrity regression assertion. |
 | Regression | Red-first source-integrity assertion, then 4/4 source-integrity tests, 2/2 workflow-model API tests, and TypeScript pass locally. GitHub Actions rerun is required for closure. |
+
+## BUG-20260720-044: Coze startup depended on a generated node_modules patch for PostgreSQL SSL parsing
+
+| Field | Detail |
+| --- | --- |
+| Severity / module | P0 / cloud startup and PostgreSQL connectivity |
+| Environment | GitHub base `0e1fa59`; Coze preview direct URL; Chrome and deployment doctor; 2026-07-20 Asia/Shanghai. |
+| Stable reproduction | Synchronize the GitHub candidate to Coze, start the preview, then request `/` or `/api/auth/me`. Before the cloud-local recovery commit, both returned HTTP 502 with `unable to connect to backend service`. |
+| Expected | A clean checkout installs and starts without editing generated dependencies, and PostgreSQL `sslmode=require` uses the currently intended libpq-compatible semantics. |
+| Actual | Coze recovered only after a cloud-local commit changed `postinstall` and rewrote `node_modules/pg-connection-string/index.js`. This modification was absent from GitHub and would be lost on a clean install. |
+| Root cause | The application pool and `doctor` passed `sslmode=require` directly to the newer `pg-connection-string` behavior without opting into libpq compatibility. The warning was handled in generated code instead of at the two source connection boundaries. |
+| Fix | Normalize the configured URL by adding `uselibpqcompat=true` only when `sslmode=require` is present and no explicit compatibility option exists. Apply the same rule in `src/lib/db-client.ts` and `scripts/doctor.mjs`; do not rewrite `node_modules`. |
+| Regression | The focused test was first observed at 4 failures / 2 passes, then passed 6/6 after the source fix. Screenshot: `test-results/screenshots/cloud-backend-unreachable-after-0e1fa59-push-20260720.jpg`. Full quality and cloud acceptance are pending. |
+| Release impact | Open P0 until the official revision is deployed without the cloud-local dependency patch and `/api/auth/me`, saved-credential login, refresh, generation, save/reopen, and download pass. |

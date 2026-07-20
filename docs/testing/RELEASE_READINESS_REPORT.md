@@ -229,3 +229,9 @@ Release remains blocked because the native-upload step was stopped by the Chrome
 ## 2026-07-19 Latest recovery claim recheck
 
 **Decision: NOT APPROVED.** The local full Vitest baseline is green at **147 test files / 569 tests**, but the latest post-recovery deployment probe still reports `/api/auth/me` as HTTP `502`. The preview is therefore not eligible for the required real-browser P0 replay. This is a cloud runtime/proxy availability blocker, not evidence that an additional source patch should be guessed at or deployed.
+
+## 2026-07-20 PostgreSQL startup source correction
+
+**Decision remains: NOT APPROVED.** The cloud was restored by a Coze-only commit that modifies an installed dependency, so the running environment is not reproducible from GitHub `main`. The official source candidate now normalizes PostgreSQL `sslmode=require` at both connection boundaries and has focused red-to-green evidence. Release still requires full local gates, a clean GitHub quality run, removal of the cloud-only `postinstall` patch, and complete direct-Chrome P0 acceptance.
+
+The local source gates are green, including the production build, but the post-recovery direct health check still returns HTTP 502. The deployment gate therefore remains failed even though the Coze editor is available.

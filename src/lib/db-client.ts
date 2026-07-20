@@ -7,16 +7,33 @@ import { Pool, PoolConfig } from 'pg';
 
 let pool: Pool | null = null;
 
+export function normalizePostgresConnectionString(connectionString: string): string {
+  try {
+    const parsed = new URL(connectionString);
+    if (
+      parsed.searchParams.get('sslmode')?.toLowerCase() === 'require'
+      && !parsed.searchParams.has('uselibpqcompat')
+    ) {
+      parsed.searchParams.set('uselibpqcompat', 'true');
+      return parsed.toString();
+    }
+  } catch {
+    return connectionString;
+  }
+  return connectionString;
+}
+
 export function isDatabaseConfigured(): boolean {
   return Boolean(process.env.DATABASE_URL || process.env.PGDATABASE_URL);
 }
 
 export function getPool(): Pool {
   if (!pool) {
-    const connectionString = process.env.DATABASE_URL || process.env.PGDATABASE_URL;
-    if (!isDatabaseConfigured() || !connectionString) {
+    const configuredConnectionString = process.env.DATABASE_URL || process.env.PGDATABASE_URL;
+    if (!isDatabaseConfigured() || !configuredConnectionString) {
       throw new Error('[db-client] No DATABASE_URL or PGDATABASE_URL environment variable set');
     }
+    const connectionString = normalizePostgresConnectionString(configuredConnectionString);
     const config: PoolConfig = {
       connectionString,
       ssl: connectionString.includes('supabase') || connectionString.includes('aidap') ? { rejectUnauthorized: false } : undefined,

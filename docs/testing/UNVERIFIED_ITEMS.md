@@ -308,6 +308,15 @@
 
 ### 2026-07-19 Production preview follow-up
 
+## 2026-07-20 startup recovery follow-up
+
+- The user reports that the cloud is restored, but the current runtime includes Coze-local commit `b34e0b3`, which patches `node_modules/pg-connection-string` during installation.
+- It is unverified that a clean Coze deployment from official GitHub source can start without that local patch.
+- Closure requires deploying the source-level PostgreSQL normalization, removing or reverting the cloud-only patch, proving `/api/auth/me` health, and rerunning the entire direct-Chrome P0 chain. A restored landing page alone is not sufficient.
+- The latest direct probe still returns HTTP 502. The Chrome extension also blocked a newly opened preview navigation with `ERR_BLOCKED_BY_CLIENT`, so no authenticated UI result is inferred from the browser reconnection attempt.
+
+### 2026-07-19 Production preview follow-up
+
 - The next cloud deployment must run the new locked-install/build script and `next start`, not `next dev`.
 - Required Chrome proof remains: reload the authenticated session, confirm the auth overlay is hidden, verify dashboard or canvas interaction, and repeat logout/relogin project persistence.
 - The local four-browser production result does not replace those cloud acceptance checks.

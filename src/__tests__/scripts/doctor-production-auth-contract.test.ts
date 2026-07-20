@@ -1,8 +1,15 @@
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 describe('production doctor authentication contract', () => {
+  it('normalizes sslmode=require before creating the PostgreSQL client', () => {
+    const source = readFileSync(resolve(process.cwd(), 'scripts/doctor.mjs'), 'utf8');
+    expect(source).toContain("searchParams.set('uselibpqcompat', 'true')");
+    expect(source).toContain('new Client({ connectionString: normalizedConnectionString');
+  });
+
   it('accepts NEXTAUTH_SECRET when WUJIE_AUTH_SECRET is absent', () => {
     const environment: NodeJS.ProcessEnv = {
       ...process.env,
