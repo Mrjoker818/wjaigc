@@ -8,27 +8,31 @@ export const CREDITS_TO_CNY = 0.01; // 1积分 = ¥0.01
 export const CNY_TO_CREDITS = 100;   // ¥1 = 100积分
 
 // ========== 图像模型积分消耗（基于官方API定价） ==========
-export const IMAGE_MODEL_CREDITS: Record<string, { credits: number; label: string; quality?: Record<string, number> }> = {
+export const IMAGE_MODEL_CREDITS: Record<string, { credits: number; label: string; quality?: Record<string, number>; resolution?: Record<string, number> }> = {
   // --- OpenAI ---
   'dall-e-3': {
     credits: 28, // ¥0.28/张 (standard 1024px)
     label: 'DALL-E 3',
     quality: { standard: 28, hd: 56 }, // HD ¥0.56/张
+    resolution: { '1K': 28, '2K': 56, '4K': 112 },
   },
   'gpt-image-2': {
     credits: 60, // ¥0.40-1.00/张，取中间值
     label: 'GPT Image 2',
     quality: { low: 40, medium: 60, high: 100 },
+    resolution: { '1K': 60, '2K': 120, '4K': 240 },
   },
   'gpt-image-2-c': {
     credits: 40,
     label: 'GPT Image 2C',
     quality: { low: 30, medium: 40, high: 70 },
+    resolution: { '1K': 40, '2K': 80, '4K': 160 },
   },
   'gpt-image-1.5': {
     credits: 35,
     label: 'GPT Image 1.5',
     quality: { low: 10, medium: 35, high: 100 },
+    resolution: { '1K': 35, '2K': 70, '4K': 140 },
   },
 
   // --- 豆包/字节跳动 Seedream ---
@@ -36,33 +40,40 @@ export const IMAGE_MODEL_CREDITS: Record<string, { credits: number; label: strin
     credits: 6, // ¥0.04-0.06/张
     label: 'Seedream 3.0',
     quality: { standard: 6, hd: 10 },
+    resolution: { '1K': 6, '2K': 12, '4K': 24 },
   },
   'seedream-3-0-lite': {
     credits: 3, // ¥0.02-0.03/张
     label: 'Seedream 3.0 Lite',
+    resolution: { '1K': 3, '2K': 6, '4K': 12 },
   },
   'doubao-seedream-3-0': {
     credits: 6,
     label: '豆包 Seedream 3.0',
     quality: { standard: 6, hd: 10 },
+    resolution: { '1K': 6, '2K': 12, '4K': 24 },
   },
   'doubao-seedream-3-0-lite': {
     credits: 3,
     label: '豆包 Seedream 3.0 Lite',
+    resolution: { '1K': 3, '2K': 6, '4K': 12 },
   },
   'seedream-4-5': {
     credits: 30, // Reference cost: Volcengine Ark public pricing, with platform margin.
     label: 'Seedream 4.5',
     quality: { standard: 30, hd: 45 },
+    resolution: { '1K': 30, '2K': 60, '4K': 120 },
   },
   'doubao-seedream-4-5': {
     credits: 30,
     label: '豆包 Seedream 4.5',
     quality: { standard: 30, hd: 45 },
+    resolution: { '1K': 30, '2K': 60, '4K': 120 },
   },
   'seedream-5-lite': {
     credits: 28,
     label: 'Seedream 5 Lite',
+    resolution: { '1K': 28, '2K': 56, '4K': 112 },
   },
 
   // --- 快手可灵 ---
@@ -70,39 +81,47 @@ export const IMAGE_MODEL_CREDITS: Record<string, { credits: number; label: strin
     credits: 15, // ¥0.10-0.15/张
     label: '可灵 V3',
     quality: { standard: 15, hd: 25 },
+    resolution: { '1K': 15, '2K': 30, '4K': 60 },
   },
   'kling-v3-omni': {
     credits: 15,
     label: '可灵 V3 Omni',
     quality: { standard: 15, hd: 25 },
+    resolution: { '1K': 15, '2K': 30, '4K': 60 },
   },
 
   // --- Google Gemini ---
   'gemini-2.5-flash-image': {
     credits: 40,
     label: 'Gemini Flash 图片',
+    resolution: { '1K': 40, '2K': 80, '4K': 160 },
   },
   'gemini-3-pro-image-preview': {
     credits: 140,
     label: 'Gemini Pro 图片',
     quality: { standard: 140, hd: 250 },
+    resolution: { '1K': 140, '2K': 280, '4K': 560 },
   },
   'gemini-3.1-flash-image-preview': {
     credits: 70,
     label: 'Gemini 3.1 Flash 图片',
     quality: { standard: 70, hd: 160 },
+    resolution: { '1K': 70, '2K': 140, '4K': 280 },
   },
   'nano-banana': {
     credits: 40,
     label: 'Nano Banana',
+    resolution: { '1K': 40, '2K': 80, '4K': 160 },
   },
   'nano-banana-pro': {
     credits: 140,
     label: 'Nano Banana Pro',
+    resolution: { '1K': 140, '2K': 280, '4K': 560 },
   },
   'nano-banana-2': {
     credits: 70,
     label: 'Nano Banana 2',
+    resolution: { '1K': 70, '2K': 140, '4K': 280 },
   },
 
   // --- Midjourney ---
@@ -110,56 +129,67 @@ export const IMAGE_MODEL_CREDITS: Record<string, { credits: number; label: strin
     credits: 35, // ¥0.30-0.40/张 (Basic套餐约$0.05/张)
     label: 'Midjourney',
     quality: { standard: 35, hd: 50 },
+    resolution: { '1K': 35, '2K': 70, '4K': 140 },
   },
 
   // --- Flux ---
   'flux-pro': {
     credits: 30, // ¥0.25-0.35/张
     label: 'Flux Pro',
+    resolution: { '1K': 30, '2K': 60, '4K': 120 },
   },
   'flux-1.1-pro': {
     credits: 30,
     label: 'Flux 1.1 Pro',
+    resolution: { '1K': 30, '2K': 60, '4K': 120 },
   },
   'flux-schnell': {
     credits: 4, // 快速模型很便宜
     label: 'Flux Schnell',
+    resolution: { '1K': 4, '2K': 8, '4K': 16 },
   },
 
   // --- Ideogram ---
   'ideogram': {
     credits: 6, // ¥0.04-0.06/张
     label: 'Ideogram',
+    resolution: { '1K': 6, '2K': 12, '4K': 24 },
   },
 
   // --- Stable Diffusion ---
   'stable-diffusion-xl': {
     credits: 2, // 开源模型极低
     label: 'SD XL',
+    resolution: { '1K': 2, '2K': 4, '4K': 8 },
   },
   'stable-diffusion-3': {
     credits: 2,
     label: 'SD 3',
+    resolution: { '1K': 2, '2K': 4, '4K': 8 },
   },
   'sdxl': {
     credits: 2,
     label: 'SDXL',
+    resolution: { '1K': 2, '2K': 4, '4K': 8 },
   },
 
   // --- HiDream ---
   'hidream': {
     credits: 8,
     label: 'HiDream',
+    resolution: { '1K': 8, '2K': 16, '4K': 32 },
   },
 
   // --- 通义万相 ---
   'wanx-v3': {
     credits: 6,
     label: '通义万相 V3',
+    resolution: { '1K': 6, '2K': 12, '4K': 24 },
   },
   'wanx-v2': {
     credits: 4,
     label: '通义万相 V2',
+    resolution: { '1K': 4, '2K': 8, '4K': 16 },
   },
 };
 

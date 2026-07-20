@@ -5,6 +5,7 @@ export const CREDIT_PRICING_CONFIG_KEY = 'credit_pricing_config';
 export interface ModelCreditEntry {
   credits: number;
   quality?: Record<string, number>;
+  resolution?: Record<string, number>;
 }
 
 export interface CreditPricingConfig {
@@ -38,6 +39,17 @@ function normalizeSingleEntry(model: string, value: unknown): number | ModelCred
         quality[q.trim()] = n;
       }
       if (Object.keys(quality).length > 0) entry.quality = quality;
+    }
+    if (obj.resolution && typeof obj.resolution === 'object' && !Array.isArray(obj.resolution)) {
+      const resolution: Record<string, number> = {};
+      for (const [r, v] of Object.entries(obj.resolution as Record<string, unknown>)) {
+        const n = Number(v);
+        if (!r.trim() || !Number.isInteger(n) || n < 0 || n > 100_000) {
+          throw new Error(`Invalid resolution credit for model ${model}: ${r}`);
+        }
+        resolution[r.trim()] = n;
+      }
+      if (Object.keys(resolution).length > 0) entry.resolution = resolution;
     }
     return entry;
   }
@@ -79,11 +91,12 @@ export async function saveCreditPricingConfig(input: Pick<CreditPricingConfig, '
   return config;
 }
 
-/** Resolve the configured credit cost for a model, optionally with quality tier. */
+/** Resolve the configured credit cost for a model, optionally with quality tier and resolution. */
 export function resolveConfiguredCreditCost(
   config: CreditPricingConfig,
   model: string,
   quality: string | undefined,
+  resolution: string | undefined,
   fallback: number,
 ): number {
   if (!model) return fallback;
@@ -97,5 +110,11 @@ export function resolveConfiguredCreditCost(
   if (quality && entry.quality?.[quality] !== undefined) {
     return entry.quality[quality];
   }
+
+  // ModelCreditEntry with optional resolution tiers
+  if (resolution && entry.resolution?.[resolution] !== undefined) {
+    return entry.resolution[resolution];
+  }
+
   return entry.credits;
 }

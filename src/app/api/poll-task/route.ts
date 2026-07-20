@@ -44,6 +44,11 @@ const FAILED_CACHE = Symbol('failed');
 const failedTaskCache = new Map<string, { error: string; timestamp: number }>();
 const TASK_RECOVERY_LEASE_MS = 10 * 60_000;
 const TASK_RECOVERY_WORKER_ID = process.env.WUJIE_WORKER_ID || `poll-task-${process.pid}`;
+// A pending submitOnly wrapper whose background worker keeps updating progress is
+// alive and must NEVER be re-submitted — every duplicate submission bills the
+// provider again. Only a worker that stopped updating for longer than the 600s
+// background submission timeout is considered dead and eligible for recovery.
+const SUBMISSION_STALE_MS = 12 * 60_000;
 
 async function refundTaskCredits(
   taskId: string,
@@ -533,10 +538,15 @@ export async function POST(request: NextRequest) {
 
     // ★ 检查 task-registry 中的任务
     let registryTask = getTaskInfo(taskId);
+    // ★ 防重复扣费：submitOnly 任务在后台 worker 向供应商提交期间（同步模型可能需
+    // 数十秒到数分钟）没有 remoteTaskId。此时每个轮询都命中恢复分支会重复调用
+    // /api/generate 并真实扣费。只有 worker 卡死（超过 SUBMISSION_STALE_MS 无更新）
+    // 才允许恢复提交；进行中的任务由下方 pending-local 早退返回 processing。
     const shouldResumeExistingAsync = Boolean(
       registryTask
       && isPendingLocalAsyncGenerateTask(registryTask)
-      && (registryTask.result as Record<string, unknown> | undefined)?.submissionPayload,
+      && (registryTask.result as Record<string, unknown> | undefined)?.submissionPayload
+      && Date.now() - registryTask.updatedAt > SUBMISSION_STALE_MS,
     );
     if ((!registryTask || shouldResumeExistingAsync) && sessionUser) {
       const persistedTask = await getCloudTaskForUser(taskId, sessionUser.id);

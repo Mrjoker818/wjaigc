@@ -27,7 +27,7 @@ import { loadCreditPricingConfig, resolveConfiguredCreditCost } from './credit-p
  * 根据图像模型名称获取积分消耗
  * 支持模糊匹配（包含关键词即可）
  */
-export function getImageModelCredits(model: string, quality?: string): number {
+export function getImageModelCredits(model: string, quality?: string, resolution?: string): number {
   if (!model) return 10; // 默认10积分
   
   // 精确匹配
@@ -35,6 +35,9 @@ export function getImageModelCredits(model: string, quality?: string): number {
   if (exact) {
     if (quality && exact.quality && exact.quality[quality]) {
       return exact.quality[quality];
+    }
+    if (resolution && exact.resolution && exact.resolution[resolution]) {
+      return exact.resolution[resolution];
     }
     return exact.credits;
   }
@@ -45,6 +48,9 @@ export function getImageModelCredits(model: string, quality?: string): number {
     if (modelLower.includes(key) || key.split('-').some(k => modelLower.includes(k) && k.length > 2)) {
       if (quality && val.quality && val.quality[quality]) {
         return val.quality[quality];
+      }
+      if (resolution && val.resolution && val.resolution[resolution]) {
+        return val.resolution[resolution];
       }
       return val.credits;
     }
@@ -143,10 +149,10 @@ export type CreditOperation = 'image_generate' | 'image_edit' | 'image_upscale' 
 export function calculateCreditCost(
   operation: CreditOperation | string,
   model?: string,
-  options?: { quality?: string; durationSeconds?: number }
+  options?: { quality?: string; resolution?: string; durationSeconds?: number }
 ): number {
   if (operation === 'image_generate') {
-    return getImageModelCredits(model || '', options?.quality);
+    return getImageModelCredits(model || '', options?.quality, options?.resolution);
   }
   if (operation === 'video_generate' || operation === 'video_extend') {
     const perSecond = getVideoModelCreditsPerSecond(model || '');
@@ -162,17 +168,17 @@ export function calculateCreditCost(
 export async function calculateConfiguredCreditCost(
   operation: CreditOperation | string,
   model?: string,
-  options?: { quality?: string; durationSeconds?: number },
+  options?: { quality?: string; resolution?: string; durationSeconds?: number },
 ): Promise<number> {
   if (!model) return calculateCreditCost(operation, model, options);
   const config = await loadCreditPricingConfig();
   if (operation === 'video_generate' || operation === 'video_extend') {
     const fallbackPerSecond = getVideoModelCreditsPerSecond(model);
-    const perSecond = resolveConfiguredCreditCost(config, model, undefined, fallbackPerSecond);
+    const perSecond = resolveConfiguredCreditCost(config, model, undefined, undefined, fallbackPerSecond);
     return perSecond * Math.max(1, options?.durationSeconds || 5);
   }
   const fallback = calculateCreditCost(operation, model, options);
-  const configured = resolveConfiguredCreditCost(config, model, options?.quality, fallback);
+  const configured = resolveConfiguredCreditCost(config, model, options?.quality, options?.resolution, fallback);
   return configured;
 }
 
@@ -222,7 +228,7 @@ export async function consumeCredits(
   customAmount?: number,
   description?: string,
   model?: string,
-  options?: { quality?: string; durationSeconds?: number }
+  options?: { quality?: string; resolution?: string; durationSeconds?: number }
 ): Promise<{ success: boolean; balance: number; cost: number; message?: string }> {
   const cost = customAmount ?? await calculateConfiguredCreditCost(operation, model, options);
   if (cost <= 0) return { success: true, balance: 0, cost: 0 };
@@ -305,7 +311,7 @@ export async function checkCredits(
   operation: CreditOperation | string,
   customAmount?: number,
   model?: string,
-  options?: { quality?: string; durationSeconds?: number }
+  options?: { quality?: string; resolution?: string; durationSeconds?: number }
 ): Promise<{ sufficient: boolean; balance: number; cost: number }> {
   const cost = customAmount ?? await calculateConfiguredCreditCost(operation, model, options);
   if (cost <= 0) return { sufficient: true, balance: 0, cost: 0 };

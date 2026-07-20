@@ -22,6 +22,16 @@ function defaultQualityTiers(modelType: string, model: string): Record<string, n
   return undefined;
 }
 
+function defaultResolutionTiers(modelType: string, model: string): Record<string, number> | undefined {
+  if (modelType !== 'image') return undefined;
+  const { IMAGE_MODEL_CREDITS } = require('@/lib/credits-constants');
+  const entry = IMAGE_MODEL_CREDITS[model];
+  if (entry?.resolution && typeof entry.resolution === 'object') {
+    return entry.resolution as Record<string, number>;
+  }
+  return undefined;
+}
+
 export async function GET(request: NextRequest) {
   const admin = await requireAdminUser(request);
   if (!admin) return NextResponse.json({ success: false, error: 'Admin access required' }, { status: 403 });
@@ -34,11 +44,13 @@ export async function GET(request: NextRequest) {
       const fallback = defaultCredits(modelType, model);
       const configured = config.modelCredits[model];
       const refQuality = defaultQualityTiers(modelType, model);
+      const refResolution = defaultResolutionTiers(modelType, model);
 
-      // Determine source and quality tiers
+      // Determine source and quality/resolution tiers
       let source: 'reference' | 'custom' = 'reference';
       let credits: number = fallback.credits;
       let quality: Record<string, number> | undefined = refQuality;
+      let resolution: Record<string, number> | undefined = refResolution;
 
       if (configured !== undefined) {
         source = 'custom';
@@ -47,6 +59,7 @@ export async function GET(request: NextRequest) {
         } else {
           credits = configured.credits;
           if (configured.quality) quality = configured.quality;
+          if (configured.resolution) resolution = configured.resolution;
         }
       }
 
@@ -59,6 +72,7 @@ export async function GET(request: NextRequest) {
         unit: fallback.unit,
         source,
         quality,
+        resolution,
       };
     }));
 

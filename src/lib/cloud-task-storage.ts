@@ -248,7 +248,10 @@ export async function claimCloudTaskLease(
         updated_at = $4
     WHERE id = $1
       AND status IN ('queued', 'pending', 'processing')
-      AND (lease_owner = $2 OR lease_expires_at = 0 OR lease_expires_at < $4)
+      -- No same-owner bypass: an unexpired lease blocks everyone, including the
+      -- current owner. Otherwise every poll re-claims and re-submits the task,
+      -- billing the provider once per poll tick.
+      AND (lease_expires_at = 0 OR lease_expires_at < $4)
     RETURNING id, lease_owner, lease_expires_at, attempt_count
   `, [taskId, owner, expiresAt, now]);
   const row = result.rows[0];

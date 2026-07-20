@@ -264,8 +264,8 @@ export default function AdminTabs(props: AdminTabsProps) {
   const [creditSubTab, setCreditSubTab] = useState('user-credits');
   const [creditSearch, setCreditSearch] = useState('');
   const [creditSort, setCreditSort] = useState('balance');
-  const [modelCreditRules, setModelCreditRules] = useState<Record<string, number | { credits: number; quality?: Record<string, number> }>>({});
-  const [modelCreditCatalog, setModelCreditCatalog] = useState<Array<{ providerId: string; providerName: string; model: string; modelType: string; credits: number; unit: string; source: string; quality?: Record<string, number> }>>([]);
+  const [modelCreditRules, setModelCreditRules] = useState<Record<string, number | { credits: number; quality?: Record<string, number>; resolution?: Record<string, number> }>>({});
+  const [modelCreditCatalog, setModelCreditCatalog] = useState<Array<{ providerId: string; providerName: string; model: string; modelType: string; credits: number; unit: string; source: string; quality?: Record<string, number>; resolution?: Record<string, number> }>>([]);
   const [pricingSaving, setPricingSaving] = useState(false);
 
   /* ── Audit state ── */
@@ -324,11 +324,13 @@ export default function AdminTabs(props: AdminTabsProps) {
       const data = await res.json();
       const catalog = data.models || [];
       setModelCreditCatalog(catalog);
-      // Build rules: support both flat number and {credits, quality} objects
-      const rules: Record<string, number | { credits: number; quality?: Record<string, number> }> = {};
+      // Build rules: support both flat number and {credits, quality, resolution} objects
+      const rules: Record<string, number | { credits: number; quality?: Record<string, number>; resolution?: Record<string, number> }> = {};
       for (const item of catalog) {
-        if (item.quality && Object.keys(item.quality).length > 0) {
-          rules[item.model] = { credits: item.credits, quality: item.quality };
+        const hasQuality = item.quality && Object.keys(item.quality).length > 0;
+        const hasResolution = item.resolution && Object.keys(item.resolution).length > 0;
+        if (hasQuality || hasResolution) {
+          rules[item.model] = { credits: item.credits, ...(hasQuality ? { quality: item.quality } : {}), ...(hasResolution ? { resolution: item.resolution } : {}) };
         } else {
           rules[item.model] = item.credits;
         }
@@ -1391,6 +1393,9 @@ export default function AdminTabs(props: AdminTabsProps) {
                         <th key={tier} className="px-3 py-2 text-right font-medium">{tier === 'standard' ? '标准' : tier === 'hd' ? '高清' : tier === 'low' ? '低质量' : tier === 'medium' ? '中等' : tier === 'high' ? '高质量' : tier === 'ultra' ? '超高质量' : tier}</th>
                       ));
                     })()}
+                    <th className="px-3 py-2 text-right font-medium">1K</th>
+                    <th className="px-3 py-2 text-right font-medium">2K</th>
+                    <th className="px-3 py-2 text-right font-medium">4K</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/60">
@@ -1399,6 +1404,8 @@ export default function AdminTabs(props: AdminTabsProps) {
                     const currentRule = modelCreditRules[item.model];
                     const baseCredits = typeof currentRule === 'number' ? currentRule : (currentRule?.credits ?? item.credits);
                     const qualityOverrides = (typeof currentRule === 'object' && currentRule?.quality) ? currentRule.quality : {};
+                    const resolutionOverrides = (typeof currentRule === 'object' && currentRule?.resolution) ? currentRule.resolution : {};
+                    const resTiers = ['1K', '2K', '4K'];
                     return (
                       <tr key={`${item.providerId}:${item.model}`}>
                         <td className="px-3 py-2 text-muted-foreground">{item.providerName}</td>
@@ -1413,8 +1420,8 @@ export default function AdminTabs(props: AdminTabsProps) {
                               const v = Math.max(0, Math.floor(Number(event.target.value) || 0));
                               setModelCreditRules(prev => {
                                 const existing = prev[item.model];
-                                if (typeof existing === 'object' && existing?.quality) {
-                                  return { ...prev, [item.model]: { credits: v, quality: existing.quality } };
+                                if (typeof existing === 'object') {
+                                  return { ...prev, [item.model]: { credits: v, ...(existing.quality ? { quality: existing.quality } : {}), ...(existing.resolution ? { resolution: existing.resolution } : {}) } };
                                 }
                                 return { ...prev, [item.model]: v };
                               });
@@ -1440,8 +1447,9 @@ export default function AdminTabs(props: AdminTabsProps) {
                                     const existing = prev[item.model];
                                     const base = typeof existing === 'number' ? existing : (existing?.credits ?? item.credits);
                                     const prevQuality = (typeof existing === 'object' && existing?.quality) ? existing.quality : {};
+                                    const prevResolution = (typeof existing === 'object' && existing?.resolution) ? existing.resolution : {};
                                     const newQuality = { ...prevQuality, [tier]: v };
-                                    return { ...prev, [item.model]: { credits: base, quality: newQuality } };
+                                    return { ...prev, [item.model]: { credits: base, quality: newQuality, ...(Object.keys(prevResolution).length > 0 ? { resolution: prevResolution } : {}) } };
                                   });
                                 }}
                                 className={`h-8 w-24 rounded-md border bg-background px-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 ${isOverridden ? 'border-primary/50 text-primary' : 'border-border text-muted-foreground'}`}
@@ -1449,10 +1457,38 @@ export default function AdminTabs(props: AdminTabsProps) {
                             </td>
                           );
                         })}
+                        {item.modelType === 'image' ? resTiers.map(rt => {
+                          const refVal = item.resolution?.[rt] ?? baseCredits;
+                          const overrideVal = resolutionOverrides[rt];
+                          const displayVal = overrideVal !== undefined ? overrideVal : refVal;
+                          const isOverridden = overrideVal !== undefined;
+                          return (
+                            <td key={rt} className="px-3 py-2 text-right">
+                              <input
+                                aria-label={`${item.model} ${rt} 积分`}
+                                type="number" min="0" max="100000"
+                                value={displayVal}
+                                placeholder={String(refVal)}
+                                onChange={event => {
+                                  const v = Math.max(0, Math.floor(Number(event.target.value) || 0));
+                                  setModelCreditRules(prev => {
+                                    const existing = prev[item.model];
+                                    const base = typeof existing === 'number' ? existing : (existing?.credits ?? item.credits);
+                                    const prevQuality = (typeof existing === 'object' && existing?.quality) ? existing.quality : {};
+                                    const prevResolution = (typeof existing === 'object' && existing?.resolution) ? existing.resolution : {};
+                                    const newResolution = { ...prevResolution, [rt]: v };
+                                    return { ...prev, [item.model]: { credits: base, ...(Object.keys(prevQuality).length > 0 ? { quality: prevQuality } : {}), resolution: newResolution } };
+                                  });
+                                }}
+                                className={`h-8 w-24 rounded-md border bg-background px-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 ${isOverridden ? 'border-primary/50 text-primary' : 'border-border text-muted-foreground'}`}
+                              />
+                            </td>
+                          );
+                        }) : resTiers.map(rt => <td key={rt} className="px-3 py-2 text-right text-xs text-muted-foreground">-</td>)}
                       </tr>
                     );
                   })}
-                  {modelCreditCatalog.length === 0 && <tr><td colSpan={4} className="px-3 py-8 text-center text-sm text-muted-foreground">暂无已启用模型，请先在 API 管理中配置模型。</td></tr>}
+                  {modelCreditCatalog.length === 0 && <tr><td colSpan={10} className="px-3 py-8 text-center text-sm text-muted-foreground">暂无已启用模型，请先在 API 管理中配置模型。</td></tr>}
                 </tbody>
               </table>
             </div>

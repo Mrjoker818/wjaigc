@@ -26,8 +26,8 @@ describe('credit pricing configuration', () => {
     }));
 
     const config = await loadCreditPricingConfig();
-    expect(resolveConfiguredCreditCost(config, 'gemini-3.1-flash-image-preview', undefined, 12)).toBe(66);
-    expect(resolveConfiguredCreditCost(config, 'unknown-model', undefined, 12)).toBe(12);
+    expect(resolveConfiguredCreditCost(config, 'gemini-3.1-flash-image-preview', undefined, undefined, 12)).toBe(66);
+    expect(resolveConfiguredCreditCost(config, 'unknown-model', undefined, undefined, 12)).toBe(12);
   });
 
   it('rejects invalid model prices instead of persisting malformed values', async () => {
