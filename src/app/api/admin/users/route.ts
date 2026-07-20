@@ -66,10 +66,11 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json() as {
-      action?: 'create' | 'update' | 'delete' | 'repair-duplicate-ids' | 'list-data' | 'get-data' | 'delete-data' | 'listUserData' | 'getUserData' | 'deleteUserData';
+      action?: 'create' | 'update' | 'delete' | 'resetPassword' | 'repair-duplicate-ids' | 'list-data' | 'get-data' | 'delete-data' | 'listUserData' | 'getUserData' | 'deleteUserData';
       userId?: string;
       name?: string;
       password?: string;
+      newPassword?: string;
       email?: string;
       updates?: Record<string, unknown>;
       dataKey?: string;
@@ -132,6 +133,19 @@ export async function POST(request: NextRequest) {
       const deleted = await deleteManagedUser(body.userId);
       await dbAddAuditLog({ user_id: admin.id, user_name: admin.name, action: 'user_delete', target_type: 'user', target_id: body.userId, detail: `删除用户 ${body.userId}`, ip_address: null, created_at: Date.now() });
       return NextResponse.json({ success: deleted, deleted });
+    }
+
+    if (body.action === 'resetPassword') {
+      if (!body.userId) {
+        return NextResponse.json({ success: false, error: 'Missing userId' }, { status: 400 });
+      }
+      const newPwd = String(body.newPassword || '');
+      if (!newPwd || newPwd.length < 6) {
+        return NextResponse.json({ success: false, error: '密码至少需要6个字符' }, { status: 400 });
+      }
+      const user = await updateManagedUser(body.userId, { password: newPwd });
+      await dbAddAuditLog({ user_id: admin.id, user_name: admin.name, action: 'user_reset_password', target_type: 'user', target_id: body.userId, detail: `重置用户 ${body.userId} 密码`, ip_address: null, created_at: Date.now() });
+      return NextResponse.json({ success: Boolean(user), user });
     }
 
     if (body.action === 'list-data' || body.action === 'listUserData') {

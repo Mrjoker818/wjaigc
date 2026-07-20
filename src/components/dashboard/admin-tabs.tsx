@@ -242,6 +242,12 @@ export default function AdminTabs(props: AdminTabsProps) {
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserGroupId, setNewUserGroupId] = useState('');
   const [userFilterGroup, setUserFilterGroup] = useState('all');
+  const [showResetPasswordDialog, setShowResetPasswordDialog] = useState(false);
+  const [resetPasswordUserId, setResetPasswordUserId] = useState<string | null>(null);
+  const [resetPasswordValue, setResetPasswordValue] = useState('');
+  const [resetPasswordConfirm, setResetPasswordConfirm] = useState('');
+  const [resetPasswordError, setResetPasswordError] = useState('');
+  const [resetPasswordLoading, setResetPasswordLoading] = useState(false);
 
   /* ── Credits state ── */
   const [creditsOverview, setCreditsOverview] = useState<{
@@ -972,12 +978,126 @@ export default function AdminTabs(props: AdminTabsProps) {
                 <div>
                   <h4 className="text-sm font-semibold text-foreground mb-2">操作</h4>
                   <div className="space-y-2">
+                    <button
+                      onClick={() => {
+                        setResetPasswordUserId(detailUser.id);
+                        setResetPasswordValue('');
+                        setResetPasswordConfirm('');
+                        setResetPasswordError('');
+                        setShowResetPasswordDialog(true);
+                      }}
+                      className="w-full h-9 rounded-lg bg-muted text-foreground text-sm font-medium hover:bg-muted/80 transition-colors flex items-center justify-center gap-2"
+                    >
+                      <Lock className="w-4 h-4" />重置密码
+                    </button>
                     <button onClick={() => props.onToggleUser(detailUser)} className={`w-full h-9 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 ${detailUser.status === 'active' ? 'bg-destructive/15 text-destructive' : 'bg-green-500/15 text-green-500'}`}>
                       {detailUser.status === 'active' ? <><Ban className="w-4 h-4" />停用用户</> : <><Check className="w-4 h-4" />启用用户</>}
                     </button>
                     <button onClick={() => props.onDeleteUser(detailUser)} className="w-full h-9 rounded-lg bg-destructive/15 text-destructive text-sm font-medium hover:bg-destructive/25 transition-colors flex items-center justify-center gap-2"><X className="w-4 h-4" />删除用户</button>
                   </div>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 重置密码弹窗 */}
+        {showResetPasswordDialog && resetPasswordUserId && (
+          <div className="fixed inset-0 z-[210] flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/50" onClick={() => { if (!resetPasswordLoading) setShowResetPasswordDialog(false); }} />
+            <div className="relative z-10 w-[400px] bg-card border border-border rounded-xl shadow-2xl p-6">
+              <div className="flex items-center justify-between mb-5">
+                <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
+                  <Lock className="w-4 h-4 text-primary" />重置用户密码
+                </h3>
+                <button
+                  onClick={() => { if (!resetPasswordLoading) setShowResetPasswordDialog(false); }}
+                  className="w-7 h-7 rounded-md bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <p className="text-sm text-muted-foreground mb-4">
+                正在为用户 <span className="font-medium text-foreground">{adminUsers.find(u => u.id === resetPasswordUserId)?.name || resetPasswordUserId}</span> 重置密码
+              </p>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs font-medium text-foreground mb-1 block">新密码</label>
+                  <input
+                    type="password"
+                    value={resetPasswordValue}
+                    onChange={e => { setResetPasswordValue(e.target.value); setResetPasswordError(''); }}
+                    placeholder="至少6个字符"
+                    disabled={resetPasswordLoading}
+                    className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-foreground mb-1 block">确认密码</label>
+                  <input
+                    type="password"
+                    value={resetPasswordConfirm}
+                    onChange={e => { setResetPasswordConfirm(e.target.value); setResetPasswordError(''); }}
+                    placeholder="再次输入新密码"
+                    disabled={resetPasswordLoading}
+                    className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
+                  />
+                </div>
+                {resetPasswordError && (
+                  <div className="flex items-center gap-2 text-sm text-destructive bg-destructive/10 rounded-lg px-3 py-2">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>{resetPasswordError}</span>
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-3 mt-5">
+                <button
+                  onClick={() => setShowResetPasswordDialog(false)}
+                  disabled={resetPasswordLoading}
+                  className="flex-1 h-10 rounded-lg bg-muted text-muted-foreground text-sm font-medium hover:text-foreground transition-colors disabled:opacity-50"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={async () => {
+                    setResetPasswordError('');
+                    if (!resetPasswordValue || resetPasswordValue.length < 6) {
+                      setResetPasswordError('密码至少需要6个字符');
+                      return;
+                    }
+                    if (resetPasswordValue !== resetPasswordConfirm) {
+                      setResetPasswordError('两次输入的密码不一致');
+                      return;
+                    }
+                    setResetPasswordLoading(true);
+                    try {
+                      const res = await fetch('/api/admin/users', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'resetPassword', userId: resetPasswordUserId, newPassword: resetPasswordValue }),
+                      });
+                      const data = await res.json();
+                      if (data.success) {
+                        setShowResetPasswordDialog(false);
+                        props.onRefreshAdmin();
+                      } else {
+                        setResetPasswordError(data.error || '重置密码失败');
+                      }
+                    } catch {
+                      setResetPasswordError('网络错误，请重试');
+                    } finally {
+                      setResetPasswordLoading(false);
+                    }
+                  }}
+                  disabled={resetPasswordLoading}
+                  className="flex-1 h-10 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {resetPasswordLoading ? (
+                    <><RefreshCw className="w-4 h-4 animate-spin" />处理中...</>
+                  ) : (
+                    <><Check className="w-4 h-4" />确认重置</>
+                  )}
+                </button>
               </div>
             </div>
           </div>

@@ -441,8 +441,9 @@ export class UserManager {
 
   /** 将当前用户的项目数据同步到服务器数据库
    * @param immediate 是否立即同步（跳过防抖），用于删除等关键操作
+   * @param silent 静默模式（退出登录时使用），不向 console.error 输出 fetch 失败
    */
-  private async syncToServer(immediate: boolean = false): Promise<void> {
+  private async syncToServer(immediate: boolean = false, silent: boolean = false): Promise<void> {
     if (!this.currentUserId || !this.multiUserData) return;
     const userData = this.multiUserData.userData[this.currentUserId];
     if (!userData) return;
@@ -495,7 +496,9 @@ export class UserManager {
         this._recentlyDeletedImageIds.clear();
       }
     } catch (error) {
-      console.error('[Sync] syncToServer error:', error);
+      if (!silent) {
+        console.error('[Sync] syncToServer error:', error);
+      }
     }
   }
 
@@ -799,7 +802,8 @@ export class UserManager {
       }
       return true;
     } catch (error) {
-      console.error('[Sync] loadProjectsFromServer error:', error);
+      // Downgrade to warn: fetch failures during session teardown (logout/reload) are expected, not code errors
+      console.warn('[Sync] loadProjectsFromServer error:', error);
       if (retryCount > 0) {
         await new Promise(r => setTimeout(r, 1000));
         return this.loadProjectsFromServer(retryCount - 1, expectedUserId);
@@ -883,7 +887,7 @@ export class UserManager {
         }
       }
     }).catch(error => {
-      console.error('[Sync] background project sync error:', error);
+      console.warn('[Sync] background project sync error:', error);
     });
 
     this.saveData();
@@ -1532,7 +1536,7 @@ export class UserManager {
       clearTimeout(this.serverSyncTimer);
       this.serverSyncTimer = null;
     }
-    await this.syncToServer(true);
+    await this.syncToServer(true, true);
     this._serverSyncReady = false; // 重置同步状态，新用户登录后需重新加载
     this.currentUserId = null;
     if (this.canUseStorage()) {

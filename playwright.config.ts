@@ -26,9 +26,9 @@ export default defineConfig({
     navigationTimeout: 30_000,
   },
   projects: [
-    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    { name: 'chromium', use: { ...devices['Desktop Chrome'], channel: 'chromium' } },
     { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
     { name: 'webkit', use: { ...devices['Desktop Safari'] } },
-    { name: 'mobile-chromium', use: { ...devices['Pixel 7'] } },
+    { name: 'mobile-chromium', use: { ...devices['Pixel 7'], channel: 'chromium' } },
   ],
 });
