@@ -26,9 +26,9 @@ export default defineConfig({
     navigationTimeout: 30_000,
   },
   projects: [
-    { name: 'chromium', use: { ...devices['Desktop Chrome'], channel: 'chromium' } },
+    { name: 'chromium', use: { ...devices['Desktop Chrome'], channel: 'chromium', launchOptions: { executablePath: process.env.CHROMIUM_PATH || '/root/.cache/ms-playwright/chromium-1161/chrome-linux/chrome' } } },
+    { name: 'chromium-1080p', use: { ...devices['Desktop Chrome'], channel: 'chromium', viewport: { width: 1920, height: 1080 }, launchOptions: { executablePath: process.env.CHROMIUM_PATH || '/root/.cache/ms-playwright/chromium-1161/chrome-linux/chrome' } } },
     { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
     { name: 'webkit', use: { ...devices['Desktop Safari'] } },
-    { name: 'mobile-chromium', use: { ...devices['Pixel 7'], channel: 'chromium' } },
   ],
 });

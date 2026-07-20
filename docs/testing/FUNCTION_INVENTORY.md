@@ -1,229 +1,242 @@
-# 无界AI功能盘点
+# 无界AI — 功能盘点矩阵
 
-- 生成时间：2026-07-19T12:55:17.727Z
-- Git Commit：`47c1056`
-- 软件版本：`2.5.0`
-- 工作目录：`J:\无界本地版\projects\_upstream-wjaigc-restore`
-- 盘点方法：源码路由、页面入口、组件、数据存储和依赖静态扫描；“已定位”不代表已通过真实验证。
+> 版本: v3.8.0 | 扫描时间: 2026-07-20 | Git Commit: $(git rev-parse --short HEAD)
 
-## 架构
+---
 
-| 领域 | 现状 | 证据 |
-| --- | --- | --- |
-| 前端/后端 | Next.js 16.2.10 App Router + React 19.2.3 + TypeScript | `src/app`、`src/components` |
-| UI/状态 | Tailwind 4、shadcn/Radix；React Hooks、localStorage、BroadcastChannel、用户数据同步 | `src/components`、`src/app/page.tsx` |
-| 数据库 | PostgreSQL（`pg`），`DATABASE_URL`/`PGDATABASE_URL` | `src/lib/db-client.ts`、`src/lib/db-storage.ts` |
-| 对象存储/上传 | S3兼容对象存储优先，服务器本地文件回退 | `src/app/api/upload/route.ts`、`src/app/api/save-image/route.ts` |
-| 身份鉴权 | 签名 HTTP-only cookie `wujie_session`，7天会话 | `src/lib/server-auth.ts`、`/api/auth/*` |
-| AI调用层 | 多提供商兼容层，OpenAI/Gemini兼容及管理员模型配置 | `src/lib/api-compatibility.ts`、`src/app/api/generate/route.ts` |
-| 异步任务 | 内存/云端任务注册、SSE推送，轮询回退、取消和恢复 | `src/lib/task-registry.ts`、`/api/task-events` |
-| 部署 | Coze云端/容器化；端口和域名由环境变量控制 | `Dockerfile`、`docker-compose.yml`、`.coze*` |
-| 日志/监控 | 操作审计、数据库审计；未发现Sentry依赖。GitHub Actions质量门禁已配置，但云端真实P0依赖仓库环境密钥 | `src/components/operation-audit-client.tsx`、`src/app/api/admin/audit`、`.github/workflows/quality.yml` |
-| 积分/支付 | 积分、充值订单、支付二维码/回调接口 | `/api/credits/*`、`wujie_recharge_orders` |
+## 一、技术架构
 
-## 数据与关键依赖
+| 层级 | 技术选型 | 版本 | 说明 |
+|------|---------|------|------|
+| 前端框架 | Next.js (App Router) | 16.2.10 | React SSR/SSG + API Routes |
+| UI 库 | React | 19.2.3 | 函数组件 + Hooks |
+| 组件库 | shadcn/ui (Radix UI) | — | 40+ 封装组件 |
+| 样式 | Tailwind CSS | 4.x | 原子化 CSS + 语义变量 |
+| 语言 | TypeScript | 5.x | 严格模式 |
+| 数据库 | PostgreSQL | — | 通过 PGDATABASE_URL 连接 |
+| ORM/驱动 | pg (node-postgres) | — | 原生连接池，无 ORM |
+| 对象存储 | S3 兼容 (可选) | — | 用于图片/视频持久化 |
+| 登录鉴权 | JWT (jose) | — | httpOnly Cookie, 7天过期 |
+| 状态管理 | React useState/useRef | — | 无外部状态库 |
+| 任务队列 | task-registry (内存) | — | Map + 并发限制 + SSE推送 |
+| 实时通信 | SSE (Server-Sent Events) | — | /api/task-events 任务进度推送 |
+| AI模型调用 | api-compatibility.ts | — | 通用 OpenAI 兼容适配层 |
+| 视频协议 | video-api.ts | — | 6种协议适配器，20+模型 |
+| 图像生成 | DALL-E 3 / Flux / SD / Seedream | — | 管理员配置，30+模型 |
+| 视频生成 | 可灵V3 / Seedance / Vidu / Sora | — | 管理员配置，20+模型 |
+| 3D生成 | Hunyuan3D / Meshy / Tripo / Rodin | — | 4提供商 |
+| 部署方式 | Next.js 生产构建 | — | coze build / coze start |
+| 日志系统 | op-log.ts → wujie_audit_log 表 | — | DB持久化 + AI分析 |
+| 错误监控 | console.log + app.log | — | /app/work/logs/bypass/ |
+| 支付/积分 | credits 系统 | — | 充值/消费/管理员定价 |
+| 文件上传 | /api/upload + /api/save-image | — | 前端压缩 + 后端 sharp |
+| 图片保存链 | persistImageBuffer 三级fallback | — | S3 → save-image → base64 |
 
-主要表/逻辑存储：`wujie_users`、`wujie_api_providers`、`wujie_user_data`、`wujie_system_settings`、`wujie_recharge_orders`、`wujie_brand_assets`、`wujie_user_groups`及积分、审计和任务关联数据。关键环境变量包括数据库连接、认证/内部/支付密钥、对象存储配置、管理员账户、模型提供商密钥和本地AI工具配置；详细可执行检查由 `npm run doctor` 输出。
+## 二、环境变量清单
 
-## 功能矩阵
+| 变量名 | 必需 | 用途 | 当前状态 |
+|--------|------|------|---------|
+| PGDATABASE_URL / DATABASE_URL | ✅ | PostgreSQL 连接串 | 已配置 |
+| COZE_WORKSPACE_PATH | ✅ | 工作目录 | 沙箱预置 |
+| DEPLOY_RUN_PORT | ✅ | 服务端口 | 沙箱预置 |
+| COZE_PROJECT_DOMAIN_DEFAULT | ✅ | 对外域名 | 沙箱预置 |
+| COZE_PROJECT_ENV | ✅ | 环境标识 (DEV/PROD) | 沙箱预置 |
+| AUTH_SECRET | ⚠️ | JWT 签名密钥 | 未配置时使用默认值(警告) |
+| APIMART_API_KEY | ❌ | APImart 备用 Key | 优先管理员后台配置 |
+| GEMINI_API_KEY | ❌ | Gemini 备用 Key | 优先管理员后台配置 |
+| PY_VECTORIZE_ENDPOINT | ❌ | VTracer/StarVector 端点 | 未配置时使用本地 fallback |
+| LOCAL_AI_ENABLED | ❌ | 本地 AI 工具开关 | 开发环境默认 true |
+| IOPAINT_BASE_URL | ❌ | IOPaint 服务地址 | 默认 http://127.0.0.1:8080 |
+| IMAGE_MAX_SIZE_MB | ❌ | 上传大小限制 | 默认 20MB |
+| IMAGE_MAX_EDGE | ❌ | 图片最大边长 | 默认 2048 |
+| UPSCAYL_MODELS_DIR | ❌ | 放大模型目录 | 默认 ./upscayl-models |
 
-| 功能 | 入口 | 路由 | 前端组件/逻辑 | 后端接口 | 数据表/状态 | 外部依赖 | 当前状态 | 风险 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 登录/退出/会话 | 首页登录页、用户菜单 | / | src/app/page.tsx; src/lib/server-auth.ts | /api/auth/login, /logout, /me | wujie_users | PostgreSQL/Cookie | 已定位，P0真实测试待执行 | P0 |
-| 自助注册 | 未发现用户入口 | 未发现独立页面 | 未发现注册组件 | 未发现 `/api/auth/register` | 管理员创建用户 | PostgreSQL | 未实现或未暴露，需产品确认 | P1 |
-| Token刷新/访问控制 | 全局路由/API中间层 | / | src/lib/server-auth.ts; src/lib/api-auth.ts | 受保护API | wujie_users | Cookie/服务端认证 | 签名会话续期逻辑待真实验证；未发现独立refresh端点 | P0 |
-| 项目仪表盘/项目管理 | 登录后首页 | / | src/components/dashboard-view.tsx | /api/user-data/sync, /api/artifacts | wujie_user_data | PostgreSQL | 已定位 | P1 |
-| 无限画布 | 首页“无限画布”/项目入口 | / | src/components/infinite-canvas.tsx | /api/user-data/sync | wujie_user_data | 浏览器/对象存储 | 已定位，P0真实测试待执行 | P0 |
-| 上传/拖入/粘贴图片 | 底部工具栏/画布 | / | src/components/infinite-canvas.tsx | /api/upload, /api/save-image | wujie_user_data | S3或本地文件 | 已定位，P0真实测试待执行 | P0 |
-| 参考图/多参考图 | 生成器“新增参考图” | / | src/components/generation-panel.tsx | /api/upload, /api/generate | 生成器状态 | 对象存储/模型提供商 | 已定位，P1待测 | P1 |
-| 画布选择/多选/移动/缩放/删除/复制 | 画布、选择工具、右键菜单 | / | src/components/infinite-canvas.tsx | /api/user-data/sync | wujie_user_data | 浏览器交互 | 已定位，P0真实测试待执行 | P0 |
-| 画布平移/重置/图层/版本历史/连线 | 底部工具栏 | / | src/components/infinite-canvas.tsx; src/components/layer-panel.tsx | /api/user-data/sync | wujie_user_data | 浏览器交互 | 已定位，P1待测 | P1 |
-| 图像生成 | 左侧生成器 | / | src/components/generation-panel.tsx | /api/generate, /api/poll-task, /api/task-events | 任务注册表/用户数据 | 模型提供商/SSE | 已定位，真实付费生成待授权 | P0 |
-| 模型/尺寸/比例/质量/数量 | 图像生成高级设置 | / | src/components/generation-panel.tsx | /api/models, /api/generate | wujie_api_providers | 提供商模型配置 | 已定位，P0真实测试待执行 | P0 |
-| 任务状态/取消/恢复 | 生成卡片/画布节点 | / | src/lib/task-events-client.ts | /api/task-events, /api/poll-task, /api/cancel-task, /api/tasks/recover | 云端任务数据 | SSE/轮询 | 已定位，P0真实测试待执行 | P0 |
-| 保存/刷新恢复/下载 | 项目工具栏/图片工具栏 | / | src/app/page.tsx; src/lib/db-storage.ts | /api/user-data/sync, /api/export-project | wujie_user_data | PostgreSQL/浏览器下载 | 已定位，P0真实测试待执行 | P0 |
-| AI聊天/提示词大师/Skills/Agent | 智能对话页及画布聊天 | /simple-chat, / | src/components/chat-panel.tsx; src/app/simple-chat/page.tsx | /api/chat, /api/optimize-prompt, /api/agent-edit | 用户数据/审计 | LLM提供商 | 已定位，P1待测 | P1 |
-| 节点工作流 | 底部工具栏“节点编辑器” | / | src/components/node-editor.tsx | /api/workflow/* | wujie_user_data | 模型提供商/SSE | 已定位，P1待测 | P1 |
-| 节点选择/删除/连线/保存恢复 | 节点编辑器 | / | src/components/node-editor.tsx | /api/workflow/save, /api/workflow/execute | wujie_user_data | 浏览器/SSE | 已定位，P1待测 | P1 |
-| 图转3D/多角度/六面体 | 图片浮动工具栏/底部工具栏 | / | src/components/model-viewer-3d.tsx; src/components/*3d*.tsx | /api/image-to-3d/*, /api/poll-3d-task | 任务数据 | 3D供应商 | 已定位，P1待测 | P1 |
-| 语言修图/擦除/蒙版/扩图/放大/去背景 | 图片浮动工具栏 | / | src/components/image-editor.tsx; src/components/image-editor/* | /api/edit, /api/image-edit, /api/image/* | 任务数据 | 模型提供商/本地AI | 已定位，P1待测 | P1 |
-| 人物精修大师 | 图片右键/浮动工具栏/底部工具栏 | / | src/components/human-ai-engine-panel.tsx | /api/human/* | 任务数据 | 人物精修引擎 | 已定位，P1待测 | P1 |
-| 品牌电商/品牌工厂/包装Pro/展陈Pro | 底部工具栏 | / | src/components/brand-*.tsx; src/components/display3d-panel.tsx | /api/brand-*, /api/display-3d/* | 品牌资产数据 | 模型提供商 | 已定位，P1待测 | P1 |
-| 字境大师/Logo Pro/AI PSD/表情助手/ChatCanvas | 底部工具栏 | / | src/components/font-design-panel.tsx; src/components/*panel.tsx | /api/font-design/*, /api/logo-skill, /api/ai-psd/* | 用户数据 | 模型提供商 | 已定位，P1待测 | P1 |
-| 视频生成/编辑/下载 | 视频生成器 | / | src/components/video-generation-panel.tsx | /api/video/* | 任务数据 | 视频提供商 | 已定位，P1待测 | P1 |
-| 管理员/API提供商/积分/支付/审计 | 管理员系统 | / | src/components/admin-system.tsx | /api/admin/*, /api/credits/* | provider/credits/audit表 | PostgreSQL/支付网关 | 已定位，P1及安全待测 | P1 |
-| AI引擎设置 | 画布底部“AI引擎设置” | / | src/components/ai-engine-settings.tsx | /api/admin/apis, /api/models | wujie_api_providers | 模型提供商 | 已定位，P1待测 | P1 |
-| 项目导出/文件下载 | 图片工具栏、项目菜单 | / | src/lib/psd-export.ts; src/lib/svg-export.ts | /api/export-project, /api/export/* | 用户数据/对象存储 | 浏览器下载 | 已定位，P0下载待测 | P0 |
+## 三、数据库表清单
 
-## API路由清单（164项）
+| 表名 | 用途 | 关键字段 |
+|------|------|---------|
+| wujie_users | 用户账号 | id, name, password_hash, role, status, api_permissions, email |
+| wujie_api_providers | API 提供商配置 | id, name, base_url, api_key, model_type, selected_models |
+| wujie_user_data | 用户项目/画布数据 | user_id, data_key, data_value (联合主键) |
+| wujie_system_settings | 系统设置 | key, value |
+| wujie_audit_log | 操作日志 | id, user_id, action, level, error_message, duration_ms, model, resolution_status |
+| cloud_tasks | 云端任务持久化 | task_id, user_id, type, status, progress, result, credits |
 
-| 路由 | 方法 | 源文件 |
-| --- | --- | --- |
-| `/api/activity` | POST | [src/app/api/activity/route.ts](../../src/app/api/activity/route.ts) |
-| `/api/admin/api-balance` | GET, POST | [src/app/api/admin/api-balance/route.ts](../../src/app/api/admin/api-balance/route.ts) |
-| `/api/admin/apis` | GET, POST | [src/app/api/admin/apis/route.ts](../../src/app/api/admin/apis/route.ts) |
-| `/api/admin/audit` | GET, POST | [src/app/api/admin/audit/route.ts](../../src/app/api/admin/audit/route.ts) |
-| `/api/admin/backups` | GET | [src/app/api/admin/backups/route.ts](../../src/app/api/admin/backups/route.ts) |
-| `/api/admin/backups/:id` | DELETE | [src/app/api/admin/backups/[id]/route.ts](../../src/app/api/admin/backups/[id]/route.ts) |
-| `/api/admin/backups/:id/download` | GET | [src/app/api/admin/backups/[id]/download/route.ts](../../src/app/api/admin/backups/[id]/download/route.ts) |
-| `/api/admin/cloud-tasks` | GET | [src/app/api/admin/cloud-tasks/route.ts](../../src/app/api/admin/cloud-tasks/route.ts) |
-| `/api/admin/credits/overview` | GET | [src/app/api/admin/credits/overview/route.ts](../../src/app/api/admin/credits/overview/route.ts) |
-| `/api/admin/credits/pricing` | GET, POST | [src/app/api/admin/credits/pricing/route.ts](../../src/app/api/admin/credits/pricing/route.ts) |
-| `/api/admin/credits/recharge` | POST | [src/app/api/admin/credits/recharge/route.ts](../../src/app/api/admin/credits/recharge/route.ts) |
-| `/api/admin/dashboard-stats` | GET | [src/app/api/admin/dashboard-stats/route.ts](../../src/app/api/admin/dashboard-stats/route.ts) |
-| `/api/admin/desktop-devices` | GET | [src/app/api/admin/desktop-devices/route.ts](../../src/app/api/admin/desktop-devices/route.ts) |
-| `/api/admin/desktop-update` | GET, POST | [src/app/api/admin/desktop-update/route.ts](../../src/app/api/admin/desktop-update/route.ts) |
-| `/api/admin/groups` | GET, POST | [src/app/api/admin/groups/route.ts](../../src/app/api/admin/groups/route.ts) |
-| `/api/admin/local-generation-records` | GET | [src/app/api/admin/local-generation-records/route.ts](../../src/app/api/admin/local-generation-records/route.ts) |
-| `/api/admin/op-log` | GET, POST | [src/app/api/admin/op-log/route.ts](../../src/app/api/admin/op-log/route.ts) |
-| `/api/admin/production-readiness` | GET | [src/app/api/admin/production-readiness/route.ts](../../src/app/api/admin/production-readiness/route.ts) |
-| `/api/admin/resources` | GET, POST | [src/app/api/admin/resources/route.ts](../../src/app/api/admin/resources/route.ts) |
-| `/api/admin/settings` | GET, POST | [src/app/api/admin/settings/route.ts](../../src/app/api/admin/settings/route.ts) |
-| `/api/admin/test-all-providers` | GET | [src/app/api/admin/test-all-providers/route.ts](../../src/app/api/admin/test-all-providers/route.ts) |
-| `/api/admin/user-folder` | POST | [src/app/api/admin/user-folder/route.ts](../../src/app/api/admin/user-folder/route.ts) |
-| `/api/admin/user-images` | GET | [src/app/api/admin/user-images/route.ts](../../src/app/api/admin/user-images/route.ts) |
-| `/api/admin/users` | GET, POST | [src/app/api/admin/users/route.ts](../../src/app/api/admin/users/route.ts) |
-| `/api/agent-edit` | GET, POST | [src/app/api/agent-edit/route.ts](../../src/app/api/agent-edit/route.ts) |
-| `/api/ai-psd/create` | POST | [src/app/api/ai-psd/create/route.ts](../../src/app/api/ai-psd/create/route.ts) |
-| `/api/ai-psd/result` | GET | [src/app/api/ai-psd/result/route.ts](../../src/app/api/ai-psd/result/route.ts) |
-| `/api/ai-psd/status` | GET | [src/app/api/ai-psd/status/route.ts](../../src/app/api/ai-psd/status/route.ts) |
-| `/api/analyze` | POST | [src/app/api/analyze/route.ts](../../src/app/api/analyze/route.ts) |
-| `/api/analyze-psd` | POST | [src/app/api/analyze-psd/route.ts](../../src/app/api/analyze-psd/route.ts) |
-| `/api/announcement` | GET | [src/app/api/announcement/route.ts](../../src/app/api/announcement/route.ts) |
-| `/api/artifacts` | GET, POST, DELETE | [src/app/api/artifacts/route.ts](../../src/app/api/artifacts/route.ts) |
-| `/api/audio/generate` | POST | [src/app/api/audio/generate/route.ts](../../src/app/api/audio/generate/route.ts) |
-| `/api/auth/login` | POST | [src/app/api/auth/login/route.ts](../../src/app/api/auth/login/route.ts) |
-| `/api/auth/logout` | POST | [src/app/api/auth/logout/route.ts](../../src/app/api/auth/logout/route.ts) |
-| `/api/auth/me` | GET | [src/app/api/auth/me/route.ts](../../src/app/api/auth/me/route.ts) |
-| `/api/brand-assets` | GET, POST | [src/app/api/brand-assets/route.ts](../../src/app/api/brand-assets/route.ts) |
-| `/api/brand-ecommerce` | POST | [src/app/api/brand-ecommerce/route.ts](../../src/app/api/brand-ecommerce/route.ts) |
-| `/api/brand-factory` | GET, POST | [src/app/api/brand-factory/route.ts](../../src/app/api/brand-factory/route.ts) |
-| `/api/brand-kit` | GET, POST | [src/app/api/brand-kit/route.ts](../../src/app/api/brand-kit/route.ts) |
-| `/api/brand-packaging/generate` | POST | [src/app/api/brand-packaging/generate/route.ts](../../src/app/api/brand-packaging/generate/route.ts) |
-| `/api/brand-packaging/tasks` | GET | [src/app/api/brand-packaging/tasks/route.ts](../../src/app/api/brand-packaging/tasks/route.ts) |
-| `/api/cache-image` | POST | [src/app/api/cache-image/route.ts](../../src/app/api/cache-image/route.ts) |
-| `/api/cancel-task` | POST | [src/app/api/cancel-task/route.ts](../../src/app/api/cancel-task/route.ts) |
-| `/api/chat` | POST | [src/app/api/chat/route.ts](../../src/app/api/chat/route.ts) |
-| `/api/chat-tasks` | GET | [src/app/api/chat-tasks/route.ts](../../src/app/api/chat-tasks/route.ts) |
-| `/api/connector/auth/login` | POST | [src/app/api/connector/auth/login/route.ts](../../src/app/api/connector/auth/login/route.ts) |
-| `/api/connector/auth/me` | GET | [src/app/api/connector/auth/me/route.ts](../../src/app/api/connector/auth/me/route.ts) |
-| `/api/creative/health` | GET | [src/app/api/creative/health/route.ts](../../src/app/api/creative/health/route.ts) |
-| `/api/creative/illustrator` | POST | [src/app/api/creative/illustrator/route.ts](../../src/app/api/creative/illustrator/route.ts) |
-| `/api/creative/photoshop` | POST | [src/app/api/creative/photoshop/route.ts](../../src/app/api/creative/photoshop/route.ts) |
-| `/api/creative/templates` | GET | [src/app/api/creative/templates/route.ts](../../src/app/api/creative/templates/route.ts) |
-| `/api/credits` | GET, POST | [src/app/api/credits/route.ts](../../src/app/api/credits/route.ts) |
-| `/api/credits/pay-redirect` | GET | [src/app/api/credits/pay-redirect/route.ts](../../src/app/api/credits/pay-redirect/route.ts) |
-| `/api/credits/payment-config` | GET, POST | [src/app/api/credits/payment-config/route.ts](../../src/app/api/credits/payment-config/route.ts) |
-| `/api/credits/payment-notify` | GET, POST | [src/app/api/credits/payment-notify/route.ts](../../src/app/api/credits/payment-notify/route.ts) |
-| `/api/credits/payment-qr` | GET | [src/app/api/credits/payment-qr/route.ts](../../src/app/api/credits/payment-qr/route.ts) |
-| `/api/credits/payment-status` | GET | [src/app/api/credits/payment-status/route.ts](../../src/app/api/credits/payment-status/route.ts) |
-| `/api/dcc/health` | GET | [src/app/api/dcc/health/route.ts](../../src/app/api/dcc/health/route.ts) |
-| `/api/dcc/preflight` | GET | [src/app/api/dcc/preflight/route.ts](../../src/app/api/dcc/preflight/route.ts) |
-| `/api/dcc/templates` | GET | [src/app/api/dcc/templates/route.ts](../../src/app/api/dcc/templates/route.ts) |
-| `/api/design/layer-split` | POST | [src/app/api/design/layer-split/route.ts](../../src/app/api/design/layer-split/route.ts) |
-| `/api/design/vectorize` | POST | [src/app/api/design/vectorize/route.ts](../../src/app/api/design/vectorize/route.ts) |
-| `/api/desktop/backup/download/:id` | GET | [src/app/api/desktop/backup/download/[id]/route.ts](../../src/app/api/desktop/backup/download/[id]/route.ts) |
-| `/api/desktop/backup/list` | GET | [src/app/api/desktop/backup/list/route.ts](../../src/app/api/desktop/backup/list/route.ts) |
-| `/api/desktop/backup/upload` | POST | [src/app/api/desktop/backup/upload/route.ts](../../src/app/api/desktop/backup/upload/route.ts) |
-| `/api/desktop/config` | GET | [src/app/api/desktop/config/route.ts](../../src/app/api/desktop/config/route.ts) |
-| `/api/desktop/device/heartbeat` | POST | [src/app/api/desktop/device/heartbeat/route.ts](../../src/app/api/desktop/device/heartbeat/route.ts) |
-| `/api/desktop/generation-records` | POST | [src/app/api/desktop/generation-records/route.ts](../../src/app/api/desktop/generation-records/route.ts) |
-| `/api/desktop/login` | POST | [src/app/api/desktop/login/route.ts](../../src/app/api/desktop/login/route.ts) |
-| `/api/desktop/resources` | GET | [src/app/api/desktop/resources/route.ts](../../src/app/api/desktop/resources/route.ts) |
-| `/api/desktop/update` | GET, POST | [src/app/api/desktop/update/route.ts](../../src/app/api/desktop/update/route.ts) |
-| `/api/desktop/update/download/:id` | dynamic | [src/app/api/desktop/update/download/[id]/route.ts](../../src/app/api/desktop/update/download/[id]/route.ts) |
-| `/api/diag/storage` | GET | [src/app/api/diag/storage/route.ts](../../src/app/api/diag/storage/route.ts) |
-| `/api/diagnostics/export` | GET | [src/app/api/diagnostics/export/route.ts](../../src/app/api/diagnostics/export/route.ts) |
-| `/api/display-3d/decompose` | POST | [src/app/api/display-3d/decompose/route.ts](../../src/app/api/display-3d/decompose/route.ts) |
-| `/api/display-3d/generate` | POST | [src/app/api/display-3d/generate/route.ts](../../src/app/api/display-3d/generate/route.ts) |
-| `/api/ecom-templates` | GET, POST | [src/app/api/ecom-templates/route.ts](../../src/app/api/ecom-templates/route.ts) |
-| `/api/edit` | GET, POST | [src/app/api/edit/route.ts](../../src/app/api/edit/route.ts) |
-| `/api/excel/generate` | POST | [src/app/api/excel/generate/route.ts](../../src/app/api/excel/generate/route.ts) |
-| `/api/export-project` | GET, POST | [src/app/api/export-project/route.ts](../../src/app/api/export-project/route.ts) |
-| `/api/export/annotation-image` | POST | [src/app/api/export/annotation-image/route.ts](../../src/app/api/export/annotation-image/route.ts) |
-| `/api/export/bom` | POST | [src/app/api/export/bom/route.ts](../../src/app/api/export/bom/route.ts) |
-| `/api/export/pdf` | POST | [src/app/api/export/pdf/route.ts](../../src/app/api/export/pdf/route.ts) |
-| `/api/export/to-canvas` | POST | [src/app/api/export/to-canvas/route.ts](../../src/app/api/export/to-canvas/route.ts) |
-| `/api/favorites` | GET, POST, DELETE | [src/app/api/favorites/route.ts](../../src/app/api/favorites/route.ts) |
-| `/api/flowchart/generate` | POST | [src/app/api/flowchart/generate/route.ts](../../src/app/api/flowchart/generate/route.ts) |
-| `/api/font-design/gallery` | GET | [src/app/api/font-design/gallery/route.ts](../../src/app/api/font-design/gallery/route.ts) |
-| `/api/font-design/gallery-image` | GET | [src/app/api/font-design/gallery-image/route.ts](../../src/app/api/font-design/gallery-image/route.ts) |
-| `/api/font-design/generate-image` | POST | [src/app/api/font-design/generate-image/route.ts](../../src/app/api/font-design/generate-image/route.ts) |
-| `/api/font-design/plan` | GET, POST | [src/app/api/font-design/plan/route.ts](../../src/app/api/font-design/plan/route.ts) |
-| `/api/font-design/prompt` | POST | [src/app/api/font-design/prompt/route.ts](../../src/app/api/font-design/prompt/route.ts) |
-| `/api/generate` | POST | [src/app/api/generate/route.ts](../../src/app/api/generate/route.ts) |
-| `/api/help-image` | GET | [src/app/api/help-image/route.ts](../../src/app/api/help-image/route.ts) |
-| `/api/human/analyze` | POST | [src/app/api/human/analyze/route.ts](../../src/app/api/human/analyze/route.ts) |
-| `/api/human/repair` | POST | [src/app/api/human/repair/route.ts](../../src/app/api/human/repair/route.ts) |
-| `/api/human/select` | POST | [src/app/api/human/select/route.ts](../../src/app/api/human/select/route.ts) |
-| `/api/human/task/:id` | GET | [src/app/api/human/task/[id]/route.ts](../../src/app/api/human/task/[id]/route.ts) |
-| `/api/image-edit` | POST | [src/app/api/image-edit/route.ts](../../src/app/api/image-edit/route.ts) |
-| `/api/image-to-3d` | POST | [src/app/api/image-to-3d/route.ts](../../src/app/api/image-to-3d/route.ts) |
-| `/api/image-to-3d/auto-multi-view` | GET, POST | [src/app/api/image-to-3d/auto-multi-view/route.ts](../../src/app/api/image-to-3d/auto-multi-view/route.ts) |
-| `/api/image-to-3d/meshy-stream` | GET | [src/app/api/image-to-3d/meshy-stream/route.ts](../../src/app/api/image-to-3d/meshy-stream/route.ts) |
-| `/api/image-to-3d/poll-post-process` | POST | [src/app/api/image-to-3d/poll-post-process/route.ts](../../src/app/api/image-to-3d/poll-post-process/route.ts) |
-| `/api/image-to-3d/post-process` | GET, POST | [src/app/api/image-to-3d/post-process/route.ts](../../src/app/api/image-to-3d/post-process/route.ts) |
-| `/api/image/color-adjust` | POST | [src/app/api/image/color-adjust/route.ts](../../src/app/api/image/color-adjust/route.ts) |
-| `/api/image/health` | GET | [src/app/api/image/health/route.ts](../../src/app/api/image/health/route.ts) |
-| `/api/image/start-services` | POST | [src/app/api/image/start-services/route.ts](../../src/app/api/image/start-services/route.ts) |
-| `/api/image/upscale` | POST | [src/app/api/image/upscale/route.ts](../../src/app/api/image/upscale/route.ts) |
-| `/api/image/upscale-pro` | POST | [src/app/api/image/upscale-pro/route.ts](../../src/app/api/image/upscale-pro/route.ts) |
-| `/api/knowledge/extract-text` | POST | [src/app/api/knowledge/extract-text/route.ts](../../src/app/api/knowledge/extract-text/route.ts) |
-| `/api/layered-decompose` | GET, POST | [src/app/api/layered-decompose/route.ts](../../src/app/api/layered-decompose/route.ts) |
-| `/api/logo-skill` | GET, POST | [src/app/api/logo-skill/route.ts](../../src/app/api/logo-skill/route.ts) |
-| `/api/mindmap/generate` | POST | [src/app/api/mindmap/generate/route.ts](../../src/app/api/mindmap/generate/route.ts) |
-| `/api/models` | GET | [src/app/api/models/route.ts](../../src/app/api/models/route.ts) |
-| `/api/omp-agent` | GET, POST | [src/app/api/omp-agent/route.ts](../../src/app/api/omp-agent/route.ts) |
-| `/api/omp-resources` | GET | [src/app/api/omp-resources/route.ts](../../src/app/api/omp-resources/route.ts) |
-| `/api/optimize-prompt` | POST | [src/app/api/optimize-prompt/route.ts](../../src/app/api/optimize-prompt/route.ts) |
-| `/api/pdf/generate` | POST | [src/app/api/pdf/generate/route.ts](../../src/app/api/pdf/generate/route.ts) |
-| `/api/poll-3d-task` | POST | [src/app/api/poll-3d-task/route.ts](../../src/app/api/poll-3d-task/route.ts) |
-| `/api/poll-task` | POST | [src/app/api/poll-task/route.ts](../../src/app/api/poll-task/route.ts) |
-| `/api/ppt/generate` | POST | [src/app/api/ppt/generate/route.ts](../../src/app/api/ppt/generate/route.ts) |
-| `/api/ppt/template/upload` | POST | [src/app/api/ppt/template/upload/route.ts](../../src/app/api/ppt/template/upload/route.ts) |
-| `/api/proxy-3d-model` | GET | [src/app/api/proxy-3d-model/route.ts](../../src/app/api/proxy-3d-model/route.ts) |
-| `/api/recharge/:orderId` | GET, POST | [src/app/api/recharge/[orderId]/route.ts](../../src/app/api/recharge/[orderId]/route.ts) |
-| `/api/recover-images` | GET, POST | [src/app/api/recover-images/route.ts](../../src/app/api/recover-images/route.ts) |
-| `/api/refine-engine` | GET, POST | [src/app/api/refine-engine/route.ts](../../src/app/api/refine-engine/route.ts) |
-| `/api/save-image` | POST | [src/app/api/save-image/route.ts](../../src/app/api/save-image/route.ts) |
-| `/api/scene-studio` | GET, POST | [src/app/api/scene-studio/route.ts](../../src/app/api/scene-studio/route.ts) |
-| `/api/scene-studio/generate` | GET, POST | [src/app/api/scene-studio/generate/route.ts](../../src/app/api/scene-studio/generate/route.ts) |
-| `/api/segment-elements` | POST | [src/app/api/segment-elements/route.ts](../../src/app/api/segment-elements/route.ts) |
-| `/api/serve-upload/:path*` | GET | [src/app/api/serve-upload/[...path]/route.ts](../../src/app/api/serve-upload/[...path]/route.ts) |
-| `/api/session` | dynamic | [src/app/api/session/route.ts](../../src/app/api/session/route.ts) |
-| `/api/simple-chat/chat` | POST | [src/app/api/simple-chat/chat/route.ts](../../src/app/api/simple-chat/chat/route.ts) |
-| `/api/simple-chat/deep-research` | POST | [src/app/api/simple-chat/deep-research/route.ts](../../src/app/api/simple-chat/deep-research/route.ts) |
-| `/api/simple-chat/upload-file` | POST | [src/app/api/simple-chat/upload-file/route.ts](../../src/app/api/simple-chat/upload-file/route.ts) |
-| `/api/story-assets/plan` | POST | [src/app/api/story-assets/plan/route.ts](../../src/app/api/story-assets/plan/route.ts) |
-| `/api/svg-convert` | POST | [src/app/api/svg-convert/route.ts](../../src/app/api/svg-convert/route.ts) |
-| `/api/svg-trace` | POST | [src/app/api/svg-trace/route.ts](../../src/app/api/svg-trace/route.ts) |
-| `/api/task-events` | GET, POST | [src/app/api/task-events/route.ts](../../src/app/api/task-events/route.ts) |
-| `/api/tasks/recover` | GET | [src/app/api/tasks/recover/route.ts](../../src/app/api/tasks/recover/route.ts) |
-| `/api/test-provider-connection` | POST | [src/app/api/test-provider-connection/route.ts](../../src/app/api/test-provider-connection/route.ts) |
-| `/api/universal-discover` | POST | [src/app/api/universal-discover/route.ts](../../src/app/api/universal-discover/route.ts) |
-| `/api/universal-generate` | POST | [src/app/api/universal-generate/route.ts](../../src/app/api/universal-generate/route.ts) |
-| `/api/upload` | POST | [src/app/api/upload/route.ts](../../src/app/api/upload/route.ts) |
-| `/api/upscayl` | GET, POST | [src/app/api/upscayl/route.ts](../../src/app/api/upscayl/route.ts) |
-| `/api/user-data/record` | POST | [src/app/api/user-data/record/route.ts](../../src/app/api/user-data/record/route.ts) |
-| `/api/user-data/sync` | GET, POST | [src/app/api/user-data/sync/route.ts](../../src/app/api/user-data/sync/route.ts) |
-| `/api/verify-protocol` | POST | [src/app/api/verify-protocol/route.ts](../../src/app/api/verify-protocol/route.ts) |
-| `/api/video/director/diagnose` | POST | [src/app/api/video/director/diagnose/route.ts](../../src/app/api/video/director/diagnose/route.ts) |
-| `/api/video/director/prompt` | POST | [src/app/api/video/director/prompt/route.ts](../../src/app/api/video/director/prompt/route.ts) |
-| `/api/video/director/shot-plan` | POST | [src/app/api/video/director/shot-plan/route.ts](../../src/app/api/video/director/shot-plan/route.ts) |
-| `/api/video/download` | GET | [src/app/api/video/download/route.ts](../../src/app/api/video/download/route.ts) |
-| `/api/video/extend` | GET, POST | [src/app/api/video/extend/route.ts](../../src/app/api/video/extend/route.ts) |
-| `/api/video/extract-frame` | POST | [src/app/api/video/extract-frame/route.ts](../../src/app/api/video/extract-frame/route.ts) |
-| `/api/video/extract-frames` | POST | [src/app/api/video/extract-frames/route.ts](../../src/app/api/video/extract-frames/route.ts) |
-| `/api/video/generate` | GET, POST | [src/app/api/video/generate/route.ts](../../src/app/api/video/generate/route.ts) |
-| `/api/video/tools` | POST | [src/app/api/video/tools/route.ts](../../src/app/api/video/tools/route.ts) |
-| `/api/vision-prompt` | POST | [src/app/api/vision-prompt/route.ts](../../src/app/api/vision-prompt/route.ts) |
-| `/api/wasm/vtracer` | GET | [src/app/api/wasm/vtracer/route.ts](../../src/app/api/wasm/vtracer/route.ts) |
-| `/api/word/generate` | POST | [src/app/api/word/generate/route.ts](../../src/app/api/word/generate/route.ts) |
-| `/api/workflow/ai-build` | POST | [src/app/api/workflow/ai-build/route.ts](../../src/app/api/workflow/ai-build/route.ts) |
-| `/api/workflow/execute` | POST | [src/app/api/workflow/execute/route.ts](../../src/app/api/workflow/execute/route.ts) |
-| `/api/workflow/models` | GET | [src/app/api/workflow/models/route.ts](../../src/app/api/workflow/models/route.ts) |
-| `/api/workflow/save` | GET, POST | [src/app/api/workflow/save/route.ts](../../src/app/api/workflow/save/route.ts) |
+## 四、功能矩阵
 
-## 自动化覆盖现状
+### 4.1 认证与用户
 
-已有 Vitest 测试位于 `src/__tests__`。本次新增的真实浏览器P0套件位于 `tests/e2e/p0-core.spec.ts`，并配置 Chromium、Firefox、WebKit 和移动 Chromium。当前文件仅描述覆盖设计，测试通过与否以 `docs/testing/REGRESSION_REPORT.md` 和 `test-results/` 中的真实执行证据为准。
+| # | 功能 | 入口 | 路由/组件 | 后端接口 | 数据表 | 自动化测试 | 风险等级 |
+|---|------|------|----------|---------|--------|-----------|---------|
+| 1 | 用户登录 | 登录页 | page.tsx → LoginDialog | POST /api/auth/login | wujie_users | ✅ E2E+API | 低 |
+| 2 | 用户退出 | 侧边栏 | page.tsx → UserManager | POST /api/auth/logout | — | ✅ E2E+API | 低 |
+| 3 | 会话检查 | 自动 | page.tsx → useEffect | GET /api/session | wujie_users | ✅ E2E+API | 低 |
+| 4 | 当前用户 | 自动 | page.tsx → UserManager | GET /api/auth/me | wujie_users | ✅ API | 低 |
+| 5 | 用户管理(管理员) | 管理员面板 | admin-tabs.tsx | GET/POST /api/admin/users | wujie_users | ✅ API(403) | 低 |
+| 6 | 权限控制 | 全局中间件 | server-auth.ts | requireApiAuthOrReject | wujie_users | ✅ API(401) | 低 |
+
+### 4.2 无限画布
+
+| # | 功能 | 入口 | 组件 | 后端接口 | 自动化测试 | 风险等级 |
+|---|------|------|------|---------|-----------|---------|
+| 7 | 画布渲染 | 首页 | infinite-canvas.tsx | — | ✅ E2E | 低 |
+| 8 | 图片选择(单选/多选/框选) | 画布 | infinite-canvas.tsx | — | ✅ E2E | 低 |
+| 9 | 图片拖拽移动 | 画布 | infinite-canvas.tsx | — | ✅ E2E | 低 |
+| 10 | 图片缩放(四角等比) | 画布 | infinite-canvas.tsx | — | ⚠️ 未验证 | 中 |
+| 11 | 画布平移(空格/长按) | 画布 | infinite-canvas.tsx | — | ✅ E2E | 低 |
+| 12 | 画布缩放(滚轮) | 画布 | infinite-canvas.tsx | — | ✅ E2E | 低 |
+| 13 | 删除选中图片 | 画布 | infinite-canvas.tsx (Delete键) | — | ✅ E2E | 低 |
+| 14 | 撤销/重做(Ctrl+Z) | 画布 | infinite-canvas.tsx | — | ⚠️ 未验证 | 中 |
+| 15 | 右键菜单 | 画布 | infinite-canvas.tsx | — | ✅ E2E | 低 |
+| 16 | 图层面板 | 画布 | layer-panel.tsx | — | ⚠️ 未验证 | 中 |
+| 17 | 节点连线 | 画布 | infinite-canvas.tsx | — | ⚠️ 未验证 | 中 |
+| 18 | 重置视图 | 画布工具栏 | infinite-canvas.tsx | — | ⚠️ 未验证 | 低 |
+| 19 | 版本历史 | 画布 | version-history-panel.tsx | — | ⚠️ 未验证 | 中 |
+| 20 | 100节点压力 | 画布 | infinite-canvas.tsx | — | ❌ 未测试 | 高 |
+
+### 4.3 图片上传与管理
+
+| # | 功能 | 入口 | 组件 | 后端接口 | 自动化测试 | 风险等级 |
+|---|------|------|------|---------|-----------|---------|
+| 21 | 点击上传 | 工具栏 | infinite-canvas.tsx | POST /api/upload | ⚠️ 未验证 | 中 |
+| 22 | 拖入上传 | 画布 | infinite-canvas.tsx (drag-drop) | POST /api/upload | ⚠️ 未验证 | 中 |
+| 23 | 粘贴上传 | 画布 | infinite-canvas.tsx (Ctrl+V) | POST /api/upload | ⚠️ 未验证 | 中 |
+| 24 | 图片压缩 | 前端 | image-compress.ts | — | ⚠️ 未验证 | 低 |
+| 25 | 保存图片到服务器 | 自动 | — | POST /api/save-image | ✅ API | 低 |
+| 26 | 提供上传文件 | 自动 | — | GET /api/serve-upload/[...path] | ✅ API(路径穿越) | 低 |
+| 27 | 项目保存 | 自动(2s防抖) | page.tsx | POST /api/user-data/sync | ✅ API | 低 |
+| 28 | 项目恢复 | 自动 | page.tsx | GET /api/user-data/sync | ✅ API | 低 |
+
+### 4.4 图像生成
+
+| # | 功能 | 入口 | 组件 | 后端接口 | 自动化测试 | 风险等级 |
+|---|------|------|------|---------|-----------|---------|
+| 29 | 文生图 | 生成面板 | generation-panel.tsx | POST /api/generate | ✅ E2E+API | 低 |
+| 30 | 图生图 | 画布工具栏 | infinite-canvas.tsx (img2img) | POST /api/generate | ⚠️ 未验证 | 中 |
+| 31 | 模型选择 | 生成面板 | generation-panel.tsx | GET /api/models | ✅ E2E+API | 低 |
+| 32 | 比例选择 | 生成面板 | generation-panel.tsx | — | ✅ E2E | 低 |
+| 33 | 数量选择 | 生成面板 | generation-panel.tsx | — | ✅ E2E | 低 |
+| 34 | 参考图上传 | 生成面板 | generation-panel.tsx | POST /api/upload | ⚠️ 未验证 | 中 |
+| 35 | 任务轮询 | 前端自动 | infinite-canvas.tsx | POST /api/poll-task | ✅ API | 低 |
+| 36 | SSE任务推送 | 前端自动 | task-events-client.ts | GET /api/task-events | ⚠️ 未验证 | 中 |
+| 37 | 任务取消 | 画布processing框 | infinite-canvas.tsx | POST /api/cancel-task | ✅ API | 低 |
+| 38 | 提示词优化 | 聊天面板 | chat-panel.tsx | POST /api/optimize-prompt | ⚠️ 未验证 | 低 |
+| 39 | 图片识词 | 画布 | infinite-canvas.tsx | POST /api/vision-prompt | ⚠️ 未验证 | 低 |
+
+### 4.5 AI 聊天
+
+| # | 功能 | 入口 | 组件 | 后端接口 | 自动化测试 | 风险等级 |
+|---|------|------|------|---------|-----------|---------|
+| 40 | AI 对话 | 聊天面板 | chat-panel.tsx | POST /api/chat | ✅ E2E | 低 |
+| 41 | 图像理解 | 聊天面板 | chat-panel.tsx (多模态) | POST /api/chat | ⚠️ 未验证 | 中 |
+| 42 | Skills 系统 | 聊天面板 | chat-panel.tsx | — | ⚠️ 未验证 | 低 |
+| 43 | @引用系统 | 聊天面板 | chat-panel.tsx (@菜单) | — | ⚠️ 未验证 | 低 |
+| 44 | Tab模式 | 聊天面板 | chat-panel.tsx (选中图片) | — | ⚠️ 未验证 | 低 |
+| 45 | 生成后引导 | 聊天面板 | chat-panel.tsx | — | ⚠️ 未验证 | 低 |
+
+### 4.6 图片编辑工具
+
+| # | 功能 | 入口 | 组件 | 后端接口 | 自动化测试 | 风险等级 |
+|---|------|------|------|---------|-----------|---------|
+| 46 | 语言修图 | 画布右键/工具栏 | image-editor.tsx | POST /api/edit | ⚠️ 未验证 | 中 |
+| 47 | 擦除(涂抹消除) | 画布工具栏 | infinite-canvas.tsx (erase) | POST /api/image-edit | ⚠️ 未验证 | 中 |
+| 48 | 蒙版修图 | 画布工具栏 | infinite-canvas.tsx (mask) | POST /api/image-edit | ⚠️ 未验证 | 中 |
+| 49 | 无损放大 | 画布工具栏 | infinite-canvas.tsx (upscale) | POST /api/image/upscale | ⚠️ 未验证 | 中 |
+| 50 | 无损放大Pro | 画布工具栏 | infinite-canvas.tsx | POST /api/image/upscale-pro | ⚠️ 未验证 | 中 |
+| 51 | 移除背景 | 画布工具栏 | infinite-canvas.tsx | POST /api/image-edit (removebg) | ⚠️ 未验证 | 中 |
+| 52 | 扩展画面 | 画布工具栏 | infinite-canvas.tsx (extend) | POST /api/image-edit | ⚠️ 未验证 | 中 |
+| 53 | 裁切 | 画布工具栏 | infinite-canvas.tsx (crop) | — | ⚠️ 未验证 | 低 |
+| 54 | SVG智能描摹 | 画布工具栏 | infinite-canvas.tsx | POST /api/svg-trace | ⚠️ 未验证 | 中 |
+| 55 | 元素分层 | 画布工具栏 | infinite-canvas.tsx | POST /api/segment-elements | ⚠️ 未验证 | 中 |
+| 56 | Agent编排编辑 | 画布工具栏 | agent-editor.tsx | POST /api/agent-edit | ⚠️ 未验证 | 中 |
+
+### 4.7 视频生成与编辑
+
+| # | 功能 | 入口 | 组件 | 后端接口 | 自动化测试 | 风险等级 |
+|---|------|------|------|---------|-----------|---------|
+| 57 | 文生视频 | 视频面板 | video-generation-panel.tsx | POST /api/video/generate | ⚠️ 未验证 | 高 |
+| 58 | 图生视频 | 视频面板 | video-generation-panel.tsx | POST /api/video/generate | ⚠️ 未验证 | 高 |
+| 59 | 首尾帧视频 | 视频面板 | video-generation-panel.tsx | POST /api/video/generate | ⚠️ 未验证 | 高 |
+| 60 | 多参考图视频 | 视频面板 | video-generation-panel.tsx | POST /api/video/generate | ⚠️ 未验证 | 高 |
+| 61 | 视频延长 | 视频编辑面板 | video-edit-panel.tsx | POST /api/video/extend | ⚠️ 未验证 | 高 |
+| 62 | 视频播放 | 画布 | video-player.tsx | — | ⚠️ 未验证 | 低 |
+| 63 | AI导演增强 | 视频面板 | video-generation-panel.tsx | POST /api/video/director/prompt | ⚠️ 未验证 | 中 |
+| 64 | AI分镜 | 视频面板 | video-generation-panel.tsx | POST /api/video/director/shot-plan | ⚠️ 未验证 | 中 |
+| 65 | 视频抽帧 | 视频面板 | — | POST /api/video/extract-frame | ⚠️ 未验证 | 中 |
+| 66 | 视频编辑(语言) | 视频编辑面板 | video-edit-panel.tsx | POST /api/video/generate (edit) | ⚠️ 未验证 | 高 |
+| 67 | 运动笔刷 | 视频面板 | motion-brush-canvas.tsx | — | ⚠️ 未验证 | 中 |
+
+### 4.8 3D 模型
+
+| # | 功能 | 入口 | 组件 | 后端接口 | 自动化测试 | 风险等级 |
+|---|------|------|------|---------|-----------|---------|
+| 68 | 单图转3D | 画布弹窗 | infinite-canvas.tsx (3D) | POST /api/image-to-3d | ⚠️ 未验证 | 高 |
+| 69 | 多图转3D | 画布弹窗 | infinite-canvas.tsx (3D多图) | POST /api/image-to-3d | ⚠️ 未验证 | 高 |
+| 70 | 文生3D | 画布弹窗 | infinite-canvas.tsx (3D文字) | POST /api/image-to-3d | ⚠️ 未验证 | 高 |
+| 71 | 自动多视角 | 画布弹窗 | infinite-canvas.tsx | POST /api/image-to-3d/auto-multi-view | ⚠️ 未验证 | 高 |
+| 72 | 3D预览器 | 3D结果 | model-viewer-3d.tsx | — | ⚠️ 未验证 | 中 |
+| 73 | 3D后处理 | 3D预览器 | model-viewer-3d.tsx | POST /api/image-to-3d/post-process | ⚠️ 未验证 | 高 |
+| 74 | 3D模型下载 | 3D预览器 | model-viewer-3d.tsx | — | ⚠️ 未验证 | 低 |
+
+### 4.9 业务模块面板
+
+| # | 功能 | 入口 | 组件 | 后端接口 | 自动化测试 | 风险等级 |
+|---|------|------|------|---------|-----------|---------|
+| 75 | 字境大师Pro | 侧边栏 | font-design-panel.tsx | POST /api/font-design/* | ⚠️ 未验证 | 中 |
+| 76 | 品牌电商 | 侧边栏 | brand-ecommerce-panel.tsx | POST /api/brand-ecommerce | ⚠️ 未验证 | 中 |
+| 77 | 品牌工厂 | 侧边栏 | brand-factory-panel.tsx | POST /api/brand-factory | ⚠️ 未验证 | 中 |
+| 78 | 精修引擎 | 侧边栏 | refine-engine-panel.tsx | POST /api/refine-engine | ⚠️ 未验证 | 中 |
+| 79 | 人物精修 | 侧边栏 | human-repair-panel.tsx | POST /api/human/repair | ⚠️ 未验证 | 中 |
+| 80 | Logo Pro | 侧边栏 | logo-skill-panel.tsx | POST /api/logo-skill | ⚠️ 未验证 | 中 |
+| 81 | 3D构图 | 侧边栏 | scene-studio-panel.tsx | POST /api/scene-studio/generate | ⚠️ 未验证 | 中 |
+| 82 | 包装Pro | 侧边栏 | brand-packaging-panel.tsx | POST /api/brand-packaging/generate | ⚠️ 未验证 | 中 |
+| 83 | 展陈Pro | 侧边栏 | display3d-panel.tsx | POST /api/display-3d/generate | ⚠️ 未验证 | 中 |
+| 84 | AI PSD | 侧边栏 | — | POST /api/ai-psd/create | ⚠️ 未验证 | 中 |
+| 85 | 表情助手 | 侧边栏 | sticker-assistant-panel.tsx | POST /api/generate | ⚠️ 未验证 | 中 |
+| 86 | 音频生成 | 侧边栏 | audio-generation-panel.tsx | POST /api/audio/generate | ⚠️ 未验证 | 中 |
+| 87 | ChatCanvas | 聊天面板 | chat-panel.tsx | — | ⚠️ 未验证 | 低 |
+| 88 | 收藏夹 | 侧边栏 | favorites-panel.tsx | GET/POST /api/favorites | ⚠️ 未验证 | 低 |
+| 89 | 工作流节点 | 节点模式 | node-editor.tsx | POST /api/workflow/execute | ⚠️ 未验证 | 高 |
+| 90 | AI自然语言建图 | 节点编辑器 | node-editor.tsx | POST /api/workflow/ai-build | ⚠️ 未验证 | 中 |
+
+### 4.10 下载与导出
+
+| # | 功能 | 入口 | 组件/库 | 后端接口 | 自动化测试 | 风险等级 |
+|---|------|------|--------|---------|-----------|---------|
+| 91 | 下载PNG | 画布右键/工具栏 | infinite-canvas.tsx | — | ⚠️ 未验证 | 低 |
+| 92 | 下载SVG | 画布右键 | infinite-canvas.tsx | POST /api/svg-trace | ⚠️ 未验证 | 低 |
+| 93 | 下载PSD | 画布右键 | infinite-canvas.tsx → psd-export.ts | — | ⚠️ 未验证 | 中 |
+| 94 | 下载3D模型 | 3D预览器 | model-viewer-3d.tsx | — | ⚠️ 未验证 | 低 |
+| 95 | 下载视频 | 视频播放器 | video-player.tsx | — | ⚠️ 未验证 | 低 |
+
+### 4.11 管理员系统
+
+| # | 功能 | 入口 | 组件 | 后端接口 | 自动化测试 | 风险等级 |
+|---|------|------|------|---------|-----------|---------|
+| 96 | API提供商管理 | 管理员面板 | admin-tabs.tsx | GET/POST /api/admin/apis | ✅ API(403) | 低 |
+| 97 | 用户管理 | 管理员面板 | admin-tabs.tsx | GET/POST /api/admin/users | ✅ API(403) | 低 |
+| 98 | 操作日志 | 管理员面板 | admin-tabs.tsx (op-log) | GET/POST /api/admin/op-log | ✅ API(403) | 低 |
+| 99 | 系统设置 | 管理员面板 | admin-tabs.tsx | GET/POST /api/admin/settings | ✅ API(403) | 低 |
+| 100 | API余额分析 | 管理员面板 | admin-tabs.tsx | GET /api/admin/api-balance | ⚠️ 未验证 | 低 |
+| 101 | 协议验证 | 管理员面板 | admin-tabs.tsx | POST /api/verify-protocol | ⚠️ 未验证 | 低 |
+| 102 | 积分管理 | 管理员面板 | admin-tabs.tsx (credits) | GET/POST /api/admin/credits/* | ⚠️ 未验证 | 中 |
+| 103 | 公告管理 | 管理员面板 | admin-tabs.tsx | GET/POST /api/announcement | ⚠️ 未验证 | 低 |
+
+## 五、统计摘要
+
+| 类别 | 功能数 | 已自动化测试 | 未验证 | 风险高 |
+|------|--------|------------|--------|--------|
+| 认证与用户 | 6 | 6 ✅ | 0 | 0 |
+| 无限画布 | 14 | 8 | 6 ⚠️ | 1 |
+| 图片上传 | 8 | 4 | 4 ⚠️ | 0 |
+| 图像生成 | 11 | 6 | 5 ⚠️ | 0 |
+| AI聊天 | 6 | 1 | 5 ⚠️ | 0 |
+| 图片编辑 | 11 | 0 | 11 ⚠️ | 0 |
+| 视频生成 | 11 | 0 | 11 ⚠️ | 5 |
+| 3D模型 | 7 | 0 | 7 ⚠️ | 3 |
+| 业务模块 | 16 | 0 | 16 ⚠️ | 1 |
+| 下载导出 | 5 | 0 | 5 ⚠️ | 0 |
+| 管理员 | 8 | 4 | 4 ⚠️ | 0 |
+| **合计** | **103** | **29 (28%)** | **74 (72%)** | **10** |
+
+> **说明**: "已自动化测试"指有对应的 E2E 或 API 测试用例覆盖。"未验证"指功能存在但尚无自动化测试覆盖，不表示功能不可用。
