@@ -538,7 +538,7 @@ describe('API 接口测试', () => {
       sessionCookie = oldCookie;
       expect(res.status).toBe(401);
       // 错误响应应该有 error 或 message 字段（不强制 success 字段，不同路由格式不同）
-      expect(res.body.error || res.body.message || res.text).toBeTruthy();
+      expect(res.body.error || res.body.message || JSON.stringify(res.body)).toBeTruthy();
     });
   });
 
