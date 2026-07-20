@@ -232,6 +232,12 @@ interface VideoGenerationPanelProps {
   floating?: boolean;
   /** 关闭浮动面板 */
   onClose?: () => void;
+  /** 从快速创作注入的视频提示词 */
+  externalPrompt?: string;
+  /** 外部提示词对应的创作模式 */
+  externalPromptMode?: 'generate' | 'extend';
+  /** 外部提示词写入后通知父组件清空 */
+  onExternalPromptConsumed?: () => void;
 }
 
 type VideoModelOption = {
@@ -333,6 +339,9 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
   serverVideoModels,
   floating = false,
   onClose,
+  externalPrompt,
+  externalPromptMode = 'generate',
+  onExternalPromptConsumed,
 }: VideoGenerationPanelProps, ref) {
   // === 状态 ===
   const [mode, setMode] = useState<'text2video' | 'image2video-first' | 'image2video-ref' | 'video-extend' | 'multi-shot' | 'image2video-firstlast'>('text2video');
@@ -355,6 +364,13 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
   const [panelPosition, setPanelPosition] = useState<{ x: number; y: number } | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const dragStartRef = useRef<{ x: number; y: number; panelX: number; panelY: number } | null>(null);
+
+  useEffect(() => {
+    if (!externalPrompt?.trim()) return;
+    setPrompt(externalPrompt);
+    setMode(externalPromptMode === 'extend' ? 'video-extend' : 'text2video');
+    onExternalPromptConsumed?.();
+  }, [externalPrompt, externalPromptMode, onExternalPromptConsumed]);
 
   // 初始居中定位
   useEffect(() => {

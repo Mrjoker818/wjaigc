@@ -2,10 +2,21 @@ import { dbGetSystemSetting, dbSetSystemSetting } from '@/lib/db-storage';
 
 export const CREDIT_PRICING_CONFIG_KEY = 'credit_pricing_config';
 
+// LLM 模型 Token 计费价格（单位：积分 / 1M tokens）
+export interface TokenCreditPricing {
+  /** 输入（prompt）每 1M tokens 积分 */
+  input: number;
+  /** 输出（completion）每 1M tokens 积分 */
+  output: number;
+}
+
 export interface ModelCreditEntry {
+  /** 基础积分（Token 计费模型作为兜底/预扣价格） */
   credits: number;
   quality?: Record<string, number>;
   resolution?: Record<string, number>;
+  /** Token 计费价格（可选，仅 LLM 模型，按实际 usage 结算） */
+  tokenPricing?: TokenCreditPricing;
 }
 
 export interface CreditPricingConfig {
@@ -50,6 +61,18 @@ function normalizeSingleEntry(model: string, value: unknown): number | ModelCred
         resolution[r.trim()] = n;
       }
       if (Object.keys(resolution).length > 0) entry.resolution = resolution;
+    }
+    if (obj.tokenPricing && typeof obj.tokenPricing === 'object' && !Array.isArray(obj.tokenPricing)) {
+      const tp = obj.tokenPricing as Record<string, unknown>;
+      const inputRate = Number(tp.input);
+      const outputRate = Number(tp.output);
+      if (
+        !Number.isInteger(inputRate) || inputRate <= 0 || inputRate > 10_000_000 ||
+        !Number.isInteger(outputRate) || outputRate <= 0 || outputRate > 10_000_000
+      ) {
+        throw new Error(`Invalid token pricing for model ${model}`);
+      }
+      entry.tokenPricing = { input: inputRate, output: outputRate };
     }
     return entry;
   }
@@ -141,4 +164,27 @@ export function resolveConfiguredCreditCost(
   }
 
   return entry.credits;
+}
+
+/**
+ * 解析模型的 Token 计费价格（积分 / 1M tokens）。
+ * 与 resolveCreditsFromConfig 同样的键优先级：providerId::model > model。
+ * 未配置 tokenPricing 时返回 null（调用方回退到按次计费）。
+ */
+export function resolveTokenPricingFromConfig(
+  config: CreditPricingConfig,
+  model: string,
+  providerId?: string
+): TokenCreditPricing | null {
+  const findEntry = (key: string): TokenCreditPricing | null => {
+    const entry = config.modelCredits[key];
+    if (!entry || typeof entry === 'number') return null;
+    return entry.tokenPricing || null;
+  };
+
+  if (providerId) {
+    const scoped = findEntry(`${providerId}::${model}`);
+    if (scoped) return scoped;
+  }
+  return findEntry(model);
 }

@@ -19,7 +19,8 @@ import {
   IMAGE_MODEL_CREDITS, VIDEO_MODEL_CREDITS, CHAT_MODEL_CREDITS,
   OTHER_OPERATION_CREDITS, CREDITS_TO_CNY,
 } from './credits-constants';
-import { loadCreditPricingConfig, resolveConfiguredCreditCost } from './credit-pricing';
+import { loadCreditPricingConfig, resolveConfiguredCreditCost, resolveTokenPricingFromConfig } from './credit-pricing';
+import type { TokenCreditPricing } from './credit-pricing';
 
 // ========== 查找模型积分消耗 ==========
 
@@ -180,6 +181,94 @@ export async function calculateConfiguredCreditCost(
   const fallback = calculateCreditCost(operation, model, options);
   const configured = resolveConfiguredCreditCost(config, model, options?.quality, options?.resolution, fallback, options?.providerId);
   return configured;
+}
+
+// ========== Token 计费（LLM 按量计费） ==========
+
+/** LLM 单次调用的 Token 用量 */
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
+/**
+ * 按 Token 用量计算积分成本。
+ * 单价单位：积分 / 1M tokens（输入、输出独立计价）。
+ * 结果向上取整，最低 1 积分（balance 为 INTEGER，必须取整）。
+ */
+export function calculateTokenCredits(
+  usage: TokenUsage,
+  pricing: TokenCreditPricing
+): number {
+  const raw =
+    (Math.max(0, usage.inputTokens) * pricing.input +
+      Math.max(0, usage.outputTokens) * pricing.output) /
+    1_000_000;
+  return Math.max(1, Math.ceil(raw));
+}
+
+/**
+ * 解析模型的 Token 计费配置；未配置时返回 null（按次计费兜底）。
+ */
+export async function resolveConfiguredTokenPricing(
+  model: string,
+  providerId?: string
+): Promise<TokenCreditPricing | null> {
+  const config = await loadCreditPricingConfig();
+  return resolveTokenPricingFromConfig(config, model, providerId);
+}
+
+/**
+ * Token 计费结算：请求前已按预估金额 preChargedCredits 预扣，
+ * 请求完成后根据实际 usage 多退少补。
+ * 结算失败不抛出异常（响应已产出，仅记录日志），返回实际成本。
+ */
+export async function settleTokenCharge(
+  userId: string,
+  model: string,
+  providerId: string | undefined,
+  usage: TokenUsage,
+  preChargedCredits: number,
+  description: string
+): Promise<number> {
+  const pricing = await resolveConfiguredTokenPricing(model, providerId);
+  if (!pricing) return preChargedCredits;
+
+  const actualCost = calculateTokenCredits(usage, pricing);
+  const diff = actualCost - preChargedCredits;
+
+  try {
+    if (diff > 0) {
+      // 实际成本高于预扣：补扣差额（余额不足时仅记录，不影响已产出的响应）
+      const result = await consumeCredits(
+        userId,
+        'chat',
+        diff,
+        `${description}（Token补扣 ${usage.inputTokens}+${usage.outputTokens}）`,
+        model,
+        { providerId }
+      );
+      if (!result.success) {
+        console.warn(
+          `[credits] Token settlement top-up failed for user ${userId}: ` +
+          `need +${diff}, balance ${result.balance}`
+        );
+        return preChargedCredits;
+      }
+    } else if (diff < 0) {
+      // 实际成本低于预扣：返还差额
+      await refundCredits(
+        userId,
+        -diff,
+        `${description}（Token返还 ${usage.inputTokens}+${usage.outputTokens}）`
+      );
+    }
+  } catch (error) {
+    console.error('[credits] Token settlement error:', error);
+    return preChargedCredits;
+  }
+
+  return actualCost;
 }
 
 /**

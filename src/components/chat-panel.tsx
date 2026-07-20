@@ -456,6 +456,10 @@ interface ChatPanelProps {
   onChatTabOpenChange?: (open: boolean) => void;
   /** Navigate canvas to a specific image */
   onNavigateToImage?: (imageId: string) => void;
+  /** Prompt injected from quick creation without auto-sending */
+  externalPrompt?: string;
+  /** Called after the injected prompt is consumed */
+  onExternalPromptConsumed?: () => void;
 }
 
 function isImageUrl(url: string): boolean {
@@ -1130,7 +1134,7 @@ function extractPromptForGeneration(content: string): string {
 /* ========== 智能体搭建弹窗 ========== */
 /* AgentBuilderDialog 已提取至 src/components/chat/AgentBuilderDialog.tsx */
 
-export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, canvasImages = [], selectedCanvasImage, onChatModelChange, onSuggestionAction, onGenerateImage, brandDna, onInjectBrandDna, chatInitialImage, onChatInitialImageConsumed, chatTabOpen, onChatTabOpenChange, onNavigateToImage }: ChatPanelProps) {
+export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, canvasImages = [], selectedCanvasImage, onChatModelChange, onSuggestionAction, onGenerateImage, brandDna, onInjectBrandDna, chatInitialImage, onChatInitialImageConsumed, chatTabOpen, onChatTabOpenChange, onNavigateToImage, externalPrompt, onExternalPromptConsumed }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [showFullHistory, setShowFullHistory] = useState(false);
   const visibleMessages = useMemo(() => showFullHistory ? messages : messages.slice(-CHAT_RENDER_WINDOW), [messages, showFullHistory]);
@@ -2809,6 +2813,13 @@ IP角色设计规范：
   const messageListRef = useRef<HTMLDivElement>(null);
   const shouldStickToBottomRef = useRef(true);
   const autoScrollRafRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!externalPrompt?.trim()) return;
+    setInput(externalPrompt);
+    onExternalPromptConsumed?.();
+    window.requestAnimationFrame(() => textareaRef.current?.focus());
+  }, [externalPrompt, onExternalPromptConsumed]);
 
   const handleMessageListScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
     const element = event.currentTarget;

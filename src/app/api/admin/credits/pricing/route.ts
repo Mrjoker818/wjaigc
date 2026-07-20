@@ -55,6 +55,7 @@ export async function GET(request: NextRequest) {
       let credits: number = fallback.credits;
       let quality: Record<string, number> | undefined = refQuality;
       let resolution: Record<string, number> | undefined = refResolution;
+      let tokenPricing: { input: number; output: number } | undefined;
 
       if (configured !== undefined) {
         source = 'custom';
@@ -64,6 +65,7 @@ export async function GET(request: NextRequest) {
           credits = configured.credits;
           if (configured.quality) quality = configured.quality;
           if (configured.resolution) resolution = configured.resolution;
+          if (configured.tokenPricing) tokenPricing = configured.tokenPricing;
         }
       }
 
@@ -78,6 +80,8 @@ export async function GET(request: NextRequest) {
         source,
         quality,
         resolution,
+        // LLM Token 计费（积分/1M tokens）；配置后按实际 usage 结算，credits 作为预估预扣
+        tokenPricing,
       };
     }));
 

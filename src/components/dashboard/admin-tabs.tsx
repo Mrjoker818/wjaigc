@@ -99,7 +99,17 @@ interface ModelCreditCatalogItem {
   source: string;
   quality?: Record<string, number>;
   resolution?: Record<string, number>;
+  /** LLM Token 计费（积分/1M tokens） */
+  tokenPricing?: { input: number; output: number };
 }
+
+/** 积分规则编辑值：数值或带质量/分辨率/Token 计费的结构化条目 */
+type ModelCreditRuleValue = number | {
+  credits: number;
+  quality?: Record<string, number>;
+  resolution?: Record<string, number>;
+  tokenPricing?: { input: number; output: number };
+};
 
 interface SystemSettings {
   defaultImageModel?: string; defaultChatModel?: string; defaultVideoModel?: string;
@@ -280,7 +290,7 @@ export default function AdminTabs(props: AdminTabsProps) {
   const [creditSubTab, setCreditSubTab] = useState('user-credits');
   const [creditSearch, setCreditSearch] = useState('');
   const [creditSort, setCreditSort] = useState('balance');
-  const [modelCreditRules, setModelCreditRules] = useState<Record<string, number | { credits: number; quality?: Record<string, number>; resolution?: Record<string, number> }>>({});
+  const [modelCreditRules, setModelCreditRules] = useState<Record<string, ModelCreditRuleValue>>({});
   const [modelCreditCatalog, setModelCreditCatalog] = useState<ModelCreditCatalogItem[]>([]);
   const [creditModelCategory, setCreditModelCategory] = useState<BillingModelCategoryFilter>('all');
   const [pricingSaving, setPricingSaving] = useState(false);
@@ -345,13 +355,19 @@ export default function AdminTabs(props: AdminTabsProps) {
       }));
       setModelCreditCatalog(catalog);
       // Build rules with providerId::model compound keys
-      const rules: Record<string, number | { credits: number; quality?: Record<string, number>; resolution?: Record<string, number> }> = {};
+      const rules: Record<string, ModelCreditRuleValue> = {};
       for (const item of catalog) {
         const key = `${item.providerId}::${item.model}`;
         const hasQuality = item.quality && Object.keys(item.quality).length > 0;
         const hasResolution = item.resolution && Object.keys(item.resolution).length > 0;
-        if (hasQuality || hasResolution) {
-          rules[key] = { credits: item.credits, ...(hasQuality ? { quality: item.quality } : {}), ...(hasResolution ? { resolution: item.resolution } : {}) };
+        const hasTokenPricing = !!item.tokenPricing;
+        if (hasQuality || hasResolution || hasTokenPricing) {
+          rules[key] = {
+            credits: item.credits,
+            ...(hasQuality ? { quality: item.quality } : {}),
+            ...(hasResolution ? { resolution: item.resolution } : {}),
+            ...(hasTokenPricing ? { tokenPricing: item.tokenPricing } : {}),
+          };
         } else {
           rules[key] = item.credits;
         }
@@ -1401,7 +1417,7 @@ export default function AdminTabs(props: AdminTabsProps) {
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h2 className="text-base font-semibold text-foreground">模型积分规则</h2>
-                <p className="mt-1 text-xs text-muted-foreground">按已启用模型计费。视频规则为每秒，其余规则为每次调用或每张图片。</p>
+                <p className="mt-1 text-xs text-muted-foreground">按已启用模型计费。视频规则为每秒，图像为每张，LLM 支持按 token 计费（积分/1M tokens，预估预扣后按实际用量多退少补），其余为每次调用。</p>
               </div>
               <button
                 disabled={pricingSaving}
@@ -1409,9 +1425,9 @@ export default function AdminTabs(props: AdminTabsProps) {
                   setPricingSaving(true);
                   try {
                     const res = await fetch('/api/admin/credits/pricing', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ modelCredits: modelCreditRules }) });
-                    if (!res.ok) throw new Error();
+                    if (!res.ok) { const d = await res.json().catch(() => null); throw new Error(d?.error || '保存失败'); }
                     await loadModelCreditPricing();
-                  } catch { alert('保存模型积分规则失败'); } finally { setPricingSaving(false); }
+                  } catch (e) { alert(e instanceof Error ? `保存模型积分规则失败：${e.message}` : '保存模型积分规则失败'); } finally { setPricingSaving(false); }
                 }}
                 className="bg-primary text-primary-foreground px-3 py-1.5 rounded-md text-xs font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors"
               >{pricingSaving ? '保存中...' : '保存规则'}</button>
@@ -1450,6 +1466,8 @@ export default function AdminTabs(props: AdminTabsProps) {
                     <th className="px-3 py-2 text-right font-medium">1K</th>
                     <th className="px-3 py-2 text-right font-medium">2K</th>
                     <th className="px-3 py-2 text-right font-medium">4K</th>
+                    <th className="px-3 py-2 text-right font-medium">输入/1M tok</th>
+                    <th className="px-3 py-2 text-right font-medium">输出/1M tok</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/60">
@@ -1459,12 +1477,13 @@ export default function AdminTabs(props: AdminTabsProps) {
                     const baseCredits = typeof currentRule === 'number' ? currentRule : (currentRule?.credits ?? item.credits);
                     const qualityOverrides = (typeof currentRule === 'object' && currentRule?.quality) ? currentRule.quality : {};
                     const resolutionOverrides = (typeof currentRule === 'object' && currentRule?.resolution) ? currentRule.resolution : {};
+                    const tokenPricingValue = (typeof currentRule === 'object' && currentRule?.tokenPricing) ? currentRule.tokenPricing : item.tokenPricing;
                     const resTiers = ['1K', '2K', '4K'];
                     return (
                       <tr key={compoundKey}>
                         <td className="px-3 py-2 text-muted-foreground">{item.providerName}</td>
                         <td className="px-3 py-2 font-mono text-xs text-foreground">{item.model}</td>
-                        <td className="px-3 py-2 text-xs text-muted-foreground">{item.unit === 'per-second' ? '每秒' : item.unit === 'per-image' ? '每张' : '每次'}</td>
+                        <td className="px-3 py-2 text-xs text-muted-foreground">{item.unit === 'per-second' ? '每秒' : item.unit === 'per-image' ? '每张' : item.unit === 'per-1m-tokens' ? '每1M tokens' : '每次'}</td>
                         <td className="px-3 py-2 text-right">
                           <input
                             aria-label={`${item.model} 默认积分`}
@@ -1475,7 +1494,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                               setModelCreditRules(prev => {
                                 const existing = prev[compoundKey];
                                 if (typeof existing === 'object') {
-                                  return { ...prev, [compoundKey]: { credits: v, ...(existing.quality ? { quality: existing.quality } : {}), ...(existing.resolution ? { resolution: existing.resolution } : {}) } };
+                                  return { ...prev, [compoundKey]: { credits: v, ...(existing.quality ? { quality: existing.quality } : {}), ...(existing.resolution ? { resolution: existing.resolution } : {}), ...(existing.tokenPricing ? { tokenPricing: existing.tokenPricing } : {}) } };
                                 }
                                 return { ...prev, [compoundKey]: v };
                               });
@@ -1503,8 +1522,9 @@ export default function AdminTabs(props: AdminTabsProps) {
                                     const base = typeof existing === 'number' ? existing : (existing?.credits ?? item.credits);
                                     const prevQuality = (typeof existing === 'object' && existing?.quality) ? existing.quality : {};
                                     const prevResolution = (typeof existing === 'object' && existing?.resolution) ? existing.resolution : {};
+                                    const prevTokenPricing = (typeof existing === 'object' && existing?.tokenPricing) ? existing.tokenPricing : undefined;
                                     const newQuality = { ...prevQuality, [tier]: v };
-                                    return { ...prev, [compoundKey]: { credits: base, quality: newQuality, ...(Object.keys(prevResolution).length > 0 ? { resolution: prevResolution } : {}) } };
+                                    return { ...prev, [compoundKey]: { credits: base, quality: newQuality, ...(Object.keys(prevResolution).length > 0 ? { resolution: prevResolution } : {}), ...(prevTokenPricing ? { tokenPricing: prevTokenPricing } : {}) } };
                                   });
                                 }}
                                 className={`h-8 w-24 rounded-md border bg-background px-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 ${isOverridden ? 'border-primary/50 text-primary' : 'border-border text-muted-foreground'}`}
@@ -1531,8 +1551,9 @@ export default function AdminTabs(props: AdminTabsProps) {
                                     const base = typeof existing === 'number' ? existing : (existing?.credits ?? item.credits);
                                     const prevQuality = (typeof existing === 'object' && existing?.quality) ? existing.quality : {};
                                     const prevResolution = (typeof existing === 'object' && existing?.resolution) ? existing.resolution : {};
+                                    const prevTokenPricing = (typeof existing === 'object' && existing?.tokenPricing) ? existing.tokenPricing : undefined;
                                     const newResolution = { ...prevResolution, [rt]: v };
-                                    return { ...prev, [compoundKey]: { credits: base, ...(Object.keys(prevQuality).length > 0 ? { quality: prevQuality } : {}), resolution: newResolution } };
+                                    return { ...prev, [compoundKey]: { credits: base, ...(Object.keys(prevQuality).length > 0 ? { quality: prevQuality } : {}), resolution: newResolution, ...(prevTokenPricing ? { tokenPricing: prevTokenPricing } : {}) } };
                                   });
                                 }}
                                 className={`h-8 w-24 rounded-md border bg-background px-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 ${isOverridden ? 'border-primary/50 text-primary' : 'border-border text-muted-foreground'}`}
@@ -1540,12 +1561,41 @@ export default function AdminTabs(props: AdminTabsProps) {
                             </td>
                           );
                         }) : resTiers.map(rt => <td key={rt} className="px-3 py-2 text-right text-xs text-muted-foreground">-</td>)}
+                        {item.modelType === 'chat' ? (['input', 'output'] as const).map(field => {
+                          const refVal = item.tokenPricing?.[field];
+                          const currentVal = tokenPricingValue?.[field];
+                          const displayVal = currentVal !== undefined ? currentVal : (refVal ?? '');
+                          const isOverridden = typeof currentRule === 'object' && currentRule?.tokenPricing?.[field] !== undefined;
+                          return (
+                            <td key={field} className="px-3 py-2 text-right">
+                              <input
+                                aria-label={`${item.model} ${field === 'input' ? '输入' : '输出'}积分/1M tokens`}
+                                type="number" min="0" max="1000000"
+                                value={displayVal}
+                                placeholder={refVal !== undefined ? String(refVal) : '-'}
+                                onChange={event => {
+                                  const raw = event.target.value;
+                                  setModelCreditRules(prev => {
+                                    const existing = prev[compoundKey];
+                                    const base = typeof existing === 'number' ? existing : (existing?.credits ?? item.credits);
+                                    const prevQuality = (typeof existing === 'object' && existing?.quality) ? existing.quality : {};
+                                    const prevResolution = (typeof existing === 'object' && existing?.resolution) ? existing.resolution : {};
+                                    const prevToken = (typeof existing === 'object' && existing?.tokenPricing) ? existing.tokenPricing : (item.tokenPricing ?? { input: 0, output: 0 });
+                                    const newToken = { ...prevToken, [field]: Math.max(0, Math.floor(Number(raw) || 0)) };
+                                    return { ...prev, [compoundKey]: { credits: base, ...(Object.keys(prevQuality).length > 0 ? { quality: prevQuality } : {}), ...(Object.keys(prevResolution).length > 0 ? { resolution: prevResolution } : {}), tokenPricing: newToken } };
+                                  });
+                                }}
+                                className={`h-8 w-24 rounded-md border bg-background px-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 ${isOverridden ? 'border-primary/50 text-primary' : 'border-border text-muted-foreground'}`}
+                              />
+                            </td>
+                          );
+                        }) : (['input', 'output'] as const).map(field => <td key={field} className="px-3 py-2 text-right text-xs text-muted-foreground">-</td>)}
                       </tr>
                     );
                   })}
                   {filteredModelCreditCatalog.length === 0 && (
                     <tr>
-                      <td colSpan={7 + visibleQualityTiers.length} className="px-3 py-8 text-center text-sm text-muted-foreground">
+                      <td colSpan={9 + visibleQualityTiers.length} className="px-3 py-8 text-center text-sm text-muted-foreground">
                         {modelCreditCatalog.length === 0 ? '暂无已启用模型，请先在 API 管理中配置模型。' : '当前类别暂无已启用模型。'}
                       </td>
                     </tr>

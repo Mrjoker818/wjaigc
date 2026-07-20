@@ -13,6 +13,7 @@ import { GenerationPanel, GenerationParams, CtrlRefSelection } from '@/component
 import VideoGenerationPanel, { type VideoGenerationPanelHandle } from '@/components/video-generation-panel';
 import { ImagePreview } from '@/components/image-preview';
 import { ChatPanel } from '@/components/chat-panel';
+import { QuickCreatePanel, type QuickCreateRequest } from '@/components/quick-create-panel';
 import { PromptEquation } from '@/components/prompt-equation';
 
 import { Toaster } from '@/components/ui/sonner';
@@ -60,6 +61,7 @@ import { fetchSessionPayload } from '@/lib/auth-session';
 
 type ThemeStyle = 'gold' | 'monochrome';
 type ActivePanel = 'generate' | 'video' | 'chat';
+type CreateMode = 'quick' | 'professional';
 
 function getInitialProjectId(): string | null {
   if (typeof window === 'undefined') return null;
@@ -208,13 +210,14 @@ function CanvasApp() {
     prevImagesRef.current = result;
     setImagesRaw(result);
   }, []);
-  const [, setActiveGenerationCount] = useState(0);
+  const [activeGenerationCount, setActiveGenerationCount] = useState(0);
   const [previewImage, setPreviewImage] = useState<CanvasImage | null>(null);
   const [themeStyle, setThemeStyle] = useState<ThemeStyle>('gold');
   const themeStyleRef = useRef(themeStyle);
   themeStyleRef.current = themeStyle;
   const [panelCollapsed, setPanelCollapsed] = useState(false);
   const [activePanel, setActivePanel] = useState<ActivePanel>('generate');
+  const [createMode, setCreateMode] = useState<CreateMode>('quick');
   // 从工作台加载指定项目
   const loadProjectById = useCallback(async (projectId: string) => {
     try {
@@ -316,6 +319,8 @@ function CanvasApp() {
 
   // Floating video panel state
   const [showVideoPanel, setShowVideoPanel] = useState(false);
+  const [externalVideoPrompt, setExternalVideoPrompt] = useState<string>();
+  const [externalVideoMode, setExternalVideoMode] = useState<'generate' | 'extend'>('generate');
 
   useEffect(() => {
     const openVideoPanel = () => {
@@ -3376,6 +3381,7 @@ function CanvasApp() {
 
   // 提示词大师 - 从chat-panel传递到generation-panel
   const [externalPrompt, setExternalPrompt] = useState<string | undefined>(undefined);
+  const [externalChatPrompt, setExternalChatPrompt] = useState<string | undefined>(undefined);
   const [externalReferenceImage, setExternalReferenceImage] = useState<{ url: string; description?: string } | null>(null);
 
   // Oh My Prompt - Vision Prompt handler
@@ -3541,6 +3547,7 @@ function CanvasApp() {
 
   const handleAddToPrompt = useCallback((optimizedPrompt: string) => {
     setExternalPrompt(optimizedPrompt);
+    setCreateMode('professional');
     setActivePanel('generate');
   }, []);
 
@@ -3548,49 +3555,83 @@ function CanvasApp() {
     setExternalPrompt(undefined);
   }, []);
 
-  // AI聊天中的图像生成回调 - 当AI建议生成图片时直接触发
-  const handleChatGenerateImage = useCallback((prompt: string, outputCount?: number, aspectRatio?: string, quality?: string) => {
-    // 从 wujie_selected_model 读取当前选择的图像生成模型（与 generation-panel 同步）
+  const getCurrentImageModel = useCallback((): { model: string; providerId?: string } => {
     let model = '';
     let providerId: string | undefined;
     try {
       const rawModel = localStorage.getItem('wujie_selected_model');
       if (rawModel) {
-        const modelInfo = JSON.parse(rawModel);
+        const modelInfo = JSON.parse(rawModel) as { model?: string; providerId?: string };
         model = modelInfo.model || '';
         providerId = modelInfo.providerId || undefined;
       }
-      // 备用：从 userData 读取
       if (!model) {
         const currentUserId = localStorage.getItem('unbounded_ai_current_user');
         const raw = localStorage.getItem('unbounded_ai_user_data');
         if (raw && currentUserId) {
-          const data = JSON.parse(raw);
-          const selectedModel = data?.userData?.[currentUserId]?.selectedModel;
-          if (selectedModel) {
-            if (selectedModel.includes('::')) {
-              const parts = selectedModel.split('::');
-              providerId = parts[0];
-              model = parts.slice(1).join('::');
-            } else {
-              model = selectedModel;
-            }
+          const data = JSON.parse(raw) as { userData?: Record<string, { selectedModel?: string }> };
+          const selectedModel = data.userData?.[currentUserId]?.selectedModel;
+          if (selectedModel?.includes('::')) {
+            const parts = selectedModel.split('::');
+            providerId = parts[0];
+            model = parts.slice(1).join('::');
+          } else if (selectedModel) {
+            model = selectedModel;
           }
         }
       }
-    } catch { /* fallback */ }
+    } catch (error) {
+      console.warn('[quick-create] failed to read selected image model', error);
+    }
+    return { model, providerId };
+  }, []);
 
+  const notifyMissingImageModel = useCallback((): void => {
+    toast.error('未选择图像生成模型', {
+      description: '请先在专业创作中选择模型',
+      className: themeStyle === 'monochrome'
+        ? 'bg-white border border-gray-200 text-gray-900'
+        : 'bg-[#141414] border border-yellow-900 text-white',
+    });
+  }, [themeStyle]);
+
+  const handleQuickGenerate = useCallback(async (request: QuickCreateRequest): Promise<boolean> => {
+    const { model, providerId } = getCurrentImageModel();
     if (!model) {
-      toast.error('未选择图像生成模型', {
-        description: '请先在图像生成面板中选择模型',
-        className: 'bg-[#141414] border border-yellow-900 text-white',
-      });
+      notifyMissingImageModel();
+      setExternalPrompt(request.prompt);
+      setCreateMode('professional');
+      setActivePanel('generate');
+      return false;
+    }
+
+    void handleGenerate({
+      prompt: request.prompt,
+      outputCount: request.outputCount,
+      aspectRatio: request.aspectRatio,
+      size: '',
+      referenceImages: request.referenceImages,
+      referenceMode: 'style',
+      imageCategory: '',
+      productCategory: '',
+      stylePreset: '',
+      quality: request.quality,
+      model,
+      providerId,
+    });
+    return true;
+  }, [getCurrentImageModel, handleGenerate, notifyMissingImageModel]);
+
+  // AI聊天中的图像生成回调 - 当AI建议生成图片时直接触发
+  const handleChatGenerateImage = useCallback((prompt: string, outputCount?: number, aspectRatio?: string, quality?: string) => {
+    const { model, providerId } = getCurrentImageModel();
+    if (!model) {
+      notifyMissingImageModel();
       return;
     }
 
-    // 调用 handleGenerate 执行实际的图像生成
-    handleGenerate({
-      prompt: prompt,
+    void handleGenerate({
+      prompt,
       outputCount: outputCount || 1,
       aspectRatio: aspectRatio || '1:1',
       size: '',
@@ -3600,10 +3641,10 @@ function CanvasApp() {
       productCategory: '',
       stylePreset: '',
       quality: quality || 'standard',
-      model: model,
-      providerId: providerId,
+      model,
+      providerId,
     });
-  }, [handleGenerate]);
+  }, [getCurrentImageModel, handleGenerate, notifyMissingImageModel]);
 
   // 适配 InfiniteCanvas 的简单回调函数
   const handleCanvasGenerateVariation = useCallback((image: CanvasImage) => {
@@ -3629,10 +3670,24 @@ function CanvasApp() {
     setShowImageEditor(true);
   }, []);
 
-  const handleOpenVideoPanel = useCallback(() => {
+  const handleOpenVideoPanel = useCallback((prompt?: string, mode: 'generate' | 'extend' = 'generate') => {
     window.dispatchEvent(new Event('wujie:close-canvas-tool-panels'));
     setShowImageEditor(false);
+    setExternalVideoPrompt(prompt?.trim() || undefined);
+    setExternalVideoMode(mode);
     setShowVideoPanel(true);
+  }, []);
+
+  const handleOpenQuickProfessional = useCallback((prompt?: string): void => {
+    if (prompt?.trim()) setExternalPrompt(prompt.trim());
+    setCreateMode('professional');
+    setActivePanel('generate');
+  }, []);
+
+  const handleOpenQuickChat = useCallback((prompt?: string): void => {
+    setExternalChatPrompt(prompt?.trim() || undefined);
+    setChatTabOpen(true);
+    setActivePanel('chat');
   }, []);
 
   const handleEditCancel = useCallback(() => {
@@ -4312,11 +4367,39 @@ function CanvasApp() {
 
           {/* Panel Content */}
           <div className="flex-1 overflow-hidden flex flex-col">
-            <div className={activePanel === 'generate' ? 'flex-1 overflow-y-auto scroll-smooth' : 'hidden'} style={{
-              scrollbarWidth: 'thin',
-              scrollbarColor: themeStyle === 'monochrome' ? '#d1d5db transparent' : '#444 transparent'
-            }}>
-              <GenerationPanel
+            <div className={activePanel === 'generate' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
+              <div className="flex flex-shrink-0 gap-1 px-4 py-2">
+                <button
+                  type="button"
+                  onClick={() => setCreateMode('quick')}
+                  className={`min-h-9 flex-1 rounded-lg px-3 text-xs font-semibold transition-colors ${createMode === 'quick' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
+                >
+                  快速创作
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCreateMode('professional')}
+                  className={`min-h-9 flex-1 rounded-lg px-3 text-xs font-semibold transition-colors ${createMode === 'professional' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
+                >
+                  专业创作
+                </button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto scroll-smooth" style={{
+                scrollbarWidth: 'thin',
+                scrollbarColor: themeStyle === 'monochrome' ? '#d1d5db transparent' : '#444 transparent'
+              }}>
+                {createMode === 'quick' ? (
+                  <QuickCreatePanel
+                    themeStyle={themeStyle}
+                    selectedImage={selectedImage ? { id: selectedImage.id, url: selectedImage.url, prompt: selectedImage.prompt } : null}
+                    isGenerating={activeGenerationCount > 0}
+                    onGenerate={handleQuickGenerate}
+                    onOpenProfessional={handleOpenQuickProfessional}
+                    onOpenChat={handleOpenQuickChat}
+                    onOpenVideo={handleOpenVideoPanel}
+                  />
+                ) : (
+                  <GenerationPanel
                     onGenerate={handleGenerate}
                     onAnalyzeImage={handleAnalyzeImage}
                     onAddToCanvas={handleAddToCanvas}
@@ -4346,13 +4429,15 @@ function CanvasApp() {
                       setActiveGenerationCount(prev => Math.max(0, prev - 1));
                     }}
                   />
+                )}
               </div>
-              <div className={activePanel === 'chat' ? 'flex-1 overflow-hidden' : 'hidden'}>
-                <ChatPanel themeStyle={themeStyle} projectId={currentProject?.id} onAddToPrompt={handleAddToPrompt} onAddImages={handleAddImages} canvasImages={images} selectedCanvasImage={selectedImage} onChatModelChange={setCurrentChatModelInfo} chatInitialImage={chatInitialImage} onChatInitialImageConsumed={() => setChatInitialImage(null)} chatTabOpen={chatTabOpen} onChatTabOpenChange={setChatTabOpen} onNavigateToImage={(id: string) => setNavigateToImageId(id)} onGenerateImage={handleChatGenerateImage} />
-              </div>
+            </div>
+            <div className={activePanel === 'chat' ? 'flex-1 overflow-hidden' : 'hidden'}>
+              <ChatPanel themeStyle={themeStyle} projectId={currentProject?.id} onAddToPrompt={handleAddToPrompt} onAddImages={handleAddImages} canvasImages={images} selectedCanvasImage={selectedImage} onChatModelChange={setCurrentChatModelInfo} chatInitialImage={chatInitialImage} onChatInitialImageConsumed={() => setChatInitialImage(null)} chatTabOpen={chatTabOpen} onChatTabOpenChange={setChatTabOpen} onNavigateToImage={(id: string) => setNavigateToImageId(id)} onGenerateImage={handleChatGenerateImage} externalPrompt={externalChatPrompt} onExternalPromptConsumed={() => setExternalChatPrompt(undefined)} />
+            </div>
 
             {/* 固定在底部的开始生成按钮 */}
-            {activePanel === 'generate' && (
+            {activePanel === 'generate' && createMode === 'professional' && (
               <div className="px-4 py-3 flex-shrink-0">
                 <div className={`h-px mb-3 ${themeStyle === 'monochrome' ? 'bg-gray-200' : 'bg-gradient-to-r from-transparent via-gold/15 to-transparent'}`} />
                 <button
@@ -4402,6 +4487,12 @@ function CanvasApp() {
           }}
           onAddImages={(urls: string[]) => handleAddImages(urls)}
           onClose={() => setShowVideoPanel(false)}
+          externalPrompt={externalVideoPrompt}
+          externalPromptMode={externalVideoMode}
+          onExternalPromptConsumed={() => {
+            setExternalVideoPrompt(undefined);
+            setExternalVideoMode('generate');
+          }}
           onError={(error: string) => {
             toast.error('视频生成失败', {
               description: error,

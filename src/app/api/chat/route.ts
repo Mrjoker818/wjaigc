@@ -5,7 +5,8 @@ import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
-import { consumeCredits, refundCredits } from '@/lib/credits';
+import { consumeCredits, refundCredits, resolveConfiguredTokenPricing, settleTokenCharge } from '@/lib/credits';
+import type { TokenCreditPricing } from '@/lib/credit-pricing';
 import { CHAT_TOOLS, executeToolCall, parseToolCallsFromStream, ToolCallResult } from '@/lib/chat-tools';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { logOperation, logError, startTimer, OP_ACTIONS } from '@/lib/op-log';
@@ -22,6 +23,67 @@ interface ChatTaskContext {
   projectId?: string;
   sessionId?: string;
   messageId?: string;
+}
+
+/**
+ * Token 计费挂钩：配置了 tokenPricing 的 LLM 模型在请求前按预估价预扣，
+ * 请求完成后根据实际 usage 多退少补。
+ */
+interface TokenBillingHooks {
+  /** 累加一次上游返回的 usage（兼容 prompt_tokens/completion_tokens 与 input_tokens/output_tokens 两种格式） */
+  addUsage: (usage: unknown) => void;
+  /** 请求结束后按累计 usage 结算（幂等，仅生效一次） */
+  finalize: () => void;
+}
+
+/** 从 SSE 数据行 JSON 中提取 usage 并累加（兼容 APImart {code,data} 包装） */
+function captureUsageFromParsedChunk(parsed: unknown, hooks?: TokenBillingHooks): void {
+  if (!hooks || !parsed || typeof parsed !== 'object') return;
+  const obj = parsed as Record<string, unknown>;
+  const payload = (obj.data && typeof obj.data === 'object' && !obj.choices ? obj.data : obj) as Record<string, unknown>;
+  if (payload.usage) hooks.addUsage(payload.usage);
+}
+
+/**
+ * 包装透传流：原样转发所有 chunk，同时扫描 SSE 行捕获 usage，
+ * 流结束后触发 Token 结算。用于不重写内容的纯透传路径。
+ */
+function wrapStreamWithTokenBilling(body: ReadableStream<Uint8Array>, hooks: TokenBillingHooks): ReadableStream<Uint8Array> {
+  const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+  const reader = body.getReader();
+  const writer = writable.getWriter();
+  const decoder = new TextDecoder();
+  let sseBuffer = '';
+  (async () => {
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        sseBuffer += decoder.decode(value, { stream: true });
+        const lines = sseBuffer.split('\n');
+        sseBuffer = lines.pop() || '';
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('data: ') && trimmed !== 'data: [DONE]') {
+            try {
+              captureUsageFromParsedChunk(JSON.parse(trimmed.slice(6)), hooks);
+            } catch { /* not JSON, ignore */ }
+          }
+        }
+        await writer.write(value);
+      }
+      const tail = sseBuffer.trim();
+      if (tail.startsWith('data: ') && tail !== 'data: [DONE]') {
+        try {
+          captureUsageFromParsedChunk(JSON.parse(tail.slice(6)), hooks);
+        } catch { /* ignore */ }
+      }
+    } catch { /* client disconnect or upstream abort */ } finally {
+      try { await writer.close(); } catch { /* already closed */ }
+      hooks.finalize();
+    }
+  })();
+  return readable;
 }
 
 export async function POST(request: NextRequest) {
@@ -80,12 +142,46 @@ export async function POST(request: NextRequest) {
 
     // 积分扣除（登录用户才扣积分，按模型差异化扣分）
     if (sessionUser) {
-      const creditResult = await consumeCredits(sessionUser.id, 'chat', undefined, undefined, model);
+      const creditResult = await consumeCredits(sessionUser.id, 'chat', undefined, undefined, model, { providerId });
       if (!creditResult.success) {
         return NextResponse.json({ error: creditResult.message || '积分不足' }, { status: 402 });
       }
       deductedCredits = creditResult.cost;
     }
+
+    // Token 计费（按量）：模型配置了 tokenPricing 时，预扣金额视为预估值，
+    // 请求完成后根据上游返回的实际 usage 多退少补。
+    let tokenPricing: TokenCreditPricing | null = null;
+    if (sessionUser) {
+      tokenPricing = await resolveConfiguredTokenPricing(model, providerId).catch(() => null);
+    }
+    const tokenUsageAcc = { inputTokens: 0, outputTokens: 0 };
+    let tokenSettled = false;
+    const tokenBillingHooks: TokenBillingHooks | undefined = sessionUser && tokenPricing
+      ? {
+          addUsage: (usage: unknown) => {
+            if (!usage || typeof usage !== 'object') return;
+            const u = usage as Record<string, unknown>;
+            const input = Number(u.prompt_tokens ?? u.input_tokens ?? 0);
+            const output = Number(u.completion_tokens ?? u.output_tokens ?? 0);
+            if (Number.isFinite(input) && input > 0) tokenUsageAcc.inputTokens += input;
+            if (Number.isFinite(output) && output > 0) tokenUsageAcc.outputTokens += output;
+          },
+          finalize: () => {
+            if (tokenSettled || !sessionUser) return;
+            if (tokenUsageAcc.inputTokens <= 0 && tokenUsageAcc.outputTokens <= 0) return;
+            tokenSettled = true;
+            void settleTokenCharge(
+              sessionUser.id,
+              model,
+              providerId,
+              { ...tokenUsageAcc },
+              deductedCredits,
+              `AI聊天 [${model}]`
+            ).catch(err => console.error('[chat] token settlement failed:', err));
+          },
+        }
+      : undefined;
 
     // Content safety check
     const lastUserMsg = messages.filter((m: { role: string }) => m.role === 'user').pop();
@@ -182,7 +278,7 @@ export async function POST(request: NextRequest) {
     // 直到 LLM 返回纯文本（无 tool_calls）或达到最大循环次数
 
     if (effectiveEnableTools && stream) {
-      return handleAgentStream(fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, isThinkingModel, availableTools, imageModel, imageProviderId, isAgentMode, taskContext);
+      return handleAgentStream(fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, isThinkingModel, availableTools, imageModel, imageProviderId, isAgentMode, taskContext, tokenBillingHooks);
     }
 
     // Non-stream or non-tool mode: original behavior
@@ -192,6 +288,11 @@ export async function POST(request: NextRequest) {
       stream,
       temperature: 0.7,
     };
+
+    // Token 计费：要求上游在流末尾返回 usage
+    if (stream && tokenBillingHooks) {
+      requestBody.stream_options = { include_usage: true };
+    }
 
     if (effectiveEnableTools) {
       requestBody.tools = availableTools;
@@ -226,6 +327,9 @@ export async function POST(request: NextRequest) {
         retryBody.tools = availableTools;
         retryBody.tool_choice = 'auto';
       }
+      if (stream && tokenBillingHooks) {
+        retryBody.stream_options = { include_usage: true };
+      }
       const retryResponse = await fetchWithV1Retry(
         chatBaseUrl,
         '/chat/completions',
@@ -256,17 +360,22 @@ export async function POST(request: NextRequest) {
       
       if (stream && retryResponse.body) {
         await appendUserJsonl(userId, 'chat', { model, providerId, messageCount: messages.length, stream: true });
-        return new NextResponse(retryResponse.body, {
+        const retryStreamBody = tokenBillingHooks
+          ? wrapStreamWithTokenBilling(retryResponse.body, tokenBillingHooks)
+          : retryResponse.body;
+        return new NextResponse(retryStreamBody, {
           headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
         });
       }
       const retryData = await retryResponse.json();
-      
+
       // Handle tool_calls in non-stream mode
       if (effectiveEnableTools && retryData.choices?.[0]?.message?.tool_calls) {
-        return handleNonStreamAgentLoop(retryData, fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, availableTools, imageModel, imageProviderId, isAgentMode, taskContext);
+        return handleNonStreamAgentLoop(retryData, fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, availableTools, imageModel, imageProviderId, isAgentMode, taskContext, tokenBillingHooks);
       }
-      
+
+      tokenBillingHooks?.addUsage(retryData?.usage);
+      tokenBillingHooks?.finalize();
       await appendUserJsonl(userId, 'chat', { model, providerId, messageCount: messages.length, stream: false });
       return NextResponse.json(retryData);
     }
@@ -306,6 +415,8 @@ export async function POST(request: NextRequest) {
           const outputText = Array.isArray(respData.output)
             ? respData.output.filter((o: { type: string }) => o.type === 'message').flatMap((o: { content: Array<{ text: string }> }) => o.content?.map((c: { text: string }) => c.text) || []).join('')
             : respData.output_text || JSON.stringify(respData.output || '');
+          tokenBillingHooks?.addUsage(respData?.usage);
+          tokenBillingHooks?.finalize();
           await appendUserJsonl(userId, 'chat', { model, providerId, messageCount: messages.length, stream: false });
           return NextResponse.json({
             id: respData.id || `chatcmpl-${Date.now()}`, object: 'chat.completion', created: Math.floor(Date.now() / 1000), model: requestModel,
@@ -364,6 +475,7 @@ export async function POST(request: NextRequest) {
                   if (parsed && typeof parsed === 'object' && 'code' in parsed && 'data' in parsed && parsed.data && !parsed.choices) {
                     outLine = 'data: ' + JSON.stringify(parsed.data);
                   }
+                  captureUsageFromParsedChunk(parsed, tokenBillingHooks);
                 } catch { /* not JSON, passthrough */ }
               }
               await writer.write(encoder.encode(outLine + '\n'));
@@ -377,12 +489,14 @@ export async function POST(request: NextRequest) {
                 if (parsed && typeof parsed === 'object' && 'code' in parsed && 'data' in parsed && parsed.data && !parsed.choices) {
                   outLine = 'data: ' + JSON.stringify(parsed.data);
                 }
+                captureUsageFromParsedChunk(parsed, tokenBillingHooks);
               } catch { /* passthrough */ }
             }
             await writer.write(encoder.encode(outLine));
           }
         } finally {
           await writer.close();
+          tokenBillingHooks?.finalize();
         }
       })();
       return new NextResponse(readable, {
@@ -399,9 +513,11 @@ export async function POST(request: NextRequest) {
     
     // Handle tool_calls in non-stream mode
     if (effectiveEnableTools && data.choices?.[0]?.message?.tool_calls) {
-      return handleNonStreamAgentLoop(data, fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, availableTools, imageModel, imageProviderId, undefined, taskContext);
+      return handleNonStreamAgentLoop(data, fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, availableTools, imageModel, imageProviderId, undefined, taskContext, tokenBillingHooks);
     }
-    
+
+    tokenBillingHooks?.addUsage(data?.usage);
+    tokenBillingHooks?.finalize();
     await appendUserJsonl(userId, 'chat', { model, providerId, messageCount: messages.length, stream: false });
     return NextResponse.json(data);
 
@@ -444,6 +560,7 @@ async function handleAgentStream(
   imageProviderId?: string,
   isAgentMode?: boolean,
   taskContext: ChatTaskContext = {},
+  tokenBilling?: TokenBillingHooks,
 ): Promise<NextResponse> {
   const agentModeEnabled = isAgentMode ?? false; // 捕获isAgentMode到局部变量
   const encoder = new TextEncoder();
@@ -456,7 +573,7 @@ async function handleAgentStream(
         while (iteration < MAX_AGENT_ITERATIONS) {
           const toolChoice = resolveChatAgentToolChoice(agentModeEnabled, iteration);
           iteration++;
-          
+
           const requestBody: Record<string, unknown> = {
             model: requestModel,
             messages: currentMessages,
@@ -465,6 +582,10 @@ async function handleAgentStream(
             tools: availableTools,
             tool_choice: toolChoice,
           };
+
+          if (tokenBilling) {
+            requestBody.stream_options = { include_usage: true };
+          }
 
           if (isThinkingModel) {
             requestBody.reasoning_effort = 'medium';
@@ -550,6 +671,11 @@ async function handleAgentStream(
 
               try {
                 const parsed = JSON.parse(data);
+                // Token 计费：usage 通常在 choices 为空的最后一个 chunk 中
+                if (parsed?.usage) tokenBilling?.addUsage(parsed.usage);
+                if (parsed?.data && typeof parsed.data === 'object' && parsed.data.usage) {
+                  tokenBilling?.addUsage(parsed.data.usage);
+                }
                 const choice = parsed.choices?.[0];
                 if (!choice) continue;
 
@@ -686,12 +812,17 @@ async function handleAgentStream(
         controller.enqueue(encoder.encode('data: [DONE]\n\n'));
         controller.close();
 
+        // Token 计费：按 Agent 循环累计的 usage 结算
+        tokenBilling?.finalize();
+
         await appendUserJsonl(userId, 'chat', { model, providerId, messageCount: fixedMessages.length, stream: true, agentIterations: iteration });
       } catch (err) {
         console.error('[chat-agent] Stream error:', err);
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: `Agent 执行出错: ${err instanceof Error ? err.message : String(err)}` })}\n\n`));
         controller.enqueue(encoder.encode('data: [DONE]\n\n'));
         controller.close();
+        // 异常时也按已捕获的部分 usage 结算（比保留整笔预估更公平）
+        tokenBilling?.finalize();
       }
     },
   });
@@ -708,7 +839,7 @@ async function handleAgentStream(
 // ============ Non-Stream Agent Loop ============
 
 async function handleNonStreamAgentLoop(
-  initialData: { choices: Array<{ message: { tool_calls?: unknown[]; content?: string } }> },
+  initialData: { choices: Array<{ message: { tool_calls?: unknown[]; content?: string } }>; usage?: unknown },
   fixedMessages: Array<Record<string, unknown>>,
   requestModel: string,
   chatApiKey: string,
@@ -722,11 +853,15 @@ async function handleNonStreamAgentLoop(
   imgProviderId?: string,
   isAgentMode?: boolean,
   taskContext: ChatTaskContext = {},
+  tokenBilling?: TokenBillingHooks,
 ): Promise<NextResponse> {
   const agentModeEnabled = isAgentMode ?? false;
   const currentMessages = [...fixedMessages];
   const allToolResults: Array<{ toolName: string; result: ToolCallResult }> = [];
   let iteration = 0;
+
+  // Token 计费：累加首轮（含 tool_calls 的响应）usage
+  tokenBilling?.addUsage(initialData.usage);
 
   // Add the initial assistant message with tool_calls
   const initialChoice = initialData.choices[0];
@@ -796,6 +931,9 @@ async function handleNonStreamAgentLoop(
     const nextMessage = nextData.choices?.[0]?.message;
     if (!nextMessage) break;
 
+    // Token 计费：累加每轮 Agent 调用的 usage
+    tokenBilling?.addUsage(nextData.usage);
+
     currentMessages.push(nextMessage as Record<string, unknown>);
 
     // If no more tool_calls, we're done
@@ -805,8 +943,9 @@ async function handleNonStreamAgentLoop(
       const allVideoUrls = allToolResults.flatMap(r => r.result.videoUrls || []);
       const allTaskIds = allToolResults.flatMap(r => r.result.taskIds || []);
 
+      tokenBilling?.finalize();
       await appendUserJsonl(userId, 'chat', { model, providerId, messageCount: fixedMessages.length, stream: false, agentIterations: iteration });
-      
+
       // Return the final response with tool results metadata
       return NextResponse.json({
         ...nextData,
@@ -825,6 +964,7 @@ async function handleNonStreamAgentLoop(
   }
 
   // Fallback: return last data
+  tokenBilling?.finalize();
   await appendUserJsonl(userId, 'chat', { model, providerId, messageCount: fixedMessages.length, stream: false, agentIterations: iteration });
   return NextResponse.json(initialData);
 }
