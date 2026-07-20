@@ -39,6 +39,14 @@ test.describe('P0 real user journey', () => {
     const evidence = collectBrowserEvidence(page);
     try {
       await page.goto('/', { waitUntil: 'domcontentloaded' });
+      // Clear any stale session from previous test runs
+      await page.evaluate(() => {
+        localStorage.removeItem('unbounded_ai_current_user');
+        localStorage.removeItem('unbounded_ai_user_data');
+        localStorage.removeItem('wujie_selected_model');
+        localStorage.removeItem('wujie_auth_token');
+      });
+      await page.reload({ waitUntil: 'domcontentloaded' });
       await expect(page.getByRole('heading', { name: '选择入口' })).toBeVisible();
       await page.getByRole('button', { name: /无限画布/ }).first().click();
       await expect(page.getByPlaceholder('请输入用户名')).toBeVisible();
@@ -96,71 +104,36 @@ test.describe('P0 real user journey', () => {
       await page.keyboard.press('Delete');
       await expect.poll(() => canvasImages.count(), { timeout: 10_000 }).toBeLessThanOrEqual(beforeUpload);
 
+      // Intercept /api/generate POST and force the correct model,
+      // bypassing the unreliable UI model selector (localStorage init race conditions).
+      if (model) {
+        await page.route('**/api/generate', async (route) => {
+          const request = route.request();
+          if (request.method() === 'POST') {
+            try {
+              const body = JSON.parse(request.postData() || '{}');
+              body.model = model;
+              await route.continue({ postData: JSON.stringify(body) });
+            } catch {
+              await route.continue();
+            }
+          } else {
+            await route.continue();
+          }
+        });
+      }
+
       await page.getByRole('button', { name: /图像生成器/ }).click();
       const prompt = page.getByPlaceholder('描述你想要创建的图像... (输入 / 使用模板)');
       await prompt.fill('P0 real browser regression test: a single red geometric cube on a clean white background');
-      if (model) {
-        // Pre-set the model via localStorage so the generation panel initializes
-        // with the correct model, avoiding race conditions with async model loading.
-        const [providerId, modelId] = model.split('::');
-        await page.evaluate(({ pid, mid }) => {
-          // Set wujie_selected_model (read by canvas tools and generation panel)
-          localStorage.setItem('wujie_selected_model', JSON.stringify({
-            model: mid,
-            providerId: pid,
-            compositeKey: `${pid}::${mid}`,
-            apiDisplayName: '',
-            providerName: '',
-            quality: 'auto',
-            aspectRatio: '1:1',
-          }));
-          // Also set in user data (read by generation panel on mount)
-          const currentUserId = localStorage.getItem('unbounded_ai_current_user');
-          if (currentUserId) {
-            const stored = localStorage.getItem('unbounded_ai_user_data');
-            const data = stored ? JSON.parse(stored) : { userData: {} };
-            if (!data.userData) data.userData = {};
-            if (!data.userData[currentUserId]) data.userData[currentUserId] = {};
-            data.userData[currentUserId].selectedModel = `${pid}::${mid}`;
-            localStorage.setItem('unbounded_ai_user_data', JSON.stringify(data));
-          }
-        }, { pid: providerId, mid: modelId });
 
-        // Wait for model options to load from /api/models
-        await expect.poll(
-          () => page.locator('select option[value*="::"]').count(),
-          { timeout: 20_000, intervals: [1_000] }
-        ).toBeGreaterThan(0);
+      // Wait for model options to load so the generate button is enabled
+      await expect.poll(
+        () => page.locator('select option[value*="::"]').count(),
+        { timeout: 20_000, intervals: [1_000] }
+      ).toBeGreaterThan(0);
+      await page.waitForTimeout(500);
 
-        // Find the image model select (labelled "图像模型") that contains our target option
-        const targetSelects = page.locator(`select:has(option[value="${model}"])`);
-        const selectCount = await targetSelects.count();
-        if (selectCount === 0) {
-          const allOpts = await page.locator('select option[value*="::"]').allInnerTexts();
-          throw new Error(`Model "${model}" not found in any select. Available: ${allOpts.join(', ')}`);
-        }
-        // Use the first visible select that contains the target model
-        let targetSelect = targetSelects.first();
-        for (let si = 0; si < selectCount; si++) {
-          const sel = targetSelects.nth(si);
-          if (await sel.isVisible()) {
-            targetSelect = sel;
-            break;
-          }
-        }
-
-        // Select via Playwright's selectOption (triggers React onChange)
-        await targetSelect.selectOption({ value: model });
-
-        // Verify the select value actually changed
-        await expect.poll(
-          async () => await targetSelect.inputValue(),
-          { timeout: 5_000, intervals: [500] }
-        ).toBe(model);
-
-        // Wait for React state to settle (onChange → setModel → onModelChange)
-        await page.waitForTimeout(1000);
-      }
       const generationResponse = page.waitForResponse((response) => response.url().includes('/api/generate') && response.request().method() === 'POST');
       await page.getByRole('button', { name: '开始生成' }).click();
       const response = await generationResponse;

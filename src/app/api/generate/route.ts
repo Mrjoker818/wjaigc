@@ -409,7 +409,7 @@ export async function POST(request: NextRequest) {
         // 使用解析后的可访问参考图 URL（而非原始相对路径或不可访问 URL）
         referenceImages: accessibleReferenceImages.length > 0 ? accessibleReferenceImages : undefined,
       };
-      if (process.env.WUJIE_ENABLE_IN_PROCESS_ASYNC_WORKER === 'true') {
+      if (process.env.WUJIE_ENABLE_IN_PROCESS_ASYNC_WORKER !== 'false') {
         after(async () => {
         try {
           const bgRes = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/generate`, {

@@ -1077,6 +1077,45 @@ export async function POST(request: NextRequest) {
       // ★ APImart 等异步供应商返回的 taskId 本身就是远程任务 ID（如 task_01KX...）
       const taskIdIsRemote = typeof taskId === 'string' && taskId.startsWith('task_');
       const effectiveRemoteTaskId = (regResult.remoteTaskId as string | undefined) || (taskIdIsRemote ? taskId : undefined);
+      // ★ direct- 前缀的 remoteTaskId 表示同步提供商的直接结果，应从 task-registry 查找而非远程轮询
+      if (effectiveRemoteTaskId && effectiveRemoteTaskId.startsWith('direct-')) {
+        const directTask = getTaskInfo(effectiveRemoteTaskId);
+        if (directTask?.status === 'completed') {
+          const directResult = (directTask.result as Record<string, unknown>) || {};
+          const directImageUrl = directResult.imageUrl as string | undefined;
+          if (directImageUrl) {
+            // 将 direct task 的结果同步到当前 async task
+            updateTaskProgress(taskId, {
+              status: 'completed',
+              progress: 100,
+              label: '生成完成',
+              result: {
+                imageUrl: directImageUrl,
+                usedModel: directResult.usedModel || regResult.usedModel,
+                modelName: directResult.modelName || regResult.modelName,
+                providerName: directResult.providerName || regResult.providerName,
+                providerId: directResult.providerId || regResult.providerId,
+                apiBaseUrl: directResult.apiBaseUrl || regResult.apiBaseUrl,
+              },
+            });
+            return NextResponse.json({
+              success: true,
+              status: 'completed',
+              progress: 100,
+              label: '生成完成',
+              imageUrl: directImageUrl,
+              task: getTaskInfo(taskId),
+            }, { status: 200 });
+          }
+        }
+        // direct task 尚未完成，返回 processing
+        return NextResponse.json({
+          success: true,
+          status: 'processing',
+          progress: registryTask.progress || 30,
+          label: '生成中...',
+        }, { status: 200 });
+      }
       const hasRemoteTaskId = !!effectiveRemoteTaskId;
       const hasDirectUrls = !!(regResult.directImageUrls as string[] | undefined)?.length;
       if (!hasRemoteTaskId && !hasDirectUrls) {
