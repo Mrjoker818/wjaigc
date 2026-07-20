@@ -188,14 +188,15 @@ export function VersionHistoryPanel({
   const placementClass = floating
     ? 'fixed left-1/2 top-1/2 h-[min(70dvh,620px)] max-h-[calc(100dvh-2rem)] -translate-x-1/2 -translate-y-1/2 rounded-lg shadow-2xl'
     : `absolute ${position === 'left' ? 'left-0' : 'right-0'} top-12 bottom-14`;
+  const edgeBorderClass = position === 'left' ? 'border-r' : 'border-l';
   const themeClass = isMonochrome
-    ? floating ? 'bg-gray-50 border border-gray-200' : 'bg-gray-50 border-l border-gray-200'
-    : floating ? 'bg-[#0a0a0a] border border-gold/10' : 'bg-[#0a0a0a] border-l border-gold/10';
+    ? floating ? 'bg-gray-50 border border-gray-200' : `bg-gray-50 ${edgeBorderClass} border-gray-200`
+    : floating ? 'bg-[#0a0a0a] border border-gold/10' : `bg-[#0a0a0a] ${edgeBorderClass} border-gold/10`;
 
   return (
     <div
       className={`${placementClass} z-[80] flex flex-col ${themeClass}`}
-      style={{ width }}
+      style={{ width, maxWidth: floating ? 'calc(100dvw - 2rem)' : 'min(100%, calc(100dvw - 1rem))' }}
       data-popup={floating ? 'version-history' : undefined}
     >
       {/* 标题栏 */}

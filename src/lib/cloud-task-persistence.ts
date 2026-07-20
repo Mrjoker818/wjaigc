@@ -25,7 +25,9 @@ interface ImageTaskSubmission {
 interface ImageTaskTerminal {
   status: Extract<CloudTaskStatus, 'completed' | 'failed' | 'cancelled' | 'timeout'>;
   imageUrl?: string;
+  imageUrls?: string[];
   maskUrl?: string;
+  maskUrls?: string[];
   error?: string;
   creditStatus?: CloudTaskCreditStatus;
   persist?: boolean;
@@ -98,8 +100,21 @@ export async function recordImageTaskSubmitted(input: ImageTaskSubmission): Prom
 export async function recordImageTaskTerminal(taskId: string, input: ImageTaskTerminal): Promise<void> {
   if (input.persist === false) return;
 
-  const result = input.imageUrl
-    ? { imageUrl: input.imageUrl, maskUrl: input.maskUrl || '' }
+  const imageUrls = Array.from(new Set([
+    ...(input.imageUrls || []),
+    ...(input.imageUrl ? [input.imageUrl] : []),
+  ].filter((url): url is string => typeof url === 'string' && url.length > 0)));
+  const maskUrls = Array.from(new Set([
+    ...(input.maskUrls || []),
+    ...(input.maskUrl ? [input.maskUrl] : []),
+  ].filter((url): url is string => typeof url === 'string' && url.length > 0)));
+  const result = imageUrls.length > 0
+    ? {
+        imageUrl: imageUrls[0],
+        imageUrls,
+        maskUrl: maskUrls[0] || '',
+        maskUrls,
+      }
     : undefined;
 
   await updateCloudTask(taskId, {

@@ -453,6 +453,7 @@ export async function POST(request: NextRequest) {
               label: '生成完成',
               result: {
                 imageUrl: bgData.directImageUrls[0],
+                imageUrls: bgData.directImageUrls,
                 usedModel: bgData.model,
                 modelName: bgData.modelName,
                 providerName: bgData.providerName,
@@ -463,6 +464,7 @@ export async function POST(request: NextRequest) {
             recordSubmitOnlyTerminal({
               status: 'completed',
               imageUrl: bgData.directImageUrls[0],
+              imageUrls: bgData.directImageUrls,
               creditStatus: deductedCredits > 0 ? 'charged' : 'not-applicable',
             });
             return;
@@ -477,17 +479,29 @@ export async function POST(request: NextRequest) {
           const directBgTaskIds = bgTaskIds.filter(id => id.startsWith('direct-'));
           if (directBgTaskIds.length > 0) {
             console.log(`[generate] submitOnly detected direct-mode bgTaskIds: ${JSON.stringify(directBgTaskIds)}`);
-            const directTask = getTaskInfo(directBgTaskIds[0]);
-            const directResult = directTask?.result as Record<string, unknown> | undefined;
-            const directImageUrl = directResult?.imageUrl as string | undefined;
-            if (directImageUrl) {
-              console.log(`[generate] submitOnly direct task already completed, imageUrl: ${directImageUrl.substring(0, 80)}`);
+            const collectDirectResults = (): { imageUrls: string[]; result?: Record<string, unknown>; failed: boolean } => {
+              const imageUrls: string[] = [];
+              let result: Record<string, unknown> | undefined;
+              let failed = false;
+              for (const directTaskId of directBgTaskIds) {
+                const directTask = getTaskInfo(directTaskId);
+                if (directTask?.status === 'failed') failed = true;
+                const directResult = directTask?.result as Record<string, unknown> | undefined;
+                if (!result && directResult) result = directResult;
+                if (Array.isArray(directResult?.imageUrls)) {
+                  imageUrls.push(...directResult.imageUrls.filter((url): url is string => typeof url === 'string' && url.length > 0));
+                }
+                if (typeof directResult?.imageUrl === 'string' && directResult.imageUrl.length > 0) imageUrls.push(directResult.imageUrl);
+              }
+              return { imageUrls: Array.from(new Set(imageUrls)), result, failed };
+            };
+            const completeDirectTasks = (imageUrls: string[], directResult?: Record<string, unknown>): void => {
               updateTaskProgress(asyncTaskId, {
                 status: 'completed',
                 progress: 100,
-                label: '生成完成',
+                label: `生成完成 (${imageUrls.length}张)`,
                 result: {
-                  imageUrl: directImageUrl,
+                  imageUrl: imageUrls[0], imageUrls,
                   usedModel: bgData.model || directResult?.usedModel,
                   modelName: bgData.modelName || directResult?.modelName,
                   providerName: bgData.providerName || directResult?.providerName,
@@ -495,52 +509,28 @@ export async function POST(request: NextRequest) {
                   providerId: bgData.providerId || directResult?.providerId,
                 }
               });
-              recordSubmitOnlyTerminal({
-                status: 'completed',
-                imageUrl: directImageUrl,
-                creditStatus: deductedCredits > 0 ? 'charged' : 'not-applicable',
-              });
+              recordSubmitOnlyTerminal({ status: 'completed', imageUrl: imageUrls[0], imageUrls, creditStatus: deductedCredits > 0 ? 'charged' : 'not-applicable' });
+            };
+            const immediateDirect = collectDirectResults();
+            if (immediateDirect.imageUrls.length > 0) {
+              completeDirectTasks(immediateDirect.imageUrls, immediateDirect.result);
               return;
             }
-            // 如果 direct task 还没完成，等待一下再检查
-            console.log(`[generate] submitOnly direct task not yet completed, waiting...`);
+            console.log('[generate] submitOnly direct tasks not yet completed, waiting...');
             for (let waitI = 0; waitI < 10; waitI++) {
               await new Promise(r => setTimeout(r, 1000));
-              const waitTask = getTaskInfo(directBgTaskIds[0]);
-              if (waitTask?.status === 'completed') {
-                const waitResult = waitTask.result as Record<string, unknown> | undefined;
-                const waitImageUrl = waitResult?.imageUrl as string | undefined;
-                if (waitImageUrl) {
-                  console.log(`[generate] submitOnly direct task completed after ${waitI + 1}s, imageUrl: ${waitImageUrl.substring(0, 80)}`);
-                  updateTaskProgress(asyncTaskId, {
-                    status: 'completed',
-                    progress: 100,
-                    label: '生成完成',
-                    result: {
-                      imageUrl: waitImageUrl,
-                      usedModel: bgData.model || waitResult?.usedModel,
-                      modelName: bgData.modelName || waitResult?.modelName,
-                      providerName: bgData.providerName || waitResult?.providerName,
-                      apiBaseUrl: bgData.apiBaseUrl || waitResult?.apiBaseUrl,
-                      providerId: bgData.providerId || waitResult?.providerId,
-                    }
-                  });
-                  recordSubmitOnlyTerminal({
-                    status: 'completed',
-                    imageUrl: waitImageUrl,
-                    creditStatus: deductedCredits > 0 ? 'charged' : 'not-applicable',
-                  });
-                  return;
-                }
+              const waitedDirect = collectDirectResults();
+              if (waitedDirect.imageUrls.length > 0) {
+                completeDirectTasks(waitedDirect.imageUrls, waitedDirect.result);
+                return;
               }
-              if (waitTask?.status === 'failed') {
+              if (waitedDirect.failed) {
                 updateTaskProgress(asyncTaskId, { status: 'failed', progress: 0, error: '生成失败', label: '生成失败' });
                 recordSubmitOnlyTerminal({ status: 'failed', error: '生成失败', creditStatus: deductedCredits > 0 ? 'refunded' : 'not-applicable' });
                 return;
               }
             }
-            // 超时仍未完成，继续到下面的轮询逻辑
-            console.warn(`[generate] submitOnly direct task not completed after 10s, falling through to polling`);
+            console.warn('[generate] submitOnly direct tasks not completed after 10s, falling through to polling');
           }
 
           if (bgTaskIds.length > 0) {
@@ -585,34 +575,43 @@ export async function POST(request: NextRequest) {
             let anyFailed = false;
             let failedError = '';
 
-            // 辅助函数：从 poll 响应中提取 imageUrl
-            const extractImageUrl = (pollData: Record<string, unknown>): string => {
+            // 辅助函数：从不同提供商的 poll 响应中提取全部图片 URL
+            const extractImageUrls = (pollData: Record<string, unknown>): string[] => {
+              const urls: string[] = [];
+              const pushValue = (value: unknown): void => {
+                if (typeof value === 'string' && value.length > 0) {
+                  urls.push(value.startsWith('data:') || value.startsWith('http') || value.startsWith('/') ? value : `data:image/png;base64,${value}`);
+                  return;
+                }
+                if (Array.isArray(value)) {
+                  value.forEach(pushValue);
+                  return;
+                }
+                if (value && typeof value === 'object') {
+                  const item = value as Record<string, unknown>;
+                  pushValue(item.url || item.image_url || item.imageUrl || item.b64_json);
+                }
+              };
               const resultObj = pollData.result as Record<string, unknown> | undefined;
               const dataObj = pollData.data as Record<string, unknown> | undefined;
-              const outputObj = pollData.output as Array<Record<string, unknown>> | undefined;
-              const extractFirstUrlFromArray = (arr: unknown): string | undefined => {
-                if (!arr || !Array.isArray(arr) || arr.length === 0) return undefined;
-                const first = arr[0] as Record<string, unknown> | undefined;
-                if (!first) return undefined;
-                const rawUrl = first.url || first.image_url || first.b64_json;
-                return typeof rawUrl === 'string' ? rawUrl : undefined;
-              };
-              return (pollData.imageUrl as string)
-                || (resultObj?.imageUrl as string)
-                || (dataObj?.imageUrl as string)
-                || (pollData.url as string)
-                || (resultObj?.url as string)
-                || extractFirstUrlFromArray(pollData.images)
-                || extractFirstUrlFromArray(dataObj as unknown as Array<Record<string, unknown>>)
-                || extractFirstUrlFromArray(resultObj?.images)
-                || extractFirstUrlFromArray(resultObj?.data as unknown as Array<Record<string, unknown>>)
-                || extractFirstUrlFromArray(outputObj)
-                || extractFirstUrlFromArray(resultObj?.output)
-                || '';
+              pushValue(pollData.imageUrls);
+              pushValue(resultObj?.imageUrls);
+              pushValue(dataObj?.imageUrls);
+              pushValue(pollData.image_urls);
+              pushValue(resultObj?.image_urls);
+              pushValue(pollData.generated_images);
+              pushValue(resultObj?.generated_images);
+              pushValue(pollData.images);
+              pushValue(resultObj?.images);
+              pushValue(resultObj?.data);
+              pushValue(pollData.output);
+              pushValue(resultObj?.output);
+              pushValue(pollData.imageUrl || resultObj?.imageUrl || dataObj?.imageUrl || pollData.url || resultObj?.url);
+              return Array.from(new Set(urls));
             };
 
-            // 轮询单个 bgTaskId，返回 { completed, failed, imageUrl, maskUrl, error }
-            const pollSingleBgTask = async (taskId: string): Promise<{ completed: boolean; failed: boolean; imageUrl: string; maskUrl: string; error: string }> => {
+            // 轮询单个 bgTaskId，返回该远程任务的全部图片结果
+            const pollSingleBgTask = async (taskId: string): Promise<{ completed: boolean; failed: boolean; imageUrls: string[]; maskUrls: string[]; error: string }> => {
               try {
                 const pollRes = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/poll-task`, {
                   method: 'POST',
@@ -628,26 +627,29 @@ export async function POST(request: NextRequest) {
                 const contentType = pollRes.headers.get('content-type') || '';
                 const responseText = await pollRes.text();
                 if (contentType.includes('text/html') || responseText.trim().startsWith('<!DOCTYPE') || responseText.trim().startsWith('<html')) {
-                  return { completed: false, failed: false, imageUrl: '', maskUrl: '', error: '' };
+                  return { completed: false, failed: false, imageUrls: [], maskUrls: [], error: '' };
                 }
                 const pollData = JSON.parse(responseText) as Record<string, unknown>;
-                const imageUrl = extractImageUrl(pollData);
-                const maskUrl = (pollData.maskUrl as string) || '';
-                if (pollData.status === 'completed' && imageUrl) {
-                  return { completed: true, failed: false, imageUrl, maskUrl, error: '' };
+                const imageUrls = extractImageUrls(pollData);
+                const maskUrls = Array.from(new Set([
+                  ...(Array.isArray(pollData.maskUrls) ? pollData.maskUrls : []),
+                  ...(typeof pollData.maskUrl === 'string' ? [pollData.maskUrl] : []),
+                ].filter((url): url is string => typeof url === 'string' && url.length > 0)));
+                if (pollData.status === 'completed' && imageUrls.length > 0) {
+                  return { completed: true, failed: false, imageUrls, maskUrls, error: '' };
                 }
                 if (pollData.status === 'failed') {
-                  return { completed: false, failed: true, imageUrl: '', maskUrl: '', error: (pollData.error as string) || '生成失败' };
+                  return { completed: false, failed: true, imageUrls: [], maskUrls: [], error: (pollData.error as string) || '生成失败' };
                 }
-                return { completed: false, failed: false, imageUrl: '', maskUrl: '', error: '' };
+                return { completed: false, failed: false, imageUrls: [], maskUrls: [], error: '' };
               } catch {
-                return { completed: false, failed: false, imageUrl: '', maskUrl: '', error: '' };
+                return { completed: false, failed: false, imageUrls: [], maskUrls: [], error: '' };
               }
             };
 
             // 主轮询循环：每轮并行轮询所有未完成的 bgTaskIds
             const pendingSet = new Set(bgTaskIds);
-            const collectedResults = new Map<string, { imageUrl: string; maskUrl: string }>();
+            const collectedResults = new Map<string, { imageUrls: string[]; maskUrls: string[] }>();
 
             while (bgPollAttempts < bgMaxPollAttempts && pendingSet.size > 0) {
               bgPollAttempts++;
@@ -665,7 +667,7 @@ export async function POST(request: NextRequest) {
                   failedError = r.error || failedError || '生成失败';
                   pendingSet.delete(r.taskId);
                 } else if (r.completed) {
-                  collectedResults.set(r.taskId, { imageUrl: r.imageUrl, maskUrl: r.maskUrl });
+                  collectedResults.set(r.taskId, { imageUrls: r.imageUrls, maskUrls: r.maskUrls });
                   pendingSet.delete(r.taskId);
                 }
               }
@@ -685,12 +687,16 @@ export async function POST(request: NextRequest) {
             for (const taskId of bgTaskIds) {
               const r = collectedResults.get(taskId);
               if (r) {
-                collectedImageUrls.push(r.imageUrl);
-                if (r.maskUrl) collectedMaskUrls.push(r.maskUrl);
+                collectedImageUrls.push(...r.imageUrls);
+                collectedMaskUrls.push(...r.maskUrls);
               }
             }
+            const uniqueImageUrls = Array.from(new Set(collectedImageUrls));
+            const uniqueMaskUrls = Array.from(new Set(collectedMaskUrls));
+            collectedImageUrls.splice(0, collectedImageUrls.length, ...uniqueImageUrls);
+            collectedMaskUrls.splice(0, collectedMaskUrls.length, ...uniqueMaskUrls);
 
-            allCompleted = collectedImageUrls.length === bgTaskIds.length;
+            allCompleted = pendingSet.size === 0 && collectedResults.size === bgTaskIds.length;
 
             if (allCompleted && collectedImageUrls.length > 0) {
               updateTaskProgress(asyncTaskId, {
@@ -712,7 +718,9 @@ export async function POST(request: NextRequest) {
               recordSubmitOnlyTerminal({
                 status: 'completed',
                 imageUrl: collectedImageUrls[0],
+                imageUrls: collectedImageUrls,
                 maskUrl: collectedMaskUrls[0] || undefined,
+                maskUrls: collectedMaskUrls,
                 creditStatus: deductedCredits > 0 ? 'charged' : 'not-applicable',
               });
               console.log(`[generate] submitOnly all ${collectedImageUrls.length}/${bgTaskIds.length} tasks completed for ${asyncTaskId}`);

@@ -66,6 +66,36 @@ function getInitialProjectId(): string | null {
   return new URLSearchParams(window.location.search).get('projectId');
 }
 
+function extractGeneratedImageUrls(payload: Record<string, unknown>): string[] {
+  const urls: string[] = [];
+  const pushValue = (value: unknown): void => {
+    if (typeof value === 'string' && value.length > 0) {
+      urls.push(value.startsWith('data:') || value.startsWith('http') || value.startsWith('/') ? value : `data:image/png;base64,${value}`);
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach(pushValue);
+      return;
+    }
+    if (value && typeof value === 'object') {
+      const item = value as Record<string, unknown>;
+      pushValue(item.url || item.image_url || item.imageUrl || item.b64_json);
+    }
+  };
+  const result = payload.result as Record<string, unknown> | undefined;
+  pushValue(payload.imageUrls);
+  pushValue(result?.imageUrls);
+  pushValue(payload.image_urls);
+  pushValue(result?.image_urls);
+  pushValue(payload.images);
+  pushValue(result?.images);
+  pushValue(result?.data);
+  pushValue(payload.output);
+  pushValue(result?.output);
+  pushValue(payload.imageUrl || result?.imageUrl || result?.image);
+  return Array.from(new Set(urls));
+}
+
 function recordUserData(input: {
   userId?: string;
   area: 'images' | 'chat' | 'projects' | 'uploads' | 'layers' | 'exports' | '3d';
@@ -1523,7 +1553,33 @@ function CanvasApp() {
         const perTaskMaxPollTime = Math.min(600, Math.max(120, estimatedTime * 4 + 120)) * 1000;
         const globalStartTime = Date.now();
 
-        const completedImages: Array<{ id: string; url: string; prompt: string; model?: string; quality?: string; aspectRatio?: string; stylePreset?: string; category?: string; size?: string; sourceUrl?: string; modelName?: string; apiProvider?: string }> = [];        let consecutiveErrors = 0;
+        const completedImages: Array<{ id: string; url: string; prompt: string; model?: string; quality?: string; aspectRatio?: string; stylePreset?: string; category?: string; size?: string; sourceUrl?: string; modelName?: string; apiProvider?: string }> = [];
+        let consecutiveErrors = 0;
+        let terminalTaskCount = 0;
+
+        const updateBatchProgress = (): void => {
+          const completedSlots = Math.min(completedImages.length, placeholderIds.length);
+          const remainingSlots = Math.max(placeholderIds.length - completedSlots, 0);
+          const terminalProgress = taskIds.length > 0
+            ? Math.round((terminalTaskCount / taskIds.length) * 100)
+            : 100;
+
+          setImages(prev => prev.map((img): CanvasImage => {
+            if (!img.isProcessingPlaceholder || !img.processing || !placeholderIds.includes(img.id)) {
+              return img;
+            }
+            return {
+              ...img,
+              processing: {
+                ...img.processing,
+                label: remainingSlots > 0
+                  ? `已完成 ${completedSlots}/${placeholderIds.length}，剩余 ${remainingSlots} 张`
+                  : '正在整理生成结果',
+                progress: terminalProgress,
+              },
+            };
+          }));
+        };
 
         for (let taskIdx = 0; taskIdx < taskIds.length; taskIdx++) {
           const currentTaskId = taskIds[taskIdx];
@@ -1537,11 +1593,14 @@ function CanvasApp() {
             // 检查是否超时：单任务超时 或 全局超时
             if (taskElapsed > perTaskMaxPollTime || globalElapsed > globalMaxPollTime) {
               console.warn(`[生成轮询] 超时退出 taskId=${currentTaskId}, 任务耗时=${Math.round(taskElapsed / 1000)}s, 全局耗时=${Math.round(globalElapsed / 1000)}s, perTaskMax=${perTaskMaxPollTime / 1000}s, globalMax=${globalMaxPollTime / 1000}s`);
+              terminalTaskCount++;
+              updateBatchProgress();
               toast.error('生成超时', {
                 description: `${data.modelName} 生成时间过长（已等待${Math.round(taskElapsed / 1000)}秒）。可能原因：API排队中、模型负载高、提示词复杂度高。请稍后重试或降低分辨率`,
                 className: 'bg-[#141414] border border-red-900 text-white',
                 duration: 10000,
               });
+              taskCompleted = true;
               break;
             }
 
@@ -1566,10 +1625,8 @@ function CanvasApp() {
               if (!pollData.success && !pollData.retryable) {
                 // 不可重试的错误
                 console.error(`[poll] taskId=${currentTaskId} NON-RETRYABLE error after ${Math.round((Date.now()-taskStartTime)/1000)}s, pollCount=${pollCount}`, pollData.error);
-                // 清理处理帧占位符，避免空图片框残留在画布上
-                for (const failedPhId of placeholderIds) {
-                  setImages(prev => prev.filter(img => img.id !== failedPhId));
-                }
+                terminalTaskCount++;
+                updateBatchProgress();
                 toast.error('生成失败', {
                   description: pollData.error || '任务执行失败',
                   className: 'bg-[#141414] border border-red-900 text-white',
@@ -1582,10 +1639,8 @@ function CanvasApp() {
               // 根据单任务最大轮询时间动态计算最大重试次数（间隔按3s估算），确保不会过早放弃
               if (!pollData.success && pollData.retryable && pollCount > Math.floor(perTaskMaxPollTime / 3000)) {
                 console.warn(`[生成] 可重试错误已达 ${pollCount} 次 (上限 ${Math.floor(perTaskMaxPollTime / 3000)})，最后错误: ${pollData.error}`);
-                // 清理处理帧占位符，避免空图片框残留在画布上
-                for (const failedPhId of placeholderIds) {
-                  setImages(prev => prev.filter(img => img.id !== failedPhId));
-                }
+                terminalTaskCount++;
+                updateBatchProgress();
                 toast.error('生成失败', {
                   description: pollData.error || '多次重试后仍未生成图像，建议稍后在画布查看',
                   className: 'bg-[#141414] border border-red-900 text-white',
@@ -1599,144 +1654,33 @@ function CanvasApp() {
                 continue;
               }
 
-              const completedImageUrl = (pollData.imageUrl || pollData.result?.imageUrl || (pollData.result?.image as Record<string, unknown>)?.url || (pollData.result?.images as Array<Record<string, unknown>>)?.[0]?.url) as string | undefined;
-              if (pollData.status === 'completed' && completedImageUrl) {
-                const rawImageUrl = completedImageUrl;
-                completedImages.push({
-                  id: `${Date.now()}-${taskIdx}`,
-                  url: rawImageUrl,
-                  prompt: enhancedPrompt || params.prompt,
-                  model: params.model,
-                  quality: params.quality,
-                  aspectRatio: params.aspectRatio,
-                  stylePreset: params.stylePreset,
-                  category: (params.imageCategory && params.imageCategory !== 'none') ? params.imageCategory : ((params.productCategory && params.productCategory !== 'none') ? params.productCategory : undefined),
-                  size: params.size,
-                  sourceUrl: rawImageUrl,
-                  modelName: pollData.modelName || undefined,
-                  apiProvider: pollData.providerName || undefined,
+              const completedImageUrls = extractGeneratedImageUrls(pollData as Record<string, unknown>);
+              if (pollData.status === 'completed' && completedImageUrls.length > 0) {
+                completedImageUrls.forEach((rawImageUrl, imageIdx) => {
+                  completedImages.push({
+                    id: `${Date.now()}-${taskIdx}-${imageIdx}`,
+                    url: rawImageUrl,
+                    prompt: enhancedPrompt || params.prompt,
+                    model: params.model,
+                    quality: params.quality,
+                    aspectRatio: params.aspectRatio,
+                    stylePreset: params.stylePreset,
+                    category: (params.imageCategory && params.imageCategory !== 'none') ? params.imageCategory : ((params.productCategory && params.productCategory !== 'none') ? params.productCategory : undefined),
+                    size: params.size,
+                    sourceUrl: rawImageUrl,
+                    modelName: pollData.modelName || undefined,
+                    apiProvider: pollData.providerName || undefined,
+                  });
                 });
                 taskCompleted = true;
                 consecutiveErrors = 0;
-
-                // 立即替换对应占位框为真实图片（而非等全部完成）
-                const phId = placeholderIds[taskIdx];
-                if (phId) {
-                  // 持久化 data: URL
-                  const persistAndReplace = async () => {
-                    let finalUrl = rawImageUrl;
-                    if (rawImageUrl.startsWith('data:')) {
-                      try {
-                        const saveResp = await fetch('/api/save-image', {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ imageUrl: rawImageUrl, userId: currentUserRef.current?.id, sourceUrl: rawImageUrl }),
-                        });
-                        const saveData = await saveResp.json();
-                        if (saveData.success && saveData.url) finalUrl = saveData.url;
-                      } catch { /* save failed, keep data URL */ }
-                    }
-
-                    // 获取图片真实尺寸
-                    const loadSize = (url: string): Promise<{w: number; h: number}> => new Promise(resolve => {
-                      const img = new window.Image();
-                      img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
-                      img.onerror = () => resolve({ w: 0, h: 0 });
-                      img.src = url;
-                    });
-                    const { w: natW, h: natH } = await loadSize(finalUrl);
-
-                    // 替换占位框为真实图片
-                    setImages(prev => prev.map((img): CanvasImage => {
-                      if (img.id !== phId || !img.isProcessingPlaceholder) return img;
-                      const displayW = natW > 0 ? Math.round(natW * Math.min(400 / natW, 400 / (natH || 1))) : img.width;
-                      const displayH = natH > 0 ? Math.round(natH * Math.min(400 / (natW || 1), 400 / natH)) : img.height;
-                      return {
-                        ...img,
-                        url: finalUrl,
-                        width: displayW || img.width,
-                        height: displayH || img.height,
-                        originalWidth: natW || img.originalWidth,
-                        originalHeight: natH || img.originalHeight,
-                        isProcessingPlaceholder: false,
-                        processing: undefined,
-                        prompt: enhancedPrompt || params.prompt,
-                        model: params.model,
-                        quality: params.quality,
-                        aspectRatio: params.aspectRatio,
-                        stylePreset: params.stylePreset,
-                        category: (params.imageCategory && params.imageCategory !== 'none') ? params.imageCategory : ((params.productCategory && params.productCategory !== 'none') ? params.productCategory : undefined),
-                        size: params.size,
-                        sourceUrl: finalUrl,
-                        modelName: pollData.modelName || undefined,
-                        apiProvider: pollData.providerName || undefined,
-                      };
-                    }));
-                  };
-                  persistAndReplace().catch(() => {
-                    // 持久化失败时也替换占位框（用原始URL）
-                    setImages(prev => prev.map((img): CanvasImage =>
-                      img.id === phId && img.isProcessingPlaceholder ? {
-                        ...img,
-                        url: rawImageUrl,
-                        isProcessingPlaceholder: false,
-                        processing: undefined,
-                        prompt: enhancedPrompt || params.prompt,
-                        model: params.model,
-                        quality: params.quality,
-                        aspectRatio: params.aspectRatio,
-                        sourceUrl: rawImageUrl,
-                        modelName: pollData.modelName || undefined,
-                        apiProvider: pollData.providerName || undefined,
-                      } : img
-                    ));
-                  });
-
-                  // 更新剩余占位框的进度标签，显示已完成数量
-                  const completedSoFar = taskIdx + 1;
-                  const remainingCount = taskIds.length - completedSoFar;
-                  if (remainingCount > 0) {
-                    setImages(prev => prev.map((img): CanvasImage => {
-                      if (img.isProcessingPlaceholder && img.processing) {
-                        return {
-                          ...img,
-                          processing: {
-                            ...img.processing,
-                            label: `已完成 ${completedSoFar}/${taskIds.length}，剩余 ${remainingCount} 张`,
-                            progress: Math.round((completedSoFar / taskIds.length) * 100),
-                          },
-                        };
-                      }
-                      return img;
-                    }));
-                  }
-                }
+                terminalTaskCount++;
+                updateBatchProgress();
 
               } else if (pollData.status === 'failed') {
                 console.warn(`[poll] taskId=${currentTaskId} FAILED after ${Math.round((Date.now()-taskStartTime)/1000)}s, pollCount=${pollCount}`, pollData.error);
-                // 移除对应的占位框，并更新剩余占位框标签
-                const failedPhId = placeholderIds[taskIdx];
-                const completedSoFar = taskIdx + 1;
-                const remainingCount = taskIds.length - completedSoFar;
-                setImages(prev => {
-                  const filtered = prev.filter(img => img.id !== failedPhId);
-                  if (remainingCount > 0) {
-                    return filtered.map((img): CanvasImage => {
-                      if (img.isProcessingPlaceholder && img.processing) {
-                        return {
-                          ...img,
-                          processing: {
-                            ...img.processing,
-                            label: `已完成 ${completedSoFar}/${taskIds.length}，剩余 ${remainingCount} 张`,
-                            progress: Math.round((completedSoFar / taskIds.length) * 100),
-                          },
-                        };
-                      }
-                      return img;
-                    });
-                  }
-                  return filtered;
-                });
+                terminalTaskCount++;
+                updateBatchProgress();
                 toast.error('生成失败', {
                   description: pollData.error || '图像生成任务失败',
                   className: 'bg-[#141414] border border-red-900 text-white',
@@ -1744,6 +1688,8 @@ function CanvasApp() {
                 taskCompleted = true;
 
               } else if (pollData.status === 'cancelled') {
+                terminalTaskCount++;
+                updateBatchProgress();
                 toast.error('任务已取消', {
                   description: pollData.error || '图像生成任务被取消',
                   className: 'bg-[#141414] border border-red-900 text-white',
@@ -1763,6 +1709,8 @@ function CanvasApp() {
               console.error(`Poll error (consecutive: ${consecutiveErrors}):`, pollError);
 
               if (consecutiveErrors >= 5) {
+                terminalTaskCount++;
+                updateBatchProgress();
                 toast.error('轮询失败', {
                   description: '连续多次查询失败，请检查网络连接',
                   className: 'bg-[#141414] border border-red-900 text-white',
@@ -1882,6 +1830,9 @@ function CanvasApp() {
             className: 'bg-[#141414] border-[#2a2a2a] text-white',
           });
           try { UserManagerCore.getInstance().recordUsage('image'); } catch { /* non-blocking */ }
+        } else {
+          // 本批次没有任何成功结果时，统一移除本批次占位框，避免失败/取消/超时后残留加载态。
+          setImages(prev => prev.filter(img => !img.isProcessingPlaceholder || !placeholderIds.includes(img.id)));
         }
 
       // === 旧模式兼容：直接返回结果 - 自动排列布局 ===
@@ -2401,22 +2352,23 @@ function CanvasApp() {
                     break;
                   }
 
-                  const completedImageUrl2 = (pollData.imageUrl || pollData.result?.imageUrl || (pollData.result?.image as Record<string, unknown>)?.url || (pollData.result?.images as Array<Record<string, unknown>>)?.[0]?.url) as string | undefined;
-                  if (pollData.status === 'completed' && completedImageUrl2) {
-                    const imageUrl = completedImageUrl2;
-                    completedImages.push({
-                      id: `${Date.now()}-${taskIdx}`,
-                      url: imageUrl,
-                      prompt: enhancedPrompt || params.prompt,
-                      model: params.model,
-                      quality: params.quality,
-                      aspectRatio: params.aspectRatio,
-                      stylePreset: params.stylePreset,
-                      category: (params.imageCategory && params.imageCategory !== 'none') ? params.imageCategory : ((params.productCategory && params.productCategory !== 'none') ? params.productCategory : undefined),
-                      size: params.size,
-                      sourceUrl: imageUrl,
-                      modelName: pollData.modelName || '',
-                      apiProvider: pollData.providerName || '',
+                  const completedImageUrls = extractGeneratedImageUrls(pollData as Record<string, unknown>);
+                  if (pollData.status === 'completed' && completedImageUrls.length > 0) {
+                    completedImageUrls.forEach((imageUrl, imageIdx) => {
+                      completedImages.push({
+                        id: `${Date.now()}-${taskIdx}-${imageIdx}`,
+                        url: imageUrl,
+                        prompt: enhancedPrompt || params.prompt,
+                        model: params.model,
+                        quality: params.quality,
+                        aspectRatio: params.aspectRatio,
+                        stylePreset: params.stylePreset,
+                        category: (params.imageCategory && params.imageCategory !== 'none') ? params.imageCategory : ((params.productCategory && params.productCategory !== 'none') ? params.productCategory : undefined),
+                        size: params.size,
+                        sourceUrl: imageUrl,
+                        modelName: pollData.modelName || '',
+                        apiProvider: pollData.providerName || '',
+                      });
                     });
                     taskCompleted = true;
                     consecutiveErrors = 0;

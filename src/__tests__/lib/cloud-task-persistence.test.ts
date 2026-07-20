@@ -86,7 +86,44 @@ describe('cloud-task-persistence', () => {
       status: 'completed',
       progress: 100,
       creditStatus: 'charged',
-      result: { imageUrl: '/uploads/result.png', maskUrl: '/uploads/mask.png' },
+      result: {
+        imageUrl: '/uploads/result.png',
+        imageUrls: ['/uploads/result.png'],
+        maskUrl: '/uploads/mask.png',
+        maskUrls: ['/uploads/mask.png'],
+      },
+    }));
+  });
+
+  it('persists all batch image and mask URLs while keeping the first item compatible', async () => {
+    await recordImageTaskTerminal('remote-task-batch', {
+      status: 'completed',
+      imageUrl: '/uploads/result-1.png',
+      imageUrls: [
+        '/uploads/result-1.png',
+        '/uploads/result-2.png',
+        '/uploads/result-1.png',
+        '/uploads/result-3.png',
+      ],
+      maskUrl: '/uploads/mask-1.png',
+      maskUrls: ['/uploads/mask-1.png', '/uploads/mask-2.png'],
+      creditStatus: 'charged',
+    });
+
+    expect(updateCloudTask).toHaveBeenCalledWith('remote-task-batch', expect.objectContaining({
+      status: 'completed',
+      progress: 100,
+      creditStatus: 'charged',
+      result: {
+        imageUrl: '/uploads/result-1.png',
+        imageUrls: [
+          '/uploads/result-1.png',
+          '/uploads/result-2.png',
+          '/uploads/result-3.png',
+        ],
+        maskUrl: '/uploads/mask-1.png',
+        maskUrls: ['/uploads/mask-1.png', '/uploads/mask-2.png'],
+      },
     }));
   });
 

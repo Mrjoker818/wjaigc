@@ -15639,7 +15639,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       {showLayerPanel && (
         <Suspense fallback={null}>
           <LayerPanel
-            floating
+            position="right"
+            width={320}
             images={images}
             selectedIds={Array.from(selectedIds)}
             isMonochrome={isMonochrome}
@@ -15673,7 +15674,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       {showVersionHistory && versionHistoryManager && (
         <Suspense fallback={null}>
           <VersionHistoryPanel
-            floating
+            position="right"
+            width={360}
             manager={versionHistoryManager}
             isMonochrome={isMonochrome}
             onRestore={(nodeId) => {
@@ -16024,7 +16026,13 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
         {/* 图层面板按钮 */}
         <button
-          onClick={() => setShowLayerPanel(prev => !prev)}
+          onClick={() => {
+            setShowLayerPanel(prev => {
+              const next = !prev;
+              if (next) setShowVersionHistory(false);
+              return next;
+            });
+          }}
           className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${showLayerPanel ? (isMonochrome ? 'text-blue-500 bg-blue-50 ring-1 ring-blue-500/30' : 'text-gold bg-gold/20 ring-1 ring-gold/40') : (isMonochrome ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100' : 'text-gold-muted hover:text-gold-light hover:bg-gold/10')}`}
           title={showLayerPanel ? '关闭图层' : '打开图层'}
         >
@@ -16034,7 +16042,13 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
         {/* 版本历史按钮 */}
         <button
-          onClick={() => setShowVersionHistory(prev => !prev)}
+          onClick={() => {
+            setShowVersionHistory(prev => {
+              const next = !prev;
+              if (next) setShowLayerPanel(false);
+              return next;
+            });
+          }}
           className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${showVersionHistory ? (isMonochrome ? 'text-blue-500 bg-blue-50 ring-1 ring-blue-500/30' : 'text-gold bg-gold/20 ring-1 ring-gold/40') : (isMonochrome ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100' : 'text-gold-muted hover:text-gold-light hover:bg-gold/10')}`}
           title={showVersionHistory ? '关闭版本历史' : '版本历史'}
         >

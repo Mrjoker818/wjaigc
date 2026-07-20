@@ -31,7 +31,15 @@ export const dynamic = 'force-dynamic';
 // ★ 本地完成缓存：避免同一任务重复查远端API和重复持久化
 // （Next.js dev模式下不同路由可能使用不同的 task-registry 实例，
 //   所以在 poll-task 内部维护自己的缓存更可靠）
-const completedTaskCache = new Map<string, { imageUrl: string; maskUrl?: string; modelName?: string; providerName?: string; timestamp: number }>();
+const completedTaskCache = new Map<string, {
+  imageUrl: string;
+  imageUrls?: string[];
+  maskUrl?: string;
+  maskUrls?: string[];
+  modelName?: string;
+  providerName?: string;
+  timestamp: number;
+}>();
 const FAILED_CACHE = Symbol('failed');
 const failedTaskCache = new Map<string, { error: string; timestamp: number }>();
 const TASK_RECOVERY_LEASE_MS = 10 * 60_000;
@@ -506,7 +514,9 @@ export async function POST(request: NextRequest) {
         status: 'completed',
         progress: 100,
         imageUrl: cachedCompleted.imageUrl,
+        imageUrls: cachedCompleted.imageUrls || [cachedCompleted.imageUrl],
         maskUrl: cachedCompleted.maskUrl || '',
+        maskUrls: cachedCompleted.maskUrls || (cachedCompleted.maskUrl ? [cachedCompleted.maskUrl] : []),
         modelName: cachedCompleted.modelName || '',
         providerName: cachedCompleted.providerName || '',
       }, { status: 200 });
@@ -537,7 +547,13 @@ export async function POST(request: NextRequest) {
             status: 'completed',
             progress: 100,
             imageUrl: persistedTask.result.imageUrl,
+            imageUrls: Array.isArray(persistedTask.result.imageUrls)
+              ? persistedTask.result.imageUrls
+              : [persistedTask.result.imageUrl],
             maskUrl: persistedTask.result.maskUrl || '',
+            maskUrls: Array.isArray(persistedTask.result.maskUrls)
+              ? persistedTask.result.maskUrls
+              : (persistedTask.result.maskUrl ? [persistedTask.result.maskUrl] : []),
           }, { status: 200 });
         }
         if (persistedTask.status === 'completed' && persistedTask.result?.videoUrl) {
@@ -651,9 +667,16 @@ export async function POST(request: NextRequest) {
               await recordImageTaskTerminal(recovered.taskId, {
                 status: 'completed',
                 imageUrl: directImageUrls[0],
+                imageUrls: directImageUrls,
                 creditStatus: persistedTask.creditCost && persistedTask.creditCost > 0 ? 'charged' : 'not-applicable',
               });
-              return NextResponse.json({ success: true, status: 'completed', progress: 100, imageUrl: directImageUrls[0] }, { status: 200 });
+              return NextResponse.json({
+                success: true,
+                status: 'completed',
+                progress: 100,
+                imageUrl: directImageUrls[0],
+                imageUrls: directImageUrls,
+              }, { status: 200 });
             }
 
             const remoteTaskIds = Array.isArray(resumedData.taskIds)
@@ -739,12 +762,14 @@ export async function POST(request: NextRequest) {
           progress: registryTask.progress,
           result: safeResult,
           imageUrl: safeResult?.imageUrl as string | undefined,
+          imageUrls: Array.isArray(safeResult?.imageUrls) ? safeResult.imageUrls : undefined,
           ...(completedVideo?.videoUrl ? {
             mediaType: 'video',
             videoUrl: completedVideo.videoUrl,
             imageUrl: completedVideo.videoUrl,
           } : {}),
           maskUrl: safeResult?.maskUrl as string | undefined,
+          maskUrls: Array.isArray(safeResult?.maskUrls) ? safeResult.maskUrls : undefined,
           modelName: (safeResult?.usedModel as string) || (safeResult?.modelName as string) || '',
           providerName: (safeResult?.providerName as string) || (safeResult?.providerId as string) || '',
         }, { status: 200 });
@@ -1376,6 +1401,21 @@ export async function POST(request: NextRequest) {
 
     if (completedStatuses.includes(taskStatus || '')) {
       // 提取图片URL - 通用格式兼容（多种 API 响应格式）
+      const sourceImageUrls: string[] = [];
+      const appendSourceImageUrl = (value: unknown, base64 = false): void => {
+        if (Array.isArray(value)) {
+          value.forEach(item => appendSourceImageUrl(item, base64));
+          return;
+        }
+        if (value && typeof value === 'object') {
+          const item = value as Record<string, unknown>;
+          appendSourceImageUrl(item.url ?? item.image_url ?? item.imageUrl ?? item.src ?? item.b64_json, Boolean(item.b64_json));
+          return;
+        }
+        if (typeof value !== 'string' || value.length === 0) return;
+        const url = base64 && !value.startsWith('data:') ? `data:image/png;base64,${value}` : value;
+        if (!sourceImageUrls.includes(url)) sourceImageUrls.push(url);
+      };
       let sourceImageUrl: string | null = null;
 
       // ★ 日志：原始 taskData 结构（深度解析 APImart 响应）
@@ -1395,68 +1435,42 @@ export async function POST(request: NextRequest) {
       }
 
       // 路径1: data.result.images[].url（APImart 格式）
-      const images = (taskData?.result as Record<string, unknown>)?.images as Array<Record<string, unknown>> | undefined;
-      console.log(`[poll-task] taskId=${taskId} path1: images array exists=${!!images}, length=${images?.length || 0}`);
-      if (images && images.length > 0) {
-        const firstImage = images[0];
-        const rawUrl = firstImage.url || firstImage.image_url || firstImage.src;
-        sourceImageUrl = Array.isArray(rawUrl) ? rawUrl[0] : (typeof rawUrl === 'string' ? rawUrl : null);
-      }
-
-      // 路径2: data.result.b64_json
       const taskResult = taskData?.result as Record<string, unknown> | undefined;
-      if (!sourceImageUrl && taskResult?.b64_json) {
-        sourceImageUrl = `data:image/png;base64,${taskResult.b64_json}`;
-      }
+      const images = taskResult?.images as Array<Record<string, unknown>> | undefined;
+      console.log(`[poll-task] taskId=${taskId} path1: images array exists=${!!images}, length=${images?.length || 0}`);
+      appendSourceImageUrl(images);
+
+      // 路径2: data.result.b64_json / image_urls / generated_images / data
+      appendSourceImageUrl(taskResult?.b64_json, true);
+      appendSourceImageUrl(taskResult?.image_urls);
+      appendSourceImageUrl(taskResult?.imageUrls);
+      appendSourceImageUrl(taskResult?.generated_images);
+      appendSourceImageUrl(taskResult?.data);
 
       // 路径3: data.output[].url（OpenAI images/generations 兼容格式）
       // 也兼容 PearAPI 格式: data.output.data[].url / data.output.image_urls[]
-      if (!sourceImageUrl) {
-        const output = taskData?.output as Record<string, unknown> | Array<Record<string, unknown>> | undefined;
-        if (output) {
-          if (Array.isArray(output) && output.length > 0) {
-            const rawUrl = output[0].url || output[0].image_url;
-            sourceImageUrl = Array.isArray(rawUrl) ? rawUrl[0] : (typeof rawUrl === 'string' ? rawUrl : null);
-          } else if (typeof output === 'object') {
-            // PearAPI: output.data[].url
-            const outputData = (output as Record<string, unknown>).data as Array<Record<string, unknown>> | undefined;
-            if (outputData && Array.isArray(outputData) && outputData.length > 0) {
-              const rawUrl = outputData[0].url || outputData[0].image_url || outputData[0].b64_json;
-              if (typeof rawUrl === 'string') sourceImageUrl = rawUrl;
-            }
-            // PearAPI: output.image_urls[]
-            if (!sourceImageUrl) {
-              const outputImageUrls = (output as Record<string, unknown>).image_urls as string[] | undefined;
-              if (Array.isArray(outputImageUrls) && outputImageUrls.length > 0) {
-                sourceImageUrl = outputImageUrls[0];
-              }
-            }
-            // 兜底: output.url
-            if (!sourceImageUrl && typeof (output as Record<string, unknown>).url === 'string') {
-              sourceImageUrl = (output as Record<string, unknown>).url as string;
-            }
-          }
-        }
+      const output = taskData?.output as Record<string, unknown> | Array<Record<string, unknown>> | undefined;
+      if (Array.isArray(output)) {
+        appendSourceImageUrl(output);
+      } else if (output && typeof output === 'object') {
+        appendSourceImageUrl(output.data);
+        appendSourceImageUrl(output.image_urls);
+        appendSourceImageUrl(output.imageUrls);
+        appendSourceImageUrl(output.generated_images);
+        appendSourceImageUrl(output.url ?? output.image_url ?? output.imageUrl);
       }
 
       // 路径4: data.data[].url（嵌套 data 数组格式 - 同步模式直返）
-      if (!sourceImageUrl) {
-        const nestedData = taskData?.data as Array<Record<string, unknown>> | undefined;
-        if (nestedData && Array.isArray(nestedData) && nestedData.length > 0) {
-          const rawUrl = nestedData[0].url || nestedData[0].image_url || nestedData[0].b64_json;
-          if (typeof rawUrl === 'string') {
-            sourceImageUrl = rawUrl.startsWith('data:') ? rawUrl : rawUrl;
-          }
-        }
-      }
+      appendSourceImageUrl(taskData?.data);
 
-      // 路径5: data.image_url / data.url（单图格式）
-      if (!sourceImageUrl) {
-        const singleUrl = (taskData?.image_url as string) || (taskData?.url as string);
-        if (singleUrl && typeof singleUrl === 'string') {
-          sourceImageUrl = Array.isArray(singleUrl) ? singleUrl[0] : singleUrl;
-        }
-      }
+      // 路径5: data.images / image_urls / generated_images / image_url / url
+      appendSourceImageUrl(taskData?.images);
+      appendSourceImageUrl(taskData?.image_urls);
+      appendSourceImageUrl(taskData?.imageUrls);
+      appendSourceImageUrl(taskData?.generated_images);
+      appendSourceImageUrl(taskData?.image_url ?? taskData?.imageUrl ?? taskData?.url);
+
+      sourceImageUrl = sourceImageUrls[0] || null;
 
       // ★ 日志：最终提取结果
       const safeSourceImageUrl = typeof sourceImageUrl === 'string' ? sourceImageUrl : (sourceImageUrl ? JSON.stringify(sourceImageUrl).substring(0, 100) : '(null)');
@@ -1469,58 +1483,37 @@ export async function POST(request: NextRequest) {
         console.log(`[poll-task] taskId=${taskId} imageUrl存在，强制设置为completed状态`);
       }
 
-      // ★ 持久化图片策略：
-      // 同步持久化所有图片URL：
-      // - data: URL 浏览器无法缓存
-      // - 远程HTTP URL：4K大图浏览器直接加载可能超时/中断，必须先持久化到本地再返回
-      // - 需要后处理的任务：后续步骤需要下载图片
+      // ★ 持久化策略：普通生成任务立即返回完整远程 URL 数组，避免大图下载阻塞 completed 响应。
+      // 只有依赖本地文件的后处理任务才同步持久化首图；批量结果由后续统一缓存与云端终态完整保存。
       if (sourceImageUrl) {
         pollResult.imageUrl = sourceImageUrl;
+        pollResult.imageUrls = sourceImageUrls;
 
-        // 检测是否需要后处理（outpaint/removeBG/crop），这些任务需要同步持久化
         const registryInfoForCheck = getTaskInfo(taskId);
         const registryResultForCheck = (registryInfoForCheck?.result as Record<string, unknown>) || {};
-        const needsPostProcess = !!(registryResultForCheck.outpaintInfo || registryResultForCheck.engine === 'ai-background-remove' || registryResultForCheck.cropInfo);
+        const needsPostProcess = !!(
+          registryResultForCheck.outpaintInfo
+          || registryResultForCheck.engine === 'ai-background-remove'
+          || registryResultForCheck.cropInfo
+          || registryResultForCheck._needsResize
+        );
 
-        try {
-          // 同步持久化：所有图片URL都需要先保存到本地，确保浏览器可靠加载
-          const { persistRemoteImage } = await import('@/lib/s3-storage');
-          const persistedUrl = await persistRemoteImage(sourceImageUrl, `generate/${taskId}`);
-          if (persistedUrl) {
-            pollResult.imageUrl = persistedUrl;
-            completedTaskCache.set(taskId, { imageUrl: persistedUrl, modelName: regModelName || model || '', providerName: regProviderName || providerName || '', timestamp: Date.now() });
-
-            // ★ 诊断日志：验证持久化后的图片实际尺寸，排查"4K变1K"问题
-            try {
-              const sharp = (await import('sharp')).default;
-              const { getServerDataRoot } = await import('@/lib/server-data-root');
-              const path = (await import('path')).default;
-              const fs = (await import('fs')).default;
-              const dataRoot = getServerDataRoot();
-              const filePath = path.join(dataRoot, persistedUrl.replace(/^\/api\/serve-upload\//, ''));
-              if (fs.existsSync(filePath)) {
-                const buf = fs.readFileSync(filePath);
-                const meta = await sharp(buf).metadata();
-                console.log(`[poll-task] Persisted image dimensions: ${meta.width}x${meta.height}, source: ${typeof sourceImageUrl === 'string' ? sourceImageUrl.substring(0, 80) : '(non-string)'}...`);
-              }
-            } catch (dimErr) {
-              // 尺寸检测失败不影响主流程
+        if (needsPostProcess) {
+          try {
+            const { persistRemoteImage } = await import('@/lib/s3-storage');
+            const persistedUrl = await persistRemoteImage(sourceImageUrl, `generate/${taskId}`);
+            if (persistedUrl) {
+              pollResult.imageUrl = persistedUrl;
+              pollResult.imageUrls = [persistedUrl, ...sourceImageUrls.slice(1)];
+              try {
+                const { saveImageDataMapping } = await import('@/lib/image-source-map');
+                const filename = persistedUrl.split('/').pop() || persistedUrl;
+                await saveImageDataMapping(filename, sourceImageUrl);
+              } catch {}
             }
-
-            // Save source mapping for future reference
-            try {
-              const { saveImageDataMapping } = await import('@/lib/image-source-map');
-              const filename = persistedUrl.split('/').pop() || persistedUrl;
-              await saveImageDataMapping(filename, sourceImageUrl);
-            } catch {}
-          } else {
-            // 持久化返回null（文件已存在或失败），使用源URL
-            completedTaskCache.set(taskId, { imageUrl: sourceImageUrl, modelName: regModelName || model || '', providerName: regProviderName || providerName || '', timestamp: Date.now() });
+          } catch (persistErr) {
+            console.warn('[poll-task] Post-process source persist failed, using original URL:', persistErr);
           }
-        } catch (persistErr) {
-          console.warn('[poll-task] Synchronous persist failed:', persistErr);
-          // 持久化失败时仍设置缓存，避免重复查询远端
-          completedTaskCache.set(taskId, { imageUrl: sourceImageUrl, modelName: regModelName || model || '', providerName: regProviderName || providerName || '', timestamp: Date.now() });
         }
 
         // ★ Outpaint 扩展后处理：直接返回 AI API 扩展结果，不合成原图
@@ -1781,7 +1774,6 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        await appendUserJsonl(userId, 'images', { type: 'completed', providerId: providerName, model: model || regUsedModel || '', taskId, imageUrl: pollResult.imageUrl });
       }
       // ★ 更新任务注册中心状态（包含 result，后续 poll 可直接从 registry 返回）
       // 保留原有 result 中的 engine/cropInfo 等元数据
@@ -1816,11 +1808,51 @@ export async function POST(request: NextRequest) {
         pollResult.success = false;
         pollResult.retryable = false;
       } else {
-      updateTaskProgress(taskId, { status: 'completed', progress: 100, result: { ...existingResult, imageUrl: pollResult.imageUrl, maskUrl: maskUrl || '', usedModel: model || regUsedModel || existingResult.usedModel, modelName: finalModelName, providerName: finalProviderName } });
+      const rawPollImageUrls = Array.isArray((pollResult as Record<string, unknown>).imageUrls)
+        ? ((pollResult as Record<string, unknown>).imageUrls as unknown[]).filter((url): url is string => typeof url === 'string' && url.length > 0)
+        : [];
+      const finalPrimaryImageUrl = typeof pollResult.imageUrl === 'string' && pollResult.imageUrl.length > 0
+        ? pollResult.imageUrl
+        : rawPollImageUrls[0];
+      const pollImageUrls = finalPrimaryImageUrl
+        ? [finalPrimaryImageUrl, ...rawPollImageUrls.filter(url => url !== finalPrimaryImageUrl && url !== rawPollImageUrls[0])]
+        : rawPollImageUrls;
+      const existingImageUrls = Array.isArray(existingResult.imageUrls)
+        ? (existingResult.imageUrls as unknown[]).filter((url): url is string => typeof url === 'string' && url.length > 0)
+        : [];
+      const imageUrls = Array.from(new Set([
+        ...pollImageUrls,
+        ...existingImageUrls.filter(url => url !== rawPollImageUrls[0]),
+      ]));
+      const pollMaskUrls = Array.isArray((pollResult as Record<string, unknown>).maskUrls)
+        ? ((pollResult as Record<string, unknown>).maskUrls as unknown[]).filter((url): url is string => typeof url === 'string' && url.length > 0)
+        : [];
+      const existingMaskUrls = Array.isArray(existingResult.maskUrls)
+        ? (existingResult.maskUrls as unknown[]).filter((url): url is string => typeof url === 'string' && url.length > 0)
+        : [];
+      const maskUrls = Array.from(new Set([
+        ...pollMaskUrls,
+        ...existingMaskUrls,
+        ...(maskUrl ? [maskUrl] : []),
+      ]));
+      pollResult.imageUrl = imageUrls[0];
+      (pollResult as Record<string, unknown>).imageUrls = imageUrls;
+      (pollResult as Record<string, unknown>).maskUrls = maskUrls;
+      await appendUserJsonl(userId, 'images', {
+        type: 'completed',
+        providerId: providerName,
+        model: model || regUsedModel || '',
+        taskId,
+        imageUrl: imageUrls[0],
+        imageUrls,
+      });
+      updateTaskProgress(taskId, { status: 'completed', progress: 100, result: { ...existingResult, imageUrl: imageUrls[0], imageUrls, maskUrl: maskUrls[0] || '', maskUrls, usedModel: model || regUsedModel || existingResult.usedModel, modelName: finalModelName, providerName: finalProviderName } });
       void recordImageTaskTerminal(taskId, {
         status: 'completed',
-        imageUrl: typeof pollResult.imageUrl === 'string' ? pollResult.imageUrl : undefined,
-        maskUrl,
+        imageUrl: imageUrls[0],
+        imageUrls,
+        maskUrl: maskUrls[0],
+        maskUrls,
         creditStatus: regInfo?.creditCost && regInfo.creditCost > 0 ? 'charged' : 'not-applicable',
       }).catch(error => console.warn('[poll-task] 云端任务完成记录失败:', error));
 
@@ -1839,15 +1871,18 @@ export async function POST(request: NextRequest) {
       (pollResult as Record<string, unknown>).modelName = finalModelName;
       (pollResult as Record<string, unknown>).providerName = finalProviderName;
 
-      // ★ 将 imageUrls 数组传递给前端（批量出图时使用）
-      if (existingResult.imageUrls) {
-        (pollResult as Record<string, unknown>).imageUrls = existingResult.imageUrls;
-      }
       // ★ 同时更新本地完成缓存（Next.js dev模式下 registry 实例可能不一致）
-      const cachedImageUrl = pollResult.imageUrl as string | undefined;
-      const cachedMaskUrl = (pollResult as Record<string, unknown>).maskUrl as string | undefined;
+      const cachedImageUrl = imageUrls[0];
       if (cachedImageUrl) {
-        completedTaskCache.set(taskId, { imageUrl: cachedImageUrl, maskUrl: cachedMaskUrl || '', modelName: finalModelName, providerName: finalProviderName, timestamp: Date.now() });
+        completedTaskCache.set(taskId, {
+          imageUrl: cachedImageUrl,
+          imageUrls,
+          maskUrl: maskUrls[0] || '',
+          maskUrls,
+          modelName: finalModelName,
+          providerName: finalProviderName,
+          timestamp: Date.now(),
+        });
       }
       }
     } else if (taskStatus?.toLowerCase() === 'failed') {
