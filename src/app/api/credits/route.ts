@@ -198,19 +198,19 @@ export async function GET(request: NextRequest) {
         cnyToCredits: CNY_TO_CREDITS,
         imageModels: Object.fromEntries(
           Object.entries(IMAGE_MODEL_CREDITS).map(([k, v]) => {
-            const credits = resolveConfiguredCreditCost(creditPricing, k, v.credits);
+            const credits = resolveConfiguredCreditCost(creditPricing, k, undefined, v.credits);
             return [k, { credits, label: v.label, cny: (credits * CREDITS_TO_CNY).toFixed(2) }];
           })
         ),
         videoModels: Object.fromEntries(
           Object.entries(VIDEO_MODEL_CREDITS).map(([k, v]) => {
-            const creditsPerSecond = resolveConfiguredCreditCost(creditPricing, k, v.creditsPerSecond);
+            const creditsPerSecond = resolveConfiguredCreditCost(creditPricing, k, undefined, v.creditsPerSecond);
             return [k, { creditsPerSecond, label: v.label, cnyPerSecond: (creditsPerSecond * CREDITS_TO_CNY).toFixed(2) }];
           })
         ),
         chatModels: Object.fromEntries(
           Object.entries(CHAT_MODEL_CREDITS).map(([k, v]) => {
-            const creditsPerCall = resolveConfiguredCreditCost(creditPricing, k, v.creditsPerCall);
+            const creditsPerCall = resolveConfiguredCreditCost(creditPricing, k, undefined, v.creditsPerCall);
             return [k, { creditsPerCall, label: v.label, cny: (creditsPerCall * CREDITS_TO_CNY).toFixed(2) }];
           })
         ),

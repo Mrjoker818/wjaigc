@@ -264,8 +264,8 @@ export default function AdminTabs(props: AdminTabsProps) {
   const [creditSubTab, setCreditSubTab] = useState('user-credits');
   const [creditSearch, setCreditSearch] = useState('');
   const [creditSort, setCreditSort] = useState('balance');
-  const [modelCreditRules, setModelCreditRules] = useState<Record<string, number>>({});
-  const [modelCreditCatalog, setModelCreditCatalog] = useState<Array<{ providerId: string; providerName: string; model: string; modelType: string; credits: number; unit: string; source: string }>>([]);
+  const [modelCreditRules, setModelCreditRules] = useState<Record<string, number | { credits: number; quality?: Record<string, number> }>>({});
+  const [modelCreditCatalog, setModelCreditCatalog] = useState<Array<{ providerId: string; providerName: string; model: string; modelType: string; credits: number; unit: string; source: string; quality?: Record<string, number> }>>([]);
   const [pricingSaving, setPricingSaving] = useState(false);
 
   /* ── Audit state ── */
@@ -324,7 +324,16 @@ export default function AdminTabs(props: AdminTabsProps) {
       const data = await res.json();
       const catalog = data.models || [];
       setModelCreditCatalog(catalog);
-      setModelCreditRules(Object.fromEntries(catalog.map((item: { model: string; credits: number }) => [item.model, item.credits])));
+      // Build rules: support both flat number and {credits, quality} objects
+      const rules: Record<string, number | { credits: number; quality?: Record<string, number> }> = {};
+      for (const item of catalog) {
+        if (item.quality && Object.keys(item.quality).length > 0) {
+          rules[item.model] = { credits: item.credits, quality: item.quality };
+        } else {
+          rules[item.model] = item.credits;
+        }
+      }
+      setModelCreditRules(rules);
     } catch { /* retain the current editable values */ }
   }, []);
 
@@ -1367,9 +1376,82 @@ export default function AdminTabs(props: AdminTabsProps) {
             </div>
             <div className="overflow-x-auto border border-border/60 rounded-md">
               <table className="w-full min-w-[700px] text-sm">
-                <thead className="bg-muted/50 text-xs text-muted-foreground"><tr><th className="px-3 py-2 text-left font-medium">供应商</th><th className="px-3 py-2 text-left font-medium">模型</th><th className="px-3 py-2 text-left font-medium">计费单位</th><th className="px-3 py-2 text-right font-medium">积分</th></tr></thead>
+                <thead className="bg-muted/50 text-xs text-muted-foreground">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium">供应商</th>
+                    <th className="px-3 py-2 text-left font-medium">模型</th>
+                    <th className="px-3 py-2 text-left font-medium">计费单位</th>
+                    <th className="px-3 py-2 text-right font-medium">默认积分</th>
+                    {(() => {
+                      const allTiers = new Set<string>();
+                      modelCreditCatalog.forEach(item => {
+                        if (item.quality) Object.keys(item.quality).forEach(k => allTiers.add(k));
+                      });
+                      return Array.from(allTiers).sort().map(tier => (
+                        <th key={tier} className="px-3 py-2 text-right font-medium">{tier === 'standard' ? '标准' : tier === 'hd' ? '高清' : tier === 'low' ? '低质量' : tier === 'medium' ? '中等' : tier === 'high' ? '高质量' : tier === 'ultra' ? '超高质量' : tier}</th>
+                      ));
+                    })()}
+                  </tr>
+                </thead>
                 <tbody className="divide-y divide-border/60">
-                  {modelCreditCatalog.map(item => <tr key={`${item.providerId}:${item.model}`}><td className="px-3 py-2 text-muted-foreground">{item.providerName}</td><td className="px-3 py-2 font-mono text-xs text-foreground">{item.model}</td><td className="px-3 py-2 text-xs text-muted-foreground">{item.unit === 'per-second' ? '每秒' : item.unit === 'per-image' ? '每张' : '每次'}</td><td className="px-3 py-2 text-right"><input aria-label={`${item.model} 积分`} type="number" min="0" max="100000" value={modelCreditRules[item.model] ?? item.credits} onChange={event => setModelCreditRules(prev => ({ ...prev, [item.model]: Math.max(0, Math.floor(Number(event.target.value) || 0)) }))} className="h-8 w-24 rounded-md border border-border bg-background px-2 text-right text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30" /></td></tr>)}
+                  {modelCreditCatalog.map(item => {
+                    const tiers = item.quality ? Object.keys(item.quality).sort() : [];
+                    const currentRule = modelCreditRules[item.model];
+                    const baseCredits = typeof currentRule === 'number' ? currentRule : (currentRule?.credits ?? item.credits);
+                    const qualityOverrides = (typeof currentRule === 'object' && currentRule?.quality) ? currentRule.quality : {};
+                    return (
+                      <tr key={`${item.providerId}:${item.model}`}>
+                        <td className="px-3 py-2 text-muted-foreground">{item.providerName}</td>
+                        <td className="px-3 py-2 font-mono text-xs text-foreground">{item.model}</td>
+                        <td className="px-3 py-2 text-xs text-muted-foreground">{item.unit === 'per-second' ? '每秒' : item.unit === 'per-image' ? '每张' : '每次'}</td>
+                        <td className="px-3 py-2 text-right">
+                          <input
+                            aria-label={`${item.model} 默认积分`}
+                            type="number" min="0" max="100000"
+                            value={baseCredits}
+                            onChange={event => {
+                              const v = Math.max(0, Math.floor(Number(event.target.value) || 0));
+                              setModelCreditRules(prev => {
+                                const existing = prev[item.model];
+                                if (typeof existing === 'object' && existing?.quality) {
+                                  return { ...prev, [item.model]: { credits: v, quality: existing.quality } };
+                                }
+                                return { ...prev, [item.model]: v };
+                              });
+                            }}
+                            className="h-8 w-24 rounded-md border border-border bg-background px-2 text-right text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+                          />
+                        </td>
+                        {tiers.map(tier => {
+                          const refVal = item.quality?.[tier] ?? baseCredits;
+                          const overrideVal = qualityOverrides[tier];
+                          const displayVal = overrideVal !== undefined ? overrideVal : refVal;
+                          const isOverridden = overrideVal !== undefined;
+                          return (
+                            <td key={tier} className="px-3 py-2 text-right">
+                              <input
+                                aria-label={`${item.model} ${tier} 积分`}
+                                type="number" min="0" max="100000"
+                                value={displayVal}
+                                placeholder={String(refVal)}
+                                onChange={event => {
+                                  const v = Math.max(0, Math.floor(Number(event.target.value) || 0));
+                                  setModelCreditRules(prev => {
+                                    const existing = prev[item.model];
+                                    const base = typeof existing === 'number' ? existing : (existing?.credits ?? item.credits);
+                                    const prevQuality = (typeof existing === 'object' && existing?.quality) ? existing.quality : {};
+                                    const newQuality = { ...prevQuality, [tier]: v };
+                                    return { ...prev, [item.model]: { credits: base, quality: newQuality } };
+                                  });
+                                }}
+                                className={`h-8 w-24 rounded-md border bg-background px-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 ${isOverridden ? 'border-primary/50 text-primary' : 'border-border text-muted-foreground'}`}
+                              />
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
                   {modelCreditCatalog.length === 0 && <tr><td colSpan={4} className="px-3 py-8 text-center text-sm text-muted-foreground">暂无已启用模型，请先在 API 管理中配置模型。</td></tr>}
                 </tbody>
               </table>

@@ -168,11 +168,11 @@ export async function calculateConfiguredCreditCost(
   const config = await loadCreditPricingConfig();
   if (operation === 'video_generate' || operation === 'video_extend') {
     const fallbackPerSecond = getVideoModelCreditsPerSecond(model);
-    const perSecond = resolveConfiguredCreditCost(config, model, fallbackPerSecond);
+    const perSecond = resolveConfiguredCreditCost(config, model, undefined, fallbackPerSecond);
     return perSecond * Math.max(1, options?.durationSeconds || 5);
   }
   const fallback = calculateCreditCost(operation, model, options);
-  const configured = resolveConfiguredCreditCost(config, model, fallback);
+  const configured = resolveConfiguredCreditCost(config, model, options?.quality, fallback);
   return configured;
 }
 
