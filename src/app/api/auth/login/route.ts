@@ -38,10 +38,13 @@ export async function POST(request: NextRequest) {
     await ensureUserDataDirs(user.id);
 
     const response = NextResponse.json({ success: true, user });
+    // Only set secure flag when the connection itself is HTTPS.
+    // On HTTP (e.g. http://127.0.0.1:5000 in test/dev), WebKit rejects secure cookies.
+    const isHttps = request.nextUrl.protocol === 'https:' || request.headers.get('x-forwarded-proto') === 'https';
     response.cookies.set(WUJIE_SESSION_COOKIE, await createSessionToken(user), {
       httpOnly: true,
       sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
+      secure: isHttps,
       path: '/',
       maxAge: WUJIE_SESSION_TTL_SECONDS,
     });
