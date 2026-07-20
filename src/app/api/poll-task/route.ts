@@ -1129,36 +1129,80 @@ export async function POST(request: NextRequest) {
       const effectiveRemoteTaskId = (regResult.remoteTaskId as string | undefined) || (taskIdIsRemote ? taskId : undefined);
       // ★ direct- 前缀的 remoteTaskId 表示同步提供商的直接结果，应从 task-registry 查找而非远程轮询
       if (effectiveRemoteTaskId && effectiveRemoteTaskId.startsWith('direct-')) {
-        const directTask = getTaskInfo(effectiveRemoteTaskId);
-        if (directTask?.status === 'completed') {
-          const directResult = (directTask.result as Record<string, unknown>) || {};
-          const directImageUrl = directResult.imageUrl as string | undefined;
-          if (directImageUrl) {
-            // 将 direct task 的结果同步到当前 async task
-            updateTaskProgress(taskId, {
-              status: 'completed',
-              progress: 100,
-              label: '生成完成',
-              result: {
-                imageUrl: directImageUrl,
-                usedModel: directResult.usedModel || regResult.usedModel,
-                modelName: directResult.modelName || regResult.modelName,
-                providerName: directResult.providerName || regResult.providerName,
-                providerId: directResult.providerId || regResult.providerId,
-                apiBaseUrl: directResult.apiBaseUrl || regResult.apiBaseUrl,
-              },
-            });
-            return NextResponse.json({
-              success: true,
-              status: 'completed',
-              progress: 100,
-              label: '生成完成',
-              imageUrl: directImageUrl,
-              task: getTaskInfo(taskId),
-            }, { status: 200 });
+        // ★ 多图修复：recovery 路径将所有 direct- taskId 存入 remoteTaskIds，
+        // 需聚合全部，而非只取 remoteTaskId（第一个）
+        const allDirectTaskIds: string[] = (
+          Array.isArray(regResult.remoteTaskIds)
+            ? (regResult.remoteTaskIds as unknown[]).filter((id): id is string => typeof id === 'string' && id.startsWith('direct-'))
+            : []
+        );
+        // 确保 remoteTaskId 本身也在列表中
+        if (!allDirectTaskIds.includes(effectiveRemoteTaskId)) {
+          allDirectTaskIds.unshift(effectiveRemoteTaskId);
+        }
+
+        // 检查所有 direct 任务状态并聚合 imageUrls
+        const aggregatedImageUrls: string[] = [];
+        let firstDirectResult: Record<string, unknown> | undefined;
+        let anyStillPending = false;
+
+        for (const directId of allDirectTaskIds) {
+          const directTask = getTaskInfo(directId);
+          if (!directTask || directTask.status === 'processing' || directTask.status === 'queued') {
+            anyStillPending = true;
+            continue;
+          }
+          if (directTask.status === 'completed') {
+            const directResult = (directTask.result as Record<string, unknown>) || {};
+            if (!firstDirectResult) firstDirectResult = directResult;
+            if (Array.isArray(directResult.imageUrls)) {
+              aggregatedImageUrls.push(...(directResult.imageUrls as unknown[]).filter((u): u is string => typeof u === 'string' && u.length > 0));
+            }
+            if (typeof directResult.imageUrl === 'string' && directResult.imageUrl.length > 0) {
+              aggregatedImageUrls.push(directResult.imageUrl);
+            }
           }
         }
-        // direct task 尚未完成，返回 processing
+
+        // 如果有任务仍在进行，等待
+        if (anyStillPending) {
+          return NextResponse.json({
+            success: true,
+            status: 'processing',
+            progress: registryTask.progress || 30,
+            label: '生成中...',
+          }, { status: 200 });
+        }
+
+        const dedupedImageUrls = Array.from(new Set(aggregatedImageUrls));
+        if (dedupedImageUrls.length > 0) {
+          const imageUrl = dedupedImageUrls[0];
+          // 将所有 direct task 的聚合结果同步到当前 async task
+          updateTaskProgress(taskId, {
+            status: 'completed',
+            progress: 100,
+            label: `生成完成 (${dedupedImageUrls.length}张)`,
+            result: {
+              imageUrl,
+              imageUrls: dedupedImageUrls,
+              usedModel: firstDirectResult?.usedModel || regResult.usedModel,
+              modelName: firstDirectResult?.modelName || regResult.modelName,
+              providerName: firstDirectResult?.providerName || regResult.providerName,
+              providerId: firstDirectResult?.providerId || regResult.providerId,
+              apiBaseUrl: firstDirectResult?.apiBaseUrl || regResult.apiBaseUrl,
+            },
+          });
+          return NextResponse.json({
+            success: true,
+            status: 'completed',
+            progress: 100,
+            label: `生成完成 (${dedupedImageUrls.length}张)`,
+            imageUrl,
+            imageUrls: dedupedImageUrls,
+            task: getTaskInfo(taskId),
+          }, { status: 200 });
+        }
+        // direct tasks 均已完成但没有 imageUrl（极罕见），继续 processing
         return NextResponse.json({
           success: true,
           status: 'processing',
