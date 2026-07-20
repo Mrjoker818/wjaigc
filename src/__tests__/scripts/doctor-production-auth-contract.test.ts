@@ -61,4 +61,29 @@ describe('production doctor authentication contract', () => {
     expect(result.stdout).toContain('[WARN] WUJIE_ADMIN_PASSWORD:');
     expect(result.stdout).toContain('[FAIL] database:');
   });
+
+  it('allows Coze startup to use managed object-storage credentials', () => {
+    const environment: NodeJS.ProcessEnv = {
+      ...process.env,
+      COZE_PROJECT_ENV: 'PROD',
+      NODE_ENV: 'production',
+      COZE_BUCKET_ENDPOINT_URL: 'https://bucket.example.test',
+      COZE_BUCKET_NAME: 'managed-bucket',
+    };
+    delete environment.COZE_BUCKET_ACCESS_KEY;
+    delete environment.COZE_BUCKET_SECRET_KEY;
+    delete environment.AWS_ACCESS_KEY_ID;
+    delete environment.AWS_SECRET_ACCESS_KEY;
+    delete environment.PGDATABASE_URL;
+    delete environment.DATABASE_URL;
+
+    const result = spawnSync(process.execPath, [resolve(process.cwd(), 'scripts/doctor.mjs'), '--startup'], {
+      cwd: process.cwd(),
+      env: environment,
+      encoding: 'utf8',
+    });
+
+    expect(result.stdout).toContain('[WARN] object-storage: bucket endpoint configured without explicit credentials; managed identity must be verified after startup');
+    expect(result.stdout).not.toContain('[FAIL] object-storage:');
+  });
 });

@@ -570,3 +570,9 @@ Release status remains **not approved** until the local candidate is deployed an
 - Clean-clone `quality` job `88252005899` passed every step: frozen install, production audit, doctor, TypeScript, ESLint, full tests, API tests, component/lib regression, and production build.
 - `real-p0-e2e` job `88252346584` failed at `Validate real P0 E2E configuration`; browser installation and the P0 test were skipped. The workflow conclusion is therefore failure and does not provide cloud browser evidence.
 - The direct preview remained HTTP 502 after the workflow completed, so Coze synchronization and P0 replay are still blocked.
+
+## 2026-07-20 Coze managed-storage startup gate
+
+- Cloud terminal evidence showed database health passing but object storage failing solely because no static S3 keys were present; the application adapter explicitly supports Coze workload identity with empty keys.
+- `coze-start.sh` exited before `pnpm start`, leaving no Next process on port 5000 and both preview domains at HTTP 502.
+- The startup-specific regression was red at 1 failure / 3 passes and green at 5/5 after the minimal doctor change. Strict release validation remains fail-closed; post-start upload/read evidence is still required.

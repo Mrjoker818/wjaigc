@@ -954,3 +954,16 @@ BUG-20260718-007 的“任务恢复、完成和刷新恢复”范围已修复并
 | Fix | Normalize the configured URL by adding `uselibpqcompat=true` only when `sslmode=require` is present and no explicit compatibility option exists. Apply the same rule in `src/lib/db-client.ts` and `scripts/doctor.mjs`; do not rewrite `node_modules`. |
 | Regression | The focused test was first observed at 4 failures / 2 passes, then passed 6/6 after the source fix. Screenshot: `test-results/screenshots/cloud-backend-unreachable-after-0e1fa59-push-20260720.jpg`. Full quality and cloud acceptance are pending. |
 | Release impact | Open P0 until the official revision is deployed without the cloud-local dependency patch and `/api/auth/me`, saved-credential login, refresh, generation, save/reopen, and download pass. |
+
+## BUG-20260720-045: Startup doctor blocked Coze managed object-storage identity
+
+| Field | Detail |
+| --- | --- |
+| Severity / module | P0 / Coze startup health gate |
+| Environment | Coze preview after merging GitHub `fc38294` and reverting cloud-only patch `b34e0b3`; 2026-07-20 Asia/Shanghai. |
+| Stable reproduction | Run `scripts/coze-start.sh` with `COZE_BUCKET_ENDPOINT_URL` and `COZE_BUCKET_NAME` configured, no explicit S3 access keys, and valid database/runtime secrets. |
+| Expected | The startup doctor warns that managed identity must be verified after startup, then allows Next to start. A separate strict production doctor must still reject unverifiable storage credentials. |
+| Actual | `doctor --startup` reported `8 passed / 3 warnings / 1 failed` because object storage had no explicit access key, exited 1, and `set -e` prevented `pnpm start`. No process listened on port 5000 and both preview domains returned 502. |
+| Root cause | `src/lib/s3-storage.ts` intentionally supports empty keys through Coze workload identity, but `scripts/doctor.mjs` treated missing static keys as fatal in every mode. The startup checker contradicted the runtime storage adapter. |
+| Fix | During `--startup` only, classify missing explicit storage keys as a warning that requires post-start verification. Keep the failure classification for strict release checks. |
+| Regression | The new startup contract was observed failing 1/4 before the fix and passing in the focused 5/5 suite after the fix; TypeScript and ESLint also pass. Cloud deployment acceptance remains pending. |

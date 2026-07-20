@@ -87,7 +87,13 @@ async function checkObjectStorage() {
   const accessKeyId = process.env.COZE_BUCKET_ACCESS_KEY || process.env.AWS_ACCESS_KEY_ID;
   const secretAccessKey = process.env.COZE_BUCKET_SECRET_KEY || process.env.AWS_SECRET_ACCESS_KEY;
   if (!accessKeyId || !secretAccessKey) {
-    add('FAIL', 'object-storage', 'bucket endpoint configured without credentials');
+    add(
+      startup ? 'WARN' : 'FAIL',
+      'object-storage',
+      startup
+        ? 'bucket endpoint configured without explicit credentials; managed identity must be verified after startup'
+        : 'bucket endpoint configured without credentials',
+    );
     return;
   }
   const client = new S3Client({

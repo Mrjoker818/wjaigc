@@ -315,6 +315,7 @@
 - Closure requires deploying the source-level PostgreSQL normalization, removing or reverting the cloud-only patch, proving `/api/auth/me` health, and rerunning the entire direct-Chrome P0 chain. A restored landing page alone is not sufficient.
 - The latest direct probe still returns HTTP 502. The Chrome extension also blocked a newly opened preview navigation with `ERR_BLOCKED_BY_CLIENT`, so no authenticated UI result is inferred from the browser reconnection attempt.
 - GitHub job `88252346584` stopped at real-E2E configuration validation; Playwright installation and the P0 scenario were skipped. The source quality job passed, but no new login, upload, generation, persistence, download, or logout evidence was produced.
+- Coze workload-identity storage is only source-compatible at this checkpoint. After the startup fix is deployed, a real upload plus read-after-write and refresh/reopen test must prove that managed credentials work; the startup warning itself is not storage acceptance.
 
 ### 2026-07-19 Production preview follow-up
 

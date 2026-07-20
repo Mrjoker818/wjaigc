@@ -237,3 +237,5 @@ Release remains blocked because the native-upload step was stopped by the Chrome
 The local source gates are green, including the production build, but the post-recovery direct health check still returns HTTP 502. The deployment gate therefore remains failed even though the Coze editor is available.
 
 GitHub clean-clone quality is also green for `ce62791`, but the required real-P0 job failed its configuration preflight and did not launch a browser. **Decision remains: NOT APPROVED.**
+
+Coze source synchronization exposed a second startup blocker: `doctor --startup` rejected the platform's managed object-storage identity before Next could listen. A source-level red-to-green fix exists, but it is not accepted until deployed and followed by real upload, storage-read, and full P0 browser evidence. **Decision remains: NOT APPROVED.**
