@@ -110,15 +110,7 @@ interface ChatSession {
 // Agent capability definition - extends the simple prompt-based agent
 // (AgentDefinition 和 AgentRecipe 类型已从 AgentBuilderDialog 导入)
 
-const AGENTS: AgentDefinition[] = [
-  {
-    id: 'liquor-packaging',
-    name: '酒类包装',
-    nameEn: 'Liquor Packaging',
-    icon: '🍷',
-    desc: '攻克 3D 瓶型与物理质感',
-    color: '#c4956a',
-    prompt: `你是一位顶级的酒类包装设计师与 3D 视觉艺术家。专为高端酒类品牌打造瓶型设计、标签系统与礼盒方案。你精通 3D 渲染技术，擅长将品牌精神转化为触手可及的物理质感。
+
 
 核心任务：
 1. 瓶型概念设计：根据品牌调性，构思具有辨识度的瓶身造型（如方型、异型、仿生型）。
