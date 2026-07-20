@@ -4,8 +4,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowRight,
   Box,
+  ChevronDown,
   Film,
   ImagePlus,
+  LayoutGrid,
   Settings2,
   Sparkles,
   Upload,
@@ -32,20 +34,237 @@ interface QuickCreatePanelProps {
   onOpenVideo: (prompt?: string, mode?: 'generate' | 'extend') => void;
 }
 
-const QUICK_GOALS = [
-  { label: '创意海报', prompt: '设计一张具有明确视觉焦点和高级排版的创意海报' },
-  { label: '电商商品图', prompt: '生成一张干净专业、突出商品质感的电商主图' },
-  { label: '品牌视觉', prompt: '设计一套具有统一品牌调性和辨识度的品牌视觉' },
-  { label: '社媒配图', prompt: '生成一张适合社交媒体发布、信息清晰且有吸引力的配图' },
+type GoalGroup = '热门创作' | '品牌识别' | '商业营销' | '空间美陈' | '内容出版' | '数字创意';
+
+interface QuickGoal {
+  label: string;
+  group: GoalGroup;
+  prompt: string;
+  keywords: string;
+}
+
+interface ParameterRecommendation {
+  aspectRatio: string;
+  quality: string;
+  outputCount: number;
+  ratioReason: string;
+  countReason: string;
+  qualityReason: string;
+}
+
+const GOAL_GROUPS: GoalGroup[] = ['热门创作', '品牌识别', '商业营销', '空间美陈', '内容出版', '数字创意'];
+
+const QUICK_GOALS: QuickGoal[] = [
+  {
+    label: '创意海报',
+    group: '热门创作',
+    keywords: '主视觉 · 活动 · 招贴',
+    prompt: '设计一组具有强视觉焦点的创意海报，建立清晰的信息层级、标题排版和品牌记忆点，兼顾传播冲击力与高级质感',
+  },
+  {
+    label: '电商商品图',
+    group: '热门创作',
+    keywords: '主图 · 详情页 · 场景图',
+    prompt: '为商品设计一套专业电商视觉，突出产品卖点、材质细节和使用场景，包含主图与差异化营销方向',
+  },
+  {
+    label: '品牌视觉',
+    group: '热门创作',
+    keywords: 'VI · 品牌资产 · 视觉语言',
+    prompt: '为品牌建立一套统一且可延展的视觉语言，明确核心图形、色彩气质、字体关系和典型应用场景',
+  },
+  {
+    label: '社媒配图',
+    group: '热门创作',
+    keywords: '小红书 · 公众号 · 信息流',
+    prompt: '设计一组适合社交媒体传播的系列配图，强化首屏吸引力、信息可读性和统一的账号视觉识别',
+  },
+  {
+    label: '包装设计',
+    group: '品牌识别',
+    keywords: '盒型 · 标签 · 瓶身',
+    prompt: '为产品设计三款差异化包装方案，完整考虑品牌识别、货架冲击力、包装结构、材质工艺和核心信息排版',
+  },
+  {
+    label: '品牌标志',
+    group: '品牌识别',
+    keywords: 'Logo · 标准字 · 图形标',
+    prompt: '为品牌设计四个专业标志方向，兼顾独特性、识别度、缩放适配和跨媒介应用，并呈现图形标与标准字关系',
+  },
+  {
+    label: 'IP 形象',
+    group: '品牌识别',
+    keywords: '角色 · 三视图 · 表情',
+    prompt: '设计一套具有鲜明性格和品牌关联的 IP 形象，包含角色核心造型、色彩体系、标志性道具与多种表情方向',
+  },
+  {
+    label: '字体设计',
+    group: '品牌识别',
+    keywords: '标题字 · 字标 · 创意字形',
+    prompt: '设计一款具有独特字形语言的品牌标题字，强化结构、笔画、负空间和可读性，适用于品牌标志与主视觉标题',
+  },
+  {
+    label: '营销主视觉',
+    group: '商业营销',
+    keywords: 'KV · Campaign · 发布会',
+    prompt: '设计一套商业营销主视觉 KV，突出活动主题和核心利益点，并预留标题、卖点与行动引导的专业排版空间',
+  },
+  {
+    label: '产品场景图',
+    group: '商业营销',
+    keywords: '广告摄影 · 氛围 · 卖点',
+    prompt: '为产品生成三张高品质商业场景图，通过光影、构图和环境叙事突出产品功能、材质与目标人群气质',
+  },
+  {
+    label: '促销物料',
+    group: '商业营销',
+    keywords: '折扣 · 节日 · 门店',
+    prompt: '设计一组统一的促销传播物料，包含醒目的优惠信息、清晰价格层级和适合线上线下延展的视觉元素',
+  },
+  {
+    label: '社交媒体套图',
+    group: '商业营销',
+    keywords: '系列封面 · 九宫格 · Story',
+    prompt: '设计四张具有统一视觉节奏的社交媒体套图，包含封面、内容信息页和互动引导页，适配移动端阅读',
+  },
+  {
+    label: '美陈设计',
+    group: '空间美陈',
+    keywords: '商业空间 · 节庆 · 装置',
+    prompt: '为商业空间设计一套主题美陈方案，包含核心艺术装置、入口氛围、互动打卡点和整体空间色彩关系',
+  },
+  {
+    label: '展览展陈',
+    group: '空间美陈',
+    keywords: '展台 · 动线 · 信息层级',
+    prompt: '设计一套专业展览展陈视觉，统筹空间动线、展台造型、品牌信息层级、灯光氛围和观众互动体验',
+  },
+  {
+    label: '快闪店',
+    group: '空间美陈',
+    keywords: 'Pop-up · 零售 · 打卡',
+    prompt: '设计一个具有社交传播力的品牌快闪店概念，包含外立面、核心陈列、体验区和标志性打卡装置',
+  },
+  {
+    label: '导视系统',
+    group: '空间美陈',
+    keywords: '标识 · 路径 · 空间图形',
+    prompt: '设计一套清晰统一的空间导视系统，包含方向指引、区域标识、信息图形和符合环境气质的材质应用',
+  },
+  {
+    label: '画册设计',
+    group: '内容出版',
+    keywords: '品牌手册 · 宣传册 · 版式',
+    prompt: '设计一套专业品牌画册视觉，建立封面、目录、跨页和图文详情页的统一网格与编辑设计语言',
+  },
+  {
+    label: '书籍封面',
+    group: '内容出版',
+    keywords: '文学 · 商业 · 概念封面',
+    prompt: '设计三款具有出版品质的书籍封面方向，通过概念图形、字体层级和留白建立内容气质与市场识别度',
+  },
+  {
+    label: '杂志视觉',
+    group: '内容出版',
+    keywords: '封面 · 专题 · Editorial',
+    prompt: '设计一套现代杂志视觉，包含高辨识度封面与专题跨页，强调编辑排版、图片节奏和栏目层级',
+  },
+  {
+    label: '演示文稿',
+    group: '内容出版',
+    keywords: 'PPT · 路演 · 提案',
+    prompt: '设计一套 16:9 商业演示文稿主视觉，包含封面、章节页、数据页和总结页，风格专业且信息层级清晰',
+  },
+  {
+    label: 'App / 网页界面',
+    group: '数字创意',
+    keywords: 'UI · 落地页 · 产品界面',
+    prompt: '设计一套现代数字产品界面主视觉，明确导航、核心内容、行动按钮和组件层级，兼顾品牌感与易用性',
+  },
+  {
+    label: '概念插画',
+    group: '数字创意',
+    keywords: '叙事 · 编辑插画 · 场景',
+    prompt: '创作三幅统一风格的概念插画，通过角色、场景、光影和视觉隐喻表达主题，并保持系列叙事一致性',
+  },
+  {
+    label: '贴纸表情包',
+    group: '数字创意',
+    keywords: '表情 · 动作 · 社交传播',
+    prompt: '设计四款统一角色风格的贴纸表情，覆盖不同情绪与动作，轮廓清晰、表意直接并适合小尺寸传播',
+  },
+  {
+    label: '3D 视觉',
+    group: '数字创意',
+    keywords: '三维图标 · 立体场景 · 材质',
+    prompt: '创建一套精致的 3D 视觉概念，统一造型语言、材质、光照和空间层次，适合作为品牌主视觉资产',
+  },
+];
+
+const ASPECT_RATIO_OPTIONS = ['1:1', '4:5', '3:4', '2:3', '16:9', '9:16', '3:2', '4:3'] as const;
+const QUALITY_OPTIONS = [
+  { value: 'standard', label: '标准' },
+  { value: 'high', label: '高清' },
 ] as const;
 
-function recommendAspectRatio(prompt: string, intent: ClassifiedIntent): string {
-  const normalized = prompt.toLowerCase();
-  if (/手机|竖版|小红书|短视频|story|9:16/.test(normalized)) return '9:16';
-  if (/海报|人物|肖像|封面|3:4/.test(normalized)) return '3:4';
-  if (/横版|电影|风景|视频|banner|16:9/.test(normalized) || intent.action === 'video') return '16:9';
-  if (/商品|电商|头像|logo|方形|1:1/.test(normalized)) return '1:1';
-  return '1:1';
+function parseExplicitCount(prompt: string): number | null {
+  const arabicMatch = prompt.match(/(?:生成|设计|制作|创建|出|要)?\s*(\d+)\s*(?:张|幅|款|版|个|套|组)/i);
+  if (arabicMatch) return Math.min(4, Math.max(1, Number(arabicMatch[1])));
+
+  const chineseNumbers: Record<string, number> = { 一: 1, 两: 2, 二: 2, 三: 3, 四: 4 };
+  const chineseMatch = prompt.match(/(?:生成|设计|制作|创建|出|要)?\s*([一两二三四])\s*(?:张|幅|款|版|个|套|组)/);
+  return chineseMatch ? chineseNumbers[chineseMatch[1]] : null;
+}
+
+function recommendParameters(prompt: string, intent: ClassifiedIntent): ParameterRecommendation {
+  const normalized = prompt.toLowerCase().replace(/\s+/g, ' ');
+  let aspectRatio = '1:1';
+  let ratioReason = '通用方形构图';
+
+  const explicitRatio = normalized.match(/(?:比例|画幅|尺寸)?\s*(1:1|4:5|3:4|2:3|16:9|9:16|3:2|4:3)/)?.[1];
+  if (explicitRatio) {
+    aspectRatio = explicitRatio;
+    ratioReason = '已识别明确比例';
+  } else if (/1080\s*[x×*]\s*1920|手机壁纸|竖屏视频|短视频封面|story|reels|9比16|竖版全屏/.test(normalized)) {
+    aspectRatio = '9:16';
+    ratioReason = '适配竖屏内容';
+  } else if (/1920\s*[x×*]\s*1080|演示文稿|ppt|路演|横版视频|电影感|大屏|banner|横幅|16比9/.test(normalized) || intent.action === 'video') {
+    aspectRatio = '16:9';
+    ratioReason = '适配横屏展示';
+  } else if (/小红书|信息流|社交媒体|社媒|ins|instagram|商品详情|4比5/.test(normalized)) {
+    aspectRatio = '4:5';
+    ratioReason = '适配社媒信息流';
+  } else if (/海报|包装|书籍封面|杂志封面|人物全身|ip形象|ip 形象|3比4/.test(normalized)) {
+    aspectRatio = '3:4';
+    ratioReason = '适配竖版设计';
+  } else if (/画册|宣传册|摄影|风景|空间|展陈|美陈|快闪店|3比2/.test(normalized)) {
+    aspectRatio = '3:2';
+    ratioReason = '适配场景展示';
+  } else if (/logo|标志|图标|头像|贴纸|表情|方形|正方形|1比1/.test(normalized)) {
+    aspectRatio = '1:1';
+    ratioReason = '适配标志与方形资产';
+  }
+
+  const explicitCount = parseExplicitCount(normalized);
+  let outputCount = explicitCount ?? 1;
+  let countReason = explicitCount ? `已识别数量，单次最多 4 张` : '单张精准输出';
+  if (!explicitCount && /九宫格|系列套图|社交媒体套图|贴纸|表情包|四个方向|四款|多款|多版|多套/.test(normalized)) {
+    outputCount = 4;
+    countReason = '系列创作需要多方向对比';
+  } else if (!explicitCount && /三款|三张|三幅|三版|三个方向|概念提案|方案对比|一组|一套|系列|套图/.test(normalized)) {
+    outputCount = 3;
+    countReason = '自动提供 3 个创意方向';
+  } else if (!explicitCount && /两款|两张|两版|两个方向|对比方案/.test(normalized)) {
+    outputCount = 2;
+    countReason = '自动提供双方案对比';
+  }
+
+  const highQuality = /高清|高精度|精细|细节|4k|2k|印刷|出版|商业摄影|专业|材质|产品图|包装|标志|logo|字体|主视觉|kv|写实/.test(normalized);
+  const draftQuality = /草图|初稿|快速|灵感|概念探索|低成本|先看看/.test(normalized);
+  const quality = highQuality && !draftQuality ? 'high' : 'standard';
+  const qualityReason = quality === 'high' ? '专业交付场景优先细节' : draftQuality ? '概念探索优先速度' : '平衡速度与质量';
+
+  return { aspectRatio, quality, outputCount, ratioReason, countReason, qualityReason };
 }
 
 function getRouteLabel(intent: ClassifiedIntent): string {
@@ -67,11 +286,16 @@ export function QuickCreatePanel({
   onOpenVideo,
 }: QuickCreatePanelProps) {
   const [prompt, setPrompt] = useState('');
+  const [activeGoalGroup, setActiveGoalGroup] = useState<GoalGroup>('热门创作');
+  const [showAllCategories, setShowAllCategories] = useState(false);
   const [uploadedReferences, setUploadedReferences] = useState<string[]>([]);
   const [includeSelectedImage, setIncludeSelectedImage] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [isUploadingReferences, setIsUploadingReferences] = useState(false);
   const [referenceUploadError, setReferenceUploadError] = useState<string>();
+  const [aspectRatioOverride, setAspectRatioOverride] = useState<string>();
+  const [qualityOverride, setQualityOverride] = useState<string>();
+  const [outputCountOverride, setOutputCountOverride] = useState<number>();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const referenceImages = useMemo(() => {
@@ -88,17 +312,31 @@ export function QuickCreatePanel({
     [includeSelectedImage, prompt, referenceImages.length, selectedImage],
   );
 
+  const inferredParameters = useMemo(() => recommendParameters(prompt, intent), [intent, prompt]);
   const recommendation = useMemo(() => ({
     intent: prompt.trim() ? describeIntent(intent) : '等待输入创作需求',
     route: prompt.trim() ? getRouteLabel(intent) : '自动匹配',
-    aspectRatio: recommendAspectRatio(prompt, intent),
-    quality: 'standard',
-    outputCount: 1,
-  }), [intent, prompt]);
+    aspectRatio: aspectRatioOverride ?? inferredParameters.aspectRatio,
+    quality: qualityOverride ?? inferredParameters.quality,
+    outputCount: outputCountOverride ?? inferredParameters.outputCount,
+  }), [aspectRatioOverride, inferredParameters, intent, outputCountOverride, prompt, qualityOverride]);
+
+  const visibleGoals = useMemo(
+    () => QUICK_GOALS.filter((goal: QuickGoal) => goal.group === activeGoalGroup),
+    [activeGoalGroup],
+  );
 
   useEffect(() => {
     setSubmitted(false);
   }, [includeSelectedImage, uploadedReferences]);
+
+  const applyPrompt = (nextPrompt: string): void => {
+    setPrompt(nextPrompt);
+    setAspectRatioOverride(undefined);
+    setQualityOverride(undefined);
+    setOutputCountOverride(undefined);
+    setSubmitted(false);
+  };
 
   const handleFiles = async (event: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
     const files = Array.from(event.target.files ?? []).filter((file: File) => file.type.startsWith('image/'));
@@ -115,14 +353,9 @@ export function QuickCreatePanel({
       try {
         const formData = new FormData();
         formData.append('file', file);
-        const response = await fetch('/api/save-image', {
-          method: 'POST',
-          body: formData,
-        });
+        const response = await fetch('/api/save-image', { method: 'POST', body: formData });
         const data = await response.json() as { url?: string; error?: string };
-        if (!response.ok || !data.url) {
-          throw new Error(data.error || '参考图片上传失败');
-        }
+        if (!response.ok || !data.url) throw new Error(data.error || '参考图片上传失败');
         return data.url;
       } catch (error) {
         console.error('[QuickCreatePanel] reference upload failed:', error);
@@ -134,9 +367,7 @@ export function QuickCreatePanel({
     if (persistedUrls.length > 0) {
       setUploadedReferences((current: string[]) => Array.from(new Set([...current, ...persistedUrls])).slice(0, 4));
     }
-    if (persistedUrls.length !== selectedFiles.length) {
-      setReferenceUploadError('部分参考图片上传失败，请重试');
-    }
+    if (persistedUrls.length !== selectedFiles.length) setReferenceUploadError('部分参考图片上传失败，请重试');
     setIsUploadingReferences(false);
   };
 
@@ -165,6 +396,7 @@ export function QuickCreatePanel({
   };
 
   const isMonochrome = themeStyle === 'monochrome';
+  const selectClassName = 'min-h-9 w-full rounded-lg border border-border bg-background px-2 text-xs text-foreground outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15';
 
   return (
     <div className="flex min-h-full flex-col px-4 py-4">
@@ -173,14 +405,14 @@ export function QuickCreatePanel({
           <div>
             <div className="flex items-center gap-2">
               <Sparkles className="h-4 w-4 text-primary" aria-hidden="true" />
-              <h2 className="text-sm font-semibold text-foreground">一句话开始创作</h2>
+              <h2 className="text-sm font-semibold text-foreground">一句话开始专业创作</h2>
             </div>
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">描述目标，系统自动匹配能力、模型和参数。</p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">像和创意搭档沟通一样描述，系统自动理解品类、尺寸、数量和质量。</p>
           </div>
           <button
             type="button"
             onClick={() => onOpenProfessional(prompt)}
-            className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            className="flex min-h-11 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg px-2.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
             <Settings2 className="h-3.5 w-3.5" aria-hidden="true" />
             专业设置
@@ -189,26 +421,54 @@ export function QuickCreatePanel({
 
         <textarea
           value={prompt}
-          onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => {
-            setPrompt(event.target.value);
-            setSubmitted(false);
-          }}
-          placeholder="例如：为一款东方茶饮设计春季新品海报，清新、克制、有高级感"
+          onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => applyPrompt(event.target.value)}
+          placeholder="例如：为东方茶饮设计 3 张春季新品海报，适合小红书竖版发布，清新克制、印刷级细节"
           className="min-h-32 w-full resize-y rounded-xl border border-border bg-muted px-3.5 py-3 text-sm leading-6 text-foreground outline-none transition-colors placeholder:text-muted-foreground/60 focus:border-primary/50 focus:ring-2 focus:ring-primary/15"
         />
 
-        <div className="mt-3 flex flex-wrap gap-2" aria-label="常用创作目标">
-          {QUICK_GOALS.map((goal) => (
+        <div className="mt-3 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+            <LayoutGrid className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
+            专业创作类别
+          </div>
+          <button
+            type="button"
+            aria-expanded={showAllCategories}
+            onClick={() => setShowAllCategories((value: boolean) => !value)}
+            className="flex min-h-9 cursor-pointer items-center gap-1 rounded-lg px-2 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+          >
+            {showAllCategories ? '收起分类' : '浏览全部'}
+            <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showAllCategories ? 'rotate-180' : ''}`} aria-hidden="true" />
+          </button>
+        </div>
+
+        {showAllCategories && (
+          <div className="mt-2 flex gap-1.5 overflow-x-auto pb-1" role="tablist" aria-label="创作类别分组">
+            {GOAL_GROUPS.map((group: GoalGroup) => (
+              <button
+                key={group}
+                type="button"
+                role="tab"
+                aria-selected={activeGoalGroup === group}
+                onClick={() => setActiveGoalGroup(group)}
+                className={`min-h-9 shrink-0 cursor-pointer rounded-lg px-2.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${activeGoalGroup === group ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
+              >
+                {group}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className={`mt-2 grid gap-2 ${showAllCategories ? 'grid-cols-2' : 'grid-cols-2'}`} aria-label="常用创作目标">
+          {(showAllCategories ? visibleGoals : QUICK_GOALS.slice(0, 4)).map((goal: QuickGoal) => (
             <button
               key={goal.label}
               type="button"
-              onClick={() => {
-                setPrompt(goal.prompt);
-                setSubmitted(false);
-              }}
-              className="min-h-9 rounded-lg border border-border bg-background px-2.5 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+              onClick={() => applyPrompt(goal.prompt)}
+              className="min-h-16 cursor-pointer rounded-xl border border-border bg-background px-3 py-2 text-left transition-colors hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
             >
-              {goal.label}
+              <span className="block text-xs font-semibold text-foreground">{goal.label}</span>
+              <span className="mt-1 block truncate text-[10px] text-muted-foreground">{goal.keywords}</span>
             </button>
           ))}
         </div>
@@ -224,7 +484,7 @@ export function QuickCreatePanel({
             type="button"
             onClick={() => fileInputRef.current?.click()}
             disabled={isUploadingReferences || uploadedReferences.length >= 4}
-            className="flex min-h-11 items-center gap-1.5 rounded-lg px-2.5 text-xs text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-45"
+            className="flex min-h-11 cursor-pointer items-center gap-1.5 rounded-lg px-2.5 text-xs text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-45"
           >
             <Upload className="h-3.5 w-3.5" aria-hidden="true" />
             {isUploadingReferences ? '上传中' : '上传图片'}
@@ -237,16 +497,14 @@ export function QuickCreatePanel({
             type="button"
             aria-pressed={includeSelectedImage}
             onClick={() => setIncludeSelectedImage((value: boolean) => !value)}
-            className={`mt-2 flex min-h-11 w-full items-center gap-2 rounded-xl border px-3 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${includeSelectedImage ? 'border-primary/50 bg-primary/10 text-foreground' : 'border-border bg-muted text-muted-foreground hover:text-foreground'}`}
+            className={`mt-2 flex min-h-11 w-full cursor-pointer items-center gap-2 rounded-xl border px-3 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${includeSelectedImage ? 'border-primary/50 bg-primary/10 text-foreground' : 'border-border bg-muted text-muted-foreground hover:text-foreground'}`}
           >
             <ImagePlus className="h-4 w-4 text-primary" aria-hidden="true" />
             {includeSelectedImage ? '已引用画布选中图片' : '引用画布当前选中图片'}
           </button>
         )}
 
-        {referenceUploadError && (
-          <p className="mt-2 text-[11px] text-destructive" role="alert">{referenceUploadError}</p>
-        )}
+        {referenceUploadError && <p className="mt-2 text-[11px] text-destructive" role="alert">{referenceUploadError}</p>}
 
         {uploadedReferences.length > 0 && (
           <div className="mt-3 grid grid-cols-4 gap-2">
@@ -258,7 +516,7 @@ export function QuickCreatePanel({
                   type="button"
                   onClick={() => setUploadedReferences((current: string[]) => current.filter((item: string) => item !== url))}
                   aria-label={`移除参考图片 ${index + 1}`}
-                  className="absolute right-1 top-1 flex h-7 w-7 items-center justify-center rounded-md bg-background/85 text-foreground opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                  className="absolute right-1 top-1 flex h-7 w-7 cursor-pointer items-center justify-center rounded-md bg-background/85 text-foreground opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
                 >
                   <X className="h-3.5 w-3.5" aria-hidden="true" />
                 </button>
@@ -271,23 +529,45 @@ export function QuickCreatePanel({
       <section className="mt-3 rounded-2xl border border-border bg-muted/40 p-4">
         <div className="flex items-center gap-2">
           {recommendation.route === '视频导演' ? <Film className="h-4 w-4 text-primary" aria-hidden="true" /> : recommendation.route === '3D 创作' ? <Box className="h-4 w-4 text-primary" aria-hidden="true" /> : <Sparkles className="h-4 w-4 text-primary" aria-hidden="true" />}
-          <h3 className="text-xs font-semibold text-foreground">系统推荐摘要</h3>
+          <h3 className="text-xs font-semibold text-foreground">系统已理解</h3>
+          <span className="rounded-md bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">自动匹配，可调整</span>
         </div>
         <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
           <div><dt className="text-muted-foreground">识别目标</dt><dd className="mt-0.5 truncate text-foreground">{recommendation.intent}</dd></div>
           <div><dt className="text-muted-foreground">执行能力</dt><dd className="mt-0.5 text-foreground">{recommendation.route}</dd></div>
-          <div><dt className="text-muted-foreground">画面比例</dt><dd className="mt-0.5 text-foreground">{recommendation.aspectRatio}</dd></div>
-          <div><dt className="text-muted-foreground">输出方案</dt><dd className="mt-0.5 text-foreground">标准质量 · 1 张</dd></div>
         </dl>
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          <label className="block text-[10px] text-muted-foreground">
+            画面比例
+            <select value={recommendation.aspectRatio} onChange={(event: React.ChangeEvent<HTMLSelectElement>) => setAspectRatioOverride(event.target.value)} className={`mt-1 ${selectClassName}`}>
+              {ASPECT_RATIO_OPTIONS.map((ratio: string) => <option key={ratio} value={ratio}>{ratio}</option>)}
+            </select>
+          </label>
+          <label className="block text-[10px] text-muted-foreground">
+            生成数量
+            <select value={recommendation.outputCount} onChange={(event: React.ChangeEvent<HTMLSelectElement>) => setOutputCountOverride(Number(event.target.value))} className={`mt-1 ${selectClassName}`}>
+              {[1, 2, 3, 4].map((count: number) => <option key={count} value={count}>{count} 张</option>)}
+            </select>
+          </label>
+          <label className="block text-[10px] text-muted-foreground">
+            输出质量
+            <select value={recommendation.quality} onChange={(event: React.ChangeEvent<HTMLSelectElement>) => setQualityOverride(event.target.value)} className={`mt-1 ${selectClassName}`}>
+              {QUALITY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </label>
+        </div>
+        <p className="mt-2 text-[10px] leading-4 text-muted-foreground">
+          {inferredParameters.ratioReason} · {inferredParameters.countReason} · {inferredParameters.qualityReason}
+        </p>
       </section>
 
       {submitted && (
         <section className="mt-3 rounded-2xl border border-primary/25 bg-primary/10 p-4" aria-live="polite">
           <h3 className="text-xs font-semibold text-foreground">任务已提交，接下来可以</h3>
           <div className="mt-2 flex flex-wrap gap-2">
-            <button type="button" onClick={() => onOpenProfessional(prompt)} className="min-h-9 rounded-lg bg-background px-2.5 text-xs text-foreground transition-colors hover:bg-muted">生成同系列</button>
-            <button type="button" onClick={() => onOpenChat(`请基于刚才的创作继续优化：${prompt}`)} className="min-h-9 rounded-lg bg-background px-2.5 text-xs text-foreground transition-colors hover:bg-muted">继续优化</button>
-            <button type="button" onClick={() => onOpenVideo(prompt)} className="min-h-9 rounded-lg bg-background px-2.5 text-xs text-foreground transition-colors hover:bg-muted">生成视频</button>
+            <button type="button" onClick={() => onOpenProfessional(prompt)} className="min-h-9 cursor-pointer rounded-lg bg-background px-2.5 text-xs text-foreground transition-colors hover:bg-muted">生成同系列</button>
+            <button type="button" onClick={() => onOpenChat(`请基于刚才的创作继续优化：${prompt}`)} className="min-h-9 cursor-pointer rounded-lg bg-background px-2.5 text-xs text-foreground transition-colors hover:bg-muted">继续优化</button>
+            <button type="button" onClick={() => onOpenVideo(prompt)} className="min-h-9 cursor-pointer rounded-lg bg-background px-2.5 text-xs text-foreground transition-colors hover:bg-muted">生成视频</button>
           </div>
         </section>
       )}
@@ -297,13 +577,13 @@ export function QuickCreatePanel({
           type="button"
           onClick={handleSubmit}
           disabled={!prompt.trim() || isGenerating || isUploadingReferences}
-          className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground shadow-card transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground shadow-card transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Sparkles className="h-4 w-4" aria-hidden="true" />
-          {isGenerating ? '生成任务进行中' : recommendation.route === '视频导演' ? '打开视频创作' : recommendation.route === 'AI 助手' || recommendation.route === '智能图片编辑' || recommendation.route === '3D 创作' ? '交给 AI 助手' : '立即生成'}
+          {isGenerating ? '生成任务进行中' : recommendation.route === '视频导演' ? '打开视频创作' : recommendation.route === 'AI 助手' || recommendation.route === '智能图片编辑' || recommendation.route === '3D 创作' ? '交给 AI 助手' : `生成 ${recommendation.outputCount} 张`}
           <ArrowRight className="h-4 w-4" aria-hidden="true" />
         </button>
-        <p className="mt-2 text-center text-[11px] text-muted-foreground">不会替换专业模式，随时可切换并调整全部参数</p>
+        <p className="mt-2 text-center text-[11px] text-muted-foreground">系统会先自动理解参数，你也可以调整或进入专业模式</p>
       </div>
     </div>
   );

@@ -77,7 +77,15 @@ const OPERATE_KEYWORDS: Record<OperateAction, string[]> = {
 
 // 生成意图关键词映射
 const GENERATE_KEYWORDS: Record<GenerateAction, string[]> = {
-  image: ['生成图片', '画', '创建图片', '生成图', '画一个', '设计一个', 'generate image', 'create image', '生图'],
+  image: [
+    '生成图片', '画', '创建图片', '生成图', '画一个', '设计一个', 'generate image', 'create image', '生图',
+    '创意海报', '电商主图', '商品场景图', '社媒配图', '社交媒体套图', '营销主视觉',
+    '包装设计', '包装方案', '礼盒设计', '瓶身设计', '标签设计', '包装效果图',
+    '美陈设计', '商业美陈', '商场美陈', '展览展陈', '快闪店', '橱窗陈列', '导视系统',
+    'ip形象', 'ip 形象', '吉祥物', '角色设定', '角色三视图', '表情包',
+    '字体设计', '标题字', '艺术字', '品牌字标', '书籍封面', '杂志视觉', '画册设计',
+    '概念插画', '贴纸设计', '3d视觉', '3d 视觉', '网页界面', 'app界面',
+  ],
   video: ['生成视频', '做视频', '创建视频', '生成一段视频', 'generate video', 'create video', '文生视频'],
   video_extend: ['延长视频', '续视频', '视频延长', 'extend video', 'continue video'],
   '3d': ['生成3d', '转3d', '创建3d', '三维', '3d模型', 'generate 3d', 'create 3d'],
@@ -93,9 +101,12 @@ const ANALYZE_KEYWORDS: Record<string, string[]> = {
 
 // 品牌意图关键词映射
 const BRAND_KEYWORDS: Record<string, string[]> = {
-  brand_design: ['品牌设计', 'logo设计', 'vi设计', 'brand', 'logo'],
-  style_switch: ['切换风格', '换风格', '改变风格', '风格', 'style'],
-  brand_asset: ['品牌资产', 'brand dna', '品牌dna'],
+  brand_design: [
+    '品牌设计', '品牌视觉', '品牌识别', '品牌标志', '标志设计', 'logo设计', 'logo 设计',
+    'vi设计', 'vi 设计', '标准字', '图形标', '品牌系统', 'brand identity', 'brand design',
+  ],
+  style_switch: ['切换风格', '换风格', '改变风格', 'style switch'],
+  brand_asset: ['品牌资产', 'brand dna', '品牌dna', '品牌规范', '视觉资产'],
 };
 
 // 工作流意图关键词映射

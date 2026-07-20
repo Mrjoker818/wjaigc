@@ -1672,7 +1672,7 @@ export async function dbAddAuditLog(entry: Omit<DbAuditLog, 'id'>): Promise<stri
         level, error_message, stack_trace, request_data, response_status, duration_ms, model, provider_id,
         resolution_status, resolution_detail, resolved_at, resolved_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)`,
-      [truncateAuditField(entry.user_id, 64), truncateAuditField(entry.user_name, 128),
+      [id, truncateAuditField(entry.user_id, 64), truncateAuditField(entry.user_name, 128),
        truncateAuditField(entry.action, 64), truncateAuditField(entry.target_type, 64),
        truncateAuditField(entry.target_id, 128), entry.detail || null,
        truncateAuditField(entry.ip_address, 64), entry.created_at || Date.now(),
