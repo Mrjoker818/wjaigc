@@ -3,6 +3,7 @@ import { requireAdminUser } from '@/lib/server-auth';
 import { getApiProviders } from '@/lib/server-api-config';
 import { getChatModelCredits, getImageModelCredits, getVideoModelCreditsPerSecond } from '@/lib/credits';
 import { loadCreditPricingConfig, saveCreditPricingConfig, buildPricingKey, type ModelCreditEntry } from '@/lib/credit-pricing';
+import { getBillingModelCategory } from '@/lib/billing-model-category';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,6 +42,7 @@ export async function GET(request: NextRequest) {
     .filter(provider => provider.isEnabled !== false)
     .flatMap(provider => (provider.selectedModels || []).map(model => {
       const modelType = provider.modelType || provider.type || 'image';
+      const billingCategory = getBillingModelCategory(modelType);
       const fallback = defaultCredits(modelType, model);
       const compoundKey = buildPricingKey(provider.id, model);
       // Try provider-specific key first, then model-only key (backward compat)
@@ -70,6 +72,7 @@ export async function GET(request: NextRequest) {
         providerName: provider.displayName || provider.name || provider.id,
         model,
         modelType,
+        billingCategory,
         credits,
         unit: fallback.unit,
         source,

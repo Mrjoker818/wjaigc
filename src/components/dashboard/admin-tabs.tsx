@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { getBillingModelCategory, type BillingModelCategory } from '@/lib/billing-model-category';
 import { AdminRechargeOrders } from './admin-recharge-orders';
 import {
   Users, TrendingUp, Wallet, ShieldCheck, Activity, BarChart3, CreditCard,
@@ -83,6 +84,21 @@ interface AuditLogView extends AuditLogEntry {
   target_type?: string;
   target_id?: string;
   level?: string;
+}
+
+type BillingModelCategoryFilter = 'all' | BillingModelCategory;
+
+interface ModelCreditCatalogItem {
+  providerId: string;
+  providerName: string;
+  model: string;
+  modelType: string;
+  billingCategory: BillingModelCategory;
+  credits: number;
+  unit: string;
+  source: string;
+  quality?: Record<string, number>;
+  resolution?: Record<string, number>;
 }
 
 interface SystemSettings {
@@ -265,7 +281,8 @@ export default function AdminTabs(props: AdminTabsProps) {
   const [creditSearch, setCreditSearch] = useState('');
   const [creditSort, setCreditSort] = useState('balance');
   const [modelCreditRules, setModelCreditRules] = useState<Record<string, number | { credits: number; quality?: Record<string, number>; resolution?: Record<string, number> }>>({});
-  const [modelCreditCatalog, setModelCreditCatalog] = useState<Array<{ providerId: string; providerName: string; model: string; modelType: string; credits: number; unit: string; source: string; quality?: Record<string, number>; resolution?: Record<string, number> }>>([]);
+  const [modelCreditCatalog, setModelCreditCatalog] = useState<ModelCreditCatalogItem[]>([]);
+  const [creditModelCategory, setCreditModelCategory] = useState<BillingModelCategoryFilter>('all');
   const [pricingSaving, setPricingSaving] = useState(false);
 
   /* ── Audit state ── */
@@ -322,7 +339,10 @@ export default function AdminTabs(props: AdminTabsProps) {
       const res = await fetch('/api/admin/credits/pricing');
       if (!res.ok) return;
       const data = await res.json();
-      const catalog = data.models || [];
+      const catalog: ModelCreditCatalogItem[] = (data.models || []).map((item: ModelCreditCatalogItem) => ({
+        ...item,
+        billingCategory: item.billingCategory || getBillingModelCategory(item.modelType),
+      }));
       setModelCreditCatalog(catalog);
       // Build rules with providerId::model compound keys
       const rules: Record<string, number | { credits: number; quality?: Record<string, number>; resolution?: Record<string, number> }> = {};
@@ -357,6 +377,25 @@ export default function AdminTabs(props: AdminTabsProps) {
     if (activeTab === 'credits') { loadCreditsOverview(); loadModelCreditPricing(); }
     if (activeTab === 'settings') loadSystemSettings();
   }, [activeTab, loadDashboardStats, loadAuditLogs, loadCreditsOverview, loadModelCreditPricing, loadSystemSettings]);
+
+  const creditCategoryCounts = useMemo(() => {
+    const counts: Record<BillingModelCategoryFilter, number> = { all: modelCreditCatalog.length, image: 0, video: 0, llm: 0, edit: 0 };
+    modelCreditCatalog.forEach(item => { counts[item.billingCategory] += 1; });
+    return counts;
+  }, [modelCreditCatalog]);
+
+  const filteredModelCreditCatalog = useMemo(() => {
+    if (creditModelCategory === 'all') return modelCreditCatalog;
+    return modelCreditCatalog.filter(item => item.billingCategory === creditModelCategory);
+  }, [creditModelCategory, modelCreditCatalog]);
+
+  const visibleQualityTiers = useMemo(() => {
+    const tiers = new Set<string>();
+    filteredModelCreditCatalog.forEach(item => {
+      if (item.quality) Object.keys(item.quality).forEach(tier => tiers.add(tier));
+    });
+    return Array.from(tiers).sort();
+  }, [filteredModelCreditCatalog]);
 
   /* ── Filtered users ── */
   const filteredUsers = useMemo(() => {
@@ -1377,6 +1416,26 @@ export default function AdminTabs(props: AdminTabsProps) {
                 className="bg-primary text-primary-foreground px-3 py-1.5 rounded-md text-xs font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors"
               >{pricingSaving ? '保存中...' : '保存规则'}</button>
             </div>
+            <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="模型类别筛选">
+              {([
+                { value: 'all', label: '全部' },
+                { value: 'image', label: '图像模型' },
+                { value: 'video', label: '视频模型' },
+                { value: 'llm', label: 'LLM 模型' },
+                { value: 'edit', label: '编辑模型' },
+              ] as Array<{ value: BillingModelCategoryFilter; label: string }>).map(option => (
+                <button
+                  key={option.value}
+                  type="button"
+                  aria-pressed={creditModelCategory === option.value}
+                  onClick={() => setCreditModelCategory(option.value)}
+                  className={`inline-flex h-9 items-center gap-2 rounded-md border px-3 text-xs font-medium transition-colors ${creditModelCategory === option.value ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground'}`}
+                >
+                  <span>{option.label}</span>
+                  <span className={`rounded-full px-1.5 py-0.5 font-mono text-[10px] ${creditModelCategory === option.value ? 'bg-primary-foreground/15 text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>{creditCategoryCounts[option.value]}</span>
+                </button>
+              ))}
+            </div>
             <div className="overflow-x-auto border border-border/60 rounded-md">
               <table className="w-full min-w-[700px] text-sm">
                 <thead className="bg-muted/50 text-xs text-muted-foreground">
@@ -1385,23 +1444,16 @@ export default function AdminTabs(props: AdminTabsProps) {
                     <th className="px-3 py-2 text-left font-medium">模型</th>
                     <th className="px-3 py-2 text-left font-medium">计费单位</th>
                     <th className="px-3 py-2 text-right font-medium">默认积分</th>
-                    {(() => {
-                      const allTiers = new Set<string>();
-                      modelCreditCatalog.forEach(item => {
-                        if (item.quality) Object.keys(item.quality).forEach(k => allTiers.add(k));
-                      });
-                      return Array.from(allTiers).sort().map(tier => (
-                        <th key={tier} className="px-3 py-2 text-right font-medium">{tier === 'standard' ? '标准' : tier === 'hd' ? '高清' : tier === 'low' ? '低质量' : tier === 'medium' ? '中等' : tier === 'high' ? '高质量' : tier === 'ultra' ? '超高质量' : tier}</th>
-                      ));
-                    })()}
+                    {visibleQualityTiers.map(tier => (
+                      <th key={tier} className="px-3 py-2 text-right font-medium">{tier === 'standard' ? '标准' : tier === 'hd' ? '高清' : tier === 'low' ? '低质量' : tier === 'medium' ? '中等' : tier === 'high' ? '高质量' : tier === 'ultra' ? '超高质量' : tier}</th>
+                    ))}
                     <th className="px-3 py-2 text-right font-medium">1K</th>
                     <th className="px-3 py-2 text-right font-medium">2K</th>
                     <th className="px-3 py-2 text-right font-medium">4K</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/60">
-                  {modelCreditCatalog.map(item => {
-                    const tiers = item.quality ? Object.keys(item.quality).sort() : [];
+                  {filteredModelCreditCatalog.map(item => {
                     const compoundKey = `${item.providerId}::${item.model}`;
                     const currentRule = modelCreditRules[compoundKey];
                     const baseCredits = typeof currentRule === 'number' ? currentRule : (currentRule?.credits ?? item.credits);
@@ -1431,12 +1483,13 @@ export default function AdminTabs(props: AdminTabsProps) {
                             className="h-8 w-24 rounded-md border border-border bg-background px-2 text-right text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
                           />
                         </td>
-                        {tiers.map(tier => {
+                        {visibleQualityTiers.map(tier => {
+                          const supportsTier = item.quality?.[tier] !== undefined;
                           const refVal = item.quality?.[tier] ?? baseCredits;
                           const overrideVal = qualityOverrides[tier];
                           const displayVal = overrideVal !== undefined ? overrideVal : refVal;
                           const isOverridden = overrideVal !== undefined;
-                          return (
+                          return supportsTier ? (
                             <td key={tier} className="px-3 py-2 text-right">
                               <input
                                 aria-label={`${item.model} ${tier} 积分`}
@@ -1457,7 +1510,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                                 className={`h-8 w-24 rounded-md border bg-background px-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 ${isOverridden ? 'border-primary/50 text-primary' : 'border-border text-muted-foreground'}`}
                               />
                             </td>
-                          );
+                          ) : <td key={tier} className="px-3 py-2 text-right text-xs text-muted-foreground">-</td>;
                         })}
                         {item.modelType === 'image' ? resTiers.map(rt => {
                           const refVal = item.resolution?.[rt] ?? baseCredits;
@@ -1490,7 +1543,13 @@ export default function AdminTabs(props: AdminTabsProps) {
                       </tr>
                     );
                   })}
-                  {modelCreditCatalog.length === 0 && <tr><td colSpan={10} className="px-3 py-8 text-center text-sm text-muted-foreground">暂无已启用模型，请先在 API 管理中配置模型。</td></tr>}
+                  {filteredModelCreditCatalog.length === 0 && (
+                    <tr>
+                      <td colSpan={7 + visibleQualityTiers.length} className="px-3 py-8 text-center text-sm text-muted-foreground">
+                        {modelCreditCatalog.length === 0 ? '暂无已启用模型，请先在 API 管理中配置模型。' : '当前类别暂无已启用模型。'}
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>

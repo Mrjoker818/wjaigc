@@ -1659,6 +1659,11 @@ export interface DbAuditLog {
   resolved_by?: string | null;
 }
 
+function truncateAuditField(value: string | null | undefined, maxLength: number): string | null {
+  if (!value) return null;
+  return value.slice(0, maxLength);
+}
+
 export async function dbAddAuditLog(entry: Omit<DbAuditLog, 'id'>): Promise<string> {
   try {
     const id = `audit_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -1667,8 +1672,10 @@ export async function dbAddAuditLog(entry: Omit<DbAuditLog, 'id'>): Promise<stri
         level, error_message, stack_trace, request_data, response_status, duration_ms, model, provider_id,
         resolution_status, resolution_detail, resolved_at, resolved_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)`,
-      [id, entry.user_id, entry.user_name || null, entry.action, entry.target_type || null, entry.target_id || null,
-       entry.detail || null, entry.ip_address || null, entry.created_at || Date.now(),
+      [truncateAuditField(entry.user_id, 64), truncateAuditField(entry.user_name, 128),
+       truncateAuditField(entry.action, 64), truncateAuditField(entry.target_type, 64),
+       truncateAuditField(entry.target_id, 128), entry.detail || null,
+       truncateAuditField(entry.ip_address, 64), entry.created_at || Date.now(),
        entry.level || 'info', entry.error_message || null, entry.stack_trace || null,
        entry.request_data ? JSON.stringify(entry.request_data) : null,
        entry.response_status || 0, entry.duration_ms || 0,
