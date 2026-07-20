@@ -1447,7 +1447,7 @@ export async function POST(request: NextRequest) {
         : action === 'remove_background' ? 'image_remove_bg'
         : action === 'outpaint' ? 'image_edit'
         : 'image_edit';
-      const creditResult = await consumeCredits(sessionUser.id, creditOp, undefined, undefined, modelStr);
+      const creditResult = await consumeCredits(sessionUser.id, creditOp, undefined, undefined, modelStr, { providerId: effectiveProviderId || undefined });
       if (!creditResult.success) {
         return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
       }

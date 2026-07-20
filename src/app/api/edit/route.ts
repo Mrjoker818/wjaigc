@@ -391,7 +391,7 @@ export async function POST(request: NextRequest) {
 
     // 积分扣除（在凭证验证通过后）
     if (sessionUser) {
-      const creditResult = await consumeCredits(sessionUser.id, 'image_retouch', undefined, undefined, model, { quality });
+      const creditResult = await consumeCredits(sessionUser.id, 'image_retouch', undefined, undefined, model, { quality, providerId: providerId || undefined });
       if (!creditResult.success) {
         return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
       }

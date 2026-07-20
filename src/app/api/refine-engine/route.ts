@@ -965,7 +965,7 @@ export async function POST(request: NextRequest) {
       deductedCredits = 0;
       sessionUser = await getSessionUser(request).catch(() => null);
       if (sessionUser) {
-        const creditResult = await consumeCredits(sessionUser.id, 'image_retouch', undefined, undefined, model);
+        const creditResult = await consumeCredits(sessionUser.id, 'image_retouch', undefined, undefined, model, { providerId: (providerId as string) || undefined });
         if (!creditResult.success) {
           return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
         }
