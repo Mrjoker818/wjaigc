@@ -58,6 +58,14 @@ describe('canvas toolbar floating windows', () => {
     expect(canvasSource).toContain('title="删除"');
   });
 
+  it('force-saves the post-delete snapshot so removed images cannot be restored', () => {
+    expect(canvasSource).toContain('onForceSave?: (images: CanvasImage[]) => void;');
+    expect(canvasSource).toContain('onForceSave?.(newImages);');
+    expect(appPageSource).toContain('onForceSave={(nextImages) => {');
+    expect(appPageSource).toContain('const persistable = nextImages.map(img => ({');
+    expect(appPageSource).not.toContain('if (currentProject?.id && images.length > 0)');
+  });
+
   it('keeps selected-image actions above the open right workspace panel', () => {
     expect(appPageSource).toContain('z-[70] flex transition-all');
     expect(canvasSource).toContain('className="absolute z-[80] pointer-events-auto"');

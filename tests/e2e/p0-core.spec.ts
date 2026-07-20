@@ -64,6 +64,8 @@ test.describe('P0 real user journey', () => {
       await (await fileChooser).setFiles({ name: 'p0-real-upload.png', mimeType: 'image/png', buffer: await createUploadFixture() });
       await expect.poll(() => canvasImages.count(), { timeout: 30_000 }).toBeGreaterThan(beforeUpload);
 
+      const deletedUploadSrc = await canvasImages.last().getAttribute('src');
+      expect(deletedUploadSrc, 'Uploaded image did not expose a source URL').toBeTruthy();
       const canvasImage = canvasImages.last().locator('..');
       await canvasImage.click();
       await canvasImage.hover();
@@ -107,6 +109,14 @@ test.describe('P0 real user journey', () => {
 
       const resultBefore = await canvasImages.count();
       await expect.poll(() => canvasImages.count(), { timeout: 180_000, intervals: [1_000, 2_000, 4_000] }).toBeGreaterThan(resultBefore);
+      await expect.poll(
+        () => page.evaluate(
+          (src) => [...document.querySelectorAll('[data-canvas-viewport] img')]
+            .some((image) => image.getAttribute('src') === src),
+          deletedUploadSrc,
+        ),
+        { timeout: 10_000 },
+      ).toBe(false);
       await page.reload({ waitUntil: 'domcontentloaded' });
       await expect.poll(() => canvasImages.count(), { timeout: 30_000 }).toBeGreaterThan(0);
 

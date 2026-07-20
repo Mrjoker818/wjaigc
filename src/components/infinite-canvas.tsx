@@ -263,7 +263,7 @@ interface InfiniteCanvasProps {
   /** IDs of images currently marked as Alt references */
   altRefMarkerIds?: string[];
   /** Force save canvas data to localStorage + server */
-  onForceSave?: () => void;
+  onForceSave?: (images: CanvasImage[]) => void;
   /** 用户绘制的连线 */
   connections?: CanvasConnection[];
   /** 连线变更回调 */
@@ -8335,7 +8335,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   // Helper to save image changes and force persist
   const applyImageChanges = (newImages: typeof images) => {
     onImagesChange(newImages);
-    onForceSave?.();
+    onForceSave?.(newImages);
   };
 
   const deleteSelectedImages = () => {

@@ -967,3 +967,18 @@ BUG-20260718-007 的“任务恢复、完成和刷新恢复”范围已修复并
 | Root cause | `src/lib/s3-storage.ts` intentionally supports empty keys through Coze workload identity, but `scripts/doctor.mjs` treated missing static keys as fatal in every mode. The startup checker contradicted the runtime storage adapter. |
 | Fix | During `--startup` only, classify missing explicit storage keys as a warning that requires post-start verification. Keep the failure classification for strict release checks. |
 | Regression | The new startup contract was observed failing 1/4 before the fix and passing in the focused 5/5 suite after the fix; TypeScript and ESLint also pass. Cloud deployment acceptance remains pending. |
+
+## BUG-20260720-046: Deleted canvas image returns when a later generation updates the project
+
+| Field | Detail |
+| --- | --- |
+| Severity / module | P1 / infinite-canvas deletion and project persistence |
+| Environment | Direct Coze preview in signed-in Chrome; deployed GitHub `af1e6c4`; local repair tree based on the same revision; 2026-07-20 Asia/Shanghai. |
+| Stable reproduction | Create an isolated project, paste one 256 x 256 PNG, move and resize it, select it, click the selected-image `删除` control, verify the canvas is empty, then submit one authorized APImart `豆包5.0Lite` generation. |
+| Expected | The deleted upload remains absent while the new generated image is added. Saving or a later project update must never restore the deleted node. |
+| Actual | The canvas is empty immediately after deletion, but the old upload returns when the generation completes. DOM evidence contains both the deleted upload `upload-1784509615500-dvhdgb.png` at 256 x 256 and the new APImart result at 800 x 800. |
+| Evidence | `test-results/screenshots/cloud-p0-canvas-delete-af1e6c4-20260720.png`; `test-results/screenshots/cloud-p0-generation-success-af1e6c4-20260720.png`; browser DOM probe recorded the two independent image nodes and URLs. |
+| Root cause | `applyImageChanges()` called `onImagesChange(newImages)` and then an argument-free `onForceSave()`. The parent callback read the previous render's `images` closure and only persisted when that stale array was non-empty. Deleting the last image therefore wrote the removed image back to the project, and project synchronization restored it. |
+| Fix | Change `onForceSave` to receive the exact post-change `CanvasImage[]`, pass `newImages` from `applyImageChanges`, serialize that snapshot in the parent, and allow an empty array to be persisted. |
+| Regression | The focused source contract was red at 1 failed / 8 passed and is green at 9/9. The real P0 E2E now records the deleted source URL and asserts it is still absent after generation. TypeScript and build ESLint pass. |
+| Cloud status | Repair is local and not yet deployed. Closure requires deploy -> repeat delete -> real generation -> reload/reopen, with only the generated image remaining. |

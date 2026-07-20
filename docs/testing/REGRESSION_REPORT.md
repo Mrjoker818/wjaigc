@@ -576,3 +576,11 @@ Release status remains **not approved** until the local candidate is deployed an
 - Cloud terminal evidence showed database health passing but object storage failing solely because no static S3 keys were present; the application adapter explicitly supports Coze workload identity with empty keys.
 - `coze-start.sh` exited before `pnpm start`, leaving no Next process on port 5000 and both preview domains at HTTP 502.
 - The startup-specific regression was red at 1 failure / 3 passes and green at 5/5 after the minimal doctor change. Strict release validation remains fail-closed; post-start upload/read evidence is still required.
+
+## 2026-07-20 direct-Chrome P0 continuation on `af1e6c4`
+
+- Cloud startup and direct application availability recovered. The signed-in administrator dashboard loaded, a direct reload retained the session, logout reached the entry page, and Chrome-saved credentials returned to the dashboard without reading or changing the password.
+- Clipboard image ingestion created a real persisted upload. The image moved from `(832, 303.5)` to `(960, 431.5)`, resized from 256 x 256 to 320 x 320, and the selected-image delete action reduced the visible image count to zero. Evidence is under `test-results/screenshots/cloud-p0-canvas-*-af1e6c4-20260720.png`.
+- One authorized APImart `doubao-seedream-5-0-lite` 1:1 task reached a business terminal state and placed an 800 x 800 blue-cube result on the canvas. This closes the current non-FHL x1 generation terminal-state observation, but not the full P0 journey.
+- The same run found `BUG-20260720-046`: the deleted upload returned after generation. Red-first contract result was 1 failed / 8 passed; the local minimal repair is green at 9/9, TypeScript passes, and build ESLint passes. Cloud replay is pending deployment.
+- Native file-chooser upload and observable download-file creation remain unverified in Chrome because the control host blocks file injection and has not exposed a download artifact. Clipboard persistence is evidence for managed object-storage write/read, not a substitute for the native chooser requirement.

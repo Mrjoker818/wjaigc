@@ -324,3 +324,11 @@
 - The local four-browser production result does not replace those cloud acceptance checks.
 
 After the reported cloud update, the preview root still served the same `95618` byte development document with `next-devtools`, HMR, and all three injected bridge scripts. A fresh logged-in Chrome reload kept `正在验证身份...` visible after the 12-second condition wait, although the canvas controls had rendered behind it. Evidence: `test-results/screenshots/cloud-p0-auth-overlay-after-user-sync-20260719.png` and `test-results/console/cloud-p0-auth-overlay-after-user-sync-20260719.json`. No P0 upload or paid generation was attempted.
+
+## 2026-07-20 remaining gates after the `af1e6c4` cloud replay
+
+- `BUG-20260720-046` repair is not deployed. Repeat clipboard/native upload -> select -> move -> resize -> delete -> real generation -> reload -> reopen and prove the deleted source URL never returns.
+- Native file-chooser upload remains unverified in Chrome. The control host rejected `fileChooser.setFiles` before the application received a file; clipboard upload passed but does not satisfy the native chooser case.
+- Generated-file download remains unverified until a browser download event and a non-empty downloaded artifact are preserved.
+- Firefox, WebKit, mobile Chromium, GitHub `real-p0-e2e`, and full trace/video/network evidence remain incomplete. GitHub still requires the five real-E2E environment values.
+- Multi-output generation, cancellation, provider failure, timeout, credit compensation, and all P1/P2 business modules remain outside the completed portion of this P0 continuation.

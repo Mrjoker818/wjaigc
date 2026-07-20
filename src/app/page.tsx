@@ -4213,11 +4213,11 @@ function CanvasApp() {
             viewStateRef.current = vs;
             setViewState(vs);
           }}
-          onForceSave={() => {
+          onForceSave={(nextImages) => {
             try {
-              if (currentProject?.id && images.length > 0) {
+              if (currentProject?.id) {
                 const mgr = UserManagerCore.getInstance();
-                const persistable = images.map(img => ({
+                const persistable = nextImages.map(img => ({
                   id: img.id,
                   url: img.url,
                   x: img.x, y: img.y,

@@ -239,3 +239,9 @@ The local source gates are green, including the production build, but the post-r
 GitHub clean-clone quality is also green for `ce62791`, but the required real-P0 job failed its configuration preflight and did not launch a browser. **Decision remains: NOT APPROVED.**
 
 Coze source synchronization exposed a second startup blocker: `doctor --startup` rejected the platform's managed object-storage identity before Next could listen. A source-level red-to-green fix exists, but it is not accepted until deployed and followed by real upload, storage-read, and full P0 browser evidence. **Decision remains: NOT APPROVED.**
+
+## 2026-07-20 resumed cloud P0 result
+
+**Decision remains: NOT APPROVED.** The official `af1e6c4` deployment now starts, serves `/api/auth/me`, retains the direct-domain authenticated session across reload, supports logout and Chrome-saved-credential relogin, accepts a clipboard PNG, and completes one authorized APImart x1 generation. Real canvas move, resize, and immediate delete interactions also passed.
+
+The run then reproduced open P1 `BUG-20260720-046`: deleting the last uploaded image triggers a force-save with the previous render's image array, so the deleted image returns after generation updates the project. A minimal local red-to-green repair exists, but it is not cloud-accepted. Native file upload, generated-file download, delete persistence after reload/reopen, and the complete P0 evidence bundle are still incomplete.
