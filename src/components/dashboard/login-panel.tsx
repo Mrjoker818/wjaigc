@@ -1,4 +1,5 @@
 'use client';
+/* eslint-disable @next/next/no-html-link-for-pages -- Login entry navigation must bypass a broken App Router hydration state. */
 
 import React, { useState, useMemo } from 'react';
 import { User } from '@/lib/user-types';
@@ -22,17 +23,18 @@ import {
   MessageCircle,
 } from 'lucide-react';
 
-interface LoginPanelProps {
-  onLogin: (user: User, productType: string) => void;
-}
-
 type LoginMode = 'canvas' | 'chat';
 type ViewState = 'select-mode' | 'login-form';
 
-export function LoginPanel({ onLogin }: LoginPanelProps) {
+interface LoginPanelProps {
+  onLogin: (user: User, productType: string) => void;
+  initialMode?: LoginMode;
+}
+
+export function LoginPanel({ onLogin, initialMode }: LoginPanelProps) {
   const userManager = useMemo(() => UserManagerCore.getInstance(), []);
-  const [viewState, setViewState] = useState<ViewState>('select-mode');
-  const [selectedMode, setSelectedMode] = useState<LoginMode>('canvas');
+  const [viewState, setViewState] = useState<ViewState>(initialMode ? 'login-form' : 'select-mode');
+  const [selectedMode, setSelectedMode] = useState<LoginMode>(initialMode ?? 'canvas');
   const [loginName, setLoginName] = useState('Mr.joker');
   const [loginPassword, setLoginPassword] = useState('');
   const [showLoginPassword, setShowLoginPassword] = useState(false);
@@ -74,7 +76,7 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
     await submitLogin(loginName.trim(), loginPassword, selectedMode);
   };
 
-  const selectMode = (mode: LoginMode) => {
+  const selectMode = (mode: LoginMode): void => {
     setSelectedMode(mode);
     setLoginError('');
     setViewState('login-form');
@@ -207,9 +209,9 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
 
                 <div className="space-y-4">
                   {/* 无限画布卡片 */}
-                  <button
-                    onClick={() => selectMode('canvas')}
-                    className="w-full text-left p-5 rounded-xl border border-border/40 bg-muted/30 hover:border-primary/50 hover:bg-muted/50 transition-all group cursor-pointer"
+                  <a
+                    href="/login/canvas"
+                    className="block w-full text-left p-5 rounded-xl border border-border/40 bg-muted/30 hover:border-primary/50 hover:bg-muted/50 transition-all group cursor-pointer"
                   >
                     <div className="flex items-center gap-4">
                       <div className="w-12 h-12 rounded-lg bg-accent flex items-center justify-center shrink-0 group-hover:shadow-[0_0_20px_rgba(212,175,55,0.2)] transition-shadow">
@@ -225,12 +227,12 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
                         <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" /></svg>
                       </div>
                     </div>
-                  </button>
+                  </a>
 
                   {/* 智能对话卡片 */}
-                  <button
-                    onClick={() => selectMode('chat')}
-                    className="w-full text-left p-5 rounded-xl border border-border/40 bg-muted/30 hover:border-primary/50 hover:bg-muted/50 transition-all group cursor-pointer"
+                  <a
+                    href="/login/chat"
+                    className="block w-full text-left p-5 rounded-xl border border-border/40 bg-muted/30 hover:border-primary/50 hover:bg-muted/50 transition-all group cursor-pointer"
                   >
                     <div className="flex items-center gap-4">
                       <div className="w-12 h-12 rounded-lg bg-accent flex items-center justify-center shrink-0 group-hover:shadow-[0_0_20px_rgba(212,175,55,0.2)] transition-shadow">
@@ -246,7 +248,7 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
                         <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" /></svg>
                       </div>
                     </div>
-                  </button>
+                  </a>
                 </div>
 
                 <p className="mt-8 text-xs text-muted-foreground/50 text-center">请联系管理员创建新账户并授权对应功能。</p>
