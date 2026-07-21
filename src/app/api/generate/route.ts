@@ -2309,6 +2309,11 @@ export async function POST(request: NextRequest) {
         }
         usedModelId = result.usedModel;
         usedProviderId = result.usedProviderId;
+        // 同步更新 providerName（修复：避免 usedProviderName 使用初始 provider 的过时值）
+        const actualProvider = await findProviderById(usedProviderId);
+        if (actualProvider) {
+          usedProviderName = actualProvider.displayName || actualProvider.name || usedProviderName;
+        }
         try {
           await appendUserJsonl(userId, 'images', {
             type: 'submit',

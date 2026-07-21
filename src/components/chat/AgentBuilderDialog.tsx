@@ -111,7 +111,7 @@ ${outputSpec || '1. 设计理念（200字内）\n2. 详细方案描述\n3. 材�
   const labelClass = `text-xs font-medium ${isGold ? 'text-muted-foreground' : 'text-gray-500'}`;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center" onClick={onClose}>
+    <div className="fixed inset-0 z-[300] flex items-center justify-center" onClick={onClose}>
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
       <div
         className={`relative w-[680px] max-h-[85vh] rounded-xl shadow-2xl overflow-hidden flex flex-col ${

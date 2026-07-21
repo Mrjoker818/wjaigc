@@ -4155,6 +4155,81 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           // 收集所有已完成任务的结果
           const completedResults = new Map<string, string[]>();
           const failedTasks = new Set<string>();
+          
+          // ★ 渐进式显示：跟踪已添加URL和位置偏移
+          const addedUrls = new Set<string>();
+          let progressiveCount = 0;
+          
+          // ★ 预计算位置参数（在while循环前，避免重复计算）
+          const srcImgs = group.sourceImageIds.map(id => imagesRef.current.find(i => i.id === id)).filter(Boolean) as CanvasImage[];
+          const srcRightEdge = srcImgs.length > 0 ? Math.max(...srcImgs.map(img => img.x + img.width)) : 0;
+          const srcCenterY = srcImgs.length > 0 ? srcImgs.reduce((s, img) => s + img.y + img.height / 2, 0) / srcImgs.length : 0;
+          const resultFrameRight = srcRightEdge + 80 + Math.max(phWidth, 420);
+          const actualSize = toolbar.size ? toolbar.size.replace(/×/g, 'x').split('x').map(Number) : [phWidth, phHeight];
+          const actualW = actualSize[0] || phWidth;
+          const actualH = actualSize[1] || phHeight;
+          
+          // ★ 渐进式添加图片辅助函数
+          const addProgressiveImages = async (newUrls: string[]) => {
+            const freshUrls = newUrls.filter(u => !addedUrls.has(u));
+            if (freshUrls.length === 0) return;
+            
+            for (const rawUrl of freshUrls) {
+              addedUrls.add(rawUrl);
+              try {
+                const saveRes = await fetch('/api/save-image', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ imageUrl: rawUrl }),
+                });
+                const saveData = await saveRes.json();
+                const savedUrl = saveData.url || rawUrl;
+                addedUrls.add(savedUrl);
+                
+                const newImg: CanvasImage = {
+                  id: `grp-result-${Date.now()}-${progressiveCount}`,
+                  url: savedUrl,
+                  x: resultFrameRight + 20 + progressiveCount * (phWidth + 20),
+                  y: srcCenterY - phHeight / 2,
+                  width: phWidth,
+                  height: phHeight,
+                  originalWidth: actualW,
+                  originalHeight: actualH,
+                  prompt: toolbar.prompt,
+                  aspectRatio: toolbar.aspectRatio,
+                  modelName: model,
+                  apiProvider: modelProviderMap.get(providerId?.split('::')[0] || '') || providerId?.split('::')[0] || undefined,
+                };
+                progressiveCount++;
+                onImagesChange([...imagesRef.current, newImg]);
+                
+                // ★ 异步修正：API 可能忽略 size 参数返回不同尺寸的图片
+                const vImg = new Image();
+                vImg.onload = () => {
+                  const nW = vImg.naturalWidth;
+                  const nH = vImg.naturalHeight;
+                  if (nW > 0 && nH > 0 && (nW !== actualW || nH !== actualH)) {
+                    const displayH = phHeight;
+                    const correctedDisplayW = Math.round(displayH * nW / nH);
+                    const updated = imagesRef.current.map(i =>
+                      i.id === newImg.id ? {
+                        ...i,
+                        originalWidth: nW,
+                        originalHeight: nH,
+                        width: correctedDisplayW,
+                        height: displayH,
+                      } : i
+                    );
+                    imagesRef.current = updated;
+                    onImagesChange(updated);
+                  }
+                };
+                vImg.src = savedUrl;
+              } catch (err) {
+                console.warn('[addProgressiveImages] save-image failed:', err);
+              }
+            }
+          };
 
           while (Date.now() - startTime < maxPollTime) {
             // 检查是否所有任务都已完成或失败
@@ -4245,10 +4320,19 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                 }
                 if (resultUrls.length > 0) {
                   completedResults.set(tid, resultUrls);
+                  // ★ 渐进式显示：立即添加到画布，不等待其他任务
+                  await addProgressiveImages(resultUrls);
                 } else {
                   // 完成但没有图片 → 失败
                   failedTasks.add(tid);
                 }
+              } else if (pollData.status === 'partiallyCompleted') {
+                // ★ 部分完成（submitOnly恢复模式）：立即显示已完成图片，继续轮询剩余
+                const partialUrls = Array.isArray(pollResult.imageUrls) ? (pollResult.imageUrls as string[]) : [];
+                if (partialUrls.length > 0) {
+                  await addProgressiveImages(partialUrls);
+                }
+                // 不标记为完成或失败，继续轮询
               } else if (pollData.status === 'failed' || (pollData.status === 'error' && !pollData.retryable)) {
                 failedTasks.add(tid);
               }
@@ -4256,72 +4340,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             }
           }
 
-          // ★ 收集所有结果图片
-          const allResultUrls: string[] = [];
-          for (const urls of completedResults.values()) {
-            allResultUrls.push(...urls);
-          }
-
-          if (allResultUrls.length > 0) {
-            const savedUrls: string[] = [];
-            for (const url of allResultUrls) {
-              try {
-                const saveRes = await fetch('/api/save-image', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ imageUrl: url }),
-                });
-                const saveData = await saveRes.json();
-                savedUrls.push(saveData.url || url);
-              } catch {
-                savedUrls.push(url);
-              }
-            }
-            const srcImgs = group.sourceImageIds.map(id => imagesRef.current.find(i => i.id === id)).filter(Boolean) as CanvasImage[];
-            const srcRightEdge = srcImgs.length > 0 ? Math.max(...srcImgs.map(img => img.x + img.width)) : 0;
-            const srcCenterY = srcImgs.length > 0 ? srcImgs.reduce((s, img) => s + img.y + img.height / 2, 0) / srcImgs.length : 0;
-            const resultFrameRight = srcRightEdge + 80 + Math.max(phWidth, 420);
-            const actualSize = toolbar.size ? toolbar.size.replace(/×/g, 'x').split('x').map(Number) : [phWidth, phHeight];
-            const actualW = actualSize[0] || phWidth;
-            const actualH = actualSize[1] || phHeight;
-            const resultImages = savedUrls.map((url: string, i: number) => ({
-              id: `grp-result-${Date.now()}-${i}`,
-              url,
-              x: resultFrameRight + 20 + i * (phWidth + 20),
-              y: srcCenterY - phHeight / 2,
-              width: phWidth, height: phHeight,
-              originalWidth: actualW,
-              originalHeight: actualH,
-              prompt: toolbar.prompt,
-              aspectRatio: toolbar.aspectRatio,
-              modelName: model,
-              apiProvider: modelProviderMap.get(providerId?.split('::')[0] || '') || providerId?.split('::')[0] || undefined,
-            }));
-            onImagesChange([...imagesRef.current, ...resultImages]);
-            // ★ 异步修正：API 可能忽略 size 参数返回不同尺寸的图片
-            resultImages.forEach((newImg) => {
-              const vImg = new Image();
-              vImg.onload = () => {
-                const nW = vImg.naturalWidth;
-                const nH = vImg.naturalHeight;
-                if (nW > 0 && nH > 0 && (nW !== actualW || nH !== actualH)) {
-                  const displayH = phHeight;
-                  const correctedDisplayW = Math.round(displayH * nW / nH);
-                  const updated = imagesRef.current.map(i =>
-                    i.id === newImg.id ? {
-                      ...i,
-                      originalWidth: nW,
-                      originalHeight: nH,
-                      width: correctedDisplayW,
-                      height: displayH,
-                    } : i
-                  );
-                  imagesRef.current = updated;
-                  onImagesChange(updated);
-                }
-              };
-              vImg.src = newImg.url;
-            });
+          // ★ 渐进式显示模式：图片已在循环中逐张添加，此处仅更新组状态
+          if (progressiveCount > 0 || completedResults.size > 0) {
+            // 至少有一张图片成功添加，重置组状态
             setGenGroups(prev => prev.map(g => {
               if (g.id !== group.id) return g;
               return {

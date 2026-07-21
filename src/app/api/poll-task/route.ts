@@ -1164,8 +1164,27 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // 如果有任务仍在进行，等待
+        // 如果有任务仍在进行，但已有部分完成：返回 partiallyCompleted 让前端提前显示
         if (anyStillPending) {
+          const dedupedPartialUrls = Array.from(new Set(aggregatedImageUrls));
+          if (dedupedPartialUrls.length > 0) {
+            // 计算进度百分比
+            const completedCount = allDirectTaskIds.length - allDirectTaskIds.filter(id => {
+              const t = getTaskInfo(id);
+              return !t || t.status === 'processing' || t.status === 'queued';
+            }).length;
+            const progressPct = Math.round((completedCount / allDirectTaskIds.length) * 90) + 5;
+            return NextResponse.json({
+              success: true,
+              status: 'partiallyCompleted',
+              progress: progressPct,
+              label: `生成中 (${completedCount}/${allDirectTaskIds.length})...`,
+              imageUrls: dedupedPartialUrls,
+              imageUrl: dedupedPartialUrls[0],
+              completedCount,
+              totalCount: allDirectTaskIds.length,
+            }, { status: 200 });
+          }
           return NextResponse.json({
             success: true,
             status: 'processing',
