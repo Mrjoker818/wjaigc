@@ -84,6 +84,7 @@ async function detectHumanWithVision(
   imageUrl: string,
   imageWidth: number,
   imageHeight: number,
+  cookie?: string,
 ): Promise<VisionDetectResult | null> {
   try {
     // 找一个支持 Vision 的 chat / vlm 模型
@@ -111,7 +112,7 @@ Respond ONLY with a valid JSON object matching this schema:
 
     const response = await fetch(`${origin}/api/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(cookie ? { cookie } : {}) },
       body: JSON.stringify({
         messages: [
           { role: 'system', content: systemPrompt },
@@ -149,7 +150,7 @@ Respond ONLY with a valid JSON object matching this schema:
   }
 }
 
-export async function analyzeHumanImageUrl(sourceImageId: string, sourceImageUrl: string): Promise<HumanAnalysis> {
+export async function analyzeHumanImageUrl(sourceImageId: string, sourceImageUrl: string, cookie?: string): Promise<HumanAnalysis> {
   const buffer = await fetchImageBuffer(sourceImageUrl);
   const metadata = await sharp(buffer).metadata();
   const width = metadata.width || 1024;
@@ -157,7 +158,7 @@ export async function analyzeHumanImageUrl(sourceImageId: string, sourceImageUrl
   const image: HumanImageDescriptor = { id: sourceImageId, url: sourceImageUrl, width, height };
 
   // 尝试 Vision LLM 真实检测
-  const visionResult = await detectHumanWithVision(sourceImageUrl, width, height);
+  const visionResult = await detectHumanWithVision(sourceImageUrl, width, height, cookie);
   if (visionResult) {
     const VALID_TYPES = new Set(['face','left_hand','right_hand','body','feet','hair','clothes','interaction']);
     const persons = visionResult.persons.length > 0
@@ -411,7 +412,7 @@ export async function startHumanRepair(input: StartHumanRepairInput): Promise<Hu
     createdAt: Date.now(),
   };
   taskStore().tasks.set(id, task);
-  registerTask(id, 'image-edit', '人物精修大师', input.userId);
+  registerTask(id, 'human-repair', '人物精修大师', input.userId);
   void runRepair(id, input);
   return task;
 }
