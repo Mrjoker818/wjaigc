@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { getResumedTaskPollingOutcome, RESUMED_TASK_MAX_POLL_ATTEMPTS, shouldStartResumedTaskPolling } from '@/lib/resumed-task-polling';
 import { hasDirectVideoPollingTimedOut } from '@/lib/video-task-polling';
 import { applyTaskIdsToProcessingPlaceholders, shouldPersistProcessingPlaceholder } from '@/lib/canvas-task-placeholders';
@@ -13,7 +13,24 @@ import { GenerationPanel, GenerationParams, CtrlRefSelection } from '@/component
 import VideoGenerationPanel, { type VideoGenerationPanelHandle } from '@/components/video-generation-panel';
 import { ImagePreview } from '@/components/image-preview';
 import { ChatPanel } from '@/components/chat-panel';
-import { QuickCreatePanel, type QuickCreateRequest } from '@/components/quick-create-panel';
+import {
+  QuickCreatePanel,
+  type QuickCreateCompileViewState,
+  type QuickCreateRequest,
+} from '@/components/quick-create-panel';
+import {
+  resolveQuickCreateModel,
+  type QuickCreateModelCandidate,
+  type ResolvedQuickCreateModel,
+} from '@/lib/model-defaults';
+import type {
+  QuickCreateCompileResult,
+  QuickCreateCompileSseEvent,
+} from '@/lib/quick-create-compile';
+import {
+  flushQuickCreateSseBuffer,
+  parseQuickCreateSseChunk,
+} from '@/lib/quick-create-sse';
 import { PromptEquation } from '@/components/prompt-equation';
 
 import { Toaster } from '@/components/ui/sonner';
@@ -63,9 +80,61 @@ type ThemeStyle = 'gold' | 'monochrome';
 type ActivePanel = 'generate' | 'video' | 'chat';
 type CreateMode = 'quick' | 'professional';
 
+interface QuickCreateModelPolicy {
+  autoModelRouting: boolean;
+  globalDefault: string;
+  quickCreateDefault: string;
+}
+
+interface QuickCreateModelsResponse {
+  success?: boolean;
+  error?: string;
+  providers?: Array<{ id: string; name?: string; displayName?: string }>;
+  models?: Array<{
+    id: string;
+    name?: string;
+    providerId: string;
+    providerName?: string;
+    isDefault?: boolean;
+  }>;
+  quickCreatePolicy?: Partial<QuickCreateModelPolicy>;
+}
+
+const EMPTY_QUICK_CREATE_MODEL_POLICY: QuickCreateModelPolicy = {
+  autoModelRouting: true,
+  globalDefault: '',
+  quickCreateDefault: '',
+};
+
 function getInitialProjectId(): string | null {
   if (typeof window === 'undefined') return null;
   return new URLSearchParams(window.location.search).get('projectId');
+}
+
+function normalizeQuickCreateModels(data: QuickCreateModelsResponse): QuickCreateModelCandidate[] {
+  const providerNames = new Map(
+    (data.providers ?? []).map(provider => [
+      provider.id,
+      provider.displayName || provider.name || provider.id,
+    ])
+  );
+
+  return (data.models ?? []).map(model => ({
+    id: `${model.providerId}::${model.id}`,
+    providerId: model.providerId,
+    modelId: model.id,
+    name: model.name || model.id,
+    providerName: model.providerName || providerNames.get(model.providerId) || model.providerId,
+    isDefault: model.isDefault,
+  }));
+}
+
+function normalizeQuickCreatePolicy(data: QuickCreateModelsResponse): QuickCreateModelPolicy {
+  return {
+    autoModelRouting: data.quickCreatePolicy?.autoModelRouting ?? true,
+    globalDefault: data.quickCreatePolicy?.globalDefault ?? '',
+    quickCreateDefault: data.quickCreatePolicy?.quickCreateDefault ?? '',
+  };
 }
 
 function extractGeneratedImageUrls(payload: Record<string, unknown>): string[] {
@@ -161,7 +230,11 @@ function CanvasApp() {
 
   // Cleanup on unmount
   useEffect(() => {
-    return () => { isMountedRef.current = false; };
+    return () => {
+      isMountedRef.current = false;
+      quickCreateCompileControllerRef.current?.abort();
+      quickCreateCompileControllerRef.current = null;
+    };
   }, []);
 
   // Wrap setImages to record incremental diff before each change
@@ -218,6 +291,21 @@ function CanvasApp() {
   const [panelCollapsed, setPanelCollapsed] = useState(false);
   const [activePanel, setActivePanel] = useState<ActivePanel>('generate');
   const [createMode, setCreateMode] = useState<CreateMode>('quick');
+  const [quickCreateImageModels, setQuickCreateImageModels] = useState<QuickCreateModelCandidate[]>([]);
+  const [quickCreateChatModels, setQuickCreateChatModels] = useState<QuickCreateModelCandidate[]>([]);
+  const [quickCreateImagePolicy, setQuickCreateImagePolicy] = useState<QuickCreateModelPolicy>(EMPTY_QUICK_CREATE_MODEL_POLICY);
+  const [quickCreateChatPolicy, setQuickCreateChatPolicy] = useState<QuickCreateModelPolicy>(EMPTY_QUICK_CREATE_MODEL_POLICY);
+  const [quickCreateModelsLoading, setQuickCreateModelsLoading] = useState(false);
+  const [quickCreateModelsError, setQuickCreateModelsError] = useState('');
+  const [quickCreateCompileState, setQuickCreateCompileState] = useState<QuickCreateCompileViewState>({
+    phase: null,
+    statusMessage: '',
+    streamText: '',
+    result: null,
+    error: '',
+    isCompiling: false,
+  });
+  const quickCreateCompileControllerRef = useRef<AbortController | null>(null);
   // 从工作台加载指定项目
   const loadProjectById = useCallback(async (projectId: string) => {
     try {
@@ -556,6 +644,64 @@ function CanvasApp() {
 
     return () => {
       cancelled = true;
+    };
+  }, [authChecked, currentUser]);
+
+  useEffect(() => {
+    if (!authChecked || !currentUser) {
+      setQuickCreateImageModels([]);
+      setQuickCreateChatModels([]);
+      setQuickCreateImagePolicy(EMPTY_QUICK_CREATE_MODEL_POLICY);
+      setQuickCreateChatPolicy(EMPTY_QUICK_CREATE_MODEL_POLICY);
+      setQuickCreateModelsError('');
+      return;
+    }
+
+    const controller = new AbortController();
+    let cancelled = false;
+
+    const loadQuickCreateModels = async (): Promise<void> => {
+      setQuickCreateModelsLoading(true);
+      setQuickCreateModelsError('');
+
+      try {
+        const [imageResponse, chatResponse] = await Promise.all([
+          fetch('/api/models?type=image', { signal: controller.signal }),
+          fetch('/api/models?type=chat', { signal: controller.signal }),
+        ]);
+        const [imageData, chatData] = await Promise.all([
+          imageResponse.json() as Promise<QuickCreateModelsResponse>,
+          chatResponse.json() as Promise<QuickCreateModelsResponse>,
+        ]);
+
+        if (!imageResponse.ok || imageData.success === false) {
+          throw new Error(imageData.error || '图像模型加载失败');
+        }
+        if (!chatResponse.ok || chatData.success === false) {
+          throw new Error(chatData.error || 'LLM 模型加载失败');
+        }
+        if (cancelled) return;
+
+        setQuickCreateImageModels(normalizeQuickCreateModels(imageData));
+        setQuickCreateChatModels(normalizeQuickCreateModels(chatData));
+        setQuickCreateImagePolicy(normalizeQuickCreatePolicy(imageData));
+        setQuickCreateChatPolicy(normalizeQuickCreatePolicy(chatData));
+      } catch (error) {
+        if (controller.signal.aborted || cancelled) return;
+        setQuickCreateImageModels([]);
+        setQuickCreateChatModels([]);
+        setQuickCreateImagePolicy(EMPTY_QUICK_CREATE_MODEL_POLICY);
+        setQuickCreateChatPolicy(EMPTY_QUICK_CREATE_MODEL_POLICY);
+        setQuickCreateModelsError(error instanceof Error ? error.message : '快速创作模型加载失败');
+      } finally {
+        if (!cancelled) setQuickCreateModelsLoading(false);
+      }
+    };
+
+    void loadQuickCreateModels();
+    return () => {
+      cancelled = true;
+      controller.abort();
     };
   }, [authChecked, currentUser]);
 
@@ -3586,6 +3732,48 @@ function CanvasApp() {
     return { model, providerId };
   }, []);
 
+  const recentQuickCreateImageModel = useMemo((): string => {
+    const { model, providerId } = getCurrentImageModel();
+    if (model.includes('::')) return model;
+    return model && providerId ? `${providerId}::${model}` : '';
+  }, [getCurrentImageModel, quickCreateImageModels]);
+
+  const resolvedQuickCreateImageModel = useMemo<ResolvedQuickCreateModel>(() => (
+    resolveQuickCreateModel({
+      quickCreateDefault: quickCreateImagePolicy.quickCreateDefault,
+      globalDefault: quickCreateImagePolicy.autoModelRouting
+        ? quickCreateImagePolicy.globalDefault
+        : undefined,
+      recentSelection: quickCreateImagePolicy.autoModelRouting
+        ? recentQuickCreateImageModel
+        : undefined,
+      models: quickCreateImageModels,
+      allowFirstAvailable: quickCreateImagePolicy.autoModelRouting,
+    })
+  ), [quickCreateImageModels, quickCreateImagePolicy, recentQuickCreateImageModel]);
+
+  const recentQuickCreateChatModel = useMemo((): string => {
+    if (!currentChatModelInfo?.model) return '';
+    if (currentChatModelInfo.model.includes('::')) return currentChatModelInfo.model;
+    return currentChatModelInfo.providerId
+      ? `${currentChatModelInfo.providerId}::${currentChatModelInfo.model}`
+      : currentChatModelInfo.model;
+  }, [currentChatModelInfo]);
+
+  const resolvedQuickCreateChatModel = useMemo<ResolvedQuickCreateModel>(() => (
+    resolveQuickCreateModel({
+      quickCreateDefault: quickCreateChatPolicy.quickCreateDefault,
+      globalDefault: quickCreateChatPolicy.autoModelRouting
+        ? quickCreateChatPolicy.globalDefault
+        : undefined,
+      recentSelection: quickCreateChatPolicy.autoModelRouting
+        ? recentQuickCreateChatModel
+        : undefined,
+      models: quickCreateChatModels,
+      allowFirstAvailable: quickCreateChatPolicy.autoModelRouting,
+    })
+  ), [quickCreateChatModels, quickCreateChatPolicy, recentQuickCreateChatModel]);
+
   const notifyMissingImageModel = useCallback((): void => {
     toast.error('未选择图像生成模型', {
       description: '请先在专业创作中选择模型',
@@ -3595,32 +3783,180 @@ function CanvasApp() {
     });
   }, [themeStyle]);
 
+  const notifyMissingQuickCreateImageModel = useCallback((): void => {
+    toast.error('当前账号没有可用的图像模型', {
+      description: '请联系管理员启用模型、配置服务端凭证并分配图像模型权限',
+      className: themeStyle === 'monochrome'
+        ? 'bg-white border border-gray-200 text-gray-900'
+        : 'bg-[#141414] border border-yellow-900 text-white',
+    });
+  }, [themeStyle]);
+
   const handleQuickGenerate = useCallback(async (request: QuickCreateRequest): Promise<boolean> => {
-    const { model, providerId } = getCurrentImageModel();
-    if (!model) {
-      notifyMissingImageModel();
-      setExternalPrompt(request.prompt);
-      setCreateMode('professional');
-      setActivePanel('generate');
+    const resolvedImageModel = resolveQuickCreateModel({
+      taskOverride: request.imageModelOverride,
+      quickCreateDefault: quickCreateImagePolicy.quickCreateDefault,
+      globalDefault: quickCreateImagePolicy.autoModelRouting
+        ? quickCreateImagePolicy.globalDefault
+        : undefined,
+      recentSelection: quickCreateImagePolicy.autoModelRouting
+        ? recentQuickCreateImageModel
+        : undefined,
+      models: quickCreateImageModels,
+      allowFirstAvailable: quickCreateImagePolicy.autoModelRouting,
+    });
+    if (!resolvedImageModel.model) {
+      notifyMissingQuickCreateImageModel();
       return false;
     }
 
-    void handleGenerate({
-      prompt: request.prompt,
-      outputCount: request.outputCount,
-      aspectRatio: request.aspectRatio,
-      size: '',
-      referenceImages: request.referenceImages,
-      referenceMode: 'style',
-      imageCategory: '',
-      productCategory: '',
-      stylePreset: '',
-      quality: request.quality,
-      model,
-      providerId,
+    quickCreateCompileControllerRef.current?.abort();
+    const controller = new AbortController();
+    quickCreateCompileControllerRef.current = controller;
+    setQuickCreateCompileState({
+      phase: 'validating',
+      statusMessage: '正在校验创作需求与模型权限',
+      streamText: '',
+      result: null,
+      error: '',
+      isCompiling: true,
     });
-    return true;
-  }, [getCurrentImageModel, handleGenerate, notifyMissingImageModel]);
+
+    let compileResult: QuickCreateCompileResult | null = null;
+    let compileError = '';
+
+    const handleCompileEvent = (event: QuickCreateCompileSseEvent): void => {
+      if (event.type === 'status') {
+        setQuickCreateCompileState((current: QuickCreateCompileViewState) => ({
+          ...current,
+          phase: event.phase,
+          statusMessage: event.message,
+        }));
+        return;
+      }
+      if (event.type === 'delta') {
+        setQuickCreateCompileState((current: QuickCreateCompileViewState) => ({
+          ...current,
+          streamText: `${current.streamText}${event.content}`,
+        }));
+        return;
+      }
+      if (event.type === 'result') {
+        compileResult = event.result;
+        setQuickCreateCompileState((current: QuickCreateCompileViewState) => ({
+          ...current,
+          result: event.result,
+        }));
+        return;
+      }
+      if (event.type === 'error') {
+        compileError = event.message;
+        setQuickCreateCompileState((current: QuickCreateCompileViewState) => ({
+          ...current,
+          error: event.message,
+        }));
+      }
+    };
+
+    try {
+      const response = await fetch('/api/quick-create/compile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: request.prompt,
+          aspectRatio: request.aspectRatio,
+          quality: request.quality,
+          outputCount: request.outputCount,
+          referenceImages: request.referenceImages,
+          chatModelOverride: request.chatModelOverride,
+          recentChatModel: recentQuickCreateChatModel || undefined,
+        }),
+        signal: controller.signal,
+      });
+
+      if (!response.body) {
+        throw new Error('快速创作服务未返回可读取的流');
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let sseBuffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const parsed = parseQuickCreateSseChunk(sseBuffer, decoder.decode(value, { stream: true }));
+        sseBuffer = parsed.buffer;
+        parsed.events.forEach(handleCompileEvent);
+      }
+
+      const trailingText = decoder.decode();
+      if (trailingText) {
+        const parsed = parseQuickCreateSseChunk(sseBuffer, trailingText);
+        sseBuffer = parsed.buffer;
+        parsed.events.forEach(handleCompileEvent);
+      }
+      flushQuickCreateSseBuffer(sseBuffer).forEach(handleCompileEvent);
+
+      if (!response.ok && !compileError) {
+        throw new Error(`快速创作编译失败（HTTP ${response.status}）`);
+      }
+      if (compileError) throw new Error(compileError);
+      if (!compileResult) throw new Error('快速创作服务未返回结构化创作方案');
+
+      // TypeScript narrowing: compileResult is non-null after the throw above
+      const finalResult: QuickCreateCompileResult = compileResult;
+      const compiledPrompt = finalResult.negativePrompt
+        ? `${finalResult.positivePrompt}\n\n[negative: ${finalResult.negativePrompt}]`
+        : finalResult.positivePrompt;
+
+      setQuickCreateCompileState((current: QuickCreateCompileViewState) => ({
+        ...current,
+        phase: 'ready',
+        statusMessage: '专业创作方案已完成，正在提交图片生成任务',
+        result: finalResult,
+        error: '',
+        isCompiling: false,
+      }));
+
+      void handleGenerate({
+        prompt: compiledPrompt,
+        outputCount: finalResult.outputCount,
+        aspectRatio: finalResult.aspectRatio,
+        size: '',
+        referenceImages: request.referenceImages,
+        referenceMode: 'style',
+        imageCategory: '',
+        productCategory: '',
+        stylePreset: '',
+        quality: finalResult.quality,
+        model: resolvedImageModel.model.modelId,
+        providerId: resolvedImageModel.model.providerId,
+      });
+      return true;
+    } catch (error) {
+      if (controller.signal.aborted) return false;
+      const message = error instanceof Error ? error.message : '快速创作编译失败，请重试';
+      setQuickCreateCompileState((current: QuickCreateCompileViewState) => ({
+        ...current,
+        error: message,
+        statusMessage: '',
+        isCompiling: false,
+      }));
+      return false;
+    } finally {
+      if (quickCreateCompileControllerRef.current === controller) {
+        quickCreateCompileControllerRef.current = null;
+      }
+    }
+  }, [
+    handleGenerate,
+    notifyMissingQuickCreateImageModel,
+    quickCreateImageModels,
+    quickCreateImagePolicy,
+    recentQuickCreateChatModel,
+    recentQuickCreateImageModel,
+  ]);
 
   // AI聊天中的图像生成回调 - 当AI建议生成图片时直接触发
   const handleChatGenerateImage = useCallback((prompt: string, outputCount?: number, aspectRatio?: string, quality?: string) => {
@@ -4393,6 +4729,13 @@ function CanvasApp() {
                     themeStyle={themeStyle}
                     selectedImage={selectedImage ? { id: selectedImage.id, url: selectedImage.url, prompt: selectedImage.prompt } : null}
                     isGenerating={activeGenerationCount > 0}
+                    imageModels={quickCreateImageModels}
+                    chatModels={quickCreateChatModels}
+                    resolvedImageModel={resolvedQuickCreateImageModel}
+                    resolvedChatModel={resolvedQuickCreateChatModel}
+                    compileState={quickCreateCompileState}
+                    modelsLoading={quickCreateModelsLoading}
+                    modelsError={quickCreateModelsError}
                     onGenerate={handleQuickGenerate}
                     onOpenProfessional={handleOpenQuickProfessional}
                     onOpenChat={handleOpenQuickChat}

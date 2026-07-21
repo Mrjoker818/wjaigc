@@ -113,6 +113,7 @@ type ModelCreditRuleValue = number | {
 
 interface SystemSettings {
   defaultImageModel?: string; defaultChatModel?: string; defaultVideoModel?: string;
+  quickCreateImageModel?: string; quickCreateChatModel?: string; quickCreateAutoModelRouting?: boolean;
   maxConcurrentTasks?: number; imageMaxSizeMB?: number; imageMaxEdge?: number;
   maxUploadMB?: number; maxVideoDuration?: number; storageQuotaMB?: number;
   sessionTimeout?: number; passwordExpiryDays?: number;
@@ -2099,6 +2100,43 @@ export default function AdminTabs(props: AdminTabsProps) {
                   <option value="">未选择</option>
                   {videoModelOpts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
+              </div>
+              <div className="border-t border-border/50 pt-5">
+                <div className="mb-4">
+                  <div className="text-sm font-semibold text-foreground">快速创作模型策略</div>
+                  <div className="text-xs text-muted-foreground mt-1">普通用户无需逐次选择模型；系统只会使用管理员已启用的模型。</div>
+                </div>
+                <div className="space-y-5">
+                  <div className="flex items-center justify-between gap-6">
+                    <div>
+                      <div className="text-sm font-medium text-foreground">快速创作图像模型</div>
+                      <div className="text-xs text-muted-foreground mt-0.5">留空时由路由策略自动选择（自动路由开启时按优先级回退全局默认）</div>
+                    </div>
+                    <select value={s('quickCreateImageModel')} onChange={e => { setSystemSettings(prev => ({ ...prev, quickCreateImageModel: e.target.value })); setSettingsDirty(true); }}
+                      className="w-56 bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors appearance-none cursor-pointer">
+                      <option value="">跟随全局默认</option>
+                      {imageModelOpts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </div>
+                  <div className="flex items-center justify-between gap-6">
+                    <div>
+                      <div className="text-sm font-medium text-foreground">快速创作 LLM</div>
+                      <div className="text-xs text-muted-foreground mt-0.5">用于理解需求、补全专业参数和编译提示词</div>
+                    </div>
+                    <select value={s('quickCreateChatModel')} onChange={e => { setSystemSettings(prev => ({ ...prev, quickCreateChatModel: e.target.value })); setSettingsDirty(true); }}
+                      className="w-56 bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors appearance-none cursor-pointer">
+                      <option value="">跟随全局默认</option>
+                      {chatModelOpts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </div>
+                  <div className="flex items-center justify-between gap-6">
+                    <div>
+                      <div className="text-sm font-medium text-foreground">按任务自动匹配模型</div>
+                      <div className="text-xs text-muted-foreground mt-0.5">开启后按快速创作默认、全局默认、最近选择和可用模型顺序自动回退</div>
+                    </div>
+                    {toggleBtn('quickCreateAutoModelRouting')}
+                  </div>
+                </div>
               </div>
               <div className="flex items-center justify-between">
                 <div>

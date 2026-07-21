@@ -32,6 +32,45 @@ describe('runtime settings', () => {
       defaultImageModel: 'provider-a::image-a',
       defaultChatModel: '',
       defaultVideoModel: '',
+      quickCreateImageModel: '',
+      quickCreateChatModel: '',
+      quickCreateAutoModelRouting: true,
+    });
+  });
+
+  it('uses quick create models when configured and normalizes auto routing', async () => {
+    mocks.dbGetSystemSetting.mockImplementation(async (key: string) => {
+      const values: Record<string, string> = {
+        defaultImageModel: 'provider-a::image-default',
+        defaultChatModel: 'provider-a::chat-default',
+        quickCreateImageModel: 'provider-b::image-fast',
+        quickCreateChatModel: 'provider-b::chat-fast',
+        quickCreateAutoModelRouting: 'false',
+      };
+      return values[key] ?? null;
+    });
+
+    await expect(getRuntimeSettings()).resolves.toMatchObject({
+      quickCreateImageModel: 'provider-b::image-fast',
+      quickCreateChatModel: 'provider-b::chat-fast',
+      quickCreateAutoModelRouting: false,
+    });
+  });
+
+  it('preserves blank quick create model settings for routing policy decisions', async () => {
+    mocks.dbGetSystemSetting.mockImplementation(async (key: string) => {
+      const values: Record<string, string> = {
+        defaultImageModel: 'provider-a::image-default',
+        defaultChatModel: 'provider-a::chat-default',
+        quickCreateImageModel: '   ',
+        quickCreateChatModel: '',
+      };
+      return values[key] ?? null;
+    });
+
+    await expect(getRuntimeSettings()).resolves.toMatchObject({
+      quickCreateImageModel: '',
+      quickCreateChatModel: '',
     });
   });
 });

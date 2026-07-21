@@ -5,14 +5,18 @@ import { dbGetSystemSetting, dbSetSystemSetting, dbAddAuditLog } from '@/lib/db-
 export const dynamic = 'force-dynamic';
 
 const ALL_SETTING_KEYS = [
-  'initialCredits', 'maxVideoDuration', 'imageMaxSizeMB', 'imageMaxEdge', 'defaultImageModel', 'defaultChatModel', 'defaultVideoModel', 'videoGenerationEnabled', '3dModelEnabled',
-  'announcementEnabled', 'announcementType', 'announcementExpiry', 'announcement',
+  'initialCredits', 'maxVideoDuration', 'imageMaxSizeMB', 'imageMaxEdge', 'defaultImageModel', 'defaultChatModel', 'defaultVideoModel',
+  'quickCreateImageModel', 'quickCreateChatModel', 'quickCreateAutoModelRouting',
+  'videoGenerationEnabled', '3dModelEnabled', 'announcementEnabled', 'announcementType', 'announcementExpiry', 'announcement',
 ];
 
 const NUMBER_KEYS = new Set([
   'initialCredits', 'maxVideoDuration', 'imageMaxSizeMB', 'imageMaxEdge',
 ]);
-const BOOLEAN_KEYS = new Set(['videoGenerationEnabled', '3dModelEnabled', 'announcementEnabled']);
+const BOOLEAN_KEYS = new Set(['quickCreateAutoModelRouting', 'videoGenerationEnabled', '3dModelEnabled', 'announcementEnabled']);
+const MODEL_SETTING_KEYS = new Set([
+  'defaultImageModel', 'defaultChatModel', 'defaultVideoModel', 'quickCreateImageModel', 'quickCreateChatModel',
+]);
 const NUMBER_RANGES: Record<string, [number, number]> = {
   initialCredits: [0, 100_000],
   maxVideoDuration: [1, 15],
@@ -32,6 +36,14 @@ function normalizeSetting(key: string, value: unknown): string {
   if (BOOLEAN_KEYS.has(key)) {
     if (typeof value !== 'boolean') throw new Error(`${key} must be boolean`);
     return String(value);
+  }
+  if (MODEL_SETTING_KEYS.has(key)) {
+    const modelValue = String(value).trim();
+    if (modelValue.length > 300) throw new Error(`${key} is too long`);
+    if (modelValue && !/^[^:\s]+::[^\s]+$/.test(modelValue)) {
+      throw new Error(`${key} must use providerId::modelId format`);
+    }
+    return modelValue;
   }
   if (key === 'announcementType' && !['banner', 'popup', 'sidebar'].includes(String(value))) {
     throw new Error('announcementType is invalid');

@@ -166,7 +166,8 @@ export function validatePromptOrThrow(prompt: string): void {
  */
 export function logSafetyWarning(prompt: string, result: SafetyCheckResult): void {
   if (result.level === 'warning') {
-    const truncatedPrompt = prompt.substring(0, 100);
-    console.warn(`[safety] Warning: ${result.reason} | matched: ${result.matched} | prompt: "${truncatedPrompt}..."`);
+    console.warn(
+      `[safety] Warning: category=${result.category ?? 'unknown'} | promptLength=${prompt.length}`,
+    );
   }
 }

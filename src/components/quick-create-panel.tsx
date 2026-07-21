@@ -2,32 +2,61 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AlertCircle,
   ArrowRight,
   Box,
+  CheckCircle2,
   ChevronDown,
   Film,
   ImagePlus,
   LayoutGrid,
+  LoaderCircle,
   Settings2,
   Sparkles,
   Upload,
   X,
 } from 'lucide-react';
 import { classifyIntent, describeIntent, type ClassifiedIntent } from '@/lib/intent-classifier';
+import type {
+  QuickCreateAspectRatio,
+  QuickCreateCompilePhase,
+  QuickCreateCompileResult,
+  QuickCreateModelSource,
+  QuickCreateQuality,
+} from '@/lib/quick-create-compile';
+import type { QuickCreateModelCandidate, ResolvedQuickCreateModel } from '@/lib/model-defaults';
+
+export interface QuickCreateCompileViewState {
+  phase: QuickCreateCompilePhase | null;
+  statusMessage: string;
+  streamText: string;
+  result: QuickCreateCompileResult | null;
+  error: string;
+  isCompiling: boolean;
+}
 
 export interface QuickCreateRequest {
   prompt: string;
-  aspectRatio: string;
-  quality: string;
+  aspectRatio: QuickCreateAspectRatio;
+  quality: QuickCreateQuality;
   outputCount: number;
   referenceImages: string[];
   intent: ClassifiedIntent;
+  imageModelOverride?: string;
+  chatModelOverride?: string;
 }
 
 interface QuickCreatePanelProps {
   themeStyle?: 'gold' | 'monochrome';
   selectedImage?: { id: string; url: string; prompt?: string } | null;
   isGenerating?: boolean;
+  imageModels: QuickCreateModelCandidate[];
+  chatModels: QuickCreateModelCandidate[];
+  resolvedImageModel: ResolvedQuickCreateModel;
+  resolvedChatModel: ResolvedQuickCreateModel;
+  compileState: QuickCreateCompileViewState;
+  modelsLoading?: boolean;
+  modelsError?: string;
   onGenerate: (request: QuickCreateRequest) => Promise<boolean>;
   onOpenProfessional: (prompt?: string) => void;
   onOpenChat: (prompt?: string) => void;
@@ -44,8 +73,8 @@ interface QuickGoal {
 }
 
 interface ParameterRecommendation {
-  aspectRatio: string;
-  quality: string;
+  aspectRatio: QuickCreateAspectRatio;
+  quality: QuickCreateQuality;
   outputCount: number;
   ratioReason: string;
   countReason: string;
@@ -218,12 +247,12 @@ function parseExplicitCount(prompt: string): number | null {
 
 function recommendParameters(prompt: string, intent: ClassifiedIntent): ParameterRecommendation {
   const normalized = prompt.toLowerCase().replace(/\s+/g, ' ');
-  let aspectRatio = '1:1';
+  let aspectRatio: QuickCreateAspectRatio = '1:1';
   let ratioReason = '通用方形构图';
 
   const explicitRatio = normalized.match(/(?:比例|画幅|尺寸)?\s*(1:1|4:5|3:4|2:3|16:9|9:16|3:2|4:3)/)?.[1];
   if (explicitRatio) {
-    aspectRatio = explicitRatio;
+    aspectRatio = explicitRatio as QuickCreateAspectRatio;
     ratioReason = '已识别明确比例';
   } else if (/1080\s*[x×*]\s*1920|手机壁纸|竖屏视频|短视频封面|story|reels|9比16|竖版全屏/.test(normalized)) {
     aspectRatio = '9:16';
@@ -276,10 +305,58 @@ function getRouteLabel(intent: ClassifiedIntent): string {
   return '图像生成';
 }
 
+function getModelSourceLabel(source: ResolvedQuickCreateModel['source']): string {
+  const labels: Record<ResolvedQuickCreateModel['source'], string> = {
+    'task-override': '本次任务覆盖',
+    'quick-create-default': '快速创作默认',
+    'global-default': '全局默认',
+    'recent-selection': '最近专业选择',
+    'first-available': '首个可用模型',
+    none: '暂无可用模型',
+  };
+  return labels[source];
+}
+
+function getModelDisplayName(resolved: ResolvedQuickCreateModel): string {
+  if (!resolved.model) return '未配置';
+  return resolved.model.name || resolved.model.modelId;
+}
+
+function getCompilePhaseLabel(phase: QuickCreateCompilePhase | null): string {
+  if (!phase) return '等待编译';
+  const labels: Record<QuickCreateCompilePhase, string> = {
+    validating: '校验需求',
+    routing: '选择模型',
+    understanding: '理解创意',
+    strategizing: '制定方案',
+    finalizing: '整理提示词',
+    ready: '方案就绪',
+  };
+  return labels[phase];
+}
+
+function getCompileModelSourceLabel(source: QuickCreateModelSource): string {
+  const labels: Record<QuickCreateModelSource, string> = {
+    'task-override': '本次任务覆盖',
+    'quick-create-default': '快速创作默认',
+    'global-default': '全局默认',
+    'recent-selection': '最近专业选择',
+    'first-available': '首个授权模型',
+  };
+  return labels[source];
+}
+
 export function QuickCreatePanel({
   themeStyle = 'gold',
   selectedImage,
   isGenerating = false,
+  imageModels,
+  chatModels,
+  resolvedImageModel,
+  resolvedChatModel,
+  compileState,
+  modelsLoading = false,
+  modelsError,
   onGenerate,
   onOpenProfessional,
   onOpenChat,
@@ -293,9 +370,12 @@ export function QuickCreatePanel({
   const [submitted, setSubmitted] = useState(false);
   const [isUploadingReferences, setIsUploadingReferences] = useState(false);
   const [referenceUploadError, setReferenceUploadError] = useState<string>();
-  const [aspectRatioOverride, setAspectRatioOverride] = useState<string>();
-  const [qualityOverride, setQualityOverride] = useState<string>();
+  const [aspectRatioOverride, setAspectRatioOverride] = useState<QuickCreateAspectRatio>();
+  const [qualityOverride, setQualityOverride] = useState<QuickCreateQuality>();
   const [outputCountOverride, setOutputCountOverride] = useState<number>();
+  const [showAdvancedModels, setShowAdvancedModels] = useState(false);
+  const [imageModelOverride, setImageModelOverride] = useState('');
+  const [chatModelOverride, setChatModelOverride] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const referenceImages = useMemo(() => {
@@ -320,6 +400,25 @@ export function QuickCreatePanel({
     quality: qualityOverride ?? inferredParameters.quality,
     outputCount: outputCountOverride ?? inferredParameters.outputCount,
   }), [aspectRatioOverride, inferredParameters, intent, outputCountOverride, prompt, qualityOverride]);
+
+  const effectiveImageModel = useMemo<ResolvedQuickCreateModel>(() => {
+    if (!imageModelOverride) return resolvedImageModel;
+    const model = imageModels.find((candidate: QuickCreateModelCandidate) => candidate.id === imageModelOverride) ?? null;
+    return model
+      ? { id: model.id, model, source: 'task-override' }
+      : resolvedImageModel;
+  }, [imageModelOverride, imageModels, resolvedImageModel]);
+
+  const effectiveChatModel = useMemo<ResolvedQuickCreateModel>(() => {
+    if (!chatModelOverride) return resolvedChatModel;
+    const model = chatModels.find((candidate: QuickCreateModelCandidate) => candidate.id === chatModelOverride) ?? null;
+    return model
+      ? { id: model.id, model, source: 'task-override' }
+      : resolvedChatModel;
+  }, [chatModelOverride, chatModels, resolvedChatModel]);
+
+  const requiresImageModel = recommendation.route === '图像生成' || recommendation.route === '品牌设计 Skill';
+  const imageModelUnavailable = requiresImageModel && !effectiveImageModel.model;
 
   const visibleGoals = useMemo(
     () => QUICK_GOALS.filter((goal: QuickGoal) => goal.group === activeGoalGroup),
@@ -391,6 +490,8 @@ export function QuickCreatePanel({
       outputCount: recommendation.outputCount,
       referenceImages,
       intent,
+      imageModelOverride: imageModelOverride || undefined,
+      chatModelOverride: chatModelOverride || undefined,
     });
     setSubmitted(accepted);
   };
@@ -539,7 +640,7 @@ export function QuickCreatePanel({
         <div className="mt-3 grid grid-cols-3 gap-2">
           <label className="block text-[10px] text-muted-foreground">
             画面比例
-            <select value={recommendation.aspectRatio} onChange={(event: React.ChangeEvent<HTMLSelectElement>) => setAspectRatioOverride(event.target.value)} className={`mt-1 ${selectClassName}`}>
+            <select value={recommendation.aspectRatio} onChange={(event: React.ChangeEvent<HTMLSelectElement>) => setAspectRatioOverride(event.target.value as QuickCreateAspectRatio)} className={`mt-1 ${selectClassName}`}>
               {ASPECT_RATIO_OPTIONS.map((ratio: string) => <option key={ratio} value={ratio}>{ratio}</option>)}
             </select>
           </label>
@@ -551,7 +652,7 @@ export function QuickCreatePanel({
           </label>
           <label className="block text-[10px] text-muted-foreground">
             输出质量
-            <select value={recommendation.quality} onChange={(event: React.ChangeEvent<HTMLSelectElement>) => setQualityOverride(event.target.value)} className={`mt-1 ${selectClassName}`}>
+            <select value={recommendation.quality} onChange={(event: React.ChangeEvent<HTMLSelectElement>) => setQualityOverride(event.target.value as QuickCreateQuality)} className={`mt-1 ${selectClassName}`}>
               {QUALITY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </label>
@@ -559,7 +660,166 @@ export function QuickCreatePanel({
         <p className="mt-2 text-[10px] leading-4 text-muted-foreground">
           {inferredParameters.ratioReason} · {inferredParameters.countReason} · {inferredParameters.qualityReason}
         </p>
+
+        <div className="mt-3 border-t border-border pt-3">
+          <button
+            type="button"
+            aria-expanded={showAdvancedModels}
+            onClick={() => setShowAdvancedModels((value: boolean) => !value)}
+            className="flex min-h-10 w-full cursor-pointer items-center justify-between rounded-lg px-2 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+          >
+            <span className="flex items-center gap-2 text-xs font-medium text-foreground">
+              <Settings2 className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
+              高级模型设置
+            </span>
+            <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${showAdvancedModels ? 'rotate-180' : ''}`} aria-hidden="true" />
+          </button>
+
+          <div className="mt-2 grid grid-cols-2 gap-2 rounded-xl border border-border bg-background p-3">
+            <div className="min-w-0">
+              <p className="text-[10px] text-muted-foreground">图像模型</p>
+              <p className="mt-1 truncate text-xs font-medium text-foreground">{getModelDisplayName(effectiveImageModel)}</p>
+              <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
+                {effectiveImageModel.model?.providerName || '等待管理员配置'} · {getModelSourceLabel(effectiveImageModel.source)}
+              </p>
+            </div>
+            <div className="min-w-0">
+              <p className="text-[10px] text-muted-foreground">LLM 路由</p>
+              <p className="mt-1 truncate text-xs font-medium text-foreground">{getModelDisplayName(effectiveChatModel)}</p>
+              <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
+                {effectiveChatModel.model?.providerName || '当前任务不一定调用'} · {getModelSourceLabel(effectiveChatModel.source)}
+              </p>
+            </div>
+          </div>
+
+          {showAdvancedModels && (
+            <div className="mt-2 grid gap-3 rounded-xl border border-border bg-background p-3">
+              <label className="block text-[10px] text-muted-foreground">
+                本次任务图像模型
+                <select
+                  value={imageModelOverride}
+                  onChange={(event: React.ChangeEvent<HTMLSelectElement>) => setImageModelOverride(event.target.value)}
+                  disabled={modelsLoading || imageModels.length === 0}
+                  className={`mt-1 ${selectClassName} disabled:cursor-not-allowed disabled:opacity-50`}
+                >
+                  <option value="">系统智能匹配</option>
+                  {imageModels.map((model: QuickCreateModelCandidate) => (
+                    <option key={model.id} value={model.id}>{model.name || model.modelId} · {model.providerName || model.providerId}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-[10px] text-muted-foreground">
+                本次任务 LLM
+                <select
+                  value={chatModelOverride}
+                  onChange={(event: React.ChangeEvent<HTMLSelectElement>) => setChatModelOverride(event.target.value)}
+                  disabled={modelsLoading || chatModels.length === 0}
+                  className={`mt-1 ${selectClassName} disabled:cursor-not-allowed disabled:opacity-50`}
+                >
+                  <option value="">系统智能匹配</option>
+                  {chatModels.map((model: QuickCreateModelCandidate) => (
+                    <option key={model.id} value={model.id}>{model.name || model.modelId} · {model.providerName || model.providerId}</option>
+                  ))}
+                </select>
+              </label>
+              <p className="text-[10px] leading-4 text-muted-foreground">覆盖只作用于本次快速创作，不会修改管理员默认、专业创作最近选择或 AI 聊天当前模型。</p>
+            </div>
+          )}
+
+          {modelsLoading && <p className="mt-2 text-[11px] text-muted-foreground">正在读取当前账号可用模型…</p>}
+          {modelsError && <p className="mt-2 text-[11px] text-destructive" role="alert">{modelsError}</p>}
+          {imageModelUnavailable && !modelsLoading && (
+            <p className="mt-2 text-[11px] leading-4 text-destructive" role="alert">当前账号没有可用的图像模型，请联系管理员启用模型、配置服务端凭证并分配权限。</p>
+          )}
+        </div>
       </section>
+
+      {(compileState.isCompiling || compileState.result || compileState.error) && (
+        <section
+          className={`mt-3 rounded-2xl border p-4 ${compileState.error ? 'border-destructive/30 bg-destructive/5' : 'border-primary/25 bg-primary/5'}`}
+          aria-live="polite"
+          aria-busy={compileState.isCompiling}
+        >
+          <div className="flex items-start gap-2.5">
+            {compileState.isCompiling ? (
+              <LoaderCircle className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-primary motion-reduce:animate-none" aria-hidden="true" />
+            ) : compileState.error ? (
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />
+            ) : (
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+            )}
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-xs font-semibold text-foreground">
+                  {compileState.error ? '专业方案编译失败' : compileState.result ? '专业创作方案已就绪' : '正在编译专业创作方案'}
+                </h3>
+                <span className={`rounded-md px-1.5 py-0.5 text-[10px] ${compileState.error ? 'bg-destructive/10 text-destructive' : 'bg-primary/10 text-primary'}`}>
+                  {getCompilePhaseLabel(compileState.phase)}
+                </span>
+              </div>
+              {compileState.statusMessage && !compileState.error && (
+                <p className="mt-1 text-[11px] leading-4 text-muted-foreground">{compileState.statusMessage}</p>
+              )}
+              {compileState.error && (
+                <p className="mt-1 text-[11px] leading-5 text-destructive" role="alert">{compileState.error}</p>
+              )}
+            </div>
+          </div>
+
+          {compileState.isCompiling && compileState.streamText && (
+            <div className="mt-3 max-h-28 overflow-y-auto rounded-xl border border-border bg-background p-3">
+              <p className="whitespace-pre-wrap break-words text-[11px] leading-5 text-muted-foreground">{compileState.streamText}</p>
+            </div>
+          )}
+
+          {compileState.result && (
+            <div className="mt-3 space-y-3">
+              <div className="rounded-xl border border-border bg-background p-3">
+                <p className="text-[10px] font-medium text-muted-foreground">创作摘要</p>
+                <p className="mt-1 text-xs leading-5 text-foreground">{compileState.result.summary}</p>
+              </div>
+              <div className="rounded-xl border border-border bg-background p-3">
+                <p className="text-[10px] font-medium text-muted-foreground">创作策略</p>
+                <p className="mt-1 text-xs leading-5 text-foreground">{compileState.result.strategy}</p>
+              </div>
+              <div>
+                <p className="text-[10px] font-medium text-muted-foreground">创意方向</p>
+                <div className="mt-2 grid gap-2">
+                  {compileState.result.directions.map((direction) => (
+                    <article key={`${direction.title}-${direction.description}`} className="rounded-xl border border-border bg-background p-3">
+                      <h4 className="text-xs font-semibold text-foreground">{direction.title}</h4>
+                      <p className="mt-1 text-[11px] leading-5 text-muted-foreground">{direction.description}</p>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {direction.visualKeywords.map((keyword: string) => (
+                          <span key={keyword} className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{keyword}</span>
+                        ))}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </div>
+              <dl className="grid grid-cols-2 gap-2 rounded-xl border border-border bg-background p-3 text-[10px]">
+                <div className="min-w-0">
+                  <dt className="text-muted-foreground">实际 LLM</dt>
+                  <dd className="mt-1 truncate text-xs font-medium text-foreground">{compileState.result.model}</dd>
+                </div>
+                <div className="min-w-0">
+                  <dt className="text-muted-foreground">服务提供方</dt>
+                  <dd className="mt-1 truncate text-xs font-medium text-foreground">{compileState.result.providerName}</dd>
+                </div>
+                <div className="min-w-0">
+                  <dt className="text-muted-foreground">路由来源</dt>
+                  <dd className="mt-1 text-xs font-medium text-foreground">{getCompileModelSourceLabel(compileState.result.modelSource)}</dd>
+                </div>
+                <div className="min-w-0">
+                  <dt className="text-muted-foreground">输出规格</dt>
+                  <dd className="mt-1 text-xs font-medium text-foreground">{compileState.result.aspectRatio} · {compileState.result.outputCount} 张 · {compileState.result.quality === 'high' ? '高清' : '标准'}</dd>
+                </div>
+              </dl>
+            </div>
+          )}
+        </section>
+      )}
 
       {submitted && (
         <section className="mt-3 rounded-2xl border border-primary/25 bg-primary/10 p-4" aria-live="polite">
@@ -576,11 +836,11 @@ export function QuickCreatePanel({
         <button
           type="button"
           onClick={handleSubmit}
-          disabled={!prompt.trim() || isGenerating || isUploadingReferences}
+          disabled={!prompt.trim() || compileState.isCompiling || isGenerating || isUploadingReferences || modelsLoading || imageModelUnavailable}
           className="flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground shadow-card transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Sparkles className="h-4 w-4" aria-hidden="true" />
-          {isGenerating ? '生成任务进行中' : recommendation.route === '视频导演' ? '打开视频创作' : recommendation.route === 'AI 助手' || recommendation.route === '智能图片编辑' || recommendation.route === '3D 创作' ? '交给 AI 助手' : `生成 ${recommendation.outputCount} 张`}
+          {compileState.isCompiling ? '正在编译专业方案' : isGenerating ? '生成任务进行中' : recommendation.route === '视频导演' ? '打开视频创作' : recommendation.route === 'AI 助手' || recommendation.route === '智能图片编辑' || recommendation.route === '3D 创作' ? '交给 AI 助手' : `生成 ${recommendation.outputCount} 张`}
           <ArrowRight className="h-4 w-4" aria-hidden="true" />
         </button>
         <p className="mt-2 text-center text-[11px] text-muted-foreground">系统会先自动理解参数，你也可以调整或进入专业模式</p>

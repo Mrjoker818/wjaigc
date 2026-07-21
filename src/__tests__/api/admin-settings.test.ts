@@ -69,4 +69,40 @@ describe('admin runtime settings', () => {
     expect(response.status).toBe(200);
     expect(mocks.dbSetSystemSetting).toHaveBeenCalledWith('imageMaxEdge', '4096');
   });
+
+  it('persists quick create model policy and allows inheriting global defaults', async () => {
+    const response = await POST(new NextRequest('http://localhost/api/admin/settings', {
+      method: 'POST',
+      body: JSON.stringify({
+        quickCreateImageModel: 'provider-a::image-fast',
+        quickCreateChatModel: '',
+        quickCreateAutoModelRouting: true,
+      }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.dbSetSystemSetting).toHaveBeenCalledWith('quickCreateImageModel', 'provider-a::image-fast');
+    expect(mocks.dbSetSystemSetting).toHaveBeenCalledWith('quickCreateChatModel', '');
+    expect(mocks.dbSetSystemSetting).toHaveBeenCalledWith('quickCreateAutoModelRouting', 'true');
+  });
+
+  it('rejects non-boolean quick create auto routing values', async () => {
+    const response = await POST(new NextRequest('http://localhost/api/admin/settings', {
+      method: 'POST',
+      body: JSON.stringify({ quickCreateAutoModelRouting: 'true' }),
+    }));
+
+    expect(response.status).toBe(400);
+    expect(mocks.dbSetSystemSetting).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed quick create model identifiers', async () => {
+    const response = await POST(new NextRequest('http://localhost/api/admin/settings', {
+      method: 'POST',
+      body: JSON.stringify({ quickCreateImageModel: 'image-without-provider' }),
+    }));
+
+    expect(response.status).toBe(400);
+    expect(mocks.dbSetSystemSetting).not.toHaveBeenCalled();
+  });
 });
