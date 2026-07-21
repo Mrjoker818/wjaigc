@@ -188,8 +188,9 @@ export function LoginPanel({ initialMode }: LoginPanelProps) {
 
                 <div className="space-y-4">
                   {/* 无限画布卡片 */}
-                  <a
-                    href="/login/canvas"
+                  <button
+                    type="button"
+                    onClick={() => selectMode('canvas')}
                     className="block w-full text-left p-5 rounded-xl border border-border/40 bg-muted/30 hover:border-primary/50 hover:bg-muted/50 transition-all group cursor-pointer"
                   >
                     <div className="flex items-center gap-4">
@@ -206,11 +207,12 @@ export function LoginPanel({ initialMode }: LoginPanelProps) {
                         <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" /></svg>
                       </div>
                     </div>
-                  </a>
+                  </button>
 
                   {/* 智能对话卡片 */}
-                  <a
-                    href="/login/chat"
+                  <button
+                    type="button"
+                    onClick={() => selectMode('chat')}
                     className="block w-full text-left p-5 rounded-xl border border-border/40 bg-muted/30 hover:border-primary/50 hover:bg-muted/50 transition-all group cursor-pointer"
                   >
                     <div className="flex items-center gap-4">
@@ -227,7 +229,7 @@ export function LoginPanel({ initialMode }: LoginPanelProps) {
                         <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" /></svg>
                       </div>
                     </div>
-                  </a>
+                  </button>
                 </div>
 
                 <p className="mt-8 text-xs text-muted-foreground/50 text-center">请联系管理员创建新账户并授权对应功能。</p>
