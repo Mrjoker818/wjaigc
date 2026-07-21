@@ -3739,6 +3739,7 @@ function CanvasApp() {
   }, []);
 
   const recentQuickCreateImageModel = useMemo((): string => {
+    if (typeof window === 'undefined') return '';
     const { model, providerId } = getCurrentImageModel();
     if (model.includes('::')) return model;
     return model && providerId ? `${providerId}::${model}` : '';
