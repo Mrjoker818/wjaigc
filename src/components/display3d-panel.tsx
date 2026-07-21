@@ -3,13 +3,15 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { getModelDisplayName } from '@/lib/model-name-map';
+import { VenueRegionCanvas, type VenueRegion } from '@/components/venue-region-canvas';
 import {
   Box, X, Minus, Maximize2, Upload, Image as ImageIcon, Layers,
   ChevronDown, Sparkles, Download, Send, Search,
   Ruler, Paintbrush, LayoutGrid, Eye, Lightbulb,
   Users, Store, Building2, TreePine, FileText,
   Grid3X3, BarChart3, DollarSign, Info, Loader2, Palette,
-  Camera, RotateCcw, FileDown, DoorOpen, FileImage, Package, Monitor
+  Camera, RotateCcw, FileDown, DoorOpen, FileImage, Package, Monitor,
+  MapPin, Layout, Lock, CheckCircle, AlertTriangle, Plus
 } from 'lucide-react';
 
 /* ============================================================
@@ -68,6 +70,95 @@ interface Props {
   onClose: () => void;
   onAddImages?: (urls: string[], meta?: { modelName?: string; apiProvider?: string }) => void;
 }
+
+/* ============================================================
+   活动现场设计师类型定义
+   ============================================================ */
+export interface VenueAnalysis {
+  spaceType: string;
+  estimatedDimensions: { length: number; width: number; height: number };
+  lighting: string;
+  regions: VenueRegion[];
+  structuralLimits: string[];
+  designNotes: string;
+}
+
+export interface ActivityBrief {
+  eventName: string;
+  eventType: string;
+  expectedCapacity: string;
+  primaryGoal: string;
+  budget: string;
+  brandStyle: string;
+  specialRequirements: string;
+}
+
+export interface LayoutProposal {
+  id: string;
+  name: string;
+  concept: string;
+  style: string;
+  highlights: string[];
+  regionUsage: { regionId: string; usage: string; priority: string }[];
+  mainInstallation: string;
+  visualElements: { primaryColor: string; materials: string[]; lighting: string };
+  flowDesign: string;
+  estimatedCost: string;
+  renderPromptHint: string;
+  pros: string[];
+  cons: string[];
+}
+
+export interface DesignID {
+  id: string;
+  version: string;
+  brandName: string;
+  theme: string;
+  lockedAt: string;
+  lockedFields: {
+    layout: { spaceType: string; dimensions?: { length: number; width: number; height: number }; regionUsage: { regionId: string; usage: string; priority: string }[]; flowDesign: string; mainInstallation: string };
+    colors: { primary: string; scheme: string };
+    materials: string[];
+    brandRules: { brandName: string; eventName: string; highlights: string[] };
+    lightingScheme: string;
+    viewAngles: string[];
+    renderPromptHint: string;
+    estimatedCost: string;
+    pros: string[];
+    concept: string;
+  };
+}
+
+export interface QcDimension {
+  score: number;
+  comment: string;
+}
+
+export interface QcResult {
+  passed: boolean;
+  overallScore: number;
+  dimensions: {
+    brandIdentity: QcDimension;
+    styleConsistency: QcDimension;
+    spaceLayout: QcDimension;
+    materialColor: QcDimension;
+    overallQuality: QcDimension;
+  };
+  issues: string[];
+  suggestions: string[];
+  verdict: string;
+}
+
+export interface VenueVersion {
+  id: string;
+  designIdVersion: string;
+  imageUrl: string;
+  qcResult?: QcResult;
+  createdAt: string;
+}
+
+type AppMode = 'display3d' | 'activity-venue';
+type ActivityStep = 1 | 2 | 3 | 4;
 
 /* ============================================================
    常量
@@ -346,6 +437,27 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
   } | null>(null);
   const [isDecomposing, setIsDecomposing] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+
+  // === 活动现场设计师 state ===
+  const [appMode, setAppMode] = useState<AppMode>('display3d');
+  const [activityStep, setActivityStep] = useState<ActivityStep>(1);
+  const [venueImageUrl, setVenueImageUrl] = useState('');
+  const [venueAnalysis, setVenueAnalysis] = useState<VenueAnalysis | null>(null);
+  const [activityBrief, setActivityBrief] = useState<ActivityBrief>({
+    eventName: '', eventType: '品牌快闪', expectedCapacity: '',
+    primaryGoal: '品牌曝光', budget: '', brandStyle: '', specialRequirements: '',
+  });
+  const [proposals, setProposals] = useState<LayoutProposal[]>([]);
+  const [selectedProposalId, setSelectedProposalId] = useState<string | null>(null);
+  const [designId, setDesignId] = useState<DesignID | null>(null);
+  const [venueVersions, setVenueVersions] = useState<VenueVersion[]>([]);
+  const [venueQcResult, setVenueQcResult] = useState<QcResult | null>(null);
+  const [isAnalyzingVenue, setIsAnalyzingVenue] = useState(false);
+  const [isGeneratingProposals, setIsGeneratingProposals] = useState(false);
+  const [isLockingDesign, setIsLockingDesign] = useState(false);
+  const [isGeneratingVenue, setIsGeneratingVenue] = useState(false);
+  const [isQcRunning, setIsQcRunning] = useState(false);
+  const [selectedVenueRegion, setSelectedVenueRegion] = useState<string | null>(null);
 
   // Theme — 3D展陈系统: 标准黑金配色 (#d4af37 + #1a1a1a)
   const accent = isMonochrome ? '#3b82f6' : '#d4af37';
@@ -629,6 +741,345 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
     if (urls.length > 0) onAddImages?.(urls, { modelName: selectedModel, apiProvider: selectedProviderId });
   }, [results, onAddImages, selectedModel, selectedProviderId]);
 
+  // === 活动现场设计师 handlers ===
+
+  // Step1: 上传场馆照片
+  const handleVenueImageUpload = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      // Convert to base64 for vision API
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const dataUrl = ev.target?.result as string;
+        setVenueImageUrl(dataUrl);
+        setVenueAnalysis(null);
+        setProposals([]);
+        setSelectedProposalId(null);
+        setDesignId(null);
+        setVenueVersions([]);
+        setVenueQcResult(null);
+        setActivityStep(1);
+      };
+      reader.readAsDataURL(file);
+    };
+    input.click();
+  };
+
+  // Step1: 分析场馆照片
+  const handleAnalyzeVenue = useCallback(async () => {
+    if (!venueImageUrl) return;
+    setIsAnalyzingVenue(true);
+    setErrorMsg('');
+    try {
+      const res = await fetch('/api/activity-venue/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          venueImageUrl,
+          brief: activityBrief.eventName || activityBrief.eventType || '',
+          model: selectedChatModel || undefined,
+          providerId: selectedChatProviderId || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        setErrorMsg(data.error || '场馆分析失败');
+        setIsAnalyzingVenue(false);
+        return;
+      }
+      if (data.taskId) {
+        const taskId = data.taskId;
+        const poll = async () => {
+          try {
+            const taskRes = await fetch('/api/poll-task', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ taskId }),
+            });
+            const taskData = await taskRes.json();
+            if (taskData.status === 'completed') {
+              const analysis = taskData.result?.analysis;
+              if (analysis) {
+                setVenueAnalysis(analysis);
+                // Auto-fill dimensions from analysis
+                if (analysis.estimatedDimensions) {
+                  setDimensions({
+                    length: analysis.estimatedDimensions.length || 9000,
+                    width: analysis.estimatedDimensions.width || 6000,
+                    height: analysis.estimatedDimensions.height || 4500,
+                  });
+                }
+                setSuccessMsg('场馆分析完成，已识别 ' + (analysis.regions?.length || 0) + ' 个区域');
+                setTimeout(() => setSuccessMsg(''), 4000);
+                setActivityStep(2);
+              }
+              setIsAnalyzingVenue(false);
+            } else if (taskData.status === 'failed') {
+              setErrorMsg(taskData.error || '场馆分析失败');
+              setIsAnalyzingVenue(false);
+            } else {
+              setTimeout(poll, 3000);
+            }
+          } catch {
+            setErrorMsg('场馆分析轮询失败');
+            setIsAnalyzingVenue(false);
+          }
+        };
+        poll();
+      } else {
+        setIsAnalyzingVenue(false);
+      }
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : '场馆分析失败');
+      setIsAnalyzingVenue(false);
+    }
+  }, [venueImageUrl, activityBrief, selectedChatModel, selectedChatProviderId]);
+
+  // Step2: 生成布局方案
+  const handleGenerateProposals = useCallback(async () => {
+    if (!venueAnalysis || !activityBrief.eventName.trim()) return;
+    setIsGeneratingProposals(true);
+    setErrorMsg('');
+    try {
+      const res = await fetch('/api/activity-venue/proposals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          venueAnalysis, activityBrief, brandName,
+          assets: assets.map(a => ({ type: a.type, url: a.url })),
+          model: selectedChatModel || undefined,
+          providerId: selectedChatProviderId || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        setErrorMsg(data.error || '方案生成失败');
+        setIsGeneratingProposals(false);
+        return;
+      }
+      if (data.taskId) {
+        const taskId = data.taskId;
+        const poll = async () => {
+          try {
+            const taskRes = await fetch('/api/poll-task', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ taskId }),
+            });
+            const taskData = await taskRes.json();
+            if (taskData.status === 'completed') {
+              const proposalList = taskData.result?.proposals || [];
+              setProposals(proposalList);
+              setSuccessMsg(`已生成 ${proposalList.length} 套布局方案`);
+              setTimeout(() => setSuccessMsg(''), 4000);
+              setIsGeneratingProposals(false);
+            } else if (taskData.status === 'failed') {
+              setErrorMsg(taskData.error || '方案生成失败');
+              setIsGeneratingProposals(false);
+            } else {
+              setTimeout(poll, 3000);
+            }
+          } catch {
+            setErrorMsg('方案生成轮询失败');
+            setIsGeneratingProposals(false);
+          }
+        };
+        poll();
+      } else {
+        setIsGeneratingProposals(false);
+      }
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : '方案生成失败');
+      setIsGeneratingProposals(false);
+    }
+  }, [venueAnalysis, activityBrief, brandName, assets, selectedChatModel, selectedChatProviderId]);
+
+  // Step3: 锁定方案为DesignID
+  const handleLockDesign = useCallback(async () => {
+    const proposal = proposals.find(p => p.id === selectedProposalId);
+    if (!proposal) return;
+    setIsLockingDesign(true);
+    setErrorMsg('');
+    try {
+      const res = await fetch('/api/activity-venue/lock-design', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ proposal, brandName, venueAnalysis, activityBrief }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        setErrorMsg(data.error || '锁定失败');
+        setIsLockingDesign(false);
+        return;
+      }
+      if (data.designId) {
+        setDesignId(data.designId);
+        setSuccessMsg(`DesignID ${data.designId.version} 已锁定`);
+        setTimeout(() => setSuccessMsg(''), 4000);
+        setActivityStep(3);
+      }
+      setIsLockingDesign(false);
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : '锁定失败');
+      setIsLockingDesign(false);
+    }
+  }, [proposals, selectedProposalId, brandName, venueAnalysis, activityBrief]);
+
+  // Step4: 生成效果图（基于DesignID）
+  const handleGenerateVenueRender = useCallback(async () => {
+    if (!designId) return;
+    setIsGeneratingVenue(true);
+    setErrorMsg('');
+    try {
+      const locked = designId.lockedFields;
+      const prompt = `${locked.renderPromptHint || ''}
+Brand: ${designId.brandName}. Theme: ${designId.theme}. Concept: ${locked.concept}.
+Layout: ${locked.layout?.flowDesign || ''}. Main installation: ${locked.layout?.mainInstallation || ''}.
+Materials: ${(locked.materials || []).join(', ')}. Lighting: ${locked.lightingScheme}.
+Primary color: ${locked.colors?.primary || ''}. Style: ${locked.colors?.scheme || ''}.
+Venue type: ${locked.layout?.spaceType || 'commercial space'}.
+Professional 3D exhibition rendering, photorealistic, high quality, commercial grade.`;
+
+      const res = await fetch('/api/display-3d/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          brandName: designId.brandName,
+          productName: activityBrief.eventName || '',
+          sceneType: 'pop_up_store',
+          environment: 'mall_atrium',
+          dimensions: dimensions,
+          imageUsageMode: 'style_extension',
+          materialStyle: locked.materials?.[0] || '',
+          lightingStyle: locked.lightingScheme || '',
+          viewOptions: ['front', 'angle_45'],
+          renderStyle: 'photorealistic',
+          prompt,
+          model: selectedModel, providerId: selectedProviderId,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        setErrorMsg(data.error || '效果图生成失败');
+        setIsGeneratingVenue(false);
+        return;
+      }
+      if (data.taskId) {
+        const taskId = data.taskId;
+        const poll = async () => {
+          try {
+            const taskRes = await fetch('/api/poll-task', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ taskId, model: selectedModel, providerId: selectedProviderId }),
+            });
+            const taskData = await taskRes.json();
+            if (taskData.status === 'completed') {
+              const imageUrls: string[] = taskData.result?.imageUrls || taskData.imageUrls || [];
+              if (imageUrls.length > 0) {
+                const newVersion: VenueVersion = {
+                  id: `ver_${Date.now()}`,
+                  designIdVersion: designId.version,
+                  imageUrl: imageUrls[0],
+                  createdAt: new Date().toISOString(),
+                };
+                setVenueVersions(prev => [...prev, newVersion]);
+                onAddImages?.(imageUrls, { modelName: selectedModel, apiProvider: selectedProviderId });
+                setSuccessMsg('效果图生成完成');
+                setTimeout(() => setSuccessMsg(''), 4000);
+              }
+              setIsGeneratingVenue(false);
+            } else if (taskData.status === 'failed') {
+              setErrorMsg(taskData.error || '效果图生成失败');
+              setIsGeneratingVenue(false);
+            } else {
+              setTimeout(poll, 3000);
+            }
+          } catch {
+            setErrorMsg('效果图生成轮询失败');
+            setIsGeneratingVenue(false);
+          }
+        };
+        poll();
+      } else {
+        setIsGeneratingVenue(false);
+      }
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : '效果图生成失败');
+      setIsGeneratingVenue(false);
+    }
+  }, [designId, activityBrief, dimensions, selectedModel, selectedProviderId, onAddImages]);
+
+  // Step4: 质检效果图
+  const handleVenueQc = useCallback(async () => {
+    const latestVersion = venueVersions[venueVersions.length - 1];
+    if (!latestVersion || !designId) return;
+    setIsQcRunning(true);
+    setErrorMsg('');
+    try {
+      const res = await fetch('/api/activity-venue/qc', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageUrl: latestVersion.imageUrl,
+          designId,
+          model: selectedChatModel || undefined,
+          providerId: selectedChatProviderId || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        setErrorMsg(data.error || '质检失败');
+        setIsQcRunning(false);
+        return;
+      }
+      if (data.taskId) {
+        const taskId = data.taskId;
+        const poll = async () => {
+          try {
+            const taskRes = await fetch('/api/poll-task', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ taskId }),
+            });
+            const taskData = await taskRes.json();
+            if (taskData.status === 'completed') {
+              const qc = taskData.result?.qcResult;
+              if (qc) {
+                setVenueQcResult(qc);
+                // Attach QC to latest version
+                setVenueVersions(prev => prev.map((v, i) =>
+                  i === prev.length - 1 ? { ...v, qcResult: qc } : v
+                ));
+                setSuccessMsg(qc.passed ? `质检通过 (综合评分 ${qc.overallScore}/10)` : `质检未通过 (综合评分 ${qc.overallScore}/10)`);
+                setTimeout(() => setSuccessMsg(''), 5000);
+              }
+              setIsQcRunning(false);
+            } else if (taskData.status === 'failed') {
+              setErrorMsg(taskData.error || '质检失败');
+              setIsQcRunning(false);
+            } else {
+              setTimeout(poll, 3000);
+            }
+          } catch {
+            setErrorMsg('质检轮询失败');
+            setIsQcRunning(false);
+          }
+        };
+        poll();
+      } else {
+        setIsQcRunning(false);
+      }
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : '质检失败');
+      setIsQcRunning(false);
+    }
+  }, [venueVersions, designId, selectedChatModel, selectedChatProviderId]);
+
   // === Render helpers ===
   const inputCls = `w-full rounded-lg border px-3 py-2 text-xs outline-none transition-colors ${isMonochrome ? 'bg-white border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-blue-400 focus:ring-1 focus:ring-blue-200' : 'bg-black/30 border-white/10 text-amber-50 placeholder:text-white/30 focus:border-amber-400/60 focus:ring-1 focus:ring-amber-400/20'}`;
   const selectCls = inputCls;
@@ -720,8 +1171,33 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
               {/* Header */}
               <header className="flex items-center justify-between px-4 shrink-0" style={{ height: 44, borderBottom: `1px solid ${border}` }}>
                 <div className="flex items-center gap-3">
-                  <h2 className="text-base font-semibold" style={{ color: textPrimary }}>3D 展陈工作台</h2>
+                  <h2 className="text-base font-semibold" style={{ color: textPrimary }}>
+                    {appMode === 'display3d' ? '3D 展陈工作台' : '活动现场设计师'}
+                  </h2>
                   <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: isMonochrome ? '#dbeafe' : 'rgba(212,175,55,0.15)', color: textAccent }}>Pro</span>
+                  {/* Mode switcher */}
+                  <div className="flex rounded-lg overflow-hidden border" style={{ borderColor: border }}>
+                    <button
+                      onClick={() => setAppMode('display3d')}
+                      className="px-3 py-1 text-xs cursor-pointer transition-colors"
+                      style={{
+                        background: appMode === 'display3d' ? (isMonochrome ? '#3b82f6' : '#d4af37') : 'transparent',
+                        color: appMode === 'display3d' ? (isMonochrome ? '#fff' : '#000') : textMuted,
+                      }}
+                    >
+                      展陈设计
+                    </button>
+                    <button
+                      onClick={() => setAppMode('activity-venue')}
+                      className="px-3 py-1 text-xs cursor-pointer transition-colors"
+                      style={{
+                        background: appMode === 'activity-venue' ? (isMonochrome ? '#3b82f6' : '#d4af37') : 'transparent',
+                        color: appMode === 'activity-venue' ? (isMonochrome ? '#fff' : '#000') : textMuted,
+                      }}
+                    >
+                      活动现场
+                    </button>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <button onClick={() => setShowHelp(true)} className={`rounded-lg px-3 py-1.5 text-xs cursor-pointer ${isMonochrome ? 'text-gray-500 hover:bg-gray-100' : 'text-white/50 hover:bg-white/5'}`}>
@@ -731,7 +1207,481 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
               </header>
 
               {/* Workspace */}
-              <div className="grid flex-1 grid-cols-[360px_1fr] gap-4 overflow-hidden p-4">
+              {appMode === 'activity-venue' ? (
+                /* ========== 活动现场设计师模式 ========== */
+                <div className="flex flex-1 overflow-hidden p-4 gap-4">
+                  {/* LEFT: 4-step workflow */}
+                  <div className="w-[380px] shrink-0 overflow-y-auto pr-2 space-y-4" data-toolbar>
+                    {/* Step indicator */}
+                    <div className={panelCls}>
+                      <div className="flex items-center gap-1 mb-3">
+                        {[1,2,3,4].map(step => (
+                          <div key={step} className="flex items-center gap-1">
+                            <button
+                              onClick={() => {
+                                if (step === 1) setActivityStep(1);
+                                else if (step === 2 && venueAnalysis) setActivityStep(2);
+                                else if (step === 3 && selectedProposalId) setActivityStep(3);
+                                else if (step === 4 && designId) setActivityStep(4);
+                              }}
+                              className={`flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold cursor-pointer transition-all ${
+                                activityStep === step
+                                  ? (isMonochrome ? 'bg-blue-500 text-white' : 'bg-[#d4af37] text-black')
+                                  : (step === 1 || (step === 2 && venueAnalysis) || (step === 3 && selectedProposalId) || (step === 4 && designId))
+                                    ? (isMonochrome ? 'bg-blue-100 text-blue-600' : 'bg-amber-400/20 text-amber-300')
+                                    : (isMonochrome ? 'bg-gray-100 text-gray-400' : 'bg-white/5 text-white/30')
+                              }`}
+                            >
+                              {step === 1 ? '1' : step === 2 ? '2' : step === 3 ? '3' : '4'}
+                            </button>
+                            {step < 4 && <div className="w-4 h-px" style={{ background: border }} />}
+                          </div>
+                        ))}
+                      </div>
+                      <div className="text-xs" style={{ color: textMuted }}>
+                        {activityStep === 1 && '上传场馆照片，AI 识别可用区域'}
+                        {activityStep === 2 && '填写活动需求，生成 3 套布局方案'}
+                        {activityStep === 3 && '选择方案并锁定 Design ID'}
+                        {activityStep === 4 && '生成效果图 + AI 质检'}
+                      </div>
+                    </div>
+
+                    {/* Step 1: Upload & Analyze */}
+                    <section className={panelCls}>
+                      <div className="mb-3 flex items-center gap-2">
+                        <span className={stepBadgeCls}>1</span>
+                        <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>场馆照片</h3>
+                        {venueAnalysis && <CheckCircle size={14} className="ml-auto" style={{ color: '#22c55e' }} />}
+                      </div>
+                      <div className="space-y-3">
+                        {!venueImageUrl ? (
+                          <button
+                            onClick={handleVenueImageUpload}
+                            className="w-full rounded-lg border-2 border-dashed py-6 flex flex-col items-center justify-center cursor-pointer transition-colors"
+                            style={{ borderColor: border, color: textMuted }}
+                          >
+                            <Upload size={20} className="mb-2 opacity-50" />
+                            <span className="text-xs">点击上传场馆照片</span>
+                            <span className="text-[10px] mt-1 opacity-60">支持 JPG / PNG</span>
+                          </button>
+                        ) : (
+                          <div className="space-y-2">
+                            <div className="relative rounded-lg overflow-hidden" style={{ maxHeight: 180 }}>
+                              <img src={venueImageUrl} className="w-full h-full object-cover" />
+                              <button
+                                onClick={() => { setVenueImageUrl(''); setVenueAnalysis(null); setProposals([]); setSelectedProposalId(null); setDesignId(null); setVenueVersions([]); setVenueQcResult(null); setActivityStep(1); }}
+                                className="absolute top-1 right-1 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center"
+                              >
+                                <X size={10} />
+                              </button>
+                            </div>
+                            <button
+                              onClick={handleAnalyzeVenue}
+                              disabled={isAnalyzingVenue}
+                              className={`w-full rounded-lg py-2 text-xs font-medium cursor-pointer transition-colors disabled:opacity-50 ${
+                                isMonochrome ? 'bg-blue-500 text-white hover:bg-blue-600' : 'bg-[#d4af37] text-black hover:bg-[#c4a030]'
+                              }`}
+                            >
+                              {isAnalyzingVenue ? <><Loader2 size={12} className="inline animate-spin mr-1" />AI 分析中...</> : venueAnalysis ? '重新分析' : 'AI 分析场馆'}
+                            </button>
+                          </div>
+                        )}
+                        {venueAnalysis && (
+                          <div className="space-y-1.5 text-[11px]" style={{ color: textMuted }}>
+                            <div className="flex justify-between"><span>空间类型</span><span style={{ color: textPrimary }}>{venueAnalysis.spaceType}</span></div>
+                            <div className="flex justify-between"><span>估算尺寸</span><span style={{ color: textPrimary }}>{venueAnalysis.estimatedDimensions?.length}×{venueAnalysis.estimatedDimensions?.width}×{venueAnalysis.estimatedDimensions?.height}mm</span></div>
+                            <div className="flex justify-between"><span>光线条件</span><span style={{ color: textPrimary }}>{venueAnalysis.lighting}</span></div>
+                            <div className="flex justify-between"><span>识别区域</span><span style={{ color: textPrimary }}>{venueAnalysis.regions?.length || 0} 个</span></div>
+                          </div>
+                        )}
+                      </div>
+                    </section>
+
+                    {/* Step 2: Activity Brief */}
+                    {venueAnalysis && (
+                      <section className={panelCls}>
+                        <div className="mb-3 flex items-center gap-2">
+                          <span className={stepBadgeCls}>2</span>
+                          <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>活动需求</h3>
+                        </div>
+                        <div className="space-y-3">
+                          <div>
+                            <label className="block text-[12px] mb-1" style={{ color: textMuted }}>品牌名称</label>
+                            <input className={inputCls} value={brandName} onChange={e => setBrandName(e.target.value)} placeholder="品牌名称" />
+                          </div>
+                          <div>
+                            <label className="block text-[12px] mb-1" style={{ color: textMuted }}>活动名称</label>
+                            <input className={inputCls} value={activityBrief.eventName} onChange={e => setActivityBrief(prev => ({ ...prev, eventName: e.target.value }))} placeholder="如：夏季新品发布会" />
+                          </div>
+                          <div>
+                            <label className="block text-[12px] mb-1" style={{ color: textMuted }}>活动类型</label>
+                            <select className={selectCls} value={activityBrief.eventType} onChange={e => setActivityBrief(prev => ({ ...prev, eventType: e.target.value }))}>
+                              <option value="品牌快闪">品牌快闪</option>
+                              <option value="产品发布">产品发布</option>
+                              <option value="展会展位">展会展位</option>
+                              <option value="商场美陈">商场美陈</option>
+                              <option value="促销活动">促销活动</option>
+                            </select>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="block text-[12px] mb-1" style={{ color: textMuted }}>预期客流</label>
+                              <input className={inputCls} value={activityBrief.expectedCapacity} onChange={e => setActivityBrief(prev => ({ ...prev, expectedCapacity: e.target.value }))} placeholder="如：500人/天" />
+                            </div>
+                            <div>
+                              <label className="block text-[12px] mb-1" style={{ color: textMuted }}>预算范围</label>
+                              <input className={inputCls} value={activityBrief.budget} onChange={e => setActivityBrief(prev => ({ ...prev, budget: e.target.value }))} placeholder="如：¥50,000" />
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-[12px] mb-1" style={{ color: textMuted }}>核心目标</label>
+                            <select className={selectCls} value={activityBrief.primaryGoal} onChange={e => setActivityBrief(prev => ({ ...prev, primaryGoal: e.target.value }))}>
+                              <option value="品牌曝光">品牌曝光</option>
+                              <option value="产品体验">产品体验</option>
+                              <option value="销售转化">销售转化</option>
+                              <option value="社交传播">社交传播</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-[12px] mb-1" style={{ color: textMuted }}>品牌风格</label>
+                            <input className={inputCls} value={activityBrief.brandStyle} onChange={e => setActivityBrief(prev => ({ ...prev, brandStyle: e.target.value }))} placeholder="如：年轻潮流、高端奢华" />
+                          </div>
+                          <div>
+                            <label className="block text-[12px] mb-1" style={{ color: textMuted }}>特别要求</label>
+                            <textarea className={`${inputCls} resize-none`} rows={2} value={activityBrief.specialRequirements} onChange={e => setActivityBrief(prev => ({ ...prev, specialRequirements: e.target.value }))} placeholder="如：需要互动装置、打卡墙" />
+                          </div>
+                          <button
+                            onClick={handleGenerateProposals}
+                            disabled={isGeneratingProposals || !activityBrief.eventName.trim() || !brandName.trim()}
+                            className={`w-full rounded-lg py-2 text-xs font-medium cursor-pointer transition-colors disabled:opacity-50 ${
+                              isMonochrome ? 'bg-blue-500 text-white hover:bg-blue-600' : 'bg-[#d4af37] text-black hover:bg-[#c4a030]'
+                            }`}
+                          >
+                            {isGeneratingProposals ? <><Loader2 size={12} className="inline animate-spin mr-1" />生成中...</> : '生成 3 套布局方案'}
+                          </button>
+                        </div>
+                      </section>
+                    )}
+
+                    {/* Step 3: Select & Lock Proposal */}
+                    {proposals.length > 0 && (
+                      <section className={panelCls}>
+                        <div className="mb-3 flex items-center gap-2">
+                          <span className={stepBadgeCls}>3</span>
+                          <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>选择方案</h3>
+                          {designId && <Lock size={14} className="ml-auto" style={{ color: '#22c55e' }} />}
+                        </div>
+                        <div className="space-y-2">
+                          {proposals.map(p => (
+                            <button
+                              key={p.id}
+                              onClick={() => setSelectedProposalId(p.id)}
+                              className={`w-full rounded-lg border p-3 text-left cursor-pointer transition-all ${
+                                selectedProposalId === p.id
+                                  ? (isMonochrome ? 'border-blue-400 bg-blue-50' : 'border-amber-400/60 bg-amber-400/10')
+                                  : (isMonochrome ? 'border-gray-200 hover:border-blue-300' : 'border-white/10 hover:border-amber-400/40')
+                              }`}
+                            >
+                              <div className="text-xs font-semibold" style={{ color: selectedProposalId === p.id ? textAccent : textPrimary }}>{p.name}</div>
+                              <div className="text-[11px] mt-1 line-clamp-2" style={{ color: textMuted }}>{p.concept}</div>
+                              <div className="flex gap-1 mt-2 flex-wrap">
+                                {p.highlights?.slice(0, 3).map((h, i) => (
+                                  <span key={i} className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: isMonochrome ? '#eff6ff' : 'rgba(212,175,55,0.1)', color: textMuted }}>{h}</span>
+                                ))}
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                        {selectedProposalId && !designId && (
+                          <button
+                            onClick={handleLockDesign}
+                            disabled={isLockingDesign}
+                            className={`w-full mt-3 rounded-lg py-2 text-xs font-medium cursor-pointer transition-colors disabled:opacity-50 ${
+                              isMonochrome ? 'bg-blue-500 text-white hover:bg-blue-600' : 'bg-[#d4af37] text-black hover:bg-[#c4a030]'
+                            }`}
+                          >
+                            {isLockingDesign ? <><Loader2 size={12} className="inline animate-spin mr-1" />锁定中...</> : '锁定为 Design ID'}
+                          </button>
+                        )}
+                        {designId && (
+                          <div className="mt-3 rounded-lg p-2.5 text-[11px]" style={{ background: isMonochrome ? '#f0fdf4' : 'rgba(34,197,94,0.1)', border: `1px solid ${isMonochrome ? '#bbf7d0' : 'rgba(34,197,94,0.2)'}` }}>
+                            <div className="flex items-center gap-1 mb-1">
+                              <Lock size={12} style={{ color: '#22c55e' }} />
+                              <span className="font-semibold" style={{ color: isMonochrome ? '#166534' : '#4ade80' }}>DesignID: {designId.version}</span>
+                            </div>
+                            <div style={{ color: textMuted }}>{designId.theme} · {designId.lockedFields?.layout?.mainInstallation}</div>
+                          </div>
+                        )}
+                      </section>
+                    )}
+
+                    {/* Step 4: Generate & QC */}
+                    {designId && (
+                      <section className={panelCls}>
+                        <div className="mb-3 flex items-center gap-2">
+                          <span className={stepBadgeCls}>4</span>
+                          <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>生成与质检</h3>
+                        </div>
+                        <div className="space-y-3">
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              onClick={handleGenerateVenueRender}
+                              disabled={isGeneratingVenue}
+                              className={`rounded-lg py-2 text-xs font-medium cursor-pointer transition-colors disabled:opacity-50 ${
+                                isMonochrome ? 'bg-blue-500 text-white hover:bg-blue-600' : 'bg-[#d4af37] text-black hover:bg-[#c4a030]'
+                              }`}
+                            >
+                              {isGeneratingVenue ? <><Loader2 size={12} className="inline animate-spin mr-1" />生成中...</> : '生成效果图'}
+                            </button>
+                            <button
+                              onClick={handleVenueQc}
+                              disabled={isQcRunning || venueVersions.length === 0}
+                              className={`rounded-lg py-2 text-xs font-medium cursor-pointer transition-colors disabled:opacity-50 border ${
+                                isMonochrome ? 'border-blue-300 text-blue-600 hover:bg-blue-50' : 'border-amber-500/40 text-amber-200 hover:bg-amber-500/10'
+                              }`}
+                            >
+                              {isQcRunning ? <><Loader2 size={12} className="inline animate-spin mr-1" />质检中...</> : 'AI 质检'}
+                            </button>
+                          </div>
+                          {/* Version history */}
+                          {venueVersions.length > 0 && (
+                            <div>
+                              <div className="text-[12px] font-semibold mb-2" style={{ color: textMuted }}>版本历史 ({venueVersions.length})</div>
+                              <div className="space-y-2">
+                                {venueVersions.map((v, i) => (
+                                  <div key={v.id} className="rounded-lg border p-2" style={{ borderColor: border }}>
+                                    <div className="flex items-center justify-between mb-1">
+                                      <span className="text-[10px] font-medium" style={{ color: textMuted }}>v{i + 1} · {v.designIdVersion}</span>
+                                      {v.qcResult && (
+                                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${v.qcResult.passed ? 'bg-green-500/20 text-green-500' : 'bg-red-500/20 text-red-500'}`}>
+                                          {v.qcResult.passed ? '通过' : '未通过'} {v.qcResult.overallScore}/10
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="rounded overflow-hidden" style={{ maxHeight: 80 }}>
+                                      <img src={v.imageUrl} className="w-full h-full object-cover" />
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </section>
+                    )}
+                  </div>
+
+                  {/* RIGHT: Preview */}
+                  <div className="flex flex-1 flex-col overflow-hidden rounded-xl border" style={{ background: bgCard, borderColor: border }}>
+                    {/* Preview tabs */}
+                    <div className="flex items-center gap-1 px-3 py-2 shrink-0 border-b" style={{ borderColor: border }}>
+                      {(['venue', 'proposals', 'render', 'qc'] as const).map(tab => (
+                        <button
+                          key={tab}
+                          onClick={() => {
+                            if (tab === 'venue') setActivityStep(1);
+                            else if (tab === 'proposals') setActivityStep(2);
+                            else if (tab === 'render') setActivityStep(4);
+                            else if (tab === 'qc') setActivityStep(4);
+                          }}
+                          className={`px-3 py-1.5 rounded-lg text-xs cursor-pointer transition-colors ${
+                            (tab === 'venue' && activityStep === 1) ||
+                            (tab === 'proposals' && activityStep === 2) ||
+                            (tab === 'render' && activityStep === 4) ||
+                            (tab === 'qc' && activityStep === 4)
+                              ? (isMonochrome ? 'bg-blue-100 text-blue-700' : 'bg-amber-500/20 text-amber-200')
+                              : (isMonochrome ? 'text-gray-500 hover:bg-gray-100' : 'text-white/50 hover:bg-white/5')
+                          }`}
+                        >
+                          {{ venue: '场馆', proposals: '方案', render: '效果图', qc: '质检' }[tab]}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Preview content */}
+                    <div className="flex-1 overflow-y-auto p-4">
+                      {/* Venue analysis view */}
+                      {activityStep === 1 && venueImageUrl && venueAnalysis && (
+                        <div className="space-y-4">
+                          <div className="text-sm font-semibold" style={{ color: textPrimary }}>场馆区域标注</div>
+                          <VenueRegionCanvas
+                            imageUrl={venueImageUrl}
+                            regions={venueAnalysis.regions || []}
+                            selectedRegionId={selectedVenueRegion}
+                            onSelectRegion={setSelectedVenueRegion}
+                          />
+                          <div className="grid grid-cols-2 gap-2 mt-3">
+                            {(venueAnalysis.regions || []).map(r => (
+                              <button
+                                key={r.id}
+                                onClick={() => setSelectedVenueRegion(r.id === selectedVenueRegion ? null : r.id)}
+                                className={`rounded-lg border p-2 text-left cursor-pointer transition-all ${
+                                  selectedVenueRegion === r.id
+                                    ? (isMonochrome ? 'border-blue-400 bg-blue-50' : 'border-amber-400/60 bg-amber-400/10')
+                                    : (isMonochrome ? 'border-gray-200' : 'border-white/10')
+                                }`}
+                              >
+                                <div className="text-xs font-medium" style={{ color: selectedVenueRegion === r.id ? textAccent : textPrimary }}>{r.name}</div>
+                                <div className="text-[10px] mt-0.5" style={{ color: textMuted }}>{r.type} · {r.estimatedSize || '-'}</div>
+                                {r.notes && <div className="text-[10px] mt-1 line-clamp-1" style={{ color: textMuted }}>{r.notes}</div>}
+                              </button>
+                            ))}
+                          </div>
+                          {venueAnalysis.designNotes && (
+                            <div className="rounded-lg p-3 text-[11px]" style={{ background: isMonochrome ? '#eff6ff' : 'rgba(59,130,246,0.1)', color: textMuted }}>
+                              <div className="font-semibold mb-1" style={{ color: textPrimary }}>设计建议</div>
+                              {venueAnalysis.designNotes}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Proposals view */}
+                      {activityStep === 2 && proposals.length > 0 && (
+                        <div className="space-y-4">
+                          <div className="text-sm font-semibold" style={{ color: textPrimary }}>布局方案对比</div>
+                          {proposals.map(p => (
+                            <div key={p.id} className={`rounded-xl border p-4 ${selectedProposalId === p.id ? (isMonochrome ? 'border-blue-400' : 'border-amber-400/60') : ''}`} style={{ borderColor: selectedProposalId === p.id ? undefined : border }}>
+                              <div className="flex items-start justify-between">
+                                <div>
+                                  <div className="text-sm font-semibold" style={{ color: selectedProposalId === p.id ? textAccent : textPrimary }}>{p.name}</div>
+                                  <div className="text-[12px] mt-1" style={{ color: textMuted }}>{p.concept}</div>
+                                </div>
+                                <span className="text-xs px-2 py-1 rounded-full shrink-0 ml-2" style={{ background: isMonochrome ? '#eff6ff' : 'rgba(212,175,55,0.1)', color: textAccent }}>{p.estimatedCost}</span>
+                              </div>
+                              <div className="grid grid-cols-3 gap-2 mt-3">
+                                <div className="rounded-lg p-2 text-[11px]" style={{ background: isMonochrome ? '#f9fafb' : 'rgba(255,255,255,0.03)' }}>
+                                  <div className="font-semibold mb-1" style={{ color: textMuted }}>主装置</div>
+                                  <div style={{ color: textPrimary }}>{p.mainInstallation}</div>
+                                </div>
+                                <div className="rounded-lg p-2 text-[11px]" style={{ background: isMonochrome ? '#f9fafb' : 'rgba(255,255,255,0.03)' }}>
+                                  <div className="font-semibold mb-1" style={{ color: textMuted }}>材质</div>
+                                  <div style={{ color: textPrimary }}>{p.visualElements?.materials?.join('、')}</div>
+                                </div>
+                                <div className="rounded-lg p-2 text-[11px]" style={{ background: isMonochrome ? '#f9fafb' : 'rgba(255,255,255,0.03)' }}>
+                                  <div className="font-semibold mb-1" style={{ color: textMuted }}>灯光</div>
+                                  <div style={{ color: textPrimary }}>{p.visualElements?.lighting}</div>
+                                </div>
+                              </div>
+                              <div className="mt-3 text-[11px]" style={{ color: textMuted }}>
+                                <div className="font-semibold mb-1">人流动线</div>
+                                {p.flowDesign}
+                              </div>
+                              <div className="flex gap-2 mt-3">
+                                {p.pros?.map((pro, i) => (
+                                  <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/10 text-green-500">+ {pro}</span>
+                                ))}
+                                {p.cons?.map((con, i) => (
+                                  <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-orange-500/10 text-orange-500">- {con}</span>
+                                ))}
+                              </div>
+                              <button
+                                onClick={() => setSelectedProposalId(p.id)}
+                                className={`mt-3 w-full rounded-lg py-1.5 text-xs cursor-pointer transition-colors ${
+                                  selectedProposalId === p.id
+                                    ? (isMonochrome ? 'bg-blue-500 text-white' : 'bg-[#d4af37] text-black')
+                                    : (isMonochrome ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-white/5 text-white/60 hover:bg-white/10')
+                                }`}
+                              >
+                                {selectedProposalId === p.id ? '已选中' : '选择此方案'}
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Render results view */}
+                      {activityStep === 4 && (
+                        <div className="space-y-4">
+                          {venueVersions.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center py-20 text-xs" style={{ color: textMuted }}>
+                              <Box size={32} className="mb-3 opacity-20" />
+                              <div>点击"生成效果图"按钮生成展陈效果图</div>
+                              <div className="mt-1 text-[10px] opacity-60">基于锁定的 DesignID 生成</div>
+                            </div>
+                          ) : (
+                            <>
+                              {/* Latest result */}
+                              <div className="space-y-3">
+                                <div className="text-sm font-semibold" style={{ color: textPrimary }}>最新效果图</div>
+                                <div className="rounded-xl overflow-hidden">
+                                  <img src={venueVersions[venueVersions.length - 1]?.imageUrl} className="w-full" />
+                                </div>
+                                <div className="flex gap-2">
+                                  <button
+                                    onClick={() => { const urls = venueVersions.map(v => v.imageUrl); if (urls.length > 0) onAddImages?.(urls, { modelName: selectedModel, apiProvider: selectedProviderId }); }}
+                                    className={`flex-1 rounded-lg border px-3 py-2 text-xs cursor-pointer ${isMonochrome ? 'border-blue-300 text-blue-600 hover:bg-blue-50' : 'border-amber-500/40 text-amber-200 hover:bg-amber-500/10'}`}
+                                  >
+                                    发送到画布
+                                  </button>
+                                  <button
+                                    onClick={handleVenueQc}
+                                    disabled={isQcRunning}
+                                    className={`flex-1 rounded-lg border px-3 py-2 text-xs cursor-pointer disabled:opacity-50 ${isMonochrome ? 'border-blue-300 text-blue-600 hover:bg-blue-50' : 'border-amber-500/40 text-amber-200 hover:bg-amber-500/10'}`}
+                                  >
+                                    {isQcRunning ? '质检中...' : '重新质检'}
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* QC Result */}
+                              {venueQcResult && (
+                                <div className={`rounded-xl border p-4 ${venueQcResult.passed ? (isMonochrome ? 'border-green-200' : 'border-green-500/30') : (isMonochrome ? 'border-red-200' : 'border-red-500/30')}`}>
+                                  <div className="flex items-center gap-2 mb-3">
+                                    {venueQcResult.passed
+                                      ? <CheckCircle size={18} style={{ color: '#22c55e' }} />
+                                      : <AlertTriangle size={18} style={{ color: '#ef4444' }} />}
+                                    <span className="text-sm font-bold" style={{ color: venueQcResult.passed ? '#22c55e' : '#ef4444' }}>
+                                      {venueQcResult.verdict}
+                                    </span>
+                                    <span className="ml-auto text-lg font-bold" style={{ color: textAccent }}>{venueQcResult.overallScore}/10</span>
+                                  </div>
+                                  <div className="grid grid-cols-5 gap-2">
+                                    {Object.entries(venueQcResult.dimensions || {}).map(([key, dim]) => {
+                                      const labels: Record<string, string> = { brandIdentity: '品牌识别', styleConsistency: '风格一致', spaceLayout: '空间布局', materialColor: '材质色彩', overallQuality: '整体质量' };
+                                      return (
+                                        <div key={key} className="rounded-lg p-2 text-center" style={{ background: isMonochrome ? '#f9fafb' : 'rgba(255,255,255,0.03)' }}>
+                                          <div className="text-[10px]" style={{ color: textMuted }}>{labels[key] || key}</div>
+                                          <div className="text-sm font-bold mt-1" style={{ color: dim.score >= 7 ? '#22c55e' : dim.score >= 5 ? '#f59e0b' : '#ef4444' }}>{dim.score}</div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                  {venueQcResult.suggestions?.length > 0 && (
+                                    <div className="mt-3 text-[11px]" style={{ color: textMuted }}>
+                                      <div className="font-semibold mb-1" style={{ color: textPrimary }}>优化建议</div>
+                                      {venueQcResult.suggestions.map((s, i) => <div key={i} className="mt-0.5">· {s}</div>)}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Empty state */}
+                      {((activityStep === 1 && !venueImageUrl) || (activityStep === 2 && proposals.length === 0)) && (
+                        <div className="flex flex-col items-center justify-center py-20 text-xs" style={{ color: textMuted }}>
+                          <MapPin size={32} className="mb-3 opacity-20" />
+                          {activityStep === 1 && !venueImageUrl && <div>请先上传场馆照片</div>}
+                          {activityStep === 2 && proposals.length === 0 && <div>请先填写活动需求并生成方案</div>}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Bottom: error/success messages */}
+                    {(errorMsg || successMsg) && (
+                      <div className="px-4 py-2 shrink-0 border-t" style={{ borderColor: border }}>
+                        {errorMsg && <div className="text-xs" style={{ color: '#ef4444' }}>{errorMsg}</div>}
+                        {successMsg && <div className="text-xs" style={{ color: '#22c55e' }}>{successMsg}</div>}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                /* ========== 原有展陈设计模式 ========== */
+                <div className="grid flex-1 grid-cols-[360px_1fr] gap-4 overflow-hidden p-4">
                 {/* LEFT: Form */}
                 <div className="overflow-y-auto pr-2 space-y-4" data-toolbar>
                   {/* Basic Info: Brand & Product */}
@@ -1331,6 +2281,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                   </div>
                 </div>
               </div>
+              )}
             </main>
 
             {/* ====== 使用说明弹窗 ====== */}

@@ -2,4 +2,10 @@
 set -euo pipefail
 
 pnpm run doctor -- --startup
-exec pnpm run start
+# Use dev mode for HMR (hot module reload) support
+# In COZE_PROJECT_ENV=DEV, new routes are picked up automatically
+if [ "${COZE_PROJECT_ENV:-DEV}" = "DEV" ]; then
+  exec pnpm run dev
+else
+  exec pnpm run start
+fi
