@@ -62,21 +62,21 @@ import { APP_FULL_VERSION_LABEL, APP_NAME } from '@/config/app-meta';
 import { fetchSessionPayload } from '@/lib/auth-session';
 
 // Heavy components — lazy-loaded to keep initial JS bundle small (LoginPanel hydrates instantly)
-const InfiniteCanvas = dynamic(() => import('@/components/infinite-canvas').then(m => m.InfiniteCanvas), { ssr: false, loading: () => null });
-const GenerationPanel = dynamic(() => import('@/components/generation-panel').then(m => m.GenerationPanel), { ssr: false, loading: () => null });
-const VideoGenerationPanel = dynamic(() => import('@/components/video-generation-panel'), { ssr: false, loading: () => null });
-const ImagePreview = dynamic(() => import('@/components/image-preview').then(m => m.ImagePreview), { ssr: false, loading: () => null });
-const ChatPanel = dynamic(() => import('@/components/chat-panel').then(m => m.ChatPanel), { ssr: false, loading: () => null });
-const QuickCreatePanel = dynamic(() => import('@/components/quick-create-panel').then(m => m.QuickCreatePanel), { ssr: false, loading: () => null });
-const PromptEquation = dynamic(() => import('@/components/prompt-equation').then(m => m.PromptEquation), { ssr: false, loading: () => null });
-const NodeEditor = dynamic(() => import('@/components/node-editor'), { ssr: false, loading: () => null });
-const WorkflowHub = dynamic(() => import('@/components/workflow-hub'), { ssr: false, loading: () => null });
-const DashboardView = dynamic(() => import('@/components/dashboard/dashboard-view'), { ssr: false, loading: () => null });
-const ImageEditor = dynamic(() => import('@/components/image-editor').then(m => m.ImageEditor), { ssr: false, loading: () => null });
-const ProjectDataPanel = dynamic(() => import('@/components/project-data-panel').then(m => m.ProjectDataPanel), { ssr: false, loading: () => null });
-const HelpGuide = dynamic(() => import('@/components/help-guide').then(m => m.HelpGuide), { ssr: false, loading: () => null });
-const FavoritesPanel = dynamic(() => import('@/components/favorites-panel').then(m => m.FavoritesPanel), { ssr: false, loading: () => null });
-const PromptTemplatePanel = dynamic(() => import('@/components/prompt-template-panel'), { ssr: false, loading: () => null });
+const InfiniteCanvas = dynamic(() => import('@/components/infinite-canvas').then(m => m.InfiniteCanvas), { loading: () => null });
+const GenerationPanel = dynamic(() => import('@/components/generation-panel').then(m => m.GenerationPanel), { loading: () => null });
+const VideoGenerationPanel = dynamic(() => import('@/components/video-generation-panel'), { loading: () => null });
+const ImagePreview = dynamic(() => import('@/components/image-preview').then(m => m.ImagePreview), { loading: () => null });
+const ChatPanel = dynamic(() => import('@/components/chat-panel').then(m => m.ChatPanel), { loading: () => null });
+const QuickCreatePanel = dynamic(() => import('@/components/quick-create-panel').then(m => m.QuickCreatePanel), { loading: () => null });
+const PromptEquation = dynamic(() => import('@/components/prompt-equation').then(m => m.PromptEquation), { loading: () => null });
+const NodeEditor = dynamic(() => import('@/components/node-editor'), { loading: () => null });
+const WorkflowHub = dynamic(() => import('@/components/workflow-hub'), { loading: () => null });
+const DashboardView = dynamic(() => import('@/components/dashboard/dashboard-view'), { loading: () => null });
+const ImageEditor = dynamic(() => import('@/components/image-editor').then(m => m.ImageEditor), { loading: () => null });
+const ProjectDataPanel = dynamic(() => import('@/components/project-data-panel').then(m => m.ProjectDataPanel), { loading: () => null });
+const HelpGuide = dynamic(() => import('@/components/help-guide').then(m => m.HelpGuide), { loading: () => null });
+const FavoritesPanel = dynamic(() => import('@/components/favorites-panel').then(m => m.FavoritesPanel), { loading: () => null });
+const PromptTemplatePanel = dynamic(() => import('@/components/prompt-template-panel'), { loading: () => null });
 
 type ThemeStyle = 'gold' | 'monochrome';
 type ActivePanel = 'generate' | 'video' | 'chat';
