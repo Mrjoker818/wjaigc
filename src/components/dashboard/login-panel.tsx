@@ -1,9 +1,7 @@
 'use client';
 /* eslint-disable @next/next/no-html-link-for-pages -- Login entry navigation must bypass a broken App Router hydration state. */
 
-import React, { useState, useMemo } from 'react';
-import { User } from '@/lib/user-types';
-import { UserManager as UserManagerCore } from '@/lib/user-manager';
+import React, { useEffect, useState } from 'react';
 import { APP_VERSION_LABEL } from '@/config/app-meta';
 import { Label } from '@/components/ui/label';
 import {
@@ -27,12 +25,10 @@ type LoginMode = 'canvas' | 'chat';
 type ViewState = 'select-mode' | 'login-form';
 
 interface LoginPanelProps {
-  onLogin: (user: User, productType: string) => void;
   initialMode?: LoginMode;
 }
 
-export function LoginPanel({ onLogin, initialMode }: LoginPanelProps) {
-  const userManager = useMemo(() => UserManagerCore.getInstance(), []);
+export function LoginPanel({ initialMode }: LoginPanelProps) {
   const [viewState, setViewState] = useState<ViewState>(initialMode ? 'login-form' : 'select-mode');
   const [selectedMode, setSelectedMode] = useState<LoginMode>(initialMode ?? 'canvas');
   const [loginName, setLoginName] = useState('Mr.joker');
@@ -41,39 +37,22 @@ export function LoginPanel({ onLogin, initialMode }: LoginPanelProps) {
   const [loginError, setLoginError] = useState('');
   const [loggingIn, setLoggingIn] = useState(false);
 
-  const submitLogin = async (name: string, password: string, productType: string) => {
+  useEffect(() => {
+    const error = new URLSearchParams(window.location.search).get('error');
+    if (error === 'invalid_credentials') {
+      setLoginError('用户名或密码错误，或该账户尚未获授权。');
+    } else if (error === 'invalid_input') {
+      setLoginError('请完整填写用户名和密码。');
+    } else if (error === 'configuration') {
+      setLoginError('登录服务暂不可用，请联系管理员检查认证配置。');
+    } else if (error === 'login_failed') {
+      setLoginError('登录失败，请稍后重试。');
+    }
+  }, []);
+
+  const handleLogin = (): void => {
     setLoggingIn(true);
     setLoginError('');
-    try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ name, password, productType }),
-      });
-
-      if (!response.ok) {
-        setLoginError('登录失败，请检查用户名、密码或授权');
-        return;
-      }
-
-      const data = await response.json() as { success?: boolean; user?: User; error?: string };
-      if (!data.user) {
-        setLoginError(data.error || '该用户未授权使用此功能，请联系管理员');
-        return;
-      }
-
-      const loggedIn = await userManager.upsertUserFromServer(data.user);
-      onLogin(loggedIn, productType);
-    } catch {
-      setLoginError('登录失败，网络异常');
-    } finally {
-      setLoggingIn(false);
-    }
-  };
-
-  const handleLogin = async () => {
-    await submitLogin(loginName.trim(), loginPassword, selectedMode);
   };
 
   const selectMode = (mode: LoginMode): void => {
@@ -284,7 +263,14 @@ export function LoginPanel({ onLogin, initialMode }: LoginPanelProps) {
                 <h2 className="text-2xl font-bold text-foreground mb-8">登录</h2>
 
                 {/* 登录表单 */}
-                <form onSubmit={(e) => { e.preventDefault(); void handleLogin(); }} autoComplete="off">
+                <form
+                  action="/api/auth/login"
+                  method="post"
+                  onSubmit={handleLogin}
+                  autoComplete="off"
+                >
+                  <input type="hidden" name="productType" value={selectedMode} />
+                  <input type="hidden" name="next" value={selectedMode === 'chat' ? '/simple-chat' : '/'} />
                   {/* 用户名输入框 */}
                   <div className="mb-5">
                     <Label className="block text-xs font-medium text-muted-foreground mb-1.5">用户名</Label>
@@ -294,9 +280,10 @@ export function LoginPanel({ onLogin, initialMode }: LoginPanelProps) {
                       </div>
                       <input
                         type="text"
+                        name="name"
                         value={loginName}
                         onChange={(e) => setLoginName(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') void handleLogin(); }}
+                        required
                         placeholder="请输入用户名"
                         disabled={loggingIn}
                         className="w-full bg-muted border-none rounded-md pl-10 pr-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/40 transition-colors disabled:opacity-50"
@@ -313,9 +300,10 @@ export function LoginPanel({ onLogin, initialMode }: LoginPanelProps) {
                       </div>
                       <input
                         type={showLoginPassword ? 'text' : 'password'}
+                        name="password"
                         value={loginPassword}
                         onChange={(e) => setLoginPassword(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') void handleLogin(); }}
+                        required
                         placeholder="请输入密码"
                         disabled={loggingIn}
                         className="w-full bg-muted border-none rounded-md pl-10 pr-10 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/40 transition-colors disabled:opacity-50"

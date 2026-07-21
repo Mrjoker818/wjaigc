@@ -174,7 +174,7 @@ export default function SimpleChatPage() {
   if (showLogin || !user) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        <LoginPanel onLogin={(nextUser: User, _productType: string) => { setUser(nextUser); setShowLogin(false); }} />
+        <LoginPanel />
       </div>
     );
   }

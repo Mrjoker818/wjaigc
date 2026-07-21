@@ -7,13 +7,22 @@ import { validateApiInputs } from '@/lib/api-validator';
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
+  const isFormSubmission = request.headers.get('content-type')?.includes('application/x-www-form-urlencoded')
+    || request.headers.get('content-type')?.includes('multipart/form-data');
+  let formProductType: 'canvas' | 'chat' = 'canvas';
+
   try {
-    const body = await request.json() as {
+    const body = (isFormSubmission
+      ? Object.fromEntries(await request.formData())
+      : await request.json()) as {
       name?: string;
       password?: string;
       productType?: string;
+      next?: string;
       profile?: Record<string, unknown>;
     };
+    formProductType = body.productType === 'chat' ? 'chat' : 'canvas';
+    const nextPath = body.next === '/simple-chat' ? '/simple-chat' : '/';
 
     // 输入校验
     const _validationError = validateApiInputs(body, {
@@ -21,6 +30,9 @@ export async function POST(request: NextRequest) {
       password: 'string',
     });
     if (_validationError) {
+      if (isFormSubmission) {
+        return NextResponse.redirect(new URL(`/login/${body.productType === 'chat' ? 'chat' : 'canvas'}?error=invalid_input`, request.url), 303);
+      }
       return NextResponse.json({ error: _validationError }, { status: 400 });
     }
 
@@ -32,12 +44,17 @@ export async function POST(request: NextRequest) {
     });
 
     if (!user) {
+      if (isFormSubmission) {
+        return NextResponse.redirect(new URL(`/login/${body.productType === 'chat' ? 'chat' : 'canvas'}?error=invalid_credentials`, request.url), 303);
+      }
       return NextResponse.json({ success: false, error: 'Invalid username or password' }, { status: 401 });
     }
 
     await ensureUserDataDirs(user.id);
 
-    const response = NextResponse.json({ success: true, user });
+    const response = isFormSubmission
+      ? NextResponse.redirect(new URL(nextPath, request.url), 303)
+      : NextResponse.json({ success: true, user });
     // Only set secure flag when the connection itself is HTTPS.
     // On HTTP (e.g. http://127.0.0.1:5000 in test/dev), WebKit rejects secure cookies.
     const isHttps = request.nextUrl.protocol === 'https:' || request.headers.get('x-forwarded-proto') === 'https';
@@ -50,6 +67,10 @@ export async function POST(request: NextRequest) {
     });
     return response;
   } catch (error) {
+    if (isFormSubmission) {
+      const errorCode = error instanceof AuthConfigurationError ? 'configuration' : 'login_failed';
+      return NextResponse.redirect(new URL(`/login/${formProductType}?error=${errorCode}`, request.url), 303);
+    }
     if (error instanceof AuthConfigurationError) {
       return NextResponse.json({
         success: false,

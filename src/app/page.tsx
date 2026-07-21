@@ -4171,25 +4171,6 @@ function CanvasApp() {
   // Workflow state for node mode
   const [nodeWorkflow, setNodeWorkflow] = useState<Workflow | null>(null);
 
-  const handleAnonymousLogin = async (user: User, productType: string) => {
-    void productType;
-    setCurrentProject(null);
-    incrementalHistoryRef.current.clear();
-    prevImagesRef.current = [];
-    skipHistoryRef.current = true;
-    setImages([]);
-    latestImagesRef.current = [];
-    setCurrentUser(user);
-    toast.success('登录成功', {
-      description: `欢迎回来，${user.name}`,
-      className: themeStyle === 'monochrome'
-        ? 'bg-white border border-gray-200 text-gray-900'
-        : 'bg-[#141414] border border-[#2a2a2a] text-white',
-    });
-    setAppMode('dashboard');
-    setTimeout(() => { skipHistoryRef.current = false; }, 100);
-  };
-
   // Keep the first client hydration small. The full workspace mounts only after
   // the bounded session check resolves, which avoids a blocked auth overlay in
   // injected development preview environments.
@@ -4210,7 +4191,7 @@ function CanvasApp() {
   if (!currentUser) {
     return (
       <>
-        <LoginPanel onLogin={handleAnonymousLogin} />
+        <LoginPanel />
         <Toaster
           position="top-center"
           toastOptions={{
