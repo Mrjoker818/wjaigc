@@ -1,23 +1,18 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import dynamic from 'next/dynamic';
 import { getResumedTaskPollingOutcome, RESUMED_TASK_MAX_POLL_ATTEMPTS, shouldStartResumedTaskPolling } from '@/lib/resumed-task-polling';
 import { hasDirectVideoPollingTimedOut } from '@/lib/video-task-polling';
 import { applyTaskIdsToProcessingPlaceholders, shouldPersistProcessingPlaceholder } from '@/lib/canvas-task-placeholders';
 import { findUniqueLegacyTaskMatch, type RecoverableLegacyTask } from '@/lib/legacy-task-recovery';
-import { InfiniteCanvas, CanvasImage, ImageGroup } from '@/components/infinite-canvas';
+import type { CanvasImage, ImageGroup } from '@/components/infinite-canvas';
 import { IncrementalHistoryManager } from '@/lib/canvas-incremental-history';
 import { TreeHistoryManager, type VersionNode } from '@/lib/canvas-tree-history';
 import { createAutoConnection, type ConnectionRelationType } from '@/lib/canvas-connections';
-import { GenerationPanel, GenerationParams, CtrlRefSelection } from '@/components/generation-panel';
-import VideoGenerationPanel, { type VideoGenerationPanelHandle } from '@/components/video-generation-panel';
-import { ImagePreview } from '@/components/image-preview';
-import { ChatPanel } from '@/components/chat-panel';
-import {
-  QuickCreatePanel,
-  type QuickCreateCompileViewState,
-  type QuickCreateRequest,
-} from '@/components/quick-create-panel';
+import type { GenerationParams, CtrlRefSelection } from '@/components/generation-panel';
+import type { VideoGenerationPanelHandle } from '@/components/video-generation-panel';
+import type { QuickCreateCompileViewState, QuickCreateRequest } from '@/components/quick-create-panel';
 import {
   resolveQuickCreateModel,
   type QuickCreateModelCandidate,
@@ -31,22 +26,12 @@ import {
   flushQuickCreateSseBuffer,
   parseQuickCreateSseChunk,
 } from '@/lib/quick-create-sse';
-import { PromptEquation } from '@/components/prompt-equation';
 
 import { Toaster } from '@/components/ui/sonner';
 import { toast } from 'sonner';
 import { Image as ImageIcon, MessageSquare, Sparkles, ChevronLeft, ChevronRight, X, Bell } from 'lucide-react';
-import NodeEditor from '@/components/node-editor';
-import WorkflowHub from '@/components/workflow-hub';
-import DashboardView from '@/components/dashboard/dashboard-view';
 import { type Workflow } from '@/lib/workflow-engine';
-import { ImageEditor } from '@/components/image-editor';
 import { LoginPanel } from '@/components/dashboard/login-panel';
-import { ProjectDataPanel } from '@/components/project-data-panel';
-
-import { HelpGuide } from '@/components/help-guide';
-import { FavoritesPanel } from '@/components/favorites-panel';
-import PromptTemplatePanel from '@/components/prompt-template-panel';
 import { taskEventsClient } from '@/lib/task-events-client';
 import { waitForTaskPollInterval } from '@/lib/task-polling-wait';
 
@@ -75,6 +60,23 @@ import { UserManager as UserManagerCore } from '@/lib/user-manager';
 import { toStableImageUrl, awaitStableImageUrl } from '@/lib/stable-image-url';
 import { APP_FULL_VERSION_LABEL, APP_NAME } from '@/config/app-meta';
 import { fetchSessionPayload } from '@/lib/auth-session';
+
+// Heavy components — lazy-loaded to keep initial JS bundle small (LoginPanel hydrates instantly)
+const InfiniteCanvas = dynamic(() => import('@/components/infinite-canvas').then(m => m.InfiniteCanvas), { ssr: false, loading: () => null });
+const GenerationPanel = dynamic(() => import('@/components/generation-panel').then(m => m.GenerationPanel), { ssr: false, loading: () => null });
+const VideoGenerationPanel = dynamic(() => import('@/components/video-generation-panel'), { ssr: false, loading: () => null });
+const ImagePreview = dynamic(() => import('@/components/image-preview').then(m => m.ImagePreview), { ssr: false, loading: () => null });
+const ChatPanel = dynamic(() => import('@/components/chat-panel').then(m => m.ChatPanel), { ssr: false, loading: () => null });
+const QuickCreatePanel = dynamic(() => import('@/components/quick-create-panel').then(m => m.QuickCreatePanel), { ssr: false, loading: () => null });
+const PromptEquation = dynamic(() => import('@/components/prompt-equation').then(m => m.PromptEquation), { ssr: false, loading: () => null });
+const NodeEditor = dynamic(() => import('@/components/node-editor'), { ssr: false, loading: () => null });
+const WorkflowHub = dynamic(() => import('@/components/workflow-hub'), { ssr: false, loading: () => null });
+const DashboardView = dynamic(() => import('@/components/dashboard/dashboard-view'), { ssr: false, loading: () => null });
+const ImageEditor = dynamic(() => import('@/components/image-editor').then(m => m.ImageEditor), { ssr: false, loading: () => null });
+const ProjectDataPanel = dynamic(() => import('@/components/project-data-panel').then(m => m.ProjectDataPanel), { ssr: false, loading: () => null });
+const HelpGuide = dynamic(() => import('@/components/help-guide').then(m => m.HelpGuide), { ssr: false, loading: () => null });
+const FavoritesPanel = dynamic(() => import('@/components/favorites-panel').then(m => m.FavoritesPanel), { ssr: false, loading: () => null });
+const PromptTemplatePanel = dynamic(() => import('@/components/prompt-template-panel'), { ssr: false, loading: () => null });
 
 type ThemeStyle = 'gold' | 'monochrome';
 type ActivePanel = 'generate' | 'video' | 'chat';
