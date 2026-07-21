@@ -375,7 +375,9 @@ function CanvasApp() {
 
   const [appMode, setAppMode] = useState<'canvas' | 'node' | 'workflow-hub' | 'dashboard'>('canvas');
   const [pendingModeSwitch, setPendingModeSwitch] = useState<'node' | 'workflow-hub' | 'dashboard' | null>(null);
-  const [authChecked, setAuthChecked] = useState(false);
+  // Start with true so SSR renders the login panel (not a blank spinner).
+  // The useEffect below will update currentUser if a valid session exists.
+  const [authChecked, setAuthChecked] = useState(true);
   const initialProjectIdRef = useRef(getInitialProjectId());
 
   const [showProjectData, setShowProjectData] = useState(false);
