@@ -131,6 +131,44 @@ const MATERIALS = [
 
 const CRAFTS = ['烫金', '烫银', 'UV', '局部UV', '压纹', '浮雕', '击凸', '模切', '镭射', '光油', '哑油', '丝印', '覆膜', '起凸', '压暗', '热转印', '击烫', '水晶标', '其他'];
 
+// === 升级：包装类型分组过滤（packaging-cmf-finishes-skill 整合 — 渐进式，不破坏原有平铺结构）===
+const PACKAGING_TYPE_GROUPS: { label: string; types: string[] }[] = [
+  { label: '全部', types: [] }, // 空数组代表全部
+  { label: '纸盒', types: ['插舌盒', '天地盖盒', '抽屉盒', '翻盖盒', '书型盒', '对开门盒', '异形盒'] },
+  { label: '软包装', types: ['自立袋', '三边封袋', '八边封袋', '吸嘴袋', '铝箔袋'] },
+  { label: '管/瓶', types: ['软管', '瓶身标签', '喷雾瓶', '滴管瓶', '广口瓶', '窄口瓶'] },
+  { label: '罐/桶', types: ['铁罐', '纸罐', '塑料罐'] },
+  { label: '套装', types: ['礼盒套装', '手提袋', '内托+外盒'] },
+];
+
+// === 升级：showcase-series 镜头节奏预设（packaging-showcase-series-skill 整合 — 作为 series_family 的可选增强模式）===
+type ShowcaseSpec = 'standard' | 'compact' | 'full';
+const SHOWCASE_PRESETS: Record<ShowcaseSpec, { label: string; count: number; shots: string[] }> = {
+  compact: {
+    label: '精简 6 张',
+    count: 6,
+    shots: ['英雄主图', '正面平铺', '工艺微距', '细节特写', '生活场景', '系列展示'],
+  },
+  standard: {
+    label: '标准 10 张',
+    count: 10,
+    shots: ['英雄主图', '正面展示', '系列组合', '结构说明', '工艺微距', '细节特写', '生活场景', '系列家族', '平铺全览', '收尾全景'],
+  },
+  full: {
+    label: '完整 14 张',
+    count: 14,
+    shots: ['英雄主图', '正面展示', '背面展示', '系列组合', '结构爆炸', '工艺微距', '细节特写1', '细节特写2', '生活场景', '货架陈列', '系列家族', '平铺全览', '礼品场景', '收尾全景'],
+  },
+};
+
+// === 升级：调研助手快捷动作（packaging-design-research-skill 整合 — 可选折叠面板）===
+const RESEARCH_QUICK_ACTIONS = [
+  { key: 'competitor', label: '竞品格局速览', prompt: '分析{brandName} {category}品类的竞品包装设计特征，提炼关键设计方向与差异化机会' },
+  { key: 'trend', label: '设计趋势推荐', prompt: '推荐当前{category}品类包装设计的3个核心趋势，给出可落地的视觉方向建议' },
+  { key: 'cmf_direction', label: 'CMF方向建议', prompt: '针对{brandName} {productName}产品，推荐最适合的包装材质(Material)、色彩(Color)与表面工艺(Finish)组合方案，并说明推荐理由' },
+  { key: 'brief', label: '生成AI Brief', prompt: '为{brandName} {productName} {category}产品包装生成一份完整的设计简报(Brief)，包含：品牌定位、目标消费者、设计方向、禁忌事项、参考风格' },
+];
+
 const OUTPUT_MODES: { value: PackagingOutputMode; label: string; icon: React.ReactNode }[] = [
   { value: 'package_render', label: '包装效果图', icon: <Package size={14} /> },
   { value: 'visual_flat_layout', label: '视觉展开图', icon: <LayoutGrid size={14} /> },
@@ -242,6 +280,22 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
   });
   const [customPrompt, setCustomPrompt] = useState('');
   const [exportFormat, setExportFormat] = useState<'PNG' | 'SVG' | 'PDF' | 'AI'>('PNG');
+
+  // === 升级：调研助手 state（packaging-design-research-skill 整合）===
+  const [showResearchPanel, setShowResearchPanel] = useState(false);
+  const [researchLoading, setResearchLoading] = useState(false);
+  const [researchSuggestion, setResearchSuggestion] = useState('');
+  const [researchActionKey, setResearchActionKey] = useState('');
+
+  // === 升级：CMF 精准模式 state（packaging-cmf-finishes-skill 整合）===
+  const [typeGroupFilter, setTypeGroupFilter] = useState('全部');
+  const [cmfModeEnabled, setCmfModeEnabled] = useState(false);
+  const [cmfLoading, setCmfLoading] = useState(false);
+  const [cmfSuggestion, setCmfSuggestion] = useState('');
+  const [showCmfSuggestion, setShowCmfSuggestion] = useState(false);
+
+  // === 升级：showcase 系列规格 state（packaging-showcase-series-skill 整合）===
+  const [showcaseSpec, setShowcaseSpec] = useState<ShowcaseSpec>('standard');
 
   // === Results state ===
   const [results, setResults] = useState<PackagingResult[]>([]);
@@ -429,6 +483,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
           providerId: selectedProviderId,
           chatModel: selectedChatModel,
           chatProviderId: selectedChatProviderId,
+          showcaseSpec,
           quality: (() => { try { const s = localStorage.getItem('wujie_selected_model'); return s ? JSON.parse(s).quality : undefined; } catch { return undefined; } })(),
           aspectRatio: (() => { try { const s = localStorage.getItem('wujie_selected_model'); return s ? JSON.parse(s).aspectRatio : undefined; } catch { return undefined; } })(),
         }),
@@ -498,7 +553,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
       console.error('[brand-packaging] Generate failed:', e);
       setIsGenerating(false);
     }
-  }, [brandName, productName, category, structure, materialCraft, outputModes, skuMatrix, extendScenes, customPrompt, logoUrl, brandColors, uploads, advancedOptions, onAddImages, selectedModel, selectedProviderId, selectedChatModel, selectedChatProviderId]);
+  }, [brandName, productName, category, structure, materialCraft, outputModes, skuMatrix, extendScenes, customPrompt, logoUrl, brandColors, uploads, advancedOptions, onAddImages, selectedModel, selectedProviderId, selectedChatModel, selectedChatProviderId, showcaseSpec]);
 
   // === Generate same series ===
   const handleGenerateSeries = useCallback(async () => {
@@ -518,6 +573,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
           providerId: selectedProviderId,
           chatModel: selectedChatModel,
           chatProviderId: selectedChatProviderId,
+          showcaseSpec,
           quality: (() => { try { const s = localStorage.getItem('wujie_selected_model'); return s ? JSON.parse(s).quality : undefined; } catch { return undefined; } })(),
           aspectRatio: (() => { try { const s = localStorage.getItem('wujie_selected_model'); return s ? JSON.parse(s).aspectRatio : undefined; } catch { return undefined; } })(),
         }),
@@ -837,6 +893,84 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                         </button>
                       </div>
                     </div>
+
+                    {/* === 升级：调研助手（packaging-design-research-skill 整合 — 可选折叠，不影响主流程）=== */}
+                    <div className="mt-3 rounded-lg border overflow-hidden" style={{ borderColor: border }}>
+                      <button
+                        className="w-full flex items-center justify-between px-3 py-2 cursor-pointer transition-colors"
+                        style={{ background: bgCard, color: textMuted }}
+                        onClick={() => setShowResearchPanel(!showResearchPanel)}
+                      >
+                        <span className="text-[12px] flex items-center gap-1.5">
+                          <BookOpen size={12} />
+                          调研助手（可选）
+                        </span>
+                        <span className="text-[10px]">{showResearchPanel ? '▲ 收起' : '▼ 展开'}</span>
+                      </button>
+                      {showResearchPanel && (
+                        <div className="p-3" style={{ background: bgSoft, borderTop: `1px solid ${border}` }}>
+                          <p className="text-[11px] mb-2.5" style={{ color: textMuted }}>
+                            基于品牌信息，AI 为你快速生成调研建议，可一键填充到设计要求
+                          </p>
+                          <div className="grid grid-cols-2 gap-1.5 mb-2.5">
+                            {RESEARCH_QUICK_ACTIONS.map(action => (
+                              <button
+                                key={action.key}
+                                className={`rounded-lg border px-2 py-1.5 text-[11px] cursor-pointer transition-colors text-left flex items-center gap-1.5 ${researchActionKey === action.key && researchLoading ? (isMonochrome ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-amber-400/60 bg-amber-400/10 text-amber-200') : (isMonochrome ? 'border-gray-200 text-gray-500 hover:border-blue-300' : 'border-white/10 text-white/50 hover:border-amber-400/40')}`}
+                                disabled={researchLoading}
+                                onClick={async () => {
+                                  if (!brandName) { alert('请先填写品牌名'); return; }
+                                  setResearchLoading(true);
+                                  setResearchActionKey(action.key);
+                                  setResearchSuggestion('');
+                                  try {
+                                    const prompt = action.prompt
+                                      .replace('{brandName}', brandName)
+                                      .replace('{productName}', productName)
+                                      .replace('{category}', category);
+                                    const res = await fetch('/api/chat', {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({
+                                        messages: [{ role: 'user', content: prompt }],
+                                        model: selectedChatModel,
+                                        providerId: selectedChatProviderId,
+                                      }),
+                                    });
+                                    const reader = res.body?.getReader();
+                                    if (!reader) throw new Error('No reader');
+                                    let full = '';
+                                    while (true) {
+                                      const { done, value } = await reader.read();
+                                      if (done) break;
+                                      full += new TextDecoder().decode(value);
+                                    }
+                                    setResearchSuggestion(full.replace(/^data:\s*/gm, '').replace(/\[DONE\]/g, '').trim());
+                                  } catch (e: any) {
+                                    setResearchSuggestion(`调研失败：${e.message}`);
+                                  } finally {
+                                    setResearchLoading(false);
+                                  }
+                                }}
+                              >
+                                {researchActionKey === action.key && researchLoading ? '生成中...' : action.label}
+                              </button>
+                            ))}
+                          </div>
+                          {researchSuggestion && (
+                            <div className="rounded-lg border p-2.5" style={{ borderColor: border, background: bgCard }}>
+                              <p className="text-[11px] whitespace-pre-wrap mb-2 max-h-32 overflow-y-auto" style={{ color: textMuted }}>{researchSuggestion}</p>
+                              <button
+                                className={`rounded-lg border px-2 py-1 text-[11px] cursor-pointer transition-colors ${isMonochrome ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-amber-400/60 bg-amber-400/10 text-amber-200 hover:bg-amber-400/20'}`}
+                                onClick={() => setCustomPrompt(prev => prev ? `${prev}\n\n【调研建议】\n${researchSuggestion}` : `【调研建议】\n${researchSuggestion}`)}
+                              >
+                                → 填充到附加要求
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </section>
 
                   {/* Step 2: Structure */}
@@ -845,15 +979,65 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                       <span className={stepBadgeCls}>2</span>
                       <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>包装结构与规格</h3>
                     </div>
+
+                    {/* === 升级：包装类型分组过滤器（packaging-cmf-finishes 整合 — 渐进式）=== */}
+                    <div className="mb-2 flex items-center gap-1.5">
+                      {PACKAGING_TYPE_GROUPS.map(g => (
+                        <button
+                          key={g.label}
+                          className={`rounded-md border px-2 py-1 text-[11px] cursor-pointer transition-colors ${typeGroupFilter === g.label ? (isMonochrome ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-amber-400/60 bg-amber-400/15 text-amber-200') : (isMonochrome ? 'border-gray-200 text-gray-500 hover:border-blue-300' : 'border-white/10 text-white/50 hover:border-amber-400/40')}`}
+                          onClick={() => setTypeGroupFilter(g.label)}
+                        >
+                          {g.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* 包装类型选择器（根据分组过滤）*/}
                     <div className="mb-3 flex flex-wrap gap-1.5">
-                      {PACKAGING_TYPES.map(t => (
+                      {PACKAGING_TYPES.filter(t => {
+                        const group = PACKAGING_TYPE_GROUPS.find(g => g.label === typeGroupFilter);
+                        if (!group || group.types.length === 0) return true; // "全部"显示所有
+                        return group.types.includes(t);
+                      }).map(t => (
                         <button key={t} className={tagBtnCls(structure.type === t)} onClick={() => setStructure(prev => ({ ...prev, type: t }))}>{t}</button>
                       ))}
                     </div>
+
+                    {/* === 升级：CMF 精准模式开关（packaging-cmf-finishes 整合 — 可选增强）=== */}
+                    <div className="mb-2 flex items-center gap-2 rounded-lg border p-2" style={{ borderColor: border, background: bgCard }}>
+                      <button
+                        className={`flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[11px] cursor-pointer transition-all ${cmfModeEnabled ? (isMonochrome ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-amber-400/60 bg-amber-400/15 text-amber-200') : (isMonochrome ? 'border-gray-200 text-gray-500 hover:border-blue-300' : 'border-white/10 text-white/50 hover:border-amber-400/40')}`}
+                        onClick={() => setCmfModeEnabled(!cmfModeEnabled)}
+                      >
+                        <Sparkles size={12} />
+                        {cmfModeEnabled ? '✓ CMF精准模式' : '启用CMF精准模式'}
+                      </button>
+                      <span className="text-[10px]" style={{ color: textMuted }}>
+                        {cmfModeEnabled ? '已启用 CMF 方案推荐 + 物理尺寸强制确认' : '可选：开启后获得精准的材质-色彩-工艺方案推荐'}
+                      </span>
+                    </div>
+
+                    {/* 物理尺寸输入（CMF 模式时显示必填提示）*/}
                     <div className="grid grid-cols-3 gap-2">
-                      <div><label className="block text-[12px] mb-1" style={{ color: textMuted }}>长 (mm)</label><input className={inputCls} type="number" placeholder="60" value={structure.length || ''} onChange={e => setStructure(p => ({ ...p, length: Number(e.target.value) }))} /></div>
-                      <div><label className="block text-[12px] mb-1" style={{ color: textMuted }}>宽 (mm)</label><input className={inputCls} type="number" placeholder="40" value={structure.width || ''} onChange={e => setStructure(p => ({ ...p, width: Number(e.target.value) }))} /></div>
-                      <div><label className="block text-[12px] mb-1" style={{ color: textMuted }}>高 (mm)</label><input className={inputCls} type="number" placeholder="150" value={structure.height || ''} onChange={e => setStructure(p => ({ ...p, height: Number(e.target.value) }))} /></div>
+                      <div>
+                        <label className="block text-[12px] mb-1 flex items-center gap-1" style={{ color: cmfModeEnabled ? textAccent : textMuted }}>
+                          长 (mm){cmfModeEnabled && <span style={{ color: isMonochrome ? '#ef4444' : '#f87171' }}>*</span>}
+                        </label>
+                        <input className={inputCls} type="number" placeholder="60" value={structure.length || ''} onChange={e => setStructure(p => ({ ...p, length: Number(e.target.value) }))} style={cmfModeEnabled && !structure.length ? { borderColor: isMonochrome ? '#fca5a5' : 'rgba(248,113,113,0.5)' } : {}} />
+                      </div>
+                      <div>
+                        <label className="block text-[12px] mb-1 flex items-center gap-1" style={{ color: cmfModeEnabled ? textAccent : textMuted }}>
+                          宽 (mm){cmfModeEnabled && <span style={{ color: isMonochrome ? '#ef4444' : '#f87171' }}>*</span>}
+                        </label>
+                        <input className={inputCls} type="number" placeholder="40" value={structure.width || ''} onChange={e => setStructure(p => ({ ...p, width: Number(e.target.value) }))} style={cmfModeEnabled && !structure.width ? { borderColor: isMonochrome ? '#fca5a5' : 'rgba(248,113,113,0.5)' } : {}} />
+                      </div>
+                      <div>
+                        <label className="block text-[12px] mb-1 flex items-center gap-1" style={{ color: cmfModeEnabled ? textAccent : textMuted }}>
+                          高 (mm){cmfModeEnabled && <span style={{ color: isMonochrome ? '#ef4444' : '#f87171' }}>*</span>}
+                        </label>
+                        <input className={inputCls} type="number" placeholder="150" value={structure.height || ''} onChange={e => setStructure(p => ({ ...p, height: Number(e.target.value) }))} style={cmfModeEnabled && !structure.height ? { borderColor: isMonochrome ? '#fca5a5' : 'rgba(248,113,113,0.5)' } : {}} />
+                      </div>
                       <div><label className="block text-[12px] mb-1" style={{ color: textMuted }}>容量</label><input className={inputCls} placeholder="100 ml" value={structure.capacity || ''} onChange={e => setStructure(p => ({ ...p, capacity: e.target.value }))} /></div>
                       <div><label className="block text-[12px] mb-1" style={{ color: textMuted }}>净含量</label><input className={inputCls} placeholder="100 g" value={structure.netContent || ''} onChange={e => setStructure(p => ({ ...p, netContent: e.target.value }))} /></div>
                       <div><label className="block text-[12px] mb-1" style={{ color: textMuted }}>内托</label><select className={selectCls} value={structure.insertTray || ''} onChange={e => setStructure(p => ({ ...p, insertTray: e.target.value }))}>{INSERT_TRAY_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
@@ -872,6 +1056,108 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                     <div className="mb-3 flex flex-wrap gap-1.5">
                       {EXTEND_SCENES.map(s => <button key={s} className={tagBtnCls(extendScenes.includes(s))} onClick={() => toggleExtendScene(s)}>{s}</button>)}
                     </div>
+
+                    {/* === 升级：CMF 智能推荐（packaging-cmf-finishes 整合 — 仅在 CMF 模式时可用）=== */}
+                    {cmfModeEnabled && (
+                      <div className="mb-3 rounded-lg border p-3" style={{ borderColor: borderStrong, background: bgCard }}>
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-[12px] font-semibold flex items-center gap-1.5" style={{ color: textAccent }}>
+                            <Sparkles size={14} />
+                            CMF 智能方案推荐
+                          </span>
+                          <button
+                            className={`rounded-lg border px-2 py-1 text-[11px] cursor-pointer transition-colors flex items-center gap-1 ${isMonochrome ? 'border-blue-400 text-blue-700 hover:bg-blue-50' : 'border-amber-400/60 text-amber-200 hover:bg-amber-400/10'}`}
+                            onClick={async () => {
+                              if (!brandName || !productName || !category) {
+                                alert('请先填写品牌名、产品名称和品类');
+                                return;
+                              }
+                              setCmfLoading(true);
+                              try {
+                                const prompt = `你是 CMF 包装设计专家。为品牌"${brandName}"的产品"${productName}"（品类：${category}，包装类型：${structure.type}）推荐最适合的包装材质(Material)、色彩(Color)与表面工艺(Finish)组合方案。
+                                
+要求：
+1. 推荐 1-2 种基础材质（从这些选项中选择：${MATERIALS.join('、')}）
+2. 推荐 2-3 种核心品牌色彩（具体色值或色调描述）
+3. 推荐 1-2 种表面工艺（从这些选项中选择：${CRAFTS.join('、')}）
+4. 简要说明推荐理由（品牌调性匹配度、成本、可落地性）
+
+请以 JSON 格式返回：
+{
+  "materials": ["材质1", "材质2"],
+  "colors": ["色彩描述1", "色彩描述2"],
+  "crafts": ["工艺1", "工艺2"],
+  "reason": "推荐理由（1-2句话）"
+}`;
+                                const res = await fetch('/api/chat', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({
+                                    messages: [{ role: 'user', content: prompt }],
+                                    model: selectedChatModel,
+                                    providerId: selectedChatProviderId,
+                                  }),
+                                });
+                                const reader = res.body?.getReader();
+                                if (!reader) throw new Error('No reader');
+                                let fullText = '';
+                                while (true) {
+                                  const { done, value } = await reader.read();
+                                  if (done) break;
+                                  fullText += new TextDecoder().decode(value);
+                                }
+                                // 提取 JSON（LLM 可能返回 markdown 代码块包裹的 JSON）
+                                const jsonMatch = fullText.match(/\{[\s\S]*\}/);
+                                if (jsonMatch) {
+                                  const suggestion = JSON.parse(jsonMatch[0]);
+                                  setCmfSuggestion(JSON.stringify(suggestion, null, 2));
+                                  setShowCmfSuggestion(true);
+                                } else {
+                                  setCmfSuggestion(fullText);
+                                  setShowCmfSuggestion(true);
+                                }
+                              } catch (e: any) {
+                                alert(`CMF 推荐失败：${e.message}`);
+                              } finally {
+                                setCmfLoading(false);
+                              }
+                            }}
+                            disabled={cmfLoading}
+                          >
+                            {cmfLoading ? '推荐中...' : '获取推荐方案'}
+                          </button>
+                        </div>
+                        {showCmfSuggestion && cmfSuggestion && (
+                          <div className="rounded-lg border p-2 text-[11px] mb-2" style={{ borderColor: border, background: bgSoft, color: textMuted }}>
+                            <div className="font-mono whitespace-pre-wrap">{cmfSuggestion}</div>
+                            <button
+                              className={`mt-2 rounded-lg border px-2 py-1 text-[11px] cursor-pointer transition-colors ${isMonochrome ? 'border-blue-400 bg-blue-50 text-blue-700 hover:bg-blue-100' : 'border-amber-400/60 bg-amber-400/10 text-amber-200 hover:bg-amber-400/20'}`}
+                              onClick={() => {
+                                try {
+                                  const suggestion = JSON.parse(cmfSuggestion);
+                                  // 自动勾选推荐的材质和工艺
+                                  if (suggestion.materials && Array.isArray(suggestion.materials)) {
+                                    setMaterialCraft(prev => ({ ...prev, materials: suggestion.materials.filter((m: string) => MATERIALS.includes(m)) }));
+                                  }
+                                  if (suggestion.crafts && Array.isArray(suggestion.crafts)) {
+                                    setMaterialCraft(prev => ({ ...prev, crafts: suggestion.crafts.filter((c: string) => CRAFTS.includes(c)) }));
+                                  }
+                                  alert('已采纳 CMF 推荐方案');
+                                } catch {
+                                  alert('推荐方案格式错误，请手动选择');
+                                }
+                              }}
+                            >
+                              ✓ 一键采纳
+                            </button>
+                          </div>
+                        )}
+                        <p className="text-[10px]" style={{ color: textMuted }}>
+                          基于品牌定位与品类特征，AI 将推荐最适合的材质、色彩与工艺组合方案
+                        </p>
+                      </div>
+                    )}
+
                     <div className="mb-2 text-[12px] font-semibold" style={{ color: textMuted }}>基础材质</div>
                     <div className="mb-3 flex flex-wrap gap-1.5">
                       {MATERIALS.map(m => <button key={m} className={tagBtnCls(materialCraft.materials.includes(m))} onClick={() => toggleMaterial(m)}>{m}</button>)}
@@ -924,6 +1210,32 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                         </button>
                       ))}
                     </div>
+
+                    {/* === 升级：showcase 镜头节奏（packaging-showcase-series-skill 整合 — 仅 series_family 选中时展示）=== */}
+                    {outputModes.includes('series_family') && (
+                      <div className="mt-3 rounded-lg border p-3" style={{ borderColor: border, background: bgSoft }}>
+                        <p className="text-[11px] font-medium mb-2" style={{ color: textMuted }}>系列图组镜头节奏</p>
+                        <div className="flex gap-1.5 mb-2.5">
+                          {(Object.entries(SHOWCASE_PRESETS) as [ShowcaseSpec, typeof SHOWCASE_PRESETS[ShowcaseSpec]][]).map(([spec, preset]) => (
+                            <button
+                              key={spec}
+                              className={`flex-1 rounded-lg border py-1.5 text-[11px] cursor-pointer transition-all text-center ${showcaseSpec === spec ? (isMonochrome ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-amber-400/60 bg-amber-400/10 text-amber-200') : (isMonochrome ? 'border-gray-200 text-gray-500 hover:border-blue-300' : 'border-white/10 text-white/40 hover:border-amber-400/30')}`}
+                              onClick={() => setShowcaseSpec(spec)}
+                            >
+                              <span className="font-medium">{preset.label}</span>
+                              <span className="block text-[10px] opacity-70">{preset.count}张</span>
+                            </button>
+                          ))}
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {SHOWCASE_PRESETS[showcaseSpec].shots.map((shot, i) => (
+                            <span key={i} className="rounded px-1.5 py-0.5 text-[10px]" style={{ background: isMonochrome ? '#f0f4ff' : 'rgba(255,255,255,0.06)', color: isMonochrome ? '#3b82f6' : 'rgba(255,255,255,0.45)' }}>
+                              {i + 1}. {shot}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </section>
 
                   {/* Step 6: Advanced tools */}

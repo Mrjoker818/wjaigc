@@ -1293,6 +1293,9 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, c
   const [currentSessionId, setCurrentSessionId] = useState<string>('');
   const [chatSessionsLoaded, setChatSessionsLoaded] = useState(false);
   const resumedChatTaskKeysRef = useRef<Set<string>>(new Set());
+  // 客户端 portal 挂载就绪标志（用于 createPortal 安全挂到 document.body）
+  const [portalReady, setPortalReady] = useState(false);
+  useEffect(() => { setPortalReady(true); }, []);
   // 自定义智能体相关状态
   const [customAgents, setCustomAgents] = useState<typeof AGENTS>([]);
   const [showAgentBuilder, setShowAgentBuilder] = useState(false);
@@ -6962,30 +6965,34 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
           }
         }}
       />
-      <AgentBuilderDialog
-        open={showAgentBuilder}
-        onClose={() => setShowAgentBuilder(false)}
-        editingAgent={editingAgent}
-        isGold={isGold}
-        onSave={(agent) => {
-          setCustomAgents(prev => {
-            const existing = prev.findIndex(a => a.id === agent.id);
-            let updated;
-            if (existing >= 0) {
-              updated = [...prev];
-              updated[existing] = agent;
-            } else {
-              updated = [...prev, agent];
-            }
-            // 限制最大30个自定义智能体，超出时移除最老的
-            if (updated.length > 30) {
-              updated = updated.slice(updated.length - 30);
-            }
-            localStorage.setItem('custom-agents', JSON.stringify(updated));
-            return updated;
-          });
-        }}
-      />
+      {/* AgentBuilderDialog 通过 portal 挂到 document.body，逃出右侧面板 fixed stacking context */}
+      {portalReady && createPortal(
+        <AgentBuilderDialog
+          open={showAgentBuilder}
+          onClose={() => setShowAgentBuilder(false)}
+          editingAgent={editingAgent}
+          isGold={isGold}
+          onSave={(agent) => {
+            setCustomAgents(prev => {
+              const existing = prev.findIndex(a => a.id === agent.id);
+              let updated;
+              if (existing >= 0) {
+                updated = [...prev];
+                updated[existing] = agent;
+              } else {
+                updated = [...prev, agent];
+              }
+              // 限制最大30个自定义智能体，超出时移除最老的
+              if (updated.length > 30) {
+                updated = updated.slice(updated.length - 30);
+              }
+              localStorage.setItem('custom-agents', JSON.stringify(updated));
+              return updated;
+            });
+          }}
+        />,
+        document.body
+      )}
     </div>
   );
 }

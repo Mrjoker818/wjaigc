@@ -41,6 +41,7 @@ export async function POST(request: NextRequest) {
       prompt: clientPrompt,
       quality = '2K',
       aspectRatio = '1:1',
+      showcaseSpec = 'standard',
     } = body;
 
     if (!brandName && !productName) {
@@ -48,7 +49,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Build the prompt (use client-built prompt if provided, otherwise build server-side)
-    const prompt = clientPrompt || buildPackagingRenderPrompt({
+    let prompt = clientPrompt || buildPackagingRenderPrompt({
       brandName,
       productName,
       category,
@@ -59,6 +60,28 @@ export async function POST(request: NextRequest) {
       advancedOptions,
       uploads,
     } as Parameters<typeof buildPackagingRenderPrompt>[0]);
+
+    // === 升级：packaging-showcase-series-skill 整合 ===
+    // 当输出模式包含 series_family 时，注入对应镜头节奏说明
+    if (outputModes.includes('series_family') && showcaseSpec) {
+      const SHOWCASE_SHOTS: Record<string, { label: string; shots: string[] }> = {
+        compact: {
+          label: '精简6张',
+          shots: ['纯色背景正面主图', '环境氛围陈列图', '材质特写图', '成分/功能卖点图', '使用场景图', '系列全家福图'],
+        },
+        standard: {
+          label: '标准10张',
+          shots: ['纯色背景正面主图', '背景正面+45°斜角图', '环境氛围陈列图', '材质/工艺特写图', '开盖/开启细节图', '成分/卖点信息图', '场景生活感图', '侧面/背面全视角图', '俯视平铺图', '系列全家福图'],
+        },
+        full: {
+          label: '完整14张',
+          shots: ['纯色背景正面主图', '背景正面+45°斜角图', '背景正面+俯视角', '环境氛围陈列图A', '环境氛围陈列图B', '材质/工艺特写图', '开盖/开启细节图', '成分/卖点信息图', '场景生活感图A', '场景生活感图B', '侧面/背面全视角图', '俯视平铺图', '礼盒/组合套装展示图', '系列全家福图'],
+        },
+      };
+      const spec = SHOWCASE_SHOTS[showcaseSpec] || SHOWCASE_SHOTS.standard;
+      const shotListText = spec.shots.map((s, i) => `${i + 1}. ${s}`).join('；');
+      prompt = `${prompt}\n\n【系列图组镜头节奏（${spec.label}）】请严格按照以下 ${spec.shots.length} 个镜头职能依次生成：${shotListText}。确保每张图片在品牌视觉语言、道具和布景调性上保持高度一致性，整组图片形成完整连贯的品牌叙事。`;
+    }
 
     // Find an image model provider (try multiple strategies for robustness)
     let provider = providerId
