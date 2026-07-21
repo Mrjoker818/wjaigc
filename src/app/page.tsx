@@ -3704,6 +3704,8 @@ function CanvasApp() {
   const getCurrentImageModel = useCallback((): { model: string; providerId?: string } => {
     let model = '';
     let providerId: string | undefined;
+    // SSR guard: useMemo executes during server render where localStorage is undefined
+    if (typeof window === 'undefined') return { model, providerId };
     try {
       const rawModel = localStorage.getItem('wujie_selected_model');
       if (rawModel) {
