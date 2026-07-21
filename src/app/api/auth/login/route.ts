@@ -6,6 +6,27 @@ import { validateApiInputs } from '@/lib/api-validator';
 
 export const dynamic = 'force-dynamic';
 
+function getPublicOrigin(request: NextRequest): string {
+  const configuredDomain = process.env.COZE_PROJECT_DOMAIN_DEFAULT?.trim();
+  if (configuredDomain) {
+    const withProtocol = /^https?:\/\//i.test(configuredDomain)
+      ? configuredDomain
+      : `https://${configuredDomain}`;
+
+    try {
+      return new URL(withProtocol).origin;
+    } catch {
+      // Fall through to the request origin when the deployment setting is malformed.
+    }
+  }
+
+  return request.nextUrl.origin;
+}
+
+function redirectToPublicPath(request: NextRequest, path: string): NextResponse {
+  return NextResponse.redirect(new URL(path, getPublicOrigin(request)), 303);
+}
+
 export async function POST(request: NextRequest) {
   const isFormSubmission = request.headers.get('content-type')?.includes('application/x-www-form-urlencoded')
     || request.headers.get('content-type')?.includes('multipart/form-data');
@@ -31,7 +52,7 @@ export async function POST(request: NextRequest) {
     });
     if (_validationError) {
       if (isFormSubmission) {
-        return NextResponse.redirect(new URL(`/login/${body.productType === 'chat' ? 'chat' : 'canvas'}?error=invalid_input`, request.url), 303);
+        return redirectToPublicPath(request, `/login/${body.productType === 'chat' ? 'chat' : 'canvas'}?error=invalid_input`);
       }
       return NextResponse.json({ error: _validationError }, { status: 400 });
     }
@@ -45,7 +66,7 @@ export async function POST(request: NextRequest) {
 
     if (!user) {
       if (isFormSubmission) {
-        return NextResponse.redirect(new URL(`/login/${body.productType === 'chat' ? 'chat' : 'canvas'}?error=invalid_credentials`, request.url), 303);
+        return redirectToPublicPath(request, `/login/${body.productType === 'chat' ? 'chat' : 'canvas'}?error=invalid_credentials`);
       }
       return NextResponse.json({ success: false, error: 'Invalid username or password' }, { status: 401 });
     }
@@ -53,7 +74,7 @@ export async function POST(request: NextRequest) {
     await ensureUserDataDirs(user.id);
 
     const response = isFormSubmission
-      ? NextResponse.redirect(new URL(nextPath, request.url), 303)
+      ? redirectToPublicPath(request, nextPath)
       : NextResponse.json({ success: true, user });
     // Only set secure flag when the connection itself is HTTPS.
     // On HTTP (e.g. http://127.0.0.1:5000 in test/dev), WebKit rejects secure cookies.
@@ -69,7 +90,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     if (isFormSubmission) {
       const errorCode = error instanceof AuthConfigurationError ? 'configuration' : 'login_failed';
-      return NextResponse.redirect(new URL(`/login/${formProductType}?error=${errorCode}`, request.url), 303);
+      return redirectToPublicPath(request, `/login/${formProductType}?error=${errorCode}`);
     }
     if (error instanceof AuthConfigurationError) {
       return NextResponse.json({

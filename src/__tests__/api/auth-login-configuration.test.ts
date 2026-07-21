@@ -38,6 +38,29 @@ describe('POST /api/auth/login configuration failures', () => {
     });
   });
 
+  it('redirects form logins to the public deployment origin instead of the internal server URL', async () => {
+    vi.stubEnv('COZE_PROJECT_DOMAIN_DEFAULT', 'https://workspace.example.test');
+    mocks.authenticateUser.mockResolvedValue({ id: 'user-1', name: 'admin' });
+    mocks.createSessionToken.mockResolvedValue('session-token');
+    mocks.ensureUserDataDirs.mockResolvedValue(undefined);
+
+    const response = await POST(new NextRequest('http://localhost:5000/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        name: 'admin',
+        password: 'password',
+        productType: 'canvas',
+        next: '/',
+      }),
+    }));
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get('location')).toBe('https://workspace.example.test/');
+    expect(response.cookies.get('wujie_session')?.value).toBe('session-token');
+    vi.unstubAllEnvs();
+  });
+
   it('returns 503 instead of treating a missing production secret as invalid credentials', async () => {
     mocks.authenticateUser.mockRejectedValue(new mocks.AuthConfigurationError('Production authentication secret is not configured'));
 
