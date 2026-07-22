@@ -4191,7 +4191,7 @@ function CanvasApp() {
   if (!currentUser) {
     return (
       <>
-        <LoginPanel initialMode="canvas" />
+        <LoginPanel />
         <Toaster
           position="top-center"
           toastOptions={{
