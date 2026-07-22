@@ -31,6 +31,10 @@ import { CanvasEditor } from "./canvas-editor";
 import { MemoryPanel, type MemoryItem } from "./memory-panel";
 import { GlobalSearch } from "./global-search";
 import { ShareDialog } from "./share-dialog";
+import { PromptOptimizer } from "./prompt-optimizer";
+import { ReportExport } from "./report-export";
+import { ModelCompare } from "./model-compare";
+import { UsageStats } from "./usage-stats";
 import {
   SimpleChatProject, SimpleChatTask, SimpleChatMessage, SimpleChatAgent, ChatAttachment, ChatArtifact,
   ProjectInstructions, ProjectKnowledgeItem,
@@ -220,6 +224,17 @@ export default function ChatArea({
   // 语音输入
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<{ stop: () => void } | null>(null);
+  // 提示词优化器
+  const [showPromptOptimizer, setShowPromptOptimizer] = useState(false);
+  // 报告导出
+  const [showReportExport, setShowReportExport] = useState(false);
+  // 多模型对比
+  const [showModelCompare, setShowModelCompare] = useState(false);
+  // API 用量统计
+  const [showUsageStats, setShowUsageStats] = useState(false);
+  const [tokenUsage, setTokenUsage] = useState<{ promptTokens: number; completionTokens: number; totalTokens: number } | null>(null);
+  // 多轮图片上下文
+  const [historyImages, setHistoryImages] = useState<string[]>([]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);

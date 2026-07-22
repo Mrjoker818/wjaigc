@@ -8,10 +8,13 @@ const loginPanelSource = readFileSync(
 );
 
 describe('login panel native form contract', () => {
-  it('prevents entry clicks before hydration and then enables both product modes', () => {
-    expect(loginPanelSource).toContain('const [isHydrated, setIsHydrated] = useState(false);');
-    expect(loginPanelSource).toContain('useEffect(() => {\n    setIsHydrated(true);\n  }, []);');
-    expect(loginPanelSource.match(/disabled=\{!isHydrated\}/g)).toHaveLength(2);
+  it('keeps both product entries usable before and after hydration', () => {
+    expect(loginPanelSource).not.toContain('isHydrated');
+    expect(loginPanelSource).not.toContain('disabled={!isHydrated}');
+    expect(loginPanelSource).toContain('href="/?entry=canvas"');
+    expect(loginPanelSource).toContain('href="/?entry=chat"');
+    expect(loginPanelSource.match(/event\.preventDefault\(\);/g)).toHaveLength(2);
+    expect(loginPanelSource).toContain("entry === 'canvas' || entry === 'chat'");
   });
 
   it('toggles password visibility without submitting the login form', () => {

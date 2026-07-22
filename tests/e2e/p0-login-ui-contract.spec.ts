@@ -16,7 +16,9 @@ test.describe('P0 login entry contract', () => {
       await page.goto('/', { waitUntil: 'domcontentloaded' });
       await expect(page.getByRole('heading', { name: '选择入口' })).toBeVisible();
       await expect(page.getByRole('button', { name: '图像生成器' })).toHaveCount(0);
-      await page.getByRole('button', { name: /无限画布/ }).click();
+      const canvasEntry = page.getByRole('link', { name: /无限画布/ });
+      await expect(canvasEntry).toHaveAttribute('href', '/?entry=canvas');
+      await canvasEntry.click();
 
       await expect(page.getByRole('heading', { name: '登录' })).toBeVisible();
       await expect(page.getByPlaceholder('请输入用户名')).toBeVisible();
@@ -36,6 +38,31 @@ test.describe('P0 login entry contract', () => {
       await expect(page.getByRole('heading', { name: '登录' })).toBeVisible();
     } finally {
       await saveBrowserEvidence(page, testInfo, evidence, 'p0-login-ui-contract');
+    }
+  });
+
+  test('an anonymous visitor can choose the chat entrance', async ({ context, page }, testInfo) => {
+    const evidence = collectBrowserEvidence(page);
+    try {
+      await context.clearCookies();
+      await page.route('**/api/session', async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ success: true, user: null }),
+        });
+      });
+      await page.goto('/', { waitUntil: 'domcontentloaded' });
+      await expect(page.getByRole('heading', { name: '选择入口' })).toBeVisible();
+      const chatEntry = page.getByRole('link', { name: /智能对话/ });
+      await expect(chatEntry).toHaveAttribute('href', '/?entry=chat');
+      await chatEntry.click();
+
+      await expect(page.getByRole('heading', { name: '登录' })).toBeVisible();
+      await expect(page.getByPlaceholder('请输入用户名')).toBeVisible();
+      await expect(page.getByPlaceholder('请输入密码')).toBeVisible();
+    } finally {
+      await saveBrowserEvidence(page, testInfo, evidence, 'p0-login-chat-entry');
     }
   });
 });
