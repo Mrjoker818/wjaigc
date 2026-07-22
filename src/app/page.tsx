@@ -60,11 +60,12 @@ import { toStableImageUrl, awaitStableImageUrl } from '@/lib/stable-image-url';
 import { APP_FULL_VERSION_LABEL, APP_NAME } from '@/config/app-meta';
 import { fetchSessionPayload } from '@/lib/auth-session';
 
-// Keep the anonymous entry UI client-only so its buttons are never visible before
-// React has attached their same-page interaction handlers.
+// LoginPanel is a client component — dynamic import keeps its JS out of the
+// initial bundle. It renders during SSR so the entry buttons are always visible;
+// the component itself guards against clicks before hydration completes.
 const LoginPanel = dynamic(
   () => import('@/components/dashboard/login-panel').then(m => m.LoginPanel),
-  { ssr: false, loading: () => <div data-testid="login-hydration-shell" className="fixed inset-0 bg-background" /> }
+  { loading: () => <div data-testid="login-hydration-shell" className="fixed inset-0 bg-background" /> }
 );
 
 // Heavy components — lazy-loaded to keep initial JS bundle small.
