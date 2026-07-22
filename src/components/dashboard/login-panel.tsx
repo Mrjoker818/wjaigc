@@ -55,11 +55,6 @@ export function LoginPanel({ initialMode }: LoginPanelProps) {
     setLoginError('');
   };
 
-  const backToModeSelection = () => {
-    setViewState('select-mode');
-    setLoginError('');
-  };
-
   return (
     <div className="fixed inset-0 z-[100] flex min-h-screen" style={{ background: '#0A0A0F' }}>
       <div className="w-full min-h-screen flex flex-col lg:flex-row">
@@ -231,14 +226,14 @@ export function LoginPanel({ initialMode }: LoginPanelProps) {
               <>
                 {/* 返回按钮 + 模式标签 */}
                 <div className="flex items-center gap-3 mb-6">
-                  <button
-                    type="button"
-                    onClick={backToModeSelection}
+                  <a
+                    href="/"
                     className="w-8 h-8 rounded-md flex items-center justify-center hover:bg-muted/50 transition-colors"
                     title="返回选择模式"
+                    aria-label="返回选择模式"
                   >
                     <ArrowLeft className="w-4 h-4 text-muted-foreground" />
-                  </button>
+                  </a>
                   <div className="flex items-center gap-2">
                     {selectedMode === 'canvas' ? (
                       <>
