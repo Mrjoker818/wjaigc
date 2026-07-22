@@ -342,17 +342,28 @@ export default function ChatArea({
     } catch {}
   }, []);
 
-  // 键盘快捷键：Ctrl+K 全局搜索，Ctrl+Shift+O 新对话
+  // 键盘快捷键：Ctrl+K 全局搜索，Ctrl+N 新对话，Ctrl+Shift+P 提示词优化器，Ctrl+M 多模型对比
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && !e.shiftKey && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setShowGlobalSearch(true);
+      } else if (mod && e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        if (project) onCreateTask(project.id);
+      } else if (mod && e.shiftKey && e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        setShowPromptOptimizer(true);
+      } else if (mod && !e.shiftKey && e.key.toLowerCase() === 'm') {
+        e.preventDefault();
+        setShowModelCompare(true);
       }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project]);
 
   // 评分持久化
   function rateMessage(msgId: string, rating: 'up' | 'down') {
@@ -625,6 +636,10 @@ export default function ChatArea({
     setUploadedImages([]);
     setIsStreaming(true);
 
+    // 提升作用域供 finally 中统计 token 用量
+    let allMessages: Array<{ role: string; content: string; images?: string[] }> = [];
+    let fullContent = "";
+
     try {
       const systemMessages: Array<{ role: string; content: string }> = [];
       const instructions = project.instructions;
@@ -659,9 +674,23 @@ export default function ChatArea({
         } catch {}
       }
 
-      const allMessages = [
+      // 多轮图片上下文：仅保留最近 3 轮用户消息的图片（更早的图片会消耗大量 token）
+      const historyMsgs = messages.filter(m => m.role !== 'search');
+      const recentUserImageIds = new Set(
+        historyMsgs.filter(m => m.role === 'user' && m.images && m.images.length > 0).slice(-3).map(m => m.id)
+      );
+      const collectedHistoryImages = historyMsgs
+        .filter(m => recentUserImageIds.has(m.id))
+        .flatMap(m => m.images || []);
+      setHistoryImages(collectedHistoryImages);
+
+      allMessages = [
         ...systemMessages,
-        ...messages.filter(m => m.role !== 'search').map(m => ({ role: m.role, content: m.content, images: m.images })),
+        ...historyMsgs.map(m => ({
+          role: m.role,
+          content: m.content,
+          images: m.role === 'user' && recentUserImageIds.has(m.id) ? m.images : undefined,
+        })),
         { role: 'user', content: userMsg.content, images: userMsg.images },
       ];
 
@@ -697,7 +726,6 @@ export default function ChatArea({
 
       const decoder = new TextDecoder();
       let buffer = "";
-      let fullContent = "";
 
       while (true) {
         const { done, value } = await reader.read();
@@ -802,6 +830,19 @@ export default function ChatArea({
       });
     } finally {
       setIsStreaming(false);
+      // 估算 token 用量（中文≈1.5字/token，英文≈4字符/token，取近似值）
+      const estimateTokens = (text: string) => {
+        const cn = (text.match(/[一-鿿]/g) || []).length;
+        const en = text.length - cn;
+        return Math.ceil(cn / 1.5 + en / 4);
+      };
+      const promptEst = allMessages.reduce((sum, m) => sum + estimateTokens(m.content || ''), 0);
+      const completionEst = estimateTokens(fullContent);
+      setTokenUsage(prev => ({
+        promptTokens: (prev?.promptTokens || 0) + promptEst,
+        completionTokens: (prev?.completionTokens || 0) + completionEst,
+        totalTokens: (prev?.totalTokens || 0) + promptEst + completionEst,
+      }));
     }
   }, [input, isStreaming, selectedModel, selectedProviderId, messages, project, task, uploadedImages, webSearch, memories, selectedImageModel, selectedImageProviderId, brandActive]);
 
@@ -1236,6 +1277,11 @@ export default function ChatArea({
           title="用量统计">
           <Clock className="w-4 h-4" />
         </button>
+        <button onClick={() => setShowReportExport(true)} disabled={!messages.some(m => m.role === 'assistant' && m.content)}
+          className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors disabled:opacity-40"
+          title="导出分析报告">
+          <Download className="w-4 h-4" />
+        </button>
         <button onClick={() => onCreateTask(project.id)}
           className="px-2.5 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary text-xs transition-colors">
           <MessageSquarePlus className="w-3.5 h-3.5 inline mr-1" />新对话
@@ -1454,6 +1500,18 @@ export default function ChatArea({
                 <span className="text-sm text-primary font-medium">松开以上传图片</span>
               </div>
             )}
+            {/* 多轮图片上下文提示：历史最近 3 轮的图片将随本次消息一起发送 */}
+            {historyImages.length > 0 && uploadedImages.length === 0 && messages.length > 0 && (
+              <div className="flex items-center gap-2 px-4 pt-3 text-[11px] text-muted-foreground">
+                <Image className="w-3.5 h-3.5 text-primary" />
+                <span>将携带最近对话中的 {historyImages.length} 张图片作为上下文</span>
+                <div className="flex -space-x-2">
+                  {historyImages.slice(0, 4).map((img, i) => (
+                    <img key={i} src={img} alt="" className="w-6 h-6 rounded-full border border-border object-cover" />
+                  ))}
+                </div>
+              </div>
+            )}
             {uploadedImages.length > 0 && (
               <div className="flex gap-2 px-4 pt-3 flex-wrap">
                 {uploadedImages.map((att, i) => (
@@ -1524,6 +1582,18 @@ export default function ChatArea({
                 className={`p-1.5 rounded-lg transition-colors ${showQuickCommands ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted'}`}
                 title="快捷工作流">
                 <Zap className="w-4 h-4" />
+              </button>
+              {/* 提示词优化器 */}
+              <button onClick={() => setShowPromptOptimizer(true)}
+                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors"
+                title="提示词优化器 (Ctrl+Shift+P)">
+                <PenLine className="w-4 h-4" />
+              </button>
+              {/* 多模型对比 */}
+              <button onClick={() => setShowModelCompare(true)}
+                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors"
+                title="多模型对比 (Ctrl+M)">
+                <GitBranch className="w-4 h-4" />
               </button>
               <button onClick={handleSend} disabled={!input.trim() && uploadedImages.length === 0}
                 className="p-1.5 rounded-lg bg-primary text-primary-foreground disabled:opacity-40 transition-all hover:bg-primary/90">
@@ -1895,17 +1965,87 @@ export default function ChatArea({
         />
       )}
 
-      {/* Upload File to Knowledge */}
+      {/* 提示词优化器 */}
+      {showPromptOptimizer && (
+        <PromptOptimizer
+          isMonochrome={theme !== 'dark'}
+          currentPrompt={input}
+          onApply={(optimized) => { setInput(optimized); setShowPromptOptimizer(false); textareaRef.current?.focus(); }}
+          onClose={() => setShowPromptOptimizer(false)}
+        />
+      )}
+
+      {/* 报告导出 */}
+      {showReportExport && (
+        <ReportExport
+          isMonochrome={theme !== 'dark'}
+          content={[...messages].reverse().find(m => m.role === 'assistant' && m.content)?.content || ''}
+          title={task?.name || '分析报告'}
+          onClose={() => setShowReportExport(false)}
+        />
+      )}
+
+      {/* 多模型对比 */}
+      {showModelCompare && (
+        <ModelCompare
+          isMonochrome={theme !== 'dark'}
+          prompt={input}
+          models={chatModels.map(m => ({ id: m.modelId, providerId: m.providerId, name: m.name, displayName: m.name }))}
+          onClose={() => setShowModelCompare(false)}
+        />
+      )}
+
+      {/* 用量统计 */}
+      {showUsageStats && (
+        <UsageStats
+          usage={{
+            prompt: tokenUsage?.promptTokens || 0,
+            completion: tokenUsage?.completionTokens || 0,
+            total: tokenUsage?.totalTokens || 0,
+          }}
+          messageCount={messages.filter(m => m.role === 'user' || m.role === 'assistant').length}
+          imageCount={messages.reduce((sum, m) => sum + (m.images?.length || 0), 0)}
+          isMonochrome={theme !== 'dark'}
+          onClose={() => setShowUsageStats(false)}
+        />
+      )}
+
+      {/* Upload File to Knowledge — 自动提取文本内容，支持文件直接分析 */}
       <input id="knowledge-file-upload" type="file" accept=".pdf,.doc,.docx,.txt,.csv,.xlsx,.pptx,.md" className="hidden"
         onChange={e => {
           const files = Array.from(e.target.files || []);
           files.forEach(f => {
             const id = Math.random().toString(36).slice(2, 10);
-            addKnowledgeItem({
-              id, type: 'file', name: f.name, enabled: true, mimeType: f.type,
-              projectId: project?.id || '', tags: [], createdAt: Date.now(), updatedAt: Date.now()
-            });
+            const reader = new FileReader();
+            reader.onload = async ev => {
+              const dataUrl = ev.target?.result as string;
+              let textContent = '';
+              // 调用文本提取 API（PDF/Word/TXT/MD），使文件内容可直接注入 AI 上下文分析
+              try {
+                const ext = f.name.split('.').pop()?.toLowerCase() || '';
+                const fileType = ext === 'docx' || ext === 'doc' ? 'docx' : ext === 'pdf' ? 'pdf' : ext === 'md' ? 'md' : 'txt';
+                const resp = await fetch('/api/knowledge/extract-text', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ fileUrl: dataUrl, fileType }),
+                });
+                if (resp.ok) {
+                  const data = await resp.json();
+                  textContent = (data.text || '').slice(0, 20000);
+                }
+              } catch { /* 提取失败时仅保存文件元数据 */ }
+              addKnowledgeItem({
+                id, type: 'file', name: f.name, enabled: true, mimeType: f.type,
+                textContent: textContent || undefined,
+                projectId: project?.id || '', tags: [], createdAt: Date.now(), updatedAt: Date.now()
+              });
+              if (textContent) {
+                setInput(prev => prev || `请分析我上传的文件「${f.name}」的内容，总结核心要点，并从文案策划角度给出可复用的建议：`);
+              }
+            };
+            reader.readAsDataURL(f);
           });
+          e.target.value = '';
         }}
       />
 
