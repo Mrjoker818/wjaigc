@@ -1,0 +1,26 @@
+import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+const loginPanelSource = readFileSync(
+  resolve(process.cwd(), 'src/components/dashboard/login-panel.tsx'),
+  'utf8'
+);
+
+describe('login panel native form contract', () => {
+  it('prevents entry clicks before hydration and then enables both product modes', () => {
+    expect(loginPanelSource).toContain('const [isHydrated, setIsHydrated] = useState(false);');
+    expect(loginPanelSource).toContain('useEffect(() => {\n    setIsHydrated(true);\n  }, []);');
+    expect(loginPanelSource.match(/disabled=\{!isHydrated\}/g)).toHaveLength(2);
+  });
+
+  it('toggles password visibility without submitting the login form', () => {
+    expect(loginPanelSource).toContain('const [showLoginPassword, setShowLoginPassword] = useState(false);');
+    expect(loginPanelSource).toContain("type={showLoginPassword ? 'text' : 'password'}");
+    expect(loginPanelSource).toContain("aria-label={showLoginPassword ? '隐藏密码' : '显示密码'}");
+    expect(loginPanelSource).toContain('aria-pressed={showLoginPassword}');
+    expect(loginPanelSource).toContain("setShowLoginPassword((value) => !value)");
+    expect(loginPanelSource).toMatch(/type="button"[\s\S]*?aria-label=\{showLoginPassword \? '隐藏密码' : '显示密码'\}/);
+    expect(loginPanelSource).toContain('{showLoginPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}');
+  });
+});

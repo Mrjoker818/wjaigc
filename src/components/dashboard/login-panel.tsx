@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { User } from '@/lib/user-types';
 import { UserManager as UserManagerCore } from '@/lib/user-manager';
 import { APP_VERSION_LABEL } from '@/config/app-meta';
@@ -44,6 +44,11 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [loggingIn, setLoggingIn] = useState(false);
+  const [isHydrated, setIsHydrated] = useState(false);
+
+  useEffect(() => {
+    setIsHydrated(true);
+  }, []);
 
   const submitLogin = async (name: string, password: string, productType: string) => {
     if (!userManager) {
@@ -86,11 +91,9 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
   };
 
   const selectMode = (mode: LoginMode) => {
-    console.log('[LoginPanel] selectMode called with:', mode);
     setSelectedMode(mode);
     setLoginError('');
     setViewState('login-form');
-    console.log('[LoginPanel] viewState set to login-form, selectedMode:', mode);
   };
 
   const backToModeSelection = () => {
@@ -223,7 +226,8 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
                   <button
                     type="button"
                     onClick={() => selectMode('canvas')}
-                    className="w-full text-left p-5 rounded-xl border border-border/40 bg-muted/30 hover:border-primary/50 hover:bg-muted/50 transition-all group cursor-pointer"
+                    disabled={!isHydrated}
+                    className="w-full text-left p-5 rounded-xl border border-border/40 bg-muted/30 hover:border-primary/50 hover:bg-muted/50 transition-all group cursor-pointer disabled:cursor-wait disabled:opacity-70"
                   >
                     <div className="flex items-center gap-4">
                       <div className="w-12 h-12 rounded-lg bg-accent flex items-center justify-center shrink-0 group-hover:shadow-[0_0_20px_rgba(212,175,55,0.2)] transition-shadow">
@@ -245,7 +249,8 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
                   <button
                     type="button"
                     onClick={() => selectMode('chat')}
-                    className="w-full text-left p-5 rounded-xl border border-border/40 bg-muted/30 hover:border-primary/50 hover:bg-muted/50 transition-all group cursor-pointer"
+                    disabled={!isHydrated}
+                    className="w-full text-left p-5 rounded-xl border border-border/40 bg-muted/30 hover:border-primary/50 hover:bg-muted/50 transition-all group cursor-pointer disabled:cursor-wait disabled:opacity-70"
                   >
                     <div className="flex items-center gap-4">
                       <div className="w-12 h-12 rounded-lg bg-accent flex items-center justify-center shrink-0 group-hover:shadow-[0_0_20px_rgba(212,175,55,0.2)] transition-shadow">
@@ -337,6 +342,7 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
                         type="button"
                         onClick={() => setShowLoginPassword((value) => !value)}
                         aria-label={showLoginPassword ? '隐藏密码' : '显示密码'}
+                        aria-pressed={showLoginPassword}
                         title={showLoginPassword ? '隐藏密码' : '显示密码'}
                         disabled={loggingIn}
                         className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/60 hover:text-muted-foreground transition-colors"
