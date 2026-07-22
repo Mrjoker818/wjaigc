@@ -1,7 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useMemo } from 'react';
-import Link from 'next/link';
+import React, { useState, useMemo } from 'react';
 import { User } from '@/lib/user-types';
 import { UserManager as UserManagerCore } from '@/lib/user-manager';
 import { APP_VERSION_LABEL } from '@/config/app-meta';
@@ -41,13 +40,6 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
   const [viewState, setViewState] = useState<ViewState>('select-mode');
   const [selectedMode, setSelectedMode] = useState<LoginMode>('canvas');
 
-  useEffect(() => {
-    const entry = new URLSearchParams(window.location.search).get('entry');
-    if (entry === 'canvas' || entry === 'chat') {
-      setSelectedMode(entry);
-      setViewState('login-form');
-    }
-  }, []);
   const [loginName, setLoginName] = useState('Mr.joker');
   const [loginPassword, setLoginPassword] = useState('');
   const [showLoginPassword, setShowLoginPassword] = useState(false);
@@ -227,12 +219,9 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
 
                 <div className="space-y-4">
                   {/* 无限画布卡片 */}
-                  <Link
-                    href="/?entry=canvas"
-                    onClick={(event) => {
-                      event.preventDefault();
-                      selectMode('canvas');
-                    }}
+                  <button
+                    type="button"
+                    onClick={() => selectMode('canvas')}
                     className="block w-full text-left p-5 rounded-xl border border-border/40 bg-muted/30 hover:border-primary/50 hover:bg-muted/50 transition-all group cursor-pointer"
                   >
                     <div className="flex items-center gap-4">
@@ -249,15 +238,12 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
                         <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" /></svg>
                       </div>
                     </div>
-                  </Link>
+                  </button>
 
                   {/* 智能对话卡片 */}
-                  <Link
-                    href="/?entry=chat"
-                    onClick={(event) => {
-                      event.preventDefault();
-                      selectMode('chat');
-                    }}
+                  <button
+                    type="button"
+                    onClick={() => selectMode('chat')}
                     className="block w-full text-left p-5 rounded-xl border border-border/40 bg-muted/30 hover:border-primary/50 hover:bg-muted/50 transition-all group cursor-pointer"
                   >
                     <div className="flex items-center gap-4">
@@ -274,7 +260,7 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
                         <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" /></svg>
                       </div>
                     </div>
-                  </Link>
+                  </button>
                 </div>
 
                 <p className="mt-8 text-xs text-muted-foreground/50 text-center">请联系管理员创建新账户并授权对应功能。</p>

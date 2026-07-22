@@ -16,10 +16,12 @@ test.describe('P0 login entry contract', () => {
       await page.goto('/', { waitUntil: 'domcontentloaded' });
       await expect(page.getByRole('heading', { name: '选择入口' })).toBeVisible();
       await expect(page.getByRole('button', { name: '图像生成器' })).toHaveCount(0);
-      const canvasEntry = page.getByRole('link', { name: /无限画布/ });
-      await expect(canvasEntry).toHaveAttribute('href', '/?entry=canvas');
+      const canvasEntry = page.getByRole('button', { name: /无限画布/ });
+      await expect(canvasEntry).toHaveAttribute('type', 'button');
+      const entryUrl = page.url();
       await canvasEntry.click();
 
+      await expect(page).toHaveURL(entryUrl);
       await expect(page.getByRole('heading', { name: '登录' })).toBeVisible();
       await expect(page.getByPlaceholder('请输入用户名')).toBeVisible();
       const passwordInput = page.getByPlaceholder('请输入密码');
@@ -36,6 +38,10 @@ test.describe('P0 login entry contract', () => {
       await expect(passwordInput).toHaveAttribute('type', 'password');
       await expect(passwordInput).toHaveValue('regression-secret');
       await expect(page.getByRole('heading', { name: '登录' })).toBeVisible();
+
+      await page.getByTitle('返回选择模式').click();
+      await expect(page).toHaveURL(entryUrl);
+      await expect(page.getByRole('heading', { name: '选择入口' })).toBeVisible();
     } finally {
       await saveBrowserEvidence(page, testInfo, evidence, 'p0-login-ui-contract');
     }
@@ -54,10 +60,12 @@ test.describe('P0 login entry contract', () => {
       });
       await page.goto('/', { waitUntil: 'domcontentloaded' });
       await expect(page.getByRole('heading', { name: '选择入口' })).toBeVisible();
-      const chatEntry = page.getByRole('link', { name: /智能对话/ });
-      await expect(chatEntry).toHaveAttribute('href', '/?entry=chat');
+      const chatEntry = page.getByRole('button', { name: /智能对话/ });
+      await expect(chatEntry).toHaveAttribute('type', 'button');
+      const entryUrl = page.url();
       await chatEntry.click();
 
+      await expect(page).toHaveURL(entryUrl);
       await expect(page.getByRole('heading', { name: '登录' })).toBeVisible();
       await expect(page.getByPlaceholder('请输入用户名')).toBeVisible();
       await expect(page.getByPlaceholder('请输入密码')).toBeVisible();

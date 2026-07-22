@@ -1231,6 +1231,11 @@ export default function ChatArea({
           title="分享对话">
           <Share2 className="w-4 h-4" />
         </button>
+        <button onClick={() => setShowUsageStats(true)}
+          className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors"
+          title="用量统计">
+          <Clock className="w-4 h-4" />
+        </button>
         <button onClick={() => onCreateTask(project.id)}
           className="px-2.5 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary text-xs transition-colors">
           <MessageSquarePlus className="w-3.5 h-3.5 inline mr-1" />新对话

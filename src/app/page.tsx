@@ -31,7 +31,6 @@ import { Toaster } from '@/components/ui/sonner';
 import { toast } from 'sonner';
 import { Image as ImageIcon, MessageSquare, Sparkles, ChevronLeft, ChevronRight, X, Bell } from 'lucide-react';
 import { type Workflow } from '@/lib/workflow-engine';
-import { LoginPanel } from '@/components/dashboard/login-panel';
 import { taskEventsClient } from '@/lib/task-events-client';
 import { waitForTaskPollInterval } from '@/lib/task-polling-wait';
 
@@ -61,7 +60,14 @@ import { toStableImageUrl, awaitStableImageUrl } from '@/lib/stable-image-url';
 import { APP_FULL_VERSION_LABEL, APP_NAME } from '@/config/app-meta';
 import { fetchSessionPayload } from '@/lib/auth-session';
 
-// Heavy components — lazy-loaded to keep initial JS bundle small (LoginPanel hydrates instantly)
+// Keep the anonymous entry UI client-only so its buttons are never visible before
+// React has attached their same-page interaction handlers.
+const LoginPanel = dynamic(
+  () => import('@/components/dashboard/login-panel').then(m => m.LoginPanel),
+  { ssr: false, loading: () => <div data-testid="login-hydration-shell" className="fixed inset-0 bg-background" /> }
+);
+
+// Heavy components — lazy-loaded to keep initial JS bundle small.
 const InfiniteCanvas = dynamic(() => import('@/components/infinite-canvas').then(m => m.InfiniteCanvas), { loading: () => null });
 const GenerationPanel = dynamic(() => import('@/components/generation-panel').then(m => m.GenerationPanel), { loading: () => null });
 const VideoGenerationPanel = dynamic(() => import('@/components/video-generation-panel'), { loading: () => null });
