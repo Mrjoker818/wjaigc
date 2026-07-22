@@ -1,7 +1,8 @@
 'use client';
-/* eslint-disable @next/next/no-html-link-for-pages -- Login entry navigation must bypass a broken App Router hydration state. */
 
-import React, { useEffect, useState } from 'react';
+import React, { useState, useMemo } from 'react';
+import { User } from '@/lib/user-types';
+import { UserManager as UserManagerCore } from '@/lib/user-manager';
 import { APP_VERSION_LABEL } from '@/config/app-meta';
 import { Label } from '@/components/ui/label';
 import {
@@ -21,33 +22,68 @@ import {
   MessageCircle,
 } from 'lucide-react';
 
+interface LoginPanelProps {
+  onLogin: (user: User, productType: string) => void;
+}
+
 type LoginMode = 'canvas' | 'chat';
 type ViewState = 'select-mode' | 'login-form';
 
-interface LoginPanelProps {
-  initialMode?: LoginMode;
-}
-
-export function LoginPanel({ initialMode }: LoginPanelProps) {
-  const [viewState, setViewState] = useState<ViewState>(initialMode ? 'login-form' : 'select-mode');
-  const [selectedMode, setSelectedMode] = useState<LoginMode>(initialMode ?? 'canvas');
+export function LoginPanel({ onLogin }: LoginPanelProps) {
+  const userManager = useMemo(() => UserManagerCore.getInstance(), []);
+  const [viewState, setViewState] = useState<ViewState>('select-mode');
+  const [selectedMode, setSelectedMode] = useState<LoginMode>('canvas');
   const [loginName, setLoginName] = useState('Mr.joker');
   const [loginPassword, setLoginPassword] = useState('');
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [loginError, setLoginError] = useState('');
+  const [loggingIn, setLoggingIn] = useState(false);
 
-  useEffect(() => {
-    const error = new URLSearchParams(window.location.search).get('error');
-    if (error === 'invalid_credentials') {
-      setLoginError('用户名或密码错误，或该账户尚未获授权。');
-    } else if (error === 'invalid_input') {
-      setLoginError('请完整填写用户名和密码。');
-    } else if (error === 'configuration') {
-      setLoginError('登录服务暂不可用，请联系管理员检查认证配置。');
-    } else if (error === 'login_failed') {
-      setLoginError('登录失败，请稍后重试。');
+  const submitLogin = async (name: string, password: string, productType: string) => {
+    setLoggingIn(true);
+    setLoginError('');
+    try {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ name, password, productType }),
+      });
+
+      if (!response.ok) {
+        setLoginError('登录失败，请检查用户名、密码或授权');
+        return;
+      }
+
+      const data = await response.json() as { success?: boolean; user?: User; error?: string };
+      if (!data.user) {
+        setLoginError(data.error || '该用户未授权使用此功能，请联系管理员');
+        return;
+      }
+
+      const loggedIn = await userManager.upsertUserFromServer(data.user);
+      onLogin(loggedIn, productType);
+    } catch {
+      setLoginError('登录失败，网络异常');
+    } finally {
+      setLoggingIn(false);
     }
-  }, []);
+  };
+
+  const handleLogin = async () => {
+    await submitLogin(loginName.trim(), loginPassword, selectedMode);
+  };
+
+  const selectMode = (mode: LoginMode) => {
+    setSelectedMode(mode);
+    setLoginError('');
+    setViewState('login-form');
+  };
+
+  const backToModeSelection = () => {
+    setViewState('select-mode');
+    setLoginError('');
+  };
 
   return (
     <div className="fixed inset-0 z-[100] flex min-h-screen" style={{ background: '#0A0A0F' }}>
@@ -139,160 +175,141 @@ export function LoginPanel({ initialMode }: LoginPanelProps) {
             </div>
           </div>
 
-          {/* AI 助手提示 */}
-          <div className="relative z-10 flex items-start gap-2 p-3 rounded-lg bg-primary/5 border border-primary/20 mb-6">
-            <MessageSquareMore className="w-4 h-4 text-primary shrink-0 mt-0.5" />
-            <p className="text-[11px] text-muted-foreground leading-relaxed">
-              右侧 <span className="text-primary font-medium">AI 聊天助手</span> 支持模糊意图追问、提示词优化、@引用图片/品牌/模型、21个内置 Skill 一键生成电商套图 / 分镜 / IP角色 / 海报
-            </p>
-          </div>
-
-          {/* 版本号 */}
-          <div className="relative z-10">
-            <p className="text-xs text-muted-foreground/50 font-mono">{APP_VERSION_LABEL}</p>
+          {/* 底部版本号 */}
+          <div className="relative z-10 flex items-center gap-2 text-muted-foreground/30 text-xs">
+            <span className="w-1.5 h-1.5 rounded-full bg-primary/40" />
+            <span>{APP_VERSION_LABEL}</span>
           </div>
         </div>
 
         {/* 右侧登录区 */}
-        <div className="flex-1 flex items-center justify-center p-6 sm:p-8 lg:p-12" style={{ backgroundColor: '#0F1117' }}>
+        <div className="flex-1 flex items-center justify-center p-6 sm:p-8 lg:p-12">
           <div className="w-full max-w-sm">
-
-            {/* 移动端品牌标识 */}
-            <div className="lg:hidden flex items-center gap-2 mb-10 justify-center">
-              <img src="/logo.png" alt="无界AI" className="w-8 h-8 object-contain rounded" />
-              <span className="text-2xl font-bold text-foreground tracking-tight">无界AI</span>
-            </div>
-
             {viewState === 'select-mode' ? (
-              /* ───── 模式选择界面 ───── */
               <>
-                <h2 className="text-2xl font-bold text-foreground mb-2">选择入口</h2>
-                <p className="text-sm text-muted-foreground mb-8">请选择你要使用的功能模式</p>
+                {/* 移动端品牌标识 */}
+                <div className="lg:hidden flex items-center gap-3 mb-8">
+                  <img src="/logo.png" alt="无界AI" className="w-8 h-8 object-contain rounded-lg" />
+                  <h1 className="text-xl font-bold text-foreground">无界AI</h1>
+                </div>
 
-                <div className="space-y-4">
-                  {/* 无限画布卡片 */}
-                  <a
-                    href="/login/canvas"
-                    className="block w-full text-left p-5 rounded-xl border border-border/40 bg-muted/30 hover:border-primary/50 hover:bg-muted/50 transition-all group cursor-pointer"
+                <div className="mb-8">
+                  <h2 className="text-2xl font-bold text-foreground mb-2">选择入口</h2>
+                  <p className="text-sm text-muted-foreground">请选择你要使用的功能模式</p>
+                </div>
+
+                <div className="space-y-3">
+                  {/* 无限画布入口 */}
+                  <button
+                    type="button"
+                    onClick={() => selectMode('canvas')}
+                    className="w-full text-left p-5 rounded-xl bg-muted/50 border border-border/20 hover:border-primary/40 hover:bg-muted/80 transition-all group"
                   >
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-lg bg-accent flex items-center justify-center shrink-0 group-hover:shadow-[0_0_20px_rgba(212,175,55,0.2)] transition-shadow">
-                        <PanelLeft className="w-6 h-6 text-primary" />
+                    <div className="flex items-start gap-4">
+                      <div className="w-10 h-10 rounded-lg bg-accent flex items-center justify-center shrink-0 group-hover:shadow-[0_0_20px_rgba(212,175,55,0.2)] transition-shadow">
+                        <PanelLeft className="w-5 h-5 text-primary" />
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <h3 className="text-lg font-semibold text-foreground mb-1">无限画布</h3>
-                        <p className="text-xs text-muted-foreground leading-relaxed">
-                          AI 图像生成 · 视频导演 · 3D模型 · 工作流编排 · 无限画布创作
-                        </p>
-                      </div>
-                      <div className="text-primary opacity-0 group-hover:opacity-100 transition-opacity">
-                        <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" /></svg>
+                      <div className="min-w-0">
+                        <h3 className="text-base font-semibold text-foreground mb-1">无限画布</h3>
+                        <p className="text-xs text-muted-foreground leading-relaxed">AI 图像生成 · 视频导演 · 3D模型 · 工作流编排 · 无限画布创作</p>
                       </div>
                     </div>
-                  </a>
+                  </button>
 
-                  {/* 智能对话卡片 */}
-                  <a
-                    href="/login/chat"
-                    className="block w-full text-left p-5 rounded-xl border border-border/40 bg-muted/30 hover:border-primary/50 hover:bg-muted/50 transition-all group cursor-pointer"
+                  {/* 智能对话入口 */}
+                  <button
+                    type="button"
+                    onClick={() => selectMode('chat')}
+                    className="w-full text-left p-5 rounded-xl bg-muted/50 border border-border/20 hover:border-primary/40 hover:bg-muted/80 transition-all group"
                   >
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-lg bg-accent flex items-center justify-center shrink-0 group-hover:shadow-[0_0_20px_rgba(212,175,55,0.2)] transition-shadow">
-                        <MessageCircle className="w-6 h-6 text-primary" />
+                    <div className="flex items-start gap-4">
+                      <div className="w-10 h-10 rounded-lg bg-accent flex items-center justify-center shrink-0 group-hover:shadow-[0_0_20px_rgba(212,175,55,0.2)] transition-shadow">
+                        <MessageCircle className="w-5 h-5 text-primary" />
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <h3 className="text-lg font-semibold text-foreground mb-1">智能对话</h3>
-                        <p className="text-xs text-muted-foreground leading-relaxed">
-                          AI 智能对话 · 图片理解 · 文生图 · 会话管理 · 模型切换
-                        </p>
-                      </div>
-                      <div className="text-primary opacity-0 group-hover:opacity-100 transition-opacity">
-                        <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" /></svg>
+                      <div className="min-w-0">
+                        <h3 className="text-base font-semibold text-foreground mb-1">智能对话</h3>
+                        <p className="text-xs text-muted-foreground leading-relaxed">AI 智能对话 · 图片理解 · 文生图 · 会话管理 · 模型切换</p>
                       </div>
                     </div>
-                  </a>
+                  </button>
                 </div>
 
                 <p className="mt-8 text-xs text-muted-foreground/50 text-center">请联系管理员创建新账户并授权对应功能。</p>
               </>
             ) : (
-              /* ───── 登录表单界面 ───── */
               <>
-                {/* 返回按钮 + 模式标签 */}
-                <div className="flex items-center gap-3 mb-6">
-                  <a
-                    href="/"
+                {/* 登录表单 */}
+                <div className="lg:hidden flex items-center gap-3 mb-8">
+                  <img src="/logo.png" alt="无界AI" className="w-8 h-8 object-contain rounded-lg" />
+                  <h1 className="text-xl font-bold text-foreground">无界AI</h1>
+                </div>
+
+                <div className="flex items-center gap-3 mb-8">
+                  <button
+                    type="button"
+                    onClick={backToModeSelection}
                     className="w-8 h-8 rounded-md flex items-center justify-center hover:bg-muted/50 transition-colors"
                     title="返回选择模式"
                     aria-label="返回选择模式"
                   >
                     <ArrowLeft className="w-4 h-4 text-muted-foreground" />
-                  </a>
-                  <div className="flex items-center gap-2">
-                    {selectedMode === 'canvas' ? (
-                      <>
-                        <PanelLeft className="w-4 h-4 text-primary" />
-                        <span className="text-sm font-medium text-foreground">无限画布</span>
-                      </>
-                    ) : (
-                      <>
-                        <MessageCircle className="w-4 h-4 text-primary" />
-                        <span className="text-sm font-medium text-foreground">智能对话</span>
-                      </>
-                    )}
+                  </button>
+                  <div>
+                    <h2 className="text-xl font-bold text-foreground">
+                      {selectedMode === 'canvas' ? '无限画布' : '智能对话'}
+                    </h2>
+                    <p className="text-xs text-muted-foreground mt-0.5">登录</p>
                   </div>
                 </div>
 
-                <h2 className="text-2xl font-bold text-foreground mb-8">登录</h2>
-
-                {/* 登录表单 */}
                 <form
-                  action="/api/auth/login"
-                  method="post"
+                  onSubmit={(e) => { e.preventDefault(); void handleLogin(); }}
+                  className="space-y-5"
                   autoComplete="off"
                 >
-                  <input type="hidden" name="productType" value={selectedMode} />
-                  <input type="hidden" name="next" value={selectedMode === 'chat' ? '/simple-chat' : '/'} />
-                  {/* 用户名输入框 */}
-                  <div className="mb-5">
-                    <Label className="block text-xs font-medium text-muted-foreground mb-1.5">用户名</Label>
+                  {/* 用户名 */}
+                  <div className="space-y-2">
+                    <Label htmlFor="login-name" className="text-sm font-medium text-foreground">用户名</Label>
                     <div className="relative">
-                      <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
-                        <UserIcon className="w-4 h-4 text-muted-foreground/60" />
+                      <div className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground/60 pointer-events-none">
+                        <UserIcon className="w-4 h-4" />
                       </div>
                       <input
+                        id="login-name"
                         type="text"
-                        name="name"
                         value={loginName}
                         onChange={(e) => setLoginName(e.target.value)}
-                        required
+                        onKeyDown={(e) => { if (e.key === 'Enter') void handleLogin(); }}
                         placeholder="请输入用户名"
-                        className="w-full bg-muted border-none rounded-md pl-10 pr-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/40 transition-colors"
+                        disabled={loggingIn}
+                        className="w-full bg-muted border-none rounded-md pl-10 pr-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/40 transition-colors disabled:opacity-50"
                       />
                     </div>
                   </div>
 
-                  {/* 密码输入框 */}
-                  <div className="mb-6">
-                    <Label className="block text-xs font-medium text-muted-foreground mb-1.5">密码</Label>
+                  {/* 密码 */}
+                  <div className="space-y-2">
+                    <Label htmlFor="login-password" className="text-sm font-medium text-foreground">密码</Label>
                     <div className="relative">
-                      <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
-                        <Settings className="w-4 h-4 text-muted-foreground/60" />
+                      <div className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground/60 pointer-events-none">
+                        <Settings className="w-4 h-4" />
                       </div>
                       <input
+                        id="login-password"
                         type={showLoginPassword ? 'text' : 'password'}
-                        name="password"
                         value={loginPassword}
                         onChange={(e) => setLoginPassword(e.target.value)}
-                        required
+                        onKeyDown={(e) => { if (e.key === 'Enter') void handleLogin(); }}
                         placeholder="请输入密码"
-                        className="w-full bg-muted border-none rounded-md pl-10 pr-10 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/40 transition-colors"
+                        disabled={loggingIn}
+                        className="w-full bg-muted border-none rounded-md pl-10 pr-10 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/40 transition-colors disabled:opacity-50"
                       />
                       <button
                         type="button"
                         onClick={() => setShowLoginPassword((value) => !value)}
                         aria-label={showLoginPassword ? '隐藏密码' : '显示密码'}
                         title={showLoginPassword ? '隐藏密码' : '显示密码'}
+                        disabled={loggingIn}
                         className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/60 hover:text-muted-foreground transition-colors"
                       >
                         {showLoginPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -303,9 +320,18 @@ export function LoginPanel({ initialMode }: LoginPanelProps) {
                   {/* 登录按钮 */}
                   <button
                     type="submit"
-                    className="w-full bg-primary text-primary-foreground font-semibold py-2.5 rounded-md text-sm hover:brightness-110 active:scale-[0.98] transition-all"
+                    disabled={loggingIn}
+                    className="w-full bg-primary text-primary-foreground font-semibold py-2.5 rounded-md text-sm hover:brightness-110 active:scale-[0.98] transition-all inline-flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    登录
+                    {loggingIn ? (
+                      <>
+                        <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                        </svg>
+                        登录中...
+                      </>
+                    ) : '登录'}
                   </button>
                 </form>
 

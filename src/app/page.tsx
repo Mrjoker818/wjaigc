@@ -4191,7 +4191,37 @@ function CanvasApp() {
   if (!currentUser) {
     return (
       <>
-        <LoginPanel />
+        <LoginPanel
+          onLogin={async (user, productType) => {
+            // 智能对话模式：直接跳转到 /simple-chat
+            if (productType === 'chat') {
+              setCurrentUser(user);
+              window.location.href = '/simple-chat';
+              return;
+            }
+
+            // 关键：先清除旧用户的所有状态，防止数据跨用户泄露
+            setCurrentProject(null);
+            incrementalHistoryRef.current.clear();
+            prevImagesRef.current = [];
+            skipHistoryRef.current = true;
+            setImages([]);
+            latestImagesRef.current = [];
+            setCurrentUser(user);
+            try {
+              const userMgr = UserManagerCore.getInstance();
+              await userMgr.loadProjectsFromServer();
+            } catch { /* non-blocking */ }
+            toast.success('登录成功', {
+              description: `欢迎回来，${user.name}`,
+              className: themeStyle === 'monochrome' 
+                ? 'bg-white border border-gray-200 text-gray-900' 
+                : 'bg-[#141414] border border-[#2a2a2a] text-white',
+            });
+            setAppMode('dashboard');
+            setTimeout(() => { skipHistoryRef.current = false; }, 100);
+          }}
+        />
         <Toaster
           position="top-center"
           toastOptions={{

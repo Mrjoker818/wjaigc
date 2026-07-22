@@ -174,7 +174,7 @@ export default function SimpleChatPage() {
   if (showLogin || !user) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        <LoginPanel />
+        <LoginPanel onLogin={async (u: User) => { setUser(u); setShowLogin(false); }} />
       </div>
     );
   }
