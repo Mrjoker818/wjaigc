@@ -35,7 +35,6 @@ export function LoginPanel({ initialMode }: LoginPanelProps) {
   const [loginPassword, setLoginPassword] = useState('');
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [loginError, setLoginError] = useState('');
-  const [loggingIn, setLoggingIn] = useState(false);
 
   useEffect(() => {
     const error = new URLSearchParams(window.location.search).get('error');
@@ -49,49 +48,6 @@ export function LoginPanel({ initialMode }: LoginPanelProps) {
       setLoginError('登录失败，请稍后重试。');
     }
   }, []);
-
-  const handleLogin = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
-    event.preventDefault();
-
-    if (!loginName.trim() || !loginPassword) {
-      setLoginError('请完整填写用户名和密码。');
-      return;
-    }
-
-    setLoggingIn(true);
-    setLoginError('');
-
-    try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({
-          name: loginName.trim(),
-          password: loginPassword,
-          productType: selectedMode,
-        }),
-      });
-      const payload = await response.json() as { success?: boolean; error?: string };
-
-      if (!response.ok || !payload.success) {
-        if (response.status === 401) {
-          setLoginError('用户名或密码错误，或该账户尚未获授权。');
-        } else if (response.status === 503) {
-          setLoginError('登录服务暂不可用，请联系管理员检查认证配置。');
-        } else {
-          setLoginError(payload.error || '登录失败，请稍后重试。');
-        }
-        return;
-      }
-
-      window.location.assign(selectedMode === 'chat' ? '/simple-chat' : '/');
-    } catch {
-      setLoginError('无法连接登录服务，请检查网络后重试。');
-    } finally {
-      setLoggingIn(false);
-    }
-  };
 
   return (
     <div className="fixed inset-0 z-[100] flex min-h-screen" style={{ background: '#0A0A0F' }}>
@@ -293,7 +249,6 @@ export function LoginPanel({ initialMode }: LoginPanelProps) {
                 <form
                   action="/api/auth/login"
                   method="post"
-                  onSubmit={handleLogin}
                   autoComplete="off"
                 >
                   <input type="hidden" name="productType" value={selectedMode} />
@@ -312,8 +267,7 @@ export function LoginPanel({ initialMode }: LoginPanelProps) {
                         onChange={(e) => setLoginName(e.target.value)}
                         required
                         placeholder="请输入用户名"
-                        disabled={loggingIn}
-                        className="w-full bg-muted border-none rounded-md pl-10 pr-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/40 transition-colors disabled:opacity-50"
+                        className="w-full bg-muted border-none rounded-md pl-10 pr-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/40 transition-colors"
                       />
                     </div>
                   </div>
@@ -332,15 +286,13 @@ export function LoginPanel({ initialMode }: LoginPanelProps) {
                         onChange={(e) => setLoginPassword(e.target.value)}
                         required
                         placeholder="请输入密码"
-                        disabled={loggingIn}
-                        className="w-full bg-muted border-none rounded-md pl-10 pr-10 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/40 transition-colors disabled:opacity-50"
+                        className="w-full bg-muted border-none rounded-md pl-10 pr-10 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/40 transition-colors"
                       />
                       <button
                         type="button"
                         onClick={() => setShowLoginPassword((value) => !value)}
                         aria-label={showLoginPassword ? '隐藏密码' : '显示密码'}
                         title={showLoginPassword ? '隐藏密码' : '显示密码'}
-                        disabled={loggingIn}
                         className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/60 hover:text-muted-foreground transition-colors"
                       >
                         {showLoginPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -351,18 +303,9 @@ export function LoginPanel({ initialMode }: LoginPanelProps) {
                   {/* 登录按钮 */}
                   <button
                     type="submit"
-                    disabled={loggingIn}
-                    className="w-full bg-primary text-primary-foreground font-semibold py-2.5 rounded-md text-sm hover:brightness-110 active:scale-[0.98] transition-all inline-flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full bg-primary text-primary-foreground font-semibold py-2.5 rounded-md text-sm hover:brightness-110 active:scale-[0.98] transition-all"
                   >
-                    {loggingIn ? (
-                      <>
-                        <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                        </svg>
-                        登录中...
-                      </>
-                    ) : '登录'}
+                    登录
                   </button>
                 </form>
 
