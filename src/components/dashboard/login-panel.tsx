@@ -214,7 +214,7 @@ export function LoginPanel({ initialMode }: LoginPanelProps) {
                 <p className="text-sm text-muted-foreground mb-8">请选择你要使用的功能模式</p>
 
                 <div className="space-y-4">
-                  {/* 用户项目仪表盘卡片 */}
+                  {/* 无限画布卡片 */}
                   <a
                     href="/login/canvas"
                     className="block w-full text-left p-5 rounded-xl border border-border/40 bg-muted/30 hover:border-primary/50 hover:bg-muted/50 transition-all group cursor-pointer"
@@ -224,9 +224,9 @@ export function LoginPanel({ initialMode }: LoginPanelProps) {
                         <PanelLeft className="w-6 h-6 text-primary" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <h3 className="text-lg font-semibold text-foreground mb-1">用户项目仪表盘</h3>
+                        <h3 className="text-lg font-semibold text-foreground mb-1">无限画布</h3>
                         <p className="text-xs text-muted-foreground leading-relaxed">
-                          管理项目并进入 AI 图像、视频、3D 与工作流创作
+                          AI 图像生成 · 视频导演 · 3D模型 · 工作流编排 · 无限画布创作
                         </p>
                       </div>
                       <div className="text-primary opacity-0 group-hover:opacity-100 transition-opacity">
@@ -276,7 +276,7 @@ export function LoginPanel({ initialMode }: LoginPanelProps) {
                     {selectedMode === 'canvas' ? (
                       <>
                         <PanelLeft className="w-4 h-4 text-primary" />
-                        <span className="text-sm font-medium text-foreground">用户项目仪表盘</span>
+                        <span className="text-sm font-medium text-foreground">无限画布</span>
                       </>
                     ) : (
                       <>
