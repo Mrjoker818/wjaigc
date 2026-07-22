@@ -6,7 +6,16 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll } from 'vitest';
-import type { Response } from 'node-fetch';
+interface ApiBody {
+  success?: boolean;
+  user?: { name?: string } | null;
+  models?: unknown[];
+  data?: unknown[];
+  status?: string;
+  error?: unknown;
+  message?: unknown;
+  [key: string]: unknown;
+}
 
 const BASE_URL = process.env.E2E_BASE_URL || 'http://127.0.0.1:5000';
 const TEST_USERNAME = process.env.E2E_TEST_USERNAME || 'Mr.joker';
@@ -15,7 +24,7 @@ const TEST_PASSWORD = process.env.E2E_TEST_PASSWORD || 'Wujie#2026Reset';
 // 使用 node 内置 fetch (Node 18+)
 let sessionCookie: string | null = null;
 
-async function api(path: string, options: RequestInit = {}): Promise<{ status: number; body: any; headers: Headers }> {
+async function api(path: string, options: RequestInit = {}): Promise<{ status: number; body: ApiBody; headers: Headers }> {
   const res = await fetch(`${BASE_URL}${path}`, {
     ...options,
     headers: {
@@ -132,8 +141,9 @@ describe('API 接口测试', () => {
       const res = await api('/api/session');
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
-      expect(res.body.user).toBeDefined();
-      expect(res.body.user.name).toBe(TEST_USERNAME);
+      const user = res.body.user as { name?: string } | undefined;
+      expect(user).toBeDefined();
+      expect(user?.name).toBe(TEST_USERNAME);
     });
   });
 

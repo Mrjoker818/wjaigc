@@ -73,8 +73,11 @@ export async function POST(request: NextRequest) {
 
     await ensureUserDataDirs(user.id);
 
+    const successPath = formProductType === 'chat'
+      ? '/simple-chat'
+      : `${nextPath}?loginMode=canvas`;
     const response = isFormSubmission
-      ? redirectToPublicPath(request, nextPath)
+      ? redirectToPublicPath(request, successPath)
       : NextResponse.json({ success: true, user });
     // Only set secure flag when the connection itself is HTTPS.
     // On HTTP (e.g. http://127.0.0.1:5000 in test/dev), WebKit rejects secure cookies.

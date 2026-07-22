@@ -1,7 +1,36 @@
 "use client";
 
+// Web Speech API type declarations
+interface SpeechRecognitionEvent extends Event {
+  results: SpeechRecognitionResultList;
+  resultIndex: number;
+}
+interface SpeechRecognitionInstance extends EventTarget {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start: () => void;
+  stop: () => void;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  onend: (() => void) | null;
+  onerror: (() => void) | null;
+}
+declare global {
+  interface Window {
+    SpeechRecognition?: new () => SpeechRecognitionInstance;
+    webkitSpeechRecognition?: new () => SpeechRecognitionInstance;
+  }
+}
+
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { Menu, Paperclip, ArrowUp, Globe, X, Settings, Bot, User as UserIcon, BookOpen, ChevronDown, Copy, RefreshCw, Trash2, Zap, Sun, Moon, FileText, Database, Sparkles, MessageSquarePlus, Minimize2, Maximize2, MoreHorizontal, Telescope, FileCode, GitBranch, Share2, Search, Eye, Image, Download, Send, Shield } from "lucide-react";
+import { Menu, Paperclip, ArrowUp, Globe, X, Settings, Bot, User as UserIcon, BookOpen, ChevronDown, Copy, RefreshCw, Trash2, Zap, Sun, Moon, FileText, Database, Sparkles, MessageSquarePlus, Minimize2, Maximize2, MoreHorizontal, Telescope, FileCode, GitBranch, Share2, Search, Eye, EyeOff, Image, Download, Send, Shield, ThumbsUp, ThumbsDown, Pencil, PenSquare, Brain, Mic, MicOff, PenLine, ScanSearch } from "lucide-react";
+import { MarkdownRenderer } from "./markdown-renderer";
+import { ImageLightbox } from "./image-lightbox";
+import { QuickCommands } from "./quick-commands";
+import { CanvasEditor } from "./canvas-editor";
+import { MemoryPanel, type MemoryItem } from "./memory-panel";
+import { GlobalSearch } from "./global-search";
+import { ShareDialog } from "./share-dialog";
 import {
   SimpleChatProject, SimpleChatTask, SimpleChatMessage, SimpleChatAgent, ChatAttachment, ChatArtifact,
   ProjectInstructions, ProjectKnowledgeItem,
@@ -166,7 +195,34 @@ export default function ChatArea({
   const [selectedModel, setSelectedModel] = useState(task?.model || "");
   const [selectedProviderId, setSelectedProviderId] = useState(task?.providerId || "");
 
+  // ===== 新增升级功能状态 =====
+  // 图片灯箱预览
+  const [lightbox, setLightbox] = useState<{ images: string[]; index: number } | null>(null);
+  // Canvas 写作画布
+  const [showCanvas, setShowCanvas] = useState(false);
+  const [canvasContent, setCanvasContent] = useState('');
+  // 记忆系统
+  const [showMemory, setShowMemory] = useState(false);
+  const [memories, setMemories] = useState<MemoryItem[]>([]);
+  const [memoriesLoading, setMemoriesLoading] = useState(false);
+  // 全局对话搜索
+  const [showGlobalSearch, setShowGlobalSearch] = useState(false);
+  const [showQuickCommands, setShowQuickCommands] = useState(false);
+  // 临时聊天（无痕模式）
+  const [tempChat, setTempChat] = useState(false);
+  // 回复评分
+  const [messageRatings, setMessageRatings] = useState<Record<string, 'up' | 'down'>>({});
+  // 消息编辑
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editingContent, setEditingContent] = useState('');
+  // 拖拽上传
+  const [dragOver, setDragOver] = useState(false);
+  // 语音输入
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<{ stop: () => void } | null>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Messages: sync from task
   const [messages, setMessages] = useState<SimpleChatMessage[]>(task?.messages || []);
@@ -256,11 +312,70 @@ export default function ChatArea({
   useEffect(() => { fetchImageModels(); }, []);
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
-  // Sync task to parent
+  // 加载用户记忆
   useEffect(() => {
-    if (!task || !project) return;
+    fetch('/api/simple-chat/memory').then(r => r.json()).then(data => {
+      if (Array.isArray(data.memories)) setMemories(data.memories);
+    }).catch(() => {});
+  }, []);
+
+  // 加载评分记录（localStorage）
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('simple_chat_ratings');
+      if (saved) setMessageRatings(JSON.parse(saved));
+    } catch {}
+  }, []);
+
+  // 键盘快捷键：Ctrl+K 全局搜索，Ctrl+Shift+O 新对话
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setShowGlobalSearch(true);
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // 评分持久化
+  function rateMessage(msgId: string, rating: 'up' | 'down') {
+    setMessageRatings(prev => {
+      const next = { ...prev };
+      if (next[msgId] === rating) delete next[msgId];
+      else next[msgId] = rating;
+      try { localStorage.setItem('simple_chat_ratings', JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }
+
+  // 记忆操作
+  async function addMemory(content: string, category: MemoryItem['category']) {
+    setMemoriesLoading(true);
+    try {
+      const res = await fetch('/api/simple-chat/memory', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content, category }),
+      });
+      const data = await res.json();
+      if (data.memory) setMemories(prev => [data.memory, ...prev]);
+    } catch {} finally { setMemoriesLoading(false); }
+  }
+
+  async function deleteMemory(id: string) {
+    setMemoriesLoading(true);
+    try {
+      await fetch(`/api/simple-chat/memory?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      setMemories(prev => prev.filter(m => m.id !== id));
+    } catch {} finally { setMemoriesLoading(false); }
+  }
+
+  // Sync task to parent（临时聊天模式下跳过保存）
+  useEffect(() => {
+    if (!task || !project || tempChat) return;
     onUpdateTask({ ...task, messages, model: selectedModel, providerId: selectedProviderId, imageModel: selectedImageModel, imageProviderId: selectedImageProviderId, updatedAt: Date.now() });
-  }, [messages, selectedModel, selectedProviderId, selectedImageModel, selectedImageProviderId]);
+  }, [messages, selectedModel, selectedProviderId, selectedImageModel, selectedImageProviderId, tempChat]);
 
   // Sync knowledge
   useEffect(() => {
@@ -276,6 +391,198 @@ export default function ChatArea({
     }
     return tags;
   }
+
+  // ===== 图片上传统一入口（按钮/粘贴/拖拽共用） =====
+  const handleImageFiles = useCallback((files: File[]) => {
+    const imageFiles = files.filter(f => f.type.startsWith('image/'));
+    if (imageFiles.length === 0) return;
+    imageFiles.forEach(file => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        setUploadedImages(prev => [...prev, {
+          id: Math.random().toString(36).slice(2, 10),
+          type: 'image' as const,
+          name: file.name || `粘贴图片-${Date.now()}.png`,
+          url: dataUrl,
+          mimeType: file.type || 'image/png',
+        }]);
+      };
+      reader.readAsDataURL(file);
+    });
+  }, []);
+
+  // Ctrl+V 粘贴图片
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const files: File[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.type.startsWith('image/')) {
+        const f = item.getAsFile();
+        if (f) files.push(f);
+      }
+    }
+    if (files.length > 0) {
+      e.preventDefault();
+      handleImageFiles(files);
+    }
+  }, [handleImageFiles]);
+
+  // 拖拽上传
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    if (e.dataTransfer.types.includes('Files')) setDragOver(true);
+  }, []);
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+  }, []);
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    handleImageFiles(Array.from(e.dataTransfer.files || []));
+  }, [handleImageFiles]);
+
+  // 语音输入（Web Speech API）
+  const toggleVoiceInput = useCallback(() => {
+    if (isListening) {
+      recognitionRef.current?.stop();
+      setIsListening(false);
+      return;
+    }
+    const SR = window as typeof window & {
+      SpeechRecognition?: new () => SpeechRecognitionInstance;
+      webkitSpeechRecognition?: new () => SpeechRecognitionInstance;
+    };
+    const Ctor = SR.SpeechRecognition || SR.webkitSpeechRecognition;
+    if (!Ctor) { alert('当前浏览器不支持语音输入'); return; }
+    const rec = new Ctor();
+    rec.lang = 'zh-CN';
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.onresult = (event: SpeechRecognitionEvent) => {
+      let transcript = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        transcript += event.results[i][0].transcript;
+      }
+      if (transcript) setInput(prev => prev + transcript);
+    };
+    rec.onerror = () => setIsListening(false);
+    rec.onend = () => setIsListening(false);
+    recognitionRef.current = rec;
+    rec.start();
+    setIsListening(true);
+  }, [isListening]);
+
+  // 消息编辑：提交后将该消息之后的对话截断并重新生成
+  function handleEditSubmit(msgId: string) {
+    const idx = messages.findIndex(m => m.id === msgId);
+    if (idx === -1 || !editingContent.trim()) return;
+    const updated = messages.slice(0, idx);
+    const editedMsg: SimpleChatMessage = { ...messages[idx], content: editingContent.trim() };
+    setMessages([...updated, editedMsg]);
+    setEditingMessageId(null);
+    setEditingContent('');
+    // 用编辑后的内容触发重新生成
+    setInput(editingContent.trim());
+    setTimeout(() => {
+      setMessages(updated);
+      setInput(editingContent.trim());
+      handleSendRef.current?.();
+    }, 0);
+  }
+
+  // 消息删除
+  function handleDeleteMessage(msgId: string) {
+    setMessages(prev => {
+      const idx = prev.findIndex(m => m.id === msgId);
+      if (idx === -1) return prev;
+      const next = [...prev];
+      next.splice(idx, 1);
+      // 若删除的是用户消息，同时删除紧随的助手回复
+      if (prev[idx].role === 'user' && next[idx]?.role === 'assistant') next.splice(idx, 1);
+      return next;
+    });
+  }
+
+  function handleRateMessage(msgId: string, rating: 'up' | 'down') {
+    setMessageRatings(prev => {
+      const next = { ...prev };
+      if (next[msgId] === rating) delete next[msgId];
+      else next[msgId] = rating;
+      return next;
+    });
+  }
+
+  // Canvas AI 协同编辑
+  async function canvasAiEdit(instruction: string, currentContent: string, selectedText: string): Promise<string> {
+    const target = selectedText || currentContent;
+    const res = await fetch('/api/simple-chat/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages: [
+          { role: 'system', content: '你是一名专业文案编辑。根据用户的修改指令，输出修改后的完整文本。只输出修改后的文本本身，不要输出解释、不要添加引号或标记。' },
+          { role: 'user', content: `【待修改文本】\n${target}\n\n【修改指令】\n${instruction}` },
+        ],
+        model: selectedModel, providerId: selectedProviderId,
+      }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const reader = res.body?.getReader();
+    if (!reader) throw new Error('No response body');
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let result = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6).trim();
+          if (data === '[DONE]' || data === '') continue;
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.type === 'content') result += parsed.content || '';
+          } catch {}
+        }
+      }
+    }
+    if (!result.trim()) throw new Error('AI 未返回内容');
+    return selectedText ? currentContent.replace(selectedText, result.trim()) : result.trim();
+  }
+
+  // 图片深度分析（文案策划专用）
+  function handleDeepAnalyze(imageUrl: string) {
+    const prompt = `请对这张图片进行专业的文案策划深度分析，按以下框架输出结构化报告：
+
+## 一、视觉元素拆解
+- 主体/构图/色彩/氛围/风格定位
+
+## 二、文案策略分析
+- 核心卖点提炼与表达方式
+- 文案调性（正式/活泼/走心/促销）
+- 目标受众画像推断
+
+## 三、营销策略推断
+- 投放场景与渠道适配（小红书/微博/公众号/抖音/朋友圈）
+- 转化路径设计分析
+
+## 四、可借鉴点与风险点
+- 值得学习的创意手法
+- 潜在的合规或审美风险
+
+## 五、行动清单
+- 给出 3 条可直接复用到我方文案策划的建议`;
+    setInput(prompt);
+  }
+
+  const handleSendRef = useRef<(() => void) | null>(null);
 
   // Handle send
   const handleSend = useCallback(async () => {
@@ -353,10 +660,19 @@ export default function ChatArea({
         }))
         .filter(item => item.content);
 
+      // 深度分析检测：消息包含分析框架标记且带图片时启用专业分析系统提示词
+      const isDeepAnalysis = content.includes('文案策划深度分析') && (userMsg.images?.length || 0) > 0;
+
       const res = await fetch('/api/simple-chat/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: allMessages, model: selectedModel, providerId: selectedProviderId, imageModel: selectedImageModel, imageProviderId: selectedImageProviderId, webSearch, knowledgeItems: apiKnowledgeItems, projectId: project.id, taskId: task.id }),
+        body: JSON.stringify({
+          messages: allMessages, model: selectedModel, providerId: selectedProviderId,
+          imageModel: selectedImageModel, imageProviderId: selectedImageProviderId,
+          webSearch, knowledgeItems: apiKnowledgeItems, projectId: project.id, taskId: task.id,
+          memories: memories.map(m => ({ category: m.category, content: m.content })),
+          deepAnalysis: isDeepAnalysis,
+        }),
       });
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -472,7 +788,10 @@ export default function ChatArea({
     } finally {
       setIsStreaming(false);
     }
-  }, [input, isStreaming, selectedModel, selectedProviderId, messages, project, task, uploadedImages, webSearch]);
+  }, [input, isStreaming, selectedModel, selectedProviderId, messages, project, task, uploadedImages, webSearch, memories, selectedImageModel, selectedImageProviderId, brandActive]);
+
+  // 供消息编辑后重新生成调用
+  handleSendRef.current = handleSend;
 
   // Deep Research
   const handleDeepResearch = useCallback(async () => {
@@ -578,13 +897,6 @@ export default function ChatArea({
     });
     setSearchResults(results);
   }, [searchQuery, project]);
-
-  // Share
-  const handleShare = useCallback(() => {
-    if (!task) return;
-    const shareText = task.messages.map(m => `**${m.role === 'user' ? '用户' : 'AI'}**: ${m.content}`).join('\n\n---\n\n');
-    navigator.clipboard.writeText(shareText).then(() => setShowShare(false));
-  }, [task]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
@@ -879,6 +1191,26 @@ export default function ChatArea({
           title="项目内搜索">
           <Search className="w-4 h-4" />
         </button>
+        <button onClick={() => setShowMemory(true)}
+          className={`p-1.5 rounded-lg transition-colors ${memories.length > 0 ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted'}`}
+          title="用户记忆">
+          <Brain className="w-4 h-4" />
+        </button>
+        <button onClick={() => setShowCanvas(true)}
+          className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors"
+          title="写作画布">
+          <PenSquare className="w-4 h-4" />
+        </button>
+        <button onClick={() => setShowGlobalSearch(true)}
+          className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors"
+          title="全局搜索 (Ctrl+K)">
+          <Globe className="w-4 h-4" />
+        </button>
+        <button onClick={() => { setTempChat(!tempChat); if (!tempChat) { messages.forEach(() => {}); } }}
+          className={`p-1.5 rounded-lg transition-colors ${tempChat ? 'bg-amber-500/20 text-amber-500' : 'text-muted-foreground hover:bg-muted'}`}
+          title={tempChat ? "临时聊天中（不保存）" : "开启临时聊天"}>
+          <Shield className="w-4 h-4" />
+        </button>
         <button onClick={() => setShowShare(true)}
           className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors"
           title="分享对话">
@@ -956,13 +1288,29 @@ export default function ChatArea({
                       <div className="w-2 h-2 rounded-full bg-muted-foreground/40 animate-bounce" style={{ animationDelay: '150ms' }} />
                       <div className="w-2 h-2 rounded-full bg-muted-foreground/40 animate-bounce" style={{ animationDelay: '300ms' }} />
                     </div>
+                  ) : msg.role === 'assistant' ? (
+                    <MarkdownRenderer content={msg.content} />
+                  ) : editingMessageId === msg.id ? (
+                    <div className="space-y-2 min-w-[280px]">
+                      <textarea
+                        value={editingContent}
+                        onChange={(e) => setEditingContent(e.target.value)}
+                        className="w-full bg-primary-foreground/10 text-primary-foreground rounded-lg px-3 py-2 text-sm outline-none resize-y min-h-[60px]"
+                        autoFocus
+                      />
+                      <div className="flex gap-2 justify-end">
+                        <button onClick={() => { setEditingMessageId(null); setEditingContent(''); }} className="px-2.5 py-1 rounded text-xs bg-primary-foreground/20 hover:bg-primary-foreground/30">取消</button>
+                        <button onClick={() => handleEditSubmit(msg.id)} className="px-2.5 py-1 rounded text-xs bg-primary-foreground text-primary font-medium">保存并重新生成</button>
+                      </div>
+                    </div>
                   ) : (
                     <div className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</div>
                   )}
                   {msg.images && msg.images.length > 0 && (
                     <div className="flex gap-2 mt-2 flex-wrap">
                       {msg.images.map((url, i) => (
-                        <img key={i} src={url} alt="" className="w-20 h-20 object-cover rounded-lg" />
+                        <img key={i} src={url} alt="" className="w-20 h-20 object-cover rounded-lg cursor-zoom-in hover:opacity-80 transition-opacity"
+                          onClick={() => setLightbox({ images: msg.images!, index: i })} />
                       ))}
                     </div>
                   )}
@@ -1020,6 +1368,29 @@ export default function ChatArea({
                         <Send className="w-3 h-3" />
                       </button>
                     )}
+                    {/* 回复评分 */}
+                    <span className="w-px h-4 bg-border mx-0.5 self-center" />
+                    <button onClick={() => handleRateMessage(msg.id, 'up')}
+                      className={`p-1 rounded transition-colors ${messageRatings[msg.id] === 'up' ? 'text-green-500 bg-green-500/10' : 'hover:bg-muted text-muted-foreground'}`} title="有帮助">
+                      <ThumbsUp className="w-3 h-3" />
+                    </button>
+                    <button onClick={() => handleRateMessage(msg.id, 'down')}
+                      className={`p-1 rounded transition-colors ${messageRatings[msg.id] === 'down' ? 'text-red-500 bg-red-500/10' : 'hover:bg-muted text-muted-foreground'}`} title="无帮助">
+                      <ThumbsDown className="w-3 h-3" />
+                    </button>
+                    {/* 保存到 Canvas */}
+                    <button onClick={() => { setCanvasContent(msg.content); setShowCanvas(true); }}
+                      className="p-1 rounded hover:bg-primary/10 text-primary transition-colors" title="在 Canvas 中编辑">
+                      <PenSquare className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
+                {/* User Message Operations */}
+                {msg.role === 'user' && !isStreaming && editingMessageId !== msg.id && (
+                  <div className="flex gap-0.5 mt-1 px-1 opacity-0 hover:opacity-100 transition-opacity">
+                    <button onClick={() => copyMessage(msg.content)} className="p-1 rounded hover:bg-muted text-muted-foreground" title="复制"><Copy className="w-3 h-3" /></button>
+                    <button onClick={() => { setEditingMessageId(msg.id); setEditingContent(msg.content); }} className="p-1 rounded hover:bg-muted text-muted-foreground" title="编辑"><Pencil className="w-3 h-3" /></button>
+                    <button onClick={() => handleDeleteMessage(msg.id)} className="p-1 rounded hover:bg-red-500/10 text-red-500" title="删除"><Trash2 className="w-3 h-3" /></button>
                   </div>
                 )}
               </div>
@@ -1035,10 +1406,34 @@ export default function ChatArea({
         </div>
       </div>
 
+      {/* Quick Commands 快捷工作流 */}
+      {showQuickCommands && (
+        <div className="px-4 pb-1">
+          <div className="max-w-3xl mx-auto">
+            <QuickCommands
+              isMonochrome={false}
+              hasImages={uploadedImages.length > 0}
+              onSelect={prompt => { setInput(prompt); setShowQuickCommands(false); textareaRef.current?.focus(); }}
+              onClose={() => setShowQuickCommands(false)}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Input */}
       <div className="px-4 pb-4 pt-2">
         <div className="max-w-3xl mx-auto">
-          <div className="relative bg-card border border-border rounded-2xl shadow-sm focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary/30 transition-all">
+          <div
+            className={`relative bg-card border rounded-2xl shadow-sm focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary/30 transition-all ${dragOver ? 'border-primary ring-2 ring-primary/30' : 'border-border'}`}
+            onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={handleDrop}
+          >
+            {dragOver && (
+              <div className="absolute inset-0 z-10 bg-primary/5 rounded-2xl flex items-center justify-center pointer-events-none">
+                <span className="text-sm text-primary font-medium">松开以上传图片</span>
+              </div>
+            )}
             {uploadedImages.length > 0 && (
               <div className="flex gap-2 px-4 pt-3 flex-wrap">
                 {uploadedImages.map((att, i) => (
@@ -1048,15 +1443,24 @@ export default function ChatArea({
                       className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                       <X className="w-3 h-3" />
                     </button>
+                    <button onClick={() => {
+                      setInput(`请对这张图片进行深度分析报告，从视觉风格、文案策略、目标受众、可复用技巧四个维度拆解，并给出可执行的创作建议：`);
+                      textareaRef.current?.focus();
+                    }}
+                      className="absolute -bottom-1 -left-1 px-1.5 py-0.5 rounded bg-primary text-primary-foreground text-[10px] opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                      深度分析
+                    </button>
                   </div>
                 ))}
               </div>
             )}
             <textarea
+              ref={textareaRef}
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={activeAgent ? `与 ${activeAgent.name} 对话...` : "输入消息，Enter 发送，Shift+Enter 换行"}
+              onPaste={handlePaste}
+              placeholder={activeAgent ? `与 ${activeAgent.name} 对话...` : "输入消息，Enter 发送，支持 Ctrl+V 粘贴图片"}
               rows={1}
               className="w-full bg-transparent px-4 py-3 pr-28 text-sm resize-none outline-none placeholder:text-muted-foreground/50 min-h-[48px] max-h-[200px]"
               style={{ scrollbarWidth: 'thin' }}
@@ -1089,6 +1493,18 @@ export default function ChatArea({
                 className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors" title="上传图片">
                 <Paperclip className="w-4 h-4" />
               </button>
+              {/* 语音输入 */}
+              <button onClick={toggleVoiceInput}
+                className={`p-1.5 rounded-lg transition-colors ${isListening ? 'bg-red-500/10 text-red-500 animate-pulse' : 'text-muted-foreground hover:bg-muted'}`}
+                title={isListening ? '停止语音输入' : '语音输入'}>
+                {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+              </button>
+              {/* 快捷工作流 */}
+              <button onClick={() => setShowQuickCommands(v => !v)}
+                className={`p-1.5 rounded-lg transition-colors ${showQuickCommands ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted'}`}
+                title="快捷工作流">
+                <Zap className="w-4 h-4" />
+              </button>
               <button onClick={handleSend} disabled={!input.trim() && uploadedImages.length === 0}
                 className="p-1.5 rounded-lg bg-primary text-primary-foreground disabled:opacity-40 transition-all hover:bg-primary/90">
                 {isStreaming ? <div className="w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" /> : <ArrowUp className="w-4 h-4" />}
@@ -1110,10 +1526,16 @@ export default function ChatArea({
                 });
               }} />
           </div>
-          <p className="text-xs text-muted-foreground/50 text-center mt-2">
+          <p className="text-xs text-muted-foreground/50 text-center mt-2 flex items-center justify-center gap-3">
             <button onClick={toggleTheme} className="inline-flex items-center gap-1 hover:text-foreground transition-colors">
               {theme === 'dark' ? <Sun className="w-3 h-3" /> : <Moon className="w-3 h-3" />}
               {theme === 'dark' ? '亮色模式' : '暗色模式'}
+            </button>
+            <button onClick={() => setTempChat(v => !v)} className={`inline-flex items-center gap-1 transition-colors ${tempChat ? 'text-amber-500' : 'hover:text-foreground'}`}>
+              <EyeOff className="w-3 h-3" />{tempChat ? '临时聊天中' : '临时聊天'}
+            </button>
+            <button onClick={() => setShowGlobalSearch(true)} className="inline-flex items-center gap-1 hover:text-foreground transition-colors">
+              <Search className="w-3 h-3" />全局搜索
             </button>
           </p>
         </div>
@@ -1379,22 +1801,78 @@ export default function ChatArea({
         </ModalOverlay>
       )}
 
-      {/* Share Dialog */}
+      {/* Share Dialog — 公开链接分享 */}
       {showShare && (
-        <ModalOverlay onClose={() => setShowShare(false)}>
-          <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
-            <ModalHeader title="分享对话" onClose={() => setShowShare(false)} />
-            <p className="text-sm text-muted-foreground mb-4">将当前对话内容复制为 Markdown 格式文本</p>
-            <div className="flex gap-2">
-              <button onClick={handleShare}
-                className="flex-1 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm hover:bg-primary/90 transition-colors">
-                复制到剪贴板
-              </button>
-              <button onClick={() => setShowShare(false)}
-                className="px-4 py-2 bg-muted rounded-lg text-sm hover:bg-muted/80 transition-colors">取消</button>
-            </div>
-          </div>
-        </ModalOverlay>
+        <ShareDialog
+          conversationId={task?.id || project?.id || 'unknown'}
+          conversationTitle={task?.name || project?.name || '对话'}
+          messages={messages.map(m => ({ id: m.id, role: m.role, content: m.content, images: m.images, timestamp: m.createdAt }))}
+          onClose={() => setShowShare(false)}
+        />
+      )}
+
+      {/* Canvas 写作画布 */}
+      {showCanvas && (
+        <CanvasEditor
+          content={canvasContent}
+          onClose={() => setShowCanvas(false)}
+          onSave={(c) => setCanvasContent(c)}
+          onAiEdit={async (selected, instruction) => {
+            const res = await fetch('/api/simple-chat/chat', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                providerId: selectedProviderId, model: selectedModel,
+                systemPrompt: '你是专业文案编辑助手。根据用户指令改写选中文本，只返回改写后的文本，不要解释。',
+                messages: [{ role: 'user', content: `原文：\n${selected}\n\n改写指令：${instruction}` }],
+                stream: false,
+              }),
+            });
+            const data = await res.json();
+            return data.content || data.choices?.[0]?.message?.content || selected;
+          }}
+        />
+      )}
+
+      {/* 记忆管理面板 */}
+      {showMemory && (
+        <MemoryPanel
+          memories={memories}
+          onClose={() => setShowMemory(false)}
+          onAdd={async (content, category) => {
+            const res = await fetch('/api/simple-chat/memory', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content, category }) });
+            if (res.ok) { const m = await res.json(); setMemories(prev => [...prev, m]); }
+          }}
+          onDelete={async (id) => {
+            await fetch(`/api/simple-chat/memory?id=${id}`, { method: 'DELETE' });
+            setMemories(prev => prev.filter(m => m.id !== id));
+          }}
+        />
+      )}
+
+      {/* 图片灯箱 */}
+      {lightbox && (
+        <ImageLightbox
+          images={lightbox.images}
+          initialIndex={lightbox.index}
+          onClose={() => setLightbox(null)}
+        />
+      )}
+
+      {/* 全局搜索 */}
+      {showGlobalSearch && (
+        <GlobalSearch
+          conversations={project?.tasks?.map(t => ({
+            id: t.id, title: t.name,
+            messages: (t.messages || []).map(m => ({ id: m.id, role: m.role as 'user' | 'assistant', content: m.content })),
+          })) || []}
+          onClose={() => setShowGlobalSearch(false)}
+          onNavigate={(taskId) => {
+            setShowGlobalSearch(false);
+            const selectedTask = project?.tasks.find(candidate => candidate.id === taskId);
+            if (selectedTask) onSelectTask(selectedTask);
+          }}
+        />
       )}
 
       {/* Upload File to Knowledge */}

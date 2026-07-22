@@ -40,6 +40,9 @@ export async function POST(request: NextRequest) {
     taskId?: string;
     imageModel?: string;
     imageProviderId?: string;
+    memories?: string[];
+    deepAnalysis?: boolean;
+    i2iStrength?: number;
   };
   const messages = body.messages || [];
   const model = body.model || 'deepseek-v4-flash';
@@ -48,6 +51,9 @@ export async function POST(request: NextRequest) {
   const knowledgeItems = body.knowledgeItems || [];
   const imageModel = body.imageModel || model;
   const imageProviderId = body.imageProviderId || providerId;
+  const memories = body.memories || [];
+  const deepAnalysis = body.deepAnalysis || false;
+  const i2iStrength = body.i2iStrength || 0.7;
 
   const user = await getSessionUser(request);
   if (!user) {
@@ -81,6 +87,30 @@ export async function POST(request: NextRequest) {
 
   // 构建增强的 system prompt（指令 + 知识库 + 联网搜索结果）
   let enhancedSystemPrompt = DEFAULT_SYSTEM_PROMPT;
+
+  // 用户记忆注入
+  if (memories.length > 0) {
+    const memoryContext = memories.slice(0, 20).map((m, i) => `${i + 1}. ${m}`).join('\n');
+    enhancedSystemPrompt += `\n\n## 用户记忆\n以下是关于用户的长期记忆信息，请在回答时参考：\n${memoryContext}`;
+  }
+
+  // 深度图片分析模式（文案策划专用）
+  if (deepAnalysis) {
+    enhancedSystemPrompt += `\n\n## 深度图片分析模式（文案策划专业版）
+用户正在请求对图片进行深度分析。请作为资深文案策划与品牌策略专家，输出结构化分析报告，包含以下维度（可根据图片类型灵活裁剪）：
+
+1. **视觉概览**：图片整体风格、色调、构图、视觉焦点
+2. **文案拆解**：标题/正文/CTA 的用词策略、语气、句式特点
+3. **受众画像**：目标人群特征、痛点、情感诉求
+4. **策略分析**：品牌定位、差异化卖点、传播目的
+5. **优劣评估**：亮点（3 条）+ 可改进点（3 条）
+6. **行动清单**：可直接落地的文案建议（至少 3 条，含示例文案）
+
+要求：
+- 使用 Markdown 格式输出（标题、列表、加粗）
+- 每个维度要有具体洞察，避免空泛描述
+- 文案建议要给出可直接使用的示例`;
+  }
 
   // 知识库注入
   if (knowledgeItems.length > 0) {
@@ -283,6 +313,13 @@ export async function POST(request: NextRequest) {
             const imgPrompt = args.prompt || fullContent.slice(0, 500);
             const imgSize = args.size || '1024x1024';
 
+            // 图生图：用户上传了参考图且意图是"基于图片生成/调整"时，传入参考图
+            const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
+            const userImages = lastUserMsg?.images || [];
+            const userText = (lastUserMsg?.content || '').toLowerCase();
+            const i2iIntent = /(这张图|这张|此图|图片|参考|改成|调整|换成|基于|类似风格|同款|根据这)/.test(userText);
+            const referenceImage = userImages.length > 0 && i2iIntent ? userImages[0] : undefined;
+
             try {
               const imgRes = await fetch(`${request.nextUrl.origin}/api/generate`, {
                 method: 'POST',
@@ -293,6 +330,7 @@ export async function POST(request: NextRequest) {
                   providerId: imageProviderId,
                   size: imgSize,
                   count: 1,
+                  ...(referenceImage ? { imageUrl: referenceImage, strength: i2iStrength } : {}),
                 }),
               });
               const imgData = await imgRes.json() as { success?: boolean; taskIds?: string[]; imageUrls?: string[] };

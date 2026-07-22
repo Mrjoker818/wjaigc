@@ -56,7 +56,7 @@ describe('POST /api/auth/login configuration failures', () => {
     }));
 
     expect(response.status).toBe(303);
-    expect(response.headers.get('location')).toBe('https://workspace.example.test/');
+    expect(response.headers.get('location')).toBe('https://workspace.example.test/?loginMode=canvas');
     expect(response.cookies.get('wujie_session')?.value).toBe('session-token');
     vi.unstubAllEnvs();
   });

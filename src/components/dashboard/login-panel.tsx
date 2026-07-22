@@ -32,7 +32,10 @@ type ViewState = 'select-mode' | 'login-form';
 export function LoginPanel({ onLogin }: LoginPanelProps) {
   const userManager = useMemo(() => {
     try { return UserManagerCore.getInstance(); }
-    catch (e) { console.error('[LoginPanel] UserManager init error:', e); return null as any; }
+    catch (error) {
+      console.error('[LoginPanel] UserManager init error:', error);
+      return null;
+    }
   }, []);
   const [viewState, setViewState] = useState<ViewState>('select-mode');
   const [selectedMode, setSelectedMode] = useState<LoginMode>('canvas');
@@ -43,6 +46,11 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
   const [loggingIn, setLoggingIn] = useState(false);
 
   const submitLogin = async (name: string, password: string, productType: string) => {
+    if (!userManager) {
+      setLoginError('登录组件初始化失败，请刷新页面后重试');
+      return;
+    }
+
     setLoggingIn(true);
     setLoginError('');
     try {
