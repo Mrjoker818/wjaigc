@@ -113,6 +113,12 @@ function getInitialProjectId(): string | null {
   return new URLSearchParams(window.location.search).get('projectId');
 }
 
+function getInitialLoginMode(): 'canvas' | null {
+  if (typeof window === 'undefined') return null;
+  const params = new URLSearchParams(window.location.search);
+  return params.get('loginMode') === 'canvas' && !params.has('error') ? 'canvas' : null;
+}
+
 function normalizeQuickCreateModels(data: QuickCreateModelsResponse): QuickCreateModelCandidate[] {
   const providerNames = new Map(
     (data.providers ?? []).map(provider => [
@@ -381,6 +387,7 @@ function CanvasApp() {
   // The useEffect below will update currentUser if a valid session exists.
   const [authChecked, setAuthChecked] = useState(true);
   const initialProjectIdRef = useRef(getInitialProjectId());
+  const initialLoginModeRef = useRef(getInitialLoginMode());
 
   const [showProjectData, setShowProjectData] = useState(false);
   const [navigateToImageId, setNavigateToImageId] = useState<string | null>(null);
@@ -516,7 +523,7 @@ function CanvasApp() {
           if (!projectId) {
             setCurrentUser(sessionUser);
             setAuthChecked(true);
-            setAppMode('dashboard');
+            setAppMode(initialLoginModeRef.current === 'canvas' ? 'canvas' : 'dashboard');
             return;
           }
 
@@ -4218,7 +4225,7 @@ function CanvasApp() {
                 ? 'bg-white border border-gray-200 text-gray-900' 
                 : 'bg-[#141414] border border-[#2a2a2a] text-white',
             });
-            setAppMode('dashboard');
+            setAppMode('canvas');
             setTimeout(() => { skipHistoryRef.current = false; }, 100);
           }}
         />
