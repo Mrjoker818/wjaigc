@@ -50,9 +50,47 @@ export function LoginPanel({ initialMode }: LoginPanelProps) {
     }
   }, []);
 
-  const handleLogin = (): void => {
+  const handleLogin = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
+    event.preventDefault();
+
+    if (!loginName.trim() || !loginPassword) {
+      setLoginError('请完整填写用户名和密码。');
+      return;
+    }
+
     setLoggingIn(true);
     setLoginError('');
+
+    try {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          name: loginName.trim(),
+          password: loginPassword,
+          productType: selectedMode,
+        }),
+      });
+      const payload = await response.json() as { success?: boolean; error?: string };
+
+      if (!response.ok || !payload.success) {
+        if (response.status === 401) {
+          setLoginError('用户名或密码错误，或该账户尚未获授权。');
+        } else if (response.status === 503) {
+          setLoginError('登录服务暂不可用，请联系管理员检查认证配置。');
+        } else {
+          setLoginError(payload.error || '登录失败，请稍后重试。');
+        }
+        return;
+      }
+
+      window.location.assign(selectedMode === 'chat' ? '/simple-chat' : '/');
+    } catch {
+      setLoginError('无法连接登录服务，请检查网络后重试。');
+    } finally {
+      setLoggingIn(false);
+    }
   };
 
   return (
