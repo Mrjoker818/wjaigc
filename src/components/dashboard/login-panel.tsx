@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { User } from '@/lib/user-types';
 import { UserManager as UserManagerCore } from '@/lib/user-manager';
 import { APP_VERSION_LABEL } from '@/config/app-meta';
@@ -40,14 +40,7 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
   const [viewState, setViewState] = useState<ViewState>('select-mode');
   const [selectedMode, setSelectedMode] = useState<LoginMode>('canvas');
 
-  // Guard entry buttons against clicks before React has attached their handlers.
-  // SSR renders the buttons visible; this flag flips true after hydration so
-  // early clicks (during the brief SSR→client handoff) are safely ignored.
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => { setMounted(true); }, []);
-
   const selectMode = (mode: LoginMode) => {
-    if (!mounted) return;
     setSelectedMode(mode);
     setLoginError('');
     setViewState('login-form');
