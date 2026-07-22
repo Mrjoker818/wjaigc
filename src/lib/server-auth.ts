@@ -50,7 +50,6 @@ export const WUJIE_SESSION_COOKIE = 'wujie_session';
 export const WUJIE_SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
 
 const DEFAULT_ADMIN_NAME = process.env.WUJIE_ADMIN_USERNAME || 'Mr.joker';
-const DEFAULT_ADMIN_PASSWORD = process.env.WUJIE_ADMIN_PASSWORD || 'dongdong851212';
 const LEGACY_STABLE_AUTH_SECRET = 'wujie-ai-stable-auth-secret-fallback-2024';
 
 export class AuthConfigurationError extends Error {
@@ -78,7 +77,7 @@ function configuredAuthSecret(): string | null {
 }
 
 function configuredAdminBootstrapPassword(): string | null {
-  return configuredValue(process.env.WUJIE_ADMIN_PASSWORD) || DEFAULT_ADMIN_PASSWORD;
+  return configuredValue(process.env.WUJIE_ADMIN_PASSWORD);
 }
 
 export function getProductionAuthConfigurationIssues(): string[] {
@@ -150,54 +149,44 @@ async function authSecret(): Promise<string> {
     _authSecretCache = { value: envSecret, warned: false };
     // Persist to DB so future deployments can recover even without env var.
     // Also upgrade a legacy built-in secret stored in DB to the env secret.
-    if (isDatabaseConfigured()) {
-      try {
-        const { dbGetSystemSetting, dbSetSystemSetting } = await import('./db-storage');
-        const dbSecret = await dbGetSystemSetting('auth_secret') as string | null;
-        if (!dbSecret || dbSecret === LEGACY_STABLE_AUTH_SECRET) {
-          await dbSetSystemSetting('auth_secret', envSecret);
-        }
-      } catch { /* non-critical */ }
-    }
+    try {
+      const { dbGetSystemSetting, dbSetSystemSetting } = await import('./db-storage');
+      const dbSecret = await dbGetSystemSetting('auth_secret') as string | null;
+      if (!dbSecret || dbSecret === LEGACY_STABLE_AUTH_SECRET) {
+        await dbSetSystemSetting('auth_secret', envSecret);
+      }
+    } catch { /* non-critical */ }
     return envSecret;
   }
 
   // Recover a previously generated secret before rejecting a redeploy. New
   // production instances still require an explicit secret when no persisted
   // credential exists.
-  if (isDatabaseConfigured()) {
-    try {
-      const { dbGetSystemSetting, dbSetSystemSetting } = await import('./db-storage');
-      const dbSecret = await dbGetSystemSetting('auth_secret') as string | null;
-      if (dbSecret && dbSecret.length >= 32) {
-        if (dbSecret === LEGACY_STABLE_AUTH_SECRET) {
-          const rotatedSecret = crypto.randomBytes(48).toString('base64url');
-          await dbSetSystemSetting('auth_secret', rotatedSecret);
-          _authSecretCache = { value: rotatedSecret, warned: false };
-          console.warn('[SECURITY] Rotated the persisted legacy authentication secret. Existing password hashes migrate on next successful login.');
-          return rotatedSecret;
-        }
-        _authSecretCache = { value: dbSecret, warned: false };
-        if (isProductionRuntime()) {
-          console.warn('[SECURITY] WUJIE_AUTH_SECRET/NEXTAUTH_SECRET not set; recovered auth secret from database. Set the env var to silence this warning.');
-        }
-        return dbSecret;
+  try {
+    const { dbGetSystemSetting, dbSetSystemSetting } = await import('./db-storage');
+    const dbSecret = await dbGetSystemSetting('auth_secret') as string | null;
+    if (dbSecret && dbSecret.length >= 32) {
+      if (dbSecret === LEGACY_STABLE_AUTH_SECRET) {
+        const rotatedSecret = crypto.randomBytes(48).toString('base64url');
+        await dbSetSystemSetting('auth_secret', rotatedSecret);
+        _authSecretCache = { value: rotatedSecret, warned: false };
+        console.warn('[SECURITY] Rotated the persisted legacy authentication secret. Existing password hashes migrate on next successful login.');
+        return rotatedSecret;
       }
-      if (!isProductionRuntime()) {
-        const fallback = crypto.randomBytes(48).toString('base64url');
-        await dbSetSystemSetting('auth_secret', fallback);
-        _authSecretCache = { value: fallback, warned: false };
-        return fallback;
+      _authSecretCache = { value: dbSecret, warned: false };
+      if (isProductionRuntime()) {
+        console.warn('[SECURITY] WUJIE_AUTH_SECRET/NEXTAUTH_SECRET not set; recovered auth secret from database. Set the env var to silence this warning.');
       }
-    } catch {
-      // DB not available, use fallback
+      return dbSecret;
     }
-  }
-
-  if (!isProductionRuntime()) {
-    const fallback = crypto.randomBytes(48).toString('base64url');
-    _authSecretCache = { value: fallback, warned: false };
-    return fallback;
+    if (!isProductionRuntime()) {
+      const fallback = crypto.randomBytes(48).toString('base64url');
+      await dbSetSystemSetting('auth_secret', fallback);
+      _authSecretCache = { value: fallback, warned: false };
+      return fallback;
+    }
+  } catch {
+    // DB not available, use fallback
   }
 
   try {
@@ -208,10 +197,15 @@ async function authSecret(): Promise<string> {
     }
   } catch { /* create a local secret below */ }
 
-  // Keep the deployment-compatible fallback so accounts created by the baseline
-  // release remain verifiable when an older environment has no configured secret.
-  _authSecretCache = { value: LEGACY_STABLE_AUTH_SECRET, warned: false };
-  return LEGACY_STABLE_AUTH_SECRET;
+  if (isProductionRuntime()) {
+    throw new AuthConfigurationError('Production authentication secret is not configured. Set WUJIE_AUTH_SECRET or NEXTAUTH_SECRET to at least 32 random characters.');
+  }
+
+  const fallback = crypto.randomBytes(48).toString('base64url');
+  _authSecretCache = { value: fallback, warned: false };
+  await mkdir(SYSTEM_DIR, { recursive: true });
+  await writeFile(AUTH_SECRET_PATH, fallback, { encoding: 'utf8', mode: 0o600 });
+  return fallback;
 }
 
 /**

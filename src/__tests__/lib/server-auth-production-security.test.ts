@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, mkdir, rm, writeFile } from 'fs/promises';
 import { createHash } from 'crypto';
 import os from 'os';
@@ -8,12 +8,6 @@ vi.mock('server-only', () => ({}));
 
 const originalEnvironment = { ...process.env };
 let temporaryDataDir: string | null = null;
-
-beforeEach(() => {
-  vi.resetModules();
-  delete process.env.DATABASE_URL;
-  delete process.env.PGDATABASE_URL;
-});
 
 afterEach(async () => {
   if (temporaryDataDir) {
@@ -28,60 +22,26 @@ afterEach(async () => {
 });
 
 describe.sequential('server authentication production security', () => {
-  it('uses the baseline stable session secret when a production authentication secret is missing', async () => {
+  it('refuses to sign a session when a production authentication secret is missing', async () => {
     temporaryDataDir = await mkdtemp(path.join(os.tmpdir(), 'wujie-auth-test-'));
     process.env.COZE_PROJECT_ENV = 'PROD';
     process.env.WUJIE_DATA_DIR = temporaryDataDir;
     delete process.env.WUJIE_AUTH_SECRET;
     delete process.env.NEXTAUTH_SECRET;
-    delete process.env.DATABASE_URL;
-    delete process.env.PGDATABASE_URL;
 
-    const systemDir = path.join(temporaryDataDir, 'system');
-    const password = 'baseline-existing-admin-password';
-    await mkdir(systemDir, { recursive: true });
-    await writeFile(path.join(systemDir, 'users.json'), JSON.stringify({
-      users: [{
-        id: 'admin_mr_joker',
-        name: 'Mr.joker',
-        passwordHash: createHash('sha256').update(`wujie-ai-stable-auth-secret-fallback-2024:${password}`).digest('hex'),
-        role: 'admin',
-        status: 'active',
-        productType: 'canvas,chat',
-        apiPermissions: { image: true, chat: true },
-        storageFolder: 'admin_mr_joker',
-        createdAt: 1,
-        updatedAt: 1,
-      }],
+    const { createSessionToken } = await import('@/lib/server-auth');
+
+    await expect(createSessionToken({
+      id: 'admin-1',
+      name: 'admin',
+      role: 'admin',
+      status: 'active',
+      createdAt: 1,
       updatedAt: 1,
-    }), 'utf8');
-
-    const { authenticateUser, createSessionToken, getSessionUser, WUJIE_SESSION_COOKIE } = await import('@/lib/server-auth');
-    const user = await authenticateUser({
-      name: 'Mr.joker',
-      password,
-      productType: 'canvas',
-    });
-    expect(user).not.toBeNull();
-    const token = await createSessionToken(user!);
-    const request = {
-      cookies: {
-        get: (name: string): { value: string } | undefined => name === WUJIE_SESSION_COOKIE ? { value: token } : undefined,
-      },
-    };
-
-    await expect(getSessionUser(request as never)).resolves.toMatchObject({
-      id: 'admin_mr_joker',
-      role: 'admin',
-    });
-    expect(user).toMatchObject({
-      id: 'admin_mr_joker',
-      role: 'admin',
-    });
-    expect(token).toContain('.');
+    })).rejects.toThrow('Production authentication secret is not configured');
   });
 
-  it('uses the baseline administrator password when a production bootstrap password is missing', async () => {
+  it('refuses to bootstrap an administrator without an explicit production password', async () => {
     temporaryDataDir = await mkdtemp(path.join(os.tmpdir(), 'wujie-auth-test-'));
     process.env.COZE_PROJECT_ENV = 'PROD';
     process.env.WUJIE_DATA_DIR = temporaryDataDir;
@@ -91,16 +51,20 @@ describe.sequential('server authentication production security', () => {
     process.env.WUJIE_ADMIN_USERNAME = 'bootstrap-admin';
 
     const { authenticateUser } = await import('@/lib/server-auth');
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
-    await expect(authenticateUser({
-      name: 'bootstrap-admin',
-      password: 'dongdong851212',
-      productType: 'canvas',
-    })).resolves.toMatchObject({
-      name: 'bootstrap-admin',
-      role: 'admin',
-      productType: 'canvas,chat',
-    });
+    try {
+      await expect(authenticateUser({
+        name: 'bootstrap-admin',
+        password: 'any-value',
+      })).rejects.toThrow('Production administrator bootstrap password is not configured');
+      expect(errorSpy).not.toHaveBeenCalled();
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
   });
 
   it('authenticates an existing administrator with the persisted production secret after redeploy', async () => {
@@ -168,4 +132,28 @@ describe.sequential('server authentication production security', () => {
     });
   });
 
+  it('authorizes a newly created managed user for the canvas product by default', async () => {
+    temporaryDataDir = await mkdtemp(path.join(os.tmpdir(), 'wujie-auth-test-'));
+    process.env.COZE_PROJECT_ENV = 'DEV';
+    process.env.WUJIE_DATA_DIR = temporaryDataDir;
+    process.env.WUJIE_AUTH_SECRET = 'test-development-auth-secret-at-least-32-characters';
+    process.env.WUJIE_ADMIN_USERNAME = 'bootstrap-admin';
+    process.env.WUJIE_ADMIN_PASSWORD = 'bootstrap-password';
+
+    const { authenticateUser, createManagedUser } = await import('@/lib/server-auth');
+    await createManagedUser({
+      name: 'canvas-user',
+      password: 'canvas-user-password',
+    });
+
+    await expect(authenticateUser({
+      name: 'canvas-user',
+      password: 'canvas-user-password',
+      productType: 'canvas',
+    })).resolves.toMatchObject({
+      name: 'canvas-user',
+      role: 'user',
+      productType: 'canvas,chat',
+    });
+  });
 });
