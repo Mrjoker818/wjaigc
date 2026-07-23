@@ -1,5 +1,7 @@
 // ========== 项目化聊天类型定义 (对齐开发文档) ==========
 
+import type { ReasoningEffort, ResponseSpeed, ResolvedChatControls } from '@/lib/chat-generation-controls';
+
 export interface SimpleChatProject {
   id: string;
   name: string;
@@ -22,6 +24,9 @@ export interface SimpleChatTask {
   providerId: string;
   imageModel?: string;
   imageProviderId?: string;
+  reasoningEffort?: ReasoningEffort;
+  responseSpeed?: ResponseSpeed;
+  appliedChatControls?: Pick<ResolvedChatControls, 'appliedReasoningEffort' | 'appliedResponseSpeed' | 'degraded' | 'notices'>;
   activeAgentId?: string;
   createdAt: number;
   updatedAt: number;

@@ -4,6 +4,7 @@ import type { ApiKind } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { SearchClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
 import { fetchWithTimeout } from '@/lib/api-helpers';
+import { resolveChatControls } from '@/lib/chat-generation-controls';
 
 const DEFAULT_SYSTEM_PROMPT = `你是无界AI的智能助手。你可以：
 1. 回答用户的各种问题
@@ -43,6 +44,8 @@ export async function POST(request: NextRequest) {
     memories?: string[];
     deepAnalysis?: boolean;
     i2iStrength?: number;
+    reasoningEffort?: string;
+    responseSpeed?: string;
   };
   const messages = body.messages || [];
   const model = body.model || 'deepseek-v4-flash';
@@ -84,6 +87,7 @@ export async function POST(request: NextRequest) {
 
   const apiKey = provider.apiKey;
   const baseUrl = provider.baseUrl?.replace(/\/+$/, '') || '';
+  const chatControls = resolveChatControls(model, provider, body.reasoningEffort, body.responseSpeed);
 
   // 构建增强的 system prompt（指令 + 知识库 + 联网搜索结果）
   let enhancedSystemPrompt = DEFAULT_SYSTEM_PROMPT;
@@ -188,6 +192,15 @@ export async function POST(request: NextRequest) {
       };
 
       try {
+        send({
+          type: 'generation_controls',
+          appliedReasoningEffort: chatControls.appliedReasoningEffort,
+          appliedResponseSpeed: chatControls.appliedResponseSpeed,
+          degraded: chatControls.degraded,
+          notices: chatControls.notices,
+          support: chatControls.support,
+        });
+
         // 先发送搜索结果（如果有联网搜索）
         if (webSearch) {
           if (searchResults) {
@@ -239,6 +252,7 @@ export async function POST(request: NextRequest) {
             stream: true,
             tools,
             tool_choice: 'auto',
+            ...chatControls.requestParams,
           }),
         }, 'chat');
 

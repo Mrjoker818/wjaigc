@@ -19,6 +19,7 @@ import {
   PRESET_SKILLS, PresetSkill
 } from "./simple-chat-types";
 import { User } from "@/lib/user-types";
+import type { ReasoningEffort, ResponseSpeed } from "@/lib/chat-generation-controls";
 import { useTheme } from "@/app/simple-chat/providers";
 
 type ChatModelInfo = {
@@ -176,6 +177,9 @@ export default function ChatArea({
   const [chatModels, setChatModels] = useState<ChatModelInfo[]>([]);
   const [selectedModel, setSelectedModel] = useState(task?.model || "");
   const [selectedProviderId, setSelectedProviderId] = useState(task?.providerId || "");
+  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(task?.reasoningEffort || 'medium');
+  const [responseSpeed, setResponseSpeed] = useState<ResponseSpeed>(task?.responseSpeed || 'balanced');
+  const [controlNotice, setControlNotice] = useState<string | null>(null);
   const [openModelMenu, setOpenModelMenu] = useState<'chat' | 'image' | null>(null);
 
   // ===== 新增升级功能状态 =====
@@ -226,6 +230,9 @@ export default function ChatArea({
       setMessages((task.messages || []).filter(Boolean));
       setSelectedModel(task.model);
       setSelectedProviderId(task.providerId);
+      setReasoningEffort(task.reasoningEffort || 'medium');
+      setResponseSpeed(task.responseSpeed || 'balanced');
+      setControlNotice(null);
       setInput("");
     }
   }, [task?.id]);
