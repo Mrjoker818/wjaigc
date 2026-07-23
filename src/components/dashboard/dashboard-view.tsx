@@ -1498,22 +1498,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       const models = data.models || [];
       setDiscoveredModels(models); setModelSearchQuery('');
       setTestNewResult({ success: true, message: `连接成功，发现 ${models.length} 个可用模型`, modelCount: models.length });
-      if (apiKind === 'vectorize') {
-        const vModels = models.filter((m: ModelInfo) => { const id = m.id.toLowerCase(); return id.includes('vector') || id.includes('vectorize') || id.includes('svg') || id.includes('tracer') || id.includes('starvector'); });
-        setSelectedModels(vModels.length > 0 ? vModels.map((m: ModelInfo) => m.id) : []);
-      } else if (apiKind === 'layer') {
-        const lModels = models.filter((m: ModelInfo) => { const id = m.id.toLowerCase(); return id.includes('layer') || id.includes('segment') || id.includes('qwen-image-layered'); });
-        setSelectedModels(lModels.length > 0 ? lModels.map((m: ModelInfo) => m.id) : []);
-      } else if (apiKind === 'upscaler') {
-        const uModels = models.filter((m: ModelInfo) => { const id = m.id.toLowerCase(); return id.includes('upscale') || id.includes('seedvr') || id.includes('esrgan') || id.includes('realesrgan') || id.includes('swinir') || id.includes('hat'); });
-        setSelectedModels(uModels.length > 0 ? uModels.map((m: ModelInfo) => m.id) : []);
-      } else if (apiKind === 'removebg') {
-        const rModels = models.filter((m: ModelInfo) => { const id = m.id.toLowerCase(); return id.includes('removebg') || id.includes('rmbg') || id.includes('birefnet') || id.includes('u2net') || id.includes('isnet') || id.includes('background') || id.includes('matting'); });
-        setSelectedModels(rModels.length > 0 ? rModels.map((m: ModelInfo) => m.id) : []);
-      } else if (selectedModels.length === 0 && models.length > 0) {
-        // Auto-select all models on first discover
-        setSelectedModels(models.map((m: ModelInfo) => m.id));
-      }
+      // 模型发现只更新候选库；所有模型类型都必须由管理员在模型管理区明确勾选后才会对产品开放。
     } catch (err) {
       const msg = err instanceof Error ? err.message : '识别模型失败';
       setTestNewResult({ success: false, message: msg.includes('JSON') ? 'API 返回了非 JSON 响应，请检查 Base URL 是否正确' : msg });
@@ -1583,7 +1568,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     if (!editingProviderId || isSubmitting) return;
     setIsSubmitting(true);
     try {
-      const models = selectedModels.length ? selectedModels : apiModel.trim() ? [apiModel.trim()] : undefined;
+      const models = selectedModels.length ? selectedModels : apiModel.trim() ? [apiModel.trim()] : [];
       const updates: Record<string, unknown> = {};
       if (apiName.trim()) updates.name = apiName.trim();
       updates.displayName = apiDisplayName.trim() || undefined;
@@ -1591,7 +1576,8 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       // 编辑模式下，空apiKey表示不修改现有密钥（服务器端保留原key）
       if (apiKey.trim()) updates.apiKey = apiKey.trim();
       updates.modelType = apiKind;
-      if (models) updates.selectedModels = models;
+      // 空数组同样需要提交，才能持久化“清空已选模型”操作。
+      updates.selectedModels = models;
       // 发送discoveredModels（包含用户手动编辑的displayName）
       if (discoveredModels.length > 0) updates.discoveredModels = discoveredModels;
       const filteredParams = advancedParams.filter(p => p.key.trim());
