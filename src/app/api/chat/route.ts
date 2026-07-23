@@ -11,6 +11,8 @@ import { CHAT_TOOLS, executeToolCall, parseToolCallsFromStream, ToolCallResult }
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { logOperation, logError, startTimer, OP_ACTIONS } from '@/lib/op-log';
 import { resolveChatAgentToolChoice } from '@/lib/chat-agent-tool-choice';
+import { resolveChatControls, type ResolvedChatControls } from '@/lib/chat-generation-controls';
+import type { ApiProvider } from '@/lib/universal-api-types';
 
 export const maxDuration = 120;
 
@@ -109,6 +111,8 @@ export async function POST(request: NextRequest) {
       projectId: requestProjectId = undefined as string | undefined,
       sessionId: requestSessionId = undefined as string | undefined,
       messageId: requestMessageId = undefined as string | undefined,
+      reasoningEffort = undefined as string | undefined,  // 推理强度: light/balanced/deep/extreme
+      responseSpeed = undefined as string | undefined,  // 响应模式: fast/balanced/precise
     } = await request.json();
     
     // P2-9: 极度模糊时强制禁用工具，确保LLM只追问不执行
@@ -199,10 +203,12 @@ export async function POST(request: NextRequest) {
     // 查找 API 提供商配置
     let chatApiKey = '';
     let chatBaseUrl = 'https://api.apimart.ai/v1';
+    let chatProvider: ApiProvider | null = null;
 
     if (providerId) {
       const provider = (await getApiProviders()).find(item => item.id === providerId);
       if (provider) {
+        chatProvider = provider;
         chatApiKey = provider.apiKey;
         chatBaseUrl = normalizeApiBaseUrl(provider.baseUrl);
       } else {
@@ -210,6 +216,7 @@ export async function POST(request: NextRequest) {
       }
     } else {
       const provider = await findProviderForModel(model, 'chat');
+      chatProvider = provider;
       chatApiKey = provider?.apiKey || '';
       if (provider?.baseUrl) {
         chatBaseUrl = provider.baseUrl.replace(/\/+$/, '');
@@ -227,6 +234,14 @@ export async function POST(request: NextRequest) {
     if (requestModel !== baseModel) {
       console.log(`[chat] Model normalized: ${baseModel} → ${requestModel}`);
     }
+
+    // Resolve chat generation controls (reasoning effort + response speed)
+    const chatControls = resolveChatControls(
+      requestModel,
+      chatProvider ?? { id: '', name: '', baseUrl: chatBaseUrl, apiKey: '', isEnabled: true, type: 'chat', createdAt: 0, updatedAt: 0 },
+      reasoningEffort,
+      responseSpeed,
+    );
 
     // Convert relative image URLs to absolute URLs
     const origin = request.headers.get('origin') || process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
@@ -278,7 +293,7 @@ export async function POST(request: NextRequest) {
     // 直到 LLM 返回纯文本（无 tool_calls）或达到最大循环次数
 
     if (effectiveEnableTools && stream) {
-      return handleAgentStream(fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, isThinkingModel, availableTools, imageModel, imageProviderId, isAgentMode, taskContext, tokenBillingHooks);
+      return handleAgentStream(fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, isThinkingModel, availableTools, imageModel, imageProviderId, isAgentMode, taskContext, tokenBillingHooks, chatControls);
     }
 
     // Non-stream or non-tool mode: original behavior
@@ -287,6 +302,7 @@ export async function POST(request: NextRequest) {
       messages: fixedMessages,
       stream,
       temperature: 0.7,
+      ...chatControls.requestParams,
     };
 
     // Token 计费：要求上游在流末尾返回 usage
@@ -297,10 +313,6 @@ export async function POST(request: NextRequest) {
     if (effectiveEnableTools) {
       requestBody.tools = availableTools;
       requestBody.tool_choice = 'auto';
-    }
-
-    if (isThinkingModel) {
-      requestBody.reasoning_effort = 'medium';
     }
 
     const response = await fetchWithV1Retry(
@@ -322,7 +334,7 @@ export async function POST(request: NextRequest) {
       const errorText = await response.text().catch(() => '');
       console.warn(`[chat] Base model ${requestModel} with thinking params failed (${response.status}), trying ${model}...`);
       
-      const retryBody: Record<string, unknown> = { model, messages: fixedMessages, stream, temperature: 0.7 };
+      const retryBody: Record<string, unknown> = { model, messages: fixedMessages, stream, temperature: 0.7, ...chatControls.requestParams };
       if (effectiveEnableTools) {
         retryBody.tools = availableTools;
         retryBody.tool_choice = 'auto';
@@ -371,7 +383,7 @@ export async function POST(request: NextRequest) {
 
       // Handle tool_calls in non-stream mode
       if (effectiveEnableTools && retryData.choices?.[0]?.message?.tool_calls) {
-        return handleNonStreamAgentLoop(retryData, fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, availableTools, imageModel, imageProviderId, isAgentMode, taskContext, tokenBillingHooks);
+        return handleNonStreamAgentLoop(retryData, fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, availableTools, imageModel, imageProviderId, isAgentMode, taskContext, tokenBillingHooks, chatControls);
       }
 
       tokenBillingHooks?.addUsage(retryData?.usage);
@@ -513,7 +525,7 @@ export async function POST(request: NextRequest) {
     
     // Handle tool_calls in non-stream mode
     if (effectiveEnableTools && data.choices?.[0]?.message?.tool_calls) {
-      return handleNonStreamAgentLoop(data, fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, availableTools, imageModel, imageProviderId, undefined, taskContext, tokenBillingHooks);
+      return handleNonStreamAgentLoop(data, fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, availableTools, imageModel, imageProviderId, undefined, taskContext, tokenBillingHooks, chatControls);
     }
 
     tokenBillingHooks?.addUsage(data?.usage);
@@ -561,6 +573,7 @@ async function handleAgentStream(
   isAgentMode?: boolean,
   taskContext: ChatTaskContext = {},
   tokenBilling?: TokenBillingHooks,
+  chatControls?: ResolvedChatControls,
 ): Promise<NextResponse> {
   const agentModeEnabled = isAgentMode ?? false; // 捕获isAgentMode到局部变量
   const encoder = new TextEncoder();
@@ -579,16 +592,13 @@ async function handleAgentStream(
             messages: currentMessages,
             stream: true,
             temperature: 0.7,
+            ...(chatControls?.requestParams ?? {}),
             tools: availableTools,
             tool_choice: toolChoice,
           };
 
           if (tokenBilling) {
             requestBody.stream_options = { include_usage: true };
-          }
-
-          if (isThinkingModel) {
-            requestBody.reasoning_effort = 'medium';
           }
 
           const response = await fetchWithV1Retry(chatBaseUrl, '/chat/completions', {
@@ -617,6 +627,7 @@ async function handleAgentStream(
                 messages: currentMessages,
                 stream: true,
                 temperature: 0.7,
+                ...(chatControls?.requestParams ?? {}),
               };
               const fallbackResponse = await fetchWithV1Retry(chatBaseUrl, '/chat/completions', {
                 method: 'POST',
@@ -854,6 +865,7 @@ async function handleNonStreamAgentLoop(
   isAgentMode?: boolean,
   taskContext: ChatTaskContext = {},
   tokenBilling?: TokenBillingHooks,
+  chatControls?: ResolvedChatControls,
 ): Promise<NextResponse> {
   const agentModeEnabled = isAgentMode ?? false;
   const currentMessages = [...fixedMessages];
@@ -911,6 +923,7 @@ async function handleNonStreamAgentLoop(
       messages: currentMessages,
       stream: false,
       temperature: 0.7,
+      ...(chatControls?.requestParams ?? {}),
       tools: availableTools,
       tool_choice: 'auto',
     };
