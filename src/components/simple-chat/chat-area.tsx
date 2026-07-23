@@ -198,6 +198,7 @@ export default function ChatArea({
   const [chatModels, setChatModels] = useState<ChatModelInfo[]>([]);
   const [selectedModel, setSelectedModel] = useState(task?.model || "");
   const [selectedProviderId, setSelectedProviderId] = useState(task?.providerId || "");
+  const [openModelMenu, setOpenModelMenu] = useState<'chat' | 'image' | null>(null);
 
   // ===== 新增升级功能状态 =====
   // 图片灯箱预览
@@ -238,6 +239,8 @@ export default function ChatArea({
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const chatModelMenuRef = useRef<HTMLDivElement>(null);
+  const imageModelMenuRef = useRef<HTMLDivElement>(null);
 
   // Messages: sync from task
   const [messages, setMessages] = useState<SimpleChatMessage[]>(task?.messages || []);
@@ -301,6 +304,20 @@ export default function ChatArea({
       }
     }).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!openModelMenu) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (!chatModelMenuRef.current?.contains(target) && !imageModelMenuRef.current?.contains(target)) {
+        setOpenModelMenu(null);
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [openModelMenu]);
 
   // Fetch image models
   const fetchImageModels = useCallback(async () => {
@@ -1173,16 +1190,22 @@ export default function ChatArea({
         </button>
         <div className="flex-1" />
         {/* Model Selector */}
-        <div className="relative group">
-          <button className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-muted hover:bg-muted/80 transition-colors text-xs">
+        <div ref={chatModelMenuRef} className="relative">
+          <button
+            type="button"
+            aria-haspopup="listbox"
+            aria-expanded={openModelMenu === 'chat'}
+            onClick={() => setOpenModelMenu(openModelMenu === 'chat' ? null : 'chat')}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-muted hover:bg-muted/80 transition-colors text-xs cursor-pointer"
+          >
             <Sparkles className="w-3.5 h-3.5 text-yellow-500" />
             <span className="font-medium max-w-[120px] truncate">{chatModels.find(m => m.providerId === selectedProviderId && m.modelId === selectedModel)?.name || selectedModel || '选择模型'}</span>
-            <ChevronDown className="w-3 h-3 text-muted-foreground" />
+            <ChevronDown className={`w-3 h-3 text-muted-foreground transition-transform ${openModelMenu === 'chat' ? 'rotate-180' : ''}`} />
           </button>
-          <div className="absolute right-0 top-full mt-1 w-80 bg-card border border-border rounded-xl shadow-xl z-50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all max-h-96 overflow-y-auto p-1">
+          <div className={`absolute right-0 top-full mt-1 w-80 bg-card border border-border rounded-xl shadow-xl z-[100] max-h-96 overflow-y-auto p-1 transition-opacity ${openModelMenu === 'chat' ? 'opacity-100 visible pointer-events-auto' : 'opacity-0 invisible pointer-events-none'}`} role="listbox">
             {chatModels.map(m => (
-              <button key={m.id} onClick={() => { setSelectedModel(m.modelId); setSelectedProviderId(m.providerId); }}
-                className={`w-full text-left px-3 py-2 rounded-lg hover:bg-muted transition-colors ${m.providerId === selectedProviderId && m.modelId === selectedModel ? 'bg-primary/10' : ''}`}>
+              <button key={m.id} type="button" role="option" aria-selected={m.providerId === selectedProviderId && m.modelId === selectedModel} onClick={() => { setSelectedModel(m.modelId); setSelectedProviderId(m.providerId); setOpenModelMenu(null); }}
+                className={`w-full text-left px-3 py-2 rounded-lg hover:bg-muted transition-colors cursor-pointer ${m.providerId === selectedProviderId && m.modelId === selectedModel ? 'bg-primary/10' : ''}`}>
                 <div className="flex items-center gap-2">
                   <span className={`text-sm font-medium ${m.providerId === selectedProviderId && m.modelId === selectedModel ? 'text-primary' : ''}`}>{m.name}</span>
                   {m.tags && m.tags.map((t: string) => (
@@ -1198,17 +1221,23 @@ export default function ChatArea({
           </div>
         </div>
         {/* Image Model Selector */}
-        <div className="relative group">
-          <button className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-muted hover:bg-muted/80 transition-colors text-xs">
+        <div ref={imageModelMenuRef} className="relative">
+          <button
+            type="button"
+            aria-haspopup="listbox"
+            aria-expanded={openModelMenu === 'image'}
+            onClick={() => setOpenModelMenu(openModelMenu === 'image' ? null : 'image')}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-muted hover:bg-muted/80 transition-colors text-xs cursor-pointer"
+          >
             <Image className="w-3.5 h-3.5 text-purple-400" />
             <span className="font-medium max-w-[100px] truncate">{imageModels.find(m => m.providerId === selectedImageProviderId && m.modelId === selectedImageModel)?.name || selectedImageModel || '图像模型'}</span>
-            <ChevronDown className="w-3 h-3 text-muted-foreground" />
+            <ChevronDown className={`w-3 h-3 text-muted-foreground transition-transform ${openModelMenu === 'image' ? 'rotate-180' : ''}`} />
           </button>
-          <div className="absolute right-0 top-full mt-1 w-80 bg-card border border-border rounded-xl shadow-xl z-50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all max-h-96 overflow-y-auto p-1">
+          <div className={`absolute right-0 top-full mt-1 w-80 bg-card border border-border rounded-xl shadow-xl z-[100] max-h-96 overflow-y-auto p-1 transition-opacity ${openModelMenu === 'image' ? 'opacity-100 visible pointer-events-auto' : 'opacity-0 invisible pointer-events-none'}`} role="listbox">
             <div className="px-3 py-1.5 text-[11px] text-muted-foreground/60 font-medium">图像生成模型</div>
             {imageModels.map(m => (
-              <button key={m.id} onClick={() => { setSelectedImageModel(m.modelId); setSelectedImageProviderId(m.providerId); }}
-                className={`w-full text-left px-3 py-2 rounded-lg hover:bg-muted transition-colors ${m.providerId === selectedImageProviderId && m.modelId === selectedImageModel ? 'bg-primary/10' : ''}`}>
+              <button key={m.id} type="button" role="option" aria-selected={m.providerId === selectedImageProviderId && m.modelId === selectedImageModel} onClick={() => { setSelectedImageModel(m.modelId); setSelectedImageProviderId(m.providerId); setOpenModelMenu(null); }}
+                className={`w-full text-left px-3 py-2 rounded-lg hover:bg-muted transition-colors cursor-pointer ${m.providerId === selectedImageProviderId && m.modelId === selectedImageModel ? 'bg-primary/10' : ''}`}>
                 <div className="flex items-center gap-2">
                   <span className={`text-sm font-medium ${m.providerId === selectedImageProviderId && m.modelId === selectedImageModel ? 'text-primary' : ''}`}>{m.name}</span>
                   {m.tags && m.tags.map(t => (
