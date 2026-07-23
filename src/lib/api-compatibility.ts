@@ -32,7 +32,7 @@ export type ResponseMode = 'polling' | 'direct' | 'async-task';
 export type SizeFormat = 'aspect-ratio' | 'pixel';
 
 /** Which endpoint to use for image generation */
-export type ImageEndpoint = '/images/generations' | '/images/edits' | '/chat/completions' | '/302/submit/super-upscale-v2';
+export type ImageEndpoint = '/images/generations' | '/images/edits' | '/midjourney/generations' | '/chat/completions' | '/302/submit/super-upscale-v2';
 
 /** How to encode /images/edits requests */
 export type EditEncoding = 'json-first' | 'multipart-only';
@@ -137,6 +137,34 @@ export const PROFILE_APIMART: ApiCompatProfile = {
  * 4SAPI's GPT Image endpoint follows the OpenAI image protocol, but rejects
  * an explicit size="auto" value and does not accept APIMart's resolution field.
  */
+/**
+ * APIB/APIMart Midjourney uses a dedicated task submission endpoint.
+ * The endpoint selects the Midjourney model itself, so generic image fields
+ * such as model, n, resolution, and derived pixel hints must not be sent.
+ */
+export const PROFILE_APIMART_MIDJOURNEY: ApiCompatProfile = {
+  id: 'apimart-midjourney',
+  label: 'APIB Midjourney (专用异步任务)',
+  responseMode: 'polling',
+  sizeFormat: 'aspect-ratio',
+  defaultEndpoint: '/midjourney/generations',
+  editEndpoint: '/midjourney/generations',
+  editEncoding: 'json-first',
+  supportsInputFidelity: false,
+  pollMode: 'path',
+  pollMethod: 'GET',
+  includeDerivedPixelHints: false,
+  pollPathTemplate: '/tasks/{taskId}?language=zh',
+};
+
+export function isApimartMidjourneyModel(modelId: string): boolean {
+  return /(^|[-_\s])midjourney($|[-_\s])|^mj(?:[-_\s]|$)/i.test(modelId.trim());
+}
+
+export function isApimartFamilyUrl(baseUrl: string | undefined): boolean {
+  return /(?:apimart|apib)\.ai/i.test(baseUrl || '');
+}
+
 export const PROFILE_4SAPI: ApiCompatProfile = {
   id: '4sapi',
   label: '4SAPI OpenAI 图像 (像素尺寸)',
@@ -324,6 +352,7 @@ export const PROFILE_302AI_UPSCALE: ApiCompatProfile = {
 /** Map of all built-in profiles by id */
 export const COMPAT_PROFILES: Record<string, ApiCompatProfile> = {
   [PROFILE_APIMART.id]: PROFILE_APIMART,
+  [PROFILE_APIMART_MIDJOURNEY.id]: PROFILE_APIMART_MIDJOURNEY,
   [PROFILE_4SAPI.id]: PROFILE_4SAPI,
   [PROFILE_OPENAI.id]: PROFILE_OPENAI,
   [PROFILE_OPENAI_ASYNC.id]: PROFILE_OPENAI_ASYNC,
@@ -808,6 +837,13 @@ export function resolveProfileForModel(
 ): ApiCompatProfile {
   // First resolve the normal profile
   const baseProfile = resolveCompatProfile(provider);
+
+  // APIB/APIMart exposes Midjourney on a dedicated endpoint. Keep this scoped
+  // to its own domains so providers with a similarly named model retain their
+  // explicitly configured compatibility profile.
+  if (isApimartFamilyUrl(provider?.baseUrl) && isApimartMidjourneyModel(modelId)) {
+    return PROFILE_APIMART_MIDJOURNEY;
+  }
 
   // IMPORTANT: If the model is a known OpenAI image model (gpt-image-*, dall-e-*),
   // it MUST use the standard OpenAI image API (/v1/images/generations or /v1/images/edits),
@@ -1647,6 +1683,30 @@ export function adjustRequestForProfile(
         }
       }
     }
+  }
+
+  // Midjourney accepts a constrained contract on its dedicated endpoint. Build
+  // the payload from the documented whitelist instead of deleting fields one by
+  // one, so new generic image parameters cannot accidentally leak into it.
+  if (profile.id === 'apimart-midjourney') {
+    const midjourneyBody: Record<string, unknown> = {};
+    const allowedFields = ['prompt', 'size', 'image_urls', 'seed', 'stylize', 'chaos', 'quality', 'no', 'tile', 'weird', 'version'] as const;
+    for (const field of allowedFields) {
+      if (body[field] !== undefined) midjourneyBody[field] = body[field];
+    }
+
+    const imageUrls: string[] = [];
+    const seenUrls = new Set<string>();
+    const appendImageUrl = (value: unknown): void => {
+      if (typeof value !== 'string' || !value || seenUrls.has(value)) return;
+      seenUrls.add(value);
+      imageUrls.push(value);
+    };
+    if (typeof body.image === 'string') appendImageUrl(body.image);
+    if (Array.isArray(body.image_urls)) body.image_urls.forEach(appendImageUrl);
+    if (imageUrls.length > 0) midjourneyBody.image_urls = imageUrls;
+
+    return { body: midjourneyBody, endpoint: '/midjourney/generations' };
   }
 
   // --- Endpoint selection ---

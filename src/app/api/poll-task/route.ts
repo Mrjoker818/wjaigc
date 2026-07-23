@@ -36,6 +36,8 @@ const completedTaskCache = new Map<string, {
   imageUrls?: string[];
   maskUrl?: string;
   maskUrls?: string[];
+  gridImageUrl?: string;
+  buttons?: unknown[];
   modelName?: string;
   providerName?: string;
   timestamp: number;
@@ -522,6 +524,8 @@ export async function POST(request: NextRequest) {
         imageUrls: cachedCompleted.imageUrls || [cachedCompleted.imageUrl],
         maskUrl: cachedCompleted.maskUrl || '',
         maskUrls: cachedCompleted.maskUrls || (cachedCompleted.maskUrl ? [cachedCompleted.maskUrl] : []),
+        gridImageUrl: cachedCompleted.gridImageUrl || '',
+        buttons: cachedCompleted.buttons || [],
         modelName: cachedCompleted.modelName || '',
         providerName: cachedCompleted.providerName || '',
       }, { status: 200 });
@@ -1439,8 +1443,9 @@ export async function POST(request: NextRequest) {
     if (statusResult) {
       const taskData0 = statusResult.data as Record<string, unknown> | undefined;
       const taskStatus0 = taskData0?.status as string | undefined;
-      const processingStatuses = ['processing', 'running', 'pending', 'in_progress', 'queued', 'submitted', 'PROCESSING', 'RUNNING', 'PENDING', 'IN_PROGRESS', 'QUEUED', 'SUBMITTED'];
+      const processingStatuses = ['processing', 'running', 'pending', 'in_progress', 'queued', 'submitted', 'not_start', 'modal', 'PROCESSING', 'RUNNING', 'PENDING', 'IN_PROGRESS', 'QUEUED', 'SUBMITTED', 'NOT_START', 'MODAL'];
       const completedStatuses = ['completed', 'succeeded', 'success', 'done', 'SUCCEEDED', 'COMPLETED', 'SUCCESS', 'DONE'];
+      const failedStatuses = ['failed', 'failure', 'cancelled', 'FAILED', 'FAILURE', 'CANCELLED'];
 
       if (processingStatuses.includes(taskStatus0 || '')) {
         for (let qp = 0; qp < MAX_QUICK_POLLS; qp++) {
@@ -1449,7 +1454,7 @@ export async function POST(request: NextRequest) {
           if (pollResult) {
             const td = pollResult.statusResult.data as Record<string, unknown> | undefined;
             const ts = td?.status as string | undefined;
-            if (completedStatuses.includes(ts || '') || (ts?.toLowerCase() === 'failed') || (ts?.toLowerCase() === 'cancelled')) {
+            if (completedStatuses.includes(ts || '') || failedStatuses.includes(ts || '')) {
               statusResult = pollResult.statusResult;
               break;
             }
@@ -1473,7 +1478,18 @@ export async function POST(request: NextRequest) {
     }
 
     const completedStatuses = ['completed', 'succeeded', 'success', 'done', 'SUCCEEDED', 'COMPLETED', 'SUCCESS', 'DONE'];
-    let normalizedStatus = completedStatuses.includes(taskStatus || '') ? 'completed' : (taskStatus?.toLowerCase() || 'processing');
+    const processingStatuses = ['processing', 'running', 'pending', 'in_progress', 'queued', 'submitted', 'not_start', 'modal', 'PROCESSING', 'RUNNING', 'PENDING', 'IN_PROGRESS', 'QUEUED', 'SUBMITTED', 'NOT_START', 'MODAL'];
+    const failedStatuses = ['failed', 'failure', 'FAILED', 'FAILURE'];
+    const cancelledStatuses = ['cancelled', 'CANCELLED'];
+    let normalizedStatus = completedStatuses.includes(taskStatus || '')
+      ? 'completed'
+      : failedStatuses.includes(taskStatus || '')
+        ? 'failed'
+        : cancelledStatuses.includes(taskStatus || '')
+          ? 'cancelled'
+          : processingStatuses.includes(taskStatus || '')
+            ? 'processing'
+            : (taskStatus?.toLowerCase() || 'processing');
 
     // ★ 日志：每次轮询结果
     console.log(`[poll-task] taskId=${taskId} status=${taskStatus} → normalized=${normalizedStatus}, progress=${(taskData?.progress as number) || 0}`);
@@ -1487,7 +1503,7 @@ export async function POST(request: NextRequest) {
       actualTime: taskData?.actual_time,
     };
 
-    if (completedStatuses.includes(taskStatus || '')) {
+    if (normalizedStatus === 'completed') {
       // 提取图片URL - 通用格式兼容（多种 API 响应格式）
       const sourceImageUrls: string[] = [];
       const appendSourceImageUrl = (value: unknown, base64 = false): void => {
@@ -1530,6 +1546,21 @@ export async function POST(request: NextRequest) {
 
       // 路径2: data.result.b64_json / image_urls / generated_images / data
       appendSourceImageUrl(taskResult?.b64_json, true);
+      // Midjourney returns a four-up preview separately from individual images.
+      // Preserve it as metadata while still making it a usable fallback result.
+      const gridImageUrl = typeof taskResult?.grid_image_url === 'string'
+        ? taskResult.grid_image_url
+        : typeof taskData?.grid_image_url === 'string'
+          ? taskData.grid_image_url
+          : undefined;
+      if (gridImageUrl) appendSourceImageUrl(gridImageUrl);
+      const taskButtons = Array.isArray(taskResult?.buttons)
+        ? taskResult.buttons
+        : Array.isArray(taskData?.buttons)
+          ? taskData.buttons
+          : [];
+      if (gridImageUrl) pollResult.gridImageUrl = gridImageUrl;
+      if (taskButtons.length > 0) pollResult.buttons = taskButtons;
       appendSourceImageUrl(taskResult?.image_urls);
       appendSourceImageUrl(taskResult?.imageUrls);
       appendSourceImageUrl(taskResult?.generated_images);
@@ -1874,7 +1905,10 @@ export async function POST(request: NextRequest) {
 
       if (!pollResult.imageUrl) {
         const taskError = taskData?.error as Record<string, unknown> | undefined;
-        const errorDetail = (taskError?.message as string) || '';
+        const errorDetail = (taskData?.fail_reason as string)
+          || (taskData?.failReason as string)
+          || (taskError?.message as string)
+          || (typeof taskData?.error === 'string' ? taskData.error : '');
         const classifiedNoImgErr = classifyApiError(errorDetail || '模型返回了文本而不是生成图像');
 
         const terminalError = classifiedNoImgErr.friendlyMessage
@@ -1934,13 +1968,17 @@ export async function POST(request: NextRequest) {
         imageUrl: imageUrls[0],
         imageUrls,
       });
-      updateTaskProgress(taskId, { status: 'completed', progress: 100, result: { ...existingResult, imageUrl: imageUrls[0], imageUrls, maskUrl: maskUrls[0] || '', maskUrls, usedModel: model || regUsedModel || existingResult.usedModel, modelName: finalModelName, providerName: finalProviderName } });
+      const gridImageUrl = typeof pollResult.gridImageUrl === 'string' ? pollResult.gridImageUrl : '';
+      const buttons = Array.isArray(pollResult.buttons) ? pollResult.buttons : [];
+      updateTaskProgress(taskId, { status: 'completed', progress: 100, result: { ...existingResult, imageUrl: imageUrls[0], imageUrls, maskUrl: maskUrls[0] || '', maskUrls, gridImageUrl, buttons, usedModel: model || regUsedModel || existingResult.usedModel, modelName: finalModelName, providerName: finalProviderName } });
       void recordImageTaskTerminal(taskId, {
         status: 'completed',
         imageUrl: imageUrls[0],
         imageUrls,
         maskUrl: maskUrls[0],
         maskUrls,
+        gridImageUrl,
+        buttons,
         creditStatus: regInfo?.creditCost && regInfo.creditCost > 0 ? 'charged' : 'not-applicable',
       }).catch(error => console.warn('[poll-task] 云端任务完成记录失败:', error));
 
@@ -1967,14 +2005,21 @@ export async function POST(request: NextRequest) {
           imageUrls,
           maskUrl: maskUrls[0] || '',
           maskUrls,
+          gridImageUrl,
+          buttons,
           modelName: finalModelName,
           providerName: finalProviderName,
           timestamp: Date.now(),
         });
       }
       }
-    } else if (taskStatus?.toLowerCase() === 'failed') {
-      const rawError = ((taskData?.error as Record<string, unknown>)?.message as string) || '图像生成任务失败';
+    } else if (normalizedStatus === 'failed') {
+      const taskError = taskData?.error as Record<string, unknown> | undefined;
+      const rawError = (taskData?.fail_reason as string)
+        || (taskData?.failReason as string)
+        || (taskError?.message as string)
+        || (typeof taskData?.error === 'string' ? taskData.error : '')
+        || '图像生成任务失败';
       const classifiedErr = classifyApiError(rawError);
       const translatedError = classifiedErr.friendlyMessage + (classifiedErr.suggestion ? ' — ' + classifiedErr.suggestion : '');
       const isCfTimeout = isCloudflareTimeoutError(rawError);
@@ -1996,9 +2041,22 @@ export async function POST(request: NextRequest) {
       (pollResult as Record<string, unknown>).errorCategory = classifiedErr.category;
       (pollResult as Record<string, unknown>).isRetryable = classifiedErr.isRetryable;
       (pollResult as Record<string, unknown>).isCfTimeout = isCfTimeout;
-    } else if (taskStatus?.toLowerCase() === 'cancelled') {
+    } else if (normalizedStatus === 'cancelled') {
+      const creditStatus = await refundTaskCredits(
+        taskId,
+        getTaskInfo(taskId)?.creditCost,
+        `图像生成取消退款 (taskId: ${taskId})`,
+      );
+      updateTaskProgress(taskId, { status: 'cancelled', progress: 100, error: '任务已被取消' });
+      await recordImageTaskTerminal(taskId, {
+        status: 'cancelled',
+        error: '任务已被取消',
+        creditStatus,
+      }).catch(error => console.warn('[poll-task] 云端任务取消记录失败:', error));
+      releaseQueueSlot(taskId);
       pollResult.error = '任务已被取消';
       pollResult.success = false;
+      pollResult.retryable = false;
     }
 
     // ★ 日志：返回给前端的最终结果

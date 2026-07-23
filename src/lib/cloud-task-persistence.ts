@@ -28,6 +28,8 @@ interface ImageTaskTerminal {
   imageUrls?: string[];
   maskUrl?: string;
   maskUrls?: string[];
+  gridImageUrl?: string;
+  buttons?: unknown[];
   error?: string;
   creditStatus?: CloudTaskCreditStatus;
   persist?: boolean;
@@ -108,12 +110,15 @@ export async function recordImageTaskTerminal(taskId: string, input: ImageTaskTe
     ...(input.maskUrls || []),
     ...(input.maskUrl ? [input.maskUrl] : []),
   ].filter((url): url is string => typeof url === 'string' && url.length > 0)));
-  const result = imageUrls.length > 0
+  const hasResultMetadata = Boolean(input.gridImageUrl) || Boolean(input.buttons?.length);
+  const result = imageUrls.length > 0 || hasResultMetadata
     ? {
-        imageUrl: imageUrls[0],
+        imageUrl: imageUrls[0] || '',
         imageUrls,
         maskUrl: maskUrls[0] || '',
         maskUrls,
+        gridImageUrl: input.gridImageUrl || '',
+        buttons: input.buttons || [],
       }
     : undefined;
 

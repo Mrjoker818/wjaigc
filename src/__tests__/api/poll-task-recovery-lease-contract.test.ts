@@ -25,9 +25,32 @@ describe('poll-task recovery lease contract', () => {
 
   it('refunds a recovered task when provider polling reaches a terminal failure', () => {
     const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/poll-task/route.ts'), 'utf8');
-    const providerFailure = source.indexOf("} else if (taskStatus?.toLowerCase() === 'failed')");
+    const providerFailure = source.indexOf("} else if (normalizedStatus === 'failed')");
 
+    expect(providerFailure).toBeGreaterThan(-1);
     expect(source.indexOf('refundTaskCredits(', providerFailure)).toBeGreaterThan(providerFailure);
+  });
+
+  it('normalizes Midjourney async statuses and preserves its terminal metadata', () => {
+    const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/poll-task/route.ts'), 'utf8');
+
+    for (const status of ['NOT_START', 'SUBMITTED', 'IN_PROGRESS', 'MODAL', 'SUCCESS', 'FAILURE']) {
+      expect(source).toContain(`'${status}'`);
+    }
+    expect(source).toContain('taskData?.fail_reason');
+    expect(source).toContain('taskData?.failReason');
+    expect(source).toContain('grid_image_url');
+    expect(source).toContain('taskResult?.buttons');
+    expect(source).toContain('gridImageUrl,');
+    expect(source).toContain('buttons,');
+  });
+
+  it('cleans up cancelled provider tasks through the normalized terminal state', () => {
+    const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/poll-task/route.ts'), 'utf8');
+    const cancelled = source.indexOf("} else if (normalizedStatus === 'cancelled')");
+
+    expect(cancelled).toBeGreaterThan(-1);
+    expect(source.indexOf('releaseQueueSlot(taskId)', cancelled)).toBeGreaterThan(cancelled);
   });
 
   it('marks a recovered task as charged before returning a successful image', () => {

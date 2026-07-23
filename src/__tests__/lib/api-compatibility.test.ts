@@ -101,6 +101,62 @@ describe('provider request contracts', () => {
     expect(body).not.toHaveProperty('resolution');
   });
 
+  it('routes APIB/APIMart Midjourney models through the dedicated asynchronous profile', () => {
+    const midjourneyProfile = resolveProfileForModel('midjourney-v6', {
+      baseUrl: 'https://api.apib.ai/v1',
+    });
+    const genericProfile = resolveProfileForModel('gpt-image-2', {
+      baseUrl: 'https://api.apib.ai/v1',
+    });
+
+    expect(midjourneyProfile.id).toBe('apimart-midjourney');
+    expect(midjourneyProfile.defaultEndpoint).toBe('/midjourney/generations');
+    expect(genericProfile.id).toBe('apimart');
+  });
+
+  it('builds the Midjourney request from its documented whitelist and merges references', () => {
+    const profile = resolveProfileForModel('mj-v7', {
+      baseUrl: 'https://apimart.ai/v1',
+    });
+    const { body, endpoint } = adjustRequestForProfile({
+      model: 'mj-v7',
+      prompt: 'A cinematic tea house in the rain',
+      size: '16:9',
+      image: 'https://example.com/first.png',
+      image_urls: ['https://example.com/first.png', 'https://example.com/second.png'],
+      seed: 42,
+      stylize: 250,
+      chaos: 20,
+      quality: 2,
+      no: 'text, watermark',
+      tile: true,
+      weird: 15,
+      version: '7',
+      n: 4,
+      resolution: '2K',
+      width: 2048,
+      height: 1152,
+      size_px: '2048x1152',
+      mask: 'data:image/png;base64,ignored',
+      strength: 0.7,
+    }, profile, { hasImage: true });
+
+    expect(endpoint).toBe('/midjourney/generations');
+    expect(body).toEqual({
+      prompt: 'A cinematic tea house in the rain',
+      size: '16:9',
+      image_urls: ['https://example.com/first.png', 'https://example.com/second.png'],
+      seed: 42,
+      stylize: 250,
+      chaos: 20,
+      quality: 2,
+      no: 'text, watermark',
+      tile: true,
+      weird: 15,
+      version: '7',
+    });
+  });
+
   it('keeps APImart ratio and resolution fields without adding undocumented pixel hints', () => {
     const { body } = adjustRequestForProfile({
       model: 'gpt-image-2',
