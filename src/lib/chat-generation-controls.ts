@@ -40,6 +40,12 @@ export function normalizeResponseSpeed(value: unknown): ResponseSpeed {
   return isResponseSpeed(value) ? value : 'balanced';
 }
 
+function parseInteger(value: string | undefined): number | undefined {
+  if (!value || !/^\d+$/.test(value)) return undefined;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
+}
+
 function parseBoolean(value: string | undefined): boolean | undefined {
   if (value === undefined) return undefined;
   if (value === 'true') return true;
@@ -107,13 +113,22 @@ export function resolveChatControls(
   const notices: string[] = [];
   let appliedReasoningEffort: ResolvedChatControls['appliedReasoningEffort'] = reasoningEffort;
 
+  const advanced = provider.advancedParams || {};
+  const reasoningParam = advanced.reasoningParamName;
+
   if (support.reasoningMode === 'reasoning_effort') {
-    requestParams.reasoning_effort = reasoningEffortValue(reasoningEffort);
+    requestParams[reasoningParam || 'reasoning_effort'] = reasoningEffortValue(reasoningEffort);
     if (reasoningEffort === 'maximum') notices.push('当前协议最高支持 high，已将“极强”映射为 high。');
   } else if (support.reasoningMode === 'thinking_budget') {
-    requestParams.thinking_budget = thinkingBudget(reasoningEffort);
+    const budgetOverrides: Record<ReasoningEffort, number | undefined> = {
+      low: parseInteger(advanced.thinkingBudgetLow),
+      medium: parseInteger(advanced.thinkingBudgetMedium),
+      high: parseInteger(advanced.thinkingBudgetHigh),
+      maximum: parseInteger(advanced.thinkingBudgetMaximum),
+    };
+    requestParams[reasoningParam || 'thinking_budget'] = budgetOverrides[reasoningEffort] || thinkingBudget(reasoningEffort);
   } else if (support.reasoningMode === 'thinking') {
-    requestParams.thinking = reasoningEffort === 'low' ? 'disabled' : 'enabled';
+    requestParams[reasoningParam || 'thinking'] = reasoningEffort === 'low' ? 'disabled' : 'enabled';
     if (reasoningEffort === 'high' || reasoningEffort === 'maximum') {
       notices.push('当前协议仅支持开启或关闭思考，已按“开启思考”执行。');
     }
@@ -125,7 +140,6 @@ export function resolveChatControls(
     notices.push('当前模型未声明推理强度参数，已使用模型默认策略。');
   }
 
-  const advanced = provider.advancedParams || {};
   const tokenParam = advanced.chatTokenLimitParam || (/^(o1|o3|o4)(-|$)|gpt-5/.test(model.toLowerCase()) ? 'max_completion_tokens' : 'max_tokens');
   const useTokenBudget = parseBoolean(advanced.enableChatSpeedTokenBudget) !== false;
   if (useTokenBudget) requestParams[tokenParam] = outputTokenLimit(responseSpeed);
