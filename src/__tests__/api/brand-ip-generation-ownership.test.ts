@@ -3,15 +3,21 @@ import { NextRequest } from 'next/server';
 
 const mocks = vi.hoisted(() => ({
   requireApiAuthOrReject: vi.fn(),
+  getRequestUser: vi.fn(),
   getBrandIpProject: vi.fn(),
   createBrandIpGenerationTask: vi.fn(),
+  executeBrandIpGeneration: vi.fn(),
   getTaskInfo: vi.fn(),
 }));
 
-vi.mock('@/lib/api-auth', () => ({ requireApiAuthOrReject: mocks.requireApiAuthOrReject }));
+vi.mock('@/lib/api-auth', () => ({
+  requireApiAuthOrReject: mocks.requireApiAuthOrReject,
+  getRequestUser: mocks.getRequestUser,
+}));
 vi.mock('@/lib/brand-ip-storage', () => ({ getBrandIpProject: mocks.getBrandIpProject }));
 vi.mock('@/lib/brand-ip-generation', () => ({
   createBrandIpGenerationTask: mocks.createBrandIpGenerationTask,
+  executeBrandIpGeneration: mocks.executeBrandIpGeneration,
 }));
 vi.mock('@/lib/task-registry', () => ({ getTaskInfo: mocks.getTaskInfo }));
 
@@ -26,6 +32,10 @@ describe('brand IP generation boundaries', () => {
       userId: 'user-a',
       userRole: 'user',
     });
+    mocks.getRequestUser.mockResolvedValue({
+      user: { id: 'user-a', role: 'user', status: 'active' },
+    });
+    mocks.executeBrandIpGeneration.mockResolvedValue(undefined);
   });
 
   it('does not create an image task before a role direction is confirmed', async () => {

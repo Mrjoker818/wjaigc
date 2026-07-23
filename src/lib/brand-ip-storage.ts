@@ -187,3 +187,137 @@ export async function createBrandIpProject(userId: string, input: CreateBrandIpP
 
   return rowToProject(result.rows[0] as unknown as BrandIpProjectRow);
 }
+
+// ─── 品牌 IP 资产持久化 ──────────────────────────────────────────────
+
+export interface BrandIpAsset {
+  id: string;
+  projectId: string;
+  userId: string;
+  taskId: string | null;
+  imageUrl: string;
+  prompt: string | null;
+  model: string | null;
+  providerId: string | null;
+  directionId: string | null;
+  version: number;
+  status: 'active' | 'archived' | 'failed';
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+}
+
+interface BrandIpAssetRow {
+  id: string;
+  project_id: string;
+  user_id: string;
+  task_id: string | null;
+  image_url: string;
+  prompt: string | null;
+  model: string | null;
+  provider_id: string | null;
+  direction_id: string | null;
+  version: number;
+  status: string;
+  metadata: string | null;
+  created_at: string;
+}
+
+function rowToAsset(row: BrandIpAssetRow): BrandIpAsset {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    userId: row.user_id,
+    taskId: row.task_id,
+    imageUrl: row.image_url,
+    prompt: row.prompt,
+    model: row.model,
+    providerId: row.provider_id,
+    directionId: row.direction_id,
+    version: row.version,
+    status: row.status as BrandIpAsset['status'],
+    metadata: row.metadata ? (() => { try { return JSON.parse(row.metadata as string); } catch { return null; } })() : null,
+    createdAt: row.created_at,
+  };
+}
+
+let assetTablesEnsured = false;
+
+async function ensureBrandIpAssetTables(): Promise<void> {
+  if (assetTablesEnsured) return;
+  await execSql(`
+    CREATE TABLE IF NOT EXISTS brand_ip_assets (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      task_id TEXT,
+      image_url TEXT NOT NULL,
+      prompt TEXT,
+      model TEXT,
+      provider_id TEXT,
+      direction_id TEXT,
+      version INTEGER NOT NULL DEFAULT 1,
+      status TEXT NOT NULL DEFAULT 'active',
+      metadata JSONB,
+      created_at TEXT NOT NULL
+    )
+  `);
+  await execSql('CREATE INDEX IF NOT EXISTS idx_brand_ip_assets_project ON brand_ip_assets(project_id, user_id, created_at DESC)');
+  assetTablesEnsured = true;
+}
+
+export interface SaveBrandIpAssetInput {
+  projectId: string;
+  userId: string;
+  taskId?: string | null;
+  imageUrl: string;
+  prompt?: string | null;
+  model?: string | null;
+  providerId?: string | null;
+  directionId?: string | null;
+  metadata?: Record<string, unknown> | null;
+}
+
+export async function saveBrandIpAsset(input: SaveBrandIpAssetInput): Promise<BrandIpAsset> {
+  await ensureBrandIpAssetTables();
+  const id = `asset-${nanoid(12)}`;
+  const now = new Date().toISOString();
+
+  // Determine next version number
+  const versionResult = await execSql(
+    'SELECT COALESCE(MAX(version), 0) + 1 AS next_version FROM brand_ip_assets WHERE project_id = $1 AND user_id = $2 AND direction_id = $3',
+    [input.projectId, input.userId, input.directionId || ''],
+  );
+  const version = (versionResult.rows[0] as unknown as { next_version: number })?.next_version ?? 1;
+
+  const result = await execSql(`
+    INSERT INTO brand_ip_assets (
+      id, project_id, user_id, task_id, image_url, prompt, model, provider_id,
+      direction_id, version, status, metadata, created_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'active', $11, $12)
+    RETURNING *
+  `, [
+    id,
+    input.projectId,
+    input.userId,
+    input.taskId ?? null,
+    input.imageUrl,
+    input.prompt ?? null,
+    input.model ?? null,
+    input.providerId ?? null,
+    input.directionId ?? null,
+    version,
+    input.metadata ? JSON.stringify(input.metadata) : null,
+    now,
+  ]);
+
+  return rowToAsset(result.rows[0] as unknown as BrandIpAssetRow);
+}
+
+export async function listBrandIpAssets(projectId: string, userId: string): Promise<BrandIpAsset[]> {
+  await ensureBrandIpAssetTables();
+  const result = await execSql(
+    'SELECT * FROM brand_ip_assets WHERE project_id = $1 AND user_id = $2 AND status = $3 ORDER BY created_at DESC',
+    [projectId, userId, 'active'],
+  );
+  return (result.rows as unknown as BrandIpAssetRow[]).map(rowToAsset);
+}

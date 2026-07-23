@@ -62,6 +62,7 @@ const RefineEnginePanel = lazy(() => import('@/components/refine-engine-panel'))
 const HumanRepairPanel = lazy(() => import('@/components/human-repair-panel'));
 const FontDesignPanel = lazy(() => import('@/components/font-design-panel'));
 const BrandFactoryPanel = lazy(() => import('@/components/brand-factory-panel'));
+const BrandIpPanel = lazy(() => import('@/components/brand-ip-panel'));
 const LogoSkillPanel = lazy(() => import('@/components/logo-skill-panel'));
 const AiPsdPanel = lazy(() => import('@/components/ai-psd/ai-psd-panel'));
 const ImageCompareDialog = lazy(() => import('@/components/image-compare-dialog').then(m => ({ default: m.ImageCompareDialog })));
@@ -447,6 +448,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   // Font design state
   const [showFontDesign, setShowFontDesign] = useState(false);
   const [showBrandFactory, setShowBrandFactory] = useState(false);
+  const [showBrandIp, setShowBrandIp] = useState(false);
   const [showLogoSkill, setShowLogoSkill] = useState(false);
   const [logoSkillBrandProject, setLogoSkillBrandProject] = useState<{ id: string; brandName: string } | null>(null);
   const [showAiPsd, setShowAiPsd] = useState(false);
@@ -1332,7 +1334,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
   // Whether any floating panel is open (used to auto-hide connections & image toolbar)
   const localMediaToolWindowOpen = showRemoveBgPicker || showDisplayDecomposePanel || show3DModal || showVideoExtractPanel || showPsdEditor;
-  const anyPanelOpen = showSvgTracePanel || showAgentEditor || showBrandEcommerce || showFontDesign || showBrandFactory || showSceneStudio || showBrandPackaging || showDisplay3D || showVideoEditPanel || showCanvasGenerator || showRefineEngine || showHumanRepair || showLogoSkill || showAiPsd || showStickerAssistant || showVideoDubPanel || localMediaToolWindowOpen;
+  const anyPanelOpen = showSvgTracePanel || showAgentEditor || showBrandEcommerce || showFontDesign || showBrandFactory || showBrandIp || showSceneStudio || showBrandPackaging || showDisplay3D || showVideoEditPanel || showCanvasGenerator || showRefineEngine || showHumanRepair || showLogoSkill || showAiPsd || showStickerAssistant || showVideoDubPanel || localMediaToolWindowOpen;
 
   // Video tools handler
   const handleVideoTool = async (action: 'to-gif' | 'extract-cover' | 'compress' | 'extract-frame', image: CanvasImage, timestamp?: number) => {
@@ -1536,6 +1538,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     setShowHumanRepair(false);
     setShowFontDesign(false);
     setShowBrandFactory(false);
+    setShowBrandIp(false);
     setShowLogoSkill(false);
     setShowAiPsd(false);
     setShowStickerAssistant(false);
@@ -14308,6 +14311,19 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           </Suspense>
         )}
 
+        {/* ====== BRAND IP DESIGN STUDIO PANEL ====== */}
+        {showBrandIp && (
+          <Suspense fallback={null}>
+            <BrandIpPanel
+              onClose={() => setShowBrandIp(false)}
+              onAddImages={(urls: string[], meta?: { modelName?: string; apiProvider?: string }) => {
+                onAddImages?.(urls, undefined, meta);
+              }}
+              isMonochrome={isMonochrome}
+            />
+          </Suspense>
+        )}
+
         {/* ====== LOGO GENERATOR PRO PANEL ====== */}
         {showLogoSkill && (
           <Suspense fallback={null}>
@@ -15893,6 +15909,16 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           >
             <Building2 className={`h-4 w-4 ${mIcon.building}`} />
             <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">品牌工厂</span>
+          </button>
+
+          {/* Brand IP Design Studio */}
+          <button
+            onClick={() => setShowBrandIp(true)}
+            className={`p-2 rounded-full transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-rose-600 hover:text-rose-500 hover:bg-rose-50' : 'text-gold hover:text-gold-light hover:bg-gold/10'}`}
+            title="品牌IP设计工场"
+          >
+            <Sparkles className="h-4 w-4" />
+            <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">品牌IP</span>
           </button>
 
           {/* Logo Generator Pro */}
