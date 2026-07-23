@@ -39,6 +39,14 @@
       },
       "title": "系统设置",
       "size": "web"
+    },
+    {
+      "type": "html",
+      "options": {
+        "path": ".cozeproj/prototype/web/brand-ip-design-studio.html"
+      },
+      "title": "品牌IP设计工场",
+      "size": "web"
     }
   ]
 }
