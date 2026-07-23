@@ -227,7 +227,7 @@ export default function ChatArea({
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+    el.style.height = Math.max(64, Math.min(el.scrollHeight, 200)) + 'px';
   }, [input]);
 
   // Messages: sync from task
@@ -1556,7 +1556,7 @@ export default function ChatArea({
               onPaste={handlePaste}
               placeholder={activeAgent ? `与 ${activeAgent.name} 对话...` : "输入消息，Enter 发送，支持 Ctrl+V 粘贴图片"}
               rows={1}
-              className="w-full bg-transparent px-4 py-3 pr-28 text-sm resize-none outline-none placeholder:text-muted-foreground/50 min-h-[48px] max-h-[200px] overflow-y-auto"
+              className="w-full bg-transparent px-4 pt-3 pb-12 pr-28 text-sm resize-none outline-none placeholder:text-muted-foreground/50 min-h-[64px] max-h-[200px] overflow-y-auto"
               style={{ scrollbarWidth: 'thin' }}
             />
             <div className="absolute right-2 bottom-2 flex items-center gap-1">
