@@ -4707,7 +4707,6 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                   <QuickCreatePanel
                     themeStyle={themeStyle}
                     selectedImage={selectedImage ? { id: selectedImage.id, url: selectedImage.url, prompt: selectedImage.prompt } : null}
-                    isGenerating={activeGenerationCount > 0}
                     imageModels={quickCreateImageModels}
                     chatModels={quickCreateChatModels}
                     resolvedImageModel={resolvedQuickCreateImageModel}

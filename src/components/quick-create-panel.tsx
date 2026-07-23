@@ -7,6 +7,7 @@ import {
   Box,
   CheckCircle2,
   ChevronDown,
+  Copy,
   Film,
   ImagePlus,
   LayoutGrid,
@@ -49,7 +50,6 @@ export interface QuickCreateRequest {
 interface QuickCreatePanelProps {
   themeStyle?: 'gold' | 'monochrome';
   selectedImage?: { id: string; url: string; prompt?: string } | null;
-  isGenerating?: boolean;
   imageModels: QuickCreateModelCandidate[];
   chatModels: QuickCreateModelCandidate[];
   resolvedImageModel: ResolvedQuickCreateModel;
@@ -349,7 +349,6 @@ function getCompileModelSourceLabel(source: QuickCreateModelSource): string {
 export function QuickCreatePanel({
   themeStyle = 'gold',
   selectedImage,
-  isGenerating = false,
   imageModels,
   chatModels,
   resolvedImageModel,
@@ -368,6 +367,8 @@ export function QuickCreatePanel({
   const [uploadedReferences, setUploadedReferences] = useState<string[]>([]);
   const [includeSelectedImage, setIncludeSelectedImage] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [copiedContent, setCopiedContent] = useState<'full' | 'positive' | 'negative' | null>(null);
   const [isUploadingReferences, setIsUploadingReferences] = useState(false);
   const [referenceUploadError, setReferenceUploadError] = useState<string>();
   const [aspectRatioOverride, setAspectRatioOverride] = useState<QuickCreateAspectRatio>();
@@ -472,7 +473,7 @@ export function QuickCreatePanel({
 
   const handleSubmit = async (): Promise<void> => {
     const trimmedPrompt = prompt.trim();
-    if (!trimmedPrompt) return;
+    if (!trimmedPrompt || isSubmitting) return;
 
     if (intent.action === 'video' || intent.action === 'video_extend') {
       onOpenVideo(trimmedPrompt, intent.action === 'video_extend' ? 'extend' : 'generate');
@@ -483,17 +484,62 @@ export function QuickCreatePanel({
       return;
     }
 
-    const accepted = await onGenerate({
-      prompt: trimmedPrompt,
-      aspectRatio: recommendation.aspectRatio,
-      quality: recommendation.quality,
-      outputCount: recommendation.outputCount,
-      referenceImages,
-      intent,
-      imageModelOverride: imageModelOverride || undefined,
-      chatModelOverride: chatModelOverride || undefined,
-    });
-    setSubmitted(accepted);
+    setIsSubmitting(true);
+    try {
+      const accepted = await onGenerate({
+        prompt: trimmedPrompt,
+        aspectRatio: recommendation.aspectRatio,
+        quality: recommendation.quality,
+        outputCount: recommendation.outputCount,
+        referenceImages,
+        intent,
+        imageModelOverride: imageModelOverride || undefined,
+        chatModelOverride: chatModelOverride || undefined,
+      });
+      setSubmitted(accepted);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const formatCompileResult = (result: QuickCreateCompileResult): string => {
+    const directions = result.directions.map((direction: QuickCreateCompileResult['directions'][number], index: number) => (
+      `${index + 1}. ${direction.title}\n${direction.description}\n关键词：${direction.visualKeywords.join('、')}`
+    )).join('\n\n');
+
+    return [
+      `创作摘要：${result.summary}`,
+      `创作策略：${result.strategy}`,
+      `创意方向：\n${directions}`,
+      `正向提示词：${result.positivePrompt}`,
+      `负向提示词：${result.negativePrompt}`,
+      `输出规格：${result.aspectRatio} · ${result.outputCount} 张 · ${result.quality === 'high' ? '高清' : '标准'}`,
+      `实际 LLM：${result.model}（${result.providerName}）`,
+    ].join('\n\n');
+  };
+
+  const copyText = async (content: string, kind: 'full' | 'positive' | 'negative'): Promise<void> => {
+    try {
+      if (navigator.clipboard?.writeText && window.isSecureContext) {
+        await navigator.clipboard.writeText(content);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = content;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        const copied = document.execCommand('copy');
+        document.body.removeChild(textarea);
+        if (!copied) throw new Error('浏览器拒绝复制请求');
+      }
+      setCopiedContent(kind);
+      window.setTimeout(() => setCopiedContent((current: 'full' | 'positive' | 'negative' | null) => current === kind ? null : current), 1800);
+    } catch (error) {
+      console.error('[QuickCreatePanel] failed to copy creative plan:', error);
+      setCopiedContent(null);
+    }
   };
 
   const isMonochrome = themeStyle === 'monochrome';
@@ -774,6 +820,32 @@ export function QuickCreatePanel({
 
           {compileState.result && (
             <div className="mt-3 space-y-3">
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => { void copyText(formatCompileResult(compileState.result as QuickCreateCompileResult), 'full'); }}
+                  className="flex min-h-9 cursor-pointer items-center gap-1.5 rounded-lg bg-background px-2.5 text-xs text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                >
+                  <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                  {copiedContent === 'full' ? '方案已复制' : '复制完整方案'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { void copyText(compileState.result?.positivePrompt ?? '', 'positive'); }}
+                  className="flex min-h-9 cursor-pointer items-center gap-1.5 rounded-lg bg-background px-2.5 text-xs text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                >
+                  <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                  {copiedContent === 'positive' ? '正向提示词已复制' : '复制正向提示词'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { void copyText(compileState.result?.negativePrompt ?? '', 'negative'); }}
+                  className="flex min-h-9 cursor-pointer items-center gap-1.5 rounded-lg bg-background px-2.5 text-xs text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                >
+                  <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                  {copiedContent === 'negative' ? '负向提示词已复制' : '复制负向提示词'}
+                </button>
+              </div>
               <div className="rounded-xl border border-border bg-background p-3">
                 <p className="text-[10px] font-medium text-muted-foreground">创作摘要</p>
                 <p className="mt-1 text-xs leading-5 text-foreground">{compileState.result.summary}</p>
@@ -836,11 +908,11 @@ export function QuickCreatePanel({
         <button
           type="button"
           onClick={handleSubmit}
-          disabled={!prompt.trim() || compileState.isCompiling || isGenerating || isUploadingReferences || modelsLoading || imageModelUnavailable}
+          disabled={!prompt.trim() || compileState.isCompiling || isSubmitting || isUploadingReferences || modelsLoading || imageModelUnavailable}
           className="flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground shadow-card transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Sparkles className="h-4 w-4" aria-hidden="true" />
-          {compileState.isCompiling ? '正在编译专业方案' : isGenerating ? '生成任务进行中' : recommendation.route === '视频导演' ? '打开视频创作' : recommendation.route === 'AI 助手' || recommendation.route === '智能图片编辑' || recommendation.route === '3D 创作' ? '交给 AI 助手' : `生成 ${recommendation.outputCount} 张`}
+          {compileState.isCompiling || isSubmitting ? '正在编译专业方案' : recommendation.route === '视频导演' ? '打开视频创作' : recommendation.route === 'AI 助手' || recommendation.route === '智能图片编辑' || recommendation.route === '3D 创作' ? '交给 AI 助手' : `生成 ${recommendation.outputCount} 张`}
           <ArrowRight className="h-4 w-4" aria-hidden="true" />
         </button>
         <p className="mt-2 text-center text-[11px] text-muted-foreground">系统会先自动理解参数，你也可以调整或进入专业模式</p>

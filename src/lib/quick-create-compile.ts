@@ -20,12 +20,13 @@ export interface QuickCreateCompileRequest {
 
 const referenceImageSchema = z.string().trim().min(1).max(8_000_000).refine((value: string) => {
   if (value.startsWith('/')) return !value.startsWith('//');
+  if (/^data:image\/(?:jpeg|png|gif|webp);base64,[a-z0-9+/=\s]+$/i.test(value)) return true;
 
   try {
     const url = new URL(value);
     return url.protocol === 'http:' || url.protocol === 'https:';
   } catch {
-    return /^data:image\/(?:jpeg|png|gif|webp);base64,[a-z0-9+/=\s]+$/i.test(value);
+    return false;
   }
 }, '参考图片必须是 HTTP/HTTPS 地址、站内绝对路径或受支持的图片 Data URI');
 
