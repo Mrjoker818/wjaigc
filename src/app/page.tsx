@@ -14,10 +14,14 @@ const CanvasWorkspace = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="fixed inset-0 flex items-center justify-center bg-[#0a0a0a]">
+      <div className="fixed inset-0 flex items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">
-          <div className="w-10 h-10 border-2 border-[#d4af37] border-t-transparent rounded-full animate-spin" />
-          <p className="text-white/60 text-sm">正在加载工作台...</p>
+          <div
+            role="status"
+            aria-label="正在加载工作台"
+            className="w-10 h-10 border-2 border-primary border-t-transparent rounded-full animate-spin"
+          />
+          <p className="text-white/60 text-sm" aria-hidden="true">正在加载工作台...</p>
         </div>
       </div>
     ),
@@ -26,10 +30,14 @@ const CanvasWorkspace = dynamic(
 
 function AuthLoadingScreen({ message }: { message: string }) {
   return (
-    <div className="fixed inset-0 flex items-center justify-center bg-[#0a0a0a]">
+    <div className="fixed inset-0 flex items-center justify-center bg-background">
       <div className="flex flex-col items-center gap-4">
-        <div className="w-10 h-10 border-2 border-[#d4af37] border-t-transparent rounded-full animate-spin" />
-        <p className="text-white/60 text-sm">{message}</p>
+        <div
+          role="status"
+          aria-label={message}
+          className="w-10 h-10 border-2 border-primary border-t-transparent rounded-full animate-spin"
+        />
+        <p className="text-white/60 text-sm" aria-hidden="true">{message}</p>
       </div>
     </div>
   );

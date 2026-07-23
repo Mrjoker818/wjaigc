@@ -596,9 +596,6 @@ export function GenerationPanel(
           }
         }
         
-        // ★ 调试日志：确认前端传递的 providerId
-        console.log('[generation-panel] 提交生成请求:', { model, pureModelId, compositeProviderId, hasProviderId: !!compositeProviderId });
-        
         onGenerate({
             prompt: fullPrompt,
             size: getModelSize(aspectRatio) || "1024x1024",
@@ -1079,11 +1076,12 @@ export function GenerationPanel(
 
     return (
         <div className={`h-full flex flex-col ${containerClass}`}>
-            <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3 custom-scrollbar">
+            <div className="flex-1 overflow-y-auto overscroll-contain px-3 py-3 space-y-3 custom-scrollbar">
                 {/* 模型选择 */}
                 <div className="space-y-1">
-                    <label className={stl}>{dot}图像模型</label>
+                    <label htmlFor="gen-model-select" className={stl}>{dot}图像模型</label>
                     <select
+                        id="gen-model-select"
                         value={model}
                         onChange={(e) => {
                             const compositeKey = e.target.value;
@@ -1189,7 +1187,7 @@ export function GenerationPanel(
 
                 {/* 创意描述 - 可拖动调整高度，支持参考图标记 */}
                 <div className="space-y-1">
-                    <label className={stl}>{dot}创意描述{altRefMarkers.length > 0 && <span className="ml-1.5 text-xs text-[#6366f1] font-normal">({altRefMarkers.length}张参考图)</span>}</label>
+                    <label htmlFor="gen-prompt-textarea" className={stl}>{dot}创意描述{altRefMarkers.length > 0 && <span className="ml-1.5 text-xs text-[#6366f1] font-normal">({altRefMarkers.length}张参考图)</span>}</label>
                     <div className="relative">
                     <div className={`relative rounded-md border ${mc ? 'border-gray-200' : 'border-white/[0.06]'} overflow-hidden`}>
                         {/* Alt reference marker chips displayed above the textarea */}
@@ -1233,6 +1231,7 @@ export function GenerationPanel(
                             </div>
                         )}
                         <textarea
+                            id="gen-prompt-textarea"
                             ref={promptTextareaRef}
                             value={prompt}
                             onChange={(e) => {
@@ -1466,8 +1465,9 @@ export function GenerationPanel(
 
                 {/* 产品品类 - 单独一行 */}
                 <div className="space-y-1">
-                    <label className={stl}>{dot}产品品类</label>
+                    <label htmlFor="gen-product-category" className={stl}>{dot}产品品类</label>
                     <select
+                        id="gen-product-category"
                         value={productCategory}
                         onChange={(e) => {
                             setProductCategory(e.target.value);
@@ -1484,8 +1484,9 @@ export function GenerationPanel(
 
                 {/* 设计类型 - 单独一行 */}
                 <div className="space-y-1">
-                    <label className={stl}>{dot}设计类型</label>
+                    <label htmlFor="gen-design-type" className={stl}>{dot}设计类型</label>
                     <select
+                        id="gen-design-type"
                         value={designType}
                         onChange={(e) => {
                             setDesignType(e.target.value);
@@ -1502,8 +1503,9 @@ export function GenerationPanel(
 
                 {/* 风格预设 - 单独一行，根据设计类型动态变化 */}
                 <div className="space-y-1">
-                    <label className={stl}>{dot}风格预设</label>
+                    <label htmlFor="gen-style-preset" className={stl}>{dot}风格预设</label>
                     <select
+                        id="gen-style-preset"
                         value={stylePreset}
                         onChange={(e) => setStylePreset(e.target.value)}
                         className={`${inputStl} appearance-none cursor-pointer`}

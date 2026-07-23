@@ -16,6 +16,17 @@ main {
   box-sizing: border-box;
 }
 
+/* 触控优化：消除 300ms 点击延迟、防止意外双击缩放 */
+button,
+[role="button"],
+a,
+input,
+select,
+textarea,
+label {
+  touch-action: manipulation;
+}
+
 /* Dashboard 可滚动主区域覆盖全局 main overflow:hidden */
 main.dashboard-scrollable {
   overflow-y: auto;
@@ -443,7 +454,10 @@ input[type="range"]::-moz-range-thumb {
 
   /* 工具栏按钮统一悬浮态 */
   .tool-btn {
-    transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+                background-color 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+                box-shadow 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+                color 0.15s cubic-bezier(0.4, 0, 0.2, 1);
   }
   .tool-btn:hover {
     transform: translateY(-1px);
@@ -1226,7 +1240,7 @@ input[type="range"]::-moz-range-thumb {
   border: 1px solid rgba(255,255,255,0.08);
   background: transparent;
   cursor: pointer;
-  transition: all 150ms;
+  transition: border-color 150ms, background-color 150ms, color 150ms;
   color: inherit;
 }
 .ratio-btn:hover {
@@ -1251,7 +1265,7 @@ input[type="range"]::-moz-range-thumb {
   background: transparent;
   font-size: 12px;
   cursor: pointer;
-  transition: all 150ms;
+  transition: border-color 150ms, background-color 150ms, color 150ms;
   color: #9ca3af;
 }
 .quality-btn:hover {

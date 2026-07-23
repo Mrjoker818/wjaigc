@@ -873,7 +873,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                         <button className="w-[72px] h-[72px] rounded-lg border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition-colors"
                           style={{ borderColor: border, color: textMuted }}
                           onClick={() => handleUpload('Logo')}>
-                          {logoUrl ? <img src={logoUrl} className="w-full h-full object-contain rounded" /> : <><Upload size={14} /><span className="text-[9px] mt-0.5">Logo</span></>}
+                          {logoUrl ? <img src={logoUrl} alt="品牌 Logo" className="w-full h-full object-contain rounded" /> : <><Upload size={14} /><span className="text-[9px] mt-0.5">Logo</span></>}
                         </button>
                         <div className="flex gap-1">
                           <input type="color" className="w-6 h-6 rounded cursor-pointer" value={brandColors[0] || '#d4af37'} onChange={e => setBrandColors([e.target.value])} title="品牌色" />
@@ -1188,7 +1188,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                       <div className="mt-2 flex flex-wrap gap-1.5">
                         {uploads.map((u, i) => (
                           <div key={i} className="relative w-12 h-12 rounded border overflow-hidden" style={{ borderColor: border }}>
-                            <img src={u.url} className="w-full h-full object-cover" />
+                            <img src={u.url} alt={`上传图片 ${i + 1}`} className="w-full h-full object-cover" />
                             <button className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-red-500 text-white flex items-center justify-center" onClick={() => setUploads(prev => prev.filter((_, j) => j !== i))}><X size={8} /></button>
                           </div>
                         ))}
@@ -1396,7 +1396,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                         <div className="grid grid-cols-2 gap-2">
                           {filteredResults.map(r => (
                             <div key={r.id} className="rounded-lg border overflow-hidden cursor-pointer group relative" style={{ borderColor: border }}>
-                              <img src={r.url} className="w-full aspect-[4/3] object-cover" />
+                              <img src={r.url} alt={OUTPUT_MODES.find(m => m.value === r.type)?.label ?? r.type} className="w-full aspect-[4/3] object-cover" />
                               <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-2">
                                 <span className="text-[12px] text-white">{OUTPUT_MODES.find(m => m.value === r.type)?.label || r.type}</span>
                                 <div className="flex gap-1 mt-1">

@@ -864,11 +864,9 @@ function getCurrentGenerationModel(): string {
     if (rawModel) {
       const modelInfo = JSON.parse(rawModel);
       if (modelInfo.model) {
-        console.log('[ChatPanel] getCurrentGenerationModel read from wujie_selected_model:', modelInfo.model);
         return modelInfo.model;
       }
     }
-    console.log('[ChatPanel] getCurrentGenerationModel wujie_selected_model is empty, falling back to userData');
     // 备用：从 userData 读取
     const currentUserId = localStorage.getItem('unbounded_ai_current_user');
     const raw = localStorage.getItem('unbounded_ai_user_data');
@@ -879,10 +877,8 @@ function getCurrentGenerationModel(): string {
       // selectedModel format: "providerId::modelId" or just "modelId"
       if (selectedModel.includes('::')) {
         const [, modelId] = selectedModel.split('::');
-        console.log('[ChatPanel] getCurrentGenerationModel read from userData:', modelId);
         return modelId;
       }
-      console.log('[ChatPanel] getCurrentGenerationModel read from userData:', selectedModel);
       return selectedModel;
     }
   } catch { /* fallback */ }
@@ -897,7 +893,6 @@ function getCurrentImageModelInfo(imageModelState: string, imageModelProviderIdS
     if (imageModelState) {
       const modelId = imageModelState.includes('::') ? imageModelState.split('::').pop()! : imageModelState;
       const providerId = imageModelProviderIdState || undefined;
-      console.log('[ChatImage] Using chat panel model:', modelId, 'providerId:', providerId);
       return { model: modelId, providerId };
     }
     // 备用：从 wujie_selected_model 读取（generation panel 选择的模型）
@@ -905,11 +900,9 @@ function getCurrentImageModelInfo(imageModelState: string, imageModelProviderIdS
     if (rawModel) {
       const modelInfo = JSON.parse(rawModel);
       if (modelInfo.model) {
-        console.log('[ChatImage] Fallback to wujie_selected_model:', modelInfo.model, 'providerId:', modelInfo.providerId);
         return { model: modelInfo.model, providerId: modelInfo.providerId || undefined };
       }
     }
-    console.log('[ChatImage] wujie_selected_model is empty or invalid, falling back to userData');
     // 备用：从 userData 读取
     const currentUserId = localStorage.getItem('unbounded_ai_current_user');
     const raw = localStorage.getItem('unbounded_ai_user_data');
@@ -920,13 +913,11 @@ function getCurrentImageModelInfo(imageModelState: string, imageModelProviderIdS
     // selectedModel format: "providerId::modelId" or just "modelId"
     if (selectedModel.includes('::')) {
       const [providerId, modelId] = selectedModel.split('::');
-      console.log('[ChatImage] Read model from userData:', modelId, 'providerId:', providerId);
       return { model: modelId, providerId };
     }
-    console.log('[ChatImage] Read model from userData (no provider):', selectedModel);
     return { model: selectedModel };
   } catch (e) {
-    console.error('[ChatImage] Error reading model:', e);
+    if (process.env.NODE_ENV === 'development') console.error('[ChatImage] Error reading model:', e);
   }
   return { model: '' };
 }
@@ -5255,7 +5246,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
         )}
 
         {/* Messages - 精致设计 */}
-        <div ref={messageListRef} onScroll={handleMessageListScroll} className={`flex-1 min-h-0 overflow-y-auto p-3 space-y-3 ${isGold ? 'bg-[#090909]' : 'bg-gray-50/50'}`}>
+        <div ref={messageListRef} onScroll={handleMessageListScroll} className={`flex-1 min-h-0 overflow-y-auto overscroll-contain p-3 space-y-3 ${isGold ? 'bg-[#090909]' : 'bg-gray-50/50'}`}>
           {messages.length === 0 && pendingImages.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center">
               {(() => {

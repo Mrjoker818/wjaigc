@@ -1992,7 +1992,7 @@ Rules:
 
         {/* 主体区域 —— flex col：上方滚动区（两列布局）+ 下方固定操作栏 */}
         <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-        <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain custom-scrollbar">
         <div className="flex gap-0 min-h-full">
           {/* ============ 左列：风格模板 + 模型选择（340px） ============ */}
           <div
@@ -2058,7 +2058,7 @@ Rules:
                 <select
                   value={model}
                   onChange={e => setModel(e.target.value)}
-                  className="w-full px-3 py-2 pr-8 rounded-lg text-[12px] appearance-none cursor-pointer font-medium focus:outline-none transition-colors truncate"
+                  className="w-full px-3 py-2 pr-8 rounded-lg text-[12px] appearance-none cursor-pointer font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 transition-colors truncate"
                   style={{ background: inputBg, color: textColor, border: `1px solid ${borderColor}` }}
                 >
                   {videoModels.length === 0 && <option value="">请在管理员后台添加视频模型</option>}
@@ -2135,7 +2135,7 @@ Rules:
                 onChange={e => setPrompt(e.target.value)}
                 placeholder={mode === 'video-extend' ? '描述希望延长的内容方向，如：继续向前推进、保持人物动作...' : useDirector ? '输入创意/剧本/想法，导演会自动补充运镜/光线/表演/氛围...' : '描述你想生成的视频画面，如：一位女性在海边漫步，夕阳西下，金色的阳光洒在海面上...'}
                 rows={4}
-                className="w-full px-3.5 py-2.5 rounded-lg text-[13px] resize-none focus:outline-none transition-colors leading-relaxed mt-2"
+                className="w-full px-3.5 py-2.5 rounded-lg text-[13px] resize-none focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 transition-colors leading-relaxed mt-2"
                 style={{
                   background: inputBg,
                   color: textColor,
@@ -2355,7 +2355,7 @@ Rules:
                         value={videoUrl}
                         onChange={e => setVideoUrl(e.target.value)}
                         placeholder="输入视频URL（画布选中视频会自动填充）"
-                        className="w-full px-3 py-2 rounded-md text-xs focus:outline-none"
+                        className="w-full px-3 py-2 rounded-md text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
                         style={{ background: inputBg, color: textColor, border: `1px solid ${borderColor}` }}
                       />
                       <div className="flex gap-2 mt-2">
@@ -2935,7 +2935,7 @@ Rules:
                               setShotPlans(copy);
                             }}
                             rows={2}
-                            className="w-full px-2 py-1.5 rounded text-[11px] resize-none focus:outline-none leading-relaxed"
+                            className="w-full px-2 py-1.5 rounded text-[11px] resize-none focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 leading-relaxed"
                             style={{ background: inputBg, color: textColor, border: `1px solid ${borderColor}` }}
                           />
 
@@ -3065,7 +3065,7 @@ Rules:
                             }}
                             placeholder={idx === 0 ? '描述开场画面...' : '描述下一镜头...'}
                             rows={2}
-                            className="w-full px-2 py-1.5 rounded text-[11px] resize-none focus:outline-none"
+                            className="w-full px-2 py-1.5 rounded text-[11px] resize-none focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
                             style={{ background: inputBg, color: textColor, border: `1px solid ${borderColor}` }}
                           />
                         </div>
@@ -3187,7 +3187,7 @@ Rules:
                     onChange={e => setNegativePrompt(e.target.value)}
                     placeholder="模糊、变形、低质量、水印..."
                     rows={2}
-                    className="w-full rounded-md px-2.5 py-1.5 text-[11px] resize-none focus:outline-none"
+                    className="w-full rounded-md px-2.5 py-1.5 text-[11px] resize-none focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
                     style={{ background: inputBg, color: textColor, border: `1px solid ${borderColor}` }}
                   />
                 </div>
@@ -3198,7 +3198,7 @@ Rules:
                     value={seed ?? ''}
                     onChange={e => { const v = e.target.value; setSeed(v ? parseInt(v, 10) : undefined); }}
                     placeholder="随机"
-                    className="flex-1 rounded-md px-2.5 py-1.5 text-[11px] focus:outline-none"
+                    className="flex-1 rounded-md px-2.5 py-1.5 text-[11px] focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
                     style={{ background: inputBg, color: textColor, border: `1px solid ${borderColor}` }}
                   />
                   <button onClick={() => setSeed(Math.floor(Math.random() * 2147483647))} className="px-2.5 py-1.5 rounded-md text-sm cursor-pointer" style={{ background: inputBg, color: subTextColor, border: `1px solid ${borderColor}` }}>🎲</button>
