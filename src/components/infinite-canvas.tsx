@@ -14320,10 +14320,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           <Suspense fallback={null}>
             <BrandIpPanel
               onClose={() => setShowBrandIp(false)}
-              onAddImages={(urls: string[], meta?: { modelName?: string; apiProvider?: string }) => {
-                onAddImages?.(urls, undefined, meta);
+              onAddImages={(urls: string[], meta?: Record<string, unknown>) => {
+                onAddImages?.(urls, undefined, meta as { modelName?: string; apiProvider?: string } | undefined);
               }}
-              isMonochrome={isMonochrome}
             />
           </Suspense>
         )}

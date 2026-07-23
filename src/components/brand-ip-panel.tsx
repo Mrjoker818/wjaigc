@@ -1,196 +1,146 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect } from 'react';
-import {
-  Sparkles, X, ChevronRight, Loader2, AlertCircle, Check, Plus,
-  Crown, Target, Eye, Palette, Download, RefreshCw, Wand2,
-  Settings, FileDown, Package, Shield, Layers, Image as ImageIcon,
-  Send, RotateCcw, Lock, ChevronLeft,
-} from 'lucide-react';
+import { useState, useRef, useCallback, useEffect } from 'react';
+import { X, Settings, ChevronRight, Upload, Sparkles } from 'lucide-react';
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+/* ================================================================
+   品牌 IP 设计工场 — 参考原型还原的黑金三栏工作台
+   ================================================================ */
 
-interface BrandIpBrief {
-  brandName: string;
-  industry: string;
-  targetAudience: string;
-  coreValues: string;
-  brandPersonality: string;
-  vision: string;
-  marketContext: string;
+interface BrandIpPanelProps {
+  onClose: () => void;
+  onAddImages?: (urls: string[], meta?: Record<string, unknown>) => void;
 }
 
-interface BrandIpDirection {
-  id: string;
-  name: string;
-  description: string;
-  scores: { differentiation: number; memorability: number; extensibility: number; feasibility: number };
-}
-
-interface BrandIpImmutableCore {
-  id: string;
-  category: string;
-  description: string;
-}
-
-interface BrandIpControlledVariable {
-  id: string;
-  category: string;
-  description: string;
-  guidance: string;
-}
-
-interface BrandIpStrategy {
-  immutableCore: BrandIpImmutableCore[];
-  controlledVariables: BrandIpControlledVariable[];
-  positioning: string;
-  toneOfVoice: string;
-  narrative: string;
-}
-
-interface BrandIpAsset {
-  id: string;
-  type: string;
-  prompt: string;
-  imageUrl: string;
-  status: 'pending' | 'completed' | 'failed';
-  createdAt: string;
-}
-
+/* ── Types ──────────────────────────────────────────────────────── */
 interface BrandIpProject {
   id: string;
   name: string;
   stage: string;
-  brief: BrandIpBrief;
-  directions: BrandIpDirection[];
-  confirmedDirectionId: string | null;
-  strategy: BrandIpStrategy | null;
-  immutableCore: BrandIpImmutableCore[];
-  controlledVariables: BrandIpControlledVariable[];
-  assets: BrandIpAsset[];
+  brief?: Record<string, unknown>;
+  confirmedDirectionId?: string | null;
+  assets?: BrandIpAsset[];
+}
+interface BrandIpAsset {
+  id: string;
+  imageUrl: string;
+  prompt: string;
+  model: string;
+  assetType: string;
+  version: number;
+  createdAt: string;
+}
+interface Direction {
+  id: string;
+  name: string;
+  tone: 'warm' | 'blue' | 'violet';
+  tag: string;
+  score: number;
+  description: string;
+  traits: string[];
 }
 
-interface BrandIpPanelProps {
-  isMonochrome: boolean;
-  onClose: () => void;
-  onAddImages?: (urls: string[], meta?: { modelName?: string; apiProvider?: string }) => void;
-}
-
-// ─── SSE Helper ──────────────────────────────────────────────────────────────
-
-async function readSseStream(
-  response: Response,
-  onDelta: (text: string) => void,
-  onResult: (data: unknown) => void,
-  onError: (msg: string) => void,
-  signal?: AbortSignal,
-): Promise<void> {
-  const reader = response.body?.getReader();
-  if (!reader) { onError('流式响应不可读'); return; }
-  const decoder = new TextDecoder();
-  let buffer = '';
-  for (;;) {
-    if (signal?.aborted) { reader.cancel(); return; }
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const parts = buffer.split('\n\n');
-    buffer = parts.pop() ?? '';
-    for (const part of parts) {
-      const lines = part.split('\n');
-      let eventType = '';
-      let dataStr = '';
-      for (const line of lines) {
-        if (line.startsWith('event:')) eventType = line.slice(6).trim();
-        else if (line.startsWith('data:')) dataStr += line.slice(5).trim();
-      }
-      if (!eventType) continue;
-      try {
-        const parsed = dataStr ? JSON.parse(dataStr) : {};
-        if (eventType === 'delta') onDelta(parsed.text ?? '');
-        else if (eventType === 'result') onResult(parsed);
-        else if (eventType === 'error') onError(parsed.message ?? '未知错误');
-      } catch { /* skip malformed */ }
-    }
-  }
-}
-
-// ─── Stages ──────────────────────────────────────────────────────────────────
-
+/* ── Constants ──────────────────────────────────────────────────── */
 const STAGES = [
-  { key: 'brand-goal',      label: '品牌目标', icon: Target,    short: '目标' },
-  { key: 'role-direction',  label: '角色方向', icon: Crown,     short: '方向' },
-  { key: 'visual-system',   label: '视觉系统', icon: Palette,   short: '视觉' },
-  { key: 'application',     label: '应用延展', icon: Package,   short: '应用' },
-  { key: 'governance',      label: '交付治理', icon: Shield,    short: '治理' },
+  { num: '01', name: '品牌目标', title: 'IP策略一页纸', desc: '先锁定IP在品牌中的任务，再进入造型设计。', items: ['品牌角色与第一用途', '受众任务与使用场景', '竞争区隔与首发范围', '成功指标与设计边界'] },
+  { num: '02', name: '角色方向', title: '角色系统', desc: '让角色脱去服饰与装饰后，仍然能够被识别。', items: ['角色命题与原型母体', '人格与功能动词', '轮廓、比例、体块与重心', '情绪、动作与角色关系'] },
+  { num: '03', name: '视觉系统', title: '视觉规范', desc: '把单张好看的角色图变成可持续使用的视觉资产。', items: ['标准版 / 单色版 / 小尺寸版', '色彩、材质与线条系统', '三视图、表情与动作', 'AI生成提示词与禁止项'] },
+  { num: '04', name: '应用延展', title: '商业应用矩阵', desc: '针对真实载体设置尺寸、裁切、工艺与验收规则。', items: ['头像与社媒内容', '包装与活动主视觉', '周边公仔与数字内容', '空间装置与渠道适配'] },
+  { num: '05', name: '交付治理', title: '治理与交付', desc: '明确哪些不能改、哪些可以变，以及如何交接和验收。', items: ['不可变核心与受控变量', '权利风险与待核验项', '版本、审批与授权边界', '生产包、上线KPI与复盘'] },
 ];
 
-function stageIndex(stage: string): number {
-  return Math.max(0, STAGES.findIndex(s => s.key === stage));
-}
-
-// ─── Workflow Paths ──────────────────────────────────────────────────────────
-
-const WORKFLOW_PATHS = [
-  { key: 'new',          label: '从零创建',   desc: '品牌没有IP形象' },
-  { key: 'upgrade',      label: '已有形象升级', desc: '已有角色但需优化' },
-  { key: 'series',       label: '系列角色',   desc: '需要主角与多个配角' },
-  { key: 'merchandise',  label: '周边/包装',   desc: '已有角色，需要生产应用' },
-  { key: 'collab',       label: '联名/授权',   desc: '跨品牌合作或IP授权' },
+const PATHS = [
+  { icon: '✦', label: '从零创建' },
+  { icon: '↗', label: '已有形象升级' },
+  { icon: '◉', label: '系列角色' },
+  { icon: '◇', label: '周边 / 包装' },
+  { icon: '∞', label: '联名 / 授权' },
 ];
 
 const CARRIERS = [
-  { key: 'social_avatar', label: '社交头像' },
-  { key: 'packaging',     label: '包装设计' },
-  { key: 'event_kv',      label: '活动主视觉' },
-  { key: 'merchandise',   label: '周边商品' },
-  { key: 'animation',     label: '动画内容' },
-  { key: 'space',         label: '空间设计' },
+  { icon: '◉', label: '社媒头像' },
+  { icon: '☺', label: '表情包' },
+  { icon: '▣', label: '产品包装' },
+  { icon: '✦', label: '活动KV' },
+  { icon: '◐', label: '周边公仔' },
+  { icon: '◌', label: '空间装置' },
 ];
 
-const ASSET_TYPES = [
-  { key: 'logo',      label: 'Logo' },
-  { key: 'mascot',    label: '吉祥物' },
-  { key: 'poster',    label: '海报' },
-  { key: 'packaging', label: '包装' },
-  { key: 'social',    label: '社交图' },
+const GATES = [
+  { icon: '◎', name: '品牌角色', status: '充分', ok: true, note: 'IP承担"年轻化陪伴者"角色' },
+  { icon: '⬡', name: '可拥有性', status: '待核验', ok: false, note: '名称需做商标检索' },
+  { icon: '◇', name: '可落地性', status: '充分', ok: true, note: '首发社媒+包装可执行' },
 ];
 
-// ─── Component ───────────────────────────────────────────────────────────────
+const MOCK_DIRECTIONS: Direction[] = [
+  { id: 'd1', name: '陪伴型守护者', tone: 'warm', tag: '推荐方向', score: 92, description: '用"靠近、回应、守护"的行为建立亲和力，适合长期内容与会员运营。', traits: ['温暖', '可靠', '有回应'] },
+  { id: 'd2', name: '好奇探索家', tone: 'blue', tag: '区隔方向', score: 88, description: '用观察、发现和收集的动作连接产品知识，适合内容科普与互动任务。', traits: ['敏锐', '乐观', '行动派'] },
+  { id: 'd3', name: '灵感创造官', tone: 'violet', tag: '商业方向', score: 86, description: '以创作、组合、变形为核心动作，适合联名、文创与多形态商品延展。', traits: ['聪明', '灵活', '有巧思'] },
+];
 
-export default function BrandIpPanel({ isMonochrome, onClose, onAddImages }: BrandIpPanelProps) {
+const VIEW_TABS = ['标准', '单色', '小尺寸'];
+
+/* ── Component ──────────────────────────────────────────────────── */
+export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Stage & project state
+  const [activeStage, setActiveStage] = useState(0);
   const [project, setProject] = useState<BrandIpProject | null>(null);
   const [projects, setProjects] = useState<BrandIpProject[]>([]);
-  const [loadingProjects, setLoadingProjects] = useState(true);
-  const [briefDraft, setBriefDraft] = useState<BrandIpBrief>({
-    brandName: '', industry: '', targetAudience: '', coreValues: '', brandPersonality: '', vision: '', marketContext: '',
-  });
-  const [workflowPath, setWorkflowPath] = useState('new');
-  const [selectedCarriers, setSelectedCarriers] = useState<string[]>(['social_avatar']);
+  const [showProjectList, setShowProjectList] = useState(false);
+
+  // Brief form
+  const [workflowPath, setWorkflowPath] = useState(0);
+  const [brandName, setBrandName] = useState('');
+  const [goal, setGoal] = useState('');
+  const [audience, setAudience] = useState('');
+  const [industry, setIndustry] = useState('');
+  const [selectedCarriers, setSelectedCarriers] = useState<number[]>([0, 2]);
+  const [smartMode, setSmartMode] = useState(true);
+
+  // Analysis state
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [strategyText, setStrategyText] = useState('');
+  const [analysisProgress, setAnalysisProgress] = useState(0);
+  const [hasAnalyzed, setHasAnalyzed] = useState(false);
+
+  // Direction state
+  const [directions] = useState<Direction[]>(MOCK_DIRECTIONS);
+  const [selectedDirection, setSelectedDirection] = useState<string | null>(null);
+  const [confirmedDirection, setConfirmedDirection] = useState(false);
+
+  // UI state
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [activeStage, setActiveStage] = useState(0);
+  const [viewTab, setViewTab] = useState(0);
+  const [toast, setToast] = useState<{ show: boolean; msg: string }>({ show: false, msg: '' });
 
-  // Strategy streaming
-  const [strategyStreaming, setStrategyStreaming] = useState(false);
-  const [strategyStreamText, setStrategyStreamText] = useState('');
-  const [strategyError, setStrategyError] = useState<string | null>(null);
-  const strategyAbortRef = useRef<AbortController | null>(null);
+  // Advanced settings
+  const [advRole, setAdvRole] = useState('长期代言人');
+  const [advCount, setAdvCount] = useState('1');
+  const [advVibe, setAdvVibe] = useState('温暖亲和');
+  const [advConstraints, setAdvConstraints] = useState('后期需支持PVC公仔生产');
+  const [advForbidden, setAdvForbidden] = useState('不得模仿具体艺术家');
+  const [advAutoRisk, setAdvAutoRisk] = useState(true);
+  const [advAutoApp, setAdvAutoApp] = useState(true);
+  const [advStructFirst, setAdvStructFirst] = useState(false);
 
-  // Generation
-  const [generating, setGenerating] = useState(false);
-  const [genError, setGenError] = useState<string | null>(null);
-  const [assetPrompt, setAssetPrompt] = useState('');
-  const [assetType, setAssetType] = useState('logo');
+  // Assets state
+  const [assets, setAssets] = useState<BrandIpAsset[]>([]);
+  const [generatingAsset, setGeneratingAsset] = useState(false);
 
-  // Position
-  const [pos, setPos] = useState({ x: 30, y: 20 });
-  const [dragging, setDragging] = useState(false);
-  const dragOffsetRef = useRef({ x: 0, y: 0 });
-  const panelRef = useRef<HTMLDivElement>(null);
+  /* ── Toast helper ──────────────────────────────────────────────── */
+  const showToast = useCallback((msg: string) => {
+    setToast({ show: true, msg });
+    setTimeout(() => setToast({ show: false, msg: '' }), 2500);
+  }, []);
 
-  // ── Load projects ──────────────────────────────────────────────────────
+  /* ── Load projects on mount ────────────────────────────────────── */
+  useEffect(() => {
+    void loadProjects();
+  }, []);
+
   const loadProjects = useCallback(async () => {
-    setLoadingProjects(true);
     try {
       const res = await fetch('/api/brand-ip/projects');
       if (res.ok) {
@@ -198,1109 +148,819 @@ export default function BrandIpPanel({ isMonochrome, onClose, onAddImages }: Bra
         setProjects(data.projects ?? []);
       }
     } catch { /* ignore */ }
-    setLoadingProjects(false);
   }, []);
 
-  useEffect(() => { loadProjects(); }, [loadProjects]);
+  /* ── Create project & run strategy analysis ───────────────────── */
+  const handleGenerate = useCallback(async () => {
+    if (!brandName.trim()) {
+      showToast('请输入品牌/项目名称');
+      return;
+    }
 
-  // ── Drag handlers ──────────────────────────────────────────────────────
-  const handleDragStart = useCallback((e: React.MouseEvent) => {
-    if ((e.target as HTMLElement).closest('button, input, textarea, select, [data-no-drag]')) return;
-    setDragging(true);
-    dragOffsetRef.current = { x: e.clientX - pos.x, y: e.clientY - pos.y };
-  }, [pos]);
+    setIsAnalyzing(true);
+    setAnalysisProgress(0);
+    setStrategyText('');
+    setHasAnalyzed(false);
 
-  useEffect(() => {
-    if (!dragging) return;
-    const onMove = (e: MouseEvent) => {
-      setPos({ x: e.clientX - dragOffsetRef.current.x, y: e.clientY - dragOffsetRef.current.y });
-    };
-    const onUp = () => setDragging(false);
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
-  }, [dragging]);
-
-  // ── Create project ─────────────────────────────────────────────────────
-  const handleCreateProject = useCallback(async () => {
-    if (!briefDraft.brandName.trim()) return;
     try {
-      const res = await fetch('/api/brand-ip/projects', {
+      // Create project if none
+      let proj = project;
+      if (!proj) {
+        const createRes = await fetch('/api/brand-ip/projects', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: brandName,
+            stage: 'strategy',
+            brief: { brandName, goal, audience, industry, workflowPath, carriers: selectedCarriers },
+          }),
+        });
+        if (!createRes.ok) {
+          showToast('项目创建失败');
+          setIsAnalyzing(false);
+          return;
+        }
+        const createData = await createRes.json();
+        proj = createData.project;
+        setProject(proj);
+        setProjects(prev => [proj!, ...prev]);
+      }
+
+      // SSE strategy analysis
+      const sseRes = await fetch('/api/brand-ip/strategy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: briefDraft.brandName, brief: briefDraft }),
+        body: JSON.stringify({
+          projectId: proj!.id,
+          brief: { brandName, goal, audience, industry, workflowPath, carriers: selectedCarriers, smartMode },
+        }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        setProject(data.project);
-        setBriefDraft({ brandName: '', industry: '', targetAudience: '', coreValues: '', brandPersonality: '', vision: '', marketContext: '' });
-        setActiveStage(0);
-      }
-    } catch { /* ignore */ }
-  }, [briefDraft]);
 
-  // ── Select project ─────────────────────────────────────────────────────
-  const handleSelectProject = useCallback(async (projId: string) => {
-    try {
-      const res = await fetch(`/api/brand-ip/projects?projectId=${projId}`);
-      if (res.ok) {
-        const data = await res.json();
-        setProject(data.project);
-        if (data.project?.brief) setBriefDraft(data.project.brief);
-        setActiveStage(stageIndex(data.project?.stage ?? 'brand-goal'));
-      }
-    } catch { /* ignore */ }
-  }, []);
-
-  // ── Run strategy analysis (SSE) ────────────────────────────────────────
-  const handleRunStrategy = useCallback(async () => {
-    if (!project) return;
-    setStrategyStreaming(true);
-    setStrategyStreamText('');
-    setStrategyError(null);
-    const ac = new AbortController();
-    strategyAbortRef.current = ac;
-    try {
-      const res = await fetch('/api/brand-ip/strategy', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId: project.id }),
-        signal: ac.signal,
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        setStrategyError(err.error || `HTTP ${res.status}`);
-        setStrategyStreaming(false);
+      if (!sseRes.ok || !sseRes.body) {
+        showToast('策略分析请求失败');
+        setIsAnalyzing(false);
         return;
       }
-      await readSseStream(
-        res,
-        (text) => setStrategyStreamText(prev => prev + text),
-        (data) => {
-          const s = data as BrandIpStrategy;
-          if (s?.immutableCore) {
-            setProject(prev => prev ? {
-              ...prev,
-              strategy: s,
-              immutableCore: s.immutableCore,
-              controlledVariables: s.controlledVariables,
-              stage: 'role-direction',
-            } : prev);
-            setActiveStage(1);
-          }
-        },
-        (msg) => setStrategyError(msg),
-        ac.signal,
-      );
-    } catch (e: unknown) {
-      if (e instanceof Error && e.name !== 'AbortError') {
-        setStrategyError(e.message);
-      }
-    } finally {
-      setStrategyStreaming(false);
-      strategyAbortRef.current = null;
-    }
-  }, [project]);
 
-  // ── Confirm direction ──────────────────────────────────────────────────
-  const handleConfirmDirection = useCallback(async (dirId: string) => {
-    if (!project) return;
+      const reader = sseRes.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let progress = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const evt = JSON.parse(line.slice(6));
+              if (evt.type === 'status') {
+                progress = 10;
+                setAnalysisProgress(progress);
+              } else if (evt.type === 'delta') {
+                setStrategyText(prev => prev + (evt.content ?? ''));
+                progress = Math.min(85, progress + 2);
+                setAnalysisProgress(progress);
+              } else if (evt.type === 'result') {
+                setStrategyText(evt.content ?? '');
+                setAnalysisProgress(95);
+              } else if (evt.type === 'error') {
+                showToast(evt.message ?? '策略分析出错');
+                setIsAnalyzing(false);
+                return;
+              } else if (evt.type === 'done') {
+                setAnalysisProgress(100);
+                setHasAnalyzed(true);
+              }
+            } catch { /* skip */ }
+          }
+        }
+      }
+
+      setIsAnalyzing(false);
+      setHasAnalyzed(true);
+      showToast('策略分析完成');
+    } catch {
+      showToast('网络错误，请重试');
+      setIsAnalyzing(false);
+    }
+  }, [brandName, goal, audience, industry, workflowPath, selectedCarriers, smartMode, project, showToast]);
+
+  /* ── Confirm direction ─────────────────────────────────────────── */
+  const handleConfirmDirection = useCallback(async () => {
+    if (!selectedDirection || !project) return;
     try {
-      const res = await fetch('/api/brand-ip/projects', {
+      await fetch('/api/brand-ip/projects', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId: project.id, confirmedDirectionId: dirId }),
+        body: JSON.stringify({
+          projectId: project.id,
+          updates: { confirmedDirectionId: selectedDirection, stage: 'visual-system' },
+        }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        setProject(data.project);
-        setActiveStage(2);
-      }
-    } catch { /* ignore */ }
-  }, [project]);
+      setConfirmedDirection(true);
+      setProject(prev => prev ? { ...prev, confirmedDirectionId: selectedDirection, stage: 'visual-system' } : prev);
+      setActiveStage(2);
+      showToast('方向已锁定，进入视觉系统阶段');
+    } catch {
+      showToast('确认失败，请重试');
+    }
+  }, [selectedDirection, project, showToast]);
 
-  // ── Generate assets ────────────────────────────────────────────────────
-  const handleGenerate = useCallback(async () => {
-    if (!project || !assetPrompt.trim()) return;
-    setGenerating(true);
-    setGenError(null);
+  /* ── Generate asset ────────────────────────────────────────────── */
+  const handleGenerateAsset = useCallback(async (assetType: string) => {
+    if (!project) {
+      showToast('请先创建项目');
+      return;
+    }
+    if (!confirmedDirection) {
+      showToast('请先确认角色方向');
+      return;
+    }
+    setGeneratingAsset(true);
     try {
       const res = await fetch('/api/brand-ip/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId: project.id, prompt: assetPrompt, assetType }),
+        body: JSON.stringify({
+          projectId: project.id,
+          prompt: `${brandName} 品牌IP角色标准图，${directions.find(d => d.id === selectedDirection)?.name ?? ''}风格`,
+          assetType,
+        }),
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        setGenError(err.error || `HTTP ${res.status}`);
-      } else {
-        const data = await res.json();
-        if (data.taskId) {
-          pollTask(data.taskId);
+        showToast('生成请求失败');
+        setGeneratingAsset(false);
+        return;
+      }
+      const data = await res.json();
+      if (data.taskId) {
+        showToast('生成任务已提交');
+        // Poll for result
+        for (let i = 0; i < 100; i++) {
+          await new Promise(r => setTimeout(r, 3000));
+          try {
+            const taskRes = await fetch(`/api/brand-ip/tasks?taskId=${data.taskId}`);
+            if (!taskRes.ok) break;
+            const taskData = await taskRes.json();
+            if (taskData.status === 'completed' || taskData.status === 'failed' || taskData.status === 'cancelled') {
+              // Refresh assets
+              const assetRes = await fetch(`/api/brand-ip/assets?projectId=${project.id}`);
+              if (assetRes.ok) {
+                const assetData = await assetRes.json();
+                setAssets(assetData.assets ?? []);
+                setProject(prev => prev ? { ...prev, assets: assetData.assets ?? [] } : prev);
+              }
+              if (taskData.status === 'completed') {
+                showToast('资产生成完成');
+              } else {
+                showToast('生成未完成: ' + (taskData.status === 'failed' ? '失败' : '已取消'));
+              }
+              break;
+            }
+          } catch { /* continue */ }
         }
       }
-    } catch (e: unknown) {
-      if (e instanceof Error) setGenError(e.message);
-    } finally {
-      setGenerating(false);
+    } catch {
+      showToast('生成失败');
     }
-  }, [project, assetPrompt, assetType]);
+    setGeneratingAsset(false);
+  }, [project, confirmedDirection, brandName, directions, selectedDirection, showToast]);
 
-  // ── Poll task ──────────────────────────────────────────────────────────
-  const pollTask = useCallback(async (taskId: string) => {
-    const maxAttempts = 120;
-    for (let i = 0; i < maxAttempts; i++) {
-      await new Promise(r => setTimeout(r, 3000));
-      try {
-        const res = await fetch(`/api/brand-ip/tasks?taskId=${taskId}`);
-        if (!res.ok) break;
-        const data = await res.json();
-        if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
-          if (project) {
-            const assetRes = await fetch(`/api/brand-ip/assets?projectId=${project.id}`);
-            if (assetRes.ok) {
-              const assetData = await assetRes.json();
-              setProject(prev => prev ? { ...prev, assets: assetData.assets ?? [] } : prev);
-            }
-          }
-          break;
-        }
-      } catch { /* continue */ }
-    }
-  }, [project]);
-
-  // ── Add asset to canvas ────────────────────────────────────────────────
+  /* ── Add asset to canvas ───────────────────────────────────────── */
   const handleAddToCanvas = useCallback((url: string) => {
     onAddImages?.([url], { modelName: 'brand-ip', apiProvider: 'server' });
   }, [onAddImages]);
 
-  // ── Theme ──────────────────────────────────────────────────────────────
-  const dark = !isMonochrome;
-  const c = {
-    bg: dark ? 'bg-[#0a0a0a]' : 'bg-white',
-    panel: dark ? 'bg-[#141414]' : 'bg-gray-50',
-    card: dark ? 'bg-[#1a1a1a]' : 'bg-white',
-    border: dark ? 'border-[#d4af37]/15' : 'border-gray-200',
-    borderActive: dark ? 'border-[#d4af37]/40' : 'border-gray-400',
-    text: dark ? 'text-white' : 'text-gray-800',
-    sub: dark ? 'text-white/50' : 'text-gray-400',
-    sub2: dark ? 'text-white/70' : 'text-gray-500',
-    input: dark ? 'bg-[#0a0a0a] border-[#d4af37]/15 text-white' : 'bg-white border-gray-200 text-gray-800',
-    gold: dark ? 'text-[#d4af37]' : 'text-gray-700',
-    goldBg: dark ? 'bg-[#d4af37] text-black' : 'bg-gray-800 text-white',
-    goldBgHover: dark ? 'hover:bg-[#e0b850]' : 'hover:bg-gray-700',
-    goldBorder: dark ? 'border-[#d4af37]/30' : 'border-gray-300',
-    goldChip: dark ? 'bg-[#d4af37]/8 text-[#d4af37] border-[#d4af37]/20' : 'bg-gray-100 text-gray-600 border-gray-200',
-    hover: dark ? 'hover:bg-white/5' : 'hover:bg-gray-100',
-    activeChip: dark ? 'bg-[#d4af37]/15 text-[#d4af37] border-[#d4af37]/30' : 'bg-gray-800 text-white border-gray-700',
-  };
+  /* ── Selected direction object ─────────────────────────────────── */
+  const selDir = directions.find(d => d.id === selectedDirection) ?? directions[0];
+  const dirTone = selDir?.tone ?? 'warm';
 
-  const currentStage = project?.stage ?? 'brand-goal';
-
-  // ─── Render ────────────────────────────────────────────────────────────
-
+  /* ═══ Render ════════════════════════════════════════════════════ */
   return (
     <div
-      ref={panelRef}
-      data-floating-panel="brand-ip"
+      className="brand-ip-workspace fixed inset-0 z-[201] flex flex-col"
       data-popup
-      className={`fixed z-[201] ${c.bg} ${c.border} border rounded-2xl shadow-2xl flex flex-col overflow-hidden bi-panel`}
-      style={{ left: pos.x, top: pos.y, width: 'min(1280px, 96vw)', height: 'min(860px, 92vh)' }}
-      onMouseDown={handleDragStart}
+      data-floating-panel="brand-ip"
+      style={{ background: 'rgba(0,0,0,.85)', backdropFilter: 'blur(12px)' }}
     >
-      {/* ═══ Header ═══ */}
-      <div className={`flex items-center justify-between px-5 py-3 border-b ${c.border} cursor-move shrink-0`}>
-        <div className="flex items-center gap-2.5">
-          <div className={`flex items-center justify-center h-8 w-8 rounded-lg ${dark ? 'bg-[#d4af37]/10' : 'bg-gray-100'}`}>
-            <Sparkles className={`h-4.5 w-4.5 ${c.gold}`} />
+      <div className="bi-shell flex flex-col h-full overflow-hidden" style={{ background: 'radial-gradient(circle at 76% 8%, rgba(225,184,92,.06), transparent 28%), #090a0c' }}>
+
+        {/* ═══ Topbar ═══ */}
+        <div className="bi-topbar" style={{ position: 'relative', zIndex: 30 }}>
+          <div className="bi-brand-lockup">
+            <div className="bi-brand-mark">无界</div>
+            <div>
+              <strong>品牌IP设计工场</strong>
+              <span>PURPOSE-FIRST IP DESIGN</span>
+            </div>
+            <span className="bi-beta">BETA</span>
           </div>
-          <div>
-            <span className={`font-bold text-base ${c.text}`}>品牌 IP 设计工场</span>
+          <div className="bi-topbar-center" style={{ fontSize: 12 }}>
+            <span className="crumb">无界AI</span>
+            <span className="slash">/</span>
+            <span className="crumb">品牌工厂</span>
+            <span className="slash">/</span>
+            <span style={{ color: '#e0b85c' }}>品牌IP设计工场</span>
             {project && (
-              <span className={`text-xs ${c.sub} ml-2`}>/ {project.name}</span>
+              <>
+                <span className="slash">/</span>
+                <span style={{ color: '#c6c7ca' }}>{project.name}</span>
+              </>
             )}
           </div>
+          <div className="bi-top-actions">
+            <button className="bi-icon-button" onClick={() => setShowProjectList(s => !s)} title="项目列表">
+              <Sparkles style={{ width: 15, height: 15 }} />
+            </button>
+            <button className="bi-icon-button" onClick={onClose} title="关闭">
+              <X style={{ width: 16, height: 16 }} />
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-1.5">
-          {project && (
-            <>
-              <button
-                onClick={() => setShowAdvanced(s => !s)}
-                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium ${c.goldChip} border transition-colors ${c.hover}`}
-                data-no-drag
-              >
-                <Settings className="h-3.5 w-3.5" /> 高级设置
-              </button>
-              <button
-                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium ${c.goldChip} border transition-colors ${c.hover}`}
-                data-no-drag
-              >
-                <FileDown className="h-3.5 w-3.5" /> 导出
-              </button>
-            </>
-          )}
-          <button onClick={onClose} className={`p-1.5 rounded-lg ${c.hover} ${c.sub} transition-colors`} data-no-drag>
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-      </div>
 
-      {/* ═══ Stage Navigation ═══ */}
-      {project && (
-        <div className={`flex items-center gap-0.5 px-5 py-2 border-b ${c.border} shrink-0 overflow-x-auto`} data-no-drag>
-          {STAGES.map((s, i) => {
-            const Icon = s.icon;
-            const active = i === activeStage;
-            const done = i < activeStage;
-            return (
-              <div key={s.key} className="flex items-center shrink-0">
-                <button
-                  onClick={() => i <= activeStage && setActiveStage(i)}
-                  disabled={i > activeStage}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                    active
-                      ? (dark ? 'bg-[#d4af37] text-black' : 'bg-gray-800 text-white')
-                      : done
-                        ? c.gold
-                        : c.sub
-                  } ${i <= activeStage ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
-                >
-                  <Icon className="h-3.5 w-3.5" />
-                  {s.label}
-                </button>
-                {i < STAGES.length - 1 && (
-                  <ChevronRight className={`h-3 w-3 ${c.sub} mx-0.5`} />
-                )}
+        {/* Project list dropdown */}
+        {showProjectList && (
+          <div
+            className="absolute right-18 top-14 z-40 rounded-xl border p-2 min-w-[200px]"
+            style={{ background: '#111216', borderColor: 'rgba(255,255,255,.08)' }}
+            data-popup
+          >
+            {projects.length === 0 && (
+              <div style={{ color: '#646770', fontSize: 11, padding: '8px 12px' }}>暂无项目</div>
+            )}
+            {projects.map(p => (
+              <button
+                key={p.id}
+                className="w-full text-left rounded-lg px-3 py-2 hover:bg-white/5 transition-colors"
+                onClick={() => {
+                  setProject(p);
+                  setBrandName(p.name);
+                  setActiveStage(p.stage === 'strategy' ? 0 : p.stage === 'role-direction' ? 1 : p.stage === 'visual-system' ? 2 : p.stage === 'application' ? 3 : 4);
+                  setShowProjectList(false);
+                }}
+                style={{ fontSize: 11, color: project?.id === p.id ? '#e0b85c' : '#c6c7ca' }}
+              >
+                {p.name}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* ═══ Body (scrollable) ═══ */}
+        <div ref={scrollRef} className="flex-1 overflow-y-auto" data-popup>
+
+          {/* ═══ Product area ═══ */}
+          <div className="bi-product" style={{ padding: '20px 24px 36px', maxWidth: 1600, margin: '0 auto' }}>
+
+            {/* Product header */}
+            <div className="bi-product-header" style={{ marginBottom: 20 }}>
+              <div>
+                <div className="bi-eyebrow">
+                  <span className="bi-live-dot" />
+                  PURPOSE-FIRST IP DESIGN
+                </div>
+                <h1 style={{ fontSize: 24, margin: '8px 0 4px', letterSpacing: '-.04em' }}>品牌IP设计工场</h1>
+                <p style={{ margin: 0, color: '#8f929a', fontSize: 12 }}>
+                  先让IP承担明确的品牌任务，再生成角色；先锁定结构和不可变核心，再做画风、服装与应用。
+                </p>
               </div>
-            );
-          })}
-        </div>
-      )}
+              <div className="bi-header-actions">
+                <button className="bi-secondary-button" onClick={() => setShowAdvanced(true)}>
+                  <Settings style={{ width: 13, height: 13 }} /> 高级设置
+                </button>
+                <button className="bi-secondary-button" onClick={() => showToast('导出功能开发中')}>
+                  <span>↓</span> 导出
+                </button>
+              </div>
+            </div>
 
-      {/* ═══ Body ═══ */}
-      <div className="flex-1 overflow-hidden" data-no-drag>
+            {/* Stage navigation */}
+            <div className="bi-stage-nav" style={{ marginBottom: 14 }}>
+              {STAGES.map((s, i) => (
+                <button
+                  key={s.num}
+                  className={`${i === activeStage ? 'active' : ''} ${i < activeStage ? 'done' : ''}`}
+                  onClick={() => i <= activeStage && setActiveStage(i)}
+                  style={{ opacity: i > activeStage ? 0.4 : 1, cursor: i > activeStage ? 'not-allowed' : 'pointer' }}
+                >
+                  <span className="bi-stage-number">{s.num}</span>
+                  {s.name}
+                </button>
+              ))}
+            </div>
 
-        {/* ─── No Project: Create / Select ─── */}
-        {!project && (
-          <div className="h-full overflow-y-auto p-6">
-            <div className="max-w-2xl mx-auto space-y-5">
-              {/* Create */}
-              <div className={`rounded-xl border ${c.border} p-5`}>
-                <h3 className={`text-sm font-semibold ${c.text} mb-4 flex items-center gap-2`}>
-                  <Plus className={`h-4 w-4 ${c.gold}`} /> 新建品牌 IP 项目
-                </h3>
+            {/* ═══ Content grid (3 columns) ═══ */}
+            <div className="bi-content-grid">
 
-                {/* Workflow path */}
-                <div className="mb-4">
-                  <label className={`text-xs ${c.sub} mb-2 block`}>工作路径</label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {WORKFLOW_PATHS.map(p => (
+              {/* ─── Left: Input panel ─── */}
+              <div className="bi-panel bi-input-panel" style={{ padding: 18 }}>
+                {/* Heading */}
+                <div className="bi-panel-heading">
+                  <div>
+                    <span className="bi-section-index">01</span>
+                    <h2>品牌目标</h2>
+                  </div>
+                  <label className="bi-smart-toggle">
+                    <input type="checkbox" checked={smartMode} onChange={e => setSmartMode(e.target.checked)} />
+                    <i />
+                    智能补全
+                  </label>
+                </div>
+
+                {/* Path grid */}
+                <div className="bi-field">
+                  <label>工作路径</label>
+                  <div className="bi-path-grid">
+                    {PATHS.map((p, i) => (
                       <button
-                        key={p.key}
-                        onClick={() => setWorkflowPath(p.key)}
-                        className={`text-left rounded-lg border p-2.5 transition-all ${
-                          workflowPath === p.key ? c.activeChip : `${c.border} ${c.hover}`
-                        }`}
+                        key={i}
+                        className={workflowPath === i ? 'selected' : ''}
+                        onClick={() => setWorkflowPath(i)}
                       >
-                        <div className={`text-xs font-medium ${workflowPath === p.key ? c.gold : c.text}`}>{p.label}</div>
-                        <div className={`text-[10px] ${c.sub} mt-0.5`}>{p.desc}</div>
+                        <span>{p.icon}</span> {p.label}
                       </button>
                     ))}
                   </div>
                 </div>
 
-                {/* Basic inputs */}
-                <div className="grid grid-cols-2 gap-3 mb-3">
+                {/* Brand name */}
+                <div className="bi-field">
+                  <label>品牌 / 项目名称 <em>*</em></label>
                   <input
-                    className={`${c.input} border rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 ${dark ? 'focus:ring-[#d4af37]/30' : 'focus:ring-gray-300'}`}
-                    placeholder="品牌/项目名称 *"
-                    value={briefDraft.brandName}
-                    onChange={e => setBriefDraft(d => ({ ...d, brandName: e.target.value }))}
+                    value={brandName}
+                    onChange={e => setBrandName(e.target.value)}
+                    placeholder="例如：中国劲酒年轻化品牌IP"
                   />
-                  <input
-                    className={`${c.input} border rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 ${dark ? 'focus:ring-[#d4af37]/30' : 'focus:ring-gray-300'}`}
-                    placeholder="希望IP完成什么目标"
-                    value={briefDraft.vision}
-                    onChange={e => setBriefDraft(d => ({ ...d, vision: e.target.value }))}
+                </div>
+
+                {/* Goal */}
+                <div className="bi-field">
+                  <label>希望IP完成什么 <em>*</em> <small>一句话即可</small></label>
+                  <textarea
+                    rows={2}
+                    value={goal}
+                    onChange={e => setGoal(e.target.value)}
+                    placeholder="例如：打造能连接年轻消费者并长期运营的品牌角色"
                   />
-                  <input
-                    className={`${c.input} border rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 ${dark ? 'focus:ring-[#d4af37]/30' : 'focus:ring-gray-300'}`}
-                    placeholder="目标受众"
-                    value={briefDraft.targetAudience}
-                    onChange={e => setBriefDraft(d => ({ ...d, targetAudience: e.target.value }))}
-                  />
-                  <input
-                    className={`${c.input} border rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 ${dark ? 'focus:ring-[#d4af37]/30' : 'focus:ring-gray-300'}`}
-                    placeholder="所属行业"
-                    value={briefDraft.industry}
-                    onChange={e => setBriefDraft(d => ({ ...d, industry: e.target.value }))}
-                  />
+                </div>
+
+                {/* Audience & Industry */}
+                <div className="bi-setting-grid" style={{ marginBottom: 16 }}>
+                  <div className="bi-field" style={{ margin: 0 }}>
+                    <label>目标受众</label>
+                    <input
+                      value={audience}
+                      onChange={e => setAudience(e.target.value)}
+                      placeholder="25-40岁都市人群"
+                    />
+                  </div>
+                  <div className="bi-field" style={{ margin: 0 }}>
+                    <label>所属行业</label>
+                    <input
+                      value={industry}
+                      onChange={e => setIndustry(e.target.value)}
+                      placeholder="酒水/食品/科技"
+                    />
+                  </div>
                 </div>
 
                 {/* Carriers */}
-                <div className="mb-3">
-                  <label className={`text-xs ${c.sub} mb-2 block`}>首发载体</label>
-                  <div className="flex flex-wrap gap-1.5">
-                    {CARRIERS.map(carrier => {
-                      const sel = selectedCarriers.includes(carrier.key);
-                      return (
-                        <button
-                          key={carrier.key}
-                          onClick={() => setSelectedCarriers(prev => sel ? prev.filter(c => c !== carrier.key) : [...prev, carrier.key])}
-                          className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-all ${
-                            sel ? c.activeChip : `${c.border} ${c.sub2} ${c.hover}`
-                          }`}
-                        >
-                          {carrier.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Collapsible advanced brief */}
-                <details className={`mb-3 rounded-lg border ${c.border}`}>
-                  <summary className={`px-3 py-2 text-xs ${c.sub2} cursor-pointer select-none`}>补充品牌信息（可选）</summary>
-                  <div className="p-3 pt-0 space-y-2">
-                    <input
-                      className={`${c.input} border rounded-lg px-3 py-2 text-sm outline-none w-full`}
-                      placeholder="核心价值观"
-                      value={briefDraft.coreValues}
-                      onChange={e => setBriefDraft(d => ({ ...d, coreValues: e.target.value }))}
-                    />
-                    <input
-                      className={`${c.input} border rounded-lg px-3 py-2 text-sm outline-none w-full`}
-                      placeholder="品牌个性"
-                      value={briefDraft.brandPersonality}
-                      onChange={e => setBriefDraft(d => ({ ...d, brandPersonality: e.target.value }))}
-                    />
-                    <textarea
-                      className={`${c.input} border rounded-lg px-3 py-2 text-sm outline-none w-full resize-none`}
-                      rows={2}
-                      placeholder="市场背景与竞争环境"
-                      value={briefDraft.marketContext}
-                      onChange={e => setBriefDraft(d => ({ ...d, marketContext: e.target.value }))}
-                    />
-                  </div>
-                </details>
-
-                <button
-                  onClick={handleCreateProject}
-                  disabled={!briefDraft.brandName.trim()}
-                  className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-40 ${c.goldBg} ${c.goldBgHover}`}
-                >
-                  <Plus className="h-4 w-4" /> 创建项目并开始
-                </button>
-              </div>
-
-              {/* Existing projects */}
-              {loadingProjects ? (
-                <div className={`flex items-center justify-center py-6 ${c.sub}`}>
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                </div>
-              ) : projects.length > 0 ? (
-                <div>
-                  <h3 className={`text-sm font-semibold ${c.text} mb-2 flex items-center gap-2`}>
-                    <Layers className={`h-4 w-4 ${c.gold}`} /> 已有项目
-                  </h3>
-                  <div className="space-y-2">
-                    {projects.map(p => (
+                <div className="bi-field">
+                  <label>首发载体 <small>可多选</small></label>
+                  <div className="bi-chip-list">
+                    {CARRIERS.map((c, i) => (
                       <button
-                        key={p.id}
-                        onClick={() => handleSelectProject(p.id)}
-                        className={`w-full flex items-center justify-between rounded-lg border ${c.border} ${c.hover} px-3 py-2.5 transition-colors text-left`}
+                        key={i}
+                        className={selectedCarriers.includes(i) ? 'selected' : ''}
+                        onClick={() => setSelectedCarriers(prev => prev.includes(i) ? prev.filter(x => x !== i) : [...prev, i])}
                       >
-                        <div>
-                          <div className={`text-sm font-medium ${c.text}`}>{p.name}</div>
-                          <div className={`text-xs ${c.sub}`}>{STAGES.find(s => s.key === p.stage)?.label ?? p.stage}</div>
-                        </div>
-                        <ChevronRight className={`h-4 w-4 ${c.sub}`} />
+                        <span>{c.icon}</span> {c.label}
                       </button>
                     ))}
                   </div>
                 </div>
-              ) : null}
-            </div>
-          </div>
-        )}
 
-        {/* ─── 3-Column Workspace ─── */}
-        {project && (
-          <div className="h-full flex">
-
-            {/* ═══ Left Column: Brief Panel ═══ */}
-            <div className={`w-[300px] shrink-0 border-r ${c.border} overflow-y-auto p-4 space-y-3`}>
-
-              {/* Stage 0: Brand Goal Input */}
-              {activeStage === 0 && (
-                <>
-                  <div className={`text-xs font-semibold ${c.gold} uppercase tracking-wide`}>品牌目标</div>
-                  <div className={`rounded-lg border ${c.border} p-3 space-y-2`}>
-                    <div className="text-xs">
-                      <span className={c.sub}>品牌名称</span>
-                      <p className={`${c.text} font-medium mt-0.5`}>{project.brief.brandName}</p>
-                    </div>
-                    <div className="text-xs">
-                      <span className={c.sub}>目标</span>
-                      <p className={`${c.text} font-medium mt-0.5`}>{project.brief.vision || '—'}</p>
-                    </div>
-                    <div className="text-xs">
-                      <span className={c.sub}>受众</span>
-                      <p className={`${c.text} font-medium mt-0.5`}>{project.brief.targetAudience || '—'}</p>
-                    </div>
-                    <div className="text-xs">
-                      <span className={c.sub}>行业</span>
-                      <p className={`${c.text} font-medium mt-0.5`}>{project.brief.industry || '—'}</p>
-                    </div>
-                    {project.brief.coreValues && (
-                      <div className="text-xs">
-                        <span className={c.sub}>核心价值观</span>
-                        <p className={`${c.text} font-medium mt-0.5`}>{project.brief.coreValues}</p>
-                      </div>
-                    )}
-                    {project.brief.brandPersonality && (
-                      <div className="text-xs">
-                        <span className={c.sub}>品牌个性</span>
-                        <p className={`${c.text} font-medium mt-0.5`}>{project.brief.brandPersonality}</p>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Carriers */}
+                {/* Upload */}
+                <div className="bi-upload-box">
+                  <input type="file" accept="image/*" id="bi-upload" onChange={() => showToast('上传功能复用现有组件')} />
+                  <label htmlFor="bi-upload" className="bi-upload-icon" style={{ cursor: 'pointer' }}>↑</label>
                   <div>
-                    <div className={`text-xs ${c.sub} mb-1.5`}>首发载体</div>
-                    <div className="flex flex-wrap gap-1">
-                      {selectedCarriers.map(k => {
-                        const carrier = CARRIERS.find(c => c.key === k);
-                        return carrier ? (
-                          <span key={k} className={`px-2 py-0.5 rounded-full text-[10px] ${c.goldChip} border`}>{carrier.label}</span>
-                        ) : null;
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Launch strategy */}
-                  <button
-                    onClick={handleRunStrategy}
-                    disabled={strategyStreaming}
-                    className={`w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-40 ${c.goldBg} ${c.goldBgHover}`}
-                  >
-                    {strategyStreaming ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                    {strategyStreaming ? 'AI 分析中...' : '启动品牌策略分析'}
-                  </button>
-                </>
-              )}
-
-              {/* Stage 1+: Brief summary */}
-              {activeStage >= 1 && (
-                <>
-                  <div className={`text-xs font-semibold ${c.gold} uppercase tracking-wide`}>项目摘要</div>
-                  <div className={`rounded-lg border ${c.border} p-3`}>
-                    <div className={`text-sm font-medium ${c.text}`}>{project.brief.brandName}</div>
-                    <div className={`text-xs ${c.sub} mt-1`}>{project.brief.industry || '—'}</div>
-                  </div>
-                  {project.strategy?.positioning && (
-                    <div className={`rounded-lg border ${c.border} p-3`}>
-                      <div className={`text-[10px] ${c.sub} uppercase tracking-wide mb-1`}>品牌定位</div>
-                      <p className={`text-xs ${c.text} leading-relaxed`}>{project.strategy.positioning}</p>
-                    </div>
-                  )}
-                  {project.confirmedDirectionId && (
-                    <div className={`rounded-lg border ${c.borderActive} p-3`}>
-                      <div className="flex items-center gap-1.5">
-                        <Check className={`h-3.5 w-3.5 ${c.gold}`} />
-                        <span className={`text-xs font-medium ${c.gold}`}>已确认方向</span>
-                      </div>
-                      <p className={`text-xs ${c.text} mt-1`}>
-                        {project.directions.find(d => d.id === project.confirmedDirectionId)?.name ?? '—'}
-                      </p>
-                    </div>
-                  )}
-                </>
-              )}
-
-              {/* Immutable core (stage 2+) */}
-              {activeStage >= 2 && project.immutableCore.length > 0 && (
-                <div>
-                  <div className={`text-xs font-semibold ${c.gold} uppercase tracking-wide flex items-center gap-1.5`}>
-                    <Lock className="h-3 w-3" /> 不可变核心
-                  </div>
-                  <div className="space-y-1.5 mt-1.5">
-                    {project.immutableCore.map(item => (
-                      <div key={item.id} className={`rounded-lg border ${c.border} p-2`}>
-                        <div className={`text-xs font-medium ${c.text}`}>{item.category}</div>
-                        <div className={`text-[11px] ${c.sub} mt-0.5`}>{item.description}</div>
-                      </div>
-                    ))}
+                    <strong>上传品牌资料</strong>
+                    <small>Logo、包装、VI 或已有角色图（可选）</small>
                   </div>
                 </div>
-              )}
 
-              {/* Controlled variables (stage 2+) */}
-              {activeStage >= 2 && project.controlledVariables.length > 0 && (
-                <div>
-                  <div className={`text-xs font-semibold ${c.sub} uppercase tracking-wide`}>可控变量</div>
-                  <div className="space-y-1.5 mt-1.5">
-                    {project.controlledVariables.map(v => (
-                      <div key={v.id} className={`rounded-lg border ${c.border} p-2`}>
-                        <div className={`text-xs font-medium ${c.text}`}>{v.category}</div>
-                        <div className={`text-[11px] ${c.sub} mt-0.5`}>{v.description}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* ═══ Center Column: Strategy / Direction / Results ═══ */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
-
-              {/* Stage 0: Strategy streaming */}
-              {activeStage === 0 && (
-                <div className="space-y-3">
-                  <div className={`text-sm font-semibold ${c.text} flex items-center gap-2`}>
-                    <Sparkles className={`h-4 w-4 ${c.gold}`} /> 品牌策略分析
-                  </div>
-                  <p className={`text-xs ${c.sub} leading-relaxed`}>
-                    系统将分析品牌角色、可拥有性和可落地性三大关卡，生成3个结构差异明显的角色方向。请在左侧填写品牌目标后点击"启动品牌策略分析"。
-                  </p>
-
-                  {/* Brand gates */}
-                  <div className="grid grid-cols-3 gap-2">
-                    {[
-                      { title: '品牌角色', desc: 'IP服务的业务目标', icon: Target },
-                      { title: '可拥有性', desc: '名称、结构、素材风险', icon: Shield },
-                      { title: '可落地性', desc: '载体、预算、供应链', icon: Package },
-                    ].map(gate => {
-                      const Icon = gate.icon;
-                      return (
-                        <div key={gate.title} className={`rounded-lg border ${c.border} p-3`}>
-                          <Icon className={`h-4 w-4 ${c.gold} mb-1.5`} />
-                          <div className={`text-xs font-medium ${c.text}`}>{gate.title}</div>
-                          <div className={`text-[10px] ${c.sub} mt-0.5`}>{gate.desc}</div>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {/* Strategy streaming result */}
-                  {strategyStreaming && (
-                    <div className={`rounded-lg border ${c.border} p-4`}>
-                      <div className="flex items-center gap-2 mb-2">
-                        <Loader2 className={`h-4 w-4 animate-spin ${c.gold}`} />
-                        <span className={`text-sm font-medium ${c.text}`}>AI 策略分析中</span>
-                      </div>
-                      <div className={`text-sm ${c.sub2} whitespace-pre-wrap max-h-64 overflow-y-auto leading-relaxed`}>
-                        {strategyStreamText || '等待模型响应...'}
-                      </div>
-                    </div>
-                  )}
-
-                  {strategyError && (
-                    <div className={`flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/5 p-3`}>
-                      <AlertCircle className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
-                      <span className="text-sm text-red-500">{strategyError}</span>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Stage 1: Direction selection */}
-              {activeStage === 1 && (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h3 className={`text-sm font-semibold ${c.text} flex items-center gap-2`}>
-                      <Crown className={`h-4 w-4 ${c.gold}`} /> 角色方向
-                    </h3>
-                    <button
-                      onClick={handleRunStrategy}
-                      disabled={strategyStreaming}
-                      className={`flex items-center gap-1 text-xs ${c.gold} ${c.hover} px-2.5 py-1 rounded-lg transition-colors disabled:opacity-40`}
-                    >
-                      <RefreshCw className="h-3.5 w-3.5" /> 重新分析
-                    </button>
-                  </div>
-                  <p className={`text-xs ${c.sub}`}>请选择一个角色方向并确认，确认后系统将锁定不可变核心。</p>
-
-                  {/* Strategy summary */}
-                  {project.strategy && (
-                    <div className={`rounded-lg border ${c.border} p-3 space-y-2`}>
-                      {project.strategy.positioning && (
-                        <div>
-                          <span className={`text-[10px] ${c.sub} uppercase`}>定位</span>
-                          <p className={`text-xs ${c.text}`}>{project.strategy.positioning}</p>
-                        </div>
-                      )}
-                      <div className="grid grid-cols-2 gap-2">
-                        {project.strategy.toneOfVoice && (
-                          <div>
-                            <span className={`text-[10px] ${c.sub} uppercase`}>语调</span>
-                            <p className={`text-xs ${c.text}`}>{project.strategy.toneOfVoice}</p>
-                          </div>
-                        )}
-                        {project.strategy.narrative && (
-                          <div>
-                            <span className={`text-[10px] ${c.sub} uppercase`}>叙事</span>
-                            <p className={`text-xs ${c.text}`}>{project.strategy.narrative}</p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Direction cards */}
-                  <div className="space-y-2.5">
-                    {(project.directions.length > 0 ? project.directions : [
-                      { id: 'dir-1', name: '方向 A', description: '基于品牌策略自动生成的角色方向', scores: { differentiation: 8, memorability: 7, extensibility: 9, feasibility: 8 } },
-                      { id: 'dir-2', name: '方向 B', description: '替代角色方向', scores: { differentiation: 9, memorability: 8, extensibility: 7, feasibility: 7 } },
-                      { id: 'dir-3', name: '方向 C', description: '创意方向', scores: { differentiation: 9, memorability: 9, extensibility: 8, feasibility: 6 } },
-                    ]).map(dir => {
-                      const selected = project.confirmedDirectionId === dir.id;
-                      return (
-                        <button
-                          key={dir.id}
-                          onClick={() => handleConfirmDirection(dir.id)}
-                          className={`w-full text-left rounded-xl border p-4 transition-all ${
-                            selected ? c.borderActive + (dark ? ' bg-[#d4af37]/5' : ' bg-gray-50') : `${c.border} ${c.hover}`
-                          }`}
-                        >
-                          <div className="flex items-start justify-between mb-2">
-                            <div>
-                              <span className={`text-sm font-semibold ${c.text}`}>{dir.name}</span>
-                              {selected && (
-                                <span className={`ml-2 inline-flex items-center gap-0.5 text-[10px] ${c.gold}`}>
-                                  <Check className="h-3 w-3" /> 已确认
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                          <p className={`text-xs ${c.sub2} mb-3`}>{dir.description}</p>
-                          <div className="grid grid-cols-4 gap-2">
-                            {Object.entries(dir.scores).map(([k, v]) => (
-                              <div key={k}>
-                                <div className="flex items-center justify-between mb-0.5">
-                                  <span className={`text-[10px] ${c.sub}`}>{k}</span>
-                                  <span className={`text-[10px] font-medium ${c.gold}`}>{v}</span>
-                                </div>
-                                <div className={`h-1 rounded-full ${dark ? 'bg-white/10' : 'bg-gray-200'}`}>
-                                  <div
-                                    className="h-1 rounded-full"
-                                    style={{ width: `${v * 10}%`, background: dark ? '#d4af37' : '#374151' }}
-                                  />
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* Stage 2: Visual System */}
-              {activeStage === 2 && (
-                <div className="space-y-3">
-                  <h3 className={`text-sm font-semibold ${c.text} flex items-center gap-2`}>
-                    <Palette className={`h-4 w-4 ${c.gold}`} /> 视觉系统
-                  </h3>
-                  <p className={`text-xs ${c.sub} leading-relaxed`}>
-                    已锁定不可变核心。基于品牌策略和已确认方向，生成标准角色图、单色图、小尺寸图和应用验证。
-                  </p>
-
-                  {/* Immutable core display */}
-                  {project.immutableCore.length > 0 && (
-                    <div className={`rounded-lg border ${c.borderActive} p-3`}>
-                      <div className={`text-xs font-semibold ${c.gold} flex items-center gap-1.5 mb-2`}>
-                        <Lock className="h-3 w-3" /> 锁定的不可变核心
-                      </div>
-                      <div className="space-y-1">
-                        {project.immutableCore.map(item => (
-                          <div key={item.id} className="flex items-start gap-2">
-                            <div className={`h-1.5 w-1.5 rounded-full ${dark ? 'bg-[#d4af37]' : 'bg-gray-600'} mt-1.5 shrink-0`} />
-                            <div>
-                              <span className={`text-xs font-medium ${c.text}`}>{item.category}</span>
-                              <span className={`text-xs ${c.sub} ml-1.5`}>{item.description}</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Controlled variables */}
-                  {project.controlledVariables.length > 0 && (
-                    <div className={`rounded-lg border ${c.border} p-3`}>
-                      <div className={`text-xs font-semibold ${c.sub} uppercase tracking-wide mb-2`}>可控变量（可在规则内变化）</div>
-                      <div className="grid grid-cols-2 gap-2">
-                        {project.controlledVariables.map(v => (
-                          <div key={v.id} className={`rounded-lg ${c.card} border ${c.border} p-2`}>
-                            <div className={`text-xs font-medium ${c.text}`}>{v.category}</div>
-                            <div className={`text-[11px] ${c.sub} mt-0.5`}>{v.description}</div>
-                            {v.guidance && <div className={`text-[10px] ${c.gold} mt-1`}>{v.guidance}</div>}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Generation controls */}
-                  <div className={`rounded-lg border ${c.border} p-3`}>
-                    <div className="flex items-center gap-2 mb-3">
-                      <Wand2 className={`h-4 w-4 ${c.gold}`} />
-                      <span className={`text-sm font-medium ${c.text}`}>生成品牌资产</span>
-                    </div>
-                    <div className="flex flex-wrap gap-1.5 mb-3">
-                      {ASSET_TYPES.map(type => (
-                        <button
-                          key={type.key}
-                          onClick={() => setAssetType(type.key)}
-                          className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-all ${
-                            assetType === type.key ? c.activeChip : `${c.border} ${c.sub2} ${c.hover}`
-                          }`}
-                        >
-                          {type.label}
-                        </button>
-                      ))}
-                    </div>
-                    <textarea
-                      className={`${c.input} border rounded-lg px-3 py-2 text-sm outline-none w-full resize-none focus:ring-1 ${dark ? 'focus:ring-[#d4af37]/30' : 'focus:ring-gray-300'}`}
-                      rows={3}
-                      placeholder="描述要生成的品牌资产..."
-                      value={assetPrompt}
-                      onChange={e => setAssetPrompt(e.target.value)}
-                    />
-                    <button
-                      onClick={handleGenerate}
-                      disabled={generating || !assetPrompt.trim()}
-                      className={`mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-40 ${c.goldBg} ${c.goldBgHover}`}
-                    >
-                      {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                      {generating ? '生成中...' : '生成资产'}
-                    </button>
-                  </div>
-
-                  {genError && (
-                    <div className={`flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/5 p-3`}>
-                      <AlertCircle className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
-                      <span className="text-sm text-red-500">{genError}</span>
-                    </div>
-                  )}
-
-                  {/* Proceed to application */}
-                  {project.assets.length > 0 && (
-                    <button
-                      onClick={() => setActiveStage(3)}
-                      className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border ${c.borderActive} ${c.gold} ${c.hover} transition-colors`}
-                    >
-                      进入应用延展 <ChevronRight className="h-4 w-4" />
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {/* Stage 3: Application */}
-              {activeStage === 3 && (
-                <div className="space-y-3">
-                  <h3 className={`text-sm font-semibold ${c.text} flex items-center gap-2`}>
-                    <Package className={`h-4 w-4 ${c.gold}`} /> 应用延展
-                  </h3>
-                  <p className={`text-xs ${c.sub} leading-relaxed`}>
-                    基于批准的标准角色，生成包装、社交头像、活动主视觉、周边等应用矩阵。
-                  </p>
-
-                  {/* Application grid */}
-                  <div className="grid grid-cols-2 gap-2">
-                    {CARRIERS.map(carrier => {
-                      const assets = project.assets.filter(a => a.type === carrier.key);
-                      return (
-                        <div key={carrier.key} className={`rounded-lg border ${c.border} p-3`}>
-                          <div className={`text-xs font-medium ${c.text} mb-1`}>{carrier.label}</div>
-                          {assets.length > 0 ? (
-                            <div className="text-[10px] text-green-500">{assets.length} 个资产</div>
-                          ) : (
-                            <div className={`text-[10px] ${c.sub}`}>未生成</div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {/* Quick generate */}
-                  <div className={`rounded-lg border ${c.border} p-3`}>
-                    <div className="flex flex-wrap gap-1.5 mb-2">
-                      {ASSET_TYPES.map(type => (
-                        <button
-                          key={type.key}
-                          onClick={() => setAssetType(type.key)}
-                          className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-all ${
-                            assetType === type.key ? c.activeChip : `${c.border} ${c.sub2} ${c.hover}`
-                          }`}
-                        >
-                          {type.label}
-                        </button>
-                      ))}
-                    </div>
-                    <textarea
-                      className={`${c.input} border rounded-lg px-3 py-2 text-sm outline-none w-full resize-none focus:ring-1 ${dark ? 'focus:ring-[#d4af37]/30' : 'focus:ring-gray-300'}`}
-                      rows={2}
-                      placeholder="描述应用场景..."
-                      value={assetPrompt}
-                      onChange={e => setAssetPrompt(e.target.value)}
-                    />
-                    <button
-                      onClick={handleGenerate}
-                      disabled={generating || !assetPrompt.trim()}
-                      className={`mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-40 ${c.goldBg} ${c.goldBgHover}`}
-                    >
-                      {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                      {generating ? '生成中...' : '生成应用'}
-                    </button>
-                  </div>
-
-                  {genError && (
-                    <div className={`flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/5 p-3`}>
-                      <AlertCircle className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
-                      <span className="text-sm text-red-500">{genError}</span>
-                    </div>
-                  )}
-
-                  <button
-                    onClick={() => setActiveStage(4)}
-                    className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border ${c.borderActive} ${c.gold} ${c.hover} transition-colors`}
-                  >
-                    进入交付治理 <ChevronRight className="h-4 w-4" />
-                  </button>
-                </div>
-              )}
-
-              {/* Stage 4: Governance */}
-              {activeStage === 4 && (
-                <div className="space-y-3">
-                  <h3 className={`text-sm font-semibold ${c.text} flex items-center gap-2`}>
-                    <Shield className={`h-4 w-4 ${c.gold}`} /> 交付治理
-                  </h3>
-                  <p className={`text-xs ${c.sub} leading-relaxed`}>
-                    权利风险登记、版本管理、导出交付包。所有权利风险使用"待核验"表述，不提供法律结论。
-                  </p>
-
-                  {/* Risk register */}
-                  <div className={`rounded-lg border ${c.border} p-3`}>
-                    <div className={`text-xs font-semibold ${c.text} mb-2`}>权利风险登记</div>
-                    <div className="space-y-1.5">
-                      {[
-                        { risk: '角色名称可能与在先商标近似', status: '待核验', owner: '品牌法务' },
-                        { risk: 'AI生成素材的版权归属', status: '待核验', owner: '品牌负责人' },
-                        { risk: '文化元素使用合规性', status: '待核验', owner: '品牌法务' },
-                      ].map((r, i) => (
-                        <div key={i} className={`flex items-center justify-between rounded-lg ${c.card} border ${c.border} px-2.5 py-1.5`}>
-                          <div>
-                            <div className={`text-xs ${c.text}`}>{r.risk}</div>
-                            <div className={`text-[10px] ${c.sub}`}>责任人: {r.owner}</div>
-                          </div>
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] border ${c.goldChip}`}>{r.status}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Version info */}
-                  <div className={`rounded-lg border ${c.border} p-3`}>
-                    <div className={`text-xs font-semibold ${c.text} mb-2`}>版本记录</div>
-                    <div className="space-y-1">
-                      {project.assets.map((asset, i) => (
-                        <div key={asset.id} className={`flex items-center justify-between text-xs`}>
-                          <span className={c.sub2}>v{(project.assets.length - i).toString().padStart(3, '0')} · {asset.type}</span>
-                          <span className={c.sub}>{new Date(asset.createdAt).toLocaleDateString()}</span>
-                        </div>
-                      ))}
-                      {project.assets.length === 0 && (
-                        <div className={`text-xs ${c.sub}`}>暂无版本记录</div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Export */}
-                  <div className="grid grid-cols-2 gap-2">
-                    <button className={`flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border ${c.border} ${c.hover} ${c.text} transition-colors`}>
-                      <FileDown className="h-4 w-4" /> 导出 Markdown
-                    </button>
-                    <button className={`flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border ${c.border} ${c.hover} ${c.text} transition-colors`}>
-                      <Package className="h-4 w-4" /> 导出 ZIP
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* ═══ Right Column: Preview / Assets ═══ */}
-            <div className={`w-[340px] shrink-0 border-l ${c.border} overflow-y-auto p-4 space-y-3`}>
-
-              {/* Current direction */}
-              {project.confirmedDirectionId && (
-                <div className={`rounded-lg border ${c.borderActive} p-3`}>
-                  <div className={`text-[10px] ${c.sub} uppercase tracking-wide mb-1`}>当前方向</div>
-                  <div className={`text-sm font-semibold ${c.gold}`}>
-                    {project.directions.find(d => d.id === project.confirmedDirectionId)?.name ?? '—'}
-                  </div>
-                  <p className={`text-xs ${c.sub2} mt-1`}>
-                    {project.directions.find(d => d.id === project.confirmedDirectionId)?.description ?? ''}
-                  </p>
-                </div>
-              )}
-
-              {/* Asset grid */}
-              <div>
-                <div className={`text-xs font-semibold ${c.gold} uppercase tracking-wide mb-2 flex items-center gap-1.5`}>
-                  <ImageIcon className="h-3.5 w-3.5" /> 资产预览
-                </div>
-                {project.assets.length > 0 ? (
-                  <div className="grid grid-cols-2 gap-2">
-                    {project.assets.map(asset => (
-                      <div key={asset.id} className={`rounded-lg border ${c.border} overflow-hidden group`}>
-                        {asset.status === 'completed' && asset.imageUrl ? (
-                          <div className="relative">
-                            <img src={asset.imageUrl} alt={asset.type} className="w-full aspect-square object-cover" />
-                            <button
-                              onClick={() => handleAddToCanvas(asset.imageUrl)}
-                              className={`absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity ${dark ? 'bg-black/60' : 'bg-white/60'}`}
-                            >
-                              <span className={`text-xs font-medium ${c.gold}`}>添加到画布</span>
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="w-full aspect-square flex items-center justify-center">
-                            {asset.status === 'pending' ? (
-                              <Loader2 className={`h-6 w-6 animate-spin ${c.sub}`} />
-                            ) : (
-                              <AlertCircle className="h-6 w-6 text-red-500" />
-                            )}
-                          </div>
-                        )}
-                        <div className="p-1.5">
-                          <div className={`text-[10px] font-medium ${c.text}`}>{asset.type}</div>
-                          {asset.status === 'completed' && (
-                            <button
-                              onClick={() => handleAddToCanvas(asset.imageUrl)}
-                              className={`text-[10px] ${c.gold} ${c.hover} mt-0.5`}
-                            >
-                              + 画布
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className={`rounded-lg border ${c.border} border-dashed p-8 text-center`}>
-                    <ImageIcon className={`h-8 w-8 ${c.sub} mx-auto mb-2`} />
-                    <p className={`text-xs ${c.sub}`}>暂无资产</p>
-                    <p className={`text-[10px] ${c.sub} mt-1`}>在视觉系统阶段生成</p>
-                  </div>
-                )}
+                {/* Generate button */}
+                <button
+                  className="bi-primary-button"
+                  disabled={isAnalyzing || !brandName.trim()}
+                  onClick={handleGenerate}
+                >
+                  {isAnalyzing ? '分析中...' : '生成策略与方向'}
+                </button>
+                <p className="bi-generate-note">
+                  系统将分析品牌角色、可拥有性、可落地性三大关卡，并生成3个角色方向
+                </p>
               </div>
 
-              {/* Validation checklist */}
-              {activeStage >= 2 && (
-                <div>
-                  <div className={`text-xs font-semibold ${c.sub} uppercase tracking-wide mb-2`}>质量检查</div>
-                  <div className="space-y-1">
-                    {[
-                      { label: '三秒识别', checked: project.assets.length > 0 },
-                      { label: '去装饰仍可识别', checked: false },
-                      { label: '单色结构成立', checked: false },
-                      { label: '32px小尺寸可识别', checked: false },
-                      { label: '多视角结构一致', checked: false },
-                    ].map(item => (
-                      <div key={item.label} className="flex items-center gap-2">
-                        <div className={`h-4 w-4 rounded border flex items-center justify-center ${
-                          item.checked
-                            ? (dark ? 'bg-[#d4af37] border-[#d4af37]' : 'bg-gray-800 border-gray-800')
-                            : c.border
-                        }`}>
-                          {item.checked && <Check className="h-3 w-3 text-white" />}
-                        </div>
-                        <span className={`text-xs ${item.checked ? c.text : c.sub}`}>{item.label}</span>
+              {/* ─── Center: Result column ─── */}
+              <div className="bi-result-column">
+
+                {/* Insight card */}
+                <div className="bi-panel bi-insight" style={{ padding: 18 }}>
+                  <div className="bi-panel-heading compact">
+                    <div>
+                      <span className="bi-section-index">02</span>
+                      <h2>策略摘要</h2>
+                    </div>
+                    <span className={`bi-status-pill ${hasAnalyzed ? 'success' : ''}`}>
+                      {isAnalyzing ? '分析中' : hasAnalyzed ? '已完成' : '待生成'}
+                    </span>
+                  </div>
+
+                  {isAnalyzing && (
+                    <div className="bi-analysis-state">
+                      <div className="bi-orb-loader"><span /></div>
+                      <strong>正在分析品牌策略</strong>
+                      <p>AI 正在解析品牌目标与三大关卡</p>
+                      <div className="bi-progress-track">
+                        <i style={{ width: `${analysisProgress}%` }} />
                       </div>
+                      <small>{analysisProgress}%</small>
+                    </div>
+                  )}
+
+                  {!isAnalyzing && !hasAnalyzed && (
+                    <div className="bi-analysis-state">
+                      <div className="bi-orb-loader" style={{ animation: 'none', opacity: 0.4 }}><span /></div>
+                      <strong style={{ color: '#646770' }}>等待策略分析</strong>
+                      <p>填写左侧品牌目标后点击"生成策略与方向"</p>
+                    </div>
+                  )}
+
+                  {!isAnalyzing && hasAnalyzed && (
+                    <>
+                      {/* Summary card */}
+                      <div className="bi-summary-card">
+                        <div className="bi-summary-top">
+                          <span>策略摘要</span>
+                          <strong>AI 生成</strong>
+                        </div>
+                        <p style={{ color: '#a0a2a7', fontSize: 10, lineHeight: 1.7, margin: '10px 0 12px', whiteSpace: 'pre-wrap' }}>
+                          {strategyText.slice(0, 500) || '策略分析完成。请查看下方角色方向并选择确认。'}
+                          {strategyText.length > 500 ? '...' : ''}
+                        </p>
+                        <div className="bi-confidence">
+                          <span>置信度</span>
+                          <div><i style={{ width: '82%' }} /></div>
+                          <strong>82%</strong>
+                        </div>
+                      </div>
+
+                      {/* Gate grid */}
+                      <div className="bi-gate-grid">
+                        {GATES.map((g, i) => (
+                          <article key={i}>
+                            <span className="bi-gate-icon" style={{ fontSize: 16 }}>{g.icon}</span>
+                            <div>
+                              <strong>{g.name}</strong>
+                              <small>{g.note}</small>
+                            </div>
+                            <b className={g.ok ? '' : 'warning'}>{g.status}</b>
+                          </article>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Directions card */}
+                <div className="bi-panel bi-directions" style={{ padding: 18 }}>
+                  <div className="bi-panel-heading compact">
+                    <div>
+                      <span className="bi-section-index">03</span>
+                      <h2>角色方向</h2>
+                    </div>
+                    <span className="bi-status-pill">3 个候选</span>
+                  </div>
+
+                  <div className="bi-direction-list">
+                    {directions.map(dir => (
+                      <button
+                        key={dir.id}
+                        className={selectedDirection === dir.id ? 'selected' : ''}
+                        onClick={() => !confirmedDirection && setSelectedDirection(dir.id)}
+                        style={{ cursor: confirmedDirection ? 'default' : 'pointer' }}
+                      >
+                        {/* Mini character */}
+                        <div className={`bi-mini-character ${dir.tone}`} style={{ height: 94 }}>
+                          <div className="ear" />
+                          <div className="ear right" />
+                          <div className="face">
+                            <i /><i />
+                          </div>
+                          <div className="body" />
+                        </div>
+
+                        {/* Copy */}
+                        <div className="bi-direction-copy">
+                          <div>
+                            <span>{dir.tag}</span>
+                            <strong>匹配 {dir.score}</strong>
+                          </div>
+                          <h3>{dir.name}</h3>
+                          <p>{dir.description}</p>
+                          <div className="bi-trait-row">
+                            {dir.traits.map((t, ti) => (
+                              <i key={ti}>{t}</i>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Radio dot */}
+                        <div className="bi-radio-dot" />
+                      </button>
                     ))}
                   </div>
+
+                  {/* Confirm button */}
+                  {selectedDirection && !confirmedDirection && (
+                    <button
+                      className="bi-primary-button"
+                      style={{ marginTop: 12, height: 36, fontSize: 11 }}
+                      onClick={handleConfirmDirection}
+                    >
+                      确认方向并锁定不可变核心
+                    </button>
+                  )}
+                  {confirmedDirection && (
+                    <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, background: 'rgba(94,229,164,.06)', border: '1px solid rgba(94,229,164,.16)', color: '#5ee5a4', fontSize: 10 }}>
+                      ✓ 方向已锁定：{directions.find(d => d.id === selectedDirection)?.name}
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
+
+              {/* ─── Right: Preview column ─── */}
+              <div className="bi-preview-column">
+
+                {/* Preview panel */}
+                <div className="bi-panel bi-preview-panel" style={{ overflow: 'hidden' }}>
+                  <div className="bi-preview-head">
+                    <span>角色预览</span>
+                    <div>
+                      {VIEW_TABS.map((t, i) => (
+                        <button
+                          key={i}
+                          className={viewTab === i ? 'active' : ''}
+                          onClick={() => setViewTab(i)}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Character stage */}
+                  <div className={`bi-character-stage ${dirTone}`} style={{ height: 262, position: 'relative', overflow: 'hidden' }}>
+                    <div className="bi-grid-floor" />
+                    {/* Hero character */}
+                    <div className="bi-hero-character">
+                      <div className="bi-hero-ear" />
+                      <div className="bi-hero-ear right" />
+                      <div className="bi-hero-head">
+                        <div className="bi-eye" />
+                        <div className="bi-eye right" />
+                        <div className="bi-cheek" />
+                        <div className="bi-cheek right" />
+                        <div className="bi-mouth" />
+                        <div className="bi-badge">★</div>
+                      </div>
+                      <div className="bi-hero-body" />
+                      <div className="bi-arm" />
+                      <div className="bi-arm right" />
+                      <div className="bi-foot" />
+                      <div className="bi-foot right" />
+                    </div>
+                    {/* Sparkles */}
+                    <span className="bi-spark s1" style={{ fontSize: 14 }}>✦</span>
+                    <span className="bi-spark s2">✦</span>
+                    <span className="bi-spark s3">✦</span>
+
+                    {/* Caption */}
+                    <div className="bi-preview-caption">
+                      <span>当前方向</span>
+                      <strong>{selDir?.name ?? '未选择'}</strong>
+                      <small>{confirmedDirection ? '已锁定' : '待确认'}</small>
+                    </div>
+                  </div>
+
+                  {/* View actions */}
+                  <div className="bi-view-actions">
+                    <button onClick={() => { const a = assets[0]; if (a) handleAddToCanvas(a.imageUrl); }}>发送到画布</button>
+                    <button onClick={() => showToast('收藏功能开发中')}>收藏</button>
+                    <button onClick={() => showToast('淘汰功能开发中')}>淘汰</button>
+                  </div>
+                </div>
+
+                {/* Deliverable panel */}
+                <div className="bi-panel bi-deliverable" style={{ padding: 15 }}>
+                  <div className="bi-deliverable-head">
+                    <div>
+                      <span className="bi-section-index">{STAGES[activeStage].num}</span>
+                      <h2>{STAGES[activeStage].title}</h2>
+                    </div>
+                    <span>{activeStage + 1} / 5</span>
+                  </div>
+                  <p>{STAGES[activeStage].desc}</p>
+                  <ul>
+                    {STAGES[activeStage].items.map((item, i) => (
+                      <li key={i}>
+                        <span>{String(i + 1).padStart(2, '0')}</span>
+                        {item}
+                        <b>{i < 2 ? '✓' : '○'}</b>
+                      </li>
+                    ))}
+                  </ul>
+                  {activeStage < 4 && (
+                    <button
+                      className="bi-next-stage"
+                      onClick={() => setActiveStage(activeStage + 1)}
+                    >
+                      进入下一阶段 <span>→</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Asset generation (stage 2+) */}
+                {activeStage >= 2 && (
+                  <div className="bi-panel" style={{ padding: 15 }}>
+                    <div className="bi-deliverable-head" style={{ marginBottom: 10 }}>
+                      <div>
+                        <span className="bi-section-index">04</span>
+                        <h2>资产生成</h2>
+                      </div>
+                    </div>
+                    {generatingAsset && (
+                      <div style={{ textAlign: 'center', padding: 12, color: '#e0b85c', fontSize: 10 }}>
+                        生成中...
+                      </div>
+                    )}
+                    {assets.length > 0 && (
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 10 }}>
+                        {assets.slice(0, 4).map(a => (
+                          <div
+                            key={a.id}
+                            style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', cursor: 'pointer' }}
+                            onClick={() => handleAddToCanvas(a.imageUrl)}
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={a.imageUrl} alt={a.assetType} style={{ width: '100%', height: 80, objectFit: 'cover' }} />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                      {['标准角色图', '单色版', '小尺寸', '表情包'].map(t => (
+                        <button
+                          key={t}
+                          className="bi-secondary-button"
+                          style={{ height: 32, fontSize: 10, justifyContent: 'center' }}
+                          disabled={generatingAsset || !confirmedDirection}
+                          onClick={() => handleGenerateAsset(t)}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Risk note */}
+                <div className="bi-risk-note">
+                  <span>!</span>
+                  <div>
+                    <strong>风险提示</strong>
+                    <p>系统输出的商标、版权和原创性判断均为"待核验"状态，不构成法律结论。请在商用前完成专业检索和法务审查。</p>
+                  </div>
+                </div>
+              </div>
+
+            </div>{/* /content-grid */}
+          </div>{/* /product */}
+        </div>{/* /scroll body */}
+
+        {/* ═══ Advanced settings drawer ═══ */}
+        {showAdvanced && (
+          <div className="bi-modal-backdrop" onClick={() => setShowAdvanced(false)}>
+            <div className="bi-advanced-drawer" onClick={e => e.stopPropagation()}>
+              <div className="bi-drawer-head">
+                <div>
+                  <span>ADVANCED</span>
+                  <h2>高级设置</h2>
+                </div>
+                <button onClick={() => setShowAdvanced(false)}>×</button>
+              </div>
+              <p className="bi-drawer-intro">
+                高级参数用于控制角色定位、生产限制和风险策略。不填写时系统将使用推荐默认值，不会阻塞基础流程。
+              </p>
+
+              <div className="bi-setting-group">
+                <label>IP 主角色定位</label>
+                <select value={advRole} onChange={e => setAdvRole(e.target.value)}>
+                  <option>长期代言人</option>
+                  <option>活动限定角色</option>
+                  <option>系列主角</option>
+                  <option>联名角色</option>
+                </select>
+              </div>
+
+              <div className="bi-setting-grid">
+                <div className="bi-setting-group">
+                  <label>角色数量</label>
+                  <select value={advCount} onChange={e => setAdvCount(e.target.value)}>
+                    <option value="1">1 个</option>
+                    <option value="2">2 个</option>
+                    <option value="3">3 个</option>
+                  </select>
+                </div>
+                <div className="bi-setting-group">
+                  <label>视觉气质</label>
+                  <select value={advVibe} onChange={e => setAdvVibe(e.target.value)}>
+                    <option>温暖亲和</option>
+                    <option>活力运动</option>
+                    <option>酷炫科技</option>
+                    <option>典雅文艺</option>
+                    <option>童趣可爱</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="bi-setting-group">
+                <label>生产限制</label>
+                <textarea
+                  rows={2}
+                  value={advConstraints}
+                  onChange={e => setAdvConstraints(e.target.value)}
+                  placeholder="例如：后期需支持PVC公仔生产"
+                />
+              </div>
+
+              <div className="bi-setting-group">
+                <label>禁止项</label>
+                <textarea
+                  rows={2}
+                  value={advForbidden}
+                  onChange={e => setAdvForbidden(e.target.value)}
+                  placeholder="例如：不得模仿具体艺术家"
+                />
+              </div>
+
+              <div className="bi-switch-list">
+                <label>
+                  <span>
+                    <strong>自动生成权利风险表</strong>
+                    <small>在交付治理阶段自动创建风险登记</small>
+                  </span>
+                  <input type="checkbox" checked={advAutoRisk} onChange={e => setAdvAutoRisk(e.target.checked)} />
+                </label>
+                <label>
+                  <span>
+                    <strong>同步生成应用矩阵</strong>
+                    <small>角色确认后自动生成首发载体应用方案</small>
+                  </span>
+                  <input type="checkbox" checked={advAutoApp} onChange={e => setAdvAutoApp(e.target.checked)} />
+                </label>
+                <label>
+                  <span>
+                    <strong>优先结构识别</strong>
+                    <small>生成前先分析已有角色的轮廓与比例</small>
+                  </span>
+                  <input type="checkbox" checked={advStructFirst} onChange={e => setAdvStructFirst(e.target.checked)} />
+                </label>
+              </div>
+
+              <div className="bi-drawer-actions">
+                <button onClick={() => setShowAdvanced(false)}>取消</button>
+                <button className="save" onClick={() => { setShowAdvanced(false); showToast('设置已保存'); }}>保存设置</button>
+              </div>
             </div>
           </div>
         )}
-      </div>
 
-      {/* ═══ Advanced Settings Drawer ═══ */}
-      {showAdvanced && project && (
-        <div className={`absolute right-0 top-0 bottom-0 w-80 ${c.panel} border-l ${c.border} z-10 p-4 space-y-3 overflow-y-auto`} data-no-drag>
-          <div className="flex items-center justify-between mb-2">
-            <span className={`text-sm font-semibold ${c.text} flex items-center gap-2`}>
-              <Settings className={`h-4 w-4 ${c.gold}`} /> 高级设置
-            </span>
-            <button onClick={() => setShowAdvanced(false)} className={`p-1 rounded-lg ${c.hover} ${c.sub}`}>
-              <ChevronLeft className="h-4 w-4" />
-            </button>
+        {/* ═══ Toast ═══ */}
+        {toast.show && (
+          <div className="bi-toast">
+            <span>✓</span>
+            {toast.msg}
           </div>
+        )}
 
-          <div className="space-y-3">
-            <div>
-              <label className={`text-xs ${c.sub} block mb-1`}>IP主角色定位</label>
-              <select className={`${c.input} border rounded-lg px-3 py-2 text-sm w-full outline-none`}>
-                <option>长期代言人</option>
-                <option>活动使者</option>
-                <option>系列主角</option>
-                <option>辅助角色</option>
-              </select>
-            </div>
-            <div>
-              <label className={`text-xs ${c.sub} block mb-1`}>角色数量</label>
-              <select className={`${c.input} border rounded-lg px-3 py-2 text-sm w-full outline-none`}>
-                <option>1 个</option>
-                <option>2 个</option>
-                <option>3 个</option>
-              </select>
-            </div>
-            <div>
-              <label className={`text-xs ${c.sub} block mb-1`}>视觉气质</label>
-              <select className={`${c.input} border rounded-lg px-3 py-2 text-sm w-full outline-none`}>
-                <option>温暖亲和</option>
-                <option>科技前卫</option>
-                <option>潮酷年轻</option>
-                <option>传统典雅</option>
-              </select>
-            </div>
-            <div>
-              <label className={`text-xs ${c.sub} block mb-1`}>生产限制</label>
-              <textarea
-                className={`${c.input} border rounded-lg px-3 py-2 text-sm w-full outline-none resize-none`}
-                rows={2}
-                placeholder="如：需支持PVC公仔生产"
-              />
-            </div>
-            <div>
-              <label className={`text-xs ${c.sub} block mb-1`}>禁止项</label>
-              <textarea
-                className={`${c.input} border rounded-lg px-3 py-2 text-sm w-full outline-none resize-none`}
-                rows={2}
-                placeholder="如：不得模仿具体艺术家"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <input type="checkbox" defaultChecked className="rounded" />
-              <span className={`text-xs ${c.text}`}>自动生成权利风险表</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <input type="checkbox" defaultChecked className="rounded" />
-              <span className={`text-xs ${c.text}`}>同步生成应用矩阵</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <input type="checkbox" defaultChecked className="rounded" />
-              <span className={`text-xs ${c.text}`}>优先结构识别</span>
-            </div>
-          </div>
-        </div>
-      )}
+      </div>{/* /shell */}
     </div>
   );
 }
