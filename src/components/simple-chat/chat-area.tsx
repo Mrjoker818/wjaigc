@@ -179,6 +179,7 @@ export default function ChatArea({
   const [selectedProviderId, setSelectedProviderId] = useState(task?.providerId || "");
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(task?.reasoningEffort || 'medium');
   const [responseSpeed, setResponseSpeed] = useState<ResponseSpeed>(task?.responseSpeed || 'balanced');
+  const [appliedChatControls, setAppliedChatControls] = useState<SimpleChatTask['appliedChatControls']>(task?.appliedChatControls);
   const [controlNotice, setControlNotice] = useState<string | null>(null);
   const [openModelMenu, setOpenModelMenu] = useState<'chat' | 'image' | null>(null);
 
@@ -232,7 +233,8 @@ export default function ChatArea({
       setSelectedProviderId(task.providerId);
       setReasoningEffort(task.reasoningEffort || 'medium');
       setResponseSpeed(task.responseSpeed || 'balanced');
-      setControlNotice(null);
+      setAppliedChatControls(task.appliedChatControls);
+      setControlNotice(task.appliedChatControls?.notices[0] || null);
       setInput("");
     }
   }, [task?.id]);
@@ -399,8 +401,8 @@ export default function ChatArea({
   // Sync task to parent（临时聊天模式下跳过保存）
   useEffect(() => {
     if (!task || !project || tempChat) return;
-    onUpdateTask({ ...task, messages, model: selectedModel, providerId: selectedProviderId, imageModel: selectedImageModel, imageProviderId: selectedImageProviderId, reasoningEffort, responseSpeed, updatedAt: Date.now() });
-  }, [messages, selectedModel, selectedProviderId, selectedImageModel, selectedImageProviderId, reasoningEffort, responseSpeed, tempChat]);
+    onUpdateTask({ ...task, messages, model: selectedModel, providerId: selectedProviderId, imageModel: selectedImageModel, imageProviderId: selectedImageProviderId, reasoningEffort, responseSpeed, appliedChatControls, updatedAt: Date.now() });
+  }, [messages, selectedModel, selectedProviderId, selectedImageModel, selectedImageProviderId, reasoningEffort, responseSpeed, appliedChatControls, tempChat]);
 
   // Sync knowledge
   useEffect(() => {
@@ -522,6 +524,7 @@ export default function ChatArea({
           { role: 'user', content: `【待修改文本】\n${target}\n\n【修改指令】\n${instruction}` },
         ],
         model: selectedModel, providerId: selectedProviderId,
+        reasoningEffort, responseSpeed,
       }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -718,7 +721,7 @@ export default function ChatArea({
                   notices,
                 };
                 setControlNotice(notices[0] || `已应用：推理 ${parsed.appliedReasoningEffort || '默认'}，速度 ${parsed.appliedResponseSpeed || '均衡'}`);
-                if (!tempChat) onUpdateTask({ ...task, appliedChatControls: appliedControls, reasoningEffort, responseSpeed, updatedAt: Date.now() });
+                setAppliedChatControls(appliedControls);
               } else if (parsed.type === 'search_status') {
                 setSearchStatus(parsed.status === 'completed' ? `搜索完成，找到 ${parsed.resultCount || 0} 条结果` : parsed.status === 'error' ? '搜索出错' : '正在搜索...');
                 // 搜索完成后，添加一条系统消息展示搜索结果
@@ -1144,7 +1147,7 @@ export default function ChatArea({
   return (
     <div className="flex-1 flex flex-col h-screen bg-background">
       {/* Top Bar */}
-      <header className="flex items-center gap-2 px-3 py-2 border-b border-border bg-background/80 backdrop-blur-sm shrink-0">
+      <header className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-border bg-background/80 backdrop-blur-sm shrink-0">
         <button onClick={onToggleSidebar} className="p-2 rounded-lg hover:bg-muted transition-colors" title="切换侧边栏">
           <Menu className="w-5 h-5 text-muted-foreground" />
         </button>
@@ -1183,7 +1186,7 @@ export default function ChatArea({
             ))}
           </div>
         </div>
-        <div className="flex items-center gap-1 rounded-lg bg-muted p-0.5" aria-label="对话控制">
+        <div className="flex flex-wrap items-center gap-1 rounded-lg bg-muted p-0.5" aria-label="推理强度">
           {(['low', 'medium', 'high', 'maximum'] as ReasoningEffort[]).map((effort) => (
             <button key={effort} type="button" onClick={() => setReasoningEffort(effort)} className={`px-2 py-1 rounded-md text-[11px] transition-colors ${reasoningEffort === effort ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`} title="推理强度">
               {effort === 'low' ? '轻量' : effort === 'medium' ? '均衡' : effort === 'high' ? '深度' : '极强'}
@@ -1912,6 +1915,7 @@ export default function ChatArea({
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 providerId: selectedProviderId, model: selectedModel,
+                reasoningEffort, responseSpeed,
                 systemPrompt: '你是专业文案编辑助手。根据用户指令改写选中文本，只返回改写后的文本，不要解释。',
                 messages: [{ role: 'user', content: `原文：\n${selected}\n\n改写指令：${instruction}` }],
                 stream: false,

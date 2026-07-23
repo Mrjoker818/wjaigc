@@ -141,16 +141,25 @@ export function resolveChatControls(
   }
 
   const tokenParam = advanced.chatTokenLimitParam || (/^(o1|o3|o4)(-|$)|gpt-5/.test(model.toLowerCase()) ? 'max_completion_tokens' : 'max_tokens');
-  const useTokenBudget = parseBoolean(advanced.enableChatSpeedTokenBudget) !== false;
-  if (useTokenBudget) requestParams[tokenParam] = outputTokenLimit(responseSpeed);
+  const useTokenBudget = parseBoolean(advanced.enableChatSpeedTokenBudget) === true;
+  if (useTokenBudget) {
+    const tokenOverrides: Record<ResponseSpeed, number | undefined> = {
+      fast: parseInteger(advanced.chatTokenLimitFast),
+      balanced: parseInteger(advanced.chatTokenLimitBalanced),
+      quality: parseInteger(advanced.chatTokenLimitQuality),
+    };
+    requestParams[tokenParam] = tokenOverrides[responseSpeed] || outputTokenLimit(responseSpeed);
+  }
 
   const supportsServiceTier = parseBoolean(advanced.supportsServiceTier) === true;
   if (supportsServiceTier) {
     requestParams.service_tier = responseSpeed === 'fast' ? (advanced.fastServiceTier || 'priority') : 'auto';
-  } else if (responseSpeed === 'fast') {
-    notices.push('当前提供商未启用优先服务档位，已通过收紧输出预算降低延迟。');
-  } else if (responseSpeed === 'quality') {
-    notices.push('质量优先会放宽输出预算，响应时间和用量可能增加。');
+  } else if (responseSpeed !== 'balanced' && useTokenBudget) {
+    notices.push(responseSpeed === 'fast'
+      ? '当前提供商未启用优先服务档位，已通过收紧输出预算降低延迟。'
+      : '质量优先会放宽输出预算，响应时间和用量可能增加。');
+  } else if (responseSpeed !== 'balanced') {
+    notices.push('当前提供商未配置响应速度参数，已保留模型默认执行策略。');
   }
 
   return {
