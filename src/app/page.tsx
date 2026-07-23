@@ -75,6 +75,11 @@ function HomeContent() {
     setCurrentUser(user);
   }, []);
 
+  const handleWorkspaceLogout = useCallback(() => {
+    window.history.replaceState(null, '', '/');
+    setCurrentUser(null);
+  }, []);
+
   // Show loading while checking session
   if (!authChecked) {
     return <AuthLoadingScreen message="正在返回工作台..." />;
@@ -97,7 +102,7 @@ function HomeContent() {
   }
 
   // Authenticated: dynamically load the heavy canvas workspace
-  return <CanvasWorkspace initialUser={currentUser} />;
+  return <CanvasWorkspace initialUser={currentUser} onLoggedOut={handleWorkspaceLogout} />;
 }
 
 export default function Home() {

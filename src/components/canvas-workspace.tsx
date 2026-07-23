@@ -226,7 +226,12 @@ function loadCanvasImageSize(url: string): Promise<{ width: number; height: numb
   });
 }
 
-export function CanvasWorkspace({ initialUser }: { initialUser: User }) {
+interface CanvasWorkspaceProps {
+  initialUser: User;
+  onLoggedOut: () => void;
+}
+
+export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspaceProps) {
   const [images, setImagesRaw] = useState<CanvasImage[]>([]);
   const [selectedImage, setSelectedImage] = useState<CanvasImage | null>(null);
 
@@ -4305,7 +4310,6 @@ export function CanvasWorkspace({ initialUser }: { initialUser: User }) {
           } catch { /* save failed - non-blocking */ }
           const userMgr = UserManagerCore.getInstance();
           await userMgr.logout();
-          setCurrentUser(null);
           setCurrentProject(null);
           // ★ 清空 undo 历史，防止退出登录后残留历史
           incrementalHistoryRef.current.clear();
@@ -4313,13 +4317,13 @@ export function CanvasWorkspace({ initialUser }: { initialUser: User }) {
           setImages([]);
           latestImagesRef.current = []; // 立即清除 ref，防止残留图片数据
           setInitialGroups([]);
-          setAppMode('canvas');
           toast.info('已退出登录', {
-            description: '请重新登录以继续使用',
+            description: '已返回入口选择页',
             className: themeStyle === 'monochrome'
               ? 'bg-white border border-gray-200 text-gray-900'
               : 'bg-[#141414] border border-[#2a2a2a] text-white',
           });
+          onLoggedOut();
         }}
       />
     </>

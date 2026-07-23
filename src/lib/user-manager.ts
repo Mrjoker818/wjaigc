@@ -486,6 +486,9 @@ export class UserManager {
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         keepalive: immediate,
+        signal: typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+          ? AbortSignal.timeout(PROJECT_SYNC_TIMEOUT_MS)
+          : undefined,
         body: JSON.stringify({ key: 'projects', value: projectsPayload }),
       });
       if (!syncRes.ok) {
@@ -1194,20 +1197,31 @@ export class UserManager {
   }
 
   async deleteProject(projectId: string): Promise<boolean> {
+    const result = await this.deleteProjects([projectId]);
+    return result.deletedIds.includes(projectId);
+  }
+
+  async deleteProjects(projectIds: string[]): Promise<{ deletedIds: string[]; skippedIds: string[] }> {
     const userData = this.getCurrentUserData();
-    if (!userData) return false;
+    const requestedIds = [...new Set(projectIds.map(id => id.trim()).filter(Boolean))];
+    if (!userData) return { deletedIds: [], skippedIds: requestedIds };
 
-    const initialLength = userData.projects.length;
-    userData.projects = userData.projects.filter(p => p.id !== projectId);
+    const existingIds = new Set(userData.projects.map(project => project.id));
+    const deletedIds = requestedIds.filter(id => existingIds.has(id));
+    const skippedIds = requestedIds.filter(id => !existingIds.has(id));
+    if (deletedIds.length === 0) return { deletedIds, skippedIds };
 
-    if (userData.projects.length !== initialLength) {
-      this.saveData();
-      // 删除项目后等待服务器同步完成，防止刷新后从服务器恢复
-      await this.syncToServer(true);
-      return true;
+    const deletedIdSet = new Set(deletedIds);
+    userData.projects = userData.projects.filter(project => !deletedIdSet.has(project.id));
+    this.saveData();
+    if (this.serverSyncTimer) {
+      clearTimeout(this.serverSyncTimer);
+      this.serverSyncTimer = null;
     }
+    // Keep deletion optimistic while one bounded background sync persists the complete batch.
+    void this.syncToServer(true);
 
-    return false;
+    return { deletedIds, skippedIds };
   }
 
   // API Key 相关方法

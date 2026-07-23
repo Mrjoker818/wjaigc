@@ -188,6 +188,10 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const [selectedAssetIds, setSelectedAssetIds] = useState<Set<string>>(new Set());
   const [assetCopiedId, setAssetCopiedId] = useState<string | null>(null);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [projectManageMode, setProjectManageMode] = useState(false);
+  const [selectedProjectIds, setSelectedProjectIds] = useState<Set<string>>(new Set());
+  const [projectDeleteLoading, setProjectDeleteLoading] = useState(false);
+  const [projectRevision, setProjectRevision] = useState(0);
   const [starredIds, setStarredIds] = useState<Set<string>>(() => {
     try { return new Set(JSON.parse(localStorage.getItem('wujie-starred-projects') || '[]')); } catch { return new Set(); }
   });
@@ -484,7 +488,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
   // ─── Project data ───
   const mgr = UserManager.getInstance();
-  const projects = mgr.getProjects();
+  const projects = useMemo(() => mgr.getProjects(), [mgr, projectRevision]);
   const statsArr: UsageStats[] = mgr.getUsageStats();
   const stats: UsageStats | null = statsArr.length > 0 ? statsArr[statsArr.length - 1] : null;
 
@@ -585,10 +589,94 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
   const handleDelete = useCallback(async (id: string) => {
     if (!confirm('确定删除此项目？此操作不可恢复。')) return;
-    await mgr.deleteProject(id);
-    setMenuOpenId(null);
-    window.location.reload();
+    try {
+      const deleted = await mgr.deleteProject(id);
+      if (!deleted) {
+        toast.error('项目不存在或已被删除');
+        return;
+      }
+      setSelectedProjectIds(prev => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      setStarredIds(prev => {
+        const next = new Set(prev);
+        next.delete(id);
+        localStorage.setItem('wujie-starred-projects', JSON.stringify([...next]));
+        return next;
+      });
+      setProjectRevision(revision => revision + 1);
+      toast.success('项目已删除');
+    } catch (error) {
+      toast.error(errorMessage(error, '删除项目失败'));
+    } finally {
+      setMenuOpenId(null);
+    }
   }, [mgr]);
+
+  const toggleProjectSelection = useCallback((id: string) => {
+    setSelectedProjectIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleSelectAllProjects = useCallback(() => {
+    setSelectedProjectIds(prev => {
+      const next = new Set(prev);
+      const visibleIds = filteredProjects.map(project => project.id);
+      const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => next.has(id));
+      visibleIds.forEach(id => allVisibleSelected ? next.delete(id) : next.add(id));
+      return next;
+    });
+  }, [filteredProjects]);
+
+  const exitProjectManageMode = useCallback(() => {
+    setProjectManageMode(false);
+    setSelectedProjectIds(new Set());
+  }, []);
+
+  const handleBatchDeleteProjects = useCallback(() => {
+    if (selectedProjectIds.size === 0 || projectDeleteLoading) return;
+    setConfirmDlg({
+      open: true,
+      title: '批量删除项目',
+      message: `确定删除选中的 ${selectedProjectIds.size} 个项目吗？此操作不可恢复。`,
+      variant: 'danger',
+      onConfirm: async () => {
+        setProjectDeleteLoading(true);
+        try {
+          const result = await mgr.deleteProjects(Array.from(selectedProjectIds));
+          if (result.deletedIds.length === 0) {
+            toast.error('所选项目不存在或已被删除');
+            return;
+          }
+          const deletedSet = new Set(result.deletedIds);
+          setStarredIds(prev => {
+            const next = new Set([...prev].filter(id => !deletedSet.has(id)));
+            localStorage.setItem('wujie-starred-projects', JSON.stringify([...next]));
+            return next;
+          });
+          setSelectedProjectIds(new Set());
+          setProjectManageMode(false);
+          setProjectRevision(revision => revision + 1);
+          if (result.skippedIds.length > 0) {
+            toast.warning(`已删除 ${result.deletedIds.length} 个项目，跳过 ${result.skippedIds.length} 个无效项目`);
+          } else {
+            toast.success(`已删除 ${result.deletedIds.length} 个项目`);
+          }
+        } catch (error) {
+          toast.error(errorMessage(error, '批量删除项目失败'));
+        } finally {
+          setProjectDeleteLoading(false);
+          setConfirmDlg(dialog => ({ ...dialog, open: false }));
+        }
+      },
+      onCancel: () => setConfirmDlg(dialog => ({ ...dialog, open: false })),
+    });
+  }, [mgr, projectDeleteLoading, selectedProjectIds]);
 
   const handleUseTemplate = useCallback((template: { name: string }) => {
     const newProject = mgr.createProject(template.name);
@@ -2075,17 +2163,40 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                   <h1 className={`text-2xl font-bold ${textPrimary}`}>我的项目</h1>
                   <p className={`text-sm mt-1 ${textSecondary}`}>{projects.length} 个项目 · {allImages.length} 张图片</p>
                 </div>
-                <div className="flex items-center gap-3">
-                  <div className="relative">
-                    <Search className={`w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 ${textSecondary}`} />
-                    <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="搜索项目..." className={`pl-9 pr-4 py-2 rounded-xl text-sm ${isDark ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-gray-200'} border focus:outline-none focus:ring-1 ${accentRingClass} w-56`} />
-                  </div>
-                  <button onClick={importProjectInputRef} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors cursor-pointer ${isDark ? `bg-white/5 border border-white/10 ${accentClass} hover:bg-white/10` : `bg-gray-100 border border-gray-200 ${isMonochrome ? 'text-[#3b82f6]' : 'text-gray-700'} hover:bg-gray-200`}`}>
-                    <Upload className="w-4 h-4" /> 导入 .wujie
-                  </button>
-                  <button onClick={onNewProject} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium ${accentBgClass} ${accentTextOnBgClass} ${accentHoverBgClass} transition-colors cursor-pointer`}>
-                    <Plus className="w-4 h-4" /> 新建项目
-                  </button>
+                 <div className="flex items-center gap-3">
+                   <div className="relative">
+                     <Search className={`w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 ${textSecondary}`} />
+                     <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="搜索项目..." className={`pl-9 pr-4 py-2 rounded-xl text-sm ${isDark ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-gray-200'} border focus:outline-none focus:ring-1 ${accentRingClass} w-56`} />
+                   </div>
+                   {projectManageMode ? (
+                     <>
+                       <button onClick={toggleSelectAllProjects} disabled={filteredProjects.length === 0} className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium border transition-colors ${isDark ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-white border-gray-200 hover:bg-gray-100'} disabled:opacity-50 disabled:cursor-not-allowed`}>
+                         {filteredProjects.length > 0 && filteredProjects.every(project => selectedProjectIds.has(project.id)) ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
+                         全选
+                       </button>
+                       <button onClick={handleBatchDeleteProjects} disabled={selectedProjectIds.size === 0 || projectDeleteLoading} className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium border border-red-500/20 bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                         {projectDeleteLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                         删除 {selectedProjectIds.size > 0 ? `(${selectedProjectIds.size})` : ''}
+                       </button>
+                       <button onClick={exitProjectManageMode} className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium border transition-colors ${isDark ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-white border-gray-200 hover:bg-gray-100'}`}>
+                         <X className="w-4 h-4" /> 完成
+                       </button>
+                     </>
+                   ) : (
+                     <button onClick={() => setProjectManageMode(true)} className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium border transition-colors ${isDark ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-white border-gray-200 hover:bg-gray-100'}`}>
+                       <CheckSquare className="w-4 h-4" /> 批量管理
+                     </button>
+                   )}
+                   {!projectManageMode && (
+                     <>
+                       <button onClick={importProjectInputRef} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors cursor-pointer ${isDark ? `bg-white/5 border border-white/10 ${accentClass} hover:bg-white/10` : `bg-gray-100 border border-gray-200 ${isMonochrome ? 'text-[#3b82f6]' : 'text-gray-700'} hover:bg-gray-200`}`}>
+                         <Upload className="w-4 h-4" /> 导入 .wujie
+                       </button>
+                       <button onClick={onNewProject} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium ${accentBgClass} ${accentTextOnBgClass} ${accentHoverBgClass} transition-colors cursor-pointer`}>
+                         <Plus className="w-4 h-4" /> 新建项目
+                       </button>
+                     </>
+                   )}
                 </div>
               </div>
               {/* Filters */}
@@ -2106,16 +2217,30 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mt-4">
-                  {filteredProjects.map(project => {
-                    const imgs = project.canvasImages || [];
-                    const thumb = imgs.length > 0 ? imgs[imgs.length - 1]?.url : null;
-                    const isRenaming = renamingProjectId === project.id;
-                    return (
-                      <div key={project.id} onClick={() => !isRenaming && onOpenProject(project)} className={`group rounded-xl border cursor-pointer transition-all hover:shadow-lg ${accentShadowClass} ${isDark ? 'bg-[#1a1a2e]/80 border-primary/20' : 'bg-white border-gray-200'} ${accentHoverBorderClass}`}>
-                        {/* Thumbnail */}
-                        <div className={`relative h-36 overflow-hidden rounded-t-xl ${isDark ? 'bg-gradient-to-br from-[#1a1a2e] to-[#0a0a0f]' : 'bg-gradient-to-br from-blue-50 to-gray-50'}`}>
-                          {thumb ? <img src={thumb} alt={project.name} className="w-full h-full object-cover" /> : <div className="flex items-center justify-center h-full"><Image className={`w-8 h-8 ${textSecondary} opacity-30`} /></div>}
-                          {starredIds.has(project.id) && <Star className={`absolute top-2 right-2 w-4 h-4 ${accentClass} fill-current`} style={{ color: accentHex }} />}
+                   {filteredProjects.map(project => {
+                     const imgs = project.canvasImages || [];
+                     const thumb = imgs.length > 0 ? imgs[imgs.length - 1]?.url : null;
+                     const isRenaming = renamingProjectId === project.id;
+                     const isSelected = selectedProjectIds.has(project.id);
+                     return (
+                       <div
+                         key={project.id}
+                         onClick={() => {
+                           if (projectManageMode) toggleProjectSelection(project.id);
+                           else if (!isRenaming) onOpenProject(project);
+                         }}
+                         aria-selected={projectManageMode ? isSelected : undefined}
+                         className={`group rounded-xl border cursor-pointer transition-all hover:shadow-lg ${accentShadowClass} ${isSelected ? 'ring-2 ring-primary border-primary' : `${isDark ? 'bg-[#1a1a2e]/80 border-primary/20' : 'bg-white border-gray-200'} ${accentHoverBorderClass}`}`}
+                       >
+                         {/* Thumbnail */}
+                         <div className={`relative h-36 overflow-hidden rounded-t-xl ${isDark ? 'bg-gradient-to-br from-[#1a1a2e] to-[#0a0a0f]' : 'bg-gradient-to-br from-blue-50 to-gray-50'}`}>
+                           {thumb ? <img src={thumb} alt={project.name} className="w-full h-full object-cover" /> : <div className="flex items-center justify-center h-full"><Image className={`w-8 h-8 ${textSecondary} opacity-30`} /></div>}
+                           {projectManageMode && (
+                             <span className={`absolute top-2 left-2 w-6 h-6 rounded-md border flex items-center justify-center shadow-sm ${isSelected ? `${accentBgClass} ${accentTextOnBgClass} border-transparent` : isDark ? 'bg-black/60 border-white/30 text-white' : 'bg-white/90 border-gray-300 text-gray-500'}`}>
+                               {isSelected && <Check className="w-4 h-4" />}
+                             </span>
+                           )}
+                           {starredIds.has(project.id) && <Star className={`absolute top-2 right-2 w-4 h-4 ${accentClass} fill-current`} style={{ color: accentHex }} />}
                         </div>
                         {/* Info */}
                         <div className="p-3">
@@ -2129,10 +2254,11 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                           )}
                           <div className={`flex items-center justify-between mt-1`}>
                             <span className={`text-xs ${textSecondary}`}>{imgs.length} 张图片</span>
-                            <div className="flex items-center gap-1">
-                              <button onClick={(e) => toggleStar(project.id, e)} className={`p-1 rounded ${isDark ? 'hover:bg-white/10' : 'hover:bg-gray-100'}`}>
-                                <Star className={`w-3 h-3 ${starredIds.has(project.id) ? accentClass : textSecondary}`} style={starredIds.has(project.id) ? { color: accentHex, fill: accentHex } : undefined} />
-                              </button>
+                            {!projectManageMode && (
+                              <div className="flex items-center gap-1">
+                               <button onClick={(e) => toggleStar(project.id, e)} className={`p-1 rounded ${isDark ? 'hover:bg-white/10' : 'hover:bg-gray-100'}`}>
+                                 <Star className={`w-3 h-3 ${starredIds.has(project.id) ? accentClass : textSecondary}`} style={starredIds.has(project.id) ? { color: accentHex, fill: accentHex } : undefined} />
+                               </button>
                               <div className="relative" data-project-menu>
                                 <button onClick={(e) => { e.stopPropagation(); setMenuOpenId(menuOpenId === project.id ? null : project.id); }} className={`p-1 rounded ${isDark ? 'hover:bg-white/10' : 'hover:bg-gray-100'}`}>
                                   <MoreVertical className={`w-3 h-3 ${textSecondary}`} />
@@ -2146,7 +2272,8 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                                 )}
                               </div>
                             </div>
-                          </div>
+                          )}
+                        </div>
                         </div>
                       </div>
                     );

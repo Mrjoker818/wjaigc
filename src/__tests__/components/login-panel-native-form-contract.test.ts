@@ -30,7 +30,7 @@ describe('login panel native form contract', () => {
     expect(homePageSource).toContain("window.location.href = '/simple-chat';");
     expect(homePageSource).toContain('setCurrentUser(user);');
     expect(homePageSource).toContain(
-      'return <CanvasWorkspace initialUser={currentUser} />;'
+      'return <CanvasWorkspace initialUser={currentUser} onLoggedOut={handleWorkspaceLogout} />;'
     );
   });
 
