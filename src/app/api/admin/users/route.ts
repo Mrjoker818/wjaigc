@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   createManagedUser,
   deleteManagedUser,
+  deleteManagedUsers,
   isRootAdminUser,
   listManagedUsers,
   repairDuplicateUserIds,
@@ -66,8 +67,9 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json() as {
-      action?: 'create' | 'update' | 'delete' | 'resetPassword' | 'repair-duplicate-ids' | 'list-data' | 'get-data' | 'delete-data' | 'listUserData' | 'getUserData' | 'deleteUserData';
+      action?: 'create' | 'update' | 'delete' | 'batch-delete' | 'resetPassword' | 'repair-duplicate-ids' | 'list-data' | 'get-data' | 'delete-data' | 'listUserData' | 'getUserData' | 'deleteUserData';
       userId?: string;
+      userIds?: string[];
       name?: string;
       password?: string;
       newPassword?: string;
@@ -133,6 +135,31 @@ export async function POST(request: NextRequest) {
       const deleted = await deleteManagedUser(body.userId);
       await dbAddAuditLog({ user_id: admin.id, user_name: admin.name, action: 'user_delete', target_type: 'user', target_id: body.userId, detail: `删除用户 ${body.userId}`, ip_address: null, created_at: Date.now() });
       return NextResponse.json({ success: deleted, deleted });
+    }
+
+    if (body.action === 'batch-delete') {
+      const userIds = Array.isArray(body.userIds)
+        ? [...new Set(body.userIds.filter((id): id is string => typeof id === 'string' && id.trim().length > 0))]
+        : [];
+      if (userIds.length === 0) {
+        return NextResponse.json({ success: false, error: 'Missing userIds' }, { status: 400 });
+      }
+      if (userIds.length > 500) {
+        return NextResponse.json({ success: false, error: 'Too many users in one batch' }, { status: 400 });
+      }
+
+      const result = await deleteManagedUsers(userIds);
+      await dbAddAuditLog({
+        user_id: admin.id,
+        user_name: admin.name,
+        action: 'user_batch_delete',
+        target_type: 'user',
+        target_id: null,
+        detail: `Deleted ${result.deletedIds.length} users; skipped ${result.skippedIds.length}`,
+        ip_address: null,
+        created_at: Date.now(),
+      });
+      return NextResponse.json({ success: true, ...result });
     }
 
     if (body.action === 'resetPassword') {

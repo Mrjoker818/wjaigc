@@ -756,31 +756,63 @@ export async function updateManagedUser(userId: string, updates: ManagedUserUpda
   return publicUser(next);
 }
 
-export async function deleteManagedUser(userId: string): Promise<boolean> {
+export async function deleteManagedUsers(userIds: string[]): Promise<{
+  deletedIds: string[];
+  skippedIds: string[];
+}> {
+  const requestedIds = [...new Set(userIds.map(id => id.trim()).filter(Boolean))];
   const file = await readStore();
-  const index = file.users.findIndex(user => user.id === userId);
-  if (index === -1) return false;
+  const usersById = new Map(file.users.map(user => [user.id, user]));
+  const skippedIds: string[] = [];
+  const deletableIds = requestedIds.filter(userId => {
+    const user = usersById.get(userId);
+    if (!user || user.role === 'admin' || user.name === DEFAULT_ADMIN_NAME) {
+      skippedIds.push(userId);
+      return false;
+    }
+    return true;
+  });
 
-  const current = file.users[index];
-  if (current.name === DEFAULT_ADMIN_NAME) {
-    return false;
+  if (deletableIds.length === 0) {
+    return { deletedIds: [], skippedIds };
   }
 
-  file.users.splice(index, 1);
+  const deletedIds: string[] = [];
+  if (isDatabaseConfigured()) {
+    for (const userId of deletableIds) {
+      if (await dbDeleteUser(userId)) {
+        deletedIds.push(userId);
+      } else {
+        skippedIds.push(userId);
+      }
+    }
+  } else {
+    deletedIds.push(...deletableIds);
+  }
+
+  const deletedSet = new Set(deletedIds);
+  file.users = file.users.filter(user => !deletedSet.has(user.id));
   await writeStore(file);
 
-  // Also delete from database directly (writeStore only upserts, never deletes)
-  await dbDeleteUser(userId);
-  await dbDeleteUserData(userId);
+  await Promise.all(deletedIds.map(async userId => {
+    if (isDatabaseConfigured()) {
+      await dbDeleteUserData(userId);
+    }
 
-  const userDir = path.resolve(getUserDataDir(userId));
-  const rootDir = path.resolve(getServerUsersDir());
-  const relative = path.relative(rootDir, userDir);
-  if (!relative.startsWith('..') && !path.isAbsolute(relative)) {
-    await rm(userDir, { recursive: true, force: true });
-  }
+    const userDir = path.resolve(getUserDataDir(userId));
+    const rootDir = path.resolve(getServerUsersDir());
+    const relative = path.relative(rootDir, userDir);
+    if (!relative.startsWith('..') && !path.isAbsolute(relative)) {
+      await rm(userDir, { recursive: true, force: true });
+    }
+  }));
 
-  return true;
+  return { deletedIds, skippedIds };
+}
+
+export async function deleteManagedUser(userId: string): Promise<boolean> {
+  const result = await deleteManagedUsers([userId]);
+  return result.deletedIds.includes(userId);
 }
 
 export async function createSessionToken(user: User): Promise<string> {

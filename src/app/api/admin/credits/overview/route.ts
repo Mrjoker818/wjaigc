@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAdminUser } from '@/lib/server-auth';
+import { listManagedUsers, requireAdminUser } from '@/lib/server-auth';
 import { execSql, isDatabaseConfigured } from '@/lib/db-client';
 
 export const dynamic = 'force-dynamic';
@@ -9,13 +9,13 @@ interface CreditDistributionRow { image_consumed?: unknown; chat_consumed?: unkn
 interface CreditUserRow { user_id: string; name?: string; balance?: unknown; total_recharged?: unknown; total_used?: unknown; }
 interface CreditTransactionRow { user_id: string; user?: string; amount?: unknown; desc?: string; created_at?: unknown; }
 
-function emptyCreditsOverview() {
+function emptyCreditsOverview(users: Array<{ id: string; name: string }> = []) {
   return {
     success: true,
     totalBalance: 0,
     totalRecharged: 0,
     totalConsumed: 0,
-    totalUsers: 0,
+    totalUsers: users.length,
     avgPerUser: 0,
     distribution: [
       { label: '图像生成', value: 0, color: '#d4af37', pct: '0%' },
@@ -23,7 +23,14 @@ function emptyCreditsOverview() {
       { label: '视频生成', value: 0, color: '#3b82f6', pct: '0%' },
       { label: '其他', value: 0, color: '#a1a1aa', pct: '0%' },
     ],
-    topUsers: [],
+    topUsers: users.map(user => ({
+      userId: user.id,
+      name: user.name,
+      consumed: 0,
+      totalConsumed: 0,
+      balance: 0,
+      totalRecharged: 0,
+    })),
     recentTransactions: [],
     storageUnavailable: true,
   };
@@ -36,8 +43,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Admin access required' }, { status: 403 });
     }
 
+    const managedUsers = await listManagedUsers();
+
     if (!isDatabaseConfigured()) {
-      return NextResponse.json(emptyCreditsOverview());
+      return NextResponse.json(emptyCreditsOverview(managedUsers));
     }
 
     // Aggregate credit stats
@@ -62,8 +71,7 @@ export async function GET(request: NextRequest) {
         `SELECT c.user_id, u.name, c.balance, c.total_recharged, c.total_used
          FROM wujie_credits c
          LEFT JOIN wujie_users u ON c.user_id = u.id
-         ORDER BY c.total_used DESC
-         LIMIT 10`
+         ORDER BY c.total_used DESC`
       ),
       execSql(
         `SELECT t.user_id, u.name as user, t.type, t.amount, t.description as desc, t.created_at
@@ -85,14 +93,22 @@ export async function GET(request: NextRequest) {
       { label: '其他', value: Number(dist.other_consumed) || 0, color: '#a1a1aa', pct: `${Math.round((Number(dist.other_consumed) || 0) / totalConsumed * 100)}%` },
     ];
 
-    const topUsers = (topUsersRes.rows as unknown as CreditUserRow[]).map(r => ({
-      userId: r.user_id,
-      name: r.name || r.user_id,
-      consumed: Number(r.total_used) || 0,
-      totalConsumed: Number(r.total_used) || 0,
-      balance: Number(r.balance) || 0,
-      totalRecharged: Number(r.total_recharged) || 0,
-    }));
+    const creditsByUserId = new Map(
+      (topUsersRes.rows as unknown as CreditUserRow[]).map(row => [row.user_id, row]),
+    );
+    const topUsers = managedUsers
+      .map(user => {
+        const credit = creditsByUserId.get(user.id);
+        return {
+          userId: user.id,
+          name: user.name,
+          consumed: Number(credit?.total_used) || 0,
+          totalConsumed: Number(credit?.total_used) || 0,
+          balance: Number(credit?.balance) || 0,
+          totalRecharged: Number(credit?.total_recharged) || 0,
+        };
+      })
+      .sort((a, b) => b.consumed - a.consumed);
 
     const recentTransactions = (recentTxRes.rows as unknown as CreditTransactionRow[]).map(r => ({
       user: r.user || r.user_id,
@@ -107,8 +123,10 @@ export async function GET(request: NextRequest) {
       totalBalance: Number(summary.total_balance) || 0,
       totalRecharged: Number(summary.total_recharged) || 0,
       totalConsumed: Number(summary.total_consumed) || 0,
-      totalUsers: Number(summary.total_users) || 0,
-      avgPerUser: Number(summary.avg_per_user) || 0,
+      totalUsers: managedUsers.length,
+      avgPerUser: managedUsers.length > 0
+        ? (Number(summary.total_balance) || 0) / managedUsers.length
+        : 0,
       distribution,
       topUsers,
       recentTransactions,

@@ -155,8 +155,7 @@ export async function GET(request: NextRequest) {
 
     for (const user of targetUsers) {
       try {
-        const projectData = await dbGetUserData(user.id, 'projects') as Record<string, unknown> | null;
-        if (!projectData) continue;
+        const projectData = await dbGetUserData(user.id, 'projects') as unknown;
 
         let projects: Array<Record<string, unknown>> = [];
         if (typeof projectData === 'string') {
@@ -212,7 +211,8 @@ export async function GET(request: NextRequest) {
 
     // 全局统计
     const stats = {
-      totalUsers: targetUsers.length,
+      totalUsers: users.length,
+      filteredUsers: targetUsers.length,
       totalImages: allImages.length,
       generated: allImages.filter(i => i.source === 'generated').length,
       uploaded: allImages.filter(i => i.source === 'uploaded').length,

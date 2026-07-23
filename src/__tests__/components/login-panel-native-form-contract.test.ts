@@ -28,7 +28,10 @@ describe('login panel native form contract', () => {
     expect(loginPanelSource).toContain("submitLogin(loginName.trim(), loginPassword, selectedMode)");
     expect(homePageSource).toContain("if (productType === 'chat')");
     expect(homePageSource).toContain("window.location.href = '/simple-chat';");
-    expect(homePageSource).toContain("setAppMode('canvas');");
+    expect(homePageSource).toContain('setCurrentUser(user);');
+    expect(homePageSource).toContain(
+      'return <CanvasWorkspace initialUser={currentUser} />;'
+    );
   });
 
   it('toggles password visibility without submitting the login form', () => {

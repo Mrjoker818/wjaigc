@@ -38,6 +38,7 @@ interface UserStat {
 
 interface DataStats {
   totalUsers: number;
+  filteredUsers: number;
   totalImages: number;
   generated: number;
   uploaded: number;
@@ -179,7 +180,7 @@ export default function DataManagerTab({
           { icon: Database, label: '总内容数', value: stats?.totalImages ?? 0, color: isDark ? 'text-blue-400' : 'text-blue-600', bg: isDark ? 'bg-blue-500/10' : 'bg-blue-50' },
           { icon: Image, label: 'AI生成', value: stats?.generated ?? 0, color: isDark ? 'text-purple-400' : 'text-purple-600', bg: isDark ? 'bg-purple-500/10' : 'bg-purple-50' },
           { icon: Upload, label: '用户上传', value: stats?.uploaded ?? 0, color: isDark ? 'text-green-400' : 'text-green-600', bg: isDark ? 'bg-green-500/10' : 'bg-green-50' },
-          { icon: Users, label: '活跃用户', value: stats?.totalUsers ?? 0, color: isDark ? 'text-amber-400' : 'text-amber-600', bg: isDark ? 'bg-amber-500/10' : 'bg-amber-50' },
+          { icon: Users, label: '总用户', value: stats?.totalUsers ?? 0, color: isDark ? 'text-amber-400' : 'text-amber-600', bg: isDark ? 'bg-amber-500/10' : 'bg-amber-50' },
         ].map(card => (
           <div key={card.label} className={`rounded-xl border p-4 ${softClass}`}>
             <div className="flex items-center gap-3">

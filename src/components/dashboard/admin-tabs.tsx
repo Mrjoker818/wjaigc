@@ -133,6 +133,7 @@ interface AdminTabsProps {
   onResetPassword: (userId: string, newPassword: string) => Promise<void>;
   onToggleUser: (user: AdminUser) => Promise<void>;
   onDeleteUser: (user: AdminUser) => void;
+  onBatchDeleteUsers: (users: AdminUser[]) => Promise<boolean>;
   onToggleUserPermission: (user: AdminUser, key: string) => Promise<void>;
   onRechargeCredits: (userId: string, amount: number, description: string) => Promise<void>;
   onUpdateUserGroup?: (userId: string, groupId: string) => Promise<void>;
@@ -455,6 +456,18 @@ export default function AdminTabs(props: AdminTabsProps) {
       }
     }
     setSelectedUserIds(new Set());
+  };
+
+  const handleBatchDeleteUsers = async () => {
+    const usersToDelete = [...selectedUserIds]
+      .map(userId => adminUsers.find(user => user.id === userId))
+      .filter((user): user is AdminUser => Boolean(user));
+    if (usersToDelete.length === 0) return;
+
+    const completed = await props.onBatchDeleteUsers(usersToDelete);
+    if (completed) {
+      setSelectedUserIds(new Set());
+    }
   };
 
   /* ── Render: Overview Tab ── */
@@ -808,7 +821,7 @@ export default function AdminTabs(props: AdminTabsProps) {
           <div className="flex items-center gap-2">
             <button onClick={() => handleBatchToggleUsers(true)} disabled={selectedUserIds.size === 0} className={`bg-muted text-muted-foreground px-3 py-2 rounded-md text-sm font-medium transition-all inline-flex items-center gap-1.5 ${selectedUserIds.size === 0 ? 'cursor-not-allowed opacity-50' : 'hover:text-foreground cursor-pointer'}`}><CheckCircle className="w-3.5 h-3.5" />批量启用</button>
             <button onClick={() => handleBatchToggleUsers(false)} disabled={selectedUserIds.size === 0} className={`bg-muted text-muted-foreground px-3 py-2 rounded-md text-sm font-medium transition-all inline-flex items-center gap-1.5 ${selectedUserIds.size === 0 ? 'cursor-not-allowed opacity-50' : 'hover:text-foreground cursor-pointer'}`}><Ban className="w-3.5 h-3.5" />批量禁用</button>
-            <button onClick={() => { if (selectedUserIds.size > 0) selectedUserIds.forEach(id => props.onDeleteUser(adminUsers.find(u => u.id === id)!)); }} disabled={selectedUserIds.size === 0} className={`bg-muted text-muted-foreground px-3 py-2 rounded-md text-sm font-medium transition-all inline-flex items-center gap-1.5 ${selectedUserIds.size === 0 ? 'cursor-not-allowed opacity-50' : 'hover:text-destructive cursor-pointer'}`}><Trash2 className="w-3.5 h-3.5" />批量删除</button>
+            <button onClick={() => void handleBatchDeleteUsers()} disabled={selectedUserIds.size === 0} className={`bg-muted text-muted-foreground px-3 py-2 rounded-md text-sm font-medium transition-all inline-flex items-center gap-1.5 ${selectedUserIds.size === 0 ? 'cursor-not-allowed opacity-50' : 'hover:text-destructive cursor-pointer'}`}><Trash2 className="w-3.5 h-3.5" />批量删除</button>
             <div className="w-px h-6 bg-border/30 mx-1" />
             <button onClick={() => setShowUserAddDrawer(true)} className="bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-medium hover:opacity-90 active:scale-[0.98] transition-all inline-flex items-center gap-2"><UserPlus className="w-4 h-4" />添加用户</button>
           </div>
@@ -1264,7 +1277,7 @@ export default function AdminTabs(props: AdminTabsProps) {
         </div>
         {/* 统计卡片 */}
         <div className="grid grid-cols-4 gap-4">
-          <StatCard icon={Users} label="总用户数" value={co ? formatNumber(co.totalUsers || adminUsers.length) : formatNumber(adminUsers.length)} colorClass="text-blue-500" iconBg="bg-blue-500/15" />
+          <StatCard icon={Users} label="总用户数" value={formatNumber(co?.totalUsers ?? adminUsers.length)} colorClass="text-blue-500" iconBg="bg-blue-500/15" />
           <StatCard icon={Wallet} label="总充值积分" value={co ? formatNumber(co.totalRecharged) : '-'} colorClass="text-primary" iconBg="bg-primary/15" />
           <StatCard icon={TrendingUp} label="总消耗积分" value={co ? formatNumber(co.totalConsumed) : '-'} colorClass="text-destructive" iconBg="bg-destructive/15" />
           <StatCard icon={BarChart3} label="系统结余" value={co ? formatNumber(co.totalBalance) : '-'} sub="充值 − 消耗" colorClass="text-green-500" iconBg="bg-green-500/15" />

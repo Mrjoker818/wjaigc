@@ -4,6 +4,7 @@ import { NextRequest } from 'next/server';
 const mocks = vi.hoisted(() => ({
   getSessionUser: vi.fn(),
   requireAdminUser: vi.fn(),
+  listManagedUsers: vi.fn(),
   execSql: vi.fn(),
   isDatabaseConfigured: vi.fn(),
   dbGetSystemSetting: vi.fn(),
@@ -16,6 +17,7 @@ vi.mock('server-only', () => ({}));
 vi.mock('@/lib/server-auth', () => ({
   getSessionUser: mocks.getSessionUser,
   requireAdminUser: mocks.requireAdminUser,
+  listManagedUsers: mocks.listManagedUsers,
 }));
 vi.mock('@/lib/db-client', () => ({
   execSql: mocks.execSql,
@@ -45,6 +47,7 @@ describe('local mode database fallbacks', () => {
     mocks.isDatabaseConfigured.mockReturnValue(false);
     mocks.getSessionUser.mockResolvedValue({ id: 'admin-1', role: 'admin' });
     mocks.requireAdminUser.mockResolvedValue({ id: 'admin-1', role: 'admin' });
+    mocks.listManagedUsers.mockResolvedValue([{ id: 'admin-1', name: 'Admin' }]);
   });
 
   it('keeps administrator read-only credit views available without a database', async () => {
@@ -59,7 +62,8 @@ describe('local mode database fallbacks', () => {
     expect(await overviewResponse.json()).toMatchObject({
       success: true,
       totalBalance: 0,
-      topUsers: [],
+      totalUsers: 1,
+      topUsers: [expect.objectContaining({ userId: 'admin-1', balance: 0 })],
       recentTransactions: [],
       storageUnavailable: true,
     });

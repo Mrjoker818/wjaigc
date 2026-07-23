@@ -31,6 +31,7 @@ import type { Project, CanvasImage, User, UsageStats } from '@/lib/user-types';
 import { ConfirmDialog } from '@/components/custom-dialogs';
 import type { ApiProvider, ModelInfo } from '@/lib/universal-api-types';
 import { getModelDisplayName } from '@/lib/model-name-map';
+import { loadProjects as loadSimpleChatProjects } from '@/components/simple-chat/simple-chat-types';
 import JSZip from 'jszip';
 
 type TabType = 'projects' | 'templates' | 'assets' | 'stats' | 'credits' | 'settings' | 'users' | 'apis' | 'data' | 'ecom-templates' | 'payment-config' | 'audit' | 'overview' | 'desktop-admin' | 'connector-admin' | 'groups' | 'chat';
@@ -869,24 +870,30 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     finally { setProductionReadinessLoading(false); }
   }, []);
 
-  // ─── Load chat projects from localStorage ───
+  // Keep the dashboard and simple-chat page on one storage contract.
   const loadChatProjects = useCallback(() => {
     try {
-      const raw = localStorage.getItem('simpleChatProjects');
-      if (raw) {
-        const projects = JSON.parse(raw);
-        setChatProjects(projects.map((p: { id: string; name: string; emoji?: string; tasks?: unknown[]; updatedAt?: number }) => ({
-          id: p.id,
-          name: p.name,
-          emoji: p.emoji || '💬',
-          taskCount: Array.isArray(p.tasks) ? p.tasks.length : 0,
-          updatedAt: p.updatedAt || 0,
-        })));
-      } else {
-        setChatProjects([]);
-      }
+      const projects = loadSimpleChatProjects();
+      setChatProjects(projects.map((project) => ({
+        id: project.id,
+        name: project.name,
+        emoji: project.emoji || '💬',
+        taskCount: Array.isArray(project.tasks) ? project.tasks.length : 0,
+        updatedAt: project.updatedAt || 0,
+      })));
     } catch { setChatProjects([]); }
   }, []);
+
+  useEffect(() => {
+    if (activeTab !== 'chat') return;
+    loadChatProjects();
+    window.addEventListener('focus', loadChatProjects);
+    window.addEventListener('storage', loadChatProjects);
+    return () => {
+      window.removeEventListener('focus', loadChatProjects);
+      window.removeEventListener('storage', loadChatProjects);
+    };
+  }, [activeTab, loadChatProjects]);
 
   // ─── Filtered providers for API management ───
   const filteredProviders = useMemo(() => {
@@ -2522,6 +2529,47 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 onCancel: () => setConfirmDlg(prev => ({ ...prev, open: false })),
               });
             }}
+            onBatchDeleteUsers={(users: AdminTabsUser[]) => new Promise<boolean>(resolve => {
+              const protectedCount = users.filter(user => user.role === 'admin').length;
+              const suffix = protectedCount > 0 ? `，其中 ${protectedCount} 个管理员账号将自动跳过` : '';
+              setConfirmDlg({
+                open: true,
+                title: '批量删除用户',
+                message: `确定删除选中的 ${users.length} 个用户吗${suffix}？此操作不可撤销。`,
+                variant: 'danger',
+                onConfirm: async () => {
+                  try {
+                    const response = await fetch('/api/admin/users', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      credentials: 'include',
+                      body: JSON.stringify({ action: 'batch-delete', userIds: users.map(user => user.id) }),
+                    });
+                    const data = await response.json();
+                    if (!response.ok || !data.success) {
+                      throw new Error(data.error || '批量删除失败');
+                    }
+                    await refreshAdmin();
+                    window.dispatchEvent(new Event('wujie-admin-users-updated'));
+                    if (data.skippedIds?.length > 0) {
+                      toast.warning(`已删除 ${data.deletedIds?.length || 0} 个用户，跳过 ${data.skippedIds.length} 个管理员或无效用户`);
+                    } else {
+                      toast.success(`已删除 ${data.deletedIds?.length || 0} 个用户`);
+                    }
+                    resolve(true);
+                  } catch (error) {
+                    toast.error(error instanceof Error ? error.message : '批量删除失败');
+                    resolve(false);
+                  } finally {
+                    setConfirmDlg(prev => ({ ...prev, open: false }));
+                  }
+                },
+                onCancel: () => {
+                  setConfirmDlg(prev => ({ ...prev, open: false }));
+                  resolve(false);
+                },
+              });
+            })}
             onToggleUserPermission={async (user: AdminTabsUser, key: string) => {
               const current: Record<string, boolean> = {
                 image: user.apiPermissions?.image ?? true, chat: user.apiPermissions?.chat ?? true,

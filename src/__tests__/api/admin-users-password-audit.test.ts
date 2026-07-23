@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   requireAdminUser: vi.fn(),
   isRootAdminUser: vi.fn(),
   listManagedUsers: vi.fn(),
+  deleteManagedUsers: vi.fn(),
   updateManagedUser: vi.fn(),
   repairDuplicateUserIds: vi.fn(),
   dbAddAuditLog: vi.fn(),
@@ -13,6 +14,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/server-auth', () => ({
   createManagedUser: vi.fn(),
   deleteManagedUser: vi.fn(),
+  deleteManagedUsers: mocks.deleteManagedUsers,
   isRootAdminUser: mocks.isRootAdminUser,
   listManagedUsers: mocks.listManagedUsers,
   requireAdminUser: mocks.requireAdminUser,
@@ -36,6 +38,7 @@ describe('POST /api/admin/users password audit', () => {
     mocks.isRootAdminUser.mockReturnValue(true);
     mocks.updateManagedUser.mockResolvedValue({ id: 'user-1', name: 'user', role: 'user' });
     mocks.listManagedUsers.mockResolvedValue([]);
+    mocks.deleteManagedUsers.mockResolvedValue({ deletedIds: ['user-1', 'user-2'], skippedIds: [] });
     mocks.repairDuplicateUserIds.mockResolvedValue({ repaired: 1, users: [] });
   });
 
@@ -75,5 +78,22 @@ describe('POST /api/admin/users password audit', () => {
 
     expect(response.status).toBe(200);
     expect(mocks.listManagedUsers).toHaveBeenCalledOnce();
+  });
+
+  it('deletes multiple users through one batch service call', async () => {
+    const response = await POST(new NextRequest('http://localhost/api/admin/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'batch-delete', userIds: ['user-1', 'user-2'] }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.deleteManagedUsers).toHaveBeenCalledOnce();
+    expect(mocks.deleteManagedUsers).toHaveBeenCalledWith(['user-1', 'user-2']);
+    expect(await response.json()).toMatchObject({
+      success: true,
+      deletedIds: ['user-1', 'user-2'],
+      skippedIds: [],
+    });
   });
 });
