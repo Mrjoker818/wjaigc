@@ -399,8 +399,8 @@ export default function ChatArea({
   // Sync task to parent（临时聊天模式下跳过保存）
   useEffect(() => {
     if (!task || !project || tempChat) return;
-    onUpdateTask({ ...task, messages, model: selectedModel, providerId: selectedProviderId, imageModel: selectedImageModel, imageProviderId: selectedImageProviderId, updatedAt: Date.now() });
-  }, [messages, selectedModel, selectedProviderId, selectedImageModel, selectedImageProviderId, tempChat]);
+    onUpdateTask({ ...task, messages, model: selectedModel, providerId: selectedProviderId, imageModel: selectedImageModel, imageProviderId: selectedImageProviderId, reasoningEffort, responseSpeed, updatedAt: Date.now() });
+  }, [messages, selectedModel, selectedProviderId, selectedImageModel, selectedImageProviderId, reasoningEffort, responseSpeed, tempChat]);
 
   // Sync knowledge
   useEffect(() => {
@@ -684,6 +684,8 @@ export default function ChatArea({
           webSearch, knowledgeItems: apiKnowledgeItems, projectId: project.id, taskId: task.id,
           memories: memories.map(m => ({ category: m.category, content: m.content })),
           deepAnalysis: isDeepAnalysis,
+          reasoningEffort,
+          responseSpeed,
         }),
       });
 
@@ -707,7 +709,10 @@ export default function ChatArea({
             if (data === '[DONE]' || data === '') continue;
             try {
               const parsed = JSON.parse(data);
-              if (parsed.type === 'search_status') {
+              if (parsed.type === 'generation_controls') {
+                const notices = Array.isArray(parsed.notices) ? parsed.notices.filter((notice): notice is string => typeof notice === 'string') : [];
+                setControlNotice(notices[0] || `已应用：推理 ${parsed.appliedReasoningEffort || '默认'}，速度 ${parsed.appliedResponseSpeed || '均衡'}`);
+              } else if (parsed.type === 'search_status') {
                 setSearchStatus(parsed.status === 'completed' ? `搜索完成，找到 ${parsed.resultCount || 0} 条结果` : parsed.status === 'error' ? '搜索出错' : '正在搜索...');
                 // 搜索完成后，添加一条系统消息展示搜索结果
                 if (parsed.status === 'completed' && parsed.resultCount > 0) {
@@ -1171,6 +1176,18 @@ export default function ChatArea({
             ))}
           </div>
         </div>
+        <div className="flex items-center gap-1 rounded-lg bg-muted p-0.5" aria-label="对话控制">
+          {(['low', 'medium', 'high', 'maximum'] as ReasoningEffort[]).map((effort) => (
+            <button key={effort} type="button" onClick={() => setReasoningEffort(effort)} className={`px-2 py-1 rounded-md text-[11px] transition-colors ${reasoningEffort === effort ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`} title="推理强度">
+              {effort === 'low' ? '轻量' : effort === 'medium' ? '均衡' : effort === 'high' ? '深度' : '极强'}
+            </button>
+          ))}
+        </div>
+        <select value={responseSpeed} onChange={(event) => setResponseSpeed(event.target.value as ResponseSpeed)} className="h-8 rounded-lg border border-border bg-muted px-2 text-xs text-foreground" aria-label="响应速度">
+          <option value="fast">快速响应</option>
+          <option value="balanced">均衡响应</option>
+          <option value="quality">质量优先</option>
+        </select>
         {/* Image Model Selector */}
         <div ref={imageModelMenuRef} className="relative">
           <button
