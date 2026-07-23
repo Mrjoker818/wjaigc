@@ -716,7 +716,7 @@ export default function ChatArea({
                 const notices = Array.isArray(parsed.notices) ? parsed.notices.filter((notice: unknown): notice is string => typeof notice === 'string') : [];
                 const appliedControls: SimpleChatTask['appliedChatControls'] = {
                   appliedReasoningEffort: parsed.appliedReasoningEffort as ResolvedChatControls['appliedReasoningEffort'],
-                  appliedResponseSpeed: parsed.appliedResponseSpeed as ResponseSpeed,
+                  appliedResponseSpeed: parsed.appliedResponseSpeed as ResolvedChatControls['appliedResponseSpeed'],
                   degraded: Boolean(parsed.degraded),
                   notices,
                 };
