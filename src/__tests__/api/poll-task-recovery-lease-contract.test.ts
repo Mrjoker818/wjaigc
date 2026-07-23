@@ -37,12 +37,33 @@ describe('poll-task recovery lease contract', () => {
     for (const status of ['NOT_START', 'SUBMITTED', 'IN_PROGRESS', 'MODAL', 'SUCCESS', 'FAILURE']) {
       expect(source).toContain(`'${status}'`);
     }
-    expect(source).toContain('taskData?.fail_reason');
-    expect(source).toContain('taskData?.failReason');
+    expect(source).toContain("'fail_reason'");
+    expect(source).toContain("'failReason'");
+    expect(source).toContain('extractTaskFailureDetail(taskData || {})');
     expect(source).toContain('grid_image_url');
     expect(source).toContain('taskResult?.buttons');
     expect(source).toContain('gridImageUrl,');
     expect(source).toContain('buttons,');
+  });
+
+  it('extracts nested provider failure reasons and keeps the upstream detail in the terminal response', () => {
+    const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/poll-task/route.ts'), 'utf8');
+
+    expect(source).toContain('function extractTaskFailureDetail');
+    for (const key of ['error_message', 'errorMessage', 'message', 'detail', 'reason']) {
+      expect(source).toContain(`'${key}'`);
+    }
+    expect(source).toContain('formatTaskFailureMessage(rawError)');
+    expect(source).toContain('上游任务失败 taskId=');
+  });
+
+  it('does not let best-effort image activity storage change a completed provider task response', () => {
+    const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/poll-task/route.ts'), 'utf8');
+    const appendStart = source.indexOf("void appendUserJsonl(userId, 'images'");
+
+    expect(appendStart).toBeGreaterThan(-1);
+    expect(source.slice(appendStart, appendStart + 600)).toContain('.catch(error =>');
+    expect(source.slice(appendStart, appendStart + 600)).toContain('用户图片记录写入失败');
   });
 
   it('cleans up cancelled provider tasks through the normalized terminal state', () => {
