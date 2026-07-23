@@ -6137,8 +6137,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 }`}
                 title="停止生成"
               >
-                <Square size={11} className="fill-current" />
-                <span>停止</span>
+                <Square size={12} className="fill-current" />
               </button>
             ) : (
               <button
