@@ -19,7 +19,7 @@ import {
   PRESET_SKILLS, PresetSkill
 } from "./simple-chat-types";
 import { User } from "@/lib/user-types";
-import type { ReasoningEffort, ResponseSpeed } from "@/lib/chat-generation-controls";
+import type { ReasoningEffort, ResponseSpeed, ResolvedChatControls } from "@/lib/chat-generation-controls";
 import { useTheme } from "@/app/simple-chat/providers";
 
 type ChatModelInfo = {
@@ -710,8 +710,15 @@ export default function ChatArea({
             try {
               const parsed = JSON.parse(data);
               if (parsed.type === 'generation_controls') {
-                const notices = Array.isArray(parsed.notices) ? parsed.notices.filter((notice): notice is string => typeof notice === 'string') : [];
+                const notices = Array.isArray(parsed.notices) ? parsed.notices.filter((notice: unknown): notice is string => typeof notice === 'string') : [];
+                const appliedControls: SimpleChatTask['appliedChatControls'] = {
+                  appliedReasoningEffort: parsed.appliedReasoningEffort as ResolvedChatControls['appliedReasoningEffort'],
+                  appliedResponseSpeed: parsed.appliedResponseSpeed as ResponseSpeed,
+                  degraded: Boolean(parsed.degraded),
+                  notices,
+                };
                 setControlNotice(notices[0] || `已应用：推理 ${parsed.appliedReasoningEffort || '默认'}，速度 ${parsed.appliedResponseSpeed || '均衡'}`);
+                if (!tempChat) onUpdateTask({ ...task, appliedChatControls: appliedControls, reasoningEffort, responseSpeed, updatedAt: Date.now() });
               } else if (parsed.type === 'search_status') {
                 setSearchStatus(parsed.status === 'completed' ? `搜索完成，找到 ${parsed.resultCount || 0} 条结果` : parsed.status === 'error' ? '搜索出错' : '正在搜索...');
                 // 搜索完成后，添加一条系统消息展示搜索结果
@@ -1289,6 +1296,7 @@ export default function ChatArea({
       <div className="flex items-center gap-2 px-4 py-1.5 border-b border-border bg-muted/30 shrink-0">
           <Bot className="w-4 h-4 text-muted-foreground" />
           <span className="text-xs text-muted-foreground">Agent:</span>
+          {controlNotice && <span className="max-w-[360px] truncate text-[11px] text-muted-foreground" title={controlNotice}>· {controlNotice}</span>}
           {activeAgent ? (
             <span className="text-xs font-medium bg-primary/10 text-primary px-2 py-0.5 rounded-full flex items-center gap-1">
               {activeAgent.emoji || '🤖'} {activeAgent.name}
