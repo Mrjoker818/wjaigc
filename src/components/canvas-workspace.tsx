@@ -120,6 +120,17 @@ function getInitialLoginMode(): 'canvas' | null {
   return params.get('loginMode') === 'canvas' && !params.has('error') ? 'canvas' : null;
 }
 
+type WorkspaceMode = 'canvas' | 'node' | 'workflow-hub' | 'dashboard';
+
+function getInitialWorkspaceMode(): WorkspaceMode {
+  if (typeof window === 'undefined') return 'dashboard';
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('view') === 'dashboard') return 'dashboard';
+  if (params.has('projectId')) return 'canvas';
+  if (params.get('loginMode') === 'canvas' && !params.has('error')) return 'canvas';
+  return 'dashboard';
+}
+
 function normalizeQuickCreateModels(data: QuickCreateModelsResponse): QuickCreateModelCandidate[] {
   const providerNames = new Map(
     (data.providers ?? []).map(provider => [
@@ -382,7 +393,7 @@ export function CanvasWorkspace({ initialUser }: { initialUser: User }) {
     }
   }, [setImages]);
 
-  const [appMode, setAppMode] = useState<'canvas' | 'node' | 'workflow-hub' | 'dashboard'>('canvas');
+  const [appMode, setAppMode] = useState<WorkspaceMode>(getInitialWorkspaceMode);
   const [pendingModeSwitch, setPendingModeSwitch] = useState<'node' | 'workflow-hub' | 'dashboard' | null>(null);
   // Start with true so SSR renders the login panel (not a blank spinner).
   // The useEffect below will update currentUser if a valid session exists.

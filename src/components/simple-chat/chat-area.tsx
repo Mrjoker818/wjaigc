@@ -243,12 +243,12 @@ export default function ChatArea({
   const imageModelMenuRef = useRef<HTMLDivElement>(null);
 
   // Messages: sync from task
-  const [messages, setMessages] = useState<SimpleChatMessage[]>(task?.messages || []);
+  const [messages, setMessages] = useState<SimpleChatMessage[]>((task?.messages || []).filter(Boolean));
 
   // Sync when task changes
   useEffect(() => {
     if (task) {
-      setMessages(task.messages);
+      setMessages((task.messages || []).filter(Boolean));
       setSelectedModel(task.model);
       setSelectedProviderId(task.providerId);
       setInput("");

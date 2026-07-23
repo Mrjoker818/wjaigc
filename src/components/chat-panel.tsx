@@ -1191,7 +1191,7 @@ function extractPromptForGeneration(content: string): string {
 export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, canvasImages = [], selectedCanvasImage, onChatModelChange, onSuggestionAction, onGenerateImage, brandDna, onInjectBrandDna, chatInitialImage, onChatInitialImageConsumed, chatTabOpen, onChatTabOpenChange, onNavigateToImage, externalPrompt, onExternalPromptConsumed }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [showFullHistory, setShowFullHistory] = useState(false);
-  const visibleMessages = useMemo(() => showFullHistory ? messages : messages.slice(-CHAT_RENDER_WINDOW), [messages, showFullHistory]);
+  const visibleMessages = useMemo(() => (showFullHistory ? messages : messages.slice(-CHAT_RENDER_WINDOW)).filter(Boolean), [messages, showFullHistory]);
   const messagesRef = useRef<Message[]>(messages);
   messagesRef.current = messages;
   const [input, setInput] = useState('');
@@ -6152,7 +6152,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
             ) : (
               <button
                 onClick={() => handleSend()}
-                disabled={!input.trim() || !isChatModelReady}
+                disabled={!input.trim() || isLoading || !isChatModelReady}
                 className={`shrink-0 h-7 px-2 rounded-md flex items-center justify-center text-[11px] font-medium transition-all ${
                   !input.trim() || !isChatModelReady
                     ? isGold

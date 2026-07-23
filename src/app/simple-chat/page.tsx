@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import Sidebar from "@/components/simple-chat/sidebar";
 import ChatArea from "@/components/simple-chat/chat-area";
 import { LoginPanel } from "@/components/dashboard/login-panel";
@@ -31,6 +32,7 @@ function createDefaultProject(): Project {
 }
 
 export default function SimpleChatPage() {
+  const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [showLogin, setShowLogin] = useState(false);
@@ -211,7 +213,7 @@ export default function SimpleChatPage() {
           onDeleteAgent={(agentId) => activeProject && handleDeleteAgent(activeProject.id, agentId)}
           onSkillToAgent={(skill) => activeProject && handleSkillToAgent(activeProject.id, skill)}
           onLogout={() => { setUser(null); setShowLogin(true); }}
-          onBackToWorkspace={() => window.location.href = '/'}
+          onBackToWorkspace={() => router.replace('/?view=dashboard')}
           sidebarOpen={sidebarOpen}
           onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
         />

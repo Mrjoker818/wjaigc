@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { Suspense, useState, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
+import { useSearchParams } from 'next/navigation';
 import { User } from '@/lib/user-types';
 import { fetchSessionPayload } from '@/lib/auth-session';
 import { LoginPanel } from '@/components/dashboard/login-panel';
@@ -23,8 +24,21 @@ const CanvasWorkspace = dynamic(
   }
 );
 
-export default function Home() {
-  const [authChecked, setAuthChecked] = useState(true);
+function AuthLoadingScreen({ message }: { message: string }) {
+  return (
+    <div className="fixed inset-0 flex items-center justify-center bg-[#0a0a0a]">
+      <div className="flex flex-col items-center gap-4">
+        <div className="w-10 h-10 border-2 border-[#d4af37] border-t-transparent rounded-full animate-spin" />
+        <p className="text-white/60 text-sm">{message}</p>
+      </div>
+    </div>
+  );
+}
+
+function HomeContent() {
+  const searchParams = useSearchParams();
+  const returningToDashboard = searchParams.get('view') === 'dashboard';
+  const [authChecked, setAuthChecked] = useState(!returningToDashboard);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
 
   // Check session on mount
@@ -63,14 +77,7 @@ export default function Home() {
 
   // Show loading while checking session
   if (!authChecked) {
-    return (
-      <div className="fixed inset-0 flex items-center justify-center bg-[#0a0a0a]">
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-10 h-10 border-2 border-[#d4af37] border-t-transparent rounded-full animate-spin" />
-          <p className="text-white/60 text-sm">正在验证身份...</p>
-        </div>
-      </div>
-    );
+    return <AuthLoadingScreen message="正在返回工作台..." />;
   }
 
   // Not authenticated: render LoginPanel (lightweight, fast hydration!)
@@ -91,4 +98,12 @@ export default function Home() {
 
   // Authenticated: dynamically load the heavy canvas workspace
   return <CanvasWorkspace initialUser={currentUser} />;
+}
+
+export default function Home() {
+  return (
+    <Suspense fallback={<AuthLoadingScreen message="正在加载工作台..." />}>
+      <HomeContent />
+    </Suspense>
+  );
 }
