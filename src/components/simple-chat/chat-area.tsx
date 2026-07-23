@@ -1,29 +1,7 @@
 "use client";
 
-// Web Speech API type declarations
-interface SpeechRecognitionEvent extends Event {
-  results: SpeechRecognitionResultList;
-  resultIndex: number;
-}
-interface SpeechRecognitionInstance extends EventTarget {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  start: () => void;
-  stop: () => void;
-  onresult: ((event: SpeechRecognitionEvent) => void) | null;
-  onend: (() => void) | null;
-  onerror: (() => void) | null;
-}
-declare global {
-  interface Window {
-    SpeechRecognition?: new () => SpeechRecognitionInstance;
-    webkitSpeechRecognition?: new () => SpeechRecognitionInstance;
-  }
-}
-
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { Menu, Paperclip, ArrowUp, Globe, X, Settings, Bot, User as UserIcon, BookOpen, ChevronDown, Copy, RefreshCw, Trash2, Zap, Sun, Moon, FileText, Database, Sparkles, MessageSquarePlus, Minimize2, Maximize2, MoreHorizontal, Telescope, FileCode, GitBranch, Share2, Search, Eye, EyeOff, Image, Download, Send, Shield, ThumbsUp, ThumbsDown, Pencil, PenSquare, Brain, Mic, MicOff, PenLine, ScanSearch, Clock } from "lucide-react";
+import { Menu, Paperclip, ArrowUp, Globe, X, Settings, Bot, User as UserIcon, BookOpen, ChevronDown, Copy, RefreshCw, Trash2, Zap, Sun, Moon, FileText, Database, Sparkles, MessageSquarePlus, Minimize2, Maximize2, MoreHorizontal, Telescope, FileCode, GitBranch, Share2, Search, Eye, EyeOff, Image, Download, Send, Shield, ThumbsUp, ThumbsDown, Pencil, PenSquare, Brain, PenLine, ScanSearch, Clock } from "lucide-react";
 import { MarkdownRenderer } from "./markdown-renderer";
 import { ImageLightbox } from "./image-lightbox";
 import { QuickCommands } from "./quick-commands";
@@ -222,9 +200,6 @@ export default function ChatArea({
   const [editingContent, setEditingContent] = useState('');
   // 拖拽上传
   const [dragOver, setDragOver] = useState(false);
-  // 语音输入
-  const [isListening, setIsListening] = useState(false);
-  const recognitionRef = useRef<{ stop: () => void } | null>(null);
   // 提示词优化器
   const [showPromptOptimizer, setShowPromptOptimizer] = useState(false);
   // 报告导出
@@ -487,37 +462,6 @@ export default function ChatArea({
     setDragOver(false);
     handleImageFiles(Array.from(e.dataTransfer.files || []));
   }, [handleImageFiles]);
-
-  // 语音输入（Web Speech API）
-  const toggleVoiceInput = useCallback(() => {
-    if (isListening) {
-      recognitionRef.current?.stop();
-      setIsListening(false);
-      return;
-    }
-    const SR = window as typeof window & {
-      SpeechRecognition?: new () => SpeechRecognitionInstance;
-      webkitSpeechRecognition?: new () => SpeechRecognitionInstance;
-    };
-    const Ctor = SR.SpeechRecognition || SR.webkitSpeechRecognition;
-    if (!Ctor) { alert('当前浏览器不支持语音输入'); return; }
-    const rec = new Ctor();
-    rec.lang = 'zh-CN';
-    rec.continuous = true;
-    rec.interimResults = true;
-    rec.onresult = (event: SpeechRecognitionEvent) => {
-      let transcript = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        transcript += event.results[i][0].transcript;
-      }
-      if (transcript) setInput(prev => prev + transcript);
-    };
-    rec.onerror = () => setIsListening(false);
-    rec.onend = () => setIsListening(false);
-    recognitionRef.current = rec;
-    rec.start();
-    setIsListening(true);
-  }, [isListening]);
 
   // 消息编辑：提交后将该消息之后的对话截断并重新生成
   function handleEditSubmit(msgId: string) {
@@ -1599,12 +1543,6 @@ export default function ChatArea({
               <button onClick={() => document.getElementById('chat-file-upload')?.click()}
                 className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors" title="上传图片">
                 <Paperclip className="w-4 h-4" />
-              </button>
-              {/* 语音输入 */}
-              <button onClick={toggleVoiceInput}
-                className={`p-1.5 rounded-lg transition-colors ${isListening ? 'bg-red-500/10 text-red-500 animate-pulse' : 'text-muted-foreground hover:bg-muted'}`}
-                title={isListening ? '停止语音输入' : '语音输入'}>
-                {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
               </button>
               {/* 快捷工作流 */}
               <button onClick={() => setShowQuickCommands(v => !v)}
