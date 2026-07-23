@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/jquery/jquery-3.7.1.min.js"></script>
+  <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/lucide/lucide-1.11.0.min.js"></script>
+  <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/tailwindcss/tailwindcss-browser-4.2.4.min.js"></script>
+  <style type="text/tailwindcss">
+    @theme {
+      --color-primary: #d6b458;
+      --color-primary-container: #302916;
+      --color-on-primary: #17140d;
+      --color-background: #0c0d10;
+      --color-surface-container-lowest: #121317;
+      --color-surface: #18191e;
+      --color-surface-container: #222329;
+      --color-surface-container-high: #2a2b32;
+      --color-surface-container-highest: #35363d;
+      --color-on-surface: #f0f0ed;
+      --color-on-surface-variant: #a6a6a0;
+      --color-success: #74bd8c;
+      --color-error: #de7d76;
+      --color-warning: #d6b458;
+      --color-outline: #4a4b50;
+      --color-outline-variant: #303137;
+      --radius-sm: .375rem;
+      --radius-md: .5rem;
+      --radius-lg: .625rem;
+      --radius-xl: .75rem;
+      --radius-2xl: 1rem;
+      --radius-full: 9999px;
+      --shadow-card: 0 2px 10px rgba(0,0,0,.28);
+      --shadow-float: 0 14px 34px rgba(0,0,0,.52);
+      --shadow-dialog: 0 28px 72px rgba(0,0,0,.65);
+      --shadow-glow: 0 0 24px rgba(214,180,88,.12);
+      --font-sans: Inter, "Noto Sans SC", system-ui, sans-serif;
+      --font-mono: "SFMono-Regular", Consolas, monospace;
+    }
+  </style>
+  <style>
+    body { min-width: 320px; }
+    .canvas-grid { background-color:#0c0d10; background-image: radial-gradient(rgba(255,255,255,.075) 1px, transparent 1px); background-size:24px 24px; }
+    .window-grid { background-image: linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px); background-size: 16px 16px; }
+    .step-active::before { content:""; position:absolute; left:0; top:8px; bottom:8px; width:2px; background:#d6b458; border-radius:9999px; }
+  </style>
+</head>
+<body class="bg-background text-on-surface font-sans overflow-hidden">
+  <div class="canvas-grid relative h-screen min-h-[720px] w-screen overflow-hidden">
+    <div class="absolute left-5 top-5 flex items-center gap-2 text-xs text-on-surface-variant">
+      <div class="flex h-8 w-8 items-center justify-center rounded-md bg-surface shadow-card"><i data-lucide="sparkles" class="h-4 w-4 text-primary"></i></div>
+      <span class="font-semibold text-on-surface">无界AI</span><span class="text-on-surface-variant/50">/</span><span>无限画布</span>
+    </div>
+    <div class="absolute right-5 top-5 flex gap-2">
+      <button id="btn-undo" class="h-8 w-8 rounded-md bg-surface text-on-surface-variant shadow-card" aria-label="撤销"><i data-lucide="undo-2" class="m-auto h-4 w-4"></i></button>
+      <button id="btn-canvas-search" class="h-8 w-8 rounded-md bg-surface text-on-surface-variant shadow-card" aria-label="缩放"><i data-lucide="search" class="m-auto h-4 w-4"></i></button>
+    </div>
+    <div class="absolute left-[12%] top-[22%] h-32 w-48 rotate-[-3deg] rounded-lg border border-outline-variant/30 bg-surface/80 shadow-card"></div>
+    <div class="absolute right-[14%] top-[37%] h-24 w-36 rotate-[4deg] rounded-lg border border-outline-variant/30 bg-surface/70 shadow-card"></div>
+
+    <!-- @main-content:start -->
+    <section id="design-studio-window" class="absolute inset-x-4 top-14 mx-auto flex h-[calc(100vh-8.5rem)] min-h-[600px] max-w-[1440px] flex-col overflow-hidden rounded-xl bg-surface shadow-dialog md:inset-x-8">
+      <header class="flex h-14 shrink-0 items-center justify-between border-b border-outline-variant/40 bg-surface-container-lowest px-4">
+        <div class="flex min-w-0 items-center gap-3">
+          <div id="window-drag-handle" class="flex h-8 w-8 shrink-0 cursor-grab items-center justify-center rounded-md bg-primary-container text-primary" title="拖动窗口"><i data-lucide="grip-horizontal" class="h-4 w-4"></i></div>
+          <div class="min-w-0"><h1 class="truncate text-sm font-semibold">品牌IP设计工场</h1><p class="text-[11px] text-on-surface-variant">云迹小队 · 角色方向</p></div>
+          <span class="hidden rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary sm:inline">草案 v0.3</span>
+        </div>
+        <div class="flex items-center gap-1">
+          <button id="btn-minimize-window" class="h-8 w-8 rounded-md text-on-surface-variant hover:bg-surface-container" title="最小化" aria-label="最小化"><i data-lucide="minus" class="m-auto h-4 w-4"></i></button>
+          <button id="btn-close-window" class="h-8 w-8 rounded-md text-on-surface-variant hover:bg-surface-container" title="关闭" aria-label="关闭"><i data-lucide="x" class="m-auto h-4 w-4"></i></button>
+        </div>
+      </header>
+      <div class="flex min-h-0 flex-1 flex-col lg:flex-row">
+        <aside class="flex shrink-0 border-b border-outline-variant/40 bg-surface-container-lowest p-3 lg:w-52 lg:flex-col lg:border-b-0 lg:border-r">
+          <div class="flex gap-1 overflow-x-auto lg:block lg:space-y-1">
+            <button id="step-brand-goal" class="relative shrink-0 rounded-md px-3 py-2 text-left text-xs text-on-surface-variant hover:bg-surface-container lg:block lg:w-full"><span class="mr-2 text-primary">01</span>品牌目标</button>
+            <button id="step-character-direction" class="step-active relative shrink-0 rounded-md bg-primary/10 px-3 py-2 text-left text-xs font-medium text-on-surface lg:block lg:w-full" aria-current="step"><span class="mr-2 text-primary">02</span>角色方向</button>
+            <button id="step-visual-system" class="relative shrink-0 rounded-md px-3 py-2 text-left text-xs text-on-surface-variant lg:block lg:w-full"><span class="mr-2">03</span>视觉系统<span class="ml-2 text-[10px] text-on-surface-variant/50">待确认</span></button>
+            <button id="step-application-extension" class="relative shrink-0 rounded-md px-3 py-2 text-left text-xs text-on-surface-variant lg:block lg:w-full"><span class="mr-2">04</span>应用延展</button>
+            <button id="step-delivery-governance" class="relative shrink-0 rounded-md px-3 py-2 text-left text-xs text-on-surface-variant lg:block lg:w-full"><span class="mr-2">05</span>交付治理</button>
+          </div>
+          <div class="ml-auto hidden rounded-md bg-surface p-3 lg:mt-auto lg:ml-0 lg:block">
+            <div class="mb-2 flex items-center justify-between text-[11px]"><span class="text-on-surface-variant">项目完成度</span><span class="text-primary">2/5</span></div>
+            <div class="h-1.5 overflow-hidden rounded-full bg-surface-container"><div class="h-full w-2/5 rounded-full bg-primary"></div></div>
+          </div>
+        </aside>
+        <div class="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[minmax(220px,.82fr)_minmax(360px,1.32fr)_minmax(240px,.82fr)] lg:overflow-hidden">
+          <section class="border-b border-outline-variant/40 p-4 lg:overflow-y-auto lg:border-b-0 lg:border-r">
+            <div class="mb-5"><p class="text-xs font-semibold text-primary">BRAND BRIEF</p><h2 class="mt-1 text-base font-semibold">输入品牌意图</h2><p class="mt-1 text-xs leading-5 text-on-surface-variant">用最少信息建立首轮角色方向，策略会保留为可追溯版本。</p></div>
+            <label class="mb-1.5 block text-xs text-on-surface-variant" for="input-project-name">项目名称</label><input id="input-project-name" value="云迹小队" readonly class="mb-4 w-full rounded-md border-none bg-surface-container px-3 py-2 text-sm text-on-surface outline-none" />
+            <label class="mb-1.5 block text-xs text-on-surface-variant" for="input-brand-goal">核心目标</label><textarea id="input-brand-goal" readonly class="mb-4 min-h-20 w-full resize-none rounded-md border-none bg-surface-container px-3 py-2 text-sm leading-5 text-on-surface outline-none">为城市探索产品建立可识别、可延展的青年向导角色。</textarea>
+            <label class="mb-2 block text-xs text-on-surface-variant">首发载体</label><div id="launch-carriers" class="grid grid-cols-2 gap-2"><button id="carrier-app" class="rounded-md bg-primary/10 px-2 py-2 text-xs text-primary">App 引导</button><button id="carrier-poster" class="rounded-md bg-surface-container px-2 py-2 text-xs text-on-surface-variant">活动海报</button><button id="carrier-social" class="rounded-md bg-surface-container px-2 py-2 text-xs text-on-surface-variant">社交内容</button><button id="carrier-packaging" class="rounded-md bg-surface-container px-2 py-2 text-xs text-on-surface-variant">周边包装</button></div>
+            <div class="mt-5 rounded-md bg-warning/10 p-3"><div class="flex gap-2"><i data-lucide="shield-alert" class="mt-0.5 h-4 w-4 shrink-0 text-warning"></i><p class="text-[11px] leading-5 text-on-surface-variant">名称、视觉符号、文化来源与授权素材均以“待核验”管理，不能视为权利结论。</p></div></div>
+          </section>
+          <section class="window-grid border-b border-outline-variant/40 bg-surface p-4 lg:overflow-y-auto lg:border-b-0 lg:border-r">
+            <div class="mb-4 flex items-start justify-between gap-3"><div><p class="text-xs font-semibold text-primary">DIRECTION REVIEW</p><h2 class="mt-1 text-base font-semibold">三个角色方向</h2></div><span class="rounded-full bg-surface-container px-2 py-1 text-[10px] text-on-surface-variant">策略已生成</span></div>
+            <article class="mb-3 rounded-lg border border-primary/35 bg-primary/5 p-4 shadow-glow"><div class="mb-3 flex items-start justify-between gap-3"><div class="flex items-center gap-2"><span class="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-xs font-bold text-on-primary">A</span><div><h3 class="text-sm font-semibold">城市巡游员</h3><p class="text-[11px] text-on-surface-variant">探索感 · 轻快 · 路径引导</p></div></div><i data-lucide="check-circle-2" class="h-4 w-4 text-primary"></i></div><p class="text-xs leading-5 text-on-surface-variant">以背包、路径标记和圆润工具体块形成识别；适合地图、任务和本地发现的连续表达。</p><div class="mt-3 flex flex-wrap gap-1.5"><span class="rounded-full bg-surface-container px-2 py-1 text-[10px] text-on-surface-variant">可拥有性 高</span><span class="rounded-full bg-surface-container px-2 py-1 text-[10px] text-on-surface-variant">可落地性 高</span><span class="rounded-full bg-surface-container px-2 py-1 text-[10px] text-on-surface-variant">首发适配</span></div></article>
+            <article class="mb-3 rounded-lg bg-surface-container-lowest p-4"><div class="mb-3 flex items-start gap-2"><span class="flex h-7 w-7 items-center justify-center rounded-md bg-surface-container text-xs font-bold text-on-surface-variant">B</span><div><h3 class="text-sm font-semibold">信号采集者</h3><p class="text-[11px] text-on-surface-variant">科技感 · 观察 · 信息整理</p></div></div><p class="text-xs leading-5 text-on-surface-variant">以观察镜与信号片为识别核心，适合内容策展与数据故事，但需控制科技元素同质化。</p></article>
+            <article class="rounded-lg bg-surface-container-lowest p-4"><div class="mb-3 flex items-start gap-2"><span class="flex h-7 w-7 items-center justify-center rounded-md bg-surface-container text-xs font-bold text-on-surface-variant">C</span><div><h3 class="text-sm font-semibold">街区同行者</h3><p class="text-[11px] text-on-surface-variant">亲和感 · 社群 · 日常陪伴</p></div></div><p class="text-xs leading-5 text-on-surface-variant">以人物关系和生活化物件建立温度，适合社交传播，但跨场景轮廓稳定性需优先验证。</p></article>
+            <div class="mt-4 flex items-center justify-between rounded-md bg-surface-container p-3"><span id="generation-lock-note" class="text-xs text-on-surface-variant">方向确认后才开放真实图像生成</span><button id="btn-confirm-direction" class="rounded-md bg-primary px-3 py-2 text-xs font-semibold text-on-primary">确认 A 方向</button></div>
+          </section>
+          <section class="bg-surface-container-lowest p-4 lg:overflow-y-auto">
+            <div class="mb-4 flex items-center justify-between"><div><p class="text-xs font-semibold text-primary">PREVIEW & DELIVERY</p><h2 class="mt-1 text-base font-semibold">预览与交付</h2></div><button id="btn-expand-preview" class="h-7 w-7 rounded-md bg-surface text-on-surface-variant" title="展开预览"><i data-lucide="expand" class="m-auto h-3.5 w-3.5"></i></button></div>
+            <div id="preview-placeholder" class="flex aspect-square items-center justify-center rounded-lg bg-surface-container shadow-card"><div class="text-center"><div class="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-primary-container"><i data-lucide="image" class="h-6 w-6 text-primary"></i></div><p id="preview-title" class="text-xs font-medium">方向确认后生成首版视觉</p><p id="preview-detail" class="mt-1 text-[11px] text-on-surface-variant">当前仅保留文本策略与方向决策</p></div></div>
+            <div class="mt-4"><h3 class="mb-2 text-xs font-semibold">不可变核心</h3><div class="space-y-2"><div class="flex items-center justify-between rounded-md bg-surface px-3 py-2"><span class="text-xs text-on-surface-variant">角色轮廓</span><span class="text-[11px] text-primary">待锁定</span></div><div class="flex items-center justify-between rounded-md bg-surface px-3 py-2"><span class="text-xs text-on-surface-variant">比例与体块</span><span class="text-[11px] text-primary">待锁定</span></div><div class="flex items-center justify-between rounded-md bg-surface px-3 py-2"><span class="text-xs text-on-surface-variant">品牌关联</span><span class="text-[11px] text-primary">待锁定</span></div></div></div>
+            <div class="mt-4 rounded-md border border-outline-variant/30 p-3"><div class="flex items-center gap-2"><i data-lucide="git-branch" class="h-4 w-4 text-primary"></i><span class="text-xs font-medium">版本与风险追溯</span></div><p id="version-risk-note" class="mt-2 text-[11px] leading-5 text-on-surface-variant">v0.3 · 文本策略已保存。每轮调整限定一个主变量，便于回溯角色漂移与授权核验任务。</p></div>
+          </section>
+        </div>
+      </div>
+    </section>
+    <!-- @main-content:end -->
+    <nav class="absolute bottom-5 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-lg bg-surface-container-lowest p-1.5 shadow-float">
+      <button id="tool-select" class="flex h-9 w-9 items-center justify-center rounded-md text-on-surface-variant" title="选择"><i data-lucide="mouse-pointer-2" class="h-4 w-4"></i></button><button id="tool-upload" class="flex h-9 w-9 items-center justify-center rounded-md text-on-surface-variant" title="上传"><i data-lucide="upload" class="h-4 w-4"></i></button><span class="mx-1 h-5 w-px bg-outline-variant"></span><button id="tool-brand-factory" class="flex h-9 w-9 items-center justify-center rounded-md text-on-surface-variant" title="品牌工厂"><i data-lucide="badge-check" class="h-4 w-4"></i></button><button id="tool-ip-studio" class="flex h-9 w-9 items-center justify-center rounded-md bg-primary text-on-primary shadow-glow" title="品牌IP设计工场" aria-current="page"><i data-lucide="sparkles" class="h-4 w-4"></i></button><button id="tool-type-studio" class="flex h-9 w-9 items-center justify-center rounded-md text-on-surface-variant" title="字境大师"><i data-lucide="type" class="h-4 w-4"></i></button>
+    </nav>
+  </div>
+  <div id="window-status" class="fixed left-1/2 top-5 z-50 hidden -translate-x-1/2 rounded-md bg-surface-container-high px-3 py-2 text-xs text-on-surface shadow-float" role="status"></div>
+  <button id="btn-restore-window" class="fixed right-5 bottom-5 z-40 hidden items-center gap-2 rounded-md bg-surface px-3 py-2 text-xs font-medium text-on-surface shadow-float"><i data-lucide="maximize-2" class="h-4 w-4 text-primary"></i>恢复品牌IP设计工场</button>
+  <script>
+    $(function () {
+      $('#btn-minimize-window').on('click', function () {
+        $('#design-studio-window').addClass('hidden');
+        $('#btn-restore-window').removeClass('hidden').addClass('flex');
+        $('#window-status').text('品牌IP设计工场已最小化').removeClass('hidden');
+      });
+      $('#btn-restore-window').on('click', function () {
+        $('#design-studio-window').removeClass('hidden');
+        $('#btn-restore-window').addClass('hidden').removeClass('flex');
+        $('#window-status').text('品牌IP设计工场已恢复').removeClass('hidden');
+      });
+      $('#btn-close-window').on('click', function () {
+        $('#design-studio-window').addClass('hidden');
+        $('#btn-restore-window').addClass('hidden').removeClass('flex');
+        $('#window-status').text('品牌IP设计工场已关闭；可从底部高亮入口重新打开').removeClass('hidden');
+      });
+      $('#tool-ip-studio').on('click', function () {
+        $('#design-studio-window').removeClass('hidden');
+        $('#btn-restore-window').addClass('hidden').removeClass('flex');
+        $('#window-status').text('品牌IP设计工场已打开').removeClass('hidden');
+      });
+      $('#btn-confirm-direction').on('click', function () {
+        $(this).text('A 方向已确认').prop('disabled', true).addClass('opacity-60');
+        $('#generation-lock-note').text('方向已确认，图像生成入口已开放');
+        $('#preview-title').text('首版视觉生成已开放');
+        $('#preview-detail').text('核心轮廓、比例与品牌关联将在首版生成前锁定。');
+        $('#version-risk-note').text('v0.4 · A 方向确认。请在生成前完成名称、视觉符号与授权素材的风险核验。');
+      });
+      $('#launch-carriers').on('click', 'button', function () {
+        $('#launch-carriers button').removeClass('bg-primary/10 text-primary').addClass('bg-surface-container text-on-surface-variant');
+        $(this).removeClass('bg-surface-container text-on-surface-variant').addClass('bg-primary/10 text-primary');
+      });
+      // 窗口拖动入口：后续应记录鼠标按下时的窗口与指针坐标，mousemove 中计算偏移并限制在画布范围内，mouseup 后持久化位置。
+      $('#window-drag-handle').on('mousedown', function () { console.log('待实现：拖动品牌IP设计工场窗口'); });
+      $('#btn-undo').on('click', function () { console.log('待接入：撤销画布最近操作'); });
+      $('#btn-canvas-search').on('click', function () { console.log('待接入：画布缩放与检索'); });
+      $('#tool-upload').on('click', function () { console.log('需要调用第三方接口实现素材上传功能'); });
+      $('#btn-expand-preview').on('click', function () { console.log('待接入：展开预览画布'); });
+    });
+    lucide.createIcons();
+  </script>
+</body>
+</html>
