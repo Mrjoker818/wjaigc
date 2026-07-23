@@ -7,7 +7,7 @@ import { AgentBuilderDialog, type AgentDefinition, type AgentRecipe } from '@/co
 import { toast } from 'sonner';
 import { extractTaskResultImageUrl } from '@/lib/task-result-url';
 import { CHAT_TASK_MAX_ATTEMPTS, getChatTaskPollIntervalMs } from '@/lib/chat-task-polling';
-import { getResumableChatGenerationTasks, mergeChatSessionMessages, mergeRecoveredChatTasks, updateChatSessionMessage, type ChatPendingGenerationTask, type RecoverableChatCloudTask } from '@/lib/chat-pending-generation';
+import { clearUnrecoverableChatGenerationStates, getResumableChatGenerationTasks, mergeChatSessionMessages, mergeRecoveredChatTasks, updateChatSessionMessage, type ChatPendingGenerationTask, type RecoverableChatCloudTask } from '@/lib/chat-pending-generation';
 import { UserManager } from '@/lib/user-manager';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -3078,7 +3078,14 @@ IP角色设计规范：
         }
       }
 
-      const pendingMessages = messagesRef.current
+      const recoveredSessionMessages = clearUnrecoverableChatGenerationStates(messagesRef.current);
+      if (recoveredSessionMessages !== messagesRef.current) {
+        messagesRef.current = recoveredSessionMessages;
+        setMessages(recoveredSessionMessages);
+        saveSession(recoveredSessionMessages, model, systemPrompt, currentSessionId);
+      }
+
+      const pendingMessages = recoveredSessionMessages
         .map(message => ({ message, tasks: getResumableChatGenerationTasks(message) }))
         .filter(({ tasks }) => tasks.length > 0);
 

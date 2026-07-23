@@ -37,6 +37,31 @@ export function getResumableChatGenerationTasks(
 }
 
 /**
+ * A browser refresh can happen after the UI shows a generation placeholder but
+ * before the provider returns a task ID. That placeholder cannot be resumed,
+ * so it must not remain in the restored session indefinitely.
+ */
+export function clearUnrecoverableChatGenerationStates<T extends ChatSessionMessageSnapshot>(
+  messages: T[],
+): T[] {
+  let changed = false;
+  const normalizedMessages = messages.map(message => {
+    if (!message.isGeneratingImage || getResumableChatGenerationTasks(message).length > 0) {
+      return message;
+    }
+
+    changed = true;
+    return {
+      ...message,
+      isGeneratingImage: false,
+      pendingGenerationTasks: undefined,
+    } as T;
+  });
+
+  return changed ? normalizedMessages : messages;
+}
+
+/**
  * A streamed assistant reply can save an older message snapshot after an
  * async tool has already persisted its provider task. Preserve that task
  * until an explicit terminal update is saved for the same message.

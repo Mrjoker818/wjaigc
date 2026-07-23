@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  clearUnrecoverableChatGenerationStates,
   getResumableChatGenerationTasks,
   mergeChatSessionMessages,
   mergeRecoveredChatTasks,
@@ -92,6 +93,40 @@ describe('getResumableChatGenerationTasks', () => {
     };
     const result = getResumableChatGenerationTasks(message);
     expect(result).toHaveLength(0);
+  });
+});
+
+describe('clearUnrecoverableChatGenerationStates', () => {
+  it('clears a restored generation placeholder without a valid provider task', () => {
+    const messages: ChatSessionMessageSnapshot[] = [
+      {
+        id: 'msg-1',
+        isGeneratingImage: true,
+        pendingGenerationTasks: [],
+      },
+    ];
+
+    const result = clearUnrecoverableChatGenerationStates(messages);
+
+    expect(result[0].isGeneratingImage).toBe(false);
+    expect(result[0].pendingGenerationTasks).toBeUndefined();
+  });
+
+  it('keeps a generation state with a valid provider task resumable', () => {
+    const messages: ChatSessionMessageSnapshot[] = [
+      {
+        id: 'msg-1',
+        isGeneratingImage: true,
+        pendingGenerationTasks: [
+          { taskId: 'task-1', model: 'gpt-4', providerId: 'p1', type: 'image' },
+        ],
+      },
+    ];
+
+    const result = clearUnrecoverableChatGenerationStates(messages);
+
+    expect(result[0].isGeneratingImage).toBe(true);
+    expect(result[0].pendingGenerationTasks).toHaveLength(1);
   });
 });
 
