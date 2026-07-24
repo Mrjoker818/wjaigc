@@ -340,6 +340,165 @@ export function translateApiError(
     };
   }
 
+  // ── 12. 国内 API 专属错误模式 ──
+
+  // 渠道余额不足 / 上游渠道积分不足（中转站）
+  if (
+    lower.includes('渠道余额不足') ||
+    lower.includes('channel balance') ||
+    lower.includes('上游余额') ||
+    lower.includes('provider balance') ||
+    lower.includes('no quota') ||
+    lower.includes('credits exhausted')
+  ) {
+    return {
+      category: 'insufficient_quota',
+      title: '渠道余额不足',
+      description: '当前 API 中转渠道账户余额已耗尽，无法继续生成。',
+      suggestions: [
+        '到 API 中转站后台为当前渠道充值',
+        '在管理员后台切换到余额充足的 API 提供商',
+        '联系 API 服务商补充额度',
+      ],
+      isRetryable: false,
+      originalMessage: raw,
+    };
+  }
+
+  // 上游超时 / 网关超时（中转站常见）
+  if (
+    lower.includes('上游超时') ||
+    lower.includes('upstream timeout') ||
+    lower.includes('gateway timeout') ||
+    lower.includes('origin timeout') ||
+    lower.includes('origin_gateway_timeout') ||
+    lower.includes('upstream_timeout') ||
+    lower.includes('上游服务超时')
+  ) {
+    return {
+      category: 'cloudflare_timeout',
+      title: '上游服务超时',
+      description: 'API 中转站无法在限定时间内从上游服务商获取响应，通常是模型负载高或网络拥堵。',
+      suggestions: [
+        '稍后重试（通常 30 秒到 2 分钟后恢复）',
+        '切换到响应更稳定的模型',
+        '高峰期可在管理员后台切换到其他提供商',
+      ],
+      isRetryable: true,
+      originalMessage: raw,
+    };
+  }
+
+  // DashScope（阿里云）特定错误码
+  if (
+    lower.includes('throttling.user') ||
+    lower.includes('throttling.ratelimitexceeded') ||
+    lower.includes('400022') ||
+    lower.includes('400020') ||
+    lower.includes('arrearage') ||
+    lower.includes('dashscope') && lower.includes('error')
+  ) {
+    const isDashScopeThrottle = lower.includes('throttling');
+    return {
+      category: isDashScopeThrottle ? 'rate_limit' : 'server_error',
+      title: isDashScopeThrottle ? '阿里云 DashScope 限流' : '阿里云 DashScope 错误',
+      description: isDashScopeThrottle
+        ? '阿里云 DashScope API 当前请求频率超过账户限额。'
+        : '阿里云 DashScope API 返回错误，可能是账户欠费或参数不合规。',
+      suggestions: isDashScopeThrottle
+        ? ['等待 10~30 秒后重试', '到阿里云控制台申请提升 QPS 额度', '切换到其他提供商的模型']
+        : ['到阿里云控制台检查账户状态和余额', '确认 API Key 绑定的应用有当前模型权限', '检查请求参数是否符合规范'],
+      isRetryable: isDashScopeThrottle,
+      originalMessage: raw,
+    };
+  }
+
+  // 可灵（Kling）/ 快手 API 错误
+  if (
+    lower.includes('kling') && (lower.includes('error') || lower.includes('failed')) ||
+    lower.includes('klingai') ||
+    lower.includes('task_status_failed') ||
+    lower.includes('任务状态异常') ||
+    (lower.includes('视频任务') && lower.includes('失败'))
+  ) {
+    return {
+      category: 'server_error',
+      title: '视频生成任务失败',
+      description: '视频生成任务在服务端执行失败，可能是提示词不合规或服务端临时异常。',
+      suggestions: [
+        '修改提示词，避免涉及版权内容和敏感词汇',
+        '稍后重试（服务端临时异常通常会自动恢复）',
+        '切换到其他视频模型尝试',
+      ],
+      isRetryable: true,
+      originalMessage: raw,
+    };
+  }
+
+  // 豆包 / 火山引擎 API 错误
+  if (
+    lower.includes('volc') && lower.includes('error') ||
+    lower.includes('volcengine') ||
+    lower.includes('ByteDance') && lower.includes('error') ||
+    lower.includes('ark') && (lower.includes('error') || statusCode === 400) && lower.includes('model')
+  ) {
+    return {
+      category: 'server_error',
+      title: '火山引擎 API 错误',
+      description: '火山引擎（豆包/Seedance）返回错误，可能是模型 ID 格式不正确或账户配置问题。',
+      suggestions: [
+        '确认 Endpoint ID 格式正确（形如 ep-xxxxxxxx-xxxxx）',
+        '到火山引擎控制台检查在线推理服务状态',
+        '确认当前账号有该模型的调用权限',
+      ],
+      isRetryable: false,
+      originalMessage: raw,
+    };
+  }
+
+  // Minimax / 海螺 AI 错误
+  if (
+    lower.includes('minimax') && lower.includes('error') ||
+    lower.includes('1000070') ||  // Minimax 常见超时错误码
+    lower.includes('1000060')     // Minimax 余额不足
+  ) {
+    const isMinimaxQuota = lower.includes('1000060');
+    return {
+      category: isMinimaxQuota ? 'insufficient_quota' : 'server_error',
+      title: isMinimaxQuota ? 'Minimax 余额不足' : 'Minimax API 错误',
+      description: isMinimaxQuota
+        ? 'Minimax 账户余额已耗尽，无法继续调用。'
+        : 'Minimax API 返回错误，可能是服务端超时或临时异常。',
+      suggestions: isMinimaxQuota
+        ? ['到 Minimax 开放平台充值账户余额', '在管理员后台切换到其他视频 API 提供商']
+        : ['稍后重试（10~30 秒后）', '切换到其他视频模型'],
+      isRetryable: !isMinimaxQuota,
+      originalMessage: raw,
+    };
+  }
+
+  // 中转站通用渠道错误（one-api / new-api 中转站）
+  if (
+    lower.includes('no available channel') ||
+    lower.includes('渠道不可用') ||
+    lower.includes('channel not found') ||
+    lower.includes('所有渠道均不可用') ||
+    lower.includes('channel_not_found')
+  ) {
+    return {
+      category: 'model_not_found',
+      title: '中转渠道不可用',
+      description: 'API 中转站没有找到支持当前模型的可用渠道，渠道可能已被禁用或暂时不可用。',
+      suggestions: [
+        '在管理员后台更换 API 提供商',
+        '联系 API 中转站服务商确认渠道状态',
+        '检查模型 ID 是否与中转站配置一致',
+      ],
+      isRetryable: false,
+      originalMessage: raw,
+    };
+  }
+
   // ── 兜底：未知错误 ──
   return {
     category: 'unknown',

@@ -5354,8 +5354,13 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
         // ★ 检查服务端返回的真实进度（若有）
         if (typeof data.progress === 'number' && data.progress > 0) {
+          // ★ P1: 若后端附加了预计剩余时间，拼入状态文案
+          const estRemaining = typeof data.estimatedRemainingSeconds === 'number' ? data.estimatedRemainingSeconds : undefined;
+          const estSuffix = estRemaining !== undefined
+            ? (estRemaining > 0 ? ` · 预计还需 ${estRemaining}s` : ' · 即将完成')
+            : '';
           const serverProgress = Math.min(92, Math.round(data.progress * 0.9) + 10);
-          onProgress?.(serverProgress, data.status || `AI 正在生成中... (已等待 ${elapsedStr})`);
+          onProgress?.(serverProgress, (data.label as string) || `AI 正在生成中... (已等待 ${elapsedStr})${estSuffix}`);
         }
 
         // ★ 检查服务端取消状态
@@ -14029,6 +14034,13 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                         activeIntervalsRef.current.delete(pollInterval);
                         toast.error(pollData.error || '视频编辑失败');
                         onImagesChange(imagesRef.current.filter((img: CanvasImage) => img.id !== frameId));
+                      } else {
+                        // ★ P1: 处理中时若后端附带预计剩余时间，更新占位框文案
+                        const est = typeof pollData.estimatedRemainingSeconds === 'number' ? pollData.estimatedRemainingSeconds : undefined;
+                        if (est !== undefined) {
+                          const label = est > 0 ? `视频编辑中... · 预计还需 ${est}s` : '视频编辑中... · 即将完成';
+                          onImagesChange(imagesRef.current.map((img: CanvasImage) => img.id === frameId ? { ...img, processingLabel: label } : img));
+                        }
                       }
                     } catch { /* ignore poll errors */ }
                   }, 3000);
@@ -14132,6 +14144,13 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                         activeIntervalsRef.current.delete(pollInterval);
                         toast.error(pollData.error || '视频延长失败');
                         onImagesChange(imagesRef.current.filter((img: CanvasImage) => img.id !== frameId));
+                      } else {
+                        // ★ P1: 处理中时若后端附带预计剩余时间，更新占位框文案
+                        const est = typeof pollData.estimatedRemainingSeconds === 'number' ? pollData.estimatedRemainingSeconds : undefined;
+                        if (est !== undefined) {
+                          const label = est > 0 ? `视频延长中... · 预计还需 ${est}s` : '视频延长中... · 即将完成';
+                          onImagesChange(imagesRef.current.map((img: CanvasImage) => img.id === frameId ? { ...img, processingLabel: label } : img));
+                        }
                       }
                     } catch { /* ignore poll errors */ }
                   }, 3000);

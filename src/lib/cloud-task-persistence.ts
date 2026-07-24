@@ -43,6 +43,7 @@ interface VideoTaskSubmission {
   providerId?: string;
   model?: string;
   label?: string;
+  creditCost?: number;
 }
 
 interface VideoTaskTerminal {
@@ -144,6 +145,7 @@ export async function recordVideoTaskSubmitted(input: VideoTaskSubmission): Prom
     remoteTaskId: input.taskId,
     progress: 5,
     label: input.label || 'Video generation',
+    creditCost: input.creditCost,
     createdAt: now,
     updatedAt: now,
   });

@@ -320,6 +320,10 @@ export async function POST(request: NextRequest) {
     const modeLabel = imageUrl ? '图生视频' : '文生视频';
     const modelName = modelInfo?.name || model;
     registerTask(taskId, 'video', `${modeLabel} · ${modelName}`, sessionUser?.id);
+    // 写入积分成本到 task-registry，用于任务失败/取消时退款
+    if (deductedCredits > 0) {
+      updateTaskProgress(taskId, { creditCost: deductedCredits });
+    }
     // Persist before returning the task ID. Cloud function runtimes may stop work
     // scheduled with `void` as soon as this route responds.
     try {
@@ -330,6 +334,7 @@ export async function POST(request: NextRequest) {
         providerId: provider.id,
         model: pureModel,
         label: `${modeLabel} - ${modelName}`,
+        creditCost: deductedCredits > 0 ? deductedCredits : undefined,
       });
     } catch (error) {
       console.warn('[video/generate] Cloud task submit persistence failed:', error);

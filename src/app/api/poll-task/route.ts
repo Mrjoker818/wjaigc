@@ -946,7 +946,12 @@ export async function POST(request: NextRequest) {
                 ? '视频任务不存在或已过期'
                 : `API 返回错误: ${errorBody.slice(0, 200)}`;
               updateTaskProgress(taskId, { status: 'failed', error: errorMsg, progress: 0 });
-              void recordVideoTaskTerminal(taskId, { status: 'failed', error: errorMsg })
+              const videoPoll4xxCreditStatus = await refundTaskCredits(
+                taskId,
+                getTaskInfo(taskId)?.creditCost,
+                `视频生成失败退款 (API ${pollResp.status}, taskId: ${taskId})`,
+              );
+              void recordVideoTaskTerminal(taskId, { status: 'failed', error: errorMsg, creditStatus: videoPoll4xxCreditStatus })
                 .catch((error) => console.warn('[poll-task] Video failure persistence failed:', error));
               releaseQueueSlot(taskId);
               failedTaskCache.set(taskId, { error: errorMsg, timestamp: Date.now() });
@@ -1047,43 +1052,76 @@ export async function POST(request: NextRequest) {
                 modelName: videoModel || '',
               }, { status: 200 });
             }
-            // 视频完成但无URL — 视为失败
+            // 视频完成但无URL — 视为失败并退款
+            const noUrlError = '视频生成已完成但未返回可用地址，请稍后重试';
             console.warn(`[poll-task/video] Task ${taskId} completed but no videoUrl found in response`);
+            const noUrlCreditStatus = await refundTaskCredits(
+              taskId,
+              getTaskInfo(taskId)?.creditCost,
+              `视频完成无URL退款 (taskId: ${taskId})`,
+            );
+            updateTaskProgress(taskId, { status: 'failed', error: noUrlError, progress: 0 });
+            void recordVideoTaskTerminal(taskId, { status: 'failed', error: noUrlError, creditStatus: noUrlCreditStatus })
+              .catch((err) => console.warn('[poll-task] Video no-url persistence failed:', err));
+            releaseQueueSlot(taskId);
+            failedTaskCache.set(taskId, { error: noUrlError, timestamp: Date.now() });
           }
 
           if (videoResult.status === 'failed') {
-            updateTaskProgress(taskId, { status: 'failed', error: videoResult.error || '视频生成失败', progress: 0 });
+            const videoFailedError = translateApiError(videoResult.error || '视频生成失败');
+            updateTaskProgress(taskId, { status: 'failed', error: videoFailedError, progress: 0 });
+            const videoFailedCreditStatus = await refundTaskCredits(
+              taskId,
+              getTaskInfo(taskId)?.creditCost,
+              `视频生成失败退款 (taskId: ${taskId})`,
+            );
             void recordVideoTaskTerminal(taskId, {
               status: 'failed',
-              error: videoResult.error || '视频生成失败',
+              error: videoFailedError,
+              creditStatus: videoFailedCreditStatus,
             }).catch((error) => console.warn('[poll-task] Video failure persistence failed:', error));
             releaseQueueSlot(taskId);
-            failedTaskCache.set(taskId, { error: videoResult.error || '视频生成失败', timestamp: Date.now() });
+            failedTaskCache.set(taskId, { error: videoFailedError, timestamp: Date.now() });
             return NextResponse.json({
               success: false, status: 'failed',
-              error: translateApiError(videoResult.error || '视频生成失败'),
+              error: videoFailedError,
               retryable: true,
             }, { status: 200 });
           }
 
           // 仍在处理中 - 更新进度
           const progress = videoResult.progress || Math.min(registryTask.progress + 5, 90);
+          const updatedLabel = `${registryTask.label?.split('·')[0] || '视频生成'} · ${videoResult.status === 'running' ? '生成中' : '排队中'}...`;
           updateTaskProgress(taskId, {
             progress,
-            label: `${registryTask.label?.split('·')[0] || '视频生成'} · ${videoResult.status === 'running' ? '生成中' : '排队中'}...`,
+            label: updatedLabel,
           });
+
+          // ★ P1: 任务运行 >30s 时，附加预计剩余时间（帮助用户判断是否超时）
+          const videoElapsed = Date.now() - (registryTask.createdAt || Date.now());
+          const VIDEO_ESTIMATED_TOTAL_MS = 120_000; // 视频默认预估120秒完成
+          const videoEstimatedRemaining = videoElapsed > 30_000
+            ? Math.max(0, Math.round((VIDEO_ESTIMATED_TOTAL_MS - videoElapsed) / 1000))
+            : undefined;
 
           return NextResponse.json({
             success: true, status: 'processing',
             progress,
-            label: registryTask.label,
+            label: updatedLabel,
+            ...(videoEstimatedRemaining !== undefined && { estimatedRemainingSeconds: videoEstimatedRemaining }),
           }, { status: 200 });
         } catch (videoPollErr) {
           console.warn('[poll-task] Video poll error:', videoPollErr instanceof Error ? videoPollErr.message : videoPollErr);
+          // ★ P1: 即使轮询出错，也尽量附加预计剩余时间
+          const videoElapsedCatch = Date.now() - (registryTask.createdAt || Date.now());
+          const videoEstRemainingCatch = videoElapsedCatch > 30_000
+            ? Math.max(0, Math.round((120_000 - videoElapsedCatch) / 1000))
+            : undefined;
           return NextResponse.json({
             success: true, status: 'processing',
             progress: registryTask.progress,
             label: registryTask.label,
+            ...(videoEstRemainingCatch !== undefined && { estimatedRemainingSeconds: videoEstRemainingCatch }),
           }, { status: 200 });
         }
       }
