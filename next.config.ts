@@ -38,7 +38,7 @@ const nextConfig: NextConfig = {
               "font-src 'self' data: https://fonts.gstatic.cn https://fonts.gstatic.com",
               "worker-src 'self' blob:",
               "frame-src 'self' blob: https://*.dev.coze.site",
-              "frame-ancestors 'self' https://*.dev.coze.site",
+              "frame-ancestors 'self' https://*.dev.coze.site https://*.coze.cn https://code.coze.cn",
               "object-src 'none'",
             ].join('; '),
           },
