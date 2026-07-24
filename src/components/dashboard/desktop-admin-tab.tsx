@@ -237,7 +237,7 @@ function formatBytes(value: unknown): string {
 
 function formatTime(value: unknown): string {
   const n = Number(value || 0);
-  return n ? new Date(n).toLocaleString() : '-';
+  return n ? new Date(n).toLocaleString('zh-CN') : '-';
 }
 
 function readFileAsDataUrl(file: File): Promise<string> {

@@ -1594,6 +1594,12 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const canvasRef = useRef<HTMLDivElement>(null);
   const uploadFileInputRef = useRef<HTMLInputElement>(null);
   const imagesRef = useRef<CanvasImage[]>(images);
+  // P2-4: 追踪所有活跃的setInterval，确保组件卸载时清理
+  const activeIntervalsRef = useRef<Set<ReturnType<typeof setInterval>>>(new Set());
+  useEffect(() => {
+    const set = activeIntervalsRef.current;
+    return () => { set.forEach((id) => clearInterval(id)); set.clear(); };
+  }, []);
 
   // 【调整2&3】生成组状态 — Alt+左键参考图组 / Ctrl+左键融图组
   const [genGroups, setGenGroups] = useState<CanvasGenGroup[]>([]);
@@ -13968,7 +13974,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                   let videoEditPollCount = 0;
                   const pollInterval = setInterval(async () => {
                     videoEditPollCount++;
-                    if (videoEditPollCount >= 100) { clearInterval(pollInterval); toast.error('视频编辑超时'); onImagesChange(imagesRef.current.filter((img: CanvasImage) => img.id !== frameId)); return; }
+                    if (videoEditPollCount >= 100) { clearInterval(pollInterval); activeIntervalsRef.current.delete(pollInterval); toast.error('视频编辑超时'); onImagesChange(imagesRef.current.filter((img: CanvasImage) => img.id !== frameId)); return; }
                     try {
                       const pollRes = await fetch('/api/poll-task', {
                         method: 'POST',
@@ -13979,6 +13985,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                       const resultUrl = pollData.imageUrl || pollData.result?.url || pollData.result?.imageUrl || (pollData.result?.image as Record<string, unknown>)?.url || (pollData.result?.images as Array<Record<string, unknown>>)?.[0]?.url;
                       if (pollData.status === 'completed' && resultUrl) {
                         clearInterval(pollInterval);
+                        activeIntervalsRef.current.delete(pollInterval);
                         const rawVideoUrl = pollData.videoUrl || resultUrl;
                         const rawThumbUrl = pollData.videoThumbnailUrl || resultUrl;
                         // ★ 持久化视频URL，防止第三方URL过期消失
@@ -14019,11 +14026,13 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                         });
                       } else if (pollData.status === 'failed' || pollData.status === 'cancelled') {
                         clearInterval(pollInterval);
+                        activeIntervalsRef.current.delete(pollInterval);
                         toast.error(pollData.error || '视频编辑失败');
                         onImagesChange(imagesRef.current.filter((img: CanvasImage) => img.id !== frameId));
                       }
                     } catch { /* ignore poll errors */ }
                   }, 3000);
+                  activeIntervalsRef.current.add(pollInterval); // P2-4: 追踪interval以备unmount清理
                 } else if (data.error) {
                   toast.error(data.error);
                 }
@@ -14068,7 +14077,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                   let videoExtendPollCount = 0;
                   const pollInterval = setInterval(async () => {
                     videoExtendPollCount++;
-                    if (videoExtendPollCount >= 100) { clearInterval(pollInterval); toast.error('视频延长超时'); onImagesChange(imagesRef.current.filter((img: CanvasImage) => img.id !== frameId)); return; }
+                    if (videoExtendPollCount >= 100) { clearInterval(pollInterval); activeIntervalsRef.current.delete(pollInterval); toast.error('视频延长超时'); onImagesChange(imagesRef.current.filter((img: CanvasImage) => img.id !== frameId)); return; }
                     try {
                       const pollRes = await fetch('/api/poll-task', {
                         method: 'POST',
@@ -14079,6 +14088,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                       const resultUrl = pollData.imageUrl || pollData.result?.url || pollData.result?.imageUrl || (pollData.result?.image as Record<string, unknown>)?.url || (pollData.result?.images as Array<Record<string, unknown>>)?.[0]?.url;
                       if (pollData.status === 'completed' && resultUrl) {
                         clearInterval(pollInterval);
+                        activeIntervalsRef.current.delete(pollInterval);
                         const rawVideoUrl = pollData.videoUrl || resultUrl;
                         const rawThumbUrl = pollData.videoThumbnailUrl || resultUrl;
                         // ★ 持久化视频URL，防止第三方URL过期消失
@@ -14119,11 +14129,13 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                         });
                       } else if (pollData.status === 'failed' || pollData.status === 'cancelled') {
                         clearInterval(pollInterval);
+                        activeIntervalsRef.current.delete(pollInterval);
                         toast.error(pollData.error || '视频延长失败');
                         onImagesChange(imagesRef.current.filter((img: CanvasImage) => img.id !== frameId));
                       }
                     } catch { /* ignore poll errors */ }
                   }, 3000);
+                  activeIntervalsRef.current.add(pollInterval); // P2-4: 追踪interval以备unmount清理
                 } else if (data.error) {
                   toast.error(data.error);
                 }

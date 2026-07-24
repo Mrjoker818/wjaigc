@@ -269,6 +269,15 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
   const [materialCraft, setMaterialCraft] = useState<PackagingMaterialCraft>({ materials: [], crafts: [] });
   const [extendScenes, setExtendScenes] = useState<string[]>([]);
   const [uploads, setUploads] = useState<{ type: string; url: string; name: string }[]>([]);
+  // P3-6: 追踪本地创建的 Blob URL，组件卸载时统一回收，避免内存泄漏
+  const blobUrlsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const set = blobUrlsRef.current;
+    return () => {
+      set.forEach((u) => { try { URL.revokeObjectURL(u); } catch { /* noop */ } });
+      set.clear();
+    };
+  }, []);
   const [outputModes, setOutputModes] = useState<PackagingOutputMode[]>(['package_render']);
   const [advancedOptions, setAdvancedOptions] = useState<PackagingAdvancedOptions>({
     enableCopywriting: false,
@@ -458,6 +467,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
       const file = (e.target as HTMLInputElement).files?.[0];
       if (!file) return;
       const url = URL.createObjectURL(file);
+      blobUrlsRef.current.add(url); // P3-6: 追踪以备 revoke
       if (type === 'Logo') setLogoUrl(url);
       else setUploads(prev => [...prev, { type, url, name: file.name }]);
     };

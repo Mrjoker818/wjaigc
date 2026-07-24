@@ -189,7 +189,7 @@ export default function DataManagerTab({
               </div>
               <div>
                 <div className={`text-xs ${textSecondary}`}>{card.label}</div>
-                <div className={`text-xl font-bold ${textPrimary}`}>{card.value.toLocaleString()}</div>
+                <div className={`text-xl font-bold ${textPrimary}`}>{card.value.toLocaleString('zh-CN')}</div>
               </div>
             </div>
           </div>

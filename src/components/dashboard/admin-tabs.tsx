@@ -157,7 +157,7 @@ interface AdminTabsProps {
 /* ── Helpers ── */
 function formatNumber(n: number): string {
   if (n >= 10000) return (n / 10000).toFixed(1).replace(/\.0$/, '') + '万';
-  if (n >= 1000) return n.toLocaleString();
+  if (n >= 1000) return n.toLocaleString('zh-CN');
   return String(n);
 }
 
@@ -642,7 +642,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                           <span className="text-sm font-medium text-foreground truncate">{m.name}</span>
                           <div className="flex items-center gap-3">
                             <span className={`text-xs ${rateColor}`}>{m.successRate}%</span>
-                            <span className="text-xs font-mono text-muted-foreground">{m.calls.toLocaleString()}</span>
+                            <span className="text-xs font-mono text-muted-foreground">{m.calls.toLocaleString('zh-CN')}</span>
                           </div>
                         </div>
                         <div className="h-1.5 bg-muted rounded-full overflow-hidden">
@@ -680,7 +680,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                         <span className="text-sm font-medium text-foreground truncate">{p.name}</span>
                       </div>
                       <div className="flex items-center gap-6 text-xs">
-                        <div className="text-muted-foreground">24h <span className="text-foreground font-mono font-medium">{p.calls24h.toLocaleString()}</span></div>
+                        <div className="text-muted-foreground">24h <span className="text-foreground font-mono font-medium">{p.calls24h.toLocaleString('zh-CN')}</span></div>
                         <div className="text-muted-foreground">失败率 <span className={`${rateColor} font-mono font-medium`}>{p.failRate}%</span></div>
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium ${badgeBg}`}>{p.status}</span>
                       </div>
@@ -865,7 +865,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                     <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isActive ? 'bg-green-500' : 'bg-muted-foreground'}`} />
                     <span className={`text-xs ${isActive ? 'text-green-500' : 'text-muted-foreground'}`}>{isActive ? '活跃' : '禁用'}</span>
                   </span>
-                  <span className="text-sm font-medium text-foreground">{getUserCredits(u).toLocaleString()}</span>
+                  <span className="text-sm font-medium text-foreground">{getUserCredits(u).toLocaleString('zh-CN')}</span>
                   <span className="text-sm text-muted-foreground">{getUserProjects(u) || '-'}</span>
                   <span className="text-xs text-muted-foreground">{formatDate(getUserCreated(u))}</span>
                   <span className="text-xs text-muted-foreground">-</span>
@@ -889,7 +889,7 @@ export default function AdminTabs(props: AdminTabsProps) {
             <div className="ml-auto w-[420px] h-full bg-card border-l border-border overflow-y-auto relative z-10">
               <div className="sticky top-0 z-10 bg-card/95 backdrop-blur-sm border-b border-border/50 px-6 py-4 flex items-center justify-between">
                 <h3 className="text-base font-semibold text-foreground">用户详情</h3>
-                <button onClick={() => setUserDetailId(null)} className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+                <button onClick={() => setUserDetailId(null)} aria-label="关闭用户详情" className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
               </div>
               <div className="p-6 space-y-6">
                 {/* 基础信息 */}
@@ -901,7 +901,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                   </div>
                 </div>
                 <div className="grid grid-cols-3 gap-3">
-                  <div className="bg-muted/50 rounded-lg p-3 text-center"><p className="text-lg font-bold text-foreground">{(detailUser.credits ?? 0).toLocaleString()}</p><p className="text-[10px] text-muted-foreground mt-0.5">积分余额</p></div>
+                  <div className="bg-muted/50 rounded-lg p-3 text-center"><p className="text-lg font-bold text-foreground">{(detailUser.credits ?? 0).toLocaleString('zh-CN')}</p><p className="text-[10px] text-muted-foreground mt-0.5">积分余额</p></div>
                   <div className="bg-muted/50 rounded-lg p-3 text-center"><p className="text-lg font-bold text-foreground">{detailUser.project_count ?? '-'}</p><p className="text-[10px] text-muted-foreground mt-0.5">作品数</p></div>
                   <div className="bg-muted/50 rounded-lg p-3 text-center"><p className="text-xs font-bold text-foreground">{getUserCreated(detailUser)}</p><p className="text-[10px] text-muted-foreground mt-0.5">注册时间</p></div>
                 </div>
@@ -1221,7 +1221,7 @@ export default function AdminTabs(props: AdminTabsProps) {
             <div className="ml-auto relative z-10 w-[380px] h-full bg-card border-l border-border overflow-y-auto">
               <div className="px-6 py-4 border-b border-border/50 flex items-center justify-between">
                 <h3 className="text-base font-semibold text-foreground">新建用户</h3>
-                <button onClick={() => setShowUserAddDrawer(false)} className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+                <button onClick={() => setShowUserAddDrawer(false)} aria-label="关闭添加用户面板" className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
               </div>
               <div className="p-6 space-y-4">
                 <div><label className="text-sm font-medium text-foreground mb-1.5 block">用户名</label><input value={newUserName} onChange={e => setNewUserName(e.target.value)} placeholder="输入用户名" className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30" /></div>
@@ -1328,9 +1328,9 @@ export default function AdminTabs(props: AdminTabsProps) {
                         <div className="text-sm font-medium text-foreground">{u.name}</div>
                       </div>
                     </div>
-                    <span className="text-sm font-bold text-primary font-mono">{u.balance.toLocaleString()}</span>
-                    <span className="text-sm text-foreground font-mono">{u.totalRecharged.toLocaleString()}</span>
-                    <span className="text-sm text-muted-foreground font-mono">{u.consumed.toLocaleString()}</span>
+                    <span className="text-sm font-bold text-primary font-mono">{u.balance.toLocaleString('zh-CN')}</span>
+                    <span className="text-sm text-foreground font-mono">{u.totalRecharged.toLocaleString('zh-CN')}</span>
+                    <span className="text-sm text-muted-foreground font-mono">{u.consumed.toLocaleString('zh-CN')}</span>
                     <div className="flex justify-end">
                       <button onClick={() => { setRechargeUserId(u.userId || u.name); setRechargeAmount(100); setShowRechargeModal(true); }} className="bg-primary/10 text-primary px-3 py-1.5 rounded-md text-xs font-medium hover:bg-primary/20 active:scale-[0.98] transition-all">充值</button>
                     </div>
@@ -1381,7 +1381,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                     <span className="text-sm font-medium text-foreground">{t.user}</span>
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium w-fit ${t.type === 'recharge' ? 'bg-primary/15 text-primary' : t.type === 'image' ? 'bg-primary/15 text-primary' : t.type === 'video' ? 'bg-blue-500/15 text-blue-500' : 'bg-green-500/15 text-green-500'}`}>{t.type === 'recharge' ? '充值' : t.type === 'image' ? '生图' : t.type === 'video' ? '视频' : t.type === 'edit' ? '编辑' : t.desc || t.type}</span>
                     <span className="text-sm text-muted-foreground">{t.desc || '-'}</span>
-                    <span className={`text-sm font-bold font-mono ${t.type === 'recharge' ? 'text-green-500' : 'text-foreground'}`}>{t.type === 'recharge' ? '+' : '-'}{Math.abs(t.amount).toLocaleString()}</span>
+                    <span className={`text-sm font-bold font-mono ${t.type === 'recharge' ? 'text-green-500' : 'text-foreground'}`}>{t.type === 'recharge' ? '+' : '-'}{Math.abs(t.amount).toLocaleString('zh-CN')}</span>
                     <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-green-500/15 text-green-500 w-fit">已完成</span>
                   </div>
                 ))}
@@ -1412,7 +1412,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-sm font-medium text-foreground truncate">{u.name}</span>
-                        <span className="text-xs font-mono text-muted-foreground">{(u.consumed || u.totalConsumed || 0).toLocaleString()}</span>
+                        <span className="text-xs font-mono text-muted-foreground">{(u.consumed || u.totalConsumed || 0).toLocaleString('zh-CN')}</span>
                       </div>
                       <div className="h-1.5 bg-muted rounded-full overflow-hidden">
                         <div className="h-full bg-primary/60 rounded-full" style={{ width: `${Math.min(100, (u.consumed || u.totalConsumed || 0) / Math.max((co?.topUsers?.[0]?.consumed || co?.topUsers?.[0]?.totalConsumed || 1), 1) * 100)}%` }} />
@@ -1633,7 +1633,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                 </div>
                 <button onClick={async () => { try { const res = await fetch('/api/admin/credits/recharge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: rechargeUserId, amount: rechargeAmount }) }); if (res.ok) { setShowRechargeModal(false); loadCreditsOverview(); onRefreshAdmin(); } else { const d = await res.json(); alert(d.error || '充值失败'); } } catch { alert('充值请求失败'); } }} className="w-full h-10 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors">确认充值</button>
               </div>
-              <button onClick={() => setShowRechargeModal(false)} className="absolute top-4 right-4 w-8 h-8 rounded-lg bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+              <button onClick={() => setShowRechargeModal(false)} aria-label="关闭充值面板" className="absolute top-4 right-4 w-8 h-8 rounded-lg bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
             </div>
           </div>
         )}
@@ -1897,9 +1897,9 @@ export default function AdminTabs(props: AdminTabsProps) {
         {/* 分页 */}
         {auditTotal > 20 && (
           <div className="flex items-center justify-center gap-2">
-            <button disabled={auditPage <= 1} onClick={() => { const p = auditPage - 1; setAuditPage(p); loadAuditLogs(p, auditFilterAction, auditFilterLevel, auditFilterUserId); }} className="h-8 px-3 rounded-lg bg-muted text-sm text-muted-foreground disabled:opacity-50 hover:text-foreground"><ChevronLeft className="w-4 h-4" /></button>
+            <button aria-label="上一页" disabled={auditPage <= 1} onClick={() => { const p = auditPage - 1; setAuditPage(p); loadAuditLogs(p, auditFilterAction, auditFilterLevel, auditFilterUserId); }} className="h-8 px-3 rounded-lg bg-muted text-sm text-muted-foreground disabled:opacity-50 hover:text-foreground"><ChevronLeft className="w-4 h-4" /></button>
             <span className="text-sm text-muted-foreground">第 {auditPage} 页 (共 {Math.ceil(auditTotal / 20)} 页, {auditTotal} 条)</span>
-            <button disabled={auditPage * 20 >= auditTotal} onClick={() => { const p = auditPage + 1; setAuditPage(p); loadAuditLogs(p, auditFilterAction, auditFilterLevel, auditFilterUserId); }} className="h-8 px-3 rounded-lg bg-muted text-sm text-muted-foreground disabled:opacity-50 hover:text-foreground"><ChevronRight className="w-4 h-4" /></button>
+            <button aria-label="下一页" disabled={auditPage * 20 >= auditTotal} onClick={() => { const p = auditPage + 1; setAuditPage(p); loadAuditLogs(p, auditFilterAction, auditFilterLevel, auditFilterUserId); }} className="h-8 px-3 rounded-lg bg-muted text-sm text-muted-foreground disabled:opacity-50 hover:text-foreground"><ChevronRight className="w-4 h-4" /></button>
           </div>
         )}
       </div>

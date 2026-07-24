@@ -964,7 +964,7 @@ async function describeImageWithVision(
   for (const entry of chatProviders) {
     for (const m of entry.models) {
       try {
-        console.log(`[image-edit] vision-describe: Trying ${m}`);
+        console.debug(`[image-edit] vision-describe: Trying ${m}`);
         const chatRequestBody = {
           model: m,
           messages: [
@@ -1013,7 +1013,7 @@ async function describeImageWithVision(
 
         // Extract text content (whether string or array)
         if (typeof content === 'string' && content.length > 20) {
-          console.log(`[image-edit] vision-describe: ${m} returned ${content.length} chars`);
+          console.debug(`[image-edit] vision-describe: ${m} returned ${content.length} chars`);
           return content;
         }
         if (Array.isArray(content)) {
@@ -1023,7 +1023,7 @@ async function describeImageWithVision(
             .filter((t: string) => t.length > 10);
           if (textParts.length > 0) {
             const joined = textParts.join(' ');
-            console.log(`[image-edit] vision-describe: ${m} returned ${joined.length} chars (array)`);
+            console.debug(`[image-edit] vision-describe: ${m} returned ${joined.length} chars (array)`);
             return joined;
           }
         }
@@ -1071,7 +1071,7 @@ async function submit302aiUpscaleTask(
     override_size_limits: true,
   };
 
-  console.log(`[image-edit] 302.AI upscale: POST ${url}, scale=${scale}`);
+  console.debug(`[image-edit] 302.AI upscale: POST ${url}, scale=${scale}`);
 
   const response = await fetch(url, {
     method: 'POST',
@@ -1088,7 +1088,7 @@ async function submit302aiUpscaleTask(
   }
 
   const result = await response.json();
-  console.log(`[image-edit] 302.AI upscale response keys:`, Object.keys(result));
+  console.debug(`[image-edit] 302.AI upscale response keys:`, Object.keys(result));
 
   // 响应格式: { image: { url, content_type, file_size, width, height }, seed }
   if (result.image && result.image.url) {
@@ -1126,7 +1126,7 @@ async function submit302aiUpscaleV6Task(
     upscale_factor: factor,
   };
 
-  console.log(`[image-edit] 302.AI upscale-v6: POST ${url}, factor=${factor}`);
+  console.debug(`[image-edit] 302.AI upscale-v6: POST ${url}, factor=${factor}`);
 
   const response = await fetch(url, {
     method: 'POST',
@@ -1143,7 +1143,7 @@ async function submit302aiUpscaleV6Task(
   }
 
   const result = await response.json();
-  console.log(`[image-edit] 302.AI upscale-v6 response keys:`, Object.keys(result));
+  console.debug(`[image-edit] 302.AI upscale-v6 response keys:`, Object.keys(result));
 
   // 响应格式: { image: { url, content_type, file_size, width, height }, seed }
   if (result.image && result.image.url) {
@@ -1173,7 +1173,7 @@ async function autoTrySubmitImageTask(
 
   for (const candidate of candidateModels) {
     try {
-      console.log(`[image-edit] ${operation}: Trying model ${candidate.model} (source: ${candidate.source}, endpoint: ${endpoint})`);
+      console.debug(`[image-edit] ${operation}: Trying model ${candidate.model} (source: ${candidate.source}, endpoint: ${endpoint})`);
       const requestBody = buildRequestBody(candidate.model);
       const result = await submitImageTask(candidate.apiBaseUrl, candidate.apiKey, requestBody, endpoint, {
         baseUrl: candidate.apiBaseUrl,
@@ -1198,7 +1198,7 @@ async function autoTrySubmitImageTask(
           // 用 1:1 比例重试尚未失败的候选模型
           for (const retryCandidate of candidateModels) {
             if (failedModelSet.has(retryCandidate.model)) {
-              console.log(`[image-edit] ${operation}: Skipping already-failed model ${retryCandidate.model} in 1:1 retry`);
+              console.debug(`[image-edit] ${operation}: Skipping already-failed model ${retryCandidate.model} in 1:1 retry`);
               continue;
             }
             try {
@@ -1408,7 +1408,7 @@ export async function POST(request: NextRequest) {
     const extractedProviderId = modelStr.includes('::') ? modelStr.split('::')[0] : '';
     if (modelStr.includes('::')) {
       modelStr = modelStr.split('::').pop()!;
-      console.log(`[image-edit] Stripped provider prefix from model: "${rawModel}" → "${modelStr}" (providerId via field: "${providerId || 'none'}")`);
+      console.debug(`[image-edit] Stripped provider prefix from model: "${rawModel}" → "${modelStr}" (providerId via field: "${providerId || 'none'}")`);
     }
     const effectiveProviderId = providerId || extractedProviderId || '';
     const engineMode = (enginePref === 'ai' || enginePref === 'local' || enginePref === 'cpu') ? enginePref : 'auto';
@@ -1980,7 +1980,7 @@ export async function POST(request: NextRequest) {
           const imageBuffer = Buffer.from(arrayBuffer);
           const metadata = await sharp(imageBuffer).metadata();
           if (metadata.width && metadata.height) {
-            console.log(`[image-edit] upscale: loaded real image size from URL: ${metadata.width}x${metadata.height} (frontend passed: ${origW}x${origH})`);
+            console.debug(`[image-edit] upscale: loaded real image size from URL: ${metadata.width}x${metadata.height} (frontend passed: ${origW}x${origH})`);
             origW = metadata.width;
             origH = metadata.height;
           }
@@ -2068,7 +2068,7 @@ export async function POST(request: NextRequest) {
           }
           return null;
         } catch (cpuError) {
-          console.log(`[image-edit] upscale: CPU error:`, cpuError instanceof Error ? cpuError.message : cpuError);
+          console.debug(`[image-edit] upscale: CPU error:`, cpuError instanceof Error ? cpuError.message : cpuError);
           return null;
         }
       };
@@ -2083,7 +2083,7 @@ export async function POST(request: NextRequest) {
       // ---- AI放大路径 (auto/ai模式) ----
       // candidateModels已在上方重排序：upscaler专用模型优先 → 通用image模型
       // 专用upscaler模型走/images/edits端点(参考图编辑)，通用image模型走/images/generations
-      console.log(`[image-edit] upscale: AI-first mode, target: ${targetW}x${targetH}, candidates: ${candidateModels.slice(0,3).map(c=>c.model).join(', ')}...`);
+      console.debug(`[image-edit] upscale: AI-first mode, target: ${targetW}x${targetH}, candidates: ${candidateModels.slice(0,3).map(c=>c.model).join(', ')}...`);
 
       // AI放大策略: 先用AI放大到API允许的最大尺寸，再用sharp精确调整到目标尺寸
       // 注意: 大多数API限制最大边长2048，所以AI放大最多到2048边长
@@ -2107,7 +2107,7 @@ export async function POST(request: NextRequest) {
         }
       })();
 
-      console.log(`[image-edit] upscale: AI request size ${aiUpscaleSize}, final target ${targetW}x${targetH}`);
+      console.debug(`[image-edit] upscale: AI request size ${aiUpscaleSize}, final target ${targetW}x${targetH}`);
 
       // 获取参考图
       const imageBase64ForVision = await resolveImageToBase64(imageUrl);
@@ -2157,12 +2157,12 @@ export async function POST(request: NextRequest) {
       }
 
       if (aiUpscaler302Candidates.length > 0) {
-        console.log(`[image-edit] upscale: detected ${aiUpscaler302Candidates.length} 302.AI upscale models`);
+        console.debug(`[image-edit] upscale: detected ${aiUpscaler302Candidates.length} 302.AI upscale models`);
         for (const c of aiUpscaler302Candidates) {
           try {
             // 计算放大倍数
             const calcScale = Math.min(Math.max(scaleVal, 2), 4);
-            console.log(`[image-edit] upscale: trying 302.AI endpoint for ${c.model}, scale=${calcScale}`);
+            console.debug(`[image-edit] upscale: trying 302.AI endpoint for ${c.model}, scale=${calcScale}`);
 
             let aiResult302: { directUrl?: string; width?: number; height?: number; usedModel?: string } | null = null;
 
@@ -2198,7 +2198,7 @@ export async function POST(request: NextRequest) {
                 height: aiResult302.height,
                 usedModel: aiResult302.usedModel || c.model,
               };
-              console.log(`[image-edit] upscale: 302.AI success, output ${aiResult302.width}x${aiResult302.height}`);
+              console.debug(`[image-edit] upscale: 302.AI success, output ${aiResult302.width}x${aiResult302.height}`);
               break; // 成功后跳出
             }
           } catch (err) {
@@ -2232,7 +2232,7 @@ export async function POST(request: NextRequest) {
         // PearAPI不支持/images/edits端点，直接排除
         const baseUrl = c.apiBaseUrl || '';
         if (baseUrl.includes('pearapi.ai') || baseUrl.includes('pearapi')) {
-          console.log(`[image-edit] upscale: skipping ${c.model} from PearAPI (does not support /images/edits endpoint)`);
+          console.debug(`[image-edit] upscale: skipping ${c.model} from PearAPI (does not support /images/edits endpoint)`);
           return false;
         }
         return true;
@@ -2241,7 +2241,7 @@ export async function POST(request: NextRequest) {
 
       if (shouldUseDedicatedUpscaler) {
         try {
-          console.log(`[image-edit] upscale: trying ${supportedUpscalerCandidates.length} dedicated upscaler models first`);
+          console.debug(`[image-edit] upscale: trying ${supportedUpscalerCandidates.length} dedicated upscaler models first`);
 
           // 原图不超过2048，直接放大2倍（不超过2048）
           const upscalerScale = Math.min(2, Math.floor(maxUpscalerEdge / origMaxEdge));
@@ -2253,7 +2253,7 @@ export async function POST(request: NextRequest) {
           upscalerTargetH = Math.round(upscalerTargetH / 16) * 16;
 
           const upscalerSize = `${upscalerTargetW}x${upscalerTargetH}`;
-          console.log(`[image-edit] upscale: dedicated upscaler target size: ${upscalerSize} (limited to max edge 2048)`);
+          console.debug(`[image-edit] upscale: dedicated upscaler target size: ${upscalerSize} (limited to max edge 2048)`);
 
           // 专用超分模型走 /images/edits 端点（参考图编辑模式，参数更简单）
           aiResult = await autoTrySubmitImageTask(supportedUpscalerCandidates, (m: string) => ({
@@ -2267,7 +2267,7 @@ export async function POST(request: NextRequest) {
 
           // 如果专用模型成功但尺寸未达到目标，需要二次放大
           if (aiResult && aiResult.imageUrl && (upscalerTargetW < targetW || upscalerTargetH < targetH)) {
-            console.log(`[image-edit] upscale: dedicated upscaler produced ${upscalerTargetW}x${upscalerTargetH}, need secondary upscale to ${targetW}x${targetH}`);
+            console.debug(`[image-edit] upscale: dedicated upscaler produced ${upscalerTargetW}x${upscalerTargetH}, need secondary upscale to ${targetW}x${targetH}`);
             // 二次放大用通用AI模型或sharp
             // 这里先返回2048结果，后续可添加二次放大逻辑
           }
@@ -2282,15 +2282,15 @@ export async function POST(request: NextRequest) {
           }
         }
       } else if (specialUpscalerCandidates.length > 0 && origMaxEdge > maxUpscalerEdge) {
-        console.log(`[image-edit] upscale: original image ${origW}x${origH} exceeds 2048 limit, skipping dedicated upscaler models`);
+        console.debug(`[image-edit] upscale: original image ${origW}x${origH} exceeds 2048 limit, skipping dedicated upscaler models`);
       } else if (supportedUpscalerCandidates.length === 0 && specialUpscalerCandidates.length > 0) {
-        console.log(`[image-edit] upscale: all dedicated upscaler models filtered (API does not support /images/edits endpoint), using general models`);
+        console.debug(`[image-edit] upscale: all dedicated upscaler models filtered (API does not support /images/edits endpoint), using general models`);
       }
 
       // Step B: 专用模型失败或不存在时，用通用image模型放大
       if (!aiResult && generalImageCandidates.length > 0) {
         try {
-          console.log(`[image-edit] upscale: trying ${generalImageCandidates.length} general image models for upscale`);
+          console.debug(`[image-edit] upscale: trying ${generalImageCandidates.length} general image models for upscale`);
           aiResult = await autoTrySubmitImageTask(generalImageCandidates, (m: string) => ({
             model: m,
             prompt: upscalerPrompt,
@@ -2323,7 +2323,7 @@ export async function POST(request: NextRequest) {
 
           // 情况1: AI 输出 >= 目标尺寸 → 下采样 + 降噪 + 锐化
           if (aiW >= targetW && aiH >= targetH) {
-            console.log(`[image-edit] AI upscale output ${aiW}x${aiH} >= target ${targetW}x${targetH}, downsampling + denoise + sharpen...`);
+            console.debug(`[image-edit] AI upscale output ${aiW}x${aiH} >= target ${targetW}x${targetH}, downsampling + denoise + sharpen...`);
             // AI 放大输出通常不带 alpha 通道；如有 alpha，convolve+sharpen 在 RGBA 上也能正确处理
             const resizedBuffer = await sharp(aiBuffer)
               .resize(targetW, targetH, { kernel: sharp.kernel.lanczos3 })
@@ -2349,13 +2349,13 @@ export async function POST(request: NextRequest) {
             const normalizedPath = savedPath.startsWith('data:') || savedPath.startsWith('http') ? savedPath : (savedPath.startsWith('/') ? savedPath : `/${savedPath}`);
             const finalUrl = normalizedPath.startsWith('data:') || normalizedPath.startsWith('http') ? normalizedPath : `${domainBase}${normalizedPath}`;
 
-            console.log(`[image-edit] AI upscale downsampled to ${targetW}x${targetH} (${(finalResizedBuffer.length / 1024).toFixed(0)}KB)`);
+            console.debug(`[image-edit] AI upscale downsampled to ${targetW}x${targetH} (${(finalResizedBuffer.length / 1024).toFixed(0)}KB)`);
             return { url: finalUrl, actualW: targetW, actualH: targetH };
           }
 
           // 情况2: AI 输出 < 目标尺寸 → 用 Lanczos3 放大到目标尺寸
           // AI 已增强画质，再用高质量插值放大到用户设定的倍数
-          console.log(`[image-edit] AI upscale output ${aiW}x${aiH} < target ${targetW}x${targetH}. Upscaling AI result to target with Lanczos3...`);
+          console.debug(`[image-edit] AI upscale output ${aiW}x${aiH} < target ${targetW}x${targetH}. Upscaling AI result to target with Lanczos3...`);
 
           // 对 AI 输出应用两步锐化增强，不做模糊降噪
           // Step 1: 中频纹理恢复
@@ -2385,7 +2385,7 @@ export async function POST(request: NextRequest) {
           const normalizedPath = savedPath.startsWith('data:') || savedPath.startsWith('http') ? savedPath : (savedPath.startsWith('/') ? savedPath : `/${savedPath}`);
           const finalUrl = normalizedPath.startsWith('data:') || normalizedPath.startsWith('http') ? normalizedPath : `${domainBase}${normalizedPath}`;
 
-          console.log(`[image-edit] AI upscale result: ${aiW}x${aiH} → ${targetW}x${targetH} (AI enhanced + Lanczos3 upscale, ${resizedBuffer ? (resizedBuffer.length / 1024).toFixed(0) + 'KB' : 'N/A'})`);
+          console.debug(`[image-edit] AI upscale result: ${aiW}x${aiH} → ${targetW}x${targetH} (AI enhanced + Lanczos3 upscale, ${resizedBuffer ? (resizedBuffer.length / 1024).toFixed(0) + 'KB' : 'N/A'})`);
           return { url: finalUrl, actualW: targetW, actualH: targetH };
         } catch (resizeErr) {
           console.error(`[image-edit] AI upscale resize failed:`, resizeErr instanceof Error ? resizeErr.message : resizeErr);
@@ -2405,9 +2405,9 @@ export async function POST(request: NextRequest) {
           if (enhanceResult.enhanced && enhanceResult.url) {
             finalUrl = enhanceResult.url;
             enhanced = true;
-            console.log(`[image-edit] AI quality enhance applied after upscale`);
+            console.debug(`[image-edit] AI quality enhance applied after upscale`);
           } else {
-            console.log(`[image-edit] AI enhance skipped/failed, using raw upscale result`);
+            console.debug(`[image-edit] AI enhance skipped/failed, using raw upscale result`);
           }
         } catch (enhanceErr) {
           console.warn('[image-edit] AI enhance error:', enhanceErr instanceof Error ? enhanceErr.message : enhanceErr);

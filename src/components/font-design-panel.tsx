@@ -432,7 +432,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
       if (data.prompt) {
         setPrompts(prev => prev ? { ...prev, prompt: data.prompt } : { prompt: data.prompt, shortPrompt: '', enhancedPrompt: '', blackOnWhitePrompt: '', transparentLogoPrompt: '' });
       }
-      setHistory(prev => [{ id: `h-${Date.now()}`, text, scene, style: secondaryStyle || primaryStyleCategory, prompt: data.prompt || '', createdAt: new Date().toLocaleString() }, ...prev]);
+      setHistory(prev => [{ id: `h-${Date.now()}`, text, scene, style: secondaryStyle || primaryStyleCategory, prompt: data.prompt || '', createdAt: new Date().toLocaleString('zh-CN') }, ...prev]);
     } catch { showToast('生成图片失败'); setIsGeneratingImage(false); stopImageTimer(); }
   }, [text, scene, primaryStyleCategory, secondaryStyle, ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced, selectedModel, showToast, stopPolling, startPolling]);
 
@@ -476,7 +476,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
       } else {
         setIsGeneratingImage(false); stopImageTimer();
       }
-      setHistory(prev => [{ id: `h-${Date.now()}`, text, scene, style: plan.title || secondaryStyle || primaryStyleCategory, prompt: plan.prompt || '', createdAt: new Date().toLocaleString() }, ...prev]);
+      setHistory(prev => [{ id: `h-${Date.now()}`, text, scene, style: plan.title || secondaryStyle || primaryStyleCategory, prompt: plan.prompt || '', createdAt: new Date().toLocaleString('zh-CN') }, ...prev]);
     } catch { showToast('生成图片失败'); setIsGeneratingImage(false); stopImageTimer(); }
   }, [text, scene, primaryStyleCategory, secondaryStyle, ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced, selectedModel, showToast, stopPolling, startPolling, buildStyleEnforcementPrefix]);
 
@@ -523,7 +523,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
       } else {
         setIsGeneratingImage(false); stopImageTimer();
       }
-      setHistory(prev => [...plans.map((plan, i) => ({ id: `h-${Date.now()}-${i}`, text, scene, style: plan.title || secondaryStyle || primaryStyleCategory, prompt: plan.prompt || '', createdAt: new Date().toLocaleString() })), ...prev]);
+      setHistory(prev => [...plans.map((plan, i) => ({ id: `h-${Date.now()}-${i}`, text, scene, style: plan.title || secondaryStyle || primaryStyleCategory, prompt: plan.prompt || '', createdAt: new Date().toLocaleString('zh-CN') })), ...prev]);
     } catch { showToast('生成图片失败'); setIsGeneratingImage(false); stopImageTimer(); }
   }, [plans, text, scene, primaryStyleCategory, secondaryStyle, ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced, selectedModel, showToast, stopPolling, startPolling, buildStyleEnforcementPrefix]);
 

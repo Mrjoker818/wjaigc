@@ -626,7 +626,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
                   bom: decomposeResult.bom?.map((b: Record<string, unknown>, i: number) => ({
                     id: String(i + 1), name: (b.name as string) || '未指定',
                     count: (b.count as number) || 1,
-                    estimatedPrice: typeof b.estimatedPrice === 'number' ? `¥${b.estimatedPrice.toLocaleString()}` : (b.estimatedPrice as string) || '-',
+                    estimatedPrice: typeof b.estimatedPrice === 'number' ? `¥${b.estimatedPrice.toLocaleString('zh-CN')}` : (b.estimatedPrice as string) || '-',
                   })) || MOCK_BOM,
                   rawAnalysis: decomposeResult.rawAnalysis || taskData.result?.rawAnalysis,
                 });
@@ -2089,7 +2089,7 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                     {activePreviewTab === 'bom' && (
                       <div className="flex-1 overflow-auto">
                         <div className="mb-2 text-xs font-semibold" style={{ color: textAccent }}>
-                          预估成本 {decomposition?.bom ? `¥${decomposition.bom.reduce((sum, b) => sum + (parseInt(String(b.estimatedPrice).replace(/[¥,]/g, '')) || 0), 0).toLocaleString()}` : '¥128,560'}
+                          预估成本 {decomposition?.bom ? `¥${decomposition.bom.reduce((sum, b) => sum + (parseInt(String(b.estimatedPrice).replace(/[¥,]/g, '')) || 0), 0).toLocaleString('zh-CN')}` : '¥128,560'}
                         </div>
                         <div className="space-y-1.5">
                           {(decomposition?.bom || MOCK_BOM).map(item => (

@@ -313,7 +313,7 @@ async function tryMultipartVectorize(
 
   for (const url of pathsToTry) {
     try {
-      console.log('[vectorize] Trying multipart POST:', url);
+      console.debug('[vectorize] Trying multipart POST:', url);
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -563,7 +563,7 @@ Do NOT redesign or stylize. Reproduce faithfully.`,
     stream: false,
   };
 
-  console.log('[vectorize] Trying chat/completions with model:', model || 'gpt-4o');
+  console.debug('[vectorize] Trying chat/completions with model:', model || 'gpt-4o');
 
   try {
     const response = await fetchWithV1Retry(baseUrl, '/chat/completions', {
@@ -693,7 +693,7 @@ async function tryChatProviderFallback(
   const baseUrl = normalizeApiBaseUrl(rawBaseUrl);
   const model = chatProvider.selectedModels?.[0] || chatProvider.selectedModel || '';
 
-  console.log('[vectorize] Trying chat provider fallback:', { baseUrl, model });
+  console.debug('[vectorize] Trying chat provider fallback:', { baseUrl, model });
 
   return tryChatCompletionsVectorize(baseUrl, chatProvider.apiKey, imageBase64, imageUrl, mode, model);
 }
@@ -785,7 +785,7 @@ export async function POST(req: NextRequest) {
       deductedCredits = creditResult.cost;
     }
 
-    console.log('[vectorize] Request:', { imageUrl: imageUrl.substring(0, 100), layerId, mode });
+    console.debug('[vectorize] Request:', { imageUrl: imageUrl.substring(0, 100), layerId, mode });
 
     // Pre-resolve image to buffer (needed for multipart form upload and base64)
     const imageBuffer = await resolveImageToBuffer(imageUrl);
@@ -820,7 +820,7 @@ export async function POST(req: NextRequest) {
     };
 
     // 1. 统一矢量化管线 (Recraft Vectorize → VLM → vtracer)
-    console.log('[vectorize] Using unified pipeline...');
+    console.debug('[vectorize] Using unified pipeline...');
     try {
       // 为 VLM 准备 base64 data URL（外部 API 无法访问本地路径）
       const pipelineImageDataUrl = imageBase64

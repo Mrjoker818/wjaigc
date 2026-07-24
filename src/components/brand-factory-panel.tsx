@@ -1574,7 +1574,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
                     <span className={`text-[10px] ${ac.textAccent} ${ac.bgAccent10} px-1.5 py-0.5 rounded`}>{VERSION_TYPES.find(vt => vt.value === v.targetType)?.label}</span>
                   </div>
                   {v.note && <p className={`${th.textMuted} text-xs mt-0.5`}>{v.note}</p>}
-                  <p className={`${th.textMuted} text-[10px] mt-0.5`}>{new Date(v.createdAt).toLocaleString()}</p>
+                  <p className={`${th.textMuted} text-[10px] mt-0.5`}>{new Date(v.createdAt).toLocaleString('zh-CN')}</p>
                 </div>
                 <div className="flex gap-1">
                   <button className={`${th.btnGhost} p-1`} title="恢复"><RotateCcw className="w-3 h-3" /></button>
@@ -1742,7 +1742,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
               <div key={c.id} className={`${th.card} p-3`}>
                 <div className="flex items-center gap-2 mb-1">
                   <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">{c.type}</span>
-                  <span className="text-[10px] text-gray-600">{new Date(c.createdAt).toLocaleString()}</span>
+                  <span className="text-[10px] text-gray-600">{new Date(c.createdAt).toLocaleString('zh-CN')}</span>
                 </div>
                 <p className={`${th.text} text-xs`}>{c.content}</p>
               </div>

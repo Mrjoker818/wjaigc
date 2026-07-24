@@ -21,6 +21,14 @@ export async function POST(req: NextRequest) {
     }
 
     const arrayBuffer = await file.arrayBuffer();
+
+    // P2-2: 文件魔数校验 — PPTX 本质是 ZIP 文件，头4字节应为 50 4B 03 04
+    const headerBytes = new Uint8Array(arrayBuffer.slice(0, 4));
+    const isZip = headerBytes[0] === 0x50 && headerBytes[1] === 0x4B &&
+                  headerBytes[2] === 0x03 && headerBytes[3] === 0x04;
+    if (!isZip) {
+      return NextResponse.json({ error: '文件内容不合法：不是有效的 PPTX（ZIP）格式' }, { status: 400 });
+    }
     const JSZip = await import('jszip');
     const zip = await JSZip.default.loadAsync(arrayBuffer);
 

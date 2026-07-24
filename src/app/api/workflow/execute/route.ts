@@ -349,7 +349,7 @@ async function executeWorkflow(
   connections: WorkflowConnection[],
   depth = 0,
 ) {
-  console.log(`[Workflow] 开始执行 ${executionId}, ${nodes.length} 个节点`);
+  console.debug(`[Workflow] 开始执行 ${executionId}, ${nodes.length} 个节点`);
 
   // 1. DAG拓扑排序
   const sorted = topologicalSort(nodes, connections);
@@ -373,7 +373,7 @@ async function executeWorkflow(
   for (const node of sorted) {
     // 检查是否被取消
     if (execState.status === 'cancelled') {
-      console.log(`[Workflow] 执行被取消: ${executionId}`);
+      console.debug(`[Workflow] 执行被取消: ${executionId}`);
       break;
     }
 
@@ -395,7 +395,7 @@ async function executeWorkflow(
       const failedUpstream = upstreamIds
         .filter(uid => { const r = resultMap.get(uid); return !r || r.status === 'failed'; })
         .map(uid => nodes.find(n => n.id === uid)?.label || uid);
-      console.log(`[Workflow] 跳过节点 ${node.label}: 上游节点失败 [${failedUpstream.join(', ')}]`);
+      console.debug(`[Workflow] 跳过节点 ${node.label}: 上游节点失败 [${failedUpstream.join(', ')}]`);
       const result: ExecutionResult = {
         nodeId: node.id,
         status: 'skipped',
@@ -473,11 +473,11 @@ async function executeWorkflow(
 
       // 构建执行请求
       if (node.type === 'ai-generate') {
-        console.log('[workflow-execute] ai-generate inputs:', JSON.stringify(inputs));
-        console.log('[workflow-execute] ai-generate node.config:', JSON.stringify(node.config));
+        console.debug('[workflow-execute] ai-generate inputs:', JSON.stringify(inputs));
+        console.debug('[workflow-execute] ai-generate node.config:', JSON.stringify(node.config));
         // 找出所有连到此节点的连线
         const incomingConns = connections.filter(c => c.toNodeId === node.id);
-        console.log('[workflow-execute] ai-generate incoming connections:', JSON.stringify(incomingConns));
+        console.debug('[workflow-execute] ai-generate incoming connections:', JSON.stringify(incomingConns));
         for (const c of incomingConns) {
           const upResult = resultMap.get(c.fromNodeId);
           console.log(`[workflow-execute] upstream ${c.fromNodeId} result:`, JSON.stringify(upResult?.output));
@@ -753,7 +753,7 @@ async function executeWorkflow(
           ? `${baseUrl}${req.endpoint}`
           : req.endpoint;
 
-      console.log(`[Workflow] 执行节点 ${node.label}(${node.type}) → ${req.endpoint}`);
+      console.debug(`[Workflow] 执行节点 ${node.label}(${node.type}) → ${req.endpoint}`);
 
       const fetchOptions: RequestInit = {
         method: req.method,
@@ -910,7 +910,7 @@ async function executeWorkflow(
   execState.status = hasFailure ? 'failed' : 'completed';
   await persistWorkflowExecution(executionId, execState);
 
-  console.log(`[Workflow] 执行完成 ${executionId}: ${execState.status}`);
+  console.debug(`[Workflow] 执行完成 ${executionId}: ${execState.status}`);
 }
 
 /**

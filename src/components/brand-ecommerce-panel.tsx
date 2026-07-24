@@ -86,6 +86,15 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
   const [refImageFile, setRefImageFile] = useState<File | null>(null);
   const [productImage, setProductImage] = useState('');
   const [productImageFile, setProductImageFile] = useState<File | null>(null);
+  // P1-2: 追踪 fallback blob URL，组件卸载或替换时 revoke 防止内存泄漏
+  const refImageBlobRef = useRef<string | null>(null);
+  const productImageBlobRef = useRef<string | null>(null);
+  useEffect(() => {
+    return () => {
+      if (refImageBlobRef.current) URL.revokeObjectURL(refImageBlobRef.current);
+      if (productImageBlobRef.current) URL.revokeObjectURL(productImageBlobRef.current);
+    };
+  }, []);
   const [productConsistencyMode, setProductConsistencyMode] = useState<'text' | 'fusion' | 'compose'>('text');
   const [productConsistencyStrength, setProductConsistencyStrength] = useState(60);
   const [templateFieldValues, setTemplateFieldValues] = useState<Record<string, Record<string, string>>>({});
@@ -276,7 +285,11 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
       const data = await resp.json();
       if (data.url) setRefImage(data.url);
     } catch {
-      setRefImage(URL.createObjectURL(file));
+      // fallback: 本地 blob URL — 记录到 ref，下次替换时 revoke
+      if (refImageBlobRef.current) URL.revokeObjectURL(refImageBlobRef.current);
+      const blobUrl = URL.createObjectURL(file);
+      refImageBlobRef.current = blobUrl;
+      setRefImage(blobUrl);
     }
   }, []);
 
@@ -297,7 +310,11 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
       const data = await resp.json();
       if (data.url) setProductImage(data.url);
     } catch {
-      setProductImage(URL.createObjectURL(file));
+      // fallback: 本地 blob URL — 记录到 ref，下次替换时 revoke
+      if (productImageBlobRef.current) URL.revokeObjectURL(productImageBlobRef.current);
+      const blobUrl = URL.createObjectURL(file);
+      productImageBlobRef.current = blobUrl;
+      setProductImage(blobUrl);
     }
   }, []);
 

@@ -120,6 +120,7 @@ main.dashboard-scrollable {
 }
 
 :root {
+  color-scheme: dark; /* P2-6: 告知浏览器使用暗色渲染原生控件 */
   --radius: 0.5rem;
   /* === 品牌色（金色） — 原型 Design Tokens === */
   --primary: #d4af37;

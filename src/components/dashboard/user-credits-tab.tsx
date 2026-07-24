@@ -307,7 +307,7 @@ export default function UserCreditsTab({
               当前余额
             </div>
             <div className="text-4xl font-bold text-primary mt-1">
-              {balance.toLocaleString()}
+              {balance.toLocaleString('zh-CN')}
             </div>
           </div>
           <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
@@ -318,12 +318,12 @@ export default function UserCreditsTab({
           <div className="flex items-center gap-1.5">
             <TrendingUp className="w-3.5 h-3.5 text-green-500" />
             <span className="text-xs text-muted-foreground">累计获得</span>
-            <span className="text-sm font-medium text-green-500">{totalEarned.toLocaleString()}</span>
+            <span className="text-sm font-medium text-green-500">{totalEarned.toLocaleString('zh-CN')}</span>
           </div>
           <div className="flex items-center gap-1.5">
             <Zap className="w-3.5 h-3.5 text-destructive" />
             <span className="text-xs text-muted-foreground">累计消费</span>
-            <span className="text-sm font-medium text-destructive">{totalSpent.toLocaleString()}</span>
+            <span className="text-sm font-medium text-destructive">{totalSpent.toLocaleString('zh-CN')}</span>
           </div>
         </div>
       </div>
@@ -359,12 +359,12 @@ export default function UserCreditsTab({
                   <div className={`${cardBg} p-4 space-y-3`}>
                     <div className="flex justify-between text-sm">
                       <span className="text-muted-foreground">充值积分</span>
-                      <span className="text-foreground font-medium">{orderInfo.amount.toLocaleString()} 积分</span>
+                      <span className="text-foreground font-medium">{orderInfo.amount.toLocaleString('zh-CN')} 积分</span>
                     </div>
                     {orderInfo.bonusCredits > 0 && (
                       <div className="flex justify-between text-sm">
                         <span className="text-muted-foreground">赠送积分</span>
-                        <span className="text-green-500 font-medium">+{orderInfo.bonusCredits.toLocaleString()}</span>
+                        <span className="text-green-500 font-medium">+{orderInfo.bonusCredits.toLocaleString('zh-CN')}</span>
                       </div>
                     )}
                     <div className="flex justify-between text-sm">
@@ -472,9 +472,9 @@ export default function UserCreditsTab({
                               热门
                             </span>
                           )}
-                          <div className="text-base font-bold text-foreground">{pkg.amount.toLocaleString()}</div>
+                          <div className="text-base font-bold text-foreground">{pkg.amount.toLocaleString('zh-CN')}</div>
                           {pkg.bonus > 0 && (
-                            <div className="text-xs text-green-500 mt-0.5">+赠送 {pkg.bonus.toLocaleString()}</div>
+                            <div className="text-xs text-green-500 mt-0.5">+赠送 {pkg.bonus.toLocaleString('zh-CN')}</div>
                           )}
                           <div className="text-sm text-primary font-semibold mt-1">¥{pkg.price}</div>
                           <div className="text-[10px] text-muted-foreground">
@@ -608,7 +608,7 @@ export default function UserCreditsTab({
                         <span className="text-muted-foreground">充值套餐</span>
                         <span className="text-foreground">
                           {isCustomAmount
-                            ? `自定义 ${customAmount.toLocaleString()} 积分`
+                            ? `自定义 ${customAmount.toLocaleString('zh-CN')} 积分`
                             : RECHARGE_PACKAGES.find(p => p.amount === selectedPackage)?.label}
                         </span>
                       </div>
@@ -618,7 +618,7 @@ export default function UserCreditsTab({
                         return pkg?.bonus ? (
                           <div className="flex justify-between text-sm mb-1">
                             <span className="text-muted-foreground">赠送积分</span>
-                            <span className="text-green-500">+{pkg.bonus.toLocaleString()}</span>
+                            <span className="text-green-500">+{pkg.bonus.toLocaleString('zh-CN')}</span>
                           </div>
                         ) : null;
                       })()}

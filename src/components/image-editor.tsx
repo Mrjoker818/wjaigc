@@ -674,10 +674,10 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     onParamsChange?.({ aspectRatio, quality, count: outputCount });
   }, [aspectRatio, quality, outputCount, onParamsChange]);
 
-  // ★ 连接SSE任务事件推送
+  // ★ 连接SSE任务事件推送（taskEventsClient 是全局单例，connect() 幂等安全，无需 disconnect cleanup）
   useEffect(() => {
     taskEventsClient.connect();
-    return () => { /* 单例不主动断开 */ };
+    // 不调用 disconnect()：此组件仅作消费端；断开会影响其他组件的SSE接收
   }, []);
 
   // 初始化图片和Canvas

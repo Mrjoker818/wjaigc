@@ -45,7 +45,7 @@ export function UsageStats({ usage, messageCount, imageCount, isMonochrome, onCl
           {/* 概览卡片 */}
           <div className="grid grid-cols-3 gap-2">
             <div className={cn("rounded-lg border p-3 text-center", isMonochrome ? "border-gray-200 bg-gray-50" : "border-[#333] bg-[#222]")}>
-              <div className="text-lg font-bold">{usage.total.toLocaleString()}</div>
+              <div className="text-lg font-bold">{usage.total.toLocaleString('zh-CN')}</div>
               <div className={cn("text-[10px]", mutedClass)}>总 Tokens</div>
             </div>
             <div className={cn("rounded-lg border p-3 text-center", isMonochrome ? "border-gray-200 bg-gray-50" : "border-[#333] bg-[#222]")}>
@@ -65,7 +65,7 @@ export function UsageStats({ usage, messageCount, imageCount, isMonochrome, onCl
               <div>
                 <div className="flex justify-between text-xs mb-1">
                   <span>输入（Prompt）</span>
-                  <span>{usage.prompt.toLocaleString()}</span>
+                  <span>{usage.prompt.toLocaleString('zh-CN')}</span>
                 </div>
                 <div className={cn("h-2 rounded-full overflow-hidden", isMonochrome ? "bg-gray-200" : "bg-[#333]")}>
                   <div className="h-full bg-blue-500 rounded-full transition-all" style={{ width: `${(usage.prompt / maxBar) * 100}%` }} />
@@ -74,7 +74,7 @@ export function UsageStats({ usage, messageCount, imageCount, isMonochrome, onCl
               <div>
                 <div className="flex justify-between text-xs mb-1">
                   <span>输出（Completion）</span>
-                  <span>{usage.completion.toLocaleString()}</span>
+                  <span>{usage.completion.toLocaleString('zh-CN')}</span>
                 </div>
                 <div className={cn("h-2 rounded-full overflow-hidden", isMonochrome ? "bg-gray-200" : "bg-[#333]")}>
                   <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${(usage.completion / maxBar) * 100}%` }} />
@@ -87,7 +87,7 @@ export function UsageStats({ usage, messageCount, imageCount, isMonochrome, onCl
           <div className={cn("rounded-lg border p-3 space-y-1.5 text-xs", isMonochrome ? "border-gray-200 bg-gray-50" : "border-[#333] bg-[#222]")}>
             <div className="flex justify-between">
               <span className={mutedClass}>平均每条消息</span>
-              <span>{avgPerMessage.toLocaleString()} tokens</span>
+              <span>{avgPerMessage.toLocaleString('zh-CN')} tokens</span>
             </div>
             <div className="flex justify-between">
               <span className={mutedClass}>预估费用</span>

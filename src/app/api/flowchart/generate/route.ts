@@ -40,14 +40,22 @@ header button:hover { background: rgba(255,255,255,0.2); }
 mermaid.initialize({ startOnLoad: true, theme: 'default', securityLevel: 'loose' });
 const code = ${JSON.stringify(mermaidCode)};
 const container = document.getElementById('diagram');
+// XSS 防护：错误消息文本化后再展示，避免 err.message 注入 innerHTML
+function showError(prefix, err) {
+  const div = document.createElement('div');
+  div.className = 'error';
+  div.textContent = prefix + (err && err.message ? err.message : String(err));
+  container.innerHTML = '';
+  container.appendChild(div);
+}
 try {
   mermaid.render('diagramSvg', code).then(result => {
     container.innerHTML = result.svg;
   }).catch(err => {
-    container.innerHTML = '<div class="error">Mermaid 渲染错误: ' + err.message + '</div>';
+    showError('Mermaid 渲染错误: ', err);
   });
 } catch(e) {
-  container.innerHTML = '<div class="error">解析错误: ' + e.message + '</div>';
+  showError('解析错误: ', e);
 }
 
 function exportSVG() {

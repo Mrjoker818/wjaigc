@@ -1,6 +1,12 @@
 import './globals.css';
+import type { Viewport } from 'next';
 import { OperationAuditClient } from '@/components/operation-audit-client';
 import { GlobalErrorMonitor } from '@/components/global-error-monitor';
+import { AppErrorBoundary } from '@/components/app-error-boundary';
+
+export const viewport: Viewport = {
+  themeColor: '#0d1117',
+};
 
 export default function RootLayout({
   children,
@@ -12,7 +18,9 @@ export default function RootLayout({
       <body className="antialiased">
         <OperationAuditClient />
         <GlobalErrorMonitor />
-        {children}
+        <AppErrorBoundary>
+          {children}
+        </AppErrorBoundary>
       </body>
     </html>
   );

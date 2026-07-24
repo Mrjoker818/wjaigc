@@ -37,7 +37,7 @@ export function buildDisplay3DRenderPrompt(input: Display3DInput): string {
 图像使用模式：${input.imageUsageMode || '未指定'}
 ${input.materialStyle ? `材质风格：${input.materialStyle}` : ''}
 ${input.lightingStyle ? `灯光氛围：${input.lightingStyle}` : ''}
-${input.budget ? `预算范围：¥${input.budget.toLocaleString()}` : ''}
+${input.budget ? `预算范围：¥${input.budget.toLocaleString('zh-CN')}` : ''}
 ${(input.renderStyle || input.renderMode) ? `渲染风格：${input.renderStyle || input.renderMode}` : ''}
 ${input.outputResolution ? `输出分辨率：${input.outputResolution}` : ''}
 ${input.outputQuality ? `输出质量：${input.outputQuality}` : ''}
