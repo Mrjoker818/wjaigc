@@ -15,6 +15,12 @@ import {
   waitForQueueSlot,
 } from '@/lib/task-registry';
 import { saveBrandIpAsset } from '@/lib/brand-ip-storage';
+import {
+  createCloudTask,
+  updateCloudTask,
+  type CloudTaskStatus,
+  type UpdateCloudTaskInput,
+} from '@/lib/cloud-task-storage';
 
 export interface CreateBrandIpGenerationTaskInput {
   userId: string;
@@ -30,6 +36,27 @@ export interface CreateBrandIpGenerationTaskInput {
 export interface BrandIpGenerationTask {
   taskId: string;
   status: 'pending' | 'queued';
+}
+
+type BrandIpTaskStatus = CloudTaskStatus;
+
+interface BrandIpTaskUpdate extends Omit<UpdateCloudTaskInput, 'status' | 'model' | 'providerId'> {
+  status?: BrandIpTaskStatus;
+  model?: string;
+  providerId?: string;
+}
+
+/** Keep the in-memory event stream responsive while persisting recovery data. */
+function updateBrandIpTask(taskId: string, update: BrandIpTaskUpdate): void {
+  const memoryStatus = update.status;
+  updateTaskProgress(taskId, {
+    ...update,
+    ...(memoryStatus ? { status: memoryStatus } : {}),
+  });
+  const { model, providerId, ...cloudUpdate } = update;
+  void updateCloudTask(taskId, cloudUpdate).catch(() => {
+    // Persistence is a recovery layer and must never interrupt generation.
+  });
 }
 
 // ─── 授权图像模型选择 ──────────────────────────────────────────────────
@@ -122,19 +149,35 @@ export async function resolveImageModel(
 export async function createBrandIpGenerationTask(input: CreateBrandIpGenerationTaskInput): Promise<BrandIpGenerationTask> {
   const taskId = `brand-ip-${nanoid(16)}`;
   const task = registerTask(taskId, 'brand-generate', '正在生成品牌 IP 视觉资产', input.userId);
-  updateTaskProgress(taskId, {
-    status: task.status === 'queued' ? 'queued' : 'pending',
+  const status = task.status === 'queued' ? 'queued' : 'pending';
+  const context = {
+    projectId: input.project.id,
+    directionId: input.direction.id,
+    prompt: input.prompt,
+    model: input.model,
+    providerId: input.providerId,
+    aspectRatio: input.aspectRatio,
+  };
+  updateBrandIpTask(taskId, { status, progress: 0, result: context });
+
+  void createCloudTask({
+    id: taskId,
+    userId: input.userId,
+    projectId: input.project.id,
+    type: 'brand-generate',
+    status,
+    providerId: input.providerId,
+    model: input.model,
     progress: 0,
-    result: {
-      projectId: input.project.id,
-      directionId: input.direction.id,
-      prompt: input.prompt,
-      model: input.model,
-      providerId: input.providerId,
-    },
+    label: '正在生成品牌 IP 视觉资产',
+    result: context,
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
+  }).catch(() => {
+    // Task execution remains available when the recovery store is unavailable.
   });
 
-  return { taskId, status: task.status === 'queued' ? 'queued' : 'pending' };
+  return { taskId, status };
 }
 
 // ─── 异步生成执行 ──────────────────────────────────────────────────────
@@ -199,8 +242,8 @@ export async function executeBrandIpGeneration(input: ExecuteBrandIpGenerationIn
     const gotSlot = await waitForQueueSlot(taskId);
     if (!gotSlot) {
       if (!isTaskCancelled(taskId)) {
-        updateTaskProgress(taskId, {
-          status: 'failed',
+        updateBrandIpTask(taskId, {
+          status: 'timeout',
           progress: 0,
           error: '排队超时，请稍后重试',
         });
@@ -210,17 +253,27 @@ export async function executeBrandIpGeneration(input: ExecuteBrandIpGenerationIn
 
     // 2. Check cancellation
     if (isTaskCancelled(taskId)) {
-      updateTaskProgress(taskId, { status: 'cancelled', progress: 0 });
+      updateBrandIpTask(taskId, { status: 'cancelled', progress: 0 });
       return;
     }
 
     // 3. Resolve authorized image model
-    updateTaskProgress(taskId, { status: 'processing', progress: 5, label: '正在选择生成模型...' });
+    updateBrandIpTask(taskId, { status: 'processing', progress: 5, label: '正在选择生成模型...' });
 
     const resolved = await resolveImageModel(input.user, input.model, input.providerId);
+    if (resolved) {
+      updateBrandIpTask(taskId, {
+        progress: 8,
+        label: '已选择生成模型，正在提交请求...',
+      });
+      void updateCloudTask(taskId, {
+        model: resolved.model,
+        providerId: resolved.providerId,
+      }).catch(() => {});
+    }
     if (!resolved) {
       const hasExplicitSelection = Boolean(input.model?.trim() || input.providerId?.trim());
-      updateTaskProgress(taskId, {
+      updateBrandIpTask(taskId, {
         status: 'failed',
         progress: 0,
         error: hasExplicitSelection
@@ -231,7 +284,7 @@ export async function executeBrandIpGeneration(input: ExecuteBrandIpGenerationIn
     }
 
     // 4. Submit generation request via internal API
-    updateTaskProgress(taskId, { progress: 10, label: '正在提交生成请求...' });
+    updateBrandIpTask(taskId, { progress: 10, label: '正在提交生成请求...' });
 
     const headers = await getInternalRequestHeaders(input.userId, input.userRole as 'user' | 'admin');
     const port = getServerPort();
@@ -255,7 +308,7 @@ export async function executeBrandIpGeneration(input: ExecuteBrandIpGenerationIn
     if (!submitResponse.ok) {
       const errorData = await submitResponse.json().catch(() => ({}));
       const errorMsg = (errorData as Record<string, unknown>)?.error as string || `生成请求失败: ${submitResponse.status}`;
-      updateTaskProgress(taskId, { status: 'failed', progress: 0, error: errorMsg });
+      updateBrandIpTask(taskId, { status: 'failed', progress: 0, error: errorMsg });
       return;
     }
 
@@ -268,7 +321,7 @@ export async function executeBrandIpGeneration(input: ExecuteBrandIpGenerationIn
         await completeGeneration(input, resolved, directImageUrl);
         return;
       }
-      updateTaskProgress(taskId, {
+      updateBrandIpTask(taskId, {
         status: 'failed',
         progress: 0,
         error: '生成请求未返回任务ID或图片',
@@ -277,9 +330,14 @@ export async function executeBrandIpGeneration(input: ExecuteBrandIpGenerationIn
     }
 
     // 5. Poll for result
-    updateTaskProgress(taskId, { progress: 30, label: '正在生成品牌资产...' });
+    updateBrandIpTask(taskId, { progress: 30, label: '正在生成品牌资产...' });
 
     const providerTaskId = providerTaskIds[0];
+    void updateCloudTask(taskId, {
+      remoteTaskId: providerTaskId,
+      progress: 30,
+      label: '正在生成品牌资产...',
+    }).catch(() => {});
     let imageUrl: string | null = null;
     let pollAttempts = 0;
 
@@ -292,7 +350,7 @@ export async function executeBrandIpGeneration(input: ExecuteBrandIpGenerationIn
           headers: { 'Content-Type': 'application/json', ...headers },
           body: JSON.stringify({ taskId: providerTaskId }),
         }).catch(() => {});
-        updateTaskProgress(taskId, { status: 'cancelled', progress: 0 });
+        updateBrandIpTask(taskId, { status: 'cancelled', progress: 0 });
         return;
       }
 
@@ -322,12 +380,12 @@ export async function executeBrandIpGeneration(input: ExecuteBrandIpGenerationIn
 
       if (pollStatus === 'failed') {
         const errorMsg = (pollData.error as string) || '生成失败';
-        updateTaskProgress(taskId, { status: 'failed', progress: 0, error: errorMsg });
+        updateBrandIpTask(taskId, { status: 'failed', progress: 0, error: errorMsg });
         return;
       }
 
       if (pollStatus === 'cancelled') {
-        updateTaskProgress(taskId, { status: 'cancelled', progress: 0 });
+        updateBrandIpTask(taskId, { status: 'cancelled', progress: 0 });
         return;
       }
 
@@ -335,12 +393,12 @@ export async function executeBrandIpGeneration(input: ExecuteBrandIpGenerationIn
       const pollProgress = typeof pollData.progress === 'number' ? pollData.progress : 0;
       const mappedProgress = Math.min(90, 30 + (pollProgress / 100) * 60);
       const pollLabel = (pollData.label as string) || '正在生成...';
-      updateTaskProgress(taskId, { progress: mappedProgress, label: pollLabel });
+      updateBrandIpTask(taskId, { progress: mappedProgress, label: pollLabel });
     }
 
     if (!imageUrl) {
-      updateTaskProgress(taskId, {
-        status: 'failed',
+      updateBrandIpTask(taskId, {
+        status: 'timeout',
         progress: 0,
         error: '生成超时，请稍后重试',
       });
@@ -352,7 +410,7 @@ export async function executeBrandIpGeneration(input: ExecuteBrandIpGenerationIn
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : '品牌资产生成失败';
     if (!isTaskCancelled(taskId)) {
-      updateTaskProgress(taskId, { status: 'failed', progress: 0, error: errorMessage });
+      updateBrandIpTask(taskId, { status: 'failed', progress: 0, error: errorMessage });
     }
   }
 }
@@ -362,7 +420,7 @@ async function completeGeneration(
   resolved: ResolveImageModelResult,
   imageUrl: string,
 ): Promise<void> {
-  updateTaskProgress(input.taskId, { progress: 95, label: '正在保存品牌资产...' });
+  updateBrandIpTask(input.taskId, { progress: 95, label: '正在保存品牌资产...' });
 
   const asset = await saveBrandIpAsset({
     projectId: input.projectId,
@@ -376,7 +434,7 @@ async function completeGeneration(
     metadata: { aspectRatio: input.aspectRatio ?? null },
   });
 
-  updateTaskProgress(input.taskId, {
+  updateBrandIpTask(input.taskId, {
     status: 'completed',
     progress: 100,
     label: '品牌资产生成完成',

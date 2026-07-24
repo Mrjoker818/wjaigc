@@ -271,6 +271,13 @@ export async function getCloudTaskForUser(taskId: string, userId: string): Promi
   return rowToCloudTask(result.rows[0]);
 }
 
+/** Server-authorized administration path. Do not expose this to client-controlled user IDs. */
+export async function getCloudTaskById(taskId: string): Promise<CloudTask | null> {
+  await ensureCloudTaskTables();
+  const result = await execSql('SELECT * FROM cloud_tasks WHERE id = $1', [taskId]);
+  return result.rows.length > 0 ? rowToCloudTask(result.rows[0]) : null;
+}
+
 export async function getCloudTaskForUserByIdempotencyKey(userId: string, idempotencyKey: string): Promise<CloudTask | null> {
   if (!idempotencyKey) return null;
   await ensureCloudTaskTables();
