@@ -620,6 +620,14 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [thumbnailVersion, setThumbnailVersion] = useState(0); // 触发重渲染
   const thumbnailRafRef = useRef<number | null>(null); // RAF 批量更新
 
+  // ★ 设备像素比（DPR）：高 DPI 屏幕需要更高分辨率的图片才能保持清晰
+  const dprRef = useRef(1);
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      dprRef.current = window.devicePixelRatio || 1;
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -663,7 +671,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           if (!ctx) return;
           ctx.drawImage(imageEl, 0, 0, tw, th);
 
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
           thumbnailCacheRef.current.set(imageUrl, dataUrl);
           // 使用 RAF 批量触发重渲染，避免每张缩略图都触发一次 setState
           if (thumbnailRafRef.current === null) {
@@ -9295,13 +9303,14 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                     </div>
                   </div>
                 ) : image.url ? (
-                  <NextImage unoptimized width={1} height={1}                     src={zoom > 0.5 || (image.width && image.width * zoom > THUMBNAIL_MAX) ? image.url : (image.thumbnailUrl || image.url)}
+                  <img
+                    src={zoom > 0.3 || (image.width && image.width * zoom * dprRef.current > THUMBNAIL_MAX) ? image.url : (image.thumbnailUrl || image.url)}
                     alt={image.prompt ? image.prompt.replace(/^\[画布上下文[：:][^\]]*\]\s*/, '').substring(0, 60) : 'canvas image'}
                     className="w-full h-full object-cover pointer-events-none overflow-hidden"
                     draggable={false}
                     loading="lazy"
                     decoding="async"
-                    style={{ contain: 'paint', imageRendering: zoom > 1 ? 'auto' : undefined }}
+                    style={{ contain: 'paint', imageRendering: zoom > 1 ? ('high-quality' as React.CSSProperties['imageRendering']) : undefined }}
                     onError={(e) => {
                       const img = e.currentTarget;
                       if (img.dataset.retried) return; // 已重试过，不再循环
