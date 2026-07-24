@@ -20,7 +20,7 @@ const nextConfig: NextConfig = {
         source: '/(.*)',
         headers: [
           // P1 fix: 基础安全响应头
-          { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
+          // 移除 X-Frame-Options，改用 CSP frame-ancestors 允许预览面板嵌入
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
           // 权限策略：关闭不需要的高危浏览器 API（保留 camera/microphone 供画布工具使用）
@@ -37,7 +37,8 @@ const nextConfig: NextConfig = {
               "connect-src * ws: wss:",
               "font-src 'self' data: https://fonts.gstatic.cn https://fonts.gstatic.com",
               "worker-src 'self' blob:",
-              "frame-src 'self' blob:",
+              "frame-src 'self' blob: https://*.dev.coze.site",
+              "frame-ancestors 'self' https://*.dev.coze.site",
               "object-src 'none'",
             ].join('; '),
           },
