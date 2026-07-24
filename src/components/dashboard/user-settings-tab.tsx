@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   User, Bell, Palette, Shield, Save, Check,
-  Moon, Sun, Monitor, ChevronRight, Camera, Key, Lock, History
+  Moon, Sun, Monitor, ChevronRight, Camera, Key, Lock, History, X
 } from 'lucide-react';
 
 interface UserSettingsTabProps {
@@ -158,7 +158,12 @@ export default function UserSettingsTab({
               </div>
               <ChevronRight className="w-4 h-4 text-muted-foreground" />
             </button>
-            <button className="w-full flex items-center justify-between px-3 py-2.5 rounded-md bg-background border border-border text-foreground text-sm hover:bg-muted/80 transition-colors">
+            <button
+              onClick={() => {
+                onToast?.('登录记录功能即将上线，敬请期待');
+              }}
+              className="w-full flex items-center justify-between px-3 py-2.5 rounded-md bg-background border border-border text-foreground text-sm hover:bg-muted/80 transition-colors"
+            >
               <div className="flex items-center gap-2">
                 <History className="w-4 h-4 text-muted-foreground" />
                 <span>登录记录</span>
@@ -306,7 +311,7 @@ export default function UserSettingsTab({
               <button onClick={handlePasswordChange} className="w-full h-10 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors">确认修改</button>
             </div>
             <button onClick={() => setShowPasswordDialog(false)} className="absolute top-4 right-4 w-8 h-8 rounded-lg bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground">
-              <ChevronRight className="w-4 h-4" />
+              <X className="w-4 h-4" />
             </button>
           </div>
         </div>

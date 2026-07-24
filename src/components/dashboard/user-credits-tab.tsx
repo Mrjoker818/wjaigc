@@ -226,8 +226,6 @@ export default function UserCreditsTab({
     }
   };
 
-;
-
   // 查询订单状态
   const handleQueryOrder = async () => {
     if (!orderInfo) return;

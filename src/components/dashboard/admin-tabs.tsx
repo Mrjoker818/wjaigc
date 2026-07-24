@@ -296,6 +296,8 @@ export default function AdminTabs(props: AdminTabsProps) {
   const [modelCreditCatalog, setModelCreditCatalog] = useState<ModelCreditCatalogItem[]>([]);
   const [creditModelCategory, setCreditModelCategory] = useState<BillingModelCategoryFilter>('all');
   const [pricingSaving, setPricingSaving] = useState(false);
+  const [filterConsumptionUser, setFilterConsumptionUser] = useState('');
+  const [filterConsumptionType, setFilterConsumptionType] = useState('');
 
   /* ── Audit state ── */
   const [auditLogs, setAuditLogs] = useState<AuditLogView[]>([]);
@@ -1353,11 +1355,17 @@ export default function AdminTabs(props: AdminTabsProps) {
           <div>
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
-                <select className="bg-background border border-border rounded-md px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer">
+                <select
+                  value={filterConsumptionUser}
+                  onChange={e => setFilterConsumptionUser(e.target.value)}
+                  className="bg-background border border-border rounded-md px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer">
                   <option value="">全部用户</option>
-                  {adminUsers.slice(0, 20).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                  {adminUsers.slice(0, 20).map(u => <option key={u.id} value={u.name}>{u.name}</option>)}
                 </select>
-                <select className="bg-background border border-border rounded-md px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer">
+                <select
+                  value={filterConsumptionType}
+                  onChange={e => setFilterConsumptionType(e.target.value)}
+                  className="bg-background border border-border rounded-md px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer">
                   <option value="">全部类型</option>
                   <option value="image">生图</option>
                   <option value="video">视频</option>
@@ -1366,7 +1374,31 @@ export default function AdminTabs(props: AdminTabsProps) {
                   <option value="vectorize">矢量化</option>
                 </select>
               </div>
-              <button onClick={() => { /* CSV export placeholder */ }} className="bg-muted text-foreground px-3 py-1.5 rounded-md text-xs font-medium hover:bg-muted/80 active:scale-[0.98] transition-all inline-flex items-center gap-1.5 border-none cursor-pointer">
+              <button
+                onClick={() => {
+                  const transactions = (co?.recentTransactions || [])
+                    .filter(t => !filterConsumptionUser || t.user === filterConsumptionUser)
+                    .filter(t => !filterConsumptionType || t.type === filterConsumptionType);
+                  if (transactions.length === 0) return;
+                  const header = ['时间', '用户', '类型', '模型/描述', '积分变化', '状态'];
+                  const rows = transactions.map(t => [
+                    t.time,
+                    t.user,
+                    t.type === 'recharge' ? '充值' : t.type === 'image' ? '生图' : t.type === 'video' ? '视频' : t.type === 'edit' ? '编辑' : t.type,
+                    t.desc || '-',
+                    (t.type === 'recharge' ? '+' : '-') + Math.abs(t.amount),
+                    '已完成',
+                  ]);
+                  const csvContent = [header, ...rows].map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
+                  const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+                  const url = URL.createObjectURL(blob);
+                  const link = document.createElement('a');
+                  link.href = url;
+                  link.download = `消耗明细_${new Date().toISOString().slice(0, 10)}.csv`;
+                  link.click();
+                  URL.revokeObjectURL(url);
+                }}
+                className="bg-muted text-foreground px-3 py-1.5 rounded-md text-xs font-medium hover:bg-muted/80 active:scale-[0.98] transition-all inline-flex items-center gap-1.5 border-none cursor-pointer">
                 <Download className="w-3.5 h-3.5" />导出 CSV
               </button>
             </div>
@@ -1375,7 +1407,10 @@ export default function AdminTabs(props: AdminTabsProps) {
                 <span>时间</span><span>用户</span><span>类型</span><span>模型</span><span>消耗积分</span><span>状态</span>
               </div>
               <div className="divide-y divide-border/30">
-                {(co?.recentTransactions || []).map((t, i) => (
+                {(co?.recentTransactions || [])
+                  .filter(t => !filterConsumptionUser || t.user === filterConsumptionUser)
+                  .filter(t => !filterConsumptionType || t.type === filterConsumptionType)
+                  .map((t, i) => (
                   <div key={i} className="grid grid-cols-6 px-5 py-3 hover:bg-muted/30 transition-colors items-center">
                     <span className="text-sm text-muted-foreground font-mono">{t.time}</span>
                     <span className="text-sm font-medium text-foreground">{t.user}</span>

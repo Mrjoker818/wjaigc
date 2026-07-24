@@ -2712,7 +2712,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               await refreshAdmin();
             }}
             onRechargeCredits={async (userId: string, amount: number, description: string) => {
-              await fetch('/api/credits/admin/recharge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ userId, amount, description }) });
+              await fetch('/api/admin/credits/recharge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ userId, amount, description }) });
               await refreshAdmin();
             }}
             providers={providers.map((p): AdminTabsProvider => ({
