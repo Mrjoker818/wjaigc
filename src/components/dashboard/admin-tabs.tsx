@@ -117,7 +117,7 @@ interface SystemSettings {
   maxConcurrentTasks?: number; imageMaxSizeMB?: number; imageMaxEdge?: number;
   maxUploadMB?: number; maxVideoDuration?: number; storageQuotaMB?: number;
   sessionTimeout?: number; passwordExpiryDays?: number;
-  openRegistration?: boolean; apiRateLimiting?: boolean;
+  registrationEnabled?: boolean; apiRateLimiting?: boolean;
   videoGenerationEnabled?: boolean; threeDModelEnabled?: boolean;
   announcementEnabled?: boolean; announcementType?: string;
   announcementExpiry?: string; announcement?: string;
@@ -1990,7 +1990,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                   <div className="text-sm font-medium text-foreground">允许用户注册</div>
                   <div className="text-xs text-muted-foreground mt-0.5">关闭后新用户将无法自行注册账号</div>
                 </div>
-                {toggleBtn('openRegistration')}
+                {toggleBtn('registrationEnabled')}
               </div>
               <div className="flex items-center justify-between">
                 <div>

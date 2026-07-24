@@ -7,13 +7,13 @@ export const dynamic = 'force-dynamic';
 const ALL_SETTING_KEYS = [
   'initialCredits', 'maxVideoDuration', 'imageMaxSizeMB', 'imageMaxEdge', 'defaultImageModel', 'defaultChatModel', 'defaultVideoModel',
   'quickCreateImageModel', 'quickCreateChatModel', 'quickCreateAutoModelRouting',
-  'videoGenerationEnabled', '3dModelEnabled', 'announcementEnabled', 'announcementType', 'announcementExpiry', 'announcement',
+  'videoGenerationEnabled', '3dModelEnabled', 'registrationEnabled', 'announcementEnabled', 'announcementType', 'announcementExpiry', 'announcement',
 ];
 
 const NUMBER_KEYS = new Set([
   'initialCredits', 'maxVideoDuration', 'imageMaxSizeMB', 'imageMaxEdge',
 ]);
-const BOOLEAN_KEYS = new Set(['quickCreateAutoModelRouting', 'videoGenerationEnabled', '3dModelEnabled', 'announcementEnabled']);
+const BOOLEAN_KEYS = new Set(['quickCreateAutoModelRouting', 'videoGenerationEnabled', '3dModelEnabled', 'registrationEnabled', 'announcementEnabled']);
 const MODEL_SETTING_KEYS = new Set([
   'defaultImageModel', 'defaultChatModel', 'defaultVideoModel', 'quickCreateImageModel', 'quickCreateChatModel',
 ]);

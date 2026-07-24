@@ -18,6 +18,7 @@ export interface RuntimeSettings {
   maxVideoDuration: number;
   videoGenerationEnabled: boolean;
   threeDModelEnabled: boolean;
+  registrationEnabled: boolean;
 }
 
 export async function getRuntimeSettings(): Promise<RuntimeSettings> {
@@ -34,6 +35,7 @@ export async function getRuntimeSettings(): Promise<RuntimeSettings> {
     maxVideoDuration,
     videoEnabled,
     threeDEnabled,
+    registrationEnabled,
   ] = await Promise.all([
     dbGetSystemSetting('initialCredits'),
     dbGetSystemSetting('imageMaxSizeMB'),
@@ -47,6 +49,7 @@ export async function getRuntimeSettings(): Promise<RuntimeSettings> {
     dbGetSystemSetting('maxVideoDuration'),
     dbGetSystemSetting('videoGenerationEnabled'),
     dbGetSystemSetting('3dModelEnabled'),
+    dbGetSystemSetting('registrationEnabled'),
   ]);
   const resolvedDefaultImageModel = String(defaultImageModel ?? '').trim();
   const resolvedDefaultChatModel = String(defaultChatModel ?? '').trim();
@@ -66,5 +69,6 @@ export async function getRuntimeSettings(): Promise<RuntimeSettings> {
     maxVideoDuration: numberSetting(maxVideoDuration, 15, 1, 15),
     videoGenerationEnabled: String(videoEnabled ?? 'true') !== 'false',
     threeDModelEnabled: String(threeDEnabled ?? 'true') !== 'false',
+    registrationEnabled: String(registrationEnabled ?? 'false') === 'true',
   };
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { User } from '@/lib/user-types';
 import { UserManager as UserManagerCore } from '@/lib/user-manager';
 import { APP_VERSION_LABEL } from '@/config/app-meta';
@@ -27,7 +27,7 @@ interface LoginPanelProps {
 }
 
 type LoginMode = 'canvas' | 'chat';
-type ViewState = 'select-mode' | 'login-form';
+type ViewState = 'select-mode' | 'login-form' | 'register-form';
 
 export function LoginPanel({ onLogin }: LoginPanelProps) {
   const userManager = useMemo(() => {
@@ -95,6 +95,79 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
   const backToModeSelection = () => {
     setViewState('select-mode');
     setLoginError('');
+    setRegisterError('');
+  };
+
+  // ───── 注册相关状态 ─────
+  const [registrationEnabled, setRegistrationEnabled] = useState<boolean | null>(null);
+  const [regName, setRegName] = useState('');
+  const [regPassword, setRegPassword] = useState('');
+  const [regConfirmPassword, setRegConfirmPassword] = useState('');
+  const [regEmail, setRegEmail] = useState('');
+  const [showRegPassword, setShowRegPassword] = useState(false);
+  const [showRegConfirm, setShowRegConfirm] = useState(false);
+  const [registerError, setRegisterError] = useState('');
+  const [registering, setRegistering] = useState(false);
+
+  useEffect(() => {
+    // 检查注册功能是否开放
+    let cancelled = false;
+    fetch('/api/auth/register', { method: 'GET' })
+      .then((res) => res.json())
+      .then((data: { registrationEnabled?: boolean }) => {
+        if (!cancelled) setRegistrationEnabled(data.registrationEnabled ?? false);
+      })
+      .catch(() => {
+        if (!cancelled) setRegistrationEnabled(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const submitRegister = async () => {
+    if (!userManager) {
+      setRegisterError('注册组件初始化失败，请刷新页面后重试');
+      return;
+    }
+    setRegistering(true);
+    setRegisterError('');
+    try {
+      const response = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          name: regName.trim(),
+          password: regPassword,
+          confirmPassword: regConfirmPassword,
+          email: regEmail.trim(),
+          productType: selectedMode,
+        }),
+      });
+      const data = await response.json() as { success?: boolean; user?: User; error?: string };
+      if (!data.success || !data.user) {
+        setRegisterError(data.error || '注册失败，请稍后重试');
+        return;
+      }
+      // 注册成功，自动登录
+      const loggedIn = await userManager.upsertUserFromServer(data.user);
+      onLogin(loggedIn, selectedMode);
+    } catch {
+      setRegisterError('注册失败，网络异常');
+    } finally {
+      setRegistering(false);
+    }
+  };
+
+  const goToRegister = () => {
+    setViewState('register-form');
+    setLoginError('');
+    setRegisterError('');
+  };
+
+  const goToLogin = () => {
+    setViewState('login-form');
+    setLoginError('');
+    setRegisterError('');
   };
 
   return (
@@ -263,7 +336,153 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
                   </button>
                 </div>
 
-                <p className="mt-8 text-xs text-muted-foreground/50 text-center">请联系管理员创建新账户并授权对应功能。</p>
+                {registrationEnabled ? (
+                  <p className="mt-8 text-xs text-muted-foreground/50 text-center">
+                    还没有账号？
+                    <button type="button" onClick={goToRegister} className="text-primary hover:underline ml-1 focus:outline-none">立即注册</button>
+                  </p>
+                ) : (
+                  <p className="mt-8 text-xs text-muted-foreground/50 text-center">请联系管理员创建新账户并授权对应功能。</p>
+                )}
+              </>
+            ) : viewState === 'register-form' ? (
+              /* ───── 注册表单界面 ───── */
+              <>
+                <div className="flex items-center gap-3 mb-6">
+                  <button
+                    type="button"
+                    onClick={backToModeSelection}
+                    className="w-8 h-8 rounded-md flex items-center justify-center hover:bg-muted/50 transition-colors"
+                    title="返回选择模式"
+                  >
+                    <ArrowLeft className="w-4 h-4 text-muted-foreground" />
+                  </button>
+                  <h2 className="text-xl font-bold text-foreground">创建账号</h2>
+                </div>
+
+                <form onSubmit={(e) => { e.preventDefault(); void submitRegister(); }} autoComplete="off">
+                  {/* 用户名 */}
+                  <div className="mb-4">
+                    <Label className="block text-xs font-medium text-muted-foreground mb-1.5">
+                      用户名 <span className="text-primary">*</span>
+                    </Label>
+                    <div className="relative">
+                      <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                        <UserIcon className="w-4 h-4 text-muted-foreground/60" />
+                      </div>
+                      <input
+                        type="text"
+                        value={regName}
+                        onChange={(e) => setRegName(e.target.value)}
+                        placeholder="3-32位，字母/数字/下划线"
+                        disabled={registering}
+                        maxLength={32}
+                        className="w-full bg-muted border-none rounded-md pl-10 pr-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/40 transition-colors disabled:opacity-50"
+                      />
+                    </div>
+                  </div>
+
+                  {/* 密码 */}
+                  <div className="mb-4">
+                    <Label className="block text-xs font-medium text-muted-foreground mb-1.5">
+                      密码 <span className="text-primary">*</span>
+                    </Label>
+                    <div className="relative">
+                      <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                        <Settings className="w-4 h-4 text-muted-foreground/60" />
+                      </div>
+                      <input
+                        type={showRegPassword ? 'text' : 'password'}
+                        value={regPassword}
+                        onChange={(e) => setRegPassword(e.target.value)}
+                        placeholder="至少 6 位"
+                        disabled={registering}
+                        className="w-full bg-muted border-none rounded-md pl-10 pr-10 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/40 transition-colors disabled:opacity-50"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowRegPassword((v) => !v)}
+                        aria-label={showRegPassword ? '隐藏密码' : '显示密码'}
+                        disabled={registering}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+                      >
+                        {showRegPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 确认密码 */}
+                  <div className="mb-4">
+                    <Label className="block text-xs font-medium text-muted-foreground mb-1.5">
+                      确认密码 <span className="text-primary">*</span>
+                    </Label>
+                    <div className="relative">
+                      <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                        <Settings className="w-4 h-4 text-muted-foreground/60" />
+                      </div>
+                      <input
+                        type={showRegConfirm ? 'text' : 'password'}
+                        value={regConfirmPassword}
+                        onChange={(e) => setRegConfirmPassword(e.target.value)}
+                        placeholder="再次输入密码"
+                        disabled={registering}
+                        className="w-full bg-muted border-none rounded-md pl-10 pr-10 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/40 transition-colors disabled:opacity-50"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowRegConfirm((v) => !v)}
+                        aria-label={showRegConfirm ? '隐藏密码' : '显示密码'}
+                        disabled={registering}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+                      >
+                        {showRegConfirm ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 邮箱（可选） */}
+                  <div className="mb-5">
+                    <Label className="block text-xs font-medium text-muted-foreground mb-1.5">
+                      邮箱 <span className="text-muted-foreground/40 font-normal">（可选）</span>
+                    </Label>
+                    <input
+                      type="email"
+                      value={regEmail}
+                      onChange={(e) => setRegEmail(e.target.value)}
+                      placeholder="example@domain.com"
+                      disabled={registering}
+                      className="w-full bg-muted border-none rounded-md px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/40 transition-colors disabled:opacity-50"
+                    />
+                  </div>
+
+                  {/* 注册按钮 */}
+                  <button
+                    type="submit"
+                    disabled={registering}
+                    className="w-full bg-primary text-primary-foreground font-semibold py-2.5 rounded-md text-sm hover:brightness-110 active:scale-[0.98] transition-all inline-flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {registering ? (
+                      <>
+                        <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                        </svg>
+                        注册中...
+                      </>
+                    ) : '创建账号'}
+                  </button>
+                </form>
+
+                {registerError && (
+                  <div className="mt-4 px-4 py-3 rounded-md text-sm font-medium" style={{ backgroundColor: '#3D1518' }}>
+                    <span className="text-destructive">{registerError}</span>
+                  </div>
+                )}
+
+                <p className="mt-6 text-xs text-muted-foreground/50 text-center">
+                  已有账号？
+                  <button type="button" onClick={goToLogin} className="text-primary hover:underline ml-1 focus:outline-none">立即登录</button>
+                </p>
               </>
             ) : (
               /* ───── 登录表单界面 ───── */
@@ -371,7 +590,11 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
                   </div>
                 )}
 
-                <p className="mt-6 text-xs text-muted-foreground/50 text-center">请联系管理员创建新账户并授权对应功能。</p>
+                <p className="mt-6 text-xs text-muted-foreground/50 text-center">
+                  {registrationEnabled ? (
+                    <>还没有账号？<button type="button" onClick={goToRegister} className="text-primary hover:underline ml-1 focus:outline-none">立即注册</button></>
+                  ) : '请联系管理员创建新账户并授权对应功能。'}
+                </p>
               </>
             )}
           </div>
