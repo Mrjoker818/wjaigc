@@ -8,6 +8,7 @@ const ALL_SETTING_KEYS = [
   'initialCredits', 'maxVideoDuration', 'imageMaxSizeMB', 'imageMaxEdge', 'defaultImageModel', 'defaultChatModel', 'defaultVideoModel',
   'quickCreateImageModel', 'quickCreateChatModel', 'quickCreateAutoModelRouting',
   'videoGenerationEnabled', '3dModelEnabled', 'registrationEnabled', 'announcementEnabled', 'announcementType', 'announcementExpiry', 'announcement',
+  'platformName', 'defaultUserRole', 'ipWhitelist',
 ];
 
 const NUMBER_KEYS = new Set([
@@ -34,8 +35,11 @@ function normalizeSetting(key: string, value: unknown): string {
     return String(numeric);
   }
   if (BOOLEAN_KEYS.has(key)) {
-    if (typeof value !== 'boolean') throw new Error(`${key} must be boolean`);
-    return String(value);
+    // Accept both boolean and string 'true'/'false' from frontend
+    if (typeof value === 'boolean') return String(value);
+    const strVal = String(value).toLowerCase().trim();
+    if (strVal === 'true' || strVal === 'false') return strVal;
+    throw new Error(`${key} must be boolean`);
   }
   if (MODEL_SETTING_KEYS.has(key)) {
     const modelValue = String(value).trim();
@@ -45,7 +49,7 @@ function normalizeSetting(key: string, value: unknown): string {
     }
     return modelValue;
   }
-  if (key === 'announcementType' && !['banner', 'popup', 'sidebar'].includes(String(value))) {
+  if (key === 'announcementType' && String(value) && !['banner', 'popup', 'sidebar'].includes(String(value))) {
     throw new Error('announcementType is invalid');
   }
   if (key === 'announcement' && String(value).length > 500) {

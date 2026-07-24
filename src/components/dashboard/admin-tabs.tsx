@@ -446,8 +446,14 @@ export default function AdminTabs(props: AdminTabsProps) {
         setSettingsDirty(false);
         setSettingsSaved(true);
         setTimeout(() => setSettingsSaved(false), 2500);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        console.error('[admin/settings] Save failed:', res.status, data);
+        setSettingsSaved(false);
       }
-    } catch {}
+    } catch (err) {
+      console.error('[admin/settings] Save error:', err);
+    }
   };
 
   const handleBatchToggleUsers = async (enable: boolean) => {
