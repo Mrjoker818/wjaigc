@@ -26,7 +26,6 @@ import { validateImageUrl } from '@/lib/input-validation';
 import { enhanceViaAI } from '@/lib/quality-enhance';
 import { recordImageTaskSubmitted, recordImageTaskTerminal } from '@/lib/cloud-task-persistence';
 import { is302AiUpscaleBaseUrl, resolve302UpscaleModelId } from '@/lib/302-upscale-models';
-import { validateUpscaleTargetDimensions, type UpscaleTargetPreset } from '@/lib/upscale-target';
 import { buildDisplayDecomposePrompt, buildDisplayDecomposeRequestBody, normalizeDisplayDecomposeRatio } from '@/lib/display-decompose';
 
 const SUPPORTED_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
@@ -399,7 +398,6 @@ interface EditRequest {
   expandPadding?: { top: number; right: number; bottom: number; left: number }; // 即梦风格方向性扩展
   targetWidth?: number;
   targetHeight?: number;
-  targetPreset?: UpscaleTargetPreset;
   aspectRatio?: string; // e.g. "4:3" - used to preserve original image ratio
   angleMode?: 'image' | 'camera';
   rotation?: number;
@@ -1991,15 +1989,8 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      const targetW = targetWidth ?? origW * scaleVal;
-      const targetH = targetHeight ?? origH * scaleVal;
-      const upscaleTargetError = validateUpscaleTargetDimensions(origW, origH, targetW, targetH);
-      if (upscaleTargetError) {
-        return NextResponse.json(
-          { success: false, error: upscaleTargetError },
-          { status: 400 },
-        );
-      }
+      const targetW = targetWidth || origW * scaleVal;
+      const targetH = targetHeight || origH * scaleVal;
       // engine 参数统一覆盖 upscaleMode：auto/ai/local(→cpu)
       const upscaleMode: 'auto' | 'ai' | 'cpu' =
         engineMode === 'ai' ? 'ai'
@@ -2410,10 +2401,7 @@ export async function POST(request: NextRequest) {
         let finalUrl = resized.url;
         let enhanced = false;
         try {
-          const enhanceResult = await enhanceViaAI(resized.url, modelStr, effectiveProviderId, {
-            targetWidth: targetW,
-            targetHeight: targetH,
-          });
+          const enhanceResult = await enhanceViaAI(resized.url);
           if (enhanceResult.enhanced && enhanceResult.url) {
             finalUrl = enhanceResult.url;
             enhanced = true;
@@ -2425,19 +2413,17 @@ export async function POST(request: NextRequest) {
           console.warn('[image-edit] AI enhance error:', enhanceErr instanceof Error ? enhanceErr.message : enhanceErr);
         }
 
-        const normalizedFinal = await resizeAiResultToTarget(finalUrl);
-
         return NextResponse.json({
           success: true,
-          imageUrl: normalizedFinal.url,
+          imageUrl: finalUrl,
           action,
           engine: 'ai-upscale-hq',
           usedModel: aiResult.usedModel,
           enhanced,
           originalSize: { width: origW, height: origH },
-          outputSize: { width: normalizedFinal.actualW, height: normalizedFinal.actualH },
-          outputWidth: normalizedFinal.actualW,
-          outputHeight: normalizedFinal.actualH,
+          outputSize: { width: resized.actualW, height: resized.actualH },
+          outputWidth: resized.actualW,
+          outputHeight: resized.actualH,
         });
       }
 

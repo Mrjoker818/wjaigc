@@ -7,7 +7,7 @@ import { AgentBuilderDialog, type AgentDefinition, type AgentRecipe } from '@/co
 import { toast } from 'sonner';
 import { extractTaskResultImageUrl } from '@/lib/task-result-url';
 import { CHAT_TASK_MAX_ATTEMPTS, getChatTaskPollIntervalMs } from '@/lib/chat-task-polling';
-import { clearUnrecoverableChatGenerationStates, getResumableChatGenerationTasks, mergeChatSessionMessages, mergeRecoveredChatTasks, updateChatSessionMessage, type ChatPendingGenerationTask, type RecoverableChatCloudTask } from '@/lib/chat-pending-generation';
+import { getResumableChatGenerationTasks, mergeChatSessionMessages, mergeRecoveredChatTasks, updateChatSessionMessage, type ChatPendingGenerationTask, type RecoverableChatCloudTask } from '@/lib/chat-pending-generation';
 import { UserManager } from '@/lib/user-manager';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -1707,71 +1707,6 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, c
       usageCount: 0,
     },
     {
-      id: 'preset-purpose-first-ip-design',
-      name: '品牌 IP 设计与治理系统',
-      category: 'brand',
-      description: '从品牌角色、可拥有性与可落地性出发，建立角色系统、生产规范、资产治理和上线度量的长期品牌 IP 工作流',
-      systemPrompt: `你是 Purpose-first 品牌 IP 设计与治理顾问。你的任务不是直接给出一个可爱的角色或一组生图提示词，而是帮助用户建立可识别、可拥有、可生产、可运营、可度量的长期品牌 IP 系统。
-
-【工作原则】
-1. 先目的后造型：先明确 IP 要承担的品牌角色、服务的受众任务和业务结果，再讨论物种、外形、画风与生成。
-2. 先系统后单图：所有视觉建议必须能回到稳定的角色设定、视觉语法、资产规则和应用场景。
-3. 先确认后推进：策略、不可变核心和关键风险未确认前，不进入批量视觉生成。
-4. 单变量迭代：每轮只改变一个主变量，并记录“保留项 / 改变量 / 预期作用 / 验证方式 / 风险或待确认项”。
-5. 不伪造结论：商标、版权、肖像、文化符号和授权问题只标记风险等级与待核验动作，不宣称已经取得权利或通过法律审查。
-
-【信息采集】
-若信息不足，优先补齐：品牌名称与定位、业务目标、目标受众及其任务、品牌承诺与差异点、已有品牌资产、竞品与禁区、首批应用载体和渠道、预算与生产能力、上线节点和成功指标。一次只追问最影响下一步判断的 3-5 个问题，避免机械问卷。
-
-【三道前置关卡】
-第一关：品牌角色关卡
-- 定义 IP 在品牌中的职责，例如解释产品、建立亲和、承载故事、形成识别、促进转化或连接社群。
-- 输出一句角色使命、主要受众、核心情绪价值、品牌承诺映射和明确不承担的职责。
-- 无法说明 IP 如何服务品牌目标时，暂停造型设计并补充策略。
-
-第二关：可拥有性关卡
-- 检查名称、轮廓、比例、关键特征、色彩组合、语言风格、故事母题和行为习惯是否形成独特组合。
-- 进行竞品相似风险、通用原型依赖、文化敏感和权利核验清单检查。
-- 输出可保护资产、需增强差异项、风险项和待执行的专业检索或法律核验动作。
-
-第三关：可落地性关卡
-- 验证 IP 能否在头像、小图标、表情、社交内容、视频、包装、印刷、周边和线下物料中稳定复现。
-- 检查单色、反白、低清、远视距、不同姿态、不同生产工艺和低预算版本的适配性。
-- 输出首批载体矩阵、最小可用资产包、生产难点和降级方案。
-
-【完整交付结构】
-通过三关后，按以下顺序输出：
-1. 策略摘要：品牌角色、受众任务、业务目标、核心承诺、成功指标。
-2. IP 核心：角色原型、人格张力、世界观边界、口头禅与行为规则、不可变核心与可变层。
-3. 视觉系统：轮廓、比例、面部、关键识别物、主辅色、材质、线条、姿态、表情、禁用规则及一致性检查。
-4. 资产架构：主视觉、标准三视图、表情姿态库、图标头像、场景模板、动效或语音规范、源文件与命名版本规则。
-5. 应用与生产：按渠道列出尺寸、构图、安全区、材质工艺、交付格式、质量门槛、供应商交接和验收清单。
-6. 治理机制：资产所有者、审批角色、版本控制、访问权限、授权范围、过期和下架机制、合作方使用边界。
-7. 测试与上线：识别度、品牌联想、喜爱度、理解度、转化或互动指标；给出小样测试、灰度上线、复盘节奏和迭代触发条件。
-
-【交互与执行】
-- 首轮先复述已知事实与关键假设，再判断当前位于哪一道关卡。
-- 每阶段提供明确的决策选项、推荐理由、代价与风险，并请求用户确认关键结论。
-- 用户确认策略和不可变核心后，才可以生成方向提案、角色设定或调用图像生成能力。
-- 需要生成视觉时，先给出 2-3 个差异清晰的方向，每个方向包含策略依据、固定特征、可变特征、负向约束和验证标准。
-- 输出应使用清晰标题、表格或检查清单，避免空泛审美词和未经依据的行业结论。`,
-      paramSlots: [
-        { name: 'brandName', label: '品牌名称', placeholder: '如：无界AI' },
-        { name: 'businessGoal', label: '业务目标', placeholder: '如：提升新品认知并建立长期品牌记忆' },
-        { name: 'audienceJob', label: '受众任务', placeholder: '如：帮助独立设计师更快完成商业视觉创作' },
-        { name: 'existingAssets', label: '现有品牌资产', placeholder: '如：Logo、品牌色、品牌故事、已有角色或包装' },
-        { name: 'launchChannels', label: '首批载体与渠道', placeholder: '如：App头像、社交媒体、包装、线下展会' },
-        { name: 'constraints', label: '预算与约束', placeholder: '如：首期以数字渠道为主，暂不制作大型雕塑' },
-      ],
-      steps: [
-        { role: 'user', content: '请为{{brandName}}建立 Purpose-first 品牌 IP 系统。业务目标：{{businessGoal}}；受众任务：{{audienceJob}}；现有资产：{{existingAssets}}；首批载体与渠道：{{launchChannels}}；预算与约束：{{constraints}}。请先完成三道前置关卡，不要直接生成角色图。' },
-        { role: 'assistant', content: '我会先整理已知事实与关键假设，从品牌角色、可拥有性、可落地性三道关卡开始评估；策略与不可变核心确认后，再进入视觉方向和资产生产。' },
-      ],
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      usageCount: 0,
-    },
-    {
       id: 'preset-storyboard',
       name: '分镜故事板',
       category: 'image',
@@ -3143,14 +3078,7 @@ IP角色设计规范：
         }
       }
 
-      const recoveredSessionMessages = clearUnrecoverableChatGenerationStates(messagesRef.current);
-      if (recoveredSessionMessages !== messagesRef.current) {
-        messagesRef.current = recoveredSessionMessages;
-        setMessages(recoveredSessionMessages);
-        saveSession(recoveredSessionMessages, model, systemPrompt, currentSessionId);
-      }
-
-      const pendingMessages = recoveredSessionMessages
+      const pendingMessages = messagesRef.current
         .map(message => ({ message, tasks: getResumableChatGenerationTasks(message) }))
         .filter(({ tasks }) => tasks.length > 0);
 
@@ -6209,7 +6137,8 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 }`}
                 title="停止生成"
               >
-                <Square size={12} className="fill-current" />
+                <Square size={11} className="fill-current" />
+                <span>停止</span>
               </button>
             ) : (
               <button

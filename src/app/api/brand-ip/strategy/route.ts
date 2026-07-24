@@ -273,17 +273,9 @@ export async function POST(request: NextRequest): Promise<Response> {
   if (auth instanceof Response) return auth;
 
   let projectId = '';
-  let requestedModel: string | undefined;
-  let requestedProviderId: string | undefined;
   try {
-    const body = await request.json() as {
-      projectId?: unknown;
-      model?: unknown;
-      providerId?: unknown;
-    };
+    const body = await request.json() as { projectId?: unknown };
     projectId = typeof body.projectId === 'string' ? body.projectId.trim() : '';
-    requestedModel = typeof body.model === 'string' ? body.model.trim() || undefined : undefined;
-    requestedProviderId = typeof body.providerId === 'string' ? body.providerId.trim() || undefined : undefined;
   } catch {
     // Body parsing failed — leave projectId empty for the 400 path
   }
@@ -315,18 +307,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     return createErrorStream('当前账号没有可用的聊天模型', 'NO_AVAILABLE_MODEL');
   }
 
-  const hasRequestedModel = Boolean(requestedModel);
-  const hasRequestedProvider = Boolean(requestedProviderId);
-  if (hasRequestedModel !== hasRequestedProvider) {
-    return createErrorStream('模型选择不完整，请同时选择模型和提供商', 'MODEL_SELECTION_INCOMPLETE');
-  }
-
-  const selected = hasRequestedModel && hasRequestedProvider
-    ? authorizedModels.find(model => model.modelId === requestedModel && model.providerId === requestedProviderId)
-    : authorizedModels[0];
-  if (!selected) {
-    return createErrorStream('所选聊天模型不可用或无权限', 'MODEL_SELECTION_DENIED');
-  }
+  const selected = authorizedModels[0];
   const provider = selected.provider;
 
   const encoder = new TextEncoder();

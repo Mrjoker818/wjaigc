@@ -17,7 +17,7 @@ import { EventEmitter } from 'events';
 // ─── 类型 ────────────────────────────────────────────────────────────
 
 export type TaskType = 'generate' | 'generate-async' | 'image-edit' | 'edit' | 'svg-trace' | 'upscale' | 'removebg' | 'extend' | 'mask' | 'erase' | 'vectorize' | 'segment' | 'batch' | 'outpaint' | 'multi-angle' | 'display-decompose' | 'brand-generate' | 'brand-ecommerce' | 'refine-engine' | 'font-design' | 'ai-psd' | 'video' | 'packaging' | 'display3d' | 'display3d-decompose' | '3d' | '3d-auto-multi-view' | '3d-retexture' | '3d-remesh' | 'venue-analyze' | 'venue-proposals' | 'venue-lock-design' | 'venue-render' | 'venue-qc' | 'human-repair';
-export type TaskStatus = 'queued' | 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'timeout';
+export type TaskStatus = 'queued' | 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
 
 export interface TaskInfo {
   taskId: string;
@@ -37,7 +37,7 @@ export interface TaskInfo {
 
 export interface TaskEvent {
   taskId: string;
-  type: 'created' | 'updated' | 'completed' | 'failed' | 'cancelled' | 'timeout' | 'progress' | 'queued';
+  type: 'created' | 'updated' | 'completed' | 'failed' | 'cancelled' | 'progress' | 'queued';
   task: TaskInfo;
 }
 
@@ -138,7 +138,7 @@ export function waitForQueueSlot(taskId: string, timeoutMs: number = 5 * 60 * 10
         clearTimeout(timer);
         subscription();
         resolve(true); // 获得槽位
-      } else if (event.task.status === 'cancelled' || event.task.status === 'failed' || event.task.status === 'timeout') {
+      } else if (event.task.status === 'cancelled' || event.task.status === 'failed') {
         clearTimeout(timer);
         subscription();
         resolve(false); // 被取消或失败
@@ -163,10 +163,10 @@ export function updateTaskProgress(
   const oldProgress = task.progress;
   Object.assign(task, { ...update, updatedAt: Date.now() });
 
-  // ★ 任务进入终态（completed/failed/cancelled/timeout）时，清理取消记录并释放队列。
-  const TERMINAL_STATUSES: TaskStatus[] = ['completed', 'failed', 'cancelled', 'timeout'];
+  // ★ 任务进入终态（completed/failed/cancelled）时，清理 cancelledTasks 中的记录
+  const TERMINAL_STATUSES: TaskStatus[] = ['completed', 'failed', 'cancelled'];
   const reachedTerminalState = TERMINAL_STATUSES.includes(task.status) && !TERMINAL_STATUSES.includes(oldStatus);
-  if (task.status === 'completed' || task.status === 'failed' || task.status === 'timeout') {
+  if (task.status === 'completed' || task.status === 'failed') {
     cancelledTasks.delete(taskId);
   }
 
@@ -175,8 +175,6 @@ export function updateTaskProgress(
     emitEvent('completed', task);
   } else if (update.status === 'failed') {
     emitEvent('failed', task);
-  } else if (update.status === 'timeout') {
-    emitEvent('timeout', task);
   } else if (update.progress !== undefined && update.progress !== oldProgress) {
     emitEvent('progress', task);
   } else if (oldStatus === 'queued' && task.status !== 'queued') {

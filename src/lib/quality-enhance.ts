@@ -75,11 +75,6 @@ export interface EnhanceResult {
   enhanced: boolean;
 }
 
-interface EnhanceTargetOptions {
-  targetWidth?: number;
-  targetHeight?: number;
-}
-
 /**
  * 对放大后的图片进行AI画质精修
  * 以放大结果为参考图，低强度保持内容不变，仅修复画质问题
@@ -92,7 +87,6 @@ export async function enhanceViaAI(
   imageUrl: string,
   model?: string,
   providerId?: string,
-  target?: EnhanceTargetOptions,
 ): Promise<EnhanceResult> {
   try {
     // 解析图片URL获取绝对路径
@@ -121,11 +115,6 @@ export async function enhanceViaAI(
 
     // 确定使用的模型
     const enhanceModel = model || 'gpt-image-1';
-    const requestedMaxEdge = Math.max(
-      target?.targetWidth || 0,
-      target?.targetHeight || 0,
-    );
-    const requestedResolution = requestedMaxEdge >= 3072 ? '4K' : '2K';
 
     // 查找API提供商（优先使用指定的 providerId）
     const provider = await findProviderForModel(enhanceModel, 'image', providerId || undefined);
@@ -149,7 +138,7 @@ export async function enhanceViaAI(
       model: enhanceModel,
       prompt: enhancePrompt,
       n: 1,
-      size: calculateActualPixelsFromRatio(aspectRatio, requestedResolution, enhanceModel) || '1024x1024',
+      size: calculateActualPixelsFromRatio(aspectRatio, '2K', enhanceModel) || '1024x1024',
       response_format: 'url',
       // 以放大结果为参考图，低强度保持内容不变
       image_urls: [absoluteUrl],

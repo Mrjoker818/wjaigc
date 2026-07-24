@@ -52,51 +52,6 @@ const TASK_RECOVERY_WORKER_ID = process.env.WUJIE_WORKER_ID || `poll-task-${proc
 // background submission timeout is considered dead and eligible for recovery.
 const SUBMISSION_STALE_MS = 12 * 60_000;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function sanitizeTaskFailureDetail(value: string): string {
-  return value
-    .replace(/https?:\/\/[^\s"']+/gi, '[URL]')
-    .replace(/\b(Bearer\s+|api[_-]?key[=:]\s*)[^\s,"']+/gi, '$1[REDACTED]')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 500);
-}
-
-function extractTaskFailureDetail(taskData: Record<string, unknown>): string {
-  const failureKeys = ['fail_reason', 'failReason', 'error_message', 'errorMessage', 'message', 'detail', 'reason'];
-  const records: Record<string, unknown>[] = [taskData];
-  const seen = new Set<Record<string, unknown>>();
-
-  for (let index = 0; index < records.length && index < 8; index++) {
-    const record = records[index];
-    if (seen.has(record)) continue;
-    seen.add(record);
-
-    for (const key of failureKeys) {
-      const value = record[key];
-      if (typeof value === 'string' && value.trim()) return sanitizeTaskFailureDetail(value);
-    }
-
-    for (const key of ['error', 'result', 'data', 'details']) {
-      const nested = record[key];
-      if (isRecord(nested) && !seen.has(nested)) records.push(nested);
-    }
-  }
-
-  return '';
-}
-
-function formatTaskFailureMessage(rawError: string): string {
-  const detail = rawError || '图像生成任务失败';
-  const classified = classifyApiError(detail);
-  const translated = classified.friendlyMessage;
-  const suffix = classified.suggestion ? `。${classified.suggestion}` : '';
-  return detail === translated ? `${translated}${suffix}` : `${translated}：${detail}${suffix}`;
-}
-
 async function refundTaskCredits(
   taskId: string,
   creditCost: number | undefined,
@@ -1949,11 +1904,16 @@ export async function POST(request: NextRequest) {
       const finalProviderName = (existingResult.providerName as string) || regProviderName || '';
 
       if (!pollResult.imageUrl) {
-        const errorDetail = extractTaskFailureDetail(taskData || {});
+        const taskError = taskData?.error as Record<string, unknown> | undefined;
+        const errorDetail = (taskData?.fail_reason as string)
+          || (taskData?.failReason as string)
+          || (taskError?.message as string)
+          || (typeof taskData?.error === 'string' ? taskData.error : '');
         const classifiedNoImgErr = classifyApiError(errorDetail || '模型返回了文本而不是生成图像');
-        const terminalError = errorDetail
-          ? formatTaskFailureMessage(errorDetail)
-          : classifiedNoImgErr.friendlyMessage || '模型返回了文本而不是生成图像，请尝试重新措辞提示';
+
+        const terminalError = classifiedNoImgErr.friendlyMessage
+          || translateApiError(errorDetail)
+          || '模型返回了文本而不是生成图像，请尝试重新措辞提示';
 
         const creditStatus = await refundTaskCredits(
           taskId,
@@ -2000,16 +1960,13 @@ export async function POST(request: NextRequest) {
       pollResult.imageUrl = imageUrls[0];
       (pollResult as Record<string, unknown>).imageUrls = imageUrls;
       (pollResult as Record<string, unknown>).maskUrls = maskUrls;
-      void appendUserJsonl(userId, 'images', {
+      await appendUserJsonl(userId, 'images', {
         type: 'completed',
         providerId: providerName,
         model: model || regUsedModel || '',
         taskId,
         imageUrl: imageUrls[0],
         imageUrls,
-      }).catch(error => {
-        const message = error instanceof Error ? error.message : String(error);
-        console.warn(`[poll-task] 用户图片记录写入失败 taskId=${taskId}: ${message}`);
       });
       const gridImageUrl = typeof pollResult.gridImageUrl === 'string' ? pollResult.gridImageUrl : '';
       const buttons = Array.isArray(pollResult.buttons) ? pollResult.buttons : [];
@@ -2057,10 +2014,14 @@ export async function POST(request: NextRequest) {
       }
       }
     } else if (normalizedStatus === 'failed') {
-      const rawError = extractTaskFailureDetail(taskData || {}) || '图像生成任务失败';
+      const taskError = taskData?.error as Record<string, unknown> | undefined;
+      const rawError = (taskData?.fail_reason as string)
+        || (taskData?.failReason as string)
+        || (taskError?.message as string)
+        || (typeof taskData?.error === 'string' ? taskData.error : '')
+        || '图像生成任务失败';
       const classifiedErr = classifyApiError(rawError);
-      const translatedError = formatTaskFailureMessage(rawError);
-      console.warn(`[poll-task] 上游任务失败 taskId=${taskId}, status=${taskStatus || 'unknown'}, keys=${Object.keys(taskData || {}).join(',') || 'none'}, error=${rawError}`);
+      const translatedError = classifiedErr.friendlyMessage + (classifiedErr.suggestion ? ' — ' + classifiedErr.suggestion : '');
       const isCfTimeout = isCloudflareTimeoutError(rawError);
       const creditStatus = await refundTaskCredits(
         taskId,

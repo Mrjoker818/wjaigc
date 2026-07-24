@@ -8,7 +8,7 @@ import { fetchWithV1Retry, shouldSkipV1Retry } from './api-helpers';
 import { getModelDisplayName } from './model-name-map';
 import { getServerSystemDir } from './server-data-root';
 import { dbGetApiProviders, dbUpsertApiProvider, dbDeleteApiProvider } from './db-storage';
-import { get302UpscaleModelsForProvider } from './302-upscale-models';
+import { get302UpscaleModelsForProvider, resolve302UpscaleModelId } from './302-upscale-models';
 
 const SYSTEM_DIR = getServerSystemDir();
 const CONFIG_PATH = path.join(SYSTEM_DIR, 'api-providers.json');
@@ -694,8 +694,51 @@ export async function addApiProvider(input: AddProviderInput): Promise<ApiProvid
     provider.discoveredModels = discovery.models.map(model => ({ ...model, providerId: id }));
   }
 
-  // 发现模型仅作为编辑候选库保存；所有模型类型都必须由管理员明确勾选后才会对产品开放。
-  provider.selectedModels = input.selectedModels || [];
+  // Auto-select matching models for vectorize/layer types
+  if (input.selectedModels && input.selectedModels.length > 0) {
+    provider.selectedModels = input.selectedModels;
+  } else if (input.modelType === 'vectorize') {
+    const matched = provider.discoveredModels.filter(m =>
+      m.id.toLowerCase().includes('vectorize') ||
+      m.id.toLowerCase().includes('vector') ||
+      m.id.toLowerCase().includes('svg') ||
+      m.id.toLowerCase().includes('tracer') ||
+      m.id.toLowerCase().includes('starvector')
+    );
+    provider.selectedModels = matched.length > 0 ? matched.map(m => m.id) : provider.discoveredModels.map(model => model.id);
+  } else if (input.modelType === 'layer') {
+    const matched = provider.discoveredModels.filter(m =>
+      m.id.toLowerCase().includes('qwen-image-layered') ||
+      m.id.toLowerCase().includes('layer') ||
+      m.id.toLowerCase().includes('segment') ||
+      m.id.toLowerCase().includes('sam')
+    );
+    provider.selectedModels = matched.length > 0 ? matched.map(m => m.id) : provider.discoveredModels.map(model => model.id);
+  } else if (input.modelType === 'upscaler') {
+    const matched = provider.discoveredModels.filter(m => {
+      const mid = m.id.toLowerCase();
+      // 通用放大关键词
+      const isUpscaler = mid.includes('upscaler') || mid.includes('upscale') ||
+        mid.includes('real-esrgan') || mid.includes('realesrgan') ||
+        mid.includes('seedvr') || mid.includes('swinir') ||
+        mid.includes('gfpgan') || mid.includes('esrgan');
+      // 302.AI 原生端点只允许两个已验证的模型。
+      const is302Upscale = Boolean(resolve302UpscaleModelId(mid));
+      return isUpscaler || is302Upscale;
+    });
+    // upscaler类型：只勾选匹配的模型，不要fallback到全部模型（避免勾选大量无关模型）
+    provider.selectedModels = matched.length > 0 ? matched.map(m => m.id) : [];
+  } else if (input.modelType === 'removebg') {
+    const matched = provider.discoveredModels.filter(m => {
+      const mid = m.id.toLowerCase();
+      return mid.includes('removebg') || mid.includes('remove-bg') || mid.includes('rmbg') ||
+        mid.includes('birefnet') || mid.includes('u2net') || mid.includes('isnet') ||
+        mid.includes('background') || mid.includes('matting');
+    });
+    provider.selectedModels = matched.length > 0 ? matched.map(m => m.id) : provider.discoveredModels.map(model => model.id);
+  } else {
+    provider.selectedModels = input.selectedModels?.length ? input.selectedModels : provider.discoveredModels.map(model => model.id);
+  }
 
   provider.selectedModel = provider.selectedModels[0];
   provider.connectionStatus = discovery?.success ? 'success' : (input.discoveredModels?.length ? 'success' : 'untested');

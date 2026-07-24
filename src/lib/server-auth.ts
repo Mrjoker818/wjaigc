@@ -500,12 +500,7 @@ async function readStore(): Promise<StoredUsersFile> {
       createdAt: now,
       updatedAt: now,
     });
-    try {
-      await writeStore(file);
-    } catch (error) {
-      // Authentication reads must not turn a read-only legacy store into a route failure.
-      console.warn('[auth] Unable to persist bootstrap administrator:', error instanceof Error ? error.message : error);
-    }
+    await writeStore(file);
   } else {
     const admin = file.users[adminIndex];
     file.users[adminIndex] = {

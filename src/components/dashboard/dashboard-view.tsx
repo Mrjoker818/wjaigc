@@ -1498,7 +1498,22 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       const models = data.models || [];
       setDiscoveredModels(models); setModelSearchQuery('');
       setTestNewResult({ success: true, message: `连接成功，发现 ${models.length} 个可用模型`, modelCount: models.length });
-      // 模型发现只更新候选库；所有模型类型都必须由管理员在模型管理区明确勾选后才会对产品开放。
+      if (apiKind === 'vectorize') {
+        const vModels = models.filter((m: ModelInfo) => { const id = m.id.toLowerCase(); return id.includes('vector') || id.includes('vectorize') || id.includes('svg') || id.includes('tracer') || id.includes('starvector'); });
+        setSelectedModels(vModels.length > 0 ? vModels.map((m: ModelInfo) => m.id) : []);
+      } else if (apiKind === 'layer') {
+        const lModels = models.filter((m: ModelInfo) => { const id = m.id.toLowerCase(); return id.includes('layer') || id.includes('segment') || id.includes('qwen-image-layered'); });
+        setSelectedModels(lModels.length > 0 ? lModels.map((m: ModelInfo) => m.id) : []);
+      } else if (apiKind === 'upscaler') {
+        const uModels = models.filter((m: ModelInfo) => { const id = m.id.toLowerCase(); return id.includes('upscale') || id.includes('seedvr') || id.includes('esrgan') || id.includes('realesrgan') || id.includes('swinir') || id.includes('hat'); });
+        setSelectedModels(uModels.length > 0 ? uModels.map((m: ModelInfo) => m.id) : []);
+      } else if (apiKind === 'removebg') {
+        const rModels = models.filter((m: ModelInfo) => { const id = m.id.toLowerCase(); return id.includes('removebg') || id.includes('rmbg') || id.includes('birefnet') || id.includes('u2net') || id.includes('isnet') || id.includes('background') || id.includes('matting'); });
+        setSelectedModels(rModels.length > 0 ? rModels.map((m: ModelInfo) => m.id) : []);
+      } else if (selectedModels.length === 0 && models.length > 0) {
+        // Auto-select all models on first discover
+        setSelectedModels(models.map((m: ModelInfo) => m.id));
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : '识别模型失败';
       setTestNewResult({ success: false, message: msg.includes('JSON') ? 'API 返回了非 JSON 响应，请检查 Base URL 是否正确' : msg });
@@ -1568,7 +1583,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     if (!editingProviderId || isSubmitting) return;
     setIsSubmitting(true);
     try {
-      const models = selectedModels.length ? selectedModels : apiModel.trim() ? [apiModel.trim()] : [];
+      const models = selectedModels.length ? selectedModels : apiModel.trim() ? [apiModel.trim()] : undefined;
       const updates: Record<string, unknown> = {};
       if (apiName.trim()) updates.name = apiName.trim();
       updates.displayName = apiDisplayName.trim() || undefined;
@@ -1576,8 +1591,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       // 编辑模式下，空apiKey表示不修改现有密钥（服务器端保留原key）
       if (apiKey.trim()) updates.apiKey = apiKey.trim();
       updates.modelType = apiKind;
-      // 空数组同样需要提交，才能持久化“清空已选模型”操作。
-      updates.selectedModels = models;
+      if (models) updates.selectedModels = models;
       // 发送discoveredModels（包含用户手动编辑的displayName）
       if (discoveredModels.length > 0) updates.discoveredModels = discoveredModels;
       const filteredParams = advancedParams.filter(p => p.key.trim());
@@ -3012,32 +3026,68 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                         {providerTaskSummary[p.id].processing > 0 && <span className="px-1.5 py-0.5 rounded bg-primary/10 text-primary">处理中 {providerTaskSummary[p.id].processing}</span>}
                         {providerTaskSummary[p.id].failed > 0 && <span className="px-1.5 py-0.5 rounded bg-destructive/10 text-destructive">异常 {providerTaskSummary[p.id].failed}</span>}
                       </div>}
-                      {(p.selectedModels && p.selectedModels.length > 0) && (
+                      {(p.discoveredModels && p.discoveredModels.length > 0) && (
                         <div className="mt-2">
                           <button
                             onClick={() => setExpandedModelProviders(prev => { const n = new Set(prev); n.has(p.id) ? n.delete(p.id) : n.add(p.id); return n; })}
                             className="flex items-center gap-1 text-[10px] text-primary hover:text-primary/80 cursor-pointer transition-colors"
                           >
                             <ChevronDown className={`w-3 h-3 transition-transform ${expandedModelProviders.has(p.id) ? 'rotate-0' : '-rotate-90'}`} />
-                            已选模型 ({p.selectedModels.length})
+                            展开模型 ({p.selectedModels?.length || 0}/{p.discoveredModels?.length || 0})
                           </button>
                           {expandedModelProviders.has(p.id) && (
                             <div className="mt-1.5 space-y-1 max-h-60 overflow-y-auto pr-1">
                               {(() => {
-                                const modelsById = new Map((p.discoveredModels || []).map(model => [model.id, model]));
-                                const visibleModels = Array.from(new Set(p.selectedModels || [])).map(modelId => (
-                                  modelsById.get(modelId) || { id: modelId, name: modelId, displayName: modelId }
-                                ));
-                                return visibleModels.map(model => {
-                                  const displayName = model.displayName || model.name || model.id;
-                                  return (
-                                    <div key={model.id} className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-muted/50">
-                                      <Check className="w-3 h-3 shrink-0 text-primary" />
-                                      <span className="text-[11px] text-foreground flex-1 truncate" title={displayName}>{displayName}</span>
-                                      <span className="text-[9px] text-muted-foreground truncate max-w-[100px]" title={model.id}>{model.id}</span>
-                                    </div>
-                                  );
-                                });
+                                const allModels = p.discoveredModels || [];
+                                const selectedSet = new Set(p.selectedModels || []);
+                                return allModels
+                                  .map(m => {
+                                    const isSelected = selectedSet.has(m.id);
+                                    const displayName = m.displayName || m.name || m.id;
+                                    return (
+                                      <div key={m.id} className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-muted/50 hover:bg-muted group">
+                                        <button
+                                          onClick={() => {
+                                            const newSelected = isSelected
+                                              ? p.selectedModels!.filter(s => s !== m.id)
+                                              : [...(p.selectedModels || []), m.id];
+                                            void quickUpdateProvider(p.id, { selectedModels: newSelected });
+                                          }}
+                                          className={`w-3.5 h-3.5 rounded flex items-center justify-center shrink-0 transition-colors ${isSelected ? 'bg-primary text-primary-foreground' : 'bg-muted-foreground/20 hover:bg-muted-foreground/40'}`}
+                                        >
+                                          {isSelected && <Check className="w-2.5 h-2.5" />}
+                                        </button>
+                                        <span className="text-[11px] text-foreground flex-1 truncate" title={displayName}>{displayName}</span>
+                                        <span className="text-[9px] text-muted-foreground truncate max-w-[100px]" title={m.id}>{m.id}</span>
+                                        <button
+                                          onClick={() => {
+                                            const newName = prompt('修改模型显示名称:', displayName);
+                                            if (newName !== null && newName.trim()) {
+                                              const newDiscovered = (p.discoveredModels || []).map(dm =>
+                                                dm.id === m.id ? { ...dm, displayName: newName.trim() } : dm
+                                              );
+                                              void quickUpdateProvider(p.id, { discoveredModels: newDiscovered });
+                                            }
+                                          }}
+                                          className="opacity-0 group-hover:opacity-100 w-4 h-4 flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-all cursor-pointer"
+                                          title="重命名"
+                                        >
+                                          <Pencil className="w-2.5 h-2.5" />
+                                        </button>
+                                        <button
+                                          onClick={() => {
+                                            const newDiscovered = (p.discoveredModels || []).filter(dm => dm.id !== m.id);
+                                            const newSelected = p.selectedModels!.filter(s => s !== m.id);
+                                            void quickUpdateProvider(p.id, { selectedModels: newSelected, discoveredModels: newDiscovered });
+                                          }}
+                                          className="opacity-0 group-hover:opacity-100 w-4 h-4 flex items-center justify-center rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all cursor-pointer"
+                                          title="删除"
+                                        >
+                                          <X className="w-2.5 h-2.5" />
+                                        </button>
+                                      </div>
+                                    );
+                                  });
                               })()}
                             </div>
                           )}
