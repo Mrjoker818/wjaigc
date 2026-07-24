@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect } from 'react';
-import { X, Settings, ChevronRight, Upload, Sparkles } from 'lucide-react';
+import { useState, useRef, useCallback, useEffect, type PointerEvent } from 'react';
+import { X, Settings, Sparkles, Square, GripVertical } from 'lucide-react';
 
 /* ================================================================
    品牌 IP 设计工场 — 参考原型还原的黑金三栏工作台
@@ -13,13 +13,38 @@ interface BrandIpPanelProps {
 }
 
 /* ── Types ──────────────────────────────────────────────────────── */
+type BrandIpStage = 'brand-goal' | 'strategy' | 'role-direction' | 'visual-system' | 'asset-generation';
+
+interface BrandIpBrief {
+  brandName?: string;
+  objective?: string;
+  audience?: string;
+  industry?: string;
+  workflowPath?: number;
+  carriers?: number[];
+  smartMode?: boolean;
+}
+
+interface BrandIpDirection {
+  id: string;
+  name: string;
+  concept: string;
+  scores: { brandRole: number; ownability: number; feasibility: number };
+  status: 'draft' | 'confirmed' | 'archived';
+}
+
+interface BrandIpImmutableCore { id: string; label: string; value: string; }
+interface BrandIpControlledVariable { id: string; label: string; value: string; risk?: 'low' | 'medium' | 'high'; }
+
 interface BrandIpProject {
   id: string;
   name: string;
-  stage: string;
-  brief?: Record<string, unknown>;
+  currentStage: BrandIpStage;
+  brief: BrandIpBrief;
+  directions: BrandIpDirection[];
   confirmedDirectionId?: string | null;
-  assets?: BrandIpAsset[];
+  immutableCore: BrandIpImmutableCore[];
+  controlledVariables: BrandIpControlledVariable[];
 }
 interface BrandIpAsset {
   id: string;
@@ -30,7 +55,7 @@ interface BrandIpAsset {
   version: number;
   createdAt: string;
 }
-interface Direction {
+interface DisplayDirection {
   id: string;
   name: string;
   tone: 'warm' | 'blue' | 'violet';
@@ -66,19 +91,28 @@ const CARRIERS = [
   { icon: '◌', label: '空间装置' },
 ];
 
-const GATES = [
-  { icon: '◎', name: '品牌角色', status: '充分', ok: true, note: 'IP承担"年轻化陪伴者"角色' },
-  { icon: '⬡', name: '可拥有性', status: '待核验', ok: false, note: '名称需做商标检索' },
-  { icon: '◇', name: '可落地性', status: '充分', ok: true, note: '首发社媒+包装可执行' },
-];
-
-const MOCK_DIRECTIONS: Direction[] = [
-  { id: 'd1', name: '陪伴型守护者', tone: 'warm', tag: '推荐方向', score: 92, description: '用"靠近、回应、守护"的行为建立亲和力，适合长期内容与会员运营。', traits: ['温暖', '可靠', '有回应'] },
-  { id: 'd2', name: '好奇探索家', tone: 'blue', tag: '区隔方向', score: 88, description: '用观察、发现和收集的动作连接产品知识，适合内容科普与互动任务。', traits: ['敏锐', '乐观', '行动派'] },
-  { id: 'd3', name: '灵感创造官', tone: 'violet', tag: '商业方向', score: 86, description: '以创作、组合、变形为核心动作，适合联名、文创与多形态商品延展。', traits: ['聪明', '灵活', '有巧思'] },
-];
-
 const VIEW_TABS = ['标准', '单色', '小尺寸'];
+
+const STAGE_INDEX: Record<BrandIpStage, number> = {
+  'brand-goal': 0,
+  strategy: 0,
+  'role-direction': 1,
+  'visual-system': 2,
+  'asset-generation': 3,
+};
+
+function toDisplayDirection(direction: BrandIpDirection, index: number): DisplayDirection {
+  const score = Math.round((direction.scores.brandRole + direction.scores.ownability + direction.scores.feasibility) / 3);
+  return {
+    id: direction.id,
+    name: direction.name,
+    tone: index % 3 === 0 ? 'warm' : index % 3 === 1 ? 'blue' : 'violet',
+    tag: index === 0 ? '推荐方向' : index === 1 ? '区隔方向' : '商业方向',
+    score,
+    description: direction.concept,
+    traits: [`品牌角色 ${direction.scores.brandRole}`, `可拥有性 ${direction.scores.ownability}`, `可落地性 ${direction.scores.feasibility}`],
+  };
+}
 
 /* ── Component ──────────────────────────────────────────────────── */
 export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps) {
@@ -106,7 +140,7 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
   const [hasAnalyzed, setHasAnalyzed] = useState(false);
 
   // Direction state
-  const [directions] = useState<Direction[]>(MOCK_DIRECTIONS);
+  const [directions, setDirections] = useState<BrandIpDirection[]>([]);
   const [selectedDirection, setSelectedDirection] = useState<string | null>(null);
   const [confirmedDirection, setConfirmedDirection] = useState(false);
 
@@ -128,6 +162,15 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
   // Assets state
   const [assets, setAssets] = useState<BrandIpAsset[]>([]);
   const [generatingAsset, setGeneratingAsset] = useState(false);
+  const [assetProgress, setAssetProgress] = useState(0);
+  const [assetLabel, setAssetLabel] = useState('');
+  const [assetTaskId, setAssetTaskId] = useState<string | null>(null);
+
+  // Floating-window state
+  const shellRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ offsetX: number; offsetY: number } | null>(null);
+  const hasInitializedWindowPositionRef = useRef(false);
+  const [windowPosition, setWindowPosition] = useState({ x: 0, y: 0 });
 
   /* ── Toast helper ──────────────────────────────────────────────── */
   const showToast = useCallback((msg: string) => {
@@ -135,11 +178,76 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
     setTimeout(() => setToast({ show: false, msg: '' }), 2500);
   }, []);
 
-  /* ── Load projects on mount ────────────────────────────────────── */
-  useEffect(() => {
-    void loadProjects();
+  const loadAssets = useCallback(async (projectId: string) => {
+    const res = await fetch(`/api/brand-ip/assets?projectId=${encodeURIComponent(projectId)}`);
+    if (!res.ok) throw new Error('assets_load_failed');
+    const data = await res.json() as { assets?: BrandIpAsset[] };
+    setAssets(data.assets ?? []);
   }, []);
 
+  const applyProject = useCallback(async (nextProject: BrandIpProject, shouldLoadAssets = true) => {
+    setProject(nextProject);
+    setBrandName(nextProject.brief.brandName ?? nextProject.name);
+    setGoal(nextProject.brief.objective ?? '');
+    setAudience(nextProject.brief.audience ?? '');
+    setIndustry(nextProject.brief.industry ?? '');
+    setWorkflowPath(nextProject.brief.workflowPath ?? 0);
+    setSelectedCarriers(nextProject.brief.carriers ?? [0, 2]);
+    setSmartMode(nextProject.brief.smartMode ?? true);
+    setDirections(nextProject.directions ?? []);
+    setSelectedDirection(nextProject.confirmedDirectionId ?? nextProject.directions?.[0]?.id ?? null);
+    setConfirmedDirection(Boolean(nextProject.confirmedDirectionId));
+    setActiveStage(STAGE_INDEX[nextProject.currentStage] ?? 0);
+    setHasAnalyzed((nextProject.directions?.length ?? 0) > 0);
+    if (shouldLoadAssets) {
+      try {
+        await loadAssets(nextProject.id);
+      } catch {
+        setAssets([]);
+      }
+    }
+  }, [loadAssets]);
+
+  const loadProject = useCallback(async (projectId: string) => {
+    const res = await fetch(`/api/brand-ip/projects?projectId=${encodeURIComponent(projectId)}`);
+    if (!res.ok) throw new Error('project_load_failed');
+    const data = await res.json() as { project?: BrandIpProject };
+    if (!data.project) throw new Error('project_missing');
+    await applyProject(data.project);
+  }, [applyProject]);
+
+  const handleWindowPointerDown = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    if (window.innerWidth < 768) return;
+    const target = event.target as HTMLElement;
+    if (target.closest('button, input, textarea, select, label, a, svg, [data-no-drag]')) return;
+    const shell = shellRef.current;
+    if (!shell) return;
+    const rect = shell.getBoundingClientRect();
+    dragRef.current = { offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }, []);
+
+  const handleWindowPointerMove = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current) return;
+    const shell = shellRef.current;
+    if (!shell) return;
+    const rect = shell.getBoundingClientRect();
+    const maxX = Math.max(16, window.innerWidth - rect.width - 16);
+    const maxY = Math.max(16, window.innerHeight - rect.height - 16);
+    setWindowPosition({
+      x: Math.min(Math.max(16, event.clientX - dragRef.current.offsetX), maxX),
+      y: Math.min(Math.max(16, event.clientY - dragRef.current.offsetY), maxY),
+    });
+  }, []);
+
+  const handleWindowPointerUp = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    dragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }, []);
+
+  /* ── Load projects on mount ────────────────────────────────────── */
   const loadProjects = useCallback(async () => {
     try {
       const res = await fetch('/api/brand-ip/projects');
@@ -148,6 +256,49 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
         setProjects(data.projects ?? []);
       }
     } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => {
+    void loadProjects();
+  }, [loadProjects]);
+
+  useEffect(() => {
+    if (window.innerWidth < 768 || hasInitializedWindowPositionRef.current) return;
+
+    const frameId = window.requestAnimationFrame(() => {
+      const shell = shellRef.current;
+      if (!shell || hasInitializedWindowPositionRef.current) return;
+
+      const rect = shell.getBoundingClientRect();
+      const maxX = Math.max(16, window.innerWidth - rect.width - 16);
+      const maxY = Math.max(16, window.innerHeight - rect.height - 16);
+      setWindowPosition({
+        x: Math.min(Math.max(16, (window.innerWidth - rect.width) / 2), maxX),
+        y: Math.min(Math.max(16, (window.innerHeight - rect.height) / 2), maxY),
+      });
+      hasInitializedWindowPositionRef.current = true;
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, []);
+
+  useEffect(() => {
+    const keepWindowVisible = (): void => {
+      if (window.innerWidth < 768) return;
+      const shell = shellRef.current;
+      if (!shell || !hasInitializedWindowPositionRef.current) return;
+
+      const rect = shell.getBoundingClientRect();
+      const maxX = Math.max(16, window.innerWidth - rect.width - 16);
+      const maxY = Math.max(16, window.innerHeight - rect.height - 16);
+      setWindowPosition(previous => ({
+        x: Math.min(Math.max(16, previous.x), maxX),
+        y: Math.min(Math.max(16, previous.y), maxY),
+      }));
+    };
+
+    window.addEventListener('resize', keepWindowVisible);
+    return () => window.removeEventListener('resize', keepWindowVisible);
   }, []);
 
   /* ── Create project & run strategy analysis ───────────────────── */
@@ -171,8 +322,15 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             name: brandName,
-            stage: 'strategy',
-            brief: { brandName, goal, audience, industry, workflowPath, carriers: selectedCarriers },
+            brief: {
+              brandName,
+              objective: goal,
+              audience,
+              industry,
+              workflowPath,
+              carriers: selectedCarriers,
+              smartMode,
+            },
           }),
         });
         if (!createRes.ok) {
@@ -181,8 +339,8 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
           return;
         }
         const createData = await createRes.json();
-        proj = createData.project;
-        setProject(proj);
+        proj = createData.project as BrandIpProject;
+        await applyProject(proj, false);
         setProjects(prev => [proj!, ...prev]);
       }
 
@@ -225,7 +383,49 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
                 progress = Math.min(85, progress + 2);
                 setAnalysisProgress(progress);
               } else if (evt.type === 'result') {
-                setStrategyText(evt.content ?? '');
+                const result = evt.result as {
+                  summary?: string;
+                  directions?: BrandIpDirection[];
+                  immutableCore?: BrandIpImmutableCore[];
+                  controlledVariables?: BrandIpControlledVariable[];
+                } | undefined;
+                if (result) {
+                  const nextBrief: BrandIpBrief = {
+                    brandName,
+                    objective: goal,
+                    audience,
+                    industry,
+                    workflowPath,
+                    carriers: selectedCarriers,
+                    smartMode,
+                  };
+                  setStrategyText(result.summary ?? '');
+                  setDirections(result.directions ?? []);
+                  setSelectedDirection(result.directions?.[0]?.id ?? null);
+                  setProject(prev => prev ? {
+                    ...prev,
+                    brief: nextBrief,
+                    directions: result.directions ?? [],
+                    immutableCore: result.immutableCore ?? [],
+                    controlledVariables: result.controlledVariables ?? [],
+                    currentStage: 'role-direction',
+                  } : prev);
+                  const saveRes = await fetch('/api/brand-ip/projects', {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      projectId: proj!.id,
+                      brief: nextBrief,
+                      directions: result.directions ?? [],
+                      immutableCore: result.immutableCore ?? [],
+                      controlledVariables: result.controlledVariables ?? [],
+                    }),
+                  });
+                  if (saveRes.ok) {
+                    const saved = await saveRes.json() as { project?: BrandIpProject };
+                    if (saved.project) await applyProject(saved.project, false);
+                  }
+                }
                 setAnalysisProgress(95);
               } else if (evt.type === 'error') {
                 showToast(evt.message ?? '策略分析出错');
@@ -247,110 +447,149 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
       showToast('网络错误，请重试');
       setIsAnalyzing(false);
     }
-  }, [brandName, goal, audience, industry, workflowPath, selectedCarriers, smartMode, project, showToast]);
+  }, [applyProject, brandName, goal, audience, industry, workflowPath, selectedCarriers, smartMode, project, showToast]);
 
   /* ── Confirm direction ─────────────────────────────────────────── */
   const handleConfirmDirection = useCallback(async () => {
     if (!selectedDirection || !project) return;
     try {
-      await fetch('/api/brand-ip/projects', {
+      const res = await fetch('/api/brand-ip/projects', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           projectId: project.id,
-          updates: { confirmedDirectionId: selectedDirection, stage: 'visual-system' },
+          confirmedDirectionId: selectedDirection,
         }),
       });
-      setConfirmedDirection(true);
-      setProject(prev => prev ? { ...prev, confirmedDirectionId: selectedDirection, stage: 'visual-system' } : prev);
-      setActiveStage(2);
+      if (!res.ok) throw new Error('confirm_failed');
+      const data = await res.json() as { project?: BrandIpProject };
+      if (!data.project) throw new Error('project_missing');
+      await applyProject(data.project, false);
+      await loadProjects();
       showToast('方向已锁定，进入视觉系统阶段');
     } catch {
       showToast('确认失败，请重试');
     }
-  }, [selectedDirection, project, showToast]);
+  }, [applyProject, loadProjects, project, selectedDirection, showToast]);
 
   /* ── Generate asset ────────────────────────────────────────────── */
-  const handleGenerateAsset = useCallback(async (assetType: string) => {
-    if (!project) {
-      showToast('请先创建项目');
-      return;
-    }
-    if (!confirmedDirection) {
+  const handleGenerateAsset = useCallback(async () => {
+    if (!project || !selectedDirection) {
       showToast('请先确认角色方向');
       return;
     }
+    const direction = directions.find(item => item.id === selectedDirection);
     setGeneratingAsset(true);
+    setAssetProgress(0);
+    setAssetLabel('正在提交生成任务');
     try {
       const res = await fetch('/api/brand-ip/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           projectId: project.id,
-          prompt: `${brandName} 品牌IP角色标准图，${directions.find(d => d.id === selectedDirection)?.name ?? ''}风格`,
-          assetType,
+          prompt: `${brandName} 品牌IP角色标准图，${direction?.name ?? ''}。${direction?.concept ?? ''}`,
+          aspectRatio: '1:1',
         }),
       });
-      if (!res.ok) {
-        showToast('生成请求失败');
-        setGeneratingAsset(false);
-        return;
-      }
-      const data = await res.json();
-      if (data.taskId) {
-        showToast('生成任务已提交');
-        // Poll for result
-        for (let i = 0; i < 100; i++) {
-          await new Promise(r => setTimeout(r, 3000));
-          try {
-            const taskRes = await fetch(`/api/brand-ip/tasks?taskId=${data.taskId}`);
-            if (!taskRes.ok) break;
-            const taskData = await taskRes.json();
-            if (taskData.status === 'completed' || taskData.status === 'failed' || taskData.status === 'cancelled') {
-              // Refresh assets
-              const assetRes = await fetch(`/api/brand-ip/assets?projectId=${project.id}`);
-              if (assetRes.ok) {
-                const assetData = await assetRes.json();
-                setAssets(assetData.assets ?? []);
-                setProject(prev => prev ? { ...prev, assets: assetData.assets ?? [] } : prev);
-              }
-              if (taskData.status === 'completed') {
-                showToast('资产生成完成');
-              } else {
-                showToast('生成未完成: ' + (taskData.status === 'failed' ? '失败' : '已取消'));
-              }
-              break;
-            }
-          } catch { /* continue */ }
+      const data = await res.json() as { taskId?: string; error?: string };
+      if (!res.ok || !data.taskId) throw new Error(data.error ?? 'submit_failed');
+      setAssetTaskId(data.taskId);
+      showToast('生成任务已提交');
+
+      for (let i = 0; i < 100; i += 1) {
+        await new Promise<void>(resolve => window.setTimeout(resolve, 3000));
+        const taskRes = await fetch(`/api/brand-ip/tasks?taskId=${encodeURIComponent(data.taskId)}`);
+        if (!taskRes.ok) throw new Error('task_load_failed');
+        const taskData = await taskRes.json() as {
+          task?: { status?: string; progress?: number; label?: string; error?: string };
+        };
+        const task = taskData.task;
+        if (!task) throw new Error('task_missing');
+        setAssetProgress(task.progress ?? 0);
+        setAssetLabel(task.label ?? '正在生成资产');
+        if (task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') {
+          if (task.status === 'completed') {
+            await loadAssets(project.id);
+            showToast('资产生成完成');
+          } else {
+            showToast(task.error ?? (task.status === 'cancelled' ? '任务已取消' : '生成失败'));
+          }
+          break;
         }
       }
     } catch {
-      showToast('生成失败');
+      showToast('生成失败，请稍后重试');
+    } finally {
+      setGeneratingAsset(false);
+      setAssetTaskId(null);
     }
-    setGeneratingAsset(false);
-  }, [project, confirmedDirection, brandName, directions, selectedDirection, showToast]);
+  }, [brandName, directions, loadAssets, project, selectedDirection, showToast]);
+
+  const handleCancelAssetTask = useCallback(async () => {
+    if (!assetTaskId) return;
+    try {
+      await fetch('/api/cancel-task', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskId: assetTaskId }),
+      });
+      setAssetLabel('正在取消任务');
+    } catch {
+      showToast('取消任务失败');
+    }
+  }, [assetTaskId, showToast]);
 
   /* ── Add asset to canvas ───────────────────────────────────────── */
   const handleAddToCanvas = useCallback((url: string) => {
     onAddImages?.([url], { modelName: 'brand-ip', apiProvider: 'server' });
   }, [onAddImages]);
 
-  /* ── Selected direction object ─────────────────────────────────── */
-  const selDir = directions.find(d => d.id === selectedDirection) ?? directions[0];
+  /* ── Display models ───────────────────────────────────────────── */
+  const displayDirections = directions.map(toDisplayDirection);
+  const selDir = displayDirections.find(direction => direction.id === selectedDirection) ?? displayDirections[0];
   const dirTone = selDir?.tone ?? 'warm';
+  const gateItems = [
+    ...((project?.immutableCore ?? []).map(item => ({
+      id: `core-${item.id}`,
+      icon: '◆',
+      name: item.label,
+      note: item.value,
+      status: '已锁定',
+      warning: false,
+    }))),
+    ...((project?.controlledVariables ?? []).map(item => ({
+      id: `variable-${item.id}`,
+      icon: '◌',
+      name: item.label,
+      note: item.value,
+      status: item.risk === 'high' ? '需核验' : '可调整',
+      warning: item.risk === 'high',
+    }))),
+  ];
 
   /* ═══ Render ════════════════════════════════════════════════════ */
   return (
-    <div
-      className="brand-ip-workspace fixed inset-0 z-[201] flex flex-col"
-      data-popup
-      data-floating-panel="brand-ip"
-      style={{ background: 'rgba(0,0,0,.85)', backdropFilter: 'blur(12px)' }}
-    >
-      <div className="bi-shell flex flex-col h-full overflow-hidden" style={{ background: 'radial-gradient(circle at 76% 8%, rgba(225,184,92,.06), transparent 28%), #090a0c' }}>
+    <div className="brand-ip-workspace fixed inset-0 z-[201]" data-popup data-floating-panel="brand-ip">
+      <div
+        ref={shellRef}
+        className="bi-shell flex flex-col overflow-hidden"
+        style={{
+          left: `${windowPosition.x}px`,
+          top: `${windowPosition.y}px`,
+          background: 'radial-gradient(circle at 76% 8%, rgba(225,184,92,.06), transparent 28%), #090a0c',
+        }}
+      >
 
         {/* ═══ Topbar ═══ */}
-        <div className="bi-topbar" style={{ position: 'relative', zIndex: 30 }}>
+        <div
+          className="bi-topbar"
+          onPointerDown={handleWindowPointerDown}
+          onPointerMove={handleWindowPointerMove}
+          onPointerUp={handleWindowPointerUp}
+          onPointerCancel={handleWindowPointerUp}
+        >
+          <GripVertical className="bi-drag-handle" aria-hidden="true" />
           <div className="bi-brand-lockup">
             <div className="bi-brand-mark">无界</div>
             <div>
@@ -397,10 +636,8 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
                 key={p.id}
                 className="w-full text-left rounded-lg px-3 py-2 hover:bg-white/5 transition-colors"
                 onClick={() => {
-                  setProject(p);
-                  setBrandName(p.name);
-                  setActiveStage(p.stage === 'strategy' ? 0 : p.stage === 'role-direction' ? 1 : p.stage === 'visual-system' ? 2 : p.stage === 'application' ? 3 : 4);
                   setShowProjectList(false);
+                  void loadProject(p.id).catch(() => showToast('项目加载失败'));
                 }}
                 style={{ fontSize: 11, color: project?.id === p.id ? '#e0b85c' : '#c6c7ca' }}
               >
@@ -432,7 +669,7 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
                 <button className="bi-secondary-button" onClick={() => setShowAdvanced(true)}>
                   <Settings style={{ width: 13, height: 13 }} /> 高级设置
                 </button>
-                <button className="bi-secondary-button" onClick={() => showToast('导出功能开发中')}>
+                <button className="bi-secondary-button" disabled title="导出将在资产交付包完成后开放">
                   <span>↓</span> 导出
                 </button>
               </div>
@@ -544,13 +781,12 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
                   </div>
                 </div>
 
-                {/* Upload */}
-                <div className="bi-upload-box">
-                  <input type="file" accept="image/*" id="bi-upload" onChange={() => showToast('上传功能复用现有组件')} />
-                  <label htmlFor="bi-upload" className="bi-upload-icon" style={{ cursor: 'pointer' }}>↑</label>
+                {/* Reference upload is unavailable until it is bound to the project asset API. */}
+                <div className="bi-upload-box" aria-disabled="true">
+                  <span className="bi-upload-icon">↑</span>
                   <div>
-                    <strong>上传品牌资料</strong>
-                    <small>Logo、包装、VI 或已有角色图（可选）</small>
+                    <strong>品牌资料导入</strong>
+                    <small>该项目暂未接入资料存储，策略生成仅使用上方文字信息</small>
                   </div>
                 </div>
 
@@ -614,25 +850,22 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
                           {strategyText.slice(0, 500) || '策略分析完成。请查看下方角色方向并选择确认。'}
                           {strategyText.length > 500 ? '...' : ''}
                         </p>
-                        <div className="bi-confidence">
-                          <span>置信度</span>
-                          <div><i style={{ width: '82%' }} /></div>
-                          <strong>82%</strong>
-                        </div>
+                
                       </div>
 
-                      {/* Gate grid */}
                       <div className="bi-gate-grid">
-                        {GATES.map((g, i) => (
-                          <article key={i}>
-                            <span className="bi-gate-icon" style={{ fontSize: 16 }}>{g.icon}</span>
+                        {gateItems.length > 0 ? gateItems.map(item => (
+                          <article key={item.id}>
+                            <span className="bi-gate-icon" style={{ fontSize: 16 }}>{item.icon}</span>
                             <div>
-                              <strong>{g.name}</strong>
-                              <small>{g.note}</small>
+                              <strong>{item.name}</strong>
+                              <small>{item.note}</small>
                             </div>
-                            <b className={g.ok ? '' : 'warning'}>{g.status}</b>
+                            <b className={item.warning ? 'warning' : ''}>{item.status}</b>
                           </article>
-                        ))}
+                        )) : (
+                          <div className="bi-gate-empty">策略完成后将在这里显示不可变核心与受控变量。</div>
+                        )}
                       </div>
                     </>
                   )}
@@ -645,11 +878,11 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
                       <span className="bi-section-index">03</span>
                       <h2>角色方向</h2>
                     </div>
-                    <span className="bi-status-pill">3 个候选</span>
+                    <span className="bi-status-pill">{displayDirections.length} 个候选</span>
                   </div>
 
                   <div className="bi-direction-list">
-                    {directions.map(dir => (
+                    {displayDirections.map(dir => (
                       <button
                         key={dir.id}
                         className={selectedDirection === dir.id ? 'selected' : ''}
@@ -699,7 +932,7 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
                   )}
                   {confirmedDirection && (
                     <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, background: 'rgba(94,229,164,.06)', border: '1px solid rgba(94,229,164,.16)', color: '#5ee5a4', fontSize: 10 }}>
-                      ✓ 方向已锁定：{directions.find(d => d.id === selectedDirection)?.name}
+                      ✓ 方向已锁定：{displayDirections.find(direction => direction.id === selectedDirection)?.name}
                     </div>
                   )}
                 </div>
@@ -761,9 +994,17 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
 
                   {/* View actions */}
                   <div className="bi-view-actions">
-                    <button onClick={() => { const a = assets[0]; if (a) handleAddToCanvas(a.imageUrl); }}>发送到画布</button>
-                    <button onClick={() => showToast('收藏功能开发中')}>收藏</button>
-                    <button onClick={() => showToast('淘汰功能开发中')}>淘汰</button>
+                    <button
+                      disabled={assets.length === 0}
+                      onClick={() => {
+                        const asset = assets[0];
+                        if (asset) handleAddToCanvas(asset.imageUrl);
+                      }}
+                    >
+                      发送到画布
+                    </button>
+                    <button disabled title="资产评价暂未接入项目持久化">收藏</button>
+                    <button disabled title="资产评价暂未接入项目持久化">淘汰</button>
                   </div>
                 </div>
 
@@ -806,8 +1047,13 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
                       </div>
                     </div>
                     {generatingAsset && (
-                      <div style={{ textAlign: 'center', padding: 12, color: '#e0b85c', fontSize: 10 }}>
-                        生成中...
+                      <div className="bi-asset-progress">
+                        <div>
+                          <span>{assetLabel || '正在生成资产'}</span>
+                          <strong>{assetProgress}%</strong>
+                        </div>
+                        <div className="bi-progress-track"><i style={{ width: `${assetProgress}%` }} /></div>
+                        <button className="bi-secondary-button" onClick={handleCancelAssetTask}>取消生成</button>
                       </div>
                     )}
                     {assets.length > 0 && (
@@ -831,7 +1077,7 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
                           className="bi-secondary-button"
                           style={{ height: 32, fontSize: 10, justifyContent: 'center' }}
                           disabled={generatingAsset || !confirmedDirection}
-                          onClick={() => handleGenerateAsset(t)}
+                          onClick={handleGenerateAsset}
                         >
                           {t}
                         </button>
@@ -945,8 +1191,8 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
               </div>
 
               <div className="bi-drawer-actions">
-                <button onClick={() => setShowAdvanced(false)}>取消</button>
-                <button className="save" onClick={() => { setShowAdvanced(false); showToast('设置已保存'); }}>保存设置</button>
+                <button onClick={() => setShowAdvanced(false)}>关闭</button>
+                <button className="save" disabled title="高级参数尚未接入项目配置存储">保存设置</button>
               </div>
             </div>
           </div>

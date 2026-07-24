@@ -164,6 +164,26 @@ function getServerPort(): string {
   return process.env.DEPLOY_RUN_PORT || '5000';
 }
 
+export function extractProviderTaskIds(submitData: Record<string, unknown>): string[] {
+  if (Array.isArray(submitData.taskIds)) {
+    return submitData.taskIds.filter((taskId: unknown): taskId is string => typeof taskId === 'string' && taskId.length > 0);
+  }
+
+  return typeof submitData.taskId === 'string' && submitData.taskId.length > 0 ? [submitData.taskId] : [];
+}
+
+function extractDirectImageUrl(submitData: Record<string, unknown>): string | null {
+  if (typeof submitData.imageUrl === 'string' && submitData.imageUrl.length > 0) {
+    return submitData.imageUrl;
+  }
+
+  const result = submitData.result;
+  if (!result || typeof result !== 'object') return null;
+
+  const resultPayload = result as Record<string, unknown>;
+  return typeof resultPayload.imageUrl === 'string' && resultPayload.imageUrl.length > 0 ? resultPayload.imageUrl : null;
+}
+
 /**
  * Execute the brand IP generation pipeline asynchronously.
  *
@@ -241,11 +261,11 @@ export async function executeBrandIpGeneration(input: ExecuteBrandIpGenerationIn
       return;
     }
 
-    const submitData = await submitResponse.json();
-    const providerTaskIds: string[] = submitData.taskIds || submitData.taskId ? [submitData.taskId] : [];
+    const submitData = await submitResponse.json() as Record<string, unknown>;
+    const providerTaskIds = extractProviderTaskIds(submitData);
     if (providerTaskIds.length === 0) {
       // Synchronous completion — image URL may be in the response
-      const directImageUrl = submitData.imageUrl || submitData.result?.imageUrl;
+      const directImageUrl = extractDirectImageUrl(submitData);
       if (directImageUrl) {
         await completeGeneration(input, resolved, directImageUrl);
         return;

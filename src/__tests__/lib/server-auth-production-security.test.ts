@@ -1,10 +1,22 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, mkdir, rm, writeFile } from 'fs/promises';
+import { readFileSync } from 'fs';
 import { createHash } from 'crypto';
 import os from 'os';
 import path from 'path';
 
 vi.mock('server-only', () => ({}));
+vi.mock('@/lib/db-client', () => ({ isDatabaseConfigured: () => false }));
+vi.mock('@/lib/db-storage', () => ({
+  dbReadUsers: vi.fn(),
+  dbWriteUsers: vi.fn(),
+  dbDeleteUser: vi.fn(),
+  dbDeleteUserData: vi.fn(),
+  dbInitCredits: vi.fn(),
+}));
+vi.mock('@/lib/runtime-settings', () => ({
+  getRuntimeSettings: vi.fn().mockResolvedValue({ initialCredits: 0 }),
+}));
 
 const originalEnvironment = { ...process.env };
 let temporaryDataDir: string | null = null;
@@ -109,6 +121,18 @@ describe.sequential('server authentication production security', () => {
       name: 'Mr.joker',
       role: 'admin',
     });
+  });
+
+  it('keeps bootstrap persistence failures from escaping an authentication read path', () => {
+    const source = readFileSync(path.resolve(process.cwd(), 'src/lib/server-auth.ts'), 'utf8');
+    const bootstrapStart = source.indexOf("if (adminIndex === -1)");
+    const bootstrapEnd = source.indexOf('} else {', bootstrapStart);
+
+    expect(bootstrapStart).toBeGreaterThan(-1);
+    expect(bootstrapEnd).toBeGreaterThan(bootstrapStart);
+    expect(source.slice(bootstrapStart, bootstrapEnd)).toContain('try {');
+    expect(source.slice(bootstrapStart, bootstrapEnd)).toContain('await writeStore(file)');
+    expect(source.slice(bootstrapStart, bootstrapEnd)).toContain('Unable to persist bootstrap administrator');
   });
 
   it('authorizes a newly bootstrapped administrator for the canvas product', async () => {

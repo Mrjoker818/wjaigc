@@ -1318,9 +1318,11 @@ input[type="range"]::-moz-range-thumb {
   --bi-green: #5ee5a4;
   --bi-warning: #ffbd66;
   box-sizing: border-box;
-  background:
-    radial-gradient(circle at 76% 8%, rgba(225,184,92,.06), transparent 28%),
-    var(--bi-bg);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(0,0,0,.56);
+  backdrop-filter: blur(8px);
   color: var(--bi-text);
   font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   font-size: 14px;
@@ -1328,7 +1330,83 @@ input[type="range"]::-moz-range-thumb {
 .brand-ip-workspace * { box-sizing: border-box; }
 .brand-ip-workspace button, .brand-ip-workspace input, .brand-ip-workspace textarea, .brand-ip-workspace select { font: inherit; }
 .brand-ip-workspace button { color: inherit; }
-.brand-ip-workspace .bi-shell { min-height: 100%; background-image: linear-gradient(rgba(255,255,255,.013) 1px, transparent 1px); background-size: 100% 48px; }
+.brand-ip-workspace .bi-shell {
+  position: fixed;
+  width: min(1440px, calc(100vw - 48px));
+  height: min(900px, calc(100dvh - 48px));
+  min-height: min(640px, calc(100dvh - 48px));
+  border: 1px solid var(--bi-line-strong);
+  border-radius: 14px;
+  background-color: var(--bi-bg);
+  background-image: linear-gradient(rgba(255,255,255,.013) 1px, transparent 1px);
+  background-size: 100% 48px;
+  box-shadow: 0 32px 100px rgba(0,0,0,.55), 0 2px 0 rgba(255,255,255,.04) inset;
+  isolation: isolate;
+  contain: layout paint;
+}
+.brand-ip-workspace .bi-drag-handle { width: 16px; color: var(--bi-muted-2); cursor: grab; flex: 0 0 auto; }
+.brand-ip-workspace .bi-topbar { touch-action: none; }
+.brand-ip-workspace .bi-topbar:active .bi-drag-handle { cursor: grabbing; }
+.brand-ip-workspace .bi-shell > .flex-1 { min-height: 0; }
+.brand-ip-workspace .bi-shell .overflow-y-auto { overscroll-behavior: contain; }
+
+@media (max-width: 767px) {
+  .brand-ip-workspace {
+    display: block;
+    padding: 0;
+    background: var(--bi-bg);
+    backdrop-filter: none;
+  }
+
+  .brand-ip-workspace .bi-shell {
+    inset: 0 !important;
+    width: 100vw;
+    height: 100dvh;
+    min-height: 0;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .brand-ip-workspace .bi-topbar {
+    padding-right: 10px;
+  }
+
+  .brand-ip-workspace .bi-topbar-center,
+  .brand-ip-workspace .bi-drag-handle {
+    display: none;
+  }
+
+  .brand-ip-workspace .bi-product {
+    padding: 16px 14px 28px !important;
+  }
+
+  .brand-ip-workspace .bi-product-header {
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .brand-ip-workspace .bi-header-actions {
+    flex: 0 0 auto;
+  }
+
+  .brand-ip-workspace .bi-stage-nav {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .brand-ip-workspace .bi-stage-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .brand-ip-workspace .bi-stage-nav button {
+    flex: 0 0 auto;
+  }
+
+  .brand-ip-workspace .bi-content-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 
 /* Topbar */
 .brand-ip-workspace .bi-topbar {
@@ -1437,10 +1515,6 @@ input[type="range"]::-moz-range-thumb {
 .brand-ip-workspace .bi-summary-top span { color: var(--bi-muted); font-size: 9px; }
 .brand-ip-workspace .bi-summary-top strong { color: var(--bi-gold-bright); font-size: 10px; }
 .brand-ip-workspace .bi-summary-card p { color: #a0a2a7; font-size: 10px; line-height: 1.7; margin: 10px 0 12px; }
-.brand-ip-workspace .bi-confidence { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 9px; font-size: 8px; color: #777a80; }
-.brand-ip-workspace .bi-confidence div { height: 3px; background: rgba(255,255,255,.06); border-radius: 2px; overflow: hidden; }
-.brand-ip-workspace .bi-confidence div i { display: block; height: 100%; background: linear-gradient(90deg, #aa7e31, var(--bi-gold-bright)); transition: width .8s; }
-.brand-ip-workspace .bi-confidence strong { color: var(--bi-gold-bright); font-size: 10px; }
 
 /* Gate grid */
 .brand-ip-workspace .bi-gate-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin-top: 9px; }
