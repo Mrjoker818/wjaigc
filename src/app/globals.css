@@ -1318,11 +1318,7 @@ input[type="range"]::-moz-range-thumb {
   --bi-green: #5ee5a4;
   --bi-warning: #ffbd66;
   box-sizing: border-box;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  background: rgba(0,0,0,.56);
-  backdrop-filter: blur(8px);
+  pointer-events: none;
   color: var(--bi-text);
   font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   font-size: 14px;
@@ -1343,7 +1339,14 @@ input[type="range"]::-moz-range-thumb {
   box-shadow: 0 32px 100px rgba(0,0,0,.55), 0 2px 0 rgba(255,255,255,.04) inset;
   isolation: isolate;
   contain: layout paint;
+  pointer-events: auto;
 }
+.brand-ip-workspace .bi-shell.is-minimized {
+  width: min(420px, calc(100vw - 32px));
+  height: auto;
+  min-height: 0;
+}
+.brand-ip-workspace .bi-shell.is-minimized > :not(.bi-topbar) { display: none; }
 .brand-ip-workspace .bi-drag-handle { width: 16px; color: var(--bi-muted-2); cursor: grab; flex: 0 0 auto; }
 .brand-ip-workspace .bi-topbar { touch-action: none; }
 .brand-ip-workspace .bi-topbar:active .bi-drag-handle { cursor: grabbing; }
@@ -1352,10 +1355,8 @@ input[type="range"]::-moz-range-thumb {
 
 @media (max-width: 767px) {
   .brand-ip-workspace {
-    display: block;
-    padding: 0;
-    background: var(--bi-bg);
-    backdrop-filter: none;
+    inset: 0;
+    pointer-events: auto;
   }
 
   .brand-ip-workspace .bi-shell {
@@ -1471,9 +1472,13 @@ input[type="range"]::-moz-range-thumb {
 .brand-ip-workspace .bi-field > label { display: flex; align-items: center; gap: 4px; color: #bebfc2; font-size: 11px; margin-bottom: 7px; font-weight: 600; }
 .brand-ip-workspace .bi-field label em { color: var(--bi-gold); font-style: normal; }
 .brand-ip-workspace .bi-field label small { color: var(--bi-muted-2); font-size: 9px; font-weight: 400; margin-left: auto; }
-.brand-ip-workspace .bi-field input, .brand-ip-workspace .bi-field textarea { width: 100%; color: #e6e4dc; background: #0d0e11; border: 1px solid var(--bi-line); border-radius: 8px; outline: 0; padding: 10px 11px; font-size: 11px; line-height: 1.65; resize: none; transition: .2s; }
-.brand-ip-workspace .bi-field input:focus, .brand-ip-workspace .bi-field textarea:focus { border-color: rgba(224,184,92,.45); box-shadow: 0 0 0 3px rgba(224,184,92,.06); }
-.brand-ip-workspace .bi-field-hint { display: block; color: #5f6269; font-size: 9px; margin-top: 6px; line-height: 1.5; }
+.brand-ip-workspace .bi-field input, .brand-ip-workspace .bi-field textarea, .brand-ip-workspace .bi-field select { width: 100%; color: #f3f1e9; background: #0d0e11; border: 1px solid var(--bi-line); border-radius: 8px; outline: 0; padding: 10px 11px; font-size: 13px; line-height: 1.55; resize: none; transition: border-color .2s, box-shadow .2s; }
+.brand-ip-workspace .bi-field select { min-height: 42px; appearance: auto; cursor: pointer; }
+.brand-ip-workspace .bi-field select option, .brand-ip-workspace .bi-setting-group select option { background: #111216; color: #f3f1e9; }
+.brand-ip-workspace .bi-field select option:checked, .brand-ip-workspace .bi-setting-group select option:checked { background: #2b2415; color: #f6d989; }
+.brand-ip-workspace .bi-field input:focus, .brand-ip-workspace .bi-field textarea:focus, .brand-ip-workspace .bi-field select:focus, .brand-ip-workspace .bi-setting-group select:focus { border-color: rgba(224,184,92,.7); box-shadow: 0 0 0 3px rgba(224,184,92,.14); }
+.brand-ip-workspace .bi-field input:disabled, .brand-ip-workspace .bi-field textarea:disabled, .brand-ip-workspace .bi-field select:disabled { cursor: not-allowed; color: #aeb0b5; opacity: .7; }
+.brand-ip-workspace .bi-field-hint { display: block; color: #a9abb0; font-size: 11px; margin-top: 6px; line-height: 1.5; }
 
 /* Path grid */
 .brand-ip-workspace .bi-path-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }

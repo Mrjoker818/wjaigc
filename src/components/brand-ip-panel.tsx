@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect, type PointerEvent } from 'react';
-import { X, Settings, Sparkles, Square, GripVertical } from 'lucide-react';
+import { X, Settings, Sparkles, Square, GripVertical, Minus, Maximize2 } from 'lucide-react';
 
 /* ================================================================
    品牌 IP 设计工场 — 参考原型还原的黑金三栏工作台
@@ -172,6 +172,7 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
   const [assetProgress, setAssetProgress] = useState(0);
   const [assetLabel, setAssetLabel] = useState('');
   const [assetTaskId, setAssetTaskId] = useState<string | null>(null);
+  const [isMinimized, setIsMinimized] = useState(false);
 
   // Each catalog is filtered by the server for the current authenticated user.
   const [chatModels, setChatModels] = useState<BrandIpModelOption[]>([]);
@@ -565,6 +566,7 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
       setAssetTaskId(data.taskId);
       showToast('生成任务已提交');
 
+      let receivedTerminalStatus = false;
       for (let i = 0; i < 100; i += 1) {
         await new Promise<void>(resolve => window.setTimeout(resolve, 3000));
         const taskRes = await fetch(`/api/brand-ip/tasks?taskId=${encodeURIComponent(data.taskId)}`);
@@ -577,6 +579,7 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
         setAssetProgress(task.progress ?? 0);
         setAssetLabel(task.label ?? '正在生成资产');
         if (task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') {
+          receivedTerminalStatus = true;
           if (task.status === 'completed') {
             await loadAssets(project.id);
             showToast('资产生成完成');
@@ -585,6 +588,11 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
           }
           break;
         }
+      }
+
+      if (!receivedTerminalStatus) {
+        setAssetLabel('任务状态查询超时');
+        showToast('任务仍可能在后台执行，请稍后重新打开项目查看资产');
       }
     } catch {
       showToast('生成失败，请稍后重试');
@@ -638,10 +646,10 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
 
   /* ═══ Render ════════════════════════════════════════════════════ */
   return (
-    <div className="brand-ip-workspace fixed inset-0 z-[201]" data-popup data-floating-panel="brand-ip">
+    <div className="brand-ip-workspace fixed z-[201]" data-popup data-floating-panel="brand-ip">
       <div
         ref={shellRef}
-        className="bi-shell flex flex-col overflow-hidden"
+        className={`bi-shell flex flex-col overflow-hidden${isMinimized ? ' is-minimized' : ''}`}
         style={{
           left: `${windowPosition.x}px`,
           top: `${windowPosition.y}px`,
@@ -682,6 +690,13 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
           <div className="bi-top-actions">
             <button className="bi-icon-button" onClick={() => setShowProjectList(s => !s)} title="项目列表">
               <Sparkles style={{ width: 15, height: 15 }} />
+            </button>
+            <button
+              className="bi-icon-button"
+              onClick={() => setIsMinimized(current => !current)}
+              title={isMinimized ? '恢复窗口' : '最小化窗口'}
+            >
+              {isMinimized ? <Maximize2 style={{ width: 15, height: 15 }} /> : <Minus style={{ width: 16, height: 16 }} />}
             </button>
             <button className="bi-icon-button" onClick={onClose} title="关闭">
               <X style={{ width: 16, height: 16 }} />
