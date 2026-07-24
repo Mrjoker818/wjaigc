@@ -72,6 +72,15 @@ interface BrandIpModelOption {
   label: string;
 }
 
+interface BrandIpTaskSnapshot {
+  status?: string;
+  progress?: number;
+  label?: string;
+  error?: string;
+}
+
+const BRAND_TASK_TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled', 'timeout']);
+
 /* ── Constants ──────────────────────────────────────────────────── */
 const STAGES = [
   { num: '01', name: '品牌目标', title: 'IP策略一页纸', desc: '先锁定IP在品牌中的任务，再进入造型设计。', items: ['品牌角色与第一用途', '受众任务与使用场景', '竞争区隔与首发范围', '成功指标与设计边界'] },
@@ -186,6 +195,9 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
   const shellRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ offsetX: number; offsetY: number } | null>(null);
   const hasInitializedWindowPositionRef = useRef(false);
+  const isMountedRef = useRef(true);
+  const taskPollingRef = useRef<number | null>(null);
+  const trackingTaskIdRef = useRef<string | null>(null);
   const [windowPosition, setWindowPosition] = useState({ x: 0, y: 0 });
 
   /* ── Toast helper ──────────────────────────────────────────────── */
@@ -201,7 +213,86 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
     setAssets(data.assets ?? []);
   }, []);
 
+  const stopTrackingAssetTask = useCallback((): void => {
+    if (taskPollingRef.current !== null) {
+      window.clearTimeout(taskPollingRef.current);
+      taskPollingRef.current = null;
+    }
+    trackingTaskIdRef.current = null;
+  }, []);
+
+  const trackAssetTask = useCallback((taskId: string, projectId: string): void => {
+    stopTrackingAssetTask();
+    trackingTaskIdRef.current = taskId;
+    setAssetTaskId(taskId);
+    setGeneratingAsset(true);
+
+    let attempts = 0;
+    const poll = async (): Promise<void> => {
+      if (!isMountedRef.current || trackingTaskIdRef.current !== taskId) return;
+      try {
+        const response = await fetch(`/api/brand-ip/tasks?taskId=${encodeURIComponent(taskId)}`);
+        if (!response.ok) throw new Error('task_load_failed');
+        const data = await response.json() as { task?: BrandIpTaskSnapshot };
+        const task = data.task;
+        if (!task) throw new Error('task_missing');
+
+        setAssetProgress(task.progress ?? 0);
+        setAssetLabel(task.label ?? '正在生成资产');
+        if (task.status && BRAND_TASK_TERMINAL_STATUSES.has(task.status)) {
+          stopTrackingAssetTask();
+          setGeneratingAsset(false);
+          setAssetTaskId(null);
+          if (task.status === 'completed') {
+            await loadAssets(projectId);
+            showToast('资产生成完成');
+          } else if (task.status === 'timeout') {
+            showToast(task.error ?? '任务处理超时，请稍后检查项目资产');
+          } else {
+            showToast(task.error ?? (task.status === 'cancelled' ? '任务已取消' : '生成失败'));
+          }
+          return;
+        }
+
+        attempts += 1;
+        if (attempts >= 100) {
+          setGeneratingAsset(false);
+          setAssetLabel('任务仍在后台执行，可重新打开项目恢复追踪');
+          return;
+        }
+      } catch {
+        setGeneratingAsset(false);
+        setAssetLabel('任务连接暂时中断，可重新打开项目恢复追踪');
+        return;
+      }
+
+      taskPollingRef.current = window.setTimeout(() => void poll(), 3000);
+    };
+
+    void poll();
+  }, [loadAssets, showToast, stopTrackingAssetTask]);
+
+  const recoverProjectTask = useCallback(async (projectId: string): Promise<void> => {
+    try {
+      const response = await fetch(`/api/brand-ip/tasks?projectId=${encodeURIComponent(projectId)}`);
+      if (!response.ok) return;
+      const data = await response.json() as { tasks?: Array<BrandIpTaskSnapshot & { taskId?: string; createdAt?: number }> };
+      const task = data.tasks?.[0];
+      if (!task?.taskId) return;
+      setAssetProgress(task.progress ?? 0);
+      setAssetLabel(task.label ?? '已恢复后台生成任务');
+      trackAssetTask(task.taskId, projectId);
+    } catch {
+      // The task remains persisted and can be recovered on the next project open.
+    }
+  }, [trackAssetTask]);
+
   const applyProject = useCallback(async (nextProject: BrandIpProject, shouldLoadAssets = true) => {
+    stopTrackingAssetTask();
+    setGeneratingAsset(false);
+    setAssetTaskId(null);
+    setAssetProgress(0);
+    setAssetLabel('');
     setProject(nextProject);
     setBrandName(nextProject.brief.brandName ?? nextProject.name);
     setGoal(nextProject.brief.objective ?? '');
@@ -222,7 +313,8 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
         setAssets([]);
       }
     }
-  }, [loadAssets]);
+    await recoverProjectTask(nextProject.id);
+  }, [loadAssets, recoverProjectTask, stopTrackingAssetTask]);
 
   const loadProject = useCallback(async (projectId: string) => {
     const res = await fetch(`/api/brand-ip/projects?projectId=${encodeURIComponent(projectId)}`);
@@ -277,6 +369,14 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
   useEffect(() => {
     void loadProjects();
   }, [loadProjects]);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      stopTrackingAssetTask();
+    };
+  }, [stopTrackingAssetTask]);
 
   useEffect(() => {
     const loadModels = async (): Promise<void> => {
@@ -538,17 +638,17 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
   }, [applyProject, loadProjects, project, selectedDirection, showToast]);
 
   /* ── Generate asset ────────────────────────────────────────────── */
-  const handleGenerateAsset = useCallback(async () => {
+  const handleGenerateAsset = useCallback(async (): Promise<void> => {
     if (!project || !selectedDirection) {
       showToast('请先确认角色方向');
       return;
     }
-    const direction = directions.find(item => item.id === selectedDirection);
+    const direction = directions.find((item: BrandIpDirection) => item.id === selectedDirection);
     setGeneratingAsset(true);
     setAssetProgress(0);
     setAssetLabel('正在提交生成任务');
     try {
-      const res = await fetch('/api/brand-ip/generate', {
+      const response = await fetch('/api/brand-ip/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -561,60 +661,33 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
           } : {}),
         }),
       });
-      const data = await res.json() as { taskId?: string; error?: string };
-      if (!res.ok || !data.taskId) throw new Error(data.error ?? 'submit_failed');
-      setAssetTaskId(data.taskId);
+      const data = await response.json() as { taskId?: string; error?: string };
+      if (!response.ok || !data.taskId) throw new Error(data.error ?? 'submit_failed');
       showToast('生成任务已提交');
-
-      let receivedTerminalStatus = false;
-      for (let i = 0; i < 100; i += 1) {
-        await new Promise<void>(resolve => window.setTimeout(resolve, 3000));
-        const taskRes = await fetch(`/api/brand-ip/tasks?taskId=${encodeURIComponent(data.taskId)}`);
-        if (!taskRes.ok) throw new Error('task_load_failed');
-        const taskData = await taskRes.json() as {
-          task?: { status?: string; progress?: number; label?: string; error?: string };
-        };
-        const task = taskData.task;
-        if (!task) throw new Error('task_missing');
-        setAssetProgress(task.progress ?? 0);
-        setAssetLabel(task.label ?? '正在生成资产');
-        if (task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') {
-          receivedTerminalStatus = true;
-          if (task.status === 'completed') {
-            await loadAssets(project.id);
-            showToast('资产生成完成');
-          } else {
-            showToast(task.error ?? (task.status === 'cancelled' ? '任务已取消' : '生成失败'));
-          }
-          break;
-        }
-      }
-
-      if (!receivedTerminalStatus) {
-        setAssetLabel('任务状态查询超时');
-        showToast('任务仍可能在后台执行，请稍后重新打开项目查看资产');
-      }
+      trackAssetTask(data.taskId, project.id);
     } catch {
-      showToast('生成失败，请稍后重试');
-    } finally {
       setGeneratingAsset(false);
-      setAssetTaskId(null);
+      setAssetLabel('提交失败，可调整后重试');
+      showToast('生成任务提交失败，请稍后重试');
     }
-  }, [brandName, directions, loadAssets, project, selectedDirection, selectedImageModel, showToast]);
+  }, [brandName, directions, project, selectedDirection, selectedImageModel, showToast, trackAssetTask]);
 
-  const handleCancelAssetTask = useCallback(async () => {
-    if (!assetTaskId) return;
+  const handleCancelAssetTask = useCallback(async (): Promise<void> => {
+    if (!assetTaskId || !project) return;
     try {
-      await fetch('/api/cancel-task', {
+      const response = await fetch('/api/cancel-task', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ taskId: assetTaskId }),
       });
-      setAssetLabel('正在取消任务');
+      if (!response.ok) throw new Error('cancel_failed');
+      setGeneratingAsset(true);
+      setAssetLabel('取消请求已发送，正在确认任务状态');
+      trackAssetTask(assetTaskId, project.id);
     } catch {
-      showToast('取消任务失败');
+      showToast('取消请求未发送成功，请稍后重试');
     }
-  }, [assetTaskId, showToast]);
+  }, [assetTaskId, project, showToast, trackAssetTask]);
 
   /* ── Add asset to canvas ───────────────────────────────────────── */
   const handleAddToCanvas = useCallback((url: string) => {

@@ -1475,9 +1475,12 @@ input[type="range"]::-moz-range-thumb {
 .brand-ip-workspace .bi-field input, .brand-ip-workspace .bi-field textarea, .brand-ip-workspace .bi-field select { width: 100%; color: #f3f1e9; background: #0d0e11; border: 1px solid var(--bi-line); border-radius: 8px; outline: 0; padding: 10px 11px; font-size: 13px; line-height: 1.55; resize: none; transition: border-color .2s, box-shadow .2s; }
 .brand-ip-workspace .bi-field select { min-height: 42px; appearance: auto; cursor: pointer; }
 .brand-ip-workspace .bi-field select option, .brand-ip-workspace .bi-setting-group select option { background: #111216; color: #f3f1e9; }
+.brand-ip-workspace .bi-field select optgroup, .brand-ip-workspace .bi-setting-group select optgroup { background: #111216; color: #d7bd77; font-weight: 700; }
 .brand-ip-workspace .bi-field select option:checked, .brand-ip-workspace .bi-setting-group select option:checked { background: #2b2415; color: #f6d989; }
+.brand-ip-workspace .bi-field select option:disabled, .brand-ip-workspace .bi-setting-group select option:disabled { color: #858890; background: #17191e; }
 .brand-ip-workspace .bi-field input:focus, .brand-ip-workspace .bi-field textarea:focus, .brand-ip-workspace .bi-field select:focus, .brand-ip-workspace .bi-setting-group select:focus { border-color: rgba(224,184,92,.7); box-shadow: 0 0 0 3px rgba(224,184,92,.14); }
-.brand-ip-workspace .bi-field input:disabled, .brand-ip-workspace .bi-field textarea:disabled, .brand-ip-workspace .bi-field select:disabled { cursor: not-allowed; color: #aeb0b5; opacity: .7; }
+.brand-ip-workspace .bi-field input:disabled, .brand-ip-workspace .bi-field textarea:disabled, .brand-ip-workspace .bi-field select:disabled, .brand-ip-workspace .bi-setting-group select:disabled { cursor: not-allowed; color: #aeb0b5; background: #17191e; opacity: .82; }
+.brand-ip-workspace .bi-field select:invalid { color: #c9b17b; }
 .brand-ip-workspace .bi-field-hint { display: block; color: #a9abb0; font-size: 11px; margin-top: 6px; line-height: 1.5; }
 
 /* Path grid */
@@ -1649,8 +1652,13 @@ input[type="range"]::-moz-range-thumb {
 /* Risk note */
 .brand-ip-workspace .bi-risk-note { display:flex;gap:9px;border:1px solid rgba(255,189,102,.13);background:rgba(255,189,102,.04);border-radius:10px;padding:10px; }
 .brand-ip-workspace .bi-risk-note > span { width:20px;height:20px;display:grid;place-items:center;color:var(--bi-warning);border:1px solid rgba(255,189,102,.24);border-radius:50%;font-weight:700; flex-shrink: 0; }
-.brand-ip-workspace .bi-risk-note p { margin:0;color:#6e7076;font-size:7px;line-height:1.5; }
-.brand-ip-workspace .bi-risk-note strong { display:block;color:#a69277;font-size:8px;margin-bottom:2px; }
+.brand-ip-workspace .bi-risk-note p { margin:0;color:#b7b9bf;font-size:11px;line-height:1.6; }
+.brand-ip-workspace .bi-risk-note strong { display:block;color:#e0c589;font-size:11px;margin-bottom:3px; }
+.brand-ip-workspace .bi-asset-progress { border:1px solid rgba(224,184,92,.2); background:rgba(224,184,92,.05); border-radius:8px; padding:10px; margin-bottom:10px; }
+.brand-ip-workspace .bi-asset-progress > div:first-child { display:flex; align-items:center; justify-content:space-between; gap:12px; color:#d6d7da; font-size:11px; }
+.brand-ip-workspace .bi-asset-progress strong { color:#f4d486; font-size:12px; }
+.brand-ip-workspace .bi-asset-progress .bi-secondary-button { margin-top:9px; color:#e8cd90; border-color:rgba(224,184,92,.28); }
+.brand-ip-workspace .bi-asset-progress .bi-secondary-button:hover { background:rgba(224,184,92,.1); color:#fff2c8; }
 
 /* Advanced drawer */
 .brand-ip-workspace .bi-modal-backdrop { position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(8px);z-index:50;display:flex;justify-content:flex-end; }

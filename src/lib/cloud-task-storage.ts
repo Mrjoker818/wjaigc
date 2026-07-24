@@ -47,6 +47,8 @@ export interface UpdateCloudTaskInput {
   status?: CloudTaskStatus;
   progress?: number;
   label?: string;
+  providerId?: string;
+  model?: string;
   result?: Record<string, unknown>;
   error?: string;
   creditStatus?: CloudTaskCreditStatus;
@@ -172,6 +174,8 @@ export async function updateCloudTask(taskId: string, input: UpdateCloudTaskInpu
   if (input.status !== undefined) { sets.push(`status = $${index++}`); params.push(input.status); }
   if (input.progress !== undefined) { sets.push(`progress = $${index++}`); params.push(input.progress); }
   if (input.label !== undefined) { sets.push(`label = $${index++}`); params.push(input.label); }
+  if (input.providerId !== undefined) { sets.push(`provider_id = $${index++}`); params.push(input.providerId); }
+  if (input.model !== undefined) { sets.push(`model = $${index++}`); params.push(input.model); }
   if (input.result !== undefined) { sets.push(`result = $${index++}`); params.push(JSON.stringify(input.result)); }
   if (input.error !== undefined) { sets.push(`error = $${index++}`); params.push(input.error); }
   if (input.creditStatus !== undefined) { sets.push(`credit_status = $${index++}`); params.push(input.creditStatus); }
