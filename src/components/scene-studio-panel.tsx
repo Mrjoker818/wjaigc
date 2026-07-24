@@ -1363,6 +1363,14 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
   // Undo/Redo system
   const MAX_SCENE_HISTORY = 50;
   const sceneHistoryRef = useRef<{ objects: SceneObject[]; lights: SceneLight[] }[]>([]);
+  // P2 fix: 追踪通过 createObjectURL 创建的 blob URL，组件卸载时统一 revoke 防内存泄漏
+  const localBlobUrlsRef = useRef<string[]>([]);
+  useEffect(() => {
+    return () => {
+      localBlobUrlsRef.current.forEach(u => URL.revokeObjectURL(u));
+      localBlobUrlsRef.current = [];
+    };
+  }, []);
   const sceneHistoryIdxRef = useRef(-1);
   const isUndoRedoRef = useRef(false); // 防止 undo/redo 操作自身记录历史
 
@@ -1560,6 +1568,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
 
   const addModelObject = useCallback((file: File) => {
     const url = URL.createObjectURL(file);
+    localBlobUrlsRef.current.push(url); // P2 fix: 记录 blob URL 供 unmount 时清理
     const id = `obj_model_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const name = file.name.replace(/\.(glb|gltf)$/i, '');
     const newObj: SceneObject = {

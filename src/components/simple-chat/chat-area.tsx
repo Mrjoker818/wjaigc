@@ -1083,7 +1083,14 @@ export default function ChatArea({
       localStorage.setItem('wujie_canvas_bridge', JSON.stringify(merged));
       const toast = document.createElement('div');
       toast.className = 'fixed bottom-20 right-6 z-[9999] bg-blue-600 text-white px-4 py-3 rounded-lg shadow-lg cursor-pointer hover:bg-blue-700 transition-colors text-sm flex items-center gap-2';
-      toast.innerHTML = `<span>已添加 ${imageUrls.length} 张图片</span><span class="underline">前往画布查看</span>`;
+      // P3 fix: 用 DOM API 构建子节点，避免 innerHTML 拼接（低风险但非最佳实践）
+      const span1 = document.createElement('span');
+      span1.textContent = `已添加 ${imageUrls.length} 张图片`;
+      const span2 = document.createElement('span');
+      span2.className = 'underline';
+      span2.textContent = '前往画布查看';
+      toast.appendChild(span1);
+      toast.appendChild(span2);
       toast.onclick = () => { window.open('/', '_blank'); toast.remove(); };
       document.body.appendChild(toast);
       setTimeout(() => toast.remove(), 8000);

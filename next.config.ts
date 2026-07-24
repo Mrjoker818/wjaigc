@@ -11,7 +11,40 @@ const nextConfig: NextConfig = {
     '@langchain/openai',
     'coze-coding-dev-sdk',
     'dotenv',
+    // P0 fix: native .node binaries must not be bundled by webpack
+    '@napi-rs/canvas',
   ],
+  async headers() {
+    return [
+      {
+        source: '/(.*)',
+        headers: [
+          // P1 fix: 基础安全响应头
+          { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          // 权限策略：关闭不需要的高危浏览器 API（保留 camera/microphone 供画布工具使用）
+          { key: 'Permissions-Policy', value: 'geolocation=(), payment=()' },
+          // 宽松 CSP：允许 Next.js 正常运行（unsafe-inline/unsafe-eval）同时阻断最高危注入
+          {
+            key: 'Content-Security-Policy',
+            value: [
+              "default-src 'self'",
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net",
+              "style-src 'self' 'unsafe-inline' https://fonts.googleapis.cn https://fonts.googleapis.com",
+              "img-src * data: blob:",
+              "media-src * blob:",
+              "connect-src * ws: wss:",
+              "font-src 'self' data: https://fonts.gstatic.cn https://fonts.gstatic.com",
+              "worker-src 'self' blob:",
+              "frame-src 'self' blob:",
+              "object-src 'none'",
+            ].join('; '),
+          },
+        ],
+      },
+    ];
+  },
   webpack: (config, { isServer }) => {
     if (isServer) {
       config.externals.push(({ request }: { request?: string }, callback: (error?: Error | null, result?: string) => void) => {
@@ -21,6 +54,8 @@ const nextConfig: NextConfig = {
           || request?.startsWith('@langchain/')
           || request === 'coze-coding-dev-sdk'
           || request === 'dotenv'
+          // P0 fix: 原生 .node 模块必须排除在 webpack bundle 之外
+          || request?.startsWith('@napi-rs/')
         ) {
           callback(null, `commonjs ${request}`);
           return;

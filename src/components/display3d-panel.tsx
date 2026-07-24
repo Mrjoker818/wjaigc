@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import { VenueRegionCanvas, type VenueRegion } from '@/components/venue-region-canvas';
@@ -318,6 +318,14 @@ ${state.customPrompt ? `\n附加要求：${state.customPrompt}` : ''}`;
 export default function Display3DPanel({ isMonochrome = false, onClose, onAddImages }: Props) {
   // === Window drag state ===
   const [isMinimized, setIsMinimized] = useState(false);
+  // P2 fix: 追踪所有通过 createObjectURL 创建的 blob URL，组件卸载时统一 revoke
+  const localBlobUrlsRef = useRef<string[]>([]);
+  useEffect(() => {
+    return () => {
+      localBlobUrlsRef.current.forEach(u => URL.revokeObjectURL(u));
+      localBlobUrlsRef.current = [];
+    };
+  }, []);
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [windowPos, setWindowPos] = useState({ x: 60, y: 60 });
@@ -495,6 +503,7 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
       const file = (e.target as HTMLInputElement).files?.[0];
       if (!file) return;
       const url = URL.createObjectURL(file);
+      localBlobUrlsRef.current.push(url); // P2 fix: 记录 blob URL 供 unmount 时清理
       setAssets(prev => [...prev, { id: Date.now().toString(), type, url, name: file.name }]);
     };
     input.click();

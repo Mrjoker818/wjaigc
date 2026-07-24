@@ -37,7 +37,7 @@ header button:hover { background: rgba(255,255,255,0.2); }
 <div id="container"><div id="diagram"></div></div>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 <script>
-mermaid.initialize({ startOnLoad: true, theme: 'default', securityLevel: 'loose' });
+mermaid.initialize({ startOnLoad: true, theme: 'default', securityLevel: 'strict' });
 const code = ${JSON.stringify(mermaidCode)};
 const container = document.getElementById('diagram');
 // XSS 防护：错误消息文本化后再展示，避免 err.message 注入 innerHTML
