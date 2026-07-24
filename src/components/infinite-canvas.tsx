@@ -39,6 +39,12 @@ import {
   isMeshyThreeDProvider,
 } from '@/lib/three-d-task-performance';
 import { THREE_O_TWO_UPSCALE_MODELS, type ThreeOhTwoUpscaleModelId } from '@/lib/302-upscale-models';
+import {
+  UPSCALE_TARGET_PRESETS,
+  calculateUpscaleTargetDimensions,
+  validateUpscaleTargetDimensions,
+  type UpscaleTargetPreset,
+} from '@/lib/upscale-target';
 import { DISPLAY_DECOMPOSE_SUPPORTED_RATIOS, type DisplayDecomposeRatio } from '@/lib/display-decompose';
 import { getCenteredFloatingPanelPosition } from '@/lib/floating-panel-position';
 import { DEFAULT_IMAGE_TOOLBAR_ITEM_ORDER, normalizeImageToolbarPreferences } from '@/lib/image-toolbar-preferences';
@@ -1205,7 +1211,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [, setUpscaylAvailable] = useState(false);
   const [upscaylSelectedModel] = useState('realesrgan-x4plus');
   const [, setUpscaylChecking] = useState(true);
-  const [upscalePreset, setUpscalePreset] = useState<'2k' | '4k' | '8k'>('2k');
+  const [upscalePreset, setUpscalePreset] = useState<UpscaleTargetPreset>('2x');
   const [showUpscalePresetMenu, setShowUpscalePresetMenu] = useState(false);
   const [upscaleMode, setUpscaleMode] = useState<'lossless' | 'ai'>('lossless'); // 无损放大 / AI放大
   const [selected302UpscaleModel, setSelected302UpscaleModel] = useState<ThreeOhTwoUpscaleModelId>('302-super-upscale-v2');
@@ -6262,25 +6268,29 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         setUpscaleMultiplier(mult);
       }, []);
 
-  // Compute target dimensions from preset (2x/4x/8x multiplier based on actual image size)
-  const getUpscaleTargetDimensions = useCallback((origW: number, origH: number, preset: '2k' | '4k' | '8k') => {
-    // Preset multiplier: 2K=2x, 4K=4x, 8K=8x based on actual image dimensions
-    const multiplier = preset === '2k' ? 2 : preset === '4k' ? 4 : 8;
-    return {
-      w: Math.round(origW * multiplier),
-      h: Math.round(origH * multiplier),
-      multiplier,
-    };
-  }, []);
-
   const handleUpscaleConfirm = useCallback(async () => {
     const img = getActiveImageData();
     if (!img) return;
 
     // Use actual pixel dimensions loaded from the image element
-    const origW = upscaleActualW || img.originalWidth || img.width;
-    const origH = upscaleActualH || img.originalHeight || img.height;
-    const { w: targetW, h: targetH, multiplier: upMultiplier } = getUpscaleTargetDimensions(origW, origH, upscalePreset);
+    const origW = Math.round(upscaleActualW || img.originalWidth || img.width);
+    const origH = Math.round(upscaleActualH || img.originalHeight || img.height);
+    const targetDim = calculateUpscaleTargetDimensions(origW, origH, upscalePreset);
+    const targetValidationError = validateUpscaleTargetDimensions(
+      origW,
+      origH,
+      targetDim.width,
+      targetDim.height,
+    );
+    if (!targetDim.canUpscale) {
+      toast.info('原图已经达到或超过所选分辨率');
+      return;
+    }
+    if (targetValidationError) {
+      toast.error(targetValidationError);
+      return;
+    }
+    const selectedPreset = UPSCALE_TARGET_PRESETS.find(preset => preset.id === upscalePreset);
 
     // 放大结果应保持与原图相同的画布显示尺寸，仅 originalWidth/Height 变大
     const displayW = img.width;
@@ -6307,41 +6317,29 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       const upscaleTimeout = setTimeout(() => upscaleController.abort(), 600000); // 10分钟超时，匹配后端maxDuration
       let res: Response;
       try {
-        if (actualEngine === 'cpu') {
-          // 本地 upscayl：调用 /api/image/upscale (upscayl-node)
-          res = await fetch('/api/image/upscale', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              imageUrl: img.url,
-              scale: upMultiplier,
-              model: upscaylSelectedModel,
-            }),
-            signal: upscaleController.signal,
-          });
-        } else {
-          res = await fetch('/api/image-edit', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              action: 'upscale',
-              imageUrl: img.url,
-              prompt: img.prompt || img.modifyPrompt || '', // 传图片描述给后端，让AI知道原图内容
-              targetWidth: targetW,
-              targetHeight: targetH,
-              aspectRatio: findClosestStandardRatio(origW, origH),
-              model: modelInfo.model,
-              providerId: modelInfo.providerId || getCurrentProviderId(),
-              scale: upMultiplier,
-              originalWidth: origW,
-              originalHeight: origH,
-              upscaleMode: actualEngine === 'ai' ? 'ai' : 'auto',
-              upscaleModel: upscaleMode === 'ai' ? selected302UpscaleModel : undefined,
-              engine: actualEngine,
-            }),
-            signal: upscaleController.signal,
-          });
-        }
+        res = await fetch('/api/image-edit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'upscale',
+            imageUrl: img.url,
+            prompt: img.prompt || img.modifyPrompt || '',
+            targetWidth: targetDim.width,
+            targetHeight: targetDim.height,
+            targetPreset: upscalePreset,
+            aspectRatio: findClosestStandardRatio(origW, origH),
+            model: modelInfo.model,
+            providerId: modelInfo.providerId || getCurrentProviderId(),
+            scale: targetDim.engineScale,
+            originalWidth: origW,
+            originalHeight: origH,
+            upscaleMode: actualEngine === 'ai' ? 'ai' : actualEngine === 'cpu' ? 'cpu' : 'auto',
+            upscaleModel: upscaleMode === 'ai' ? selected302UpscaleModel : undefined,
+            engine: actualEngine,
+            localModel: upscaylSelectedModel,
+          }),
+          signal: upscaleController.signal,
+        });
       } catch (fetchErr: unknown) {
         clearTimeout(upscaleTimeout);
         const err = fetchErr as Error;
@@ -6397,14 +6395,14 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
 
       updateProcessingFrame(placeholderId, { progress: 22, status: upscaleMode === 'lossless' ? '无损放大中（Real-ESRGAN 超分辨率 + AI画质精修）...' : 'AI 放大 + 画质精修中...' });
       let resultUrl: string | null;
-      let actualOutW = targetW;
-      let actualOutH = targetH;
+      let actualOutW = targetDim.width;
+      let actualOutH = targetDim.height;
       let usedModelName = modelInfo.apiDisplayName || modelInfo.model;
 
       let proStrategy = '';
       if (upscaleMode === 'lossless') {
         // 无损放大：可能直接返回URL，也可能降级到异步轮询
-        proStrategy = (data.strategy as string) || '';
+        proStrategy = (data.strategy as string) || (data.engine as string) || '';
         const isFallback = data.fallback === true;
         const fallbackReason = (data.fallbackReason as string) || '';
 
@@ -6415,9 +6413,15 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           resultUrl = await pollForResult(aiTaskId, usedModelName, (progress, status) => {
             updateProcessingFrame(placeholderId, { progress, status });
           });
+        } else if (data.taskId && !data.url && !data.imageUrl) {
+          const aiTaskId = data.taskId as string;
+          usedModelName = String(data.usedModel || modelInfo.model);
+          resultUrl = await pollForResult(aiTaskId, usedModelName, (progress, status) => {
+            updateProcessingFrame(placeholderId, { progress, status });
+          });
         } else {
-          resultUrl = (data.url as string) || null;
-          const proModel = (data.model as string) || 'Real-ESRGAN';
+          resultUrl = (data.url as string) || (data.imageUrl as string) || null;
+          const proModel = String(data.usedModel || data.model || 'Real-ESRGAN');
           const isEnhanced = data.enhanced === true;
           if (proStrategy === 'onnx+ai-enhance') {
             usedModelName = 'Real-ESRGAN+AI精修' + (isFallback ? '(降级)' : '');
@@ -6434,6 +6438,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             if (isEnhanced) usedModelName += '+AI精修';
           }
         }
+        const outSize = data.outputSize as { width: number; height: number } | undefined;
+        actualOutW = outSize?.width || (data.outputWidth as number) || targetDim.width;
+        actualOutH = outSize?.height || (data.outputHeight as number) || targetDim.height;
 
         if (isFallback && fallbackReason) {
           console.warn(`[upscale] 降级提示: ${fallbackReason}`);
@@ -6441,29 +6448,20 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         }
       } else {
         usedModelName = String(data.usedModel || modelInfo.model);
-        resultUrl = (data.imageUrl as string | null) || await pollForResult((data.taskId as string) || '', usedModelName, (progress, status) => {
+        resultUrl = (data.url as string) || (data.imageUrl as string) || await pollForResult((data.taskId as string) || '', usedModelName, (progress, status) => {
           updateProcessingFrame(placeholderId, { progress, status });
         });
         const outSize = data.outputSize as { width: number; height: number } | undefined;
-        actualOutW = outSize?.width || (data.outputWidth as number) || targetW;
-        actualOutH = outSize?.height || (data.outputHeight as number) || targetH;
+        actualOutW = outSize?.width || (data.outputWidth as number) || targetDim.width;
+        actualOutH = outSize?.height || (data.outputHeight as number) || targetDim.height;
       }
       if (resultUrl) {
         updateProcessingFrame(placeholderId, { progress: 96, status: '正在载入结果...' });
         const stableUrl = await awaitStableImageUrl(resultUrl as string);
-        // 无损放大结果异步检测实际尺寸
-        if (upscaleMode === 'lossless') {
-          const imgEl = new Image();
-          imgEl.onload = () => {
-            actualOutW = imgEl.naturalWidth;
-            actualOutH = imgEl.naturalHeight;
-          };
-          imgEl.src = stableUrl;
-        }
         completeProcessingFrame(placeholderId, stableUrl, displayW, displayH, {
           originalWidth: actualOutW,
           originalHeight: actualOutH,
-          modifyPrompt: `${upMultiplier}x ${upscaleMode === 'lossless' ? '无损' : 'HD'} ${upscalePreset.toUpperCase()} 放大`,
+          modifyPrompt: `${selectedPreset?.label || upscalePreset.toUpperCase()} ${upscaleMode === 'lossless' ? '无损超分' : 'AI超分'}`,
           modelName: usedModelName,
           apiProvider: upscaleMode === 'lossless' ? (proStrategy === 'local-upscayl' ? '本地' : proStrategy === 'ai-redraw' ? 'AI重绘' : proStrategy === 'cloud-fal-SeedVR2' ? 'fal.ai' : 'PearAPI') : (modelInfo.providerName || ''),
         }, 'upscale');
@@ -6487,7 +6485,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     }
     setIsEditProcessing(false);
     setActiveTool('none');
-  }, [getActiveImageData, upscaleActualW, upscaleActualH, getUpscaleTargetDimensions, upscalePreset, createProcessingFrameRightOf, getCurrentModel, upscaleEnginePref, updateProcessingFrame, upscaleMode, selected302UpscaleModel, upscaylSelectedModel, getCurrentProviderId, removeProcessingFrame, pollForResult, completeProcessingFrame]);
+  }, [getActiveImageData, upscaleActualW, upscaleActualH, upscalePreset, createProcessingFrameRightOf, getCurrentModel, upscaleEnginePref, updateProcessingFrame, upscaleMode, selected302UpscaleModel, upscaylSelectedModel, getCurrentProviderId, removeProcessingFrame, pollForResult, completeProcessingFrame]);
 
   // Engine selection helper: if pref saved, run directly; else open dialog
   const triggerWithEngine = useCallback((tool: 'upscale'|'removebg'|'svg'|'segment', doExecute: (engine: 'auto'|'ai'|'local') => void) => {
@@ -6512,11 +6510,11 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       const actualH = imgEl.naturalHeight;
       setUpscaleActualW(actualW);
       setUpscaleActualH(actualH);
-      // Auto-select preset based on actual image size
+      // Prefer the next bounded resolution tier instead of multiplying large images.
       const maxDim = Math.max(actualW, actualH);
-      if (maxDim >= 2000) setUpscalePreset('2k'); // Large images: 2x is enough
-      else if (maxDim >= 800) setUpscalePreset('4k'); // Medium: 4x
-      else setUpscalePreset('2k'); // Small: 2x default
+      if (maxDim >= 4096) setUpscalePreset('8k');
+      else if (maxDim >= 800) setUpscalePreset('4k');
+      else setUpscalePreset('2x');
     };
     imgEl.onerror = () => {
       // Fallback to stored dimensions
@@ -6525,9 +6523,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
       setUpscaleActualW(origW);
       setUpscaleActualH(origH);
       const maxDim = Math.max(origW, origH);
-      if (maxDim >= 2000) setUpscalePreset('2k');
+      if (maxDim >= 4096) setUpscalePreset('8k');
       else if (maxDim >= 800) setUpscalePreset('4k');
-      else setUpscalePreset('2k');
+      else setUpscalePreset('2x');
     };
     imgEl.src = img.url;
     });
@@ -10819,10 +10817,15 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           const imgScreenW = editImg.width * zoom;
           const panelX = imgScreenX + imgScreenW / 2;
           const panelY = imgScreenY - 8;
-          const origW = upscaleActualW || editImg.originalWidth || editImg.width;
-          const origH = upscaleActualH || editImg.originalHeight || editImg.height;
-          const targetDim = getUpscaleTargetDimensions(origW, origH, upscalePreset);
+          const origW = Math.round(upscaleActualW || editImg.originalWidth || editImg.width);
+          const origH = Math.round(upscaleActualH || editImg.originalHeight || editImg.height);
+          const targetDim = calculateUpscaleTargetDimensions(origW, origH, upscalePreset);
           const isSizeLoaded = upscaleActualW > 0 && upscaleActualH > 0;
+          const selectedPreset = UPSCALE_TARGET_PRESETS.find(preset => preset.id === upscalePreset);
+          const targetValidationError = isSizeLoaded
+            ? validateUpscaleTargetDimensions(origW, origH, targetDim.width, targetDim.height)
+            : null;
+          const canExecute = isSizeLoaded && targetDim.canUpscale && !targetValidationError;
 
           return (
             <div
@@ -10849,18 +10852,41 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                       isMonochrome ? 'bg-blue-50 text-blue-700 hover:bg-blue-100' : 'bg-[#252525] text-text-bright hover:bg-[#282828]/85'
                     }`}
                   >
-                    {upscalePreset === '2k' ? '2×' : upscalePreset === '4k' ? '4×' : '8×'}
+                    {selectedPreset?.shortLabel || upscalePreset.toUpperCase()}
                     <ChevronDown size={10} />
                   </button>
                   {showUpscalePresetMenu && (
-                    <div className={`absolute top-full left-0 mt-1 py-1 rounded-lg border shadow-xl z-50 min-w-[100px] ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1e1e1e] border-[#444]'}`}>
-                      {(['2k', '4k', '8k'] as const).map(p => {
-                        const pMul = p === '2k' ? 2 : p === '4k' ? 4 : 8;
-                        const pTarget = getUpscaleTargetDimensions(origW, origH, p);
+                    <div className={`absolute top-full left-0 mt-1 py-1 rounded-lg border shadow-xl z-50 min-w-[190px] ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1e1e1e] border-[#444]'}`}>
+                      {UPSCALE_TARGET_PRESETS.map(preset => {
+                        const pTarget = calculateUpscaleTargetDimensions(origW, origH, preset.id);
+                        const presetUnavailable = isSizeLoaded && (
+                          !pTarget.canUpscale
+                          || Boolean(validateUpscaleTargetDimensions(origW, origH, pTarget.width, pTarget.height))
+                        );
                         return (
-                          <button key={p} onClick={(e) => { e.stopPropagation(); setUpscalePreset(p); setShowUpscalePresetMenu(false); }} className={`w-full px-3 py-1.5 text-xs text-left flex items-center justify-between ${isMonochrome ? 'hover:bg-blue-50' : 'hover:bg-gold/10'} ${upscalePreset === p ? (isMonochrome ? 'text-blue-600' : 'text-gold') : isMonochrome ? 'text-gray-600' : 'text-text-bright'}`}>
-                            <span>{pMul}× <span className="opacity-60 ml-1">{pTarget.w}×{pTarget.h}</span></span>
-                            {upscalePreset === p && <span className={isMonochrome ? 'text-blue-500' : 'text-gold'}>✓</span>}
+                          <button
+                            key={preset.id}
+                            disabled={presetUnavailable}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setUpscalePreset(preset.id);
+                              setShowUpscalePresetMenu(false);
+                            }}
+                            className={`w-full px-3 py-1.5 text-xs text-left flex items-center justify-between gap-3 ${
+                              presetUnavailable
+                                ? 'cursor-not-allowed opacity-40'
+                                : isMonochrome ? 'hover:bg-blue-50' : 'hover:bg-gold/10'
+                            } ${
+                              upscalePreset === preset.id
+                                ? (isMonochrome ? 'text-blue-600' : 'text-gold')
+                                : isMonochrome ? 'text-gray-600' : 'text-text-bright'
+                            }`}
+                          >
+                            <span>{preset.label}</span>
+                            <span className="flex items-center gap-2 whitespace-nowrap">
+                              <span className="opacity-60">{pTarget.width}×{pTarget.height}</span>
+                              {upscalePreset === preset.id && <span className={isMonochrome ? 'text-blue-500' : 'text-gold'}>✓</span>}
+                            </span>
                           </button>
                         );
                       })}
@@ -10913,20 +10939,23 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                 </div>
                 <div className={panelDividerClass} />
                 {/* Target dimensions */}
-                <span className={`text-xs tabular-nums font-semibold ${isMonochrome ? 'text-gray-700' : 'text-text-bright'}`}>
-                  {isSizeLoaded ? `${targetDim.w}×${targetDim.h}` : '...'}
+                <span
+                  className={`text-xs tabular-nums font-semibold ${isMonochrome ? 'text-gray-700' : 'text-text-bright'}`}
+                  title={targetValidationError || (targetDim.canUpscale ? '目标输出尺寸' : '原图已达到该分辨率')}
+                >
+                  {isSizeLoaded ? `${targetDim.width}×${targetDim.height}` : '...'}
                 </span>
                 <div className={panelDividerClass} />
                 {/* Execute button */}
                 <button
                   onClick={handleUpscaleConfirm}
-                  disabled={targetDim.multiplier <= 1}
+                  disabled={!canExecute}
                   className={`w-8 h-8 flex items-center justify-center rounded-lg transition-all ${
-                    targetDim.multiplier <= 1
+                    !canExecute
                       ? isMonochrome ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-[#333] text-gold-muted/50 cursor-not-allowed'
                       : isMonochrome ? 'bg-blue-500 text-white hover:bg-blue-600 active:scale-95' : 'bg-gold text-black hover:bg-[#e5c047] active:scale-95'
                   }`}
-                  title="开始放大"
+                  title={targetValidationError || (targetDim.canUpscale ? '开始放大' : '原图已达到该分辨率')}
                 >
                   <Sparkles size={14} />
                 </button>
