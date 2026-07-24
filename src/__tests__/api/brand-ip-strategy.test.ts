@@ -196,6 +196,44 @@ describe('POST /api/brand-ip/strategy', () => {
     expect(mocks.stream).not.toHaveBeenCalled();
   });
 
+  it('rejects an incomplete explicit model selection without invoking the provider', async () => {
+    const response = await POST(request({ model: 'chat-a' }));
+    const events = await readSse(response);
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'error',
+      code: 'MODEL_SELECTION_INCOMPLETE',
+    }));
+    expect(events.at(-1)).toEqual({ type: 'done' });
+    expect(mocks.stream).not.toHaveBeenCalled();
+  });
+
+  it('rejects an explicit model/provider combination that is not authorized', async () => {
+    const response = await POST(request({ model: 'chat-a', providerId: 'provider-b' }));
+    const events = await readSse(response);
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'error',
+      code: 'MODEL_SELECTION_DENIED',
+    }));
+    expect(events.at(-1)).toEqual({ type: 'done' });
+    expect(mocks.stream).not.toHaveBeenCalled();
+  });
+
+  it('uses an exact authorized model/provider combination when the client selects one', async () => {
+    const response = await POST(request({ model: 'chat-a', providerId: 'provider-a' }));
+    const events = await readSse(response);
+    const result = events.find((event: Record<string, unknown>) => event.type === 'result');
+
+    expect(result).toEqual(expect.objectContaining({
+      result: expect.objectContaining({ model: 'chat-a', providerId: 'provider-a' }),
+    }));
+    expect(mocks.config).toHaveBeenCalledWith({
+      apiKey: 'secret-provider-a',
+      modelBaseUrl: 'https://provider-a.example/v1',
+    });
+  });
+
   it('streams model text, validates the strategy result, and ends with done', async () => {
     const response = await POST(request());
     const events = await readSse(response);

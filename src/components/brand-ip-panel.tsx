@@ -65,6 +65,13 @@ interface DisplayDirection {
   traits: string[];
 }
 
+interface BrandIpModelOption {
+  key: string;
+  model: string;
+  providerId: string;
+  label: string;
+}
+
 /* ── Constants ──────────────────────────────────────────────────── */
 const STAGES = [
   { num: '01', name: '品牌目标', title: 'IP策略一页纸', desc: '先锁定IP在品牌中的任务，再进入造型设计。', items: ['品牌角色与第一用途', '受众任务与使用场景', '竞争区隔与首发范围', '成功指标与设计边界'] },
@@ -166,6 +173,14 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
   const [assetLabel, setAssetLabel] = useState('');
   const [assetTaskId, setAssetTaskId] = useState<string | null>(null);
 
+  // Each catalog is filtered by the server for the current authenticated user.
+  const [chatModels, setChatModels] = useState<BrandIpModelOption[]>([]);
+  const [imageModels, setImageModels] = useState<BrandIpModelOption[]>([]);
+  const [selectedChatModelKey, setSelectedChatModelKey] = useState('');
+  const [selectedImageModelKey, setSelectedImageModelKey] = useState('');
+  const selectedChatModel = chatModels.find(model => model.key === selectedChatModelKey) ?? null;
+  const selectedImageModel = imageModels.find(model => model.key === selectedImageModelKey) ?? null;
+
   // Floating-window state
   const shellRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ offsetX: number; offsetY: number } | null>(null);
@@ -263,6 +278,51 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
   }, [loadProjects]);
 
   useEffect(() => {
+    const loadModels = async (): Promise<void> => {
+      try {
+        const [chatResponse, imageResponse] = await Promise.all([
+          fetch('/api/models?type=chat'),
+          fetch('/api/models?type=image'),
+        ]);
+        const [chatData, imageData] = await Promise.all([
+          chatResponse.ok ? chatResponse.json() : Promise.resolve({}),
+          imageResponse.ok ? imageResponse.json() : Promise.resolve({}),
+        ]) as Array<{
+          models?: Array<{ id: string; name?: string; providerId?: string }>;
+          providers?: Array<{ id: string; name?: string }>;
+        }>;
+
+        const mapModels = (data: {
+          models?: Array<{ id: string; name?: string; providerId?: string }>;
+          providers?: Array<{ id: string; name?: string }>;
+        }): BrandIpModelOption[] => {
+          const providerNames = new Map((data.providers ?? []).map(provider => [provider.id, provider.name ?? provider.id]));
+          return (data.models ?? [])
+            .filter(model => Boolean(model.id && model.providerId))
+            .map(model => ({
+              key: `${model.providerId}::${model.id}`,
+              model: model.id,
+              providerId: model.providerId ?? '',
+              label: `${providerNames.get(model.providerId ?? '') ?? model.providerId} / ${model.name ?? model.id}`,
+            }));
+        };
+
+        const nextChatModels = mapModels(chatData);
+        const nextImageModels = mapModels(imageData);
+        setChatModels(nextChatModels);
+        setImageModels(nextImageModels);
+        setSelectedChatModelKey(current => nextChatModels.some(model => model.key === current) ? current : nextChatModels[0]?.key ?? '');
+        setSelectedImageModelKey(current => nextImageModels.some(model => model.key === current) ? current : nextImageModels[0]?.key ?? '');
+      } catch {
+        setChatModels([]);
+        setImageModels([]);
+      }
+    };
+
+    void loadModels();
+  }, []);
+
+  useEffect(() => {
     if (window.innerWidth < 768 || hasInitializedWindowPositionRef.current) return;
 
     const frameId = window.requestAnimationFrame(() => {
@@ -351,6 +411,10 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
         body: JSON.stringify({
           projectId: proj!.id,
           brief: { brandName, goal, audience, industry, workflowPath, carriers: selectedCarriers, smartMode },
+          ...(selectedChatModel ? {
+            model: selectedChatModel.model,
+            providerId: selectedChatModel.providerId,
+          } : {}),
         }),
       });
 
@@ -447,7 +511,7 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
       showToast('网络错误，请重试');
       setIsAnalyzing(false);
     }
-  }, [applyProject, brandName, goal, audience, industry, workflowPath, selectedCarriers, smartMode, project, showToast]);
+  }, [applyProject, brandName, goal, audience, industry, workflowPath, selectedCarriers, smartMode, project, selectedChatModel, showToast]);
 
   /* ── Confirm direction ─────────────────────────────────────────── */
   const handleConfirmDirection = useCallback(async () => {
@@ -490,6 +554,10 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
           projectId: project.id,
           prompt: `${brandName} 品牌IP角色标准图，${direction?.name ?? ''}。${direction?.concept ?? ''}`,
           aspectRatio: '1:1',
+          ...(selectedImageModel ? {
+            model: selectedImageModel.model,
+            providerId: selectedImageModel.providerId,
+          } : {}),
         }),
       });
       const data = await res.json() as { taskId?: string; error?: string };
@@ -524,7 +592,7 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
       setGeneratingAsset(false);
       setAssetTaskId(null);
     }
-  }, [brandName, directions, loadAssets, project, selectedDirection, showToast]);
+  }, [brandName, directions, loadAssets, project, selectedDirection, selectedImageModel, showToast]);
 
   const handleCancelAssetTask = useCallback(async () => {
     if (!assetTaskId) return;
@@ -788,6 +856,21 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
                     <strong>品牌资料导入</strong>
                     <small>该项目暂未接入资料存储，策略生成仅使用上方文字信息</small>
                   </div>
+                </div>
+
+                <div className="bi-field">
+                  <label>策略模型</label>
+                  <select
+                    value={selectedChatModelKey}
+                    onChange={event => setSelectedChatModelKey(event.target.value)}
+                    disabled={chatModels.length === 0 || isAnalyzing}
+                  >
+                    {chatModels.length === 0 ? (
+                      <option value="">暂无可用聊天模型</option>
+                    ) : chatModels.map(model => (
+                      <option key={model.key} value={model.key}>{model.label}</option>
+                    ))}
+                  </select>
                 </div>
 
                 {/* Generate button */}
@@ -1070,6 +1153,20 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
                         ))}
                       </div>
                     )}
+                    <div className="bi-field" style={{ marginBottom: 10 }}>
+                      <label>图像模型</label>
+                      <select
+                        value={selectedImageModelKey}
+                        onChange={event => setSelectedImageModelKey(event.target.value)}
+                        disabled={imageModels.length === 0 || generatingAsset}
+                      >
+                        {imageModels.length === 0 ? (
+                          <option value="">暂无可用图像模型</option>
+                        ) : imageModels.map(model => (
+                          <option key={model.key} value={model.key}>{model.label}</option>
+                        ))}
+                      </select>
+                    </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
                       {['标准角色图', '单色版', '小尺寸', '表情包'].map(t => (
                         <button

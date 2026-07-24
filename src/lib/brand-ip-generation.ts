@@ -91,7 +91,8 @@ export interface ResolveImageModelResult {
 
 /**
  * Resolve an authorized image model for the user.
- * Prefers explicit model/providerId from the request; falls back to first authorized.
+ * Legacy callers without either field use the first authorized model. Explicit
+ * choices must include an exact model/provider pair and never silently fall back.
  */
 export async function resolveImageModel(
   user: User,
@@ -100,26 +101,20 @@ export async function resolveImageModel(
 ): Promise<ResolveImageModelResult | null> {
   const providers = await getApiProviders();
   const authorized = buildAuthorizedImageModels(user, providers);
+  const model = preferredModel?.trim();
+  const providerId = preferredProviderId?.trim();
+  const hasModel = Boolean(model);
+  const hasProviderId = Boolean(providerId);
 
-  if (authorized.length === 0) return null;
-
-  // Try exact match on preferred model + provider
-  if (preferredModel && preferredProviderId) {
-    const match = authorized.find(
-      m => m.modelId === preferredModel && m.providerId === preferredProviderId,
-    );
-    if (match) return { model: match.modelId, providerId: match.providerId };
+  if (!hasModel && !hasProviderId) {
+    const first = authorized[0];
+    return first ? { model: first.modelId, providerId: first.providerId } : null;
   }
 
-  // Try preferred model only
-  if (preferredModel) {
-    const match = authorized.find(m => m.modelId === preferredModel);
-    if (match) return { model: match.modelId, providerId: match.providerId };
-  }
+  if (!hasModel || !hasProviderId) return null;
 
-  // Fall back to first available
-  const first = authorized[0];
-  return { model: first.modelId, providerId: first.providerId };
+  const match = authorized.find(item => item.modelId === model && item.providerId === providerId);
+  return match ? { model: match.modelId, providerId: match.providerId } : null;
 }
 
 // ─── 任务创建 ──────────────────────────────────────────────────────────
@@ -224,10 +219,13 @@ export async function executeBrandIpGeneration(input: ExecuteBrandIpGenerationIn
 
     const resolved = await resolveImageModel(input.user, input.model, input.providerId);
     if (!resolved) {
+      const hasExplicitSelection = Boolean(input.model?.trim() || input.providerId?.trim());
       updateTaskProgress(taskId, {
         status: 'failed',
         progress: 0,
-        error: '没有可用的图像生成模型，请联系管理员配置',
+        error: hasExplicitSelection
+          ? '所选图像生成模型不可用或无权限'
+          : '没有可用的图像生成模型，请联系管理员配置',
       });
       return;
     }
