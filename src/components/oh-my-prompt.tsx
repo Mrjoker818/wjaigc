@@ -482,7 +482,7 @@ export default function OhMyPrompt({
 
   const isGold = themeStyle === 'gold';
   const panelClass = floating 
-    ? 'absolute right-2 bottom-16 w-80 bg-[#1a1a1a] text-white rounded-xl shadow-2xl border border-[#333] overflow-hidden flex flex-col z-50'
+    ? 'fixed right-2 bottom-16 w-80 bg-[#1a1a1a] text-white rounded-xl shadow-2xl border border-[#333] overflow-hidden flex flex-col z-[200]'
     : 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm';
   const innerClass = floating
     ? 'w-full flex flex-col bg-[#1a1a1a]'
