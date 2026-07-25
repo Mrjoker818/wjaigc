@@ -1516,8 +1516,8 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
         const rModels = models.filter((m: ModelInfo) => { const id = m.id.toLowerCase(); return id.includes('removebg') || id.includes('rmbg') || id.includes('birefnet') || id.includes('u2net') || id.includes('isnet') || id.includes('background') || id.includes('matting'); });
         setSelectedModels(rModels.length > 0 ? rModels.map((m: ModelInfo) => m.id) : []);
       } else if (apiKind === 'video') {
-        const vModels = models.filter((m: ModelInfo) => { const id = m.id.toLowerCase(); return id.includes('video') || id.includes('seedance') || id.includes('kling') || id.includes('hailuo') || id.includes('vidu') || id.includes('sora') || id.includes('veo') || id.includes('pika') || id.includes('ray2') || id.includes('ray3') || id.includes('gen-3') || id.includes('gen-4') || id.includes('cogvideo') || id.includes('wan-') || id.includes('runway') || id.includes('luma') || id.includes('mochi') || id.includes('ltx'); });
-        setSelectedModels(vModels.length > 0 ? vModels.map((m: ModelInfo) => m.id) : []);
+        // Backend already filtered to video-only models, auto-select all
+        setSelectedModels(models.map((m: ModelInfo) => m.id));
       } else if (selectedModels.length === 0 && models.length > 0) {
         // Auto-select all models on first discover
         setSelectedModels(models.map((m: ModelInfo) => m.id));

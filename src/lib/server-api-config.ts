@@ -153,51 +153,31 @@ function inferModelType(modelId: string, fallback: 'image' | 'chat' | '3d' | 've
   ) {
     return 'audio';
   }
-  // 视频模型关键词匹配 — 必须在图像之前检查，避免视频模型被误判为图像
+  // 视频模型关键词匹配 — 必须在所有其他类型之前检查
+  // 例外：如果同时包含 image 关键词，归类为图像模型
   if (
-    id.includes('video-generation') ||
-    id.includes('video-gen') ||
-    id.includes('kling-v3-video') ||
-    id.includes('kling-v3-omni-video') ||
-    id.includes('kling-v3-5-video') ||
-    id.includes('kling-video') ||
+    id.includes('video') ||
     id.includes('seedance') ||
-    id.includes('vidu-') ||
-    id.includes('vidu/q') ||
-    id.includes('hailuo-') ||
-    id.includes('minimax-video') ||
-    id.includes('wan2.7-video') ||
-    id.includes('wan2-video') ||
-    id.includes('wan-') && id.includes('video') ||
-    id.includes('veo-') ||
-    id.includes('veo3') ||
-    id.includes('veo2') ||
-    id.includes('gen-3-alpha') ||
-    id.includes('gen-3-turbo') ||
-    id.includes('gen-4') ||
-    id.includes('gen-2') ||
-    id.includes('pika-') ||
-    id.includes('ray2') ||
-    id.includes('ray3') ||
-    id.includes('sora-2') ||
+    id.includes('kling') ||
+    id.includes('hailuo') ||
+    id.includes('vidu') ||
     (id.includes('sora') && !id.includes('sorafenib')) ||
-    id.includes('cogvideox') ||
-    id.includes('cog-video') ||
-    id.includes('ltx-video') ||
-    id.includes('mochi-') ||
-    id.includes('hunyuan-video') ||
-    id.includes('open-sora') ||
-    id.includes('pyramid-flow') ||
+    id.includes('veo') ||
+    id.includes('pika') ||
+    id.includes('ray2') || id.includes('ray3') ||
+    id.includes('gen-3') || id.includes('gen-4') || id.includes('gen-2') ||
+    id.includes('cogvideo') || id.includes('cog-video') ||
+    id.includes('wan-') || id.includes('wan2.') || id.includes('wan2-') ||
     id.includes('runway') ||
-    id.includes('luma-') ||
-    id.includes('pika/') ||
-    id.includes('kling-v3') && !id.includes('image') ||
-    id.includes('doubao-seedance') ||
-    id.includes('video-01') ||
-    id.includes('t2v') ||
-    id.includes('i2v') ||
-    id.includes('text-to-video') ||
-    id.includes('image-to-video')
+    id.includes('luma') ||
+    id.includes('mochi') ||
+    id.includes('ltx') ||
+    id.includes('doubao-video') || id.includes('bytedance-video') ||
+    id.includes('minimax-video') ||
+    id.includes('deforum') ||
+    id.includes('text2video') || id.includes('t2v') ||
+    id.includes('image2video') || id.includes('i2v') ||
+    id.includes('pyramid-flow')
   ) {
     // 例外：如果同时包含 image 关键词，则不是视频模型
     if (id.includes('image')) return 'image';
@@ -248,27 +228,8 @@ function inferModelType(modelId: string, fallback: 'image' | 'chat' | '3d' | 've
   ) return 'removebg';
   // 分层模型关键词匹配
   if (id.includes('qwen-image-layered') || id.includes('layer') || id.includes('segment') || id.includes('sam') || id.includes('detection') || id.includes('yolo')) return 'layer';
-  // 3D模型关键词匹配
-  if (id.includes('3d') || id.includes('tripo') || id.includes('meshy') || id.includes('hunyuan')) return '3d';
-  // 视频模型关键词匹配 — 必须在图像之前检查，避免 cogvideo 等被误判
-  if (
-    id.includes('video') ||
-    id.includes('seedance') ||
-    id.includes('kling') ||
-    id.includes('hailuo') ||
-    id.includes('vidu') ||
-    id.includes('sora') ||
-    id.includes('veo') ||
-    id.includes('pika') ||
-    id.includes('ray2') || id.includes('ray3') ||
-    id.includes('gen-3') || id.includes('gen-4') ||
-    id.includes('cogvideo') ||
-    id.includes('wan-') ||
-    id.includes('runway') ||
-    id.includes('luma') ||
-    id.includes('mochi') ||
-    id.includes('ltx')
-  ) return 'video';
+  // 3D模型关键词匹配 — 移除 hunyuan（hunyuan-video 已在上面被正确归类为视频）
+  if (id.includes('3d') || id.includes('tripo') || id.includes('meshy') || id.includes('hunyuan-3d') || id.includes('hunyuan3d')) return '3d';
   // 图像模型关键词匹配 — 必须在 chat 之前检查，因为有些模型名同时包含 gpt+image
   if (
     id.includes('image') ||
@@ -338,11 +299,15 @@ function inferModelType(modelId: string, fallback: 'image' | 'chat' | '3d' | 've
 
 function formatModel(model: Record<string, unknown>, provider: ApiProvider): ModelInfo {
   const id = String(model.id || model.name || '').trim();
+  const providerType = modelTypeForProvider(provider);
+  // 对于 video/audio 类型提供商，未知模型不应回退为该类型（否则 LLM/图像模型会通过视频过滤）
+  // 改为回退为 'chat'，这样只有被 inferModelType 明确识别为 video 的模型才会出现在列表中
+  const fallback = (providerType === 'video' || providerType === 'audio') ? 'chat' : providerType;
   return {
     id,
     name: id.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
     providerId: provider.id,
-    type: inferModelType(id, modelTypeForProvider(provider)),
+    type: inferModelType(id, fallback),
     owned_by: typeof model.owned_by === 'string' ? model.owned_by : undefined,
   };
 }
@@ -605,16 +570,14 @@ export async function discoverModelsForCredentials(
     const models = rawModels
       .map((m: Record<string, unknown>) => formatModel(m, probeProvider))
       .filter((m: ModelInfo) => m.id && (
-        // For general/universal/vectorize/layer/upscaler/removebg/video/audio: show all models (admin picks what they need)
+        // For general/universal/vectorize/layer/upscaler/removebg: show all models (admin picks what they need)
         modelType === 'universal' ||
         modelType === 'general' ||
         modelType === 'vectorize' ||
         modelType === 'layer' ||
         modelType === 'upscaler' ||
         modelType === 'removebg' ||
-        modelType === 'video' ||
-        modelType === 'audio' ||
-        // For image/chat/3d: also show other types so admin can pick cross-type models
+        // For image/chat/3d/video/audio: only show models matching the selected type
         m.type === modelType
       ));
 

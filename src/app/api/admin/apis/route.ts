@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
           const result = await discoverModelsForCredentials(
             existing.baseUrl,
             existing.apiKey,
-            (existing.modelType || 'image') as ApiKind,
+            (body.modelType || existing.modelType || 'image') as ApiKind,
           );
           return NextResponse.json(result);
         }
