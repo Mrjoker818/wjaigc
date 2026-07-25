@@ -1,5 +1,13 @@
 # 无界AI — AI 图像生成与协作平台
 
+## 品牌 IP 设计工场
+
+- **前端**: `src/components/brand-ip-panel.tsx`，负责品牌项目、角色方向、策略流、资产预览与高级设置。
+- **项目设置**: 高级设置持久化在项目的 `brief.advanced` 字段；载入项目时需回填该字段，更新复用 `PATCH /api/brand-ip/projects`。
+- **资产生命周期**: `src/app/api/brand-ip/assets/route.ts` 提供项目归属校验后的收藏与归档更新；收藏写入 `metadata.favorite`，淘汰资产状态为 `archived`。
+- **差异化生成**: `src/lib/brand-ip-generation.ts` 的 `BRAND_IP_ASSET_TYPES` 定义标准角色图、单色版、小尺寸、表情包四类输出。生成请求必须携带合法 `assetType`，并由提示词编译器加入对应产出约束，最终写入资产元数据。
+- **策略模型选择**: `POST /api/brand-ip/strategy` 以 `providerId + model` 精确匹配用户已授权的聊天模型；未授权选择必须返回 SSE 错误，不能静默降级到其他模型。
+
 ## 项目概览
 
 这是一个基于 Next.js 16 + React 19 + TypeScript 的 AI 图像与视频生成协作平台，支持无限画布操作、AI 聊天、图像/视频生成与编辑、图生图、PSD/SVG 导出等功能。

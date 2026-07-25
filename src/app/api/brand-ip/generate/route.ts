@@ -3,8 +3,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getRequestUser } from '@/lib/api-auth';
 import { assertBrandIpGenerationAllowed } from '@/lib/brand-ip';
 import {
+  BRAND_IP_ASSET_TYPES,
   createBrandIpGenerationTask,
   executeBrandIpGeneration,
+  type BrandIpAssetType,
 } from '@/lib/brand-ip-generation';
 import { getBrandIpProject } from '@/lib/brand-ip-storage';
 import type { User } from '@/lib/user-types';
@@ -30,6 +32,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       model?: unknown;
       providerId?: unknown;
       aspectRatio?: unknown;
+      assetType?: unknown;
     };
 
     const projectId = typeof body.projectId === 'string' ? body.projectId.trim() : '';
@@ -41,6 +44,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const model = typeof body.model === 'string' ? body.model.trim() : undefined;
     const providerId = typeof body.providerId === 'string' ? body.providerId.trim() : undefined;
     const aspectRatio = typeof body.aspectRatio === 'string' ? body.aspectRatio.trim() : undefined;
+    const assetType = typeof body.assetType === 'string' ? body.assetType.trim() : '';
+    if (!BRAND_IP_ASSET_TYPES.includes(assetType as BrandIpAssetType)) {
+      return NextResponse.json({ error: '不支持的品牌资产类型' }, { status: 400 });
+    }
 
     const project = await getBrandIpProject(projectId, user.id);
     if (!project) return NextResponse.json({ error: '品牌 IP 项目不存在' }, { status: 404 });
@@ -64,6 +71,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       model,
       providerId,
       aspectRatio,
+      assetType: assetType as BrandIpAssetType,
     });
 
     // Fire-and-forget the async generation pipeline.
@@ -80,6 +88,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       model,
       providerId,
       aspectRatio,
+      assetType: assetType as BrandIpAssetType,
     }).catch(() => {
       // Errors are handled inside executeBrandIpGeneration via task-registry.
     });

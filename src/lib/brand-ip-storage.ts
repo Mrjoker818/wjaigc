@@ -321,3 +321,36 @@ export async function listBrandIpAssets(projectId: string, userId: string): Prom
   );
   return (result.rows as unknown as BrandIpAssetRow[]).map(rowToAsset);
 }
+
+export interface UpdateBrandIpAssetInput {
+  status?: BrandIpAsset['status'];
+  metadata?: Record<string, unknown>;
+}
+
+export async function updateBrandIpAsset(
+  assetId: string,
+  projectId: string,
+  userId: string,
+  input: UpdateBrandIpAssetInput,
+): Promise<BrandIpAsset | null> {
+  await ensureBrandIpAssetTables();
+  const existingResult = await execSql(
+    'SELECT * FROM brand_ip_assets WHERE id = $1 AND project_id = $2 AND user_id = $3 LIMIT 1',
+    [assetId, projectId, userId],
+  );
+  const existingRow = existingResult.rows[0] as unknown as BrandIpAssetRow | undefined;
+  if (!existingRow) return null;
+
+  const existing = rowToAsset(existingRow);
+  const nextStatus = input.status ?? existing.status;
+  const nextMetadata = input.metadata === undefined
+    ? existing.metadata
+    : { ...(existing.metadata ?? {}), ...input.metadata };
+
+  const result = await execSql(
+    'UPDATE brand_ip_assets SET status = $1, metadata = $2 WHERE id = $3 AND project_id = $4 AND user_id = $5 RETURNING *',
+    [nextStatus, nextMetadata ? JSON.stringify(nextMetadata) : null, assetId, projectId, userId],
+  );
+  const row = result.rows[0] as unknown as BrandIpAssetRow | undefined;
+  return row ? rowToAsset(row) : null;
+}

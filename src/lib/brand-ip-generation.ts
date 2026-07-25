@@ -16,6 +16,20 @@ import {
 } from '@/lib/task-registry';
 import { saveBrandIpAsset } from '@/lib/brand-ip-storage';
 
+export const BRAND_IP_ASSET_TYPES = ['标准角色图', '单色版', '小尺寸', '表情包'] as const;
+export type BrandIpAssetType = (typeof BRAND_IP_ASSET_TYPES)[number];
+
+const ASSET_TYPE_PROMPTS: Record<BrandIpAssetType, string> = {
+  '标准角色图': '输出完整标准角色设定图：单一主角、正面全身、清晰轮廓、干净纯色背景，优先展现品牌识别元素与角色比例。',
+  '单色版': '输出单色识别版：仅使用单一深色与单一浅色，不使用渐变、纹理或复杂光影，确保轮廓与品牌符号在单色印刷中清晰可辨。',
+  '小尺寸': '输出小尺寸适配版：构图简洁、主体占画面大部分、移除细小装饰，确保在 48px 图标尺寸下仍能识别角色轮廓和核心符号。',
+  '表情包': '输出表情包资产：方形构图、角色半身或头像、表情与动作鲜明、留出清晰边缘，不包含文字、水印或复杂背景。',
+};
+
+function compileAssetPrompt(prompt: string, assetType: BrandIpAssetType): string {
+  return `${prompt}\n\n资产交付类型：${assetType}\n${ASSET_TYPE_PROMPTS[assetType]}`;
+}
+
 export interface CreateBrandIpGenerationTaskInput {
   userId: string;
   userRole: string;
@@ -25,6 +39,7 @@ export interface CreateBrandIpGenerationTaskInput {
   model?: string;
   providerId?: string;
   aspectRatio?: string;
+  assetType: BrandIpAssetType;
 }
 
 export interface BrandIpGenerationTask {
@@ -136,6 +151,7 @@ export async function createBrandIpGenerationTask(input: CreateBrandIpGeneration
       prompt: input.prompt,
       model: input.model,
       providerId: input.providerId,
+      assetType: input.assetType,
     },
   });
 
@@ -155,6 +171,7 @@ export interface ExecuteBrandIpGenerationInput {
   model?: string;
   providerId?: string;
   aspectRatio?: string;
+  assetType: BrandIpAssetType;
 }
 
 const POLL_INTERVAL_MS = 2000;
@@ -219,7 +236,7 @@ export async function executeBrandIpGeneration(input: ExecuteBrandIpGenerationIn
     const port = getServerPort();
 
     const submitBody: Record<string, unknown> = {
-      prompt: input.prompt,
+      prompt: compileAssetPrompt(input.prompt, input.assetType),
       model: resolved.model,
       providerId: resolved.providerId,
       submitOnly: true,
@@ -355,7 +372,10 @@ async function completeGeneration(
     model: resolved.model,
     providerId: resolved.providerId,
     directionId: input.directionId,
-    metadata: { aspectRatio: input.aspectRatio ?? null },
+    metadata: {
+      aspectRatio: input.aspectRatio ?? null,
+      assetType: input.assetType,
+    },
   });
 
   updateTaskProgress(input.taskId, {

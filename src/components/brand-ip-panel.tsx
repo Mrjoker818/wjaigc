@@ -24,6 +24,18 @@ interface BrandIpBrief {
   workflowPath?: number;
   carriers?: number[];
   smartMode?: boolean;
+  advanced?: BrandIpAdvancedSettings;
+}
+
+interface BrandIpAdvancedSettings {
+  role: string;
+  count: string;
+  vibe: string;
+  constraints: string;
+  forbidden: string;
+  autoRisk: boolean;
+  autoApp: boolean;
+  structFirst: boolean;
 }
 
 interface BrandIpDirection {
@@ -55,6 +67,7 @@ interface BrandIpAsset {
   assetType: string;
   version: number;
   createdAt: string;
+  metadata?: { favorite?: boolean };
 }
 interface DisplayDirection {
   id: string;
@@ -302,6 +315,17 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
     setWorkflowPath(nextProject.brief.workflowPath ?? 0);
     setSelectedCarriers(nextProject.brief.carriers ?? [0, 2]);
     setSmartMode(nextProject.brief.smartMode ?? true);
+    const advanced = nextProject.brief.advanced;
+    if (advanced) {
+      setAdvRole(advanced.role);
+      setAdvCount(advanced.count);
+      setAdvVibe(advanced.vibe);
+      setAdvConstraints(advanced.constraints);
+      setAdvForbidden(advanced.forbidden);
+      setAdvAutoRisk(advanced.autoRisk);
+      setAdvAutoApp(advanced.autoApp);
+      setAdvStructFirst(advanced.structFirst);
+    }
     setDirections(nextProject.directions ?? []);
     setSelectedDirection(nextProject.confirmedDirectionId ?? nextProject.directions?.[0]?.id ?? null);
     setConfirmedDirection(Boolean(nextProject.confirmedDirectionId));
@@ -638,8 +662,60 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
     }
   }, [applyProject, loadProjects, project, selectedDirection, showToast]);
 
+  const handleSaveAdvanced = useCallback(async (): Promise<void> => {
+    if (!project) {
+      showToast('请先创建品牌 IP 项目后再保存设置');
+      return;
+    }
+
+    const advanced: BrandIpAdvancedSettings = {
+      role: advRole,
+      count: advCount,
+      vibe: advVibe,
+      constraints: advConstraints.trim(),
+      forbidden: advForbidden.trim(),
+      autoRisk: advAutoRisk,
+      autoApp: advAutoApp,
+      structFirst: advStructFirst,
+    };
+    const brief: BrandIpBrief = { ...project.brief, advanced };
+
+    try {
+      const response = await fetch('/api/brand-ip/projects', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: project.id, brief }),
+      });
+      const data = await response.json() as { project?: BrandIpProject; error?: string };
+      if (!response.ok || !data.project) throw new Error(data.error ?? 'advanced_save_failed');
+      await applyProject(data.project, false);
+      await loadProjects();
+      setShowAdvanced(false);
+      showToast('高级设置已保存');
+    } catch {
+      showToast('高级设置保存失败，请重试');
+    }
+  }, [advAutoApp, advAutoRisk, advConstraints, advCount, advForbidden, advRole, advStructFirst, advVibe, applyProject, loadProjects, project, showToast]);
+
+  const handleAssetAction = useCallback(async (assetId: string, action: 'favorite' | 'archive'): Promise<void> => {
+    if (!project) return;
+    try {
+      const response = await fetch('/api/brand-ip/assets', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: project.id, assetId, action }),
+      });
+      const data = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(data.error ?? 'asset_action_failed');
+      await loadAssets(project.id);
+      showToast(action === 'favorite' ? '资产已收藏' : '资产已淘汰');
+    } catch {
+      showToast(action === 'favorite' ? '收藏失败，请重试' : '淘汰失败，请重试');
+    }
+  }, [loadAssets, project, showToast]);
+
   /* ── Generate asset ────────────────────────────────────────────── */
-  const handleGenerateAsset = useCallback(async (): Promise<void> => {
+  const handleGenerateAsset = useCallback(async (assetType: string): Promise<void> => {
     if (!project || !selectedDirection) {
       showToast('请先确认角色方向');
       return;
@@ -654,7 +730,8 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           projectId: project.id,
-          prompt: `${brandName} 品牌IP角色标准图，${direction?.name ?? ''}。${direction?.concept ?? ''}`,
+          assetType,
+          prompt: `${brandName} 品牌IP${assetType}，${direction?.name ?? ''}。${direction?.concept ?? ''}`,
           aspectRatio: '1:1',
           ...(selectedImageModel ? {
             model: selectedImageModel.model,
@@ -1175,8 +1252,18 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
                     >
                       发送到画布
                     </button>
-                    <button disabled title="资产评价暂未接入项目持久化">收藏</button>
-                    <button disabled title="资产评价暂未接入项目持久化">淘汰</button>
+                    <button
+                      disabled={assets.length === 0 || Boolean(assets[0]?.metadata?.favorite)}
+                      onClick={() => assets[0] && void handleAssetAction(assets[0].id, 'favorite')}
+                    >
+                      {assets[0]?.metadata?.favorite ? '已收藏' : '收藏'}
+                    </button>
+                    <button
+                      disabled={assets.length === 0}
+                      onClick={() => assets[0] && void handleAssetAction(assets[0].id, 'archive')}
+                    >
+                      淘汰
+                    </button>
                   </div>
                 </div>
 
@@ -1263,7 +1350,7 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
                           className="bi-secondary-button"
                           style={{ height: 32, fontSize: 10, justifyContent: 'center' }}
                           disabled={generatingAsset || !confirmedDirection}
-                          onClick={handleGenerateAsset}
+                          onClick={() => void handleGenerateAsset(t)}
                         >
                           {t}
                         </button>
@@ -1378,7 +1465,7 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
 
               <div className="bi-drawer-actions">
                 <button onClick={() => setShowAdvanced(false)}>关闭</button>
-                <button className="save" disabled title="高级参数尚未接入项目配置存储">保存设置</button>
+                <button className="save" onClick={() => void handleSaveAdvanced()}>保存设置</button>
               </div>
             </div>
           </div>

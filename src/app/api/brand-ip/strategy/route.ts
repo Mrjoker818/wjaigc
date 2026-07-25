@@ -273,9 +273,17 @@ export async function POST(request: NextRequest): Promise<Response> {
   if (auth instanceof Response) return auth;
 
   let projectId = '';
+  let requestedModel: string | undefined;
+  let requestedProviderId: string | undefined;
   try {
-    const body = await request.json() as { projectId?: unknown };
+    const body = await request.json() as {
+      projectId?: unknown;
+      model?: unknown;
+      providerId?: unknown;
+    };
     projectId = typeof body.projectId === 'string' ? body.projectId.trim() : '';
+    requestedModel = typeof body.model === 'string' ? body.model.trim() || undefined : undefined;
+    requestedProviderId = typeof body.providerId === 'string' ? body.providerId.trim() || undefined : undefined;
   } catch {
     // Body parsing failed — leave projectId empty for the 400 path
   }
@@ -307,7 +315,14 @@ export async function POST(request: NextRequest): Promise<Response> {
     return createErrorStream('当前账号没有可用的聊天模型', 'NO_AVAILABLE_MODEL');
   }
 
-  const selected = authorizedModels[0];
+  const selected = requestedModel || requestedProviderId
+    ? authorizedModels.find(
+      item => item.modelId === requestedModel && item.providerId === requestedProviderId,
+    )
+    : authorizedModels[0];
+  if (!selected) {
+    return createErrorStream('所选策略模型不可用或未获授权，请重新选择', 'MODEL_NOT_AUTHORIZED');
+  }
   const provider = selected.provider;
 
   const encoder = new TextEncoder();
