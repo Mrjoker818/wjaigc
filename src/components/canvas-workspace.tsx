@@ -3660,30 +3660,13 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
       if (result.success && result.data) {
         const data = result.data;
-        // Store structured vision result for OhMyPrompt component
+        // Store structured vision result for OhMyPrompt component (user picks category there)
         setVisionResult(data);
 
-        // Build bilingual prompt string
-        let promptText = '';
-        if (data.zh?.prompt) {
-          promptText += `【中文提示词】${data.zh.prompt}`;
-        }
-        if (data.en?.prompt) {
-          promptText += `${promptText ? '\n' : ''}【英文提示词】${data.en.prompt}`;
-        }
-        if (data.zh_style_tags?.length || data.en_style_tags?.length) {
-          const zhTags = data.zh_style_tags?.length ? data.zh_style_tags.join(', ') : '';
-          const enTags = data.en_style_tags?.length ? data.en_style_tags.join(', ') : '';
-          promptText += `\n【风格标签】${zhTags}${enTags ? ' | ' + enTags : ''}`;
-        }
-        if (!promptText && data.raw) {
-          promptText = data.raw;
-        }
-
-        if (promptText) {
-          setExternalPrompt(promptText);
-          toast.success('提示词生成成功', {
-            description: data.zh?.title || data.en?.title || '双语提示词已生成',
+        const hasContent = data.zh?.prompt || data.en?.prompt || data.zh_style_tags?.length || data.en_style_tags?.length || data.raw;
+        if (hasContent) {
+          toast.success('识词完成', {
+            description: data.zh?.title || data.en?.title || '关键词已生成，请在灵感工坊中选择发送',
             className: themeStyle === 'monochrome' ? 'bg-white border-blue-500 text-gray-900' : 'bg-[#141414] border-[#d4af37] text-white',
           });
         } else {

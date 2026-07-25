@@ -346,6 +346,33 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Auto-detect fallback: if no model specified, find any vision-capable chat model
+    if (candidates.length === 0 && !resolvedModel && !resolvedProviderId) {
+      const visionPatterns = [
+        /gpt-4o/i, /gpt-4-turbo/i, /gpt-4\./i,
+        /claude-3/i, /claude-4/i,
+        /gemini/i,
+        /qwen-vl/i, /qwen2-vl/i, /qwen2\.5-vl/i, /qvq/i,
+        /glm-4v/i, /glm-4\.6v/i,
+        /internvl/i, /llava/i,
+      ];
+      for (const provider of allProviders) {
+        const found = (provider.selectedModels || []).find((mid: string) =>
+          visionPatterns.some(pat => pat.test(mid))
+        );
+        if (found) {
+          candidates.push({
+            apiKey: provider.apiKey,
+            baseUrl: normalizeApiBaseUrl(provider.baseUrl),
+            model: found,
+            preset: provider.providerPreset,
+            providerName: provider.name,
+          });
+          break;
+        }
+      }
+    }
+
     if (candidates.length === 0) {
       return NextResponse.json({ error: '请在聊天面板选择一个支持图片理解的模型（如 GPT-4o、Gemini、Claude 等）' }, { status: 400 });
     }

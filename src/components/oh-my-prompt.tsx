@@ -33,18 +33,19 @@ function saveSettings(settings: Partial<OmpSettings>) {
 }
 
 // API Functions
-async function analyzeVisionPrompt(imageDataUrl: string): Promise<VisionApiResultData> {
-  const formData = new FormData();
-  // Convert data URL to blob
-  const response = await fetch(imageDataUrl);
-  const blob = await response.blob();
-  formData.append('image', blob, 'image.png');
-  formData.append('mode', 'fast');
-  
-  const res = await fetch('/api/vision-prompt', { method: 'POST', body: formData });
-  if (!res.ok) throw new Error('Vision analysis failed');
+async function analyzeVisionPromptInternal(imageDataUrl: string): Promise<VisionApiResultData> {
+  const res = await fetch('/api/vision-prompt', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ imageUrl: imageDataUrl }), // no model — API auto-detects
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Vision analysis failed');
+  }
   const data = await res.json();
-  return data as VisionApiResultData;
+  if (!data.success) throw new Error(data.error || '分析失败');
+  return data.data as VisionApiResultData;
 }
 
 async function optimizeWithAgent(prompt: string, history: Array<{role:string, content:string}>, signal?: AbortSignal, onChunk?: (text: string) => void): Promise<string> {
@@ -77,19 +78,82 @@ async function optimizeWithAgent(prompt: string, history: Array<{role:string, co
 // ============================================
 // Vision Tab - 识词 (图片关键词提取)
 // ============================================
+interface VisionKeywordCategory {
+  key: string;
+  label: string;
+  hint?: string;
+  text: string;
+}
+
+// Format a structured JSON block (zh_json / en_json) into a readable prompt string
+function formatStructuredJson(json?: Record<string, string | string[]>): string {
+  if (!json) return '';
+  const parts: string[] = [];
+  for (const [, value] of Object.entries(json)) {
+    if (Array.isArray(value)) {
+      if (value.length) parts.push(value.join(', '));
+    } else if (typeof value === 'string' && value.trim()) {
+      parts.push(value.trim());
+    }
+  }
+  return parts.join(', ');
+}
+
+// Build categorized keyword blocks from the rich API result
+function buildVisionCategories(result: VisionApiResultData): VisionKeywordCategory[] {
+  const categories: VisionKeywordCategory[] = [];
+
+  if (result.zh?.prompt) {
+    categories.push({ key: 'zh', label: '中文提示词', hint: result.zh.title, text: result.zh.prompt });
+  }
+  if (result.en?.prompt) {
+    categories.push({ key: 'en', label: '英文提示词', hint: result.en.title, text: result.en.prompt });
+  }
+  if (result.zh_style_tags?.length) {
+    categories.push({ key: 'zh_tags', label: '中文风格标签', text: result.zh_style_tags.join(', ') });
+  }
+  if (result.en_style_tags?.length) {
+    categories.push({ key: 'en_tags', label: '英文风格标签', text: result.en_style_tags.join(', ') });
+  }
+  const zhStruct = formatStructuredJson(result.zh_json);
+  if (zhStruct) {
+    categories.push({ key: 'zh_json', label: '中文结构化描述', hint: '主体/动作/环境/光影等', text: zhStruct });
+  }
+  const enStruct = formatStructuredJson(result.en_json);
+  if (enStruct) {
+    categories.push({ key: 'en_json', label: '英文结构化描述', hint: 'subject/action/lighting…', text: enStruct });
+  }
+  const jsonStruct = formatStructuredJson(result.json_prompt);
+  if (jsonStruct && !zhStruct && !enStruct) {
+    categories.push({ key: 'json', label: '结构化描述', text: jsonStruct });
+  }
+  // legacy backward-compat
+  if (!categories.length && result.keywords?.length) {
+    categories.push({ key: 'keywords', label: '关键词', text: result.keywords.join(', ') });
+  }
+  return categories;
+}
+
 interface VisionTabProps {
   initialImageUrl?: string;
   onInsertPrompt: (prompt: string, negative?: string) => void;
   onOptimizePrompt: (prompt: string, mode: string) => void;
+  externalResult?: VisionApiResultData | null;
+  externalAnalyzing?: boolean;
+  floating?: boolean;
 }
 
-function VisionTab({ initialImageUrl, onInsertPrompt, onOptimizePrompt }: VisionTabProps) {
+function VisionTab({ initialImageUrl, onInsertPrompt, onOptimizePrompt, externalResult, externalAnalyzing, floating }: VisionTabProps) {
   const [imagePreview, setImagePreview] = useState<string>(initialImageUrl || '');
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [result, setResult] = useState<VisionApiResultData | null>(null);
-  const [outputFormat, setOutputFormat] = useState('comma');
-  const [copied, setCopied] = useState(false);
+  const [internalAnalyzing, setInternalAnalyzing] = useState(false);
+  const [internalResult, setInternalResult] = useState<VisionApiResultData | null>(null);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [sentKey, setSentKey] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Prefer external result/state (from canvas right-click flow) if present, else internal
+  const result = externalResult ?? internalResult;
+  const isAnalyzing = externalAnalyzing || internalAnalyzing;
 
   useEffect(() => {
     if (initialImageUrl && !imagePreview) {
@@ -102,44 +166,60 @@ function VisionTab({ initialImageUrl, onInsertPrompt, onOptimizePrompt }: Vision
     const reader = new FileReader();
     reader.onload = (e) => {
       setImagePreview(e.target?.result as string);
-      setResult(null);
+      setInternalResult(null);
     };
     reader.readAsDataURL(file);
   }, []);
 
   const handleAnalyze = useCallback(async () => {
     if (!imagePreview || isAnalyzing) return;
-    setIsAnalyzing(true);
-    setResult(null);
+    setInternalAnalyzing(true);
+    setInternalResult(null);
     try {
-      const data = await analyzeVisionPrompt(imagePreview);
-      setResult(data);
+      const data = await analyzeVisionPromptInternal(imagePreview);
+      setInternalResult(data);
     } catch (error) {
       console.error('Vision analysis error:', error);
-      alert('图片识词失败，请重试');
+      alert(error instanceof Error ? error.message : '图片识词失败，请重试');
     } finally {
-      setIsAnalyzing(false);
+      setInternalAnalyzing(false);
     }
   }, [imagePreview, isAnalyzing]);
 
-  const getFormattedPrompt = useCallback(() => {
-    if (!result?.keywords?.length) return '';
-    const kws = result.keywords;
-    switch(outputFormat) {
-      case 'comma': return kws.join(', ');
-      case 'dot': return kws.map(k => `・${k}`).join('\n');
-      case 'bracket': return kws.map(k => `(${k})`).join(', ');
-      default: return kws.join(', ');
-    }
-  }, [result, outputFormat]);
+  const categories = result ? buildVisionCategories(result) : [];
 
-  const handleCopy = useCallback(async () => {
-    const text = getFormattedPrompt();
-    if (!text) return;
-    await navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }, [getFormattedPrompt]);
+  const handleCopyCategory = useCallback(async (cat: VisionKeywordCategory) => {
+    if (!cat.text) return;
+    try {
+      await navigator.clipboard.writeText(cat.text);
+      setCopiedKey(cat.key);
+      setTimeout(() => setCopiedKey(null), 2000);
+    } catch {
+      // clipboard may be blocked in some contexts — fallback to a hidden textarea
+      const ta = document.createElement('textarea');
+      ta.value = cat.text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); setCopiedKey(cat.key); setTimeout(() => setCopiedKey(null), 2000); } catch {}
+      document.body.removeChild(ta);
+    }
+  }, []);
+
+  const handleSendCategory = useCallback((cat: VisionKeywordCategory) => {
+    if (!cat.text) return;
+    onInsertPrompt(cat.text, result?.negative_prompt);
+    setSentKey(cat.key);
+    setTimeout(() => setSentKey(null), 2000);
+  }, [onInsertPrompt, result?.negative_prompt]);
+
+  const resetTab = useCallback(() => {
+    setImagePreview('');
+    setInternalResult(null);
+  }, []);
+
+  const accent = floating ? '#d4af37' : undefined;
 
   return (
     <div className="h-full flex flex-col p-4 gap-3 overflow-hidden">
@@ -147,7 +227,9 @@ function VisionTab({ initialImageUrl, onInsertPrompt, onOptimizePrompt }: Vision
         {/* Image Upload Area */}
         <div 
           className={`relative border-2 border-dashed rounded-xl transition-all cursor-pointer overflow-hidden
-            ${imagePreview ? 'border-primary/30' : 'border-border hover:border-primary/50 hover:bg-muted/30'}`}
+            ${floating
+              ? (imagePreview ? 'border-[#d4af37]/40' : 'border-[#444] hover:border-[#d4af37]/60 hover:bg-[#222]')
+              : (imagePreview ? 'border-primary/30' : 'border-border hover:border-primary/50 hover:bg-muted/30')}`}
           style={{ minHeight: imagePreview ? '0' : '120px' }}
           onClick={() => fileInputRef.current?.click()}
         >
@@ -160,13 +242,13 @@ function VisionTab({ initialImageUrl, onInsertPrompt, onOptimizePrompt }: Vision
               <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                 <span className="text-white text-xs">点击更换图片</span>
               </div>
-              <button onClick={(e) => { e.stopPropagation(); setImagePreview(''); setResult(null); }}
+              <button onClick={(e) => { e.stopPropagation(); resetTab(); }}
                 className="absolute top-2 right-2 p-1 bg-black/60 rounded-full text-white hover:bg-black/80">
                 <X className="w-3 h-3" />
               </button>
             </div>
           ) : (
-            <div className="flex flex-col items-center justify-center py-8 gap-2 text-muted-foreground">
+            <div className={`flex flex-col items-center justify-center py-8 gap-2 ${floating ? 'text-gray-400' : 'text-muted-foreground'}`}>
               <Upload className="w-8 h-8 opacity-50" />
               <span className="text-xs">点击上传图片，AI自动识别关键词</span>
             </div>
@@ -175,72 +257,92 @@ function VisionTab({ initialImageUrl, onInsertPrompt, onOptimizePrompt }: Vision
 
         {/* Analyze Button */}
         {imagePreview && !isAnalyzing && !result && (
-          <Button onClick={handleAnalyze} className="w-full gap-2">
+          <Button onClick={handleAnalyze} className={`w-full gap-2 ${floating ? 'bg-[#d4af37] text-black hover:bg-[#c9a227]' : ''}`}>
             <Eye className="w-4 h-4" />开始识词
           </Button>
         )}
         
         {isAnalyzing && (
-          <div className="flex items-center justify-center gap-2 py-4 text-muted-foreground">
-            <Loader2 className="w-5 h-5 animate-spin text-primary" />
+          <div className={`flex items-center justify-center gap-2 py-4 ${floating ? 'text-gray-300' : 'text-muted-foreground'}`}>
+            <Loader2 className={`w-5 h-5 animate-spin ${floating ? 'text-[#d4af37]' : 'text-primary'}`} />
             <span className="text-sm">AI正在分析图片...</span>
           </div>
         )}
 
-        {/* Result */}
-        {result && (
+        {/* Result — categorized keyword cards */}
+        {result && !isAnalyzing && (
           <div className="space-y-3">
-            {/* Format selector */}
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">输出格式：</span>
-              <div className="flex gap-1">
-                {[
-                  { v: 'comma', label: '逗号分隔' },
-                  { v: 'dot', label: '要点' },
-                  { v: 'bracket', label: '加权' },
-                ].map(f => (
-                  <button key={f.v} onClick={() => setOutputFormat(f.v)}
-                    className={`px-2 py-0.5 text-xs rounded-md transition-colors
-                      ${outputFormat === f.v ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:bg-muted'}`}>
-                    {f.label}
-                  </button>
-                ))}
-              </div>
+            <div className={`flex items-center justify-between text-xs ${floating ? 'text-gray-400' : 'text-muted-foreground'}`}>
+              <span>识别到 {categories.length} 类关键词，选择需要的发送或复制</span>
+              {typeof result.confidence === 'number' && result.confidence > 0 && (
+                <span className={floating ? 'text-[#d4af37]' : 'text-primary'}>置信度 {Math.round(result.confidence * 100)}%</span>
+              )}
             </div>
 
-            {/* Keywords */}
-            <div className="bg-muted/50 rounded-lg p-3 relative group">
-              <pre className="text-xs text-foreground whitespace-pre-wrap font-mono leading-relaxed">{getFormattedPrompt()}</pre>
-              <button onClick={handleCopy}
-                className="absolute top-2 right-2 p-1.5 rounded-md bg-background/80 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-background">
-                {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5 text-muted-foreground" />}
-              </button>
-            </div>
-
-            {/* Negative Prompt */}
-            {result.negative_prompt && (
-              <div className="bg-destructive/5 rounded-lg p-3">
-                <div className="text-xs font-medium text-destructive mb-1">反向提示词</div>
-                <p className="text-xs text-muted-foreground">{result.negative_prompt}</p>
+            {categories.length === 0 && (
+              <div className={`rounded-lg p-3 text-xs ${floating ? 'bg-[#2a2a2a] text-gray-400' : 'bg-muted/50 text-muted-foreground'}`}>
+                未识别到有效关键词，请重试或更换图片。
               </div>
             )}
 
-            {/* Actions */}
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" className="flex-1 gap-1.5" onClick={handleCopy}>
-                <Copy className="w-3.5 h-3.5" />复制
-              </Button>
-              <Button size="sm" className="flex-1 gap-1.5" onClick={() => { onInsertPrompt(getFormattedPrompt(), result?.negative_prompt); }}>
-                <Send className="w-3.5 h-3.5" />插入到生成器
-              </Button>
-            </div>
-            
-            <Button variant="ghost" size="sm" className="w-full gap-1.5 text-primary" 
-              onClick={() => onOptimizePrompt(getFormattedPrompt(), 'enhance')}>
-              <Wand2 className="w-3.5 h-3.5" />继续优化此提示词
-            </Button>
+            {categories.map(cat => {
+              const isCopied = copiedKey === cat.key;
+              const isSent = sentKey === cat.key;
+              return (
+                <div key={cat.key}
+                  className={`rounded-lg p-3 border ${floating ? 'bg-[#222] border-[#3a3a3a]' : 'bg-muted/40 border-border'}`}>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className={`text-xs font-semibold ${floating ? 'text-[#d4af37]' : 'text-primary'}`}>{cat.label}</span>
+                      {cat.hint && (
+                        <span className={`text-[10px] truncate ${floating ? 'text-gray-500' : 'text-muted-foreground'}`}>· {cat.hint}</span>
+                      )}
+                    </div>
+                  </div>
+                  <p className={`text-xs leading-relaxed whitespace-pre-wrap break-words ${floating ? 'text-gray-200' : 'text-foreground'}`}>
+                    {cat.text}
+                  </p>
+                  <div className="flex gap-2 mt-2.5">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className={`flex-1 gap-1.5 h-8 text-xs ${floating ? 'bg-transparent border-[#444] text-gray-200 hover:bg-[#333] hover:text-white' : ''}`}
+                      onClick={() => handleCopyCategory(cat)}
+                    >
+                      {isCopied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+                      {isCopied ? '已复制' : '复制关键词'}
+                    </Button>
+                    <Button
+                      size="sm"
+                      className={`flex-1 gap-1.5 h-8 text-xs ${floating ? 'bg-[#d4af37] text-black hover:bg-[#c9a227]' : ''}`}
+                      onClick={() => handleSendCategory(cat)}
+                    >
+                      {isSent ? <Check className="w-3.5 h-3.5" /> : <Send className="w-3.5 h-3.5" />}
+                      {isSent ? '已发送' : '发送关键词'}
+                    </Button>
+                  </div>
+                  <button
+                    onClick={() => onOptimizePrompt(cat.text, 'enhance')}
+                    className={`mt-2 text-[11px] flex items-center gap-1 ${floating ? 'text-[#d4af37] hover:text-[#e6c34d]' : 'text-primary hover:underline'}`}
+                  >
+                    <Wand2 className="w-3 h-3" />用此关键词继续优化
+                  </button>
+                </div>
+              );
+            })}
 
-            <Button variant="ghost" size="sm" className="w-full gap-1.5" onClick={() => { setImagePreview(''); setResult(null); }}>
+            {/* Negative Prompt */}
+            {result.negative_prompt && (
+              <div className={`rounded-lg p-3 ${floating ? 'bg-[#2a1a1a] border border-red-900/40' : 'bg-destructive/5'}`}>
+                <div className="text-xs font-medium text-destructive mb-1">反向提示词（随发送一并附带）</div>
+                <p className={`text-xs ${floating ? 'text-gray-300' : 'text-muted-foreground'}`}>{result.negative_prompt}</p>
+              </div>
+            )}
+
+            <Button variant="ghost" size="sm"
+              className={`w-full gap-1.5 ${floating ? 'text-gray-300 hover:text-white hover:bg-[#333]' : ''}`}
+              style={accent ? undefined : undefined}
+              onClick={resetTab}>
               <RotateCcw className="w-3.5 h-3.5" />重新识词
             </Button>
           </div>
@@ -408,8 +510,23 @@ function AgentEnhanceTab({ initialPrompt, onInsertPrompt, onClose, floating }: A
 // ============================================
 // Vision API Result Type (must match API response)
 // ============================================
+export interface VisionLangBlock {
+  title?: string;
+  prompt?: string;
+  analysis?: string;
+}
 export interface VisionApiResultData {
-  keywords: string[];
+  zh?: VisionLangBlock;
+  en?: VisionLangBlock;
+  zh_style_tags?: string[];
+  en_style_tags?: string[];
+  zh_json?: Record<string, string | string[]>;
+  en_json?: Record<string, string | string[]>;
+  json_prompt?: Record<string, string | string[]>;
+  confidence?: number;
+  raw?: string;
+  // legacy backward-compat
+  keywords?: string[];
   negative_prompt?: string;
   description?: string;
   style?: string;
@@ -527,6 +644,9 @@ export default function OhMyPrompt({
               initialImageUrl={autoAnalyzeImageUrl || initialImageUrl}
               onInsertPrompt={handleVisionInsert}
               onOptimizePrompt={handleOptimize}
+              externalResult={externalVisionResult}
+              externalAnalyzing={externalIsAnalyzing}
+              floating={floating}
             />
           ) : (
             <AgentEnhanceTab 
