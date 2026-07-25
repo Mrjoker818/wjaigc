@@ -1,164 +1,362 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect } from 'react';
-import { Sparkles, X, ChevronRight, Loader2, AlertCircle, Check, Plus, Crown, Target, Eye, Palette, Download, RefreshCw, Wand2 } from 'lucide-react';
+import { useState, useRef, useCallback, useEffect, type PointerEvent } from 'react';
+import { X, Settings, Sparkles, Square, GripVertical, Minus, Maximize2 } from 'lucide-react';
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+/* ================================================================
+   品牌 IP 设计工场 — 参考原型还原的黑金三栏工作台
+   ================================================================ */
+
+interface BrandIpPanelProps {
+  onClose: () => void;
+  onAddImages?: (urls: string[], meta?: Record<string, unknown>) => void;
+}
+
+/* ── Types ──────────────────────────────────────────────────────── */
+type BrandIpStage = 'brand-goal' | 'strategy' | 'role-direction' | 'visual-system' | 'asset-generation';
 
 interface BrandIpBrief {
-  brandName: string;
-  industry: string;
-  targetAudience: string;
-  coreValues: string;
-  brandPersonality: string;
-  vision: string;
-  marketContext: string;
+  brandName?: string;
+  objective?: string;
+  audience?: string;
+  industry?: string;
+  workflowPath?: number;
+  carriers?: number[];
+  smartMode?: boolean;
 }
 
 interface BrandIpDirection {
   id: string;
   name: string;
-  description: string;
-  scores: { differentiation: number; memorability: number; extensibility: number; feasibility: number };
+  concept: string;
+  scores: { brandRole: number; ownability: number; feasibility: number };
+  status: 'draft' | 'confirmed' | 'archived';
 }
 
-interface BrandIpImmutableCore {
-  id: string;
-  category: string;
-  description: string;
-}
-
-interface BrandIpControlledVariable {
-  id: string;
-  category: string;
-  description: string;
-  guidance: string;
-}
-
-interface BrandIpStrategy {
-  immutableCore: BrandIpImmutableCore[];
-  controlledVariables: BrandIpControlledVariable[];
-  positioning: string;
-  toneOfVoice: string;
-  narrative: string;
-}
-
-interface BrandIpAsset {
-  id: string;
-  type: string;
-  prompt: string;
-  imageUrl: string;
-  status: 'pending' | 'completed' | 'failed';
-  createdAt: string;
-}
+interface BrandIpImmutableCore { id: string; label: string; value: string; }
+interface BrandIpControlledVariable { id: string; label: string; value: string; risk?: 'low' | 'medium' | 'high'; }
 
 interface BrandIpProject {
   id: string;
   name: string;
-  stage: string;
+  currentStage: BrandIpStage;
   brief: BrandIpBrief;
   directions: BrandIpDirection[];
-  confirmedDirectionId: string | null;
-  strategy: BrandIpStrategy | null;
+  confirmedDirectionId?: string | null;
   immutableCore: BrandIpImmutableCore[];
   controlledVariables: BrandIpControlledVariable[];
-  assets: BrandIpAsset[];
+}
+interface BrandIpAsset {
+  id: string;
+  imageUrl: string;
+  prompt: string;
+  model: string;
+  assetType: string;
+  version: number;
+  createdAt: string;
+}
+interface DisplayDirection {
+  id: string;
+  name: string;
+  tone: 'warm' | 'blue' | 'violet';
+  tag: string;
+  score: number;
+  description: string;
+  traits: string[];
 }
 
-interface BrandIpPanelProps {
-  isMonochrome: boolean;
-  onClose: () => void;
-  onAddImages?: (urls: string[], meta?: { modelName?: string; apiProvider?: string }) => void;
+interface BrandIpModelOption {
+  key: string;
+  model: string;
+  providerId: string;
+  label: string;
 }
 
-// ─── Helper ──────────────────────────────────────────────────────────────────
-
-function sseEvent(type: string, data: unknown): string {
-  return `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
+interface BrandIpTaskSnapshot {
+  status?: string;
+  progress?: number;
+  label?: string;
+  error?: string;
 }
 
-async function readSseStream(
-  response: Response,
-  onDelta: (text: string) => void,
-  onResult: (data: unknown) => void,
-  onError: (msg: string) => void,
-  signal?: AbortSignal,
-): Promise<void> {
-  const reader = response.body?.getReader();
-  if (!reader) { onError('流式响应不可读'); return; }
-  const decoder = new TextDecoder();
-  let buffer = '';
-  for (;;) {
-    if (signal?.aborted) { reader.cancel(); return; }
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const parts = buffer.split('\n\n');
-    buffer = parts.pop() ?? '';
-    for (const part of parts) {
-      const lines = part.split('\n');
-      let eventType = '';
-      let dataStr = '';
-      for (const line of lines) {
-        if (line.startsWith('event:')) eventType = line.slice(6).trim();
-        else if (line.startsWith('data:')) dataStr += line.slice(5).trim();
-      }
-      if (!eventType) continue;
-      try {
-        const parsed = dataStr ? JSON.parse(dataStr) : {};
-        if (eventType === 'delta') onDelta(parsed.text ?? '');
-        else if (eventType === 'result') onResult(parsed);
-        else if (eventType === 'error') onError(parsed.message ?? '未知错误');
-      } catch { /* skip malformed */ }
-    }
-  }
-}
+const BRAND_TASK_TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled', 'timeout']);
 
-// ─── Stage Badge ─────────────────────────────────────────────────────────────
-
+/* ── Constants ──────────────────────────────────────────────────── */
 const STAGES = [
-  { key: 'brand-goal', label: '品牌目标', icon: Target },
-  { key: 'strategy', label: '品牌策略', icon: Sparkles },
-  { key: 'role-direction', label: '角色方向', icon: Crown },
-  { key: 'visual-system', label: '视觉系统', icon: Palette },
-  { key: 'asset-generation', label: '资产生成', icon: Download },
+  { num: '01', name: '品牌目标', title: 'IP策略一页纸', desc: '先锁定IP在品牌中的任务，再进入造型设计。', items: ['品牌角色与第一用途', '受众任务与使用场景', '竞争区隔与首发范围', '成功指标与设计边界'] },
+  { num: '02', name: '角色方向', title: '角色系统', desc: '让角色脱去服饰与装饰后，仍然能够被识别。', items: ['角色命题与原型母体', '人格与功能动词', '轮廓、比例、体块与重心', '情绪、动作与角色关系'] },
+  { num: '03', name: '视觉系统', title: '视觉规范', desc: '把单张好看的角色图变成可持续使用的视觉资产。', items: ['标准版 / 单色版 / 小尺寸版', '色彩、材质与线条系统', '三视图、表情与动作', 'AI生成提示词与禁止项'] },
+  { num: '04', name: '应用延展', title: '商业应用矩阵', desc: '针对真实载体设置尺寸、裁切、工艺与验收规则。', items: ['头像与社媒内容', '包装与活动主视觉', '周边公仔与数字内容', '空间装置与渠道适配'] },
+  { num: '05', name: '交付治理', title: '治理与交付', desc: '明确哪些不能改、哪些可以变，以及如何交接和验收。', items: ['不可变核心与受控变量', '权利风险与待核验项', '版本、审批与授权边界', '生产包、上线KPI与复盘'] },
 ];
 
-function stageIndex(stage: string): number {
-  return Math.max(0, STAGES.findIndex(s => s.key === stage));
+const PATHS = [
+  { icon: '✦', label: '从零创建' },
+  { icon: '↗', label: '已有形象升级' },
+  { icon: '◉', label: '系列角色' },
+  { icon: '◇', label: '周边 / 包装' },
+  { icon: '∞', label: '联名 / 授权' },
+];
+
+const CARRIERS = [
+  { icon: '◉', label: '社媒头像' },
+  { icon: '☺', label: '表情包' },
+  { icon: '▣', label: '产品包装' },
+  { icon: '✦', label: '活动KV' },
+  { icon: '◐', label: '周边公仔' },
+  { icon: '◌', label: '空间装置' },
+];
+
+const VIEW_TABS = ['标准', '单色', '小尺寸'];
+
+const STAGE_INDEX: Record<BrandIpStage, number> = {
+  'brand-goal': 0,
+  strategy: 0,
+  'role-direction': 1,
+  'visual-system': 2,
+  'asset-generation': 3,
+};
+
+function toDisplayDirection(direction: BrandIpDirection, index: number): DisplayDirection {
+  const score = Math.round((direction.scores.brandRole + direction.scores.ownability + direction.scores.feasibility) / 3);
+  return {
+    id: direction.id,
+    name: direction.name,
+    tone: index % 3 === 0 ? 'warm' : index % 3 === 1 ? 'blue' : 'violet',
+    tag: index === 0 ? '推荐方向' : index === 1 ? '区隔方向' : '商业方向',
+    score,
+    description: direction.concept,
+    traits: [`品牌角色 ${direction.scores.brandRole}`, `可拥有性 ${direction.scores.ownability}`, `可落地性 ${direction.scores.feasibility}`],
+  };
 }
 
-// ─── Component ───────────────────────────────────────────────────────────────
+/* ── Component ──────────────────────────────────────────────────── */
+export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps) {
+  const scrollRef = useRef<HTMLDivElement>(null);
 
-export default function BrandIpPanel({ isMonochrome, onClose, onAddImages }: BrandIpPanelProps) {
+  // Stage & project state
+  const [activeStage, setActiveStage] = useState(0);
   const [project, setProject] = useState<BrandIpProject | null>(null);
   const [projects, setProjects] = useState<BrandIpProject[]>([]);
-  const [loadingProjects, setLoadingProjects] = useState(true);
-  const [briefDraft, setBriefDraft] = useState<BrandIpBrief>({
-    brandName: '', industry: '', targetAudience: '', coreValues: '', brandPersonality: '', vision: '', marketContext: '',
-  });
+  const [showProjectList, setShowProjectList] = useState(false);
 
-  // Strategy streaming
-  const [strategyStreaming, setStrategyStreaming] = useState(false);
-  const [strategyStreamText, setStrategyStreamText] = useState('');
-  const [strategyError, setStrategyError] = useState<string | null>(null);
-  const strategyAbortRef = useRef<AbortController | null>(null);
+  // Brief form
+  const [workflowPath, setWorkflowPath] = useState(0);
+  const [brandName, setBrandName] = useState('');
+  const [goal, setGoal] = useState('');
+  const [audience, setAudience] = useState('');
+  const [industry, setIndustry] = useState('');
+  const [selectedCarriers, setSelectedCarriers] = useState<number[]>([0, 2]);
+  const [smartMode, setSmartMode] = useState(true);
 
-  // Generation
-  const [generating, setGenerating] = useState(false);
-  const [genError, setGenError] = useState<string | null>(null);
-  const [assetPrompt, setAssetPrompt] = useState('');
-  const [assetType, setAssetType] = useState('logo');
+  // Analysis state
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [strategyText, setStrategyText] = useState('');
+  const [analysisProgress, setAnalysisProgress] = useState(0);
+  const [hasAnalyzed, setHasAnalyzed] = useState(false);
 
-  // Position
-  const [pos, setPos] = useState({ x: 60, y: 40 });
-  const [dragging, setDragging] = useState(false);
-  const dragOffsetRef = useRef({ x: 0, y: 0 });
-  const panelRef = useRef<HTMLDivElement>(null);
+  // Direction state
+  const [directions, setDirections] = useState<BrandIpDirection[]>([]);
+  const [selectedDirection, setSelectedDirection] = useState<string | null>(null);
+  const [confirmedDirection, setConfirmedDirection] = useState(false);
 
-  // ── Load projects ──────────────────────────────────────────────────────
+  // UI state
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [viewTab, setViewTab] = useState(0);
+  const [toast, setToast] = useState<{ show: boolean; msg: string }>({ show: false, msg: '' });
+
+  // Advanced settings
+  const [advRole, setAdvRole] = useState('长期代言人');
+  const [advCount, setAdvCount] = useState('1');
+  const [advVibe, setAdvVibe] = useState('温暖亲和');
+  const [advConstraints, setAdvConstraints] = useState('后期需支持PVC公仔生产');
+  const [advForbidden, setAdvForbidden] = useState('不得模仿具体艺术家');
+  const [advAutoRisk, setAdvAutoRisk] = useState(true);
+  const [advAutoApp, setAdvAutoApp] = useState(true);
+  const [advStructFirst, setAdvStructFirst] = useState(false);
+
+  // Assets state
+  const [assets, setAssets] = useState<BrandIpAsset[]>([]);
+  const [generatingAsset, setGeneratingAsset] = useState(false);
+  const [assetProgress, setAssetProgress] = useState(0);
+  const [assetLabel, setAssetLabel] = useState('');
+  const [assetTaskId, setAssetTaskId] = useState<string | null>(null);
+  const [isMinimized, setIsMinimized] = useState(false);
+
+  // Each catalog is filtered by the server for the current authenticated user.
+  const [chatModels, setChatModels] = useState<BrandIpModelOption[]>([]);
+  const [imageModels, setImageModels] = useState<BrandIpModelOption[]>([]);
+  const [selectedChatModelKey, setSelectedChatModelKey] = useState('');
+  const [selectedImageModelKey, setSelectedImageModelKey] = useState('');
+  const selectedChatModel = chatModels.find(model => model.key === selectedChatModelKey) ?? null;
+  const selectedImageModel = imageModels.find(model => model.key === selectedImageModelKey) ?? null;
+
+  // Floating-window state
+  const shellRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ offsetX: number; offsetY: number } | null>(null);
+  const hasInitializedWindowPositionRef = useRef(false);
+  const isMountedRef = useRef(true);
+  const taskPollingRef = useRef<number | null>(null);
+  const trackingTaskIdRef = useRef<string | null>(null);
+  const [windowPosition, setWindowPosition] = useState({ x: 0, y: 0 });
+
+  /* ── Toast helper ──────────────────────────────────────────────── */
+  const showToast = useCallback((msg: string) => {
+    setToast({ show: true, msg });
+    setTimeout(() => setToast({ show: false, msg: '' }), 2500);
+  }, []);
+
+  const loadAssets = useCallback(async (projectId: string) => {
+    const res = await fetch(`/api/brand-ip/assets?projectId=${encodeURIComponent(projectId)}`);
+    if (!res.ok) throw new Error('assets_load_failed');
+    const data = await res.json() as { assets?: BrandIpAsset[] };
+    setAssets(data.assets ?? []);
+  }, []);
+
+  const stopTrackingAssetTask = useCallback((): void => {
+    if (taskPollingRef.current !== null) {
+      window.clearTimeout(taskPollingRef.current);
+      taskPollingRef.current = null;
+    }
+    trackingTaskIdRef.current = null;
+  }, []);
+
+  const trackAssetTask = useCallback((taskId: string, projectId: string): void => {
+    stopTrackingAssetTask();
+    trackingTaskIdRef.current = taskId;
+    setAssetTaskId(taskId);
+    setGeneratingAsset(true);
+
+    let attempts = 0;
+    const poll = async (): Promise<void> => {
+      if (!isMountedRef.current || trackingTaskIdRef.current !== taskId) return;
+      try {
+        const response = await fetch(`/api/brand-ip/tasks?taskId=${encodeURIComponent(taskId)}`);
+        if (!response.ok) throw new Error('task_load_failed');
+        const data = await response.json() as { task?: BrandIpTaskSnapshot };
+        const task = data.task;
+        if (!task) throw new Error('task_missing');
+
+        setAssetProgress(task.progress ?? 0);
+        setAssetLabel(task.label ?? '正在生成资产');
+        if (task.status && BRAND_TASK_TERMINAL_STATUSES.has(task.status)) {
+          stopTrackingAssetTask();
+          setGeneratingAsset(false);
+          setAssetTaskId(null);
+          if (task.status === 'completed') {
+            await loadAssets(projectId);
+            showToast('资产生成完成');
+          } else if (task.status === 'timeout') {
+            showToast(task.error ?? '任务处理超时，请稍后检查项目资产');
+          } else {
+            showToast(task.error ?? (task.status === 'cancelled' ? '任务已取消' : '生成失败'));
+          }
+          return;
+        }
+
+        attempts += 1;
+        if (attempts >= 100) {
+          setGeneratingAsset(false);
+          setAssetLabel('任务仍在后台执行，可重新打开项目恢复追踪');
+          return;
+        }
+      } catch {
+        setGeneratingAsset(false);
+        setAssetLabel('任务连接暂时中断，可重新打开项目恢复追踪');
+        return;
+      }
+
+      taskPollingRef.current = window.setTimeout(() => void poll(), 3000);
+    };
+
+    void poll();
+  }, [loadAssets, showToast, stopTrackingAssetTask]);
+
+  const recoverProjectTask = useCallback(async (projectId: string): Promise<void> => {
+    try {
+      const response = await fetch(`/api/brand-ip/tasks?projectId=${encodeURIComponent(projectId)}`);
+      if (!response.ok) return;
+      const data = await response.json() as { tasks?: Array<BrandIpTaskSnapshot & { taskId?: string; createdAt?: number }> };
+      const task = data.tasks?.[0];
+      if (!task?.taskId) return;
+      setAssetProgress(task.progress ?? 0);
+      setAssetLabel(task.label ?? '已恢复后台生成任务');
+      trackAssetTask(task.taskId, projectId);
+    } catch {
+      // The task remains persisted and can be recovered on the next project open.
+    }
+  }, [trackAssetTask]);
+
+  const applyProject = useCallback(async (nextProject: BrandIpProject, shouldLoadAssets = true) => {
+    stopTrackingAssetTask();
+    setGeneratingAsset(false);
+    setAssetTaskId(null);
+    setAssetProgress(0);
+    setAssetLabel('');
+    setProject(nextProject);
+    setBrandName(nextProject.brief.brandName ?? nextProject.name);
+    setGoal(nextProject.brief.objective ?? '');
+    setAudience(nextProject.brief.audience ?? '');
+    setIndustry(nextProject.brief.industry ?? '');
+    setWorkflowPath(nextProject.brief.workflowPath ?? 0);
+    setSelectedCarriers(nextProject.brief.carriers ?? [0, 2]);
+    setSmartMode(nextProject.brief.smartMode ?? true);
+    setDirections(nextProject.directions ?? []);
+    setSelectedDirection(nextProject.confirmedDirectionId ?? nextProject.directions?.[0]?.id ?? null);
+    setConfirmedDirection(Boolean(nextProject.confirmedDirectionId));
+    setActiveStage(STAGE_INDEX[nextProject.currentStage] ?? 0);
+    setHasAnalyzed((nextProject.directions?.length ?? 0) > 0);
+    if (shouldLoadAssets) {
+      try {
+        await loadAssets(nextProject.id);
+      } catch {
+        setAssets([]);
+      }
+    }
+    await recoverProjectTask(nextProject.id);
+  }, [loadAssets, recoverProjectTask, stopTrackingAssetTask]);
+
+  const loadProject = useCallback(async (projectId: string) => {
+    const res = await fetch(`/api/brand-ip/projects?projectId=${encodeURIComponent(projectId)}`);
+    if (!res.ok) throw new Error('project_load_failed');
+    const data = await res.json() as { project?: BrandIpProject };
+    if (!data.project) throw new Error('project_missing');
+    await applyProject(data.project);
+  }, [applyProject]);
+
+  const handleWindowPointerDown = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    if (window.innerWidth < 768) return;
+    const target = event.target as HTMLElement;
+    if (target.closest('button, input, textarea, select, label, a, svg, [data-no-drag]')) return;
+    const shell = shellRef.current;
+    if (!shell) return;
+    const rect = shell.getBoundingClientRect();
+    dragRef.current = { offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }, []);
+
+  const handleWindowPointerMove = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current) return;
+    const shell = shellRef.current;
+    if (!shell) return;
+    const rect = shell.getBoundingClientRect();
+    const maxX = Math.max(16, window.innerWidth - rect.width - 16);
+    const maxY = Math.max(16, window.innerHeight - rect.height - 16);
+    setWindowPosition({
+      x: Math.min(Math.max(16, event.clientX - dragRef.current.offsetX), maxX),
+      y: Math.min(Math.max(16, event.clientY - dragRef.current.offsetY), maxY),
+    });
+  }, []);
+
+  const handleWindowPointerUp = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    dragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }, []);
+
+  /* ── Load projects on mount ────────────────────────────────────── */
   const loadProjects = useCallback(async () => {
-    setLoadingProjects(true);
     try {
       const res = await fetch('/api/brand-ip/projects');
       if (res.ok) {
@@ -166,597 +364,1034 @@ export default function BrandIpPanel({ isMonochrome, onClose, onAddImages }: Bra
         setProjects(data.projects ?? []);
       }
     } catch { /* ignore */ }
-    setLoadingProjects(false);
   }, []);
-
-  useEffect(() => { loadProjects(); }, [loadProjects]);
-
-  // ── Drag handlers ──────────────────────────────────────────────────────
-  const handleDragStart = useCallback((e: React.MouseEvent) => {
-    if ((e.target as HTMLElement).closest('button, input, textarea, select, [data-no-drag]')) return;
-    setDragging(true);
-    dragOffsetRef.current = { x: e.clientX - pos.x, y: e.clientY - pos.y };
-  }, [pos]);
 
   useEffect(() => {
-    if (!dragging) return;
-    const onMove = (e: MouseEvent) => {
-      setPos({ x: e.clientX - dragOffsetRef.current.x, y: e.clientY - dragOffsetRef.current.y });
+    void loadProjects();
+  }, [loadProjects]);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      stopTrackingAssetTask();
     };
-    const onUp = () => setDragging(false);
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
-  }, [dragging]);
+  }, [stopTrackingAssetTask]);
 
-  // ── Create project ─────────────────────────────────────────────────────
-  const handleCreateProject = useCallback(async () => {
-    if (!briefDraft.brandName.trim()) return;
-    try {
-      const res = await fetch('/api/brand-ip/projects', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: briefDraft.brandName, brief: briefDraft }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setProject(data.project);
-        setBriefDraft({ brandName: '', industry: '', targetAudience: '', coreValues: '', brandPersonality: '', vision: '', marketContext: '' });
-      }
-    } catch { /* ignore */ }
-  }, [briefDraft]);
+  useEffect(() => {
+    const loadModels = async (): Promise<void> => {
+      try {
+        const [chatResponse, imageResponse] = await Promise.all([
+          fetch('/api/models?type=chat'),
+          fetch('/api/models?type=image'),
+        ]);
+        const [chatData, imageData] = await Promise.all([
+          chatResponse.ok ? chatResponse.json() : Promise.resolve({}),
+          imageResponse.ok ? imageResponse.json() : Promise.resolve({}),
+        ]) as Array<{
+          models?: Array<{ id: string; name?: string; providerId?: string }>;
+          providers?: Array<{ id: string; name?: string }>;
+        }>;
 
-  // ── Select project ─────────────────────────────────────────────────────
-  const handleSelectProject = useCallback(async (projId: string) => {
-    try {
-      const res = await fetch(`/api/brand-ip/projects?projectId=${projId}`);
-      if (res.ok) {
-        const data = await res.json();
-        setProject(data.project);
-        if (data.project?.brief) setBriefDraft(data.project.brief);
+        const mapModels = (data: {
+          models?: Array<{ id: string; name?: string; providerId?: string }>;
+          providers?: Array<{ id: string; name?: string }>;
+        }): BrandIpModelOption[] => {
+          const providerNames = new Map((data.providers ?? []).map(provider => [provider.id, provider.name ?? provider.id]));
+          return (data.models ?? [])
+            .filter(model => Boolean(model.id && model.providerId))
+            .map(model => ({
+              key: `${model.providerId}::${model.id}`,
+              model: model.id,
+              providerId: model.providerId ?? '',
+              label: `${providerNames.get(model.providerId ?? '') ?? model.providerId} / ${model.name ?? model.id}`,
+            }));
+        };
+
+        const nextChatModels = mapModels(chatData);
+        const nextImageModels = mapModels(imageData);
+        setChatModels(nextChatModels);
+        setImageModels(nextImageModels);
+        setSelectedChatModelKey(current => nextChatModels.some(model => model.key === current) ? current : nextChatModels[0]?.key ?? '');
+        setSelectedImageModelKey(current => nextImageModels.some(model => model.key === current) ? current : nextImageModels[0]?.key ?? '');
+      } catch {
+        setChatModels([]);
+        setImageModels([]);
       }
-    } catch { /* ignore */ }
+    };
+
+    void loadModels();
   }, []);
 
-  // ── Run strategy analysis (SSE) ────────────────────────────────────────
-  const handleRunStrategy = useCallback(async () => {
-    if (!project) return;
-    setStrategyStreaming(true);
-    setStrategyStreamText('');
-    setStrategyError(null);
-    const ac = new AbortController();
-    strategyAbortRef.current = ac;
+  useEffect(() => {
+    if (window.innerWidth < 768 || hasInitializedWindowPositionRef.current) return;
+
+    const frameId = window.requestAnimationFrame(() => {
+      const shell = shellRef.current;
+      if (!shell || hasInitializedWindowPositionRef.current) return;
+
+      const rect = shell.getBoundingClientRect();
+      const maxX = Math.max(16, window.innerWidth - rect.width - 16);
+      const maxY = Math.max(16, window.innerHeight - rect.height - 16);
+      setWindowPosition({
+        x: Math.min(Math.max(16, (window.innerWidth - rect.width) / 2), maxX),
+        y: Math.min(Math.max(16, (window.innerHeight - rect.height) / 2), maxY),
+      });
+      hasInitializedWindowPositionRef.current = true;
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, []);
+
+  useEffect(() => {
+    const keepWindowVisible = (): void => {
+      if (window.innerWidth < 768) return;
+      const shell = shellRef.current;
+      if (!shell || !hasInitializedWindowPositionRef.current) return;
+
+      const rect = shell.getBoundingClientRect();
+      const maxX = Math.max(16, window.innerWidth - rect.width - 16);
+      const maxY = Math.max(16, window.innerHeight - rect.height - 16);
+      setWindowPosition(previous => ({
+        x: Math.min(Math.max(16, previous.x), maxX),
+        y: Math.min(Math.max(16, previous.y), maxY),
+      }));
+    };
+
+    window.addEventListener('resize', keepWindowVisible);
+    return () => window.removeEventListener('resize', keepWindowVisible);
+  }, []);
+
+  /* ── Create project & run strategy analysis ───────────────────── */
+  const handleGenerate = useCallback(async () => {
+    if (!brandName.trim()) {
+      showToast('请输入品牌/项目名称');
+      return;
+    }
+
+    setIsAnalyzing(true);
+    setAnalysisProgress(0);
+    setStrategyText('');
+    setHasAnalyzed(false);
+
     try {
-      const res = await fetch('/api/brand-ip/strategy', {
+      // Create project if none
+      let proj = project;
+      if (!proj) {
+        const createRes = await fetch('/api/brand-ip/projects', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: brandName,
+            brief: {
+              brandName,
+              objective: goal,
+              audience,
+              industry,
+              workflowPath,
+              carriers: selectedCarriers,
+              smartMode,
+            },
+          }),
+        });
+        if (!createRes.ok) {
+          showToast('项目创建失败');
+          setIsAnalyzing(false);
+          return;
+        }
+        const createData = await createRes.json();
+        proj = createData.project as BrandIpProject;
+        await applyProject(proj, false);
+        setProjects(prev => [proj!, ...prev]);
+      }
+
+      // SSE strategy analysis
+      const sseRes = await fetch('/api/brand-ip/strategy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId: project.id }),
-        signal: ac.signal,
+        body: JSON.stringify({
+          projectId: proj!.id,
+          brief: { brandName, goal, audience, industry, workflowPath, carriers: selectedCarriers, smartMode },
+          ...(selectedChatModel ? {
+            model: selectedChatModel.model,
+            providerId: selectedChatModel.providerId,
+          } : {}),
+        }),
       });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        setStrategyError(err.error || `HTTP ${res.status}`);
-        setStrategyStreaming(false);
+
+      if (!sseRes.ok || !sseRes.body) {
+        showToast('策略分析请求失败');
+        setIsAnalyzing(false);
         return;
       }
-      await readSseStream(
-        res,
-        (text) => setStrategyStreamText(prev => prev + text),
-        (data) => {
-          // result event carries structured strategy
-          const s = data as BrandIpStrategy;
-          if (s?.immutableCore) {
-            setProject(prev => prev ? {
-              ...prev,
-              strategy: s,
-              immutableCore: s.immutableCore,
-              controlledVariables: s.controlledVariables,
-              stage: 'role-direction',
-            } : prev);
-          }
-        },
-        (msg) => setStrategyError(msg),
-        ac.signal,
-      );
-    } catch (e: unknown) {
-      if (e instanceof Error && e.name !== 'AbortError') {
-        setStrategyError(e.message);
-      }
-    } finally {
-      setStrategyStreaming(false);
-      strategyAbortRef.current = null;
-    }
-  }, [project]);
 
-  // ── Confirm direction ──────────────────────────────────────────────────
-  const handleConfirmDirection = useCallback(async (dirId: string) => {
-    if (!project) return;
+      const reader = sseRes.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let progress = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const evt = JSON.parse(line.slice(6));
+              if (evt.type === 'status') {
+                progress = 10;
+                setAnalysisProgress(progress);
+              } else if (evt.type === 'delta') {
+                setStrategyText(prev => prev + (evt.content ?? ''));
+                progress = Math.min(85, progress + 2);
+                setAnalysisProgress(progress);
+              } else if (evt.type === 'result') {
+                const result = evt.result as {
+                  summary?: string;
+                  directions?: BrandIpDirection[];
+                  immutableCore?: BrandIpImmutableCore[];
+                  controlledVariables?: BrandIpControlledVariable[];
+                } | undefined;
+                if (result) {
+                  const nextBrief: BrandIpBrief = {
+                    brandName,
+                    objective: goal,
+                    audience,
+                    industry,
+                    workflowPath,
+                    carriers: selectedCarriers,
+                    smartMode,
+                  };
+                  setStrategyText(result.summary ?? '');
+                  setDirections(result.directions ?? []);
+                  setSelectedDirection(result.directions?.[0]?.id ?? null);
+                  setProject(prev => prev ? {
+                    ...prev,
+                    brief: nextBrief,
+                    directions: result.directions ?? [],
+                    immutableCore: result.immutableCore ?? [],
+                    controlledVariables: result.controlledVariables ?? [],
+                    currentStage: 'role-direction',
+                  } : prev);
+                  const saveRes = await fetch('/api/brand-ip/projects', {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      projectId: proj!.id,
+                      brief: nextBrief,
+                      directions: result.directions ?? [],
+                      immutableCore: result.immutableCore ?? [],
+                      controlledVariables: result.controlledVariables ?? [],
+                    }),
+                  });
+                  if (saveRes.ok) {
+                    const saved = await saveRes.json() as { project?: BrandIpProject };
+                    if (saved.project) await applyProject(saved.project, false);
+                  }
+                }
+                setAnalysisProgress(95);
+              } else if (evt.type === 'error') {
+                showToast(evt.message ?? '策略分析出错');
+                setIsAnalyzing(false);
+                return;
+              } else if (evt.type === 'done') {
+                setAnalysisProgress(100);
+                setHasAnalyzed(true);
+              }
+            } catch { /* skip */ }
+          }
+        }
+      }
+
+      setIsAnalyzing(false);
+      setHasAnalyzed(true);
+      showToast('策略分析完成');
+    } catch {
+      showToast('网络错误，请重试');
+      setIsAnalyzing(false);
+    }
+  }, [applyProject, brandName, goal, audience, industry, workflowPath, selectedCarriers, smartMode, project, selectedChatModel, showToast]);
+
+  /* ── Confirm direction ─────────────────────────────────────────── */
+  const handleConfirmDirection = useCallback(async () => {
+    if (!selectedDirection || !project) return;
     try {
       const res = await fetch('/api/brand-ip/projects', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId: project.id, confirmedDirectionId: dirId }),
+        body: JSON.stringify({
+          projectId: project.id,
+          confirmedDirectionId: selectedDirection,
+        }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        setProject(data.project);
-      }
-    } catch { /* ignore */ }
-  }, [project]);
+      if (!res.ok) throw new Error('confirm_failed');
+      const data = await res.json() as { project?: BrandIpProject };
+      if (!data.project) throw new Error('project_missing');
+      await applyProject(data.project, false);
+      await loadProjects();
+      showToast('方向已锁定，进入视觉系统阶段');
+    } catch {
+      showToast('确认失败，请重试');
+    }
+  }, [applyProject, loadProjects, project, selectedDirection, showToast]);
 
-  // ── Generate assets ────────────────────────────────────────────────────
-  const handleGenerate = useCallback(async () => {
-    if (!project || !assetPrompt.trim()) return;
-    setGenerating(true);
-    setGenError(null);
+  /* ── Generate asset ────────────────────────────────────────────── */
+  const handleGenerateAsset = useCallback(async (): Promise<void> => {
+    if (!project || !selectedDirection) {
+      showToast('请先确认角色方向');
+      return;
+    }
+    const direction = directions.find((item: BrandIpDirection) => item.id === selectedDirection);
+    setGeneratingAsset(true);
+    setAssetProgress(0);
+    setAssetLabel('正在提交生成任务');
     try {
-      const res = await fetch('/api/brand-ip/generate', {
+      const response = await fetch('/api/brand-ip/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId: project.id, prompt: assetPrompt, assetType }),
+        body: JSON.stringify({
+          projectId: project.id,
+          prompt: `${brandName} 品牌IP角色标准图，${direction?.name ?? ''}。${direction?.concept ?? ''}`,
+          aspectRatio: '1:1',
+          ...(selectedImageModel ? {
+            model: selectedImageModel.model,
+            providerId: selectedImageModel.providerId,
+          } : {}),
+        }),
       });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        setGenError(err.error || `HTTP ${res.status}`);
-      } else {
-        // Start polling for task completion
-        const data = await res.json();
-        if (data.taskId) {
-          pollTask(data.taskId);
-        }
-      }
-    } catch (e: unknown) {
-      if (e instanceof Error) setGenError(e.message);
-    } finally {
-      setGenerating(false);
+      const data = await response.json() as { taskId?: string; error?: string };
+      if (!response.ok || !data.taskId) throw new Error(data.error ?? 'submit_failed');
+      showToast('生成任务已提交');
+      trackAssetTask(data.taskId, project.id);
+    } catch {
+      setGeneratingAsset(false);
+      setAssetLabel('提交失败，可调整后重试');
+      showToast('生成任务提交失败，请稍后重试');
     }
-  }, [project, assetPrompt, assetType]);
+  }, [brandName, directions, project, selectedDirection, selectedImageModel, showToast, trackAssetTask]);
 
-  // ── Poll task ──────────────────────────────────────────────────────────
-  const pollTask = useCallback(async (taskId: string) => {
-    const maxAttempts = 120;
-    for (let i = 0; i < maxAttempts; i++) {
-      await new Promise(r => setTimeout(r, 3000));
-      try {
-        const res = await fetch(`/api/brand-ip/tasks?taskId=${taskId}`);
-        if (!res.ok) break;
-        const data = await res.json();
-        if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
-          // Reload assets
-          if (project) {
-            const assetRes = await fetch(`/api/brand-ip/assets?projectId=${project.id}`);
-            if (assetRes.ok) {
-              const assetData = await assetRes.json();
-              setProject(prev => prev ? { ...prev, assets: assetData.assets ?? [] } : prev);
-            }
-          }
-          break;
-        }
-      } catch { /* continue */ }
+  const handleCancelAssetTask = useCallback(async (): Promise<void> => {
+    if (!assetTaskId || !project) return;
+    try {
+      const response = await fetch('/api/cancel-task', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskId: assetTaskId }),
+      });
+      if (!response.ok) throw new Error('cancel_failed');
+      setGeneratingAsset(true);
+      setAssetLabel('取消请求已发送，正在确认任务状态');
+      trackAssetTask(assetTaskId, project.id);
+    } catch {
+      showToast('取消请求未发送成功，请稍后重试');
     }
-  }, [project]);
+  }, [assetTaskId, project, showToast, trackAssetTask]);
 
-  // ── Add asset to canvas ────────────────────────────────────────────────
+  /* ── Add asset to canvas ───────────────────────────────────────── */
   const handleAddToCanvas = useCallback((url: string) => {
     onAddImages?.([url], { modelName: 'brand-ip', apiProvider: 'server' });
   }, [onAddImages]);
 
-  // ── Theme classes ──────────────────────────────────────────────────────
-  const t = isMonochrome ? {
-    bg: 'bg-white', border: 'border-gray-200', text: 'text-gray-800', subText: 'text-gray-500',
-    input: 'bg-gray-50 border-gray-200 text-gray-800', accent: 'text-gray-700', accentBg: 'bg-gray-700',
-    hover: 'hover:bg-gray-100', card: 'bg-gray-50 border-gray-200', chip: 'bg-gray-100 text-gray-600',
-  } : {
-    bg: 'bg-[#1a1a1a]', border: 'border-[#d4af37]/30', text: 'text-white', subText: 'text-white/50',
-    input: 'bg-[#0a0a0a] border-[#d4af37]/20 text-white', accent: 'text-[#d4af37]', accentBg: 'bg-[#d4af37] text-black',
-    hover: 'hover:bg-white/5', card: 'bg-[#0f0f0f] border-[#d4af37]/15', chip: 'bg-[#d4af37]/10 text-[#d4af37]',
-  };
+  /* ── Display models ───────────────────────────────────────────── */
+  const displayDirections = directions.map(toDisplayDirection);
+  const selDir = displayDirections.find(direction => direction.id === selectedDirection) ?? displayDirections[0];
+  const dirTone = selDir?.tone ?? 'warm';
+  const gateItems = [
+    ...((project?.immutableCore ?? []).map(item => ({
+      id: `core-${item.id}`,
+      icon: '◆',
+      name: item.label,
+      note: item.value,
+      status: '已锁定',
+      warning: false,
+    }))),
+    ...((project?.controlledVariables ?? []).map(item => ({
+      id: `variable-${item.id}`,
+      icon: '◌',
+      name: item.label,
+      note: item.value,
+      status: item.risk === 'high' ? '需核验' : '可调整',
+      warning: item.risk === 'high',
+    }))),
+  ];
 
-  const currentStage = project?.stage ?? 'brand-goal';
-  const sIdx = stageIndex(currentStage);
-
+  /* ═══ Render ════════════════════════════════════════════════════ */
   return (
-    <div
-      ref={panelRef}
-      data-floating-panel="brand-ip"
-      className={`fixed z-[201] ${t.bg} ${t.border} border rounded-2xl shadow-2xl flex flex-col`}
-      style={{ left: pos.x, top: pos.y, width: '880px', maxHeight: '88vh', minHeight: '400px' }}
-      onMouseDown={handleDragStart}
-    >
-      {/* ── Header ── */}
-      <div className={`flex items-center justify-between px-5 py-3 border-b ${t.border} cursor-move`}>
-        <div className="flex items-center gap-2">
-          <Sparkles className={`h-5 w-5 ${t.accent}`} />
-          <span className={`font-bold text-base ${t.text}`}>品牌 IP 设计工场</span>
-          {project && (
-            <span className={`text-xs ${t.subText} ml-2`}>/ {project.name}</span>
-          )}
+    <div className="brand-ip-workspace fixed z-[201]" data-popup data-floating-panel="brand-ip">
+      <div
+        ref={shellRef}
+        className={`bi-shell flex flex-col overflow-hidden${isMinimized ? ' is-minimized' : ''}`}
+        style={{
+          left: `${windowPosition.x}px`,
+          top: `${windowPosition.y}px`,
+          background: 'radial-gradient(circle at 76% 8%, rgba(225,184,92,.06), transparent 28%), #090a0c',
+        }}
+      >
+
+        {/* ═══ Topbar ═══ */}
+        <div
+          className="bi-topbar"
+          onPointerDown={handleWindowPointerDown}
+          onPointerMove={handleWindowPointerMove}
+          onPointerUp={handleWindowPointerUp}
+          onPointerCancel={handleWindowPointerUp}
+        >
+          <GripVertical className="bi-drag-handle" aria-hidden="true" />
+          <div className="bi-brand-lockup">
+            <div className="bi-brand-mark">无界</div>
+            <div>
+              <strong>品牌IP设计工场</strong>
+              <span>PURPOSE-FIRST IP DESIGN</span>
+            </div>
+            <span className="bi-beta">BETA</span>
+          </div>
+          <div className="bi-topbar-center" style={{ fontSize: 12 }}>
+            <span className="crumb">无界AI</span>
+            <span className="slash">/</span>
+            <span className="crumb">品牌工厂</span>
+            <span className="slash">/</span>
+            <span style={{ color: '#e0b85c' }}>品牌IP设计工场</span>
+            {project && (
+              <>
+                <span className="slash">/</span>
+                <span style={{ color: '#c6c7ca' }}>{project.name}</span>
+              </>
+            )}
+          </div>
+          <div className="bi-top-actions">
+            <button className="bi-icon-button" onClick={() => setShowProjectList(s => !s)} title="项目列表">
+              <Sparkles style={{ width: 15, height: 15 }} />
+            </button>
+            <button
+              className="bi-icon-button"
+              onClick={() => setIsMinimized(current => !current)}
+              title={isMinimized ? '恢复窗口' : '最小化窗口'}
+            >
+              {isMinimized ? <Maximize2 style={{ width: 15, height: 15 }} /> : <Minus style={{ width: 16, height: 16 }} />}
+            </button>
+            <button className="bi-icon-button" onClick={onClose} title="关闭">
+              <X style={{ width: 16, height: 16 }} />
+            </button>
+          </div>
         </div>
-        <button onClick={onClose} className={`p-1 rounded-lg ${t.hover} ${t.subText} transition-colors`} data-no-drag>
-          <X className="h-4 w-4" />
-        </button>
-      </div>
 
-      {/* ── Stage indicator ── */}
-      {project && (
-        <div className={`flex items-center gap-1 px-5 py-2 border-b ${t.border} overflow-x-auto`}>
-          {STAGES.map((s, i) => {
-            const Icon = s.icon;
-            const active = i === sIdx;
-            const done = i < sIdx;
-            return (
-              <div key={s.key} className="flex items-center shrink-0">
-                <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
-                  active ? (isMonochrome ? 'bg-gray-800 text-white' : 'bg-[#d4af37] text-black')
-                  : done ? (isMonochrome ? 'text-gray-600' : 'text-[#d4af37]/70')
-                  : t.subText
-                }`}>
-                  <Icon className="h-3.5 w-3.5" />
-                  {s.label}
-                </div>
-                {i < STAGES.length - 1 && <ChevronRight className={`h-3 w-3 ${t.subText} mx-0.5`} />}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* ── Body ── */}
-      <div className="flex-1 overflow-y-auto px-5 py-4" data-no-drag>
-
-        {/* ═══ No project: project list + create ═══ */}
-        {!project && (
-          <div className="space-y-4">
-            {/* Create new */}
-            <div className={`rounded-xl border ${t.border} p-4`}>
-              <h3 className={`text-sm font-semibold ${t.text} mb-3 flex items-center gap-2`}>
-                <Plus className="h-4 w-4" /> 新建品牌 IP 项目
-              </h3>
-              <div className="grid grid-cols-2 gap-3">
-                <input
-                  className={`${t.input} border rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-[#d4af37]/40`}
-                  placeholder="品牌名称 *"
-                  value={briefDraft.brandName}
-                  onChange={e => setBriefDraft(d => ({ ...d, brandName: e.target.value }))}
-                />
-                <input
-                  className={`${t.input} border rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-[#d4af37]/40`}
-                  placeholder="所属行业"
-                  value={briefDraft.industry}
-                  onChange={e => setBriefDraft(d => ({ ...d, industry: e.target.value }))}
-                />
-                <input
-                  className={`${t.input} border rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-[#d4af37]/40`}
-                  placeholder="目标受众"
-                  value={briefDraft.targetAudience}
-                  onChange={e => setBriefDraft(d => ({ ...d, targetAudience: e.target.value }))}
-                />
-                <input
-                  className={`${t.input} border rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-[#d4af37]/40`}
-                  placeholder="核心价值观"
-                  value={briefDraft.coreValues}
-                  onChange={e => setBriefDraft(d => ({ ...d, coreValues: e.target.value }))}
-                />
-                <input
-                  className={`${t.input} border rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-[#d4af37]/40`}
-                  placeholder="品牌个性"
-                  value={briefDraft.brandPersonality}
-                  onChange={e => setBriefDraft(d => ({ ...d, brandPersonality: e.target.value }))}
-                />
-                <input
-                  className={`${t.input} border rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-[#d4af37]/40`}
-                  placeholder="品牌愿景"
-                  value={briefDraft.vision}
-                  onChange={e => setBriefDraft(d => ({ ...d, vision: e.target.value }))}
-                />
-              </div>
-              <textarea
-                className={`${t.input} border rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-[#d4af37]/40 w-full mt-3 resize-none`}
-                rows={2}
-                placeholder="市场背景与竞争环境"
-                value={briefDraft.marketContext}
-                onChange={e => setBriefDraft(d => ({ ...d, marketContext: e.target.value }))}
-              />
+        {/* Project list dropdown */}
+        {showProjectList && (
+          <div
+            className="absolute right-18 top-14 z-40 rounded-xl border p-2 min-w-[200px]"
+            style={{ background: '#111216', borderColor: 'rgba(255,255,255,.08)' }}
+            data-popup
+          >
+            {projects.length === 0 && (
+              <div style={{ color: '#646770', fontSize: 11, padding: '8px 12px' }}>暂无项目</div>
+            )}
+            {projects.map(p => (
               <button
-                onClick={handleCreateProject}
-                disabled={!briefDraft.brandName.trim()}
-                className={`mt-3 px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-40 ${isMonochrome ? 'bg-gray-800 text-white hover:bg-gray-700' : 'bg-[#d4af37] text-black hover:bg-[#e0b850]'}`}
+                key={p.id}
+                className="w-full text-left rounded-lg px-3 py-2 hover:bg-white/5 transition-colors"
+                onClick={() => {
+                  setShowProjectList(false);
+                  void loadProject(p.id).catch(() => showToast('项目加载失败'));
+                }}
+                style={{ fontSize: 11, color: project?.id === p.id ? '#e0b85c' : '#c6c7ca' }}
               >
-                创建项目
+                {p.name}
               </button>
-            </div>
+            ))}
+          </div>
+        )}
 
-            {/* Existing projects */}
-            {loadingProjects ? (
-              <div className={`flex items-center justify-center py-8 ${t.subText}`}>
-                <Loader2 className="h-5 w-5 animate-spin" />
-              </div>
-            ) : projects.length > 0 ? (
+        {/* ═══ Body (scrollable) ═══ */}
+        <div ref={scrollRef} className="flex-1 overflow-y-auto" data-popup>
+
+          {/* ═══ Product area ═══ */}
+          <div className="bi-product" style={{ padding: '20px 24px 36px', maxWidth: 1600, margin: '0 auto' }}>
+
+            {/* Product header */}
+            <div className="bi-product-header" style={{ marginBottom: 20 }}>
               <div>
-                <h3 className={`text-sm font-semibold ${t.text} mb-2`}>已有项目</h3>
-                <div className="space-y-2">
-                  {projects.map(p => (
-                    <button
-                      key={p.id}
-                      onClick={() => handleSelectProject(p.id)}
-                      className={`w-full flex items-center justify-between rounded-lg border ${t.border} ${t.hover} px-3 py-2.5 transition-colors text-left`}
-                    >
-                      <div>
-                        <div className={`text-sm font-medium ${t.text}`}>{p.name}</div>
-                        <div className={`text-xs ${t.subText}`}>{STAGES.find(s => s.key === p.stage)?.label ?? p.stage}</div>
-                      </div>
-                      <ChevronRight className={`h-4 w-4 ${t.subText}`} />
-                    </button>
-                  ))}
+                <div className="bi-eyebrow">
+                  <span className="bi-live-dot" />
+                  PURPOSE-FIRST IP DESIGN
                 </div>
+                <h1 style={{ fontSize: 24, margin: '8px 0 4px', letterSpacing: '-.04em' }}>品牌IP设计工场</h1>
+                <p style={{ margin: 0, color: '#8f929a', fontSize: 12 }}>
+                  先让IP承担明确的品牌任务，再生成角色；先锁定结构和不可变核心，再做画风、服装与应用。
+                </p>
               </div>
-            ) : null}
-          </div>
-        )}
-
-        {/* ═══ Brand goal stage: show brief + strategy button ═══ */}
-        {project && sIdx === 0 && (
-          <div className="space-y-4">
-            <div className={`rounded-xl border ${t.border} p-4`}>
-              <h3 className={`text-sm font-semibold ${t.text} mb-3 flex items-center gap-2`}>
-                <Target className="h-4 w-4" /> 品牌目标摘要
-              </h3>
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div><span className={t.subText}>品牌名称:</span> <span className={t.text}>{project.brief.brandName}</span></div>
-                <div><span className={t.subText}>行业:</span> <span className={t.text}>{project.brief.industry}</span></div>
-                <div><span className={t.subText}>受众:</span> <span className={t.text}>{project.brief.targetAudience}</span></div>
-                <div><span className={t.subText}>核心价值观:</span> <span className={t.text}>{project.brief.coreValues}</span></div>
-                <div><span className={t.subText}>个性:</span> <span className={t.text}>{project.brief.brandPersonality}</span></div>
-                <div><span className={t.subText}>愿景:</span> <span className={t.text}>{project.brief.vision}</span></div>
+              <div className="bi-header-actions">
+                <button className="bi-secondary-button" onClick={() => setShowAdvanced(true)}>
+                  <Settings style={{ width: 13, height: 13 }} /> 高级设置
+                </button>
+                <button className="bi-secondary-button" disabled title="导出将在资产交付包完成后开放">
+                  <span>↓</span> 导出
+                </button>
               </div>
-              {project.brief.marketContext && (
-                <p className={`text-sm ${t.subText} mt-2`}>{project.brief.marketContext}</p>
-              )}
-            </div>
-            <button
-              onClick={handleRunStrategy}
-              disabled={strategyStreaming}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-40 ${isMonochrome ? 'bg-gray-800 text-white hover:bg-gray-700' : 'bg-[#d4af37] text-black hover:bg-[#e0b850]'}`}
-            >
-              {strategyStreaming ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-              {strategyStreaming ? '分析中...' : '启动品牌策略分析'}
-            </button>
-          </div>
-        )}
-
-        {/* ═══ Strategy streaming ═══ */}
-        {strategyStreaming && (
-          <div className={`mt-4 rounded-xl border ${t.border} p-4`}>
-            <div className="flex items-center gap-2 mb-2">
-              <Loader2 className={`h-4 w-4 animate-spin ${t.accent}`} />
-              <span className={`text-sm font-medium ${t.text}`}>AI 策略分析中</span>
-            </div>
-            <div className={`text-sm ${t.subText} whitespace-pre-wrap max-h-48 overflow-y-auto leading-relaxed`}>
-              {strategyStreamText || '等待模型响应...'}
-            </div>
-          </div>
-        )}
-
-        {strategyError && (
-          <div className={`mt-3 flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/5 p-3`}>
-            <AlertCircle className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
-            <span className="text-sm text-red-500">{strategyError}</span>
-          </div>
-        )}
-
-        {/* ═══ Strategy result ═══ */}
-        {project?.strategy && sIdx >= 1 && (
-          <div className="space-y-4">
-            {/* Positioning */}
-            {project.strategy.positioning && (
-              <div className={`rounded-xl border ${t.border} p-4`}>
-                <h4 className={`text-xs font-semibold ${t.subText} uppercase tracking-wide mb-1`}>品牌定位</h4>
-                <p className={`text-sm ${t.text}`}>{project.strategy.positioning}</p>
-              </div>
-            )}
-
-            {/* Immutable core */}
-            {project.immutableCore.length > 0 && (
-              <div className={`rounded-xl border ${t.border} p-4`}>
-                <h4 className={`text-xs font-semibold ${t.subText} uppercase tracking-wide mb-2`}>不可变核心</h4>
-                <div className="space-y-1.5">
-                  {project.immutableCore.map(c => (
-                    <div key={c.id} className="flex items-start gap-2">
-                      <div className={`h-1.5 w-1.5 rounded-full ${isMonochrome ? 'bg-gray-600' : 'bg-[#d4af37]'} mt-1.5 shrink-0`} />
-                      <div>
-                        <span className={`text-sm font-medium ${t.text}`}>{c.category}</span>
-                        <span className={`text-sm ${t.subText} ml-2`}>{c.description}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Controlled variables */}
-            {project.controlledVariables.length > 0 && (
-              <div className={`rounded-xl border ${t.border} p-4`}>
-                <h4 className={`text-xs font-semibold ${t.subText} uppercase tracking-wide mb-2`}>可控变量</h4>
-                <div className="grid grid-cols-2 gap-2">
-                  {project.controlledVariables.map(v => (
-                    <div key={v.id} className={`rounded-lg ${t.card} border p-2.5`}>
-                      <div className={`text-sm font-medium ${t.text}`}>{v.category}</div>
-                      <div className={`text-xs ${t.subText} mt-0.5`}>{v.description}</div>
-                      {v.guidance && <div className={`text-xs ${t.accent} mt-1`}>{v.guidance}</div>}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Tone & narrative */}
-            <div className="grid grid-cols-2 gap-3">
-              {project.strategy.toneOfVoice && (
-                <div className={`rounded-xl border ${t.border} p-3`}>
-                  <h4 className={`text-xs font-semibold ${t.subText} uppercase tracking-wide mb-1`}>语调风格</h4>
-                  <p className={`text-sm ${t.text}`}>{project.strategy.toneOfVoice}</p>
-                </div>
-              )}
-              {project.strategy.narrative && (
-                <div className={`rounded-xl border ${t.border} p-3`}>
-                  <h4 className={`text-xs font-semibold ${t.subText} uppercase tracking-wide mb-1`}>叙事框架</h4>
-                  <p className={`text-sm ${t.text}`}>{project.strategy.narrative}</p>
-                </div>
-              )}
             </div>
 
-            {/* Re-run strategy */}
-            <button
-              onClick={handleRunStrategy}
-              disabled={strategyStreaming}
-              className={`flex items-center gap-2 text-xs ${t.accent} ${t.hover} px-3 py-1.5 rounded-lg transition-colors disabled:opacity-40`}
-            >
-              <RefreshCw className="h-3.5 w-3.5" /> 重新分析策略
-            </button>
-          </div>
-        )}
-
-        {/* ═══ Role direction stage ═══ */}
-        {project && sIdx === 2 && (
-          <div className="space-y-3">
-            <h3 className={`text-sm font-semibold ${t.text} flex items-center gap-2`}>
-              <Crown className="h-4 w-4" /> 角色方向（请选择并确认一个）
-            </h3>
-            <div className="space-y-2">
-              {(project.directions.length > 0 ? project.directions : [
-                { id: 'dir-1', name: '方向 A', description: '基于品牌策略自动生成的角色方向', scores: { differentiation: 8, memorability: 7, extensibility: 9, feasibility: 8 } },
-                { id: 'dir-2', name: '方向 B', description: '替代角色方向', scores: { differentiation: 9, memorability: 8, extensibility: 7, feasibility: 7 } },
-              ]).map(dir => (
+            {/* Stage navigation */}
+            <div className="bi-stage-nav" style={{ marginBottom: 14 }}>
+              {STAGES.map((s, i) => (
                 <button
-                  key={dir.id}
-                  onClick={() => handleConfirmDirection(dir.id)}
-                  className={`w-full text-left rounded-xl border p-3 transition-colors ${
-                    project.confirmedDirectionId === dir.id
-                      ? (isMonochrome ? 'border-gray-800 bg-gray-50' : 'border-[#d4af37] bg-[#d4af37]/5')
-                      : `${t.border} ${t.hover}`
-                  }`}
+                  key={s.num}
+                  className={`${i === activeStage ? 'active' : ''} ${i < activeStage ? 'done' : ''}`}
+                  onClick={() => i <= activeStage && setActiveStage(i)}
+                  style={{ opacity: i > activeStage ? 0.4 : 1, cursor: i > activeStage ? 'not-allowed' : 'pointer' }}
                 >
-                  <div className="flex items-center justify-between">
-                    <span className={`text-sm font-medium ${t.text}`}>{dir.name}</span>
-                    {project.confirmedDirectionId === dir.id && <Check className={`h-4 w-4 ${t.accent}`} />}
-                  </div>
-                  <p className={`text-xs ${t.subText} mt-1`}>{dir.description}</p>
-                  <div className="flex gap-3 mt-2">
-                    {Object.entries(dir.scores).map(([k, v]) => (
-                      <div key={k} className="flex items-center gap-1">
-                        <span className={`text-xs ${t.subText}`}>{k}</span>
-                        <span className={`text-xs font-medium ${t.accent}`}>{v}/10</span>
-                      </div>
-                    ))}
-                  </div>
+                  <span className="bi-stage-number">{s.num}</span>
+                  {s.name}
                 </button>
               ))}
             </div>
-          </div>
-        )}
 
-        {/* ═══ Visual system stage ═══ */}
-        {project && sIdx === 3 && (
-          <div className="space-y-3">
-            <h3 className={`text-sm font-semibold ${t.text} flex items-center gap-2`}>
-              <Palette className="h-4 w-4" /> 视觉系统
-            </h3>
-            <div className={`rounded-xl border ${t.border} p-4`}>
-              <p className={`text-sm ${t.subText}`}>
-                已确认方向: <span className={t.text}>{project.directions.find(d => d.id === project.confirmedDirectionId)?.name ?? '未选择'}</span>
-              </p>
-              <p className={`text-xs ${t.subText} mt-2`}>
-                视觉系统基于品牌策略和已确认的角色方向，包含色彩规范、字体规范、图形语言和构图原则。点击下方"生成品牌资产"开始创建视觉资产。
-              </p>
-            </div>
-          </div>
-        )}
+            {/* ═══ Content grid (3 columns) ═══ */}
+            <div className="bi-content-grid">
 
-        {/* ═══ Asset generation stage ═══ */}
-        {project && sIdx >= 3 && (
-          <div className="space-y-4">
-            <div className={`rounded-xl border ${t.border} p-4`}>
-              <h3 className={`text-sm font-semibold ${t.text} flex items-center gap-2 mb-3`}>
-                <Download className="h-4 w-4" /> 资产生成
-              </h3>
-              {!project.confirmedDirectionId && (
-                <div className={`flex items-center gap-2 text-xs ${t.subText} mb-3`}>
-                  <AlertCircle className="h-3.5 w-3.5" /> 需先确认角色方向才能生成资产
+              {/* ─── Left: Input panel ─── */}
+              <div className="bi-panel bi-input-panel" style={{ padding: 18 }}>
+                {/* Heading */}
+                <div className="bi-panel-heading">
+                  <div>
+                    <span className="bi-section-index">01</span>
+                    <h2>品牌目标</h2>
+                  </div>
+                  <label className="bi-smart-toggle">
+                    <input type="checkbox" checked={smartMode} onChange={e => setSmartMode(e.target.checked)} />
+                    <i />
+                    智能补全
+                  </label>
                 </div>
-              )}
-              <div className="flex gap-2 mb-3">
-                {['logo', 'mascot', 'poster', 'packaging', 'social'].map(type => (
-                  <button
-                    key={type}
-                    onClick={() => setAssetType(type)}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
-                      assetType === type
-                        ? (isMonochrome ? 'bg-gray-800 text-white' : 'bg-[#d4af37] text-black')
-                        : `${t.chip} ${t.hover}`
-                    }`}
+
+                {/* Path grid */}
+                <div className="bi-field">
+                  <label>工作路径</label>
+                  <div className="bi-path-grid">
+                    {PATHS.map((p, i) => (
+                      <button
+                        key={i}
+                        className={workflowPath === i ? 'selected' : ''}
+                        onClick={() => setWorkflowPath(i)}
+                      >
+                        <span>{p.icon}</span> {p.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Brand name */}
+                <div className="bi-field">
+                  <label>品牌 / 项目名称 <em>*</em></label>
+                  <input
+                    value={brandName}
+                    onChange={e => setBrandName(e.target.value)}
+                    placeholder="例如：中国劲酒年轻化品牌IP"
+                  />
+                </div>
+
+                {/* Goal */}
+                <div className="bi-field">
+                  <label>希望IP完成什么 <em>*</em> <small>一句话即可</small></label>
+                  <textarea
+                    rows={2}
+                    value={goal}
+                    onChange={e => setGoal(e.target.value)}
+                    placeholder="例如：打造能连接年轻消费者并长期运营的品牌角色"
+                  />
+                </div>
+
+                {/* Audience & Industry */}
+                <div className="bi-setting-grid" style={{ marginBottom: 16 }}>
+                  <div className="bi-field" style={{ margin: 0 }}>
+                    <label>目标受众</label>
+                    <input
+                      value={audience}
+                      onChange={e => setAudience(e.target.value)}
+                      placeholder="25-40岁都市人群"
+                    />
+                  </div>
+                  <div className="bi-field" style={{ margin: 0 }}>
+                    <label>所属行业</label>
+                    <input
+                      value={industry}
+                      onChange={e => setIndustry(e.target.value)}
+                      placeholder="酒水/食品/科技"
+                    />
+                  </div>
+                </div>
+
+                {/* Carriers */}
+                <div className="bi-field">
+                  <label>首发载体 <small>可多选</small></label>
+                  <div className="bi-chip-list">
+                    {CARRIERS.map((c, i) => (
+                      <button
+                        key={i}
+                        className={selectedCarriers.includes(i) ? 'selected' : ''}
+                        onClick={() => setSelectedCarriers(prev => prev.includes(i) ? prev.filter(x => x !== i) : [...prev, i])}
+                      >
+                        <span>{c.icon}</span> {c.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Reference upload is unavailable until it is bound to the project asset API. */}
+                <div className="bi-upload-box" aria-disabled="true">
+                  <span className="bi-upload-icon">↑</span>
+                  <div>
+                    <strong>品牌资料导入</strong>
+                    <small>该项目暂未接入资料存储，策略生成仅使用上方文字信息</small>
+                  </div>
+                </div>
+
+                <div className="bi-field">
+                  <label>策略模型</label>
+                  <select
+                    value={selectedChatModelKey}
+                    onChange={event => setSelectedChatModelKey(event.target.value)}
+                    disabled={chatModels.length === 0 || isAnalyzing}
                   >
-                    {type}
-                  </button>
-                ))}
-              </div>
-              <textarea
-                className={`${t.input} border rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-[#d4af37]/40 w-full resize-none`}
-                rows={3}
-                placeholder="描述要生成的品牌资产..."
-                value={assetPrompt}
-                onChange={e => setAssetPrompt(e.target.value)}
-              />
-              <button
-                onClick={handleGenerate}
-                disabled={generating || !assetPrompt.trim() || !project.confirmedDirectionId}
-                className={`mt-2 flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-40 ${isMonochrome ? 'bg-gray-800 text-white hover:bg-gray-700' : 'bg-[#d4af37] text-black hover:bg-[#e0b850]'}`}
-              >
-                {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
-                {generating ? '生成中...' : '生成资产'}
-              </button>
-            </div>
+                    {chatModels.length === 0 ? (
+                      <option value="">暂无可用聊天模型</option>
+                    ) : chatModels.map(model => (
+                      <option key={model.key} value={model.key}>{model.label}</option>
+                    ))}
+                  </select>
+                </div>
 
-            {genError && (
-              <div className={`flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/5 p-3`}>
-                <AlertCircle className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
-                <span className="text-sm text-red-500">{genError}</span>
+                {/* Generate button */}
+                <button
+                  className="bi-primary-button"
+                  disabled={isAnalyzing || !brandName.trim()}
+                  onClick={handleGenerate}
+                >
+                  {isAnalyzing ? '分析中...' : '生成策略与方向'}
+                </button>
+                <p className="bi-generate-note">
+                  系统将分析品牌角色、可拥有性、可落地性三大关卡，并生成3个角色方向
+                </p>
               </div>
-            )}
 
-            {/* Asset grid */}
-            {project.assets.length > 0 && (
-              <div className="grid grid-cols-3 gap-3">
-                {project.assets.map(asset => (
-                  <div key={asset.id} className={`rounded-xl border ${t.border} overflow-hidden`}>
-                    {asset.status === 'completed' && asset.imageUrl ? (
-                      <img src={asset.imageUrl} alt={asset.type} className="w-full aspect-square object-cover" />
-                    ) : (
-                      <div className="w-full aspect-square flex items-center justify-center">
-                        {asset.status === 'pending' ? (
-                          <Loader2 className={`h-6 w-6 animate-spin ${t.subText}`} />
-                        ) : (
-                          <AlertCircle className="h-6 w-6 text-red-500" />
+              {/* ─── Center: Result column ─── */}
+              <div className="bi-result-column">
+
+                {/* Insight card */}
+                <div className="bi-panel bi-insight" style={{ padding: 18 }}>
+                  <div className="bi-panel-heading compact">
+                    <div>
+                      <span className="bi-section-index">02</span>
+                      <h2>策略摘要</h2>
+                    </div>
+                    <span className={`bi-status-pill ${hasAnalyzed ? 'success' : ''}`}>
+                      {isAnalyzing ? '分析中' : hasAnalyzed ? '已完成' : '待生成'}
+                    </span>
+                  </div>
+
+                  {isAnalyzing && (
+                    <div className="bi-analysis-state">
+                      <div className="bi-orb-loader"><span /></div>
+                      <strong>正在分析品牌策略</strong>
+                      <p>AI 正在解析品牌目标与三大关卡</p>
+                      <div className="bi-progress-track">
+                        <i style={{ width: `${analysisProgress}%` }} />
+                      </div>
+                      <small>{analysisProgress}%</small>
+                    </div>
+                  )}
+
+                  {!isAnalyzing && !hasAnalyzed && (
+                    <div className="bi-analysis-state">
+                      <div className="bi-orb-loader" style={{ animation: 'none', opacity: 0.4 }}><span /></div>
+                      <strong style={{ color: '#646770' }}>等待策略分析</strong>
+                      <p>填写左侧品牌目标后点击"生成策略与方向"</p>
+                    </div>
+                  )}
+
+                  {!isAnalyzing && hasAnalyzed && (
+                    <>
+                      {/* Summary card */}
+                      <div className="bi-summary-card">
+                        <div className="bi-summary-top">
+                          <span>策略摘要</span>
+                          <strong>AI 生成</strong>
+                        </div>
+                        <p style={{ color: '#a0a2a7', fontSize: 10, lineHeight: 1.7, margin: '10px 0 12px', whiteSpace: 'pre-wrap' }}>
+                          {strategyText.slice(0, 500) || '策略分析完成。请查看下方角色方向并选择确认。'}
+                          {strategyText.length > 500 ? '...' : ''}
+                        </p>
+                
+                      </div>
+
+                      <div className="bi-gate-grid">
+                        {gateItems.length > 0 ? gateItems.map(item => (
+                          <article key={item.id}>
+                            <span className="bi-gate-icon" style={{ fontSize: 16 }}>{item.icon}</span>
+                            <div>
+                              <strong>{item.name}</strong>
+                              <small>{item.note}</small>
+                            </div>
+                            <b className={item.warning ? 'warning' : ''}>{item.status}</b>
+                          </article>
+                        )) : (
+                          <div className="bi-gate-empty">策略完成后将在这里显示不可变核心与受控变量。</div>
                         )}
                       </div>
-                    )}
-                    <div className="p-2">
-                      <div className={`text-xs font-medium ${t.text}`}>{asset.type}</div>
-                      {asset.status === 'completed' && asset.imageUrl && (
+                    </>
+                  )}
+                </div>
+
+                {/* Directions card */}
+                <div className="bi-panel bi-directions" style={{ padding: 18 }}>
+                  <div className="bi-panel-heading compact">
+                    <div>
+                      <span className="bi-section-index">03</span>
+                      <h2>角色方向</h2>
+                    </div>
+                    <span className="bi-status-pill">{displayDirections.length} 个候选</span>
+                  </div>
+
+                  <div className="bi-direction-list">
+                    {displayDirections.map(dir => (
+                      <button
+                        key={dir.id}
+                        className={selectedDirection === dir.id ? 'selected' : ''}
+                        onClick={() => !confirmedDirection && setSelectedDirection(dir.id)}
+                        style={{ cursor: confirmedDirection ? 'default' : 'pointer' }}
+                      >
+                        {/* Mini character */}
+                        <div className={`bi-mini-character ${dir.tone}`} style={{ height: 94 }}>
+                          <div className="ear" />
+                          <div className="ear right" />
+                          <div className="face">
+                            <i /><i />
+                          </div>
+                          <div className="body" />
+                        </div>
+
+                        {/* Copy */}
+                        <div className="bi-direction-copy">
+                          <div>
+                            <span>{dir.tag}</span>
+                            <strong>匹配 {dir.score}</strong>
+                          </div>
+                          <h3>{dir.name}</h3>
+                          <p>{dir.description}</p>
+                          <div className="bi-trait-row">
+                            {dir.traits.map((t, ti) => (
+                              <i key={ti}>{t}</i>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Radio dot */}
+                        <div className="bi-radio-dot" />
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Confirm button */}
+                  {selectedDirection && !confirmedDirection && (
+                    <button
+                      className="bi-primary-button"
+                      style={{ marginTop: 12, height: 36, fontSize: 11 }}
+                      onClick={handleConfirmDirection}
+                    >
+                      确认方向并锁定不可变核心
+                    </button>
+                  )}
+                  {confirmedDirection && (
+                    <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, background: 'rgba(94,229,164,.06)', border: '1px solid rgba(94,229,164,.16)', color: '#5ee5a4', fontSize: 10 }}>
+                      ✓ 方向已锁定：{displayDirections.find(direction => direction.id === selectedDirection)?.name}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* ─── Right: Preview column ─── */}
+              <div className="bi-preview-column">
+
+                {/* Preview panel */}
+                <div className="bi-panel bi-preview-panel" style={{ overflow: 'hidden' }}>
+                  <div className="bi-preview-head">
+                    <span>角色预览</span>
+                    <div>
+                      {VIEW_TABS.map((t, i) => (
                         <button
-                          onClick={() => handleAddToCanvas(asset.imageUrl)}
-                          className={`text-xs ${t.accent} ${t.hover} mt-1`}
+                          key={i}
+                          className={viewTab === i ? 'active' : ''}
+                          onClick={() => setViewTab(i)}
                         >
-                          添加到画布
+                          {t}
                         </button>
-                      )}
+                      ))}
                     </div>
                   </div>
-                ))}
+
+                  {/* Character stage */}
+                  <div className={`bi-character-stage ${dirTone}`} style={{ height: 262, position: 'relative', overflow: 'hidden' }}>
+                    <div className="bi-grid-floor" />
+                    {/* Hero character */}
+                    <div className="bi-hero-character">
+                      <div className="bi-hero-ear" />
+                      <div className="bi-hero-ear right" />
+                      <div className="bi-hero-head">
+                        <div className="bi-eye" />
+                        <div className="bi-eye right" />
+                        <div className="bi-cheek" />
+                        <div className="bi-cheek right" />
+                        <div className="bi-mouth" />
+                        <div className="bi-badge">★</div>
+                      </div>
+                      <div className="bi-hero-body" />
+                      <div className="bi-arm" />
+                      <div className="bi-arm right" />
+                      <div className="bi-foot" />
+                      <div className="bi-foot right" />
+                    </div>
+                    {/* Sparkles */}
+                    <span className="bi-spark s1" style={{ fontSize: 14 }}>✦</span>
+                    <span className="bi-spark s2">✦</span>
+                    <span className="bi-spark s3">✦</span>
+
+                    {/* Caption */}
+                    <div className="bi-preview-caption">
+                      <span>当前方向</span>
+                      <strong>{selDir?.name ?? '未选择'}</strong>
+                      <small>{confirmedDirection ? '已锁定' : '待确认'}</small>
+                    </div>
+                  </div>
+
+                  {/* View actions */}
+                  <div className="bi-view-actions">
+                    <button
+                      disabled={assets.length === 0}
+                      onClick={() => {
+                        const asset = assets[0];
+                        if (asset) handleAddToCanvas(asset.imageUrl);
+                      }}
+                    >
+                      发送到画布
+                    </button>
+                    <button disabled title="资产评价暂未接入项目持久化">收藏</button>
+                    <button disabled title="资产评价暂未接入项目持久化">淘汰</button>
+                  </div>
+                </div>
+
+                {/* Deliverable panel */}
+                <div className="bi-panel bi-deliverable" style={{ padding: 15 }}>
+                  <div className="bi-deliverable-head">
+                    <div>
+                      <span className="bi-section-index">{STAGES[activeStage].num}</span>
+                      <h2>{STAGES[activeStage].title}</h2>
+                    </div>
+                    <span>{activeStage + 1} / 5</span>
+                  </div>
+                  <p>{STAGES[activeStage].desc}</p>
+                  <ul>
+                    {STAGES[activeStage].items.map((item, i) => (
+                      <li key={i}>
+                        <span>{String(i + 1).padStart(2, '0')}</span>
+                        {item}
+                        <b>{i < 2 ? '✓' : '○'}</b>
+                      </li>
+                    ))}
+                  </ul>
+                  {activeStage < 4 && (
+                    <button
+                      className="bi-next-stage"
+                      onClick={() => setActiveStage(activeStage + 1)}
+                    >
+                      进入下一阶段 <span>→</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Asset generation (stage 2+) */}
+                {activeStage >= 2 && (
+                  <div className="bi-panel" style={{ padding: 15 }}>
+                    <div className="bi-deliverable-head" style={{ marginBottom: 10 }}>
+                      <div>
+                        <span className="bi-section-index">04</span>
+                        <h2>资产生成</h2>
+                      </div>
+                    </div>
+                    {generatingAsset && (
+                      <div className="bi-asset-progress">
+                        <div>
+                          <span>{assetLabel || '正在生成资产'}</span>
+                          <strong>{assetProgress}%</strong>
+                        </div>
+                        <div className="bi-progress-track"><i style={{ width: `${assetProgress}%` }} /></div>
+                        <button className="bi-secondary-button" onClick={handleCancelAssetTask}>取消生成</button>
+                      </div>
+                    )}
+                    {assets.length > 0 && (
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 10 }}>
+                        {assets.slice(0, 4).map(a => (
+                          <div
+                            key={a.id}
+                            style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', cursor: 'pointer' }}
+                            onClick={() => handleAddToCanvas(a.imageUrl)}
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={a.imageUrl} alt={a.assetType} style={{ width: '100%', height: 80, objectFit: 'cover' }} />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="bi-field" style={{ marginBottom: 10 }}>
+                      <label>图像模型</label>
+                      <select
+                        value={selectedImageModelKey}
+                        onChange={event => setSelectedImageModelKey(event.target.value)}
+                        disabled={imageModels.length === 0 || generatingAsset}
+                      >
+                        {imageModels.length === 0 ? (
+                          <option value="">暂无可用图像模型</option>
+                        ) : imageModels.map(model => (
+                          <option key={model.key} value={model.key}>{model.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                      {['标准角色图', '单色版', '小尺寸', '表情包'].map(t => (
+                        <button
+                          key={t}
+                          className="bi-secondary-button"
+                          style={{ height: 32, fontSize: 10, justifyContent: 'center' }}
+                          disabled={generatingAsset || !confirmedDirection}
+                          onClick={handleGenerateAsset}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Risk note */}
+                <div className="bi-risk-note">
+                  <span>!</span>
+                  <div>
+                    <strong>风险提示</strong>
+                    <p>系统输出的商标、版权和原创性判断均为"待核验"状态，不构成法律结论。请在商用前完成专业检索和法务审查。</p>
+                  </div>
+                </div>
               </div>
-            )}
+
+            </div>{/* /content-grid */}
+          </div>{/* /product */}
+        </div>{/* /scroll body */}
+
+        {/* ═══ Advanced settings drawer ═══ */}
+        {showAdvanced && (
+          <div className="bi-modal-backdrop" onClick={() => setShowAdvanced(false)}>
+            <div className="bi-advanced-drawer" onClick={e => e.stopPropagation()}>
+              <div className="bi-drawer-head">
+                <div>
+                  <span>ADVANCED</span>
+                  <h2>高级设置</h2>
+                </div>
+                <button onClick={() => setShowAdvanced(false)}>×</button>
+              </div>
+              <p className="bi-drawer-intro">
+                高级参数用于控制角色定位、生产限制和风险策略。不填写时系统将使用推荐默认值，不会阻塞基础流程。
+              </p>
+
+              <div className="bi-setting-group">
+                <label>IP 主角色定位</label>
+                <select value={advRole} onChange={e => setAdvRole(e.target.value)}>
+                  <option>长期代言人</option>
+                  <option>活动限定角色</option>
+                  <option>系列主角</option>
+                  <option>联名角色</option>
+                </select>
+              </div>
+
+              <div className="bi-setting-grid">
+                <div className="bi-setting-group">
+                  <label>角色数量</label>
+                  <select value={advCount} onChange={e => setAdvCount(e.target.value)}>
+                    <option value="1">1 个</option>
+                    <option value="2">2 个</option>
+                    <option value="3">3 个</option>
+                  </select>
+                </div>
+                <div className="bi-setting-group">
+                  <label>视觉气质</label>
+                  <select value={advVibe} onChange={e => setAdvVibe(e.target.value)}>
+                    <option>温暖亲和</option>
+                    <option>活力运动</option>
+                    <option>酷炫科技</option>
+                    <option>典雅文艺</option>
+                    <option>童趣可爱</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="bi-setting-group">
+                <label>生产限制</label>
+                <textarea
+                  rows={2}
+                  value={advConstraints}
+                  onChange={e => setAdvConstraints(e.target.value)}
+                  placeholder="例如：后期需支持PVC公仔生产"
+                />
+              </div>
+
+              <div className="bi-setting-group">
+                <label>禁止项</label>
+                <textarea
+                  rows={2}
+                  value={advForbidden}
+                  onChange={e => setAdvForbidden(e.target.value)}
+                  placeholder="例如：不得模仿具体艺术家"
+                />
+              </div>
+
+              <div className="bi-switch-list">
+                <label>
+                  <span>
+                    <strong>自动生成权利风险表</strong>
+                    <small>在交付治理阶段自动创建风险登记</small>
+                  </span>
+                  <input type="checkbox" checked={advAutoRisk} onChange={e => setAdvAutoRisk(e.target.checked)} />
+                </label>
+                <label>
+                  <span>
+                    <strong>同步生成应用矩阵</strong>
+                    <small>角色确认后自动生成首发载体应用方案</small>
+                  </span>
+                  <input type="checkbox" checked={advAutoApp} onChange={e => setAdvAutoApp(e.target.checked)} />
+                </label>
+                <label>
+                  <span>
+                    <strong>优先结构识别</strong>
+                    <small>生成前先分析已有角色的轮廓与比例</small>
+                  </span>
+                  <input type="checkbox" checked={advStructFirst} onChange={e => setAdvStructFirst(e.target.checked)} />
+                </label>
+              </div>
+
+              <div className="bi-drawer-actions">
+                <button onClick={() => setShowAdvanced(false)}>关闭</button>
+                <button className="save" disabled title="高级参数尚未接入项目配置存储">保存设置</button>
+              </div>
+            </div>
           </div>
         )}
-      </div>
+
+        {/* ═══ Toast ═══ */}
+        {toast.show && (
+          <div className="bi-toast">
+            <span>✓</span>
+            {toast.msg}
+          </div>
+        )}
+
+      </div>{/* /shell */}
     </div>
   );
 }
