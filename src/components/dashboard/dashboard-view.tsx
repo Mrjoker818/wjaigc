@@ -1497,7 +1497,12 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       if (!data.success && data.error) { setTestNewResult({ success: false, message: data.error }); setDiscoveredModels([]); setIsTestingNew(false); return; }
       const models = data.models || [];
       setDiscoveredModels(models); setModelSearchQuery('');
-      setTestNewResult({ success: true, message: `连接成功，发现 ${models.length} 个可用模型`, modelCount: models.length });
+      if (models.length === 0 && data.message) {
+        // Backend has a diagnostic message (e.g. 401, 404, non-JSON) — show it instead of generic text
+        setTestNewResult({ success: true, message: data.message, modelCount: 0 });
+      } else {
+        setTestNewResult({ success: true, message: `连接成功，发现 ${models.length} 个可用模型`, modelCount: models.length });
+      }
       if (apiKind === 'vectorize') {
         const vModels = models.filter((m: ModelInfo) => { const id = m.id.toLowerCase(); return id.includes('vector') || id.includes('vectorize') || id.includes('svg') || id.includes('tracer') || id.includes('starvector'); });
         setSelectedModels(vModels.length > 0 ? vModels.map((m: ModelInfo) => m.id) : []);
@@ -1510,6 +1515,9 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       } else if (apiKind === 'removebg') {
         const rModels = models.filter((m: ModelInfo) => { const id = m.id.toLowerCase(); return id.includes('removebg') || id.includes('rmbg') || id.includes('birefnet') || id.includes('u2net') || id.includes('isnet') || id.includes('background') || id.includes('matting'); });
         setSelectedModels(rModels.length > 0 ? rModels.map((m: ModelInfo) => m.id) : []);
+      } else if (apiKind === 'video') {
+        const vModels = models.filter((m: ModelInfo) => { const id = m.id.toLowerCase(); return id.includes('video') || id.includes('seedance') || id.includes('kling') || id.includes('hailuo') || id.includes('vidu') || id.includes('sora') || id.includes('veo') || id.includes('pika') || id.includes('ray2') || id.includes('ray3') || id.includes('gen-3') || id.includes('gen-4') || id.includes('cogvideo') || id.includes('wan-') || id.includes('runway') || id.includes('luma') || id.includes('mochi') || id.includes('ltx'); });
+        setSelectedModels(vModels.length > 0 ? vModels.map((m: ModelInfo) => m.id) : []);
       } else if (selectedModels.length === 0 && models.length > 0) {
         // Auto-select all models on first discover
         setSelectedModels(models.map((m: ModelInfo) => m.id));

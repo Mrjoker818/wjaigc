@@ -156,23 +156,48 @@ function inferModelType(modelId: string, fallback: 'image' | 'chat' | '3d' | 've
   // 视频模型关键词匹配 — 必须在图像之前检查，避免视频模型被误判为图像
   if (
     id.includes('video-generation') ||
+    id.includes('video-gen') ||
     id.includes('kling-v3-video') ||
     id.includes('kling-v3-omni-video') ||
+    id.includes('kling-v3-5-video') ||
+    id.includes('kling-video') ||
     id.includes('seedance') ||
     id.includes('vidu-') ||
+    id.includes('vidu/q') ||
     id.includes('hailuo-') ||
     id.includes('minimax-video') ||
     id.includes('wan2.7-video') ||
     id.includes('wan2-video') ||
+    id.includes('wan-') && id.includes('video') ||
     id.includes('veo-') ||
     id.includes('veo3') ||
+    id.includes('veo2') ||
     id.includes('gen-3-alpha') ||
+    id.includes('gen-3-turbo') ||
     id.includes('gen-4') ||
+    id.includes('gen-2') ||
     id.includes('pika-') ||
     id.includes('ray2') ||
     id.includes('ray3') ||
     id.includes('sora-2') ||
-    (id.includes('sora') && !id.includes('sorafenib'))
+    (id.includes('sora') && !id.includes('sorafenib')) ||
+    id.includes('cogvideox') ||
+    id.includes('cog-video') ||
+    id.includes('ltx-video') ||
+    id.includes('mochi-') ||
+    id.includes('hunyuan-video') ||
+    id.includes('open-sora') ||
+    id.includes('pyramid-flow') ||
+    id.includes('runway') ||
+    id.includes('luma-') ||
+    id.includes('pika/') ||
+    id.includes('kling-v3') && !id.includes('image') ||
+    id.includes('doubao-seedance') ||
+    id.includes('video-01') ||
+    id.includes('t2v') ||
+    id.includes('i2v') ||
+    id.includes('text-to-video') ||
+    id.includes('image-to-video')
   ) {
     // 例外：如果同时包含 image 关键词，则不是视频模型
     if (id.includes('image')) return 'image';
@@ -225,6 +250,25 @@ function inferModelType(modelId: string, fallback: 'image' | 'chat' | '3d' | 've
   if (id.includes('qwen-image-layered') || id.includes('layer') || id.includes('segment') || id.includes('sam') || id.includes('detection') || id.includes('yolo')) return 'layer';
   // 3D模型关键词匹配
   if (id.includes('3d') || id.includes('tripo') || id.includes('meshy') || id.includes('hunyuan')) return '3d';
+  // 视频模型关键词匹配 — 必须在图像之前检查，避免 cogvideo 等被误判
+  if (
+    id.includes('video') ||
+    id.includes('seedance') ||
+    id.includes('kling') ||
+    id.includes('hailuo') ||
+    id.includes('vidu') ||
+    id.includes('sora') ||
+    id.includes('veo') ||
+    id.includes('pika') ||
+    id.includes('ray2') || id.includes('ray3') ||
+    id.includes('gen-3') || id.includes('gen-4') ||
+    id.includes('cogvideo') ||
+    id.includes('wan-') ||
+    id.includes('runway') ||
+    id.includes('luma') ||
+    id.includes('mochi') ||
+    id.includes('ltx')
+  ) return 'video';
   // 图像模型关键词匹配 — 必须在 chat 之前检查，因为有些模型名同时包含 gpt+image
   if (
     id.includes('image') ||
@@ -253,9 +297,7 @@ function inferModelType(modelId: string, fallback: 'image' | 'chat' | '3d' | 've
     id.includes('novelai') ||
     id.includes('nai-diffusion') ||
     id.includes('cogview') ||
-    id.includes('cogvideox') ||
-    id.includes('minimax-image') ||
-    id.includes('minimax-video')
+    id.includes('minimax-image')
   ) return 'image';
   // Embedding/rerank 模型 — 既不是 chat 也不是 image，归类为 chat（对话面板不显示）
   // 但这些模型不应该出现在图像面板，所以先匹配它们并归入 chat
@@ -563,13 +605,15 @@ export async function discoverModelsForCredentials(
     const models = rawModels
       .map((m: Record<string, unknown>) => formatModel(m, probeProvider))
       .filter((m: ModelInfo) => m.id && (
-        // For general/universal/vectorize/layer/upscaler/removebg: show all models (admin picks what they need)
+        // For general/universal/vectorize/layer/upscaler/removebg/video/audio: show all models (admin picks what they need)
         modelType === 'universal' ||
         modelType === 'general' ||
         modelType === 'vectorize' ||
         modelType === 'layer' ||
         modelType === 'upscaler' ||
         modelType === 'removebg' ||
+        modelType === 'video' ||
+        modelType === 'audio' ||
         // For image/chat/3d: also show other types so admin can pick cross-type models
         m.type === modelType
       ));
