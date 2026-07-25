@@ -27,6 +27,8 @@ import { enhanceViaAI } from '@/lib/quality-enhance';
 import { recordImageTaskSubmitted, recordImageTaskTerminal } from '@/lib/cloud-task-persistence';
 import { is302AiUpscaleBaseUrl, resolve302UpscaleModelId } from '@/lib/302-upscale-models';
 import { validateUpscaleTargetDimensions, type UpscaleTargetPreset } from '@/lib/upscale-target';
+import { createUpscaleExecutionPlan, type UpscaleProductMode, type UpscaleProviderCapability } from '@/lib/upscale-orchestrator';
+import { executeOverlapTileUpscale } from '@/lib/upscale-tile-executor';
 import { buildDisplayDecomposePrompt, buildDisplayDecomposeRequestBody, normalizeDisplayDecomposeRatio } from '@/lib/display-decompose';
 
 const SUPPORTED_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
@@ -413,11 +415,11 @@ interface EditRequest {
   eraseModel?: string; // IOPaint erase model: lama/zits/anime-lama
   removeBgModel?: string; // IOPaint RemoveBG model: isnet-general-use / u2net / u2netp / silueta
   originalPrompt?: string; // 原图的生成提示词, 用于多角度场景上下文
-  upscaleMode?: 'cpu' | 'ai'; // 放大模式: CPU本地 / AI云端
+  upscaleMode?: 'auto' | 'ai' | 'cpu' | 'ai-only' | 'fidelity'; // 新产品模式兼容旧值
   upscaleModel?: string; // 302.AI 原生放大模型
   outputFormat?: 'png' | 'jpg' | 'webp'; // 输出格式
   compression?: number; // 压缩质量 (0-100)
-  engine?: 'auto' | 'ai' | 'local' | 'cpu'; // 引擎选择: 智能自动/云端AI/本地算法
+  engine?: 'auto' | 'ai' | 'local' | 'cpu' | 'ai-only' | 'fidelity'; // 智能推荐/仅AI/保真放大，兼容旧值
 }
 
 // Helper: submit a task to the images/generations API and return taskId or directUrl
@@ -1413,7 +1415,13 @@ export async function POST(request: NextRequest) {
       console.debug(`[image-edit] Stripped provider prefix from model: "${rawModel}" → "${modelStr}" (providerId via field: "${providerId || 'none'}")`);
     }
     const effectiveProviderId = providerId || extractedProviderId || '';
-    const engineMode = (enginePref === 'ai' || enginePref === 'local' || enginePref === 'cpu') ? enginePref : 'auto';
+    const engineMode = (
+      enginePref === 'ai'
+      || enginePref === 'local'
+      || enginePref === 'cpu'
+      || enginePref === 'ai-only'
+      || enginePref === 'fidelity'
+    ) ? enginePref : 'auto';
 
     // ★ 输入校验
     if (!action || !['erase', 'mask', 'upscale', 'extend', 'removebg', 'inpaint', 'outpaint', 'remove_background', 'multi_angle', 'display_decompose'].includes(action)) {
@@ -1972,23 +1980,22 @@ export async function POST(request: NextRequest) {
       const scaleVal = body.scale || 2;
       let origW = body.originalWidth || 512;
       let origH = body.originalHeight || 512;
+      let sourceBuffer: Buffer;
 
-      // ★ 尝试从图片URL获取真实尺寸（前端可能传递的是画布显示尺寸而非真实像素尺寸）
-      if (imageUrl && (origW < 512 || origH < 512 || origW === 512)) {
-        try {
-          const sharp = (await import('sharp')).default;
-          const response = await fetch(imageUrl);
-          const arrayBuffer = await response.arrayBuffer();
-          const imageBuffer = Buffer.from(arrayBuffer);
-          const metadata = await sharp(imageBuffer).metadata();
-          if (metadata.width && metadata.height) {
-            console.debug(`[image-edit] upscale: loaded real image size from URL: ${metadata.width}x${metadata.height} (frontend passed: ${origW}x${origH})`);
-            origW = metadata.width;
-            origH = metadata.height;
-          }
-        } catch (e) {
-          console.warn('[image-edit] upscale: failed to load image metadata from URL:', e);
+      // 始终读取源文件真实 metadata，禁止使用画布显示尺寸参与 4K/8K 编排。
+      try {
+        sourceBuffer = await fetchImageBuffer(imageUrl);
+        const sourceMetadata = await sharp(sourceBuffer).metadata();
+        if (!sourceMetadata.width || !sourceMetadata.height) {
+          throw new Error('图片缺少有效宽高');
         }
+        origW = sourceMetadata.width;
+        origH = sourceMetadata.height;
+      } catch (error) {
+        return NextResponse.json({
+          success: false,
+          error: `无法读取原图尺寸：${error instanceof Error ? error.message : String(error)}`,
+        }, { status: 400 });
       }
 
       const targetW = targetWidth ?? origW * scaleVal;
@@ -2000,11 +2007,18 @@ export async function POST(request: NextRequest) {
           { status: 400 },
         );
       }
-      // engine 参数统一覆盖 upscaleMode：auto/ai/local(→cpu)
-      const upscaleMode: 'auto' | 'ai' | 'cpu' =
-        engineMode === 'ai' ? 'ai'
-        : engineMode === 'local' || engineMode === 'cpu' ? 'cpu'
-        : (body.upscaleMode as 'auto' | 'ai' | 'cpu') || 'auto';
+
+      const requestedMode = engineMode !== 'auto' ? engineMode : (body.upscaleMode || 'auto');
+      const productMode: UpscaleProductMode = requestedMode === 'ai' || requestedMode === 'ai-only'
+        ? 'ai-only'
+        : requestedMode === 'cpu' || requestedMode === 'local' || requestedMode === 'fidelity'
+          ? 'fidelity'
+          : 'auto';
+      const upscaleMode: 'auto' | 'ai' | 'cpu' = productMode === 'ai-only'
+        ? 'ai'
+        : productMode === 'fidelity'
+          ? 'cpu'
+          : 'auto';
       const requested302UpscaleModel = body.upscaleModel
         ? resolve302UpscaleModelId(body.upscaleModel)
         : null;
@@ -2014,6 +2028,39 @@ export async function POST(request: NextRequest) {
           success: false,
           error: '仅支持 302 Super-Upscale V2 和 302 Upscale V6',
         }, { status: 400 });
+      }
+
+      const { isUpscalerModel } = await import('@/lib/model-capabilities');
+      const dedicatedCandidates = candidateModels.filter(candidate => isUpscalerModel(candidate.model));
+      const providerCandidates = dedicatedCandidates.map((candidate, index) => ({
+        id: `${index}:${candidate.source}:${candidate.model}`,
+        candidate,
+      }));
+      const providerCapabilities: UpscaleProviderCapability[] = providerCandidates.map(({ id, candidate }) => ({
+        id,
+        kind: 'dedicated-ai',
+        maxInputEdge: 2048,
+        maxScale: resolve302UpscaleModelId(candidate.model) === '302-super-upscale-v2' ? 4 : 4,
+        supportsTiling: Boolean(resolve302UpscaleModelId(candidate.model) && is302AiUpscaleBaseUrl(candidate.apiBaseUrl)),
+        available: Boolean(candidate.apiKey && candidate.apiBaseUrl),
+      }));
+
+      let executionPlan;
+      try {
+        executionPlan = createUpscaleExecutionPlan({
+          mode: productMode,
+          sourceWidth: origW,
+          sourceHeight: origH,
+          targetWidth: targetW,
+          targetHeight: targetH,
+          providers: providerCapabilities,
+        });
+      } catch (error) {
+        return NextResponse.json({
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+          fallbackAllowed: false,
+        }, { status: 422 });
       }
 
       // 本地CPU放大的内部实现（复用原逻辑）
@@ -2082,11 +2129,147 @@ export async function POST(request: NextRequest) {
         }
       };
 
-      // ---- 用户强制CPU模式: 仅本地upscayl ----
+      const toPublicUrl = (savedPath: string): string => {
+        if (savedPath.startsWith('data:') || savedPath.startsWith('http')) return savedPath;
+        const configuredDomain = process.env.COZE_PROJECT_DOMAIN_DEFAULT;
+        if (!configuredDomain) return savedPath.startsWith('/') ? savedPath : `/${savedPath}`;
+        const domainBase = configuredDomain.startsWith('http')
+          ? configuredDomain.replace(/\/+$/, '')
+          : `https://${configuredDomain.replace(/\/+$/, '')}`;
+        return `${domainBase}${savedPath.startsWith('/') ? savedPath : `/${savedPath}`}`;
+      };
+
+      // 8K、输入超限或目标倍率超出单次能力时，走真实 AI 重叠瓦片链路。
+      if (executionPlan.tiled && executionPlan.providerId) {
+        const selectedProvider = providerCandidates.find(item => item.id === executionPlan.providerId)?.candidate;
+        const selectedModel = selectedProvider ? resolve302UpscaleModelId(selectedProvider.model) : null;
+        if (!selectedProvider || !selectedModel || !is302AiUpscaleBaseUrl(selectedProvider.apiBaseUrl)) {
+          return NextResponse.json({
+            success: false,
+            error: '当前 AI 超分提供商不支持安全的重叠瓦片执行',
+            fallbackAllowed: executionPlan.fallbackAllowed,
+            fallbackReason: executionPlan.fallbackReason,
+          }, { status: 422 });
+        }
+
+        const taskId = `upscale-tiled-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        registerTask(taskId, 'upscale', 'AI 分块超分', sessionUser?.id);
+        updateTaskProgress(taskId, { status: 'processing', progress: 5, label: '正在准备重叠瓦片' });
+
+        try {
+          const tiledResult = await executeOverlapTileUpscale({
+            source: sourceBuffer,
+            targetWidth: targetW,
+            targetHeight: targetH,
+            tileSize: executionPlan.tileSize,
+            overlap: executionPlan.overlap,
+            concurrency: 2,
+            isCancelled: () => isTaskCancelled(taskId),
+            onProgress: (progress: number) => {
+              updateTaskProgress(taskId, {
+                status: 'processing',
+                progress: 5 + Math.round(progress * 0.85),
+                label: `AI 分块超分 ${progress}%`,
+              });
+            },
+            processTile: async ({ input, tile, targetWidth: tileTargetWidth, targetHeight: tileTargetHeight }) => {
+              let currentBuffer = input;
+              let currentMetadata = await sharp(currentBuffer).metadata();
+              let pass = 0;
+
+              while (
+                currentMetadata.width
+                && currentMetadata.height
+                && (currentMetadata.width < tileTargetWidth || currentMetadata.height < tileTargetHeight)
+                && pass < 4
+              ) {
+                if (isTaskCancelled(taskId)) throw new Error('AI 超分任务已取消');
+                const remainingScale = Math.max(
+                  tileTargetWidth / currentMetadata.width,
+                  tileTargetHeight / currentMetadata.height,
+                );
+                const passScale = Math.min(4, Math.max(1, Math.ceil(remainingScale)));
+                const tileFilename = `upscale_tile_${taskId}_${tile.index}_${pass}.png`;
+                const tilePath = await saveBufferToPublic(currentBuffer, tileFilename);
+                const tileUrl = toPublicUrl(tilePath);
+                const response = selectedModel === '302-super-upscale-v2'
+                  ? await submit302aiUpscaleTask(
+                    selectedProvider.apiBaseUrl,
+                    selectedProvider.apiKey,
+                    tileUrl,
+                    passScale,
+                  )
+                  : await submit302aiUpscaleV6Task(
+                    selectedProvider.apiBaseUrl,
+                    selectedProvider.apiKey,
+                    tileUrl,
+                    passScale,
+                  );
+                if (!response.directUrl) throw new Error('AI 超分瓦片响应缺少图片地址');
+                currentBuffer = await fetchImageBuffer(response.directUrl);
+                currentMetadata = await sharp(currentBuffer).metadata();
+                pass += 1;
+              }
+
+              if (!currentMetadata.width || !currentMetadata.height) {
+                throw new Error('无法读取 AI 超分瓦片输出尺寸');
+              }
+              return currentBuffer;
+            },
+          });
+
+          const finalBuffer = tiledResult.buffer;
+          const outputMetadata = await sharp(finalBuffer).metadata();
+          if (outputMetadata.width !== targetW || outputMetadata.height !== targetH) {
+            throw new Error(`分块融合输出尺寸异常：${outputMetadata.width}x${outputMetadata.height}`);
+          }
+          const filename = `upscale_ai_tiled_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.png`;
+          const imagePath = await saveBufferToPublic(finalBuffer, filename);
+          const imageUrlResult = toPublicUrl(imagePath);
+          updateTaskProgress(taskId, {
+            status: 'completed',
+            progress: 100,
+            label: 'AI 分块超分完成',
+            result: { imageUrl: imageUrlResult },
+          });
+
+          return NextResponse.json({
+            success: true,
+            taskId,
+            imageUrl: imageUrlResult,
+            action,
+            engine: executionPlan.engine,
+            providerId: executionPlan.providerId,
+            usedModel: selectedProvider.model,
+            tiled: executionPlan.tiled,
+            tileCount: tiledResult.tileCount,
+            fallbackAllowed: executionPlan.fallbackAllowed,
+            fallbackReason: executionPlan.fallbackReason,
+            originalSize: { width: origW, height: origH },
+            outputSize: { width: outputMetadata.width, height: outputMetadata.height },
+            outputWidth: outputMetadata.width,
+            outputHeight: outputMetadata.height,
+          });
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          updateTaskProgress(taskId, { status: isTaskCancelled(taskId) ? 'cancelled' : 'failed', error: errorMessage });
+          return NextResponse.json({
+            success: false,
+            taskId,
+            error: errorMessage,
+            engine: executionPlan.engine,
+            tiled: executionPlan.tiled,
+            fallbackAllowed: executionPlan.fallbackAllowed,
+            fallbackReason: executionPlan.fallbackReason,
+          }, { status: isTaskCancelled(taskId) ? 409 : 502 });
+        }
+      }
+
+      // ---- 用户强制保真模式: 仅本地 Real-ESRGAN / UpScayl ----
       if (upscaleMode === 'cpu') {
         const cpuRes = await runLocalCpuUpscale();
         if (cpuRes) return cpuRes;
-        return NextResponse.json({ success: false, error: 'CPU本地放大失败，请检查upscayl模型是否已下载' }, { status: 500 });
+        return NextResponse.json({ success: false, error: '保真放大失败，请检查本地超分模型是否可用' }, { status: 500 });
       }
 
       // ---- AI放大路径 (auto/ai模式) ----
@@ -2139,7 +2322,6 @@ export async function POST(request: NextRequest) {
       const negativePrompt = '(worst quality, low quality, normal quality:2), blurry, pixelated, jpeg artifacts, painting, oil painting, illustration, cartoon, anime, over-smoothed, plastic skin, waxy, airbrushed, soft focus, smoothed, gaussian blur, changed content, new elements, different colors, altered composition, deformed, watermark, text, makeup change, flat, cartoonish, drawn, sketch, CG, 3d render, unnatural, noise, grain, speckle, color splotch, compression block, ringing, halo, chromatic aberration, moire, added texture, fake skin pores, fake hair strands, invented details, painted over, retouched, HDR, oversaturated, shifted, misaligned, moved, position change, content drift, creative interpretation, style change';
 
       // 分离候选: 专用upscaler模型走/images/edits(参考图编辑)，通用模型走/images/generations
-      const { isUpscalerModel } = await import('@/lib/model-capabilities');
       const specialUpscalerCandidates = candidateModels.filter(c => isUpscalerModel(c.model));
       const generalImageCandidates = candidateModels.filter(c => !isUpscalerModel(c.model));
 
