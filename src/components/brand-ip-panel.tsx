@@ -10,6 +10,7 @@ import { X, Settings, Sparkles, Square, GripVertical, Minus, Maximize2 } from 'l
 interface BrandIpPanelProps {
   onClose: () => void;
   onAddImages?: (urls: string[], meta?: Record<string, unknown>) => void;
+  isMonochrome?: boolean;
 }
 
 /* ── Types ──────────────────────────────────────────────────────── */
