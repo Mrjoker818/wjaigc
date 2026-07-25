@@ -556,24 +556,22 @@ export function parseVideoSubmitResponse(
       };
     }
     case 'pearapi-video': {
-      // PearAPI async: {id, status:'queued', model}
-      if (data?.id && (data?.status === 'queued' || data?.status === 'running')) {
+      // PearAPI 与 APImart 格式相同：{code:200, data:[{status:"submitted", task_id:"xxx"}]}
+      const items = data?.data;
+      const item = Array.isArray(items) ? items[0] : items;
+      // 同步完成：data[0].url 直接有视频
+      if (item?.url || item?.video_url) {
         return {
-          taskId: data.id,
-          status: 'submitted',
-          estimatedTime: 240,
-        };
-      }
-      // PearAPI sync: {created, data:[{url}]}
-      const syncData = data?.data?.[0];
-      if (syncData?.url) {
-        return {
-          taskId: '',
+          taskId: item?.task_id || item?.id || '',
           status: 'succeeded',
-          videoUrl: syncData.url,
+          videoUrl: item.url || item.video_url,
         };
       }
-      return { taskId: data?.id || '', status: 'submitted', estimatedTime: 240 };
+      return {
+        taskId: item?.task_id || item?.id || data?.task_id || '',
+        status: 'submitted',
+        estimatedTime: 240,
+      };
     }
     case 'rest-generic':
     default: {
@@ -670,7 +668,7 @@ export function buildVideoPollRequest(
       };
     case 'pearapi-video':
       return {
-        url: `${cleanBaseUrl}/v1/videos/tasks/${taskId}`,
+        url: `${cleanBaseUrl}/v1/tasks/${taskId}`,
         headers: { 'Authorization': `Bearer ${apiKey}` },
         method: 'GET',
       };
@@ -1216,41 +1214,45 @@ function buildPearApiVideoSubmit(baseUrl: string, apiKey: string, params: VideoG
  * Completed response: {status:'completed', output:{created, data:[{url}], video_urls:[...]}, progress, error:{message}}
  */
 function parsePearApiVideoPoll(data: unknown): VideoTaskPollResult {
-  const status = (getApiString(data, 'status') || '').toLowerCase();
-  const output = getApiValue(data, 'output') || data;
+  // PearAPI 轮询响应格式与 APImart 相同：
+  // {code:200, data:{id, status, progress(0-100), result:{videos:[{url:[...]}]}}}
+  const inner = getApiValue(data, 'data');
+  const item = Array.isArray(inner) ? inner[0] : inner;
+  const status = (getApiString(item, 'status') || getApiString(data, 'status') || '').toLowerCase();
 
   if (status === 'succeeded' || status === 'completed' || status === 'success' || status === 'done') {
-    const dataArr = getApiValue(output, 'data') || getApiValue(output, 'video_urls');
+    const result = getApiValue(item, 'result') || getApiValue(item, 'results') || getApiValue(item, 'output');
+    const videos = getApiValue(result, 'videos') || getApiValue(result, 'video_results');
     let videoUrl: string | undefined;
-    if (Array.isArray(dataArr) && dataArr.length > 0) {
-      const first = dataArr[0];
-      videoUrl = getApiString(first) || getApiString(first, 'url') || getApiString(first, 'video_url');
+    if (Array.isArray(videos) && videos.length > 0) {
+      const video = videos[0];
+      const url = getApiValue(video, 'url');
+      videoUrl = Array.isArray(url) ? getApiString(url[0]) : getApiString(url) || getApiString(video, 'video_url');
     }
-    if (!videoUrl) videoUrl = getApiString(output, 'video_url') || getApiString(output, 'url') || getApiString(data, 'video_url');
-
+    if (!videoUrl) videoUrl = getApiString(result, 'video_url') || getApiString(result, 'url') || getApiString(item, 'video_url');
     return {
       status: 'succeeded',
       progress: 100,
       videoUrl,
-      duration: getApiNumber(output, 'duration'),
-      thumbnailUrl: getApiString(output, 'thumbnail_url') || getApiString(output, 'cover_url'),
+      duration: getApiNumber(result, 'duration'),
+      thumbnailUrl: getApiString(result, 'thumbnail_url') || getApiString(result, 'cover_url'),
     };
   }
   if (status === 'failed' || status === 'error' || status === 'cancelled') {
     return {
       status: 'failed',
-      error: getApiString(data, 'error', 'message') || getApiString(data, 'message') || getApiString(output, 'error', 'message') || 'Video generation failed',
+      error: getApiString(item, 'error', 'message') || getApiString(item, 'fail_reason') || getApiString(data, 'error', 'message') || getApiString(data, 'message') || 'Video generation failed',
     };
   }
   if (status === 'running' || status === 'processing' || status === 'in_progress') {
-    const rawProgress = getApiNumber(data, 'progress') ?? getApiNumber(output, 'progress');
+    const rawProgress = getApiNumber(item, 'progress') ?? getApiNumber(data, 'progress');
     const progress = rawProgress != null
       ? (rawProgress > 1 ? rawProgress : Math.round(rawProgress * 100))
       : 50;
     return { status: 'running', progress };
   }
-  // queued/pending
-  return { status: 'pending', progress: getApiNumber(data, 'progress') ?? 5 };
+  // pending/queued/submitted
+  return { status: 'pending', progress: getApiNumber(item, 'progress') ?? 10 };
 }
 
 /** Convert aspect ratio like "16:9" to approximate pixel size string "1920x1080" */

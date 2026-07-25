@@ -1184,22 +1184,9 @@ export async function POST(request: NextRequest) {
           'low': 'low', 'medium': 'medium',
         };
 
-        // ★ 供应商适配：检测是否为 APImart/PearAPI（要求小写 '1k/2k/4k' 格式）
-        // 其他供应商（如火山方舟直连）直接使用 '1K/2K/4K' 格式
-        const providerBaseUrl = currentApiBaseUrl || '';
-        const isApimartOrPearApi = providerBaseUrl.includes('apimart') ||
-                                    providerBaseUrl.includes('pearapi') ||
-                                    currentProviderId?.toLowerCase().includes('apimart') ||
-                                    currentProviderId?.toLowerCase().includes('pearapi');
-
-        // ★ resolution参数映射：仅 APImart/PearAPI 需要小写 '1k/2k/4k' 格式
-        // 其他供应商保持原样（'1K/2K/4K'）
-        const resolutionMap: Record<string, string> = isApimartOrPearApi ? {
-          'high': '2k', 'medium': '1k', 'low': '1k', 'auto': '2k',
-          '4K': '4k', '2K': '2k', '1K': '1k', 'ultra': '4k', 'hd': '4k',
-          'standard': '1k',
-        } : {
-          // 非APImart/PearAPI：仅转换 'high/medium/low' 为 '2K/1K/1K'（火山方舟格式）
+        // ★ resolution参数映射：统一使用大写 '1K/2K/4K' 格式
+        // APImart/PearAPI 官方文档明确要求大写（示例：{"resolution":"2K"}），禁止小写
+        const resolutionMap: Record<string, string> = {
           'high': '2K', 'medium': '1K', 'low': '1K', 'auto': '2K',
           '4K': '4K', '2K': '2K', '1K': '1K', 'ultra': '4K', 'hd': '4K',
           'standard': '1K',
@@ -1208,15 +1195,14 @@ export async function POST(request: NextRequest) {
         if (currentModelConfig.paramType === 'quality') {
           requestBody.quality = qualityMap[quality] || quality;
         } else if (currentModelConfig.paramType === 'resolution') {
-          // ★ 关键修复：将 quality 参数转换为 API 期望的 resolution 格式
-          requestBody.resolution = resolutionMap[quality] || quality.toLowerCase();
+          // ★ 将 quality 参数转换为 API 期望的 resolution 格式（大写）
+          requestBody.resolution = resolutionMap[quality] || quality;
           requestBody.quality = qualityMap[quality] || quality;
         } else if (currentModelConfig.paramType === 'both') {
           // GPT-Image系列同时支持resolution和quality两种参数
-          // resolution控制输出尺寸档位（1k/2k/4k），quality控制生成细节质量
-          // 前端传递独立的resolution参数和quality参数
-          // ★ APImart/PearAPI 需要小写格式，其他供应商保持原样
-          requestBody.resolution = isApimartOrPearApi ? resolutionTier.toLowerCase() : resolutionTier;
+          // resolution控制输出尺寸档位（1K/2K/4K），quality控制生成细节质量
+          // ★ 统一使用大写格式，APImart/PearAPI 文档均要求大写
+          requestBody.resolution = resolutionTier;
           requestBody.quality = qualityMap[quality] || quality; // 使用前端传递的质量级别
         } else {
           // paramType === 'none' — send both for maximum compatibility
