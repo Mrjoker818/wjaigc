@@ -2063,8 +2063,9 @@ export async function POST(request: NextRequest) {
         }, { status: 422 });
       }
 
-      // 本地CPU放大的内部实现（复用原逻辑）
-      const runLocalCpuUpscale = async () => {
+      // 本地保真放大的内部实现。fallbackReason 仅在 Auto 从 AI 降级时传入，
+      // 确保成功响应仍可审计实际执行引擎与降级原因。
+      const runLocalCpuUpscale = async (fallbackReason?: string) => {
         try {
           const { performUpscaleAuto } = await import('@/lib/image-tools/upscayl');
           const result = await performUpscaleAuto({
@@ -2099,8 +2100,13 @@ export async function POST(request: NextRequest) {
                 success: true,
                 imageUrl: finalUrl,
                 action,
-                engine: 'cpu-auto-resized',
+                engine: 'fidelity',
+                providerId: null,
                 usedModel: result.model || 'realesrgan',
+                tiled: false,
+                tileCount: 1,
+                fallbackAllowed: executionPlan.fallbackAllowed,
+                fallbackReason: fallbackReason ?? executionPlan.fallbackReason,
                 scale: scaleVal,
                 originalSize: result.originalSize || { width: origW, height: origH },
                 outputSize: { width: targetW, height: targetH },
@@ -2113,8 +2119,13 @@ export async function POST(request: NextRequest) {
               success: true,
               imageUrl: result.imageUrl,
               action,
-              engine: result.engine || 'cpu-auto',
+              engine: 'fidelity',
+              providerId: null,
               usedModel: result.model || 'realesrgan',
+              tiled: false,
+              tileCount: 1,
+              fallbackAllowed: executionPlan.fallbackAllowed,
+              fallbackReason: fallbackReason ?? executionPlan.fallbackReason,
               scale: scaleVal,
               originalSize: result.originalSize || { width: origW, height: origH },
               outputSize: result.outputSize || { width: targetW, height: targetH },
@@ -2138,6 +2149,87 @@ export async function POST(request: NextRequest) {
           : `https://${configuredDomain.replace(/\/+$/, '')}`;
         return `${domainBase}${savedPath.startsWith('/') ? savedPath : `/${savedPath}`}`;
       };
+
+      // 单次倍率可覆盖目标时，直接调用编排器选中的专用 AI 超分模型。
+      // AI 输出必须真实达到目标尺寸；Sharp 只允许下采样或格式归一，禁止补足缺失像素。
+      if (!executionPlan.tiled && executionPlan.providerId) {
+        const selectedProvider = providerCandidates.find(item => item.id === executionPlan.providerId)?.candidate;
+        const selectedModel = selectedProvider ? resolve302UpscaleModelId(selectedProvider.model) : null;
+
+        if (selectedProvider && selectedModel && is302AiUpscaleBaseUrl(selectedProvider.apiBaseUrl)) {
+          try {
+            const requestedScale = Math.min(4, Math.max(1, Math.ceil(executionPlan.targetScale)));
+            const response = selectedModel === '302-super-upscale-v2'
+              ? await submit302aiUpscaleTask(
+                selectedProvider.apiBaseUrl,
+                selectedProvider.apiKey,
+                imageUrl,
+                requestedScale,
+              )
+              : await submit302aiUpscaleV6Task(
+                selectedProvider.apiBaseUrl,
+                selectedProvider.apiKey,
+                imageUrl,
+                requestedScale,
+              );
+
+            if (!response.directUrl) throw new Error('AI 超分响应缺少图片地址');
+            const aiBuffer = await fetchImageBuffer(response.directUrl);
+            const aiMetadata = await sharp(aiBuffer).metadata();
+            if (!aiMetadata.width || !aiMetadata.height) {
+              throw new Error('无法读取 AI 超分输出尺寸');
+            }
+            if (aiMetadata.width < targetW || aiMetadata.height < targetH) {
+              throw new Error(`AI 超分输出尺寸不足：${aiMetadata.width}x${aiMetadata.height}，目标为 ${targetW}x${targetH}`);
+            }
+
+            const finalBuffer = aiMetadata.width === targetW && aiMetadata.height === targetH
+              ? aiBuffer
+              : await sharp(aiBuffer)
+                .resize(targetW, targetH, { kernel: sharp.kernel.lanczos3 })
+                .png({ quality: 95 })
+                .toBuffer();
+            const outputMetadata = await sharp(finalBuffer).metadata();
+            const filename = `upscale_ai_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.png`;
+            const imagePath = await saveBufferToPublic(finalBuffer, filename);
+
+            return NextResponse.json({
+              success: true,
+              imageUrl: toPublicUrl(imagePath),
+              action,
+              engine: executionPlan.engine,
+              providerId: executionPlan.providerId,
+              usedModel: response.usedModel || selectedProvider.model,
+              tiled: false,
+              tileCount: 1,
+              fallbackAllowed: executionPlan.fallbackAllowed,
+              fallbackReason: executionPlan.fallbackReason,
+              originalSize: { width: origW, height: origH },
+              outputSize: { width: outputMetadata.width, height: outputMetadata.height },
+              outputWidth: outputMetadata.width,
+              outputHeight: outputMetadata.height,
+            });
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            if (executionPlan.fallbackAllowed) {
+              console.warn(`[image-edit] dedicated AI upscale failed, falling back to fidelity: ${errorMessage}`);
+              const fidelityResult = await runLocalCpuUpscale(`专用 AI 超分失败，已降级到保真模式：${errorMessage}`);
+              if (fidelityResult) return fidelityResult;
+            }
+            return NextResponse.json({
+              success: false,
+              error: errorMessage,
+              engine: executionPlan.engine,
+              providerId: executionPlan.providerId,
+              tiled: false,
+              fallbackAllowed: executionPlan.fallbackAllowed,
+              fallbackReason: executionPlan.fallbackAllowed
+                ? `专用 AI 超分失败且保真降级不可用：${errorMessage}`
+                : null,
+            }, { status: 502 });
+          }
+        }
+      }
 
       // 8K、输入超限或目标倍率超出单次能力时，走真实 AI 重叠瓦片链路。
       if (executionPlan.tiled && executionPlan.providerId) {
@@ -2252,24 +2344,65 @@ export async function POST(request: NextRequest) {
           });
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
-          updateTaskProgress(taskId, { status: isTaskCancelled(taskId) ? 'cancelled' : 'failed', error: errorMessage });
+          if (isTaskCancelled(taskId)) {
+            updateTaskProgress(taskId, { status: 'cancelled', error: errorMessage });
+            return NextResponse.json({
+              success: false,
+              taskId,
+              error: errorMessage,
+              engine: executionPlan.engine,
+              providerId: executionPlan.providerId,
+              tiled: executionPlan.tiled,
+              fallbackAllowed: executionPlan.fallbackAllowed,
+              fallbackReason: executionPlan.fallbackReason,
+            }, { status: 409 });
+          }
+
+          if (executionPlan.fallbackAllowed) {
+            updateTaskProgress(taskId, {
+              status: 'processing',
+              progress: 90,
+              label: 'AI 分块失败，正在切换保真模式',
+            });
+            const fidelityResult = await runLocalCpuUpscale(`AI 分块超分失败，已降级到保真模式：${errorMessage}`);
+            if (fidelityResult) {
+              updateTaskProgress(taskId, {
+                status: 'completed',
+                progress: 100,
+                label: '保真降级完成',
+              });
+              return fidelityResult;
+            }
+          }
+
+          updateTaskProgress(taskId, { status: 'failed', error: errorMessage });
           return NextResponse.json({
             success: false,
             taskId,
             error: errorMessage,
             engine: executionPlan.engine,
+            providerId: executionPlan.providerId,
             tiled: executionPlan.tiled,
             fallbackAllowed: executionPlan.fallbackAllowed,
-            fallbackReason: executionPlan.fallbackReason,
-          }, { status: isTaskCancelled(taskId) ? 409 : 502 });
+            fallbackReason: executionPlan.fallbackAllowed
+              ? `AI 分块超分失败且保真降级不可用：${errorMessage}`
+              : executionPlan.fallbackReason,
+          }, { status: 502 });
         }
       }
 
-      // ---- 用户强制保真模式: 仅本地 Real-ESRGAN / UpScayl ----
-      if (upscaleMode === 'cpu') {
+      // ---- 保真执行计划: 仅本地 Real-ESRGAN / UpScayl ----
+      // 以统一编排器的结果为准，覆盖用户显式保真模式和 Auto 无可用 AI 时的可解释降级。
+      if (executionPlan.engine === 'fidelity') {
         const cpuRes = await runLocalCpuUpscale();
         if (cpuRes) return cpuRes;
-        return NextResponse.json({ success: false, error: '保真放大失败，请检查本地超分模型是否可用' }, { status: 500 });
+        return NextResponse.json({
+          success: false,
+          error: '保真放大失败，请检查本地超分模型是否可用',
+          engine: executionPlan.engine,
+          fallbackAllowed: executionPlan.fallbackAllowed,
+          fallbackReason: executionPlan.fallbackReason,
+        }, { status: 500 });
       }
 
       // ---- AI放大路径 (auto/ai模式) ----
@@ -2642,6 +2775,14 @@ export async function POST(request: NextRequest) {
             originalSize: { width: origW, height: origH },
             outputSize: { width: targetW, height: targetH },
             _needsResize: true,
+            _targetW: targetW,
+            _targetH: targetH,
+            engine: executionPlan.engine,
+            providerId: executionPlan.providerId,
+            tiled: executionPlan.tiled,
+            tileCount: 1,
+            fallbackAllowed: executionPlan.fallbackAllowed,
+            fallbackReason: executionPlan.fallbackReason,
             _model: modelStr,
           },
         });

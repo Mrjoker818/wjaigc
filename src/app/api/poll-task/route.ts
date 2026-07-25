@@ -1720,93 +1720,54 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // ★ AI 放大后处理：AI 模型按自身预设尺寸输出，直接使用 AI 输出
-        // AI 输出已是 AI 能增强的最佳尺寸，无需再 resize（resize 会导致模糊/涂抹）
+        // ★ AI 放大后处理：AI 必须真实生成目标像素，Sharp 只允许下采样和格式归一。
         const upscaleResizeInfo = registryResult._needsResize as boolean | undefined;
-        const upscaleTargetW = registryResult._targetW as number | undefined;
-        const upscaleTargetH = registryResult._targetH as number | undefined;
+        const registeredOutputSize = registryResult.outputSize as { width?: number; height?: number } | undefined;
+        const upscaleTargetW = (registryResult._targetW as number | undefined) || registeredOutputSize?.width;
+        const upscaleTargetH = (registryResult._targetH as number | undefined) || registeredOutputSize?.height;
         if (upscaleResizeInfo && upscaleTargetW && upscaleTargetH && pollResult.imageUrl) {
           try {
             const sharp = (await import('sharp')).default;
             const aiResultBuf = await fetchImageBuffer(pollResult.imageUrl as string);
             const aiMeta = await sharp(aiResultBuf).metadata();
-            const aiW = aiMeta.width || upscaleTargetW;
-            const aiH = aiMeta.height || upscaleTargetH;
+            const aiW = aiMeta.width || 0;
+            const aiH = aiMeta.height || 0;
 
-            console.log(`[poll-task] AI Upscale: AI output ${aiW}x${aiH}, target was ${upscaleTargetW}x${upscaleTargetH}`);
-
-            // AI 输出小于目标时，先用两步锐化增强，再用 Lanczos3 放大到目标尺寸
-            let finalBuf = aiResultBuf;
-            if (aiW < upscaleTargetW * 0.9 || aiH < upscaleTargetH * 0.9) {
-              // AI 输出显著小于目标(差距>10%)，两步锐化 + Lanczos3 放大到目标
-              // Step 1: 中频纹理恢复
-              const step1 = await sharp(aiResultBuf)
-                .sharpen({ sigma: 1.2, m1: 0.8, m2: 0.4, x1: 2, y2: 4, y3: 10 })
-                .png({ quality: 95 })
-                .toBuffer();
-              // Step 2: 微观边缘增强
-              const step2 = await sharp(step1)
-                .sharpen({ sigma: 0.3, m1: 0.4, m2: 0.15, x1: 1, y2: 2, y3: 6 })
-                .png({ quality: 95 })
-                .toBuffer();
-              // Step 3: Lanczos3 放大到用户设定的目标尺寸
-              finalBuf = await sharp(step2)
-                .resize(upscaleTargetW, upscaleTargetH, { kernel: sharp.kernel.lanczos3 })
-                .png({ quality: 95 })
-                .toBuffer();
-              console.log(`[poll-task] AI Upscale: sharpened + Lanczos3 upscaled from ${aiW}x${aiH} to ${upscaleTargetW}x${upscaleTargetH}`);
+            if (aiW < upscaleTargetW || aiH < upscaleTargetH) {
+              throw new Error(`AI 超分输出尺寸不足：${aiW}x${aiH}，目标为 ${upscaleTargetW}x${upscaleTargetH}`);
             }
 
-            // 仅在 AI 输出大于目标时才做缩小（精确裁剪到目标尺寸）+ 锐化
-            if (aiW > upscaleTargetW && aiH > upscaleTargetH) {
-              const downscaled = await sharp(aiResultBuf)
+            let finalBuf = aiResultBuf;
+            if (aiW !== upscaleTargetW || aiH !== upscaleTargetH) {
+              finalBuf = await sharp(aiResultBuf)
                 .resize(upscaleTargetW, upscaleTargetH, { fit: 'fill', kernel: sharp.kernel.lanczos3 })
                 .png({ quality: 95 })
                 .toBuffer();
-              // 缩小后添加锐化补偿
-              finalBuf = await sharp(downscaled)
-                .sharpen({ sigma: 0.8, m1: 0.6, m2: 0.3, x1: 2, y2: 4, y3: 8 })
-                .png({ quality: 95 })
-                .toBuffer();
-              console.log(`[poll-task] AI Upscale: downscaled from ${aiW}x${aiH} to ${upscaleTargetW}x${upscaleTargetH} + sharpened`);
-            }
 
-            // 持久化最终结果
-            if (!Buffer.isBuffer(finalBuf) || finalBuf !== aiResultBuf) {
               const { saveImageFile } = await import('../../../lib/server-data-root');
-              const ts = Date.now();
-              const filename = `upscale-ai-${ts}.png`;
-              const savedUrl = saveImageFile(Buffer.isBuffer(finalBuf) ? finalBuf : aiResultBuf, filename, 'upscale');
-              if (savedUrl) {
-                pollResult.imageUrl = savedUrl;
-              }
+              const savedUrl = saveImageFile(finalBuf, `upscale-ai-${Date.now()}.png`, 'upscale');
+              if (savedUrl) pollResult.imageUrl = savedUrl;
             }
 
-            // 返回最终输出尺寸：如果做了放大则用目标尺寸，否则用AI输出尺寸
-            const didUpscale = (aiW < upscaleTargetW * 0.9 || aiH < upscaleTargetH * 0.9);
-            const didDownscale = (aiW > upscaleTargetW && aiH > upscaleTargetH);
-            const finalW = didDownscale ? upscaleTargetW : (didUpscale ? upscaleTargetW : aiW);
-            const finalH = didDownscale ? upscaleTargetH : (didUpscale ? upscaleTargetH : aiH);
-            (pollResult as Record<string, unknown>).outputSize = { width: finalW, height: finalH };
-            console.log(`[poll-task] AI Upscale: final output ${finalW}x${finalH}`);
-
-            // AI 画质精修（带关键词约束，仅修复画质不改变内容）
-            if (pollResult.imageUrl) {
-              try {
-                const enhanceResult = await enhanceViaAI(pollResult.imageUrl as string);
-                if (enhanceResult.enhanced && enhanceResult.url) {
-                  pollResult.imageUrl = enhanceResult.url;
-                  (pollResult as Record<string, unknown>).enhanced = true;
-                  console.log('[poll-task] AI quality enhance applied after upscale');
-                } else {
-                  console.log('[poll-task] AI enhance skipped/failed, using raw upscale result');
-                }
-              } catch (enhanceErr) {
-                console.warn('[poll-task] AI enhance error:', enhanceErr instanceof Error ? enhanceErr.message : enhanceErr);
-              }
-            }
+            (pollResult as Record<string, unknown>).outputSize = { width: upscaleTargetW, height: upscaleTargetH };
+            (pollResult as Record<string, unknown>).outputWidth = upscaleTargetW;
+            (pollResult as Record<string, unknown>).outputHeight = upscaleTargetH;
+            (pollResult as Record<string, unknown>).engine = registryResult.engine || 'dedicated-ai';
+            (pollResult as Record<string, unknown>).usedModel = registryResult.usedModel;
+            (pollResult as Record<string, unknown>).providerId = registryResult.providerId;
+            (pollResult as Record<string, unknown>).tiled = registryResult.tiled || false;
+            (pollResult as Record<string, unknown>).tileCount = registryResult.tileCount || 1;
+            (pollResult as Record<string, unknown>).fallbackAllowed = registryResult.fallbackAllowed || false;
+            (pollResult as Record<string, unknown>).fallbackReason = registryResult.fallbackReason;
+            console.log(`[poll-task] AI Upscale: validated output ${upscaleTargetW}x${upscaleTargetH}`);
           } catch (upscaleResizeErr) {
-            console.warn('[poll-task] AI Upscale post-process failed, using raw AI result:', upscaleResizeErr instanceof Error ? upscaleResizeErr.message : upscaleResizeErr);
+            const message = upscaleResizeErr instanceof Error ? upscaleResizeErr.message : String(upscaleResizeErr);
+            console.warn('[poll-task] AI Upscale validation failed:', message);
+            pollResult.imageUrl = undefined;
+            pollResult.imageUrls = [];
+            pollResult.status = 'failed';
+            pollResult.success = false;
+            pollResult.error = message;
           }
         }
 
@@ -1943,7 +1904,9 @@ export async function POST(request: NextRequest) {
 
       if (!pollResult.imageUrl) {
         const taskError = taskData?.error as Record<string, unknown> | undefined;
-        const errorDetail = (taskData?.fail_reason as string)
+        const postProcessError = typeof pollResult.error === 'string' ? pollResult.error : '';
+        const errorDetail = postProcessError
+          || (taskData?.fail_reason as string)
           || (taskData?.failReason as string)
           || (taskError?.message as string)
           || (typeof taskData?.error === 'string' ? taskData.error : '');

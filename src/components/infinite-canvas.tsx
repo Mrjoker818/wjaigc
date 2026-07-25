@@ -45,6 +45,7 @@ import {
   validateUpscaleTargetDimensions,
   type UpscaleTargetPreset,
 } from '@/lib/upscale-target';
+import type { UpscaleProductMode } from '@/lib/upscale-orchestrator';
 import { DISPLAY_DECOMPOSE_SUPPORTED_RATIOS, type DisplayDecomposeRatio } from '@/lib/display-decompose';
 import { getCenteredFloatingPanelPosition } from '@/lib/floating-panel-position';
 import { DEFAULT_IMAGE_TOOLBAR_ITEM_ORDER, normalizeImageToolbarPreferences } from '@/lib/image-toolbar-preferences';
@@ -1205,7 +1206,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [, setUpscaylChecking] = useState(true);
   const [upscalePreset, setUpscalePreset] = useState<UpscaleTargetPreset>('2x');
   const [showUpscalePresetMenu, setShowUpscalePresetMenu] = useState(false);
-  const [upscaleMode, setUpscaleMode] = useState<'lossless' | 'ai'>('lossless'); // 无损放大 / AI放大
+  const [upscaleMode, setUpscaleMode] = useState<UpscaleProductMode>('auto');
   const [selected302UpscaleModel, setSelected302UpscaleModel] = useState<ThreeOhTwoUpscaleModelId>('302-super-upscale-v2');
   // Engine preference for tools: auto/ai/local (persisted in localStorage)
   const getEnginePref = (key: string): 'auto' | 'ai' | 'local' => {
@@ -6310,11 +6311,12 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     exitEditModeRef.current();
     try {
       const modelInfo = getCurrentModel();
-      // Determine actual engine for upscale from preference
-      const actualEngine: 'auto'|'ai'|'local'|'cpu' = upscaleMode === 'ai'
-        ? 'ai'
-        : (upscaleEnginePref === 'local' ? 'cpu' : 'auto');
-      updateProcessingFrame(placeholderId, { progress: 8, status: actualEngine === 'cpu' ? '正在使用本地 Real-ESRGAN 放大...' : actualEngine === 'ai' ? '正在提交到 AI 模型...' : '正在选择最优放大引擎...' });
+      const initialStatus = upscaleMode === 'ai-only'
+        ? '正在提交到专用 AI 超分模型...'
+        : upscaleMode === 'fidelity'
+          ? '正在进行保真放大...'
+          : '正在自动选择最优放大引擎...';
+      updateProcessingFrame(placeholderId, { progress: 8, status: initialStatus });
       // ★ 放大操作可能耗时较长（如108s），设置5分钟超时与后端直接模式600s对齐
       const upscaleController = new AbortController();
       const upscaleTimeout = setTimeout(() => upscaleController.abort(), 600000); // 10分钟超时，匹配后端maxDuration
@@ -6336,9 +6338,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             scale: targetDim.engineScale,
             originalWidth: origW,
             originalHeight: origH,
-            upscaleMode: actualEngine === 'ai' ? 'ai' : actualEngine === 'cpu' ? 'cpu' : 'auto',
-            upscaleModel: upscaleMode === 'ai' ? selected302UpscaleModel : undefined,
-            engine: actualEngine,
+            upscaleMode,
+            upscaleModel: upscaleMode === 'ai-only' ? selected302UpscaleModel : undefined,
+            engine: upscaleMode,
             localModel: upscaylSelectedModel,
           }),
           signal: upscaleController.signal,
@@ -6396,67 +6398,40 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         return;
       }
 
-      updateProcessingFrame(placeholderId, { progress: 22, status: upscaleMode === 'lossless' ? '无损放大中（Real-ESRGAN 超分辨率 + AI画质精修）...' : 'AI 放大 + 画质精修中...' });
-      let resultUrl: string | null;
-      let actualOutW = targetDim.width;
-      let actualOutH = targetDim.height;
-      let usedModelName = modelInfo.apiDisplayName || modelInfo.model;
+      const isTiled = data.tiled === true;
+      const tileCount = Number(data.tileCount as number) || 0;
+      const fallbackAllowed = data.fallbackAllowed === true;
+      const fallbackReason = String((data.fallbackReason as string) || '');
+      const executionEngine = String(data.engine || data.strategy || upscaleMode);
+      const executionLabel = isTiled && tileCount > 0
+        ? `正在分块超分（共 ${tileCount} 块）...`
+        : upscaleMode === 'fidelity'
+          ? '正在进行保真放大...'
+          : '正在进行 AI 超分与画质归一...';
+      updateProcessingFrame(placeholderId, { progress: 22, status: executionLabel });
 
-      let proStrategy = '';
-      if (upscaleMode === 'lossless') {
-        // 无损放大：可能直接返回URL，也可能降级到异步轮询
-        proStrategy = (data.strategy as string) || (data.engine as string) || '';
-        const isFallback = data.fallback === true;
-        const fallbackReason = (data.fallbackReason as string) || '';
-
-        if (data.requiresPolling && data.taskId) {
-          // 降级到AI异步轮询
-          const aiTaskId = data.taskId as string;
-          usedModelName = 'AI重绘放大(降级)';
-          resultUrl = await pollForResult(aiTaskId, usedModelName, (progress, status) => {
-            updateProcessingFrame(placeholderId, { progress, status });
-          });
-        } else if (data.taskId && !data.url && !data.imageUrl) {
-          const aiTaskId = data.taskId as string;
-          usedModelName = String(data.usedModel || modelInfo.model);
-          resultUrl = await pollForResult(aiTaskId, usedModelName, (progress, status) => {
-            updateProcessingFrame(placeholderId, { progress, status });
-          });
-        } else {
-          resultUrl = (data.url as string) || (data.imageUrl as string) || null;
-          const proModel = String(data.usedModel || data.model || 'Real-ESRGAN');
-          const isEnhanced = data.enhanced === true;
-          if (proStrategy === 'onnx+ai-enhance') {
-            usedModelName = 'Real-ESRGAN+AI精修' + (isFallback ? '(降级)' : '');
-          } else if (proStrategy === 'cloud+ai-enhance') {
-            usedModelName = '云端无损+AI精修';
-          } else if (proStrategy === 'local-upscayl') {
-            usedModelName = '本地Real-ESRGAN' + (isFallback ? '(降级)' : '');
-          } else if (proStrategy === 'ai-redraw+ai-enhance') {
-            usedModelName = 'AI放大+精修' + (isFallback ? '(降级)' : '');
-          } else if (proStrategy === 'ai-redraw') {
-            usedModelName = 'AI重绘放大' + (isFallback ? '(降级)' : '');
-          } else {
-            usedModelName = proModel === 'SeedVR2-Upscaler' ? 'SeedVR2 无损放大' : 'Real-ESRGAN 无损放大';
-            if (isEnhanced) usedModelName += '+AI精修';
-          }
-        }
-        const outSize = data.outputSize as { width: number; height: number } | undefined;
-        actualOutW = outSize?.width || (data.outputWidth as number) || targetDim.width;
-        actualOutH = outSize?.height || (data.outputHeight as number) || targetDim.height;
-
-        if (isFallback && fallbackReason) {
-          console.warn(`[upscale] 降级提示: ${fallbackReason}`);
-          toast.warning(`无损放大提示: ${fallbackReason}`);
-        }
-      } else {
-        usedModelName = String(data.usedModel || modelInfo.model);
-        resultUrl = (data.url as string) || (data.imageUrl as string) || await pollForResult((data.taskId as string) || '', usedModelName, (progress, status) => {
-          updateProcessingFrame(placeholderId, { progress, status });
+      let usedModelName = String(data.usedModel || data.model || modelInfo.apiDisplayName || modelInfo.model);
+      let resultUrl = (data.url as string) || (data.imageUrl as string) || null;
+      if (!resultUrl && data.taskId) {
+        resultUrl = await pollForResult(String(data.taskId), usedModelName, (progress, status) => {
+          const tiledStatus = isTiled && tileCount > 0 ? `分块 ${status}（${tileCount} 块）` : status;
+          updateProcessingFrame(placeholderId, { progress, status: tiledStatus });
         });
-        const outSize = data.outputSize as { width: number; height: number } | undefined;
-        actualOutW = outSize?.width || (data.outputWidth as number) || targetDim.width;
-        actualOutH = outSize?.height || (data.outputHeight as number) || targetDim.height;
+      }
+
+      const outSize = data.outputSize as { width: number; height: number } | undefined;
+      const actualOutW = outSize?.width || (data.outputWidth as number) || targetDim.width;
+      const actualOutH = outSize?.height || (data.outputHeight as number) || targetDim.height;
+      const providerName = String(data.providerName || data.providerId || modelInfo.providerName || '');
+
+      if (fallbackReason) {
+        console.warn(`[upscale] 降级提示: ${fallbackReason}`);
+        const fallbackPrefix = fallbackAllowed ? '自动模式已降级' : '执行说明';
+        toast.warning(`${fallbackPrefix}: ${fallbackReason}`);
+        usedModelName += '（降级）';
+      }
+      if (isTiled && tileCount > 0) {
+        toast.success(`分块超分完成：${tileCount} 块，输出 ${actualOutW}×${actualOutH}`);
       }
       if (resultUrl) {
         updateProcessingFrame(placeholderId, { progress: 96, status: '正在载入结果...' });
@@ -6464,9 +6439,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         completeProcessingFrame(placeholderId, stableUrl, displayW, displayH, {
           originalWidth: actualOutW,
           originalHeight: actualOutH,
-          modifyPrompt: `${selectedPreset?.label || upscalePreset.toUpperCase()} ${upscaleMode === 'lossless' ? '无损超分' : 'AI超分'}`,
-          modelName: usedModelName,
-          apiProvider: upscaleMode === 'lossless' ? (proStrategy === 'local-upscayl' ? '本地' : proStrategy === 'ai-redraw' ? 'AI重绘' : proStrategy === 'cloud-fal-SeedVR2' ? 'fal.ai' : 'PearAPI') : (modelInfo.providerName || ''),
+          modifyPrompt: `${selectedPreset?.label || upscalePreset.toUpperCase()} ${upscaleMode === 'fidelity' ? '保真超分' : 'AI超分'}${isTiled ? ` · ${tileCount}块分块融合` : ''}`,
+          modelName: `${usedModelName} · ${executionEngine}`,
+          apiProvider: providerName,
         }, 'upscale');
       } else {
         const pollError = lastPollErrorRef.current || '放大超时，请重试';
@@ -6488,7 +6463,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     }
     setIsEditProcessing(false);
     setActiveTool('none');
-  }, [getActiveImageData, upscaleActualW, upscaleActualH, upscalePreset, createProcessingFrameRightOf, getCurrentModel, upscaleEnginePref, updateProcessingFrame, upscaleMode, selected302UpscaleModel, upscaylSelectedModel, getCurrentProviderId, removeProcessingFrame, pollForResult, completeProcessingFrame]);
+  }, [getActiveImageData, upscaleActualW, upscaleActualH, upscalePreset, createProcessingFrameRightOf, getCurrentModel, updateProcessingFrame, upscaleMode, selected302UpscaleModel, upscaylSelectedModel, getCurrentProviderId, removeProcessingFrame, pollForResult, completeProcessingFrame]);
 
   // Engine selection helper: if pref saved, run directly; else open dialog
   const triggerWithEngine = useCallback((tool: 'upscale'|'removebg'|'svg'|'segment', doExecute: (engine: 'auto'|'ai'|'local') => void) => {
@@ -10895,7 +10870,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                     </div>
                   )}
                 </div>
-                {upscaleMode === 'ai' && (
+                {upscaleMode === 'ai-only' && (
                   <select
                     aria-label="302 AI 放大模型"
                     value={selected302UpscaleModel}
@@ -10914,30 +10889,28 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                   </select>
                 )}
                 <div className={panelDividerClass} />
-                {/* Upscale mode selector: 无损放大 / AI放大 */}
+                {/* Upscale product mode selector */}
                 <div className="flex items-center gap-0.5">
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setUpscaleMode('lossless'); }}
-                    className={`px-2 py-1 text-xs rounded-l-md transition-all font-medium ${
-                      upscaleMode === 'lossless'
-                        ? isMonochrome ? 'bg-blue-500 text-white' : 'bg-gold text-black'
-                        : isMonochrome ? 'bg-gray-100 text-gray-500 hover:bg-gray-200' : 'bg-[#252525] text-gold-muted hover:bg-[#333]'
-                    }`}
-                    title="无损放大：Real-ESRGAN 超分辨率算法，真实无损，忠实还原每一个像素"
-                  >
-                    无损放大
-                  </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setUpscaleMode('ai'); }}
-                    className={`px-2 py-1 text-xs rounded-r-md transition-all font-medium ${
-                      upscaleMode === 'ai'
-                        ? isMonochrome ? 'bg-blue-500 text-white' : 'bg-gold text-black'
-                        : isMonochrome ? 'bg-gray-100 text-gray-500 hover:bg-gray-200' : 'bg-[#252525] text-gold-muted hover:bg-[#333]'
-                    }`}
-                    title="AI放大：AI模型智能补细节+增强清晰度，内容可能有变化"
-                  >
-                    AI放大
-                  </button>
+                  {([
+                    { id: 'auto', label: '自动', title: '自动选择专用 AI 或保真引擎；发生降级时会明确说明原因' },
+                    { id: 'ai-only', label: '仅 AI', title: '仅使用专用 AI 超分；失败时不会静默回退到 CPU 放大' },
+                    { id: 'fidelity', label: '保真', title: '优先保持原始构图与像素特征，不使用生成式重绘' },
+                  ] as const).map((mode, index, modes) => (
+                    <button
+                      key={mode.id}
+                      onClick={(e) => { e.stopPropagation(); setUpscaleMode(mode.id); }}
+                      className={`px-2 py-1 text-xs transition-all font-medium ${
+                        index === 0 ? 'rounded-l-md' : index === modes.length - 1 ? 'rounded-r-md' : ''
+                      } ${
+                        upscaleMode === mode.id
+                          ? isMonochrome ? 'bg-blue-500 text-white' : 'bg-gold text-black'
+                          : isMonochrome ? 'bg-gray-100 text-gray-500 hover:bg-gray-200' : 'bg-[#252525] text-gold-muted hover:bg-[#333]'
+                      }`}
+                      title={mode.title}
+                    >
+                      {mode.label}
+                    </button>
+                  ))}
                 </div>
                 <div className={panelDividerClass} />
                 {/* Target dimensions */}
