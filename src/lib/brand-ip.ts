@@ -4,19 +4,7 @@ export interface BrandIpBrief {
   brandName?: string;
   objective?: string;
   audience?: string;
-  industry?: string;
-  workflowPath?: number;
-  carriers?: number[];
-  smartMode?: boolean;
   personality?: string[];
-  advancedRole?: string;
-  advancedCharacterCount?: string;
-  advancedVibe?: string;
-  advancedConstraints?: string;
-  advancedForbidden?: string;
-  advancedAutoRisk?: boolean;
-  advancedAutoApplication?: boolean;
-  advancedStructureFirst?: boolean;
   [key: string]: unknown;
 }
 

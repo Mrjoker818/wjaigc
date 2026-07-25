@@ -25,7 +25,6 @@ export interface CreateBrandIpGenerationTaskInput {
   model?: string;
   providerId?: string;
   aspectRatio?: string;
-  assetType?: 'character-standard' | 'monochrome' | 'small-format' | 'emoji-pack';
 }
 
 export interface BrandIpGenerationTask {
@@ -127,14 +126,7 @@ export async function resolveImageModel(
 
 export async function createBrandIpGenerationTask(input: CreateBrandIpGenerationTaskInput): Promise<BrandIpGenerationTask> {
   const taskId = `brand-ip-${nanoid(16)}`;
-  const assetTypeLabels: Record<NonNullable<CreateBrandIpGenerationTaskInput['assetType']>, string> = {
-    'character-standard': '标准角色图',
-    monochrome: '单色版',
-    'small-format': '小尺寸版',
-    'emoji-pack': '表情包',
-  };
-  const assetType = input.assetType ?? 'character-standard';
-  const task = registerTask(taskId, 'brand-generate', `正在生成${assetTypeLabels[assetType]}`, input.userId);
+  const task = registerTask(taskId, 'brand-generate', '正在生成品牌 IP 视觉资产', input.userId);
   updateTaskProgress(taskId, {
     status: task.status === 'queued' ? 'queued' : 'pending',
     progress: 0,
@@ -144,7 +136,6 @@ export async function createBrandIpGenerationTask(input: CreateBrandIpGeneration
       prompt: input.prompt,
       model: input.model,
       providerId: input.providerId,
-      assetType,
     },
   });
 
@@ -164,7 +155,6 @@ export interface ExecuteBrandIpGenerationInput {
   model?: string;
   providerId?: string;
   aspectRatio?: string;
-  assetType?: 'character-standard' | 'monochrome' | 'small-format' | 'emoji-pack';
 }
 
 const POLL_INTERVAL_MS = 2000;
@@ -223,14 +213,7 @@ export async function executeBrandIpGeneration(input: ExecuteBrandIpGenerationIn
     }
 
     // 4. Submit generation request via internal API
-    const assetTypeLabels: Record<NonNullable<ExecuteBrandIpGenerationInput['assetType']>, string> = {
-      'character-standard': '标准角色图',
-      monochrome: '单色版',
-      'small-format': '小尺寸版',
-      'emoji-pack': '表情包',
-    };
-    const assetLabel = assetTypeLabels[input.assetType ?? 'character-standard'];
-    updateTaskProgress(taskId, { progress: 10, label: `正在提交${assetLabel}生成请求...` });
+    updateTaskProgress(taskId, { progress: 10, label: '正在提交生成请求...' });
 
     const headers = await getInternalRequestHeaders(input.userId, input.userRole as 'user' | 'admin');
     const port = getServerPort();
@@ -276,7 +259,7 @@ export async function executeBrandIpGeneration(input: ExecuteBrandIpGenerationIn
     }
 
     // 5. Poll for result
-    updateTaskProgress(taskId, { progress: 30, label: `正在生成${assetLabel}...` });
+    updateTaskProgress(taskId, { progress: 30, label: '正在生成品牌资产...' });
 
     const providerTaskId = providerTaskIds[0];
     let imageUrl: string | null = null;

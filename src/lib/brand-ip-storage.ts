@@ -190,8 +190,6 @@ export async function createBrandIpProject(userId: string, input: CreateBrandIpP
 
 // ─── 品牌 IP 资产持久化 ──────────────────────────────────────────────
 
-export type BrandIpAssetType = 'character-standard' | 'monochrome' | 'small-format' | 'emoji-pack';
-
 export interface BrandIpAsset {
   id: string;
   projectId: string;
@@ -204,8 +202,6 @@ export interface BrandIpAsset {
   directionId: string | null;
   version: number;
   status: 'active' | 'archived' | 'failed';
-  assetType: BrandIpAssetType;
-  favorite: boolean;
   metadata: Record<string, unknown> | null;
   createdAt: string;
 }
@@ -227,10 +223,6 @@ interface BrandIpAssetRow {
 }
 
 function rowToAsset(row: BrandIpAssetRow): BrandIpAsset {
-  const metadata = row.metadata ? (() => { try { return JSON.parse(row.metadata as string) as Record<string, unknown>; } catch { return null; } })() : null;
-  const assetType = metadata?.assetType;
-  const validAssetTypes: BrandIpAssetType[] = ['character-standard', 'monochrome', 'small-format', 'emoji-pack'];
-
   return {
     id: row.id,
     projectId: row.project_id,
@@ -243,11 +235,7 @@ function rowToAsset(row: BrandIpAssetRow): BrandIpAsset {
     directionId: row.direction_id,
     version: row.version,
     status: row.status as BrandIpAsset['status'],
-    assetType: typeof assetType === 'string' && validAssetTypes.includes(assetType as BrandIpAssetType)
-      ? assetType as BrandIpAssetType
-      : 'character-standard',
-    favorite: metadata?.favorite === true,
-    metadata,
+    metadata: row.metadata ? (() => { try { return JSON.parse(row.metadata as string); } catch { return null; } })() : null,
     createdAt: row.created_at,
   };
 }
@@ -325,65 +313,11 @@ export async function saveBrandIpAsset(input: SaveBrandIpAssetInput): Promise<Br
   return rowToAsset(result.rows[0] as unknown as BrandIpAssetRow);
 }
 
-export async function listBrandIpAssets(
-  projectId: string,
-  userId: string,
-  status: 'active' | 'archived' | 'all' = 'active',
-): Promise<BrandIpAsset[]> {
+export async function listBrandIpAssets(projectId: string, userId: string): Promise<BrandIpAsset[]> {
   await ensureBrandIpAssetTables();
-  const result = status === 'all'
-    ? await execSql(
-      'SELECT * FROM brand_ip_assets WHERE project_id = $1 AND user_id = $2 ORDER BY created_at DESC',
-      [projectId, userId],
-    )
-    : await execSql(
-      'SELECT * FROM brand_ip_assets WHERE project_id = $1 AND user_id = $2 AND status = $3 ORDER BY created_at DESC',
-      [projectId, userId, status],
-    );
-  return (result.rows as unknown as BrandIpAssetRow[]).map(rowToAsset);
-}
-
-async function updateBrandIpAsset(
-  projectId: string,
-  userId: string,
-  assetId: string,
-  changes: { status?: 'active' | 'archived'; favorite?: boolean },
-): Promise<BrandIpAsset | null> {
-  await ensureBrandIpAssetTables();
-  const existingResult = await execSql(
-    'SELECT * FROM brand_ip_assets WHERE id = $1 AND project_id = $2 AND user_id = $3 LIMIT 1',
-    [assetId, projectId, userId],
-  );
-  const existing = existingResult.rows[0] as unknown as BrandIpAssetRow | undefined;
-  if (!existing) return null;
-
-  const currentMetadata = rowToAsset(existing).metadata ?? {};
-  const metadata = changes.favorite === undefined
-    ? currentMetadata
-    : { ...currentMetadata, favorite: changes.favorite };
-  const nextStatus = changes.status ?? existing.status;
   const result = await execSql(
-    'UPDATE brand_ip_assets SET status = $1, metadata = $2 WHERE id = $3 AND project_id = $4 AND user_id = $5 RETURNING *',
-    [nextStatus, JSON.stringify(metadata), assetId, projectId, userId],
+    'SELECT * FROM brand_ip_assets WHERE project_id = $1 AND user_id = $2 AND status = $3 ORDER BY created_at DESC',
+    [projectId, userId, 'active'],
   );
-  const row = result.rows[0] as unknown as BrandIpAssetRow | undefined;
-  return row ? rowToAsset(row) : null;
-}
-
-export async function setBrandIpAssetFavorite(
-  projectId: string,
-  userId: string,
-  assetId: string,
-  favorite: boolean,
-): Promise<BrandIpAsset | null> {
-  return updateBrandIpAsset(projectId, userId, assetId, { favorite });
-}
-
-export async function setBrandIpAssetStatus(
-  projectId: string,
-  userId: string,
-  assetId: string,
-  status: 'active' | 'archived',
-): Promise<BrandIpAsset | null> {
-  return updateBrandIpAsset(projectId, userId, assetId, { status });
+  return (result.rows as unknown as BrandIpAssetRow[]).map(rowToAsset);
 }
