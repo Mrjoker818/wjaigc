@@ -1214,14 +1214,17 @@ function buildPearApiVideoSubmit(baseUrl: string, apiKey: string, params: VideoG
  * Completed response: {status:'completed', output:{created, data:[{url}], video_urls:[...]}, progress, error:{message}}
  */
 function parsePearApiVideoPoll(data: unknown): VideoTaskPollResult {
-  // PearAPI 轮询响应格式与 APImart 相同：
-  // {code:200, data:{id, status, progress(0-100), result:{videos:[{url:[...]}]}}}
+  // PearAPI 轮询响应有两种格式：
+  // 1. 包裹格式：{code:200, data:{id, status, progress, result/output:{videos:[{url}]}}}
+  // 2. 扁平格式（实测 GET /v1/videos/tasks/{id}）：{id, status, progress, output:{video_url}}
   const inner = getApiValue(data, 'data');
-  const item = Array.isArray(inner) ? inner[0] : inner;
+  // 无 data 包裹时回退到顶层对象，确保 status/progress/output 均能取到
+  const item = (inner && (Array.isArray(inner) ? inner[0] : inner)) || data;
   const status = (getApiString(item, 'status') || getApiString(data, 'status') || '').toLowerCase();
 
   if (status === 'succeeded' || status === 'completed' || status === 'success' || status === 'done') {
-    const result = getApiValue(item, 'result') || getApiValue(item, 'results') || getApiValue(item, 'output');
+    const result = getApiValue(item, 'result') || getApiValue(item, 'results') || getApiValue(item, 'output')
+      || getApiValue(data, 'output') || getApiValue(data, 'result');
     const videos = getApiValue(result, 'videos') || getApiValue(result, 'video_results');
     let videoUrl: string | undefined;
     if (Array.isArray(videos) && videos.length > 0) {
