@@ -3033,61 +3033,56 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                             className="flex items-center gap-1 text-[10px] text-primary hover:text-primary/80 cursor-pointer transition-colors"
                           >
                             <ChevronDown className={`w-3 h-3 transition-transform ${expandedModelProviders.has(p.id) ? 'rotate-0' : '-rotate-90'}`} />
-                            展开模型 ({p.selectedModels?.length || 0}/{p.discoveredModels?.length || 0})
+                            已启用模型 ({p.selectedModels?.length || 0})
                           </button>
                           {expandedModelProviders.has(p.id) && (
                             <div className="mt-1.5 space-y-1 max-h-60 overflow-y-auto pr-1">
                               {(() => {
-                                const allModels = p.discoveredModels || [];
                                 const selectedSet = new Set(p.selectedModels || []);
-                                return allModels
-                                  .map(m => {
-                                    const isSelected = selectedSet.has(m.id);
-                                    const displayName = m.displayName || m.name || m.id;
-                                    return (
-                                      <div key={m.id} className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-muted/50 hover:bg-muted group">
-                                        <button
-                                          onClick={() => {
-                                            const newSelected = isSelected
-                                              ? p.selectedModels!.filter(s => s !== m.id)
-                                              : [...(p.selectedModels || []), m.id];
-                                            void quickUpdateProvider(p.id, { selectedModels: newSelected });
-                                          }}
-                                          className={`w-3.5 h-3.5 rounded flex items-center justify-center shrink-0 transition-colors ${isSelected ? 'bg-primary text-primary-foreground' : 'bg-muted-foreground/20 hover:bg-muted-foreground/40'}`}
-                                        >
-                                          {isSelected && <Check className="w-2.5 h-2.5" />}
-                                        </button>
-                                        <span className="text-[11px] text-foreground flex-1 truncate" title={displayName}>{displayName}</span>
-                                        <span className="text-[9px] text-muted-foreground truncate max-w-[100px]" title={m.id}>{m.id}</span>
-                                        <button
-                                          onClick={() => {
-                                            const newName = prompt('修改模型显示名称:', displayName);
-                                            if (newName !== null && newName.trim()) {
-                                              const newDiscovered = (p.discoveredModels || []).map(dm =>
-                                                dm.id === m.id ? { ...dm, displayName: newName.trim() } : dm
-                                              );
-                                              void quickUpdateProvider(p.id, { discoveredModels: newDiscovered });
-                                            }
-                                          }}
-                                          className="opacity-0 group-hover:opacity-100 w-4 h-4 flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-all cursor-pointer"
-                                          title="重命名"
-                                        >
-                                          <Pencil className="w-2.5 h-2.5" />
-                                        </button>
-                                        <button
-                                          onClick={() => {
-                                            const newDiscovered = (p.discoveredModels || []).filter(dm => dm.id !== m.id);
-                                            const newSelected = p.selectedModels!.filter(s => s !== m.id);
-                                            void quickUpdateProvider(p.id, { selectedModels: newSelected, discoveredModels: newDiscovered });
-                                          }}
-                                          className="opacity-0 group-hover:opacity-100 w-4 h-4 flex items-center justify-center rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all cursor-pointer"
-                                          title="删除"
-                                        >
-                                          <X className="w-2.5 h-2.5" />
-                                        </button>
-                                      </div>
-                                    );
-                                  });
+                                const selectedModelList = (p.discoveredModels || []).filter(m => selectedSet.has(m.id));
+                                if (selectedModelList.length === 0) {
+                                  return (
+                                    <div className="px-2 py-1.5 text-[10px] text-muted-foreground italic">暂无已启用模型，请点击「编辑」管理模型</div>
+                                  );
+                                }
+                                return selectedModelList.map(m => {
+                                  const displayName = m.displayName || m.name || m.id;
+                                  return (
+                                    <div key={m.id} className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-muted/50 hover:bg-muted group">
+                                      <span className="w-3.5 h-3.5 rounded bg-primary text-primary-foreground flex items-center justify-center shrink-0">
+                                        <Check className="w-2.5 h-2.5" />
+                                      </span>
+                                      <span className="text-[11px] text-foreground flex-1 truncate" title={displayName}>{displayName}</span>
+                                      <span className="text-[9px] text-muted-foreground truncate max-w-[100px]" title={m.id}>{m.id}</span>
+                                      <button
+                                        onClick={() => {
+                                          const newName = prompt('修改模型显示名称:', displayName);
+                                          if (newName !== null && newName.trim()) {
+                                            const newDiscovered = (p.discoveredModels || []).map(dm =>
+                                              dm.id === m.id ? { ...dm, displayName: newName.trim() } : dm
+                                            );
+                                            void quickUpdateProvider(p.id, { discoveredModels: newDiscovered });
+                                          }
+                                        }}
+                                        className="opacity-0 group-hover:opacity-100 w-4 h-4 flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-all cursor-pointer"
+                                        title="重命名"
+                                      >
+                                        <Pencil className="w-2.5 h-2.5" />
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          const newDiscovered = (p.discoveredModels || []).filter(dm => dm.id !== m.id);
+                                          const newSelected = p.selectedModels!.filter(s => s !== m.id);
+                                          void quickUpdateProvider(p.id, { selectedModels: newSelected, discoveredModels: newDiscovered });
+                                        }}
+                                        className="opacity-0 group-hover:opacity-100 w-4 h-4 flex items-center justify-center rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all cursor-pointer"
+                                        title="删除"
+                                      >
+                                        <X className="w-2.5 h-2.5" />
+                                      </button>
+                                    </div>
+                                  );
+                                });
                               })()}
                             </div>
                           )}
