@@ -61,10 +61,10 @@ export async function GET(request: NextRequest) {
       ),
       execSql(
         `SELECT
-           COALESCE(SUM(CASE WHEN description LIKE '%生图%' OR description LIKE '%image%' OR description LIKE '%生成%' THEN ABS(amount) ELSE 0 END), 0) as image_consumed,
+           COALESCE(SUM(CASE WHEN description LIKE '%视频%' OR description LIKE '%video%' THEN 0 WHEN description LIKE '%聊天%' OR description LIKE '%chat%' OR description LIKE '%对话%' THEN 0 WHEN description LIKE '%生图%' OR description LIKE '%图像%' OR description LIKE '%image%' OR description LIKE '%生成%' OR description LIKE '%编辑%' OR description LIKE '%放大%' OR description LIKE '%背景%' OR description LIKE '%修图%' OR description LIKE '%矢量%' OR description LIKE '%SVG%' OR description LIKE '%描摹%' THEN ABS(amount) ELSE 0 END), 0) as image_consumed,
            COALESCE(SUM(CASE WHEN description LIKE '%聊天%' OR description LIKE '%chat%' OR description LIKE '%对话%' THEN ABS(amount) ELSE 0 END), 0) as chat_consumed,
            COALESCE(SUM(CASE WHEN description LIKE '%视频%' OR description LIKE '%video%' THEN ABS(amount) ELSE 0 END), 0) as video_consumed,
-           COALESCE(SUM(CASE WHEN description NOT LIKE '%生图%' AND description NOT LIKE '%image%' AND description NOT LIKE '%生成%' AND description NOT LIKE '%聊天%' AND description NOT LIKE '%chat%' AND description NOT LIKE '%对话%' AND description NOT LIKE '%视频%' AND description NOT LIKE '%video%' AND amount < 0 THEN ABS(amount) ELSE 0 END), 0) as other_consumed
+           COALESCE(SUM(CASE WHEN description NOT LIKE '%生图%' AND description NOT LIKE '%图像%' AND description NOT LIKE '%image%' AND description NOT LIKE '%生成%' AND description NOT LIKE '%编辑%' AND description NOT LIKE '%放大%' AND description NOT LIKE '%背景%' AND description NOT LIKE '%修图%' AND description NOT LIKE '%矢量%' AND description NOT LIKE '%SVG%' AND description NOT LIKE '%描摹%' AND description NOT LIKE '%聊天%' AND description NOT LIKE '%chat%' AND description NOT LIKE '%对话%' AND description NOT LIKE '%视频%' AND description NOT LIKE '%video%' AND amount < 0 THEN ABS(amount) ELSE 0 END), 0) as other_consumed
          FROM wujie_credit_transactions WHERE amount < 0`
       ),
       execSql(
@@ -110,13 +110,19 @@ export async function GET(request: NextRequest) {
       })
       .sort((a, b) => b.consumed - a.consumed);
 
-    const recentTransactions = (recentTxRes.rows as unknown as CreditTransactionRow[]).map(r => ({
-      user: r.user || r.user_id,
-      type: Number(r.amount) > 0 ? 'recharge' : (r.desc || '').includes('生图') || (r.desc || '').includes('生成') ? 'image' : (r.desc || '').includes('视频') ? 'video' : (r.desc || '').includes('聊天') || (r.desc || '').includes('chat') ? 'chat' : 'other',
-      amount: Number(r.amount) || 0,
-      desc: r.desc || '-',
-      time: new Date(Number(r.created_at)).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }),
-    }));
+    const recentTransactions = (recentTxRes.rows as unknown as CreditTransactionRow[]).map(r => {
+      const desc = r.desc || '';
+      const isVideo = desc.includes('视频') || desc.includes('video');
+      const isChat = !isVideo && (desc.includes('聊天') || desc.includes('chat') || desc.includes('对话'));
+      const isImage = !isVideo && !isChat && (desc.includes('生图') || desc.includes('生成') || desc.includes('image'));
+      return {
+        user: r.user || r.user_id,
+        type: Number(r.amount) > 0 ? 'recharge' : isVideo ? 'video' : isChat ? 'chat' : isImage ? 'image' : 'other',
+        amount: Number(r.amount) || 0,
+        desc: r.desc || '-',
+        time: new Date(Number(r.created_at)).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }),
+      };
+    });
 
     return NextResponse.json({
       success: true,

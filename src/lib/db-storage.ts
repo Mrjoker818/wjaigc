@@ -167,6 +167,38 @@ export async function ensureCoreTables(): Promise<void> {
       )
     `);
 
+    // 用户积分表
+    await execSql(`
+      CREATE TABLE IF NOT EXISTS wujie_credits (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL UNIQUE,
+        balance INTEGER NOT NULL DEFAULT 0,
+        total_recharged INTEGER NOT NULL DEFAULT 0,
+        total_used INTEGER NOT NULL DEFAULT 0,
+        created_at BIGINT NOT NULL,
+        updated_at BIGINT NOT NULL
+      )
+    `);
+    await execSql(`CREATE INDEX IF NOT EXISTS idx_credits_user ON wujie_credits(user_id)`);
+
+    // 积分交易记录表
+    await execSql(`
+      CREATE TABLE IF NOT EXISTS wujie_credit_transactions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        type TEXT NOT NULL,
+        amount INTEGER NOT NULL,
+        balance_after INTEGER DEFAULT 0,
+        description TEXT DEFAULT '',
+        model TEXT DEFAULT '',
+        task_id TEXT DEFAULT '',
+        created_at BIGINT NOT NULL
+      )
+    `);
+    await execSql(`CREATE INDEX IF NOT EXISTS idx_credit_tx_user ON wujie_credit_transactions(user_id)`);
+    await execSql(`CREATE INDEX IF NOT EXISTS idx_credit_tx_type ON wujie_credit_transactions(type)`);
+    await execSql(`CREATE INDEX IF NOT EXISTS idx_credit_tx_created ON wujie_credit_transactions(created_at)`);
+
     // ─── 安全迁移：给已有表补充缺失列 ────────────────────────────────
     // CREATE TABLE IF NOT EXISTS 不会添加新列，需要单独 ALTER TABLE
     const migrations: [string, string, string][] = [
@@ -1919,15 +1951,27 @@ export async function dbGetDashboardStats(periodDays = 7) {
     );
     const totalApiCalls = (apiCallsRes.rows as { count: number }[])[0]?.count || 0;
 
-    // Model usage rank (top 10 by transaction count)
+    // Model usage rank (top 10 by call count) — extract model name from description
+    // description format: "图像生成 [model-name] 扣除 N 积分" or operation label
     const modelRankRes = await execSql(
-      `SELECT description, COUNT(*) as calls FROM wujie_credit_transactions WHERE created_at >= $1 AND description IS NOT NULL GROUP BY description ORDER BY calls DESC LIMIT 10`,
+      `SELECT
+         CASE
+           WHEN reference_id ~ '\\[.+\\]' THEN substring(reference_id FROM '\\[(.+)\\]')
+           WHEN description ~ '\\[.+\\]' THEN substring(description FROM '\\[(.+)\\]')
+           ELSE COALESCE(split_part(description, ' ', 1), '未知')
+         END as model_name,
+         COUNT(*) as calls
+       FROM wujie_credit_transactions
+       WHERE created_at >= $1 AND amount < 0
+       GROUP BY model_name
+       ORDER BY calls DESC
+       LIMIT 10`,
       [periodStart]
     );
-    const modelRank = (modelRankRes.rows as { description: string; calls: number }[]).map(r => ({
-      name: r.description?.replace(/模型.*/, '').trim() || r.description || '未知',
+    const modelRank = (modelRankRes.rows as { model_name: string; calls: number }[]).map(r => ({
+      name: r.model_name || '未知',
       calls: r.calls,
-      successRate: 95 + Math.random() * 5, // approximate
+      successRate: 100,
     }));
 
     // Recent users (last 5)
