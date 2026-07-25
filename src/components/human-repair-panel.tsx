@@ -152,6 +152,10 @@ export default function HumanRepairPanel({ isMonochrome = false, onClose, onAddI
   const [batchUrls, setBatchUrls] = useState("");
   const [isBusy, setIsBusy] = useState(false);
   const [candidates, setCandidates] = useState<HumanCandidateView[]>([]);
+  const imageUrlRef = useRef(initialImageUrl);
+  const analysisAbortRef = useRef<AbortController | null>(null);
+  const analysisRequestRef = useRef(0);
+  const repairRequestRef = useRef(0);
 
   const panelClass = isMonochrome ? "bg-white border-gray-200 text-gray-800" : "bg-[#171717] border-[#3b3b3b] text-white";
   const subduedClass = isMonochrome ? "text-gray-500" : "text-zinc-400";
@@ -176,24 +180,56 @@ export default function HumanRepairPanel({ isMonochrome = false, onClose, onAddI
 
   const recommendedIds = analysis?.targets.filter(t => t.recommendedMode !== "no_repair").map(t => t.id) || [];
 
-  const analyze = useCallback(async (url = imageUrl) => {
+  const resetSourceState = useCallback((nextUrl: string) => {
+    imageUrlRef.current = nextUrl;
+    setImageUrl(nextUrl);
+    setAnalysis(null);
+    setSelectedTargetIds([]);
+    setCandidates([]);
+  }, []);
+
+  const analyze = useCallback(async (sourceUrl?: string) => {
+    const url = sourceUrl ?? imageUrlRef.current;
     if (!url) return;
+    analysisAbortRef.current?.abort();
+    const controller = new AbortController();
+    const requestId = ++analysisRequestRef.current;
+    analysisAbortRef.current = controller;
     setIsBusy(true);
     try {
       const r = await fetch("/api/human/analyze", {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({ imageId: url, imageUrl: url }),
       });
       const data = await r.json() as { analysis?: HumanAnalysisView; targets?: HumanTargetView[]; error?: string };
       if (!r.ok) throw new Error(data.error || "人物检测失败");
+      if (requestId !== analysisRequestRef.current || imageUrlRef.current !== url) return;
       const next = data.analysis || { targets: data.targets || [], scores: {} };
       setAnalysis(next);
       setSelectedTargetIds(next.targets.filter(t => t.recommendedMode !== "no_repair").map(t => t.id));
-    } catch (e) { toast.error(e instanceof Error ? e.message : "人物检测失败"); }
-    finally { setIsBusy(false); }
-  }, [imageUrl]);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      if (requestId === analysisRequestRef.current && imageUrlRef.current === url) {
+        toast.error(error instanceof Error ? error.message : "人物检测失败");
+      }
+    } finally {
+      if (requestId === analysisRequestRef.current) setIsBusy(false);
+    }
+  }, []);
 
-  useEffect(() => { if (initialImageUrl) void analyze(initialImageUrl); }, [analyze, initialImageUrl]);
+  useEffect(() => {
+    if (!initialImageUrl) return;
+    resetSourceState(initialImageUrl);
+    void analyze(initialImageUrl);
+  }, [analyze, initialImageUrl, resetSourceState]);
+
+  useEffect(() => () => {
+    analysisAbortRef.current?.abort();
+    analysisRequestRef.current += 1;
+    repairRequestRef.current += 1;
+  }, []);
 
   const waitForTask = useCallback(async (taskId: string): Promise<HumanCandidateView[]> => {
     for (let i = 0; i < 120; i++) {
@@ -213,9 +249,9 @@ export default function HumanRepairPanel({ isMonochrome = false, onClose, onAddI
       body: JSON.stringify({
         imageId: url, imageUrl: url, targetIds,
         candidateCount: mode === "pro" ? candidateCount : 1,
-        model: selectedModel || undefined,
-        providerId: selectedProviderId || undefined,
-        mode: selectedModel ? "auto" : "mock",
+        model: selectedModel,
+        providerId: selectedProviderId,
+        mode: "auto",
         options: { strength, lockIdentity: true, lockHair: true, lockClothes: true, lockPose: true, lockBackground: true, protectTextLogoProduct: true },
       }),
     });
@@ -225,29 +261,47 @@ export default function HumanRepairPanel({ isMonochrome = false, onClose, onAddI
   }, [candidateCount, mode, selectedModel, selectedProviderId, strength, waitForTask]);
 
   const handleRepair = useCallback(async () => {
-    if (!imageUrl) return toast.error("请先输入或选择图片");
+    const sourceUrl = imageUrlRef.current;
+    if (!sourceUrl) return toast.error("请先输入或选择图片");
+    if (!selectedProviderId || !selectedModel) return toast.error("请选择已授权的图像编辑模型");
+    const requestId = ++repairRequestRef.current;
     setIsBusy(true);
     try {
       const ids = mode === "pro" ? selectedTargetIds : recommendedIds;
-      const results = await repairOne(imageUrl, ids);
+      const results = await repairOne(sourceUrl, ids);
+      if (requestId !== repairRequestRef.current || imageUrlRef.current !== sourceUrl) return;
       setCandidates(results);
       toast.success("人物精修完成，共生成 " + results.length + " 个候选结果");
-    } catch (e) { toast.error(e instanceof Error ? e.message : "人物精修失败"); }
-    finally { setIsBusy(false); }
-  }, [imageUrl, mode, recommendedIds, repairOne, selectedTargetIds]);
+    } catch (error) {
+      if (requestId === repairRequestRef.current && imageUrlRef.current === sourceUrl) {
+        toast.error(error instanceof Error ? error.message : "人物精修失败");
+      }
+    } finally {
+      if (requestId === repairRequestRef.current) setIsBusy(false);
+    }
+  }, [mode, recommendedIds, repairOne, selectedModel, selectedProviderId, selectedTargetIds]);
 
   const handleBatch = useCallback(async () => {
     const urls = batchUrls.split('\n').map(s => s.replace(/\r$/, '').trim()).filter(Boolean);
     if (!urls.length) return toast.error("请输入至少一个图片 URL");
+    if (!selectedProviderId || !selectedModel) return toast.error("请选择已授权的图像编辑模型");
+    const requestId = ++repairRequestRef.current;
     setIsBusy(true);
     try {
       const all: HumanCandidateView[] = [];
-      for (const u of urls) { all.push(...await repairOne(u, [])); }
+      for (const url of urls) {
+        all.push(...await repairOne(url, []));
+        if (requestId !== repairRequestRef.current) return;
+      }
+      if (requestId !== repairRequestRef.current) return;
       setCandidates(all);
       toast.success("批量精修完成：" + urls.length + " 张");
-    } catch (e) { toast.error(e instanceof Error ? e.message : "批量精修失败"); }
-    finally { setIsBusy(false); }
-  }, [batchUrls, repairOne]);
+    } catch (error) {
+      if (requestId === repairRequestRef.current) toast.error(error instanceof Error ? error.message : "批量精修失败");
+    } finally {
+      if (requestId === repairRequestRef.current) setIsBusy(false);
+    }
+  }, [batchUrls, repairOne, selectedModel, selectedProviderId]);
 
   const selectCandidate = useCallback(async (candidate: HumanCandidateView) => {
     const taskId = candidate.id.split("-").slice(0, 6).join("-");
@@ -272,7 +326,7 @@ export default function HumanRepairPanel({ isMonochrome = false, onClose, onAddI
   const detectorBadge = analysis?.detector === "vision-adapter" ? (
     <span className="text-[10px] bg-emerald-900/40 text-emerald-400 border border-emerald-700/50 rounded px-1.5 py-0.5">Vision AI 检测</span>
   ) : analysis ? (
-    <span className="text-[10px] bg-zinc-800 text-zinc-400 border border-zinc-700 rounded px-1.5 py-0.5">Mock 检测器</span>
+    <span className="text-[10px] bg-zinc-800 text-zinc-400 border border-zinc-700 rounded px-1.5 py-0.5">基础区域检测</span>
   ) : null;
 
   return (
@@ -299,7 +353,13 @@ export default function HumanRepairPanel({ isMonochrome = false, onClose, onAddI
         {/* Image Input */}
         <div className="flex gap-2">
           <input
-            value={imageUrl} onChange={e => setImageUrl(e.target.value)}
+            value={imageUrl}
+            onChange={event => {
+              analysisAbortRef.current?.abort();
+              analysisRequestRef.current += 1;
+              repairRequestRef.current += 1;
+              resetSourceState(event.target.value);
+            }}
             placeholder="粘贴图片 URL 开始检测…"
             className={"flex-1 rounded-md border px-3 py-2 text-sm " + inputClass}
           />
@@ -371,29 +431,29 @@ export default function HumanRepairPanel({ isMonochrome = false, onClose, onAddI
           ))}
         </div>
 
+        <div className={"rounded-lg border p-3 text-sm " + inputClass}>
+          <label className={"block text-xs mb-1 " + subduedClass}>图像编辑模型</label>
+          <select
+            value={selectedModel ? selectedProviderId + "::" + selectedModel : ""}
+            onChange={event => {
+              const [providerId, model] = event.target.value.split("::");
+              setSelectedProviderId(providerId || "");
+              setSelectedModel(model || "");
+            }}
+            className={"w-full rounded border px-2 py-1.5 text-sm " + inputClass}
+          >
+            <option value="">请选择已授权模型</option>
+            {models.map(model => (
+              <option key={model.providerId + "::" + model.id} value={model.providerId + "::" + model.id}>
+                {model.displayName || model.name || model.id}
+              </option>
+            ))}
+          </select>
+        </div>
+
         {/* Pro mode settings */}
         {mode === "pro" && (
           <div className={"space-y-3 rounded-lg border p-3 text-sm " + inputClass}>
-            {/* Model Selector */}
-            <div>
-              <label className={"block text-xs mb-1 " + subduedClass}>图像编辑模型</label>
-              <select
-                value={selectedModel ? selectedProviderId + "::" + selectedModel : ""}
-                onChange={e => {
-                  const [pid, mid] = e.target.value.split("::");
-                  setSelectedProviderId(pid || "");
-                  setSelectedModel(mid || "");
-                }}
-                className={"w-full rounded border px-2 py-1.5 text-sm " + inputClass}
-              >
-                <option value="">Mock 模式（无需 API，用于测试）</option>
-                {models.map(m => (
-                  <option key={m.providerId + "::" + m.id} value={m.providerId + "::" + m.id}>
-                    {m.displayName || m.name || m.id}
-                  </option>
-                ))}
-              </select>
-            </div>
             {/* Candidate Count */}
             <div className="flex items-center gap-3">
               <label className={"text-xs " + subduedClass}>候选数量</label>
@@ -434,7 +494,7 @@ export default function HumanRepairPanel({ isMonochrome = false, onClose, onAddI
         {/* Repair Button */}
         <button
           onClick={mode === "batch" ? () => void handleBatch() : () => void handleRepair()}
-          disabled={isBusy || (!imageUrl && mode !== "batch")}
+          disabled={isBusy || !selectedProviderId || !selectedModel || (!imageUrl && mode !== "batch")}
           className="flex w-full items-center justify-center gap-2 rounded-lg bg-amber-500 px-4 py-2.5 text-sm font-semibold text-black disabled:opacity-40"
         >
           {isBusy ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}

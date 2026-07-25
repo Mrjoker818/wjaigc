@@ -58,6 +58,11 @@ export interface BomItem {
   estimatedPrice: string;
 }
 
+export interface DisplayFloorPlanZone {
+  name: string;
+  description: string;
+}
+
 export interface Display3DResult {
   id: string;
   type: string;
@@ -67,6 +72,7 @@ export interface Display3DResult {
 
 interface Props {
   isMonochrome?: boolean;
+  sourceImage?: { id: string; url: string; prompt?: string } | null;
   onClose: () => void;
   onAddImages?: (urls: string[], meta?: { modelName?: string; apiProvider?: string }) => void;
 }
@@ -226,40 +232,6 @@ const OUTPUT_RESOLUTIONS = ['1920×1080', '2560×1440', '3840×2160'];
 const OUTPUT_FORMATS = ['PNG', 'JPG', 'WEBP'];
 const OUTPUT_QUALITIES = ['标准', '高', '极高'];
 
-// Mock data for decomposition
-const MOCK_COMPONENTS: DisplayComponent[] = [
-  { id: '1', index: 1, name: '门头', sizeSuggestion: '9000×1200×600', material: '发光字+亚克力', craft: '烤漆+内发光' },
-  { id: '2', index: 2, name: '主背板', sizeSuggestion: '6000×3000', material: '喷绘布+KT板', craft: 'UV喷绘' },
-  { id: '3', index: 3, name: '灯箱', sizeSuggestion: '800×1800×120', material: '亚克力+灯片', craft: '内发光' },
-  { id: '4', index: 4, name: '展柜', sizeSuggestion: '1200×600×950', material: '木质+玻璃', craft: '烤漆' },
-  { id: '5', index: 5, name: '地贴', sizeSuggestion: '9000×6000', material: 'PVC地贴', craft: 'UV喷印' },
-  { id: '6', index: 6, name: '立牌', sizeSuggestion: '600×1600', material: 'KT板+PVC', craft: 'UV喷绘' },
-  { id: '7', index: 7, name: '打卡装置', sizeSuggestion: '1800×1800×2400', material: '亚克力+铁艺', craft: '烤漆造型' },
-  { id: '8', index: 8, name: '收银台', sizeSuggestion: '1500×700×1050', material: '木质+亚克力', craft: '烤漆' },
-  { id: '9', index: 9, name: '展示台', sizeSuggestion: '1000×1000×900', material: '木质+亚克力', craft: '烤漆+灯带' },
-];
-
-const MOCK_MATERIALS: DisplayMaterialSpec[] = [
-  { id: '1', name: '乳白色烤漆板', description: '表面烤漆，高光细腻' },
-  { id: '2', name: '亚克力灯箱', description: '内发光，均匀透光' },
-  { id: '3', name: '金色不锈钢拉丝', description: '304拉丝，香槟金' },
-  { id: '4', name: 'PVC地贴', description: 'UV喷印，防滑耐磨' },
-  { id: '5', name: '木纹饰面板', description: '环保板材，木纹自然' },
-  { id: '6', name: '喷绘布', description: 'UV喷绘，色彩饱满' },
-];
-
-const MOCK_BOM: BomItem[] = [
-  { id: '1', name: '门头', count: 1, estimatedPrice: '¥12,800' },
-  { id: '2', name: '主背板', count: 1, estimatedPrice: '¥9,600' },
-  { id: '3', name: '灯箱', count: 2, estimatedPrice: '¥6,400' },
-  { id: '4', name: '展柜', count: 3, estimatedPrice: '¥18,900' },
-  { id: '5', name: '地贴', count: 1, estimatedPrice: '¥3,200' },
-  { id: '6', name: '立牌', count: 2, estimatedPrice: '¥1,600' },
-  { id: '7', name: '打卡装置', count: 1, estimatedPrice: '¥7,800' },
-  { id: '8', name: '收银台', count: 1, estimatedPrice: '¥6,500' },
-  { id: '9', name: '展示台', count: 4, estimatedPrice: '¥11,200' },
-];
-
 /* ============================================================
    Prompt 模板
    ============================================================ */
@@ -315,7 +287,7 @@ ${state.customPrompt ? `\n附加要求：${state.customPrompt}` : ''}`;
 /* ============================================================
    组件
    ============================================================ */
-export default function Display3DPanel({ isMonochrome = false, onClose, onAddImages }: Props) {
+export default function Display3DPanel({ isMonochrome = false, sourceImage = null, onClose, onAddImages }: Props) {
   // === Window drag state ===
   const [isMinimized, setIsMinimized] = useState(false);
   // P2 fix: 追踪所有通过 createObjectURL 创建的 blob URL，组件卸载时统一 revoke
@@ -441,10 +413,21 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
     components: DisplayComponent[];
     materials: DisplayMaterialSpec[];
     bom: BomItem[];
+    floorPlanZones: DisplayFloorPlanZone[];
+    notes: string[];
     rawAnalysis?: string;
   } | null>(null);
   const [isDecomposing, setIsDecomposing] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+
+  useEffect(() => {
+    setDecomposition(null);
+    setErrorMsg('');
+    setSuccessMsg('');
+    if (sourceImage?.url) {
+      setActivePreviewTab('decompose');
+    }
+  }, [sourceImage?.id, sourceImage?.url]);
 
   // === 活动现场设计师 state ===
   const [appMode, setAppMode] = useState<AppMode>('display3d');
@@ -594,74 +577,93 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
 
   // === Decompose handler ===
   const handleDecompose = useCallback(async () => {
-    if (!brandName.trim() || results.length === 0) return;
+    const imageUrl = sourceImage?.url || results[0]?.url || '';
+    const sourceLabel = sourceImage ? '当前画布图片' : '展陈效果图';
+    if (!imageUrl) {
+      setErrorMsg(`请先选择要分析的${sourceLabel}`);
+      return;
+    }
+    if (!selectedChatModel || !selectedChatProviderId) {
+      setErrorMsg('请选择已授权的分析模型后再进行美陈拆解');
+      return;
+    }
+
+    const analysisModel = selectedChatModel;
+    const analysisProviderId = selectedChatProviderId;
+    setErrorMsg('');
+    setSuccessMsg('');
+    setDecomposition(null);
     setIsDecomposing(true);
     try {
-      const imageUrl = results[0]?.url || '';
       const res = await fetch('/api/display-3d/decompose', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ brandName, sceneType, dimensions, imageUrl, model: selectedChatModel || undefined, providerId: selectedChatProviderId || undefined }),
+        body: JSON.stringify({
+          brandName: brandName.trim() || '未命名品牌',
+          sceneType,
+          dimensions,
+          imageUrl,
+          model: analysisModel,
+          providerId: analysisProviderId,
+        }),
       });
-      const data = await res.json();
-      if (!res.ok || data.error) {
-        console.error('[display-3d] Decompose error:', data.error);
-        setIsDecomposing(false);
-        return;
+      const data = await res.json().catch(() => ({})) as { taskId?: string; error?: string };
+      if (!res.ok || data.error || !data.taskId) {
+        throw new Error(data.error || '美陈拆解任务提交失败');
       }
-      if (data.taskId) {
-        const taskId = data.taskId;
-        const poll = async () => {
-          try {
-            const taskRes = await fetch('/api/poll-task', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ taskId, model: selectedModel, providerId: selectedProviderId }),
-            });
-            const taskData = await taskRes.json();
-            if (taskData.status === 'completed') {
-              const decomposeResult = taskData.result?.decomposition || taskData.result;
-              if (decomposeResult) {
-                setDecomposition({
-                  components: decomposeResult.components?.map((c: Record<string, unknown>, i: number) => ({
-                    id: String(i + 1), index: c.index as number || i + 1,
-                    name: (c.name as string) || '未命名', sizeSuggestion: (c.sizeSuggestion as string) || '-',
-                    material: (c.material as string) || '-', craft: (c.craft as string) || '-',
-                  })) || MOCK_COMPONENTS,
-                  materials: decomposeResult.materials?.map((m: Record<string, unknown>, i: number) => ({
-                    id: String(i + 1), name: (m.name as string) || '未指定',
-                    description: (m.description as string) || '',
-                  })) || MOCK_MATERIALS,
-                  bom: decomposeResult.bom?.map((b: Record<string, unknown>, i: number) => ({
-                    id: String(i + 1), name: (b.name as string) || '未指定',
-                    count: (b.count as number) || 1,
-                    estimatedPrice: typeof b.estimatedPrice === 'number' ? `¥${b.estimatedPrice.toLocaleString('zh-CN')}` : (b.estimatedPrice as string) || '-',
-                  })) || MOCK_BOM,
-                  rawAnalysis: decomposeResult.rawAnalysis || taskData.result?.rawAnalysis,
-                });
-              }
-              setIsDecomposing(false);
-              setActivePreviewTab('decompose');
-            } else if (taskData.status === 'failed') {
-              console.error('[display-3d] Decompose failed:', taskData.error);
-              setIsDecomposing(false);
-            } else {
-              setTimeout(poll, 3000);
+
+      const poll = async (): Promise<void> => {
+        try {
+          const taskRes = await fetch('/api/poll-task', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ taskId: data.taskId, model: analysisModel, providerId: analysisProviderId }),
+          });
+          const taskData = await taskRes.json().catch(() => ({})) as {
+            status?: string;
+            error?: string;
+            result?: { decomposition?: unknown; rawAnalysis?: string };
+          };
+          if (taskData.status === 'completed') {
+            const decomposeResult = taskData.result?.decomposition;
+            if (!decomposeResult || typeof decomposeResult !== 'object') {
+              throw new Error('分析服务未返回有效的结构化拆解结果');
             }
-          } catch (e) {
-            console.error('[display-3d] Decompose poll error:', e);
+            const result = decomposeResult as {
+              components?: DisplayComponent[];
+              materials?: DisplayMaterialSpec[];
+              bom?: BomItem[];
+              floorPlanZones?: DisplayFloorPlanZone[];
+              notes?: string[];
+              rawAnalysis?: string;
+            };
+            setDecomposition({
+              components: Array.isArray(result.components) ? result.components : [],
+              materials: Array.isArray(result.materials) ? result.materials : [],
+              bom: Array.isArray(result.bom) ? result.bom : [],
+              floorPlanZones: Array.isArray(result.floorPlanZones) ? result.floorPlanZones : [],
+              notes: Array.isArray(result.notes) ? result.notes : [],
+              rawAnalysis: result.rawAnalysis || taskData.result?.rawAnalysis,
+            });
+            setSuccessMsg('美陈拆解已完成，以下内容均来自本次分析结果。');
             setIsDecomposing(false);
+            setActivePreviewTab('decompose');
+          } else if (taskData.status === 'failed' || !taskRes.ok) {
+            throw new Error(taskData.error || '美陈拆解任务失败');
+          } else {
+            window.setTimeout(() => { void poll(); }, 3000);
           }
-        };
-        poll();
-      } else {
-        setIsDecomposing(false);
-      }
-    } catch (e) {
-      console.error('[display-3d] Decompose failed:', e);
+        } catch (error) {
+          setErrorMsg(error instanceof Error ? error.message : '美陈拆解轮询失败，请重试');
+          setIsDecomposing(false);
+        }
+      };
+      void poll();
+    } catch (error) {
+      setErrorMsg(error instanceof Error ? error.message : '美陈拆解失败，请重试');
       setIsDecomposing(false);
     }
-  }, [brandName, sceneType, dimensions, results, onAddImages, selectedChatModel, selectedChatProviderId, selectedModel, selectedProviderId]);
+  }, [brandName, sceneType, dimensions, results, selectedChatModel, selectedChatProviderId, sourceImage]);
 
   // === Export handlers ===
   const handleExportPdf = useCallback(async () => {
@@ -696,8 +698,13 @@ export default function Display3DPanel({ isMonochrome = false, onClose, onAddIma
   }, [brandName, sceneType, results, decomposition]);
 
   const handleExportBom = useCallback(async () => {
+    const bomData = decomposition?.bom ?? [];
+    if (bomData.length === 0) {
+      setErrorMsg('当前拆解结果没有可导出的 BOM 清单');
+      return;
+    }
+
     try {
-      const bomData = decomposition?.bom || MOCK_BOM;
       const res = await fetch('/api/export/bom', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1996,7 +2003,7 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                             </div>
                           )}
                           {/* Numbered annotations overlay */}
-                          {!isGenerating && results.length > 0 && MOCK_COMPONENTS.map((comp, i) => (
+                          {!isGenerating && results.length > 0 && (decomposition?.components ?? []).map((comp, i) => (
                             <div key={comp.id} className="absolute rounded-full w-5 h-5 flex items-center justify-center text-[9px] font-bold cursor-pointer"
                               style={{ background: accent, color: isMonochrome ? '#fff' : '#000', left: `${10 + i * 8}%`, top: `${20 + (i % 4) * 14}%` }}>
                               {comp.index}
@@ -2023,7 +2030,7 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                             className="rounded-lg border px-3 py-1.5 text-[12px] cursor-pointer disabled:opacity-50"
                             style={{ borderColor: border, color: textAccent }}
                             onClick={handleDecompose}
-                            disabled={isDecomposing || results.length === 0}
+                            disabled={isDecomposing || (!sourceImage?.url && results.length === 0)}
                           >
                             {isDecomposing ? <><Loader2 size={10} className="inline animate-spin mr-1" />拆解中...</> : <><Sparkles size={10} className="inline mr-1" />AI 拆解方案</>}
                           </button>
@@ -2037,7 +2044,7 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                             <th className="text-left">工艺</th>
                           </tr></thead>
                           <tbody>
-                            {(decomposition?.components || MOCK_COMPONENTS).map(comp => (
+                            {(decomposition?.components ?? []).map(comp => (
                               <tr key={comp.id} style={{ borderTop: `1px solid ${border}` }}>
                                 <td className="py-2" style={{ color: textAccent }}>{comp.index}</td>
                                 <td style={{ color: textPrimary }}>{comp.name}</td>
@@ -2046,6 +2053,9 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                                 <td style={{ color: textMuted }}>{comp.craft}</td>
                               </tr>
                             ))}
+                            {!isDecomposing && (decomposition?.components ?? []).length === 0 && (
+                              <tr><td colSpan={5} className="py-8 text-center" style={{ color: textMuted }}>尚无真实构件拆解结果。请选择分析模型后执行 AI 拆解。</td></tr>
+                            )}
                           </tbody>
                         </table>
                       </div>
@@ -2053,36 +2063,46 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
 
                     {/* Floor plan */}
                     {activePreviewTab === 'floorplan' && (
-                      <div className="flex-1 flex flex-col">
-                        <div className="flex-1 rounded-xl border relative" style={{ background: isMonochrome ? '#f9fafb' : 'rgba(0,0,0,0.4)', borderColor: border }}>
-                          <svg viewBox="0 0 400 260" className="w-full h-full">
-                            <rect x="50" y="35" width="300" height="180" rx="20" fill={isMonochrome ? 'rgba(59,130,246,0.08)' : 'rgba(255,255,255,0.08)'} stroke={accent} strokeWidth="1.5" />
-                            <text x="200" y="25" textAnchor="middle" fill={textMuted} fontSize="11">{dimensions.length} mm</text>
-                            <text x="35" y="130" textAnchor="middle" fill={textMuted} fontSize="11" transform="rotate(-90 35 130)">{dimensions.width} mm</text>
-                            {MOCK_COMPONENTS.map((comp, i) => {
-                              const positions = [[300,55],[200,55],[100,90],[200,130],[80,180],[320,180],[200,180],[280,130],[130,135]];
-                              const [cx, cy] = positions[i] || [150, 100];
-                              return (
-                                <g key={comp.id}>
-                                  <circle cx={cx} cy={cy} r="13" fill={accent} />
-                                  <text x={cx} y={cy + 4} textAnchor="middle" fill={isMonochrome ? '#fff' : '#000'} fontSize="11" fontWeight="bold">{comp.index}</text>
-                                </g>
-                              );
-                            })}
-                            <path d="M200 245 L200 215" stroke={accent} strokeWidth="2" />
-                            <text x="200" y="255" textAnchor="middle" fill={textPrimary} fontSize="11">入口</text>
-                          </svg>
-                        </div>
-                        <div className="mt-2 flex flex-wrap gap-2 text-[12px]" style={{ color: textMuted }}>
-                          <span>人流动线</span><span>展示区</span><span>体验区</span><span>服务区</span><span>储物/后场</span>
-                        </div>
+                      <div className="flex-1 flex flex-col gap-3 overflow-auto">
+                        {(decomposition?.floorPlanZones ?? []).length > 0 ? (
+                          <>
+                            <div className="rounded-xl border p-3" style={{ background: isMonochrome ? '#f9fafb' : 'rgba(0,0,0,0.4)', borderColor: border }}>
+                              <div className="mb-2 flex items-center justify-between text-[11px]" style={{ color: textMuted }}>
+                                <span>空间建议：{dimensions.length} × {dimensions.width} mm</span>
+                                <span>基于本次 AI 拆解</span>
+                              </div>
+                              <div className="grid grid-cols-2 gap-2">
+                                {(decomposition?.floorPlanZones ?? []).map((zone, index) => (
+                                  <div key={`${zone.name}-${index}`} className="rounded-lg border p-2" style={{ borderColor: border, background: bgCard }}>
+                                    <div className="text-xs font-medium" style={{ color: textPrimary }}>{index + 1}. {zone.name}</div>
+                                    <div className="mt-1 text-[11px] leading-relaxed" style={{ color: textMuted }}>{zone.description || '本次分析未提供区域说明'}</div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                            <p className="text-[11px]" style={{ color: textMuted }}>区域顺序仅用于方案沟通，不代表精确平面位置或施工动线。</p>
+                            {(decomposition?.notes ?? []).length > 0 && (
+                              <div className="rounded-lg border p-2 text-[11px]" style={{ borderColor: border, background: bgCard, color: textMuted }}>
+                                <div className="mb-1 font-medium" style={{ color: textPrimary }}>制作复核提示</div>
+                                <ul className="list-disc space-y-1 pl-4">
+                                  {(decomposition?.notes ?? []).map((note, index) => <li key={`${note}-${index}`}>{note}</li>)}
+                                </ul>
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <div className="flex-1 flex flex-col items-center justify-center text-xs py-8" style={{ color: textMuted }}>
+                            <Layout size={28} className="mb-2 opacity-20" />
+                            本次分析未返回平面分区信息。
+                          </div>
+                        )}
                       </div>
                     )}
 
                     {/* Material specs */}
                     {activePreviewTab === 'material' && (
                       <div className="flex-1 overflow-auto space-y-2">
-                        {(decomposition?.materials || MOCK_MATERIALS).map(m => (
+                        {(decomposition?.materials ?? []).map(m => (
                           <div key={m.id} className="flex gap-2 rounded-lg p-2" style={{ background: bgCard }}>
                             <div className="h-10 w-10 rounded-lg shrink-0" style={{ background: isMonochrome ? '#dbeafe' : 'rgba(212,175,55,0.3)' }} />
                             <div>
@@ -2091,24 +2111,33 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                             </div>
                           </div>
                         ))}
+                        {!isDecomposing && (decomposition?.materials ?? []).length === 0 && (
+                          <div className="py-8 text-center text-xs" style={{ color: textMuted }}>本次分析未返回材质与工艺信息。</div>
+                        )}
                       </div>
                     )}
 
                     {/* BOM */}
                     {activePreviewTab === 'bom' && (
                       <div className="flex-1 overflow-auto">
-                        <div className="mb-2 text-xs font-semibold" style={{ color: textAccent }}>
-                          预估成本 {decomposition?.bom ? `¥${decomposition.bom.reduce((sum, b) => sum + (parseInt(String(b.estimatedPrice).replace(/[¥,]/g, '')) || 0), 0).toLocaleString('zh-CN')}` : '¥128,560'}
-                        </div>
-                        <div className="space-y-1.5">
-                          {(decomposition?.bom || MOCK_BOM).map(item => (
-                            <div key={item.id} className="flex justify-between items-center rounded-lg px-2.5 py-2 text-xs" style={{ background: bgCard }}>
-                              <span style={{ color: textPrimary }}>{item.name}</span>
-                              <span style={{ color: textMuted }}>x{item.count}</span>
-                              <span style={{ color: textAccent }}>{item.estimatedPrice}</span>
+                        {(decomposition?.bom ?? []).length > 0 ? (
+                          <>
+                            <div className="mb-2 text-xs font-semibold" style={{ color: textAccent }}>
+                              预估成本 ¥{(decomposition?.bom ?? []).reduce((sum, b) => sum + (parseInt(String(b.estimatedPrice).replace(/[¥,]/g, '')) || 0), 0).toLocaleString('zh-CN')}
                             </div>
-                          ))}
-                        </div>
+                            <div className="space-y-1.5">
+                              {(decomposition?.bom ?? []).map(item => (
+                                <div key={item.id} className="flex justify-between items-center rounded-lg px-2.5 py-2 text-xs" style={{ background: bgCard }}>
+                                  <span style={{ color: textPrimary }}>{item.name}</span>
+                                  <span style={{ color: textMuted }}>x{item.count}</span>
+                                  <span style={{ color: textAccent }}>{item.estimatedPrice}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </>
+                        ) : (
+                          <div className="py-8 text-center text-xs" style={{ color: textMuted }}>本次分析未返回 BOM，暂不可导出清单。</div>
+                        )}
                       </div>
                     )}
 
@@ -2129,7 +2158,7 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                               </svg>
                             </div>
                             <div className="space-y-1">
-                              {(decomposition?.components || MOCK_COMPONENTS).map(comp => (
+                              {(decomposition?.components ?? []).map(comp => (
                                 <div key={comp.id} className="flex items-center justify-between text-[12px] px-2 py-1.5 rounded-lg" style={{ background: bgCard }}>
                                   <span className="flex items-center gap-1.5">
                                     <span className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold" style={{ background: accent, color: isMonochrome ? '#fff' : '#000' }}>{comp.index}</span>
@@ -2138,6 +2167,9 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                                   <span style={{ color: textMuted }}>{comp.sizeSuggestion}</span>
                                 </div>
                               ))}
+                              {(decomposition?.components ?? []).length === 0 && (
+                                <div className="py-4 text-center text-xs" style={{ color: textMuted }}>暂无部件尺寸建议。</div>
+                              )}
                             </div>
                           </div>
                         ) : (
@@ -2198,30 +2230,29 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                     <section className={`${panelCls} overflow-auto`}>
                       <h3 className="text-[12px] font-semibold mb-2" style={{ color: textPrimary }}>方案拆解 · 构成部件</h3>
                       <div className="space-y-1">
-                        {MOCK_COMPONENTS.slice(0, 5).map(c => (
+                        {(decomposition?.components ?? []).slice(0, 5).map(c => (
                           <div key={c.id} className="flex items-center justify-between text-[9px] py-0.5" style={{ color: textMuted }}>
                             <span style={{ color: textAccent }}>{c.index}.</span>
                             <span className="flex-1 ml-1" style={{ color: textPrimary }}>{c.name}</span>
                             <span>{c.sizeSuggestion}</span>
                           </div>
                         ))}
+                        {(decomposition?.components ?? []).length === 0 && <div className="py-6 text-center text-[10px]" style={{ color: textMuted }}>暂无真实拆解数据</div>}
                       </div>
                     </section>
 
                     {/* Floor plan mini */}
-                    <section className={`${panelCls} overflow-hidden`}>
-                      <h3 className="text-[12px] font-semibold mb-2" style={{ color: textPrimary }}>AI 平面拆解参考图</h3>
-                      <div className="h-[140px]">
-                        <svg viewBox="0 0 200 140" className="w-full h-full">
-                          <rect x="25" y="15" width="150" height="100" rx="10" fill={isMonochrome ? 'rgba(59,130,246,0.06)' : 'rgba(255,255,255,0.05)'} stroke={accent} strokeWidth="1" />
-                          {[[1,150,28],[2,100,28],[3,50,50],[4,100,70],[5,40,95]].map(([id,x,y]) => (
-                            <g key={id}>
-                              <circle cx={x} cy={y} r="8" fill={accent} />
-                              <text x={x} y={y+3} textAnchor="middle" fill={isMonochrome ? '#fff' : '#000'} fontSize="8" fontWeight="bold">{id}</text>
-                            </g>
-                          ))}
-                          <text x="100" y="130" textAnchor="middle" fill={textMuted} fontSize="8">入口</text>
-                        </svg>
+                    <section className={`${panelCls} overflow-auto`}>
+                      <h3 className="text-[12px] font-semibold mb-2" style={{ color: textPrimary }}>AI 平面分区建议</h3>
+                      <div className="space-y-1">
+                        {(decomposition?.floorPlanZones ?? []).slice(0, 4).map((zone, index) => (
+                          <div key={`${zone.name}-${index}`} className="text-[9px]" style={{ color: textMuted }}>
+                            <span style={{ color: textAccent }}>{index + 1}.</span>{' '}
+                            <span style={{ color: textPrimary }}>{zone.name}</span>
+                            {zone.description && <div className="pl-3 mt-0.5">{zone.description}</div>}
+                          </div>
+                        ))}
+                        {(decomposition?.floorPlanZones ?? []).length === 0 && <div className="py-6 text-center text-[10px]" style={{ color: textMuted }}>暂无平面分区数据</div>}
                       </div>
                     </section>
 
@@ -2229,25 +2260,26 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                     <section className={`${panelCls} overflow-auto`}>
                       <h3 className="text-[12px] font-semibold mb-2" style={{ color: textPrimary }}>材质工艺</h3>
                       <div className="space-y-1">
-                        {MOCK_MATERIALS.slice(0, 4).map(m => (
+                        {(decomposition?.materials ?? []).slice(0, 4).map(m => (
                           <div key={m.id} className="text-[9px]" style={{ color: textMuted }}>
                             <div style={{ color: textPrimary }}>{m.name}</div>
                           </div>
                         ))}
+                        {(decomposition?.materials ?? []).length === 0 && <div className="py-6 text-center text-[10px]" style={{ color: textMuted }}>暂无材质数据</div>}
                       </div>
                     </section>
 
                     {/* BOM mini */}
                     <section className={`${panelCls} overflow-auto`}>
                       <h3 className="text-[12px] font-semibold mb-1" style={{ color: textPrimary }}>物料清单 BOM</h3>
-                      <div className="text-[9px] mb-1" style={{ color: textAccent }}>¥128,560</div>
                       <div className="space-y-0.5">
-                        {MOCK_BOM.slice(0, 5).map(item => (
+                        {(decomposition?.bom ?? []).slice(0, 5).map(item => (
                           <div key={item.id} className="flex justify-between text-[9px]" style={{ color: textMuted }}>
                             <span>{item.name}</span>
                             <span style={{ color: textAccent }}>{item.estimatedPrice}</span>
                           </div>
                         ))}
+                        {(decomposition?.bom ?? []).length === 0 && <div className="py-6 text-center text-[10px]" style={{ color: textMuted }}>暂无 BOM 数据</div>}
                       </div>
                     </section>
                   </div>
@@ -2271,7 +2303,7 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                     <button
                       className={`rounded-lg border px-3 py-1.5 text-[12px] cursor-pointer disabled:opacity-50 ${isMonochrome ? 'border-blue-300 text-blue-600 hover:bg-blue-50' : 'border-amber-500/40 text-amber-200 hover:bg-amber-500/10'}`}
                       onClick={handleExportBom}
-                      disabled={results.length === 0}
+                      disabled={(decomposition?.bom.length ?? 0) === 0}
                     >
                       导出BOM
                     </button>

@@ -1,5 +1,12 @@
 # 无界AI — AI 图像生成与协作平台
 
+## 美陈拆解
+
+- **前端面板**: `src/components/display3d-panel.tsx` 以当前无限画布选中图片作为拆解来源；提交后冻结 `providerId + model`，轮询期间不得因用户切换模型而改变分析上下文。
+- **拆解 API**: `POST /api/display-3d/decompose` 只接受已启用且精确授权的 `providerId + model` 组合。服务端通过 `findProviderById` 定位提供商，并验证模型在该提供商的 `selectedModels` 内；禁止按模型名模糊匹配、选择首个模型或静默降级。
+- **结果契约**: 模型必须返回 JSON，且完整包含数组字段 `components`、`materials`、`bom`、`floorPlanZones`、`notes`。无法提取、解析或归一化为该契约时，任务必须失败，不得用原始文本或固定演示数据伪装成功。
+- **展示规则**: 构件、材质、BOM、平面分区、复核提示与 BOM 导出均只消费当前任务的真实 `decomposition` 数据；没有数据时显示空态。平面分区仅作沟通建议，必须提示由设计师、制作方和结构工程师复核。
+
 ## 品牌 IP 设计工场
 
 - **前端**: `src/components/brand-ip-panel.tsx`，负责品牌项目、角色方向、策略流、资产预览与高级设置。

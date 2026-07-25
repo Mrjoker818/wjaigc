@@ -46,7 +46,6 @@ import {
   type UpscaleTargetPreset,
 } from '@/lib/upscale-target';
 import type { UpscaleProductMode } from '@/lib/upscale-orchestrator';
-import { DISPLAY_DECOMPOSE_SUPPORTED_RATIOS, type DisplayDecomposeRatio } from '@/lib/display-decompose';
 import { getCenteredFloatingPanelPosition } from '@/lib/floating-panel-position';
 import { DEFAULT_IMAGE_TOOLBAR_ITEM_ORDER, normalizeImageToolbarPreferences } from '@/lib/image-toolbar-preferences';
 import OhMyPrompt from '@/components/oh-my-prompt';
@@ -464,6 +463,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [pendingSceneStudioModel, setPendingSceneStudioModel] = useState<{url: string; name: string} | null>(null);
   const [showBrandPackaging, setShowBrandPackaging] = useState(false);
   const [showDisplay3D, setShowDisplay3D] = useState(false);
+  const [display3DSource, setDisplay3DSource] = useState<{ id: string; url: string; prompt?: string } | null>(null);
 
   // Image compare state
   const [showCompareDialog, setShowCompareDialog] = useState(false);
@@ -1241,9 +1241,6 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [svgTraceBwThreshold, setSvgTraceBwThreshold] = useState(50);
   const [svgTraceBwTurdSize, ] = useState(2);
   const [svgTraceBwInvert, ] = useState(false);
-  const [showDisplayDecomposePanel, setShowDisplayDecomposePanel] = useState(false);
-  const [displayDecomposeRatio, setDisplayDecomposeRatio] = useState<DisplayDecomposeRatio>('16:9');
-  const [displayDecomposeProcessing, setDisplayDecomposeProcessing] = useState(false);
 
   // Check ONNX upscale availability on mount
   useEffect(() => {
@@ -1340,7 +1337,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   }, [videoDubTarget, dubText, dubVoice, dubSpeed, onAddImages]);
 
   // Whether any floating panel is open (used to auto-hide connections & image toolbar)
-  const localMediaToolWindowOpen = showRemoveBgPicker || showDisplayDecomposePanel || show3DModal || showVideoExtractPanel || showPsdEditor;
+  const localMediaToolWindowOpen = showRemoveBgPicker || show3DModal || showVideoExtractPanel || showPsdEditor;
   const anyPanelOpen = showSvgTracePanel || showAgentEditor || showBrandEcommerce || showFontDesign || showBrandFactory || showBrandIp || showSceneStudio || showBrandPackaging || showDisplay3D || showVideoEditPanel || showCanvasGenerator || showRefineEngine || showHumanRepair || showLogoSkill || showAiPsd || showStickerAssistant || showVideoDubPanel || localMediaToolWindowOpen;
 
   // Video tools handler
@@ -1556,7 +1553,6 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     setShowVideoExtractPanel(false);
     setShowPsdEditor(false);
     setShowRemoveBgPicker(false);
-    setShowDisplayDecomposePanel(false);
     setShow3DModal(false);
     setShow3DViewer(false);
     setShowVideoEditPanel(false);
@@ -6680,85 +6676,14 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     const image = getActiveImageData();
     if (!image) return;
     setEditImageId(image.id);
-    setShowDisplayDecomposePanel(true);
+    setDisplay3DSource({
+      id: image.id,
+      url: image.url,
+      prompt: image.prompt || image.modifyPrompt || undefined,
+    });
+    setShowDisplay3D(true);
     setShowToolbarCustomize(false);
   }, [getActiveImageData]);
-
-  const handleDisplayDecomposeConfirm = useCallback(async () => {
-    const image = getActiveImageData();
-    if (!image || displayDecomposeProcessing) return;
-
-    const [ratioWidth, ratioHeight] = displayDecomposeRatio.split(':').map(Number);
-    const maxSide = Math.max(image.width, image.height);
-    const frameWidth = Math.max(120, ratioWidth >= ratioHeight ? maxSide : Math.round(maxSide * ratioWidth / ratioHeight));
-    const frameHeight = Math.max(120, ratioWidth >= ratioHeight ? Math.round(maxSide * ratioHeight / ratioWidth) : maxSide);
-    const placeholderId = createProcessingFrameRightOf(
-      image,
-      '美陈拆解',
-      frameWidth,
-      frameHeight,
-      '正在识别美陈元素...'
-    );
-
-    setShowDisplayDecomposePanel(false);
-    setDisplayDecomposeProcessing(true);
-    setIsEditProcessing(true);
-    try {
-      const modelInfo = getCurrentModel();
-      updateProcessingFrame(placeholderId, { progress: 12, status: '正在提交美陈拆解任务...' });
-      const response = await fetch('/api/image-edit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'display_decompose',
-          imageUrl: image.url,
-          aspectRatio: displayDecomposeRatio,
-          model: modelInfo.model,
-          providerId: modelInfo.providerId || getCurrentProviderId(),
-          prompt: image.prompt || image.modifyPrompt || '',
-        }),
-      });
-      const data = await response.json().catch(() => ({})) as {
-        success?: boolean;
-        error?: string;
-        imageUrl?: string;
-        taskId?: string;
-        usedModel?: string;
-      };
-      if (!response.ok || data.success === false) {
-        throw new Error(translateErrorFrontend(data.error || `美陈拆解失败 (${response.status})`));
-      }
-
-      updateProcessingFrame(placeholderId, { progress: 24, status: 'AI 正在拆解物料与设计元素...' });
-      const resultUrl = data.imageUrl || (data.taskId
-        ? await pollForResult(data.taskId, data.usedModel || modelInfo.model, (progress, status) => {
-          updateProcessingFrame(placeholderId, { progress, status });
-        })
-        : null);
-      if (!resultUrl) throw new Error(lastPollErrorRef.current || '美陈拆解超时，请重试');
-
-      updateProcessingFrame(placeholderId, { progress: 96, status: '正在载入美陈拆解板...' });
-      const stableUrl = await awaitStableImageUrl(resultUrl);
-      completeProcessingFrame(placeholderId, stableUrl, frameWidth, frameHeight, {
-        originalWidth: Math.round(frameWidth),
-        originalHeight: Math.round(frameHeight),
-        prompt: '美陈拆解',
-        modifyPrompt: `美陈拆解 / 元素物料板 / ${displayDecomposeRatio}`,
-        modelName: data.usedModel || modelInfo.apiDisplayName || modelInfo.model,
-        apiProvider: modelInfo.providerName || '',
-      }, 'edit');
-      toast.success('美陈拆解完成');
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '美陈拆解失败';
-      updateProcessingFrame(placeholderId, { progress: -1, status: `美陈拆解失败：${message}`, error: message });
-      setTimeout(() => removeProcessingFrame(placeholderId), 5000);
-      toast.error(message);
-    } finally {
-      setDisplayDecomposeProcessing(false);
-      setIsEditProcessing(false);
-      setActiveTool('none');
-    }
-  }, [getActiveImageData, displayDecomposeProcessing, displayDecomposeRatio, createProcessingFrameRightOf, getCurrentModel, getCurrentProviderId, updateProcessingFrame, pollForResult, completeProcessingFrame, removeProcessingFrame]);
 
   // 3. SVG智能描摹 - Sharp + VTracer (彩色) / ImageMagick + Potrace (黑白) / Sharp (压缩/缩略图)
   const handleOpenSvgTrace = useCallback(() => {
@@ -10943,61 +10868,6 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           );
         })()}
 
-        {showDisplayDecomposePanel && (
-          <div
-            className={`fixed left-1/2 top-1/2 z-[190] w-72 max-w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 rounded-lg border shadow-2xl ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#17171b] border-white/[0.12]'}`}
-            data-popup="display-decompose"
-            onMouseDown={event => event.stopPropagation()}
-            onWheel={event => event.stopPropagation()}
-          >
-            <div className={`flex items-center justify-between px-3 py-2.5 border-b ${isMonochrome ? 'border-gray-100' : 'border-white/[0.1]'}`}>
-              <div className={`flex items-center gap-2 text-sm font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>
-                <LayoutGrid size={15} className={isMonochrome ? 'text-emerald-600' : 'text-gold'} />
-                美陈拆解
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowDisplayDecomposePanel(false)}
-                className={`p-1 rounded ${isMonochrome ? 'text-gray-400 hover:bg-gray-100 hover:text-gray-700' : 'text-gold-muted hover:bg-white/10 hover:text-white'}`}
-                title="关闭"
-              >
-                <X size={15} />
-              </button>
-            </div>
-            <div className="p-3">
-              <div className="grid grid-cols-3 gap-1.5">
-                {DISPLAY_DECOMPOSE_SUPPORTED_RATIOS.map(ratio => (
-                  <button
-                    key={ratio}
-                    type="button"
-                    onClick={() => setDisplayDecomposeRatio(ratio)}
-                    className={`h-8 rounded border text-xs font-medium transition-colors ${
-                      displayDecomposeRatio === ratio
-                        ? isMonochrome ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-gold/70 bg-gold/20 text-gold'
-                        : isMonochrome ? 'border-gray-200 bg-gray-50 text-gray-600 hover:bg-gray-100' : 'border-white/[0.1] bg-white/5 text-gold-muted hover:bg-white/10'
-                    }`}
-                  >
-                    {ratio}
-                  </button>
-                ))}
-              </div>
-              <button
-                type="button"
-                onClick={handleDisplayDecomposeConfirm}
-                disabled={displayDecomposeProcessing}
-                className={`mt-3 flex h-9 w-full items-center justify-center gap-2 rounded text-xs font-semibold transition-colors ${
-                  displayDecomposeProcessing
-                    ? isMonochrome ? 'bg-gray-100 text-gray-400' : 'bg-white/5 text-gold-muted/50'
-                    : isMonochrome ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-gold text-black hover:bg-gold/90'
-                }`}
-              >
-                <Sparkles size={14} />
-                {displayDecomposeProcessing ? '拆解中...' : '生成拆解板'}
-              </button>
-            </div>
-          </div>
-        )}
-
         {/* ====== SVG智能描摹 FLOATING PANEL ====== */}
         {showSvgTracePanel && (() => {
           const editImg = images.find(i => i.id === editImageId);
@@ -14442,7 +14312,11 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         {showDisplay3D && (
           <Suspense fallback={null}>
             <Display3DPanel
-              onClose={() => setShowDisplay3D(false)}
+              sourceImage={display3DSource}
+              onClose={() => {
+                setShowDisplay3D(false);
+                setDisplay3DSource(null);
+              }}
               onAddImages={(urls: string[], meta?: { modelName?: string; apiProvider?: string }) => {
                 onAddImages?.(urls, undefined, meta);
               }}

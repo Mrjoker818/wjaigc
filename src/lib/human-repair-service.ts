@@ -5,7 +5,7 @@ import sharp from 'sharp';
 import { fetchImageBuffer } from '@/lib/fetch-image-buffer';
 import { saveImageFile } from '@/lib/server-data-root';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
-import { findProviderForFeature } from '@/lib/server-api-config';
+import { findProviderById, findProviderForFeature } from '@/lib/server-api-config';
 import {
   analyzeHumanImage,
   buildHumanMaskSpec,
@@ -42,7 +42,7 @@ export interface StartHumanRepairInput {
   options?: HumanRepairOptions;
   model?: string;
   providerId?: string;
-  mode?: 'mock' | 'auto' | 'gpt-image-edit' | 'flux-edit';
+  mode?: 'auto' | 'gpt-image-edit' | 'flux-edit';
   manualMaskImage?: string;
   requestCookie?: string;
 }
@@ -287,19 +287,12 @@ export async function buildHumanMaskDataUrl(
   return toDataUrl(mask);
 }
 
-function chooseProvider(input: StartHumanRepairInput, target: HumanTarget): 'mock-image-edit' | 'gpt-image-edit' | 'flux-edit' {
-  if (input.mode === 'mock' || process.env.HUMAN_AI_ENGINE_MODE === 'mock') return 'mock-image-edit';
+function chooseProvider(input: StartHumanRepairInput, target: HumanTarget): 'gpt-image-edit' | 'flux-edit' {
   if (input.mode === 'flux-edit') return 'flux-edit';
   if (target.type === 'body' || target.type === 'feet') {
     return input.mode === 'auto' && process.env.HUMAN_AI_ALLOW_FLUX_BODY === 'true' ? 'flux-edit' : 'gpt-image-edit';
   }
   return 'gpt-image-edit';
-}
-
-async function mockCandidate(sourceImageUrl: string, taskId: string, target: HumanTarget, index: number): Promise<string> {
-  const source = await fetchImageBuffer(sourceImageUrl);
-  const output = await sharp(source).png().toBuffer();
-  return saveImageFile(output, `${taskId}-${target.id}-candidate-${index + 1}.png`, 'human-repair');
 }
 
 async function realCandidate(
@@ -350,24 +343,14 @@ async function runRepair(taskId: string, input: StartHumanRepairInput): Promise<
       const maskSpec = buildHumanMaskSpec(target, task.analysis.image, repairMode);
 
       for (let index = 0; index < count; index++) {
-        let imageUrl: string;
-        let outsideChangeRate = 0;
-
-        if (provider === 'mock-image-edit') {
-          imageUrl = await mockCandidate(input.sourceImageUrl, taskId, target, index);
-          // Mock 模式不改变原图，outsideChangeRate 精确为 0
-          outsideChangeRate = 0;
-        } else {
-          imageUrl = await realCandidate(input, target, maskImage);
-          // 计算蒙版外像素变化率，确保原图保护
-          outsideChangeRate = await computeOutsideChangeRate(
-            input.sourceImageUrl,
-            imageUrl,
-            maskSpec,
-            task.analysis.image.width,
-            task.analysis.image.height,
-          );
-        }
+        const imageUrl = await realCandidate(input, target, maskImage);
+        const outsideChangeRate = await computeOutsideChangeRate(
+          input.sourceImageUrl,
+          imageUrl,
+          maskSpec,
+          task.analysis.image.width,
+          task.analysis.image.height,
+        );
 
         candidates.push({
           id: `${taskId}-${target.id}-${index + 1}`,
@@ -399,7 +382,12 @@ async function runRepair(taskId: string, input: StartHumanRepairInput): Promise<
 }
 
 export async function startHumanRepair(input: StartHumanRepairInput): Promise<HumanRepairTask> {
-  const analysis = await analyzeHumanImageUrl(input.sourceImageId, input.sourceImageUrl);
+  if (!input.providerId || !input.model) throw new Error('请选择已授权的图像编辑模型');
+  const provider = await findProviderById(input.providerId);
+  if (!provider || !(provider.selectedModels || []).includes(input.model)) {
+    throw new Error('所选图像编辑模型未授权或已停用');
+  }
+  const analysis = await analyzeHumanImageUrl(input.sourceImageId, input.sourceImageUrl, input.requestCookie);
   const id = `human-${crypto.randomUUID()}`;
   const task: HumanRepairTask = {
     id,
