@@ -1,6 +1,6 @@
 /**
  * 视频生成 API 通用调用层
- * 支持 6 种协议适配：dashscope / volcengine-ark / minimax / vidu / openai-video / fal-video / rest-generic / custom
+ * 支持 7 种协议适配：dashscope / volcengine-ark / minimax / vidu / openai-video / fal-video / ai-link / rest-generic / custom
  * 所有视频 API 统一采用"异步提交 + 轮询结果"模式
  */
 
@@ -15,6 +15,7 @@ export type VideoCompatProfile =
   | 'fal-video'       // fal.ai托管 (Pika等)
   | 'apimart-video'   // APImart /api-b /v1/videos/generations (VEO3/Sora2等)
   | 'pearapi-video'   // PearAPI /v1/videos/generations (gpt-image-2视频/可灵等通用格式)
+  | 'ai-link'         // AI Link /v1/videos (kling-v3/viduq3/grok-video-3/seedance等)
   | 'rest-generic'    // 通用REST (Runway/Luma/Google等)
   | 'custom';         // 管理员自定义
 
@@ -302,6 +303,31 @@ export const VIDEO_MODEL_REGISTRY: Record<string, VideoModelInfo> = {
     profile: 'apimart-video', name: 'Wan2.5 Video (APImart)', short: 'Wan2.5V', provider: 'Wan/APImart',
     features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 8, durations: [5,8], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'], region: 'global' },
   },
+  // ==== AI Link 视频模型 ====
+  'kling-v3': {
+    profile: 'ai-link', name: 'Kling V3 (AI Link)', short: 'KlingV3', provider: 'Kuaishou/AI-Link',
+    features: { firstLastFrame: true, multiReference: true, videoEdit: false, videoExtend: false, audio: true, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5, 10], ratios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p'], region: 'global' },
+  },
+  'viduq3': {
+    profile: 'ai-link', name: 'Vidu Q3 (AI Link)', short: 'ViduQ3', provider: 'ShengShu/AI-Link',
+    features: { firstLastFrame: true, multiReference: true, videoEdit: false, videoExtend: false, audio: true, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 16, durations: [4, 8, 16], ratios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p','4K'], region: 'global' },
+  },
+  'grok-video-3': {
+    profile: 'ai-link', name: 'Grok Video 3 (AI Link)', short: 'GrokV3', provider: 'xAI/AI-Link',
+    features: { firstLastFrame: false, multiReference: true, videoEdit: false, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 8, durations: [3, 5, 8], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'], region: 'global' },
+  },
+  'doubao-seedance-2-0-260128': {
+    profile: 'ai-link', name: 'Seedance 2.0 (AI Link)', short: 'SD2.0', provider: 'ByteDance/AI-Link',
+    features: { firstLastFrame: true, multiReference: true, videoEdit: false, videoExtend: false, audio: true, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 15, durations: [5,6,7,8,9,10,11,12,13,14,15], ratios: ['1:1','4:3','3:4','16:9','9:16','21:9'], resolutions: ['480p','720p','1080p','4K'], region: 'global' },
+  },
+  'doubao-seedance-2-0-fast-260128': {
+    profile: 'ai-link', name: 'Seedance 2.0 Fast (AI Link)', short: 'SD2.0F', provider: 'ByteDance/AI-Link',
+    features: { firstLastFrame: true, multiReference: true, videoEdit: false, videoExtend: false, audio: true, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 15, durations: [5,6,7,8,9,10,11,12,13,14,15], ratios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['480p','720p'], region: 'global' },
+  },
+  'happyhorse-1.0': {
+    profile: 'ai-link', name: 'HappyHorse 1.0 (AI Link)', short: 'HH1.0', provider: 'HappyHorse/AI-Link',
+    features: { firstLastFrame: false, multiReference: true, videoEdit: true, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5, 10], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'], region: 'global' },
+  },
 };
 
 /**
@@ -441,6 +467,7 @@ export function resolveVideoCompatProfile(
     if (urlLower.includes('openai')) return 'openai-video';
     if (urlLower.includes('apib.ai') || urlLower.includes('apimart')) return 'apimart-video';
     if (urlLower.includes('pearapi') || urlLower.includes('pearapi.ai')) return 'pearapi-video';
+    if (urlLower.includes('ai-link') || urlLower.includes('ai-link.shop') || urlLower.includes('ailink')) return 'ai-link';
     // If baseUrl does NOT match any official API domain, it's a third-party proxy
     // → use rest-generic (OpenAI-compatible format) regardless of model name
     if (!urlLower.includes('volcengine') && !urlLower.includes('ark') &&
@@ -494,6 +521,8 @@ export function buildVideoSubmitRequest(
       return buildApiMartVideoSubmit(baseUrl, apiKey, params);
     case 'pearapi-video':
       return buildPearApiVideoSubmit(baseUrl, apiKey, params);
+    case 'ai-link':
+      return buildAiLinkSubmit(baseUrl, apiKey, params);
     case 'rest-generic':
     default:
       return buildRestGenericSubmit(baseUrl, apiKey, params);
@@ -571,6 +600,14 @@ export function parseVideoSubmitResponse(
         taskId: item?.task_id || item?.id || data?.task_id || '',
         status: 'submitted',
         estimatedTime: 240,
+      };
+    }
+    case 'ai-link': {
+      // AI Link: {id: "xxx", task_id: "xxx", status: "queued", model: "kling-v3"}
+      return {
+        taskId: data?.id || data?.task_id || '',
+        status: 'submitted',
+        estimatedTime: 180,
       };
     }
     case 'rest-generic':
@@ -672,6 +709,12 @@ export function buildVideoPollRequest(
         headers: { 'Authorization': `Bearer ${apiKey}` },
         method: 'GET',
       };
+    case 'ai-link':
+      return {
+        url: `${cleanBaseUrl}/v1/videos/${taskId}`,
+        headers: { 'Authorization': `Bearer ${apiKey}` },
+        method: 'GET',
+      };
     case 'rest-generic':
     default: {
       // 支持自定义轮询端点（通过advancedParams.pollEndpoint指定）
@@ -731,6 +774,8 @@ export function parseVideoPollResponse(
       return parseApiMartVideoPoll(data);
     case 'pearapi-video':
       return parsePearApiVideoPoll(data);
+    case 'ai-link':
+      return parseAiLinkPoll(data);
     case 'rest-generic':
     default:
       return parseRestGenericPoll(data);
@@ -1498,6 +1543,7 @@ export function buildVideoExtendRequest(
     case 'minimax':
     case 'apimart-video':
     case 'pearapi-video':
+    case 'ai-link':
     case 'rest-generic':
     default:
       return buildRestGenericExtend(baseUrl, apiKey, params);
@@ -1639,6 +1685,182 @@ function buildRestGenericExtend(baseUrl: string, apiKey: string, params: VideoGe
   };
 }
 
+// ==================== AI Link Protocol Adapter ====================
+
+/**
+ * Construct the content download URL for an AI Link video task.
+ * When the task status is "completed", the video binary is available at this endpoint.
+ * Requires Authorization header when fetching.
+ */
+export function getAiLinkContentUrl(baseUrl: string, taskId: string): string {
+  const clean = ensureBaseUrl(baseUrl);
+  return `${clean}/v1/videos/${taskId}/content`;
+}
+
+/**
+ * Build the submit request for AI Link video API (POST /v1/videos).
+ * Supports 6 models with different request body formats:
+ * - kling-v3: reference_images[], image_with_roles[], mode, duration, aspect_ratio, audio
+ * - viduq3: image_urls[], duration, resolution, aspect_ratio, audio, seed
+ * - grok-video-3: images[], seconds, resolution, aspect_ratio
+ * - doubao-seedance-2-0-260128 / doubao-seedance-2-0-fast-260128: image_url, reference_images[], end_image_url, mode, duration/seconds, aspect_ratio, resolution, generate_audio
+ * - happyhorse-1.0: mode, content[], resolution, ratio, duration
+ */
+function buildAiLinkSubmit(baseUrl: string, apiKey: string, params: VideoGenerateParams) {
+  const model = params.model || '';
+  const modelLower = model.toLowerCase();
+  const body: Record<string, unknown> = { model };
+
+  // Common: prompt
+  if (params.prompt) {
+    body.prompt = params.prompt;
+  }
+
+  // Resolve reference images
+  const firstFrameUrl = params.imageUrl;
+  const lastFrameUrl = params.lastFrameImageUrl;
+  const refImages = params.referenceImages || [];
+
+  if (modelLower === 'kling-v3') {
+    // Kling V3 on AI Link
+    body.mode = firstFrameUrl ? 'i2v' : 't2v';
+    if (params.duration) body.duration = params.duration;
+    if (params.aspectRatio) body.aspect_ratio = params.aspectRatio;
+
+    // image_with_roles: [{url, role}] for first/last frame
+    const imageWithRoles: Array<{ url: string; role: string }> = [];
+    if (firstFrameUrl) imageWithRoles.push({ url: firstFrameUrl, role: 'first_frame' });
+    if (lastFrameUrl) imageWithRoles.push({ url: lastFrameUrl, role: 'last_frame' });
+    if (imageWithRoles.length > 0) body.image_with_roles = imageWithRoles;
+
+    // reference_images: plain URL array for additional references
+    if (refImages.length > 0) {
+      body.reference_images = refImages;
+    }
+
+    if (params.generateAudio !== undefined) body.audio = params.generateAudio;
+  } else if (modelLower === 'viduq3') {
+    // Vidu Q3 on AI Link — requires at least 1 image for i2v
+    if (params.duration) body.duration = params.duration;
+    if (params.aspectRatio) body.aspect_ratio = params.aspectRatio;
+
+    // image_urls: all image URLs combined
+    const imageUrls: string[] = [];
+    if (firstFrameUrl) imageUrls.push(firstFrameUrl);
+    if (lastFrameUrl) imageUrls.push(lastFrameUrl);
+    imageUrls.push(...refImages);
+    if (imageUrls.length > 0) body.image_urls = imageUrls;
+
+    if (params.generateAudio !== undefined) body.audio = params.generateAudio;
+    if (params.seed !== undefined) body.seed = params.seed;
+  } else if (modelLower === 'grok-video-3') {
+    // Grok Video 3 — images[] for references, seconds as string
+    if (params.duration) body.seconds = String(params.duration);
+    if (params.aspectRatio) body.aspect_ratio = params.aspectRatio;
+
+    // images: all image URLs
+    const images: string[] = [];
+    if (firstFrameUrl) images.push(firstFrameUrl);
+    if (lastFrameUrl) images.push(lastFrameUrl);
+    images.push(...refImages);
+    if (images.length > 0) body.images = images;
+  } else if (modelLower.includes('doubao-seedance')) {
+    // Doubao Seedance 2.0 on AI Link
+    body.mode = firstFrameUrl ? 'i2v' : 't2v';
+    if (params.duration) body.duration = params.duration;
+    if (params.aspectRatio) body.aspect_ratio = params.aspectRatio;
+
+    // image_url: single first frame image
+    if (firstFrameUrl) body.image_url = firstFrameUrl;
+    // end_image_url: last frame
+    if (lastFrameUrl) body.end_image_url = lastFrameUrl;
+    // reference_images: additional references
+    if (refImages.length > 0) body.reference_images = refImages;
+
+    if (params.generateAudio !== undefined) body.generate_audio = params.generateAudio;
+  } else if (modelLower.includes('happyhorse')) {
+    // HappyHorse 1.0 — mode + content[]
+    let mode = 't2v';
+    if (firstFrameUrl || refImages.length > 0) mode = 'i2v';
+    if (params.videoUrl) mode = 'video_edit';
+    body.mode = mode;
+
+    if (params.duration) body.duration = params.duration;
+    if (params.aspectRatio) body.ratio = params.aspectRatio;
+
+    // content: array of {type, url} for images/video
+    const content: Array<Record<string, unknown>> = [];
+    if (firstFrameUrl) content.push({ type: 'image', url: firstFrameUrl });
+    if (lastFrameUrl) content.push({ type: 'image', url: lastFrameUrl });
+    for (const ref of refImages) {
+      content.push({ type: 'image', url: ref });
+    }
+    if (params.videoUrl) content.push({ type: 'video', url: params.videoUrl });
+    if (content.length > 0) body.content = content;
+
+    if (params.seed !== undefined) body.seed = params.seed;
+  } else {
+    // Generic fallback for unknown AI Link models
+    if (params.duration) body.duration = params.duration;
+    if (params.aspectRatio) body.aspect_ratio = params.aspectRatio;
+    if (firstFrameUrl) body.image_url = firstFrameUrl;
+    if (lastFrameUrl) body.end_image_url = lastFrameUrl;
+    if (refImages.length > 0) body.reference_images = refImages;
+    if (params.generateAudio !== undefined) body.audio = params.generateAudio;
+  }
+
+  return {
+    url: `${baseUrl}/v1/videos`,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
+    method: 'POST',
+  };
+}
+
+/**
+ * Parse AI Link poll response (GET /v1/videos/{task_id}).
+ *
+ * Response schema (VideoTaskStatusResponse):
+ * - id: string
+ * - model: string
+ * - object: "video.task"
+ * - status: "queued" | "in_progress" | "completed" | "failed"
+ * - progress: number (0-100)
+ * - created_at, completed_at, expires_at: timestamps
+ * - error: { code, message } (when failed)
+ *
+ * Note: The actual video content is NOT in the poll response.
+ * When status is "completed", the caller must fetch GET /v1/videos/{task_id}/content
+ * to download the video binary. Use getAiLinkContentUrl() to construct the URL.
+ */
+function parseAiLinkPoll(data: unknown): VideoTaskPollResult {
+  const obj = asApiRecord(data);
+  const status = getApiString(obj, 'status') || '';
+  const progress = getApiNumber(obj, 'progress');
+  const errorObj = asApiRecord(getApiValue(obj, 'error'));
+  const errorMsg = getApiString(errorObj, 'message') || getApiString(errorObj, 'code');
+
+  switch (status) {
+    case 'queued':
+      return { status: 'pending', progress: progress ?? 0 };
+    case 'in_progress':
+      return { status: 'running', progress: progress ?? 50 };
+    case 'completed':
+      // Video content is NOT in the poll response for AI Link.
+      // The caller (poll-task route) must construct the content URL and download it.
+      // We return status 'succeeded' with empty videoUrl; the poll-task route
+      // has special handling for ai-link to construct getAiLinkContentUrl().
+      return { status: 'succeeded', progress: 100 };
+    case 'failed':
+      return { status: 'failed', error: errorMsg || '视频生成失败' };
+    default:
+      return { status: 'pending', progress: progress ?? 0 };
+  }
+}
+
 // ==================== Utility Functions ====================
 
 /**
@@ -1658,7 +1880,11 @@ export function isVideoModel(modelId: string): boolean {
     lower.includes('ray2') ||
     lower.includes('ray3') ||
     lower.includes('gen-3') ||
-    lower.includes('gen-4');
+    lower.includes('gen-4') ||
+    lower.includes('viduq3') ||
+    lower.includes('grok-video') ||
+    lower.includes('happyhorse') ||
+    lower.includes('wan2.5');
 }
 
 /**

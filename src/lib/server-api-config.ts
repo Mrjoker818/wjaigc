@@ -116,6 +116,22 @@ function normalizeBaseUrl(baseUrl: string): string {
   return trimmed;
 }
 
+/** AI Link video API preset models (no /v1/models endpoint available) */
+const AI_LINK_VIDEO_MODELS = [
+  'kling-v3',
+  'viduq3',
+  'grok-video-3',
+  'doubao-seedance-2-0-260128',
+  'doubao-seedance-2-0-fast-260128',
+  'happyhorse-1.0',
+];
+
+/** Check if a base URL belongs to AI Link video API */
+function isAiLinkBaseUrl(baseUrl: string): boolean {
+  const lower = (baseUrl || '').toLowerCase();
+  return lower.includes('ai-link.shop') || lower.includes('ailink.shop');
+}
+
 function modelTypeForProvider(provider: ApiProvider): 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler' | 'removebg' | 'audio' {
   if (provider.modelType === 'chat') return 'chat';
   if (provider.modelType === '3d') return '3d';
@@ -501,6 +517,22 @@ export async function discoverModelsForCredentials(
       success: true,
       models: known302UpscaleModels,
       message: '302.AI 放大模型已加载：Super-Upscale V2、Upscale V6',
+      latencyMs: Date.now() - startedAt,
+    };
+  }
+
+  // AI Link video API has no /v1/models endpoint — return preset model list
+  if (modelType === 'video' && isAiLinkBaseUrl(baseUrl)) {
+    const aiLinkModels: ModelInfo[] = AI_LINK_VIDEO_MODELS.map(id => ({
+      id,
+      name: id,
+      providerId: 'ai-link',
+      type: 'video' as const,
+    }));
+    return {
+      success: true,
+      models: aiLinkModels,
+      message: `AI Link 视频模型已加载：${aiLinkModels.length} 个模型`,
       latencyMs: Date.now() - startedAt,
     };
   }

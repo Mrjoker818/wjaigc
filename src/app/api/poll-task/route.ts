@@ -995,6 +995,19 @@ export async function POST(request: NextRequest) {
                 console.log(`[poll-task/video] Extracted videoUrl from raw data: ${videoResult.videoUrl.slice(0, 100)}`);
               }
             }
+
+            // AI Link: video content is NOT in the poll response.
+            // When status is "completed", fetch GET /v1/videos/{task_id}/content with auth header.
+            if (!videoResult.videoUrl && videoProfile === 'ai-link') {
+              try {
+                const { getAiLinkContentUrl } = await import('@/lib/video-api');
+                const contentUrl = getAiLinkContentUrl(vBaseUrl, thirdPartyTaskId);
+                console.log(`[poll-task/video] AI Link: fetching content from ${contentUrl}`);
+                videoResult.videoUrl = contentUrl;
+              } catch (aiLinkErr) {
+                console.warn(`[poll-task/video] AI Link content URL construction failed:`, aiLinkErr);
+              }
+            }
             
             if (videoResult.videoUrl) {
               // 持久化视频文件（直接下载保存，不经过sharp压缩）
@@ -1005,7 +1018,16 @@ export async function POST(request: NextRequest) {
                 const { getServerDataRoot } = await import('@/lib/server-data-root');
                 const dataRoot = getServerDataRoot();
                 
-                const videoResp = await fetch(videoResult.videoUrl, { signal: AbortSignal.timeout(120000) });
+                // AI Link content endpoint requires Authorization header
+                const videoFetchHeaders: Record<string, string> = {};
+                if (videoProfile === 'ai-link') {
+                  videoFetchHeaders['Authorization'] = `Bearer ${vApiKey}`;
+                }
+
+                const videoResp = await fetch(videoResult.videoUrl, {
+                  headers: videoFetchHeaders,
+                  signal: AbortSignal.timeout(120000),
+                });
                 if (videoResp.ok) {
                   const videoBuffer = Buffer.from(await videoResp.arrayBuffer());
                   // 从原始URL或Content-Type推断视频扩展名
