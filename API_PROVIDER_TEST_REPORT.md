@@ -53,7 +53,7 @@
 - **响应格式**：异步任务（提交→taskId→轮询）
 - **提交响应**：`{code:200, data:[{status:'submitted', task_id:'task_01KYCCMJ34F85ZEJ3AHF0TYMFJ'}]}`
 - **首次轮询**：HTTP 200，`status=pending progress=5`
-- **结论**：视频���成链路正常工作
+- **结论**：视频生成链路正常工作
 
 #### 5. Pear视频 ⭐
 - **修复前状态**：HTTP 400 "不支持的 model"（DB配置 `seedance-2.0` / `wan2.7` 无效）
@@ -144,7 +144,7 @@ const item = (inner && (Array.isArray(inner) ? inner[0] : inner)) || data; // �
 2. ⚠️ **4sapi 图像**：
    - 在4sapi平台确认账户分组权限
    - 或更换为有 `imagen` 模型渠道的分组/账户
-   - 或考虑移除该供应商（因平台无可���图像模型）
+   - 或考虑移除该供应商（因平台无可用图像模型）
 
 ### 需平台操作
 3. ❌ **AI link 图像**：
@@ -161,7 +161,7 @@ const item = (inner && (Array.isArray(inner) ? inner[0] : inner)) || data; // �
 
 ## 六、测试文件清单
 
-- `scripts/test-providers.mjs` — 主测试脚本（覆盖所有启用供���商）
+- `scripts/test-providers.mjs` — 主测试脚本（覆盖所有启用供应商）
 - `/tmp/provider-test.log` — 首次完整测试日志
 - `/tmp/retest.mjs` — 用正确key重测4sapi和PearAPI图像
 - `/tmp/retest.log` — 重测日志
@@ -172,4 +172,4 @@ const item = (inner && (Array.isArray(inner) ? inner[0] : inner)) || data; // �
 
 ---
 
-**报告生成**：基于真实HTTP调用结果，所有图片/视频URL均为实际生成的成品链接，测试覆盖提交���轮询→成品URL完整链路。
+**报告生成**：基于真实HTTP调用结果，所有图片/视频URL均为实际生成的成品链接，测试覆盖提交→轮询→成品URL完整链路。
