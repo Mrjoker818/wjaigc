@@ -15652,7 +15652,16 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         {/* ── Center: Main function buttons (always visible) ── */}
         <button
           aria-label="选择工具"
-          className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 ${isMonochrome ? `${mIcon.mousePointer} hover:text-gray-700 hover:bg-gray-100` : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
+          onClick={() => {
+            // 退出抓手/平移模式，回到默认选择模式
+            setIsSpacePressed(false);
+            setIsPanning(false);
+          }}
+          className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 ${
+            !isPanning && !isSpacePressed
+              ? (isMonochrome ? 'text-blue-600 bg-blue-50 ring-1 ring-blue-500/30' : 'text-text-bright bg-white/15 ring-1 ring-gold/30')
+              : (isMonochrome ? `${mIcon.mousePointer} hover:text-gray-700 hover:bg-gray-100` : 'text-gold-muted hover:text-text-bright hover:bg-white/10')
+          }`}
           title="选择工具"
         >
           <MousePointer2 className="h-4 w-4" />
