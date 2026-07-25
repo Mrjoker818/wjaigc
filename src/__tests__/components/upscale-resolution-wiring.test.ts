@@ -26,6 +26,24 @@ describe('4K and 8K upscale toolbar wiring', () => {
     expect(source).not.toContain("fetch('/api/image/upscale'");
   });
 
+  it('exposes auto, AI-only, and fidelity product modes without legacy aliases', () => {
+    expect(source).toContain("useState<UpscaleProductMode>('auto')");
+    expect(source).toContain("setUpscaleMode('auto')");
+    expect(source).toContain("setUpscaleMode('ai-only')");
+    expect(source).toContain("setUpscaleMode('fidelity')");
+    expect(source).toContain('upscaleMode,');
+    expect(source).not.toContain("useState<'lossless' | 'ai'>");
+    expect(source).not.toContain("upscaleMode: actualEngine === 'ai'");
+  });
+
+  it('surfaces tiled execution and explainable fallback audit details', () => {
+    expect(source).toContain('data.tiled === true');
+    expect(source).toContain('data.tileCount as number');
+    expect(source).toContain('data.fallbackAllowed === true');
+    expect(source).toContain('data.fallbackReason as string');
+    expect(source).toContain('分块');
+  });
+
   it('accepts both synchronous URL response fields and retains task polling', () => {
     expect(source).toContain('(data.url as string) || (data.imageUrl as string)');
     expect(source).toContain('data.taskId');
