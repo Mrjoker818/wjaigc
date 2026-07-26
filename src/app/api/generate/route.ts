@@ -151,9 +151,11 @@ export async function POST(request: NextRequest) {
     if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
       return NextResponse.json({ success: false, error: '请输入创意描述（prompt）' }, { status: 400 });
     }
-    // 尺寸校验
-    if (requestedPixelSize && requestedPixelSize !== 'auto' && !/^\d+x\d+$/.test(requestedPixelSize)) {
-      return NextResponse.json({ success: false, error: '尺寸格式无效，应为 宽x高（如 1024x1024）' }, { status: 400 });
+    // 尺寸校验（允许像素格式 1024x1024 和宽高比格式 1:1 / 16:9）
+    if (requestedPixelSize && requestedPixelSize !== 'auto'
+      && !/^\d+x\d+$/.test(requestedPixelSize)
+      && !/^\d+:\d+$/.test(requestedPixelSize)) {
+      return NextResponse.json({ success: false, error: '尺寸格式无效，应为 宽x高（如 1024x1024）或比例格式（如 1:1）' }, { status: 400 });
     }
     // 参考图URL校验（过滤空字符串元素，避免前端删除后残留空元素）
     if (referenceImages && Array.isArray(referenceImages)) {

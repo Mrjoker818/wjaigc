@@ -1695,6 +1695,28 @@ export function adjustRequestForProfile(
       if (body[field] !== undefined) midjourneyBody[field] = body[field];
     }
 
+    // Midjourney --q accepts a string-encoded numeric value ("0.25" / "0.5" / "1" / "2").
+    // Convert semantic quality tier names to their numeric string equivalents.
+    if (midjourneyBody.quality !== undefined) {
+      const qualityMap: Record<string, string> = {
+        low: '0.5', draft: '0.25', standard: '1', hd: '2', high: '2',
+      };
+      const q = midjourneyBody.quality;
+      if (typeof q === 'string') {
+        const mapped = qualityMap[q.toLowerCase()];
+        if (mapped !== undefined) {
+          midjourneyBody.quality = mapped;
+        } else if (!/^[0-9.]+$/.test(q)) {
+          // Unknown non-numeric string — drop it rather than sending an invalid value
+          delete midjourneyBody.quality;
+        }
+        // If it's already a numeric string like "1", keep as-is
+      } else if (typeof q === 'number') {
+        // Convert number to string to satisfy the Go struct field type
+        midjourneyBody.quality = String(q);
+      }
+    }
+
     const imageUrls: string[] = [];
     const seenUrls = new Set<string>();
     const appendImageUrl = (value: unknown): void => {

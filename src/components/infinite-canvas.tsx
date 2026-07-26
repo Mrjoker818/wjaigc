@@ -1789,12 +1789,13 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     const sourceImage = imagesRef.current.find(
       (image) => image.id === gesture.source.imageId,
     );
-    if (!sourceImage || !projectId) {
+    const effectiveProjectId = projectId || brandProject?.id;
+    if (!sourceImage || !effectiveProjectId) {
       setAnnotationV2State((current) => ({
         ...current,
         gesture: { kind: 'idle' },
       }));
-      toast.error('请先保存项目，并确认来源图片仍在画布中');
+      toast.error(effectiveProjectId ? '请确认来源图片仍在画布中' : '请先保存或选择一个项目');
       return;
     }
 
@@ -1813,7 +1814,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     const toastId = toast.loading('正在识别点击对象');
     try {
       const result = await resolveSemanticAnnotation({
-        projectId,
+        projectId: effectiveProjectId,
         sourceImageId: sourceImage.id,
         sourceVersionId: gesture.source.versionId,
         point,
@@ -1849,6 +1850,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   }, [
     commitResolvedSemantic,
     projectId,
+    brandProject?.id,
     selectAnnotationV2Tool,
     setAnnotationV2State,
   ]);
@@ -1859,8 +1861,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     const sourceImage = imagesRef.current.find(
       (image) => image.id === sourceAnnotation?.sourceImageId,
     );
-    if (!sourceAnnotation || !sourceImage || !projectId) {
-      setAnnotationExecutionError('请先保存项目，并确认来源图片仍在画布中');
+    const effectiveProjectId = projectId || brandProject?.id;
+    if (!sourceAnnotation || !sourceImage || !effectiveProjectId) {
+      setAnnotationExecutionError(effectiveProjectId ? '请确认来源图片仍在画布中' : '请先保存或选择一个项目');
       return;
     }
 
@@ -1976,6 +1979,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
     annotationTaskId,
     annotationV2State.annotations,
     annotationV2State.prompt,
+    brandProject,
     getCurrentModel,
     onImagesChange,
     projectId,
@@ -2373,6 +2377,58 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         if (inputFocused) return;
         selectAnnotationV2Tool(annotationV2State.tool === 'region' ? 'semantic-object' : 'region');
         return;
+      }
+      // Shift+1~0: Collapsible toolbar feature shortcuts
+      if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (inputFocused) return;
+        switch (e.code) {
+          case 'Digit1':
+            e.preventDefault();
+            setShow3DModal(true);
+            return;
+          case 'Digit2':
+            e.preventDefault();
+            onEditImage?.(null);
+            return;
+          case 'Digit3':
+            e.preventDefault();
+            setAgentEditImage(null);
+            setShowAgentEditor(true);
+            return;
+          case 'Digit4':
+            e.preventDefault();
+            onOpenVideoPanel?.();
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new Event('wujie:open-video-panel'));
+            }
+            return;
+          case 'Digit5':
+            e.preventDefault();
+            setShowBrandEcommerce(true);
+            return;
+          case 'Digit6':
+            e.preventDefault();
+            setRefineEngineImageUrl('');
+            setShowRefineEngine(true);
+            return;
+          case 'Digit7':
+            e.preventDefault();
+            setHumanRepairImageUrl(selectedImageData?.url || selectedImage?.url || '');
+            setShowHumanRepair(true);
+            return;
+          case 'Digit8':
+            e.preventDefault();
+            setShowFontDesign(true);
+            return;
+          case 'Digit9':
+            e.preventDefault();
+            setShowBrandFactory(true);
+            return;
+          case 'Digit0':
+            e.preventDefault();
+            setShowBrandIp(true);
+            return;
+        }
       }
       if (e.code === 'Space' && !e.repeat) {
         if (inputFocused) return;
@@ -7178,12 +7234,13 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   }, [getActiveImageData, createProcessingFrameRightOf, getCurrentModel, updateProcessingFrame, getCurrentProviderId, removeBgModelId, removeBgEngine, completeProcessingFrame, onImagesChange]);
 
   const handleOpenDisplayDecompose = useCallback(() => {
-    const img = getActiveImageData();
+    // Use selectedImageData directly to avoid stale editImageId blocking panel open
+    const img = selectedImageData || (selectedIds.size === 1 ? imagesRef.current.find(i => selectedIds.has(i.id)) : null);
     if (!img) return;
     setEditImageId(img.id);
     setShowDisplayDecomposePanel(true);
     setShowToolbarCustomize(false);
-  }, [getActiveImageData]);
+  }, [selectedImageData, selectedIds]);
 
   const handleDisplayDecomposeConfirm = useCallback(async () => {
     const img = getActiveImageData();
@@ -15738,7 +15795,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2">
                       <LayoutGrid size={14} className={isMonochrome ? 'text-emerald-500' : 'text-gold'} />
-                      <span className={`text-xs font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>美陈拆解</span>
+                      <span className={`text-xs font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>元素拆解</span>
                     </div>
                     <button
                       onClick={() => setShowDisplayDecomposePanel(false)}
@@ -15748,7 +15805,7 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                     </button>
                   </div>
                   <div className={`text-[11px] leading-relaxed mb-3 ${isMonochrome ? 'text-gray-500' : 'text-gold-muted/80'}`}>
-                    识别画面中的展陈、广告物料、道具与装饰，生成平面元素拆解板。开启自动去背景后输出透明 PNG。
+                    识别画面中的视觉元素与设计构件，提取关键材质、色彩与样式，生成可复用的元素拆解板。开启自动去背景后输出透明 PNG。
                   </div>
                   {/* 自动去背景开关 */}
                   <button
@@ -16491,17 +16548,6 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
           <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">图像生成器</span>
         </button>
 
-        {/* ChatCanvas 批注始终位于折叠区，避免展开工具被右侧面板遮挡 */}
-        <button
-          data-toolbar="bottom-annotation-entry"
-          onClick={toggleAnnotationV2Mode}
-          className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${annotationMode ? (isMonochrome ? 'text-blue-500 bg-blue-50 ring-1 ring-blue-500/30' : 'text-gold bg-gold/20 ring-1 ring-gold/40') : (isMonochrome ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100' : 'text-gold-muted hover:text-gold-light hover:bg-gold/10')}`}
-          title="ChatCanvas 批注 (C)"
-        >
-          <MessageCircle className="h-4 w-4" />
-          <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">ChatCanvas (C)</span>
-        </button>
-
         <div className={`w-px h-5 mx-1.5 ${separatorCls}`} />
 
         {/* ── Right: Feature buttons (collapsible) ── */}
@@ -16706,6 +16752,19 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
               <path d="M3 8l9 5 9-5" />
             </svg>
             <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">六面体</span>
+          </button>
+
+          <div className={`w-px h-5 mx-1 ${separatorCls} shrink-0`} />
+
+          {/* ChatCanvas 批注 — 折叠区末尾 */}
+          <button
+            data-toolbar="bottom-annotation-entry"
+            onClick={toggleAnnotationV2Mode}
+            className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${annotationMode ? (isMonochrome ? 'text-blue-500 bg-blue-50 ring-1 ring-blue-500/30' : 'text-gold bg-gold/20 ring-1 ring-gold/40') : (isMonochrome ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100' : 'text-gold-muted hover:text-gold-light hover:bg-gold/10')}`}
+            title="ChatCanvas 批注 (C)"
+          >
+            <MessageCircle className="h-4 w-4" />
+            <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">ChatCanvas (C)</span>
           </button>
 
         </div>
