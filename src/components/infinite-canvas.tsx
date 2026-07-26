@@ -63,6 +63,7 @@ const AgentEditor = lazy(() => import('@/components/agent-editor').then(m => ({ 
 import { computeSnapGuides, findBestSnapOffset, type SnapGuide } from '@/lib/canvas-snap-guides';
 import { type CanvasConnection, type ConnectionRelationType, createAutoConnection, computeConnectionEndpoints, buildConnectionPath, buildArrowHead, RELATION_TYPE_CONFIG } from '@/lib/canvas-connections';
 import { EngineSelectDialog, type EditEngine } from '@/components/engine-select-dialog';
+import { DISPLAY_DECOMPOSE_SUPPORTED_RATIOS, DEFAULT_DISPLAY_DECOMPOSE_RATIO, type DisplayDecomposeRatio } from '@/lib/display-decompose';
 const BrandEcommercePanel = lazy(() => import('@/components/brand-ecommerce-panel').then(m => ({ default: m.BrandEcommercePanel })));
 const RefineEnginePanel = lazy(() => import('@/components/refine-engine-panel'));
 const HumanRepairPanel = lazy(() => import('@/components/human-repair-panel'));
@@ -464,6 +465,10 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   const [showBrandPackaging, setShowBrandPackaging] = useState(false);
   const [showDisplay3D, setShowDisplay3D] = useState(false);
   const [display3DSource, setDisplay3DSource] = useState<{ id: string; url: string; prompt?: string } | null>(null);
+  // 美陈拆解（独立功能：识别展陈/物料/道具，生成浅灰背景平面元素拆解板）
+  const [showDisplayDecomposePanel, setShowDisplayDecomposePanel] = useState(false);
+  const [displayDecomposeRatio, setDisplayDecomposeRatio] = useState<DisplayDecomposeRatio>('16:9');
+  const [displayDecomposeProcessing, setDisplayDecomposeProcessing] = useState(false);
 
   // Image compare state
   const [showCompareDialog, setShowCompareDialog] = useState(false);
@@ -6673,17 +6678,99 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
   }, [getActiveImageData, createProcessingFrameRightOf, getCurrentModel, updateProcessingFrame, getCurrentProviderId, removeBgModelId, removeBgEngine, completeProcessingFrame, onImagesChange]);
 
   const handleOpenDisplayDecompose = useCallback(() => {
-    const image = getActiveImageData();
-    if (!image) return;
-    setEditImageId(image.id);
-    setDisplay3DSource({
-      id: image.id,
-      url: image.url,
-      prompt: image.prompt || image.modifyPrompt || undefined,
-    });
-    setShowDisplay3D(true);
+    const img = getActiveImageData();
+    if (!img) return;
+    setEditImageId(img.id);
+    setShowDisplayDecomposePanel(true);
     setShowToolbarCustomize(false);
   }, [getActiveImageData]);
+
+  const handleDisplayDecomposeConfirm = useCallback(async () => {
+    const img = getActiveImageData();
+    if (!img || displayDecomposeProcessing) return;
+
+    const [rw, rh] = displayDecomposeRatio.split(':').map(Number);
+    const maxSide = Math.max(img.width, img.height);
+    let displayW = maxSide;
+    let displayH = Math.round(maxSide * rh / rw);
+    if (displayH > maxSide) {
+      displayH = maxSide;
+      displayW = Math.round(maxSide * rw / rh);
+    }
+    const frameW = Math.max(180, displayW);
+    const frameH = Math.max(120, displayH);
+
+    const placeholderId = createProcessingFrameRightOf(
+      img,
+      '美陈拆解',
+      frameW,
+      frameH,
+      '正在拆解美陈元素...'
+    );
+
+    setShowDisplayDecomposePanel(false);
+    setDisplayDecomposeProcessing(true);
+    setIsEditProcessing(true);
+
+    try {
+      const modelInfo = getCurrentModel();
+      updateProcessingFrame(placeholderId, { progress: 12, status: '正在提交美陈拆解任务...' });
+      const res = await fetch('/api/image-edit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'display_decompose',
+          imageUrl: img.url,
+          aspectRatio: displayDecomposeRatio,
+          model: modelInfo.model,
+          providerId: modelInfo.providerId || getCurrentProviderId(),
+          prompt: img.prompt || img.modifyPrompt || '',
+        }),
+      });
+
+      const data = await res.json().catch(() => ({} as Record<string, unknown>));
+      if (!res.ok || data.success === false) {
+        throw new Error(translateErrorFrontend(String(data.error || `美陈拆解失败 (${res.status})`)));
+      }
+
+      updateProcessingFrame(placeholderId, { progress: 24, status: 'AI 正在识别物料、道具与设计元素...' });
+      const usedModelName = String(data.usedModel || modelInfo.apiDisplayName || modelInfo.model);
+      let resultUrl = data.imageUrl ? String(data.imageUrl) : '';
+      if (!resultUrl && data.taskId) {
+        resultUrl = await pollForResult(String(data.taskId), usedModelName, (progress, status) => {
+          updateProcessingFrame(placeholderId, { progress, status });
+        }) || '';
+      }
+
+      if (!resultUrl) {
+        throw new Error(lastPollErrorRef.current || '美陈拆解超时，请重试');
+      }
+
+      updateProcessingFrame(placeholderId, { progress: 96, status: '正在载入美陈拆解板...' });
+      completeProcessingFrame(placeholderId, resultUrl, frameW, frameH, {
+        originalWidth: Math.round(frameW),
+        originalHeight: Math.round(frameH),
+        prompt: '美陈拆解',
+        modifyPrompt: `美陈拆解 / 元素物料板 / ${displayDecomposeRatio}`,
+        modelName: usedModelName,
+        apiProvider: modelInfo.providerName || '',
+      }, 'edit');
+      toast.success('美陈拆解完成');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '美陈拆解失败';
+      updateProcessingFrame(placeholderId, {
+        progress: -1,
+        status: `美陈拆解失败：${message}`,
+        error: message,
+      });
+      setTimeout(() => removeProcessingFrame(placeholderId), 5000);
+      toast.error(message);
+    } finally {
+      setDisplayDecomposeProcessing(false);
+      setIsEditProcessing(false);
+      setActiveTool('none');
+    }
+  }, [getActiveImageData, displayDecomposeProcessing, displayDecomposeRatio, getCurrentModel, getCurrentProviderId, createProcessingFrameRightOf, updateProcessingFrame, completeProcessingFrame, removeProcessingFrame, pollForResult]);
 
   // 3. SVG智能描摹 - Sharp + VTracer (彩色) / ImageMagick + Potrace (黑白) / Sharp (压缩/缩略图)
   const handleOpenSvgTrace = useCallback(() => {
@@ -15024,6 +15111,59 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                   <Settings2 size={12} />
                 </button>
               </div>
+
+              {/* 美陈拆解浮动面板 */}
+              {showDisplayDecomposePanel && (
+                <div
+                  className={`absolute top-full mt-2 left-1/2 -translate-x-1/2 w-72 p-3 rounded-xl border shadow-2xl z-50 ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#141418] border-white/[0.12]'}`}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onWheel={(e) => e.stopPropagation()}
+                  data-popup="display-decompose"
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <LayoutGrid size={14} className={isMonochrome ? 'text-emerald-500' : 'text-gold'} />
+                      <span className={`text-xs font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>美陈拆解</span>
+                    </div>
+                    <button
+                      onClick={() => setShowDisplayDecomposePanel(false)}
+                      className={`p-1 rounded-lg ${isMonochrome ? 'text-gray-400 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted/70 hover:text-white hover:bg-white/10'}`}
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                  <div className={`text-[11px] leading-relaxed mb-3 ${isMonochrome ? 'text-gray-500' : 'text-gold-muted/80'}`}>
+                    识别画面中的展陈、广告物料、道具与装饰，生成浅灰背景的平面元素拆解板。
+                  </div>
+                  <div className="grid grid-cols-3 gap-1.5 mb-3">
+                    {DISPLAY_DECOMPOSE_SUPPORTED_RATIOS.map((ratio) => (
+                      <button
+                        key={ratio}
+                        onClick={() => setDisplayDecomposeRatio(ratio)}
+                        className={`px-2 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+                          displayDecomposeRatio === ratio
+                            ? isMonochrome ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'bg-gold/20 border-gold/60 text-gold'
+                            : isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100' : 'bg-white/5 border-white/[0.1] text-gold-muted hover:bg-white/10'
+                        }`}
+                      >
+                        {ratio}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    onClick={handleDisplayDecomposeConfirm}
+                    disabled={displayDecomposeProcessing}
+                    className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
+                      displayDecomposeProcessing
+                        ? isMonochrome ? 'bg-gray-100 text-gray-400' : 'bg-white/5 text-gold-muted/50'
+                        : isMonochrome ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-gold text-black hover:bg-gold/90'
+                    }`}
+                  >
+                    <Sparkles size={13} />
+                    {displayDecomposeProcessing ? '拆解中...' : '生成拆解板'}
+                  </button>
+                </div>
+              )}
 
               {/* 工具栏自定义弹窗 */}
               {showToolbarCustomize && (
