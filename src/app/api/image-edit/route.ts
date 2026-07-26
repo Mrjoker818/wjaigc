@@ -1677,10 +1677,10 @@ export async function POST(request: NextRequest) {
     if (action === 'display_decompose') {
       const decomposeAspectRatio = normalizeDisplayDecomposeRatio(aspectRatio);
       const displayDecomposePrompt = buildDisplayDecomposePrompt(prompt);
-      const imageBase64 = await resolveImageToBase64(imageUrl).catch((error) => {
-        console.warn('[display-decompose] Failed to resolve image as base64, using original URL:', error);
-        return '';
-      });
+      // Note: image_urls is already included in buildDisplayDecomposeRequestBody.
+      // Do NOT add `image: imageBase64` — it triggers hasImageField=true in submitImageTask,
+      // which causes adjustRequestForProfile to select profile.editEndpoint (/images/edits)
+      // instead of /images/generations, breaking providers like PearAPI that return 404 on /images/edits.
       const result = await autoTrySubmitImageTask(candidateModels, (candidateModel) => ({
         ...buildDisplayDecomposeRequestBody({
           model: candidateModel,
@@ -1688,7 +1688,6 @@ export async function POST(request: NextRequest) {
           aspectRatio: decomposeAspectRatio,
           extraPrompt: prompt,
         }),
-        ...(imageBase64 ? { image: imageBase64 } : {}),
       }), '美陈拆解', '/images/generations');
 
       if (result.directUrl) {
